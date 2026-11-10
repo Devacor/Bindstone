@@ -2,19 +2,28 @@
 
 > Exceptions behave identically on both backends; the VM decides catchability by `records_base`.
 >
-> - **A caught error is an error value.** `catch (e)` binds the error's message as a
->   string - every string operation reads it unchanged (printing, `to_string(e)`, `e + "..."`, `e == "text"`, a
->   `string` slot, the string methods, `type_of(e)` is `"string"`) - that also answers `e.message`, `e.file`,
->   `e.line`, `e.column`, `e.stack` (the script call stack at the error, `file:line` per frame, innermost first) and
->   `e.value`. A `throw value` keeps the thrown value, with its type, as `e.value` (`throw 42`: `e` reads `"42"`,
->   `e.value` is the int 42; a thrown object's or map's own fields also read through `e`), and its place is the
->   throw expression; a run-time error's place is the statement that raised it and its `e.value` is null. One
->   engine call builds it at every catch on both backends (`engine::make_caught_error`): a fresh string whose node
->   keys an engine table entry holding the place, the stack (the same capture the uncaught trace uses,
->   `capture_stack_trace`, with columns) and the value; a member read on a string receiver consults the table
->   before `string has no member` (`engine::caught_error_member`). A copy shares the node and answers the same; a
->   string built from it is a new node and is text only. An entry is dropped once the table holds the only
->   reference. `script_exception::thrown` tells a script throw (a rethrow keeps it) from a run-time error.
+> - **The catch variable is the thrown value; a run-time error is an error value.** A `throw value` binds the value
+>   itself (`throw 42`: `e` is the int 42; an instance, an array or a map is the thrown one, never a copy). A
+>   run-time error binds its message as a string - every string operation reads it unchanged (printing,
+>   `to_string(e)`, `e + "..."`, `e == "text"`, a `string` slot, the string methods) - whose `type_of` is `"error"`
+>   in a dynamic variable and that answers `e.kind` (`error_kind_of` over the failure's code;
+>   `script_exception::kind` carries it through a rethrow). One engine call builds the variable at every catch on
+>   both backends (`engine::make_caught_error`). A value with a node (a string, an instance, an array, a map) keys an
+>   engine table entry holding the place, the stack (the same capture the uncaught trace uses,
+>   `capture_stack_trace`, with columns) and the value, and answers `e.message`, `e.file`, `e.line`, `e.column`,
+>   `e.stack` and `e.value`: a member read the receiver's own members did not answer consults the table before the
+>   no-member error (`engine::caught_error_member`). A string's entry is dropped once the table holds the only
+>   reference (a copy shares the node and answers the same; a string built from it is text only); an instance's,
+>   array's or map's goes when its handlers end. A thrown scalar has no node and carries no place; a member read
+>   through a handler's variable (`member_expr::on_caught`, the escape-mark pass) answers `.value` and `.message` for it.
+>   A run-time error's dynamic type is one of the engine's per-kind error types (`engine::caught_error_tag`), so a
+>   parallel body, where no entry is made, still tells an error and its kind.
+>   `script_exception::thrown` tells a script throw (a rethrow keeps it) from a run-time error.
+> - **Typed clauses are the parser's.** `catch (Type e)` clauses lower to one handler over a hidden variable: each
+>   clause is `if (catch_takes#(v, "Type"))` (`engine::catch_clause_takes`: a class through `derives_from`, a
+>   builtin kind by name, `error` for a run-time error) whose block declares `Type e = catch_value#(v)` (a call
+>   result, so the declaration takes the value without a copy), and the chain ends in `throw;` when no clause
+>   catches everything. Neither backend knows a clause.
 > - **Terminal-error tier.** Execution-budget exhaustion ALWAYS latches a terminal error (never
 >   catchable); a `memory_cap` denial is catchable on its FIRST raise per execute, terminal on the
 >   second. A latched terminal error skips every script `catch` to the host boundary

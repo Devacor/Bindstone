@@ -2036,13 +2036,13 @@ public:
 
         test("static_spellings_rejected", [check_quad_error, check_quad_runtime, check_quad_error_text]() {
             // `C.s` and `this.s` are not static spellings: their read and write errors stay,
-            // byte-identical across backends (the write raises a STRING, never a bool)
+            // byte-identical across backends (the write raises an error, never a bool)
             const std::string P = "class C { static int s = 0; int q = 1; string viaThis() { string r = \"ok\"; try { this.s = 1; } catch (err) { r = type_of(err) + \":\" + to_string(err); } return r; } string readThis() { string r = \"ok\"; try { int t = this.s; } catch (err) { r = to_string(err); } return r; } } ";
             check_quad_error("class C { static int s = 0; } C.s", "dot read on a class name");
-            check_quad_runtime("class C { static int s = 0; } string r = \"\"; try { C.s = 8; } catch (err) { r = type_of(err) + \":\" + to_string(err); } r + \" \" + to_string(C::s)", "string:'C' is a class; use C::s 0", "dot store on a class name");
+            check_quad_runtime("class C { static int s = 0; } string r = \"\"; try { C.s = 8; } catch (err) { r = type_of(err) + \":\" + to_string(err); } r + \" \" + to_string(C::s)", "error:'C' is a class; use C::s 0", "dot store on a class name");
             check_quad_error("class C { static int s = 0; } C.s += 1", "dot compound on a class name");
             check_quad_error("class C { static int s = 0; } C.s++", "dot ++ on a class name");
-            check_quad_runtime((P + "auto o = C(); o.viaThis() + \" \" + to_string(C::s)").c_str(), "string:Cannot assign to 's': C has no such member 0", "this.s store");
+            check_quad_runtime((P + "auto o = C(); o.viaThis() + \" \" + to_string(C::s)").c_str(), "error:Cannot assign to 's': C has no such member 0", "this.s store");
             check_quad_runtime((P + "auto o = C(); o.readThis()").c_str(), "C has no member 's'", "this.s read");
             check_quad_error_text("class S { private: static int counter = 0; public: static int peek() { return counter; } } S::counter = 5", "Cannot access private member 'counter' of class 'S'", "private static store is refused before any conversion");
         });

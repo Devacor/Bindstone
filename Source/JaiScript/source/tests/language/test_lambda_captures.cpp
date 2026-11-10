@@ -35,6 +35,32 @@ public:
             });
         });
 
+        test("a_for_loops_variable_is_its_own_each_iteration_for_a_reference_capture", [this]() {
+            // top level (environment storage) and a function (frame slots); the value is copied forward ahead of the update
+            const std::vector<std::pair<std::string, std::string>> cases = {
+                {"array<var> f = []; for (int i = 0; i < 3; ++i) { f.push(() => i); } print(f[0](), f[1](), f[2]());", "012"},
+                {"void run() { array<var> f = []; for (int i = 0; i < 3; ++i) { f.push(() => i); f.push([&]() { return i; }); f.push([&i]() { return i; }); "
+                 "f.push(function() { return i; }); } string r = \"\"; for (auto g : f) { r += to_string(g()); } print(r); } run();", "000011112222"},
+                {"array<var> f = []; for (int i = 0; i < 6; ++i) { f.push(() => i); auto bump = [&]() { i += 1; }; bump(); } print(f[0](), f[1](), f[2]());", "135"},
+                {"void run() { array<var> f = []; for (int i = 0; i < 6; ++i) { f.push(() => i); auto bump = [&]() { i += 1; }; bump(); } print(f[0](), f[1](), f[2]()); } run();", "135"},
+                {"void run() { array<var> f = []; for (int i = 0; i < 2; ++i) { f.push([&]() { i += 10; return i; }); } print(f[0](), \" \", f[0](), \" \", f[1]()); } run();", "10 20 11"},
+                {"void run() { array<var> f = []; for (int i = 0; i < 4; ++i) { f.push(() => i); if (i % 2 == 0) { continue; } } print(f[0](), f[1](), f[2](), f[3]()); } run();", "0123"},
+                {"void run() { array<var> f = []; for (int i = 0; i < 2; ++i) { for (int j = 0; j < 2; ++j) { f.push(() => i * 10 + j); } } "
+                 "print(f[0](), \" \", f[1](), \" \", f[2](), \" \", f[3]()); } run();", "0 1 10 11"},
+                {"void run() { array<var> f = []; for (int i = 0; i < 3; ++i) { f.push([i]() { return i; }); f.push([=]() { return i; }); } "
+                 "string r = \"\"; for (auto g : f) { r += to_string(g()); } print(r); } run();", "001122"},
+                // a loop inside a lambda the vm converts to capture slots
+                {"int t() { int base = 0; var mk = [=]() { array<var> f = []; for (int i = 0; i < 3; ++i) { f.push(() => i); } return f[0]() * 100 + f[1]() * 10 + f[2]() + base; }; return mk(); } print(t());", "12"},
+                // the copy runs only for an iteration whose variable a lambda still holds
+                {"int copies = 0; class C { int n = 0; C() {} C(const C& o) { n = o.n; copies += 1; } }\n"
+                 "array<var> f = []; for (C c = C(); c.n < 4; c.n += 1) { if (c.n == 1) { f.push(() => c.n); } } print(f[0](), \" \", copies);", "1 1"},
+                // a variable declared in a loop body is the iteration's
+                {"void run() { array<var> f = []; int n = 0; while (n < 3) { int k = n * 10; f.push([&]() { k += 1; return k; }); n += 1; } print(f[0](), \" \", f[1](), \" \", f[2]()); } run();", "1 11 21"},
+                {"int total = 0; for (int i = 0; i < 4; ++i) { auto add = [&]() { total += i; }; add(); } print(total);", "6"},
+            };
+            check_outputs(cases, {}, true);
+        });
+
         test("nested_lambda_reads_the_declaring_frame_not_the_creating_frame", [this]() {
             auto eng = make_engine();
             auto result = eng->execute(R"(

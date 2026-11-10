@@ -1267,11 +1267,11 @@ public:
                 check_eq(expected, v_out, std::string("vm: ") + what);
             };
             expect_both("function f() {} string r = \"\"; try { f.x = 1; } catch (e) { r = type_of(e) + \":\" + to_string(e); } r",
-                "string:Cannot assign to member of non-object type", "store on a function");
+                "error:Cannot assign to member of non-object type", "store on a function");
             expect_both("var n = 5; string r = \"\"; try { n.x = 1; } catch (e) { r = type_of(e) + \":\" + to_string(e); } r",
-                "string:Cannot assign to member of non-object type", "store on an int");
+                "error:Cannot assign to member of non-object type", "store on an int");
             expect_both("class C { static int s = 0; } string r = \"\"; try { C.s = 8; } catch (e) { r = type_of(e) + \":\" + to_string(e); } r",
-                "string:'C' is a class; use C::s", "dot store on a class name");
+                "error:'C' is a class; use C::s", "dot store on a class name");
         });
         // ---- returnattr: a failed typed-return conversion raises at the `return` with the
         // returning frame on top (the vm captures before the callee frame pops, the

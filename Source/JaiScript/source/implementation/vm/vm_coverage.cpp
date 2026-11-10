@@ -92,7 +92,7 @@ namespace {
 			return fam::compare;
 		case opcode::op_const: case opcode::op_const_folded: case opcode::op_null: case opcode::op_true: case opcode::op_false: case opcode::op_pop: case opcode::op_dup: case opcode::op_load:
 		case opcode::op_store: case opcode::op_decl_var: case opcode::op_decl_ref_ident: case opcode::op_decl_ref_value: case opcode::op_decl_keep:
-		case opcode::op_decl_share: case opcode::op_bind_captures: case opcode::op_ref_target_store:
+		case opcode::op_decl_share: case opcode::op_bind_captures: case opcode::op_ref_target_store: case opcode::op_fresh_cell:
 			return fam::move;
 		case opcode::op_loop_back: case opcode::op_cfor_prep: case opcode::op_cfor_back: case opcode::op_cfor_pop: case opcode::op_parallel_advance: return fam::loop;
 		case opcode::op_cells_back: case opcode::op_cells_enter: case opcode::op_cells_cfor_back: case opcode::op_cells_resume: return fam::block;

@@ -1423,20 +1423,28 @@ namespace jai {
         // Writes of the engine's clock sample (host entries, budget-check samples, time:: reads of the system clock)
         uint64_t clock_sample_count() const noexcept;
 
-        // The catch variable's value, both backends at the catch: the error's message as a string (every string operation
-        // reads it unchanged) that also answers e.message, e.file, e.line, e.column, e.stack (file:line per frame,
-        // innermost first) and e.value (a throw's value; null for a run-time error). The place is the throw's, else the
-        // innermost frame's statement.
+        // The catch variable's value, both backends at the catch. A throw binds the thrown value itself; a run-time error
+        // binds an error: its message as a string (every string operation reads it unchanged) whose type_of is "error" and
+        // that answers e.kind. A string, an instance, an array or a map (a value with a node to key on) also answers
+        // e.message, e.file, e.line, e.column, e.stack (file:line per frame, innermost first) and e.value while its handler
+        // runs; a string keeps answering afterwards. The place is the throw's, else the innermost frame's statement.
         // thrown_text: the throw's own message (a thrown object's to_string(), engine::text_of), spoken for a value that is no text
         script_value make_caught_error(const script_value& thrown, bool by_throw, const source_location* throw_site,
-                                       const std::vector<stack_frame>& trace, const char* thrown_text = nullptr);
+                                       const std::vector<stack_frame>& trace, const char* thrown_text = nullptr,
+                                       error_kind kind = error_kind::other);
         // The backends' catch: the captured frames move into the error and are spelled only when e.file, e.line,
         // e.column or e.stack is read
         script_value make_caught_error(const script_value& thrown, bool by_throw, const source_location* throw_site,
-                                       std::vector<stack_frame>&& trace, const char* thrown_text = nullptr);
-        // A member read on a string receiver that is a caught error (nullopt: not one, or not an error member; a thrown
-        // object or map answers its own fields)
-        std::optional<script_value> caught_error_member(const script_value& receiver, uint64_t member_id);
+                                       std::vector<stack_frame>&& trace, const char* thrown_text = nullptr,
+                                       error_kind kind = error_kind::other);
+        // A member read the receiver's own members did not answer, on a caught value (nullopt: not one, or not an error member)
+        // catch_variable: the receiver is read through a handler's variable, where any thrown value answers .value and .message
+        std::optional<script_value> caught_error_member(const script_value& receiver, uint64_t member_id, bool catch_variable = false);
+        // Whether a run-time error's catch variable (type_of's "error", `catch (error e)`)
+        bool is_caught_runtime_error(const script_value& value) const noexcept;
+        int caught_error_tag(const script_value& value) const noexcept;
+        // Whether a typed catch clause takes the value: the clause's type by name, a class through its bases
+        bool catch_clause_takes(const script_value& value, const std::string& type_name) const;
         // The handler that bound `caught` is done and its variable let go: the thrown value dies, as C++ destroys the exception
         // object when its handler exits, unless a copy of the error (a capture, a stored e) still holds it
         void end_caught_error(const script_value& caught) noexcept;

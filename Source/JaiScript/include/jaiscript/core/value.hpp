@@ -500,6 +500,7 @@ namespace detail {
         // and the closures they reach, never a heap scan. A cell an escaped closure keeps is checked again later (a weak
         // list swept as it grows) and at engine teardown (release_deferred_cell_cycles).
         static void gather_shared_cells(const script_value* values, size_t count, std::vector<script_value>& out);
+        static bool is_shared_cell(const script_value& value) noexcept;   // a cell something besides `value` holds too
         static void release_cell_cycles(std::vector<script_value>& cells, engine* eng);
         static bool release_plain_cells(std::vector<script_value>& cells, engine* eng);
         static void release_deferred_cell_cycles(engine* eng);

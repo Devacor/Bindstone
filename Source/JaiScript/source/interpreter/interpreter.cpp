@@ -28,6 +28,7 @@
 #include <jaiscript/detail/string_element.hpp>
 #include <jaiscript/detail/import_paths.hpp>
 #include <jaiscript/detail/capture_ladder.hpp> // shared capture-source ladder (vm parity)
+#include <jaiscript/detail/loop_binding.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (vm parity)
 #include <jaiscript/detail/const_rules.hpp>   // const guards (vm parity)
 #include <jaiscript/detail/aggregate_init.hpp>
@@ -649,7 +650,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         } catch (const std::exception& e) {
             // a native exception a statement raises (a host error, an allocation failure) is the run's script exception, as on the vm
             active_exception_value_ = make_value(std::string(detail::native_exception_text(e)));
-            current_exception_ = script_exception(detail::native_exception_text(e));
+            current_exception_ = script_exception(detail::native_exception_text(e)); current_exception_->kind = error_kind::host;
             is_unwinding_ = true;
         }
 
@@ -4389,6 +4390,7 @@ JAI_NOINLINE void interpreter::raise_script_text(const std::string& text, const 
 
 JAI_NOINLINE void interpreter::raise_no_member(std::string_view kind, std::string_view member, const source_location& location) {
     raise_script_text(no_member_text(kind, member), location);
+    current_exception_->kind = error_kind::no_member;
 }
 
 checked_result<void> interpreter::method_value_error(const member_expr* expr, const script_value& object, bool bindable) {
@@ -4677,7 +4679,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
     // Handle string methods
     if (objectValue.is_string() || objectValue.is_utf8_string()) {
         if (!as_callee) {   // a caught error's own members and a thrown object's fields before the string methods (KEEP BYTE-PARALLEL with vm_backend::member_access_value)
-            if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id)) {
+            if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id, expr->on_caught)) {
                 push_value(std::move(*error_member));
                 return {};
             }
@@ -4699,7 +4701,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
             return {};
         }
         else {
-            if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id)) {   // e.file, e.line, ... on a caught error
+            if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id, expr->on_caught)) {   // e.file, e.line, ... on a caught error
                 push_value(std::move(*error_member));
                 return {};
             }
@@ -4727,6 +4729,10 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
             return {};
         }
         else {
+            if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id, expr->on_caught)) {   // a caught array's place
+                push_value(std::move(*error_member));
+                return {};
+            }
             raise_no_member("array", expr->member, expr->location);
             push_value(make_value());
             return {};
@@ -4752,6 +4758,10 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         }
         else {
             // an enum's value table reads its keys with a dot (Direction.north); any other map's key is read with []
+            if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id, expr->on_caught)) {   // a caught map's place
+                push_value(std::move(*error_member));
+                return {};
+            }
             auto& map_storage = const_cast<script_value&>(objectValue).get_map_storage();
             if (!map_storage || !map_storage->enum_values()) { return map_dot_key_error(expr->member_id); }
             auto it = map_storage->find(script_value(std::string(expr->member), engine_));
@@ -4833,6 +4843,12 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
     }
 
     if (!objectValue.is_object()) {
+        if (expr->on_caught) [[unlikely]] {   // a thrown scalar read through its catch variable (KEEP BYTE-PARALLEL with vm_backend::member_access_value)
+            if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id, true)) {
+                push_value(std::move(*error_member));
+                return {};
+            }
+        }
         if (objectValue.is_null()) {
             return checked_result<void>(make_error_code(runtime_error_code::member_access_on_null), null_member_message(expr->object.get(), as_callee), expr->member_id, null_member_receiver_symbol(expr->object.get()));
         }
@@ -4928,6 +4944,10 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
 
     if (as_callee) {   // KEEP BYTE-PARALLEL with vm_backend::exec_probe_member and member_access_value
         if (auto refused = detail::refuse_cdtor_call(target.instance.get(), member_id)) { return *refused; }
+    }
+    if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id, expr->on_caught)) {   // a caught instance's place (KEEP BYTE-PARALLEL with vm_backend::member_access_value)
+        push_value(std::move(*error_member));
+        return {};
     }
     raise_no_member(target.class_name(), expr->member, expr->location);
     push_value(make_value());  // Push null for failed member access
@@ -6174,6 +6194,27 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
     return result;
 }
 
+// KEEP BYTE-PARALLEL with vm_backend::exec_fresh_cell
+void interpreter::fresh_loop_binding(const for_stmt* stmt) {
+    const auto* decl = static_cast<const variable_decl*>(stmt->initializer.get());
+    const bool in_slot = decl->slot_index != SIZE_MAX && !call_stack_.empty();
+    const script_value* held = in_slot ? call_stack_.back().get_local(decl->slot_index) : environment_->get_env_var_ptr(decl->name_id);
+    if (!held) { return; }
+    std::optional<script_value> next = detail::next_iteration_cell(*held, engine_);
+    if (!next) { return; }
+    if (!in_slot) {
+        if (script_value* at = environment_->get_env_var_ptr(decl->name_id)) { *at = std::move(*next); }
+        return;
+    }
+    if (parallel_worker_) {
+        call_stack_.back().set_local(decl->slot_index, std::move(*next));
+        return;
+    }
+    detail::shared_cell_release replaced{engine_};
+    if (const script_value* old = call_stack_.back().get_local(decl->slot_index)) { script_value::gather_shared_cells(old, 1, replaced.cells); }
+    call_stack_.back().set_local(decl->slot_index, std::move(*next));
+}
+
 checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
     // Check if we're resuming into this for-loop from a coroutine yield
     bool resuming_loop = false;
@@ -6279,6 +6320,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
     };
 
     auto eval_update = [&]() {
+        if (stmt->fresh_binding && !replay_update) { fresh_loop_binding(stmt); }
         if (!stmt->update) return;
 
         struct updating_scope {
@@ -7131,7 +7173,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         } catch (const std::exception& e) {
             while (valueStack_.size() > try_stack_mark) { (void)valueStack_.pop(); }
             if (auto* se = dynamic_cast<const script_exception*>(&e)) { current_exception_ = *se; }
-            else { current_exception_ = script_exception(detail::native_exception_text(e)); }
+            else { current_exception_ = script_exception(detail::native_exception_text(e)); current_exception_->kind = error_kind::host; }
             active_exception_value_ = make_value(std::string(detail::native_exception_text(e)));
             is_unwinding_ = true;
         }
@@ -7163,6 +7205,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         std::string error_msg = format_error(try_result, *string_symbolizer_);
         active_exception_value_ = make_value(error_msg);
         current_exception_ = script_exception(error_msg);
+        current_exception_->kind = error_kind_of(try_result.error());
         caught_error = true;
     } else if (is_unwinding_ && current_exception_) {
         // Old-style exception unwinding (for script throw statements)
@@ -7192,7 +7235,8 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
             const bool by_throw = current_exception_ && current_exception_->thrown;
             script_value caught = engine_->make_caught_error(active_exception_value_ ? *active_exception_value_ : make_value(), by_throw,
                                                              by_throw ? &current_exception_->location() : nullptr, std::move(captured_trace_),
-                                                             by_throw ? current_exception_->what() : nullptr);
+                                                             by_throw ? current_exception_->what() : nullptr,
+                                                             current_exception_ ? current_exception_->kind : error_kind::other);
             captured_trace_.clear();
             caught_scope.emplace(engine_, caught);
             if (stmt->catch_slot_index != SIZE_MAX && !call_stack_.empty()) {
@@ -7869,7 +7913,7 @@ checked_result<void> interpreter::raise_native_exception(const std::exception& e
     if (const auto* thrown = dynamic_cast<const script_exception*>(&e)) {
         current_exception_ = *thrown;
     } else {
-        current_exception_ = script_exception(detail::native_exception_text(e));
+        current_exception_ = script_exception(detail::native_exception_text(e)); current_exception_->kind = error_kind::host;
     }
     is_unwinding_ = true;
     push_value(make_value());
@@ -8817,7 +8861,7 @@ bool scope_slots_at(const statement* s, const ast_node* at, bool mid_statement, 
         auto* tr = static_cast<const try_stmt*>(s);
         found = s == at || scope_slots_at(tr->try_block.get(), at, mid_statement, out);
         if (!found) {
-            note_scope_slot(tr->catch_slot_index, tr->catch_var, out);
+            if (tr->catch_var.find('#') == std::string::npos) { note_scope_slot(tr->catch_slot_index, tr->catch_var, out); }   // typed clauses declare their own
             found = scope_slots_at(tr->catch_block.get(), at, mid_statement, out);
         }
         break;

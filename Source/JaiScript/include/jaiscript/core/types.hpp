@@ -5,6 +5,7 @@
 
 #include <jaiscript/jaiscript_fwd.hpp>
 #include <jaiscript/core/checked_result.hpp>
+#include <jaiscript/core/runtime_errors.hpp>
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -370,7 +371,8 @@ namespace jai {
     class script_exception : public runtime_error {
         using runtime_error::runtime_error;
     public:
-        bool thrown = false;   // a script `throw value` (the caught error keeps the value as e.value), not a run-time error
+        bool thrown = false;   // a script `throw value` (the catch variable is the value), not a run-time error
+        error_kind kind = error_kind::other;   // a run-time error's family (e.kind)
     };
     
 } // namespace jai

@@ -1994,6 +1994,7 @@ JAI_NOINLINE void vm_compiler::compile_for(for_stmt* stmt) {
 	for (size_t at : loops_.back().continue_patches) {
 		patch_jump(at, continue_target);
 	}
+	if (stmt->fresh_binding) { emit(opcode::op_fresh_cell, add_node(stmt->initializer)); }
 	if (stmt->update) { compile_hoisted_update(stmt->update); }
 	emit(opcode::op_loop_back, static_cast<uint32_t>(top));
 
@@ -2019,7 +2020,7 @@ JAI_NOINLINE void vm_compiler::compile_for(for_stmt* stmt) {
 // Fast iterations run through op_cfor_prep/op_cfor_back with cached int pointers; when
 // runtime types don't cooperate the SAME loop runs its generic cond/update bytecode.
 JAI_NOINLINE bool vm_compiler::compile_counted_for(for_stmt* stmt) {
-	if (reference_) return false;
+	if (reference_ || stmt->fresh_binding) return false;
 	if (!stmt->initializer || !stmt->condition || !stmt->update) return false;
 	if (detail::const_site_of(stmt->update.get()) || detail::const_site_of(stmt->initializer.get())) return false;
 
@@ -2345,7 +2346,7 @@ JAI_NOINLINE void vm_compiler::compile_try(try_stmt* stmt) {
 	loops_.back().kind = region_kind::catch_block;
 	loops_.back().scope_depth = scope_depth_;
 	const size_t locals = chunk_->debug_locals.size();
-	if (catch_slot != k_invalid_u32) { note_debug_local(catch_slot, stmt->catch_var); }
+	if (catch_slot != k_invalid_u32 && stmt->catch_var.find('#') == std::string::npos) { note_debug_local(catch_slot, stmt->catch_var); }   // typed clauses declare their own
 	compile_statement(stmt->catch_block);
 	close_debug_locals(locals);
 	loops_.pop_back();

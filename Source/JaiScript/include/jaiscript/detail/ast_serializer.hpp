@@ -457,6 +457,7 @@ namespace jai::detail {
             flag(e->is_arrow);
             flag(e->is_static);
             flag(e->null_safe);
+            flag(e->on_caught);   // the escape-mark pass's, kept for a body copied on its own (a converted closure)
         }
 
         JAI_NOINLINE void write_lambda_expr(const ast_node* n) {
@@ -556,6 +557,7 @@ namespace jai::detail {
             node(s->condition.get());
             node(s->update.get());
             node(s->body.get());
+            flag(s->fresh_binding);   // the escape-mark pass's, kept for a body copied on its own (a converted closure)
         }
 
         JAI_NOINLINE void write_range_for_stmt(const ast_node* n) {
@@ -1334,6 +1336,7 @@ namespace jai::detail {
             auto e = std::make_shared<member_expr>(loc, obj, member, member_id, arrow, is_static);
             e->getter_id = getter_id;
             e->null_safe = flag();
+            e->on_caught = flag();
             return e;
         }
 
@@ -1471,7 +1474,9 @@ namespace jai::detail {
             auto c = expr_opt();
             auto u = expr_opt();
             auto b = [&] { auto body = loop_body(); return stmt_req(); }();
-            return std::make_shared<for_stmt>(loc, i, c, u, b);
+            auto loop = std::make_shared<for_stmt>(loc, i, c, u, b);
+            loop->fresh_binding = flag();
+            return loop;
         }
 
         JAI_NOINLINE ast_node_ptr read_range_for_stmt(const source_location& loc) {

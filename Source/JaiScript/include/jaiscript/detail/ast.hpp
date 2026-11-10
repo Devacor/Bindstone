@@ -383,6 +383,9 @@ namespace jai {
         mutable uint64_t setter_id = UINT64_MAX;  // "_set_" + member, cached like getter_id
         // A structured range-for binding's read of its entry (detail::stamp_map_entry_bindings): 1 the key, 2 the value
         uint8_t entry_half = 0;
+        // the object names a handler's catch variable: a thrown value with no member of its own answers .value and .message
+        // (set by the escape-mark pass; engine::caught_error_member)
+        bool on_caught = false;
         // a reference bind's verdict for one script class (detail::ref_plain_script_field): the member is a plain script field of it
         // (no C++ property, no user accessor, public chain) while both epochs hold; ref_field_declared is its declared type, ref_field_slot
         // the slot the class assigned it
@@ -659,6 +662,9 @@ namespace jai {
         expression_ptr condition;  // Can be null
         expression_ptr update;     // Can be null
         statement_ptr body;
+        // a lambda in the loop captures the initializer's variable by reference: each iteration has its own, the value copied
+        // forward ahead of the update (set by the escape-mark pass)
+        bool fresh_binding = false;
 
         for_stmt(const source_location& loc, declaration_ptr i, expression_ptr c, expression_ptr u, statement_ptr b)
             : statement(loc, node_type::for_stmt), initializer(i), condition(c), update(u), body(b) { mark_result_discarded(update.get()); }    };

@@ -34,6 +34,7 @@
 #include <jaiscript/detail/string_element.hpp>
 #include <jaiscript/detail/import_paths.hpp>
 #include <jaiscript/detail/capture_ladder.hpp>
+#include <jaiscript/detail/loop_binding.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>
 #include <jaiscript/detail/body_walker.hpp>
 #include <jaiscript/detail/expr_children.hpp>
@@ -12740,7 +12741,7 @@ JAI_NOINLINE op_status vm_backend::call_threw(size_t truncate_to) {
 	} catch (const std::exception& e) {
 		if (truncate_to != SIZE_MAX) { stack_.truncate(truncate_to); }
 		active_exception_value_ = script_value(std::string(detail::native_exception_text(e)), engine_);
-		current_exception_ = script_exception(detail::native_exception_text(e));
+		current_exception_ = script_exception(detail::native_exception_text(e)); current_exception_->kind = error_kind::host;
 		is_unwinding_ = true;
 		stack_.push_back(make_null());
 		return {};
@@ -14251,6 +14252,7 @@ JAI_NOINLINE void vm_backend::raise_script_exception(const std::string& message,
 
 JAI_NOINLINE void vm_backend::raise_no_member(std::string_view kind, std::string_view member, const source_location& location) {
 	raise_script_exception(no_member_text(kind, member), location);
+	current_exception_->kind = error_kind::no_member;
 }
 
 checked_result<script_value> vm_backend::eval_expression(const expression_ptr& expr, const std::shared_ptr<environment>& env) {
@@ -14600,7 +14602,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 
 	if (objectValue.is_string() || objectValue.is_utf8_string()) {
 		if (!as_callee) {   // a caught error's own members and a thrown object's fields before the string methods (KEEP BYTE-PARALLEL with interpreter::member_read_on)
-			if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id)) {
+			if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id, expr->on_caught)) {
 				out = std::move(*error_member);
 				return {};
 			}
@@ -14617,7 +14619,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 			out = script_value::make_function(boundMethod, engine_);
 			return {};
 		}
-		if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id)) {   // e.file, e.line, ... on a caught error
+		if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id, expr->on_caught)) {   // e.file, e.line, ... on a caught error
 			out = std::move(*error_member);
 			return {};
 		}
@@ -14638,6 +14640,10 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 			out = script_value::make_function(boundMethod, engine_);
 			return {};
 		}
+		if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id, expr->on_caught)) {   // a caught array's place
+			out = std::move(*error_member);
+			return {};
+		}
 		raise_no_member("array", expr->member, expr->location);
 		out = make_null();
 		return {};
@@ -14653,6 +14659,10 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 				return method(ctx, capturedValue, detail::deref_builtin_args(args, scratch));
 			};
 			out = script_value::make_function(boundMethod, engine_);
+			return {};
+		}
+		if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id, expr->on_caught)) {   // a caught map's place
+			out = std::move(*error_member);
 			return {};
 		}
 		auto& map_storage = const_cast<script_value&>(objectValue).get_map_storage();
@@ -14714,6 +14724,12 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 	}
 
 	if (!objectValue.is_object()) {
+		if (expr->on_caught) [[unlikely]] {   // a thrown scalar read through its catch variable (KEEP BYTE-PARALLEL with interpreter::member_read_on)
+			if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id, true)) {
+				out = std::move(*error_member);
+				return {};
+			}
+		}
 		if (objectValue.is_null()) {
 			return raise_(make_error_code(runtime_error_code::member_access_on_null), null_member_message(expr->object.get(), as_callee), expr->member_id, null_member_receiver_symbol(expr->object.get()));
 		}
@@ -14798,6 +14814,10 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 
 	if (as_callee) {   // KEEP BYTE-PARALLEL with interpreter::member_read_on
 		if (auto refused = detail::refuse_cdtor_call(target.instance.get(), expr->member_id)) { return raise_from(*refused); }
+	}
+	if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id, expr->on_caught)) {   // a caught instance's place (KEEP BYTE-PARALLEL with interpreter::member_read_on)
+		out = std::move(*error_member);
+		return {};
 	}
 	raise_no_member(target.class_name(), expr->member, expr->location);
 	out = make_null();
@@ -19167,6 +19187,19 @@ op_status vm_backend::exec_try_pop(frame&, const vm_instruction&) {
 	return {};
 }
 
+// KEEP BYTE-PARALLEL with interpreter::fresh_loop_binding
+op_status vm_backend::exec_fresh_cell(frame& f, const vm_instruction& ins) {
+	const auto* decl = static_cast<const variable_decl*>(f.code->nodes[ins.a].get());
+	const bool in_slot = decl->slot_index != SIZE_MAX && has_slots(f);
+	const script_value* held = in_slot ? frame_slot(f, decl->slot_index) : environment_->get_env_var_ptr(decl->name_id);
+	if (!held) { return {}; }
+	std::optional<script_value> next = detail::next_iteration_cell(*held, engine_);
+	if (!next) { return {}; }
+	if (in_slot) { return define_decl_value(f, decl->name_id, decl->slot_index, std::move(*next), true, decl); }
+	if (script_value* at = environment_->get_env_var_ptr(decl->name_id)) { *at = std::move(*next); }
+	return {};
+}
+
 op_status vm_backend::exec_catch_end(frame& f, const vm_instruction&) {
 	assert(!try_records_.empty());
 	try_record rec = std::move(try_records_.back());
@@ -19283,6 +19316,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 			std::string message = format_error(*failure, *symbolizer_);
 			active_exception_value_ = script_value(message, engine_);
 			current_exception_ = script_exception(message);
+			current_exception_->kind = error_kind_of(failure->ec);
 		}
 		if (!trace_captured_) { capture_stack_trace(); }   // the stack at the error, for the caught value
 		is_unwinding_ = false;
@@ -19325,7 +19359,8 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 			const bool by_throw = current_exception_ && current_exception_->thrown;
 			script_value caught = engine_->make_caught_error(active_exception_value_ ? *active_exception_value_ : make_null(), by_throw,
 			                                                 by_throw ? &current_exception_->location() : nullptr, std::move(captured_trace_),
-			                                                 by_throw ? current_exception_->what() : nullptr);
+			                                                 by_throw ? current_exception_->what() : nullptr,
+			                                                 current_exception_ ? current_exception_->kind : error_kind::other);
 			captured_trace_.clear();
 			try_records_[handler_index].caught_scope = std::make_shared<caught_error_scope>(engine_, caught);
 			if (handler.catch_slot != k_invalid_u32 && has_slots(f)) {
@@ -20284,6 +20319,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_try_push: return exec_try_push(f, ins);
 		case opcode::op_try_pop: return exec_try_pop(f, ins);
 		case opcode::op_catch_end: return exec_catch_end(f, ins);
+		case opcode::op_fresh_cell: return exec_fresh_cell(f, ins);
 		case opcode::op_return_convert: return exec_return_convert(f, ins);
 		case opcode::op_case_eq: return exec_case_eq(f, ins);
 		case opcode::op_iter_init: return exec_iter_init(f, ins);
@@ -20350,7 +20386,9 @@ checked_result<void> vm_backend::run(frame& entry) {
 			if (!handle_throw_unwind(fp, records_base)) { return {}; }
 		} catch (const std::exception& e) {
 			if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; }
-			convert_cpp_exception_in_frame(script_exception(detail::native_exception_text(e)));
+			script_exception native(detail::native_exception_text(e));
+			native.kind = error_kind::host;
+			convert_cpp_exception_in_frame(native);
 			if (!handle_throw_unwind(fp, records_base)) { return {}; }
 		} catch (...) {
 			if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; }
@@ -20753,6 +20791,7 @@ op_status vm_backend::run_dispatch_loop(frame*& fp, const size_t records_base) {
 			case opcode::op_try_push:
 			case opcode::op_try_pop:
 			case opcode::op_catch_end:
+			case opcode::op_fresh_cell:
 			case opcode::op_case_eq:
 			case opcode::op_iter_init:
 			case opcode::op_iter_next:

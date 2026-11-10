@@ -801,6 +801,7 @@ struct engine::implementation {
     type_info* type_info_void_ = nullptr;
     type_info* type_info_invalid_ = nullptr;
     type_info* type_info_any_ = nullptr;
+    type_info* type_info_error_[k_error_kind_count] = {};   // the dynamic type a caught run-time error carries, one per kind
     type_info* type_info_reference_null_ = nullptr;   // interned "null&" twin (get_type_info_reference fast path)
     type_info* type_info_untyped_function_ = nullptr;
 
@@ -920,10 +921,14 @@ struct engine::implementation {
     uint64_t source_reads_ = 0;
     uint64_t check_walks_ = 0;
     std::string cwd_;   // the working directory resolution keys use, refreshed when a check pass opens
-    // caught errors (engine::make_caught_error): the catch variable is its message as a string whose node keys the error's
-    // place, stack and thrown value; an entry goes when nothing but this table holds the string
+    // caught values (engine::make_caught_error), keyed by the catch variable's node: a string's entry goes when nothing but
+    // this table holds the string; an instance's, an array's or a map's (text null) goes when its handlers are done
     struct caught_error {
         script_value text;
+        std::string message;     // a thrown instance's, array's or map's display text
+        size_t handlers = 1;     // the handlers that hold a node-keyed value
+        bool runtime = false;    // a run-time error, of `kind`
+        error_kind kind = error_kind::other;
         bool has_site = false;   // a throw's own place; else the innermost frame's statement, read from the trace
         std::string site_file;
         size_t site_line = 0;
@@ -2540,6 +2545,9 @@ engine::implementation::implementation()
         type_info math_info = type_info::make_math(string_symbolizer_, math_kinds[k]);
         type_info_math_[k] = intern_type(type_key{math_kinds[k], 0, 0}, math_info);
     }
+    for (unsigned k = 0; k < k_error_kind_count; ++k) {
+        type_info_error_[k] = intern_type(type_key{script_value_type::jai_any_type, k + 1, 0}, any_info);
+    }
 
     // Register standard C++ implicit conversions
     // NOTE: These conversions can't use engine reference yet because the engine isn't fully constructed
@@ -3234,6 +3242,16 @@ void engine::initialize_engine_reference() {
         }
         return script_value::make_cell_reference(std::move(extended.value()), engine_weak);
     });
+
+    // a typed catch clause's test and its variable's value (the parser's lowering, parser::try_statement)
+    add_function("catch_takes#", [this](const script_value& caught, const std::string& type_name) -> bool {
+        return catch_clause_takes(caught, type_name);
+    });
+    add_function("catch_value#", [](const script_value& caught) -> script_value { return script_value(caught.deref()); });
+    for (unsigned kind = 0; kind < k_error_kind_count; ++kind) {
+        const char* name = error_kind_name(static_cast<error_kind>(kind));
+        add_global(std::string("error_kind::") + name, std::string(name), false);
+    }
 
     // Parallel builtins (parallel_transform v0; internal/parallel_design.md). thread_count()
     // reports the worker count a region uses without constructing the pool.
@@ -6260,25 +6278,53 @@ uint64_t engine::clock_sample_count() const noexcept {
 }
 
 script_value engine::make_caught_error(const script_value& thrown_in, bool by_throw, const source_location* throw_site,
-                                       const std::vector<stack_frame>& trace, const char* thrown_text) {
-    return make_caught_error(thrown_in, by_throw, throw_site, std::vector<stack_frame>(trace), thrown_text);
+                                       const std::vector<stack_frame>& trace, const char* thrown_text, error_kind kind) {
+    return make_caught_error(thrown_in, by_throw, throw_site, std::vector<stack_frame>(trace), thrown_text, kind);
+}
+
+namespace {
+    // the node a caught value's place and stack are keyed on (null: a value with none, which carries no place)
+    const void* caught_node(const script_value& v) noexcept {
+        switch (v.raw_storage_index()) {
+            case script_value::TYPEID_STRING: return &v.unchecked_as_string();
+            case script_value::TYPEID_ARRAY: return v.unchecked_get_array_storage().get();
+            case script_value::TYPEID_MAP: return v.unchecked_get_map_storage().get();
+            case script_value::TYPEID_OBJECT: {
+                const auto* holder = v.peek_object_holder();
+                return holder && holder->is_instance() ? static_cast<const void*>(&*holder->unchecked_instance()) : nullptr;
+            }
+            default: return nullptr;
+        }
+    }
 }
 
 script_value engine::make_caught_error(const script_value& thrown_in, bool by_throw, const source_location* throw_site,
-                                       std::vector<stack_frame>&& trace, const char* thrown_text) {
+                                       std::vector<stack_frame>&& trace, const char* thrown_text, error_kind kind) {
     const script_value& thrown = thrown_in.deref();
-    const std::string* text = thrown.text_bytes();
-    script_value caught(text ? *text : thrown_text ? std::string(thrown_text) : thrown.to_string(), this);
-    caught.set_type_info(type_info_ptr{get_type_info_any()});   // the catch variable stays a dynamic local
+    const bool text = !by_throw || thrown.raw_storage_index() == script_value::TYPEID_STRING;
+    // a throw binds the thrown value; a string and a run-time error bind a string of their own, the node the entry keys on
+    script_value caught = text ? script_value(thrown.raw_storage_index() == script_value::TYPEID_STRING ? thrown.unchecked_as_string()
+                                                  : thrown_text ? std::string(thrown_text) : thrown.to_string(), this)
+                               : script_value(thrown);
+    const size_t held = caught.raw_storage_index();
+    if (!by_throw) {
+        caught.set_type_info(type_info_ptr{impl->type_info_error_[static_cast<unsigned>(kind)]});   // dynamic, and an error of its kind
+    } else if (text || held == script_value::TYPEID_NULL || held == script_value::TYPEID_INT || held == script_value::TYPEID_FLOAT ||
+               held == script_value::TYPEID_BOOL || held == script_value::TYPEID_CHAR) {
+        caught.set_type_info(type_info_ptr{get_type_info_any()});   // the catch variable is a dynamic local
+    }
     if (parallel_region_active()) { return caught; }
+    const void* node = caught_node(caught);
+    if (!node) { return caught; }
     auto& table = impl->caught_errors_;
     if (table.size() >= impl->caught_errors_sweep_at_) {
         for (auto it = table.begin(); it != table.end();) {
-            it = it->second.text.unchecked_string_handle().unique() ? table.erase(it) : std::next(it);
+            it = !it->second.text.is_null() && it->second.text.unchecked_string_handle().unique() ? table.erase(it) : std::next(it);
         }
         impl->caught_errors_sweep_at_ = std::max<size_t>(32, table.size() * 2);
     }
-    implementation::caught_error info{caught, false, {}, 0, 0, std::move(trace), script_value(std::monostate{}, this)};
+    implementation::caught_error info{text ? caught : script_value(std::monostate{}, this), {}, 1, !by_throw, kind, false, {}, 0, 0, std::move(trace),
+                                      script_value(std::monostate{}, this)};
     if (throw_site && throw_site->line > 0) {
         info.has_site = true;
         info.site_file = throw_site->filename;
@@ -6286,18 +6332,27 @@ script_value engine::make_caught_error(const script_value& thrown_in, bool by_th
         info.site_column = throw_site->column;
     }
     if (by_throw) { info.value = thrown; }
-    table.erase(&caught.unchecked_as_string());
-    table.emplace(&caught.unchecked_as_string(), std::move(info));
+    if (!text) {
+        info.message = thrown_text ? std::string(thrown_text) : thrown.to_string();
+        if (auto held = table.find(node); held != table.end()) { info.handlers = held->second.handlers + 1; }
+    }
+    table.erase(node);
+    table.emplace(node, std::move(info));
     return caught;
 }
 
 void engine::end_caught_error(const script_value& caught) noexcept {
     try {
-        if (caught.raw_storage_index() != script_value::TYPEID_STRING) { return; }
         auto& table = impl->caught_errors_;
-        auto it = table.find(&caught.unchecked_as_string());
+        if (table.empty()) { return; }
+        const void* node = caught_node(caught);
+        auto it = node ? table.find(node) : table.end();
         if (it == table.end()) { return; }
-        if (it->second.text.unchecked_string_handle().use_count() > 2) { return; }   // a copy outlives the handler: it keeps the value
+        if (it->second.text.is_null()) {
+            if (it->second.handlers > 1) { --it->second.handlers; return; }
+        } else if (it->second.text.unchecked_string_handle().use_count() > 2) {
+            return;   // a copy outlives the handler: it keeps the value
+        }
         script_value dying = std::move(it->second.value);
         table.erase(it);
     } catch (...) {}
@@ -6306,20 +6361,80 @@ void engine::end_caught_error(const script_value& caught) noexcept {
 void engine::release_suspended_values(script_value* values, size_t count) noexcept {
     for (size_t i = count; i-- > 0;) {
         script_value dying = std::move(values[i]);
-        if (dying.raw_storage_index() == script_value::TYPEID_STRING && !impl->caught_errors_.empty()) { end_caught_error(dying); }
+        if (!impl->caught_errors_.empty()) { end_caught_error(dying); }
     }
 }
 
-std::optional<script_value> engine::caught_error_member(const script_value& receiver, uint64_t member_id) {
+// the kind a caught run-time error's own type names (-1: the value carries none)
+int engine::caught_error_tag(const script_value& v) const noexcept {
+    const type_info* declared = v.get_type_info().get();
+    for (unsigned k = 0; k < k_error_kind_count; ++k) {
+        if (declared == impl->type_info_error_[k]) { return static_cast<int>(k); }
+    }
+    return -1;
+}
+
+bool engine::is_caught_runtime_error(const script_value& value) const noexcept {
+    const script_value& v = value.deref();
+    if (v.raw_storage_index() != script_value::TYPEID_STRING) { return false; }
+    if (caught_error_tag(v) >= 0) { return true; }
+    // a copy in another dynamic variable is the error still; in a string variable it is its message
+    const auto declared = v.get_type_info();
+    if (impl->caught_errors_.empty() || (declared && declared->base_type != script_value_type::jai_any_type)) { return false; }
+    auto it = impl->caught_errors_.find(&v.unchecked_as_string());
+    return it != impl->caught_errors_.end() && it->second.runtime;
+}
+
+bool engine::catch_clause_takes(const script_value& value, const std::string& type_name) const {
+    const script_value& v = value.deref();
+    if (type_name == "error") { return is_caught_runtime_error(v); }
+    const auto container = [&](std::string_view kind) {
+        return type_name.size() >= kind.size() && type_name.compare(0, kind.size(), kind) == 0 &&
+               (type_name.size() == kind.size() || type_name[kind.size()] == '<');
+    };
+    switch (v.type()) {
+        case script_value_type::jai_null_type: return type_name == "null";
+        case script_value_type::jai_bool_type: return type_name == "bool";
+        case script_value_type::jai_int_type: return type_name == "int";
+        case script_value_type::jai_float_type: return type_name == "float";
+        case script_value_type::jai_char_type: return type_name == "char";
+        case script_value_type::jai_string_type: return type_name == "string" && !is_caught_runtime_error(v);
+        case script_value_type::jai_utf8_string_type: return type_name == "utf8_string";
+        case script_value_type::jai_array_type: return container("array");
+        case script_value_type::jai_map_type: return container("map");
+        case script_value_type::jai_function_type: return type_name == "function";
+        case script_value_type::jai_object_type:
+        case script_value_type::jai_shared_ptr_type: {
+            const auto* holder = v.raw_storage_index() == script_value::TYPEID_OBJECT ? v.peek_object_holder() : nullptr;
+            if (!holder || !holder->is_instance()) { return false; }
+            const auto held = holder->unchecked_instance()->get_class_definition();
+            const auto wanted = get_class_definition(type_name);
+            return held && wanted && held->derives_from(wanted.get());
+        }
+        default: return false;
+    }
+}
+
+std::optional<script_value> engine::caught_error_member(const script_value& receiver, uint64_t member_id, bool catch_variable) {
     const script_value& r = receiver.deref();
-    if (impl->caught_errors_.empty() || r.raw_storage_index() != script_value::TYPEID_STRING) { return std::nullopt; }
-    auto it = impl->caught_errors_.find(&r.unchecked_as_string());
-    if (it == impl->caught_errors_.end()) { return std::nullopt; }
-    const implementation::caught_error& info = it->second;
+    const void* node = impl->caught_errors_.empty() ? nullptr : caught_node(r);
+    auto it = node ? impl->caught_errors_.find(node) : impl->caught_errors_.end();
     const std::string_view name = get_symbolizer()->get_string(member_id);
+    if (it == impl->caught_errors_.end()) {
+        // an error caught in a parallel body has no entry: its own type holds its kind
+        const int kind = r.raw_storage_index() == script_value::TYPEID_STRING ? caught_error_tag(r) : -1;
+        if (kind >= 0 && name == "kind") { return script_value(std::string(error_kind_name(static_cast<error_kind>(kind))), this); }
+        if (kind >= 0 && name == "message") { return script_value(r.unchecked_as_string(), this); }
+        // a thrown value with no node (a number, a bool, null), or one caught in a parallel body
+        if (catch_variable && kind < 0 && name == "value") { return script_value(r); }
+        if (catch_variable && kind < 0 && name == "message") { return script_value(r.to_string(), this); }
+        return std::nullopt;
+    }
+    const implementation::caught_error& info = it->second;
     const auto spell = [](const std::string& file) { return file.empty() ? std::string("<script>") : file; };
     const stack_frame* innermost = info.trace.empty() ? nullptr : &info.trace.front();
-    if (name == "message") { return script_value(r.unchecked_as_string(), this); }
+    if (name == "message") { return info.text.is_null() ? script_value(info.message, this) : script_value(r.unchecked_as_string(), this); }
+    if (name == "kind" && info.runtime) { return script_value(std::string(error_kind_name(info.kind)), this); }
     if (name == "file") {
         return script_value(info.has_site ? spell(info.site_file) : innermost ? spell(innermost->file) : std::string(), this);
     }
@@ -6337,15 +6452,6 @@ std::optional<script_value> engine::caught_error_member(const script_value& rece
                 frame.elided ? elided_frames_text(frame.elided) : spell(frame.file) + ":" + std::to_string(frame.line), this));
         }
         return frames;
-    }
-    // a thrown object or map answers its own fields through the error (catch (e) { e.code })
-    script_value v = info.value.deref();
-    if (auto instance = v.is_object() ? v.get_class_instance() : nullptr) {
-        if (const script_value* field = instance->find_field_value(member_id)) { return script_value(field->deref()); }
-    } else if (v.is_map()) {
-        const auto& map = v.as_map();
-        auto found = map.find(script_value(std::string(name), this));
-        if (found != map.end()) { return script_value(found->second.deref()); }
     }
     return std::nullopt;
 }

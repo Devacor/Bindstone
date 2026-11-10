@@ -690,12 +690,15 @@ struct script_value::cell_cycle_registry {
     static void teardown(void* p) { delete static_cast<cell_cycle_registry*>(p); }
 };
 
+bool script_value::is_shared_cell(const script_value& v) noexcept {
+    if (v.raw_storage_index() != TYPEID_REFERENCE) return false;
+    const auto& holder = *v.storage_.get_if<TYPEID_REFERENCE>();
+    return holder && holder->plain_cell() && holder.use_count() > 1;
+}
+
 void script_value::gather_shared_cells(const script_value* values, size_t count, std::vector<script_value>& out) {
     for (size_t i = 0; i < count; ++i) {
-        const script_value& v = values[i];
-        if (v.raw_storage_index() != TYPEID_REFERENCE) continue;
-        const auto& holder = *v.storage_.get_if<TYPEID_REFERENCE>();
-        if (holder && holder->plain_cell() && holder.use_count() > 1) out.push_back(v);
+        if (is_shared_cell(values[i])) out.push_back(values[i]);
     }
 }
 

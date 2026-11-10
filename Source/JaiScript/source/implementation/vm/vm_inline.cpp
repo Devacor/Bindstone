@@ -643,6 +643,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		auto o = clone_expr(m->object, c);
 		if (!c.ok) return nullptr;
 		auto n = c.make<member_expr>(m->location, o, m->member, m->member_id, m->is_arrow, m->is_static);
+		n->on_caught = m->on_caught;
 		n->null_safe = m->null_safe; n->getter_id = m->getter_id; n->enum_constant = m->enum_constant; n->call_result_discarded = m->call_result_discarded;
 		return n;
 	}
@@ -801,7 +802,9 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 		statement_ptr body = clone_stmt(fs->body, c, false);
 		--c.loop_depth;
 		if (!c.ok) return nullptr;
-		return c.make<for_stmt>(fs->location, init, cond, upd, body);
+		auto loop = c.make<for_stmt>(fs->location, init, cond, upd, body);
+		loop->fresh_binding = fs->fresh_binding;
+		return loop;
 	}
 	case node_type::while_stmt: {
 		auto* ws = static_cast<const while_stmt*>(s.get());

@@ -488,8 +488,6 @@ public:
                 {"class A { } var a = new A;", foreign_word::new_without_arguments},
                 {"goto done;", foreign_word::goto_statement},
                 {"var x = 1; var p = &x;", foreign_word::address_of},
-                {"try { throw 1; } catch (Error e) { }", foreign_word::typed_catch},
-                {"try { throw 1; } catch (int e) { }", foreign_word::typed_catch},
                 {"class A { } class B extends A { }", foreign_word::extends_base},
                 {"var a = 1; var b = a === 1;", foreign_word::strict_equal},
                 {"var a = 1; var b = a !== 1;", foreign_word::strict_not_equal},

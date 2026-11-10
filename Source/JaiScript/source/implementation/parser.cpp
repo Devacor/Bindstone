@@ -38,6 +38,10 @@ namespace {
             block_stmt* body = nullptr;   // the function body this scope's frame runs
         };
         std::vector<scope> scopes;
+        // the for loops being walked and the names declared inside them that hide a loop's variable (loop null), innermost last
+        struct loop_variable { for_stmt* loop; uint64_t symbol; };
+        std::vector<loop_variable> loop_variables;
+        std::vector<uint64_t> catch_variables;   // the handlers being walked: their variables, and a typed chain's names for one
         detail::native_stack_mark stack;
         // class bodies being walked: inside one, an unqualified name resolves to a member (a script field or a
         // native property) before a same-named program global, and fields are never registered here
@@ -48,6 +52,13 @@ namespace {
         void escape(uint64_t symbol, bool lambda_capture = false) {
             if (symbol == UINT64_MAX) {
                 return;
+            }
+            if (lambda_capture) {
+                for (auto it = loop_variables.rbegin(); it != loop_variables.rend(); ++it) {
+                    if (it->symbol != symbol) { continue; }
+                    if (it->loop) { it->loop->fresh_binding = true; }
+                    break;
+                }
             }
             for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
                 bool found = false;
@@ -364,6 +375,8 @@ namespace {
                         static_cast<identifier_expr*>(m->object.get())->name == "time") {
                         names_execute_elapsed = true;
                     }
+                    m->on_caught = m->object && m->object->get_type() == node_type::identifier_expr &&
+                                   std::find(catch_variables.begin(), catch_variables.end(), static_cast<identifier_expr*>(m->object.get())->symbol_id) != catch_variables.end();
                     walk_expr(m->object.get());
                     break;
                 }
@@ -449,11 +462,16 @@ namespace {
                 case node_type::expression_stmt:
                     walk_expr(static_cast<expression_stmt*>(s)->expression.get());
                     break;
-                case node_type::block_stmt:
+                case node_type::block_stmt: {
+                    const size_t hidden = loop_variables.size();
+                    const size_t handlers = catch_variables.size();
                     for (const auto& d : static_cast<block_stmt*>(s)->declarations) {
                         walk_stmt(d.get());
                     }
+                    loop_variables.resize(hidden);
+                    catch_variables.resize(handlers);
                     break;
+                }
                 case node_type::if_stmt: {
                     auto* i = static_cast<if_stmt*>(s);
                     walk_expr(i->condition.get());
@@ -469,10 +487,18 @@ namespace {
                 }
                 case node_type::for_stmt: {
                     auto* f = static_cast<for_stmt*>(s);
+                    const size_t outer = loop_variables.size();
+                    f->fresh_binding = false;
                     walk_stmt(f->initializer.get());
+                    if (f->initializer && f->initializer->get_type() == node_type::variable_decl) {
+                        auto* d = static_cast<variable_decl*>(f->initializer.get());
+                        const bool reference = d->type && d->type->base_type == script_value_type::jai_reference_type;
+                        if (d->name_id != UINT64_MAX) { loop_variables.back() = {reference ? nullptr : f, d->name_id}; }
+                    }
                     walk_expr(f->condition.get());
                     walk_expr(f->update.get());
                     walk_stmt(f->body.get());
+                    loop_variables.resize(outer);
                     break;
                 }
                 case node_type::range_for_stmt: {
@@ -517,7 +543,10 @@ namespace {
                 case node_type::try_stmt: {
                     auto* t = static_cast<try_stmt*>(s);
                     walk_stmt(t->try_block.get());
+                    const size_t handlers = catch_variables.size();
+                    if (t->catch_var_id != UINT64_MAX) { catch_variables.push_back(t->catch_var_id); }
                     walk_stmt(t->catch_block.get());
+                    catch_variables.resize(handlers);
                     break;
                 }
                 case node_type::switch_stmt: {
@@ -563,6 +592,13 @@ namespace {
                     }
                     if (!scopes.empty() && d->name_id != UINT64_MAX) {
                         scopes.back().vars.emplace(d->name_id, d);
+                    }
+                    if (d->name_id != UINT64_MAX) { loop_variables.push_back({nullptr, d->name_id}); }
+                    // a typed chain's `var& name = <caught>`
+                    if (d->type && d->type->base_type == script_value_type::jai_reference_type && d->initializer &&
+                        d->initializer->get_type() == node_type::identifier_expr && d->name_id != UINT64_MAX &&
+                        std::find(catch_variables.begin(), catch_variables.end(), static_cast<identifier_expr*>(d->initializer.get())->symbol_id) != catch_variables.end()) {
+                        catch_variables.push_back(d->name_id);
                     }
                     break;
                 }
@@ -4545,30 +4581,156 @@ checked_result<statement_ptr> parser::try_statement() {
     uint64_t catch_var_id = UINT64_MAX;
     size_t catch_slot = SIZE_MAX;
     block_scope_guard catch_var_scope(*this);
-    if (match(token_type::left_paren)) {
-        const bool typed = is_type_keyword_token(peek().type) || check(token_type::const_keyword) ||
-                           (check(token_type::identifier) && current_ + 1 < stream_->size() &&
-                            ((*stream_)[current_ + 1].type == token_type::identifier || (*stream_)[current_ + 1].type == token_type::ampersand ||
-                             (*stream_)[current_ + 1].type == token_type::colon_colon));
-        if (typed) {
-            report_foreign(detail::foreign_word::typed_catch, peek());
+    // `(Type name)`: a typed clause; `(name)`, `(var name)`, `(auto name)` and no parentheses catch everything
+    const auto typed_clause = [this]() {
+        if (!check(token_type::left_paren) || current_ + 2 >= stream_->size()) { return false; }
+        const token& first = (*stream_)[current_ + 1];
+        const token& second = (*stream_)[current_ + 2];
+        if (first.type == token_type::var_keyword || first.type == token_type::auto_keyword) { return false; }
+        return !(first.type == token_type::identifier && second.type == token_type::right_paren);
+    };
+    if (!typed_clause()) {
+        if (match(token_type::left_paren)) {
+            if (!match(token_type::var_keyword)) { (void)match(token_type::auto_keyword); }
+            JAISCRIPT_TRY_ASSIGN(token var_name, consume(token_type::identifier, "expected variable name in catch"));
+            catch_var = var_name.lexeme;
+            JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after catch variable"));
+            catch_var_id = get_symbol_id(var_name);
+            if (in_function_scope() && catch_var_id != UINT64_MAX) {
+                catch_slot = allocate_slot(catch_var_id);
+            }
+        }
+
+        // Parse catch block
+        JAISCRIPT_TRY(expect(token_type::left_brace, "expected '{' after 'catch'"));
+        JAISCRIPT_TRY_ASSIGN(statement_ptr catch_block, block_statement());
+        if (check(token_type::catch_keyword)) {
+            report_error("a catch with no type catches everything: it is the last handler of its try", peek());
             return make_error_code(parse_error_code::syntax_error);
         }
-        JAISCRIPT_TRY_ASSIGN(token var_name, consume(token_type::identifier, "expected variable name in catch"));
-        catch_var = var_name.lexeme;
-        JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after catch variable"));
-        catch_var_id = get_symbol_id(var_name);
-        if (in_function_scope() && catch_var_id != UINT64_MAX) {
-            catch_slot = allocate_slot(catch_var_id);
-        }
+
+        auto result = std::make_shared<try_stmt>(tryToken.location, try_block, catch_block, catch_var);
+        result->catch_var_id = catch_var_id;
+        result->catch_slot_index = catch_slot;
+        return result;
     }
 
-    // Parse catch block
-    JAISCRIPT_TRY(expect(token_type::left_brace, "expected '{' after 'catch'"));
-    JAISCRIPT_TRY_ASSIGN(statement_ptr catch_block, block_statement());
+    // Typed clauses are one handler over a hidden variable: each clause is a test of what was caught, tried in order, whose
+    // body declares the clause's variable as that value; with no clause for it the error is thrown on (`throw;`)
+    const token catch_token = previous();
+    // plain locals: the lambdas below name them (a structured binding is not capturable everywhere)
+    const auto caught = hidden_name("catch");
+    const uint64_t caught_id = caught.first;
+    const std::string_view caught_name = caught.second;
+    if (in_function_scope()) { catch_slot = allocate_slot(caught_id); }
+    const auto takes = hidden_name("catch_takes");
+    const uint64_t takes_id = takes.first;
+    const std::string_view takes_name = takes.second;
+    const auto value = hidden_name("catch_value");
+    const uint64_t value_id = value.first;
+    const std::string_view value_name = value.second;
+    struct clause {
+        source_location at;
+        expression_ptr test;      // null: the handler that catches everything
+        statement_ptr body;
+    };
+    std::vector<clause> clauses;
+    bool first = true;
+    while (first || match(token_type::catch_keyword)) {
+        first = false;
+        const token clause_token = previous();
+        if (!clauses.empty() && !clauses.back().test) {
+            report_error("a catch with no type catches everything: it is the last handler of its try", clause_token);
+            return make_error_code(parse_error_code::syntax_error);
+        }
+        clause parsed;
+        parsed.at = clause_token.location;
+        block_scope_guard clause_scope(*this);
+        declaration_ptr variable;
+        const auto value_of_caught = [&](const source_location& at) {
+            std::vector<expression_ptr> arguments{hidden_identifier(caught_id, caught_name, at)};
+            return std::make_shared<call_expr>(at, std::make_shared<identifier_expr>(at, value_name, value_id), std::move(arguments));
+        };
+        // `var& name = <caught>`: the handler's name for the caught value where the clause keeps it dynamic
+        const auto name_of_caught = [&](const token& name) {
+            type_info reference(script_value_type::jai_reference_type);
+            type_info_ptr dynamic = store_type_info(type_info::make_any(*symbolizer_));
+            reference.type_name = dynamic->type_name + "&";
+            reference.type_params.push_back(dynamic);
+            reference.id = symbolizer_->intern(reference.canonical_name());
+            auto declared = std::make_shared<variable_decl>(name.location, store_type_info(std::move(reference)), name.lexeme, get_symbol_id(name),
+                                                            hidden_identifier(caught_id, caught_name, name.location));
+            if (in_function_scope() && declared->name_id != UINT64_MAX) { declared->slot_index = allocate_slot(declared->name_id); }
+            return declared;
+        };
+        if (typed_clause()) {
+            advance();
+            const bool is_const = match(token_type::const_keyword);
+            const token const_at = previous();
+            type_info_ptr type;
+            std::string type_name;
+            if (check(token_type::identifier) && peek().lexeme == "error" && current_ + 1 < stream_->size() &&
+                ((*stream_)[current_ + 1].type == token_type::identifier || (*stream_)[current_ + 1].type == token_type::ampersand)) {
+                advance();
+                type_name = "error";
+            } else {
+                JAISCRIPT_TRY_ASSIGN(type, parse_type());
+                if (!type) {
+                    report_error("expected a type in the catch clause: catch (Type name)", peek());
+                    return make_error_code(parse_error_code::syntax_error);
+                }
+                const type_info* named = type->base_type == script_value_type::jai_shared_ptr_type && !type->type_params.empty() ? type->type_params[0].get() : type.get();
+                type_name = named->type_name;
+            }
+            (void)match(token_type::ampersand);   // the variable is the thrown value either way
+            JAISCRIPT_TRY_ASSIGN(token var_name, consume(token_type::identifier, "expected variable name in catch"));
+            JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after catch variable"));
+            std::vector<expression_ptr> arguments{hidden_identifier(caught_id, caught_name, var_name.location),
+                                                  std::make_shared<literal_expr>(var_name.location, script_value(script_value::ast_literal_tag{}, type_name))};
+            parsed.test = std::make_shared<call_expr>(var_name.location, std::make_shared<identifier_expr>(var_name.location, takes_name, takes_id), std::move(arguments));
+            std::shared_ptr<variable_decl> declared;
+            if (type) {
+                declared = std::make_shared<variable_decl>(var_name.location, type, var_name.lexeme, get_symbol_id(var_name), value_of_caught(var_name.location));
+                if (in_function_scope() && declared->name_id != UINT64_MAX) { declared->slot_index = allocate_slot(declared->name_id); }
+            } else {
+                declared = name_of_caught(var_name);
+            }
+            if (is_const && !finish_const(declared, const_at, false)) { return make_error_code(parse_error_code::syntax_error); }
+            variable = declared;
+        } else if (match(token_type::left_paren)) {
+            if (!match(token_type::var_keyword)) { (void)match(token_type::auto_keyword); }
+            JAISCRIPT_TRY_ASSIGN(token var_name, consume(token_type::identifier, "expected variable name in catch"));
+            JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after catch variable"));
+            variable = name_of_caught(var_name);
+        }
+        JAISCRIPT_TRY(expect(token_type::left_brace, "expected '{' after 'catch'"));
+        const source_location body_at = previous().location;
+        JAISCRIPT_TRY_ASSIGN(statement_ptr handler, block_statement());
+        if (variable) {
+            std::vector<declaration_ptr> scoped{variable, std::make_shared<statement_decl>(body_at, handler)};
+            parsed.body = std::make_shared<block_stmt>(body_at, std::move(scoped));
+        } else {
+            parsed.body = handler;
+        }
+        clauses.push_back(std::move(parsed));
+    }
 
-    auto result = std::make_shared<try_stmt>(tryToken.location, try_block, catch_block, catch_var);
-    result->catch_var_id = catch_var_id;
+    statement_ptr chain;
+    if (clauses.back().test) {
+        std::vector<declaration_ptr> rethrow{std::make_shared<statement_decl>(catch_token.location,
+            std::make_shared<expression_stmt>(catch_token.location, std::make_shared<throw_expr>(catch_token.location, nullptr)))};
+        chain = std::make_shared<block_stmt>(catch_token.location, std::move(rethrow));
+    } else {
+        chain = clauses.back().body;
+        clauses.pop_back();
+    }
+    for (size_t i = clauses.size(); i-- > 0;) {
+        chain = std::make_shared<if_stmt>(clauses[i].at, clauses[i].test, clauses[i].body, chain);
+    }
+    std::vector<declaration_ptr> handler_body{std::make_shared<statement_decl>(catch_token.location, chain)};
+    auto result = std::make_shared<try_stmt>(tryToken.location, try_block, std::make_shared<block_stmt>(catch_token.location, std::move(handler_body)),
+                                             std::string(caught_name));
+    result->catch_var_id = caught_id;
     result->catch_slot_index = catch_slot;
     return result;
 }

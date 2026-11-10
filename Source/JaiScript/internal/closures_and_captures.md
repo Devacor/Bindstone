@@ -95,8 +95,17 @@ the parse error `A reference capture takes no initializer`.
 | Init-capture `[x = e]` | copy of `e` | copy of `e` | n/a | n/a |
 
 `[]` agrees with C++'s no-capture intent. Escaped reference captures retain shared cells,
-and explicit captures of program-scope names are permitted. To snapshot a loop variable
-on each iteration, use `[=]` or name the variable.
+and explicit captures of program-scope names are permitted.
+
+## Loop variables
+
+A variable declared in a loop body is declared again each iteration, and a marked declaration boxes a new cell
+each time, so a by-reference capture holds its iteration's variable. The variable a C-style `for` declares is
+declared once: when a lambda inside the loop captures it by reference the escape-mark pass sets
+`for_stmt::fresh_binding`, and ahead of the update each backend replaces a cell something else still holds with
+a new cell holding a copy of the value (`detail/loop_binding.hpp`; VM `op_fresh_cell`, interpreter
+`fresh_loop_binding`), JavaScript's `let` in a `for`. A loop without the mark compiles as it always did (a marked
+one leaves the counted form), and an iteration whose cell nothing else holds copies nothing.
 
 ## The embedding footgun (hosts, read this)
 

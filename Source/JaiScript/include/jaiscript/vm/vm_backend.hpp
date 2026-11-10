@@ -2837,6 +2837,7 @@ namespace jai::vm {
         op_status exec_try_push(frame& f, const vm_instruction& ins);
         op_status exec_try_pop(frame& f, const vm_instruction& ins);
         op_status exec_catch_end(frame& f, const vm_instruction& ins);
+        op_status exec_fresh_cell(frame& f, const vm_instruction& ins);
         op_status exec_case_eq(frame& f, const vm_instruction& ins);
         void exec_switch_table(frame& f, const vm_instruction& ins);
         bool build_switch_table(frame& f, const chunk::switch_table& t);

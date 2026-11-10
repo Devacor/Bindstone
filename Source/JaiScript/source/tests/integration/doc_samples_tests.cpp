@@ -39,11 +39,11 @@ namespace doc_quickstart_run {
 // [sample quickstart-run]
 int main() {
     auto eng = jai::engine::make();                    // an engine is an object: make as many as you like
-    jai::stdlib::register_all(eng);                    // formatted print, to_string, math, containers, JSON
+    jai::stdlib::register_all(eng);                    // formatted print, to_string, JSON, random, time
 
     eng->execute(R"(print("hello from {}", "JaiScript");)");
 
-    jai::script_value r = eng->execute("6 * 7");       // the value of the last expression
+    jai::held_value r = eng->execute("6 * 7");         // the value of the last expression
     std::cout << "6 * 7 = " << r.as_int() << "\n";
     std::cout << eng->execute(R"("jai" + "script")").as<std::string>() << "\n";
     std::cout << std::boolalpha << eng->execute("2.5 * 2 > 4").as<bool>() << "\n";
@@ -128,7 +128,7 @@ int64_t total_ammo(const Turret& a, const Turret& b) { return a.ammo + b.ammo; }
 
 int main() {
     auto eng = jai::engine::make();
-    jai::stdlib::register_all(*eng);
+    jai::stdlib::register_all(eng);
 
     jai::dynamic_binder<Turret>(*eng, "Turret")   // 2. bind it under a script name
         .constructor<>()
@@ -650,7 +650,7 @@ public:
 				// [sample quickstart-call]
 				eng->execute("int damage_for(int level) { return level * 3; }");
 
-				jai::script_value fn = eng->get_variable("damage_for");
+				jai::held_value fn = eng->get_variable("damage_for");   // held: safe to keep and call later
 				jai::checked_result<jai::script_value> r = fn.as_function()({eng->make_value(int64_t{4})});
 				if (r) { std::cout << "damage_for(4) = " << r.value().as_int() << "\n"; }
 
@@ -675,7 +675,7 @@ public:
 
 				eng->import_recheck_interval(0);                  // see a save at once (the default looks every 0.2 s)
 				eng->execute_file((dir / "game.jai").string());
-				jai::script_value tick = eng->get_variable("tick");
+				jai::held_value tick = eng->get_variable("tick");   // kept across frames
 				for (int64_t frame = 1; frame <= 4; ++frame) {
 				    if (frame == 3) { save("rules.jai", "int damage_for(int frame) { return frame * 100; }"); }   // an edit lands
 				    auto r = tick.as_function()({eng->make_value(frame)});
@@ -812,7 +812,7 @@ public:
 			cpp_sample engine_block(*this, page, "binder-spawner-engine");
 			// [sample binder-spawner-engine]
 			auto eng = jai::engine::make();
-			jai::stdlib::register_all(*eng);   // formatted print, containers, math, json
+			jai::stdlib::register_all(eng);   // formatted print, containers, math, json
 			jai::bind_registrar(*eng);         // every jai::registrar in the binary, one call
 			// [/sample]
 			engine_block.finish();
@@ -933,7 +933,7 @@ public:
 				auto front = jai::engine::make();
 				auto back = jai::engine::make();
 				for (jai::engine* eng : {front.get(), back.get()}) {
-				    jai::stdlib::register_all(*eng);
+				    jai::stdlib::register_all(eng);
 				    jai::stdlib::register_atomics(*eng);
 				    eng->add_global_ref("page_views", page_views);    // a reference: no engine copies it
 				}
@@ -1089,7 +1089,7 @@ public:
 
 		test("signals_spawner", [this]() {
 			auto eng = make_engine();
-			jai::stdlib::register_all(*eng);
+			jai::stdlib::register_all(eng);
 			jai::bind_registrar(*eng);
 			expect_script("embedding/10-signals-properties.html", "signals-spawner", eng);
 		});

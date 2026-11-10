@@ -75,19 +75,13 @@ std::cout &lt;&lt; sum &lt;&lt; &quot;\n&quot;;</code></pre></div>
 <h2 id="submitting-work">The API<a class="hlink" href="#submitting-work" aria-label="link">&#8203;</a></h2>
 <p>A task is a <code>thread_pool::task_type</code>, a <code>std::function&lt;void()&gt;</code>.</p>
 <div class="tablewrap"><table><thead><tr><th>call</th><th>does</th></tr></thead><tbody>
-<tr id="construction-and-worker-count"><td><code>thread_pool(n = 0)</code></td><td>starts <code>n</code> workers and keeps them for the pool's lifetime. 0 means <code>thread_pool::default_worker_count()</code>: one less than the hardware threads, never less than one. Neither copyable nor movable.</td></tr>
-<tr><td><code>worker_count()</code></td><td>the number of workers</td></tr>
 <tr><td><code>submit(task)</code></td><td>shared queue: the first free worker runs it</td></tr>
-<tr><td><code>submit_to(worker, task)</code></td><td>that worker's own queue: only its thread runs the task, in submission order, between the shared tasks it also takes. For thread-affine state. An index outside 0 to <code>worker_count() - 1</code> throws <code>std::out_of_range</code>.</td></tr>
-<tr id="continuations-then-and-then-on"><td><code>submit(task, then, where)</code></td><td>runs <code>then</code> once after <code>task</code> returns or throws</td></tr>
-<tr><td><code>submit_batch(tasks, then, where)</code></td><td>queues a <code>std::vector</code> of tasks under one lock and runs <code>then</code> once after the last finishes. An empty batch continues at once. If queueing throws, the tasks already queued run, <code>then</code> is dropped and the caller gets the exception.</td></tr>
-<tr><td><code>where</code></td><td><code>then_on::pool</code> (default): on the worker that finished the work. <code>then_on::posted</code>: on the thread that calls <code>run_posted()</code>.</td></tr>
-<tr><td><code>wait_idle()</code></td><td>blocks until every task submitted so far has finished, pool continuations included, and their captures are destroyed. It does not wait for posted work.</td></tr>
-<tr id="the-posted-queue-post-and-run-posted"><td><code>post(task)</code></td><td>queues a task for the draining thread, from any thread</td></tr>
-<tr><td><code>run_posted()</code></td><td>runs the posted queue on the calling thread, in posting order, and returns how many tasks ran</td></tr>
-<tr id="exceptions-on-exception"><td><code>on_exception(handler)</code></td><td>installs a <code>std::function&lt;void(std::exception_ptr)&gt;</code>; replaceable at any time from any thread</td></tr>
-<tr id="spinning-spin-budget-ns"><td><code>spin_budget_ns(ns)</code>, <code>spin_budget_ns()</code></td><td>sets and reads how long an idle worker spins before it parks (default 1,000,000: 1&nbsp;ms)</td></tr>
+<tr><td><code>submit_to(worker, task)</code></td><td>that worker's own queue: only its thread runs the task, in submission order</td></tr>
+<tr id="continuations-then-and-then-on"><td><code>submit(task, then, where)</code></td><td>runs <code>then</code> once after <code>task</code> returns or throws, on the pool or posted</td></tr>
+<tr><td><code>wait_idle()</code></td><td>blocks until every task submitted so far has finished</td></tr>
+<tr id="the-posted-queue-post-and-run-posted"><td><code>post(task)</code>, <code>run_posted()</code></td><td>queues a task for the draining thread; runs the posted queue on the calling thread</td></tr>
 </tbody></table></div>
+<p>Every call, with its defaults and failures: <a href="../reference/host.html#pool-api"><code>jai::thread_pool</code> calls</a>.</p>
 <p>An engine's own pool is sized from <code>thread_pool::performance_core_count()</code> and built with
 <code>thread_pool::fast_threads</code>, which opts its workers out of the system's power throttling
 (<a href="17-host-api.html#parallel-worker-count">Parallel worker count</a>).</p>

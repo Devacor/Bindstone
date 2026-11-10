@@ -65,15 +65,7 @@ when the program loads. The VS&nbsp;Code extension in <code>tools/vscode-jaiscri
 F2 renames.</li>
 <li>For scripts written against your own host, see <a href="#host-surface">The host surface</a>.</li></ol>
 <h2 id="what-it-does">What it does<a class="hlink" href="#what-it-does" aria-label="link">&#8203;</a></h2>
-<div class="tablewrap"><table><thead><tr><th>feature</th><th>covers</th></tr></thead><tbody>
-<tr><td>Diagnostics</td><td>parse errors and every checker error and warning, in the checker's text, on each change. An error in an imported file is reported in that file. A file that does not parse reports its one parse error, and the names it declares stay declared for its importers.</td></tr>
-<tr><td>Definition, references</td><td>functions, classes, fields, methods, constructors, globals, locals, parameters, enums and their values, namespace members, across imports and includes. Definition on an <code>import</code> or <code>include</code> path opens the file.</td></tr>
-<tr><td>Hover</td><td>a variable's declared type, or the type inferred for <code>auto</code>; a function's signatures; a class with its fields and methods; an enum value with its number; a host function with its registered parameter types</td></tr>
-<tr><td>Completion</td><td>names in scope, the enclosing class's members, the program's and the host's declarations, keywords. After <code>.</code>: the receiver's members (inherited and bound C++ ones included) or the builtin methods of an array, map or string. After <code>::</code>: a namespace's members, a class's statics, an enum's values.</td></tr>
-<tr><td>Signature help</td><td>every overload inside a call's parentheses, the current parameter highlighted</td></tr>
-<tr><td>Rename</td><td>the declaration and every use across the program (<a href="#rename">rules</a>)</td></tr>
-<tr><td>Symbols</td><td>the document outline, and every declaration in the workspace's <code>.jai</code> files, fuzzy-matched</td></tr>
-</tbody></table></div>
+<p>Diagnostics on each change, definition and references, hover, completion, signature help, <a href="#rename">rename</a>, and document and workspace symbols. What each covers: <a href="../reference/host.html#lsp-capabilities">language server features</a>.</p>
 <h3 id="limits">What it does not see<a class="hlink" href="#limits" aria-label="link">&#8203;</a></h3>
 <ul>
 <li><strong>Dynamic values.</strong> A member used on a <code>var</code> has no definition and no hover, and a
@@ -143,15 +135,7 @@ fail:</p>
 <code>build-debug/bin</code>, then the trees Visual Studio's CMake presets create (Release before Debug);</li>
 <li><code>PATH</code>.</li>
 </ol>
-<div class="tablewrap"><table>
-<thead><tr><th>setting</th><th>default</th><th>meaning</th></tr></thead>
-<tbody>
-<tr><td><code>jaiscript.languageServer.enabled</code></td><td><code>true</code></td><td>run the server for <code>.jai</code> files</td></tr>
-<tr><td><code>jaiscript.languageServer.path</code></td><td>empty</td><td>the server executable; <code>${workspaceFolder}</code> expands</td></tr>
-<tr><td><code>jaiscript.languageServer.host</code></td><td><code>runner</code></td><td>the host profile</td></tr>
-<tr><td><code>jaiscript.languageServer.includePaths</code></td><td><code>[]</code></td><td>include paths for <code>import</code> and <code>include</code></td></tr>
-<tr><td><code>jaiscript.languageServer.log</code></td><td><code>false</code></td><td>log requests and timings to the <em>JaiScript Language Server</em> output channel</td></tr>
-</tbody></table></div>
+<p>The extension's settings are under <code>jaiscript.languageServer.</code>, each with its default: <a href="../reference/host.html#lsp-settings">extension settings</a>.</p>
 <p>A settings change restarts the server, as does <em>JaiScript: Restart Language Server</em> in the command palette.
 Rebuilding the extension is <code>npm install</code> and <code>npm run compile</code>.</p>
 <h2 id="rename">Rename<a class="hlink" href="#rename" aria-label="link">&#8203;</a></h2>

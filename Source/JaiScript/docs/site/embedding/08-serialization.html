@@ -175,17 +175,7 @@ binary: 114 bytes, hero=Alice</code></pre></div>
 </ul>
 <h3 id="archive-methods">The archive inside <code>save</code>, <code>load</code> and <code>serialize</code><a class="hlink" href="#archive-methods" aria-label="link">&#8203;</a></h3>
 <p>Named properties are the normal form; the unnamed calls exist for hand-written layouts.</p>
-<div class="tablewrap"><table><thead><tr><th>Call</th><th>Writer</th><th>Reader</th></tr></thead><tbody>
-<tr><td><code>ar.serialize("name", value)</code>, <code>ar("name", value)</code>, <code>ar(JAI_NVP(x), JAI_NVP(y))</code>, <code>ar(make_nvp("name", value))</code></td><td>a named property through the dispatch above; <code>JAI_NVP</code> spells the key from the variable&#x27;s name</td><td>the named property into <code>value</code>; a record without it throws <code>Property 'name' not found during deserialization</code></td></tr>
-<tr><td><code>ar(obj)</code></td><td><code>obj</code>&#x27;s own <code>save</code> or <code>serialize</code>, in place</td><td><code>obj</code>&#x27;s own <code>load</code> or <code>serialize</code>, from the current record</td></tr>
-<tr><td><code>ar.has_property("name")</code>, <code>ar.seek_property("name")</code></td><td></td><td>whether the current record has the property; <code>seek_property</code> also positions the reader at it (false when absent)</td></tr>
-<tr><td><code>ar.write_element(value)</code> / <code>ar.read_element(value)</code></td><td colspan="2">the next element between <code>begin_array</code> and <code>end_array</code></td></tr>
-<tr><td><code>write_int8</code> &hellip; <code>write_int64</code>, <code>write_uint8</code> &hellip; <code>write_uint64</code>, <code>write_float32</code>, <code>write_float64</code>, <code>write_bool</code>, <code>write_string</code>; <code>read_int32()</code>, <code>read_string()</code>, &hellip; in the same widths</td><td colspan="2">one unnamed primitive</td></tr>
-<tr><td><code>begin_object(type_name, version)</code> / <code>end_object()</code></td><td>opens a record</td><td>fills both arguments</td></tr>
-<tr><td><code>begin_array</code> / <code>end_array()</code></td><td><code>begin_array(size)</code></td><td><code>size_t n = begin_array()</code></td></tr>
-<tr><td><code>begin_map</code> / <code>end_map()</code></td><td><code>begin_map(size)</code>, <code>write_map_key(key)</code></td><td><code>begin_map()</code>, <code>read_map_key(key)</code></td></tr>
-<tr><td><code>ar.get_version()</code></td><td></td><td>the version of the record opened last (<a href="#versions-and-missing-fields">Versions</a>)</td></tr>
-</tbody></table></div>
+<p>Every call, with what the writer and the reader do: <a href="../reference/host.html#archive-calls">archive calls</a>.</p>
 <h3 id="versions-and-missing-fields">Versions and missing fields<a class="hlink" href="#versions-and-missing-fields" aria-label="link">&#8203;</a></h3>
 <p><strong>The contract.</strong> The archives keep no class version. Both formats are self-describing, and a reader finds a property by name, never by position.</p>
 <ul>
@@ -215,41 +205,21 @@ void load(Archive&amp; ar) {
 }</code></pre></div>
 <p><a href="../bridges/04-from-cereal.html#versions-in-a-self-describing-format">From Cereal</a> converts a Cereal-versioned type this way.</p>
 <p><strong>The <code>std::uint32_t</code> version parameter</strong> of a member <code>save</code>, <code>load</code> or <code>serialize</code> exists so Cereal-shaped code compiles. It carries a number you chose only for a record you opened yourself:</p>
-<ul>
-<li>A save always receives 0.</li>
-<li>A load reached through a named read (<code>ar("name", obj)</code>, a <code>JAI_PROPERTY</code>, a non-polymorphic pointer&#x27;s <code>$val</code>) receives the number stored in that record. Every other load (<code>ar(obj)</code>, a polymorphic pointer&#x27;s <code>$val</code>) receives 0. <code>ar.get_version()</code> answers the same number for the record opened last.</li>
-<li>A record the archive opens itself stores none: JSON writes no <code>"$type"</code> or <code>"$version"</code> key, which reads back as 1, and binary stores an empty type name and 0. The root record of <code>to_json</code> / <code>to_binary</code> has version 1, which JSON leaves unwritten.</li>
-<li>A hand-written <code>save</code> can open a record with <code>begin_object(type_name, version)</code>. Binary keeps any number; JSON writes <code>"$version"</code> only above 1, so 0 reads back as 1.</li>
-</ul>
+<p>What each save, load and record receives: <a href="../reference/host.html#archive-versions">versions</a>.</p>
 <p><strong>A binder chain&#x27;s <code>.version(n)</code></strong> never reaches the C++ archives. It is a number (1 by default) the engine keeps for the class, used only by the script archives for bound objects inside script values:</p>
-<ul>
-<li>script <code>to_binary</code> / <code>to_base64</code> write it after the class name; <code>to_json</code> writes no <code>"$version"</code>;</li>
-<li><code>from_binary</code> / <code>from_base64</code> hand it to the class&#x27;s <code>.post_load_hook</code> only when the class also has a <code>.deserialization_factory</code>; without a factory the object is rebuilt by its class name and the hook receives 1;</li>
-<li><code>from_json</code> runs the hook with the object&#x27;s <code>"$version"</code> key (beside its <code>"$type"</code>) when it has one, and 1 otherwise.</li>
-</ul>
+<p>What each script archive call does with it: <a href="../reference/host.html#archive-versions">versions</a>.</p>
 <h3 id="wire-formats">Wire formats<a class="hlink" href="#wire-formats" aria-label="link">&#8203;</a></h3>
 <p>Both formats run the same calls; the writer decides the bytes. JSON writes a record as an object of its properties, and a record opened with a type name leads with <code>"$type"</code>, then <code>"$version"</code> when it is above 1. Binary is little-endian:</p>
-<div class="tablewrap"><table><thead><tr><th>Binary value</th><th>Bytes</th></tr></thead><tbody>
-<tr><td>record</td><td><code>0x01</code>, the type name (a <code>uint32</code> length, then the bytes; empty for a record the archive opens itself), a <code>uint32</code> version; then, when the record closes, its property count, every property name, every property&#x27;s byte size (so a reader jumps to a property by name and skips unknown ones unparsed), the values, and <code>0x02</code></td></tr>
-<tr><td>array</td><td><code>0x03</code>, a count, the elements, <code>0x04</code></td></tr>
-<tr><td>map</td><td><code>0x05</code> &hellip; <code>0x06</code></td></tr>
-<tr><td>null</td><td><code>0x00</code></td></tr>
-</tbody></table></div>
+<p>The bytes of a record, an array, a map and null: <a href="../reference/host.html#archive-binary-format">binary format</a>.</p>
 <p id="one-handle-format">Classes and handles are spelled with the same keys by the script archives and the C++ archives, in JSON and in binary, numbered by per-save object ids:</p>
+<p>Every spelling: <a href="../reference/host.html#archive-handle-keys">class and handle keys</a>. The three a graph uses:</p>
 <div class="tablewrap"><table><thead><tr><th>Value</th><th>Written as</th></tr></thead><tbody>
-<tr><td>an object that names its class</td><td><code>{"$type": "Name", "$val": {...}}</code></td></tr>
-<tr><td><code>shared_ptr</code>, first reference to its object</td><td><code>{"$id": N, "$val": {...}}</code>, with <code>"$type"</code> when the object names its class</td></tr>
-<tr><td><code>shared_ptr</code> to an object already written</td><td><code>{"$id": N}</code>, which the load re-aliases, in any order and through cycles</td></tr>
-<tr><td><code>weak_ptr</code></td><td><code>{"$ref": N}</code>, with the object&#x27;s <code>"$val"</code> (and <code>"$type"</code>) inline when it is the first reference, so a weak pointer that precedes its owner still loads</td></tr>
-<tr><td><code>unique_ptr</code> (C++ only)</td><td><code>{"$val": {...}}</code> by the pointer&#x27;s static type, with no <code>$type</code>: a <code>unique_ptr&lt;Base&gt;</code> holding a derived object writes only the <code>Base</code> fields and loads a <code>Base</code>, so a polymorphic owner is a <code>shared_ptr&lt;Base&gt;</code></td></tr>
-<tr><td>null pointer, empty handle, expired weak handle</td><td>null</td></tr>
+<tr><td><code>shared_ptr</code>, first reference to its object</td><td><code>{"$id": N, "$val": {...}}</code></td></tr>
+<tr><td><code>shared_ptr</code> to an object already written</td><td><code>{"$id": N}</code></td></tr>
+<tr><td><code>weak_ptr</code></td><td><code>{"$ref": N}</code></td></tr>
 </tbody></table></div>
 <p>The two layers differ only where a static type exists:</p>
-<div class="tablewrap"><table><thead><tr><th></th><th>Script archives</th><th>C++ archives</th></tr></thead><tbody>
-<tr><td>an object&#x27;s class</td><td>named on every object</td><td>named only when a base pointer holds a registered derived class; a nested C++ record carries no <code>$type</code></td></tr>
-<tr><td>the root</td><td>the value itself</td><td>a record type&#x27;s properties, flat, with no type name; anything else (an owning pointer, a container, a number) under <code>"value0"</code>, as the <a href="02-dynamic-binder.html#serialized">binder chapter</a> shows</td></tr>
-<tr><td>a class name the engine does not know</td><td>the object loads as a plain map</td><td>the load throws <code>Unknown polymorphic type: Name</code></td></tr>
-</tbody></table></div>
+<p>Class names, the root and unknown class names in each: <a href="../reference/host.html#archive-layers">script archives and C++ archives</a>.</p>
 <p>One graph in each:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Node { int v = 1; }
 class Link { shared_ptr&lt;Node&gt; a; shared_ptr&lt;Node&gt; b; weak_ptr&lt;Node&gt; w; }

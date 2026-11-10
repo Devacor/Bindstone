@@ -216,15 +216,11 @@ threat 5 -&gt; 7</code></pre></div>
 <p>One engine serves one thread at a time, and everything registered into it or made by it belongs to that thread. Another thread may use or drop those objects only while the engine is idle, with the hand-off synchronized. Two engines on two threads need no locks, because nothing is global; share a value between them with an <a href="#atomics">atomic</a>.</p>
 <h3 id="copies-and-handles">When a bound object is copied, and when it is shared<a class="hlink" href="#copies-and-handles" aria-label="link">&#8203;</a></h3>
 <p>The boundary never copies: <code>make_object(shared_ptr)</code>, a <code>T&amp;</code> or <code>std::shared_ptr&lt;T&gt;</code> result, and a member whose type is a registered class all arrive as the C++ object. From there the object behaves as a script class instance does. The guide&#x27;s <a href="../guide/03-value-semantics.html#bound-cpp-objects">Bound C++ objects</a> walks each case with one class.</p>
+<p>Every case, one per row: <a href="../reference/host.html#binder-copies">when a bound object is copied or shared</a>. The three met daily:</p>
 <div class="tablewrap"><table><thead><tr><th>Script</th><th>Result</th></tr></thead><tbody>
-<tr><td>A value into a variable, field or element (<code>Turret b = a;</code>, <code>var c = b;</code>), a by-value parameter or return, a container literal element (<code>[a]</code>), a by-value capture (<code>[a]</code>, <code>[=]</code>)</td><td>A separate C++ object made by the copy constructor.</td></tr>
-<tr><td>A call&#x27;s <code>T&amp;</code> result into <code>var c</code>, <code>auto c</code> or <code>Turret c</code>; a <code>T&amp;</code> argument the host passes into a <code>var p</code> or <code>Turret p</code> parameter</td><td>A copy, as C++ <code>auto</code> drops the reference.</td></tr>
-<tr><td>A reference: <code>var&amp; g = gate;</code>, <code>auto&amp; c = owner.child();</code>, <code>C&amp; c</code>, a <code>&amp;</code> parameter</td><td>The same object. <code>c = other;</code> runs the class&#x27;s bound <code>=</code>.</td></tr>
-<tr><td>A handle: <code>new Turret(...)</code>, a <code>shared_ptr&lt;Turret&gt;</code> variable, a <code>std::shared_ptr&lt;Turret&gt;</code> the host returns, passes to a callback, or gives <code>add_global</code> or <code>make_object</code></td><td>Every copy of the handle shares the one object: <code>var g = gate;</code> names the host&#x27;s <code>gate</code>.</td></tr>
-<tr><td>A class with a deleted copy constructor (<code>std::atomic</code>, <code>std::mutex</code>)</td><td>Each copy above raises <code>Cannot copy C++ object of type &#x27;T&#x27;: the type is not copy-constructible. Hold it by reference (auto&amp;/var&amp;) or share it (shared_ptr&lt;T&gt;).</code></td></tr>
-<tr><td>A typed slot the object converts into: <code>int n = obj;</code> as a declaration, assignment, parameter, return or field</td><td>Calls the bound <code>to_int</code> on the object itself, with no copy; a <code>float</code>, <code>bool</code>, <code>char</code> or <code>string</code> slot calls <code>to_float</code>, <code>to_bool</code>, <code>to_char</code> or <code>to_string</code>.</td></tr>
-<tr><td>Assigning into a variable, field or element declared <code>C</code> (<code>a = other;</code>)</td><td>Runs the bound <code>=</code> on the held object. With none bound, the held object is replaced by a copy-constructed one. A <code>var</code> variable takes a copy of <code>other</code> in place of what it held.</td></tr>
-<tr><td>A bound property passed to a <code>&amp;</code> parameter: <code>gate.level</code>, or <code>this.level</code> or a bare <code>level</code> inside a method of a script class deriving <code>Spawner</code></td><td>Binds the property itself; the callee&#x27;s writes land in the C++ member. A <code>[=]</code> lambda copies its value at creation, a <code>[&amp;]</code> lambda reads the live property.</td></tr>
+<tr><td>A value into a variable, field, element, by-value parameter or by-value capture</td><td>A separate C++ object made by the copy constructor.</td></tr>
+<tr><td>A reference: <code>var&amp; g = gate;</code>, a <code>&amp;</code> parameter</td><td>The same object.</td></tr>
+<tr><td>A handle: <code>new Turret(...)</code>, a <code>std::shared_ptr&lt;Turret&gt;</code> the host returns</td><td>Every copy of the handle shares the one object.</td></tr>
 </tbody></table></div>
 <p>The bound <code>=</code> is the <code>"="</code> method: <code>.method("=", &amp;C::operator=)</code>, or a lambda taking <code>(C&amp;, const C&amp;)</code>; overloads from other types resolve like any overload set. <code>auto_bind</code> binds it only for a trivially copy-assignable class. Assigning through a reference to a class that binds none raises <code>Cannot assign to a reference to 'C': its binding has no operator=</code>. Binding <code>"="</code> on a class whose assignment cannot compile fails at the binding, as in C++.</p>
 
@@ -359,25 +355,13 @@ neq true
 axes 2
 dot 11.0</code></pre></div>
 <p>A method that returns <code>T&amp;</code> hands script the object it refers to, and the receiver is kept alive across a chain, so <code>Vec2(1.0, 1.0).scale(3.0).translate(1.0, 0.0).x</code> is safe on temporaries. <code>!=</code> worked without being bound because <code>==</code> supplies it.</p>
+<p>Every verb with its rules: <a href="../reference/host.html#binder-verbs">binder verbs</a>. The ones most chains use:</p>
 <div class="tablewrap"><table><thead><tr><th>Verb</th><th>What it binds</th></tr></thead><tbody>
-<tr><td><code>.constructor&lt;Args...&gt;()</code></td><td>A constructor overload, resolved by arity and C++ parameter types. <code>.constructor&lt;&gt;()</code> prefers a <code>T(engine*)</code> constructor when the type has one.</td></tr>
-<tr><td><code>.method(name, &amp;T::fn)</code></td><td>A member function, const or not. A member <em>data</em> pointer here is a compile error that points to <code>.property()</code>.</td></tr>
-<tr><td><code>.method(name, lambda)</code></td><td>A lambda whose first parameter is <code>T&amp;</code> or <code>const T&amp;</code> is a method on that object. Any other lambda is a method that ignores its receiver (<code>.method("twice", [](int64_t k) { return k * 2; })</code>). A stateful functor keeps one state on every call path.</td></tr>
-<tr><td>Overloads</td><td>Registering a name again with another C++ signature, same arity included, adds an overload.</td></tr>
-<tr><td><code>.static_method(name, fn)</code></td><td>A free function or lambda, called as <code>Vec2::axes()</code>. Bound-class arguments work. Returning a bound class does not compile: return primitives or strings, and bind a constructor overload or an engine-level function as a factory.</td></tr>
-<tr><td><code>.property(name, &amp;T::member)</code></td><td>Field access. A setter is generated only for a copy-assignable member type. A <code>std::vector&lt;E&gt;</code> member binds as a live view without a copy (<code>size</code>, <code>push</code>, <code>pop</code>, <code>at</code>, <code>[]</code>). A member of a registered class type binds by reference. A <code>jai::signal&lt;Sig&gt;</code> or <code>signal_emitter&lt;Sig&gt;</code> member binds as a <a href="#signals-one-view-every-signature">connect surface</a>.</td></tr>
-<tr><td><code>.property(name, getter, setter)</code></td><td>A computed property from lambdas or a member function pair. A <code>nullptr</code> setter makes it read-only: a store raises <code>Cannot assign to 'x': it is read-only</code>.</td></tr>
-<tr><td><code>.property(name, &amp;T::member, jai::skip_type_check)</code></td><td>A property whose type is not registered yet throws at registration with a fix-it message. This tag skips the check for a deliberate cycle, such as <code>std::shared_ptr&lt;Node&gt; next</code> bound inside <code>Node</code>&#x27;s own chain.</td></tr>
-<tr><td><code>.static_property(name, &amp;var)</code>, <code>.static_property(name, getter, setter)</code></td><td>A class-level value, read and written as <code>Class::name</code>. The pointer form binds the live variable.</td></tr>
-<tr><td><code>.base_class&lt;Base&gt;()</code></td><td>An inheritance edge: base methods and properties are callable on the derived with virtual dispatch, and a <code>Base</code> slot may hold this type on a polymorphic load. Diamond inheritance throws.</td></tr>
-<tr><td><code>.auto_bind(mode)</code></td><td>Everything the declarations know: <code>property_owner</code> schema properties, observables and signals; base classes; and <code>to_string()</code>, <code>size()</code>, <code>empty()</code> and <code>==</code>/<code>!=</code> where the class has them. A <code>static T::jai_auto_bind(dynamic_binder&lt;T&gt;&amp;)</code> hook lets a class bind its own private members. Modes: <code>all</code>, <code>properties</code>, <code>hierarchy</code>.</td></tr>
-<tr><td><code>.transparent_wrapper(unwrap)</code></td><td>An operation not found on the wrapper retries on the unwrapped value. This is how <code>gate.threat + 2</code> reads the observable&#x27;s <code>int</code> while <code>.on_change</code> stays on the wrapper.</td></tr>
-<tr><td><code>.post_load_hook(fn)</code></td><td>The class&#x27;s <code>post_load</code>, <code>[](T&amp; self)</code> or <code>[](T&amp; self, int version)</code>, run by a script-side load (<code>from_json</code>, <code>from_binary</code>, <code>from_base64</code>) after it writes the fields.</td></tr>
-<tr><td><code>.version(n)</code></td><td>A number (default 1) for the script archives only. <code>to_binary</code> and <code>to_base64</code> write it beside each bound object; <code>from_binary</code> and <code>from_base64</code> pass it to the post-load hook when the class also has a <code>.deserialization_factory</code> (otherwise the hook receives 1); <code>from_json</code> passes the object&#x27;s <code>"$version"</code> key, or 1. The C++ archives never read it (<a href="08-serialization.html#versions-and-missing-fields">Versions and missing fields</a>).</td></tr>
-<tr><td><code>.deserialization_factory(fn)</code></td><td>Constructs a non-default-constructible type on load. The archive-only, context-only and context-plus-archive signatures are detected.</td></tr>
-<tr><td><code>.serial_only_constructor()</code>, <code>.serial_method(name)</code>, <code>.serial_static_method(name)</code></td><td>Keep the constructor or the call out of <a href="#serial-only-constructors">parallel bodies</a>.</td></tr>
-<tr><td><code>.bound_engine()</code></td><td>The engine this binder targets, for a configure function that calls <code>bind_signal_type</code> or adds globals.</td></tr>
-<tr><td><code>.build()</code></td><td>Finishes the registration. The destructor calls it if you do not. A binder moves but does not copy.</td></tr>
+<tr><td><code>.constructor&lt;Args...&gt;()</code></td><td>A constructor overload, resolved by arity and C++ parameter types.</td></tr>
+<tr><td><code>.method(name, &amp;T::fn)</code>, <code>.method(name, lambda)</code></td><td>A member function, or a lambda whose first parameter is <code>T&amp;</code> or <code>const T&amp;</code>.</td></tr>
+<tr><td><code>.property(name, &amp;T::member)</code></td><td>Field access.</td></tr>
+<tr><td><code>.base_class&lt;Base&gt;()</code></td><td>An inheritance edge.</td></tr>
+<tr><td><code>.build()</code></td><td>Finishes the registration. The destructor calls it if you do not.</td></tr>
 </tbody></table></div>
 <p><strong>Parameters.</strong> These hold for methods, static methods, constructors and <code>add_function</code> alike:</p>
 <ul>
@@ -385,15 +369,7 @@ dot 11.0</code></pre></div>
 <li>A <code>char</code> parameter (by value or <code>const char&amp;</code>), and a store to a <code>char</code> property, take a char or a one-character string. Any other length raises <code>Cannot convert 'string' to 'char': a char takes a string of exactly one character</code>.</li>
 </ul>
 <p><strong>Operators</strong> are methods named by token, following the script rules of the <a href="../guide/04-operators.html">operators chapter</a>. A type can start as a script class and move to C++ without its call sites changing.</p>
-<div class="tablewrap"><table><thead><tr><th>Binding</th><th>Rule</th></tr></thead><tbody>
-<tr><td>Tokens</td><td><code>+ - * / % &amp; | ^ &lt;&lt; &gt;&gt; == != &lt; &lt;= &gt; &gt;= &lt;=&gt;</code>, unary <code>- + ~</code> (a lambda taking only the object), <code>[]</code>, <code>()</code>, <code>=</code>, and <code>to_bool</code> for <code>!v</code> and <code>if (v)</code>.</td></tr>
-<tr><td>Supplied</td><td><code>&lt;=&gt;</code> supplies <code>&lt; &lt;= &gt; &gt;=</code> and <code>==</code>; <code>==</code> supplies <code>!=</code>; <code>5 == m</code> asks <code>m</code>&#x27;s <code>==</code> taking an int.</td></tr>
-<tr><td><code>++</code>, <code>--</code></td><td>C++&#x27;s two forms, which a script class cannot declare: a lambda taking only the object answers <code>++v</code>; one taking the object and an ignored <code>int64_t</code> answers <code>v++</code>. A missing form raises <code>Cannot apply &#x27;++&#x27; to T</code>.</td></tr>
-<tr><td>Compound (<code>"+="</code> ...)</td><td>Runs once on the object in place, for a variable, field, element, map value or reference; nothing is stored back, and the expression is what the operator returns. With none bound, <code>m += o</code> is <code>m = m + o</code>.</td></tr>
-<tr><td>Reflected</td><td>A lambda whose first parameter is another type and whose second is the class, C++&#x27;s free <code>operator-(int64_t, const Money&amp;)</code>, answers <code>5 - m</code>. Arithmetic never reverses on its own; the checker warns at a number left of a bound class&#x27;s operator that has no reflected form.</td></tr>
-<tr><td>Overload choice</td><td>An operator counts for an operand only when one of its overloads takes it. With <code>operator&lt;(const Money&amp;)</code> and <code>operator&lt;=&gt;(int64_t)</code> bound, <code>m &lt; 5</code> runs the <code>&lt;=&gt;</code>. With only <code>operator+(const Money&amp;)</code>, <code>m + "!"</code> is the builtin concatenation of <code>m</code>&#x27;s text.</td></tr>
-<tr><td>No match</td><td><code>No bound 'Money * int': bind operator "*" taking int on Money, or convert the operand</code></td></tr>
-</tbody></table></div>
+<p>The tokens, the operators one binding supplies, <code>++</code> and <code>--</code>, compound and reflected forms, overload choice and the no-match error: <a href="../reference/host.html#binder-operators">bound operators</a>.</p>
 
 <h3 id="serial-only-constructors">Serial-only constructors<a class="hlink" href="#serial-only-constructors" aria-label="link">&#8203;</a></h3>
 <p>A <code>parallel_for</code> body may construct bound classes and script classes over them (<a href="../guide/16-parallel.html#constructing-objects">parallel loops</a>); the constructor and destructor then run on a worker thread. That is safe for a constructor that only builds its own members. One that touches state other objects share (a registry, a cache, a service lookup, a signal hub) is marked <code>.serial_only_constructor()</code>. A body that constructs the class, or a script class over it, is refused when the statement is reached, before any element runs.</p>
@@ -565,13 +541,7 @@ print(type_of(b), " ", type_of(f), " ", type_of(w));</code></pre></div>
 4 2.5 0
 Box&lt;int&gt; Box&lt;float&gt; Box&lt;int32&gt;</code></pre></div>
 <p>An instantiation is named the way a script spells it:</p>
-<div class="tablewrap"><table><thead><tr><th>C++ argument</th><th>Script spelling</th></tr></thead><tbody>
-<tr><td><code>int64_t</code>, <code>double</code></td><td><code>int</code>, <code>float</code> (a script <code>double</code> is the same type)</td></tr>
-<tr><td><code>int32_t</code>, <code>uint8_t</code>, C++ <code>float</code></td><td><code>int32</code>, <code>uint8</code>, <code>float32</code></td></tr>
-<tr><td><code>std::vector&lt;E&gt;</code>, <code>std::map&lt;K, V&gt;</code>, <code>std::shared_ptr&lt;T&gt;</code></td><td><code>array&lt;E&gt;</code>, <code>map&lt;K,V&gt;</code>, <code>shared_ptr&lt;T&gt;</code></td></tr>
-<tr><td>A class</td><td>Its <code>JAI_STATIC_BINDER</code> or template-binder name</td></tr>
-<tr><td>Anything else</td><td>A compile error: specialize <code>jai::type_name_helper&lt;T&gt;</code> with the name scripts write.</td></tr>
-</tbody></table></div>
+<p><code>int64_t</code> is <code>int</code> and <code>std::vector&lt;E&gt;</code> is <code>array&lt;E&gt;</code>; every spelling: <a href="../reference/host.html#binder-template-names">template instantiation names</a>.</p>
 <ul>
 <li>Binding one width of a numeric argument binds its 32/64-bit sibling too: <code>Box&lt;int32&gt;</code> with <code>Box&lt;int&gt;</code>, <code>Box&lt;float32&gt;</code> with <code>Box&lt;float&gt;</code>.</li>
 <li>Two C++ types the script spells alike (<code>int</code> and <code>long</code> on MSVC) cannot both bind: the second <code>bind_static_type</code> throws.</li>
@@ -597,18 +567,7 @@ back-&gt;execute(R"(
 std::cout &lt;&lt; "the host reads " &lt;&lt; page_views.load() &lt;&lt; "\n";</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">back saw 2 and left 12
 the host reads 12</code></pre></div>
-<div class="tablewrap"><table><thead><tr><th>Script</th><th>Types</th><th>Value</th></tr></thead><tbody>
-<tr><td><code>a.load()</code>, <code>int n = a;</code>, <code>float f = a;</code>, <code>bool b = a;</code>, <code>if (a)</code></td><td>all</td><td>the value; a typed slot converts through the atomic&#x27;s own value type, and an int or float one is true when non-zero</td></tr>
-<tr><td><code>a.store(v)</code>, <code>a = v</code></td><td>all</td><td><code>=</code> yields <code>v</code></td></tr>
-<tr><td><code>a.exchange(v)</code></td><td>all</td><td>the value before</td></tr>
-<tr><td><code>a.compare_exchange(expected, desired)</code></td><td>all</td><td>C++&#x27;s <code>compare_exchange_strong</code>: stores <code>desired</code> and yields true when the value equals <code>expected</code>; else writes the value into the variable <code>expected</code> and yields false</td></tr>
-<tr><td><code>a.fetch_add(n)</code>, <code>a.fetch_sub(n)</code></td><td>int, float</td><td>the value before</td></tr>
-<tr><td><code>a.fetch_and(bits)</code>, <code>a.fetch_or(bits)</code>, <code>a.fetch_xor(bits)</code></td><td>int</td><td>the value before</td></tr>
-<tr><td><code>a += n</code>, <code>a -= n</code></td><td>int, float</td><td>the value after</td></tr>
-<tr><td><code>a &amp;= bits</code>, <code>a |= bits</code>, <code>a ^= bits</code></td><td>int</td><td>the value after</td></tr>
-<tr><td><code>++a</code>, <code>--a</code> / <code>a++</code>, <code>a--</code></td><td>int</td><td>the value after / the value before</td></tr>
-<tr><td><code>a == v</code>, <code>a != v</code>, <code>to_string(a)</code>, <code>print(a)</code></td><td>all</td><td>compare or print the loaded value</td></tr>
-</tbody></table></div>
+<p>Every call and operator, the types it takes and what it yields: <a href="../reference/host.html#binder-atomics">atomics</a>.</p>
 <ul>
 <li><code>a = a + 1</code> is a load and then a store, two steps another engine can come between; <code>a += 1</code>, <code>++a</code> and <code>a.fetch_add(1)</code> are one. Two atomics written one after the other are two separate facts: state that must change together belongs in a transaction.</li>
 <li>An int step keeps the language&#x27;s overflow rule, where a C++ <code>std::atomic</code> wraps: at the largest int, <code>a += 1</code> raises <code>Integer overflow in &#x27;+=&#x27;</code> (<code>&#x27;++&#x27;</code>, and <code>&#x27;+&#x27;</code> for <code>fetch_add</code>) and leaves the value as it was.</li>

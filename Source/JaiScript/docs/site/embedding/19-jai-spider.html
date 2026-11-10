@@ -73,18 +73,7 @@ one, otherwise the official amalgamation, downloaded at configure time and check
 <code>-DJAI_SPIDER_SQLITE_ZIP=&lt;zip&gt;</code> or <code>-DJAI_SPIDER_SQLITE_DIR=&lt;dir&gt;</code> supply it offline.
 Ctrl+C stops the server and closes every database. In the request log a control or non-ASCII byte of the path is
 written as <code>\xNN</code>.</p>
-<div class="tablewrap" id="options"><table><thead><tr><th>Option</th><th>Meaning</th></tr></thead><tbody>
-<tr><td><code>--port N</code></td><td>the port (default 8080; 0 picks a free one, named in the spinning line)</td></tr>
-<tr><td><code>--host ADDR</code></td><td>the IPv4 address to listen on (default 127.0.0.1; 0.0.0.0 for every interface)</td></tr>
-<tr><td><code>--root DIR</code></td><td>the static root (default: the app's <code>public/</code> folder when it exists)</td></tr>
-<tr><td><code>--max-body N</code></td><td>the largest request body, with <code>K</code>, <code>M</code> or <code>G</code> (default 2M)</td></tr>
-<tr><td><code>--timeout S</code></td><td>seconds a request may take to arrive and a response to leave (default 30)</td></tr>
-<tr><td><code>--budget S</code></td><td>the execution budget per request (default 30; 0 is unlimited)</td></tr>
-<tr><td><code>--backend vm|interp</code></td><td>the engine's backend</td></tr>
-<tr><td><code>--dev</code></td><td>error pages show the error and its trace (absolute paths included), and the library is imported from the source checkout's <code>lib/</code>, so edits to it reload too</td></tr>
-<tr><td><code>--allow-shutdown TOKEN</code></td><td><code>POST /__spider/shutdown</code> from the same machine with the header <code>X-Spider-Shutdown: TOKEN</code> stops the server; without the token it is 403 (a cross-site page cannot send the header without a preflight the server never grants)</td></tr>
-<tr><td><code>--quiet</code></td><td>no banner and no request log</td></tr>
-</tbody></table></div>
+<p id="options">The usual options are <code>--port N</code> (default 8080), <code>--root DIR</code> for the static root and <code>--dev</code> for error pages that show the error. Every option: <a href="../reference/host.html#spider-options">command-line options</a>.</p>
 <h2 id="first-app">A first app<a class="hlink" href="#first-app" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai" data-host="jai_spider"><span class="cb-label">jaiscript &mdash; app.jai (under jai_spider)</span><pre><code class="lang-jai">import "spider.jai";
 
@@ -127,21 +116,15 @@ the <a href="../guide/17-web.html"><code>web::</code> library</a>, and <code>par
 <h2 id="request-response">Request and Response<a class="hlink" href="#request-response" aria-label="link">&#8203;</a></h2>
 <p><code>spider::Request</code> is a script class in <code>lib/spider.jai</code>; its source is the reference.</p>
 <div class="tablewrap"><table><thead><tr><th>spider::Request</th><th>What it holds</th></tr></thead><tbody>
-<tr><td><code>method</code>, <code>path</code>, <code>target</code>, <code>query_string</code>, <code>version</code></td><td>the request line: <code>path</code> percent-decoded and without the query, <code>target</code> as it arrived</td></tr>
-<tr><td><code>query</code>, <code>cookies</code>, <code>params</code></td><td><code>map&lt;string, string&gt;</code>: the parsed query (<code>+</code> is a space), the Cookie header, the route's captures</td></tr>
-<tr><td><code>headers</code>, <code>header(name)</code></td><td>names lowercased; <code>header("Content-Type")</code> reads any spelling</td></tr>
-<tr><td><code>body</code>, <code>form()</code>, <code>files()</code>, <code>json()</code></td><td>the raw body; its urlencoded or multipart fields; its uploads as <code>map&lt;string, spider::Upload&gt;</code> (<code>filename</code>, <code>content_type</code>, <code>data</code>, <code>size()</code>, <code>save(path)</code>); <code>from_json</code> of it</td></tr>
-<tr><td><code>cookie(name)</code>, <code>param(name)</code>, <code>remote_addr</code></td><td>"" when absent; the peer's address</td></tr>
+<tr><td><code>method</code>, <code>path</code></td><td>the request line; <code>path</code> percent-decoded and without the query</td></tr>
+<tr><td><code>query</code>, <code>params</code></td><td><code>map&lt;string, string&gt;</code>: the parsed query, the route's captures</td></tr>
+<tr><td><code>header(name)</code>, <code>cookie(name)</code></td><td>one header, in any spelling; one cookie, "" when absent</td></tr>
+<tr><td><code>body</code>, <code>form()</code>, <code>json()</code></td><td>the raw body; its urlencoded or multipart fields; <code>from_json</code> of it</td></tr>
 </tbody></table></div>
+<p>Every member, uploads included: <a href="../reference/host.html#spider-request"><code>spider::Request</code></a>.</p>
 <p><code>spider::Response</code> (<a href="../guide/17-web.html#spider-response">its members</a>) is the class a handler
 answers with and a client call returns. <code>lib/spider.jai</code> adds the helpers that build the usual answers:</p>
-<div class="tablewrap"><table><thead><tr><th>Helper</th><th>What it answers</th></tr></thead><tbody>
-<tr><td><code>spider::Response(status, body)</code></td><td>both optional: 200 and an empty body</td></tr>
-<tr><td><code>spider::html(text)</code>, <code>spider::plain_text(text)</code>, <code>spider::json(value)</code></td><td>a body with its Content-Type; each takes an optional status, and <code>spider::html</code> takes a <code>web::html</code> too</td></tr>
-<tr><td><code>spider::redirect(url)</code></td><td>303 See Other by default, the answer to a form post</td></tr>
-<tr><td><code>spider::file(path, content_type)</code></td><td>a file streamed from disk, relative to the app's folder, typed by its extension unless one is given. The response names the file by a random token in an <code>X-Sendfile</code> header that the host consumes, so an <code>X-Sendfile</code> header from anywhere else serves nothing.</td></tr>
-<tr><td><code>spider::not_found(text)</code></td><td>a 404</td></tr>
-</tbody></table></div>
+<p><code>spider::html(text)</code>, <code>spider::plain_text(text)</code> and <code>spider::json(value)</code> answer a body with its Content-Type, <code>spider::redirect(url)</code> a 303, <code>spider::not_found(text)</code> a 404 and <code>spider::file(path, content_type)</code> a file from disk. Each one's arguments and defaults: <a href="../reference/host.html#spider-helpers">response helpers</a>.</p>
 <h2 id="routing">Routing<a class="hlink" href="#routing" aria-label="link">&#8203;</a></h2>
 <p><code>spider::Router</code> has <code>get</code>, <code>post</code>, <code>put</code>, <code>patch</code>,
 <code>delete</code>, <code>any</code> and <code>add(method, pattern, handler)</code>. Routes match in the order they were
@@ -272,18 +255,7 @@ to <code>spider::file</code> never climbs out of its folder.</li>
 <p>HTTP/1.1 and 1.0 are served with keep-alive and pipelining, bodies by Content-Length or chunked, and
 <code>Expect: 100-continue</code>. A connection holds one response at a time: the next request is read once the last
 response has left.</p>
-<div class="tablewrap"><table><thead><tr><th>Failure</th><th>Answer</th></tr></thead><tbody>
-<tr><td>a run-time error or an uncaught throw in a handler</td><td>500; the error and its trace are logged, and the page shows them under <code>--dev</code> only</td></tr>
-<tr><td>a Response with a status outside 200 to 599, a header name that is not a token, or a header value or cookie line holding a line break or NUL</td><td>500, logged: <code>Response status 101 is not a final HTTP status (200 to 599)</code>, <code>Response header &#x27;N&#x27; is not a header name, or its value holds a line break or NUL</code>, <code>Response cookie &#x27;L&#x27; holds a line break or NUL</code></td></tr>
-<tr><td>an app that never called <code>spider::spin</code></td><td>500 naming the missing call</td></tr>
-<tr><td>a handler that runs past its budget</td><td>500 through the execution budget (<a href="05-safety-rails.html">Safety Rails</a>); the engine serves on</td></tr>
-<tr><td>a body over the maximum (2 MiB by default)</td><td>413 before the body is read</td></tr>
-<tr><td>a request head over 64 KiB</td><td>431 (414 for a request line alone)</td></tr>
-<tr><td>a malformed request, both Content-Length and Transfer-Encoding, a header field holding a bare CR, LF or NUL, a dot segment in the path</td><td>400; another HTTP version is 505, another transfer coding 501</td></tr>
-<tr><td>a Host header that is not <code>localhost</code>, a <code>127.x</code> address or <code>[::1]</code>, when the server listens on a loopback address</td><td>421, so a page whose own name resolves to 127.0.0.1 (DNS rebinding) cannot reach the app</td></tr>
-<tr><td>a request that takes longer than <code>--timeout</code> to arrive, or a response to leave</td><td>the connection closes</td></tr>
-<tr><td>more than 512 open connections, or more than 128 from one address</td><td>503</td></tr>
-</tbody></table></div>
+<p>A run-time error or an uncaught throw in a handler answers 500 and is logged. The limits on bodies, request heads, Host names, timeouts and connections each answer with their own status. Every failure with its status and logged text: <a href="../reference/host.html#spider-failures">failures and limits</a>.</p>
 <p><code>tools/jai_spider/examples/guestbook</code> is a complete app: templates, a form, a session, SQLite storage, a
 JSON API and a stylesheet.</p><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/18-build-integration.html"><span>&larr; previous</span>Building JaiScript into a Host</a><a class="next" rel="next" href="../embedding/20-foundry.html"><span>next &rarr;</span>Foundry: Testing a Host</a></nav></article>
 </main>

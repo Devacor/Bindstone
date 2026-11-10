@@ -74,18 +74,7 @@ eng-&gt;execute(&quot;sum_all(1, 2, 3, 4)&quot;).as_int();   // 10</code></pre><
 <p>Registering a name again with another signature adds an overload, resolved by argument types at the call. A
 <code>script_value</code> you construct takes the engine pointer, as above, or comes from <code>eng-&gt;make_value(v)</code>,
 <code>make_null()</code>, <code>make_array()</code> or <code>make_map()</code>.</p>
-<div class="tablewrap" id="more-registration-calls"><table><thead><tr><th>Call</th><th>What it does</th></tr></thead><tbody>
-<tr><td><code>add_function_with_arity(name, fn, arity)</code></td><td>registers a raw <code>jai::script_function</code> (it receives the argument vector) of exactly <code>arity</code> arguments; <code>SIZE_MAX</code> takes any count</td></tr>
-<tr><td><code>add_overloaded_function(name, arg_count, fn)</code></td><td>adds a raw <code>script_function</code> of <code>arg_count</code> arguments to <code>name</code>'s overload set</td></tr>
-<tr><td><code>add_custom_conversion&lt;T&gt;(from, to)</code></td><td>crosses a C++ <code>T</code> with no binding: <code>from(const script_value&amp;) -&gt; T</code> and <code>to(const T&amp;) -&gt; script_value</code></td></tr>
-<tr><td><code>add_vector_conversion&lt;T&gt;()</code>, <code>add_map_conversion&lt;K, V&gt;()</code></td><td>registers the <code>std::vector&lt;T&gt;</code> or <code>std::map&lt;K, V&gt;</code> conversion ahead of the first binding that names it (bindings register the shapes they name)</td></tr>
-<tr><td><code>registered_class_names()</code></td><td>every class the engine can name, host-bound and script-declared, sorted</td></tr>
-<tr><td><code>has_registered_class&lt;T&gt;()</code></td><td>whether a <code>dynamic_binder</code> bound <code>T</code> on this engine</td></tr>
-<tr><td><code>get_backend_type()</code>, <code>get_backend_name()</code></td><td>the backend (<code>jai::backend_type::vm</code> unless <code>set_backend</code> chose another) and its name</td></tr>
-<tr><td><code>text_of(v)</code></td><td>a value's text as <code>print</code> spells it, a class's own <code>to_string()</code> included; a failing <code>to_string()</code>'s error is the result</td></tr>
-<tr><td><code>app_data_dir(app)</code>, <code>app_cache_dir(app)</code>, <code>engine::executable_path()</code></td><td>the per-user data and cache folders for an app, and the running executable (empty when the platform cannot say). Queries only; the folders need the filesystem privilege and come from the resolvers <code>app_directory_resolvers(data, cache)</code> installs.</td></tr>
-<tr><td><code>set_output_stream(stream)</code></td><td>redirects <code>print()</code>; <code>nullptr</code> restores <code>std::cout</code></td></tr>
-</tbody></table></div>
+<p id="more-registration-calls">The raw-arity and overload registrations, custom and container conversions, class and backend queries, <code>text_of</code>, the app folders and <code>set_output_stream</code>: <a href="../reference/host.html#hostapi-registration">registration and engine queries</a>.</p>
 <h3 id="host-direct-entries">A direct entry for a hot variadic function<a class="hlink" href="#host-direct-entries" aria-label="link">&#8203;</a></h3>
 <p>A typed <code>add_function</code> binding has a fast call path unless a parameter is a non-const reference to a value
 (a <code>T&amp;</code> that writes back). <code>const std::string&amp;</code>, a bound object's <code>T&amp;</code>,
@@ -443,15 +432,7 @@ std::cout &lt;&lt; run.result().value().to_string() &lt;&lt; &quot;\n&quot;;</co
 wave 2 at 2.0
 wave 3 at 4.0
 cleared</code></pre></div>
-<div class="tablewrap"><table><thead><tr><th>Call</th><th>Does</th></tr></thead><tbody>
-<tr><td><code>eng-&gt;start(source)</code> <code>start_file(path)</code> <code>start_file_source(path, content)</code> <code>start(bite)</code> <code>start(callable, args)</code></td><td>starts a run and runs it to its first <code>sleep</code> or its end: what <code>execute</code>, <code>execute_file</code>, <code>execute_file_source</code>, a jaibite's run or a call of the function value would be. A jaibite must outlive its run.</td></tr>
-<tr><td><code>run.state()</code> <code>run.done()</code></td><td><code>script_run::status::suspended</code>, <code>completed</code> or <code>failed</code>; <code>done()</code> is either of the last two</td></tr>
-<tr><td><code>run.wake_at()</code></td><td>when the suspending <code>sleep</code> ends, as a monotonic reading of the time source; zero once done</td></tr>
-<tr><td><code>run.resume()</code></td><td>continues to the next <code>sleep</code> or the end and returns the state. Before <code>wake_at()</code> it returns <code>suspended</code> at once, so a host may call it every frame.</td></tr>
-<tr><td><code>run.cancel()</code></td><td>ends a suspended run: its <code>sleep</code> raises the terminal <code>Run cancelled</code>, no catch runs, every frame unwinds with its destructors, and the run is failed</td></tr>
-<tr><td><code>run.result()</code></td><td>the run's value once completed, its error once failed (<code>eng-&gt;format_error(run.result())</code>)</td></tr>
-<tr><td><code>~script_run()</code></td><td>cancels a run still suspended. <code>script_run</code> is move-only.</td></tr>
-</tbody></table></div>
+<p>A run also has <code>state()</code> and <code>cancel()</code>, and its destructor cancels a run still suspended. Every call: <a href="../reference/host.html#hostapi-script-run"><code>script_run</code> calls</a>.</p>
 <ul>
 <li><strong>Failure.</strong> A run from source, a file or a jaibite fails as <code>execute()</code> does: the
 <code>start</code> or <code>resume()</code> that ends it throws, and the run is then failed with the text in
@@ -470,12 +451,7 @@ its engine stays done.</li>
 <li><strong>The debugger.</strong> A breakpoint stops a run like any script. A suspended run is not a stop, and a step
 over a <code>sleep</code> ends at the run's next statement once it resumes.</li>
 </ul>
-<div class="tablewrap"><table><thead><tr><th>Misuse</th><th>Throws <code>jai::runtime_error</code></th></tr></thead><tbody>
-<tr><td><code>resume()</code> or <code>cancel()</code> on another thread</td><td><code>A run resumes only on the thread that started it</code></td></tr>
-<tr><td>resuming or cancelling a run from code that run is running</td><td><code>The run is running: it resumes only while suspended</code></td></tr>
-<tr><td><code>resume()</code>, <code>cancel()</code> or <code>result()</code> on a moved-from <code>script_run</code></td><td><code>The script_run holds no run</code></td></tr>
-<tr><td><code>start</code> of a value that is not a function</td><td><code>Cannot start a run of a value that is not a function</code></td></tr>
-</tbody></table></div>
+<p>Resuming on another thread, from inside the run, or through a moved-from <code>script_run</code> throws <code>jai::runtime_error</code>: <a href="../reference/host.html#hostapi-script-run-misuse"><code>script_run</code> misuse</a>.</p>
 <h2 id="parallel-worker-count">Parallel worker count<a class="hlink" href="#parallel-worker-count" aria-label="link">&#8203;</a></h2>
 <p>A parallel region (<a href="../guide/16-parallel.html">Parallel Loops</a>) runs on at most
 <code>eng-&gt;parallel_thread_count()</code> threads, the calling thread among them.
@@ -513,10 +489,7 @@ transport may serve many engines on many threads when its <code>exchange</code> 
 below do.</li>
 </ul>
 <p>Two transports ship as opt-in headers that nothing in the library includes:</p>
-<div class="tablewrap"><table><thead><tr><th>Header</th><th>Provides</th></tr></thead><tbody>
-<tr><td><code>&lt;jaiscript/net/http_socket_transport.hpp&gt;</code></td><td><code>jai::net::http_socket_transport</code>: HTTP/1.1 over Winsock or POSIX sockets, one connection per call, every wait bounded by the timeout (name resolution excepted). An https URL needs a <code>jai::net::tls_layer</code> passed to its constructor; without one it fails with <code>HTTPS needs a transport with TLS: this one speaks plain HTTP only</code>.</td></tr>
-<tr><td><code>&lt;jaiscript/net/openssl_tls.hpp&gt;</code></td><td><code>jai::net::openssl_tls</code>: that layer on OpenSSL 1.1.1 or 3.x (TLS 1.2 and up, SNI, the chain and host name verified). Its constructor takes the trust setup, a function of the <code>SSL_CTX*</code>; without one it uses OpenSSL's default certificate paths. Include it only where OpenSSL is linked. On Android and iOS the trust setup fills the store from the platform (SecTrust, <code>/system/etc/security/cacerts</code>); on Windows, from the ROOT store.</td></tr>
-</tbody></table></div>
+<p><code>&lt;jaiscript/net/http_socket_transport.hpp&gt;</code> provides <code>jai::net::http_socket_transport</code>, plain HTTP/1.1 over sockets unless its constructor is given a <code>jai::net::tls_layer</code>. <code>&lt;jaiscript/net/openssl_tls.hpp&gt;</code> provides <code>jai::net::openssl_tls</code>, that layer on OpenSSL. Versions, trust setup and the plain-HTTP error: <a href="../reference/host.html#hostapi-http-headers">HTTP transport headers</a>.</p>
 <p>The runner and jai_spider make one transport per process: WinHTTP on Windows (the system's TLS and certificate
 store), sockets with <code>openssl_tls</code> on Linux and macOS when the build found OpenSSL, and plain sockets
 otherwise, where an https URL raises the plain-HTTP error. <code>JAISCRIPT_HTTP_TRANSPORT=socket</code> in the

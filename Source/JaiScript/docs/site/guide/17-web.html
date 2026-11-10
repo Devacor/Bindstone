@@ -64,11 +64,7 @@ café © 2026 🙂 – � &amp;bogus; AT&amp;T
 true
 utf8_string</code></pre></div>
 <h3 id="percent-encoding">Percent-encoding<a class="hlink" href="#percent-encoding" aria-label="link">&#8203;</a></h3>
-<div class="tablewrap"><table><thead><tr><th>Function</th><th>What it does</th></tr></thead><tbody>
-<tr><td><code>web::url_encode(s)</code></td><td>RFC 3986, for a path segment or any other URL part: <code>A-Z a-z 0-9 - . _ ~</code> stay, every other byte is <code>%XX</code> in upper-case hex (PHP&#x27;s <code>rawurlencode</code>)</td></tr>
-<tr><td><code>web::form_encode(s)</code></td><td><code>application/x-www-form-urlencoded</code>, for a form body or query string: <code>A-Z a-z 0-9 * - . _</code> stay, a space is <code>+</code>, every other byte is <code>%XX</code> (PHP&#x27;s <code>urlencode</code>)</td></tr>
-<tr><td><code>web::url_decode(s)</code>, <code>web::form_decode(s)</code></td><td>each <code>%XX</code> back into its byte; <code>form_decode</code> also reads <code>+</code> as a space</td></tr>
-</tbody></table></div>
+<p><code>web::url_encode(s)</code> encodes a path segment or any other URL part (RFC 3986, a space is <code>%20</code>); <code>web::form_encode(s)</code> encodes a form body or query string (a space is <code>+</code>). <code>web::url_decode(s)</code> and <code>web::form_decode(s)</code> read them back. The exact byte sets: <a href="../reference/library.html#web-text-functions">encoding and query strings</a>.</p>
 <p>Decoding never fails: a <code>%</code> without two hex digits after it is kept as written. The decoded bytes need not be valid UTF-8.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string title = &quot;Snap Jaw/Social? 50% off &amp; more&quot;;
 print(web::url_encode(title));
@@ -80,11 +76,7 @@ Snap+Jaw%2FSocial%3F+50%25+off+%26+more
 100% sure, 100% sure
 a+b a b</code></pre></div>
 <h3 id="queries">Query strings<a class="hlink" href="#queries" aria-label="link">&#8203;</a></h3>
-<div class="tablewrap"><table><thead><tr><th>Function</th><th>Rules</th></tr></thead><tbody>
-<tr><td><code>web::parse_query(s)</code></td><td>a <code>map&lt;string, string&gt;</code>: a leading <code>?</code> is skipped, keys and values are form-decoded, a key without <code>=</code> has an empty value, an empty key is dropped, a repeated key keeps its last value</td></tr>
-<tr><td><code>web::parse_query_all(s)</code></td><td>keeps every value: a <code>map&lt;string, var&gt;</code> of <code>array&lt;string&gt;</code>, in arrival order</td></tr>
-<tr><td><code>web::build_query(m)</code></td><td>form-encodes a map, joined with <code>&amp;</code> in the map&#x27;s key order. A string, number or bool is written as <code>to_string</code> writes it, an array repeats its key per element, a null value drops its key. Any other value raises <code>web::build_query: the value of &#x27;m&#x27; is a map</code> (or <code>... is not text, a number, a bool or an array of them</code>)</td></tr>
-</tbody></table></div>
+<p><code>web::parse_query(s)</code> reads a query into a <code>map&lt;string, string&gt;</code> where a repeated key keeps its last value, <code>web::parse_query_all(s)</code> keeps every value as an array, and <code>web::build_query(m)</code> form-encodes a map in its key order. Every rule: <a href="../reference/library.html#web-text-functions">encoding and query strings</a>.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(to_json(web::parse_query(&quot;?page=2&amp;sort=new+first&amp;tag=a&amp;tag=b&amp;draft&quot;)));
 print(to_json(web::parse_query_all(&quot;tag=a&amp;tag=b&amp;tag=c+d&quot;)));
 print(web::build_query({&quot;q&quot;: &quot;jai script&quot;, &quot;page&quot;: 2, &quot;tags&quot;: [&quot;a&quot;, &quot;b c&quot;], &quot;draft&quot;: false, &quot;skip&quot;: null}));</code></pre></div>
@@ -126,25 +118,16 @@ print(saved.status, &quot; &quot;, saved.header(&quot;Location&quot;));
 spider::Response gone = spider::catch(&quot;https://api.example.org/scores/7&quot;,
     {&quot;method&quot;: &quot;DELETE&quot;, &quot;headers&quot;: {&quot;Authorization&quot;: &quot;Bearer &quot; + token}, &quot;timeout&quot;: 5});</code></pre></div>
 <p>Text content is sent as it is (<code>text/plain; charset=utf-8</code>); any other value (a map, an array, a number, a bool, null) is sent as <code>to_json</code> writes it (<code>application/json</code>). The options map takes:</p>
-<div class="tablewrap"><table><thead><tr><th>Option</th><th>Meaning</th></tr></thead><tbody>
-<tr><td><code>method</code></td><td><code>GET</code>, <code>HEAD</code>, <code>POST</code>, <code>PUT</code>, <code>PATCH</code>, <code>DELETE</code> or <code>OPTIONS</code>, any case</td></tr>
-<tr><td><code>headers</code></td><td>a map of names to text, number or bool values; overrides the defaults (<code>User-Agent: jaiscript-spider/VERSION</code>, <code>Accept: */*</code>, the content&#x27;s type)</td></tr>
-<tr><td><code>timeout</code></td><td>seconds for the whole call, redirects included (default 30)</td></tr>
-<tr><td><code>type</code></td><td><code>"json"</code>, <code>"text"</code>, <code>"form"</code> (a map sent as <code>web::build_query</code> spells it) or a media type such as <code>"text/csv"</code> for text content</td></tr>
-<tr><td><code>redirects</code></td><td>how many to follow, 0 to 100 (default 5); 0 answers the redirect itself</td></tr>
-</tbody></table></div>
+<p><code>method</code>, <code>headers</code>, <code>timeout</code> (seconds, default 30), <code>type</code> and <code>redirects</code> (default 5). Their values: <a href="../reference/library.html#web-options">request options</a>.</p>
 <h3 id="spider-response"><code>spider::Response</code><a class="hlink" href="#spider-response" aria-label="link">&#8203;</a></h3>
 <p>An HTTP answer: what a client call returns, and what a <code>jai_spider</code> handler builds to answer a request. An error status is an answer, not an error: <code>ok()</code> tells them apart. A response is a value: assigning one copies its headers and cookies.</p>
 <div class="tablewrap"><table><thead><tr><th>Member</th><th>What it is</th></tr></thead><tbody>
-<tr><td><code>spider::Response(status, body)</code></td><td>a new one (both optional: 200 and an empty body)</td></tr>
 <tr><td><code>status</code>, <code>ok()</code></td><td>the status code (<code>int</code>); true for 2xx</td></tr>
 <tr><td><code>body</code>, <code>json()</code></td><td>the body&#x27;s bytes; <code>from_json</code> of them</td></tr>
-<tr><td><code>url</code></td><td>the URL that answered, after redirects ("" for a response a script built)</td></tr>
-<tr><td><code>headers</code>, <code>header(name)</code></td><td>a writable <code>map&lt;string, string&gt;</code>; a received answer&#x27;s names are lowercased and a repeated header is joined with <code>", "</code>. <code>header(name)</code> reads any spelling, "" when absent</td></tr>
-<tr><td><code>header(name, value)</code></td><td>sets a header, replacing any spelling of the name, and returns the response, so calls chain. Raises <code>Response.header: &#x27;N&#x27; is not a header name, or its value holds a line break or NUL</code></td></tr>
-<tr><td><code>cookies</code></td><td>the Set-Cookie lines (<code>array&lt;string&gt;</code>)</td></tr>
-<tr><td><code>set_cookie(name, value[, options])</code>, <code>clear_cookie(name[, options])</code></td><td>adds a Set-Cookie line, the value percent-encoded; <code>clear_cookie</code> sets <code>Max-Age=0</code>. Options: <code>max_age</code>, <code>expires</code> (unix seconds), <code>path</code> ("/"), <code>domain</code>, <code>secure</code> (false), <code>http_only</code> (true), <code>same_site</code> ("Lax"; "" leaves it out). The name is a token, and <code>path</code>, <code>domain</code> and <code>same_site</code> hold no <code>;</code> or control character (<code>Response.set_cookie: option &#x27;path&#x27; holds a &#x27;;&#x27; or a control character</code>)</td></tr>
+<tr><td><code>header(name)</code></td><td>a header by any spelling of its name, "" when absent</td></tr>
+<tr><td><code>set_cookie(name, value[, options])</code></td><td>adds a Set-Cookie line, the value percent-encoded</td></tr>
 </tbody></table></div>
+<p>Every member and cookie option: <a href="../reference/library.html#web-response">spider::Response members</a>.</p>
 <h3 id="spider-security">Cookies and sessions: what is and is not protected<a class="hlink" href="#spider-security" aria-label="link">&#8203;</a></h3>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">spider::Response r = spider::Response(200, &quot;hi&quot;);
 r.set_cookie(&quot;session&quot;, &quot;abc 1&quot;, {&quot;max_age&quot;: 3600});

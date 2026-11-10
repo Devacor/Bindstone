@@ -55,12 +55,12 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 </ul>
 <h2 id="ask-what-shape-is-this">Ask: what shape is this?<a class="hlink" href="#ask-what-shape-is-this" aria-label="link">&#8203;</a></h2>
 <div class="tablewrap"><table><thead><tr><th>Call</th><th>Answers</th></tr></thead><tbody>
-<tr><td><code>reflect::type_name(v)</code></td><td><code>type_of</code>, except that a typed container gives its canonical tag (<code>"array&lt;int&gt;"</code>, not <code>"array"</code>). A reference answers what it refers to</td></tr>
-<tr><td><code>reflect::fields(v)</code></td><td>one map per field: <code>name</code>, <code>type</code>, <code>kind</code>, <code>access</code>, <code>static</code>, <code>from</code> (the declaring class). Base class fields first, then own, in declaration order on every engine and backend; a class&#x27;s static fields follow its instance fields</td></tr>
-<tr><td><code>reflect::methods(v)</code></td><td>one map <strong>per overload</strong>: <code>name</code>, <code>arity</code>, <code>static</code>, <code>access</code>, <code>from</code>, <code>params</code> (an array of <code>{name, type, default}</code> maps), sorted by name then arity. Property accessors and constructors are not listed</td></tr>
+<tr><td><code>reflect::type_name(v)</code></td><td><code>type_of</code>, except that a typed container gives its canonical tag (<code>"array&lt;int&gt;"</code>, not <code>"array"</code>)</td></tr>
+<tr><td><code>reflect::fields(v)</code></td><td>one map per field: <code>name</code>, <code>type</code>, <code>kind</code>, <code>access</code>, <code>static</code>, <code>from</code> (the declaring class)</td></tr>
+<tr><td><code>reflect::methods(v)</code></td><td>one map <strong>per overload</strong>: <code>name</code>, <code>arity</code>, <code>static</code>, <code>access</code>, <code>from</code>, <code>params</code></td></tr>
 <tr><td><code>reflect::has_field(v, "name")</code>, <code>reflect::has_method(v, "name")</code></td><td>bool; both walk the inheritance chain</td></tr>
-<tr><td><code>reflect::method_arguments(v, "name")</code>, <code>reflect::function_arguments("name")</code></td><td>one <code>params</code> array per overload; empty for a host-registered function</td></tr>
 </tbody></table></div>
+<p>Every shape call, with its ordering rules: <a href="../reference/library.html#reflection-shape">reflection calls</a>.</p>
 <p>A C++-bound class lists the host&#x27;s property schema, where <code>kind</code> tells a plain field from a <code>"signal"</code> or <code>"observable"</code> member.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Creature { int hp = 10; private: string name = "grim"; }
 class Goblin : Creature {
@@ -80,12 +80,7 @@ for (auto m : reflect::methods("Goblin")) {
 wound arity 2 (private) {&quot;default&quot;: true, &quot;name&quot;: &quot;crit&quot;, &quot;type&quot;: &quot;bool&quot;}</code></pre></div>
 <h3 id="strings-are-class-names">Strings are class names<a class="hlink" href="#strings-are-class-names" aria-label="link">&#8203;</a></h3>
 <p>Every function that takes an instance also takes a class name, so a string there is looked up as a class and an unknown name raises (<code>reflect::fields: unknown class 'hello'</code>, each function under its own name). Given a class name, <code>get</code>, <code>set</code> and <code>invoke</code> reach its static members (<code>reflect::get: class 'C' has no static field 'a'</code> otherwise). Only <code>reflect::type_name</code> reads a string as a value.</p>
-<div class="tablewrap"><table><thead><tr><th>Function</th><th>Given another non-class value (<code>5</code>, an array, <code>null</code>)</th></tr></thead><tbody>
-<tr><td><code>fields</code>, <code>bases</code></td><td><code>[]</code></td></tr>
-<tr><td><code>has_field</code>, <code>has_method</code>, <code>is_cpp_bound</code></td><td><code>false</code></td></tr>
-<tr><td><code>methods</code>, <code>method_arguments</code>, <code>generation</code>, <code>instances</code></td><td>raises <code>reflect::methods expects a class or class name</code></td></tr>
-<tr><td><code>get</code>, <code>set</code>, <code>invoke</code></td><td>raises <code>reflect::get expects an object or class name</code></td></tr>
-</tbody></table></div>
+<p>Another non-class value (<code>5</code>, an array, <code>null</code>) gives <code>fields</code> an empty array and <code>has_field</code> <code>false</code>, and raises from <code>methods</code>, <code>get</code>, <code>set</code> and <code>invoke</code>. Each function&#x27;s answer: <a href="../reference/library.html#reflection-non-class">a non-class argument</a>.</p>
 <p>So a property grid over arbitrary values tests for a string before it calls <code>reflect::fields</code>:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Goblin { int hp = 10; float speed = 1.5; }
 
@@ -104,13 +99,12 @@ null: 0
 <h2 id="act-read-write-call-construct">Act: read, write, call, construct<a class="hlink" href="#act-read-write-call-construct" aria-label="link">&#8203;</a></h2>
 <div class="tablewrap"><table><thead><tr><th>Call</th><th>Is</th></tr></thead><tbody>
 <tr><td><code>reflect::get(s, "hp")</code></td><td><code>s.hp</code></td></tr>
-<tr><td><code>reflect::set(s, "hp", 42)</code></td><td><code>s.hp = 42</code>; a typed field converts or raises the direct syntax&#x27;s error</td></tr>
+<tr><td><code>reflect::set(s, "hp", 42)</code></td><td><code>s.hp = 42</code></td></tr>
 <tr><td><code>reflect::invoke(s, "wound", 5)</code></td><td><code>s.wound(5)</code></td></tr>
-<tr><td><code>reflect::bind(s, "wound")</code></td><td>the method as a callable that holds <code>s</code> and keeps it alive: the one spelling of a method taken as a value (<a href="07-classes.html#methods-as-values">Classes</a>). A string, array or map is refused; wrap the call in a lambda</td></tr>
-<tr><td><code>reflect::call("ns::name", args...)</code></td><td>a call of the global or namespace-qualified function</td></tr>
-<tr><td><code>reflect::construct("Class", args...)</code></td><td><code>Class(args)</code>: a value, copies are independent</td></tr>
-<tr><td><code>reflect::construct_shared("Class", args...)</code></td><td><code>new Class(args)</code>: a shared handle (<a href="03-value-semantics.html">Value Semantics</a>), as in <code>spawned.push(reflect::construct_shared(row["type"], row["hp"]))</code></td></tr>
+<tr><td><code>reflect::construct("Class", args...)</code></td><td><code>Class(args)</code>: a value</td></tr>
+<tr><td><code>reflect::construct_shared("Class", args...)</code></td><td><code>new Class(args)</code>: a shared handle (<a href="03-value-semantics.html">Value Semantics</a>)</td></tr>
 </tbody></table></div>
+<p><code>reflect::bind(s, "wound")</code> gives the method as a callable that holds <code>s</code> (<a href="07-classes.html#methods-as-values">Classes</a>), and <code>reflect::call("ns::name", args...)</code> calls a function by name. Every rule: <a href="../reference/library.html#reflection-act">reflection calls</a>.</p>
 <p><strong>Reflection ignores script access control, by design.</strong> <code>get</code>, <code>set</code>, <code>invoke</code>, <code>bind</code> and <code>construct</code> reach private members and private constructors, while direct syntax keeps enforcing <code>private</code>. <code>from_json</code> and <code>from_binary</code> likewise restore private state.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Soldier {
     int hp = 10;
@@ -141,14 +135,11 @@ value 30, shared 9</code></pre></div>
 <h2 id="navigate-the-wider-world">Navigate: the wider world<a class="hlink" href="#navigate-the-wider-world" aria-label="link">&#8203;</a></h2>
 <div class="tablewrap"><table><thead><tr><th>Call</th><th>Answers</th></tr></thead><tbody>
 <tr><td><code>reflect::classes()</code></td><td>every class, script-declared and host-bound, sorted</td></tr>
-<tr><td><code>reflect::functions()</code></td><td>every function, namespace-qualified and sorted; no constructors</td></tr>
-<tr><td><code>reflect::globals()</code></td><td>global variable names, sorted</td></tr>
 <tr><td><code>reflect::bases(v)</code></td><td>the base classes in declaration order, empty at a root</td></tr>
-<tr><td><code>reflect::is_cpp_bound(v)</code></td><td>for a class name, whether the host registered it; for a value, whether a C++ object backs it</td></tr>
-<tr><td><code>reflect::is_enabled(requirements...)</code></td><td>whether the host granted every named privilege (<code>"filesystem"</code>, <code>jai::filesystem</code>, a custom permission name); false for an unknown name (<a href="10-modules.html#where-files-are">Where files are</a>)</td></tr>
 <tr><td><code>reflect::instances("Class")</code></td><td>the live instances of a class, in creation order</td></tr>
 <tr><td><code>reflect::generation("Class")</code></td><td>a counter that moves whenever the class is redefined</td></tr>
 </tbody></table></div>
+<p>Functions, globals, host-bound classes and privileges are asked the same way: <a href="../reference/library.html#reflection-navigate">program-wide queries</a>.</p>
 <h2 id="hot-reload-ask-again">Hot reload: ask again<a class="hlink" href="#hot-reload-ask-again" aria-label="link">&#8203;</a></h2>
 <p><code>reflect::generation</code> is the cheap poll: a property grid re-reads <code>fields()</code> only when the number moved. The sample declares <code>Evolver</code> twice, which is legal because a class declared again at program scope replaces the class in place for every live instance (<a href="10-modules.html#program-scope-redeclarations">Program-scope redeclarations</a>); a reloaded file does that.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Evolver { int a = 1; }

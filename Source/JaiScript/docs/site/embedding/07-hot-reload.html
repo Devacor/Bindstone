@@ -77,16 +77,12 @@ eng-&gt;execute(R&quot;( print(&quot;hp: &quot;, type_of(p.hp), &quot; &quot;, p
 name: Alice
 level: 5
 speed: Player has no member &#x27;speed&#x27;</code></pre></div>
+<p>Every change, statics, constructors, base classes and C++ bases included: <a href="../reference/host.html#reload-migration">instance migration</a>. The four the sample shows:</p>
 <div class="tablewrap"><table><thead><tr><th>change</th><th>what happens to live instances</th></tr></thead><tbody>
-<tr><td>field kept (same name and type)</td><td>value preserved, even if the initializer changed: an initializer is a new instance&#x27;s default</td></tr>
+<tr><td>field kept (same name and type)</td><td>value preserved, even if the initializer changed</td></tr>
 <tr><td>field added</td><td>takes the new initializer</td></tr>
-<tr><td>field removed</td><td>gone; access raises <code>Player has no member 'speed'</code></td></tr>
-<tr><td>field retyped</td><td>the value converts as an assignment would (int to string through <code>to_string</code>, int to float), and a float truncates into an int as <code>cast&lt;int&gt;</code> does; a value with no conversion takes the new initializer</td></tr>
-<tr><td>method body changed</td><td>the next call runs the new body, including through a method bound earlier with <code>reflect::bind</code></td></tr>
-<tr><td>static members</td><td>values preserved, not reset to the initializer; removed statics are inaccessible; static method bodies update</td></tr>
-<tr><td>constructor overloads</td><td>replaced with the class; dispatch by arity works as before</td></tr>
-<tr><td>base class reloaded</td><td>derived instances keep their own data and take the base&#x27;s new and retyped fields, converted the same way</td></tr>
-<tr><td>script class extending a C++ class</td><td>the live C++ object is carried across, neither destroyed nor rebuilt; inherited C++ methods stay callable</td></tr>
+<tr><td>field removed</td><td>gone; access raises an error</td></tr>
+<tr><td>field retyped</td><td>the value converts as an assignment would; a value with no conversion takes the new initializer</td></tr>
 </tbody></table></div>
 <p>The cost is linear in live instances and fields. To give live objects a changed default, write it in a hook or an update function.</p>
 <h2 id="the-hot-reload-migrate-hook">The <code>hot_reload_migrate</code> hook<a class="hlink" href="#the-hot-reload-migrate-hook" aria-label="link">&#8203;</a></h2>

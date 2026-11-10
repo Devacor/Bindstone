@@ -1008,6 +1008,9 @@ print(to_json(stock.to_array()));</code></pre></div>
 <div class="api-entry" data-provider="core" data-search="math::abs(value: number or vector) -&gt; number or vector observe integral arguments retain exact integral results. every engine"><h3 id="api-38030f8a78a5"><code>math::abs(value: number or vector) -&gt; number or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Integral arguments retain exact integral results.</p>
 </div>
+<div class="api-entry" data-provider="core" data-search="math::angle(vector: vector2) -&gt; float observe radians, atan2(y, x) in (-pi, pi]; 0 for the zero vector. every engine"><h3 id="api-118408163959"><code>math::angle(vector: vector2) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>Radians, atan2(y, x) in (-pi, pi]; 0 for the zero vector.</p>
+</div>
 <div class="api-entry" data-provider="core" data-search="math::angle_between(left: vector, right: matching_vector) -&gt; float observe radians. every engine"><h3 id="api-d8bdc82ef15f"><code>math::angle_between(left: vector, right: matching_vector) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Radians.</p>
 </div>
@@ -1048,6 +1051,12 @@ print(to_json(stock.to_array()));</code></pre></div>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::floor(value: number or vector) -&gt; float or vector observe component-wise for floating vectors; integers accepted. every engine"><h3 id="api-52e688a9dffb"><code>math::floor(value: number or vector) -&gt; float or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Component-wise for floating vectors; integers accepted.</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="math::from_angle(angle: number) -&gt; vector2 observe radians; the unit vector (cos, sin). every engine"><h3 id="api-0612e0b6da27"><code>math::from_angle(angle: number) -&gt; vector2</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>Radians; the unit vector (cos, sin).</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="math::from_angle(angle: number, length: number) -&gt; vector2 observe radians. every engine"><h3 id="api-5ead3aba7978"><code>math::from_angle(angle: number, length: number) -&gt; vector2</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>Radians.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::ifloor(value: number) -&gt; int convert  every engine"><h3 id="api-651b056cd2db"><code>math::ifloor(value: number) -&gt; int</code></h3><p><strong>Every engine</strong> &middot; convert</p>
 </div>
@@ -1119,6 +1128,9 @@ print(to_json(stock.to_array()));</code></pre></div>
 <p>Radians.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::rotate(vector: vector3, axis: vector3, angle: number) -&gt; vector3 observe  every engine"><h3 id="api-e1caaba42aae"><code>math::rotate(vector: vector3, axis: vector3, angle: number) -&gt; vector3</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="math::rotate_around(point: vector2, pivot: vector2, angle: number) -&gt; vector2 observe radians. every engine"><h3 id="api-dee567668a2e"><code>math::rotate_around(point: vector2, pivot: vector2, angle: number) -&gt; vector2</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>Radians.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::round(value: number or vector) -&gt; float or vector observe  every engine"><h3 id="api-c6265a0558ee"><code>math::round(value: number or vector) -&gt; float or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
@@ -1225,6 +1237,8 @@ print(to_json(stock.to_array()));</code></pre></div>
 </div>
 </section>
 <section class="api-group"><h2 id="group-math-ivec2">math::ivec2</h2>
+<div class="api-entry" data-provider="core" data-search="math::ivec2.angle() -&gt; float observe  every engine"><h3 id="api-706bebb23373"><code>math::ivec2.angle() -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+</div>
 <div class="api-entry" data-provider="core" data-search="math::ivec2.cross(other: matching_vector) -&gt; number or vector3 observe  every engine"><h3 id="api-e7aba0fdbc42"><code>math::ivec2.cross(other: matching_vector) -&gt; number or vector3</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::ivec2.distance_to(other: matching_vector) -&gt; float observe  every engine"><h3 id="api-dcbb4fa63226"><code>math::ivec2.distance_to(other: matching_vector) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
@@ -1238,6 +1252,8 @@ print(to_json(stock.to_array()));</code></pre></div>
 <div class="api-entry" data-provider="core" data-search="math::ivec2.normalized() -&gt; floating_vector copy  every engine"><h3 id="api-39e65223a0af"><code>math::ivec2.normalized() -&gt; floating_vector</code></h3><p><strong>Every engine</strong> &middot; copy</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::ivec2.rotated(angle: number) -&gt; vector2 copy  every engine"><h3 id="api-68c1198a2cfc"><code>math::ivec2.rotated(angle: number) -&gt; vector2</code></h3><p><strong>Every engine</strong> &middot; copy</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="math::ivec2.rotated_around(pivot: vector2, angle: number) -&gt; vector2 copy  every engine"><h3 id="api-ecb2e4b17cbf"><code>math::ivec2.rotated_around(pivot: vector2, angle: number) -&gt; vector2</code></h3><p><strong>Every engine</strong> &middot; copy</p>
 </div>
 </section>
 <section class="api-group"><h2 id="group-math-ivec3">math::ivec3</h2>
@@ -1257,6 +1273,8 @@ print(to_json(stock.to_array()));</code></pre></div>
 </div>
 </section>
 <section class="api-group"><h2 id="group-math-vec2">math::vec2</h2>
+<div class="api-entry" data-provider="core" data-search="math::vec2.angle() -&gt; float observe  every engine"><h3 id="api-ae3aab68e7de"><code>math::vec2.angle() -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+</div>
 <div class="api-entry" data-provider="core" data-search="math::vec2.cross(other: matching_vector) -&gt; number or vector3 observe  every engine"><h3 id="api-4646d50ba020"><code>math::vec2.cross(other: matching_vector) -&gt; number or vector3</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::vec2.distance_to(other: matching_vector) -&gt; float observe  every engine"><h3 id="api-e88dab1d188a"><code>math::vec2.distance_to(other: matching_vector) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
@@ -1270,6 +1288,8 @@ print(to_json(stock.to_array()));</code></pre></div>
 <div class="api-entry" data-provider="core" data-search="math::vec2.normalized() -&gt; floating_vector copy  every engine"><h3 id="api-7386218321ed"><code>math::vec2.normalized() -&gt; floating_vector</code></h3><p><strong>Every engine</strong> &middot; copy</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::vec2.rotated(angle: number) -&gt; vector2 copy  every engine"><h3 id="api-4df70c342199"><code>math::vec2.rotated(angle: number) -&gt; vector2</code></h3><p><strong>Every engine</strong> &middot; copy</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="math::vec2.rotated_around(pivot: vector2, angle: number) -&gt; vector2 copy  every engine"><h3 id="api-82bcc83b3030"><code>math::vec2.rotated_around(pivot: vector2, angle: number) -&gt; vector2</code></h3><p><strong>Every engine</strong> &middot; copy</p>
 </div>
 </section>
 <section class="api-group"><h2 id="group-math-vec3">math::vec3</h2>

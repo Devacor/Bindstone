@@ -42,7 +42,7 @@ class Trail {
 	bool reaches(ivec2 a_at) { return stepsFrom(a_at) >= 0; }
 
 	array<ivec2> tilesBeyond(int a_steps, array<ivec2> a_tiles) {
-		return array::filter(a_tiles, at => this.stepsFrom(at) > a_steps);
+		return array::filter(a_tiles, at => stepsFrom(at) > a_steps);
 	}
 
 	ivec2 nextStep(ivec2 a_from) {

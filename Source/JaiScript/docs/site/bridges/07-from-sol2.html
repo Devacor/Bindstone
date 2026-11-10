@@ -70,7 +70,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 </tbody></table></div>
 <h3 id="usertypes">Usertypes<a class="hlink" href="#usertypes" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th>sol2</th><th>JaiScript</th></tr></thead><tbody>
-<tr><td><code>lua.new_usertype&lt;T&gt;("T", ...);</code></td><td><code>jai::dynamic_binder&lt;T&gt;(*eng, "T") ... .build();</code></td></tr>
+<tr><td><code>lua.new_usertype&lt;T&gt;("T", ...);</code></td><td><code>jai::dynamic_binder&lt;T&gt;(*eng, "T") ...;</code></td></tr>
 <tr><td><code>sol::constructors&lt;T(), T(std::string, int64_t)&gt;()</code>, called as <code>T.new(...)</code></td><td><code>.constructor&lt;&gt;()</code> and <code>.constructor&lt;std::string, int64_t&gt;()</code>, called as <code>T(...)</code> for a value or <code>new T(...)</code> for a <code>shared_ptr</code></td></tr>
 <tr><td><code>sol::factories([](int v) { return std::make_shared&lt;T&gt;(v); })</code></td><td><code>.constructor&lt;int&gt;()</code>: <code>new T(v)</code> in script already makes the <code>shared_ptr</code>, and a C++ object handed over with <code>eng-&gt;make_object(ptr)</code> stays one object on both sides</td></tr>
 <tr><td><code>"method", &amp;T::method</code>, called as <code>obj:method()</code></td><td><code>.method("method", &amp;T::method)</code>, called as <code>obj.method()</code></td></tr>

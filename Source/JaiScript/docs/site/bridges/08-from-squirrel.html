@@ -73,7 +73,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 </tbody></table></div>
 <h3 id="classes">Classes<a class="hlink" href="#classes" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th>Squirrel</th><th>JaiScript</th></tr></thead><tbody>
-<tr><td><code>sq_newclass</code>, <code>sq_settypetag</code>, <code>sq_setclassudsize(v, -1, sizeof(T))</code></td><td><code>jai::dynamic_binder&lt;T&gt;(*eng, "T") ... .build();</code>; the object lives in a <code>std::shared_ptr&lt;T&gt;</code></td></tr>
+<tr><td><code>sq_newclass</code>, <code>sq_settypetag</code>, <code>sq_setclassudsize(v, -1, sizeof(T))</code></td><td><code>jai::dynamic_binder&lt;T&gt;(*eng, "T") ...;</code>; the object lives in a <code>std::shared_ptr&lt;T&gt;</code></td></tr>
 <tr><td>a <code>constructor</code> closure that placement-<code>new</code>s <code>T</code> into the user data</td><td><code>.constructor&lt;int64_t&gt;()</code>, once per overload</td></tr>
 <tr><td>a method closure that fetches <code>this</code> with <code>sq_getinstanceup(v, 1, &amp;up, tag, SQTrue)</code></td><td><code>.method("name", &amp;T::name)</code>; the binder checks the receiver's class before the call</td></tr>
 <tr><td><code>sq_setreleasehook</code> to run a destructor</td><td>nothing: the destructor runs when the last <code>shared_ptr</code> goes</td></tr>
@@ -152,8 +152,7 @@ jai::stdlib::register_all(eng);
 
 jai::dynamic_binder&lt;gloom_rng&gt;(*eng, "Rng")
     .constructor&lt;jai::script_int&gt;()
-    .method("roll", &amp;gloom_rng::roll)
-    .build();
+    .method("roll", &amp;gloom_rng::roll);
 
 eng-&gt;add_function("host_log", [log](const std::string&amp; line) { log(line); });</code></pre></div>
 <ul>

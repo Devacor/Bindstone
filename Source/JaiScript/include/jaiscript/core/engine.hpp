@@ -45,7 +45,7 @@ namespace jai {
     struct import_site;
     namespace vm { class vm_backend; struct coverage_tables; }
     namespace debug { class controller; class transport; }
-    namespace detail { struct release_machine; struct run_record; struct run_entry_state; struct run_registry; struct engine_access; }
+    namespace detail { struct release_machine; struct run_record; struct run_entry_state; struct run_registry; struct engine_access; class pending_binder; }
     struct script_namespace_data;
 
     // engine::vm_coverage_summary: the report's class totals as numbers, for a harness that aggregates many runs
@@ -1672,8 +1672,16 @@ namespace jai {
         // type_index order, not dependency order); resolved when the base arrives.
         void defer_base_link(std::type_index base, std::shared_ptr<class_definition> derived);
 
+        // A bound member of a class type no binder has registered yet is recorded; settle_bindings reports those still missing
+        void require_bound_type(const std::string& class_name, const std::string& member, const std::type_info& type);
+        // Commits the binders still alive, in creation order, then raises one error listing every unresolved type and every
+        // binding whose implicit commit failed. Each load, check and host entry calls it while anything is pending.
+        void settle_bindings();
+        size_t binding_settle_count() const;
+
         // Allow dynamic_binder to access implementation details
         template<typename T> friend class dynamic_binder;
+        friend class detail::pending_binder;
         // Allow function_binder to access conversion registry
         template<typename T> friend struct detail::value_converter;
         // Allow interpreter to access implementation for include/import

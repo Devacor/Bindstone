@@ -151,12 +151,6 @@ namespace dynamic_binder_detail {
     make_context_archive_factory(FactoryFunc&& factory, std::string class_name, engine* engine_ptr);
 }
 
-// Tag for opting out of registration-time type dependency validation
-// Use this with .property() to acknowledge circular dependencies
-// Example: .property("child", &Parent::child, skip_type_check)
-struct skip_type_check_t {};
-inline constexpr skip_type_check_t skip_type_check{};
-
 namespace dynamic_binder_validation {
     // Helper to detect if a type is a standard container
     template<typename T>
@@ -255,6 +249,36 @@ namespace dynamic_binder_validation {
 }
 
 namespace detail {
+	// A binder's place among its engine's uncommitted binders, in creation order (engine.cpp). The engine commits those
+	// still alive when it first loads a script, and lets go of every one when it dies.
+	class pending_binder {
+	public:
+		pending_binder(const pending_binder&) = delete;
+		pending_binder& operator=(const pending_binder&) = delete;
+
+	protected:
+		using commit_function = void (*)(pending_binder&);
+
+		pending_binder(engine& owner, const std::string& class_name, commit_function commit);
+		pending_binder(pending_binder&& other) noexcept;   // takes other's place
+		~pending_binder();
+
+		bool uncommitted() const { return owner_ != nullptr; }
+		void leave() noexcept;
+		// Commits when uncommitted; a failure is recorded on the engine, which raises it at its next load
+		void commit_or_record() noexcept;
+
+		std::string class_name_;
+
+	private:
+		friend class jai::engine;
+
+		engine* owner_ = nullptr;
+		pending_binder* previous_ = nullptr;
+		pending_binder* next_ = nullptr;
+		commit_function commit_ = nullptr;
+	};
+
 	// Public C++ method adapter: the shared runtime helper returns checked_result.
 	template<typename T>
 	T* extract_cpp_object_ptr(const script_value& val, uint64_t target_id = UINT64_MAX) {
@@ -529,11 +553,11 @@ concept has_jai_auto_bind = requires(dynamic_binder<T>& builder) {
 
 // Builder pattern for registering C++ classes to JaiScript
 template<typename T>
-class dynamic_binder {
+class dynamic_binder : private detail::pending_binder {
     static_assert(!math_adapted<T>, "T binds as a native math type (math_adapter); delete its dynamic_binder registration");
 public:
     dynamic_binder(engine& engine, const std::string& class_name)
-        : engine_(engine), class_name_(class_name) {
+        : detail::pending_binder(engine, class_name, &commit_pending), engine_(engine) {
         // Extract base template name if this is a templated type
         std::string baseTemplateName = extract_base_template_name(class_name);
 
@@ -583,33 +607,25 @@ public:
         : dynamic_binder(*engine_ptr, class_name) {
     }
 
-    // Destructor - automatically call build() if not already called
-    // This ensures the class is registered even if the user forgets to call build()
+    // The binding commits here unless build() or the engine's first load already committed it
     ~dynamic_binder() {
-        if (!built_) {
-            try { build(); } catch (...) {}
-        }
+        commit_or_record();
     }
 
     // base_class<B>'s auto-registration configures a sibling instantiation directly
     template<typename> friend class dynamic_binder;
 
-    // Disable copy (would cause double-build issues)
     dynamic_binder(const dynamic_binder&) = delete;
     dynamic_binder& operator=(const dynamic_binder&) = delete;
 
-    // Enable move
     dynamic_binder(dynamic_binder&& other) noexcept
-        : engine_(other.engine_)
-        , class_name_(std::move(other.class_name_))
+        : detail::pending_binder(std::move(other))
+        , engine_(other.engine_)
         , class_def_(std::move(other.class_def_))
         , serialization_metadata_(std::move(other.serialization_metadata_))
         , pending_math_properties_(std::move(other.pending_math_properties_))
         , has_explicit_constructor_(other.has_explicit_constructor_)
-        , built_(other.built_)
     {
-        // Mark the moved-from object as built to prevent double-registration
-        other.built_ = true;
     }
 
     // Add constructor
@@ -1069,17 +1085,10 @@ public:
         return *this;
     }
 
-    // Add property/field binding (with automatic registration validation)
+    // A member whose class type is not registered yet is recorded; the engine's first load reports those still missing
     template<typename P>
     dynamic_binder& property(const std::string& name, P T::*member) {
-        return property_impl<P>(name, member, false);
-    }
-
-    // Add property/field binding (opt-out of registration validation)
-    // Use this to explicitly acknowledge circular dependencies
-    template<typename P>
-    dynamic_binder& property(const std::string& name, P T::*member, skip_type_check_t) {
-        return property_impl<P>(name, member, true);
+        return property_impl<P>(name, member);
     }
 
 private:
@@ -1167,34 +1176,15 @@ private:
         return cpp_obj ? static_cast<void*>(&(cpp_obj->*std::bit_cast<P T::*>(st.method))) : nullptr;
     }
 
-    // Internal implementation for property registration with validation
     template<typename P>
-    dynamic_binder& property_impl(const std::string& name, P T::*member, bool skip_validation) {
+    dynamic_binder& property_impl(const std::string& name, P T::*member) {
         // Signal members may hand out the generic view at read time — make
         // sure its type exists before any getter can run.
         if constexpr (dynamic_binder_validation::is_signal_type<P>::value) {
             detail::ensure_signal_view_type_registered(engine_);
         }
-        // Validate that property type is registered (unless explicitly skipped)
         if constexpr (dynamic_binder_validation::needs_registration_check<P>()) {
-            if (!skip_validation) {
-                // Extract the validation type (unwraps smart pointers)
-                using validation_type_t = typename dynamic_binder_validation::get_validation_type<P>::type;
-
-                // We use std::type_index to identify types, just like the rest of the codebase
-                auto prop_type_index = std::type_index(typeid(validation_type_t));
-                auto registered_class = engine_.get_class_definition_by_type(prop_type_index);
-
-                if (!registered_class) {
-                    throw std::runtime_error(
-                        "Property '" + name + "' of class '" + class_name_ + "' uses unregistered type '" +
-                        typeid(P).name() + "'. " +
-                        "You must register this type with dynamic_binder before registering '" + class_name_ + "', " +
-                        "or use skip_type_check to explicitly acknowledge circular dependencies:\n" +
-                        "  .property(\"" + name + "\", &" + class_name_ + "::" + name + ", jai::skip_type_check)"
-                    );
-                }
-            }
+            engine_.require_bound_type(class_name_, name, typeid(typename dynamic_binder_validation::get_validation_type<P>::type));
         }
 
         // Register the property as a special field that knows how to access the C++ member
@@ -1711,11 +1701,11 @@ private:
 
 public:
 
-    // Finalize registration
+    // Commits the binding at this point and throws what fails; without it the binding commits when the binder's lifetime
+    // ends or when the engine first loads a script, whichever comes first
     void build() {
-        // Prevent double-build
-        if (built_) return;
-        built_ = true;
+        if (!uncommitted()) return;
+        leave();
 
         // A bound method of the same name is the class's chosen spelling (Palette's color() /
         // color(c)); the property stays reachable through it
@@ -1820,12 +1810,14 @@ private:
     }
 
     engine& engine_;
-    std::string class_name_;
     std::shared_ptr<class_definition> class_def_;
     serialization::class_metadata serialization_metadata_;
     std::vector<detail::pending_math_property> pending_math_properties_;
     bool has_explicit_constructor_ = false;  // Track if user registered any constructor
-    bool built_ = false;  // Track if build() was called
+
+    static void commit_pending(detail::pending_binder& link) {
+        static_cast<dynamic_binder&>(link).build();
+    }
     
     // Automatically register container conversions for type T
     void register_container_conversions() {

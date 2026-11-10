@@ -132,8 +132,7 @@ wave 2 incoming</code></pre></div>
 <div class="codeblock cb-cpp" data-sample="signals-door-binder"><span class="cb-label">C++</span><pre><code class="lang-cpp">jai::dynamic_binder&lt;Door&gt;(*eng, "Door")
     .constructor&lt;&gt;()
     .method("open", &amp;Door::open)
-    .property("onOpen", &amp;Door::onOpen)     // the whole script exposure
-    .build();</code></pre></div>
+    .property("onOpen", &amp;Door::onOpen);    // the whole script exposure</code></pre></div>
 <div class="codeblock cb-jai" data-host="Door binder chain" data-sample="signals-door-script"><span class="cb-label">jaiscript &middot; needs the host registration above</span><pre><code class="lang-jai">var d = Door();
 d.onOpen.connect("watch", [=](int w) -&gt; void { print("opened to {}", w); });
 d.open(42);

@@ -480,8 +480,8 @@ public:
         dynamic_binder<CppTreeNode>(*jai_engine, "CppTreeNode")
             .constructor<int>()
             .property("value", &CppTreeNode::value)
-            .property("left", &CppTreeNode::left, jai::skip_type_check)
-            .property("right", &CppTreeNode::right, jai::skip_type_check)
+            .property("left", &CppTreeNode::left)
+            .property("right", &CppTreeNode::right)
             .build();
 
         jai_engine->add_function("cpp_insertNode", &cpp_insertNode);

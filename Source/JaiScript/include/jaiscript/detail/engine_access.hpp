@@ -131,6 +131,7 @@ namespace jai::detail {
         JAI_FORCEINLINE static checked_result<script_value> run_template_unit(engine& a_engine, const std::string& unit, const std::string& source) { return a_engine.run_template_unit(unit, source); }
         JAI_FORCEINLINE static bool template_unit_current(engine& a_engine, const std::string& unit, const std::string& source) { return a_engine.template_unit_current(unit, source); }
         JAI_FORCEINLINE static std::shared_ptr<class_definition> get_class_definition_by_type(const engine& a_engine, const std::type_index& type) { return a_engine.get_class_definition_by_type(type); }
+        JAI_FORCEINLINE static size_t binding_settle_count(const engine& a_engine) { return a_engine.binding_settle_count(); }
         JAI_FORCEINLINE static std::shared_ptr<conversions::conversion_registry> get_conversion_registry(const engine& a_engine) { return a_engine.get_conversion_registry(); }
         template<typename Registry> JAI_FORCEINLINE static void set_conversion_registry(engine& a_engine, Registry&& registry) { return a_engine.set_conversion_registry(std::forward<Registry>(registry)); }
         JAI_FORCEINLINE static serialization::serialization_registry& get_serialization_registry(engine& a_engine) { return a_engine.get_serialization_registry(); }

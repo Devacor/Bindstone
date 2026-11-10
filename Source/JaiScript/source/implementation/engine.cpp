@@ -42,6 +42,9 @@
 #include <deque>
 #include <mutex>
 #endif
+#if defined(__GNUC__)
+#include <cxxabi.h>
+#endif
 #include <charconv>
 #include <iostream>
 #include <fstream>
@@ -153,34 +156,6 @@ checked_result<script_value> script_callable_thunk::call(const std::vector<scrip
         auto* cc = static_cast<call*>(ctx);
         return be.execute_callable(cc->payload, cc->args);
     }, &c, host_call);
-}
-
-checked_result<script_value> engine::checked_host_entry(host_entry_body run, void* context, bool host_call) {
-    execution_backend* backend = calling_backend();
-    if (!backend) {
-        return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
-    }
-    // Mid-script host callbacks keep the latched unwinding flag: the calling script's catch must still see the thrown VALUE
-    if (backend->is_executing() || backend->is_unwinding()) {
-        run_pin pin(host_call ? this : nullptr);
-        return run(*backend, context);
-    }
-    note_host_entry();
-    debug_execution_scope executing(*this);
-    backend->begin_host_call();
-    const auto failure = [&](const char* text) {
-        backend->prepare_for_execution();
-        return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed), "{0}", park_error_text(text));
-    };
-    try {
-        auto result = run(*backend, context);
-        if (result.has_value() && backend->is_unwinding()) [[unlikely]] {   // an uncaught script throw: its text, as execute() throws it
-            return failure(without_category_suffix(backend->get_current_exception()).what());
-        }
-        return result;
-    } catch (const std::exception& e) {   // a nested run's failure (an import that is missing or fails its check) leaves as an exception
-        return failure(e.what());
-    }
 }
 
 namespace {
@@ -815,6 +790,21 @@ struct engine::implementation {
     execution_backend_ptr backend;   // constructed lazily via engine::backend()
     backend_type current_backend_type = backend_type::vm;
     bool has_executed_ = false; // Once true, set_backend is forbidden (defined callables capture the backend)
+
+    struct unresolved_binding_type {
+        std::string class_name;
+        std::string member;
+        std::type_index type;
+    };
+    std::vector<unresolved_binding_type> unresolved_binding_types_;
+    std::vector<std::string> binding_commit_failures_;
+    detail::pending_binder* first_pending_binder_ = nullptr;
+    detail::pending_binder* last_pending_binder_ = nullptr;
+    bool bindings_unsettled_ = false;   // a live binder, an unresolved type or a recorded commit failure
+    size_t binding_settle_count_ = 0;
+    void binding_gate(engine& self) {
+        if (bindings_unsettled_) [[unlikely]] { self.settle_bindings(); }
+    }
     bool tearing_down = false;  // engine dtor: backend() must not reconstruct for late thunks
     bool custom_numeric_ops_flag_ = false; // sticky signal from add_function; applied at wiring
     // Sticky: ANY binary-operator / "[]" symbol registered as a global function. While set,
@@ -1595,6 +1585,7 @@ struct engine::implementation {
     script_value execute_cache_hit(engine& self, const std::shared_ptr<script_cache_entry>& held,
                                    const instance_variables& instanceVars, std::string_view source) {
         script_cache_entry& entry = *held;
+        binding_gate(self);
         has_executed_ = true;
         load_scope loading(*this);
         self.backend()->prepare_for_execution();
@@ -2871,6 +2862,16 @@ void engine::release_program_scope_in_reverse() noexcept {
 // and fail soft instead of re-entering a half-destroyed backend.
 engine::~engine() {
     if (impl) {
+        // A binder that outlives the engine commits nothing and never reaches it
+        for (detail::pending_binder* binder = impl->first_pending_binder_; binder;) {
+            detail::pending_binder* next = binder->next_;
+            binder->owner_ = nullptr;
+            binder->previous_ = nullptr;
+            binder->next_ = nullptr;
+            binder = next;
+        }
+        impl->first_pending_binder_ = nullptr;
+        impl->last_pending_binder_ = nullptr;
         // Tear the transport down first (join its thread, detach the controller) so no
         // parked script thread stays blocked in the hook once anything it touches dies.
         if (impl->debug_transport_) {
@@ -3572,6 +3573,7 @@ script_value engine::execute_unheld(script_source source) {
 }
 
 script_value engine::execute_source(const std::string& scriptContent, const instance_variables& instanceVars, const std::string& sourcePath, bool textual, std::string_view include_scope) {
+    impl->binding_gate(*this);
     impl->has_executed_ = true;
     implementation::load_scope loading(*impl);
     impl->note_root_source(sourcePath);
@@ -3680,6 +3682,7 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
 }
 
 jai::jaibite engine::jaibite(const std::string& scriptContent) {
+    impl->binding_gate(*this);
     lexer lexer(scriptContent, &impl->string_symbolizer_);
     auto tokens = lexer.tokenize();
     parser parser(tokens, &impl->string_symbolizer_, this, impl->registeredTemplateTypes);
@@ -3758,6 +3761,7 @@ void engine::check_bite(jai::jaibite& bite, const std::string* source) {
 held_value engine::execute(jai::jaibite& bite) { return hold(execute_unheld(bite)); }
 
 script_value engine::execute_unheld(jai::jaibite& bite) {
+    impl->binding_gate(*this);
     impl->has_executed_ = true;
     check_bite(bite, nullptr);   // diagnostics once; proofs re-stamp on surface moves
     backend()->prepare_for_execution();
@@ -3814,6 +3818,7 @@ jai::jaibite engine::jaibite_load(const std::string& path) {
 }
 
 jai::jaibite engine::jaibite_load_bytes(const uint8_t* data, size_t size, const std::string& own_path) {
+    impl->binding_gate(*this);
     uint64_t saved_fingerprint = 0;
     uint32_t flags = 0;
     detail::jaibite_context context;
@@ -4009,6 +4014,7 @@ const check_report& engine::last_check_diagnostics() const {
 }
 
 check_report engine::check(const std::string& scriptContent) {
+    impl->binding_gate(*this);
     auto cached = impl->find_cached_script("<script>", scriptContent);
     if (!cached) {
         lexer lexer(scriptContent, &impl->string_symbolizer_);
@@ -4768,6 +4774,138 @@ void engine::register_class_by_type(std::type_index type, std::shared_ptr<class_
             }
         }
     }
+}
+
+namespace {
+
+// The spelling a host writes: MSVC names carry class keys, the Itanium ABI names are mangled
+std::string readable_cpp_type_name(const std::type_index& type) {
+    std::string result;
+#if defined(__GNUC__)
+    int status = 0;
+    char* demangled = abi::__cxa_demangle(type.name(), nullptr, nullptr, &status);
+    result = status == 0 && demangled ? demangled : type.name();
+    std::free(demangled);
+#else
+    result = type.name();
+#endif
+    for (std::string_view noise : {"struct ", "class ", "union ", "enum ", "`anonymous namespace'::", "`anonymous-namespace'::", "(anonymous namespace)::"}) {
+        for (size_t at = result.find(noise); at != std::string::npos; at = result.find(noise, at)) {
+            const bool starts_a_name = at == 0 || !(std::isalnum(static_cast<unsigned char>(result[at - 1])) || result[at - 1] == '_');
+            if (starts_a_name) { result.erase(at, noise.size()); } else { at += noise.size(); }
+        }
+    }
+    return result;
+}
+
+std::string unqualified_cpp_type_name(const std::string& readable) {
+    const size_t arguments = readable.find('<');
+    const size_t scope = readable.rfind("::", arguments);
+    const size_t start = scope == std::string::npos ? 0 : scope + 2;
+    return readable.substr(start, arguments == std::string::npos ? std::string::npos : arguments - start);
+}
+
+}
+
+void engine::require_bound_type(const std::string& class_name, const std::string& member, const std::type_info& type) {
+    const std::type_index index(type);
+    if (impl->classesByType.count(index) != 0) { return; }
+    impl->unresolved_binding_types_.push_back({class_name, member, index});
+    impl->bindings_unsettled_ = true;
+}
+
+size_t engine::binding_settle_count() const {
+    return impl->binding_settle_count_;
+}
+
+void engine::settle_bindings() {
+    ++impl->binding_settle_count_;
+    while (detail::pending_binder* binder = impl->first_pending_binder_) {
+        binder->commit_or_record();
+    }
+    std::erase_if(impl->unresolved_binding_types_, [this](const implementation::unresolved_binding_type& unresolved) {
+        return impl->classesByType.count(unresolved.type) != 0;
+    });
+    impl->bindings_unsettled_ = !impl->unresolved_binding_types_.empty();
+    if (impl->unresolved_binding_types_.empty() && impl->binding_commit_failures_.empty()) { return; }
+
+    std::string message = "Bindings are incomplete:";
+    for (const auto& unresolved : impl->unresolved_binding_types_) {
+        const std::string type_name = readable_cpp_type_name(unresolved.type);
+        message += "\n  '" + unresolved.class_name + "." + unresolved.member + "' uses the C++ type '" + type_name +
+                   "', which is not registered. Register it: jai::dynamic_binder<" + type_name + ">(engine, \"" + unqualified_cpp_type_name(type_name) + "\");";
+    }
+    for (const std::string& failure : impl->binding_commit_failures_) {
+        message += "\n  " + failure;
+    }
+    impl->binding_commit_failures_.clear();
+    throw runtime_error(message);
+}
+
+namespace detail {
+
+pending_binder::pending_binder(engine& owner, const std::string& class_name, commit_function commit) :
+    class_name_(class_name),
+    owner_(&owner),
+    previous_(owner.impl->last_pending_binder_),
+    commit_(commit) {
+
+    (previous_ ? previous_->next_ : owner.impl->first_pending_binder_) = this;
+    owner.impl->last_pending_binder_ = this;
+    owner.impl->bindings_unsettled_ = true;
+}
+
+pending_binder::pending_binder(pending_binder&& other) noexcept :
+    class_name_(std::move(other.class_name_)),
+    owner_(other.owner_),
+    previous_(other.previous_),
+    next_(other.next_),
+    commit_(other.commit_) {
+
+    if (owner_) {
+        (previous_ ? previous_->next_ : owner_->impl->first_pending_binder_) = this;
+        (next_ ? next_->previous_ : owner_->impl->last_pending_binder_) = this;
+    }
+    other.owner_ = nullptr;
+    other.previous_ = nullptr;
+    other.next_ = nullptr;
+}
+
+pending_binder::~pending_binder() {
+    leave();
+}
+
+void pending_binder::leave() noexcept {
+    if (!owner_) { return; }
+    (previous_ ? previous_->next_ : owner_->impl->first_pending_binder_) = next_;
+    (next_ ? next_->previous_ : owner_->impl->last_pending_binder_) = previous_;
+    auto& state = *owner_->impl;
+    state.bindings_unsettled_ = state.first_pending_binder_ || !state.unresolved_binding_types_.empty() || !state.binding_commit_failures_.empty();
+    owner_ = nullptr;
+    previous_ = nullptr;
+    next_ = nullptr;
+}
+
+void pending_binder::commit_or_record() noexcept {
+    engine* owner = owner_;
+    if (!owner) { return; }
+    const char* failure = nullptr;
+    std::string text;
+    try {
+        commit_(*this);
+    } catch (const std::exception& e) {
+        text = e.what();
+        failure = text.c_str();
+    } catch (...) {
+        failure = "unknown exception";
+    }
+    leave();
+    if (failure) {
+        owner->impl->binding_commit_failures_.push_back("class '" + class_name_ + "' failed to register: " + failure);
+        owner->impl->bindings_unsettled_ = true;
+    }
+}
+
 }
 
 void engine::defer_base_link(std::type_index base, std::shared_ptr<class_definition> derived) {
@@ -5904,6 +6042,41 @@ uint64_t engine::host_entry_generation() const noexcept { return impl->entry_gen
 bool engine::unit_rerun(unit_stamp unit) const {
     auto it = impl->unit_first_run_.find(unit.id);
     return it != impl->unit_first_run_.end() && it->second != unit.seq;
+}
+
+checked_result<script_value> engine::checked_host_entry(host_entry_body run, void* context, bool host_call) {
+    execution_backend* backend = calling_backend();
+    if (!backend) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
+    }
+    // Mid-script host callbacks keep the latched unwinding flag: the calling script's catch must still see the thrown VALUE
+    if (backend->is_executing() || backend->is_unwinding()) {
+        run_pin pin(host_call ? this : nullptr);
+        return run(*backend, context);
+    }
+    if (impl->bindings_unsettled_) [[unlikely]] {
+        try {
+            settle_bindings();
+        } catch (const std::exception& e) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed), "{0}", park_error_text(e.what()));
+        }
+    }
+    note_host_entry();
+    debug_execution_scope executing(*this);
+    backend->begin_host_call();
+    const auto failure = [&](const char* text) {
+        backend->prepare_for_execution();
+        return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed), "{0}", park_error_text(text));
+    };
+    try {
+        auto result = run(*backend, context);
+        if (result.has_value() && backend->is_unwinding()) [[unlikely]] {   // an uncaught script throw: its text, as execute() throws it
+            return failure(without_category_suffix(backend->get_current_exception()).what());
+        }
+        return result;
+    } catch (const std::exception& e) {   // a nested run's failure (an import that is missing or fails its check) leaves as an exception
+        return failure(e.what());
+    }
 }
 
 void engine::note_host_entry() {

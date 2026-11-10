@@ -136,8 +136,7 @@ int main() {
         .property("name", &Turret::name)
         .property("ammo", &Turret::ammo)
         .method("fire", &Turret::fire)
-        .method("range", &Turret::range)
-        .build();
+        .method("range", &Turret::range);
     eng->add_function("total_ammo", &total_ammo);  // 3. functions that take it
 
     eng->execute(R"(                                // 4. scripts construct and call it
@@ -613,8 +612,7 @@ public:
 				    .constructor<std::string>()
 				    .property("name", &Player::name)
 				    .property("hp", &Player::hp)
-				    .method("hit", &Player::hit)
-				    .build();
+				    .method("hit", &Player::hit);
 				eng->add_function("roll", [](int64_t sides) { return sides / 2 + 1; });   // any C++ callable
 
 				auto hero = std::make_shared<Player>("Ada");     // a live C++ object the script shares
@@ -893,8 +891,7 @@ public:
 			    .static_method("axes", []() { return 2; })
 			    .static_method("dot", [](const Vec2& a, const Vec2& b) { return a.x * b.x + a.y * b.y; })
 			    .property("x", &Vec2::x)
-			    .property("y", &Vec2::y)
-			    .build();
+			    .property("y", &Vec2::y);
 			// [/sample]
 			host.finish();
 			expect_script("embedding/02-dynamic-binder.html", "binder-vec2", eng);
@@ -909,8 +906,7 @@ public:
 			jai::dynamic_binder<Sprite>(*eng, "Sprite")
 			    .constructor<>()
 			    .serial_only_constructor()
-			    .property("alpha", &Sprite::alpha)
-			    .build();
+			    .property("alpha", &Sprite::alpha);
 			// [/sample]
 			host.finish();
 			expect_script("embedding/02-dynamic-binder.html", "binder-sprite", eng);
@@ -949,8 +945,7 @@ public:
 			    .method("add", &Meter::add)
 			    .method("reading", &Meter::reading)
 			    .method("publish", &Meter::publish)
-			    .serial_method("publish", jai::serial_overloads::every)   // const, but it reaches a shared manager
-			    .build();
+			    .serial_method("publish", jai::serial_overloads::every);  // const, but it reaches a shared manager
 			eng->add_function("master", []() { return master_meter; });        // the program's one Meter (level 100)
 			eng->add_function("log_line", [](const std::string& line) { logger().write(line); });
 			eng->serial_function("log_line");
@@ -971,11 +966,9 @@ public:
 			// not at all: a derived registration materializes an unregistered property_owner base.
 			jai::dynamic_binder<Pickup>(*eng, "Pickup")
 			    .auto_bind()
-			    .method("kind", [](Pickup& p) { return std::string("pickup:") + p.name.get(); })
-			    .build();
+			    .method("kind", [](Pickup& p) { return std::string("pickup:") + p.name.get(); });
 			jai::dynamic_binder<HealthPickup>(*eng, "HealthPickup")
-			    .auto_bind()      // derives the Pickup base edge from property_owner<HealthPickup, Pickup>
-			    .build();         // healing AND the inherited name both bind — no re-exposure needed
+			    .auto_bind();     // derives the Pickup base edge: healing and the inherited name both bind
 			// [/sample]
 			host.finish();
 			cpp_sample json_block(*this, page, "binder-pickup-json");
@@ -1036,8 +1029,7 @@ public:
 			jai::dynamic_binder<Door>(*eng, "Door")
 			    .constructor<>()
 			    .method("open", &Door::open)
-			    .property("onOpen", &Door::onOpen)     // the whole script exposure
-			    .build();
+			    .property("onOpen", &Door::onOpen);    // the whole script exposure
 			// [/sample]
 			binder_block.finish();
 			expect_script(page, "signals-door-script", eng);
@@ -1081,15 +1073,14 @@ public:
 			    .property("pos", &Body::pos)
 			    .property("tint", &Body::tint)
 			    .property("path", &Body::path)
-			    .method("moved", &Body::moved)
-			    .build();
+			    .method("moved", &Body::moved);
 			// [/sample]
 			host.finish();
 			expect_script(page, "math-functions", eng);
 			expect_script(page, "math-body-script", eng);
 			cpp_sample marker_block(*this, page, "math-marker");
 			// [sample math-marker]
-			jai::dynamic_binder<Marker>(*eng, "Marker").auto_bind().build();
+			jai::dynamic_binder<Marker>(*eng, "Marker").auto_bind();
 
 			auto marker = std::make_shared<Marker>();
 			int changes = 0;
@@ -1186,8 +1177,7 @@ public:
 			// [sample chai-monster-binding]
 			jai::dynamic_binder<Entity>(*eng, "Entity")
 			    .property("name", &Entity::name)
-			    .method("describe", &Entity::describe)
-			    .build();
+			    .method("describe", &Entity::describe);
 
 			jai::dynamic_binder<Monster>(*eng, "Monster")
 			    .base_class<Entity>()
@@ -1198,8 +1188,7 @@ public:
 			    .method("alive", &Monster::alive)
 			    .method("==", &Monster::operator==)
 			    .property("hp", &Monster::health, &Monster::setHealth)
-			    .property("maxHp", [](const Monster&) { return int64_t{100}; }, nullptr)
-			    .build();
+			    .property("maxHp", [](const Monster&) { return int64_t{100}; }, nullptr);
 
 			eng->add_function("describe", [](std::shared_ptr<Entity> e) { return e->describe(); });
 			// [/sample]

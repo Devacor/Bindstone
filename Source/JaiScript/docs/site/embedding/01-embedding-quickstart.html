@@ -100,8 +100,7 @@ jai::dynamic_binder&lt;Player&gt;(*eng, &quot;Player&quot;)
     .constructor&lt;std::string&gt;()
     .property(&quot;name&quot;, &amp;Player::name)
     .property(&quot;hp&quot;, &amp;Player::hp)
-    .method(&quot;hit&quot;, &amp;Player::hit)
-    .build();
+    .method(&quot;hit&quot;, &amp;Player::hit);
 eng-&gt;add_function(&quot;roll&quot;, [](int64_t sides) { return sides / 2 + 1; });   // any C++ callable
 
 auto hero = std::make_shared&lt;Player&gt;(&quot;Ada&quot;);     // a live C++ object the script shares

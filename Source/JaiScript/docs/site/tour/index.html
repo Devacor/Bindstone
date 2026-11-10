@@ -191,8 +191,7 @@ eng-&gt;add_function(&quot;screen_shake&quot;, [](jai::script_float amount) { ca
 jai::dynamic_binder&lt;Turret&gt;(*eng, &quot;Turret&quot;)      // your C++ class, callable from script
     .constructor&lt;&gt;()
     .method(&quot;fire&quot;, &amp;Turret::fire)
-    .property(&quot;shots&quot;, &amp;Turret::shots)
-    .build();
+    .property(&quot;shots&quot;, &amp;Turret::shots);
 
 eng-&gt;execute_file(&quot;scripts/level1.jai&quot;);         // scripts see screen_shake and Turret like their own</code></pre></div>
 <p>From there: step through scripts in VS Code while the game runs, cap a script&#x27;s time and memory so a bad mod cannot hang a frame, precompile scripts (<code>.jaibite</code>) so shipped builds skip parsing, and serialize script objects alongside your own. The <a href="../embedding/index.html">Embedding guide</a> walks each one.</p>

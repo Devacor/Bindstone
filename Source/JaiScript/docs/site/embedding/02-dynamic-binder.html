@@ -84,8 +84,7 @@ int main() {
         .property(&quot;name&quot;, &amp;Turret::name)
         .property(&quot;ammo&quot;, &amp;Turret::ammo)
         .method(&quot;fire&quot;, &amp;Turret::fire)
-        .method(&quot;range&quot;, &amp;Turret::range)
-        .build();
+        .method(&quot;range&quot;, &amp;Turret::range);
     eng-&gt;add_function(&quot;total_ammo&quot;, &amp;total_ammo);  // 3. functions that take it
 
     eng-&gt;execute(R&quot;(                                // 4. scripts construct and call it
@@ -171,9 +170,12 @@ jai::bind_registrar(*eng);         // every jai::registrar in the binary, one ca
 <li><strong>One name everywhere.</strong> A type is named by its <code>JAI_PROPERTY_OWNER(Name)</code> or <code>JAI_PROPERTY_OWNER_AS(Class, "Name")</code> pin when it declares one, else by its bare class name, and that is also its serialization <code>$type</code>.</li>
 <li><strong>Static phase.</strong> Declarations, schemas, serialization identities and the registrar queue set themselves up at program start, in any file order, touching no engine.</li>
 <li><strong>Runtime phase.</strong> The host calls <code>engine::make()</code>, <code>jai::stdlib::register_all</code>, <code>jai::bind_registrar</code> once per engine, then any explicit binder chains, then scripts. Registrations may come in any order: a derived class registered before its <code>property_owner</code> base registers that base under its own name, and a later explicit registration of the base adopts the same definition and gives it the explicit name.</li>
+<li><strong>A bound member may name a class that registers later</strong>, its own class included. The engine's first load, check or host call into script raises one error listing every type still unregistered; register them and load again.</li>
 <li><strong>Registering after scripts have run</strong> is supported. Re-registering an explicitly bound type replaces its binding for objects constructed from then on; existing objects keep their shape.</li>
 <li><strong>The one enforced rule:</strong> an explicit registration cannot adopt an automatically registered base while script instances of it are alive, because that would change their type identity. The binder throws. Finish registering before scripts construct objects, and pin a name on any class scripts construct directly.</li>
 </ul>
+<div class="codeblock cb-output"><span class="cb-label">error</span><pre><code class="lang-output">Bindings are incomplete:
+  'Hangar.plane' uses the C++ type 'Plane', which is not registered. Register it: jai::dynamic_binder&lt;Plane&gt;(engine, "Plane");</code></pre></div>
 
 <h2 id="scripted">Scripted<a class="hlink" href="#scripted" aria-label="link">&#8203;</a></h2>
 <p>No glue was written for <code>id</code>, <code>level</code> or <code>onWave</code>:</p>
@@ -188,7 +190,7 @@ print("{} at level {}: {} waves so far", s.id, s.level, s.total_waves());</code>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave 1 incoming
 wave 2 incoming
 north-gate at level 3: 2 waves so far</code></pre></div>
-<p><code>build()</code> adds a default constructor for any default-constructible, non-abstract type, preferring a <code>T(engine*)</code> constructor when one exists. A signal connection takes a name (<code>"hud"</code>): the signal owns a named connection, which lasts as long as the object and is replaced or removed by name.</p>
+<p>A binding has a default constructor for any default-constructible, non-abstract type, preferring a <code>T(engine*)</code> constructor when one exists. A signal connection takes a name (<code>"hud"</code>): the signal owns a named connection, which lasts as long as the object and is replaced or removed by name.</p>
 
 <h2 id="live-objects-both-directions">Live objects, both directions<a class="hlink" href="#live-objects-both-directions" aria-label="link">&#8203;</a></h2>
 <p>Script writes land in the C++ member, and C++ emits reach script receivers:</p>
@@ -333,8 +335,7 @@ jai::dynamic_binder&lt;Vec2&gt;(*eng, "Vec2")
     .static_method("axes", []() { return 2; })
     .static_method("dot", [](const Vec2&amp; a, const Vec2&amp; b) { return a.x * b.x + a.y * b.y; })
     .property("x", &amp;Vec2::x)
-    .property("y", &amp;Vec2::y)
-    .build();</code></pre></div>
+    .property("y", &amp;Vec2::y);</code></pre></div>
 <div class="codeblock cb-jai" data-host="Vec2 binder chain" data-sample="binder-vec2"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">var v = Vec2(3.0, 4.0);
 print("length {}", v.length());
 var a = Vec2(1.0, 2.0) + Vec2(3.0, 4.0);
@@ -361,7 +362,7 @@ dot 11.0</code></pre></div>
 <tr><td><code>.method(name, &amp;T::fn)</code>, <code>.method(name, lambda)</code></td><td>A member function, or a lambda whose first parameter is <code>T&amp;</code> or <code>const T&amp;</code>.</td></tr>
 <tr><td><code>.property(name, &amp;T::member)</code></td><td>Field access.</td></tr>
 <tr><td><code>.base_class&lt;Base&gt;()</code></td><td>An inheritance edge.</td></tr>
-<tr><td><code>.build()</code></td><td>Finishes the registration. The destructor calls it if you do not.</td></tr>
+<tr><td><code>.build()</code></td><td>Optional: commits the binding at that point and throws what fails. A chain commits when its statement ends, and a binder still in scope when the first script loads is committed then; a failure in either is raised by the next load.</td></tr>
 </tbody></table></div>
 <p><strong>Parameters.</strong> These hold for methods, static methods, constructors and <code>add_function</code> alike:</p>
 <ul>
@@ -383,8 +384,7 @@ dot 11.0</code></pre></div>
 jai::dynamic_binder&lt;Sprite&gt;(*eng, "Sprite")
     .constructor&lt;&gt;()
     .serial_only_constructor()
-    .property("alpha", &amp;Sprite::alpha)
-    .build();</code></pre></div>
+    .property("alpha", &amp;Sprite::alpha);</code></pre></div>
 <div class="codeblock cb-jai" data-host="Sprite serial-only binder" data-sample="binder-sprite"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">class Glowing : Sprite { float glow = 0.5; Glowing() : super() {} }
 array&lt;int&gt; lights = [1, 2, 3];
 try { parallel_for (auto&amp; n : lights) { Sprite s; n = 0; } } catch (e) { print(e); }
@@ -416,8 +416,7 @@ jai::dynamic_binder&lt;Meter&gt;(*eng, "Meter")
     .method("add", &amp;Meter::add)
     .method("reading", &amp;Meter::reading)
     .method("publish", &amp;Meter::publish)
-    .serial_method("publish", jai::serial_overloads::every)   // const, but it reaches a shared manager
-    .build();
+    .serial_method("publish", jai::serial_overloads::every);  // const, but it reaches a shared manager
 eng-&gt;add_function("master", []() { return master_meter; });        // the program's one Meter (level 100)
 eng-&gt;add_function("log_line", [](const std::string&amp; line) { logger().write(line); });
 eng-&gt;serial_function("log_line");</code></pre></div>
@@ -468,11 +467,9 @@ public:
 // not at all: a derived registration materializes an unregistered property_owner base.
 jai::dynamic_binder&lt;Pickup&gt;(*eng, "Pickup")
     .auto_bind()
-    .method("kind", [](Pickup&amp; p) { return std::string("pickup:") + p.name.get(); })
-    .build();
+    .method("kind", [](Pickup&amp; p) { return std::string("pickup:") + p.name.get(); });
 jai::dynamic_binder&lt;HealthPickup&gt;(*eng, "HealthPickup")
-    .auto_bind()      // derives the Pickup base edge from property_owner&lt;HealthPickup, Pickup&gt;
-    .build();         // healing AND the inherited name both bind — no re-exposure needed</code></pre></div>
+    .auto_bind();     // derives the Pickup base edge: healing and the inherited name both bind</code></pre></div>
 <p>A save through the base pointer records the concrete <code>$type</code>, and a load through the base pointer returns the derived object, with no factory map and no slicing:</p>
 <div class="codeblock cb-cpp" data-sample="binder-pickup-json"><span class="cb-label">C++</span><pre><code class="lang-cpp">std::shared_ptr&lt;Pickup&gt; loot = std::make_shared&lt;HealthPickup&gt;();
 loot-&gt;name = std::string(&quot;elixir&quot;);

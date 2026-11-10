@@ -23,3 +23,4 @@ source/tests/stdlib/web_text_tests.cpp	email	mailto:ada@example.org	URL-parsing 
 docs/site/guide/01-hello.html	machine-path	R"(C:\games\save.dat)"	a raw-string example
 source/tests/stdlib/string_tests.cpp	machine-path	R"(C:\games\save.dat)"	raw-string test data
 docs/site/guide/19-templates.html	email	ada@example.org	a template sample's placeholder address (example.org is reserved for documentation)
+docs/site/assets/search-text.js	ledger	"ledger"	the search text carries the variable name from the nocopy example in guide/07-classes.html

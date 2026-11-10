@@ -314,29 +314,6 @@ Migrations</a> map each library&#x27;s calls to JaiScript&#x27;s and convert rea
 </div>
 
 <div class="home-section">
-<h2 id="the-honest-tradeoffs">The honest tradeoffs</h2>
-<ul class="tradeoffs">
-  <li><strong>Copies cost.</strong> Value semantics means passing a big structure by value deep-copies it. The
-  idiom is <code>&amp;</code> parameters for anything heavy, which are cheap by design. If you write Python-shaped
-  code expecting reference semantics, your first hour will surprise you; read
-  <a href="guide/03-value-semantics.html">Value Semantics</a> first and it won&#x27;t.</li>
-  <li><strong>Lua is faster.</strong>
-    <ul>
-    <li>On microbenchmarks the VM wins or ties Lua 5.4 on statements, containers, range-for and method calls. Lua
-    runs a hot arithmetic loop about 3&times; faster and call-dense recursion about 2.8&times; faster.</li>
-    <li>On whole programs Lua 5.4 is ahead by 1.2 to 1.6&times; on the games (Gator Quest, GLOOM) and by about
-    2.4&times; on the object-heavy benchmark apps (Richards, DeltaBlue). The VM is ahead on the raymarched OSSUARY
-    scene and the bytecode-interpreter app. LuaJIT is far ahead of both.</li>
-    <li>The VM does reuse the frame for a bare self tail call, so tail recursion runs at loop speed to any
-    depth.</li>
-    </ul>
-  The head-to-head numbers, one machine, one protocol: <a href="embedding/11-performance.html">Performance</a>.</li>
-  <li><strong>Two backends cost maintenance.</strong> That&#x27;s the price of the executable spec, and shared
-  semantic kernels keep the duplicated surface small.</li>
-</ul>
-</div>
-
-<div class="home-section">
 <h2 id="who-its-for">Who it&#x27;s for</h2>
 <p>Anyone embedding scripting in a C++ engine who wants:</p>
 <ul>

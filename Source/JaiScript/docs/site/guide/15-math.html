@@ -166,19 +166,23 @@ try { print(math::sqrt(a)); } catch (e) { print(e); }</code></pre></div>
 math::mix expects vectors of the same dimensions
 math::sqrt expects a numeric argument</code></pre></div>
 <h2 id="geometry">Geometry<a class="hlink" href="#geometry" aria-label="link">&#8203;</a></h2>
-<p>A method is the free function with the receiver first, but <strong>three names differ</strong>. Both spellings return a new value: there is no in-place form, so normalizing in place is <code>v = v.normalized();</code>. A color has none of the methods.</p>
+<p>A method is the free function with the receiver first, but <strong>four names differ</strong>. Both spellings return a new value: there is no in-place form, so normalizing in place is <code>v = v.normalized();</code>. A color has none of the methods.</p>
 <div class="tablewrap"><table><thead><tr><th>Free function</th><th>Method (also returns a copy)</th></tr></thead><tbody>
-<tr><td><code>math::dot(a, b)</code>, <code>math::cross(a, b)</code>, <code>math::length(v)</code>, <code>math::length_squared(v)</code></td><td>the same names: <code>a.dot(b)</code>, <code>a.cross(b)</code>, <code>v.length()</code>, <code>v.length_squared()</code></td></tr>
+<tr><td><code>math::dot(a, b)</code>, <code>math::cross(a, b)</code>, <code>math::length(v)</code>, <code>math::length_squared(v)</code>, <code>math::angle(v)</code></td><td>the same names: <code>a.dot(b)</code>, <code>a.cross(b)</code>, <code>v.length()</code>, <code>v.length_squared()</code>, <code>v.angle()</code></td></tr>
 <tr><td><code>math::normalize(v)</code></td><td><code>v.normalized()</code></td></tr>
 <tr><td><code>math::distance(a, b)</code></td><td><code>a.distance_to(b)</code></td></tr>
 <tr><td><code>math::rotate(v, angle)</code>, <code>math::rotate(v, axis, angle)</code></td><td><code>v.rotated(angle)</code>, <code>v.rotated(axis, angle)</code></td></tr>
-<tr><td><code>math::distance_squared(a, b)</code>, <code>math::reflect(v, n)</code>, <code>math::project(v, onto)</code>, <code>math::angle_between(a, b)</code>, <code>math::perpendicular(v)</code></td><td>none</td></tr>
+<tr><td><code>math::rotate_around(v, pivot, angle)</code></td><td><code>v.rotated_around(pivot, angle)</code></td></tr>
+<tr><td><code>math::distance_squared(a, b)</code>, <code>math::reflect(v, n)</code>, <code>math::project(v, onto)</code>, <code>math::angle_between(a, b)</code>, <code>math::perpendicular(v)</code>, <code>math::from_angle(angle)</code>, <code>math::from_angle(angle, length)</code></td><td>none</td></tr>
 </tbody></table></div>
 <ul>
 <li>Two ivecs keep exact ints: <code>dot</code>, <code>length_squared</code> and <code>distance_squared</code> give an int, <code>cross</code> an ivec3. <code>cross</code> of two vec2 is the scalar z.</li>
-<li>Angles are radians. <code>perpendicular</code> turns a vec2 or ivec2 a quarter counterclockwise.</li>
+<li>Angles are radians, and a positive angle turns x toward y. <code>math::radians(deg)</code> converts a number of degrees and <code>math::degrees(rad)</code> converts back.</li>
+<li><code>rotate</code> turns a vec2, or a vec3 about an axis of any length (a zero axis leaves the vector as it is). <code>rotate_around</code> turns a vec2 point about a vec2 pivot. Each gives a float vector, from an ivec too.</li>
+<li><code>angle</code> is a vec2&#x27;s direction, <code>atan2(y, x)</code> in (-&pi;, &pi;], and 0 for the zero vector. <code>from_angle</code> is the vec2 <code>(cos, sin)</code> of a direction times the length (1 when omitted).</li>
+<li><code>perpendicular</code> turns a vec2 or ivec2 a quarter counterclockwise.</li>
 <li>Normalizing the zero vector gives zero, projecting onto zero gives zero, and <code>angle_between</code> is 0 when either vector is zero.</li>
-<li>Dimensions must agree, and an error names the shape it expected: <code>math::dot expects two vectors of the same dimensions</code>, <code>math::cross expects two vec2 or two vec3 vectors</code>, <code>math::rotate expects (vec2, angle) or (vec3, axis, angle)</code>.</li>
+<li>Dimensions must agree, and an error names the shape it expected: <code>math::dot expects two vectors of the same dimensions</code>, <code>math::cross expects two vec2 or two vec3 vectors</code>, <code>math::rotate expects (vec2, angle) or (vec3, axis, angle)</code>, <code>math::rotate_around expects (vec2, pivot, angle)</code>, <code>math::angle expects a vec2</code>.</li>
 </ul>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">using math::vec2, math::vec3, math::ivec2;
 
@@ -188,11 +192,15 @@ print(v.dot(x), " ", x.cross(vec3(0, 1, 0)), " ", math::cross(vec2(1, 2), vec2(3
 print(math::normalize(v), " ", v.normalized(), " ", v);            // v is unchanged
 print(math::distance(vec2(0, 0), vec2(3, 4)), " ", vec2(0, 0).distance_to(vec2(3, 4)));
 print(math::round(math::rotate(vec2(2, 0), math::PI / 2)), " ", math::round(x.rotated(vec3(0, 0, 1), math::PI / 2)));
+print(math::radians(90), " ", math::degrees(math::PI), " ", math::degrees(vec2(0, 2).angle()));
+print(math::round(vec2(2, 1).rotated_around(vec2(1, 1), math::radians(90))), " ", math::from_angle(0.0, 3));
 try { var w = vec2(3, 4); w.normalize(); } catch (e) { print(e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3.0 (0.0, 0.0, 1.0) -2.0 int
 (0.6, 0.8, 0.0) (0.6, 0.8, 0.0) (3.0, 4.0, 0.0)
 5.0 5.0
 (0.0, 2.0) (0.0, 1.0, 0.0)
+1.5707963267948966 180.0 90.0
+(1.0, 2.0) (3.0, 0.0)
 math::vec2 has no member &#x27;normalize&#x27;</code></pre></div>
 <h2 id="colors">Colors<a class="hlink" href="#colors" aria-label="link">&#8203;</a></h2>
 <p>Arithmetic, <code>math::clamp</code>, <code>math::min</code>, <code>math::max</code> and the rounding functions work on all four channels, and a color combines only with colors and scalars. <code>math::mix</code> and <code>math::lerp</code> blend colors in the OKLab perceptual space, so a blend keeps its brightness instead of dipping through gray; the eased mixes ease the same blend. <code>math::mix_rgb</code> blends each channel directly and <code>math::mix_hsv</code> travels the shorter way around the hue wheel. Alpha always blends linearly.</p>

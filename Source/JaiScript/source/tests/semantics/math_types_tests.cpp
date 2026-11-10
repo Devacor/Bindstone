@@ -324,6 +324,21 @@ public:
             expect("var r = math::rotate(math::vec3(1, 0, 0), math::vec3(0, 0, 2), 1.5707963267948966); var s = math::vec3(0, 1, 0).rotated(math::vec3(1, 0, 0), 3.141592653589793); "
                    "to_string(math::abs(r.x) < 1e-7 && math::abs(r.y - 1) < 1e-7 && math::abs(r.z) < 1e-7 && math::abs(s.y + 1) < 1e-7 && math::abs(s.z) < 1e-6)", "true", "rotate a vec3 about an axis (Rodrigues; the axis is normalized)");
             expect("to_string(math::rotate(math::vec3(1, 2, 3), math::vec3(), 1.0)) + type_of(math::rotate(math::ivec2(1, 0), 0.5))", "(1.0, 2.0, 3.0)math::vec2", "a zero axis leaves the vector; an ivec rotates into a vec");
+            expect("to_string(math::angle(math::vec2(0, 1))) + to_string(math::vec2(-1, 0).angle()) + to_string(math::angle(math::ivec2(0, -1))) + to_string(math::angle(math::vec2())) + "
+                   "to_string(math::vec2(-0.0, -0.0).angle()) + to_string(math::angle(math::vec2(-1, -0.0)))", "1.57079632679489663.141592653589793-1.57079632679489660.00.03.141592653589793",
+                   "angle is atan2(y, x) in (-pi, pi]; the zero vector gives 0");
+            expect("var u = math::from_angle(0); var w = math::from_angle(0.0, 3); var q = math::from_angle(1.5707963267948966, 2); "
+                   "to_string(u) + type_of(u) + to_string(w) + to_string(math::abs(q.x) < 1e-7 && q.y == 2.0) + to_string(math::abs(math::from_angle(0.75).angle() - 0.75) < 1e-7)",
+                   "(1.0, 0.0)math::vec2(3.0, 0.0)truetrue", "from_angle is (cos, sin) scaled by the length");
+            expect("var r = math::rotate_around(math::vec2(2, 1), math::vec2(1, 1), 1.5707963267948966); var s = math::ivec2(3, 0).rotated_around(math::ivec2(1, 0), 3.141592653589793); var p = math::vec2(0.1, 0.7); "
+                   "to_string(math::abs(r.x - 1) < 1e-7 && math::abs(r.y - 2) < 1e-7 && math::abs(s.x + 1) < 1e-6 && math::abs(s.y) < 1e-6) + type_of(s) + to_string(p.rotated_around(p, 1.25) == p)",
+                   "truemath::vec2true", "rotate_around turns a point about a pivot; ivecs give a vec2");
+            expect(raised("var q = math::angle(math::vec3());"), "math::angle expects a vec2", "angle is two-dimensional");
+            expect(raised("var a = \"x\"; var q = math::from_angle(a);"), "math::from_angle expects (angle) or (angle, length)", "from_angle takes numbers");
+            expect(raised("var q = math::rotate_around(math::vec3(), math::vec3(), 1.0);"), "math::rotate_around expects (vec2, pivot, angle)", "rotate_around is two-dimensional");
+            expect(raised("var v = math::vec2(1, 0); var q = v.rotated_around(2.0, 1.0);"), "math::rotate_around expects (vec2, pivot, angle)", "the pivot is a vec2");
+            expect("array<float> turns = [0.0, 0.5, 1.0, 1.5]; array<float> out = [0.0, 0.0, 0.0, 0.0]; parallel_for (auto& t, auto& o : turns, out) { o = math::angle(math::rotate_around(math::from_angle(t, 2.0), math::vec2(1, 1), 0.25)); } "
+                   "float serial = math::angle(math::rotate_around(math::from_angle(1.5, 2.0), math::vec2(1, 1), 0.25)); to_string(out[3] == serial && out[0] != out[1])", "true", "a parallel body takes the rotation set");
             expect("math::vec3 v = math::vec3(3, 4, 0); auto f = [v]() { return v.length(); }; to_string(f())", "5.0", "a method kept for later is a lambda");
             expect("function speed(math::vec3 v) -> float { return v.length(); } math::vec3 n = math::vec3(0, 3, 4).normalized(); float d = n.dot(math::vec3(0, 1, 0)); to_string(speed(math::vec3(0, 3, 4))) + to_string(d)",
                    "5.00.6000000238418579", "typed slots take the results");
@@ -385,6 +400,11 @@ public:
                   "math::vec3 r = math::reflect(v, n); math::vec3 j = math::project(v, axis); math::vec3 z = math::project(v, math::vec3()); math::vec2 q = math::rotate(p, t); math::vec2 q2 = p.rotated(2); "
                   "math::vec3 w = math::rotate(v, axis, t); math::vec3 w2 = v.rotated(math::vec3(), t); math::vec3 w3 = math::rotate(iv, axis, 1.25); float a = math::angle_between(v, axis) + math::angle_between(v, math::vec3()) + math::angle_between(iv, v); "
                   "return to_string(r) + to_string(j) + to_string(z) + to_string(q) + to_string(q2) + to_string(w) + to_string(w2) + to_string(w3) + to_string(a) + to_string(math::reflect(iv, n)); } f()", "reflect, project, rotate and angle_between");
+            agree("function f(var d) -> string { math::vec2 p = math::vec2(3, -1); math::vec2 c = math::vec2(0.5, 2); math::ivec2 ip = math::ivec2(-4, 0); float t = 0.7; int k = 2; "
+                  "float a = math::angle(p) + p.angle() + math::angle(ip) + math::angle(math::vec2()) + math::angle(p - c) + ip.angle() + math::angle(d); math::vec2 u = math::from_angle(t); math::vec2 w = math::from_angle(a, k); "
+                  "math::vec2 w2 = math::from_angle(d.x, d.y); math::vec2 r = math::rotate_around(p, c, t); math::vec2 r2 = p.rotated_around(c, k); math::vec2 r3 = math::rotate_around(ip, c, a); math::vec2 r4 = ip.rotated_around(ip, t); "
+                  "var r5 = math::rotate_around(d, p, t); var r6 = d.rotated_around(c, d.angle()); "
+                  "return to_string(a) + to_string(u) + to_string(w) + to_string(w2) + to_string(r) + to_string(r2) + to_string(r3) + to_string(r4) + to_string(r5) + to_string(r6); } f(math::vec2(-2, -0.0))", "angle, from_angle and rotate_around");
             agree("function f() -> string { math::ivec3 big = math::ivec3(2000000000, 2000000000, 2000000000); math::vec3 n = big.normalized(); return to_string(big.length()) + to_string(n) + to_string(math::distance(big, -big)); } f()", "ivec components widen where the kernel reads doubles");
             agree("function f() -> string { math::color c = math::color(0.25, 0.5, 0.75, 0.5); c.g = 0.125; c.a *= 2; math::color m = math::mix(c, math::color(1, 0, 0), 0.5); math::color k = math::clamp(c * 3, 0.0, 1.0); "
                   "math::color r = math::mix_rgb(c, m, 0.5); var sc = c; var sm = m; var sk = k; var sr = r; return to_string(sc) + to_string(sm) + to_string(sk) + to_string(sr) + to_string(c == m); } f()", "colors lowered, OKLab boxed");
@@ -440,11 +460,16 @@ public:
             check_eq(std::string("p=(1.0, 2.5, 3.0) n=4 c=(7, -1) "), shown, "lowered locals fold for the debugger");
             check(listings.find("T_ADD_FF") != std::string::npos && listings.find("C_MATH") != std::string::npos, "the lowered local runs as float slots in a cell block: " + listings.substr(0, 2000));
             listings.clear();
-            e->execute("function g() -> float { math::vec3 v = math::vec3(1, 2, 3); math::vec3 w = math::rotate(v, math::vec3(0, 0, 1), 0.5); float a = math::angle_between(v, w); return w.x + a; } g();");
+            e->execute("function g() -> float { math::vec3 v = math::vec3(1, 2, 3); math::vec3 w = math::rotate(v, math::vec3(0, 0, 1), 0.5); float a = math::angle_between(v, w); "
+                       "math::vec2 d = math::from_angle(a, 2.0); math::vec2 o = math::rotate_around(d, math::vec2(1, 1), a); return w.x + a + o.angle(); } g();");
             const std::string rotate_call = "MATH " + std::to_string(static_cast<int>(jai::detail::math_fn::rotate_)) + " ";
             const std::string angle_call = "MATH " + std::to_string(static_cast<int>(jai::detail::math_fn::angle_between_)) + " ";
-            check(listings.find("T_MUL_FF") != std::string::npos && listings.find(rotate_call) == std::string::npos && listings.find(angle_call) == std::string::npos,
-                  "rotate and angle_between run as component arithmetic, no boxed call");
+            bool boxed_rotation_set = false;
+            for (const char* name : {"angle", "from_angle", "rotate_around"}) {
+                boxed_rotation_set = boxed_rotation_set || listings.find("MATH " + std::to_string(static_cast<int>(jai::detail::math_intrinsic_from_name(name))) + " ") != std::string::npos;
+            }
+            check(listings.find("T_MUL_FF") != std::string::npos && listings.find(rotate_call) == std::string::npos && listings.find(angle_call) == std::string::npos && !boxed_rotation_set,
+                  "rotate, angle_between, angle, from_angle and rotate_around run as component arithmetic, no boxed call: " + listings.substr(0, 3000));
             (void)raised;
         });
 
@@ -667,10 +692,14 @@ public:
             check_eq(std::string("math::color has no member 'x'|"), errors("math::color c; var q = c.x;"), "a vector name on a color");
             check_eq(std::string(""), errors("var v = math::vec2(1, 2); var w = math::floor(v); math::vec2 x = w;"), "a var argument leaves the result dynamic");
             check_eq(std::string(""), errors("math::vec3 a; math::vec3 b; float d = a.dot(b); math::vec3 n = a.normalized(); math::vec3 c = math::cross(a, b); int e = math::ivec2(1, 2).length_squared(); "
-                                             "math::vec2 r = math::ivec2(1, 0).rotated(0.5); float l = math::length(a) + a.distance_to(b) + math::angle_between(a, b); int k = math::dot(math::ivec3(), math::ivec3());"),
+                                             "math::vec2 r = math::ivec2(1, 0).rotated(0.5); float l = math::length(a) + a.distance_to(b) + math::angle_between(a, b); int k = math::dot(math::ivec3(), math::ivec3()); "
+                                             "math::vec2 h = math::from_angle(l, 2); float t = h.angle() + math::angle(math::ivec2(1, 2)); math::vec2 o = h.rotated_around(r, t); math::vec2 p = math::rotate_around(math::ivec2(1, 0), h, t);"),
                      "the geometry library types its results");
             check_eq(std::string("math::vec3 has no member 'foo'|"), errors("math::vec3 v; var q = v.foo();"), "an unknown method");
             check_eq(std::string("'dot' expects 1 argument|"), errors("math::vec3 v; var q = v.dot();"), "a method's arity");
+            check_eq(std::string("'rotated_around' expects 2 arguments (pivot, angle)|'angle' expects 0 arguments|math::vec3 has no member 'angle'|"),
+                     errors("math::vec2 v; var q = v.rotated_around(v); var a = v.angle(1); math::vec3 w; var b = w.angle();"), "the rotation methods' arity; angle is a vec2's");
+            check(errors("math::vec2 v; math::vec2 a = math::angle(v);").find("math::vec2") != std::string::npos && errors("float f = math::from_angle(1.0);").find("float") != std::string::npos, "angle is a float, from_angle a vec2");
             check_eq(std::string(""), errors("math::vec3 p; math::vec3 a = math::min(p); float c = math::length(p, p);"),
                      "a library call's count is the kernel's runtime error (docs/site/embedding/06-static-checking.html \"Namespaces, and recovery\"), its result untyped");
         });

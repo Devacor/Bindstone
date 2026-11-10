@@ -495,11 +495,10 @@ MV's vocabulary for the rest (`at_origin`, `set`, `translate`, `scale`).
 | construct | `math::vec3()` zero; `math::vec3(x, y)` z = 0, MV's `Point`/`Size` default **[Dev]** (GLSL has no two-argument vec3); `math::vec3(x, y, z)`; `math::vec3(v2, z)`; `math::vec4(v3, w)` |
 | fields | 5.4 |
 | operators | unary `-`; `+ - * /` with the same kind (componentwise) and with a scalar on either side; `+= -= *= /=`; `== !=` |
-| methods | `length()`, `length_squared()`, `normalized()`, `dot(o)`, `cross(o)`, `distance_to(o)`, `rotated(angle)` (vec2), `rotated(axis, angle)` (vec3): the geometry library below with the receiver first |
+| methods | `length()`, `length_squared()`, `normalized()`, `dot(o)`, `cross(o)`, `distance_to(o)`, `rotated(angle)` (vec2), `rotated(axis, angle)` (vec3), `angle()` and `rotated_around(pivot, angle)` (vec2, ivec2): the geometry library below with the receiver first |
 | free functions | the geometry library and the component-wise family below; `mix` and its family stay free functions |
 | not built: constants | `math::vec3::zero()`, `::one()`, `::splat(s)` |
-| not built: 2D helpers (MV `generalUtility`) | `angle_2d(o)` (degrees in [0, 360) of `o - self`), `angle_2d_rad(o)`, `move_toward(goal, max_distance)`, `at_origin()`, `approx_equal(o, ulps = 1)` |
-| not built: per component | `to_degrees()`, `to_radians()` |
+| not built: 2D helpers (MV `generalUtility`) | `move_toward(goal, max_distance)`, `at_origin()`, `approx_equal(o, ulps = 1)` |
 | not built: reshape | `xy()` (vec3, vec4), `xyz()` (vec4), `with_x(v)` / `with_y(v)` / `with_z(v)` / `with_w(v)` |
 | not built: mutators (**m**) | `set(x, y[, z[, w]])`, `translate(dx, dy[, dz])`, `scale(s)`, `normalize()`, `clear()` |
 
@@ -509,7 +508,9 @@ MV's vocabulary for the rest (`at_origin`, `set`, `translate`, `scale`).
 n)` (`v - 2 dot(v, n) n`, `n` taken as a unit normal, as GLSL's); `math::project(a, onto)`; `math::angle_between(a, b)`
 (radians, the cosine clamped to [-1, 1] before `acos`); `math::perpendicular(v)` (vec2: `(-y, x)`);
 `math::rotate(v, angle)` (vec2, radians, counterclockwise) and `math::rotate(v, axis, angle)` (vec3, Rodrigues' formula
-about the normalized axis). One kernel runs them (`math_intrinsics.hpp` `eval_geometry`), and the methods call it with
+about the normalized axis); `math::rotate_around(v, pivot, angle)` (vec2: `pivot + rotate(v - pivot, angle)`);
+`math::angle(v)` (vec2: `atan2(y, x)` in (-pi, pi] with a negative zero `y` read as zero, 0 for the zero vector) and its
+inverse `math::from_angle(angle, length = 1)` (the vec2 `(cos, sin) * length`, scalars in). One kernel runs them (`math_intrinsics.hpp` `eval_geometry`), and the methods call it with
 the receiver first:
 - vectors only: a color has no geometry, and the vector arguments of a call have the same dimensions;
 - a scalar result is binary64 computed from the widened components; a vector result is computed in binary64 and lands
@@ -544,7 +545,7 @@ from a scalar row's type failure, so the scalar path is unchanged):
 |---|---|
 | construct | `math::ivec3()`, `(x, y)` z = 0 **[Dev]**, `(x, y, z)`, `(v2, z)`; from floats through the checked kernel: `cast<math::ivec3>(v)` |
 | operators | unary `-`; `+ - *` with the same kind and an int scalar; `/`, `%` (truncating; a zero divisor raises); compound forms; `== !=` |
-| methods | the geometry methods of 6.1: `dot`, `length_squared` and `cross` exact ints, `length`, `normalized`, `distance_to` and `rotated` floats and vecs |
+| methods | the geometry methods of 6.1: `dot`, `length_squared` and `cross` exact ints, `length`, `normalized`, `distance_to`, `rotated`, `angle` and `rotated_around` floats and vecs |
 | free functions | the geometry library (exact where 6.1 says so), `min/max/abs/clamp` exact |
 | not built | `math::ivec3::trunc(v)`, `::round(v)`, `::floor(v)`, `::ceil(v)` (MV `round<int>` / `cast<int>`); `to_vec()` (exact below 2^24 per component), `manhattan(o)`, `chebyshev(o)`; mutators (**m**) `set`, `translate`, `clear`; `approx_equal` is not provided (exact type) |
 
@@ -605,8 +606,8 @@ this has no migration cost.
 ## 7. Hoist list
 
 Each MV utility, where it goes, and why. Built: the rows marked "exists", `math::wrap(lo, hi, v)` (float result) and
-the vector rows of the interpolation family. Not built: the other destinations (`percent_of_range`, `angle_2d`,
-`wrapping_distance`, `approx_equal`, the power-of-two helpers, `move_toward`, `random_string`, `array.shuffle()`,
+the vector rows of the interpolation family, and the vec2 rotation set (`math::angle`, `math::from_angle`,
+`math::rotate_around`). Not built: the other destinations (`percent_of_range`, `wrapping_distance`, `approx_equal`, the power-of-two helpers, `move_toward`, `random_string`, `array.shuffle()`,
 `insert_sorted`, the matrices).
 
 | MV utility | goes to | reason |
@@ -615,10 +616,10 @@ the vector rows of the interpolation family. Not built: the other destinations (
 | `wrap(int/long/float/double)` | `math::wrap(lo, hi, v)` intrinsic, int and float | pure; the stdlib global `wrap` is float-only |
 | `clamp` | `math::clamp` exists | already hoisted |
 | `percentOfRange` | `math::percent_of_range(value, start, end)` | pure and cheap |
-| `toDegrees` / `toRadians` (scalar and `Point`) | exist as `math::radians_to_degrees` / `degrees_to_radians`; add vector rows and `to_degrees()` / `to_radians()` methods | pure |
+| `toDegrees` / `toRadians` (scalar and `Point`) | exist as `math::degrees` / `math::radians` (also `radians_to_degrees` / `degrees_to_radians`), scalars only; no third spelling, no vector rows and no methods | pure |
 | `distance(x1, y1, x2, y2)`, `(a - b).magnitude()`, `preSquareDistance` | `math::distance(x1, y1, x2, y2)` exists; add `math::distance(a, b)` / `distance_squared` rows and methods | pure |
-| `angle2D`, `angle2DRad` | `v.angle_2d(o)`, `angle_2d_rad(o)` (and scalar forms) | pure; fixes the int overload's `x2 - y2` bug |
-| `rotatePoint2D`, `rotatePoint2DRad` | `rotated_2d(deg)`, `rotated_2d_rad(rad)` | pure; the in-place mutator form becomes a value method |
+| `angle2D`, `angle2DRad` | exist as `math::angle(v)` / `v.angle()` on a vec2 or ivec2: radians, `atan2(y, x)` in (-pi, pi], 0 for the zero vector; the angle from `a` to `b` is `math::angle(b - a)`, degrees through `math::degrees`; `math::from_angle(angle, length = 1)` is the inverse | pure; fixes the int overload's `x2 - y2` bug |
+| `rotatePoint2D`, `rotatePoint2DRad` | exist as `math::rotate(v, angle)` / `v.rotated(angle)` about the origin and `math::rotate_around(v, pivot, angle)` / `v.rotated_around(pivot, angle)` about a point, radians (degrees through `math::radians`) | pure; the in-place mutator form becomes a value method |
 | `wrappingDistance` | `math::wrapping_distance(lo, hi, a, b)` | pure; fixes the swapped `wrap` argument order |
 | `equals`, `floatEqualImplementation`, `floatingPointRangeCompareCheck` | `math::approx_equal(a, b, ulps = 1)` and `approx_equal` methods | pure; `std::bit_cast` instead of pointer punning |
 | `isPowerOfTwo`, `roundUpPowerOfTwo` | `math::is_power_of_two(n)`, `math::next_power_of_two(n)` on int64 (checked overflow) | pure integer helpers; MV's int version overflows past 2^30 |

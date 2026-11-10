@@ -3025,7 +3025,8 @@ private:
             }
             case math_fn::dot_: case math_fn::cross_: case math_fn::length_: case math_fn::length_squared_:
             case math_fn::normalize_: case math_fn::reflect_: case math_fn::project_: case math_fn::angle_between_:
-            case math_fn::perpendicular_: case math_fn::rotate_: case math_fn::distance: case math_fn::distance_squared: {
+            case math_fn::perpendicular_: case math_fn::rotate_: case math_fn::distance: case math_fn::distance_squared:
+            case math_fn::angle_: case math_fn::rotate_around_: {
                 // the geometry library (math_intrinsics.hpp eval_geometry): the vector arguments' kinds decide; the scalar
                 // distance form (four numbers) stays float
                 if (args.empty() || args[0].kind != ctype::math_k) {
@@ -3037,7 +3038,7 @@ private:
                 const size_t dims = detail::math::dims(vk);
                 bool exact = detail::math::integral(vk);
                 const bool two = fn != math_fn::length_ && fn != math_fn::length_squared_ && fn != math_fn::normalize_ &&
-                                 fn != math_fn::perpendicular_ && !(fn == math_fn::rotate_ && args.size() == 2);
+                                 fn != math_fn::perpendicular_ && fn != math_fn::angle_ && !(fn == math_fn::rotate_ && args.size() == 2);
                 if (two) {
                     if (args.size() < 2 || args[1].kind != ctype::math_k) { return {}; }
                     exact = exact && detail::math::integral(math_type_from_name(args[1].cls));
@@ -3050,7 +3051,7 @@ private:
                         return math_ctype(exact ? script_value_type::jai_ivec3_type : script_value_type::jai_vec3_type);
                     case math_fn::perpendicular_:
                         return math_ctype(vk);
-                    case math_fn::length_: case math_fn::angle_between_: case math_fn::distance:
+                    case math_fn::length_: case math_fn::angle_between_: case math_fn::distance: case math_fn::angle_:
                         return ctype::make(ctype::float_k);
                     default:
                         return math_ctype(detail::math::family_kind(false, dims));
@@ -3071,7 +3072,7 @@ private:
                 if (all(ctype::int_k)) { return ctype::make(ctype::int_k); }
                 if (all(ctype::float_k)) { return ctype::make(ctype::float_k); }
                 return {};
-            case math_fn::vec2_: return math_ctype(script_value_type::jai_vec2_type);
+            case math_fn::vec2_: case math_fn::from_angle_: return math_ctype(script_value_type::jai_vec2_type);
             case math_fn::vec3_: return math_ctype(script_value_type::jai_vec3_type);
             case math_fn::ivec2_: return math_ctype(script_value_type::jai_ivec2_type);
             case math_fn::sign_: return ctype::make(ctype::int_k);

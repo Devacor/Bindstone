@@ -3648,6 +3648,54 @@
     },
     {
       "owner": "math",
+      "name": "rotate_around",
+      "signature": "rotate_around(point: vector2, pivot: vector2, angle: number) -> vector2",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "Radians.",
+      "source": "include/jaiscript/detail/math_intrinsics.hpp",
+      "form": "function",
+      "availability": "Every engine",
+      "display": "math::rotate_around(point: vector2, pivot: vector2, angle: number) -> vector2"
+    },
+    {
+      "owner": "math",
+      "name": "angle",
+      "signature": "angle(vector: vector2) -> float",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "Radians, atan2(y, x) in (-pi, pi]; 0 for the zero vector.",
+      "source": "include/jaiscript/detail/math_intrinsics.hpp",
+      "form": "function",
+      "availability": "Every engine",
+      "display": "math::angle(vector: vector2) -> float"
+    },
+    {
+      "owner": "math",
+      "name": "from_angle",
+      "signature": "from_angle(angle: number) -> vector2",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "Radians; the unit vector (cos, sin).",
+      "source": "include/jaiscript/detail/math_intrinsics.hpp",
+      "form": "function",
+      "availability": "Every engine",
+      "display": "math::from_angle(angle: number) -> vector2"
+    },
+    {
+      "owner": "math",
+      "name": "from_angle",
+      "signature": "from_angle(angle: number, length: number) -> vector2",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "Radians.",
+      "source": "include/jaiscript/detail/math_intrinsics.hpp",
+      "form": "function",
+      "availability": "Every engine",
+      "display": "math::from_angle(angle: number, length: number) -> vector2"
+    },
+    {
+      "owner": "math",
       "name": "mix_rgb",
       "signature": "mix_rgb(start: color, end: color, percent: number) -> color",
       "provider": "core",
@@ -3897,6 +3945,30 @@
       "form": "method",
       "availability": "Every engine",
       "display": "math::vec2.rotated(angle: number) -> vector2"
+    },
+    {
+      "owner": "math::vec2",
+      "name": "rotated_around",
+      "signature": "rotated_around(pivot: vector2, angle: number) -> vector2",
+      "provider": "core",
+      "effect": "copy",
+      "notes": "",
+      "source": "include/jaiscript/detail/math_intrinsics.hpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "math::vec2.rotated_around(pivot: vector2, angle: number) -> vector2"
+    },
+    {
+      "owner": "math::vec2",
+      "name": "angle",
+      "signature": "angle() -> float",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "",
+      "source": "include/jaiscript/detail/math_intrinsics.hpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "math::vec2.angle() -> float"
     },
     {
       "owner": "math",
@@ -4233,6 +4305,30 @@
       "form": "method",
       "availability": "Every engine",
       "display": "math::ivec2.rotated(angle: number) -> vector2"
+    },
+    {
+      "owner": "math::ivec2",
+      "name": "rotated_around",
+      "signature": "rotated_around(pivot: vector2, angle: number) -> vector2",
+      "provider": "core",
+      "effect": "copy",
+      "notes": "",
+      "source": "include/jaiscript/detail/math_intrinsics.hpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "math::ivec2.rotated_around(pivot: vector2, angle: number) -> vector2"
+    },
+    {
+      "owner": "math::ivec2",
+      "name": "angle",
+      "signature": "angle() -> float",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "",
+      "source": "include/jaiscript/detail/math_intrinsics.hpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "math::ivec2.angle() -> float"
     },
     {
       "owner": "math",

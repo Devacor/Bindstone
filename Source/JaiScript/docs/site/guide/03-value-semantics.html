@@ -108,11 +108,12 @@ print("{} {}", s.hp, links[1].hp);</code></pre></div>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; stock = [1, 2, 3];
 array&lt;int&gt; get_stock() { return stock; }          // by value: the caller gets a copy
 array&lt;int&gt;&amp; stock_ref() { return stock; }         // by reference: the caller names stock
-get_stock().push(4);
-print("after get_stock().push(4): {}", stock.size());
+auto copy = get_stock();
+copy.push(4);
+print("after the copy's push(4): {} and {}", stock.size(), copy.size());
 stock_ref().push(4);
 print("after stock_ref().push(4): {}", stock.size());</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">after get_stock().push(4): 3
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">after the copy's push(4): 3 and 4
 after stock_ref().push(4): 4</code></pre></div>
 <h2 id="lost-writes">Lost writes fail the load<a class="hlink" href="#lost-writes" aria-label="link">&#8203;</a></h2>
 <p>A write into a copy that nothing reads afterwards changes nothing anyone can see. It is nearly always a loop variable or a parameter that was meant to be a reference, so the checker refuses it at load. A write is refused when all three hold:</p>

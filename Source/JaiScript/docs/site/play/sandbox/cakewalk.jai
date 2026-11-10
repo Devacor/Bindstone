@@ -1,232 +1,299 @@
 // CAKEWALK: a gator in a dark cave. Eat every cake to go deeper; a bat costs a heart.
-// Arrows or WASD move, esc quits. Until a key is pressed the gator walks itself.
+// Arrows or WASD walk, R digs a new cave, esc quits. Until a key is pressed the gator walks itself.
+// The game runs live: change a setting while it plays and the running game takes the new value.
+using math::ivec2;
+
+// ---- settings that apply at once
+float FRAMES_PER_SECOND = 30.0;
+float GATOR_TILES_PER_SECOND = 7.5;
+float BAT_TILES_PER_SECOND = 3.75;
+int BAT_SMELL_RANGE = 10;                 // steps of walking within which a bat hunts the gator
+float TORCH_REACH = 8.0;                  // tiles
+array<int> ROCK_COLOR = [70, 80, 120];
+array<int> FLOOR_COLOR = [200, 130, 60];
+array<int> GATOR_COLOR = [70, 200, 90];
+array<int> CAKE_COLOR = [255, 150, 200];
+array<int> BAT_COLOR = [230, 120, 255];
+
+// ---- settings that shape the next cave (R digs one now)
+int CAVE_WIDTH = 48;
+int CAVE_HEIGHT = 16;
+int OPEN_PERCENT = 45;                    // how much of the rock a new cave digs out
+int STARTING_HEARTS = 3;
+int FIRST_CAVE_CAKES = 6;
+int FIRST_CAVE_BATS = 2;
+
 string ESC = "\x1b";
-int W = math::min(term_cols() / 2, 48);   // a tile is two characters wide
-int H = math::min(term_rows() - 2, 22);
-int WALL = 0;
-int FLOOR = 1;
-int CAKE = 2;
-int FRAMES_PER_STEP = 4;                  // the gator walks 7.5 tiles a second, a bat half that
-map<string, int> STEPS = {"left": -1, "a": -1, "right": 1, "d": 1, "up": -W, "w": -W, "down": W, "s": W};   // a key's step, as a tile offset
-int frame_limit = ARGS.size() > 0 ? ARGS[0].to_int() : 0;   // jaiscript cakewalk.jai -- 300: play 300 frames unpaced, then quit
+array<ivec2> NEIGHBORS = [ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1)];
+map<string, ivec2> KEY_STEPS = {
+	"left": ivec2(-1, 0), "a": ivec2(-1, 0), "right": ivec2(1, 0), "d": ivec2(1, 0),
+	"up": ivec2(0, -1), "w": ivec2(0, -1), "down": ivec2(0, 1), "s": ivec2(0, 1)
+};
+enum Tile { Rock, Floor, Cake }
+
+// How many steps of walking separate each tile from the nearest goal; -1 where no walk leads
+class Trail {
+	Trail(array<int> a_steps = [], int a_width = 0) {
+		steps = a_steps;
+		width = a_width;
+	}
+
+	int stepsFrom(ivec2 a_at) { return steps[a_at.x + a_at.y * width]; }
+	bool reaches(ivec2 a_at) { return stepsFrom(a_at) >= 0; }
+
+	array<ivec2> tilesBeyond(int a_steps, array<ivec2> a_tiles) {
+		return array::filter(a_tiles, at => this.stepsFrom(at) > a_steps);
+	}
+
+	ivec2 nextStep(ivec2 a_from) {
+		for (ivec2 direction : NEIGHBORS) {
+			if (reaches(a_from + direction) && stepsFrom(a_from + direction) < stepsFrom(a_from)) {
+				return a_from + direction;
+			}
+		}
+		return a_from;
+	}
+
+private:
+	array<int> steps;
+	int width = 0;
+}
+
+class Cave {
+	int width = 0;
+	int height = 0;
+	ivec2 entrance;
+
+	bool isRock(ivec2 a_at) { return tiles[indexOf(a_at)] == Tile::Rock; }
+	bool hasCake(ivec2 a_at) { return tiles[indexOf(a_at)] == Tile::Cake; }
+	void placeCake(ivec2 a_at) { tiles[indexOf(a_at)] = Tile::Cake; }
+	void eatCake(ivec2 a_at) { tiles[indexOf(a_at)] = Tile::Floor; }
+
+	array<ivec2> tilesOf(Tile a_kind) {
+		array<ivec2> result;
+		for (int i = 0; i < tiles.size(); ++i) {
+			if (tiles[i] == a_kind) {
+				result.push(ivec2(i % width, i / width));
+			}
+		}
+		return result;
+	}
+
+	// Breadth-first search outward from the goals
+	Trail trailTo(array<ivec2> a_goals) {
+		array<int> steps;
+		steps.assign(width * height, -1);
+		for (ivec2 goal : a_goals) {
+			steps[indexOf(goal)] = 0;
+		}
+		for (int next = 0; next < a_goals.size(); ++next) {
+			for (ivec2 direction : NEIGHBORS) {
+				ivec2 beside = a_goals[next] + direction;   // the rim is rock, so no neighbour leaves the cave
+				if (!isRock(beside) && steps[indexOf(beside)] < 0) {
+					steps[indexOf(beside)] = steps[indexOf(a_goals[next])] + 1;
+					a_goals.push(beside);
+				}
+			}
+		}
+		return Trail(steps, width);
+	}
+
+	// A digger wanders from the middle of solid rock, carving floor, until enough of the cave is open
+	void dig(random& a_dice) {
+		width = math::min(CAVE_WIDTH, term_cols() / 2);   // a tile is two characters wide
+		height = math::min(CAVE_HEIGHT, term_rows() - 2);
+		tiles.assign(width * height, Tile::Rock);
+		entrance = ivec2(width / 2, height / 2);
+		ivec2 digger = entrance;
+		for (int toCarve = (width - 2) * (height - 2) * OPEN_PERCENT / 100; toCarve > 0; ) {
+			if (isRock(digger)) {
+				tiles[indexOf(digger)] = Tile::Floor;
+				toCarve -= 1;
+			}
+			ivec2 next = digger + a_dice.pick(NEIGHBORS);
+			bool insideTheRim = next.x > 0 && next.y > 0 && next.x < width - 1 && next.y < height - 1;
+			digger = insideTheRim ? next : digger;
+		}
+	}
+
+private:
+	array<Tile> tiles;
+
+	int indexOf(ivec2 a_at) { return a_at.x + a_at.y * width; }
+}
+
+class Gator {
+	ivec2 position;
+	bool facingLeft = false;
+	int hearts = STARTING_HEARTS;
+}
 
 class Bat {
-	int at = 0;
-	Bat(int at_) { at = at_; }
-}
-
-array<int> tiles;      // W * H of WALL, FLOOR or CAKE, row by row
-array<bool> seen;      // the tiles the torch has lit so far
-array<int> to_gator;   // steps from each tile to the gator, -1 where no path leads
-array<int> to_cake;    // steps from each tile to the nearest cake
-array<Bat> bats;
-random rng(2026);
-int gator = 0;         // the gator's tile: x + y * W
-bool faces_left = false;
-int level = 1;
-int hearts = 3;
-int cakes = 0;
-int eaten = 0;
-int hurt_frames = 0;   // the screen flashes red while this counts down
-bool piloted = false;  // false until the first key press: the gator follows to_cake
-
-// Breadth-first search: the steps from the start tiles to every tile a walk can reach
-array<int> flood(array<int> starts) {
-	array<int> steps;
-	steps.resize(W * H, -1);
-	for (int start : starts) { steps[start] = 0; }
-	for (int head = 0; head < starts.size(); ++head) {
-		int at = starts[head];
-		for (int next : [at - 1, at + 1, at - W, at + W]) {   // the map's rim is wall, so no neighbour leaves it
-			if (tiles[next] != WALL && steps[next] < 0) {
-				steps[next] = steps[at] + 1;
-				starts.push(next);
-			}
+	ivec2 position;
+	// A bat that smells the gator closes in; any other flutters about
+	void fly(Cave& a_cave, Trail& a_toGator, random& a_dice) {
+		bool smellsTheGator = a_toGator.reaches(position) && a_toGator.stepsFrom(position) <= BAT_SMELL_RANGE;
+		ivec2 next = smellsTheGator ? a_toGator.nextStep(position) : position + a_dice.pick(NEIGHBORS);
+		if (!a_cave.isRock(next)) {
+			position = next;
 		}
 	}
-	return steps;
 }
 
-// The neighbour of a tile that is one step closer by a flood's count, or the tile itself
-int downhill(array<int>& steps, int at) {
-	for (int next : [at - 1, at + 1, at - W, at + W]) {
-		if (steps[next] >= 0 && steps[next] < steps[at]) { return next; }
-	}
-	return at;
-}
-
-array<int> tiles_where(int kind) {
-	array<int> result;
-	for (int i = 0; i < W * H; ++i) {
-		if (tiles[i] == kind) { result.push(i); }
-	}
-	return result;
-}
-
-// A cave by cellular automaton: random rock, then four passes where a tile turns to what most of its nine neighbours are
-void dig_cave() {
-	tiles.resize(W * H);
-	for (int i = 0; i < W * H; ++i) {
-		tiles[i] = rng.next_int(0, 99) < 56 ? FLOOR : WALL;
-	}
-	for (int pass = 0; pass < 4; ++pass) {
-		array<int> before = tiles;   // assignment copies: the pass reads the old cave while it writes the new one
-		for (int y = 0; y < H; ++y) {
-			for (int x = 0; x < W; ++x) {
-				int walls = 0;
-				for (int ny = y - 1; ny <= y + 1; ++ny) {
-					for (int nx = x - 1; nx <= x + 1; ++nx) {
-						bool outside = nx < 1 || ny < 1 || nx >= W - 1 || ny >= H - 1;
-						if (outside || before[nx + ny * W] == WALL) { walls += 1; }
-					}
+class Painter {
+	// The whole frame as one string: a tile's background is written only where it changes
+	string paint(Cave& a_cave, Gator& a_gator, array<Bat>& a_bats) {
+		string result = ESC + "[H";
+		for (int y = 0; y < a_cave.height; ++y) {
+			string lastBackground = "";
+			for (int x = 0; x < a_cave.width; ++x) {
+				ivec2 at = ivec2(x, y);
+				float light = math::max(0.0, 1.0 - math::length(math::vec2(at - a_gator.position)) / TORCH_REACH);
+				float checker = (x + y) % 2 == 0 ? 1.0 : 0.88;
+				string background = color(48, a_cave.isRock(at) ? ROCK_COLOR : FLOOR_COLOR, light * checker);
+				string tile = "  ";
+				if (at == a_gator.position) {
+					background = color(48, GATOR_COLOR, 1.0);
+					tile = color(38, GATOR_COLOR, 0.2) + (a_gator.facingLeft ? "<:" : ":>");
+				} else if (light > 0.0 && a_bats.some(bat => bat.position == at)) {
+					tile = color(38, BAT_COLOR, 1.0) + "^^";
+				} else if (a_cave.hasCake(at)) {
+					tile = color(38, CAKE_COLOR, 1.0) + "◢◣";   // a cake glows, so it shows in the dark
 				}
-				tiles[x + y * W] = walls >= 5 ? WALL : FLOOR;
+				if (background != lastBackground) {
+					lastBackground = background;
+					result += background;
+				}
+				result += tile;
+			}
+			result += ESC + "[0m\n";
+		}
+		return result;
+	}
+
+private:
+	// The escape code that sets the text color (layer 38) or the background (layer 48)
+	string color(int a_layer, array<int> a_rgb, float a_brightness) {
+		array<int> lit = array::map(a_rgb, channel => math::itrunc(channel * a_brightness));
+		return `${ESC}[${a_layer};2;${lit[0]};${lit[1]};${lit[2]}m`;
+	}
+}
+
+class Game {
+	Game() { digCave(); }
+
+	bool play() {
+		readKeys();
+		gatorSteps += GATOR_TILES_PER_SECOND / FRAMES_PER_SECOND;
+		batSteps += BAT_TILES_PER_SECOND / FRAMES_PER_SECOND;
+		for (; gatorSteps >= 1.0; gatorSteps -= 1.0) {
+			moveGator();
+		}
+		for (; batSteps >= 1.0; batSteps -= 1.0) {
+			for (auto& bat : bats) {
+				bat.fly(cave, toGator, dice);
+			}
+		}
+		sufferBites();
+		if (gator.hearts <= 0) {
+			gator = Gator();
+			level = 1;
+			digCave();
+		} else if (cakesLeft == 0) {
+			level += 1;
+			digCave();
+		}
+		print(painter.paint(cave, gator, bats) + statusLine() + ESC + "[K", skip_newline);
+		sleep(1.0 / FRAMES_PER_SECOND);
+		if (!running) {
+			print(`${ESC}[0m${ESC}[?25h\nThe gator reached cave ${level}.`);
+		}
+		return running;
+	}
+
+private:
+	Cave cave;
+	Gator gator;
+	array<Bat> bats;
+	Painter painter;
+	Trail toGator;
+	Trail toCake;
+	float gatorSteps = 0.0;        // the steps each is owed: its speed adds a fraction of one every frame
+	float batSteps = 0.0;
+	random dice = random(2026);
+	ivec2 heading;                 // the step the keys ask for; (0, 0) stands still
+	int level = 1;
+	int cakesLeft = 0;
+	bool selfPlaying = true;
+	bool running = true;
+
+	void digCave() {
+		cave.dig(dice);
+		gator.position = cave.entrance;
+		toGator = cave.trailTo([gator.position]);
+		array<ivec2> farFromTheGator = toGator.tilesBeyond(8, cave.tilesOf(Tile::Floor));
+		dice.shuffle(farFromTheGator);
+		cakesLeft = math::min(FIRST_CAVE_CAKES + level - 1, farFromTheGator.size());
+		for (int i = 0; i < cakesLeft; ++i) {
+			cave.placeCake(farFromTheGator[i]);
+		}
+		bats.clear();
+		for (int i = cakesLeft; i < cakesLeft + FIRST_CAVE_BATS + level - 1 && i < farFromTheGator.size(); ++i) {
+			bats.push(Bat{farFromTheGator[i]});
+		}
+		toCake = cave.trailTo(cave.tilesOf(Tile::Cake));
+		print(ESC + "[?25l" + ESC + "[2J", skip_newline);
+	}
+
+	void readKeys() {
+		for (string key = read_key(); key != ""; key = read_key()) {
+			selfPlaying = false;
+			if (key == "esc") {
+				running = false;
+			} else if (key == "r") {
+				digCave();
+			} else if (KEY_STEPS.has(key)) {
+				heading = KEY_STEPS[key];   // a tap between two steps still walks a tile
 			}
 		}
 	}
-}
 
-void start_level() {
-	array<int> open;
-	while (open.size() < W * H / 3) {   // a cave whose biggest room is too small is dug again
-		dig_cave();
-		open = tiles_where(FLOOR);
-		gator = open[open.size() / 2];
-		to_gator = flood([gator]);
-		open.filter([](int tile) { return to_gator[tile] >= 0; });
-	}
-	for (int i = 0; i < W * H; ++i) {
-		if (to_gator[i] < 0) { tiles[i] = WALL; }   // seal the pockets no walk reaches
-	}
-	open.filter([](int tile) { return to_gator[tile] > 8; });
-	rng.shuffle(open);
-	cakes = math::min(5 + level, open.size() / 2);
-	for (int i = 0; i < cakes; ++i) { tiles[open[i]] = CAKE; }
-	bats.clear();
-	for (int i = 0; i < 1 + level; ++i) { bats.push(Bat(open[cakes + i])); }
-	seen.resize(W * H);
-	seen.fill(false);
-	to_cake = flood(tiles_where(CAKE));
-}
-
-void move_gator(int to) {
-	if (to == gator || tiles[to] == WALL) { return; }
-	faces_left = to == gator - 1 || (faces_left && to != gator + 1);
-	gator = to;
-	if (tiles[gator] == CAKE) {
-		tiles[gator] = FLOOR;
-		cakes -= 1;
-		eaten += 1;
-		to_cake = flood(tiles_where(CAKE));
-	}
-	to_gator = flood([gator]);
-}
-
-// A bat that can smell the gator (within 10 steps) closes in; any other flutters about
-void move_bats() {
-	for (auto& bat : bats) {
-		int next = bat.at;
-		if (to_gator[bat.at] <= 10) {
-			next = downhill(to_gator, bat.at);
-		} else {
-			next = rng.pick([bat.at - 1, bat.at + 1, bat.at - W, bat.at + W]);
-		}
-		if (tiles[next] != WALL) { bat.at = next; }
-	}
-}
-
-void check_bites() {
-	for (auto& bat : bats) {
-		if (bat.at == gator && hurt_frames == 0) {
-			hearts -= 1;
-			hurt_frames = 20;
-			bat.at = rng.pick(tiles_where(FLOOR));
-		}
-	}
-}
-
-string ink(int r, int g, int b) { return `${ESC}[38;2;${r};${g};${b}m`; }
-string paper(float r, float g, float b) { return `${ESC}[48;2;${math::itrunc(r)};${math::itrunc(g)};${math::itrunc(b)}m`; }
-
-string draw(int frame) {
-	float reach = 8.0 + 0.5 * math::sin(frame * 0.45);   // the torch flickers
-	int gx = gator % W;
-	int gy = gator / W;
-	array<bool> bat_here;
-	bat_here.resize(W * H);
-	for (auto& bat : bats) { bat_here[bat.at] = true; }
-	string result = ESC + "[H";
-	for (int y = 0; y < H; ++y) {
-		string style = "";
-		for (int x = 0; x < W; ++x) {
-			int i = x + y * W;
-			float away = math::sqrt(cast<float>((x - gx) * (x - gx) + (y - gy) * (y - gy)));
-			float light = math::max(0.0, 1.0 - away / reach);
-			if (light > 0.0) { seen[i] = true; }
-			float glow = seen[i] ? math::max(light, 0.2) * ((x + y) % 2 == 0 ? 1.0 : 0.88) : 0.0;   // remembered tiles stay dim; a checker shows the grid
-			float red = hurt_frames > 0 ? 90.0 * light : 0.0;
-			string back = tiles[i] == WALL ? paper(70 * glow + red, 80 * glow, 120 * glow) : paper(200 * glow + red, 130 * glow, 60 * glow);
-			string tile = "  ";
-			if (i == gator) {
-				back = paper(70, 200, 90);
-				tile = ink(10, 40, 20) + (faces_left ? "<:" : ":>");
-			} else if (bat_here[i] && light > 0.0) {
-				tile = ink(230, 120, 255) + "^^";
-			} else if (tiles[i] == CAKE) {
-				tile = ink(255, 150, 200) + "◢◣";   // a cake glows: it shows in the dark
+	void moveGator() {
+		for (auto [key, step] : KEY_STEPS) {
+			if (key_down(key) && !cave.isRock(gator.position + step)) {
+				heading = step;
 			}
-			if (back != style) {   // a colour is written only where it changes
-				style = back;
-				result += back;
-			}
-			result += tile;
 		}
-		result += ESC + "[0m\n";
+		ivec2 to = selfPlaying ? toCake.nextStep(gator.position) : gator.position + heading;
+		heading = ivec2(0, 0);
+		if (to == gator.position || cave.isRock(to)) {
+			return;
+		}
+		gator.facingLeft = to.x < gator.position.x || (gator.facingLeft && to.x == gator.position.x);
+		gator.position = to;
+		toGator = cave.trailTo([to]);
+		if (cave.hasCake(to)) {
+			cave.eatCake(to);
+			cakesLeft -= 1;
+			toCake = cave.trailTo(cave.tilesOf(Tile::Cake));
+		}
 	}
-	string status = `CAKEWALK  cave ${level}  cakes left ${cakes}  ${string::repeat("♥", hearts)}`;
-	status += piloted ? "   arrows or WASD move, esc quits" : "   the gator walks itself: press a key to take over";
-	return result + status + ESC + "[K";
+
+	void sufferBites() {
+		for (auto& bat : bats) {
+			if (bat.position == gator.position) {
+				gator.hearts -= 1;
+				bat.position = dice.pick(cave.tilesOf(Tile::Floor));
+			}
+		}
+	}
+
+	string statusLine() {
+		string result = `CAKEWALK  cave ${level}  cakes left ${cakesLeft}  ${string::repeat("♥", gator.hearts)}`;
+		return result + (selfPlaying ? "   press a key to take over from the gator" : "   arrows or WASD walk, R digs, esc quits");
+	}
 }
 
-print(ESC + "[?25l" + ESC + "[2J", skip_newline);
-start_level();
-time::stopwatch clock;
-clock.start();
-float frame_time = frame_limit > 0 ? 0.0 : 1.0 / 30.0;
-bool running = true;
-int heading = 0;   // the step the keys ask for; 0 stands still
-for (int frame = 0; running && (frame_limit == 0 || frame < frame_limit); ++frame) {
-	float frame_start = clock.elapsed();
-	for (string key = read_key(); key != ""; key = read_key()) {
-		piloted = true;
-		if (key == "esc") { running = false; }
-		if (STEPS.has(key)) { heading = STEPS[key]; }   // a tap between two steps still moves a tile
-	}
-	if (frame % FRAMES_PER_STEP == 0) {
-		for (auto [key, step] : STEPS) {
-			if (key_down(key) && tiles[gator + step] != WALL) { heading = step; }   // a held key keeps walking
-		}
-		move_gator(piloted ? gator + heading : downhill(to_cake, gator));
-		heading = 0;
-		check_bites();
-	}
-	if (frame % (FRAMES_PER_STEP * 2) == 0) {
-		move_bats();
-		check_bites();
-	}
-	if (hurt_frames > 0) { hurt_frames -= 1; }
-	if (hearts == 0) {   // out of hearts: back to the first cave
-		level = 1;
-		hearts = 3;
-		eaten = 0;
-		start_level();
-	} else if (cakes == 0) {
-		level += 1;
-		start_level();
-	}
-	print(draw(frame), skip_newline);   // the whole frame in one write
-	float spent = clock.elapsed() - frame_start;
-	if (spent < frame_time) { sleep(frame_time - spent); }
-}
-print(ESC + "[0m" + ESC + "[?25h");
-print(`The gator ate ${eaten} cakes and reached cave ${level}.`);
+// Declared without an initializer, so a reload keeps the running game while everything above it takes its new text
+Game game;
+bool frame() { return game.play(); }

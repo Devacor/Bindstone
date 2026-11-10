@@ -7,6 +7,7 @@
 
 const JaiPlay = (() => {
 	const RING = 1024;
+	const EDIT_BYTES = 1 << 18;
 	const NAMED = { " ": 128, ArrowLeft: 129, ArrowRight: 130, ArrowUp: 131, ArrowDown: 132, Shift: 133, Control: 134,
 		Alt: 135, Escape: 136, Enter: 137, Tab: 138, Backspace: 139 };
 	const GAME_KEYS = new Set([" ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Backspace", "Enter"]);
@@ -104,9 +105,10 @@ const JaiPlay = (() => {
 			if (this.options.onExit) { this.options.onExit(code); }
 		}
 
-		// game: a bundle URL ({entry, args, files}); source: program text run under budget seconds; attended: false for a
-		// run no click began, which leaves the page its focus and the sound locked
-		async start({ game, source, budget = 0, attended = true }) {
+		// game: a bundle URL ({entry, args, files}); source: program text run under budget seconds; live: text saved as
+		// the file program.jai beside the source, which edit() rewrites while the run goes on; attended: false for a run
+		// no click began, which leaves the page its focus and the sound locked
+		async start({ game, source, live, budget = 0, attended = true }) {
 			const useThreads = await threaded;
 			this.stop();
 			if (attended) { JaiAudio.unlock(); }
@@ -126,16 +128,32 @@ const JaiPlay = (() => {
 				this.words = new Int32Array(new SharedArrayBuffer(4 * (16 + RING)));
 				this.words[1] = cols;
 				this.words[2] = rows;
-				this.worker.postMessage({ shared: this.words.buffer, game, source, budget });
+				const edits = new SharedArrayBuffer(8 + EDIT_BYTES);
+				this.edits = { words: new Int32Array(edits, 0, 2), bytes: new Uint8Array(edits, 8) };
+				this.worker.postMessage({ shared: this.words.buffer, edits, game, source, live, budget });
 			} else {
-				this.worker.postMessage({ game, source, budget, cols, rows });
+				this.worker.postMessage({ game, source, live, budget, cols, rows });
 			}
+		}
+
+		// Rewrites the live file of the run under way. The threaded engine's worker never returns to its event loop, so
+		// the text crosses in shared memory: [0] a count that is odd while the page writes, [1] the text's length
+		edit(text) {
+			if (!this.running) { return; }
+			if (!this.edits) { this.worker.postMessage({ edit: text }); return; }
+			const bytes = new TextEncoder().encode(text);
+			if (bytes.length > EDIT_BYTES) { return; }
+			Atomics.add(this.edits.words, 0, 1);
+			this.edits.bytes.set(bytes);
+			Atomics.store(this.edits.words, 1, bytes.length);
+			Atomics.add(this.edits.words, 0, 1);
 		}
 
 		stop() {
 			if (this.worker) { this.worker.terminate(); this.worker = null; }
 			JaiAudio.reset();
 			this.words = null;
+			this.edits = null;
 			this.held.clear();
 			this.running = false;
 		}

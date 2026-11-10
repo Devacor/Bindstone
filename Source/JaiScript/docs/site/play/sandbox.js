@@ -1,5 +1,7 @@
 // The Play page's sandbox tab: the program in the editor runs on the engine in this page, its output in the terminal above it.
 // The first sample is a game in a file of its own, and it starts by itself the first time the tab shows.
+// A program that declares bool frame() runs live: sandbox/live.jai calls it frame after frame, and the editor's text is
+// saved as the file it reloads while the program runs.
 "use strict";
 
 const JaiSandbox = (() => {
@@ -16,7 +18,11 @@ const JaiSandbox = (() => {
 	const picker = document.getElementById("sandbox-sample");
 	const run = document.getElementById("sandbox-run");
 	const panel = document.getElementById("sandbox");
+	const launcher = fetch("sandbox/live.jai").then((reply) => reply.ok ? reply.text() : "print(\"sandbox/live.jai did not load\");\n");
+	const declaresFrame = (text) => /\bbool\s+frame\s*\(\s*\)/.test(text);
 	let session = null;
+	let live = false;
+	let pendingEdit = 0;
 	let onStatus = () => {};
 	const note = (text) => session.write("\r\n\x1b[2m[" + text + "]\x1b[0m\r\n");
 
@@ -50,9 +56,15 @@ const JaiSandbox = (() => {
 			if (picker.value === SAMPLES[0].id && !session.running && !panel.hidden) { start(false); }
 		});
 	}
-	function start(attended) {
+	async function start(attended) {
 		run.disabled = true;
-		session.start({ source: editor.value, budget: BUDGET_SECONDS, attended });
+		const text = editor.value;
+		live = declaresFrame(text);
+		if (live) {
+			session.start({ source: await launcher, live: text, budget: BUDGET_SECONDS, attended });
+		} else {
+			session.start({ source: text, budget: BUDGET_SECONDS, attended });
+		}
 	}
 	function stop(reason) {
 		if (!session || !session.running) { return; }
@@ -62,6 +74,10 @@ const JaiSandbox = (() => {
 	}
 
 	picker.addEventListener("change", () => load(picker.value));
+	editor.addEventListener("input", () => {
+		clearTimeout(pendingEdit);
+		pendingEdit = setTimeout(() => { if (live && session && session.running) { session.edit(editor.value); } }, 250);
+	});
 	run.addEventListener("click", () => start(true));
 	editor.addEventListener("keydown", (event) => {
 		if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {

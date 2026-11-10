@@ -265,7 +265,7 @@ def check_hero(runner, out, timeout):
 
 
 def check_sandbox_game(runner, timeout):
-    """The Play page's sandbox opens on cakewalk.jai: it stays under 300 lines and plays the same frames on both backends."""
+    """The Play page's sandbox opens on cakewalk.jai, which live.jai plays: it stays under 300 lines and draws the same frames on both backends."""
     game = SITE / "play" / "sandbox" / "cakewalk.jai"
     lines = len(game.read_text(encoding="utf-8").splitlines())
     if lines >= 300:
@@ -273,11 +273,11 @@ def check_sandbox_game(runner, timeout):
     printed = {}
     for be in ("vm", "interp"):
         try:
-            p = subprocess.run([str(runner), "--no-pause", "--backend=" + be, game.name, "--", "240"], cwd=str(game.parent),
+            p = subprocess.run([str(runner), "--no-pause", "--backend=" + be, "live.jai", "--", game.name, "45"], cwd=str(game.parent),
                                capture_output=True, timeout=timeout)
         except subprocess.TimeoutExpired:
             return ["play/sandbox/cakewalk.jai [%s]: no end after %ss" % (be, timeout)]
-        if p.returncode != 0 or b"The gator ate" not in p.stdout:
+        if p.returncode != 0 or b"CAKEWALK  cave 1" not in p.stdout:
             return ["play/sandbox/cakewalk.jai [%s]: exit %s, %r" % (be, p.returncode, p.stderr.decode("utf-8", "replace").strip()[:400])]
         printed[be] = p.stdout
     return [] if printed["vm"] == printed["interp"] else ["play/sandbox/cakewalk.jai: vm and interp drew different frames"]

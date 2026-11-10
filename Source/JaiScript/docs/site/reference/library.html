@@ -334,6 +334,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>reflect::functions()</code></td><td>Every function, namespace-qualified and sorted; no constructors.</td></tr>
 <tr><td><code>reflect::globals()</code></td><td>Global variable names, sorted.</td></tr>
 <tr><td><code>reflect::bases(v)</code></td><td>The base classes in declaration order, empty at a root.</td></tr>
+<tr><td><code>reflect::is_a(v, "Class")</code></td><td><code>v instanceof Class</code> for a class named at run time: true when <code>v</code> holds an object of the class or of one derived from it; false for any other value, a string included. An unknown class name raises <code>reflect::is_a: unknown class 'Nope'</code>.</td></tr>
 <tr><td><code>reflect::is_cpp_bound(v)</code></td><td>For a class name, whether the host registered it; for a value, whether a C++ object backs it.</td></tr>
 <tr><td><code>reflect::is_enabled(requirements...)</code></td><td>Whether the host granted every named privilege (<code>"filesystem"</code>, <code>jai::filesystem</code>, a custom permission name); false for an unknown name (<a href="../guide/10-modules.html#where-files-are">Where files are</a>).</td></tr>
 <tr><td><code>reflect::instances("Class")</code></td><td>The live instances of a class, in creation order.</td></tr>

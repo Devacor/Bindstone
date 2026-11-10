@@ -3631,7 +3631,7 @@ public:
 				"parallel_transform", "print", "reflect::bases", "reflect::bind", "reflect::call", "reflect::classes",
 				"reflect::construct", "reflect::construct_shared", "reflect::fields", "reflect::function_arguments",
 				"reflect::functions", "reflect::generation", "reflect::get", "reflect::globals", "reflect::has_field",
-				"reflect::has_method", "reflect::instances", "reflect::invoke", "reflect::is_cpp_bound", "reflect::is_enabled",
+				"reflect::has_method", "reflect::instances", "reflect::invoke", "reflect::is_a", "reflect::is_cpp_bound", "reflect::is_enabled",
 				"reflect::method_arguments", "reflect::methods", "reflect::scoped_template_dirs",
 				"reflect::scoped_template_output_limit", "reflect::set", "reflect::template_output_limit", "reflect::type_name",
 				"resolve_path", "sleep", "spider::Response", "spider::catch", "spider::get", "spider::post", "spider::sling",

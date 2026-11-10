@@ -230,6 +230,8 @@ namespace jai {
         checked_result<expression_ptr> parenthesized();
         checked_result<expression_ptr> bracket_expression();
         checked_result<expression_ptr> cast_expression();
+        int infix_precedence() const;
+        checked_result<expression_ptr> instance_test_rest(expression_ptr left);
         
         // Helper parsers
         checked_result<expression_ptr> finish_call(expression_ptr callee);

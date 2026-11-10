@@ -367,7 +367,7 @@ failed: no such slot (slot 7)</code></pre></div>
 <tr><td>equality</td><td>reference equality by default</td><td><code>==</code> compares fields; <code>operator==</code> replaces it; <code>same_object(a, b)</code> is identity</td></tr>
 <tr><td>operators</td><td><code>public static Vec operator+(Vec a, Vec b)</code></td><td><code>Vec operator+(Vec o)</code>, a method</td></tr>
 <tr><td><code>as</code></td><td><code>x as Hero</code></td><td><code>cast&lt;Hero&amp;&gt;(x)</code>, which raises a catchable error when <code>x</code> is not a <code>Hero</code></td></tr>
-<tr><td><code>is</code></td><td><code>x is Hero</code></td><td>no operator. <code>type_of(x) == "Hero"</code> is the exact class only; the is-a test is below</td></tr>
+<tr><td><code>is</code></td><td><code>x is Hero</code></td><td><code>x instanceof Hero</code>: a <code>Hero</code> or a class derived from it. <code>type_of(x) == "Hero"</code> is the exact class only</td></tr>
 <tr><td>using, IDisposable, finally</td><td><code>using (var f = Open())</code>, <code>finally { }</code></td><td>a destructor, <code>~File()</code>, runs when its scope ends, a throw included; no <code>finally</code></td></tr>
 </tbody></table></div>
 <div class="tabs" id="classes-sample-tabs">
@@ -416,13 +416,13 @@ class Paladin : Hero {
     Paladin(string n) : super(n) {}
     string describe() override { return "Sir " + super::describe(); }
 }
-bool is_hero(var x) { try { cast&lt;Hero&amp;&gt;(x); return true; } catch (e) { return false; } }
 
 Paladin p = Paladin("Ada");
 p.hp = -3;                                   // through _set_hp
 var anyone = p;
+var text = "text";
 print(p.describe(), " ", p.hp, " ", Hero::count, " hero: " + p);
-print(type_of(anyone) == "Hero", " ", is_hero(anyone), " ", is_hero("text"));
+print(type_of(anyone) == "Hero", " ", anyone instanceof Hero, " ", text instanceof Hero);
 try { throw anyone; } catch (Hero h) { print("caught a Hero: ", h.name); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Sir Ada 0 1 hero: Ada (0 hp)
 false true false
@@ -430,7 +430,7 @@ caught a Hero: Ada</code></pre></div>
 </div>
 </div>
 <p>C# prints its bools capitalized and throws only an <code>Exception</code>, so its program has no third line.</p>
-<p><strong>The is-a test.</strong> There is no <code>is</code> operator. <code>cast&lt;Hero&amp;&gt;(x)</code> succeeds for a <code>Hero</code> or a subclass and raises otherwise, so the helper above answers <code>x is Hero</code> for any value. A typed <code>catch (Hero h)</code> takes a <code>Hero</code> or a subclass the same way. <code>reflect::bases(x)</code> lists a class instance's direct bases only.</p>
+<p><strong>The is-a test.</strong> <code>x instanceof Hero</code> is true for a <code>Hero</code> or a subclass and false for anything else, a value that is no object included. After it, <code>cast&lt;Hero&amp;&gt;(x)</code> cannot fail; <code>as</code> stays the cast, which raises where C# would give null. A typed <code>catch (Hero h)</code> takes a <code>Hero</code> or a subclass the same way.</p>
 <h3 id="errors-strings-and-the-rest">Errors, strings and the rest<a class="hlink" href="#errors-strings-and-the-rest" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th></th><th>C#</th><th>JaiScript</th></tr></thead><tbody>
 <tr><td>throw</td><td><code>throw new InvalidOperationException("x");</code></td><td><code>throw "x";</code>: any value</td></tr>

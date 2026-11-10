@@ -827,7 +827,7 @@ namespace {
 				return maybe_object(t->then_expression) || maybe_object(t->else_expression);
 			}
 			case node_type::cast_expr:
-				return !primitive_or_string(static_cast<const cast_expr*>(e.get())->target);
+				return !static_cast<const cast_expr*>(e.get())->instance_test && !primitive_or_string(static_cast<const cast_expr*>(e.get())->target);
 			case node_type::assignment_expr: {
 				auto* a = static_cast<const assignment_expr*>(e.get());
 				if (a->target && a->target->get_type() == node_type::identifier_expr) {
@@ -2445,7 +2445,7 @@ namespace {
 			case node_type::cast_expr: {
 				auto* n = static_cast<cast_expr*>(e.get());
 				// a conditional's arm where a reference may bind reads as a value here; a T& it binds is checked where it binds
-				if (n->binding_ref && !proof_mode) { return walk_expr(n->operand); }
+				if ((n->binding_ref && !proof_mode) || n->instance_test) { return walk_expr(n->operand); }   // instanceof reads its operand and answers a bool
 				if (n->by_reference) { return fail(e.get(), "cast<T&> is not allowed in a parallel body"); }
 				if (proof_mode && conversion_may_run_code(n->target, n->operand)) { root_escaped = true; }
 				note_converting_construction(n->target, n->operand, n);

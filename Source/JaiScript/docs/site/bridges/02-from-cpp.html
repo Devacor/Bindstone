@@ -427,6 +427,7 @@ rope=2</code></pre></div>
 <tr><td>initialization</td><td><code>int i{5};</code>, <code>T x;</code>, <code>T x(a, b);</code></td><td>the same three; <code>T x;</code> default-constructs a class and zeroes a number</td></tr>
 <tr><td>containers</td><td><code>std::vector&lt;int&gt;</code>, <code>std::map&lt;std::string, int&gt;</code>, <code>{1, 2, 3}</code></td><td><code>array&lt;int&gt;</code>, <code>map&lt;string, int&gt;</code> (iterates in key order), <code>[1, 2, 3]</code>, <code>{"key": 1}</code></td></tr>
 <tr><td>casts</td><td><code>static_cast&lt;int&gt;(2.7)</code>, <code>dynamic_cast&lt;Square&amp;&gt;(s)</code>, <code>std::static_pointer_cast&lt;Square&gt;(p)</code></td><td><code>cast&lt;int&gt;(2.7)</code>, <code>cast&lt;Square&amp;&gt;(s)</code>, <code>cast&lt;shared_ptr&lt;Square&gt;&gt;(p)</code>; a wrong class raises the catchable <code>Cannot cast 'X' to 'T'</code> (<a href="../guide/02-type-ladder.html#cast-the-explicit-boundary">cast</a>)</td></tr>
+<tr><td>is it a Square?</td><td><code>if (dynamic_cast&lt;Square*&gt;(p))</code></td><td><code>if (s instanceof Square)</code>, then <code>cast&lt;Square&amp;&gt;(s)</code>, which cannot fail after the test (<a href="../guide/07-classes.html#instanceof">instanceof</a>)</td></tr>
 <tr><td>identity</td><td><code>&amp;a == &amp;b</code></td><td><code>same_object(a, b)</code></td></tr>
 </tbody></table></div>
 <h3 id="functions-references-lambdas">Functions, references and lambdas<a class="hlink" href="#functions-references-lambdas" aria-label="link">&#8203;</a></h3>

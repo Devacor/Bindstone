@@ -5879,6 +5879,10 @@ checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const repla
         push_value(std::move(operand));
         return {};
     }
+    if (expr->instance_test) {   // KEEP BYTE-PARALLEL with the vm's exec_cast
+        push_value(script_value(detail::instance_test(operand, *expr->target, engine_), engine_));
+        return {};
+    }
     if (expr->by_reference) {
         auto out = detail::cast_reference(detail::cast_pin_temporary(std::move(operand), engine_), *expr, engine_, string_symbolizer_);
         if (!out) {

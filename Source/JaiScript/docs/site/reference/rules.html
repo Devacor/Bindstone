@@ -59,6 +59,8 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td>Floating-point type</td><td><code>double</code>, <code>float</code> (one type)</td><td>none (a literal with a <code>.</code> is a float)</td></tr>
 <tr><td>Non-public members</td><td><code>private:</code>, <code>protected:</code> (one level: the class and its subclasses)</td><td>none</td></tr>
 <tr><td>Textual inclusion</td><td><code>#include "x.jai"</code></td><td><code>include "x.jai"</code></td></tr>
+<tr><td>Is it a T?</td><td>none (<code>dynamic_cast</code> has no spelling: <code>cast&lt;T&amp;&gt;(x)</code> raises where it would fail)</td><td><code>x instanceof T</code></td></tr>
+<tr><td>A constant</td><td><code>const auto x = e;</code>, <code>for (const auto x : xs)</code>, <code>const auto [a, b] = e;</code></td><td><code>const x = e;</code>, <code>for (const x : xs)</code>, <code>const [a, b] = e;</code></td></tr>
 </tbody></table></div>
 <p>Words from other languages (<code>virtual</code>, <code>delete</code>, <code>goto</code>, <code>extends</code>, <code>constexpr</code>, <code>const_cast</code>, <code>===</code>, <code>function*</code>, <code>&amp;x</code>) are not reserved; where one fails to parse, the error names the JaiScript spelling (<a href="errors.html#run-time-errors">catalogue</a>, <a href="../bridges/index.html">Language Bridges</a>). <code>const</code> is a keyword; C++&#x27;s other places for it (a const method, a const return type, <code>array&lt;const int&gt;</code>, <code>shared_ptr&lt;const T&gt;</code>) each raise their own text.</p>
 
@@ -73,6 +75,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td>Assignment targets</td><td></td><td>Every C++ lvalue: a call returning <code>T&amp;</code>, a conditional of lvalues, <code>(a = b) = c</code>, <code>++x = v</code>, <code>cast&lt;T&amp;&gt;(e)</code>.</td></tr>
 <tr><td>Comparison</td><td><code>== != &lt; &gt; &lt;= &gt;=</code></td><td><code>1 == 1.0</code> is true. A char beside a string compares as its one-character string (<code>s[i] == "x"</code>). NaN follows IEEE (false and unequal).</td></tr>
 <tr><td>Three-way</td><td><code>&lt;=&gt;</code></td><td>Returns -1 / 0 / 1; groups all NaNs last; signed zeros are equivalent.</td></tr>
+<tr id="rule-instanceof"><td>Class test</td><td><code>x instanceof T</code></td><td>True when <code>x</code> holds an object whose class is <code>T</code> or derives from it at any depth (script and host classes, <code>ns::T</code>). A handle answers for its object; a null or expired handle and a value that is no object are false. A relational operator: <code>!(x instanceof T)</code>, <code>a instanceof T &amp;&amp; b</code>. <code>T</code> is a class: an unknown name, an enum and a builtin type fail the load.</td></tr>
 <tr><td>Logical</td><td><code>&amp;&amp;</code> <code>||</code> <code>!</code></td><td>Short-circuit. <code>!v</code> on a class instance is <code>!to_bool(v)</code>; an instance whose class declares no <code>bool to_bool()</code> is true.</td></tr>
 <tr><td>Bitwise</td><td><code>&amp;</code> <code>|</code> <code>^</code> <code>~</code> <code>&lt;&lt;</code> <code>&gt;&gt;</code></td><td>Integers, on the 64-bit pattern. <code>&lt;&lt;</code> discards high bits by contract, <code>&gt;&gt;</code> is arithmetic; the count must be 0..63.</td></tr>
 <tr><td>Null</td><td><code>?? ??=</code></td><td><code>a ?? b</code>: <code>a</code> unless null, else <code>b</code> (evaluated only then). <code>a ??= b</code> stores only into a null <code>a</code>.</td></tr>
@@ -142,6 +145,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>utf8_string</code></td><td>The text type, where a type is read.</td></tr>
 <tr><td><code>uint8</code> <code>int8</code></td><td>An array&#x27;s element type only.</td></tr>
 <tr><td><code>[[warn_mode]]</code> <code>[[strict_mode]]</code> <code>[[nodiscard]]</code></td><td>The attributes (<a href="#region-attributes">attributes</a>).</td></tr>
+<tr><td><code>instanceof</code></td><td>The class test, after an operand (<a href="#rule-instanceof">class test</a>).</td></tr>
 <tr><td><code>hot_reload_migrate</code></td><td>Reserved for the reload hook at a file&#x27;s top level.</td></tr>
 </tbody></table></div>
 

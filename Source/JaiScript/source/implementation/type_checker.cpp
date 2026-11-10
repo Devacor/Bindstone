@@ -5063,6 +5063,36 @@ private:
 
     // cast<T>(e): certain T (proofs flow); cast<T&>(e): T for member lookup, never a store proof (tentative, like every reference);
     // cast<shared_ptr<T>>(e): the handle spelling. The operand is the explicit typed boundary - never checked against T.
+    // e instanceof T: T names a class; an operand whose declared type can hold no object of a class is never one
+    ctype infer_instance_test(cast_expr* c, const ctype& operand) {
+        stamp_const(c->const_check, const_none, {});
+        const std::string name(c->target->type_name);
+        const ctype result = ctype::make(ctype::bool_k);
+        if (enum_type_name(*c->target) || find_enum(name)) {
+            diag(diag_level::error, c->location, "'instanceof' tests a class, and '" + name + "' is an enum: compare the value with one of its values (x == " + name + "::value)");
+            return result;
+        }
+        if (!known_class(name) && !extra_global(name)) {
+            diag(diag_level::error, c->location, "unknown type '" + name + "'");
+            return result;
+        }
+        if (operand.tentative || operand.is_unknown()) { return result; }
+        switch (operand.kind) {
+            case ctype::int_k: case ctype::float_k: case ctype::bool_k: case ctype::char_k: case ctype::string_k: case ctype::utf8_k:
+            case ctype::array_k: case ctype::map_k: case ctype::math_k: case ctype::function_k:
+                diag(diag_level::error, c->location, "'instanceof " + name + "' is always false: the operand is '" + ctype_name(operand) + "', never an object of a class");
+                break;
+            case ctype::object_k:
+                // two classes neither of which derives from the other: true only of an object whose class derives from both
+                if (!operand.cls.empty() && class_relation(operand.cls, name) == 0 && class_relation(name, operand.cls) == 0) {
+                    diag(diag_level::warning, c->location, "'instanceof " + name + "' is false for every '" + std::string(operand.cls) + "' but one whose class derives from '" + name + "' too");
+                }
+                break;
+            default: break;
+        }
+        return result;
+    }
+
     JAI_NOINLINE ctype infer_cast(cast_expr* c) {
         if (c->implicit_ref) {   // a piece of an assignment target read as a reference: its operand's type
             ctype operand_t = infer(c->operand.get());
@@ -5070,6 +5100,7 @@ private:
             return operand_t;
         }
         ctype operand_t = infer(c->operand.get());
+        if (c->instance_test) { return infer_instance_test(c, operand_t); }
         if (c->by_reference) { report_mixed_reference_conditional(c->operand.get()); }
         check_const_cast(c);
         ctype t = ctype_from_type_info(c->target.get());

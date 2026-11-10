@@ -20178,6 +20178,10 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 		stack_.push_back(std::move(operand));
 		return {};
 	}
+	if (expr->instance_test) {   // KEEP BYTE-PARALLEL with the interpreter's visit_cast_expr
+		stack_.push_back(script_value(detail::instance_test(operand, *expr->target, engine_), engine_));
+		return {};
+	}
 	if (expr->by_reference) {
 		auto out = detail::cast_reference(detail::cast_pin_temporary(std::move(operand), engine_), *expr, engine_, symbolizer_);
 		if (!out) {

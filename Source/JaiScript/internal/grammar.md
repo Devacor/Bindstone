@@ -397,7 +397,8 @@ bitwiseAndExpression = equalityExpression ("&" equalityExpression)*
 
 equalityExpression = relationalExpression (("==" | "!=") relationalExpression)*
 
-relationalExpression = shiftExpression (("<" | ">" | "<=" | ">=" | "<=>") shiftExpression)*
+relationalExpression = shiftExpression (("<" | ">" | "<=" | ">=" | "<=>") shiftExpression | "instanceof" className)*
+                       (* instanceof is a word only here, after an operand: e instanceof T is whether e holds an object of class T or of one derived from it *)
 
 shiftExpression = additiveExpression (("<<" | ">>") additiveExpression)*
 

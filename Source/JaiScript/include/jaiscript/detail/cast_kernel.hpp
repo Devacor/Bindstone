@@ -81,6 +81,27 @@ namespace jai::detail {
 		return def->get_name() == cls->type_name || class_derives_from(eng, def->get_type_id(), cls->id);
 	}
 
+	// x instanceof T (and reflect::is_a): x holds a live object whose class is T or derives from it at any depth. A handle
+	// answers for the object it names (a null or expired one names none); a value that is no object is no instance.
+	inline bool instance_of_class(const script_value& seen_in, const std::string& class_name, engine* eng) {
+		const script_value& seen = seen_in.deref();
+		if (seen.raw_storage_index() == script_value::TYPEID_WEAK_PTR) {
+			auto locked = seen.get_weak_ptr().lock();
+			if (!locked) { return false; }
+			script_value target(std::monostate{}, eng);
+			target.set_object_holder(locked);
+			return instance_of_class(target, class_name, eng);
+		}
+		if (const class_definition* def = cast_dynamic_class(seen)) { return def->is_subtype_of(class_name); }
+		if (seen.is_null() || !seen.get_object_holder()) { return false; }
+		const slot_class_view view = resolve_slot_class(seen, eng);   // a host object by its bound class
+		return view.def && view.def->is_subtype_of(class_name);
+	}
+	inline bool instance_test(const script_value& seen, const type_info& target, engine* eng) {
+		return target.base_type == script_value_type::jai_object_type && !target.is_enum && !target.type_name.empty() &&
+		       instance_of_class(seen, target.type_name, eng);
+	}
+
 	// Shared reference admission is in ref_lvalue.hpp; casts, parameters, loops and returns use it.
 
 	// A typed range-for variable's element: by value it takes the element as `T x = element;` would, by

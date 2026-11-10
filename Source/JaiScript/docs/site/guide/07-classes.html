@@ -252,7 +252,17 @@ caught: Cannot cast 'Cat' to 'Tiger&amp;'</code></pre></div>
 <li><strong>A constructor or destructor calls its own class's overrides</strong>, as in C++: <code>Cat()</code> above printed <code>cat</code> while building a <code>Tiger</code>. A call there to a method only a derived class declares is the load error <code>Cannot call 'layout' while 'Widget' is under construction: only a class derived from it declares it</code> (<code>under destruction</code> in a destructor).</li>
 <li id="a-subtype-member-through-a-base-typed-receiver"><strong>A base-typed slot keeps the whole object.</strong> C++ would slice; here <code>Cat c = Tiger();</code>, a <code>Cat</code> parameter and an <code>array&lt;Cat&gt;</code> element each hold a complete <code>Tiger</code> with its overrides. The slot's type decides only what the checker lets you name: <code>cast&lt;Tiger&amp;&gt;(c)</code> reaches the rest by reference (<code>cast&lt;Tiger&gt;(c)</code> is a copy), and a wrong guess raises a catchable error.</li>
 <li>A base value never enters a derived slot, nor a sibling's or an unrelated class's.</li>
+<li id="instanceof"><strong><code>x instanceof T</code> asks what an object is</strong>: true when its class is <code>T</code> or derives from <code>T</code> at any depth, through a value, a reference, a handle (a null one is false) or a <code>var</code> (one that holds no object is false). After the test <code>cast&lt;T&amp;&gt;(x)</code> cannot fail; the checker does not narrow <code>x</code> itself. <code>reflect::is_a(x, "T")</code> takes the class name at run time.</li>
 </ul>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Hero { string name = "hero"; }
+class Paladin : Hero { string smite() { return name + " smites"; } }
+array&lt;Hero&gt; party = [Hero(), Paladin()];          // a Hero element keeps a whole Paladin
+for (auto&amp; h : party) {
+    if (h instanceof Paladin) { print(cast&lt;Paladin&amp;&gt;(h).smite()); }
+    else { print(type_of(h), " ", h instanceof Hero, " ", reflect::is_a(h, "Paladin")); }
+}</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Hero true false
+hero smites</code></pre></div>
 <p><strong>Several bases</strong> construct in declaration order, each with its own bases first, and are destroyed in reverse. An initializer list names a base to pass it arguments (<code>super(...)</code> is the first base), in any order:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Engine { Engine(int rpm) { print("Engine ", rpm); } ~Engine() { print("~Engine"); } }
 class Radio { Radio() { print("Radio"); } ~Radio() { print("~Radio"); } }

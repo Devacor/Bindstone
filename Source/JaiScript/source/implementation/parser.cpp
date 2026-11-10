@@ -2277,6 +2277,7 @@ namespace {
     constexpr int k_ternary_precedence = 1;      // right-associative: the else arm is another conditional
     constexpr int k_coalesce_precedence = 2;     // right-associative, below || and above the conditional, as C#'s
     constexpr int k_equality_precedence = 8;
+    constexpr int k_relational_precedence = 9;
     constexpr int k_shift_precedence = 10;
     constexpr int k_additive_precedence = 11;    // + - * / % fold their literal operands
 
@@ -2296,7 +2297,7 @@ namespace {
             case token_type::ampersand: return 7;
             case token_type::equal_equal: case token_type::bang_equal: return k_equality_precedence;
             case token_type::less: case token_type::less_equal: case token_type::greater: case token_type::greater_equal:
-            case token_type::spaceship: return 9;
+            case token_type::spaceship: return k_relational_precedence;
             case token_type::left_shift: case token_type::right_shift: return k_shift_precedence;
             case token_type::plus: case token_type::minus: return k_additive_precedence;
             case token_type::star: case token_type::slash: case token_type::percent: return 12;
@@ -2347,16 +2348,46 @@ checked_result<expression_ptr> parser::expression() {
 }
 
 // One frame per operand on the way down: what follows the operand climbs in operator_rest
+// The operator after an operand: a token's, or the word instanceof, an operator only there (a relational one, as in JavaScript)
+int parser::infix_precedence() const {
+    const token& next = peek();
+    if (next.type == token_type::identifier && next.lexeme == "instanceof") { return k_relational_precedence; }
+    return operator_precedence(next.type);
+}
+
 checked_result<expression_ptr> parser::operator_expression(int min_precedence) {
     stack_.guard(peek().location);
     const size_t operand_start = current_;
     auto left = unary();
-    if (!left || operator_precedence(peek().type) < min_precedence) { return left; }
+    if (!left || infix_precedence() < min_precedence) { return left; }
     return operator_rest(std::move(left.value()), min_precedence, operand_start);
 }
 
+// e instanceof T: T a class by name (ns::T too); the node is a cast that answers instead of converting
+JAI_NOINLINE checked_result<expression_ptr> parser::instance_test_rest(expression_ptr left) {
+    const token word = advance();
+    if (!check(token_type::identifier)) {
+        report_error(is_type_keyword_token(peek().type)
+            ? "'instanceof' tests a class, and '" + std::string(peek().lexeme) + "' is a builtin type: compare type_of(x) == \"" + std::string(peek().lexeme) + "\""
+            : std::string("expected a class name after 'instanceof'"), peek());
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    JAISCRIPT_TRY_ASSIGN(type_info_ptr target, parse_type());
+    if (!target || target->base_type != script_value_type::jai_object_type || target->type_name.empty()) {
+        report_error("expected a class name after 'instanceof'", word);
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    auto test = std::make_shared<cast_expr>(word.location, target, false, std::move(left));
+    test->instance_test = true;
+    return expression_ptr(test);
+}
+
 JAI_NOINLINE checked_result<expression_ptr> parser::operator_rest(expression_ptr left, int min_precedence, size_t operand_start) {
-    for (int precedence = operator_precedence(peek().type); precedence >= min_precedence; precedence = operator_precedence(peek().type)) {
+    for (int precedence = infix_precedence(); precedence >= min_precedence; precedence = infix_precedence()) {
+        if (precedence == k_relational_precedence && peek().type == token_type::identifier) {
+            JAISCRIPT_TRY_ASSIGN(left, instance_test_rest(std::move(left)));
+            continue;
+        }
         if (precedence == k_assignment_precedence) { return assignment_rest(std::move(left), operand_start); }
         if (precedence == k_ternary_precedence) {
             JAISCRIPT_TRY_ASSIGN(left, ternary_rest(std::move(left)));
@@ -3411,7 +3442,8 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::declaration_rest() {
             current_ = savedPos;
             errors_.resize(errors_before);
             pushed_back_token_ = pushed_before;
-        } else if (check(token_type::identifier)) {
+        } else if (check(token_type::identifier) && !(peek().lexeme == "instanceof" && current_ + 1 < stream_->size() &&
+                                                      (*stream_)[current_ + 1].type == token_type::identifier)) {   // x instanceof T ... is an expression
             // Pattern: identifier identifier - a declaration. A '(' after the second
             // identifier makes it a class-typed free function (C++ return-type-first,
             // same as the namespace path); otherwise a variable: Point p; / Point mk() {...}

@@ -4936,6 +4936,18 @@
     },
     {
       "owner": "reflect",
+      "name": "is_a",
+      "signature": "is_a(value: var, class_name: string) -> bool",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "instanceof for a class named at run time: true for an object of the class or of one derived from it, false for any other value. An unknown class name raises.",
+      "source": "include/jaiscript/stdlib/reflection.hpp",
+      "form": "function",
+      "availability": "register_all() or area registration",
+      "display": "reflect::is_a(value: var, class_name: string) -> bool"
+    },
+    {
+      "owner": "reflect",
       "name": "generation",
       "signature": "generation(object_or_class: var) -> int",
       "provider": "stdlib",

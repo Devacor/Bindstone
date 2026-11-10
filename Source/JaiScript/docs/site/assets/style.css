@@ -290,12 +290,12 @@ li::marker { color: var(--fg-dim); }
 .content > p { max-width: 70ch; }
 /* prose links carry an underline, not just a hue */
 .chapter p a, .chapter li a, .chapter td a, .toc-desc a, .content > p a,
-.pillar p a, .receipt a, .home-section > p a {
+.pillar p a, .receipt a, .home-section p a, .home-section li a {
   text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: .18em;
   text-decoration-color: color-mix(in srgb, var(--link) 45%, transparent);
 }
 .chapter p a:hover, .chapter li a:hover, .chapter td a:hover, .content > p a:hover,
-.home-section > p a:hover { text-decoration-color: currentColor; }
+.home-section p a:hover, .home-section li a:hover { text-decoration-color: currentColor; }
 
 /* ---------- callouts ---------- */
 .callout, blockquote {
@@ -319,17 +319,17 @@ blockquote { padding-left: 1.1rem; border-left: 3px solid var(--border-strong); 
 .callout > :first-child { margin-top: 0; }
 .callout > :last-child { margin-bottom: 0; }
 .callout code { background: var(--bg2); }
-article.chapter details {
+article.chapter details, .home-section details {
   margin: 1.3rem 0; padding: .6rem 1.1rem .7rem;
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
 }
-article.chapter details > summary {
+article.chapter details > summary, .home-section details > summary {
   cursor: pointer; font: 600 .76rem var(--mono); letter-spacing: .1em;
   text-transform: uppercase; color: var(--fg-dim);
 }
-article.chapter details > summary:hover { color: var(--head); }
-article.chapter details[open] > summary { margin-bottom: .35rem; }
-article.chapter details p { margin: .45rem 0; }
+article.chapter details > summary:hover, .home-section details > summary:hover { color: var(--head); }
+article.chapter details[open] > summary, .home-section details[open] > summary { margin-bottom: .35rem; }
+article.chapter details p, .home-section details p { margin: .45rem 0; }
 
 /* ---------- code blocks ---------- */
 .codeblock {
@@ -612,6 +612,7 @@ tr:target td { background: var(--glow); }
 .receipt .what { font-size: .9rem; color: var(--fg-dim); }
 .home-section { max-width: 60rem; margin: 0 auto; padding: 0 0 1.2rem; }
 .home-section > h2 { font-size: 1.6rem; }
+.home-section .section-lead { font-size: 1.12rem; color: var(--head); }
 
 /* ---------- footer ---------- */
 .site-footer {

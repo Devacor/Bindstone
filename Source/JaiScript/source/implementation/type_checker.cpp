@@ -4076,10 +4076,45 @@ private:
         return true;
     }
 
+    // A bare call in a method that a member of the name takes and refuses, while the function the member hides (C++ lookup:
+    // locals, members, then globals) accepts the arguments: what the refusal adds, naming the hidden function's qualified call
+    bool hidden_function_probe_ = false;
+    std::string hidden_function_hint(std::string_view fname, const std::vector<ctype>& args) {
+        if (!hidden_function_probe_) { return {}; }
+        const auto accepts = [&](const std::vector<const function_decl*>& fns) {
+            for (const auto* fn : fns) {
+                if (script_fn_viable(fn, args)) { return true; }
+            }
+            return false;
+        };
+        const std::string name(fname);
+        std::string qualified;
+        if (const std::string space = enclosing_namespace_member(fname); !space.empty()) {
+            const auto fit = namespace_fns_.find(space + "::" + name);
+            if (fit == namespace_fns_.end() || !accepts(fit->second)) { return {}; }
+            qualified = space + "::" + name;
+        } else if (const auto it = functions_.find(fname); it != functions_.end()) {
+            if (!accepts(it->second)) { return {}; }
+            qualified = "::" + name;
+        } else if (eng_.has_function(name)) {
+            std::vector<engine::host_overload_signature> sigs;
+            bool viable = !eng_.host_function_signatures(name, sigs) || sigs.empty();
+            for (size_t i = 0; i < sigs.size() && !viable; ++i) {
+                viable = (sigs[i].arity == SIZE_MAX || sigs[i].arity == args.size()) && host_overload_viable(sigs[i], args);
+            }
+            if (!viable) { return {}; }
+            qualified = "::" + name;
+        } else {
+            return {};
+        }
+        return ": the method hides the function '" + name + "' here; call that one as " + qualified + "(...)";
+    }
+
     void report_no_overload(std::string_view fname, const std::vector<const function_decl*>& overloads,
                             const std::vector<ctype>& args, const source_location& loc, bool foreign = false) {
         size_t rl = (overloads.empty() || foreign) ? 0 : overloads[0]->location.line;
         size_t rc = (overloads.empty() || foreign) ? 0 : overloads[0]->location.column;
+        const std::string hint = hidden_function_hint(fname, args);
         if (overloads.size() == 1) {
             const function_decl* fn = overloads[0];
             auto [min_a, max_a] = arity_range(fn);
@@ -4088,7 +4123,7 @@ private:
                     ? std::to_string(min_a)
                     : std::to_string(min_a) + " to " + std::to_string(max_a);
                 diag(diag_level::error, loc, "'" + std::string(fname) + "' expects " + expected +
-                     " argument(s), got " + std::to_string(args.size()), rl, rc);
+                     " argument(s), got " + std::to_string(args.size()) + hint, rl, rc);
                 return;
             }
             for (size_t i = 0; i < args.size(); ++i) {
@@ -4096,7 +4131,7 @@ private:
                 if (p.is_reference) {
                     if (!reference_parameter_binds(p, args[i])) {
                         diag(diag_level::error, loc, "argument " + std::to_string(i + 1) + " of '" + std::string(fname) + "': cannot bind '" +
-                             ctype_name(args[i]) + "' to '" + p.name + "' declared '" + (p.is_const ? "const " : "") + p.type->canonical_name() + "&'", rl, rc);
+                             ctype_name(args[i]) + "' to '" + p.name + "' declared '" + (p.is_const ? "const " : "") + p.type->canonical_name() + "&'" + hint, rl, rc);
                         return;
                     }
                     continue;
@@ -4105,7 +4140,7 @@ private:
                 if (!assignable(args[i], pt)) {
                     diag(diag_level::error, loc, "argument " + std::to_string(i + 1) + " of '" +
                          std::string(fname) + "': cannot pass '" + ctype_name(args[i]) + "' to '" +
-                         p.name + "' declared '" + (p.type ? p.type->canonical_name() : "auto") + "'" + assignment_detail(args[i], pt),
+                         p.name + "' declared '" + (p.type ? p.type->canonical_name() : "auto") + "'" + assignment_detail(args[i], pt) + hint,
                          rl, rc);
                     return;
                 }
@@ -4113,7 +4148,7 @@ private:
             return;
         }
         diag(diag_level::error, loc, "no overload of '" + std::string(fname) + "' matches this call (" +
-             std::to_string(args.size()) + " argument(s))", rl, rc);
+             std::to_string(args.size()) + " argument(s))" + hint, rl, rc);
     }
 
     // Host (C++) function surface: reject only certainties — arity misses across every
@@ -5309,7 +5344,9 @@ private:
                     if (access_denied(hit, id->name, id->location)) { return {}; }
                     if (hit.methods) {
                         if (hit.provable) { ov = hit.methods; ov_class_ = class_ctx_name_; }
+                        hidden_function_probe_ = true;
                         ctype r = check_script_overloads(id->name, *hit.methods, args, c->location, hit.foreign).result;
+                        hidden_function_probe_ = false;
                         if (!nodiscard_hit_.name.empty()) { nodiscard_hit_.name = std::string(class_ctx_name_) + "." + nodiscard_hit_.name; }
                         if (!hit.provable) { r.tentative = true; }
                         return r;

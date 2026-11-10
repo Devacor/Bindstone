@@ -78,7 +78,8 @@ namespace serialization {
 [[noreturn]] void throw_archive_value_range(std::string_view value_text, const char* field);
 [[noreturn]] void throw_archive_value_range(int64_t value, const char* field);
 [[noreturn]] void throw_archive_value_range(uint64_t value, const char* field);
-// A value whose route only run time settles (a property, a registered type, a pointer to a polymorphic base) and has none
+// A value with no route, reached where only run time settles the route: a property (its mode is a run-time value), a
+// registered type (registration also binds types nothing saves), a pointer to a polymorphic base (the dynamic type's route)
 [[noreturn]] void throw_not_serializable(const char* type_name);
 [[noreturn]] void throw_not_deserializable(const char* type_name);
 
@@ -113,6 +114,22 @@ constexpr void no_route_to_read() {
     static_assert(serialization_traits::load_member_verdict_v<T> != member_name_verdict::not_an_archive_function, JAI_DETAIL_MISSHAPEN_MEMBER("load"));
     static_assert(serialization_traits::serialize_member_verdict_v<T> != member_name_verdict::absent || serialization_traits::load_member_verdict_v<T> != member_name_verdict::absent,
         "the archive cannot read this type, it has no serialization route: " JAI_DETAIL_SERIALIZATION_ROUTES);
+}
+
+// A property_owner that declares a serialization member means the archive to call it: one jai::access cannot reach is the
+// forgotten friend, not a request for the properties alone
+template<typename T>
+constexpr void no_unreachable_member_to_write() {
+    using serialization_traits::member_name_verdict;
+    static_assert(serialization_traits::serialize_member_verdict_v<T> != member_name_verdict::unreachable, JAI_DETAIL_UNREACHABLE_MEMBER("serialize"));
+    static_assert(serialization_traits::save_member_verdict_v<T> != member_name_verdict::unreachable, JAI_DETAIL_UNREACHABLE_MEMBER("save"));
+}
+
+template<typename T>
+constexpr void no_unreachable_member_to_read() {
+    using serialization_traits::member_name_verdict;
+    static_assert(serialization_traits::serialize_member_verdict_v<T> != member_name_verdict::unreachable, JAI_DETAIL_UNREACHABLE_MEMBER("serialize"));
+    static_assert(serialization_traits::load_member_verdict_v<T> != member_name_verdict::unreachable, JAI_DETAIL_UNREACHABLE_MEMBER("load"));
 }
 
 #undef JAI_DETAIL_MISSHAPEN_MEMBER
@@ -446,39 +463,10 @@ private:
     template<typename T> using has_adl_save = adl_detect::has_adl_save<Derived, T>;
     template<typename T> using has_adl_serialize = adl_detect::has_adl_serialize<Derived, T>;
 
-    template<template<typename...> class Pack, typename... Ts>
-    static constexpr bool has_route_for_each(const Pack<Ts...>*) { return (has_route<Ts>() && ...); }
-
 public:
-    // Whether operator() has a route for T it can name at compile time, in the order it tries them. A pointer to a
-    // polymorphic type counts: its dynamic type's registered route writes it. Asked by the callers whose T may
-    // legitimately have none (a transient property, a type registered only to bind it); handing the archive a T
-    // without one is a compile error.
+    // A record the archive writes through a member route: its named values go where the caller opened an object
     template<typename T>
-    static constexpr bool has_route() {
-        using namespace serialization_traits;
-        if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string>) {
-            return true;
-        } else if constexpr (has_save_method<T>::value || has_serialize_method<T>::value || has_property_mgr<T>::value) {
-            return true;
-        } else if constexpr (is_std_shared_ptr_v<T> || is_std_weak_ptr_v<T>) {
-            return std::is_polymorphic_v<typename T::element_type> || has_route<typename T::element_type>();
-        } else if constexpr (is_std_unique_ptr_v<T>) {
-            return has_route<typename T::element_type>();
-        } else if constexpr (is_std_pair_v<T> || is_std_variant_v<T> || is_std_tuple_v<T>) {
-            return has_route_for_each(static_cast<const T*>(nullptr));
-        } else if constexpr (is_std_optional_v<T> || is_std_array_v<T>) {
-            return has_route<typename T::value_type>();
-        } else if constexpr (is_map_like_v<T>) {
-            return has_route<typename T::key_type>() && has_route<typename T::mapped_type>();
-        } else if constexpr (is_set_like_v<T> || is_sequence_container_v<T>) {
-            return has_route<typename T::value_type>();
-        } else if constexpr (is_jai_property_v<T>) {
-            return has_route<property_element_t<T>>();
-        } else {
-            return has_adl_serialize<T>::value || has_adl_save<T>::value;
-        }
-    }
+    static constexpr bool writes_member_record_v = has_save_method<T>::value || has_serialize_method<T>::value || has_property_mgr<T>::value;
 
     // operator() for types with member save method
     // Prefers versioned save(Archive&, uint32_t), falls back to simple save(Archive&)
@@ -533,6 +521,7 @@ public:
         !has_serialize_method<T>::value &&
         has_property_mgr<T>::value, int> = 0>
     void operator()(const T& obj) {
+        no_unreachable_member_to_write<T>();
         bool wrap = needs_object_wrapper();
         if (wrap) {
             self()->begin_object();
@@ -559,6 +548,14 @@ public:
         !std::is_enum_v<T> &&
         !std::is_same_v<T, std::string>, int> = 0>
     void operator()(const T& value) {
+        write_unrouted<false>(value);
+    }
+
+    // The standard shapes and the free functions. Deferred is the caller for whom only run time settles whether T is
+    // written at all (serialize_deferred): a type with no route throws where the archive reaches it, as an element of an
+    // empty container never does; for every other caller that type is a compile error.
+    template<bool Deferred, typename T>
+    void write_unrouted(const T& value) {
         using namespace serialization_traits;
 
         // ====================================================================
@@ -575,7 +572,7 @@ public:
                 push_context(SerializationContext::ObjectBody);
                 self()->serialize("$id", id);
                 if (is_new) {
-                    write_shared_payload(value);
+                    write_shared_payload<Deferred>(value);
                 }
                 pop_context();
                 self()->end_object();
@@ -596,7 +593,7 @@ public:
                 push_context(SerializationContext::ObjectBody);
                 self()->serialize("$ref", id);
                 if (is_new) {
-                    write_shared_payload(shared);
+                    write_shared_payload<Deferred>(shared);
                 }
                 pop_context();
                 self()->end_object();
@@ -611,7 +608,7 @@ public:
             } else {
                 self()->begin_object();
                 push_context(SerializationContext::ObjectBody);
-                self()->serialize("$val", *value);
+                write_named<Deferred>("$val", *value);
                 pop_context();
                 self()->end_object();
             }
@@ -620,8 +617,8 @@ public:
         else if constexpr (is_std_pair_v<T>) {
             self()->begin_array(2);
             push_context(SerializationContext::ArrayElement);
-            write_element(value.first);
-            write_element(value.second);
+            write_element<Deferred>(value.first);
+            write_element<Deferred>(value.second);
             pop_context();
             self()->end_array();
         }
@@ -631,7 +628,7 @@ public:
             push_context(SerializationContext::ArrayElement);
             self()->write_bool(value.has_value());
             if (value.has_value()) {
-                write_element(*value);
+                write_element<Deferred>(*value);
             }
             pop_context();
             self()->end_array();
@@ -640,8 +637,8 @@ public:
         else if constexpr (is_std_variant_v<T>) {
             self()->begin_array(2);
             push_context(SerializationContext::ArrayElement);
-            write_element(static_cast<uint32_t>(value.index()));
-            std::visit([this](const auto& v) { write_element(v); }, value);
+            write_element<Deferred>(static_cast<uint32_t>(value.index()));
+            std::visit([this](const auto& v) { write_element<Deferred>(v); }, value);
             pop_context();
             self()->end_array();
         }
@@ -649,7 +646,7 @@ public:
             constexpr auto size = std::tuple_size_v<T>;
             self()->begin_array(size);
             push_context(SerializationContext::ArrayElement);
-            std::apply([this](const auto&... args) { (write_element(args), ...); }, value);
+            std::apply([this](const auto&... args) { (write_element<Deferred>(args), ...); }, value);
             pop_context();
             self()->end_array();
         }
@@ -658,7 +655,7 @@ public:
             self()->begin_array(N);
             push_context(SerializationContext::ArrayElement);
             for (const auto& elem : value) {
-                write_element(elem);
+                write_element<Deferred>(elem);
             }
             pop_context();
             self()->end_array();
@@ -672,7 +669,7 @@ public:
                 for (const auto& [key, val] : value) {
                     self()->write_map_key(key);
                     push_context(SerializationContext::MapValue);
-                    write_value(val);
+                    write_value<Deferred>(val);
                     consume_value_context();
                 }
                 self()->end_map();
@@ -683,8 +680,8 @@ public:
                 for (const auto& [key, val] : value) {
                     self()->begin_array(2);
                     push_context(SerializationContext::ArrayElement);
-                    write_element(key);
-                    write_element(val);
+                    write_element<Deferred>(key);
+                    write_element<Deferred>(val);
                     pop_context();
                     self()->end_array();
                 }
@@ -697,7 +694,7 @@ public:
             self()->begin_array(value.size());
             push_context(SerializationContext::ArrayElement);
             for (const auto& elem : value) {
-                write_element(elem);
+                write_element<Deferred>(elem);
             }
             pop_context();
             self()->end_array();
@@ -714,13 +711,13 @@ public:
             self()->begin_array(count);
             push_context(SerializationContext::ArrayElement);
             for (const auto& elem : value) {
-                write_element(elem);
+                write_element<Deferred>(elem);
             }
             pop_context();
             self()->end_array();
         }
         else if constexpr (is_jai_property_v<T>) {
-            write_value(value.get());
+            write_value<Deferred>(value.get());
         }
         else if constexpr (has_adl_serialize<T>::value) {
             // ADL serialize functions write named properties, so wrap in object
@@ -748,7 +745,11 @@ public:
                 self()->end_object();
             }
         } else {
-            no_route_to_write<T>();
+            if constexpr (Deferred) {
+                throw_not_serializable(typeid(T).name());
+            } else {
+                no_route_to_write<T>();
+            }
         }
     }
 
@@ -756,29 +757,52 @@ public:
     // - In PropertyValue context: no wrapping (already inside an object)
     // - In ArrayElement context: wrap complex types with begin_object/end_object
     // - In Root context: wrap complex types (standalone serialization)
-    template<typename T>
+    template<bool Deferred = false, typename T>
     void write_value(const T& value) {
         if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string>) {
             write_primitive(value);
         }
-        else {
+        else if constexpr (writes_member_record_v<T>) {
             (*self())(value);
+        }
+        else {
+            write_unrouted<Deferred>(value);
         }
     }
 
-    template<typename T>
+    template<bool Deferred = false, typename T>
     std::enable_if_t<std::is_arithmetic_v<T> || std::is_same_v<T, std::string>>
     write_element(const T& value) {
         write_primitive(value);
     }
 
-    template<typename T>
+    template<bool Deferred = false, typename T>
     std::enable_if_t<!std::is_arithmetic_v<T> && !std::is_same_v<T, std::string>>
     write_element(const T& value) {
-        write_value(value);
+        write_value<Deferred>(value);
+    }
+
+    // serialize(name, value) and operator()(value) for the callers whose T may have no route and never be written: a
+    // property, the polymorphic registry
+    template<typename T>
+    void serialize_deferred(const char* name, const T& value) {
+        write_named<true>(name, value);
+    }
+
+    template<typename T>
+    void write_deferred(const T& value) {
+        write_value<true>(value);
     }
 
 private:
+    template<bool Deferred, typename T>
+    void write_named(const char* name, const T& value) {
+        self()->write_property_name(name);
+        push_context(SerializationContext::PropertyValue);
+        write_value<Deferred>(value);
+        consume_value_context();
+    }
+
     template<typename T>
     void write_primitive(const T& value) {
         if constexpr (std::is_same_v<T, int8_t>) self()->write_int8(value);
@@ -816,7 +840,7 @@ private:
     // inside the wrapping object body): "$type"+"$val" for a registered polymorphic
     // dynamic type, else "$val". Shared by the shared_ptr and the forward-referencing
     // weak_ptr write paths so the two cannot drift apart.
-    template<typename SharedPtr>
+    template<bool Deferred, typename SharedPtr>
     void write_shared_payload(const SharedPtr& value) {
         using elem_type = typename SharedPtr::element_type;
         if constexpr (std::is_polymorphic_v<elem_type>) {
@@ -862,13 +886,9 @@ private:
                     "' through pointer-to-base '" + typeid(elem_type).name() +
                     "'. Register it with jai::registrar<T, Context, jai::bases<Base>>(\"Name\") or derive from jai::property_owner<T, Base>.");
             }
-            if constexpr (!has_route<elem_type>()) {
-                throw_not_serializable(typeid(elem_type).name());
-            }
         }
-        if constexpr (!std::is_polymorphic_v<elem_type> || has_route<elem_type>()) {
-            self()->serialize("$val", *value);
-        }
+        // the dynamic type of a polymorphic object is settled here, so its own type's missing route is this save's error
+        write_named<Deferred || std::is_polymorphic_v<elem_type>>("$val", *value);
     }
 
 public:
@@ -1089,52 +1109,22 @@ private:
     template<typename T> using has_adl_load = adl_detect::has_adl_load<Derived, T>;
     template<typename T> using has_adl_serialize = adl_detect::has_adl_serialize<Derived, T>;
 
-    template<template<typename...> class Pack, typename... Ts>
-    static constexpr bool has_route_for_each(const Pack<Ts...>*) { return (has_route<Ts>() && ...); }
-
 public:
-    // The reader's side of archive_writer_impl::has_route: a pointer's element must also be one a load can construct
     template<typename T>
-    static constexpr bool has_route() {
-        using namespace serialization_traits;
-        if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string>) {
-            return true;
-        } else if constexpr (has_load_method<T>::value || has_serialize_method<T>::value || has_property_mgr<T>::value) {
-            return true;
-        } else if constexpr (is_std_vector_v<T> || is_std_array_v<T> || is_std_optional_v<T>) {
-            return has_route<typename T::value_type>();
-        } else if constexpr (is_std_map_v<T> || is_std_unordered_map_v<T>) {
-            return has_route<typename T::key_type>() && has_route<typename T::mapped_type>();
-        } else if constexpr (is_set_like_v<T>) {
-            return has_route<typename T::key_type>();
-        } else if constexpr (is_std_pair_v<T> || is_std_variant_v<T> || is_std_tuple_v<T>) {
-            return has_route_for_each(static_cast<const T*>(nullptr));
-        } else if constexpr (is_std_shared_ptr_v<T> || is_std_weak_ptr_v<T>) {
-            using elem_type = typename T::element_type;
-            return std::is_polymorphic_v<elem_type> || has_load_and_construct<elem_type>::value ||
-                (::jai::serialization::load_default_constructible<elem_type> && has_route<elem_type>());
-        } else if constexpr (is_std_unique_ptr_v<T>) {
-            return ::jai::serialization::load_default_constructible<typename T::element_type> && has_route<typename T::element_type>();
-        } else if constexpr (is_jai_property_v<T>) {
-            return has_route<property_element_t<T>>();
-        } else {
-            return has_adl_serialize<T>::value || has_adl_load<T>::value;
-        }
-    }
+    static constexpr bool reads_member_record_v = has_load_method<T>::value || has_serialize_method<T>::value || has_property_mgr<T>::value;
 
 private:
-
     // Helper to load variant alternatives by index
-    template<typename Variant, std::size_t I = 0>
+    template<bool Deferred, typename Variant, std::size_t I = 0>
     void load_variant_by_index(Variant& v, std::size_t index) {
         if constexpr (I < std::variant_size_v<Variant>) {
             if (I == index) {
                 using T = std::variant_alternative_t<I, Variant>;
                 T val{};
-                read_element(val);
+                read_element<Deferred>(val);
                 v = std::move(val);
             } else {
-                load_variant_by_index<Variant, I + 1>(v, index);
+                load_variant_by_index<Deferred, Variant, I + 1>(v, index);
             }
         } else {
             throw serialization_error("Invalid variant index: " + std::to_string(index));
@@ -1180,6 +1170,7 @@ public:
         !has_serialize_method<T>::value &&
         has_property_mgr<T>::value, int> = 0>
     void operator()(T& obj) {
+        no_unreachable_member_to_read<T>();
         read_scope scope(this);
         obj.load_owned_properties(*self());  // walks the inheritance chain (not just the derived mgr)
         scope.done();
@@ -1199,9 +1190,31 @@ public:
         !std::is_enum_v<T> &&
         !std::is_same_v<T, std::string>, int> = 0>
     void operator()(T& value) {
-        read_scope scope(this);
-        read_unscoped(value);
-        scope.done();
+        read_value<false>(value);
+    }
+
+    // operator()'s dispatch; Deferred as archive_writer_impl::write_unrouted takes it
+    template<bool Deferred, typename T>
+    void read_value(T& value) {
+        if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string> || reads_member_record_v<T>) {
+            (*self())(value);
+        } else {
+            read_scope scope(this);
+            read_unscoped<Deferred>(value);
+            scope.done();
+        }
+    }
+
+    // operator()(value) and read_custom(value) for the callers whose T may have no route and never be read: the
+    // polymorphic registry, a property
+    template<typename T>
+    void read_deferred(T& value) {
+        read_value<true>(value);
+    }
+
+    template<typename T>
+    void read_custom_deferred(T& value) {
+        read_custom_as<true>(value);
     }
 
     // A record's named values from the object already open, as serialize_object_content writes them
@@ -1220,7 +1233,7 @@ public:
         }
     }
 
-    template<typename T>
+    template<bool Deferred, typename T>
     void read_unscoped(T& value) {
         using namespace serialization_traits;
 
@@ -1231,7 +1244,7 @@ public:
             reserve_for_load(value, size);
             for (size_t i = 0; i < size; ++i) {
                 elem_type elem{};
-                read_element(elem);
+                read_element<Deferred>(elem);
                 value.push_back(std::move(elem));
             }
             self()->end_array();
@@ -1244,7 +1257,7 @@ public:
                                           ", got " + std::to_string(size));
             }
             for (size_t i = 0; i < N; ++i) {
-                read_element(value[i]);
+                read_element<Deferred>(value[i]);
             }
             self()->end_array();
         }
@@ -1258,7 +1271,7 @@ public:
                     std::string key;
                     if (!self()->read_map_key(key)) break;
                     V val{};
-                    read_element(val);
+                    read_element<Deferred>(val);
                     value[key] = std::move(val);
                 }
                 self()->end_map();
@@ -1268,8 +1281,8 @@ public:
                     self()->begin_array();
                     K key{};
                     V val{};
-                    read_element(key);
-                    read_element(val);
+                    read_element<Deferred>(key);
+                    read_element<Deferred>(val);
                     self()->end_array();
                     value[std::move(key)] = std::move(val);
                 }
@@ -1282,15 +1295,15 @@ public:
             value.clear();
             for (size_t i = 0; i < size; ++i) {
                 elem_type elem{};
-                read_element(elem);
+                read_element<Deferred>(elem);
                 value.insert(std::move(elem));
             }
             self()->end_array();
         }
         else if constexpr (is_std_pair_v<T>) {
             self()->begin_array();
-            read_element(value.first);
-            read_element(value.second);
+            read_element<Deferred>(value.first);
+            read_element<Deferred>(value.second);
             self()->end_array();
         }
         // std::shared_ptr - format: {"$id": N, "$val": {...}} or {"$id": N} or null
@@ -1318,7 +1331,7 @@ public:
                 // First (data-bearing) encounter of this id. read_shared_payload handles
                 // polymorphic / load_and_construct / default construction and registers the
                 // object eagerly under id.
-                value = self()->template read_shared_payload<elem_type>(id);
+                value = read_shared_payload<Deferred, elem_type>(id);
             }
             self()->end_object();
         }
@@ -1338,7 +1351,7 @@ public:
             if (self()->has_deserialized_shared(id)) {
                 value = self()->template get_deserialized_shared<elem_type>(id);
             } else if (self()->has_property("$val") || self()->has_property("$type")) {
-                value = self()->template read_shared_payload<elem_type>(id);
+                value = read_shared_payload<Deferred, elem_type>(id);
             } else {
                 value.reset();
             }
@@ -1355,7 +1368,9 @@ public:
             self()->begin_object();
             if constexpr (::jai::serialization::load_default_constructible<elem_type>) {
                 value = ::jai::serialization::make_unique_default_for_load<elem_type>();
-                self()->serialize("$val", *value);
+                read_named<Deferred>("$val", *value);
+            } else if constexpr (Deferred) {
+                throw serialization_error("Cannot deserialize unique_ptr<T>: type is not default constructible");
             } else {
                 static_assert(::jai::serialization::load_default_constructible<elem_type>,
                     "the archive loads a std::unique_ptr's object into a default-constructed one: give the type a default constructor "
@@ -1369,7 +1384,7 @@ public:
             bool has_value = self()->read_bool();
             if (has_value) {
                 elem_type val{};
-                read_element(val);
+                read_element<Deferred>(val);
                 value = std::move(val);
             } else {
                 value = std::nullopt;
@@ -1379,19 +1394,19 @@ public:
         else if constexpr (is_std_variant_v<T>) {
             self()->begin_array();
             uint32_t index;
-            read_element(index);
-            load_variant_by_index(value, static_cast<std::size_t>(index));
+            read_element<Deferred>(index);
+            load_variant_by_index<Deferred>(value, static_cast<std::size_t>(index));
             self()->end_array();
         }
         else if constexpr (is_std_tuple_v<T>) {
             self()->begin_array();
-            std::apply([this](auto&... args) { (read_element(args), ...); }, value);
+            std::apply([this](auto&... args) { (read_element<Deferred>(args), ...); }, value);
             self()->end_array();
         }
         else if constexpr (is_jai_property_v<T>) {
             using element_type = property_element_t<T>;
             element_type temp{};
-            (*self())(temp);
+            read_value<Deferred>(temp);
             value = std::move(temp);
         }
         // Fallback: try ADL serialize(), then ADL load(), or provide compile-time error
@@ -1407,34 +1422,49 @@ public:
             load(*self(), value);
             self()->end_object();
         } else {
-            no_route_to_read<T>();
+            if constexpr (Deferred) {
+                throw_not_deserializable(typeid(T).name());
+            } else {
+                no_route_to_read<T>();
+            }
         }
     }
 
-    template<typename T>
+    template<bool Deferred = false, typename T>
     std::enable_if_t<std::is_arithmetic_v<T> || std::is_same_v<T, std::string>>
     read_element(T& value) {
         read_primitive(value);
     }
 
-    template<typename T>
+    template<bool Deferred = false, typename T>
     std::enable_if_t<!std::is_arithmetic_v<T> && !std::is_same_v<T, std::string>>
     read_element(T& value) {
         // For custom types with serialize/load methods, expect object wrapper
         // since their serialize() will read named properties.
         // DON'T wrap smart pointers - they have their own array format,
         // and their pointed-to object will be wrapped when read_element(*ptr) is called.
-        if constexpr (has_load_method<T>::value || has_serialize_method<T>::value ||
-                      has_property_mgr<T>::value) {
+        if constexpr (reads_member_record_v<T>) {
             self()->begin_object();
             (*self())(value);
             self()->end_object();
         } else {
-            (*self())(value);
+            read_value<Deferred>(value);
         }
     }
 
 private:
+    template<bool Deferred, typename T>
+    void read_named(const char* name, T& value) {
+        if (!self()->seek_property(name)) {
+            throw serialization_error("Property '" + std::string(name) + "' not found during deserialization");
+        }
+        if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string>) {
+            read_primitive(value);
+        } else {
+            read_custom_as<Deferred>(value);
+        }
+    }
+
     template<typename T>
     void read_primitive(T& value) {
         if constexpr (std::is_same_v<T, int8_t>) value = self()->read_int8();
@@ -1460,7 +1490,7 @@ private:
     // its own subtree resolve), and returns it. Shared by the shared_ptr read path and the
     // forward-referenced weak_ptr read path so they cannot drift apart. Returns null when no
     // payload is present (a pure back-reference whose target is registered elsewhere).
-    template<typename elem_type>
+    template<bool Deferred, typename elem_type>
     std::shared_ptr<elem_type> read_shared_payload(uint32_t id) {
         std::shared_ptr<elem_type> result;
         if constexpr (std::is_polymorphic_v<elem_type>) {
@@ -1583,18 +1613,14 @@ private:
                 ::jai::access::load_and_construct(*self(), c);
                 self()->end_object();
             } else if constexpr (::jai::serialization::load_default_constructible<elem_type>) {
-                if constexpr (!std::is_polymorphic_v<elem_type> || has_route<elem_type>()) {
-                    result = ::jai::serialization::make_default_for_load<elem_type>();
-                    self()->register_deserialized_shared(id, result);
-                    self()->serialize("$val", *result);
-                } else {
-                    throw_not_deserializable(typeid(elem_type).name());
-                }
+                result = ::jai::serialization::make_default_for_load<elem_type>();
+                self()->register_deserialized_shared(id, result);
+                read_named<Deferred || std::is_polymorphic_v<elem_type>>("$val", *result);
             } else {
                 // a polymorphic base loads through its $type; only a load that names none reaches here
                 if constexpr (std::is_polymorphic_v<elem_type>) {
                     no_route_to_construct_polymorphic<elem_type>();
-                } else {
+                } else if constexpr (!Deferred) {
                     no_route_to_construct<elem_type>();
                 }
                 throw serialization_error("Cannot deserialize shared_ptr<" + std::string(typeid(elem_type).name()) + ">: type is not default constructible and has no load_and_construct");
@@ -1607,6 +1633,11 @@ public:
     // Made public for use by smart pointer serialization in property_serialization.hpp
     template<typename T>
     void read_custom(T& value) {
+        read_custom_as<false>(value);
+    }
+
+    template<bool Deferred, typename T>
+    void read_custom_as(T& value) {
         if constexpr (has_versioned_load_method<T>::value) {
             std::string type_name;
             uint32_t version;
@@ -1638,12 +1669,13 @@ public:
         else if constexpr (has_property_mgr<T>::value) {
             std::string type_name;
             uint32_t version;
+            no_unreachable_member_to_read<T>();
             self()->begin_object(type_name, version);
             value.load_owned_properties(*self());  // walks the inheritance chain
             self()->end_object();
         }
         else {
-            (*self())(value);
+            read_value<Deferred>(value);
         }
     }
 };

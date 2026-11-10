@@ -108,40 +108,13 @@ inline std::string base64_decode(const std::string& input) {
 } // namespace detail
 
 namespace detail {
-template<typename T, typename = void>
-struct has_property_mgr : std::false_type {};
+// A record writes named values: through its properties, a member save or serialize jai::access reaches, or a free
+// serialize or save
+template<typename Archive, typename T>
+constexpr bool writes_record_v = Archive::template writes_member_record_v<T> || serialization::writes_free_record_v<Archive, T>;
 
-template<typename T>
-struct has_property_mgr<T, std::void_t<decltype(std::declval<T>().property_mgr)>> : std::true_type {};
-
-// Concept to detect types with templated save() method (using concrete archive for detection)
-template<typename T, typename = void>
-struct has_save_method : std::false_type {};
-
-template<typename T>
-struct has_save_method<T, std::void_t<decltype(std::declval<T>().save(std::declval<serialization::json_archive_writer&>()))>> : std::true_type {};
-
-// Concept to detect types with templated load() method (using concrete archive for detection)
-template<typename T, typename = void>
-struct has_load_method : std::false_type {};
-
-template<typename T>
-struct has_load_method<T, std::void_t<decltype(std::declval<T>().load(std::declval<serialization::json_archive_reader&>()))>> : std::true_type {};
-
-template<typename T, typename = void>
-struct has_serialize_method : std::false_type {};
-
-template<typename T>
-struct has_serialize_method<T, std::void_t<decltype(std::declval<T>().serialize(std::declval<serialization::json_archive_writer&>()))>> : std::true_type {};
-
-// A record writes named values: through its properties, a member save or serialize, or a free serialize or save
-template<typename T>
-constexpr bool writes_record_v = has_property_mgr<T>::value || has_save_method<T>::value || has_serialize_method<T>::value ||
-    serialization::writes_free_record_v<serialization::json_archive_writer, T>;
-
-template<typename T>
-constexpr bool reads_record_v = has_property_mgr<T>::value || has_load_method<T>::value || has_serialize_method<T>::value ||
-    serialization::reads_free_record_v<serialization::json_archive_reader, T>;
+template<typename Archive, typename T>
+constexpr bool reads_record_v = Archive::template reads_member_record_v<T> || serialization::reads_free_record_v<Archive, T>;
 
 // The root object every archive's document is: a record writes its named values into the root; anything else is the
 // root's value0, so an owning pointer goes through the archive's smart-ptr path ($id/$type/$val) and keeps its dynamic
@@ -149,7 +122,7 @@ constexpr bool reads_record_v = has_property_mgr<T>::value || has_load_method<T>
 template<typename Archive, typename T>
 void write_root(Archive& ar, const T& value) {
     ar.begin_object("", 1);
-    if constexpr (writes_record_v<T>) {
+    if constexpr (writes_record_v<Archive, T>) {
         ar.serialize_object_content(value);
     } else {
         ar.serialize("value0", value);
@@ -164,7 +137,7 @@ T read_root(Archive& ar) {
     uint32_t version;
     ar.begin_object(type_name, version);
     T result{};
-    if constexpr (reads_record_v<T>) {
+    if constexpr (reads_record_v<Archive, T>) {
         ar.read_object_content(result);
     } else {
         ar.serialize("value0", result);

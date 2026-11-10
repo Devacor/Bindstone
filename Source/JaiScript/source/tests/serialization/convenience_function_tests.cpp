@@ -239,24 +239,10 @@ namespace route_verdicts {
 	static_assert(serialize_member_verdict_v<final_private_serialize> == member_name_verdict::absent, "a final class cannot be probed");
 	static_assert(serialize_member_verdict_v<int> == member_name_verdict::absent && save_member_verdict_v<std::vector<int>> == member_name_verdict::absent);
 
-	static_assert(writer::has_route<private_serialize_friend_jai_access>() && reader::has_route<private_serialize_friend_jai_access>());
-	static_assert(binary_writer::has_route<final_private_serialize>() && binary_reader::has_route<final_private_serialize>());
-	static_assert(writer::has_route<saves_to_a_path>() && reader::has_route<saves_to_a_path>(), "the free serialize is the route");
-	static_assert(writer::has_route<private_properties_owner>() && reader::has_route<private_properties_owner>());
-	static_assert(writer::has_route<std::map<std::string, std::vector<std::optional<saves_to_a_path>>>>());
-	static_assert(reader::has_route<std::tuple<int, std::string, std::pair<conv_player, std::variant<int, saves_to_a_path>>>>());
-	static_assert(!writer::has_route<forgotten_friend_serialize>() && !reader::has_route<forgotten_friend_serialize>());
-	static_assert(!writer::has_route<forgotten_friend_save_load>() && !binary_reader::has_route<forgotten_friend_save_load>());
-	static_assert(!writer::has_route<no_route_data>() && !reader::has_route<no_route_data>());
-	static_assert(!writer::has_route<std::map<std::string, std::vector<no_route_data>>>() && !reader::has_route<std::optional<no_route_data>>());
-	static_assert(!writer::has_route<std::tuple<int, no_route_data>>() && !reader::has_route<std::variant<int, no_route_data>>());
-	static_assert(writer::has_route<std::shared_ptr<polymorphic_no_route>>() && reader::has_route<std::weak_ptr<polymorphic_no_route>>(),
-		"a pointer to a polymorphic type is written through its dynamic type");
-	static_assert(!writer::has_route<polymorphic_no_route>() && !writer::has_route<std::unique_ptr<polymorphic_no_route>>());
-	static_assert(!writer::has_route<std::shared_ptr<no_route_data>>() && !reader::has_route<std::shared_ptr<no_route_data>>());
-	static_assert(writer::has_route<std::shared_ptr<needs_an_argument>>() && !reader::has_route<std::shared_ptr<needs_an_argument>>(),
-		"a load must be able to construct what a pointer names");
-	static_assert(!reader::has_route<std::unique_ptr<needs_an_argument>>() && reader::has_route<std::unique_ptr<sp_simple_data>>());
+	static_assert(writer::writes_member_record_v<private_serialize_friend_jai_access> && binary_reader::reads_member_record_v<final_private_serialize>);
+	static_assert(writer::writes_member_record_v<private_properties_owner> && reader::reads_member_record_v<private_properties_owner>);
+	static_assert(!writer::writes_member_record_v<forgotten_friend_serialize> && !reader::reads_member_record_v<forgotten_friend_save_load>);
+	static_assert(!binary_writer::writes_member_record_v<saves_to_a_path> && !reader::reads_member_record_v<no_route_data>);
 }
 
 struct catalog_like_root_obj {
@@ -357,6 +343,11 @@ public:
             reader("obj", loaded);
             reader.end_object();
             check_eq(42, loaded.get(), "friend jai::access grants the trait probes private access");
+            const std::string root = to_json(*eng, obj, 0);
+            check(root.find("\"hidden\"") != std::string::npos && root.find("value0") == std::string::npos, "a record with private members writes flat at the root: " + root);
+            check_eq(42, from_json<private_serialize_friend_jai_access>(*eng, root).get(), "and reads flat, JSON");
+            check_eq(42, from_binary<private_serialize_friend_jai_access>(*eng, to_binary(*eng, obj)).get(), "and binary");
+            check_eq(42, from_json<private_serialize_friend_jai_access>(*eng, "{\"hidden\": 42}").get(), "a hand-written flat root");
         });
 
         test("unrelated_save_and_load_members_leave_the_real_route_alone", [this]() {
@@ -382,11 +373,16 @@ public:
                 }
                 return "no error";
             };
-            const std::string unwritable = failure([&]() { to_json(*eng, unroutable_property_owner{}); });
-            check(unwritable.find("is not serializable. Add save/load, serialize, property_owner, or ADL functions") != std::string::npos, "an automatic property of a type with no route: " + unwritable);
-            const std::string unreadable = failure([&]() { from_json<unroutable_property_owner>(*eng, "{\"data\": []}"); });
-            check(unreadable.find("is not deserializable.") != std::string::npos, "the load of that property: " + unreadable);
-            check_eq(std::string("no error"), failure([&]() { from_json<unroutable_property_owner>(*eng, "{}"); }), "a document without the property never reaches it");
+            unroutable_property_owner unroutable;
+            const std::string empty = to_json(*eng, unroutable, 0);
+            check(empty.find("\"data\":[]") != std::string::npos || empty.find("\"data\": []") != std::string::npos, "an empty container of a type with no route saves: " + empty);
+            check_eq(std::string("no error"), failure([&]() { from_json<unroutable_property_owner>(*eng, empty); }), "and loads");
+            check_eq(std::string("no error"), failure([&]() { from_binary<unroutable_property_owner>(*eng, to_binary(*eng, unroutable)); }), "in binary too");
+            unroutable.data->push_back(no_route_data{});
+            const std::string unwritable = failure([&]() { to_json(*eng, unroutable); });
+            check(unwritable.find("is not serializable. Add save/load, serialize, property_owner, or ADL functions") != std::string::npos, "the save reaches an element with no route: " + unwritable);
+            const std::string unreadable = failure([&]() { from_json<unroutable_property_owner>(*eng, "{\"data\": [{}]}"); });
+            check(unreadable.find("is not deserializable.") != std::string::npos, "the load reaches one: " + unreadable);
             const std::string sliced = failure([&]() { to_binary(*eng, std::make_shared<polymorphic_no_route>()); });
             check(sliced.find("is not serializable.") != std::string::npos, "a pointer whose dynamic type has no route: " + sliced);
             const std::string unbuilt = failure([&]() { from_json<std::shared_ptr<polymorphic_no_route>>(*eng, "{\"value0\": {\"$id\": 1, \"$val\": {}}}"); });

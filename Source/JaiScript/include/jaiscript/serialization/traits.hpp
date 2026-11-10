@@ -124,8 +124,8 @@ std::unique_ptr<T> make_unique_default_for_load() {
 } // namespace serialization
 
 // Whether a class declares or inherits a member of a serialization name at any access level, and whether that member is
-// a plain public one. The archives ask only where a type has no route they can call, to tell a forgotten
-// `friend jai::access;` from a type with no serialization at all.
+// a plain public one. The archives ask where a type has no route they can call, and of a property_owner about to take its
+// properties' route, to tell a forgotten `friend jai::access;` from a type that declares no such member.
 namespace serialization_traits {
 
 #if defined(_MSC_VER) && !defined(__clang__)

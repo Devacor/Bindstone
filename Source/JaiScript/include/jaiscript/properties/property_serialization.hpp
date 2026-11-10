@@ -246,13 +246,9 @@ namespace jai {
 			return;
 		}
 
-		// the mode is a run-time value, so a T no archive can write is this property's error at the save, not the build's
+		// the mode is a run-time value, so a T no archive can write is an error where a save reaches it, not the build's
 		ar.dispatch([this](auto& concrete_ar) {
-			if constexpr (std::remove_reference_t<decltype(concrete_ar)>::template has_route<T>()) {
-				concrete_ar.serialize(name().c_str(), m_value);
-			} else {
-				serialization::throw_not_serializable(typeid(T).name());
-			}
+			concrete_ar.serialize_deferred(name().c_str(), m_value);
 		});
 	}
 
@@ -261,11 +257,7 @@ namespace jai {
 		// property_manager has already positioned to this property (read the name);
 		// we're now at the VALUE
 		ar.dispatch([&](auto& concrete_ar) {
-			if constexpr (std::remove_reference_t<decltype(concrete_ar)>::template has_route<T>()) {
-				concrete_ar.read_custom(m_value);
-			} else {
-				serialization::throw_not_deserializable(typeid(T).name());
-			}
+			concrete_ar.read_custom_deferred(m_value);
 		});
 	}
 
@@ -277,12 +269,8 @@ namespace jai {
 	inline void deleted_property<T>::serialize(serialization::any_archive_reader& ar) {
 		if constexpr (std::is_default_constructible_v<T>) {
 			ar.dispatch([](auto& concrete_ar) {
-				if constexpr (std::remove_reference_t<decltype(concrete_ar)>::template has_route<T>()) {
-					T dummy{};
-					concrete_ar.read_custom(dummy);
-				} else {
-					serialization::throw_not_deserializable(typeid(T).name());
-				}
+				T dummy{};
+				concrete_ar.read_custom_deferred(dummy);
 			});
 		} else {
 			// For non-default-constructible types, read as a generic script_value to

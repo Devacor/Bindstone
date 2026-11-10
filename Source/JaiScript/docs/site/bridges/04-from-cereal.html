@@ -891,8 +891,9 @@ the linker, as Cereal's registrations are.</li>
 <li><strong>A versioned free function.</strong> A free <code>serialize(Archive&amp;, T&amp;, std::uint32_t)</code>
 is not found: the type has no route, and handing it to an archive is a compile error that lists the routes.</li>
 <li><strong>A forgotten <code>friend jai::access;</code>.</strong> A compile error that names the function, as in
-Cereal, wherever an archive is handed the type. A <code>JAI_PROPERTY</code> of such a type compiles (its mode is a
-run-time value) and its save throws <code>jai::serialization_error</code>
+Cereal, wherever an archive is handed the type. A <code>property_owner</code> level with the function and no friend is that error too. A
+<code>JAI_PROPERTY</code> whose type forgot it compiles (its mode is a run-time value) and its save throws
+<code>jai::serialization_error</code>
 (<a href="../embedding/08-serialization.html#dispatch-priority-cereal-style-provide-either-serialize-or-save-load">dispatch</a>).</li>
 <li><strong>Base and derived fields share a record.</strong> A derived field named like a base field writes the
 same key twice. (In a <code>property_owner</code> chain the derived level wins, as C++ name hiding does.)</li>

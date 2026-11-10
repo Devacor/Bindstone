@@ -14,6 +14,9 @@
 // must_not_compile 10: declares load_and_construct() but jai::access cannot reach it
 // must_not_compile 11: the archive cannot construct this type on a load
 // must_not_compile 12: declares load_and_construct() but jai::access cannot reach it
+// must_not_compile 13: declares save() but jai::access cannot reach it
+// must_not_compile 14: declares load() but jai::access cannot reach it
+// must_not_compile 15: declares serialize() but jai::access cannot reach it
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/properties.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
@@ -107,9 +110,30 @@ struct SavesToAPath {
 	bool load() { return true; }
 };
 
+// a property_owner registers itself where it is defined, so each of these is an error as a declaration
+#if JAI_MUST_NOT_COMPILE == 13 || JAI_MUST_NOT_COMPILE == 14
+class ForgottenFriendOwner : public jai::property_owner<ForgottenFriendOwner> {
+public:
+	JAI_PROPERTY((int), capacity, 20);
+protected:
+	template<class Archive> void save(Archive& a_archive, std::uint32_t const) const { property_mgr.save(a_archive); }
+	template<class Archive> void load(Archive& a_archive, std::uint32_t const) { property_mgr.load(a_archive); }
+};
+
+#elif JAI_MUST_NOT_COMPILE == 15
+class ForgottenFriendLevel : public jai::property_owner<ForgottenFriendLevel> {
+public:
+	JAI_PROPERTY((int), capacity, 20);
+private:
+	template<class Archive> void serialize(Archive& a_archive) { a_archive(JAI_NVP(capacity)); }
+};
+#endif
+
 class Owner : public jai::property_owner<Owner> {
 public:
 	JAI_PROPERTY((ForgottenFriendSerialize), forgotten);
+	JAI_PROPERTY((std::vector<NoRoute>), unroutable);
+	void save(const std::string&) const {}
 	JAI_TRANSIENT_PROPERTY((NoRoute), scratch);
 	JAI_TRANSIENT_PROPERTY((std::vector<SavesToAPath>), paths);
 	JAI_TRANSIENT_PROPERTY((std::shared_ptr<NoWayToConstruct>), unbuilt);
@@ -151,6 +175,13 @@ inline std::string exercise(jai::engine& a_engine) {
 #elif JAI_MUST_NOT_COMPILE == 12
 	static jai::registrar<InheritsConstruct, void, jai::bases<ForgottenFriendRegistered>> registered("InheritsConstruct");
 	return {};
+#elif JAI_MUST_NOT_COMPILE == 13
+	return jai::to_json(a_engine, ForgottenFriendOwner{});
+#elif JAI_MUST_NOT_COMPILE == 14
+	jai::from_binary<ForgottenFriendOwner>(a_engine, {});
+	return {};
+#elif JAI_MUST_NOT_COMPILE == 15
+	return jai::to_json(a_engine, std::vector<std::shared_ptr<ForgottenFriendLevel>>{});
 #else
 	static jai::registrar<SavesToAPath, void> boundOnly("SavesToAPath");
 	static jai::registrar<BuiltAtRunTime, void, jai::bases<RegisteredBase>> builtAtRunTime("BuiltAtRunTime");

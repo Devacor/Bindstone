@@ -111,7 +111,7 @@ Cannot store a non-numeric value in a math::vec3 component</code></pre></div>
 <li>A vector concatenates into a string as its text, and is true when any component is nonzero.</li>
 <li><code>==</code> and <code>!=</code> compare every component: a vec equals an ivec holding the same values; vectors of different dimensions, or a color and a <code>vec4</code>, are never equal.</li>
 <li><code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code> and <code>&lt;=&gt;</code> order vectors lexicographically, the order <code>sort()</code> uses; across dimensions the shared components decide first, then the shorter vector is less. A color orders only against a color.</li>
-<li>Mixed kinds or dimensions in arithmetic, a float scalar with an ivec and a zero divisor component raise the scalar operators&#x27; errors.</li>
+<li>Mixed kinds or dimensions in arithmetic, a float scalar with an ivec and an ivec&#x27;s zero divisor component raise the scalar operators&#x27; errors; a float vector&#x27;s zero divisor is IEEE.</li>
 </ul>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">using math::vec2, math::vec3, math::ivec2, math::color;
 
@@ -151,7 +151,7 @@ print(a, " ", copy, " ", ship.pos);</code></pre></div>
 <ul>
 <li><code>math::mix(a, b, t)</code>, also spelled <code>math::lerp</code>, is <code>a + (b - a) * t</code>. <code>math::unmix(a, b, v)</code> is where <code>v</code> lies between <code>a</code> and <code>b</code> (0 over an empty range). <code>math::remap(v, in_lo, in_hi, out_lo, out_hi)</code> maps one range onto another.</li>
 <li><code>math::mix_in</code>, <code>math::mix_out</code>, <code>math::mix_in_out</code> and <code>math::mix_out_in</code> <code>(a, b, t, strength)</code> are eased mixes; the <code>math::unmix_in</code> family inverts them.</li>
-<li>Interpolations, <code>math::floor</code>, <code>math::ceil</code> and <code>math::round</code> (half away from zero) give a float vector. <code>math::abs</code>, <code>math::min</code>, <code>math::max</code> and <code>math::clamp</code> keep an ivec an ivec unless a bound is a float.</li>
+<li>Interpolations, <code>math::floor</code>, <code>math::ceil</code> and <code>math::round</code> (half away from zero) give a float vector. <code>math::abs</code>, <code>math::min</code>, <code>math::max</code> and <code>math::clamp</code> keep an ivec an ivec unless a bound is a float. With <code>lo</code> above <code>hi</code>, <code>clamp</code> gives <code>lo</code> when <code>v &lt; lo</code>, else <code>hi</code>.</li>
 </ul>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">using math::vec2, math::ivec2;
 
@@ -223,7 +223,7 @@ print(j, " ", type_of(from_json(j)), " ", from_base64(to_base64(math::color(1, 0
 [(1.0, 0.0, 9.0), (1.0, 2.0, 3.0), (14.0, 5.0, 6.0)] (1, 0, 9) door
 {&quot;$type&quot;:&quot;math::vec2&quot;,&quot;$val&quot;:{&quot;x&quot;:0.1,&quot;y&quot;:1e+30}} math::vec2 (1.0, 0.5, 0.0, 1.0)</code></pre></div>
 <h2 id="what-the-checker-catches">What the checker catches<a class="hlink" href="#what-the-checker-catches" aria-label="link">&#8203;</a></h2>
-<p>The strict checker (<a href="13-strict-checking.html">Types That Fail Early</a>) knows every math type, its members and the library&#x27;s result types, so a wrong type (<code>math::vec3 v = 5;</code>), member (<code>math::color has no member 'x'</code>) or argument count (<code>'dot' expects 1 argument</code>) fails the load. Errors that depend on values (mixed kinds, a zero divisor, an int32 overflow) stay catchable at run time.</p>
+<p>The strict checker (<a href="13-strict-checking.html">Types That Fail Early</a>) knows every math type, its members and the library&#x27;s result types, so a wrong type (<code>math::vec3 v = 5;</code>), member (<code>math::color has no member 'x'</code>) or argument count (<code>'dot' expects 1 argument</code>) fails the load. Errors that depend on values (mixed kinds, an ivec&#x27;s zero divisor, an int32 overflow) stay catchable at run time.</p>
 <nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/14-time.html"><span>&larr; previous</span>Time: Clocks, Stopwatches &amp; Dates</a><a class="next" rel="next" href="../guide/16-parallel.html"><span>next &rarr;</span>Parallel Loops</a></nav></article>
 </main>
 </div>

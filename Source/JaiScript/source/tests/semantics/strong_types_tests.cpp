@@ -840,7 +840,7 @@ public:
             check(i1.find("ERROR") == 0, "int %= 0 raises");
             auto [i2, v2] = both("float f = 1.5; f %= 0.0; f");
             check_eq(i2, v2, "float modulo-by-zero parity");
-            check(i2.find("ERROR") == 0, "float %= 0.0 raises");
+            check_eq(std::string("nan"), i2, "float %= 0.0 is IEEE");
         });
 
         test("compound_string_targets_append", [this, check_both, both]() {

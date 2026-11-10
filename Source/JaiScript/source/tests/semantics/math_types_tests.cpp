@@ -207,7 +207,7 @@ public:
             expect(raised("var q = math::vec3(1, 2, 3) + math::ivec3(1, 2, 3);"), "Invalid operands for + operator", "mixed kinds");
             expect(raised("var q = math::vec2(1, 2) + math::vec3(1, 2, 3);"), "Invalid operands for + operator", "mixed dimensions");
             expect(raised("var q = math::vec2(1, 2) % 2;"), "Invalid operands for % operator", "vec modulo");
-            expect(raised("var q = math::vec2(1, 1) / 0;"), "Division by zero", "float division by zero");
+            expect("to_string(math::vec2(1, -1) / 0)", "(inf, -inf)", "float division by zero is IEEE");
             expect(raised("var q = math::ivec2(1, 1) / math::ivec2(1, 0);"), "Division by zero", "int division by zero");
             expect(raised("var q = math::ivec2(1, 1) % math::ivec2(1, 0);"), "Modulo by zero", "int modulo by zero");
             expect("to_string(math::vec2(1, 1) < math::vec2(2, 2))", "true", "lexicographic ordering");
@@ -238,6 +238,8 @@ public:
             expect("to_string(math::min(math::vec2(1, 5), math::vec2(3, 2))) + to_string(math::max(math::ivec2(1, 5), 3))", "(1.0, 2.0)(3, 5)", "min, max, scalar broadcast");
             expect("to_string(math::clamp(math::vec3(-1, 0.5, 2), 0.0, 1.0)) + to_string(math::clamp(math::ivec2(-5, 9), math::ivec2(0, 0), math::ivec2(4, 4)))",
                    "(0.0, 0.5, 1.0)(0, 4)", "clamp");
+            expect("to_string(math::clamp(5, 10, 0)) + to_string(math::clamp(20, 10, 0)) + to_string(math::clamp(math::vec2(5, 20), 10.0, 0.0)) + to_string(math::clamp(math::ivec2(5, 20), 10, 0))",
+                   "100(10.0, 0.0)(10, 0)", "lo above hi: lo when the value is below lo, else hi");
             expect("var c = math::clamp(math::ivec2(-5, 9), 0.0, 4.0); to_string(c) + type_of(c)", "(0.0, 4.0)math::vec2", "a float bound gives a vec");
             expect("to_string(math::mix(0.0, 10.0, math::vec2(0.1, 0.9)))", "(1.0, 9.0)", "scalar ends, vector t");
             expect(raised("var q = math::mix(math::vec2(0, 0), math::vec3(1, 1, 1), 0.5);"), "math::mix expects vectors of the same dimensions", "dimensions must agree");
@@ -412,7 +414,7 @@ public:
             expect("function f() -> string { math::ivec2 a = math::ivec2(4, 5); string m = \"\"; try { a = a / math::ivec2(2, 0); } catch (e) { m = e; } return m + to_string(a); } f()",
                    "Division by zero(4, 5)", "an ivec division by zero");
             expect("function f() -> string { math::vec2 v = math::vec2(4, 5); string m = \"\"; try { v = v / math::vec2(2, 0); } catch (e) { m = e; } return m + to_string(v); } f()",
-                   "Division by zero(4.0, 5.0)", "a vec division by zero");
+                   "(2.0, inf)", "a vec division by zero is IEEE");
             expect("function f() -> string { math::vec3 v = math::vec3(1, 2, 3); string m = \"\"; try { v.y = \"a\"; } catch (e) { m = e; } return m + to_string(v); } f()",
                    "Cannot store a non-numeric value in a math::vec3 component(1.0, 2.0, 3.0)", "a component store's text");
             expect("[[warn_mode]] function f() -> string { math::vec3 v = math::vec3(1, 2, 3); string m = \"\"; try { var w = v.w; } catch (e) { m = e; } try { v.w = 1; } catch (e) { m += \"|\" + e; } return m; } f()",

@@ -3616,10 +3616,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 					break;
 				}
 				case compound_slash: {
-					if (rIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
-						return raise_(make_error_code(runtime_error_code::division_by_zero));
-					}
-					if (rIdx == script_value::TYPEID_FLOAT && derefRight.unchecked_as_float() == 0.0) {
+					if (detail::math::integer_zero_divisor(target, derefRight)) {
 						return raise_(make_error_code(runtime_error_code::division_by_zero));
 					}
 					if (target.is_int()) {
@@ -3748,10 +3745,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 				break;
 			}
 			case compound_slash: {
-				if (rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
-					return raise_(make_error_code(runtime_error_code::division_by_zero));
-				}
-				if (rightIdx == script_value::TYPEID_FLOAT && derefRight.unchecked_as_float() == 0.0) {
+				if (detail::math::integer_zero_divisor(target, derefRight)) {
 					return raise_(make_error_code(runtime_error_code::division_by_zero));
 				}
 				if (bothInt) {
@@ -3771,7 +3765,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 				break;
 			}
 			case compound_percent: {
-				if (rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
+				if (detail::math::integer_zero_divisor(target, derefRight)) {
 					return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 				}
 				VM_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, token_type::percent, derefRight, 4));
@@ -4122,8 +4116,8 @@ JAI_FORCEINLINE bool vm_backend::stack_numeric_rows(script_value& l, const scrip
 		case token_type::plus: l = script_value(a + b, engine_); break;
 		case token_type::minus: l = script_value(a - b, engine_); break;
 		case token_type::star: l = script_value(a * b, engine_); break;
-		case token_type::slash: done = b != 0.0; if (done) { l = script_value(a / b, engine_); } break;
-		case token_type::percent: done = b != 0.0; if (done) { l = script_value(std::fmod(a, b), engine_); } break;
+		case token_type::slash: l = script_value(a / b, engine_); break;
+		case token_type::percent: l = script_value(std::fmod(a, b), engine_); break;
 		case token_type::less: l = script_value(a < b, engine_); break;
 		case token_type::less_equal: l = script_value(a <= b, engine_); break;
 		case token_type::greater: l = script_value(a > b, engine_); break;
@@ -4763,8 +4757,8 @@ bool vm_backend::typed_binary_head(frame& f, const fused_binary_proto& p, Sink& 
 	case token_type::plus: emit_float(a + b); return true;
 	case token_type::minus: emit_float(a - b); return true;
 	case token_type::star: emit_float(a * b); return true;
-	case token_type::slash: if (b == 0.0) return false; emit_float(a / b); return true;
-	case token_type::percent: if (b == 0.0) return false; emit_float(std::fmod(a, b)); return true;
+	case token_type::slash: emit_float(a / b); return true;
+	case token_type::percent: emit_float(std::fmod(a, b)); return true;
 	case token_type::less: sink(script_value(a < b, engine_)); return true;
 	case token_type::less_equal: sink(script_value(a <= b, engine_)); return true;
 	case token_type::greater: sink(script_value(a > b, engine_)); return true;
@@ -4855,12 +4849,8 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 			case token_type::plus: emit_float(a + b); return {};
 			case token_type::minus: emit_float(a - b); return {};
 			case token_type::star: emit_float(a * b); return {};
-			case token_type::slash:
-				if (b == 0.0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
-				emit_float(a / b); return {};
-			case token_type::percent:
-				if (b == 0.0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
-				emit_float(std::fmod(a, b)); return {};
+			case token_type::slash: emit_float(a / b); return {};
+			case token_type::percent: emit_float(std::fmod(a, b)); return {};
 			case token_type::less: sink(script_value(a < b, engine_)); return {};
 			case token_type::less_equal: sink(script_value(a <= b, engine_)); return {};
 			case token_type::greater: sink(script_value(a > b, engine_)); return {};
@@ -5459,13 +5449,13 @@ op_status vm_backend::exec_compound_fused(frame& f, const vm_instruction& ins) {
 					case token_type::plus: r = a + b; break;
 					case token_type::minus: r = a - b; break;
 					case token_type::star: r = a * b; break;
-					case token_type::slash: ok = b != 0.0; if (ok) { r = a / b; } break;
+					case token_type::slash: r = a / b; break;
 					default: ok = false; break;
 					}
 				}
 			}
 			const uint32_t kind = cp.kind_flags & compound_kind_mask;
-			if (ok && (kind == compound_plus || kind == compound_minus || kind == compound_star || (kind == compound_slash && r != 0.0))) {
+			if (ok && (kind == compound_plus || kind == compound_minus || kind == compound_star || kind == compound_slash)) {
 				script_float& t = varPtr->unchecked_as_float_ref();
 				t = kind == compound_plus ? t + r : kind == compound_minus ? t - r : kind == compound_star ? t * r : t / r;
 				if (!(cp.kind_flags & compound_flag_no_result)) {
@@ -5959,13 +5949,9 @@ op_status vm_backend::exec_index_compound(frame& f, const uint32_t compound) {
 		if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 			rightValue = rightValue.bound_decoded_temp();
 		}
-		const size_t ri = rightValue.raw_storage_index();
-		if (op == token_type::slash && ((ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) ||
-		                                (ri == script_value::TYPEID_FLOAT && rightValue.unchecked_as_float() == 0.0))) {
-			return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
-		}
-		if (op == token_type::percent && ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-			return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
+		if ((op == token_type::slash || op == token_type::percent) && detail::math::integer_zero_divisor(currentValue, rightValue)) {
+			return op == token_type::slash ? raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero")
+			                               : raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 		}
 		const bool text_slot = currentValue.is_reference() && currentValue.get_reference_holder() && currentValue.get_reference_holder()->string_element();
 		VM_TRY_ASSIGN(resultValue, compound_value(op, currentValue, rightValue, incdec, text_slot));
@@ -8956,8 +8942,8 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_arith(frame& f, size_t& ip, const v
 		case opcode::op_t_add_ff: r = a + b; break;
 		case opcode::op_t_sub_ff: r = a - b; break;
 		case opcode::op_t_mul_ff: r = a * b; break;
-		case opcode::op_t_div_ff: ok = b != 0.0; if (ok) { r = a / b; } break;
-		case opcode::op_t_mod_ff: ok = b != 0.0; if (ok) { r = std::fmod(a, b); } break;
+		case opcode::op_t_div_ff: r = a / b; break;
+		case opcode::op_t_mod_ff: r = std::fmod(a, b); break;
 		default: ok = false; break;
 		}
 		if (!ok) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }
@@ -9537,7 +9523,7 @@ op_status vm_backend::exec_c_arith_any(frame& f, size_t& ip, const vm_instructio
 		case token_type::plus: r = a + b; break;
 		case token_type::minus: r = a - b; break;
 		case token_type::star: r = a * b; break;
-		case token_type::slash: ok = b != 0.0; if (ok) { r = a / b; } break;
+		case token_type::slash: r = a / b; break;
 		default: ok = false; break;
 		}
 		kind = kflt; out = cell_bits_of_float(r);
@@ -9942,8 +9928,8 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_inst
 			case token_type::plus: r = a + b; break;
 			case token_type::minus: r = a - b; break;
 			case token_type::star: r = a * b; break;
-			case token_type::slash: ok = b != 0.0; if (ok) { r = a / b; } break;
-			case token_type::percent: ok = b != 0.0; if (ok) { r = std::fmod(a, b); } break;
+			case token_type::slash: r = a / b; break;
+			case token_type::percent: r = std::fmod(a, b); break;
 			default: ok = false; break;
 			}
 			if (!ok) return miss();
@@ -10161,8 +10147,8 @@ JAI_FORCEINLINE bool vm_backend::typed_arith_fast(frame& f, const vm_instruction
 			case opcode::op_t_add_ff: r = a + b; break;
 			case opcode::op_t_sub_ff: r = a - b; break;
 			case opcode::op_t_mul_ff: r = a * b; break;
-			case opcode::op_t_div_ff: ok = b != 0.0; if (ok) { r = a / b; } break;
-			case opcode::op_t_mod_ff: ok = b != 0.0; if (ok) { r = std::fmod(a, b); } break;
+			case opcode::op_t_div_ff: r = a / b; break;
+			case opcode::op_t_mod_ff: r = std::fmod(a, b); break;
 			default: ok = false; break;
 			}
 			if (ok && typed_land_float(f, ins.a, r)) return true;
@@ -10267,8 +10253,8 @@ JAI_FORCEINLINE bool vm_backend::dyn_arith_fast(frame& f, const vm_instruction& 
 	case opcode::op_d_add: r = a + b; break;
 	case opcode::op_d_sub: r = a - b; break;
 	case opcode::op_d_mul: r = a * b; break;
-	case opcode::op_d_div: if (b == 0.0) return false; r = a / b; break;
-	default: if (b == 0.0) return false; r = std::fmod(a, b); break;
+	case opcode::op_d_div: r = a / b; break;
+	default: r = std::fmod(a, b); break;
 	}
 	return dyn_land(f, ins.a, script_value::TYPEID_FLOAT, 0, r);
 }
@@ -11038,12 +11024,9 @@ JAI_NOINLINE op_status vm_backend::map_numeric_compound(frame& f, const vm_instr
 	if (element_type && element_type->base_type == script_value_type::jai_object_type) { return {}; }
 	handled = true;
 	const token_type op = compound_kind_token(ins.a);
-	if (op == token_type::slash &&
-	    ((rk == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) || (rk == script_value::TYPEID_FLOAT && rhs.unchecked_as_float() == 0.0))) {
-		return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
-	}
-	if (op == token_type::percent && rk == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) {
-		return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
+	if ((op == token_type::slash || op == token_type::percent) && detail::math::integer_zero_divisor(target, rhs)) {
+		return op == token_type::slash ? raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero")
+		                               : raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 	}
 	script_value resultValue = make_null();
 	VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(target, op, rhs, detail::compound_index(op)));
@@ -11108,15 +11091,11 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 			    index >= 0 && index < static_cast<script_int>(storage->size())) {
 				const token_type op = compound_kind_token(ins.a);
 				// Zero pre-checks keep INDEX_COMPOUND's exact error codes/texts
-				if (op == token_type::slash &&
-				    ((rhs_idx == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) ||
-				     (rhs_idx == script_value::TYPEID_FLOAT && rhs.unchecked_as_float() == 0.0))) {
-					return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
-				}
-				if (op == token_type::percent && rhs_idx == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) {
-					return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
-				}
 				const script_value current = storage->get(static_cast<size_t>(index), engine_);
+				if ((op == token_type::slash || op == token_type::percent) && detail::math::integer_zero_divisor(current, rhs)) {
+					return op == token_type::slash ? raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero")
+					                               : raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
+				}
 				script_value resultValue = make_null();
 				VM_TRY_ASSIGN(resultValue, (ins.a & compound_flag_incdec) ? detail::incdec_step(current, op == token_type::plus, engine_) : evaluate_arithmetic(current, op, rhs, detail::compound_index(op)));
 				if (storage->kind() == script_array::kind_t::i64 && resultValue.raw_storage_index() == script_value::TYPEID_FLOAT &&
@@ -11135,13 +11114,9 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 				if (elem_idx == script_value::TYPEID_INT || elem_idx == script_value::TYPEID_FLOAT) {
 					const token_type op = compound_kind_token(ins.a);
 					// Zero pre-checks keep INDEX_COMPOUND's exact error codes/texts
-					if (op == token_type::slash &&
-					    ((rhs_idx == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) ||
-					     (rhs_idx == script_value::TYPEID_FLOAT && rhs.unchecked_as_float() == 0.0))) {
-						return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
-					}
-					if (op == token_type::percent && rhs_idx == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) {
-						return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
+					if ((op == token_type::slash || op == token_type::percent) && detail::math::integer_zero_divisor(*target_ptr, rhs)) {
+						return op == token_type::slash ? raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero")
+						                               : raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 					}
 					script_value resultValue = make_null();
 					VM_TRY_ASSIGN(resultValue, (ins.a & compound_flag_incdec) ? detail::incdec_step(*target_ptr, op == token_type::plus, engine_) : evaluate_arithmetic(*target_ptr, op, rhs, detail::compound_index(op)));

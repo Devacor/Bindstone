@@ -101,7 +101,7 @@ public:
 		test("division_by_zero", [this]() {
 			auto e = vm_engine();
 			check_throws([&]() { e->execute("5 / 0"); }, "integer division by zero throws");
-			check_throws([&]() { e->execute("5.0 / 0.0"); }, "float division by zero throws");
+			check_true(std::isinf(e->execute("5.0 / 0.0").as_float()), "float division by zero is IEEE");
 			check_throws([&]() { e->execute("var a = 5; var b = 0; a / b"); }, "variable division by zero throws");
 		});
 

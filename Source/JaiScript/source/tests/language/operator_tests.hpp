@@ -190,9 +190,7 @@ public:
                 eng->execute("5 / 0");
             }, "Integer division by zero should throw");
             
-            check_throws([&]() {
-                eng->execute("5.0 / 0.0");
-            }, "Float division by zero should throw");
+            check_true(std::isinf(eng->execute("5.0 / 0.0").as_float()), "Float division by zero is IEEE");
         });
         
         // Regression: identifier+literal binary fast path fed the engine-less AST literal to the

@@ -184,15 +184,15 @@ array&lt;Shape&gt; all = [Shape(), Circle()];
 print(s.kind(), " ", type_of(s), " ", all[1].kind(), " ", cast&lt;Circle&amp;&gt;(s).r);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">circle Circle circle 1.5</code></pre></div>
 <h3 id="arithmetic">Arithmetic has no undefined behavior<a class="hlink" href="#arithmetic" aria-label="link">&#8203;</a></h3>
-<p>Signed overflow and division by zero, integer or float, raise an error that <code>catch</code> sees and leave the target untouched. Shifts wrap modulo 2<sup>64</sup>, and <code>math::wrap_add</code>, <code>wrap_sub</code> and <code>wrap_mul</code> wrap on purpose. An <code>int</code> is 64 bits everywhere:</p>
+<p>Signed overflow and integer division by zero raise an error that <code>catch</code> sees and leave the target untouched. Shifts wrap modulo 2<sup>64</sup>, and <code>math::wrap_add</code>, <code>wrap_sub</code> and <code>wrap_mul</code> wrap on purpose. An <code>int</code> is 64 bits everywhere:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int big = 9223372036854775807;
 try { big = big + 1; } catch (e) { print("caught: ", e); }
 try { print(10 / 0); } catch (e) { print("caught: ", e); }
-try { print(1.0 / 0.0); } catch (e) { print("caught: ", e); }
+print(1.0 / 0.0);
 print(1 &lt;&lt; 63, " ", math::wrap_add(big, 1), " ", 2147483647 + 1);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Integer overflow in '+'
 caught: Division by zero
-caught: Division by zero
+inf
 -9223372036854775808 -9223372036854775808 2147483648</code></pre></div>
 <h3 id="evaluation-order">Evaluation order is defined<a class="hlink" href="#evaluation-order" aria-label="link">&#8203;</a></h3>
 <div class="callout cpp"><p>C++17's sequencing, made total: what C++17 leaves unspecified between arguments is left to right here, on both backends.</p></div>

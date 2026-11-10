@@ -1680,8 +1680,7 @@ checked_result<void> interpreter::assign_compound_identifier(assignment_expr* ex
         const token_type op = expr->op.type;
         const token_type baseOp = detail::compound_base(op);
         const size_t rightIdx = derefRight.raw_storage_index();
-        const bool zero_divisor = (rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) ||
-                                  (rightIdx == script_value::TYPEID_FLOAT && derefRight.unchecked_as_float() == 0.0);
+        const bool zero_divisor = (op == token_type::slash_equal || op == token_type::percent_equal) && detail::math::integer_zero_divisor(target, derefRight);
         if (bound && op == token_type::percent_equal) { return checked_result<void>(make_error_code(runtime_error_code::unknown_operator)); }
         if (!bound) {
             if (op == token_type::plus_equal && detail::compound_plus_text(target, derefRight) == detail::compound_text::mismatch) {
@@ -1689,7 +1688,7 @@ checked_result<void> interpreter::assign_compound_identifier(assignment_expr* ex
             }
             const size_t leftIdx = target.raw_storage_index();
             const bool general = detail::char_operands_promote(leftIdx, rightIdx) || detail::utf8_operands(leftIdx, rightIdx) || detail::math::owns_arithmetic(leftIdx, rightIdx);
-            if (!general && op == token_type::percent_equal && rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
+            if (!general && op == token_type::percent_equal && zero_divisor) {
                 return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
             }
             if (general || op == token_type::percent_equal) [[unlikely]] {
@@ -1724,7 +1723,7 @@ checked_result<void> interpreter::assign_compound_identifier(assignment_expr* ex
             const script_float a = leftIdx == script_value::TYPEID_INT ? static_cast<script_float>(target.unchecked_as_int()) : target.unchecked_as_float();
             const script_float b = rightIdx == script_value::TYPEID_INT ? static_cast<script_float>(derefRight.unchecked_as_int()) : derefRight.unchecked_as_float();
             script_float out;
-            (void)detail::float_arith(baseOp, a, b, out);   // its one fault, a zero divisor, raised above
+            (void)detail::float_arith(baseOp, a, b, out);   // faultless: a zero divisor is IEEE
             if (bound) { target.assign_through(make_value(out)); }
             else if (leftIdx == script_value::TYPEID_FLOAT) { target.unchecked_as_float_ref() = out; }
             else { JAISCRIPT_TRY(compound_typed_store_back(target, make_value(out), identifier->name)); }
@@ -2069,13 +2068,9 @@ checked_result<void> interpreter::assign_compound_element(assignment_expr* expr,
         if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
             rightValue = rightValue.bound_decoded_temp();
         }
-        const size_t ri = rightValue.raw_storage_index();
-        if (expr->op.type == token_type::slash_equal && ((ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) ||
-                                                        (ri == script_value::TYPEID_FLOAT && rightValue.unchecked_as_float() == 0.0))) {
-            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
-        }
-        if (expr->op.type == token_type::percent_equal && ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-            return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
+        if ((expr->op.type == token_type::slash_equal || expr->op.type == token_type::percent_equal) && detail::math::integer_zero_divisor(currentValue, rightValue)) {
+            return expr->op.type == token_type::slash_equal ? checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero")
+                                                           : checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
         }
         const bool text_slot = currentValue.is_reference() && currentValue.get_reference_holder() && currentValue.get_reference_holder()->string_element();
         JAISCRIPT_TRY_ASSIGN(resultValue, compound_value(detail::compound_base(expr->op.type), currentValue, rightValue, expr->incdec_desugar, text_slot));

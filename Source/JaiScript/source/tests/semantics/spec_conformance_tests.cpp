@@ -4135,7 +4135,7 @@ private:
 		test("a_compound_operator_has_one_table_at_every_destination", [this]() {
 			// the simplification audit's F9-F12 (one semantics per compound operator, one zero-divisor text per operator family):
 			// member '/=' divides like the local's, '+=' appends text only to a text target at every destination (a local, a field,
-			// this's field, an element, a map entry, a reference), '/' and '/=' raise 'Division by zero', '%' and '%=' 'Modulo by zero'
+			// this's field, an element, a map entry, a reference), an integer '/' and '/=' raise 'Division by zero', '%' and '%=' 'Modulo by zero'
 			expect("one compound table", R"(
 				class T { string s = "a"; var n = 7; int big = 9007199254740993; float f = 1.0; void half() { n /= 2; } void addc() { s += 'c'; } }
 				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
@@ -4154,16 +4154,45 @@ private:
 				t([]() { int x = 5; int z = 0; return x % z; }) + "|" +
 				t([]() { int x = 5; x /= 0; return x; }) + "|" +
 				t([]() { int x = 5; int z = 0; return x / z; }) + "|" +
-				t([]() { float x = 5.0; x %= 0.0; return x; }) + "|" +
-				t([]() { float x = 5.0; float z = 0.0; return x / z; }) + "|" +
-				t([]() { T o; o.f /= 0.0; return o.f; }) + "|" +
 				t([]() { array<int> a = [4]; a[0] %= 0; return 1; }) + "|" +
 				t([]() { array<int> ai = [3]; auto& e0 = ai[0]; e0 %= 0; return 1; });
 			)", "int:3|3|9007199254740993|acc|ac|vz|"
 			    "Cannot apply '+=' to string and int|Cannot apply '+=' to string and int|Cannot apply '+=' to string and int|"
 			    "Cannot apply '+=' to int and string|Cannot apply '+=' to string and int|"
-			    "Modulo by zero|Modulo by zero|Division by zero|Division by zero|Modulo by zero|Division by zero|Division by zero|"
+			    "Modulo by zero|Modulo by zero|Division by zero|Division by zero|"
 			    "Modulo by zero|Modulo by zero", warn_region);
+		});
+		test("float_division_and_modulo_by_zero_are_ieee", [this]() {
+			// docs/site/guide/04-operators.html "Arithmetic": a float '/' or '%' (an int operand promoted beside a float included) gives
+			// an infinity or NaN at every destination and on every path (literals, typed locals, var, loops, elements, members, a
+			// reference, a vec); two ints still raise, and a float result that leaves an int slot's range raises at the store
+			expect("ieee float division", R"(
+				class T { float f = 1.0; var n = 2.5; }
+				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
+				function loops() -> string {
+					array<float> w = [1.0, -1.0, 0.0]; float z = 0.0; float acc = 0.0; string s = "";
+					for (int i = 0; i < 3; i++) { float q = w[i] / z; float m = w[i] % z; s += `${q},${m};`; w[i] /= z; acc = acc + 1.0 / z; }
+					var d = 0.0; var v = 3.0;
+					for (int i = 0; i < 2; i++) { v = v / d; }
+					return `${s}${w[0]},${w[1]},${w[2]};${acc};${v}`;
+				}
+				t([]() { return 1.0 / 0.0; }) + "|" + t([]() { return -1.0 / 0.0; }) + "|" + t([]() { return 0.0 / 0.0; }) + "|" +
+				t([]() { return 1.5 % 0.0; }) + "|" + t([]() { return 1 / 0.0; }) + "|" + t([]() { return 1.0 / 0; }) + "|" + t([]() { return 1.0 % 0; }) + "|" +
+				t([]() { float x = 5.0; x %= 0.0; return x; }) + "|" +
+				t([]() { float x = 5.0; float z = 0.0; return x / z; }) + "|" +
+				t([]() { float x = 5.0; x /= 0; return x; }) + "|" +
+				t([]() { var x = 5; x /= 0.0; return `${type_of(x)}:${x}`; }) + "|" +
+				t([]() { var x = 5.0; int z = 0; return x % z; }) + "|" +
+				t([]() { var z = 0.0; var h = 0.5; return `${0.5 / z},${0.5 % z},${h % 0.0}`; }) + "|" +
+				t([]() { T o; o.f /= 0.0; o.n %= 0; return `${o.f},${o.n}`; }) + "|" +
+				t([]() { map<string, float> m = {"k": 2.0}; m["k"] /= 0; return m["k"]; }) + "|" +
+				t([]() { array<float> a = [3.0]; auto& e0 = a[0]; e0 /= 0.0; return a[0]; }) + "|" +
+				t([]() { var a = [3.0, 4]; a[0] /= 0; a[1] /= 0; return a; }) + "|" +
+				t([]() { return math::vec2(1, -1) / 0; }) + "|" + t([]() { math::vec2 v = math::vec2(4, 0); v /= math::vec2(0, 0); return v.x; }) + "|" +
+				t([]() { return math::is_inf(1.0 / 0.0) && math::is_nan(0.0 % 0.0); }) + "|" +
+				t([]() { int x = 5; x /= 0.0; return x; }) + "|" + t([]() { int z = 0; return 1 / z; }) + "|" + t([]() { int z = 0; return 1 % z; }) + "|" + loops();
+			)", "inf|-inf|nan|nan|inf|inf|nan|nan|inf|inf|float:inf|nan|inf,nan,nan|inf,nan|inf|inf|Division by zero|(inf, -inf)|inf|true|"
+			    "Cannot convert float to integer: non-finite or out of range|Division by zero|Modulo by zero|inf,nan;-inf,nan;nan,nan;inf,-inf,nan;inf;inf", warn_region);
 		});
 	}
 

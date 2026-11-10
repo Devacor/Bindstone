@@ -430,8 +430,8 @@ namespace jai::detail::math {
 	// vec (the scalar applied to every component). The scalar converts to the component type first, as C++'s
 	// `Point<T> * T` does: vec kinds take int and float scalars and compute in binary32; ivec kinds take int scalars (a
 	// scalar outside int32 follows the integer policy) and compute each component exactly in int64 - two int32 operands
-	// cannot overflow it - narrowing the result to int32 under the policy. A zero divisor raises the scalar kernels'
-	// texts. `%` is the ivec kinds' only.
+	// cannot overflow it - narrowing the result to int32 under the policy. An ivec's zero divisor raises the scalar
+	// kernels' texts; a vec's is IEEE. `%` is the ivec kinds' only.
 	JAI_MATH_COLD inline checked_result<script_value> binary(bop op, const script_value& l, const script_value& r, engine* eng) {
 		const bool lm = is_kind(l.raw_storage_index()), rm = is_kind(r.raw_storage_index());
 		const vk k = lm ? l.unchecked_vec_kind() : r.unchecked_vec_kind();
@@ -469,10 +469,7 @@ namespace jai::detail::math {
 				case bop::add: f[c] = a + b; break;
 				case bop::sub: f[c] = a - b; break;
 				case bop::mul: f[c] = a * b; break;
-				default:
-					if (b == 0.0f) { return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero"); }
-					f[c] = a / b;
-					break;
+				default: f[c] = a / b; break;
 			}
 		}
 		return make(k, f, out, eng);
@@ -525,6 +522,13 @@ namespace jai::detail::math {
 	}
 	JAI_FORCEINLINE bool owns_arithmetic(size_t lr, size_t rr) noexcept {
 		return owns_comparison(lr, rr) && lr != sv::TYPEID_STRING && rr != sv::TYPEID_STRING;
+	}
+	// `target /= right` and `target %= right` raise on a zero divisor ahead of the operands' kinds only where the
+	// arithmetic is integer: an int zero over a target that is neither a float nor a vec (their division is IEEE)
+	inline bool integer_zero_divisor(const script_value& target, const script_value& right) noexcept {
+		if (right.raw_storage_index() != sv::TYPEID_INT || right.unchecked_as_int() != 0) { return false; }
+		const script_value& t = target.deref();
+		return !t.is_float() && !(is_kind(t.raw_storage_index()) && !integral(t.unchecked_vec_kind()));
 	}
 	JAI_MATH_COLD inline checked_result<script_value> ordering_error(const script_value& l, const script_value& r) {
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch),

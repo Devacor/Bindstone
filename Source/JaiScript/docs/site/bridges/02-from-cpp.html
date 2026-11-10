@@ -111,7 +111,7 @@ Vec v = Vec(1, 2) + Vec(3, 4);
 print(s.name, " ", s.area(), " ", heap-&gt;area(), " ", v.x, ",", v.y);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">square 9.0 25.0 4,6</code></pre></div>
 <h3 id="control-flow-and-errors">Control flow and errors<a class="hlink" href="#control-flow-and-errors" aria-label="link">&#8203;</a></h3>
-<div class="tablewrap"><table><thead><tr><th></th><th>C++</th><th>JaiScript</th></tr></thead><tbody><tr><td>range-for</td><td><code>for (auto&amp; x : v)</code></td><td>the same; over a map, <code>kv.first</code> and <code>kv.second</code></td></tr><tr><td>structured binding</td><td><code>auto [a, b] = p;</code>, <code>for (auto&amp; [k, v] : m)</code></td><td><code>auto [a, b] = arr;</code> unpacks an array; <code>for (auto&amp; [k, v] : m)</code> binds a map entry's key and value</td></tr><tr><td>switch</td><td>falls through without <code>break</code></td><td>breaks by default; <code>fallthrough;</code> continues into the next case</td></tr><tr><td>do, goto</td><td><code>do { } while (c);</code>, <code>goto end;</code></td><td><code>do { } while (c);</code> is the same; no <code>goto</code> (writing one is an error that says so)</td></tr><tr><td>throw</td><td><code>throw std::runtime_error("x");</code></td><td><code>throw "x";</code>, any value</td></tr><tr><td>catch</td><td><code>catch (const std::exception&amp; e)</code></td><td><code>catch (e)</code>, untyped: <code>e</code> reads as the message and <code>e.value</code> holds what was thrown</td></tr><tr><td>enum</td><td><code>enum class Dir { N, S };</code> and <code>Dir::N</code></td><td><code>enum Dir { n, s }</code>, then <code>Dir::n</code> or <code>Dir.n</code>: plain ints counted from 0; no <code>enum class</code> and no explicit values (<code>n = 5</code> is a parse error)</td></tr><tr><td>namespace</td><td><code>namespace util { }</code> and <code>util::f()</code></td><td>the same</td></tr><tr><td>include</td><td><code>#include "x.h"</code></td><td><code>#include "x.jai"</code> or <code>include "x.jai";</code> runs the file's text in place; <code>import "x.jai";</code> loads a module once and reloads it when it changes</td></tr><tr><td>coroutine</td><td>C++20 <code>co_yield</code></td><td><code>coroutine int gen() { yield 1; }</code>, driven by <code>next()</code> or range-<code>for</code></td></tr><tr><td>formatting</td><td><code>std::format("{} {:.2f}", a, b)</code></td><td><code>format("{} {:.2f}", a, b)</code>, <code>print("{}", a)</code>, <code>`${b:.2f}`</code>; as in C++20 only a string literal is a format string, and <code>vformat(fmt, a)</code> is <code>std::vformat</code></td></tr></tbody></table></div>
+<div class="tablewrap"><table><thead><tr><th></th><th>C++</th><th>JaiScript</th></tr></thead><tbody><tr><td>range-for</td><td><code>for (auto&amp; x : v)</code></td><td>the same; over a map, <code>kv.first</code> and <code>kv.second</code></td></tr><tr><td>structured binding</td><td><code>auto [a, b] = p;</code>, <code>for (auto&amp; [k, v] : m)</code></td><td><code>auto [a, b] = arr;</code> unpacks an array; <code>for (auto&amp; [k, v] : m)</code> binds a map entry's key and value</td></tr><tr><td>switch</td><td>falls through without <code>break</code></td><td>breaks by default; <code>fallthrough;</code> continues into the next case</td></tr><tr><td>do, goto</td><td><code>do { } while (c);</code>, <code>goto end;</code></td><td><code>do { } while (c);</code> is the same; no <code>goto</code> (writing one is an error that says so)</td></tr><tr><td>throw</td><td><code>throw std::runtime_error("x");</code></td><td><code>throw "x";</code>, any value</td></tr><tr><td>catch</td><td><code>catch (const std::exception&amp; e)</code></td><td><code>catch (Err e)</code> by type (a class takes its subclasses), <code>catch (error e)</code> for a run-time error, <code>catch (e)</code> for anything; the variable is the thrown value itself, <code>const Err&amp;</code> or not</td></tr><tr><td>enum</td><td><code>enum class Dir { N, S };</code> and <code>Dir::N</code></td><td><code>enum Dir { n, s }</code>, then <code>Dir::n</code> or <code>Dir.n</code>: plain ints counted from 0; no <code>enum class</code> and no explicit values (<code>n = 5</code> is a parse error)</td></tr><tr><td>namespace</td><td><code>namespace util { }</code> and <code>util::f()</code></td><td>the same</td></tr><tr><td>include</td><td><code>#include "x.h"</code></td><td><code>#include "x.jai"</code> or <code>include "x.jai";</code> runs the file's text in place; <code>import "x.jai";</code> loads a module once and reloads it when it changes</td></tr><tr><td>coroutine</td><td>C++20 <code>co_yield</code></td><td><code>coroutine int gen() { yield 1; }</code>, driven by <code>next()</code> or range-<code>for</code></td></tr><tr><td>formatting</td><td><code>std::format("{} {:.2f}", a, b)</code></td><td><code>format("{} {:.2f}", a, b)</code>, <code>print("{}", a)</code>, <code>`${b:.2f}`</code>; as in C++20 only a string literal is a format string, and <code>vformat(fmt, a)</code> is <code>std::vformat</code></td></tr></tbody></table></div>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Dir { north, south }
 namespace util { int twice(int v) { return v * 2; } }
 auto [lo, hi] = [3, 8];
@@ -119,8 +119,8 @@ map&lt;string, int&gt; stock = {"ore": 4, "gem": 1};
 for (auto [name, count] : stock) { print(name, "=", count); }
 try {
     throw util::twice(hi);
-} catch (e) {
-    print("caught ", e.value, " (", type_of(e.value), ") ", Dir.south, " ", lo);
+} catch (int e) {
+    print("caught ", e, " (", type_of(e), ") ", Dir.south, " ", lo);
 }
 print(format("{} {:.2f}", "pi", math::PI));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">gem=1
@@ -145,7 +145,7 @@ caught: Cannot cast 'Shape' to 'Square&amp;'</code></pre></div>
 <h2 id="watch-out">Watch out<a class="hlink" href="#watch-out" aria-label="link">&#8203;</a></h2>
 <p>The differences below are the ones a C++ habit runs into first. Each sample shows what JaiScript does.</p>
 <h3 id="switch">switch does not fall through<a class="hlink" href="#switch" aria-label="link">&#8203;</a></h3>
-<p>A case ends at the next case, with no <code>break</code>. <code>fallthrough;</code> (C++'s <code>[[fallthrough]]</code>) continues into the case below:</p>
+<p>A case ends at the next case, with no <code>break</code>. Stacked labels (<code>case 1: case 2:</code>) share a body as in C++, and <code>fallthrough;</code> (C++'s <code>[[fallthrough]]</code>) continues a case with statements into the one below:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int hits = 0;
 switch (1) {
     case 1: hits += 1;          // ends here
@@ -222,7 +222,7 @@ bump(5);</code></pre></div>
     bump(5);
          ^</code></pre></div>
 <h3 id="reference-captures">A reference capture can outlive its frame<a class="hlink" href="#reference-captures" aria-label="link">&#8203;</a></h3>
-<p><code>[&amp;]</code> and <code>[&amp;x]</code> move the captured local into a shared cell, so returning such a lambda is safe where C++ would leave it dangling:</p>
+<p><code>[&amp;]</code> and <code>[&amp;x]</code> move the captured local into a shared cell, so returning such a lambda is safe where C++ would leave it dangling. A <code>for</code> loop&#x27;s variable captured this way is each iteration&#x27;s own (<a href="../guide/06-functions.html#lambdas-and-captures">Functions &amp; Lambdas</a>):</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function make_counter() {
     int count = 0;
     return [&amp;count]() { count += 1; return count; };
@@ -253,9 +253,9 @@ int second(int x) { return x * 10; }
 print(first(2));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">21</code></pre></div>
 <h3 id="not-there">What is not there<a class="hlink" href="#not-there" aria-label="link">&#8203;</a></h3>
-<p>Raw pointers (<code>T*</code>, <code>&amp;x</code>, <code>delete</code>), templates, const methods, const types and <code>const_cast</code>, <code>constexpr</code>, <code>unsigned</code> and sized integer types, <code>struct</code>, <code>virtual</code>, <code>mutable</code>, <code>enum class</code>, <code>goto</code>, typed <code>catch</code> clauses, <code>static_cast</code> (spelled <code>cast</code>) and <code>sizeof</code>.</p>
+<p>Raw pointers (<code>T*</code>, <code>&amp;x</code>, <code>delete</code>), templates, const methods, const types and <code>const_cast</code>, <code>constexpr</code>, <code>unsigned</code> and sized integer types, <code>struct</code>, <code>virtual</code>, <code>mutable</code>, <code>enum class</code>, <code>goto</code>, <code>static_cast</code> (spelled <code>cast</code>) and <code>sizeof</code>.</p>
 <ul>
-<li><code>&amp;x</code>, <code>delete</code>, a const method or type, <code>const_cast</code>, <code>constexpr</code>, a <code>mutable</code> field, <code>virtual</code>, <code>goto</code> and a typed <code>catch</code> are parse errors that name the JaiScript spelling.</li>
+<li><code>&amp;x</code>, <code>delete</code>, a const method or type, <code>const_cast</code>, <code>constexpr</code>, a <code>mutable</code> field, <code>virtual</code> and <code>goto</code> are parse errors that name the JaiScript spelling.</li>
 <li>The others, a <code>mutable</code> lambda among them, fail as a parse error, a load error or an error when the line runs, and the message does not name the missing feature.</li>
 </ul>
 <p>So a puzzling message on a C++-shaped line is worth checking against this list.</p>

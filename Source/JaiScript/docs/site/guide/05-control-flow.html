@@ -47,7 +47,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a><span class="sep" aria-hidden="true">/</span><a href="index.html">Guide</a><span class="sep" aria-hidden="true">/</span>05</nav>
 <article class="chapter"><h1 id="control-flow">Control Flow<a class="hlink" href="#control-flow" aria-label="link">&#8203;</a></h1>
 <p>Everything you expect from C++ control flow, minus its sharpest edge: <code>switch</code> never falls through by accident, and a runaway loop cannot outlive its execution budget. <code>if/else</code>, <code>while</code>, C-style <code>for</code>, range-based <code>for</code>, <code>break</code>/<code>continue</code>, and <code>try/catch/throw</code>. All of it unwinds correctly out of loops and nested frames on both backends.</p>
-<p>As in C++, a <code>break</code> with no loop or <code>switch</code> around it, or a <code>continue</code> with no loop, is a parse error (<code>'break' outside a loop or switch</code>). A function or lambda body leaves nothing it sits in. A <code>{</code> that starts a statement opens a block, nested blocks included. A map literal written there goes in parentheses, except at a unit&#x27;s top level, where <code>{"key": value}</code> is the unit&#x27;s value (a data file an <code>include</code> reads).</p>
+<p>As in C++, a <code>break</code> with no loop or <code>switch</code> around it, or a <code>continue</code> with no loop, is a parse error (<code>'break' outside a loop or switch</code>). A plain <code>=</code> that is the whole condition of an <code>if</code>, <code>while</code>, <code>do</code> or <code>for</code> draws the warning <code>assignment used as a condition: write '==' to compare, or '((a = b))' with parentheses of its own to assign</code>; <code>if ((a = next()))</code> is silent. A function or lambda body leaves nothing it sits in. A <code>{</code> that starts a statement opens a block, nested blocks included. A map literal written there goes in parentheses, except at a unit&#x27;s top level, where <code>{"key": value}</code> is the unit&#x27;s value (a data file an <code>include</code> reads).</p>
 <h2 id="if-while-for">if / while / for<a class="hlink" href="#if-while-for" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto n = 7;
 if (n % 2 == 0) { print("even"); } else { print("odd"); }
@@ -102,12 +102,13 @@ bob scored 5
 <li>An <code>auto</code> variable takes the elements&#x27; static type: over an <code>array&lt;int&gt;</code> it is an <code>int</code>, over a <code>var</code> array (no static element type) it is a <code>var</code>.</li>
 </ul>
 <h2 id="switch-break-by-default-explicit-fallthrough">switch: break by default, explicit <code>fallthrough;</code><a class="hlink" href="#switch-break-by-default-explicit-fallthrough" aria-label="link">&#8203;</a></h2>
-<div class="callout cpp"><p>Unlike C++, a <code>case</code> ends where the next one begins; <code>fallthrough;</code> continues into the next case on purpose.</p></div>
-<p>The classic C footgun is inverted: cases <strong>never</strong> fall through unless you write <code>fallthrough;</code>. Case values can be integers, strings, enum members, or expressions. A case matches when the language&#x27;s <code>==</code> holds: <code>switch (1)</code> matches <code>case 1.0</code>, an instance matches memberwise or through its <code>operator==</code>, and an error that <code>operator==</code> raises leaves the switch. <code>fallthrough;</code> outside a switch is an error.</p>
+<div class="callout cpp"><p>Unlike C++, a <code>case</code> ends where the next one begins; <code>fallthrough;</code> continues into the next case on purpose. Stacked labels share a body, as in C++.</p></div>
+<p>The classic C footgun is inverted: a case with statements <strong>never</strong> falls through unless you write <code>fallthrough;</code>. A case with no statements shares the body of the label below it (<code>case 1: case 2: body</code>), and an empty last label does nothing. <code>default</code> runs after every case wherever it is written, so it shares a body only as the last label (otherwise <code>a label that shares a body with 'default' needs 'default' as the last label of the switch</code>). Case values can be integers, strings, enum members, or expressions. A case matches when the language&#x27;s <code>==</code> holds: <code>switch (1)</code> matches <code>case 1.0</code>, an instance matches memberwise or through its <code>operator==</code>, and an error that <code>operator==</code> raises leaves the switch. <code>fallthrough;</code> outside a switch is an error.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function describe(weapon) {
     auto damage = 0;
     switch (weapon) {
-        case "sword": damage = 10;
+        case "sword":
+        case "blade": damage = 10;
         case "bow":   damage = 8;
         case "magic":
             damage = 15;
@@ -118,15 +119,15 @@ bob scored 5
     }
     return damage;
 }
-print("sword: {}", describe("sword"));
+print("sword: {}, blade: {}", describe("sword"), describe("blade"));
 print("magic: {} (fell through into enchanted)", describe("magic"));
 print("enchanted: {}", describe("enchanted"));
 print("fists: {}", describe("fists"));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">sword: 10
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">sword: 10, blade: 10
 magic: 20 (fell through into enchanted)
 enchanted: 5
 fists: 1</code></pre></div>
-<p>Note <code>enchanted</code> alone gives <code>0 += 5</code> = 5, and no match lands in <code>default</code>. Switches nest, <code>return</code> works from inside a case, and <code>break</code>/<code>continue</code> in a loop-enclosed switch affect the loop, never leak into the switch.</p>
+<p>Note <code>enchanted</code> alone gives <code>0 += 5</code> = 5, and no match lands in <code>default</code>. Switches nest and <code>return</code> works from inside a case. In a switch inside a loop, <code>break</code> leaves the switch only and <code>continue</code> reaches the loop.</p>
 <p>A case body holds statements, as in C++. A variable declared in a case needs the body in braces, which also keeps the variable to that case:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string order = "heal";
 switch (order) {
@@ -150,14 +151,14 @@ switch (order) {
             int amount = 5;
             ^</code></pre></div>
 <h2 id="try-catch-throw">try / catch / throw<a class="hlink" href="#try-catch-throw" aria-label="link">&#8203;</a></h2>
-<p>Any value can be thrown. <code>catch (e)</code> binds the error, and <code>catch</code> without a variable is allowed. A bare <code>throw;</code> inside a catch re-throws, and one with no active exception raises the catchable <code>Bare throw with no active exception thrown.</code> <code>throw</code> is an expression, so it composes (<code>x &gt; 0 ? x : throw "negative"</code>). Uncaught script throws surface to the C++ host as exceptions (with a captured script stack trace).</p>
+<p>Any value can be thrown. <code>catch (e)</code> catches everything and <code>e</code> is what was thrown; <code>catch</code> without a variable is allowed. A bare <code>throw;</code> inside a catch re-throws, and one with no active exception raises the catchable <code>Bare throw with no active exception thrown.</code> <code>throw</code> is an expression, so it composes (<code>x &gt; 0 ? x : throw "negative"</code>). Uncaught script throws surface to the C++ host as exceptions (with a captured script stack trace).</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">try {
     throw "something broke";
 } catch (e) {
     print("caught: {}", e);
 }
 
-try { throw 42; } catch (e) { print("thrown values can be any type: {} (e.value + 1 = {})", e, e.value + 1); }
+try { throw 42; } catch (e) { print("thrown values keep their type: {} is an {} (e + 1 = {})", e, type_of(e), e + 1); }
 
 try {
     try {
@@ -173,20 +174,22 @@ try {
 try { throw "ignored"; } catch { print("catch without a variable"); }
 "done";</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: something broke
-thrown values can be any type: 42 (e.value + 1 = 43)
+thrown values keep their type: 42 is an int (e + 1 = 43)
 rethrowing inner
 outer caught: inner
 catch without a variable
 == result: done</code></pre></div>
-<p>Throws work mid-argument-evaluation, and C++ exceptions interop in both directions. A bound host function, method, operator or property accessor that throws surfaces as a catchable script error with the exception&#x27;s text where it was called. An uncaught script throw reaches the host with its script stack trace attached. Inside a <code>catch</code>, <code>e</code> reads as the error text alone, and when the same error escapes to the host its <code>what()</code> is that same text.</p>
-<p><strong>A caught error is a value that knows where it came from.</strong> <code>e</code> behaves as its message string everywhere: printing it, <code>to_string(e)</code>, <code>e + "..."</code>, <code>e == "text"</code>, a <code>string</code> variable, the string methods. It also answers <code>e.message</code>, <code>e.file</code>, <code>e.line</code>, <code>e.column</code> and <code>e.stack</code>.</p>
+<p>Throws work mid-argument-evaluation, and C++ exceptions interop in both directions. A bound host function, method, operator or property accessor that throws surfaces as a catchable script error with the exception&#x27;s text where it was called. An uncaught script throw reaches the host with its script stack trace attached. A run-time error&#x27;s <code>e</code> reads as the error text alone, and when the same error escapes to the host its <code>what()</code> is that same text.</p>
+<p><strong>The catch variable is the thrown value.</strong> <code>type_of(e)</code> is its type, <code>throw 42</code> gives an <code>e</code> equal to <code>42</code>, and a thrown array, map or instance is used as itself.</p>
+<p><strong>A run-time error is an <code>error</code>.</strong> <code>type_of(e)</code> is <code>"error"</code>, <code>e.kind</code> is its family (<code>e.kind == error_kind::bounds</code>; the names are in the <a href="../reference/index.html#error-kinds">reference</a>), and <code>e</code> behaves as its message string everywhere: printing it, <code>to_string(e)</code>, <code>e + "..."</code>, <code>e == "text"</code>, a <code>string</code> variable, the string methods.</p>
+<p><strong>A caught value knows where it came from.</strong> An error and a thrown string, array, map or instance answer <code>e.message</code>, <code>e.file</code>, <code>e.line</code>, <code>e.column</code>, <code>e.stack</code> and <code>e.value</code>; an instance&#x27;s own member of one of those names is read first. A thrown number, bool or null carries no place: its catch variable answers <code>e.value</code> and <code>e.message</code> only.</p>
 <ul>
-<li><strong>The place and the value.</strong> For a <code>throw</code> the place is the throw itself and <code>e.value</code> is the thrown value, with its type. A thrown object&#x27;s fields also read straight through <code>e</code>, and its message is its class&#x27;s <code>to_string()</code>, as <code>print</code> shows it. For a run-time error the place is the statement that raised it and <code>e.value</code> is <code>null</code>.</li>
+<li><strong>The place and the value.</strong> For a <code>throw</code> the place is the throw itself, <code>e.value</code> is <code>e</code>, and an instance&#x27;s <code>e.message</code> is its class&#x27;s <code>to_string()</code>, as <code>print</code> shows it. For a run-time error the place is the statement that raised it and <code>e.value</code> is <code>null</code>.</li>
 <li><strong>The stack.</strong> The stack is the script call stack at the error as <code>file:line</code> strings, one per frame, innermost first (below: <code>pick</code>&#x27;s line, then the top level&#x27;s). On the VM a bare self tail call (<code>return f(n - 1);</code>) reuses its frame, so a tail recursion leaves one entry where the interpreter lists every level.</li>
 <li><strong>Deep stacks.</strong> A stack deeper than 64 frames lists the innermost 64 and ends with one line <code>... N more frames</code> for the rest, so the trace stays the same size however deep the error starts.</li>
 <li><strong>The cost of counting.</strong> Counting the rest walks the frames beneath the ones shown and stops at a <code>try</code> an earlier count already passed, so a catch and rethrow at every level of a recursion stays linear in its depth. A throw with no such <code>try</code> beneath it pays for the whole depth each time. A <code>try</code> in a loop at the bottom of a deep recursion that has none of its own, or a host catching repeatedly from deep in a script, counts every frame on every throw.</li>
-<li><strong>Copies.</strong> A copy of <code>e</code> answers the same. A new string built from it (<code>e + ""</code>) is just text.</li>
-<li><strong>Lifetime.</strong> The thrown value lives until the handler that caught it exits, by completing, a <code>return</code>, a <code>break</code> or a new throw. It then dies as C++ destroys the exception object. A bare <code>throw;</code> carries it on to the next handler. A copy of <code>e</code> kept past its handler still answers its message, place and stack, and its <code>e.value</code> is <code>null</code>.</li>
+<li><strong>Copies.</strong> A copy of an error or of a thrown string answers the same. A new string built from it (<code>e + ""</code>) is just text. A thrown array, map or instance answers its place while its handler runs.</li>
+<li><strong>Lifetime.</strong> The thrown value lives until the handler that caught it exits, by completing, a <code>return</code>, a <code>break</code> or a new throw. It then dies as C++ destroys the exception object. A bare <code>throw;</code> carries it on to the next handler. A copy of an error or of a thrown string kept past its handler still answers its message, place and stack, and its <code>e.value</code> is <code>null</code>.</li>
 </ul>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int pick(array&lt;int&gt; xs, int i) {
     return xs[i];
@@ -194,14 +197,46 @@ catch without a variable
 try {
     pick([1, 2, 3], 7);
 } catch (e) {
-    print("{} (line {}, value {})", e, e.line, e.value);
+    print("{} ({}, line {}, value {})", e, e.kind, e.line, e.value);
     print("stack depth: {}", e.stack.size());
 }
 class Oops { int code = 7; }
 try { throw Oops(); } catch (e) { print("code {} at line {}", e.code, e.line); }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Array index 7 out of bounds for array of size 3 (line 2, value null)
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Array index 7 out of bounds for array of size 3 (bounds, line 2, value null)
 stack depth: 2
 code 7 at line 11</code></pre></div>
+<h2 id="typed-catch">catch by type<a class="hlink" href="#typed-catch" aria-label="link">&#8203;</a></h2>
+<p><code>catch (Type e)</code> takes one type. A <code>try</code> has any number of clauses, tried in order, and the first that takes the thrown value runs with <code>e</code> declared as that type:</p>
+<ul>
+<li>A class takes its subclasses.</li>
+<li>A builtin name (<code>int</code>, <code>string</code>, <code>array&lt;int&gt;</code>, ...) takes that kind and no other: an <code>int</code> is not a <code>float</code>.</li>
+<li><code>error</code> takes a run-time error, and nothing a script throws.</li>
+<li><code>catch (e)</code>, <code>catch (var e)</code>, <code>catch (auto e)</code> and <code>catch</code> alone take everything, and come last (<code>a catch with no type catches everything: it is the last handler of its try</code>).</li>
+</ul>
+<p><code>e</code> is the thrown value itself, never a copy, with or without <code>&amp;</code>; <code>const</code> makes it read-only. With no clause for it the error goes on to the next <code>try</code> out, from the place that raised it. There is no <code>finally</code>: a destructor runs when its scope ends, a throw included.</p>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class LoadError { string what = "load"; }
+class MissingFile : LoadError { }
+string handle(var action) {
+    try { action(); }
+    catch (MissingFile e) { return "missing file"; }
+    catch (LoadError e) { return "load error: " + e.what; }
+    catch (int code) { return "code " + to_string(code + 1); }
+    catch (error e) { return e.kind == error_kind::bounds ? "out of range" : "error: " + e; }
+    catch (e) { return "something else: a " + type_of(e); }
+    return "ok";
+}
+print(handle(() =&gt; { throw MissingFile(); }));
+print(handle(() =&gt; { throw LoadError(); }));
+print(handle(() =&gt; { throw 41; }));
+print(handle(() =&gt; { auto xs = [1]; xs[4]; }));
+print(handle(() =&gt; { int zero = 0; print(1 / zero); }));
+print(handle(() =&gt; { throw 2.5; }));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">missing file
+load error: load
+code 42
+out of range
+error: Division by zero
+something else: a float</code></pre></div>
 <h2 id="what-a-catch-can-see">What a catch can see, and what never reaches one<a class="hlink" href="#what-a-catch-can-see" aria-label="link">&#8203;</a></h2>
 <p>The runtime's own errors are ordinary catchable values: a bad index, a division by zero, a failed <code>cast</code>, and a type mismatch the checker could not see coming because the value came out of a <code>var</code>:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto xs = [1, 2, 3];
@@ -226,7 +261,7 @@ caught: Cannot cast &#x27;int&#x27; to &#x27;char&#x27;</code></pre></div>
             ^</code></pre></div>
 <p>The rule in one line: a mismatch the checker can see (a literal, a typed local, a typed return) fails the load; a mismatch it cannot see (a <code>var</code>-sourced value) raises where it lands and is catchable there. <a href="../guide/02-type-ladder.html#when-a-mismatch-is-caught">The Type Ladder</a> walks through both halves, and <a href="../guide/13-strict-checking.html">Types That Fail Early</a> collects the whole story. The third kind of error (the terminal kind) is next.</p>
 <h2 id="terminal-errors-execution-budget-memory-cap-are-uncatchable-by-design">Terminal errors: execution budget &amp; memory cap are UNCATCHABLE by design<a class="hlink" href="#terminal-errors-execution-budget-memory-cap-are-uncatchable-by-design" aria-label="link">&#8203;</a></h2>
-<p>Every <code>execute()</code>/coroutine <code>next()</code> call has a wall-clock budget: <strong>default 5.0 seconds</strong> (<code>engine::execution_budget(seconds)</code>; <code>0</code> disables). When it trips, the error is <strong>terminal</strong>: script <code>catch</code> handlers are skipped all the way out, so a runaway script can never swallow its own kill signal and livelock the host.</p>
+<p>Every <code>execute()</code>/coroutine <code>next()</code> call has a wall-clock budget: <strong>default 5.0 seconds</strong> (<code>engine::execution_budget(seconds)</code>; <code>0</code> disables). When it trips, the error is <strong>terminal</strong>: every <code>catch</code>, typed or not, is skipped all the way out, so a runaway script can never swallow its own kill signal and livelock the host.</p>
 <div class="codeblock cb-jai" data-budget="1" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// engine.execution_budget() defaults to 5.0 seconds per execute()
 try {
     while (true) { }

@@ -62,6 +62,7 @@ OLD_TEXTS = [
     r"\[map\]",
     r"\[object\]",
     r"\[function\]",
+    r"catch takes one name and no type",
 ]
 
 

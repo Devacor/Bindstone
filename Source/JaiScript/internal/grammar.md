@@ -357,6 +357,8 @@ loopVariable = "const"? type "&"? IDENTIFIER
 switchStatement = "switch" "(" expression ")" "{" caseClause* "}"
 
 caseClause = ("case" expression | "default") ":" statement* fallthroughStatement?   // a case matches when switchValue == caseValue holds (the language's ==)
+// a case with no statements ahead of another label shares that label's body (the parser gives it a fallthrough); default's
+// body runs after every case's, so a label shares one with default only when default is the last label
 
 fallthroughStatement = "fallthrough" ";"
 
@@ -366,9 +368,12 @@ breakStatement = "break" ";"
 
 continueStatement = "continue" ";"
 
-tryStatement = "try" blockStatement catchClause
+tryStatement = "try" blockStatement catchClause+
 
-catchClause = "catch" ("(" IDENTIFIER ")")? blockStatement
+catchClause = "catch" ("(" ("var" | "auto")? IDENTIFIER ")")? blockStatement      // takes everything: the last clause
+            | "catch" "(" "const"? (type | "error") "&"? IDENTIFIER ")" blockStatement
+// typed clauses are one handler (parser::try_statement): a hidden catch variable, each clause an `if (catch_takes#(v, "Type"))`
+// whose block declares `Type name = catch_value#(v)`, and `throw;` when no clause takes the value
 
 // Expressions (precedence from lowest to highest)
 expression = assignmentExpression
@@ -892,8 +897,9 @@ try {
     print("Caught: {}", e);       // e reads as the message: Something went wrong!
 }
 
-try { throw 42; } catch (e) { int code = e.value; }   // e.value is the thrown value with its type (int 42)
-// e.message, e.file, e.line, e.column, e.stack ("file:line", innermost first); e.value is null for a run-time error
+try { throw 42; } catch (e) { int code = e; }   // e is the thrown value with its type (int 42)
+try { xs[9]; } catch (error e) { e.kind == error_kind::bounds; }   // a run-time error: its message as a string, type_of "error"
+// e.message, e.file, e.line, e.column, e.stack ("file:line", innermost first) on an error and a thrown string, array, map or instance
 
 // Catch without variable
 try {
@@ -951,7 +957,7 @@ string healthLevel = health > 75 ? "healthy" :
    `Type(args)` / `Type{args}` (value semantics).
 10. **Super Access**: `super::` to call parent class methods; `: super(...)`/`: this(...)` for
     constructor delegation (the ONLY initializer-list forms).
-11. **Switch Semantics**: Break-by-default. Use `fallthrough;` for explicit fall-through.
+11. **Switch Semantics**: Break-by-default. Use `fallthrough;` for explicit fall-through; a case with no statements shares the next label's body.
 12. **Visibility**: `public:`/`private:`/`protected:` labels are **enforced at member
     access** on both backends, in two levels: default and
     `public:` = everyone; `private:` = the declaring class and every class derived from

@@ -13893,7 +13893,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 	const bool capture_by_ref_default = proto.default_capture == static_cast<uint8_t>(lambda_expr::capture_default::by_reference);
 
 	const bool uses_instance = proto.uses_instance;
-	const bool captures_this = proto.captures_this || (has_default_capture && uses_instance);
+	bool captures_this = proto.captures_this || (has_default_capture && uses_instance);
 	if (uses_instance && !captures_this) {
 		return raise_(make_error_code(runtime_error_code::capture_undefined_variable), "Lambda capture list does not capture 'this'; use [this], [=] or [&]");
 	}
@@ -14049,6 +14049,11 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 					return raise_from(*src.access_error);
 				}
 				if (src.global) { continue; }   // a global resolves when the lambda runs (KEEP BYTE-PARALLEL with the interpreter)
+				if (!captures_this && detail::default_capture_takes_instance(src, scope)) {
+					captureEnv->define(this_id_, script_value(scope.this_storage->deref()));
+					captures_this = true;
+					continue;
+				}
 				if (src.cell) {
 					if (capture_by_ref_default) {
 						captureEnv->define(var_id, share_env_ref(*src.cell));

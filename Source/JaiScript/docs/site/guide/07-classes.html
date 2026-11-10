@@ -404,19 +404,21 @@ print(Counter::count, " ", Counter::twice(), " ", Counter::ratio, " ", b.next())
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int hp = 1;                                  // a global of the same name
 class Tank {
     int hp = 7;
+    int doubled() { return hp * 2; }
     void probe() {
         auto bare = [this]() { return hp; };        // reads the field when called
         auto copy = [=]() { return hp; };           // the field's value now
         auto live = [&amp;]() { hp += 1; return hp; };  // the live field
-        print("bare {} copy {} live {}", bare(), copy(), live());
+        auto twice = () =&gt; doubled();               // a method, through the captured instance
+        print("bare {} copy {} live {} twice {}", bare(), copy(), live(), twice());
         hp = 100;                                   // the member hides the global
         print("bare {} copy {} global {}", bare(), copy(), ::hp);
     }
 }
 Tank().probe();</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">bare 7 copy 7 live 8
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">bare 7 copy 7 live 8 twice 16
 bare 100 copy 7 global 1</code></pre></div>
-<p><code>[this]</code> captures the instance itself, never a copy, and <code>[]</code> reaches no instance state. Shadowing is legal, so the checker only warns: a local that shadows a field (<code>local 'hp' shadows field 'hp' of class 'Creature'</code>), an outer local, or a global the function already read. A constructor parameter named after the field it sets (<code>C(int hp) { this.hp = hp; }</code>) stays silent.</p>
+<p><code>[this]</code> captures the instance itself, never a copy, and <code>[]</code> reaches no instance state. A bare method call needs the instance: a lambda with <code>[=]</code> or <code>[&amp;]</code>, an arrow function and a <code>function(...)</code> expression capture it for the call as <code>[this]</code> does, and under <code>[]</code> the call is the error <code>Lambda capture list does not capture enclosing name 'doubled'; name it, or use [this], [=] or [&amp;]</code>. Shadowing is legal, so the checker only warns: a local that shadows a field (<code>local 'hp' shadows field 'hp' of class 'Creature'</code>), an outer local, or a global the function already read. A constructor parameter named after the field it sets (<code>C(int hp) { this.hp = hp; }</code>) stays silent.</p>
 <h2 id="methods-as-values">Methods are called, not read<a class="hlink" href="#methods-as-values" aria-label="link">&#8203;</a></h2>
 <p><code>player.heal</code> without parentheses is an error, for script, host and builtin methods (<code>arr.push</code>) alike, at load when the receiver's class is known. To hold a method as a value, bind it with <code>reflect::bind(player, "heal")</code>, which keeps the object alive (<a href="12-reflection.html">Reflection</a>), or wrap the call in a lambda. A field that holds a callable, and a static method, read as values.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Player { int hp = 5; void heal() { hp += 1; } }

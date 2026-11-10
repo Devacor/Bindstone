@@ -5151,6 +5151,11 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                         return *src.access_error;
                     }
                     if (src.global) { continue; }   // a global resolves when the lambda runs (KEEP BYTE-PARALLEL with vm exec_closure)
+                    if (!captures_this && detail::default_capture_takes_instance(src, member_scope_)) {
+                        captureEnv->define(this_id, script_value(member_scope_.this_storage->deref()));
+                        captures_this = true;
+                        continue;
+                    }
                     if (src.cell) {
                         if (capture_by_ref) {
                             captureEnv->define(var_id, share_boxed_slot(*src.cell));

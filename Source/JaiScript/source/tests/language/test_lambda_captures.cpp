@@ -260,6 +260,35 @@ public:
                    "Cannot capture undefined variable 'g'", "[g] of a field without a global keeps its text");
         });
 
+        test("default_capture_in_a_method_calls_a_bare_method", [expect]() {
+            // A default capture that names a method captures the instance, as naming this does; [] captures nothing
+            const std::string cls =
+                "int twice(int a_x) { return -1; }\n"
+                "class Base { int inherited(int a_x) { return a_x + 1000; } }\n"
+                "class C : Base {\n"
+                "  int bonus = 3;\n"
+                "  int twice(int a_x) { return a_x * 2 + bonus; }\n"
+                "  int arrow() { var f = x => x + twice(1); return f(10); }\n"
+                "  int byRef() { var f = [&](int x) { return x + twice(1); }; return f(10); }\n"
+                "  int byCopy() { var f = [=](int x) { return x + twice(1); }; return f(10); }\n"
+                "  int functionForm() { var f = function(x) { return x + twice(1); }; return f(10); }\n"
+                "  int snapshot() { var f = [=]() { return bonus * 100 + twice(0); }; bonus = 4; return f(); }\n"
+                "  int base() { var f = x => inherited(x); return f(1); }\n"
+                "  int hidden() { var f = x => secret(x); return f(1); }\n"
+                "  int local() { var twice = x => 7; var f = x => twice(x); return f(1); }\n"
+                "  var escaping() { return x => twice(x); }\n"
+                "private:\n"
+                "  int secret(int a_x) { return a_x + 50; }\n"
+                "}\n";
+            expect(cls + "C c; `${c.arrow()}|${c.byRef()}|${c.byCopy()}|${c.functionForm()}`", "15|15|15|15", "a bare method call in each default-capture form");
+            expect(cls + "C c; to_string(c.snapshot())", "304", "[=] still copies the field beside the method call");
+            expect(cls + "C c; `${c.base()}|${c.hidden()}|${c.local()}`", "1001|51|7", "inherited, private and a local of the method's name");
+            expect(cls + "var f = C().escaping(); to_string(f(2))", "7", "the lambda keeps the instance");
+            expect("[[warn_mode]];\n" + cls + "class D : C { int none() { var f = [](int x) { return x + twice(1); }; return f(10); } }\n"
+                   "string m = \"\"; try { D().none(); } catch (e) { m = e; } m",
+                   "Lambda capture list does not capture enclosing name 'twice'; name it, or use [this], [=] or [&]", "[] reaches no method");
+        });
+
         test("mutation_through_ref_capture_visible_in_enclosing_scope_with_global", [expect, with_global, report]() {
             const std::string f = "int f() { int a = 1; auto lam = [&]() { a = a + 100; return 0; }; lam(); return a; }";
             expect(with_global + f + report, "101|5", "the enclosing local sees the write, the global does not");

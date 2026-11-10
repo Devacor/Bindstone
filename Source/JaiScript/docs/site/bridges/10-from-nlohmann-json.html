@@ -347,6 +347,7 @@ int main() {
 <tr><td>When writing and reading differ</td><td colspan="2">free <code>to_json</code> and <code>from_json</code></td><td>free <code>save</code> and <code>load</code></td><td colspan="2">member <code>save</code> and <code>load</code></td></tr>
 <tr><td>Text out and back</td><td colspan="2"><code>json j = save; j.dump()</code>, <code>json::parse(text).get&lt;SaveGame&gt;()</code></td><td colspan="3"><code>jai::to_json(*eng, save, 0)</code>, <code>jai::from_json&lt;SaveGame&gt;(*eng, text)</code></td></tr>
 <tr><td>Key order</td><td colspan="2">alphabetical</td><td colspan="2">the order of the calls</td><td>name order</td></tr>
+<tr><td>A type with no conversion</td><td colspan="2">a compile error at the conversion</td><td colspan="3">a compile error where an archive is handed the type; a forgotten <code>friend jai::access;</code> is named in the message</td></tr>
 <tr><td>Reflected and visible to scripts</td><td colspan="4">no</td><td>yes (<a href="../embedding/02-dynamic-binder.html">dynamic_binder</a>)</td></tr>
 </tbody></table></div>
 <p>Both nlohmann forms write:</p>

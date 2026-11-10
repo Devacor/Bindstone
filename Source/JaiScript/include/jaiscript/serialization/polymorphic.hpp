@@ -26,6 +26,8 @@
 namespace jai {
 namespace serialization {
 template<typename T> class construct;
+[[noreturn]] void throw_not_serializable(const char* type_name);
+[[noreturn]] void throw_not_deserializable(const char* type_name);
 }
 }
 
@@ -197,8 +199,13 @@ private:
     static save_fn_t make_save_fn() {
         return [](any_archive_writer& ar, const void* ptr) {
             auto& obj = *static_cast<const T*>(ptr);
+            // a type registered only to bind it has no route: its error waits for a save that reaches it
             ar.dispatch([&](auto& concrete_ar) {
-                concrete_ar(obj);
+                if constexpr (std::remove_reference_t<decltype(concrete_ar)>::template has_route<T>()) {
+                    concrete_ar(obj);
+                } else {
+                    throw_not_serializable(typeid(T).name());
+                }
             });
         };
     }
@@ -280,11 +287,16 @@ private:
                     // Register before loading properties so subtree back-references
                     // (weak_ptr / shared_ptr pointing back into this object) resolve.
                     concrete_ar.register_deserialized_shared(id, ptr);
-                    concrete_ar(*ptr);
+                    if constexpr (std::remove_reference_t<decltype(concrete_ar)>::template has_route<T>()) {
+                        concrete_ar(*ptr);
+                    } else {
+                        throw_not_deserializable(typeid(T).name());
+                    }
                     return std::static_pointer_cast<void>(ptr);
                 });
             };
         } else {
+            no_route_to_construct_polymorphic<T>();
             return nullptr;
         }
     }

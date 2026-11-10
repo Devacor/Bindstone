@@ -10,6 +10,16 @@ void throw_archive_expected(const char* expected, std::string_view found) {
     throw serialization_error(std::string("Expected ") + expected + " in the archive, found " + std::string(found));
 }
 
+void throw_not_serializable(const char* type_name) {
+    throw serialization_error("Type '" + std::string(type_name) + "' is not serializable. "
+        "Add save/load, serialize, property_owner, or ADL functions — or mark the property transient.");
+}
+
+void throw_not_deserializable(const char* type_name) {
+    throw serialization_error("Type '" + std::string(type_name) + "' is not deserializable. "
+        "Add save/load, serialize, property_owner, or ADL functions — or mark the property transient.");
+}
+
 void throw_archive_value_range(std::string_view value_text, const char* field) {
     throw serialization_error("Archive value " + std::string(value_text) + " does not fit " + field);
 }

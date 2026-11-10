@@ -439,7 +439,7 @@ gate_wasm() {
 # The public headers (include/jaiscript less detail/, vm/, testing/ and net/openssl_tls.hpp, which needs OpenSSL's) each
 # compile alone, the pages whose samples build a whole program compile with the includes they show
 # (docs/site_tools/check_sample_includes.py), and tools/ci/host_warnings.cpp, a host file over the headers the embedding pages name, builds under
-# -Wall -Wextra -Werror: with HEADER_CXX, else with each of g++ and clang++ found (on Windows, Visual Studio's clang++ when
+# -Wall -Wextra -Werror, and each case of tools/ci/must_not_compile.cpp fails to compile with its message: with HEADER_CXX, else with each of g++ and clang++ found (on Windows, Visual Studio's clang++ when
 # none is on PATH). JAI_BUILD_JOBS sets the parallel compiles (default 4).
 header_compilers() {
 	local c vswhere install
@@ -451,6 +451,33 @@ header_compilers() {
 	install="$("$vswhere" -latest -products '*' -property installationPath 2>/dev/null | tr -d '\r' | head -n 1)"
 	[ -n "$install" ] && [ -f "$install/VC/Tools/Llvm/x64/bin/clang++.exe" ] && echo "$install/VC/Tools/Llvm/x64/bin/clang++.exe"
 	return 0
+}
+
+# tools/ci/must_not_compile.cpp builds with no case, and with each case it names fails with that case's text
+must_not_compile() {
+	local cxx="$1" work="$2" source="$ROOT/tools/ci/must_not_compile.cpp" failed=0 number text cases=()
+	mapfile -t cases < <(sed -n 's|^// must_not_compile \([0-9][0-9]*\): \(.*\)$|\1:\2|p' "$source" | tr -d '\r')
+	[ "${#cases[@]}" -gt 0 ] || { echo "::error::tools/ci/must_not_compile.cpp names no case"; return 1; }
+	printf '%s\n' 0 "${cases[@]%%:*}" | xargs -P "${JAI_BUILD_JOBS:-4}" -I{} "$BASH" -c \
+		'"$1" -std=c++20 -I"$2" -fsyntax-only -DJAI_MUST_NOT_COMPILE="$3" "$4" > "$5/must_not_compile_$3.log" 2>&1; echo $? > "$5/must_not_compile_$3.rc"' \
+		_ "$cxx" "$ROOT/include" {} "$source" "$work"
+	if [ "$(cat "$work/must_not_compile_0.rc")" != 0 ]; then
+		failed=1
+		echo "::error::tools/ci/must_not_compile.cpp does not compile with no case ($cxx)"
+		grep -m 3 -E "error" "$work/must_not_compile_0.log" | cut -c1-240
+	fi
+	for text in "${cases[@]}"; do
+		number="${text%%:*}"; text="${text#*:}"
+		if [ "$(cat "$work/must_not_compile_$number.rc")" = 0 ]; then
+			failed=1
+			echo "::error::must_not_compile case $number compiles with $cxx (expected: $text)"
+		elif ! grep -qF "$text" "$work/must_not_compile_$number.log"; then
+			failed=1
+			echo "::error::must_not_compile case $number fails with $cxx without its text: $text"
+			grep -m 3 -E "error" "$work/must_not_compile_$number.log" | cut -c1-240
+		fi
+	done
+	return "$failed"
 }
 
 gate_headers() {
@@ -478,6 +505,8 @@ gate_headers() {
 			echo "::error::a page's C++ samples need an include the page does not show ($cxx)"
 			grep -A 6 "^FAIL" "$work/samples.log" | head -14 | cut -c1-240
 		fi
+		echo "headers: $cxx, the programs the serialization headers reject"
+		must_not_compile "$cxx" "$work" || failed=1
 		echo "headers: $cxx, the host file under -Wall -Wextra -Werror"
 		if ! "$cxx" -std=c++20 -I"$ROOT/include" -Wall -Wextra -Werror -O2 -c "$ROOT/tools/ci/host_warnings.cpp" -o "$work/host_warnings.o" > "$work/host.log" 2>&1; then
 			failed=1
@@ -487,7 +516,7 @@ gate_headers() {
 	done
 	rm -rf "$work"
 	[ "$failed" = 0 ] || exit 1
-	echo "headers: every public header compiles alone, the samples need no include their page hides, and the host file builds warning-free"
+	echo "headers: every public header compiles alone, the samples need no include their page hides, the host file builds warning-free and the rejected programs fail with their messages"
 }
 
 gate_embed_quickstart() {

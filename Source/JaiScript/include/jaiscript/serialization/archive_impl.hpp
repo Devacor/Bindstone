@@ -78,6 +78,46 @@ namespace serialization {
 [[noreturn]] void throw_archive_value_range(std::string_view value_text, const char* field);
 [[noreturn]] void throw_archive_value_range(int64_t value, const char* field);
 [[noreturn]] void throw_archive_value_range(uint64_t value, const char* field);
+// A value whose route only run time settles (a property, a registered type, a pointer to a polymorphic base) and has none
+[[noreturn]] void throw_not_serializable(const char* type_name);
+[[noreturn]] void throw_not_deserializable(const char* type_name);
+
+#define JAI_DETAIL_SERIALIZATION_ROUTES \
+    "give the type a member serialize(Archive&), or save(Archive&) and load(Archive&) (non-public ones with 'friend jai::access;'), " \
+    "a free serialize, save or load the archive finds by argument-dependent lookup, or JAI_PROPERTY members of a jai::property_owner"
+#define JAI_DETAIL_UNREACHABLE_MEMBER(name) \
+    "the type declares " name "() but jai::access cannot reach it: add 'friend jai::access;' to the class (or make the function public). " \
+    "The archive calls " name "(Archive&) or " name "(Archive&, std::uint32_t); a " name " member of any other shape is not an archive function"
+#define JAI_DETAIL_MISSHAPEN_MEMBER(name) \
+    "the type's public member " name " is not an archive function (the archive calls " name "(Archive&) or " name "(Archive&, std::uint32_t)) " \
+    "and the type has no other serialization route: " JAI_DETAIL_SERIALIZATION_ROUTES
+
+// The compile errors for a type T an archive is handed and has no route for; the compiler's instantiation notes name T
+template<typename T>
+constexpr void no_route_to_write() {
+    using serialization_traits::member_name_verdict;
+    static_assert(serialization_traits::serialize_member_verdict_v<T> != member_name_verdict::unreachable, JAI_DETAIL_UNREACHABLE_MEMBER("serialize"));
+    static_assert(serialization_traits::save_member_verdict_v<T> != member_name_verdict::unreachable, JAI_DETAIL_UNREACHABLE_MEMBER("save"));
+    static_assert(serialization_traits::serialize_member_verdict_v<T> != member_name_verdict::not_an_archive_function, JAI_DETAIL_MISSHAPEN_MEMBER("serialize"));
+    static_assert(serialization_traits::save_member_verdict_v<T> != member_name_verdict::not_an_archive_function, JAI_DETAIL_MISSHAPEN_MEMBER("save"));
+    static_assert(serialization_traits::serialize_member_verdict_v<T> != member_name_verdict::absent || serialization_traits::save_member_verdict_v<T> != member_name_verdict::absent,
+        "the archive cannot write this type, it has no serialization route: " JAI_DETAIL_SERIALIZATION_ROUTES);
+}
+
+template<typename T>
+constexpr void no_route_to_read() {
+    using serialization_traits::member_name_verdict;
+    static_assert(serialization_traits::serialize_member_verdict_v<T> != member_name_verdict::unreachable, JAI_DETAIL_UNREACHABLE_MEMBER("serialize"));
+    static_assert(serialization_traits::load_member_verdict_v<T> != member_name_verdict::unreachable, JAI_DETAIL_UNREACHABLE_MEMBER("load"));
+    static_assert(serialization_traits::serialize_member_verdict_v<T> != member_name_verdict::not_an_archive_function, JAI_DETAIL_MISSHAPEN_MEMBER("serialize"));
+    static_assert(serialization_traits::load_member_verdict_v<T> != member_name_verdict::not_an_archive_function, JAI_DETAIL_MISSHAPEN_MEMBER("load"));
+    static_assert(serialization_traits::serialize_member_verdict_v<T> != member_name_verdict::absent || serialization_traits::load_member_verdict_v<T> != member_name_verdict::absent,
+        "the archive cannot read this type, it has no serialization route: " JAI_DETAIL_SERIALIZATION_ROUTES);
+}
+
+#undef JAI_DETAIL_MISSHAPEN_MEMBER
+#undef JAI_DETAIL_UNREACHABLE_MEMBER
+#undef JAI_DETAIL_SERIALIZATION_ROUTES
 [[noreturn]] void throw_archive_value_range(double value, const char* field);
 
 template<typename T>
@@ -406,7 +446,40 @@ private:
     template<typename T> using has_adl_save = adl_detect::has_adl_save<Derived, T>;
     template<typename T> using has_adl_serialize = adl_detect::has_adl_serialize<Derived, T>;
 
+    template<template<typename...> class Pack, typename... Ts>
+    static constexpr bool has_route_for_each(const Pack<Ts...>*) { return (has_route<Ts>() && ...); }
+
 public:
+    // Whether operator() has a route for T it can name at compile time, in the order it tries them. A pointer to a
+    // polymorphic type counts: its dynamic type's registered route writes it. Asked by the callers whose T may
+    // legitimately have none (a transient property, a type registered only to bind it); handing the archive a T
+    // without one is a compile error.
+    template<typename T>
+    static constexpr bool has_route() {
+        using namespace serialization_traits;
+        if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string>) {
+            return true;
+        } else if constexpr (has_save_method<T>::value || has_serialize_method<T>::value || has_property_mgr<T>::value) {
+            return true;
+        } else if constexpr (is_std_shared_ptr_v<T> || is_std_weak_ptr_v<T>) {
+            return std::is_polymorphic_v<typename T::element_type> || has_route<typename T::element_type>();
+        } else if constexpr (is_std_unique_ptr_v<T>) {
+            return has_route<typename T::element_type>();
+        } else if constexpr (is_std_pair_v<T> || is_std_variant_v<T> || is_std_tuple_v<T>) {
+            return has_route_for_each(static_cast<const T*>(nullptr));
+        } else if constexpr (is_std_optional_v<T> || is_std_array_v<T>) {
+            return has_route<typename T::value_type>();
+        } else if constexpr (is_map_like_v<T>) {
+            return has_route<typename T::key_type>() && has_route<typename T::mapped_type>();
+        } else if constexpr (is_set_like_v<T> || is_sequence_container_v<T>) {
+            return has_route<typename T::value_type>();
+        } else if constexpr (is_jai_property_v<T>) {
+            return has_route<property_element_t<T>>();
+        } else {
+            return has_adl_serialize<T>::value || has_adl_save<T>::value;
+        }
+    }
+
     // operator() for types with member save method
     // Prefers versioned save(Archive&, uint32_t), falls back to simple save(Archive&)
     // Context-aware: wraps in begin_object/end_object when called from array/root context
@@ -675,9 +748,7 @@ public:
                 self()->end_object();
             }
         } else {
-            throw serialization_error(
-                "Type '" + std::string(typeid(T).name()) + "' is not serializable. "
-                "Add save/load, serialize, property_owner, or ADL functions — or mark the property transient.");
+            no_route_to_write<T>();
         }
     }
 
@@ -791,8 +862,13 @@ private:
                     "' through pointer-to-base '" + typeid(elem_type).name() +
                     "'. Register it with jai::registrar<T, Context, jai::bases<Base>>(\"Name\") or derive from jai::property_owner<T, Base>.");
             }
+            if constexpr (!has_route<elem_type>()) {
+                throw_not_serializable(typeid(elem_type).name());
+            }
         }
-        self()->serialize("$val", *value);
+        if constexpr (!std::is_polymorphic_v<elem_type> || has_route<elem_type>()) {
+            self()->serialize("$val", *value);
+        }
     }
 
 public:
@@ -1012,6 +1088,41 @@ private:
     // ADL-findable load(Archive&, T&) / serialize(Archive&, T&) free functions
     template<typename T> using has_adl_load = adl_detect::has_adl_load<Derived, T>;
     template<typename T> using has_adl_serialize = adl_detect::has_adl_serialize<Derived, T>;
+
+    template<template<typename...> class Pack, typename... Ts>
+    static constexpr bool has_route_for_each(const Pack<Ts...>*) { return (has_route<Ts>() && ...); }
+
+public:
+    // The reader's side of archive_writer_impl::has_route: a pointer's element must also be one a load can construct
+    template<typename T>
+    static constexpr bool has_route() {
+        using namespace serialization_traits;
+        if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string>) {
+            return true;
+        } else if constexpr (has_load_method<T>::value || has_serialize_method<T>::value || has_property_mgr<T>::value) {
+            return true;
+        } else if constexpr (is_std_vector_v<T> || is_std_array_v<T> || is_std_optional_v<T>) {
+            return has_route<typename T::value_type>();
+        } else if constexpr (is_std_map_v<T> || is_std_unordered_map_v<T>) {
+            return has_route<typename T::key_type>() && has_route<typename T::mapped_type>();
+        } else if constexpr (is_set_like_v<T>) {
+            return has_route<typename T::key_type>();
+        } else if constexpr (is_std_pair_v<T> || is_std_variant_v<T> || is_std_tuple_v<T>) {
+            return has_route_for_each(static_cast<const T*>(nullptr));
+        } else if constexpr (is_std_shared_ptr_v<T> || is_std_weak_ptr_v<T>) {
+            using elem_type = typename T::element_type;
+            return std::is_polymorphic_v<elem_type> || has_load_and_construct<elem_type>::value ||
+                (::jai::serialization::load_default_constructible<elem_type> && has_route<elem_type>());
+        } else if constexpr (is_std_unique_ptr_v<T>) {
+            return ::jai::serialization::load_default_constructible<typename T::element_type> && has_route<typename T::element_type>();
+        } else if constexpr (is_jai_property_v<T>) {
+            return has_route<property_element_t<T>>();
+        } else {
+            return has_adl_serialize<T>::value || has_adl_load<T>::value;
+        }
+    }
+
+private:
 
     // Helper to load variant alternatives by index
     template<typename Variant, std::size_t I = 0>
@@ -1246,7 +1357,9 @@ public:
                 value = ::jai::serialization::make_unique_default_for_load<elem_type>();
                 self()->serialize("$val", *value);
             } else {
-                throw serialization_error("Cannot deserialize unique_ptr<T>: type is not default constructible");
+                static_assert(::jai::serialization::load_default_constructible<elem_type>,
+                    "the archive loads a std::unique_ptr's object into a default-constructed one: give the type a default constructor "
+                    "(a non-public one with 'friend jai::access;')");
             }
             self()->end_object();
         }
@@ -1294,9 +1407,7 @@ public:
             load(*self(), value);
             self()->end_object();
         } else {
-            throw serialization_error(
-                "Type '" + std::string(typeid(T).name()) + "' is not deserializable. "
-                "Add save/load, serialize, property_owner, or ADL functions — or mark the property transient.");
+            no_route_to_read<T>();
         }
     }
 
@@ -1472,10 +1583,20 @@ private:
                 ::jai::access::load_and_construct(*self(), c);
                 self()->end_object();
             } else if constexpr (::jai::serialization::load_default_constructible<elem_type>) {
-                result = ::jai::serialization::make_default_for_load<elem_type>();
-                self()->register_deserialized_shared(id, result);
-                self()->serialize("$val", *result);
+                if constexpr (!std::is_polymorphic_v<elem_type> || has_route<elem_type>()) {
+                    result = ::jai::serialization::make_default_for_load<elem_type>();
+                    self()->register_deserialized_shared(id, result);
+                    self()->serialize("$val", *result);
+                } else {
+                    throw_not_deserializable(typeid(elem_type).name());
+                }
             } else {
+                // a polymorphic base loads through its $type; only a load that names none reaches here
+                if constexpr (std::is_polymorphic_v<elem_type>) {
+                    no_route_to_construct_polymorphic<elem_type>();
+                } else {
+                    no_route_to_construct<elem_type>();
+                }
                 throw serialization_error("Cannot deserialize shared_ptr<" + std::string(typeid(elem_type).name()) + ">: type is not default constructible and has no load_and_construct");
             }
         }

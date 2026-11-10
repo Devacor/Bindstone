@@ -123,6 +123,94 @@ std::unique_ptr<T> make_unique_default_for_load() {
 
 } // namespace serialization
 
+// Whether a class declares or inherits a member of a serialization name at any access level, and whether that member is
+// a plain public one. The archives ask only where a type has no route they can call, to tell a forgotten
+// `friend jai::access;` from a type with no serialization at all.
+namespace serialization_traits {
+
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(push)
+#pragma warning(disable: 4250 4623 4624 4625 4626 5026 5027)
+#endif
+
+#define JAI_DETAIL_MEMBER_NAME_PROBE(member) \
+	struct member##_name_fallback { void member(); }; \
+	template<typename T> struct member##_name_probe : T, member##_name_fallback {}; \
+	/* naming the member through the probe is ambiguous exactly when T has one */ \
+	template<typename T, typename = void> struct member##_name_found : std::true_type {}; \
+	template<typename T> struct member##_name_found<T, std::void_t<decltype(&member##_name_probe<T>::member)>> : std::false_type {}; \
+	template<typename T, bool = std::is_class_v<T> && !std::is_final_v<T>> struct declares_##member : std::false_type {}; \
+	template<typename T> struct declares_##member<T, true> : member##_name_found<T> {}; \
+	/* one public member that is neither a template nor overloaded: its address needs no friend */ \
+	template<typename T, typename = void> struct has_plain_public_##member : std::false_type {}; \
+	template<typename T> struct has_plain_public_##member<T, std::void_t<decltype(&T::member)>> : std::true_type {}
+
+JAI_DETAIL_MEMBER_NAME_PROBE(serialize);
+JAI_DETAIL_MEMBER_NAME_PROBE(save);
+JAI_DETAIL_MEMBER_NAME_PROBE(load);
+JAI_DETAIL_MEMBER_NAME_PROBE(load_and_construct);
+
+#undef JAI_DETAIL_MEMBER_NAME_PROBE
+
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(pop)
+#endif
+
+// What a type with no callable route says about one serialization name
+enum class member_name_verdict { absent, unreachable, not_an_archive_function };
+
+template<typename Declares, typename PlainPublic>
+inline constexpr member_name_verdict member_name_verdict_of =
+	!Declares::value ? member_name_verdict::absent :
+	PlainPublic::value ? member_name_verdict::not_an_archive_function : member_name_verdict::unreachable;
+
+template<typename T> inline constexpr member_name_verdict serialize_member_verdict_v = member_name_verdict_of<declares_serialize<T>, has_plain_public_serialize<T>>;
+template<typename T> inline constexpr member_name_verdict save_member_verdict_v = member_name_verdict_of<declares_save<T>, has_plain_public_save<T>>;
+template<typename T> inline constexpr member_name_verdict load_member_verdict_v = member_name_verdict_of<declares_load<T>, has_plain_public_load<T>>;
+template<typename T> inline constexpr bool declares_load_and_construct_v = declares_load_and_construct<T>::value;
+
+// Stands for any archive and any construct<U>, to ask whether jai::access can call the load_and_construct a class
+// declares or inherits, whichever class that one constructs
+struct any_load_and_construct_argument { template<typename U> operator U&() const; };
+template<typename T, typename = void>
+struct reaches_load_and_construct : std::false_type {};
+template<typename T>
+struct reaches_load_and_construct<T, std::void_t<decltype(::jai::access::load_and_construct<T>(
+	std::declval<any_load_and_construct_argument&>(), std::declval<any_load_and_construct_argument&>()))>> : std::true_type {};
+
+// A class whose own load_and_construct, or the nearest base's, is closed to jai::access
+template<typename T>
+inline constexpr bool load_and_construct_unreachable_v = declares_load_and_construct_v<T> && !reaches_load_and_construct<T>::value;
+
+} // namespace serialization_traits
+
+namespace serialization {
+
+#define JAI_DETAIL_UNREACHABLE_LOAD_AND_CONSTRUCT \
+	"the type declares load_and_construct() but jai::access cannot reach it: add 'friend jai::access;' to the class (or make the function public)"
+
+// The compile error for a type T an archive must construct on a load and cannot
+template<typename T>
+constexpr void no_route_to_construct() {
+	static_assert(!serialization_traits::load_and_construct_unreachable_v<T>, JAI_DETAIL_UNREACHABLE_LOAD_AND_CONSTRUCT);
+	static_assert(!serialization_traits::declares_load_and_construct_v<T> || serialization_traits::load_and_construct_unreachable_v<T>,
+		"the type's load_and_construct() does not construct it: the archive calls load_and_construct(Archive&, jai::serialization::construct<T>&) "
+		"with T the type it loads, and an inherited one constructs its own class");
+	static_assert(serialization_traits::declares_load_and_construct_v<T>,
+		"the archive cannot construct this type on a load: give it a default constructor (a non-public one with 'friend jai::access;') "
+		"or a static load_and_construct(Archive&, jai::serialization::construct<T>&)");
+}
+
+// A polymorphic type may load through its subclasses alone, so only a load_and_construct jai::access cannot reach is an error
+template<typename T>
+constexpr void no_route_to_construct_polymorphic() {
+	static_assert(!serialization_traits::load_and_construct_unreachable_v<T>, JAI_DETAIL_UNREACHABLE_LOAD_AND_CONSTRUCT);
+}
+
+#undef JAI_DETAIL_UNREACHABLE_LOAD_AND_CONSTRUCT
+
+} // namespace serialization
+
 namespace serialization_traits {
 
 template<typename T> struct is_std_vector : std::false_type {};

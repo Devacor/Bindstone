@@ -880,6 +880,10 @@ public:
 			// [/sample]
 			to_binary_block.finish();
 
+			Spawner byValue = jai::from_json<Spawner>(*eng, jai::to_json(*eng, *gate));
+			check_eq((int64_t)7, byValue.level.get(), "the page's by-value load");
+			check_eq(std::string("east-gate"), byValue.id.get());
+
 			expect_script(page, "binder-smart", eng);
 			expect_script(page, "binder-smart-reload", eng);
 			expect_script(page, "binder-connect", eng);

@@ -230,7 +230,7 @@ public:
 
 class Inventory : public jai::property_owner&lt;Inventory&gt; {
 public:
-    JAI_PROPERTY((std::vector&lt;std::shared_ptr&lt;Item&gt;&gt;), items);
+    JAI_PROPERTY((std::vector&lt;Item&gt;), items);
     JAI_PROPERTY((int), capacity, 20);
 };
 
@@ -243,10 +243,10 @@ public:
 };
 
 auto eng = jai::engine::make();
-auto player = std::make_shared&lt;Player&gt;();
+Player player;
 std::string text = jai::to_json(*eng, player);
-auto loaded = jai::from_json&lt;std::shared_ptr&lt;Player&gt;&gt;(*eng, text);</code></pre></div>
-<p>A <code>property_owner</code> cannot be moved, so the player and the items are held through <code>std::shared_ptr</code>. Properties are written in name order, a property the file lacks keeps its initializer, and <code>hpFraction</code> is recomputed by the code that uses it or in a <code>load</code> the class adds (<a href="#the-property-route">The property route</a>).</p>
+Player loaded = jai::from_json&lt;Player&gt;(*eng, text);</code></pre></div>
+<p>The types are held as Cereal's were: the items by value in their vector, the player by value, the inventory through its <code>shared_ptr</code>. Properties are written in name order, a property the file lacks keeps its initializer, and <code>hpFraction</code> is recomputed by the code that uses it or in a <code>load</code> the class adds (<a href="#the-property-route">The property route</a>).</p>
 </div>
 <div class="tab-panel" id="conversion-free" role="tabpanel" aria-labelledby="conversion-tab-free" tabindex="0">
 <p>Cereal's free <code>serialize(Archive&amp;, T&amp;)</code> and <code>save</code> / <code>load</code> pairs port the same way: free templates beside each type, found by argument-dependent lookup.</p>
@@ -273,7 +273,7 @@ void load(Archive&amp; ar, Player&amp; player) {
 auto eng = jai::engine::make();
 std::string text = jai::to_json(*eng, player);
 Player loaded = jai::from_json&lt;Player&gt;(*eng, text);</code></pre></div>
-<p>A root saved through free functions sits under <code>"value0"</code>: <code>{"value0": {"name": "Vex", "hp": 40, "inventory": {"$id": 1, "$val": {...}}}}</code>.</p>
+<p>The root is written as the member functions write it: <code>{"name": "Vex", "hp": 40, "inventory": {"$id": 1, "$val": {...}}}</code>.</p>
 </div>
 </div>
 <p>The gate existed for Cereal files written before <code>capacity</code> did. Those files reach JaiScript through
@@ -369,9 +369,9 @@ public:
     JAI_TRANSIENT_PROPERTY((float), hpFraction, 1.0f);
 };
 
-auto player = std::make_shared&lt;Player&gt;();
+Player player;
 std::string json = jai::to_json(*eng, player);
-auto loaded = jai::from_json&lt;std::shared_ptr&lt;Player&gt;&gt;(*eng, json);</code></pre></div>
+Player loaded = jai::from_json&lt;Player&gt;(*eng, json);</code></pre></div>
 <ul>
 <li>A load reads the properties the record and the class share. A property the record lacks keeps its
 initializer, and one the class no longer declares is skipped, so adding or removing a <code>JAI_PROPERTY</code>
@@ -381,8 +381,9 @@ needs no migration code.</li>
 <li><code>property_owner&lt;Burn, Effect&gt;</code> records <code>Burn</code>'s name and its edge to
 <code>Effect</code>, so no registrar is needed. The name is the bare class name;
 <code>JAI_PROPERTY_OWNER_AS(Burn, "Burn")</code> pins it.</li>
-<li>A <code>property_owner</code> cannot be moved (its property manager points at its members), so a root loads
-through a <code>std::shared_ptr</code>.</li>
+<li>A <code>property_owner</code> copies and moves as its members do, so it is held by value, in a container or
+through a pointer. By value it is written as its static type; a derived object behind a base keeps its
+<code>$type</code> through a <code>std::shared_ptr</code>, as the effects do.</li>
 <li>Members that are not properties are not saved. A class that needs more keeps a <code>save</code> /
 <code>load</code> pair, which takes precedence, and calls <code>save_owned_properties(ar)</code> and
 <code>load_owned_properties(ar)</code> in it for every level's properties

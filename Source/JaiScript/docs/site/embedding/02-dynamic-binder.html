@@ -286,7 +286,7 @@ again-&gt;spawn_wave();   // receivers persist in binary too</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave logged</code></pre></div>
 <ul>
 <li><strong>Which receivers save.</strong> Script-text receivers persist. Function receivers (script lambdas and C++ callbacks) are runtime-only and are skipped without error.</li>
-<li><strong><code>property_owner</code> types load as <code>shared_ptr</code>.</strong> Their property managers point into the object, so the types cannot move: <code>from_json&lt;Spawner&gt;</code> by value does not compile.</li>
+<li><strong>By value or by pointer.</strong> A <code>property_owner</code> copies and moves, so <code>jai::from_json&lt;Spawner&gt;(*eng, jai::to_json(*eng, *gate))</code> returns one by value: its properties sit flat at the root, under its static type. A <code>shared_ptr</code> keeps identity and a derived object&#x27;s <code>$type</code>.</li>
 <li><strong>Across releases.</strong> JSON is the readable form for debugging and diffs, binary the compact one. Fields are found by name, so adding or removing one needs no migration, but neither layout is promised to load across 0.x releases (<a href="../stability.html">Stability</a>).</li>
 </ul>
 <p><a href="08-serialization.html">Serialization</a> covers versioning, hooks, <code>$ref</code> aliasing and custom archives.</p>

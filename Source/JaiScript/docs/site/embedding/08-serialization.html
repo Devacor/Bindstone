@@ -150,7 +150,7 @@ binary: 114 bytes, hero=Alice</code></pre></div>
 <ul>
 <li>The third argument of <code>to_json</code> is the indent: 2 by default, 0 for one line.</li>
 <li>Also: <code>to_binary_string</code> / <code>from_binary_string</code>, <code>to_base64</code> / <code>from_base64</code>, and a <code>Context&amp;</code> overload of each (<code>jai::from_json&lt;T&gt;(*eng, json, ctx)</code>) that hands a user context to nested <code>save</code> and <code>load</code> calls as <code>ar.get_user_context&lt;Context&gt;()</code>.</li>
-<li>A load that returns <code>T</code> by value needs a movable <code>T</code>. A <code>property_owner</code> deletes its move constructor (its property manager points at its members), so it loads as <code>jai::from_json&lt;std::shared_ptr&lt;T&gt;&gt;</code>, which also keeps a derived object&#x27;s <code>$type</code>.</li>
+<li>A load that returns <code>T</code> by value needs a default-constructible, movable <code>T</code>; a <code>property_owner</code> is both. <code>jai::from_json&lt;std::shared_ptr&lt;T&gt;&gt;</code> keeps a derived object&#x27;s <code>$type</code>.</li>
 <li>Every failure in either direction throws <code>jai::serialization_error</code>, a <code>jai::runtime_error</code>.</li>
 </ul>
 <h3 id="dispatch-priority-cereal-style-provide-either-serialize-or-save-load">Dispatch priority<a class="hlink" href="#dispatch-priority-cereal-style-provide-either-serialize-or-save-load" aria-label="link">&#8203;</a></h3>

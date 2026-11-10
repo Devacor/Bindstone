@@ -182,6 +182,14 @@ silent after disconnect: true</code></pre></div>
 <li><strong>A lambda</strong> resolves the program-scope names it calls when it runs: <code>[=](int w) -&gt; void { on_wave(w); }</code> reaches a reloaded <code>on_wave</code>.</li>
 <li><strong>A named function passed directly</strong> (<code>connect("hud", on_wave)</code>) keeps the body it had when connected. Wrap it in a lambda, or re-run the connect, to follow reloads.</li>
 </ul>
+<h3 id="copies-and-moves">Copies and moves<a class="hlink" href="#copies-and-moves" aria-label="link">&#8203;</a></h3>
+<p>A <code>signal_emitter</code> neither copies nor moves. The emitter <code>JAI_SIGNAL_PROPERTY</code> declares (a <code>jai::member_signal_emitter</code>) and the one inside an <code>observable_property</code> follow the <code>property_owner</code> that holds them:</p>
+<ul>
+<li><strong>A move</strong> takes the receivers: they stay connected and run when the new object emits, and the moved-from object emits to nobody. Move assignment lets go of the target&#x27;s receivers first.</li>
+<li><strong>A copy</strong> keeps the script engine and parameter names and starts with no receivers. Copy assignment leaves the target&#x27;s receivers connected, and an observable property&#x27;s receivers see the new value.</li>
+<li>The receivers an owner holds through <code>track(...)</code>, and the script receivers its property manager keeps, move with it and are not copied.</li>
+<li>A receiver that captured the old object&#x27;s address still holds that address. Reconnect one that reaches back into its owner.</li>
+</ul>
 <h3 id="connections-that-save">Connections that save<a class="hlink" href="#connections-that-save" aria-label="link">&#8203;</a></h3>
 <p><code>JAI_SIGNAL_PROPERTY</code> gives the signal a hidden property that serializes with the owner&#x27;s other properties, in JSON or binary.</p>
 <ul>

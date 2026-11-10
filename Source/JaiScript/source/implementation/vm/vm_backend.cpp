@@ -8553,7 +8553,9 @@ JAI_FORCEINLINE vm_backend::frame& vm_backend::raw_push(frame& f, const chunk::c
 	rec.f.window_live = 0;
 	rec.f.raw = true;
 	const size_t n = callee_loop.cells.size();
-	std::memset(static_cast<void*>(ncs.cells.data()), 0, (n <= 8 ? 8 : n) * sizeof(cell_word));
+	// a constant size, so the common small frame clears with inline stores
+	if (n <= 8) { std::memset(static_cast<void*>(ncs.cells.data()), 0, 8 * sizeof(cell_word)); }
+	else { std::memset(static_cast<void*>(ncs.cells.data()), 0, n * sizeof(cell_word)); }
 	const size_t argc = cc.args.size();
 	for (size_t i = 0; i < argc; ++i) {
 		const chunk::cell_loop::call_arg& a = cc.args[i];
@@ -10831,11 +10833,11 @@ op_status vm_backend::index_store_fused_rows(frame& f, const vm_instruction& ins
 		if (node && !node->is_typed() && index >= 0 && index < static_cast<script_int>(node->size())) {
 			auto container_type_info = container.get_type_info();
 			type_info_ptr element_type = container_type_info ? container_type_info->element_type() : nullptr;
-			// Plain-scalar in-place lane: no element type -> no conversion -> NO user code
+			// Plain-scalar in-place lane: no element type, or var -> no conversion -> NO user code
 			// can run, so the handle pin and the value pre-copy below are dead hedges.
 			// Same-storage-kind scalar rhs writes the element payload in place and carries
 			// tag+engine exactly like clone_for_assignment's copy did (identical post-state).
-			if (!element_type) {
+			if (!element_type || element_type->base_type == script_value_type::jai_any_type) {
 				const script_value& rhs_peek = value_operand ? value_ptr->deref() : stack_.back().deref();
 				const size_t ri = rhs_peek.raw_storage_index();
 				if (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT) {

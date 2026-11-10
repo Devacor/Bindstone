@@ -9,6 +9,7 @@ docs/site_tools/check_leakage.py	provenance	(r"	the site leak checker's own patt
 docs/site_tools/check_leakage.py	ledger	(r"	the site leak checker's own patterns
 docs/site_tools/check_leakage.py	agent-name	(r"	the site leak checker's own patterns
 docs/site/embedding/11-performance.html	iso-date	<tr><td><strong>	the date a published measurement was taken
+docs/site/embedding/11-performance.html	iso-date	<p>Measured 	the date a published measurement was taken
 docs/site/guide/14-time.html	iso-date	<code>	a date-format example
 source/tests/stdlib/time_tests.cpp	iso-date	months across years	date arithmetic test data
 source/tests/language/function_tests.cpp	ledger	edger	a script class named Ledger in a nocopy test

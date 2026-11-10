@@ -19306,6 +19306,15 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 			pop_back_detached(try_records_);
 			continue;
 		}
+		// typed clauses none of which takes it: the try has no handler for this error (KEEP BYTE-PARALLEL with the interpreter's visit_try_stmt)
+		if (rec.clause_types) [[unlikely]] {
+			const bool by_throw = !failure && current_exception_ && current_exception_->thrown && active_exception_value_;
+			if (!engine_->catch_admits(*rec.clause_types, by_throw ? &*active_exception_value_ : nullptr)) {
+				current_catch_var_id_ = rec.saved_catch_var_id;
+				pop_back_detached(try_records_);
+				continue;
+			}
+		}
 		// Releasing stack operands or staged arguments can run destructors that reenter and grow try_records_.
 		// Keep an owned handler description across those calls; update the live record by index, never a stale reference.
 		const size_t handler_index = try_records_.size() - 1;
@@ -20320,6 +20329,9 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_try_pop: return exec_try_pop(f, ins);
 		case opcode::op_catch_end: return exec_catch_end(f, ins);
 		case opcode::op_fresh_cell: return exec_fresh_cell(f, ins);
+		case opcode::op_try_types:
+			try_records_.back().clause_types = &static_cast<const try_stmt*>(f.code->nodes[ins.a].get())->clause_types;
+			return {};
 		case opcode::op_return_convert: return exec_return_convert(f, ins);
 		case opcode::op_case_eq: return exec_case_eq(f, ins);
 		case opcode::op_iter_init: return exec_iter_init(f, ins);
@@ -20792,6 +20804,7 @@ op_status vm_backend::run_dispatch_loop(frame*& fp, const size_t records_base) {
 			case opcode::op_try_pop:
 			case opcode::op_catch_end:
 			case opcode::op_fresh_cell:
+			case opcode::op_try_types:
 			case opcode::op_case_eq:
 			case opcode::op_iter_init:
 			case opcode::op_iter_next:

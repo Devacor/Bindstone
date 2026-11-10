@@ -1599,7 +1599,7 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 		compile_continue();
 		return;
 	case node_type::try_stmt:
-		compile_try(static_cast<try_stmt*>(stmt.get()));
+		compile_try(static_cast<try_stmt*>(stmt.get()), stmt);
 		return;
 	case node_type::switch_stmt:
 		compile_switch(static_cast<switch_stmt*>(stmt.get()));
@@ -2317,7 +2317,7 @@ bool vm_compiler::compile_entry_half(const expression_ptr& init) {
 	return true;
 }
 
-JAI_NOINLINE void vm_compiler::compile_try(try_stmt* stmt) {
+JAI_NOINLINE void vm_compiler::compile_try(try_stmt* stmt, const statement_ptr& node) {
 	const uint32_t catch_sym = add_symbol(symbolizer_->intern(stmt->catch_var));
 	// The catch variable is a frame-slot local of the catch body (compile_range_for's
 	// slot test); a top-level catch binds it in a scope env pushed at handler entry
@@ -2327,6 +2327,7 @@ JAI_NOINLINE void vm_compiler::compile_try(try_stmt* stmt) {
 		catch_slot = static_cast<uint32_t>(stmt->catch_slot_index);
 	}
 	size_t try_push = emit(opcode::op_try_push, k_invalid_u32, catch_sym, catch_slot);
+	if (!stmt->clause_types.empty()) { emit(opcode::op_try_types, add_node(node)); }
 
 	push_region(region_kind::loop);
 	loops_.back().kind = region_kind::try_block;

@@ -22,8 +22,11 @@
 > - **Typed clauses are the parser's.** `catch (Type e)` clauses lower to one handler over a hidden variable: each
 >   clause is `if (catch_takes#(v, "Type"))` (`engine::catch_clause_takes`: a class through `derives_from`, a
 >   builtin kind by name, `error` for a run-time error) whose block declares `Type e = catch_value#(v)` (a call
->   result, so the declaration takes the value without a copy), and the chain ends in `throw;` when no clause
->   catches everything. Neither backend knows a clause.
+>   result, so the declaration takes the value without a copy; `error` and a clause that takes everything declare
+>   `var& e = v`). A try with no clause that takes everything lists its types (`try_stmt::clause_types`), and each
+>   backend asks `engine::catch_admits` before it enters the handler (interpreter `visit_try_stmt`; VM
+>   `op_try_types` on the record, `unwind_to_handler`): an error no clause takes passes the try as if it had none,
+>   so its stack and place are the raise's. The chain's closing `throw;` is never reached.
 > - **Terminal-error tier.** Execution-budget exhaustion ALWAYS latches a terminal error (never
 >   catchable); a `memory_cap` denial is catchable on its FIRST raise per execute, terminal on the
 >   second. A latched terminal error skips every script `catch` to the host boundary

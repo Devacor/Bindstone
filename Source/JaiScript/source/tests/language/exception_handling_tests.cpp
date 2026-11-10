@@ -231,6 +231,8 @@ public:
                 {"try { throw new Oops(); } catch (Oops o) { print(o.code, \" \", type_of(o)); }", "7 Oops"},
                 // no clause takes it: the error goes on to the next handler from where it was raised
                 {"void typed_only() { try { throw \"nope\"; } catch (int n) { print(\"int\"); } }\ntry { typed_only(); } catch (e) { print(\"propagated \", e, \" \", e.line); }", "propagated nope 17"},
+                // a try none of whose clauses takes the error is passed without entering a handler: the stack is the raise's
+                {"int inner(array<int> a) { return a[5]; } int middle() { return inner([1]); } int outer() { try { return middle(); } catch (int k) { return k; } return -1; }\ntry { outer(); } catch (e) { print(e.line, \" \", e.stack.size()); }", "17 4"},
                 {"try { try { var v = [1]; v[9]; } catch (string s) { print(\"wrong\"); } } catch (error e) { print(\"outer \", e.kind, \" \", e.line); }", "outer bounds 17"},
                 {"void typed_only() { try { throw 3; } catch (string s) { } }\ntyped_only();", "ERROR 3"},
                 {"try { throw \"e\"; } catch (string e) { try { throw 1; } catch (int n) { print(n); } print(e, \" \", e.line); }", "1\ne 17"},

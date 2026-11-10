@@ -7195,6 +7195,19 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         return {};
     }
 
+    // typed clauses none of which takes it: the try has no handler for this error (KEEP BYTE-PARALLEL with
+    // vm_backend::unwind_to_handler)
+    if (!resuming_catch && !stmt->clause_types.empty() && (!try_result || (is_unwinding_ && current_exception_))) [[unlikely]] {
+        const bool by_throw = try_result && current_exception_->thrown && active_exception_value_;
+        if (!engine_->catch_admits(stmt->clause_types, by_throw ? &*active_exception_value_ : nullptr)) {
+            current_catch_var_id_ = saved_catch_var_id;
+            if (!try_result) {
+                return try_result;
+            }
+            return {};
+        }
+    }
+
     // Check if an error occurred (either checked_result error or exception unwinding)
     bool caught_error = resuming_catch;
 

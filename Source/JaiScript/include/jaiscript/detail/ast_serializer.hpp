@@ -602,6 +602,8 @@ namespace jai::detail {
             symbol(s->catch_var_id, UINT64_MAX);
             slot(s->catch_slot_index);
             node(s->catch_block.get());
+            varint(s->clause_types.size());
+            for (const std::string& type : s->clause_types) { str(type); }
         }
 
         JAI_NOINLINE void write_switch_stmt(const ast_node* n) {
@@ -1537,6 +1539,9 @@ namespace jai::detail {
             s->catch_var_id = catch_id;
             s->catch_slot_index = catch_slot;
             track_slot(catch_slot, catch_id, false, true);
+            const uint64_t clause_count = varint();
+            if (clause_count > remaining()) { jaibite_fail("corrupt catch clause count"); }
+            for (uint64_t i = 0; i < clause_count; ++i) { s->clause_types.push_back(str()); }
             return s;
         }
 

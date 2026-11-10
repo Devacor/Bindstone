@@ -4716,7 +4716,12 @@ checked_result<statement_ptr> parser::try_statement() {
     }
 
     statement_ptr chain;
+    std::vector<std::string> clause_types;
     if (clauses.back().test) {
+        for (const clause& typed : clauses) {
+            const auto* test = static_cast<const call_expr*>(typed.test.get());
+            clause_types.push_back(static_cast<const literal_expr*>(test->arguments[1].get())->value.to_string());
+        }
         std::vector<declaration_ptr> rethrow{std::make_shared<statement_decl>(catch_token.location,
             std::make_shared<expression_stmt>(catch_token.location, std::make_shared<throw_expr>(catch_token.location, nullptr)))};
         chain = std::make_shared<block_stmt>(catch_token.location, std::move(rethrow));
@@ -4732,6 +4737,7 @@ checked_result<statement_ptr> parser::try_statement() {
                                              std::string(caught_name));
     result->catch_var_id = caught_id;
     result->catch_slot_index = catch_slot;
+    result->clause_types = std::move(clause_types);
     return result;
 }
 

@@ -6385,9 +6385,21 @@ bool engine::is_caught_runtime_error(const script_value& value) const noexcept {
     return it != impl->caught_errors_.end() && it->second.runtime;
 }
 
+bool engine::catch_admits(const std::vector<std::string>& clause_types, const script_value* thrown) const {
+    for (const std::string& type_name : clause_types) {
+        if (thrown ? clause_takes_thrown(thrown->deref(), type_name) : type_name == "error") { return true; }
+    }
+    return false;
+}
+
 bool engine::catch_clause_takes(const script_value& value, const std::string& type_name) const {
     const script_value& v = value.deref();
-    if (type_name == "error") { return is_caught_runtime_error(v); }
+    const bool runtime = is_caught_runtime_error(v);
+    return type_name == "error" ? runtime : !runtime && clause_takes_thrown(v, type_name);
+}
+
+// a clause's type against a value a script threw
+bool engine::clause_takes_thrown(const script_value& v, const std::string& type_name) const {
     const auto container = [&](std::string_view kind) {
         return type_name.size() >= kind.size() && type_name.compare(0, kind.size(), kind) == 0 &&
                (type_name.size() == kind.size() || type_name[kind.size()] == '<');
@@ -6398,7 +6410,7 @@ bool engine::catch_clause_takes(const script_value& value, const std::string& ty
         case script_value_type::jai_int_type: return type_name == "int";
         case script_value_type::jai_float_type: return type_name == "float";
         case script_value_type::jai_char_type: return type_name == "char";
-        case script_value_type::jai_string_type: return type_name == "string" && !is_caught_runtime_error(v);
+        case script_value_type::jai_string_type: return type_name == "string";
         case script_value_type::jai_utf8_string_type: return type_name == "utf8_string";
         case script_value_type::jai_array_type: return container("array");
         case script_value_type::jai_map_type: return container("map");

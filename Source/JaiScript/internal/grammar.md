@@ -373,7 +373,8 @@ tryStatement = "try" blockStatement catchClause+
 catchClause = "catch" ("(" ("var" | "auto")? IDENTIFIER ")")? blockStatement      // takes everything: the last clause
             | "catch" "(" "const"? (type | "error") "&"? IDENTIFIER ")" blockStatement
 // typed clauses are one handler (parser::try_statement): a hidden catch variable, each clause an `if (catch_takes#(v, "Type"))`
-// whose block declares `Type name = catch_value#(v)`, and `throw;` when no clause takes the value
+// whose block declares `Type name = catch_value#(v)`; with no clause that takes everything the try lists its types and
+// the backends pass an error none takes without entering the handler (engine::catch_admits)
 
 // Expressions (precedence from lowest to highest)
 expression = assignmentExpression

@@ -240,6 +240,7 @@ namespace jai::detail {
         JAI_FORCEINLINE static script_value make_caught_error(engine& a_engine, const script_value& thrown, bool by_throw, const source_location* throw_site, std::vector<stack_frame>&& trace, const char* thrown_text = nullptr, error_kind kind = error_kind::other) { return a_engine.make_caught_error(thrown, by_throw, throw_site, std::move(trace), thrown_text, kind); }
         JAI_FORCEINLINE static bool is_caught_runtime_error(const engine& a_engine, const script_value& value) noexcept { return a_engine.is_caught_runtime_error(value); }
         JAI_FORCEINLINE static bool catch_clause_takes(const engine& a_engine, const script_value& value, const std::string& type_name) { return a_engine.catch_clause_takes(value, type_name); }
+        JAI_FORCEINLINE static bool catch_admits(const engine& a_engine, const std::vector<std::string>& clause_types, const script_value* thrown) { return a_engine.catch_admits(clause_types, thrown); }
         JAI_FORCEINLINE static std::optional<script_value> caught_error_member(engine& a_engine, const script_value& receiver, uint64_t member_id, bool catch_variable = false) { return a_engine.caught_error_member(receiver, member_id, catch_variable); }
         JAI_FORCEINLINE static void end_caught_error(engine& a_engine, const script_value& caught) noexcept { return a_engine.end_caught_error(caught); }
         JAI_FORCEINLINE static void release_suspended_values(engine& a_engine, script_value* values, size_t count) noexcept { return a_engine.release_suspended_values(values, count); }

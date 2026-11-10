@@ -1445,6 +1445,10 @@ namespace jai {
         int caught_error_tag(const script_value& value) const noexcept;
         // Whether a typed catch clause takes the value: the clause's type by name, a class through its bases
         bool catch_clause_takes(const script_value& value, const std::string& type_name) const;
+        // Whether a try's typed clauses take what is being raised, asked before its handler is entered (thrown null: a
+        // run-time error)
+        bool catch_admits(const std::vector<std::string>& clause_types, const script_value* thrown) const;
+        bool clause_takes_thrown(const script_value& value, const std::string& type_name) const;
         // The handler that bound `caught` is done and its variable let go: the thrown value dies, as C++ destroys the exception
         // object when its handler exits, unless a copy of the error (a capture, a stored e) still holds it
         void end_caught_error(const script_value& caught) noexcept;

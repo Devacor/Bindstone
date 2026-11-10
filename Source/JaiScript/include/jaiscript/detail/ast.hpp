@@ -787,6 +787,9 @@ namespace jai {
         uint64_t catch_var_id = UINT64_MAX;    // Interned catch variable (UINT64_MAX = unnamed catch)
         size_t catch_slot_index = SIZE_MAX;    // Frame slot of the catch variable (SIZE_MAX = scope env)
         statement_ptr catch_block;
+        // typed clauses with none that takes everything: the types the handler takes (engine::catch_admits). An error none of
+        // them takes passes the try as if it had no handler
+        std::vector<std::string> clause_types;
 
         try_stmt(const source_location& loc, statement_ptr try_blk, statement_ptr catch_blk, const std::string& var = "")
             : statement(loc, node_type::try_stmt), try_block(try_blk), catch_var(var), catch_block(catch_blk) {}    };

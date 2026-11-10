@@ -55,8 +55,8 @@ GLOOM_SHOWCASE_HALF=e1e62cb65c9774fe
 GLOOM_SHOWCASE_ASCII=d8e16c271412bf5d
 GLOOM_SOUND="24 effects, 136535 bytes, bank 4270573572, 25 cues 1838541177"
 GLOOM_SHIM_FRAMES=20918499
-DEMOREEL_STREAM=c0086107f2b4bac1
-DEMOREEL_JULIA_STREAM=2427049989
+DEMOREEL_STREAM=f087d42d0b3011b4
+DEMOREEL_JULIA_STREAM=2006425744
 CRAWLER_STATE=2459230215
 CRAWLER_GOD_STATE=4133945146
 CRAWLER_FRAMES=a36b9a559cf181a17c6d5d20ea7eadf7e0f6ae4c4c4682b70576dc1dd84916d1
@@ -250,32 +250,32 @@ gate_demoreel() {
 	if vm_only demoreel; then
 		run "$BIN/jai_demoreel" --smoke --expect "$DEMOREEL_STREAM"
 	fi
-	# the runner's presenter at a width the reel draws rows in parallel, through FINALE's text cards: each backend's parallel
+	# the runner's presenter at a width the reel draws rows in parallel, through EIGHT's text cards: each backend's parallel
 	# rows must reproduce the VM's serial frames, in both pixel modes
 	cd "$ROOT/examples/demoreel"
 	local pix serial
 	for pix in sext half; do
-		run_logged "$BIN/jaiscript" --backend=vm demoreel.jai -- frames 90 w 120 h 40 scene 10 pix "$pix" workers 0
+		run_logged "$BIN/jaiscript" --backend=vm demoreel.jai -- frames 90 w 120 h 40 scene 0 pix "$pix" workers 0
 		want "demoreel $pix serial: the text cards were not drawn" "rows serial \| pixels $pix \| text in [1-9][0-9]* frames"
 		serial="$(grep -Eo 'stream hash [0-9]+' "$LOG")"
 		for backend in vm interp; do
 			hash_on "$backend" || continue
-			run_logged "$BIN/jaiscript" --backend="$backend" demoreel.jai -- frames 90 w 120 h 40 scene 10 pix "$pix" workers 1
+			run_logged "$BIN/jaiscript" --backend="$backend" demoreel.jai -- frames 90 w 120 h 40 scene 0 pix "$pix" workers 1
 			want "demoreel $pix $backend: parallel rows did not reproduce the serial frames ($serial)" "$serial \|"
 			want "demoreel $pix $backend: the rows did not run in parallel through the text cards" "rows parallel \| pixels $pix \| text in [1-9][0-9]* frames"
 		done
 	done
-	# FINALE's FOUR slide reloads scenes/live/spin_tweaked.jai while it runs, with parallel rows on
+	# EIGHT's FOUR slide reloads scenes/live/spin_tweaked.jai while it runs, with parallel rows on
 	for backend in vm interp; do
 		hash_on "$backend" || continue
-		run_logged "$BIN/jaiscript" --backend="$backend" demoreel.jai -- frames 40 w 120 h 40 scene 10 at 32.4 pix sext workers 1
-		want "demoreel $backend: FINALE did not reload its live module" "live reloads 1\$"
+		run_logged "$BIN/jaiscript" --backend="$backend" demoreel.jai -- frames 40 w 120 h 40 scene 0 at 32.4 pix sext workers 1
+		want "demoreel $backend: EIGHT did not reload its live module" "live reloads 1\$"
 	done
 	# the soundtrack's cues and the video frames
 	vm_only demoreel || return 0
 	local out="${TMPDIR:-/tmp}/demoreel_gate_$$"
 	run_logged "$BIN/jaiscript" demoreel.jai -- midi "$out/cues"
-	want "demoreel midi: expected one cue a scene" "^12 cues -> "
+	want "demoreel midi: expected one cue a scene" "^13 cues -> "
 	run_logged "$BIN/jaiscript" demoreel.jai -- video "$out/video" every 10 frames 60
 	want "demoreel video: expected six frames" "^video: 6 frames"
 	rm -rf "$out"
@@ -427,9 +427,9 @@ gate_wasm() {
 	cd "$ROOT/examples/crawler"
 	run_logged node "$runner" "$engine" scripts/crawler.jai smoke seed 6 turns 1500
 	want "wasm crawler: expected STATE_HASH $CRAWLER_STATE" "STATE_HASH: $CRAWLER_STATE\$"
-	# JULIA's columns run through parallel_transform, whose borrows tag container pointers
+	# JULIA's rows run through parallel_transform, whose borrows tag container pointers
 	cd "$ROOT/examples/demoreel"
-	run_logged node "$runner" "$engine" demoreel.jai scene 1 frames 20 pix sext
+	run_logged node "$runner" "$engine" demoreel.jai scene 2 frames 20 pix sext
 	want "wasm demoreel: expected JULIA's stream hash $DEMOREEL_JULIA_STREAM" "stream hash $DEMOREEL_JULIA_STREAM \|"
 	cd "$ROOT/tools/jaiscript_web"
 	run_logged node "$runner" "$engine" catches.jai

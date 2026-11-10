@@ -1,543 +1,565 @@
-// MAELSTROM — ink in water, simulated: Jos Stam's stable fluids. The flow lives
-// on a grid of half the pixel resolution: each frame the nozzles stir their jets
-// in, vorticity confinement hands back the curl the grid smears away (a force
-// along the gradient of the curl's magnitude), warm-started SOR projects the
-// velocity divergence-free, and the velocity advects itself semi-Lagrangian
-// (trace back, sample bilinear). The ink lives on the pixels: it traces back
-// through the upsampled flow, so its filaments stay finer than the grid that
-// moves them. The dye is a density plus its hue as a premultiplied (cos, sin)
-// vector, so two inks blend into the hue between them and opposite hues wash out
-// to pearl. The density is drawn as a height field, lit diffuse and Blinn
-// specular from its gradient; motes ride the current. Jets cross, a ring of
-// nozzles winds the tank up, the tank drains, and eight inks bloom into a
-// rainbow wheel that a whirlpool twists. The ink and the light run their rows
-// in parallel.
+// MAELSTROM — neon ink in black water, seen from above and simulated: Jos Stam's
+// stable fluids. The flow lives on a grid a third of the pixel resolution: each
+// frame the forces stir it, vorticity confinement hands back the curl the grid
+// smears away (a force along the gradient of the curl's magnitude), warm-started
+// SOR projects the velocity divergence-free, and the velocity advects itself
+// semi-Lagrangian (trace back, sample bilinear). The ink is one number a cell on a
+// grid twice as fine, carried by the same flow. The picture reads it as marbling
+// reads a tray: the amount of ink picks a place along a row of eight neon tubes
+// with dark water between them, so wherever the ink changes it draws glowing
+// contours, the flow folds them, and no amount of stirring blends them to mud.
+// The ink also settles, slowly, toward a ramp across the tank, which is what
+// keeps every hue in the water however long it is stirred. The camera samples
+// the ink bilinear, rolled, zoomed and panned, so a contour stays a clean curve
+// at any zoom.
 //
-// Graded for the screen: caustic light ripples across the bare water, the jets
-// pump their ink on the beat, a starburst of jets fires out from the middle of
-// the tank, the frame darkens toward its corners, and at the
-// end the camera pushes in on the whirlpool. Then the whirlpool winds tighter and
-// sinks into a funnel through bar nine, and on bar ten's downbeat it erupts: a geyser
-// of ink towers out of the middle, sixteen jets fire a rainbow ring across the tank
-// and a shock ring races over the water, and the camera is thrown up and back; the
-// geyser falls back pulsing on every kick, each kick sends a ring out across the
-// surface, and bar eleven fires it again.
+// The tank opens banded like Jupiter: opposing jets whose shear rolls the bands
+// up into billows. A counter-rotating pair of vortices folds them while six
+// nozzles orbit the tank and a rod drags a figure-eight through it; the pair
+// gives way to one whirlpool whose ramp turns with it, so the bands sweep round
+// as arms the faster middle winds ahead of; the whirlpool reverses, and a drain
+// opens that swallows the tank into its eye.
 //
-// Scored to its cue: the jets pump on the kick, the crossing jets' inks turn with
-// each chord, the snare flares the ink's light and the bass the caustics, the
-// energy feeds the curl, the ring's nozzles race through the bar before the burst,
-// the starburst (bar 4), the bloom (bar 6) and the geyser (bar 10) land as hits, its
-// second spout (bar 11) as an accent.
+// Scored to its cue: three nozzles pour on the kick and three draw ink out on the
+// snare, the kick surges the jets, makes the tubes throb and punches the camera
+// in, the energy feeds the curl, each kick over the whirlpool sends a ring of
+// light out from its eye, and the hits land as rings that shove the ink outward:
+// the pair (bar 2), the whirlpool (bar 4, a shock whose wake lays the ink back
+// in clean bands, the picture flashing negative), the reversal (bar 6, every
+// tube trading its colour) and the drain (bar 8).
 
 // Globals on purpose: the parallel row bodies read them (arrays borrow zero-copy).
-array<float> MS_U = [];      // the flow, cells per second, on the half-size grid
-array<float> MS_V = [];
-array<float> MS_D = [];      // the ink per pixel: density,
-array<float> MS_A = [];      // density * cos(hue),
-array<float> MS_B = [];      // density * sin(hue)
-array<float> MS_ZEROS = [];  // one ink row's result, cleared
-array<int> MS_INNER = [];    // the rows the ink moves on (the walls stay dry)
-array<int> MS_ALL = [];
-int MS_LIFT = 0;             // the snare's flare on the ink, in shades
-int MS_GLOW = 0;             // the bass's lift on the caustics
+array<float> MS_FU = [];     // the flow that carries the ink, flow cells per second
+array<float> MS_FV = [];
+array<float> MS_INK = [];    // each ink cell's ink, in palette entries
+array<float> MS_HOME_X = []; // the ink a cell settles back to: its column's share
+array<float> MS_HOME_Y = []; // plus its row's,
+array<float> MS_SETTLE = []; // and by whole ink cells of radius from the tank's middle, the share of the way it goes in a frame
+array<int> MS_RADIUS = [];   // per ink cell: that radius
+array<int> MS_SHADE = [];    // by a quarter of the squared radius: the brightness level's first palette entry
+array<int> MS_INK_ROWS = [];
+array<int> MS_ROWS = [];
 int MS_W = 0;
-int MS_H = 0;
-int MS_CW = 0;
+int MS_DW = 0;               // the ink grid
+int MS_DH = 0;
+int MS_CW = 0;               // the flow grid
 int MS_CH = 0;
-int MS_INK = 0;
-int MS_BG = 0;               // 16 water tones x 4 caustic levels
-array<int> MS_COLS = [];     // the screen's columns, for the column cast
-array<float> MS_COS = [];    // a 256-entry cosine table for the caustics
-array<float> MS_CCOL = [];   // per column: this frame's caustic phase
-array<int> MS_VIG = [];      // per pixel: how far the vignette darkens it
-float MS_T = 0.0;
-float MS_RUN = 0.0;          // a frame's step, in pixels per (cell per second)
-float MS_FADE = 1.0;
-array<int> MS_IMG = [];      // the tank lit from above, per pixel: the texture the camera flies over
-float MS_CX = 0.0;           // the camera over the tank: where it stands, in tank pixels,
+float MS_RUN = 0.0;          // a frame's step, in ink cells per (flow cell per second)
+float MS_CX = 0.0;           // the tank's middle, in ink cells
 float MS_CY = 0.0;
-float MS_FX = 0.0;           // the way it faces and its right, on the water's plane,
-float MS_FY = -1.0;
-float MS_RX = 1.0;
-float MS_RY = 0.0;
-float MS_HC = 60.0;          // its height, the horizon's row and its focal length,
-float MS_HOR = 0.0;
-float MS_FOC = 100.0;
-float MS_PEAK = 10.0;        // how tall the thickest ink stands
-float MS_ZMAX = 200.0;
-bool MS_SURGE = false;       // the water's own heights are on: the funnel, the geyser and the kick's rings
-float MS_GX = 0.0;           // where they stand, in tank pixels
-float MS_GY = 0.0;
-array<float> MS_RAD = [];    // by whole pixels of radius from there: the height they add,
-array<int> MS_RADL = [];     // and how many shades a ring's crest lights
+float MS_OX = 0.0;           // the camera: pixel (x, y) shows ink cell (OX + AX x + BX y, OY + AY x + BY y)
+float MS_OY = 0.0;
+float MS_AX = 1.0;
+float MS_AY = 0.0;
+float MS_BX = 0.0;
+float MS_BY = 1.0;
+int MS_TUBES = 0;            // the first palette entry of the tubes as drawn this frame
+int MS_PHASE = 0;            // how far along the tubes every cell's ink is shifted
 
-// one screen column of the tank in perspective, on a parallel_transform worker: the
-// ray walks the water's plane from near to far and each step raises the ink by its
-// density, drawing the column upward from the last height it reached, so nearer ink
-// hides the ink behind it (VoxelSpace's column cast over the lit dye); -1 where the
-// column sees past the tank
-function maelstrom_column(int x) -> array<int> {
-	int hh = MS_H;
-	int ww = MS_W;
-	array<int> col = [];
-	for (int y = 0; y < hh; ++y) { col.push(-1); }
-	float u = (x + 0.5 - ww * 0.5) / MS_FOC;
-	float dx = MS_FX + MS_RX * u;
-	float dy = MS_FY + MS_RY * u;
-	float cx = MS_CX;
-	float cy = MS_CY;
-	float hc = MS_HC;
-	float hor = MS_HOR;
-	float foc = MS_FOC;
-	float peak = MS_PEAK;
-	float zmax = MS_ZMAX;
-	int ink = MS_INK;
-	int ybuf = hh;
-	float z = 2.0;
-	while (z < zmax && ybuf > 0) {
-		float px = cx + dx * z;
-		float py = cy + dy * z;
-		if (px >= 1.0 && px < ww - 1.0 && py >= 1.0 && py < hh - 1.0) {
-			int i = itrunc(py) * ww + itrunc(px);
-			float d = MS_D[i];
-			float rise = d / (d + 0.35) * peak;
-			int lift = 0;
-			if (MS_SURGE) {
-				float gx = px - MS_GX;
-				float gy = py - MS_GY;
-				float rr = math::sqrt(gx * gx + gy * gy);
-				int ri = itrunc(rr);
-				rise += MS_RAD[ri] + (MS_RAD[ri + 1] - MS_RAD[ri]) * (rr - ri);
-				lift = MS_RADL[ri];
-			}
-			int sy = itrunc(hor + (hc - rise) * foc / z);
-			if (sy < ybuf) {
-				int c = MS_IMG[i];
-				if (lift != 0) {
-					// a ring's crest catches the light and its trough falls dark: the ink moves through its
-					// shades, the water through its caustic levels
-					int lv0 = c - ink;
-					if (lv0 >= 0 && lv0 < 500) {
-						int l20 = lv0 % 20;
-						if (l20 < 16) {
-							int to = l20 + lift * 3;
-							c += (to > 15 ? 15 : (to < 0 ? 0 : to)) - l20;
-						}
-					} else {
-						int g4 = (c - MS_BG) % 4;
-						int to2 = g4 + lift;
-						c += (to2 > 3 ? 3 : (to2 < 0 ? 0 : to2)) - g4;
-					}
-				}
-				int top = sy < 0 ? 0 : sy;
-				// below its lit top the ink's side faces the camera: a few shades darker
-				int lv = c - ink;
-				int side = lv >= 0 && lv < 500 ? lv % 20 : -1;
-				for (int yy = top; yy < ybuf; ++yy) {
-					if (side >= 0 && yy > top + 1) {
-						int dark = side > 15 ? 12 : side - 4;
-						col[yy] = c - side + (dark < 0 ? 0 : dark);
-					} else {
-						col[yy] = c;
-					}
-				}
-				ybuf = top;
-			}
-		}
-		z += 0.45 + z * 0.006;
-	}
-	return col;
-}
-
-// one row of ink, on a parallel_transform worker: each pixel takes the flow at
-// its centre (bilinear over the half-size grid), traces back one step and blends
-// the four pixels it lands among; returns the row's density, then a, then b
+// one row of ink, on a parallel_transform worker: each cell takes the flow at its
+// centre (bilinear over the flow grid, stepped along the row), traces back one
+// step, blends the four cells it lands among and settles toward home
 function maelstrom_ink_row(int y) -> array<float> {
-	int ww = MS_W;
+	int dw = MS_DW;
+	array<float> out = [];
+	out.resize(dw, 0.0);
+	if (y < 1 || y >= MS_DH - 1) { return out; }
 	int gw = MS_CW;
-	float gxmax = gw - 1.001;
 	float gymax = MS_CH - 1.001;
-	float xmax = ww - 1.001;
-	float ymax = MS_H - 1.001;
+	float xmax = dw - 2.001;
+	float ymax = MS_DH - 2.001;
 	float run = MS_RUN;
-	float fade = MS_FADE;
-	array<float> out = MS_ZEROS;
+	float home_y = MS_HOME_Y[y];
 	float qy = y * 0.5 - 0.25;
 	qy = qy > gymax ? gymax : qy;
 	int gy = qy;
 	float ty = qy - gy;
-	for (int x = 1; x < ww - 1; ++x) {
-		float qx = x * 0.5 - 0.25;
-		qx = qx > gxmax ? gxmax : qx;
-		int gx = qx;
-		float tx = qx - gx;
-		int g = gy * gw + gx;
-		float ut = MS_U[g] + (MS_U[g + 1] - MS_U[g]) * tx;
-		float ub = MS_U[g + gw] + (MS_U[g + gw + 1] - MS_U[g + gw]) * tx;
-		float vt = MS_V[g] + (MS_V[g + 1] - MS_V[g]) * tx;
-		float vb = MS_V[g + gw] + (MS_V[g + gw + 1] - MS_V[g + gw]) * tx;
-		float px = x - run * (ut + (ub - ut) * ty);
-		float py = y - run * (vt + (vb - vt) * ty);
-		px = px < 0.0 ? 0.0 : (px > xmax ? xmax : px);
-		py = py < 0.0 ? 0.0 : (py > ymax ? ymax : py);
-		int ix = px;
-		int iy = py;
-		float sx = px - ix;
-		float sy = py - iy;
-		int k = iy * ww + ix;
-		float w00 = (1.0 - sx) * (1.0 - sy);
-		float w10 = sx * (1.0 - sy);
-		float w01 = (1.0 - sx) * sy;
-		float w11 = sx * sy;
-		out[x] = (w00 * MS_D[k] + w10 * MS_D[k + 1] + w01 * MS_D[k + ww] + w11 * MS_D[k + ww + 1]) * fade;
-		out[ww + x] = (w00 * MS_A[k] + w10 * MS_A[k + 1] + w01 * MS_A[k + ww] + w11 * MS_A[k + ww + 1]) * fade;
-		out[ww + ww + x] = (w00 * MS_B[k] + w10 * MS_B[k + 1] + w01 * MS_B[k + ww] + w11 * MS_B[k + ww + 1]) * fade;
+	int g = gy * gw;
+	float ua = MS_FU[g] + (MS_FU[g + gw] - MS_FU[g]) * ty;
+	float va = MS_FV[g] + (MS_FV[g + gw] - MS_FV[g]) * ty;
+	int x = 1;
+	int radius_at = y * dw;
+	for (int gx = 1; gx < gw; ++gx) {
+		++g;
+		float ub = MS_FU[g] + (MS_FU[g + gw] - MS_FU[g]) * ty;
+		float vb = MS_FV[g] + (MS_FV[g + gw] - MS_FV[g]) * ty;
+		float du = (ub - ua) * 0.5;
+		float dv = (vb - va) * 0.5;
+		float u = ua + du * 0.5;
+		float v = va + dv * 0.5;
+		int xe = x + 2;
+		while (x < xe) {
+			float px = x - run * u;
+			float py = y - run * v;
+			px = px < 1.0 ? 1.0 : (px > xmax ? xmax : px);
+			py = py < 1.0 ? 1.0 : (py > ymax ? ymax : py);
+			int ix = px;
+			int iy = py;
+			float sx = px - ix;
+			int k = iy * dw + ix;
+			int k2 = k + dw;
+			float a = MS_INK[k];
+			float b = MS_INK[k2];
+			float top = a + (MS_INK[k + 1] - a) * sx;
+			float bottom = b + (MS_INK[k2 + 1] - b) * sx;
+			float ink = top + (bottom - top) * (py - iy);
+			out[x] = ink + (home_y + MS_HOME_X[x] - ink) * MS_SETTLE[MS_RADIUS[radius_at + x]];
+			u += du;
+			v += dv;
+			++x;
+		}
+		ua = ub;
+		va = vb;
 	}
 	return out;
 }
 
-// one row of the picture: the ink as a lit height field. Its gradient makes the
-// normal, the light comes from the upper left, the hue is the angle of the ink's
-// hue vector (pearl where opposite inks cancelled), specular glints top the crests
+// one row of the picture, on a parallel_transform worker: the camera's line across
+// the ink, clipped to the tank; each pixel blends the four ink cells around it and
+// takes that much ink's place along the tubes, at the shade of its radius
 function maelstrom_row(int y) -> array<int> {
 	int ww = MS_W;
-	int hh = MS_H;
-	int base = MS_INK;
-	// caustics: two crossing waves, bright where their sum passes zero
-	float rowp = 2.0 * math::sin(y * 0.17 + MS_T * 1.1);
-	float yq = y * 0.23;
-	int up = y > 0 ? -ww : 0;
-	int down = y < hh - 1 ? ww : 0;
-	float lx = -0.48;
-	float ly = -0.56;
-	float lz = 0.675;
-	float hl = 1.0 / math::sqrt(lx * lx + ly * ly + (lz + 1.0) * (lz + 1.0));
-	float hx = lx * hl;
-	float hy = ly * hl;
-	float hz = (lz + 1.0) * hl;
+	int tubes = MS_TUBES;
+	int phase = MS_PHASE;
 	array<int> out = [];
-	int i = y * ww;
-	for (int x = 0; x < ww; ++x) {
-		float den = MS_D[i];
-		int vig = MS_VIG[i];
-		if (den < 0.03) {
-			float cv = MS_COS[itrunc((x * 0.21 + rowp) * 40.743666) & 255] + MS_COS[itrunc((yq + MS_CCOL[x]) * 40.743666) & 255];
-			cv = cv < 0.0 ? -cv : cv;
-			int glow = cv < 0.24 ? itrunc((0.24 - cv) * 12.5) + 1 + MS_GLOW : 0;
-			int tone = (y * 16 / hh) + vig * 2;
-			out.push(MS_BG + (tone > 15 ? 15 : tone) * 4 + (glow > 3 ? 3 : glow));
-			++i;
-			continue;
-		}
-		float gx = MS_D[x < ww - 1 ? i + 1 : i] - MS_D[x > 0 ? i - 1 : i];
-		float gy = MS_D[i + down] - MS_D[i + up];
-		float nx = -gx * 2.6;
-		float ny = -gy * 2.6;
-		float il = 1.0 / math::sqrt(nx * nx + ny * ny + 1.0);
-		float diff = (nx * lx + ny * ly + lz) * il;
-		diff = diff < 0.0 ? 0.0 : diff;
-		float s = (nx * hx + ny * hy + hz) * il;
-		float s2 = s * s;
-		float s4 = s2 * s2;
-		float s8 = s4 * s4;
-		float s32 = s8 * s8 * s8 * s8;
-		float cover = den / (den + 0.3);
-		int lv = cover * (0.42 + 0.78 * diff) * 16.0 - vig * 2 + MS_LIFT;
-		lv = lv > 15 ? 15 : (lv < 0 ? 0 : lv);
-		if (s32 > 0.4 && cover > 0.4) {
-			int sp = 16 + (s32 - 0.4) * 6.6;
-			lv = sp > 19 ? 19 : sp;
-		}
-		float av = MS_A[i];
-		float bv = MS_B[i];
-		int row = 24;
-		if (av * av + bv * bv > den * den * 0.04) {
-			int hq = math::atan2(bv, av) * 3.8197186 + 24.5;
-			row = hq % 24;
-		}
-		out.push(base + row * 20 + lv);
-		++i;
+	out.resize(ww, tubes);
+	float ax = MS_AX;
+	float ay = MS_AY;
+	float fx = MS_OX + MS_BX * y;
+	float fy = MS_OY + MS_BY * y;
+	float xhi = MS_DW - 2.01;
+	float yhi = MS_DH - 2.01;
+	float from = 0.0;
+	float to = ww - 1.0;
+	if (ax > 0.00001) {
+		from = math::max(from, (1.0 - fx) / ax);
+		to = math::min(to, (xhi - fx) / ax);
+	} else if (ax < -0.00001) {
+		from = math::max(from, (xhi - fx) / ax);
+		to = math::min(to, (1.0 - fx) / ax);
+	} else if (fx < 1.0 || fx > xhi) {
+		return out;
+	}
+	if (ay > 0.00001) {
+		from = math::max(from, (1.0 - fy) / ay);
+		to = math::min(to, (yhi - fy) / ay);
+	} else if (ay < -0.00001) {
+		from = math::max(from, (yhi - fy) / ay);
+		to = math::min(to, (1.0 - fy) / ay);
+	} else if (fy < 1.0 || fy > yhi) {
+		return out;
+	}
+	if (to < from) { return out; }
+	int x0 = from;
+	if (x0 < from) { ++x0; }
+	int x1 = to;
+	fx += ax * x0;
+	fy += ay * x0;
+	int dw = MS_DW;
+	float ex = fx - MS_CX;
+	float ey = fy - MS_CY;
+	for (int x = x0; x <= x1; ++x) {
+		int ix = fx;
+		int iy = fy;
+		float sx = fx - ix;
+		int k = iy * dw + ix;
+		int k2 = k + dw;
+		float a = MS_INK[k];
+		float b = MS_INK[k2];
+		float top = a + (MS_INK[k + 1] - a) * sx;
+		float bottom = b + (MS_INK[k2 + 1] - b) * sx;
+		int ink = top + (bottom - top) * (fy - iy);
+		int far = (ex * ex + ey * ey) * 0.25;
+		out[x] = tubes + MS_SHADE[far] + ((ink + phase) & 127);
+		ex += ax;
+		ey += ay;
+		fx += ax;
+		fy += ay;
 	}
 	return out;
 }
 
 class Maelstrom : Scene {
-	int cw = 0;                // the flow grid: cw x ch cells, two pixels to a cell
+	int cw = 0;                  // the flow grid: cw x ch cells, three pixels to a cell
 	int ch = 0;
-	array<float> u1 = [];      // the flow advected
+	int dw = 0;                  // the ink grid: two cells to a flow cell
+	int dh = 0;
+	float unit = 1.0;            // flow cells to one of the reference tank's (40 rows)
+	array<float> u = [];         // the flow, flow cells per second,
+	array<float> v = [];
+	array<float> u1 = [];        // and advected
 	array<float> v1 = [];
-	array<float> pr = [];      // pressure, kept: each solve starts from the last one
-	array<float> dv = [];      // divergence
-	array<float> cu = [];      // curl
-	array<float> mx = [];      // motes, in pixels
-	array<float> my = [];
-	int motes = 48;
-	int ink = 0;               // 25 rows (24 hues, then pearl) x 20 levels (16 lit, 4 specular)
-	int bg = 0;                // 16 water tones, top to bottom
-	int mote = 0;
-	int sor_iters = 20;
-	float beat = 0.48387097;   // the soundtrack's 124 bpm
-	float vorticity = 14.0;
+	array<float> pr = [];        // pressure, kept: each solve starts from the last one
+	array<float> dv = [];        // divergence
+	array<float> cu = [];        // curl
+	array<float> away_x = [];    // per flow cell: the unit vector away from the tank's middle,
+	array<float> away_y = [];
+	array<int> away_r = [];      // and its radius in whole ink cells
+	array<float> radial = [];    // by that radius: the speed outward the rings and the drain give the ink
+	array<float> ring_born = [];
+	array<float> ring_power = [];
+	array<float> ring_lays = [];     // 1 for a shock whose wake lays the ink back in its bands
+	int ring_next = 0;
+	array<float> level = [];         // by that radius: the brightness level, before rounding
+	array<float> shade_radius = [];  // the radius each of MS_SHADE's entries stands for
+	array<float> neon = [        // the tubes: red, green and blue light each
+		1.00, 0.08, 0.55,
+		0.00, 0.80, 1.00,
+		1.00, 0.84, 0.04,
+		0.58, 0.20, 1.00,
+		0.55, 1.00, 0.00,
+		1.00, 0.38, 0.00,
+		0.10, 0.35, 1.00,
+		0.00, 1.00, 0.50
+	];
+	int tubes = 0;               // the palette's 128 entries along the tubes, at 10 brightness levels, then all of it negative
+	int jets = 5;
+	int sor_iters = 8;
+	float vorticity = 12.0;
+	float jet_speed = 14.0;      // the opening's jets
+	float settling = 0.18;       // the share of the way home the ink settles in a second,
+	float pool_settling = 0.6;   // and in the whirlpool, where home turns with the water
+	float home_rate = 1.4;       // this many radians a second
+	float home_turned = 0.0;
+	float pair_speed = 16.0;     // how fast each vortex turns at its core's edge, flow cells a second
+	float pool_speed = 18.0;
+	float drain_speed = 14.0;
 	float tt = 0.0;
+	float turn = 1.0;            // the way the whirlpool winds
+	float orbit = 0.0;           // where the nozzles' ring has turned to
+	int traded = 0;              // the tubes' colours, moved along by the reversal
+	float kick_before = 0.0;
+
+	float t_pair = MUSIC_BAR * 2.0;
+	float t_pool = MUSIC_BAR * 4.0;
+	float t_flip = MUSIC_BAR * 6.0;
+	float t_drain = MUSIC_BAR * 8.0;
+
+	// the reel picks the grid before build runs, so the budget is set at construction
+	Maelstrom() { pixel_budget = 30000; }
+
+	int length_bars() override { return 10; }
+	array<float> hit_times() override { return [t_pair, t_pool, t_flip, t_drain]; }
+	array<int> hit_levels() override { return [1, 2, 1, 2]; }
 
 	void build() override {
 		name = "MAELSTROM";
-		handle = "stable fluids . pressure, curl and ink";
-		replay = 24.0;   // the water is its whole history
-		cw = (w + 1) / 2;
-		ch = (h + 1) / 2;
+		handle = "stable fluids . pressure, curl and neon ink";
+		replay = 20.0;   // the water is its whole history
+		cw = (w + 2) / 3;
+		ch = (h + 2) / 3;
+		dw = cw * 2;
+		dh = ch * 2;
+		unit = ch / 40.0;
 		int cn = cw * ch;
-		MS_U = gfx.make_fgrid(cn);
-		MS_V = gfx.make_fgrid(cn);
+		u = gfx.make_fgrid(cn);
+		v = gfx.make_fgrid(cn);
 		u1 = gfx.make_fgrid(cn);
 		v1 = gfx.make_fgrid(cn);
 		pr = gfx.make_fgrid(cn);
 		dv = gfx.make_fgrid(cn);
 		cu = gfx.make_fgrid(cn);
-		int n = w * h;
-		MS_D = gfx.make_fgrid(n);
-		MS_A = gfx.make_fgrid(n);
-		MS_B = gfx.make_fgrid(n);
-		MS_ZEROS = gfx.make_fgrid(w * 3);
-		MS_INNER = [];
-		for (int r = 1; r < h - 1; ++r) { MS_INNER.push(r); }
-		MS_ALL = [];
-		for (int r2 = 0; r2 < h; ++r2) { MS_ALL.push(r2); }
-		ink = pal.size();
-		for (int r3 = 0; r3 < 25; ++r3) {
-			var c = r3 < 24 ? ink_rgb(r3 * 0.2617994) : [205.0, 214.0, 236.0];
-			float cr = c[0]; float cg = c[1]; float cb = c[2];
-			for (int l = 0; l < 16; ++l) {
-				float f = (l + 0.5) / 16.0;
-				f = f * (1.2 - 0.2 * f);
-				pal.add(7.0 + (cr - 7.0) * f, 8.0 + (cg - 8.0) * f, 20.0 + (cb - 20.0) * f);
-			}
-			for (int s = 0; s < 4; ++s) {
-				float k = 0.22 + s * 0.2;
-				pal.add(cr + (255.0 - cr) * k, cg + (255.0 - cg) * k, cb + (255.0 - cb) * k);
-			}
-		}
-		bg = pal.size();
-		for (int t2 = 0; t2 < 16; ++t2) {
-			float f2 = t2 / 15.0;
-			float wr = 14.0 + (3.0 - 14.0) * f2;
-			float wg = 20.0 + (4.0 - 20.0) * f2;
-			float wb = 44.0 + (13.0 - 44.0) * f2;
-			for (int c4 = 0; c4 < 4; ++c4) {
-				float lift = c4 * 0.11 * (1.0 - f2 * 0.6);
-				pal.add(wr + (90.0 - wr) * lift, wg + (170.0 - wg) * lift, wb + (230.0 - wb) * lift);
+		MS_W = w;
+		MS_DW = dw;
+		MS_DH = dh;
+		MS_CW = cw;
+		MS_CH = ch;
+		MS_CX = dw * 0.5 - 0.5;
+		MS_CY = dh * 0.5 - 0.5;
+		MS_INK = gfx.make_fgrid(dw * dh);
+		MS_HOME_X = gfx.make_fgrid(dw);
+		MS_HOME_Y = gfx.make_fgrid(dh);
+		MS_INK_ROWS = [];
+		for (int r = 0; r < dh; ++r) { MS_INK_ROWS.push(r); }
+		MS_ROWS = [];
+		for (int r2 = 0; r2 < h; ++r2) { MS_ROWS.push(r2); }
+		mix_tubes();
+		int reach = math::itrunc(math::sqrt(dw * dw + dh * dh * 1.0) * 0.5) + 3;
+		MS_SETTLE = gfx.make_fgrid(reach);
+		radial = gfx.make_fgrid(reach);
+		level = gfx.make_fgrid(reach);
+		int shades = (dw * dw + dh * dh) / 16 + 2;
+		MS_SHADE = gfx.make_grid(shades);
+		for (int q = 0; q < shades; ++q) { shade_radius.push(math::sqrt(q * 4.0 + 2.0)); }
+		MS_RADIUS = gfx.make_grid(dw * dh);
+		for (int y = 0; y < dh; ++y) {
+			float ey = y + 0.5 - dh * 0.5;
+			for (int x = 0; x < dw; ++x) {
+				float ex = x + 0.5 - dw * 0.5;
+				MS_RADIUS[y * dw + x] = math::itrunc(math::sqrt(ex * ex + ey * ey));
 			}
 		}
-		MS_COS = [];
-		for (int q = 0; q < 256; ++q) { MS_COS.push(math::cos(q * 0.024543693)); }
-		MS_CCOL = gfx.make_fgrid(w);
-		MS_VIG = gfx.make_grid(w * h);
-		for (int vy = 0; vy < h; ++vy) {
-			for (int vx = 0; vx < w; ++vx) {
-				float ex = (vx + 0.5) / w * 2.0 - 1.0;
-				float ey = (vy + 0.5) / h * 2.0 - 1.0;
-				float r = ex * ex + ey * ey;
-				MS_VIG[vy * w + vx] = r < 1.4 ? 0 : 1;
+		away_x = gfx.make_fgrid(cn);
+		away_y = gfx.make_fgrid(cn);
+		away_r = gfx.make_grid(cn);
+		for (int gy = 0; gy < ch; ++gy) {
+			float fy = gy - (ch - 1) * 0.5;
+			for (int gx = 0; gx < cw; ++gx) {
+				float fx = gx - (cw - 1) * 0.5;
+				float far = math::sqrt(fx * fx + fy * fy);
+				int i = gy * cw + gx;
+				away_x[i] = fx / (far + 0.0001);
+				away_y[i] = fy / (far + 0.0001);
+				away_r[i] = math::itrunc(far * 2.0);
 			}
 		}
-		mote = pal.add(92, 116, 160);
-		for (int k2 = 0; k2 < motes; ++k2) {
-			mx.push(2.0 + rng.nextf() * (w - 4));
-			my.push(2.0 + rng.nextf() * (h - 4));
+		for (int k = 0; k < 8; ++k) {
+			ring_born.push(-100.0);
+			ring_power.push(0.0);
+			ring_lays.push(0.0);
+		}
+		lay_bands();
+		for (int settle = 0; settle < 12; ++settle) { project(); }
+		carry_ink(0.0, 0.0);
+	}
+
+	// the palette: eight tubes of sixteen entries each, a tube's light swelling from the
+	// dark water at its edges to a white-hot core; ten levels, from black through full
+	// light to the tubes burning white; then the negative of every entry
+	void mix_tubes() {
+		tubes = pal.size();
+		array<float> gain = [0.0, 0.12, 0.28, 0.48, 0.72, 1.0, 1.0, 1.0, 1.0, 1.0];
+		array<float> glare = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.4, 0.6, 0.8];
+		for (int negative = 0; negative < 2; ++negative) {
+			for (int shade = 0; shade < 10; ++shade) {
+				for (int e = 0; e < 128; ++e) {
+					int hue = (e / 16) * 3;
+					float off = ((e % 16) + 0.5) / 16.0 - 0.5;
+					float glow = 1.0 - off * off / 0.1156;
+					glow = glow < 0.0 ? 0.0 : glow;
+					float core = glow > 0.8 ? (glow - 0.8) * 2.2 : 0.0;
+					float light = 0.05 + 0.95 * glow;
+					float white = core + (1.0 - core) * glare[shade] * (0.12 + 0.88 * glow);
+					float r = 4.0 + 251.0 * neon[hue] * light;
+					float g = 5.0 + 250.0 * neon[hue + 1] * light;
+					float b = 16.0 + 239.0 * neon[hue + 2] * light;
+					r = (r + (255.0 - r) * white) * gain[shade];
+					g = (g + (255.0 - g) * white) * gain[shade];
+					b = (b + (255.0 - b) * white) * gain[shade];
+					if (negative == 1) {
+						pal.add(255.0 - r, 255.0 - g, 255.0 - b);
+					} else {
+						pal.add(r, g, b);
+					}
+				}
+			}
 		}
 	}
 
-	// a saturated ink of hue angle a (radians, red at 0)
-	var ink_rgb(float a) {
-		float h6 = a * 0.9549297;
-		int sector = h6;
-		float f = h6 - sector;
-		float lo = 255.0 * 0.12;
-		float up = lo + (255.0 - lo) * f;
-		float dn = 255.0 - (255.0 - lo) * f;
-		switch (sector % 6) {
-			case 0: return [255.0, up, lo];
-			case 1: return [dn, 255.0, lo];
-			case 2: return [lo, 255.0, up];
-			case 3: return [lo, dn, 255.0];
-			case 4: return [up, lo, 255.0];
-			default: return [255.0, lo, dn];
+	// the ramp the ink settles back to: seven tubes to the tank's height, deepening along the unit vector (across, down)
+	void lay_home(float across, float down) {
+		float tube = 112.0 / dh;
+		for (int x = 0; x < dw; ++x) { MS_HOME_X[x] = (x - MS_CX) * across * tube; }
+		for (int y = 0; y < dh; ++y) { MS_HOME_Y[y] = 1080.0 + (y - MS_CY) * down * tube; }
+	}
+
+	// the opening: the ink in its bands, across jets that run against their neighbours,
+	// their seams already rippling so the shear rolls them up
+	void lay_bands() {
+		lay_home(0.0, 1.0);
+		var& ink = MS_INK;
+		for (int y = 0; y < dh; ++y) {
+			int i = y * dw;
+			for (int x = 0; x < dw; ++x) {
+				ink[i] = MS_HOME_Y[y];
+				++i;
+			}
+		}
+		array<float> phase = [];
+		for (int s = 0; s <= jets; ++s) {
+			phase.push(rng.nextf() * 6.2831853);
+			phase.push(rng.nextf() * 6.2831853);
+		}
+		for (int gy = 1; gy < ch - 1; ++gy) {
+			float across = (gy + 0.5) * jets / ch;
+			int seam_at = math::itrunc(across + 0.5);
+			float ripple = math::cos(3.14159265 * across);
+			ripple = seam_at == 0 || seam_at == jets ? 0.0 : ripple * ripple * ripple * ripple;
+			for (int gx = 1; gx < cw - 1; ++gx) {
+				int j = gy * cw + gx;
+				u[j] = band_jet(gy);
+				float along = gx * 6.2831853 / cw;
+				v[j] = jet_speed * unit * ripple * (0.3 * math::sin(along * 5.0 + phase[seam_at * 2]) + 0.2 * math::sin(along * 3.0 + phase[seam_at * 2 + 1]));
+			}
 		}
 	}
 
-	int length_bars() override { return 12; }
+	// a flow row's place in the opening's jets: alternate ways, shearing at the seams
+	float band_jet(int gy) {
+		float wave = math::sin(3.14159265 * (gy + 0.5) * jets / ch) * 3.0;
+		float steep = math::exp(wave);
+		return jet_speed * unit * (steep - 1.0 / steep) / (steep + 1.0 / steep);
+	}
 
-	float t_geyser = MUSIC_BAR * 10.0;
-	float t_spout = MUSIC_BAR * 11.0;
-	array<float> hit_times() override { return [MUSIC_BAR * 4.0, MUSIC_BAR * 6.0, MUSIC_BAR * 10.0, MUSIC_BAR * 11.0]; }
-	array<int> hit_levels() override { return [2, 2, 2, 1]; }
-
-	float smooth01(float u) {
-		float c = u < 0.0 ? 0.0 : (u > 1.0 ? 1.0 : u);
+	float smooth01(float x) {
+		float c = x < 0.0 ? 0.0 : (x > 1.0 ? 1.0 : x);
 		return c * c * (3.0 - 2.0 * c);
 	}
 
+	float kick_at(float t) { return cue == null ? 0.0 : cue.kick_env(t); }
+	float snare_at(float t) { return cue == null ? 0.0 : cue.snare_env(t); }
+	float hit_at(float t) { return cue == null ? 0.0 : cue.hit(t); }
+
 	void update(float t, float dt) override {
+		float before = tt;
 		tt = t;
 		if (dt <= 0.0) { return; }
-		vorticity = 10.0 + 8.0 * (cue == null ? 0.6 : cue.energy(t));
+		vorticity = 9.0 + 9.0 * (cue == null ? 0.6 : cue.energy(t));
 		float step = dt > 0.05 ? 0.05 : dt;
+		strike(before, t);
 		stir(t, step);
 		confine(step);
 		project();
 		advect_flow(step);
-		advect_ink(step);
-		drift_motes(step);
+		carry_ink(t, step);
 	}
 
-	// the choreography, in pixels: crossing jets, then a ring of nozzles winding
-	// the tank up; the tank drains, and eight inks bloom inward into a wheel the
-	// whirlpool twists
+	// the hits, once each as the clock crosses them: a ring of light for the pair, and a
+	// shock for the whirlpool, the reversal (the whole flow turning back on itself, every
+	// tube trading its colour for the next) and the drain
+	void strike(float before, float t) {
+		if (before < t_pair && t >= t_pair) { ring(t_pair, 0.8, 0.0); }
+		if (before < t_pool && t >= t_pool) { ring(t_pool, 1.0, 1.0); }
+		if (before < t_flip && t >= t_flip) {
+			ring(t_flip, 1.0, 1.0);
+			turn = 0.0 - turn;
+			traded += 16;
+			int cn = cw * ch;
+			for (int i = 0; i < cn; ++i) {
+				u[i] = 0.0 - u[i];
+				v[i] = 0.0 - v[i];
+				pr[i] = 0.0 - pr[i];
+			}
+		}
+		if (before < t_drain && t >= t_drain) { ring(t_drain, 1.0, 1.0); }
+		float kick = kick_at(t);
+		if (t > t_pool && kick > kick_before + 0.3) { ring(t, 0.3 * kick, 0.0); }
+		kick_before = kick;
+	}
+
+	void ring(float born, float power, float lays) {
+		ring_born[ring_next] = born;
+		ring_power[ring_next] = power;
+		ring_lays[ring_next] = lays;
+		ring_next = (ring_next + 1) % ring_born.size();
+	}
+
+	// the choreography, in ink cells: the opening's jets, then a counter-rotating pair
+	// with a rod stirring between them, then one whirlpool (home turning with it) that
+	// the drain tightens, six nozzles orbiting from the pair on
 	void stir(float t, float step) {
-		float cx = w * 0.5;
-		float cy = h * 0.5;
-		// the jets pump on the kick; the crossing jets' inks turn with the chord
-		float hit = cue == null ? 0.0 : cue.kick_env(t);
-		float pump = 0.45 + 1.3 * hit;
-		float tint = (cue == null ? 0 : cue.chord(t)) * 0.5235988;
+		float cx = MS_CX;
+		float cy = MS_CY;
+		float kick = kick_at(t);
+		float snare = snare_at(t);
+		if (t < t_pair) {
+			drive_jets((0.5 + 1.6 * kick) * step);
+			return;
+		}
+		float drain = smooth01((t - t_drain) / (MUSIC_BAR * 1.5));
+		if (t >= t_pool) {
+			float pool = smooth01((t - t_pool) / MUSIC_BEAT);
+			home_turned += turn * home_rate * (1.0 + drain) * pool * step;
+			lay_home(0.0 - math::sin(home_turned), math::cos(home_turned));
+			whirl(cx, cy, turn * unit * (pool_speed + drain_speed * drain) * pool, ch * (0.26 - 0.1 * drain), (4.0 + 2.0 * drain) * step);
+		} else {
+			float pair = smooth01((t - t_pair) / MUSIC_BEAT);
+			whirl(cx - dw * 0.23, cy, 0.0 - pair_speed * unit * pair, ch * 0.2, 3.5 * step);
+			whirl(cx + dw * 0.23, cy, pair_speed * unit * pair, ch * 0.2, 3.5 * step);
+			float a = t * 1.3;
+			drag(cx + dw * 0.3 * math::sin(a), cy + dh * 0.27 * math::sin(a * 2.0),
+				dw * 0.195 * math::cos(a), dh * 0.351 * math::cos(a * 2.0), 4.0 * unit);
+		}
 		float rush = cue == null ? 0.0 : cue.riser(t);
-		if (t < MUSIC_BAR * 3.0) {
-			float pulse = (0.8 + 0.2 * math::sin(t * 2.7)) * (0.85 + 0.3 * hit);
-			jet(3.0, h * 0.30, 1.0, 0.10, 70.0 * pulse, 5.3 + tint + 0.3 * math::sin(t * 0.9), 24.0 * pump, 3.0 * h / 120.0, step);
-			jet(w - 4.0, h * 0.70, -1.0, -0.10, 70.0 * pulse, 2.9 + tint + 0.3 * math::sin(t * 1.1), 24.0 * pump, 3.0 * h / 120.0, step);
+		orbit += turn * (0.55 + 1.2 * rush * rush + 1.4 * drain) * step;
+		float reach = 1.0 - 0.5 * drain;
+		for (int k = 0; k < 6; ++k) {
+			float a2 = orbit + k * 1.0471976;
+			float ca = math::cos(a2);
+			float sa = math::sin(a2);
+			bool pours = k % 2 == 0;
+			float beat = pours ? kick : snare;
+			float aim = pours ? 0.55 : 1.4;
+			float speed = (5.0 + 22.0 * beat) * unit / math::sqrt(1.0 + aim * aim);
+			float x = cx + ca * dw * 0.37 * reach;
+			float y = cy + sa * dh * 0.37 * reach;
+			drag(x, y, (0.0 - sa * turn - ca * aim) * speed, (ca * turn - sa * aim) * speed, 3.5 * unit);
+			pour(x, y, (pours ? 1.0 : -1.0) * (12.0 + 80.0 * beat) * step, 4.5 * unit);
 		}
-		if (t > MUSIC_BAR * 2.5 && t < 10.177) {
-			float ring = h * 0.38;
-			float spin = t * 0.6 + rush * rush * 1.4;
-			for (int k = 0; k < 4; ++k) {
-				float a = spin + k * 1.5707963;
-				float ca = math::cos(a);
-				float sa = math::sin(a);
-				jet(cx + ca * ring * 1.2, cy + sa * ring, -sa - ca * 0.35, ca - sa * 0.35, 56.0,
-					k * 1.5707963 + t * 0.45, 9.0 * pump, 2.4 * h / 120.0, step);
-			}
-		}
-		// the burst: twelve jets fire outward from the middle, a rainbow starburst
-		if (t > MUSIC_BAR * 4.0 && t < MUSIC_BAR * 4.0 + 0.7) {
-			for (int k3 = 0; k3 < 12; ++k3) {
-				float a3 = k3 * 0.5235988 + 0.2;
-				float c3 = math::cos(a3);
-				float s3 = math::sin(a3);
-				jet(cx + c3 * h * 0.1, cy + s3 * h * 0.1, c3, s3, 170.0, a3, 30.0 * pump, 3.6 * h / 120.0, step);
-			}
-		}
-		if (t > MUSIC_BAR * 5.0) { vortex(cx, cy, swirl(t), step); }
-		if (t > MUSIC_BAR * 6.0 && t < MUSIC_BAR * 6.0 + 1.0) {
-			for (int k2 = 0; k2 < 8; ++k2) {
-				float a2 = k2 * 0.7853982 + 0.3;
-				float c2 = math::cos(a2);
-				float s2 = math::sin(a2);
-				jet(cx + c2 * h * 0.34, cy + s2 * h * 0.3, -c2, -s2, 84.0, a2, 22.0, 2.6 * h / 120.0, step);
-			}
-		}
-		// the geyser: sixteen jets fire outward from the middle, then eight more on the second spout
-		float erupt = t - t_geyser;
-		float spout = t - t_spout;
-		if ((erupt > 0.0 && erupt < 0.8) || (spout > 0.0 && spout < 0.45)) {
-			int n = erupt < 0.8 ? 16 : 8;
-			float fan = 6.2831853 / n;
-			for (int k4 = 0; k4 < n; ++k4) {
-				float a4 = k4 * fan + (erupt < 0.8 ? 0.1 : 0.5) + erupt * 0.6;
-				float c4 = math::cos(a4);
-				float s4 = math::sin(a4);
-				jet(cx + c4 * h * 0.06, cy + s4 * h * 0.06, c4, s4, 200.0, a4 + tint, 34.0 * pump, 3.2 * h / 120.0, step);
+	}
+
+	// the opening's jets pull the flow back toward their shear
+	void drive_jets(float grip) {
+		for (int gy = 1; gy < ch - 1; ++gy) {
+			float jet = band_jet(gy);
+			int i = gy * cw + 1;
+			for (int gx = 1; gx < cw - 1; ++gx) {
+				u[i] += (jet - u[i]) * grip;
+				++i;
 			}
 		}
 	}
 
-	// the whirlpool's strength: it winds up with the ring, eases off while the
-	// bloom fires, then takes over
-	float swirl(float t) {
-		if (t < 11.577) { return (t - MUSIC_BAR * 5.0) * 0.3; }
-		if (t < 12.377) { return 0.25; }
-		if (t > t_geyser) { return 0.15 + 0.6 * math::exp(0.0 - (t - t_geyser) * 0.8); }
-		float k = 0.25 + (t - 12.377) * 0.6;
-		k = k > 1.0 ? 1.0 : k;
-		float wind = (t - MUSIC_BAR * 9.0) / MUSIC_BAR;
-		return wind > 0.0 ? k + wind * wind * 1.8 : k;
-	}
-
-	// a nozzle at pixel (x, y) shooting `speed` pixels a second along (dx, dy):
-	// it pulls the flow in a disc toward its jet and adds ink of hue angle `hue`,
-	// densest at the centre
-	void jet(float x, float y, float dx, float dy, float speed, float hue, float rate, float rad, float step) {
-		var& uu = MS_U;
-		var& vv = MS_V;
-		float il = 0.5 / math::sqrt(dx * dx + dy * dy);
-		float jx = dx * il * speed;
-		float jy = dy * il * speed;
+	// a disc of `rad` ink cells about ink cell (x, y) pulls the flow toward (vx, vy), hardest at its centre
+	void drag(float x, float y, float vx, float vy, float rad) {
 		float qx = x * 0.5 - 0.25;
 		float qy = y * 0.5 - 0.25;
 		float qr = rad * 0.5 + 0.75;
 		float qr2 = qr * qr;
-		int a0 = math::max(1, itrunc(qx - qr));
-		int a1 = math::min(cw - 2, itrunc(qx + qr) + 1);
-		int b0 = math::max(1, itrunc(qy - qr));
-		int b1 = math::min(ch - 2, itrunc(qy + qr) + 1);
-		for (int gy = b0; gy <= b1; ++gy) {
+		int x0 = math::max(1, math::itrunc(qx - qr));
+		int x1 = math::min(cw - 2, math::itrunc(qx + qr) + 1);
+		int y0 = math::max(1, math::itrunc(qy - qr));
+		int y1 = math::min(ch - 2, math::itrunc(qy + qr) + 1);
+		for (int gy = y0; gy <= y1; ++gy) {
 			float ey = gy - qy;
-			for (int gx = a0; gx <= a1; ++gx) {
+			for (int gx = x0; gx <= x1; ++gx) {
 				float ex = gx - qx;
 				float q = ex * ex + ey * ey;
 				if (q >= qr2) { continue; }
 				float f = (1.0 - q / qr2) * 0.6;
 				int i = gy * cw + gx;
-				uu[i] += (jx - uu[i]) * f;
-				vv[i] += (jy - vv[i]) * f;
-			}
-		}
-		var& d = MS_D;
-		var& a = MS_A;
-		var& b = MS_B;
-		int ww = w;
-		float hc = math::cos(hue);
-		float hs = math::sin(hue);
-		float r2 = rad * rad;
-		int x0 = math::max(1, itrunc(x - rad));
-		int x1 = math::min(ww - 2, itrunc(x + rad) + 1);
-		int y0 = math::max(1, itrunc(y - rad));
-		int y1 = math::min(h - 2, itrunc(y + rad) + 1);
-		for (int py = y0; py <= y1; ++py) {
-			float ey2 = py - y;
-			for (int px = x0; px <= x1; ++px) {
-				float ex2 = px - x;
-				float q2 = ex2 * ex2 + ey2 * ey2;
-				if (q2 >= r2) { continue; }
-				float add = rate * (1.0 - q2 / r2) * step;
-				int j = py * ww + px;
-				float nd = d[j] + add;
-				float na = a[j] + add * hc;
-				float nb = b[j] + add * hs;
-				float k = nd > 3.0 ? 3.0 / nd : 1.0;
-				d[j] = nd * k;
-				a[j] = na * k;
-				b[j] = nb * k;
+				u[i] += (vx - u[i]) * f;
+				v[i] += (vy - v[i]) * f;
 			}
 		}
 	}
 
-	// a whirlpool at pixel (x, y): spin about it, falling off with distance
-	void vortex(float x, float y, float amount, float step) {
-		var& uu = MS_U;
-		var& vv = MS_V;
-		int gw = cw;
+	// ink poured into (or, negative, drawn out of) a disc about ink cell (x, y), most at its centre
+	void pour(float x, float y, float amount, float rad) {
+		var& ink = MS_INK;
+		float r2 = rad * rad;
+		int x0 = math::max(1, math::itrunc(x - rad));
+		int x1 = math::min(dw - 2, math::itrunc(x + rad) + 1);
+		int y0 = math::max(1, math::itrunc(y - rad));
+		int y1 = math::min(dh - 2, math::itrunc(y + rad) + 1);
+		for (int py = y0; py <= y1; ++py) {
+			float ey = py - y;
+			for (int px = x0; px <= x1; ++px) {
+				float ex = px - x;
+				float q = ex * ex + ey * ey;
+				if (q >= r2) { continue; }
+				float fall = 1.0 - q / r2;
+				ink[py * dw + px] += amount * fall * fall;
+			}
+		}
+	}
+
+	// a vortex at ink cell (x, y): the flow is pulled toward a swirl about it that turns
+	// `speed` flow cells a second at `core` cells out and falls away beyond
+	void whirl(float x, float y, float speed, float core, float grip) {
 		float qx = x * 0.5 - 0.25;
 		float qy = y * 0.5 - 0.25;
-		float s2 = ch * ch * 0.09;
-		float k = amount * step * 46.0 / s2;
+		float c2 = core * core;
+		float k = 2.0 * speed / core;
 		for (int gy = 1; gy < ch - 1; ++gy) {
 			float ey = gy - qy;
-			int i = gy * gw + 1;
-			for (int gx = 1; gx < gw - 1; ++gx) {
+			int i = gy * cw + 1;
+			for (int gx = 1; gx < cw - 1; ++gx) {
 				float ex = gx - qx;
-				float f = k / (1.0 + (ex * ex + ey * ey) / s2);
-				uu[i] -= ey * f;
-				vv[i] += ex * f;
+				float fall = 1.0 / (1.0 + (ex * ex + ey * ey) / c2);
+				float pull = grip * fall;
+				u[i] += (0.0 - ey * k * fall - u[i]) * pull;
+				v[i] += (ex * k * fall - v[i]) * pull;
 				++i;
 			}
 		}
@@ -545,8 +567,8 @@ class Maelstrom : Scene {
 
 	// vorticity confinement: push along N x curl, N the unit gradient of |curl|
 	void confine(float step) {
-		var& uu = MS_U;
-		var& vv = MS_V;
+		var& uu = u;
+		var& vv = v;
 		var& c = cu;
 		int gw = cw;
 		int gh = ch;
@@ -579,8 +601,8 @@ class Maelstrom : Scene {
 	// over-relaxation from last frame's pressure (walls are Neumann: a border cell
 	// copies its inner neighbour), then subtract grad(p)
 	void project() {
-		var& uu = MS_U;
-		var& vv = MS_V;
+		var& uu = u;
+		var& vv = v;
 		var& p = pr;
 		var& dvg = dv;
 		int gw = cw;
@@ -626,8 +648,8 @@ class Maelstrom : Scene {
 	// bilinear blend of the four cells it lands among; the walls hold still and
 	// the water slowly calms
 	void advect_flow(float step) {
-		var& uu = MS_U;
-		var& vv = MS_V;
+		var& uu = u;
+		var& vv = v;
 		var& un = u1;
 		var& vn = v1;
 		int gw = cw;
@@ -656,210 +678,129 @@ class Maelstrom : Scene {
 				++i;
 			}
 		}
-		for (int y2 = 1; y2 < gh - 1; ++y2) {
-			int j = y2 * gw + 1;
-			for (int x2 = 1; x2 < gw - 1; ++x2) {
-				uu[j] = un[j];
-				vv[j] = vn[j];
-				++j;
-			}
-		}
+		u = u1;
+		v = v1;
 	}
 
-	// the ink rows in parallel, written back once every row has read the old ink;
-	// the tank drains faster before the bloom
-	void advect_ink(float step) {
-		MS_W = w;
-		MS_H = h;
-		MS_CW = cw;
-		MS_CH = ch;
-		MS_RUN = step * 2.0;
-		MS_FADE = 1.0 - (tt > 10.177 && tt < 11.977 ? 0.9 : 0.22) * step;
-		var rows = parallel_transform(MS_INNER, maelstrom_ink_row);
-		var& d = MS_D;
-		var& a = MS_A;
-		var& b = MS_B;
-		int ww = w;
-		for (int r = 0; r < rows.size(); ++r) {
-			var& row = rows[r];
-			int i = (r + 1) * ww;
-			for (int x = 1; x < ww - 1; ++x) {
-				d[i + x] = row[x];
-				a[i + x] = row[ww + x];
-				b[i + x] = row[ww + ww + x];
-			}
-		}
-	}
-
-	// motes ride the current; one that leaves the water, or now and then any
-	// one, comes back somewhere new
-	void drift_motes(float step) {
-		var& uu = MS_U;
-		var& vv = MS_V;
-		int gw = cw;
-		float run = step * 2.0;
-		for (int k = 0; k < motes; ++k) {
-			float x = mx[k];
-			float y = my[k];
-			int g = itrunc(y * 0.5) * gw + itrunc(x * 0.5);
-			x += run * uu[g];
-			y += run * vv[g];
-			if (x < 1.5 || x > w - 2.5 || y < 1.5 || y > h - 2.5 || rng.next(240) == 0) {
-				x = 2.0 + rng.nextf() * (w - 4);
-				y = 2.0 + rng.nextf() * (h - 4);
-			}
-			mx[k] = x;
-			my[k] = y;
-		}
-	}
-
-	// the camera circles the tank, tilted down at it: it sways through the opening, swings
-	// round after the starburst, rides the kick a little, and over the last bars dives
-	// low and close over the whirlpool
-	void place_camera() {
-		float t = tt;
-		float kick = cue == null ? 0.0 : cue.kick_env(t);
-		float swing = t > MUSIC_BAR * 4.0 ? (t - MUSIC_BAR * 4.0) * 0.32 : 0.0;
-		float ang = 0.32 * math::sin(t * 0.42) + swing;
-		float fx = math::sin(ang);
-		float fy = 0.0 - math::cos(ang);
-		float dive = t > 11.977 ? (t - 11.977) / 3.2 : 0.0;
-		dive = dive > 1.0 ? 1.0 : dive * dive * (3.0 - 2.0 * dive);
-		// it circles faster and sinks as the funnel winds up, then the geyser throws it up and back
-		float wind = (t - MUSIC_BAR * 9.0) / MUSIC_BAR;
-		wind = wind < 0.0 ? 0.0 : (wind > 1.0 ? 1.0 : wind);
-		float thrown = smooth01((t - t_geyser) / (MUSIC_BAR * 1.4));
-		ang += wind * wind * 1.1 - thrown * 0.5;
-		fx = math::sin(ang);
-		fy = 0.0 - math::cos(ang);
-		float flash = cue == null ? 0.0 : cue.hit(t);
-		float back = h * (0.82 - dive * 0.34 - wind * 0.08 + thrown * 0.32);
-		MS_FX = fx;
-		MS_FY = fy;
-		MS_RX = 0.0 - fy;
-		MS_RY = fx;
-		MS_CX = w * 0.5 - fx * back;
-		MS_CY = h * 0.5 - fy * back;
-		MS_HC = h * (0.62 - dive * 0.26 - wind * 0.06 + thrown * 0.26) * (1.0 - kick * 0.05);
-		MS_FOC = w * 0.6 * (1.0 + kick * 0.04 + flash * 0.1);
-		MS_HOR = 0.0 - h * (0.25 - dive * 0.12 + thrown * 0.08) + math::sin(t * 53.0) * flash * flash * h * 0.04;
-		MS_PEAK = h * (0.085 + kick * 0.03);
-		MS_ZMAX = back + h * 1.2;
-		surge(t, wind);
-	}
-
-	// the water's own heights about the middle, by radius: the funnel the whirlpool sinks, the geyser's tower
-	// and a ring out across the surface on every kick from the whirlpool on (the geyser's the biggest)
-	void surge(float t, float wind) {
-		MS_SURGE = t > MUSIC_BAR * 5.0;
-		if (!MS_SURGE) { return; }
-		MS_GX = w * 0.5;
-		MS_GY = h * 0.5;
-		int n = itrunc(math::sqrt(w * w + h * h * 1.0)) + 2;
-		var& rad = MS_RAD;
-		var& lit = MS_RADL;
-		if (rad.size() != n) {
-			rad = gfx.make_fgrid(n);
-			lit = gfx.make_grid(n);
-		}
-		float kick = cue == null ? 0.0 : cue.kick_env(t);
-		float erupt = t - t_geyser;
-		float spout = t - t_spout;
-		float funnel = erupt < 0.0 ? h * 0.07 * wind * wind : h * 0.07 * math::exp(0.0 - erupt * 9.0);
-		float fr2 = h * h * 0.012;
-		float tower = 0.0;
-		if (erupt > 0.0) {
-			tower = h * 0.3 * (1.0 - math::exp(0.0 - erupt * 14.0)) * (0.35 + 0.65 * math::exp(0.0 - erupt * 1.1)) * (1.0 + kick * 0.35);
-			if (spout > 0.0) { tower += h * 0.18 * (1.0 - math::exp(0.0 - spout * 14.0)) * math::exp(0.0 - spout * 1.6); }
-		}
-		float tw2 = h * h * 0.0018;
+	// what the tank's middle sends out, by radius: every ring's lit crest, dark wake and
+	// shove outward (a shock's wake also lays the ink back in its bands), the drain's
+	// pull inward, its white eye and the dark closing in on it
+	void radiate(float t, float step) {
+		var& settle = MS_SETTLE;
+		var& push = radial;
+		var& lit = level;
+		int n = lit.size();
+		float drain = smooth01((t - t_drain) / MUSIC_BAR);
+		float closing = smooth01((t - t_drain - MUSIC_BAR * 0.5) / (MUSIC_BAR * 1.5));
+		float dark_at = n * (1.0 - closing) + 11.0 * unit * closing;
+		float dusk = 0.25 / unit;
+		float eye = 3.5 * unit;
+		float mouth = 9.0 * unit;
+		float pull = 26.0 * unit * drain;
+		float calm = (settling + (pool_settling - settling) * smooth01((t - t_pool) / MUSIC_BEAT)) * step;
+		float full = 5.0 + 2.5 * hit_at(t);
 		for (int r = 0; r < n; ++r) {
-			float q = r * r / tw2;
-			rad[r] = tower / (1.0 + q * q) - funnel / (1.0 + r * r / fr2);
-			lit[r] = 0;
+			float m = r / mouth;
+			float q = r / eye;
+			push[r] = 0.0 - pull * m / (1.0 + m * m);
+			lit[r] = full + 4.0 * drain / (1.0 + q * q * q * q);
+			settle[r] = calm;
 		}
-		if (cue == null) { return; }
-		// the rings: each kick's spreads at a constant speed and dies away, a lit crest with a dark trough
-		// behind it; the geyser's is bigger
-		float speed = h * 0.75;
-		float wd = h * 0.045;
-		int k = cue.kick.last(t / MUSIC_STEP + 0.0001);
-		while (k >= 0) {
-			float born = cue.kick.at[k] * MUSIC_STEP;
-			float age = t - born;
-			if (age > 2.6) { break; }
-			if (born >= MUSIC_BAR * 5.0) {
-				bool big = born >= t_geyser - 0.01 && born < t_geyser + 0.05;
-				float amp = h * (erupt > 0.0 ? 0.035 : 0.02) * (big ? 1.8 : 1.0) * cue.kick.vel[k] / 127.0 * math::exp(0.0 - age * 1.1);
-				float ring_r = big ? h * 0.12 + age * speed * 1.4 : age * speed;
-				int r0 = math::max(0, itrunc(ring_r - wd * 2.6));
-				int r1 = math::min(n - 1, itrunc(ring_r + wd) + 1);
-				for (int r2 = r0; r2 <= r1; ++r2) {
-					float e = (r2 - ring_r) / wd;
-					float f = e > -1.0 ? 1.0 - e * e : -0.5 * (1.0 - (e + 1.8) * (e + 1.8) / 0.64);
-					if (e < -2.6 || (e > -1.0 && f <= 0.0)) { continue; }
-					rad[r2] += amp * f;
-					int l = itrunc(f * amp / (h * 0.01));
-					l = lit[r2] + l;
-					lit[r2] = l > 3 ? 3 : (l < -3 ? -3 : l);
+		float wide = 3.5 * unit;
+		for (int k = 0; k < ring_born.size(); ++k) {
+			float age = t - ring_born[k];
+			if (age < 0.0 || age > 2.2) { continue; }
+			float amp = ring_power[k] * math::exp(0.0 - age * 1.5);
+			float at = (3.0 + age * 48.0) * unit;
+			int r0 = math::max(0, math::itrunc(at - wide * 2.6));
+			int r1 = math::min(n - 1, math::itrunc(at + wide) + 1);
+			for (int r2 = r0; r2 <= r1; ++r2) {
+				float e = (r2 - at) / wide;
+				if (e > -1.0) {
+					float crest = 1.0 - e * e;
+					if (crest > 0.0) {
+						lit[r2] += 3.4 * amp * crest;
+						push[r2] += 24.0 * unit * amp * crest;
+					}
+				} else {
+					float wake = 1.0 - (e + 1.8) * (e + 1.8) / 0.64;
+					if (wake > 0.0) {
+						lit[r2] -= 3.0 * amp * wake;
+						settle[r2] += ring_lays[k] * wake;
+					}
 				}
 			}
-			--k;
 		}
+		for (int r3 = 0; r3 < n; ++r3) {
+			if (settle[r3] > 1.0) { settle[r3] = 1.0; }
+			float left = (dark_at - r3) * dusk;
+			if (left < 1.0) { lit[r3] *= left < 0.0 ? 0.0 : left; }
+		}
+		var& shade = MS_SHADE;
+		int shades = shade.size();
+		for (int q2 = 0; q2 < shades; ++q2) {
+			float far = shade_radius[q2];
+			int whole_far = far;
+			float l = lit[whole_far] + (lit[whole_far + 1] - lit[whole_far]) * (far - whole_far);
+			int whole = l + 0.5;
+			shade[q2] = (whole < 0 ? 0 : (whole > 9 ? 9 : whole)) * 128;
+		}
+	}
+
+	// the ink rides the flow plus what the rings and the drain add (a push the projection
+	// would cancel, so the flow itself never takes it); its rows run in parallel and
+	// rebuild the ink once every row has read the old one
+	void carry_ink(float t, float step) {
+		radiate(t, step);
+		MS_FU = u;
+		MS_FV = v;
+		var& fu = MS_FU;
+		var& fv = MS_FV;
+		int cn = cw * ch;
+		for (int i = 0; i < cn; ++i) {
+			float out = radial[away_r[i]];
+			fu[i] += away_x[i] * out;
+			fv[i] += away_y[i] * out;
+		}
+		MS_RUN = step * 2.0;
+		var rows = parallel_transform(MS_INK_ROWS, maelstrom_ink_row);
+		var& ink = MS_INK;
+		ink.clear();
+		for (int r = 0; r < rows.size(); ++r) { ink.append(rows[r]); }
+	}
+
+	// the camera hangs over the tank: it sways and rolls, punches in on the kick and
+	// the hits, and over the drain dives into the eye, turning with the spiral
+	void place_camera() {
+		float t = tt;
+		float flash = hit_at(t);
+		float drain = smooth01((t - t_drain) / (MUSIC_BAR * 2.0));
+		float roll = 0.08 * math::sin(t * 0.47) + math::sin(t * 53.0) * flash * flash * 0.02;
+		roll += turn * drain * drain * 2.4;
+		float zoom = (1.2 + 0.06 * math::sin(t * 0.31) + 0.9 * drain) * (1.0 + 0.035 * kick_at(t) + 0.1 * flash);
+		float k = dw / (w * zoom);
+		float ca = math::cos(roll) * k;
+		float sa = math::sin(roll) * k;
+		float sway = (1.0 - drain) * dw * 0.025;
+		MS_AX = ca;
+		MS_AY = sa;
+		MS_BX = 0.0 - sa;
+		MS_BY = ca;
+		MS_OX = MS_CX + sway * math::sin(t * 0.37) + (0.5 - w * 0.5) * ca - (0.5 - h * 0.5) * sa;
+		MS_OY = MS_CY + sway * 0.6 * math::sin(t * 0.53) + (0.5 - w * 0.5) * sa + (0.5 - h * 0.5) * ca;
 	}
 
 	void render(var& grid) override {
-		MS_W = w;
-		MS_H = h;
-		MS_INK = ink;
-		MS_BG = bg;
-		MS_T = tt;
-		float snare = cue == null ? 0.0 : cue.snare_env(tt);
-		float flash = cue == null ? 0.0 : cue.hit(tt);
-		MS_LIFT = itrunc(snare * 2.5 + flash * 3.0);
-		MS_GLOW = itrunc((cue == null ? 0.0 : cue.bass_env(tt)) * 1.5);
-		var& cc = MS_CCOL;
-		for (int c = 0; c < w; ++c) { cc[c] = 2.0 * math::sin(c * 0.13 - tt * 0.9); }
-		var rows = parallel_transform(MS_ALL, maelstrom_row);
-		int ww = w;
-		var& img = MS_IMG;
-		if (img.size() != w * h) { img = gfx.make_grid(w * h); }
-		int k0 = 0;
-		for (int y0 = 0; y0 < h; ++y0) {
-			var& row0 = rows[y0];
-			for (int x0 = 0; x0 < ww; ++x0) {
-				img[k0] = row0[x0];
-				++k0;
-			}
-		}
 		place_camera();
-		if (MS_COLS.size() != w) {
-			MS_COLS = [];
-			for (int c2 = 0; c2 < w; ++c2) { MS_COLS.push(c2); }
-		}
-		var cols = parallel_transform(MS_COLS, maelstrom_column);
-		// past the tank: the deep water's gradient, darkest at the top
-		for (int x = 0; x < ww; ++x) {
-			var& col = cols[x];
-			for (int y = 0; y < h; ++y) {
-				int c = col[y];
-				if (c < 0) {
-					int tone = 15 - y * 10 / h;
-					c = bg + (tone < 0 ? 0 : tone) * 4;
-				}
-				grid[y * ww + x] = c;
-			}
-		}
-		// the motes ride the water's surface in perspective
-		for (int k = 0; k < motes; ++k) {
-			float rx = mx[k] - MS_CX;
-			float ry = my[k] - MS_CY;
-			float z = rx * MS_FX + ry * MS_FY;
-			if (z < 4.0) { continue; }
-			float side = rx * MS_RX + ry * MS_RY;
-			int px = itrunc(ww * 0.5 + side * MS_FOC / z);
-			int py = itrunc(MS_HOR + MS_HC * MS_FOC / z);
-			if (px >= 0 && px < ww && py >= 0 && py < h) { grid[py * ww + px] = mote; }
-		}
+		// the shocks flash the picture negative
+		float since_pool = tt - t_pool;
+		float since_drain = tt - t_drain;
+		bool negative = (since_pool >= 0.0 && since_pool < 0.1) || (since_drain >= 0.0 && since_drain < 0.1);
+		MS_W = w;
+		MS_TUBES = negative ? tubes + 1280 : tubes;
+		MS_PHASE = traded + math::itrunc(3.5 * kick_at(tt));
+		var rows = parallel_transform(MS_ROWS, maelstrom_row);
+		grid.clear();
+		for (int y = 0; y < h; ++y) { grid.append(rows[y]); }
 	}
 }

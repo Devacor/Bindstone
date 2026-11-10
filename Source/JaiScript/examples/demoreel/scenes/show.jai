@@ -1,4 +1,4 @@
-// SHOW — the finale's presentation: eight slides on the beat, one for each axis
+// SHOW — EIGHT's presentation: eight slides on the beat, one for each axis
 // the 8-cube opens, each a dimension of JaiScript. A slide counts itself in with a
 // big word, a code card slides in and types itself in syntax colours, a live
 // demonstration plays beside it and three captions run along the lower third;
@@ -97,7 +97,7 @@ function ease_in(float k) -> float {
 
 function shade(int c, float k) -> int {
 	float f = k < 0.0 ? 0.0 : (k > 1.0 ? 1.0 : k);
-	return rgb(itrunc((c >> 16) * f), itrunc(((c >> 8) & 255) * f), itrunc((c & 255) * f));
+	return rgb(math::itrunc((c >> 16) * f), math::itrunc(((c >> 8) & 255) * f), math::itrunc((c & 255) * f));
 }
 
 class Slide {
@@ -123,10 +123,10 @@ class Slide {
 class Deck {
 	var slides = [];
 	int ui = 0;          // palette: 10 panel shades, the title bar, a line highlight, three window dots, white, black, reload green
-	int hyper = 0;       // the finale's 8 axes x 12 levels
+	int hyper = 0;       // EIGHT's 8 axes x 12 levels
 	float beat = 0.48387097;
 	float bar = 1.93548388;
-	float first = 5.80645164;   // the first slide's downbeat: bar 3
+	float first = 3.87096776;   // the first slide's downbeat: bar 2
 	float span = 7.74193552;    // four bars a slide
 
 	// the layout, in cells and pixels, refreshed every frame
@@ -221,7 +221,7 @@ class Deck {
 	// 0 before the first slide, 1..8 during one, 9 after the last
 	int section(float t) {
 		if (t < first) { return 0; }
-		int d = itrunc((t - first) / span) + 1;
+		int d = math::itrunc((t - first) / span) + 1;
 		return d > 9 ? 9 : d;
 	}
 
@@ -253,10 +253,10 @@ class Deck {
 	}
 
 	void dot(var& grid, float cx, float cy, float r, int c) {
-		int x0 = itrunc(cx - r - 1.0);
-		int x1 = itrunc(cx + r + 1.0);
-		int y0 = itrunc(cy - r - 1.0);
-		int y1 = itrunc(cy + r + 1.0);
+		int x0 = math::itrunc(cx - r - 1.0);
+		int x1 = math::itrunc(cx + r + 1.0);
+		int y0 = math::itrunc(cy - r - 1.0);
+		int y1 = math::itrunc(cy + r + 1.0);
 		for (int y = y0; y <= y1; ++y) {
 			if (y < 0 || y >= ph) { continue; }
 			for (int x = x0; x <= x1; ++x) {
@@ -273,10 +273,10 @@ class Deck {
 		float dy = y1 - y0;
 		float adx = dx < 0.0 ? -dx : dx;
 		float ady = dy < 0.0 ? -dy : dy;
-		int steps = itrunc((adx > ady ? adx : ady) + 1.0);
+		int steps = math::itrunc((adx > ady ? adx : ady) + 1.0);
 		for (int s = 0; s <= steps; ++s) {
-			int x = itrunc(x0 + dx * s / steps);
-			int y = itrunc(y0 + dy * s / steps);
+			int x = math::itrunc(x0 + dx * s / steps);
+			int y = math::itrunc(y0 + dy * s / steps);
 			if (x >= 0 && x < pw && y >= 0 && y < ph) { grid[y * pw + x] = c; }
 		}
 	}
@@ -331,7 +331,7 @@ class Deck {
 	void draw_sweep(var& grid, int d, float lt) {
 		if (lt > 0.32) { return; }
 		int axis_ink = hyper + slides[d - 1].axis * 12;
-		int edge = itrunc(lt / 0.32 * (pw + ph + 40)) - 20;
+		int edge = math::itrunc(lt / 0.32 * (pw + ph + 40)) - 20;
 		for (int y = 0; y < ph; ++y) {
 			int base = y * pw;
 			int x0 = edge - y / 2;
@@ -345,7 +345,7 @@ class Deck {
 	// before the first slide: the name in big letters with a shine across them, what
 	// the eight are about typed under it, and a count-in on the last bar's four beats
 	void draw_intro(var& grid, float t) {
-		float lt = t - 2.5;
+		float lt = t - 0.25;
 		if (lt < 0.0) { return; }
 		string name = "JAISCRIPT";
 		int sx = 1;
@@ -353,12 +353,12 @@ class Deck {
 		int tw = gfx.text_width(name, sx);
 		int tx = (pw - tw) / 2;
 		int ty = ph / 2 - 7 * sx - 2;
-		int shown = itrunc(lt * 14.0) + 1;
+		int shown = math::itrunc(lt * 14.0) + 1;
 		float leave = (first - t) / 0.35;
 		if (leave > 0.0) {
 			int ramp = leave < 1.0 ? hyper + 7 * 12 + 2 : hyper + 6 * 12 + 4;
 			gfx.draw_text(grid, pw, ph, name, tx, ty, sx, sx, ramp, 8, ui + 16, shown);
-			int sweep = itrunc((lt - 0.7) * pw * 0.9);
+			int sweep = math::itrunc((lt - 0.7) * pw * 0.9);
 			for (int y = ty; y < ty + 7 * sx; ++y) {
 				int base = y * pw;
 				for (int x = tx; x < tx + tw; ++x) {
@@ -369,7 +369,7 @@ class Deck {
 		}
 		float count_at = first - bar;
 		if (t > count_at) {
-			int beats = itrunc((t - count_at) / beat);
+			int beats = math::itrunc((t - count_at) / beat);
 			for (int k = 0; k < 4; ++k) {
 				float cx = pw * 0.5 + (k - 1.5) * 4.0 * sx;
 				float cy = ty + 7 * sx + 5.0 * sx;
@@ -379,8 +379,8 @@ class Deck {
 		}
 		string a = "a scripting language for c++";
 		string b = "in eight dimensions";
-		int shown_a = itrunc(lt * 30.0);
-		int shown_b = itrunc((lt - 1.2) * 24.0);
+		int shown_a = math::itrunc(lt * 30.0);
+		int shown_b = math::itrunc((lt - 1.2) * 24.0);
 		int r = rows / 2 + rows / 4 + 1;
 		float fade = (first - t) / 0.4;
 		fade = fade > 1.0 ? 1.0 : fade;
@@ -400,7 +400,7 @@ class Deck {
 			int x1 = col_px(col + 2);
 			int y0 = row_px(1);
 			int y1 = row_px(2);
-			int c = lit ? axis_ink + 10 : (now ? axis_ink + 4 + itrunc(pulse(t) * 6.0) : ui + 3);
+			int c = lit ? axis_ink + 10 : (now ? axis_ink + 4 + math::itrunc(pulse(t) * 6.0) : ui + 3);
 			fill(grid, x0, y0, x1, y1, c);
 			txt_put(col, 2, `${k + 1}`, lit || now ? rgb(238, 236, 255) : rgb(90, 92, 130));
 		}
@@ -415,13 +415,13 @@ class Deck {
 		// the counted word slams in white on the downbeat and settles to its axis' colours
 		int scale = rows >= 34 ? 3 : 2;
 		if (pw >= 300) { scale = 4; }
-		int wx = col_px(2) - itrunc(out_k * pw * 0.6);
-		int wy = row_px(1) + 1 - itrunc(pulse(t) * pulse(t) * 2.0);
+		int wx = col_px(2) - math::itrunc(out_k * pw * 0.6);
+		int wy = row_px(1) + 1 - math::itrunc(pulse(t) * pulse(t) * 2.0);
 		int ramp = lt < 0.12 ? ui + 15 : axis_ink + 4;
 		gfx.draw_text(grid, pw, ph, s.word, wx, wy, scale, scale, ramp, lt < 0.12 ? 1 : 8, ui + 16, s.word.size());
 		int word_cells = cell_col(gfx.text_width(s.word, scale)) + 4;
 		int title_row = cell_row(wy + 7 * scale / 2);
-		int typed = itrunc((lt - 0.2) * 28.0);
+		int typed = math::itrunc((lt - 0.2) * 28.0);
 		if (typed > 0 && out_k < 0.5) {
 			string spaced = "";
 			for (int i = 0; i < s.title.size() && i < typed; ++i) { spaced += s.title.substr(i, 1) + " "; }
@@ -432,7 +432,7 @@ class Deck {
 		int card_w = split - 3;
 		int lines = s.code.size();
 		int card_h = lines + 4;
-		int shift = itrunc((in_k - 1.0 - out_k) * (card_w + 4));
+		int shift = math::itrunc((in_k - 1.0 - out_k) * (card_w + 4));
 		int c0 = 2 + shift;
 		int r0 = top;
 		window(grid, c0, r0, c0 + card_w, r0 + card_h, axis_ink + 7, s.file, rgb(200, 196, 240));
@@ -442,12 +442,12 @@ class Deck {
 		for (int k = 0; k < s.bullets.size(); ++k) {
 			float bk = ease_out((lt - 1.6 - k * 1.1) / 0.4);
 			if (bk <= 0.0) { continue; }
-			int bshift = itrunc((bk - 1.0 - out_k) * (split + 4));
+			int bshift = math::itrunc((bk - 1.0 - out_k) * (split + 4));
 			int row = br + k * 2;
 			if (row >= rows - 2) { break; }
 			fill(grid, col_px(2 + bshift), row_px(row), col_px(3 + bshift), row_px(row + 1), axis_ink + 9);
 			string line = s.bullets[k];
-			int shown = itrunc((lt - 1.6 - k * 1.1) * 40.0);
+			int shown = math::itrunc((lt - 1.6 - k * 1.1) * 40.0);
 			txt_put(4 + bshift, row, line.substr(0, shown > line.size() ? line.size() : (shown < 0 ? 0 : shown)), rgb(238, 236, 255));
 		}
 		// the demonstration, sliding in from the right under the cube's window
@@ -455,7 +455,7 @@ class Deck {
 		int v1 = cols - 2;
 		int vr0 = rows / 2;
 		int vr1 = rows - 3;
-		int vshift = itrunc((1.0 - in_k + out_k) * (v1 - v0 + 4));
+		int vshift = math::itrunc((1.0 - in_k + out_k) * (v1 - v0 + 4));
 		window(grid, v0 + vshift, vr0, v1 + vshift, vr1, axis_ink + 7, "live", rgb(160, 156, 210));
 		demo(grid, d, v0 + vshift, vr0 + 1, v1 + vshift, vr1, lt, t);
 	}
@@ -463,7 +463,7 @@ class Deck {
 	// the code, typed in at a steady clip with a block cursor; the debugging slide
 	// keeps a breakpoint in the gutter and, once paused, highlights the line it holds
 	void draw_code(var& grid, var& s, int c0, int r0, int card_w, float lt, int d) {
-		int typed = itrunc((lt - 0.55) * 42.0);
+		int typed = math::itrunc((lt - 0.55) * 42.0);
 		int lines = s.code.size();
 		int left = c0 + 4;
 		int room = card_w - 6;
@@ -492,7 +492,7 @@ class Deck {
 				++col;
 			}
 			if (typed <= 0) {
-				if (itrunc(lt * 4.0) % 2 == 0 && col - left < room) { txt_glyph(col, row, 0x2588, rgb(238, 236, 255)); }
+				if (math::itrunc(lt * 4.0) % 2 == 0 && col - left < room) { txt_glyph(col, row, 0x2588, rgb(238, 236, 255)); }
 				break;
 			}
 			--typed;
@@ -524,7 +524,7 @@ class Deck {
 		float cx = (x0 + x1) * 0.5;
 		float cy = (y0 + y1) * 0.5;
 		float reach = (x1 - x0 < y1 - y0 ? x1 - x0 : y1 - y0) * 0.48;
-		int born = itrunc(lt * 22.0);
+		int born = math::itrunc(lt * 22.0);
 		born = born > 160 ? 160 : born;
 		for (int k = 0; k < born; ++k) {
 			float age = lt - k / 22.0;
@@ -533,7 +533,7 @@ class Deck {
 			float a = k * 2.39996 + age * 0.6;
 			float r = reach * (age / 2.6) * (0.6 + 0.4 * math::sin(k * 1.7));
 			int axis_ink = hyper + (k % 8) * 12;
-			dot(grid, cx + math::cos(a) * r * 1.0, cy + math::sin(a) * r, 0.6 + life * 1.4, axis_ink + 4 + itrunc(life * 7.0));
+			dot(grid, cx + math::cos(a) * r * 1.0, cy + math::sin(a) * r, 0.6 + life * 1.4, axis_ink + 4 + math::itrunc(life * 7.0));
 		}
 	}
 
@@ -563,7 +563,7 @@ class Deck {
 			if (lt >= 4.2) { f = 1.0 - f; }
 			dot(grid, ax + (bx2 - ax) * f, fy, 0.9, hyper + 1 * 12 + 10);
 		}
-		int chars = itrunc(out_k * 80.0);
+		int chars = math::itrunc(out_k * 80.0);
 		for (int li = 0; li < json.size(); ++li) {
 			string line = json[li];
 			var ink = syntax_ink(line);
@@ -582,10 +582,10 @@ class Deck {
 		txt_put(c0 + 2, r0 + 1, "reflect::fields(boss)", INK_FUNC);
 		var names = ["name", "hp", "speed", "angry", "loot"];
 		var types = ["string", "int", "float", "bool", "array"];
-		int hp = 900 - itrunc(lt * 61.0) % 900;
+		int hp = 900 - math::itrunc(lt * 61.0) % 900;
 		float speed = 2.5 + math::sin(lt * 2.1) * 1.5;
 		var vals = ["\"lich\"", `${hp}`, gfx.fmt1(speed), lt > 3.0 ? "true" : "false", "[3 items]"];
-		int pick = itrunc(lt / (beat * 2.0)) % 5;
+		int pick = math::itrunc(lt / (beat * 2.0)) % 5;
 		for (int k = 0; k < 5; ++k) {
 			int row = r0 + 3 + k;
 			if (row >= r1 - 1) { break; }
@@ -669,7 +669,7 @@ class Deck {
 		int bh = (y1 - y0) / bands;
 		if (bh < 1) { return; }
 		float sweep = ease_out(lt / 3.0) * 1.0;
-		int reach = x0 + itrunc((x1 - x0) * (sweep > 1.0 ? 1.0 : sweep));
+		int reach = x0 + math::itrunc((x1 - x0) * (sweep > 1.0 ? 1.0 : sweep));
 		for (int b = 0; b < bands; ++b) {
 			int by = y0 + b * bh;
 			int axis_ink = hyper + b * 12;
@@ -679,7 +679,7 @@ class Deck {
 					float u = (x - x0) * 1.0 / (x1 - x0);
 					float v = (y - y0) * 1.0 / (y1 - y0);
 					float f = math::sin(u * 9.0 + lt * 2.0) + math::sin(v * 7.0 - lt) + math::sin((u + v) * 5.0);
-					int lv = itrunc((f + 3.0) * 1.6);
+					int lv = math::itrunc((f + 3.0) * 1.6);
 					grid[base + x] = axis_ink + (lv < 0 ? 0 : (lv > 11 ? 11 : lv));
 				}
 				if (reach < x1 && reach > x0) { grid[base + reach] = ui + 15; }
@@ -706,18 +706,18 @@ class Deck {
 				dot(grid, px, py, 1.3, axis_ink + 10);
 			}
 			dot(grid, rx, ry, 2.2 + (1.0 - f) * 1.0, axis_ink + (f < 0.25 ? 11 : 6));
-			txt_put(cell_col(itrunc(rx)) + 2, cell_row(itrunc(ry)), names[k], rgb(220, 216, 250));
+			txt_put(cell_col(math::itrunc(rx)) + 2, cell_row(math::itrunc(ry)), names[k], rgb(220, 216, 250));
 		}
-		dot(grid, ex, ey, 3.0, hyper + 5 * 12 + 6 + itrunc((1.0 - f) * 5.0));
-		txt_put(cell_col(itrunc(ex)) - 3, cell_row(itrunc(ey)) + 2, "onOpen", INK_FUNC);
-		int hits = lt > 0.8 ? itrunc((lt - 0.8) / beat) : 0;
+		dot(grid, ex, ey, 3.0, hyper + 5 * 12 + 6 + math::itrunc((1.0 - f) * 5.0));
+		txt_put(cell_col(math::itrunc(ex)) - 3, cell_row(math::itrunc(ey)) + 2, "onOpen", INK_FUNC);
+		int hits = lt > 0.8 ? math::itrunc((lt - 0.8) / beat) : 0;
 		txt_put(c0 + 2, r1 - 2, `open(42) x${hits}  received ${hits * 4}`, INK_NUM);
 	}
 
 	// SEVEN: paused on the breakpoint, once per call: the locals and the call stack
 	void demo_debugger(var& grid, int c0, int r0, int c1, int r1, float lt) {
 		bool paused = lt > 3.5;
-		int n = paused ? itrunc((lt - 3.5) / (beat * 2.0)) % 5 : 0;
+		int n = paused ? math::itrunc((lt - 3.5) / (beat * 2.0)) % 5 : 0;
 		fill(grid, col_px(c0 + 1), row_px(r0), col_px(c1 - 1), row_px(r0 + 1), paused ? ui + 13 : ui + 11);
 		txt_put(c0 + 2, r0, paused ? " PAUSED  breakpoint  hero.jai:3 " : " running ", paused ? rgb(255, 250, 230) : rgb(170, 170, 210));
 		txt_put(c0 + 2, r0 + 2, "LOCALS", rgb(150, 146, 210));

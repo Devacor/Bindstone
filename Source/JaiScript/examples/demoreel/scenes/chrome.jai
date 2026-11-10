@@ -619,7 +619,7 @@ class Chrome : Scene {
 		}
 		if (since >= 0.35) { return; }
 		float a = 1.0 - since / 0.35;
-		int edge = itrunc(a * a * 17.0);
+		int edge = math::itrunc(a * a * 17.0);
 		for (int y = 0; y < h; ++y) {
 			int row = y * w;
 			int by4 = (y & 3) * 4;
@@ -655,7 +655,7 @@ class Chrome : Scene {
 		}
 		for (int s2 = 0; s2 < sx.size(); ++s2) {
 			float flare = cue != null ? 1.0 + cue.hit(tt) * 2.2 + cue.snare_env(tt) * 0.8 : 1.0;
-			int len = itrunc((3.0 + 4.0 * (0.5 + 0.5 * math::sin(tt * 7.0 + s2 * 1.7))) * flare * h / 120.0) + 2;
+			int len = math::itrunc((3.0 + 4.0 * (0.5 + 0.5 * math::sin(tt * 7.0 + s2 * 1.7))) * flare * h / 120.0) + 2;
 			for (int r = 1; r <= len; ++r) {
 				int ink = r * 3 < len ? glint + 2 : (r * 3 < len * 2 ? glint + 1 : glint);
 				star_px(grid, sx[s2] + r, sy[s2], ink);

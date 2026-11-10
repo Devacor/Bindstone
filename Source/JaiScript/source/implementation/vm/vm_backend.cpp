@@ -18711,7 +18711,7 @@ struct vm_backend::construction_lender final : detail::construction_host {
 	std::optional<error_propagator> pass_depth_gate() override { return self.pass_depth_gate(); }
 	std::shared_ptr<environment> current_environment() override { return self.environment_; }
 	std::shared_ptr<environment> global_environment() override { return self.engine_ ? self.engine_->get_global_environment() : self.environment_; }
-	const class_definition* caller_access_context() override { return caller ? self.frame_access_context(*caller) : self.current_access_context(); }
+	const class_definition* caller_access_context() override { return caller ? self.caller_access_context(caller, caller_env.get()) : self.current_access_context(); }
 	std::shared_ptr<environment> parallel_sandbox() override {
 		return self.parallel_worker_ && self.parallel_method_pins_ ? self.parallel_method_pins_->definition_env : nullptr;
 	}
@@ -22746,7 +22746,7 @@ op_status vm_backend::bind_site_reference(size_t i, const call_site& site, frame
 					                                         caller_frame->locals->scope_static,
 					                                         symbol_id, /*want_methods*/ false);
 					if (member) {
-						VM_TRY(detail::bare_member_access(member, symbol_id, frame_access_context(*caller_frame)));
+						VM_TRY(detail::bare_member_access(member, symbol_id, caller_access_context(caller_frame, caller_env.get())));
 					}
 					argPtr = member.value_ptr;
 					// A C++ property binds the member itself / its accessors (internal/reference_model.md)
@@ -22809,7 +22809,7 @@ op_status vm_backend::bind_place_reference(const expression* place, frame* calle
                                            script_value& out, bool& bound) {
 	// C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with the interpreter)
 	if (caller_env && place->get_type() == node_type::member_expr && static_cast<const member_expr*>(place)->is_static) {
-		const class_definition* access = caller_frame ? frame_access_context(*caller_frame) : caller_env->find_access_context();
+		const class_definition* access = caller_access_context(caller_frame, caller_env.get());
 		if (auto cell = detail::static_member_lvalue(*engine_, static_cast<const member_expr*>(place), *caller_env, *symbolizer_, access)) {
 			if (!*cell) { return raise_from(*cell); }
 			return reference_to_storage(*cell->value(), out, bound);
@@ -22880,7 +22880,7 @@ checked_result<script_value> vm_backend::component_reference(frame* caller_frame
 		ensure_frame_member_scope(*caller_frame, caller_env.get());   // the identifier ladder reads the frame's member scope
 	}
 	return detail::math::component_reference(e, caller_view(caller_frame), caller_env.get(),
-		caller_frame ? frame_access_context(*caller_frame) : (caller_env ? caller_env->find_access_context() : nullptr),
+		caller_access_context(caller_frame, caller_env.get()),
 		engine_, symbolizer_, [this](script_value& storage) { return share_env_ref(storage); });
 }
 

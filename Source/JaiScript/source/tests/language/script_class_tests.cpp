@@ -1359,6 +1359,49 @@ public:
             check_eq(outputs[0], outputs[1], "statics/ref access parity");
         });
 
+        test("member_access_private_field_by_reference_beside_lambda", [this]() {
+            // A T& argument binds in the calling method's class, whatever else the method holds (a lambda gives it a frame env)
+            const char* src = R"(
+                class Cave {
+                    Cave() {}
+                    Cave(int& a_seed) { a_seed += 100; }
+                    void dig(int& a_dice) { a_dice += 1; }
+                    static void digStatic(int& a_dice) { a_dice += 10; }
+                }
+                class Game {
+                    int arrow() { cave.dig(dice); var f = x => x + 1; return f(dice); }
+                    int bracket() { openCave.dig(dice); var f = []() { return 1; }; return dice + f(); }
+                    int viaThis() { cave.dig(this.dice); var f = x => x; return f(dice); }
+                    int staticCallee() { Cave::digStatic(dice); var f = x => x; return f(dice); }
+                    int constructed() { Cave made(dice); var f = x => x; return f(dice); }
+                    int inLambda() { var f = [this]() { cave.dig(dice); return dice; }; return f(); }
+                    int noLambda() { cave.dig(dice); return dice; }
+                    Cave openCave;
+                private:
+                    Cave cave;
+                    int dice = 0;
+                }
+                Game game;
+                string out = "";
+                try { out += `${game.arrow()}`; } catch (e) { out += e; }
+                try { out += `|${game.bracket()}`; } catch (e) { out += "|" + e; }
+                try { out += `|${game.viaThis()}`; } catch (e) { out += "|" + e; }
+                try { out += `|${game.staticCallee()}`; } catch (e) { out += "|" + e; }
+                try { out += `|${game.constructed()}`; } catch (e) { out += "|" + e; }
+                try { out += `|${game.inLambda()}`; } catch (e) { out += "|" + e; }
+                try { out += `|${game.noLambda()}`; } catch (e) { out += "|" + e; }
+                out;
+            )";
+            std::string outputs[2];
+            for (bool use_vm : {false, true}) {
+                auto e = jai::foundry::make_default_engine();
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+                outputs[use_vm ? 1 : 0] = e->execute(src).as<std::string>();
+            }
+            check_eq(std::string("2|3|3|13|113|114|115"), outputs[0], "interp private field by reference beside a lambda");
+            check_eq(outputs[0], outputs[1], "private field by reference beside a lambda parity");
+        });
+
         // ------------------------------------------------- bare-name resolution order
         // Audit pins (docs/site/guide/07-classes.html "Name resolution in
         // methods"): catch var > locals/params > enclosing scopes > GLOBALS > fields >

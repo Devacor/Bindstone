@@ -1746,6 +1746,13 @@ namespace jai::vm {
             return nullptr;
         }
 
+        // A caller frame asked while a call is being set up: environment_ may already be the callee's chain, so a frame with an
+        // environment of its own answers from the caller's
+        const class_definition* caller_access_context(const frame* caller_frame, const environment* caller_env) const {
+            if (caller_env && (!caller_frame || caller_frame->entry_env)) { return caller_env->find_access_context(); }
+            return caller_frame ? frame_access_context(*caller_frame) : nullptr;
+        }
+
         // Caller context for builtins (reflect::set/invoke enforcement): a builtin call
         // pushes no vm frame, so the innermost live frame answers for the caller
         const class_definition* current_access_context() const override {

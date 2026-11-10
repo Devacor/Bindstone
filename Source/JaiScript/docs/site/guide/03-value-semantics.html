@@ -246,7 +246,7 @@ print("arr[1] after realloc = {}", arr[1]);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">h.hp = 11
 arr[1] = 7
 arr[1] after realloc = 8</code></pre></div>
-<p>Shrinking the array out from under an element reference stops the script with <code>Reference to a removed array element</code> rather than corrupting memory, on both backends. The error is catchable, and the store it interrupted writes nothing.</p>
+<p>Shrinking the array out from under an element reference stops the script with <code>Reference to a removed array element</code> rather than corrupting memory, on both backends. The error is catchable, and the store it interrupted writes nothing. An element reference names an index, not an element: after an <code>insert</code>, an <code>erase</code> below it, a <code>sort</code> or any other reorder it reads and writes whatever now sits at that index. A map entry reference names its key and follows the entry.</p>
 <p>A vector or color component (<a href="15-math.html">Math</a>) is an lvalue too, as a struct member is in C++. All of these bind it: <code>f(v.x)</code> with <code>void f(float&amp; a)</code>, <code>auto&amp; r = pos.y;</code>, <code>cast&lt;float&amp;&gt;(v.x)</code> and a <code>-&gt; float&amp;</code> return of a component. Writes land in the vector the component belongs to (a local, a field, an element of an <code>array&lt;math::vec2&gt;</code>, a C++ property through its setter), with the same narrowing as <code>v.x = value</code>.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">void scale(float&amp; a) { a *= 2.0; }
 math::vec2 v = math::vec2(1.5, 2.0);

@@ -139,148 +139,449 @@ points, <code>&lt;jaiscript/serialization/construct.hpp&gt;</code> for <code>loa
 </tbody></table></div>
 
 <h2 id="a-worked-conversion">A worked conversion<a class="hlink" href="#a-worked-conversion" aria-label="link">&#8203;</a></h2>
-<p>A small save game: an inventory of items, a player that holds it through a <code>shared_ptr</code>, and status
-effects behind base pointers.</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++ (Cereal)</span><pre><code class="lang-cpp">#include &lt;cereal/types/string.hpp&gt;
-#include &lt;cereal/types/vector.hpp&gt;
+<p>A small save game, five ways: items, an inventory with private fields, and a player that holds the inventory
+through a <code>shared_ptr</code> and derives <code>hpFraction</code> on load. Every form but
+<code>JAI_PROPERTY</code>, which is shorter, keeps each type and field at the same line number.</p>
+<div class="tabs" id="conversion-tabs">
+<div class="tab-list" role="tablist" aria-label="Library and form" hidden>
+<button type="button" role="tab" id="conversion-tab-cereal-member" aria-controls="conversion-cereal-member" aria-selected="true">Cereal: intrusive</button>
+<button type="button" role="tab" id="conversion-tab-cereal-free" aria-controls="conversion-cereal-free" aria-selected="false" tabindex="-1">Cereal: non-intrusive</button>
+<button type="button" role="tab" id="conversion-tab-member" aria-controls="conversion-member" aria-selected="false" tabindex="-1">JaiScript: intrusive</button>
+<button type="button" role="tab" id="conversion-tab-property" aria-controls="conversion-property" aria-selected="false" tabindex="-1">JaiScript: JAI_PROPERTY</button>
+<button type="button" role="tab" id="conversion-tab-free" aria-controls="conversion-free" aria-selected="false" tabindex="-1">JaiScript: non-intrusive</button>
+</div>
+<div class="tab-panel" id="conversion-cereal-member" role="tabpanel" aria-labelledby="conversion-tab-cereal-member" tabindex="0">
+<p>Cereal with the functions inside each type. <code>Player</code> splits <code>save</code> from <code>load</code> because a load also derives <code>hpFraction</code>.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++ (Cereal, intrusive)</span><pre><code class="lang-cpp">#include &lt;cereal/archives/json.hpp&gt;
 #include &lt;cereal/types/memory.hpp&gt;
-#include &lt;cereal/archives/json.hpp&gt;
+#include &lt;cereal/types/string.hpp&gt;
+#include &lt;cereal/types/vector.hpp&gt;
+#include &lt;sstream&gt;
 
 struct Item {
     std::string name;
     int count = 1;
 
     template&lt;class Archive&gt;
-    void serialize(Archive&amp; ar) { ar(CEREAL_NVP(name), CEREAL_NVP(count)); }
+    void serialize(Archive&amp; ar) {
+        ar(CEREAL_NVP(name));
+        ar(CEREAL_NVP(count));
+    }
 };
 
 class Inventory {
+public:
+    void add(const Item&amp; item) { items.push_back(item); }
+
+private:
     friend class cereal::access;
     std::vector&lt;Item&gt; items;
     int capacity = 20;
 
     template&lt;class Archive&gt;
-    void serialize(Archive&amp; ar, std::uint32_t const version) {
+    void serialize(Archive&amp; ar) {
         ar(CEREAL_NVP(items));
-        if (version &gt;= 2) { ar(CEREAL_NVP(capacity)); }
+        ar(CEREAL_NVP(capacity));
     }
 };
-CEREAL_CLASS_VERSION(Inventory, 2);
 
-class Player {
-public:
+struct Player {
     std::string name;
     int hp = 100;
     std::shared_ptr&lt;Inventory&gt; inventory = std::make_shared&lt;Inventory&gt;();
-    float hpFraction = 1.0f;                     // derived on load, never saved
+    float hpFraction = 1.0f;
 
     template&lt;class Archive&gt;
-    void save(Archive&amp; ar) const { ar(CEREAL_NVP(name), CEREAL_NVP(hp), CEREAL_NVP(inventory)); }
+    void save(Archive&amp; ar) const {
+        ar(CEREAL_NVP(name));
+        ar(CEREAL_NVP(hp));
+        ar(CEREAL_NVP(inventory));
+    }
 
     template&lt;class Archive&gt;
     void load(Archive&amp; ar) {
-        ar(CEREAL_NVP(name), CEREAL_NVP(hp), CEREAL_NVP(inventory));
+        ar(CEREAL_NVP(name));
+        ar(CEREAL_NVP(hp));
+        ar(CEREAL_NVP(inventory));
         hpFraction = hp / 100.0f;
     }
 };
 
-std::ofstream os("player.json");
-{
-    cereal::JSONOutputArchive ar(os);
-    ar(player);
+int main() {
+    Item potion;
+    potion.name = "potion";
+    potion.count = 3;
+
+    Player player;
+    player.name = "Vex";
+    player.hp = 40;
+    player.inventory-&gt;add(potion);
+
+    std::stringstream stream;
+    {
+        cereal::JSONOutputArchive ar(stream);
+        ar(player);
+    }
+    std::string text = stream.str();
+
+    Player loaded;
+    {
+        cereal::JSONInputArchive ar(stream);
+        ar(loaded);
+    }
 }</code></pre></div>
-<p>The same save in JaiScript, three ways. Cereal's version is intrusive, so <strong>member functions</strong> is the direct port; <strong>non-intrusive</strong> moves the functions out of the types; <strong>JAI_PROPERTY</strong> is intrusive with no functions at all.</p>
-<div class="tabs" id="conversion-tabs">
-<div class="tab-list" role="tablist" aria-label="Intrusive or non-intrusive" hidden>
-<button type="button" role="tab" id="conversion-tab-member" aria-controls="conversion-member" aria-selected="true">Intrusive: member functions</button>
-<button type="button" role="tab" id="conversion-tab-property" aria-controls="conversion-property" aria-selected="false" tabindex="-1">Intrusive: JAI_PROPERTY</button>
-<button type="button" role="tab" id="conversion-tab-free" aria-controls="conversion-free" aria-selected="false" tabindex="-1">Non-intrusive</button>
 </div>
-<div class="tab-panel" id="conversion-member" role="tabpanel" aria-labelledby="conversion-tab-member" tabindex="0">
-<p><code>Item</code> and <code>Player</code> change only <code>CEREAL_NVP</code> to <code>JAI_NVP</code>. The type headers go, and so does the inventory's version gate:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++ (JaiScript)</span><pre><code class="lang-cpp">#include &lt;jaiscript/serialization/convenience.hpp&gt;
+<div class="tab-panel" id="conversion-cereal-free" role="tabpanel" aria-labelledby="conversion-tab-cereal-free" tabindex="0">
+<p>Cereal with the functions after each type, found by argument-dependent lookup. The types hold only data.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++ (Cereal, non-intrusive)</span><pre><code class="lang-cpp">#include &lt;cereal/archives/json.hpp&gt;
+#include &lt;cereal/types/memory.hpp&gt;
+#include &lt;cereal/types/string.hpp&gt;
+#include &lt;cereal/types/vector.hpp&gt;
+#include &lt;sstream&gt;
+
+struct Item {
+    std::string name;
+    int count = 1;
+};
+
+template&lt;class Archive&gt;
+void serialize(Archive&amp; ar, Item&amp; item) {
+    ar(cereal::make_nvp("name", item.name));
+    ar(cereal::make_nvp("count", item.count));
+}
 
 class Inventory {
+public:
+    void add(const Item&amp; item) { items.push_back(item); }
+
+private:
+    template&lt;class Archive&gt; friend void serialize(Archive&amp; ar, Inventory&amp; inventory);
+    std::vector&lt;Item&gt; items;
+    int capacity = 20;
+};
+
+template&lt;class Archive&gt;
+void serialize(Archive&amp; ar, Inventory&amp; inventory) {
+    ar(cereal::make_nvp("items", inventory.items));
+    ar(cereal::make_nvp("capacity", inventory.capacity));
+}
+
+struct Player {
+    std::string name;
+    int hp = 100;
+    std::shared_ptr&lt;Inventory&gt; inventory = std::make_shared&lt;Inventory&gt;();
+    float hpFraction = 1.0f;
+};
+
+template&lt;class Archive&gt;
+void save(Archive&amp; ar, const Player&amp; player) {
+    ar(cereal::make_nvp("name", player.name));
+    ar(cereal::make_nvp("hp", player.hp));
+    ar(cereal::make_nvp("inventory", player.inventory));
+}
+
+template&lt;class Archive&gt;
+void load(Archive&amp; ar, Player&amp; player) {
+    ar(cereal::make_nvp("name", player.name));
+    ar(cereal::make_nvp("hp", player.hp));
+    ar(cereal::make_nvp("inventory", player.inventory));
+    player.hpFraction = player.hp / 100.0f;
+}
+
+int main() {
+    Item potion;
+    potion.name = "potion";
+    potion.count = 3;
+
+    Player player;
+    player.name = "Vex";
+    player.hp = 40;
+    player.inventory-&gt;add(potion);
+
+    std::stringstream stream;
+    {
+        cereal::JSONOutputArchive ar(stream);
+        ar(player);
+    }
+    std::string text = stream.str();
+
+    Player loaded;
+    {
+        cereal::JSONInputArchive ar(stream);
+        ar(loaded);
+    }
+}</code></pre></div>
+</div>
+<div class="tab-panel" id="conversion-member" role="tabpanel" aria-labelledby="conversion-tab-member" tabindex="0">
+<p>The port of Cereal's intrusive form: the same member functions in the same places, with <code>JAI_NVP</code> for <code>CEREAL_NVP</code>.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++ (JaiScript, intrusive)</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/engine.hpp&gt;
+#include &lt;jaiscript/serialization/convenience.hpp&gt;
+#include &lt;memory&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
+
+struct Item {
+    std::string name;
+    int count = 1;
+
+    template&lt;class Archive&gt;
+    void serialize(Archive&amp; ar) {
+        ar(JAI_NVP(name));
+        ar(JAI_NVP(count));
+    }
+};
+
+class Inventory {
+public:
+    void add(const Item&amp; item) { items.push_back(item); }
+
+private:
     friend jai::access;
     std::vector&lt;Item&gt; items;
     int capacity = 20;
 
     template&lt;class Archive&gt;
-    void serialize(Archive&amp; ar) { ar(JAI_NVP(items), JAI_NVP(capacity)); }
+    void serialize(Archive&amp; ar) {
+        ar(JAI_NVP(items));
+        ar(JAI_NVP(capacity));
+    }
 };
 
-auto eng = jai::engine::make();
-std::ofstream("player.json") &lt;&lt; jai::to_json(*eng, player);
+struct Player {
+    std::string name;
+    int hp = 100;
+    std::shared_ptr&lt;Inventory&gt; inventory = std::make_shared&lt;Inventory&gt;();
+    float hpFraction = 1.0f;
 
-std::stringstream text;
-text &lt;&lt; std::ifstream("player.json").rdbuf();
-Player loaded = jai::from_json&lt;Player&gt;(*eng, text.str());</code></pre></div>
+    template&lt;class Archive&gt;
+    void save(Archive&amp; ar) const {
+        ar(JAI_NVP(name));
+        ar(JAI_NVP(hp));
+        ar(JAI_NVP(inventory));
+    }
+
+    template&lt;class Archive&gt;
+    void load(Archive&amp; ar) {
+        ar(JAI_NVP(name));
+        ar(JAI_NVP(hp));
+        ar(JAI_NVP(inventory));
+        hpFraction = hp / 100.0f;
+    }
+};
+
+int main() {
+    Item potion;
+    potion.name = "potion";
+    potion.count = 3;
+
+    Player player;
+    player.name = "Vex";
+    player.hp = 40;
+    player.inventory-&gt;add(potion);
+
+    auto eng = jai::engine::make();
+    std::string text = jai::to_json(*eng, player);
+
+    Player loaded = jai::from_json&lt;Player&gt;(*eng, text);
+}</code></pre></div>
 </div>
 <div class="tab-panel" id="conversion-property" role="tabpanel" aria-labelledby="conversion-tab-property" tabindex="0">
-<p>Each type derives <code>jai::property_owner</code> and declares its fields with <code>JAI_PROPERTY</code>. No <code>serialize</code>, <code>save</code> or <code>load</code> is written, and the same declarations make the fields reflected and visible to scripts:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++ (JaiScript)</span><pre><code class="lang-cpp">#include &lt;jaiscript/properties/macros.hpp&gt;
+<p>Each type derives <code>jai::property_owner</code> and declares its fields with <code>JAI_PROPERTY</code>, which also makes them reflected and visible to scripts. The one function left is the <code>load</code> that derives <code>hpFraction</code>.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++ (JaiScript, JAI_PROPERTY)</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/engine.hpp&gt;
+#include &lt;jaiscript/properties/macros.hpp&gt;
 #include &lt;jaiscript/properties/property_serialization.hpp&gt;
 #include &lt;jaiscript/serialization/convenience.hpp&gt;
+#include &lt;memory&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
 
-class Item : public jai::property_owner&lt;Item&gt; {
-public:
+struct Item : jai::property_owner&lt;Item&gt; {
     JAI_PROPERTY((std::string), name);
     JAI_PROPERTY((int), count, 1);
 };
 
 class Inventory : public jai::property_owner&lt;Inventory&gt; {
 public:
+    void add(const Item&amp; item) { items-&gt;push_back(item); }
+
+private:
     JAI_PROPERTY((std::vector&lt;Item&gt;), items);
     JAI_PROPERTY((int), capacity, 20);
 };
 
-class Player : public jai::property_owner&lt;Player&gt; {
-public:
+struct Player : jai::property_owner&lt;Player&gt; {
     JAI_PROPERTY((std::string), name);
     JAI_PROPERTY((int), hp, 100);
     JAI_PROPERTY((std::shared_ptr&lt;Inventory&gt;), inventory, std::make_shared&lt;Inventory&gt;());
-    JAI_TRANSIENT_PROPERTY((float), hpFraction, 1.0f);   // reflected, never saved
+    JAI_TRANSIENT_PROPERTY((float), hpFraction, 1.0f);
+
+    template&lt;class Archive&gt;
+    void load(Archive&amp; ar) {
+        load_owned_properties(ar);
+        hpFraction = hp / 100.0f;
+    }
 };
 
-auto eng = jai::engine::make();
-Player player;
-std::string text = jai::to_json(*eng, player);
-Player loaded = jai::from_json&lt;Player&gt;(*eng, text);</code></pre></div>
-<p>The types are held as Cereal's were: the items by value in their vector, the player by value, the inventory through its <code>shared_ptr</code>. Properties are written in name order, a property the file lacks keeps its initializer, and <code>hpFraction</code> is recomputed by the code that uses it or in a <code>load</code> the class adds (<a href="#the-property-route">The property route</a>).</p>
+int main() {
+    Item potion;
+    potion.name = "potion";
+    potion.count = 3;
+
+    Player player;
+    player.name = "Vex";
+    player.hp = 40;
+    player.inventory-&gt;add(potion);
+
+    auto eng = jai::engine::make();
+    std::string text = jai::to_json(*eng, player);
+
+    Player loaded = jai::from_json&lt;Player&gt;(*eng, text);
+}</code></pre></div>
 </div>
 <div class="tab-panel" id="conversion-free" role="tabpanel" aria-labelledby="conversion-tab-free" tabindex="0">
-<p>Cereal's free <code>serialize(Archive&amp;, T&amp;)</code> and <code>save</code> / <code>load</code> pairs port the same way: free templates beside each type, found by argument-dependent lookup.</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++ (JaiScript)</span><pre><code class="lang-cpp">#include &lt;jaiscript/serialization/convenience.hpp&gt;
+<p>The port of Cereal's non-intrusive form: the same free functions in the same places, with <code>ar("name", value)</code> for <code>cereal::make_nvp</code>.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++ (JaiScript, non-intrusive)</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/engine.hpp&gt;
+#include &lt;jaiscript/serialization/convenience.hpp&gt;
+#include &lt;memory&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
 
-// Item, Inventory and Player are plain structs with no serialization code inside them.
-// A free function reaches public members only, so Inventory's fields are public here.
+struct Item {
+    std::string name;
+    int count = 1;
+};
 
 template&lt;class Archive&gt;
-void serialize(Archive&amp; ar, Item&amp; item) { ar("name", item.name); ar("count", item.count); }
+void serialize(Archive&amp; ar, Item&amp; item) {
+    ar("name", item.name);
+    ar("count", item.count);
+}
+
+class Inventory {
+public:
+    void add(const Item&amp; item) { items.push_back(item); }
+
+private:
+    template&lt;class Archive&gt; friend void serialize(Archive&amp; ar, Inventory&amp; inventory);
+    std::vector&lt;Item&gt; items;
+    int capacity = 20;
+};
 
 template&lt;class Archive&gt;
-void serialize(Archive&amp; ar, Inventory&amp; inventory) { ar("items", inventory.items); ar("capacity", inventory.capacity); }
+void serialize(Archive&amp; ar, Inventory&amp; inventory) {
+    ar("items", inventory.items);
+    ar("capacity", inventory.capacity);
+}
+
+struct Player {
+    std::string name;
+    int hp = 100;
+    std::shared_ptr&lt;Inventory&gt; inventory = std::make_shared&lt;Inventory&gt;();
+    float hpFraction = 1.0f;
+};
 
 template&lt;class Archive&gt;
-void save(Archive&amp; ar, const Player&amp; player) { ar("name", player.name); ar("hp", player.hp); ar("inventory", player.inventory); }
+void save(Archive&amp; ar, const Player&amp; player) {
+    ar("name", player.name);
+    ar("hp", player.hp);
+    ar("inventory", player.inventory);
+}
 
 template&lt;class Archive&gt;
 void load(Archive&amp; ar, Player&amp; player) {
-    ar("name", player.name); ar("hp", player.hp); ar("inventory", player.inventory);
+    ar("name", player.name);
+    ar("hp", player.hp);
+    ar("inventory", player.inventory);
     player.hpFraction = player.hp / 100.0f;
 }
 
-auto eng = jai::engine::make();
-std::string text = jai::to_json(*eng, player);
-Player loaded = jai::from_json&lt;Player&gt;(*eng, text);</code></pre></div>
-<p>The root is written as the member functions write it: <code>{"name": "Vex", "hp": 40, "inventory": {"$id": 1, "$val": {...}}}</code>.</p>
+int main() {
+    Item potion;
+    potion.name = "potion";
+    potion.count = 3;
+
+    Player player;
+    player.name = "Vex";
+    player.hp = 40;
+    player.inventory-&gt;add(potion);
+
+    auto eng = jai::engine::make();
+    std::string text = jai::to_json(*eng, player);
+
+    Player loaded = jai::from_json&lt;Player&gt;(*eng, text);
+}</code></pre></div>
 </div>
 </div>
-<p>The gate existed for Cereal files written before <code>capacity</code> did. Those files reach JaiScript through
-the converter, which reads them with Cereal and its version branch
-(<a href="#converting-existing-files">below</a>), so the first JaiScript layout holds every current field. The
-inventory is written as <code>{"$id": 1, "$val": {"items": [...], "capacity": 20}}</code>; a second
-<code>shared_ptr</code> to it in the same save writes <code>{"$id": 1}</code> and loads as the same object.</p>
+<p><code>Inventory</code>'s fields are private, so the non-intrusive forms declare the free function a friend (or
+make the fields public); <code>JAI_PROPERTY</code> declarations need no friend.</p>
+<div class="tablewrap"><table><thead><tr><th></th><th>Cereal: intrusive</th><th>Cereal: non-intrusive</th><th>JaiScript: intrusive</th><th>JaiScript: JAI_PROPERTY</th><th>JaiScript: non-intrusive</th></tr></thead><tbody>
+<tr><td>Headers</td><td colspan="2"><code>cereal/archives/json.hpp</code> and a <code>cereal/types/</code> header per standard type</td><td><code>convenience.hpp</code> alone</td><td>plus <code>properties/macros.hpp</code> and <code>property_serialization.hpp</code></td><td><code>convenience.hpp</code> alone</td></tr>
+<tr><td>Access to private fields</td><td><code>friend class cereal::access;</code></td><td>a <code>friend</code> declaration of the free function</td><td><code>friend jai::access;</code> (left out, the save throws)</td><td>none</td><td>a <code>friend</code> declaration of the free function</td></tr>
+<tr><td>Where the member list lives</td><td>functions inside the type</td><td>functions after the type</td><td>functions inside the type</td><td>the declarations themselves</td><td>functions after the type</td></tr>
+<tr><td>How a member is named</td><td><code>CEREAL_NVP(hp)</code></td><td><code>cereal::make_nvp("hp", player.hp)</code></td><td><code>JAI_NVP(hp)</code></td><td>by its declaration</td><td><code>ar("hp", player.hp)</code></td></tr>
+<tr><td>Save and load split</td><td>member <code>save</code> const and <code>load</code></td><td>free <code>save</code> and <code>load</code></td><td>member <code>save</code> const and <code>load</code></td><td>a <code>load</code> alone, calling <code>load_owned_properties(ar)</code></td><td>free <code>save</code> and <code>load</code></td></tr>
+<tr><td>The never-saved member</td><td colspan="3">a plain field the functions leave out</td><td><code>JAI_TRANSIENT_PROPERTY</code>: reflected, never saved</td><td>a plain field the functions leave out</td></tr>
+<tr><td>How the root is written</td><td colspan="2"><code>ar(player)</code> on a <code>JSONOutputArchive</code>, complete when the archive is destroyed</td><td colspan="3"><code>jai::to_json(*eng, player)</code> returns the text</td></tr>
+<tr><td>The JSON</td><td colspan="2">the record under <code>"value0"</code>, in call order; the pointer as <code>"ptr_wrapper"</code> with <code>"id"</code> and <code>"data"</code></td><td>the record at the root, in call order; the pointer as <code>"$id"</code> and <code>"$val"</code></td><td>the same, in name order</td><td>as the member functions write it</td></tr>
+</tbody></table></div>
+<p>Both Cereal forms write:</p>
+<div class="codeblock cb-plain"><span class="cb-label">text</span><pre><code class="lang-plain">{
+    "value0": {
+        "name": "Vex",
+        "hp": 40,
+        "inventory": {
+            "ptr_wrapper": {
+                "id": 2147483649,
+                "data": {
+                    "items": [
+                        {
+                            "name": "potion",
+                            "count": 3
+                        }
+                    ],
+                    "capacity": 20
+                }
+            }
+        }
+    }
+}</code></pre></div>
+<p>The JaiScript member functions and free functions write:</p>
+<div class="codeblock cb-plain"><span class="cb-label">text</span><pre><code class="lang-plain">{
+  "name": "Vex",
+  "hp": 40,
+  "inventory": {
+    "$id": 1,
+    "$val": {
+      "items": [
+        {
+          "name": "potion",
+          "count": 3
+        }
+      ],
+      "capacity": 20
+    }
+  }
+}</code></pre></div>
+<p>The <code>JAI_PROPERTY</code> form writes the same record with each level in name order:</p>
+<div class="codeblock cb-plain"><span class="cb-label">text</span><pre><code class="lang-plain">{
+  "hp": 40,
+  "inventory": {
+    "$id": 1,
+    "$val": {
+      "capacity": 20,
+      "items": [
+        {
+          "count": 3,
+          "name": "potion"
+        }
+      ]
+    }
+  },
+  "name": "Vex"
+}</code></pre></div>
+<p>A second <code>shared_ptr</code> to the inventory in the same save writes <code>{"$id": 1}</code> and loads as the
+same object. A class with a <code>CEREAL_CLASS_VERSION</code> gate ports without it
+(<a href="#versions-in-a-self-describing-format">Versions</a>).</p>
 
 <h3 id="a-polymorphic-hierarchy">A polymorphic hierarchy<a class="hlink" href="#a-polymorphic-hierarchy" aria-label="link">&#8203;</a></h3>
 <div class="codeblock cb-cpp"><span class="cb-label">C++ (Cereal)</span><pre><code class="lang-cpp">#include &lt;cereal/types/polymorphic.hpp&gt;
@@ -376,8 +677,7 @@ Player loaded = jai::from_json&lt;Player&gt;(*eng, json);</code></pre></div>
 <li>A load reads the properties the record and the class share. A property the record lacks keeps its
 initializer, and one the class no longer declares is skipped, so adding or removing a <code>JAI_PROPERTY</code>
 needs no migration code.</li>
-<li><code>JAI_TRANSIENT_PROPERTY</code> is reflected but never saved, like a field a Cereal function left out.
-<code>JAI_NAMED_PROPERTY((type), "saved_name", member)</code> keeps a key stable through a rename.</li>
+<li><code>JAI_NAMED_PROPERTY((type), "saved_name", member)</code> keeps a key stable through a rename.</li>
 <li><code>property_owner&lt;Burn, Effect&gt;</code> records <code>Burn</code>'s name and its edge to
 <code>Effect</code>, so no registrar is needed. The name is the bare class name;
 <code>JAI_PROPERTY_OWNER_AS(Burn, "Burn")</code> pins it.</li>
@@ -423,9 +723,20 @@ void load(Archive&amp; ar) {
         metersPerSecond = kilometersPerHour / 3.6;
     }
 }</code></pre></div>
-<p>A Cereal version history does not carry over: the version branches stay on the Cereal side for as long as the
-converter needs them. A versioned member function still compiles and is called, but the number it receives is not
-a record version, so leave it unused on the JaiScript side.</p>
+<p>A Cereal version history does not carry over. Had the <a href="#a-worked-conversion">worked conversion</a>'s
+inventory gained <code>capacity</code> in its second version, its Cereal function would gate the field:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++ (Cereal)</span><pre><code class="lang-cpp">    template&lt;class Archive&gt;
+    void serialize(Archive&amp; ar, std::uint32_t const version) {
+        ar(CEREAL_NVP(items));
+        if (version &gt;= 2) { ar(CEREAL_NVP(capacity)); }
+    }
+};
+CEREAL_CLASS_VERSION(Inventory, 2)</code></pre></div>
+<p>The gate serves Cereal files written before <code>capacity</code> was. Those files reach JaiScript through the
+converter, which reads them with Cereal and its version branch
+(<a href="#converting-existing-files">below</a>), so the first JaiScript layout holds every current field and the
+JaiScript function is the ungated one the worked conversion shows. A versioned member function still compiles and
+is called, but the number it receives is not a record version, so leave it unused on the JaiScript side.</p>
 
 <h2 id="a-migration-path">A migration path<a class="hlink" href="#a-migration-path" aria-label="link">&#8203;</a></h2>
 <ol>

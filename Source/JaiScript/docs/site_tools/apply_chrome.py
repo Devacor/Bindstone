@@ -119,6 +119,8 @@ EMBEDDING = [
      "Every way into a project in full: CMake, Visual Studio and MSBuild, Xcode and an installed package, with the sources, flags and defines each needs, one file or per file, and Debug and Release notes."),
     ("19-jai-spider.html", "jai_spider: a Web Application Host",
      "jai_spider serves a JaiScript program over HTTP/1.1: the handler the app hands to spider::spin, Request and a Router in script, spider::Response shared with the spider:: client, SQLite bound as a class, cookie sessions, static files, and modules that reload on the request after they are saved."),
+    ("20-foundry.html", "Foundry: Testing a Host",
+     "Foundry is the test framework JaiScript's own suite is written in, one header and one runner source file: suites, checks, the runner's flags, and a test executable for a project of your own."),
 ]
 
 LANGUAGE_BRIDGES = [
@@ -161,7 +163,7 @@ SECTION_INDEX_DESC = {
     "guide/index.html":
         "Twenty chapters covering the whole core language, the opt-in web:: library, random numbers and crypto, HTML templates and a terminal game - every standalone sample runs on both backends, with the output it prints.",
     "embedding/index.html":
-        "Nineteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, editor support, host math types, a thread pool for host work, and a web application host.",
+        "Twenty chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, editor support, host math types, a thread pool for host work, a web application host, and a test framework.",
     "examples/index.html":
         "Complete, playable programs written in JaiScript - a raycast shooter, a dungeon crawler, a demoscene reel, an online RPG and a DOOM port - and what each one proves.",
     "play/index.html":

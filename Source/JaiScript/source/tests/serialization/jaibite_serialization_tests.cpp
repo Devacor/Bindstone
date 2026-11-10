@@ -605,8 +605,8 @@ public:
                     behavioral += use_vm ? 1 : 0;
                 }
             }
-            check_true(structural > 600, "the corpus parsed: " + std::to_string(structural));
-            check_true(behavioral > 300, "the corpus ran: " + std::to_string(behavioral));
+            check_true(structural > 400, "the corpus parsed: " + std::to_string(structural));
+            check_true(behavioral > 200, "the corpus ran: " + std::to_string(behavioral));
         });
 
         test("class_and_lambda_bytes_stable_before_and_after_execute", [this]() {

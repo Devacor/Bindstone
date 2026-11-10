@@ -6045,6 +6045,7 @@ checked_result<statement_ptr> parser::switch_statement() {
     JAISCRIPT_TRY(expect(token_type::left_brace, "expected '{' after switch condition"));
 
     auto switchStmt = std::make_shared<switch_stmt>(switchToken.location, condition);
+    bool empty_case_above = false;
 
     // Parse cases and default
     while (!check(token_type::right_brace) && !is_at_end()) {
@@ -6058,6 +6059,7 @@ checked_result<statement_ptr> parser::switch_statement() {
             // Set context for parsing case body
             bool oldInSwitchCase = in_switch_case_;
             in_switch_case_ = true;
+            bool ended_by_break = false;
 
             // Parse case body until we hit another case, default, or end of switch
             while (!check(token_type::case_keyword) && !check(token_type::default_keyword) &&
@@ -6086,6 +6088,7 @@ checked_result<statement_ptr> parser::switch_statement() {
                         return consume_result.error();
                     }
                     // Don't add break to the body since it's implicit
+                    ended_by_break = true;
                     break;
                 }
 
@@ -6099,6 +6102,13 @@ checked_result<statement_ptr> parser::switch_statement() {
 
             // Restore context
             in_switch_case_ = oldInSwitchCase;
+
+            // a case with no statements shares the body of the label below it
+            empty_case_above = caseStmt->body.empty() && !ended_by_break && (check(token_type::case_keyword) || check(token_type::default_keyword));
+            if (empty_case_above) {
+                caseStmt->body.push_back(std::make_shared<fallthrough_stmt>(caseStmt->location));
+                caseStmt->has_fallthrough = true;
+            }
 
             switchStmt->cases.push_back(caseStmt);
 
@@ -6117,7 +6127,7 @@ checked_result<statement_ptr> parser::switch_statement() {
             bool oldInSwitchCase = in_switch_case_;
             in_switch_case_ = true;
 
-            // Parse default body
+            bool default_ended_by_break = false;
             while (!check(token_type::case_keyword) && !check(token_type::default_keyword) &&
                    !check(token_type::right_brace) && !is_at_end()) {
 
@@ -6129,6 +6139,7 @@ checked_result<statement_ptr> parser::switch_statement() {
                         in_switch_case_ = oldInSwitchCase;
                         return consume_result.error();
                     }
+                    default_ended_by_break = true;
                     break;
                 }
 
@@ -6143,6 +6154,12 @@ checked_result<statement_ptr> parser::switch_statement() {
             // Restore context
             in_switch_case_ = oldInSwitchCase;
 
+            // default's body runs after every case's, so it shares one only as the last label
+            if (((defaultStmt->body.empty() && !default_ended_by_break) || empty_case_above) && check(token_type::case_keyword)) {
+                report_error("a label that shares a body with 'default' needs 'default' as the last label of the switch", peek());
+                return make_error_code(parse_error_code::syntax_error);
+            }
+            empty_case_above = false;
             switchStmt->default_case = defaultStmt;
 
         } else {

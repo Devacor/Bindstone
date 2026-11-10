@@ -116,19 +116,12 @@ print("{} {}", type_of(y), type_of(mixed));</code></pre></div>
 <p>Every typed slot runs the same table: a declaration, <code>=</code>, a by-value parameter, a return, a field, a static. A refused store is a load error where the checker sees both types and a catchable run-time error where one arrives through a <code>var</code>.</p>
 <div class="tablewrap"><table><thead><tr><th>Slot</th><th>Converts implicitly</th><th>Refused, and the spelling that converts</th></tr></thead><tbody>
 <tr><td><code>int</code></td><td>bool (<code>true</code> is <code>1</code>), an enum value, an object with <code>to_int()</code></td><td>a float: <code>cast&lt;int&gt;(x)</code> truncates toward zero, <code>math::ifloor(x)</code> rounds down. A char: <code>cast&lt;int&gt;(c)</code>. A string: <code>s.to_int()</code></td></tr>
-<tr><td><code>float</code></td><td>int (<code>3</code> is <code>3.0</code>), bool, an object with <code>to_float()</code></td><td>a string: <code>s.to_float()</code></td></tr>
 <tr><td><code>bool</code></td><td>int, float, null, an object, by truthiness (<code>0</code> is <code>false</code>)</td><td>a string, an array or a map: <code>!s.empty()</code> or a comparison</td></tr>
-<tr><td>enum <code>E</code></td><td>nothing but a value of <code>E</code></td><td>an int or another enum&#x27;s value: <code>cast&lt;E&gt;(n)</code>, which raises for an int <code>E</code> lacks</td></tr>
 <tr><td><code>string</code></td><td>utf8_string (its bytes), char, an object with <code>to_string()</code></td><td>an int, float, bool, null or container: <code>to_string(x)</code> or <code>`${x}`</code></td></tr>
-<tr><td><code>char</code></td><td>a string of exactly one character, an object with <code>to_char()</code></td><td>an int: <code>cast&lt;char&gt;(65)</code>, range-checked to 0..255. A longer or empty string</td></tr>
-<tr><td><code>array</code> / <code>map</code></td><td>the same kind of container, its elements checked at the element boundary</td><td>an element of another type (<code>array&lt;int&gt; a = ["x"];</code>)</td></tr>
 <tr><td>class <code>C</code></td><td><code>C</code> or a subclass, as a copy that keeps its own class and overrides; a <code>shared_ptr</code> to one (copies the pointee); a value that exactly one one-argument constructor <code>C(src)</code> takes; on <code>=</code>, a value an <code>operator=</code> of <code>C</code> takes</td><td><code>null</code>; a parent, sibling or unrelated class</td></tr>
 <tr><td><code>shared_ptr&lt;C&gt;</code></td><td>a handle or an instance of <code>C</code> or a subclass (an instance becomes a new shared object), <code>null</code></td><td>a <code>shared_ptr&lt;Base&gt;</code>: <code>cast&lt;shared_ptr&lt;C&gt;&gt;(b)</code></td></tr>
-<tr><td><code>weak_ptr&lt;C&gt;</code></td><td>a handle of <code>C</code> or a subclass, <code>null</code></td><td>an instance: it has no shared owner</td></tr>
-<tr><td><code>T&amp;</code></td><td>an lvalue holding a <code>T</code> (a class: <code>T</code> or a subclass), with no copy</td><td>everything else (<a href="03-value-semantics.html">Value Semantics</a>)</td></tr>
-<tr><td><code>function</code></td><td>a function, a lambda, a bound method, <code>null</code></td><td>anything else, an instance with <code>operator()</code> included: wrap it in a lambda</td></tr>
-<tr><td><code>var</code></td><td>anything</td><td></td></tr>
 </tbody></table></div>
+<p>Every slot (<code>float</code>, enums, <code>char</code>, containers, <code>weak_ptr</code>, <code>T&amp;</code>, <code>function</code>, <code>auto</code>): <a href="../reference/rules.html#type-conversions">the conversion table</a>.</p>
 <ul>
 <li><strong>One step.</strong> Conversions never chain: a class with <code>to_int()</code> enters an <code>int</code> slot, and does not go on through another class&#x27;s <code>C(int)</code> constructor into a <code>C</code> slot. A converting constructor or <code>to_X()</code> that throws shows its own error.</li>
 <li><strong>Conditions keep truthiness.</strong> <code>if (s)</code>, <code>while (xs)</code>, <code>!x</code> and <code>&amp;&amp;</code> test any value: an empty string or container is false there. Only a declared <code>bool</code> slot refuses text and containers.</li>
@@ -162,6 +155,7 @@ true 0 42</code></pre></div>
 <tr><td><code>cast&lt;T&amp;&gt;(obj)</code></td><td>a <strong>reference</strong> to the same object: how a base-typed slot reaches a member only the subclass declares</td></tr>
 <tr><td><code>cast&lt;shared_ptr&lt;T&gt;&gt;(obj)</code></td><td>a <strong>handle</strong> sharing the same object</td></tr>
 </tbody></table></div>
+<p>Every form and its error texts: <a href="../reference/rules.html#cast">cast</a>.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Base { int a = 1; }
 class Derived : Base { int t = 9; }
 print("{} {} {} {}", cast&lt;int&gt;(2.7), cast&lt;int&gt;('a'), cast&lt;char&gt;(97), cast&lt;string&gt;(5) + "!");

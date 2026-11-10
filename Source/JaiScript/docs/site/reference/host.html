@@ -134,14 +134,27 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>eng-&gt;execute("co.next()")</code> / native handle <code>e-&gt;next(eng)</code>, <code>e-&gt;next(eng, n)</code> / <code>e-&gt;done()</code></td><td>Drive script coroutines from C++.</td></tr>
 </tbody></table></div>
 <h3 id="thread-pool">Thread pool: <a href="../embedding/16-thread-pool.html">Thread Pool for Host Work</a>, <a href="../embedding/17-host-api.html#parallel-worker-count">Parallel worker count</a><a class="hlink" href="#thread-pool" aria-label="link">&#8203;</a></h3>
-<div class="tablewrap"><table><thead><tr><th>API (<code>&lt;jaiscript/thread_pool.hpp&gt;</code>)</th><th>What it does</th></tr></thead><tbody><tr><td><code>jai::thread_pool pool(n)</code> / <code>worker_count()</code> / <code>thread_pool::default_worker_count()</code></td><td><code>n</code> workers (0 = hardware threads minus one, at least one).</td></tr>
+<p>Each call with a compiled example: <a href="../embedding/16-thread-pool.html#submitting-work">Thread Pool for Host Work</a>. A task is a <code>thread_pool::task_type</code>, a <code>std::function&lt;void()&gt;</code>.</p>
+<div class="tablewrap"><table><thead><tr><th>Call (<code>&lt;jaiscript/thread_pool.hpp&gt;</code>)</th><th>Does</th></tr></thead><tbody>
+<tr><td><code>thread_pool(n = 0)</code></td><td>Starts <code>n</code> workers and keeps them for the pool's lifetime. Neither copyable nor movable.</td></tr>
+<tr><td><code>thread_pool(0)</code></td><td>0 means <code>thread_pool::default_worker_count()</code>: one less than the hardware threads, never less than one.</td></tr>
+<tr><td><code>worker_count()</code></td><td>The number of workers.</td></tr>
+<tr><td><code>submit(task)</code></td><td>Shared queue: the first free worker runs it.</td></tr>
+<tr><td><code>submit_to(worker, task)</code></td><td>That worker's own queue: only its thread runs the task, in submission order, between the shared tasks it also takes. For thread-affine state.</td></tr>
+<tr><td><code>submit_to</code>, bad index</td><td>An index outside 0 to <code>worker_count() - 1</code> throws <code>std::out_of_range</code>.</td></tr>
+<tr><td><code>submit(task, then, where)</code></td><td>Runs <code>then</code> once after <code>task</code> returns or throws.</td></tr>
+<tr><td><code>submit_batch(tasks, then, where)</code></td><td>Queues a <code>std::vector</code> of tasks under one lock and runs <code>then</code> once after the last finishes. An empty batch continues at once.</td></tr>
+<tr><td><code>submit_batch</code>, queueing throws</td><td>The tasks already queued run, <code>then</code> is dropped and the caller gets the exception.</td></tr>
+<tr><td><code>where</code></td><td><code>then_on::pool</code> (default): on the worker that finished the work. <code>then_on::posted</code>: on the thread that calls <code>run_posted()</code>.</td></tr>
+<tr><td><code>wait_idle()</code></td><td>Blocks until every task submitted so far has finished, pool continuations included, and their captures are destroyed. Does not wait for posted work.</td></tr>
+<tr><td><code>post(task)</code></td><td>Queues a task for the draining thread, from any thread.</td></tr>
+<tr><td><code>run_posted()</code></td><td>Runs the posted queue on the calling thread, in posting order, and returns how many tasks ran.</td></tr>
+<tr><td><code>on_exception(handler)</code></td><td>Installs a <code>std::function&lt;void(std::exception_ptr)&gt;</code>; replaceable at any time from any thread.</td></tr>
+<tr><td><code>spin_budget_ns(ns)</code>, <code>spin_budget_ns()</code></td><td>Sets and reads how long an idle worker spins before it parks (default 1,000,000: 1&nbsp;ms).</td></tr>
 <tr><td><code>thread_pool::performance_core_count()</code></td><td>A hybrid CPU&#x27;s performance cores, between 1 and the hardware threads; detected once.</td></tr>
 <tr><td><code>jai::thread_pool pool{n, jai::thread_pool::fast_threads}</code></td><td>Workers that ask the system not to throttle them to save power (off by default).</td></tr>
+<tr><td><code>spin_budget_ns(0)</code></td><td>Parks at once.</td></tr>
 <tr><td><code>eng-&gt;parallel_thread_count(n)</code> / <code>parallel_thread_count()</code></td><td>Threads of a parallel region, the caller included. Default: the performance cores, at most the hardware threads minus one; 0 restores it.</td></tr>
-<tr><td><code>submit(task)</code> / <code>submit_to(worker, task)</code></td><td>The shared queue (first free worker) / one worker&#x27;s own queue, in order.</td></tr>
-<tr><td><code>submit(task, then, where)</code> / <code>submit_batch(tasks, then, where)</code></td><td><code>then</code> runs once after the task or the whole batch, on the pool (<code>then_on::pool</code>) or posted (<code>then_on::posted</code>).</td></tr>
-<tr><td><code>post(task)</code> / <code>run_posted()</code></td><td>Queue work for the host&#x27;s thread / run it there, returning how many ran.</td></tr>
-<tr><td><code>on_exception(handler)</code> / <code>spin_budget_ns(ns)</code> / <code>wait_idle()</code></td><td>Receive escaped exceptions / spin before parking (0 parks at once) / block until submitted work finishes.</td></tr>
 </tbody></table></div>
 
 <h2 id="binder-reference">dynamic_binder: <a href="../embedding/02-dynamic-binder.html">Binding C++ Classes</a><a class="hlink" href="#binder-reference" aria-label="link">&#8203;</a></h2>
@@ -360,9 +373,9 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <p>The two layers differ only where a static type exists.</p>
 <div class="tablewrap"><table><thead><tr><th></th><th>Script archives</th><th>C++ archives</th></tr></thead><tbody>
 <tr><td>an object&#x27;s class</td><td>named on every object</td><td>named only when a base pointer holds a registered derived class; a nested C++ record carries no <code>$type</code></td></tr>
-<tr><td>the root, a record type (member or free <code>serialize</code> / <code>save</code> / <code>load</code>, a <code>property_owner</code>)</td><td>the value itself</td><td>its properties, flat, with no type name</td></tr>
+<tr><td>the root, a record type</td><td>the value itself</td><td>its properties, flat, with no type name</td></tr>
 <tr><td>the root, anything else (an owning pointer, a container, a number)</td><td>the value itself</td><td>under <code>"value0"</code>, as the <a href="../embedding/02-dynamic-binder.html#serialized">binder chapter</a> shows</td></tr>
-<tr><td>a <code>property_owner</code></td><td></td><td>copies and moves, so it saves and loads by value: <code>jai::from_json&lt;Spawner&gt;(*eng, jai::to_json(*eng, *gate))</code> returns one, its properties flat at the root under its static type</td></tr>
+<tr><td>a load that returns <code>T</code> by value</td><td></td><td>needs a default-constructible, movable <code>T</code>; a <code>property_owner</code> is both</td></tr>
 <tr><td>a <code>shared_ptr</code> root</td><td></td><td>keeps identity and a derived object&#x27;s <code>$type</code></td></tr>
 <tr><td>a class name the engine does not know</td><td>the object loads as a plain map</td><td>the load throws <code>Unknown polymorphic type: Name</code></td></tr>
 </tbody></table></div>
@@ -405,26 +418,6 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>jaiscript.languageServer.host</code></td><td><code>runner</code></td><td>The host profile.</td></tr>
 <tr><td><code>jaiscript.languageServer.includePaths</code></td><td><code>[]</code></td><td>Include paths for <code>import</code> and <code>include</code>.</td></tr>
 <tr><td><code>jaiscript.languageServer.log</code></td><td><code>false</code></td><td>Log requests and timings to the <em>JaiScript Language Server</em> output channel.</td></tr>
-</tbody></table></div>
-
-<h2 id="pool-api"><code>jai::thread_pool</code> calls<a class="hlink" href="#pool-api" aria-label="link">&#8203;</a></h2>
-<p>Each call with a compiled example: <a href="../embedding/16-thread-pool.html#submitting-work">Thread Pool for Host Work</a>. A task is a <code>thread_pool::task_type</code>, a <code>std::function&lt;void()&gt;</code>.</p>
-<div class="tablewrap"><table><thead><tr><th>Call</th><th>Does</th></tr></thead><tbody>
-<tr><td><code>thread_pool(n = 0)</code></td><td>Starts <code>n</code> workers and keeps them for the pool's lifetime. Neither copyable nor movable.</td></tr>
-<tr><td><code>thread_pool(0)</code></td><td>0 means <code>thread_pool::default_worker_count()</code>: one less than the hardware threads, never less than one.</td></tr>
-<tr><td><code>worker_count()</code></td><td>The number of workers.</td></tr>
-<tr><td><code>submit(task)</code></td><td>Shared queue: the first free worker runs it.</td></tr>
-<tr><td><code>submit_to(worker, task)</code></td><td>That worker's own queue: only its thread runs the task, in submission order, between the shared tasks it also takes. For thread-affine state.</td></tr>
-<tr><td><code>submit_to</code>, bad index</td><td>An index outside 0 to <code>worker_count() - 1</code> throws <code>std::out_of_range</code>.</td></tr>
-<tr><td><code>submit(task, then, where)</code></td><td>Runs <code>then</code> once after <code>task</code> returns or throws.</td></tr>
-<tr><td><code>submit_batch(tasks, then, where)</code></td><td>Queues a <code>std::vector</code> of tasks under one lock and runs <code>then</code> once after the last finishes. An empty batch continues at once.</td></tr>
-<tr><td><code>submit_batch</code>, queueing throws</td><td>The tasks already queued run, <code>then</code> is dropped and the caller gets the exception.</td></tr>
-<tr><td><code>where</code></td><td><code>then_on::pool</code> (default): on the worker that finished the work. <code>then_on::posted</code>: on the thread that calls <code>run_posted()</code>.</td></tr>
-<tr><td><code>wait_idle()</code></td><td>Blocks until every task submitted so far has finished, pool continuations included, and their captures are destroyed. Does not wait for posted work.</td></tr>
-<tr><td><code>post(task)</code></td><td>Queues a task for the draining thread, from any thread.</td></tr>
-<tr><td><code>run_posted()</code></td><td>Runs the posted queue on the calling thread, in posting order, and returns how many tasks ran.</td></tr>
-<tr><td><code>on_exception(handler)</code></td><td>Installs a <code>std::function&lt;void(std::exception_ptr)&gt;</code>; replaceable at any time from any thread.</td></tr>
-<tr><td><code>spin_budget_ns(ns)</code>, <code>spin_budget_ns()</code></td><td>Sets and reads how long an idle worker spins before it parks (default 1,000,000: 1&nbsp;ms).</td></tr>
 </tbody></table></div>
 
 <h2 id="hostapi-reference">More host calls<a class="hlink" href="#hostapi-reference" aria-label="link">&#8203;</a></h2>

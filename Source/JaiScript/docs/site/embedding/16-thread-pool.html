@@ -81,7 +81,7 @@ std::cout &lt;&lt; sum &lt;&lt; &quot;\n&quot;;</code></pre></div>
 <tr><td><code>wait_idle()</code></td><td>blocks until every task submitted so far has finished</td></tr>
 <tr id="the-posted-queue-post-and-run-posted"><td><code>post(task)</code>, <code>run_posted()</code></td><td>queues a task for the draining thread; runs the posted queue on the calling thread</td></tr>
 </tbody></table></div>
-<p>Every call, with its defaults and failures: <a href="../reference/host.html#pool-api"><code>jai::thread_pool</code> calls</a>.</p>
+<p>Every call, with its defaults and failures: <a href="../reference/host.html#thread-pool"><code>jai::thread_pool</code> calls</a>.</p>
 <p>An engine's own pool is sized from <code>thread_pool::performance_core_count()</code> and built with
 <code>thread_pool::fast_threads</code>, which opts its workers out of the system's power throttling
 (<a href="17-host-api.html#parallel-worker-count">Parallel worker count</a>).</p>

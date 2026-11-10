@@ -703,7 +703,7 @@ function lava_pixel(int x, int y) -> int {
 }
 
 
-// lattice row j: the rays through every second pixel of picture row 2j, one past the right edge included
+// lattice row j: the rays through every second pixel of every second picture row, one past the right edge included
 function lava_lattice_row(int j) -> array<int> {
 	array<int> out = [];
 	for (int i = 0; i < LV_CW; ++i) { out.push(lava_pixel(i * 2, j * 2)); }

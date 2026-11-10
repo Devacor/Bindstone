@@ -3024,6 +3024,34 @@ public:
             check_eq((size_t)0, error_count(e->check("class C { static float f = 3; static int n = true; static int u; }")), "converting static initializers are clean");
         });
 
+        // An instance has no static member (the run's "C has no member 'n'"): a dotted read, store or call of one names C::n
+        test("a_static_through_an_instance_names_the_qualified_spelling", [this]() {
+            auto e = make_engine();
+            const std::string cls = "class C { static int n = 3; static int bump() { n += 1; return n; } int k = 1;\n"
+                                    "  int bare() { return n + bump() + k; } }\nclass D : C { }\nC c;\nD d;\n";
+            const std::pair<const char*, const char*> through[] = {
+                {"int a = c.n;", "'n' is a static member of class 'C': name it C::n"},
+                {"c.n = 5;", "'n' is a static member of class 'C': name it C::n"},
+                {"int a = c.bump();", "'bump' is a static member of class 'C': name it C::bump(...)"},
+                {"int a = d.n;", "'n' is a static member of class 'D': name it D::n"},
+                {"int a = C().n;", "'n' is a static member of class 'C': name it C::n"},
+                {"class F : C { int f() { return this.n; } }", "'n' is a static member of class 'F': name it F::n"},
+            };
+            for (const auto& [stmt, text] : through) {
+                auto r = e->check(cls + stmt);
+                check_eq((size_t)1, error_count(r), std::string(stmt) + "\n" + r.format());
+                check_true(has_diag(r, dlevel::error, text), r.format());
+            }
+            check_eq((size_t)0, error_count(e->check(cls + "int a = C::n + C::bump() + D::n + c.k + c.bare();\n"
+                "class G { static int n = 1; int _get_n() { return 2; } }\nG g;\nint b = g.n;")), "the qualified spellings, an instance member and an accessor");
+            for (bool use_vm : {false, true}) {
+                auto x = make_engine();
+                x->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
+                check_eq(std::string("C has no member 'n'|5"), x->execute("[[warn_mode]];\n" + cls + "string r = \"\";\ntry { int a = c.n; } catch (err) { r = err; }\n`${r}|${C::bump() + 1}`").to_string(),
+                         use_vm ? "vm" : "interp");
+            }
+        });
+
         // ------------------------------------------------------------ precision map (docs "Precision map")
 
         // The creature shape: a script kind over a dynamic_binder base in an imported unit, a

@@ -1588,7 +1588,8 @@ private:
         return true;
     }
 
-    member_hit lookup_member(std::string_view cls, std::string_view member, bool want_static, int depth = 0) {
+    // instance_only: a dotted receiver's view (obj.name), which reaches no static of a script class
+    member_hit lookup_member(std::string_view cls, std::string_view member, bool want_static, int depth = 0, bool instance_only = false) {
         member_hit miss;
         if (depth > 32) { miss.certain = false; return miss; }
         if (const sclass* c = find_sclass(cls)) {
@@ -1608,13 +1609,15 @@ private:
             } else {
                 if (auto f = c->fields.find(member); f != c->fields.end()) { return hit(f->second, nullptr); }
                 if (auto m = c->methods.find(member); m != c->methods.end()) { return hit(nullptr, &m->second); }
-                // instance access reaches statics too (Cat().count, count++ in methods)
-                if (auto f = c->static_fields.find(member); f != c->static_fields.end()) { return hit(f->second, nullptr); }
-                if (auto m = c->static_methods.find(member); m != c->static_methods.end()) { return hit(nullptr, &m->second); }
+                // a method's bare name reaches statics too (count++ in methods)
+                if (!instance_only) {
+                    if (auto f = c->static_fields.find(member); f != c->static_fields.end()) { return hit(f->second, nullptr); }
+                    if (auto m = c->static_methods.find(member); m != c->static_methods.end()) { return hit(nullptr, &m->second); }
+                }
             }
             member_hit result;
             for (auto base : c->decl->base_classes) {
-                member_hit h = lookup_member(base, member, want_static, depth + 1);
+                member_hit h = lookup_member(base, member, want_static, depth + 1, instance_only);
                 if (h.found) {
                     if (h.read_only && c->methods.count("_set_" + std::string(member))) { h.read_only = false; }   // a script _set_ override takes the stores
                     return h;
@@ -5012,6 +5015,23 @@ private:
         return infer_class_member(m, recv, writing, typed_field_out, hit_out);
     }
 
+    // obj.name where name is a static of obj's script class and no instance member: the run finds no such member on an instance,
+    // so the load reports it and names the qualified spelling
+    bool static_through_instance(const member_expr* m, const ctype& recv, const member_hit& hit, bool call) {
+        if (!hit.found || recv.kind != ctype::object_k) { return false; }
+        bool is_static = hit.field && hit.field->is_static;
+        if (hit.methods) {
+            is_static = !hit.methods->empty();
+            for (const auto* fn : *hit.methods) { is_static = is_static && fn->is_static; }
+        }
+        if (!is_static || chain_has_user_accessor(recv.cls, m->member) || stale_shape_receiver(recv, m->object.get())) { return false; }
+        const member_hit instance = lookup_member(recv.cls, m->member, /*want_static=*/false, 0, /*instance_only=*/true);
+        if (instance.found || !instance.certain) { return false; }
+        diag(diag_level::error, m->location, "'" + std::string(m->member) + "' is a static member of class '" + std::string(recv.cls) +
+             "': name it " + std::string(recv.cls) + "::" + std::string(m->member) + (call ? "(...)" : ""));
+        return true;
+    }
+
     // A member of a class, an enum or a class used as a value; a reference's referent (diagnostic_only) is checked alike
     ctype infer_class_member(member_expr* m, const ctype& recv, bool writing, const variable_decl** typed_field_out,
                              member_hit* hit_out) {
@@ -5034,6 +5054,7 @@ private:
         if (access_denied(hit, m->member, m->location)) { return {}; }
         if (hit_out) { *hit_out = hit; }
         if (!want_static && chain_has_user_accessor(cls, m->member)) { return accessor_read_type(cls, m->member); }   // a user _get_/_set_ answers: known member, typed only by a single declared getter, never a proof
+        if (!want_static && static_through_instance(m, recv, hit, false)) { return {}; }
         if (hit.found) {
             if (!writing && !want_static && m->object->get_type() == node_type::this_expr) { report_unready_field_read(hit.field, m->location); }
             if (typed_field_out && hit.field && (hit.field->type || hit.field->function_spelling)) { *typed_field_out = hit.field; }
@@ -5559,6 +5580,7 @@ private:
         bool want_static = (recv.kind == ctype::class_ref_k);
         member_hit hit = lookup_member(recv.cls, m->member, want_static);
         if (!hit.found && !want_static && chain_has_user_accessor(recv.cls, m->member)) { return {}; }   // calling what a user _get_ returns
+        if (!want_static && static_through_instance(m, recv, hit, true)) { return {}; }
         if (hit.found) {
             if (hit.methods) {
                 if (hit.provable && ov) { *ov = hit.methods; ov_class_ = recv.cls; }

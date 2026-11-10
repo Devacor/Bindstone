@@ -260,6 +260,10 @@ ctype binary_result_kind(const ctype& l, token_type op, const ctype& r) {
             }
             return {};
         case token_type::percent:
+            if ((l.kind == ctype::float_k && is_numeric_or_char(r.kind)) || (r.kind == ctype::float_k && is_numeric_or_char(l.kind))) {
+                return ctype::make(ctype::float_k);
+            }
+            [[fallthrough]];
         case token_type::ampersand:
         case token_type::pipe:
         case token_type::caret:
@@ -4556,7 +4560,7 @@ private:
                 return infer_cast(static_cast<cast_expr*>(e));
             case node_type::yield_expr: {
                 auto* y = static_cast<yield_expr*>(e);
-                if (y->value) { infer(y->value.get()); }
+                if (y->value) { check_coroutine_value(infer(y->value.get()), y->location, "yield"); }
                 return {};
             }
             default:
@@ -4813,6 +4817,12 @@ private:
         if (!a.is_unknown() && !b.is_unknown() && a.kind != ctype::null_k && b.kind != ctype::null_k) {   // a T-or-null arm pair is a nullable value, never a type mix
             last_mixed_ternary_ = {t, a, b};
             mixed_ternaries_[t] = last_mixed_ternary_;
+            if ((a.kind == ctype::int_k && b.kind == ctype::float_k) || (a.kind == ctype::float_k && b.kind == ctype::int_k)) {
+                // C++'s common type, for diagnostics alone: the chosen arm keeps its own kind at run time, so it proves nothing
+                ctype common = ctype::make(ctype::float_k);
+                common.tentative = true;
+                return common;
+            }
         }
         ctype mixed{};
         mixed.const_key = a.const_key || b.const_key;
@@ -5082,6 +5092,9 @@ private:
             if (!writing && !recv.tentative && !m->is_static) {
                 builtin_method_value(recv, m);
                 scalar_member_missing(recv, m, false);
+            }
+            if (writing && recv.kind == ctype::map_k && !recv.tentative && !m->is_static) {
+                diag(diag_level::error, m->location, "cannot assign to member '" + std::string(m->member) + "' of a map; store the key as [\"" + std::string(m->member) + "\"]");
             }
             return {};   // builtin methods / map keys / dynamic: lenient
         }
@@ -5557,6 +5570,10 @@ private:
             }
             if (recv.kind == ctype::coroutine_k && !m->is_static) { return coroutine_method_call(recv, m, c, args); }
             if (ctype t; binary_member_call(c, m, recv, args, t)) { return t; }
+            if (recv.kind == ctype::array_k && recv.ti && m->member == "insert" && args.size() == 2) {
+                const auto issue = container_element_issue(args[1], recv.ti->element_type().get());
+                if (!issue.empty()) { diag(diag_level::error, c->location, "cannot insert into '" + ctype_name(recv) + "': " + issue); }
+            }
             if (recv.kind == ctype::array_k && recv.ti && m->member == "push" && args.size() == 1) {
                 const auto issue = container_element_issue(args[0], recv.ti->element_type().get());
                 if (!issue.empty()) {
@@ -7360,6 +7377,11 @@ private:
         }
         const bool declared = f->element_type && f->element_type->base_type != script_value_type::jai_any_type && !f->auto_spelled;
         stamp(f->element_conversion_free, !declared || (!elem.is_unknown() && same_type(ctype_from_type_info(f->element_type.get()), elem)), false);
+        if (declared && !f->is_reference && !elem.is_unknown() && !assignable(elem, ctype_from_type_info(f->element_type.get()))) {
+            const ctype slot = ctype_from_type_info(f->element_type.get());   // each element initializes the variable as a declaration would
+            diag(diag_level::error, f->location, "cannot initialize '" + std::string(f->variable_name) + "' declared '" + f->element_type->canonical_name() +
+                 "' with '" + ctype_name(elem) + "'" + assignment_detail(elem, slot));
+        }
         if (declared && f->is_reference && !elem.is_unknown() && !reference_type_compatible(elem, ctype_from_type_info(f->element_type.get()))) {
             diag(diag_level::error, f->location, "cannot bind '" + ctype_name(elem) + "' to '" + std::string(f->variable_name) +
                  "' declared '" + f->element_type->canonical_name() + "&'");
@@ -7512,6 +7534,15 @@ private:
         check_return_value(r, value, proof);
     }
 
+    // An int coroutine's yield or return of a float the checker sees: the one store a coroutine's values are checked for at load
+    void check_coroutine_value(const ctype& value, const source_location& loc, const char* verb) {
+        if (fn_stack_.empty()) { return; }
+        const fn_ctx& fn = fn_stack_.back();
+        if (!fn.is_coroutine || !fn.ret || fn.ret->base_type != script_value_type::jai_int_type || value.kind != ctype::float_k) { return; }
+        diag(diag_level::error, loc, std::string("cannot ") + verb + " 'float' from '" + std::string(fn.name) + "' declared to return 'int': " + float_to_int_fix,
+             fn.line, fn.column);
+    }
+
     JAI_NOINLINE void check_return_value(return_stmt* r, ctype value, uint8_t& proof) {
         if (r->binds_reference) { report_mixed_reference_conditional(r->value.get()); }
         if (fn_stack_.empty()) { return; }
@@ -7526,6 +7557,7 @@ private:
             if (k == 0 || (open.inferred_return != 0 && open.inferred_return != k)) { open.inferred_mixed = true; }
             else { open.inferred_return = k; }
         }
+        if (fn.is_coroutine) { check_coroutine_value(value, r->location, "return"); }
         if (fn.is_coroutine || !fn.ret) { return; }   // coroutine returns/yields + auto: lenient
         if (!r->value && requires_return_value(fn.ret)) {
             diag(diag_level::error, r->location, "'" + std::string(fn.name) + "' declared to return '" +
@@ -7722,7 +7754,7 @@ private:
     // An auto initializer's static type: a ternary whose arms are int and float has C++'s common type, float;
     // every other mixed ternary has none
     ctype numeric_ternary_type(const expression* init_expr, const ctype& init) {
-        if (!init.is_unknown() || last_mixed_ternary_.node != init_expr) { return init; }
+        if (last_mixed_ternary_.node != init_expr) { return init; }
         const auto a = last_mixed_ternary_.then_type.kind, b = last_mixed_ternary_.else_type.kind;
         if ((a == ctype::int_k && b == ctype::float_k) || (a == ctype::float_k && b == ctype::int_k)) { return ctype::make(ctype::float_k); }
         return init;
@@ -7974,11 +8006,29 @@ private:
         }
     }
 
+    // C++ [dcl.fct.default]: a default argument names no parameter (it is evaluated where no parameter is bound yet)
+    void report_default_naming_parameter(const std::vector<parameter>& params, const parameter& of, const expression* e) {
+        if (!e || e->get_type() == node_type::lambda_expr) { return; }
+        stack_.guard(e->location);
+        if (e->get_type() == node_type::identifier_expr) {
+            const std::string_view name = static_cast<const identifier_expr*>(e)->name;
+            for (const auto& p : params) {
+                if (p.name == name) {
+                    diag(diag_level::error, e->location, "default value of '" + of.name + "' names parameter '" + p.name + "': a default cannot read a parameter");
+                    return;
+                }
+            }
+            return;
+        }
+        for_each_child_expression(e, [&](const expression* k) { report_default_naming_parameter(params, of, k); });
+    }
+
     void define_params(const std::vector<parameter>& params, const source_location& fn_loc, bool warn_field_shadows = true) {
         for (const auto& p : params) {
             check_spelled_type(p.type.get(), fn_loc);
             ctype pt = ctype_from_type_info(p.type.get());
             if (p.default_value) {
+                report_default_naming_parameter(params, p, p.default_value.get());
                 ctype dv = infer(p.default_value.get());
                 if (!p.is_reference && !pt.is_unknown() && !assignable(dv, pt)) {
                     diag(diag_level::error, p.default_value->location,

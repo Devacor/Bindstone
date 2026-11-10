@@ -234,7 +234,8 @@ namespace jai {
         // Helper parsers
         checked_result<expression_ptr> finish_call(expression_ptr callee);
         checked_result<expression_ptr> finish_member_access(expression_ptr object, bool is_arrow);
-        bool looks_like_map_literal();  // Lookahead to distinguish map literals from blocks
+        bool looks_like_map_literal();
+        bool json_map_key_follows();  // Lookahead to distinguish map literals from blocks
         bool json_map_ahead(size_t offset = 1) const;
         checked_result<expression_ptr> parse_map_literal();
         expression_ptr identifier_map_key();

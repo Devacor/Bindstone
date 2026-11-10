@@ -2424,6 +2424,18 @@ bool parser::json_map_ahead(size_t offset) const {
 
 // Helper function to check if { starts a map literal (as opposed to a block statement)
 // This avoids using exceptions for control flow
+// At a key token: the key (one token, or a name qualified with ::) is followed by ':'. Leaves the position past the key.
+bool parser::json_map_key_follows() {
+    const bool name = check(token_type::identifier);
+    advance();
+    while (name && check(token_type::colon_colon)) {
+        advance();
+        if (!check(token_type::identifier)) { return false; }
+        advance();
+    }
+    return check(token_type::colon);
+}
+
 bool parser::looks_like_map_literal() {
     // Save position for lookahead
     size_t savedPos = current_;
@@ -2457,11 +2469,10 @@ bool parser::looks_like_map_literal() {
         current_ = savedPos + 1; // back to after {
     }
 
-    // Check for JSON-style map: one key token (identifier/string/int/float/char/bool)
+    // Check for JSON-style map: one key token (identifier/string/int/float/char/bool), or a qualified name (E::v),
     // followed by ':'
     if (is_json_map_key_token(peek().type)) {
-        advance();
-        bool isMap = check(token_type::colon);
+        const bool isMap = json_map_key_follows();
         current_ = savedPos;
         return isMap;
     }
@@ -2497,11 +2508,7 @@ checked_result<expression_ptr> parser::parse_map_literal() {
     // First, check if the first token could be a key (identifier/string/int/float/
     // char/bool - keep in lockstep with looks_like_map_literal via is_json_map_key_token)
     if (is_json_map_key_token(peek().type)) {
-        advance(); // consume the potential key
-        if (check(token_type::colon)) {
-            isJsonStyle = true;
-        }
-        // Restore position
+        isJsonStyle = json_map_key_follows();
         current_ = savedPos;
     }
 
@@ -2513,8 +2520,8 @@ checked_result<expression_ptr> parser::parse_map_literal() {
         do {
             expression_ptr key;
 
-            // a bare identifier key is its name as a string: {x: 10} is {"x": 10}
-            if (check(token_type::identifier)) {
+            // a bare identifier key is its name as a string: {x: 10} is {"x": 10}; a qualified name is its value
+            if (check(token_type::identifier) && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type != token_type::colon_colon) {
                 key = identifier_map_key();
             } else {
                 // Parse as expression (for quoted strings or computed keys)

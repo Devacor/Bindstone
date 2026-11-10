@@ -6325,7 +6325,8 @@ script_value engine::make_caught_error(const script_value& thrown_in, bool by_th
         caught.set_type_info(type_info_ptr{impl->type_info_error_[static_cast<unsigned>(kind)]});   // dynamic, and an error of its kind
     } else if (text || held == script_value::TYPEID_NULL || held == script_value::TYPEID_INT || held == script_value::TYPEID_FLOAT ||
                held == script_value::TYPEID_BOOL || held == script_value::TYPEID_CHAR) {
-        caught.set_type_info(type_info_ptr{get_type_info_any()});   // the catch variable is a dynamic local
+        // the catch variable is a dynamic local; an enum's value stays its enum's, which a typed clause tests
+        if (const type_info* tag = caught.type_info_raw(); !(held == script_value::TYPEID_INT && tag && tag->is_enum)) { caught.set_type_info(type_info_ptr{get_type_info_any()}); }
     }
     if (parallel_region_active()) { return caught; }
     const void* node = caught_node(caught);
@@ -6421,7 +6422,10 @@ bool engine::clause_takes_thrown(const script_value& v, const std::string& type_
     switch (v.type()) {
         case script_value_type::jai_null_type: return type_name == "null";
         case script_value_type::jai_bool_type: return type_name == "bool";
-        case script_value_type::jai_int_type: return type_name == "int";
+        case script_value_type::jai_int_type: {
+            const type_info* tag = v.type_info_raw();   // an enum's value is caught as its enum, as C++ catches by exact type
+            return tag && tag->is_enum ? type_name == tag->type_name : type_name == "int";
+        }
         case script_value_type::jai_float_type: return type_name == "float";
         case script_value_type::jai_char_type: return type_name == "char";
         case script_value_type::jai_string_type: return type_name == "string";

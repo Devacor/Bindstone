@@ -9,7 +9,6 @@
 
 static jai::registrar<MV::Scene::Parallax, MV::Services> _hookParallax("Parallax",
 	[](jai::dynamic_binder<MV::Scene::Parallax>& builder, const MV::Services&) {
-	builder.serial_method("enabled").serial_method("disable");
 	builder.base_class<MV::Scene::Component>();
 
 	builder.method("translateRatio", static_cast<MV::Point<>(MV::Scene::Parallax::*)() const>(&MV::Scene::Parallax::translateRatio));
@@ -24,9 +23,9 @@ static jai::registrar<MV::Scene::Parallax, MV::Services> _hookParallax("Parallax
 	builder.method("zoomRatio", static_cast<std::shared_ptr<MV::Scene::Parallax>(MV::Scene::Parallax::*)(const MV::Point<>&)>(&MV::Scene::Parallax::zoomRatio));
 
 	builder.method("enabled", static_cast<bool(MV::Scene::Parallax::*)() const>(&MV::Scene::Parallax::enabled));
-	builder.method("enabled", static_cast<std::shared_ptr<MV::Scene::Parallax>(MV::Scene::Parallax::*)(bool)>(&MV::Scene::Parallax::enabled));
+	builder.method("enabled", static_cast<std::shared_ptr<MV::Scene::Parallax>(MV::Scene::Parallax::*)(bool)>(&MV::Scene::Parallax::enabled), jai::serial);
 	builder.method("enable", &MV::Scene::Parallax::enable);
-	builder.method("disable", &MV::Scene::Parallax::disable);
+	builder.method("disable", &MV::Scene::Parallax::disable, jai::serial);
 });
 
 namespace MV {

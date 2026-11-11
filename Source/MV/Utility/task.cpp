@@ -5,7 +5,6 @@
 #include "services.hpp"
 
 static jai::registrar<MV::Task, MV::Services> _hookTask("Task", [](jai::dynamic_binder<MV::Task>& builder, const MV::Services&) {
-	builder.serial_method("cancel").serial_method("now").serial_method("before");
 	builder.auto_bind();
 
 	builder.constructor<const std::string&>();
@@ -15,13 +14,13 @@ static jai::registrar<MV::Task, MV::Services> _hookTask("Task", [](jai::dynamic_
 	builder.constructor<const std::string&, std::function<bool(MV::Task&, double)>>();
 	builder.constructor<const std::shared_ptr<MV::ActionBase>&>();
 
-	builder.method("cancel", [](MV::Task& self) { self.cancel(); });
-	builder.method("cancel", [](MV::Task& self, const std::string& id) { self.cancel(id); });
+	builder.method("cancel", [](MV::Task& self) { self.cancel(); }, jai::serial);
+	builder.method("cancel", [](MV::Task& self, const std::string& id) { self.cancel(id); }, jai::serial);
 
-	builder.method("now", [](MV::Task& self, const std::string& name) -> MV::Task& { return self.now(name); });
-	builder.method("now", [](MV::Task& self, const std::string& name, bool block) -> MV::Task& { return self.now(name, block); });
-	builder.method("now", [](MV::Task& self, const std::string& name, std::function<bool(MV::Task&, double)> fn) -> MV::Task& { return self.now(name, fn); });
-	builder.method("now", [](MV::Task& self, const std::shared_ptr<MV::Task>& task) -> MV::Task& { return self.now(task); });
+	builder.method("now", [](MV::Task& self, const std::string& name) -> MV::Task& { return self.now(name); }, jai::serial);
+	builder.method("now", [](MV::Task& self, const std::string& name, bool block) -> MV::Task& { return self.now(name, block); }, jai::serial);
+	builder.method("now", [](MV::Task& self, const std::string& name, std::function<bool(MV::Task&, double)> fn) -> MV::Task& { return self.now(name, fn); }, jai::serial);
+	builder.method("now", [](MV::Task& self, const std::shared_ptr<MV::Task>& task) -> MV::Task& { return self.now(task); }, jai::serial);
 
 	builder.method("then", [](MV::Task& self, const std::string& name) -> MV::Task& { return self.then(name); });
 	builder.method("then", [](MV::Task& self, const std::string& name, bool block) -> MV::Task& { return self.then(name, block); });
@@ -42,7 +41,7 @@ static jai::registrar<MV::Task, MV::Services> _hookTask("Task", [](jai::dynamic_
 	builder.method("after", [](MV::Task& self, const std::string& ref, const std::string& name, bool block) -> MV::Task& { return self.after(ref, name, block); });
 	builder.method("after", [](MV::Task& self, const std::string& ref, const std::shared_ptr<MV::Task>& task) -> MV::Task& { return self.after(ref, task); });
 
-	builder.method("before", [](MV::Task& self, const std::string& ref, const std::string& name) -> MV::Task& { return self.before(ref, name); });
-	builder.method("before", [](MV::Task& self, const std::string& ref, const std::string& name, bool block) -> MV::Task& { return self.before(ref, name, block); });
-	builder.method("before", [](MV::Task& self, const std::string& ref, const std::shared_ptr<MV::Task>& task) -> MV::Task& { return self.before(ref, task); });
+	builder.method("before", [](MV::Task& self, const std::string& ref, const std::string& name) -> MV::Task& { return self.before(ref, name); }, jai::serial);
+	builder.method("before", [](MV::Task& self, const std::string& ref, const std::string& name, bool block) -> MV::Task& { return self.before(ref, name, block); }, jai::serial);
+	builder.method("before", [](MV::Task& self, const std::string& ref, const std::shared_ptr<MV::Task>& task) -> MV::Task& { return self.before(ref, task); }, jai::serial);
 });

@@ -7,10 +7,9 @@
 
 static jai::registrar<MV::Scene::Sprite, MV::Services> _hookSprite("Sprite",
 	[](jai::dynamic_binder<MV::Scene::Sprite>& builder, const MV::Services&) {
-	builder.serial_method("corners");
 	builder.base_class<MV::Scene::Drawable>();
 
-	builder.method("corners", &MV::Scene::Sprite::corners<MV::Point<>>);
+	builder.method("corners", &MV::Scene::Sprite::corners<MV::Point<>>, jai::serial);
 
 	builder.method("subdivide", &MV::Scene::Sprite::subdivide);
 	builder.method("subdivisions", &MV::Scene::Sprite::subdivisions);

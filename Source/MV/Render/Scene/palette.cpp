@@ -7,7 +7,6 @@
 
 static jai::registrar<MV::Scene::Palette, MV::Services> _hookPalette("Palette",
 	[](jai::dynamic_binder<MV::Scene::Palette>& builder, const MV::Services&) {
-	builder.serial_method("color").serial_method("colorAlphaSelector");
 	builder.base_class<MV::Scene::Drawable>();
 	builder.auto_bind();
 
@@ -15,10 +14,10 @@ static jai::registrar<MV::Scene::Palette, MV::Services> _hookPalette("Palette",
 	builder.property("onSwatchClicked", [](MV::Scene::Palette& a_self) -> jai::signal<MV::Scene::Palette::PaletteSignalSignture>& { return a_self.onSwatchClicked; }, nullptr);
 
 	builder.method("color", static_cast<MV::Color(MV::Scene::Palette::*)() const>(&MV::Scene::Palette::color));
-	builder.method("color", static_cast<std::shared_ptr<MV::Scene::Palette>(MV::Scene::Palette::*)(const MV::Color&)>(&MV::Scene::Palette::color));
+	builder.method("color", static_cast<std::shared_ptr<MV::Scene::Palette>(MV::Scene::Palette::*)(const MV::Color&)>(&MV::Scene::Palette::color), jai::serial);
 	builder.method("padding", &MV::Scene::Palette::padding);
 	builder.method("selectorPercent", &MV::Scene::Palette::selectorPercent);
-	builder.method("colorAlphaSelector", &MV::Scene::Palette::colorAlphaSelector);
+	builder.method("colorAlphaSelector", &MV::Scene::Palette::colorAlphaSelector, jai::serial);
 
 	builder.method("globalPriority", static_cast<int64_t(MV::Scene::Palette::*)() const>(&MV::Scene::Palette::globalPriority));
 	builder.method("globalPriority", static_cast<std::shared_ptr<MV::Scene::Palette>(MV::Scene::Palette::*)(int64_t)>(&MV::Scene::Palette::globalPriority));

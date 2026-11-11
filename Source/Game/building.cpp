@@ -42,7 +42,7 @@ void Building::jai_auto_bind(jai::dynamic_binder<Building>& builder) {
 	builder.method("networkId", [](Building& a_self) { return static_cast<int64_t>(a_self.slot); });
 	builder.method("spawnCreature", [](Building& a_self, const std::string& a_key) {
 		a_self.gameInstance.spawnCreature(a_self.slotIndex(), a_key);
-	});
+	}, jai::serial);
 	builder.method("setVar", [](Building& a_self, jai::script_value a_key, jai::script_value a_value) {
 		a_self.localVariables[a_key.as_string()] = std::move(a_value);
 	});
@@ -54,11 +54,10 @@ void Building::jai_auto_bind(jai::dynamic_binder<Building>& builder) {
 
 static jai::registrar<Building, MV::Services, jai::bases<MV::Scene::Component>> _hookBuilding("Building",
 	[](jai::dynamic_binder<Building>& builder, const MV::Services&) {
-	builder.serial_method("spawnCreature").serial_method("upgrade");
 	builder.base_class<MV::Scene::Component>();
 	jai::bind_signal_type<void(std::shared_ptr<Building>)>(builder.bound_engine(), "SignalBuilding");
 	builder.method("current", [](Building& a_self) -> const BuildTree& { return *a_self.current(); });
-	builder.method("upgrade", &Building::upgrade);
+	builder.method("upgrade", &Building::upgrade, jai::serial);
 	builder.method("player", &Building::player);
 	builder.method("assetPath", &Building::assetPath);
 	builder.method("skin", &Building::skin);

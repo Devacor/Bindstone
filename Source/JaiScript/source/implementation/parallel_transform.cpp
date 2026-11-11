@@ -1704,7 +1704,7 @@ namespace {
 		}
 
 		// ===== Host methods =====
-		// A bound C++ method runs on any thread unless it is marked serial_method(); a non-const one only over an object the
+		// A bound C++ method runs on any thread unless it is bound jai::serial; a non-const one only over an object the
 		// calling chunk made (call_parallel_host_pin). The receiver's class is a runtime fact, so every class whose chain binds
 		// the name in C++ gets a pin; a serial method's pin raises its refusal when it is called.
 		struct host_pin { const class_definition* cls; uint64_t name_id; const class_definition* owner; };
@@ -2592,7 +2592,7 @@ namespace {
 						if (namespace_host_entry(*eng, space->name, m->member)) {
 							const std::string qualified = std::string(space->name) + "::" + std::string(m->member);
 							if (engine_access::host_function_serial(*eng, qualified)) {
-								return fail(m, "host function '" + qualified + "' is marked serial_function() and cannot be called in a parallel body");
+								return fail(m, "host function '" + qualified + "' is marked jai::serial and cannot be called in a parallel body");
 							}
 							if (space->symbol_id == UINT64_MAX) { space->symbol_id = sym->intern(space->name); }
 							if (m->member_id == UINT64_MAX) { m->member_id = sym->intern(m->member); }
@@ -2612,7 +2612,7 @@ namespace {
 						if (host != host_classes.end() && host->second->static_method_in_chain(m->member_id).is_function()) {
 							if (host->second->serial_static_method(m->member_id)) {
 								return fail(m, "C++ static method '" + std::string(class_name->name) + "::" + std::string(m->member) +
-								               "' is marked serial_static_method() and cannot be called in a parallel body");
+								               "' is marked jai::serial and cannot be called in a parallel body");
 							}
 							const script_value method = host->second->static_method_in_chain(m->member_id);
 							const auto* writes = method.as_function().target<host_writeback_function>();
@@ -2824,7 +2824,7 @@ namespace {
 				} else if (proof_mode || !engine_access::host_function_registered(*eng, callee_name)) {
 					return fail(callee, "host function '" + callee_name + "' is not callable in a parallel body");
 				} else {
-					return fail(callee, "host function '" + callee_name + "' is marked serial_function() and cannot be called in a parallel body");
+					return fail(callee, "host function '" + callee_name + "' is marked jai::serial and cannot be called in a parallel body");
 				}
 			}
 			for (const auto& a : call->arguments) {
@@ -5071,7 +5071,7 @@ checked_result<script_value> call_parallel_host_pin(const parallel_method_pin& p
 	const uint64_t arity_bit = uint64_t(1) << std::min<size_t>(args.size(), 63);
 	if (pin.serial_arities & arity_bit) {
 		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
-			"C++ method '{0}' of '{1}' is marked serial_method() and cannot be called in a parallel body", name_id, type_id);
+			"C++ method '{0}' of '{1}' is marked jai::serial and cannot be called in a parallel body", name_id, type_id);
 	}
 	if ((pin.mutating_arities & arity_bit) && !(inst && inst->region_tag() != 0 && inst->region_tag() == engine_access::parallel_region_serial(*eng))) {
 		if (property) {

@@ -560,9 +560,7 @@ namespace stdlib {
     // Register JSON and binary serialization functions with an engine
     void register_json_functions(engine& eng_ref) {
         engine* eng = &eng_ref;
-        // an archive reaches the engine's class registry and the objects a value holds
-        for (const char* name : {"to_json", "from_json", "to_binary", "from_binary", "to_base64", "from_base64"}) { eng_ref.serial_function(name); }
-
+        // serial: an archive reaches the engine's class registry and the objects a value holds
         eng_ref.add_variadic_function("to_json", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() == 1) {
                 serialization::json_archive_writer writer(-1, eng); // No indentation, with engine ref
@@ -577,7 +575,7 @@ namespace stdlib {
             } else {
                 throw runtime_error("to_json expects 1 or 2 arguments, got " + std::to_string(args.size()));
             }
-        });
+        }, serial);
         
 		eng_ref.add_function("from_json", [eng](const std::string& json) -> script_value {
 			detail::engine_access::load_session session(eng);
@@ -587,7 +585,7 @@ namespace stdlib {
 			script_value result = reader.has_archive_keys() ? load_archive_value(eng, parsed, true) : std::move(parsed);
 			session.complete();
 			return result;
-		});
+		}, serial);
         
         eng_ref.add_variadic_function("to_binary", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {
@@ -600,7 +598,7 @@ namespace stdlib {
             const auto& data = writer.data();
             script_string binary_str(data.begin(), data.end());
             return script_value(binary_str, eng);
-        });
+        }, serial);
 
         eng_ref.add_variadic_function("from_binary", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {
@@ -619,7 +617,7 @@ namespace stdlib {
 			script_value result = load_archive_value(eng, reader.read_value(), false);
 			session.complete();
 			return result;
-        });
+        }, serial);
 
         eng_ref.add_variadic_function("to_base64", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {
@@ -632,7 +630,7 @@ namespace stdlib {
             const auto& data = writer.data();
             std::string binary_str(data.begin(), data.end());
             return script_value(base64_encode(binary_str), eng);
-        });
+        }, serial);
 
         eng_ref.add_function("from_base64", [eng](const std::string& base64_str) -> script_value {
             std::string binary_str = base64_decode(base64_str);
@@ -643,7 +641,7 @@ namespace stdlib {
 			script_value result = load_archive_value(eng, reader.read_value(), false);
 			session.complete();
 			return result;
-        });
+        }, serial);
 
         eng_ref.add_function("base64_encode", [eng](const std::string& input) -> script_value {
             return script_value(base64_encode(input), eng);

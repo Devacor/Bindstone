@@ -34,7 +34,6 @@ static jai::registrar<MV::Scene::AnimationTrack, MV::Services> _hookAnimationTra
 
 static jai::registrar<MV::Scene::Spine, MV::Services> _hookSpine("Spine",
 	[](jai::dynamic_binder<MV::Scene::Spine>& builder, const MV::Services&) {
-	builder.serial_method("animate").serial_method("queueAnimation").serial_method("load").serial_method("unload");
 	builder.base_class<MV::Scene::Drawable>();
 
 	auto& eng = builder.bound_engine();
@@ -64,12 +63,12 @@ static jai::registrar<MV::Scene::Spine, MV::Services> _hookSpine("Spine",
 	builder.method("track", static_cast<MV::Scene::AnimationTrack&(MV::Scene::Spine::*)()>(&MV::Scene::Spine::track));
 	builder.method("currentTrack", &MV::Scene::Spine::currentTrack);
 
-	builder.method("animate", &MV::Scene::Spine::animate);
-	builder.method("queueAnimation", static_cast<std::shared_ptr<MV::Scene::Spine>(MV::Scene::Spine::*)(const std::string&, double, bool)>(&MV::Scene::Spine::queueAnimation));
-	builder.method("queueAnimation", static_cast<std::shared_ptr<MV::Scene::Spine>(MV::Scene::Spine::*)(const std::string&, bool)>(&MV::Scene::Spine::queueAnimation));
+	builder.method("animate", &MV::Scene::Spine::animate, jai::serial);
+	builder.method("queueAnimation", static_cast<std::shared_ptr<MV::Scene::Spine>(MV::Scene::Spine::*)(const std::string&, double, bool)>(&MV::Scene::Spine::queueAnimation), jai::serial);
+	builder.method("queueAnimation", static_cast<std::shared_ptr<MV::Scene::Spine>(MV::Scene::Spine::*)(const std::string&, bool)>(&MV::Scene::Spine::queueAnimation), jai::serial);
 
-	builder.method("load", [](MV::Scene::Spine& self, const MV::Scene::Spine::FileBundle& bundle) { return self.load(bundle); });
-	builder.method("unload", &MV::Scene::Spine::unload);
+	builder.method("load", [](MV::Scene::Spine& self, const MV::Scene::Spine::FileBundle& bundle) { return self.load(bundle); }, jai::serial);
+	builder.method("unload", &MV::Scene::Spine::unload, jai::serial);
 	builder.method("loaded", &MV::Scene::Spine::loaded);
 	builder.method("bundle", &MV::Scene::Spine::bundle);
 });

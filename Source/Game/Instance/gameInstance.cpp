@@ -10,11 +10,10 @@
 
 static jai::registrar<GameInstance, MV::Services> _hookGameInstance("GameInstance",
 	[](jai::dynamic_binder<GameInstance>& builder, const MV::Services&) {
-	builder.serial_method("spawnCreature");
 	builder.method("creature", [](GameInstance& a_self, int64_t a_id) { return a_self.creature(a_id); });
 	builder.method("spawnCreature", [](GameInstance& a_self, int64_t a_slot, const std::string& a_id) {
 		a_self.spawnCreature(static_cast<int>(a_slot), a_id);
-	});
+	}, jai::serial);
 	builder.method("data", [](GameInstance& a_self) -> GameData& { return a_self.data(); });
 	builder.method("pathMap", [](GameInstance& a_self) { return a_self.path().self(); });
 });
@@ -340,8 +339,7 @@ ServerGameInstance::ServerGameInstance(GameServer& a_game) :
 		auto effectNode = gameObjectContainer()->make("E_" + std::to_string(networkBattleEffect->id()));
 		effectNode->position(networkBattleEffect->self()->position);
 		return effectNode->attach<ServerBattleEffect>(networkBattleEffect, *this).self();
-	});
-	script().engine().serial_function("spawnOnNetwork");   // the network pool and the scene graph
+	}, jai::serial);   // the network pool and the scene graph
 }
 
 void ServerGameInstance::updateImplementation(double /*a_dt*/) {

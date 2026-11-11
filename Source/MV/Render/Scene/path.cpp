@@ -7,22 +7,20 @@
 
 static jai::registrar<MV::Scene::PathMap, MV::Services> _hookPathMap("PathMap",
 	[](jai::dynamic_binder<MV::Scene::PathMap>& builder, const MV::Services&) {
-	builder.serial_method("resizeGrid").serial_method("cellSize").serial_method("searchBudget").serial_method("searchLimit")
-		.serial_method("fieldsPerTick").serial_method("maxFlowFields");
 	builder.base_class<MV::Scene::Drawable>();
 	builder.auto_bind();
 
-	builder.method("resizeGrid", &MV::Scene::PathMap::resizeGrid);
+	builder.method("resizeGrid", &MV::Scene::PathMap::resizeGrid, jai::serial);
 	builder.method("cellSize", static_cast<MV::Size<>(MV::Scene::PathMap::*)() const>(&MV::Scene::PathMap::cellSize));
-	builder.method("cellSize", static_cast<std::shared_ptr<MV::Scene::PathMap>(MV::Scene::PathMap::*)(const MV::Size<>&)>(&MV::Scene::PathMap::cellSize));
-	builder.method("searchBudget", [](MV::Scene::PathMap& a_self) -> int64_t { return a_self.searchBudget(); });
-	builder.method("searchBudget", [](MV::Scene::PathMap& a_self, int64_t a_nodes) { return a_self.searchBudget(a_nodes); });
-	builder.method("searchLimit", [](MV::Scene::PathMap& a_self) -> int64_t { return a_self.searchLimit(); });
-	builder.method("searchLimit", [](MV::Scene::PathMap& a_self, int64_t a_nodes) { return a_self.searchLimit(a_nodes); });
-	builder.method("fieldsPerTick", [](MV::Scene::PathMap& a_self) -> int64_t { return a_self.fieldsPerTick(); });
-	builder.method("fieldsPerTick", [](MV::Scene::PathMap& a_self, int64_t a_fields) { return a_self.fieldsPerTick(static_cast<int>(a_fields)); });
-	builder.method("maxFlowFields", [](MV::Scene::PathMap& a_self) -> int64_t { return a_self.maxFlowFields(); });
-	builder.method("maxFlowFields", [](MV::Scene::PathMap& a_self, int64_t a_fields) { return a_self.maxFlowFields(a_fields); });
+	builder.method("cellSize", static_cast<std::shared_ptr<MV::Scene::PathMap>(MV::Scene::PathMap::*)(const MV::Size<>&)>(&MV::Scene::PathMap::cellSize), jai::serial);
+	builder.method("searchBudget", [](MV::Scene::PathMap& a_self) -> int64_t { return a_self.searchBudget(); }, jai::serial);
+	builder.method("searchBudget", [](MV::Scene::PathMap& a_self, int64_t a_nodes) { return a_self.searchBudget(a_nodes); }, jai::serial);
+	builder.method("searchLimit", [](MV::Scene::PathMap& a_self) -> int64_t { return a_self.searchLimit(); }, jai::serial);
+	builder.method("searchLimit", [](MV::Scene::PathMap& a_self, int64_t a_nodes) { return a_self.searchLimit(a_nodes); }, jai::serial);
+	builder.method("fieldsPerTick", [](MV::Scene::PathMap& a_self) -> int64_t { return a_self.fieldsPerTick(); }, jai::serial);
+	builder.method("fieldsPerTick", [](MV::Scene::PathMap& a_self, int64_t a_fields) { return a_self.fieldsPerTick(static_cast<int>(a_fields)); }, jai::serial);
+	builder.method("maxFlowFields", [](MV::Scene::PathMap& a_self) -> int64_t { return a_self.maxFlowFields(); }, jai::serial);
+	builder.method("maxFlowFields", [](MV::Scene::PathMap& a_self, int64_t a_fields) { return a_self.maxFlowFields(a_fields); }, jai::serial);
 	builder.method("gridSize", &MV::Scene::PathMap::gridSize);
 
 	builder.method("nodeFromGrid", static_cast<MV::MapNode&(MV::Scene::PathMap::*)(const MV::Point<int>&)>(&MV::Scene::PathMap::nodeFromGrid));
@@ -39,9 +37,6 @@ static jai::registrar<MV::Scene::PathMap, MV::Services> _hookPathMap("PathMap",
 
 static jai::registrar<MV::Scene::PathAgent, MV::Services> _hookPathAgent("PathAgent",
 	[](jai::dynamic_binder<MV::Scene::PathAgent>& builder, const MV::Services&) {
-	builder.serial_method("gridPosition").serial_method("localPosition").serial_method("gridGoal").serial_method("localGoal")
-		.serial_method("pathMode").serial_method("gridSpeed").serial_method("localSpeed").serial_method("stop").serial_method("path")
-		.serial_method("disableFootprint").serial_method("enableFootprint");
 	builder.base_class<MV::Scene::Component>();
 	builder.auto_bind();
 
@@ -52,33 +47,33 @@ static jai::registrar<MV::Scene::PathAgent, MV::Services> _hookPathAgent("PathAg
 	builder.property("onStart", [](MV::Scene::PathAgent& a_self) -> jai::signal<MV::Scene::PathAgent::CallbackSignature>& { return a_self.onStart; }, nullptr);
 
 	builder.method("gridPosition", static_cast<MV::Point<MV::PointPrecision>(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::gridPosition));
-	builder.method("gridPosition", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<int>&)>(&MV::Scene::PathAgent::gridPosition));
+	builder.method("gridPosition", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<int>&)>(&MV::Scene::PathAgent::gridPosition), jai::serial);
 	builder.method("localPosition", static_cast<MV::Point<MV::PointPrecision>(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::localPosition));
-	builder.method("localPosition", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<>&)>(&MV::Scene::PathAgent::localPosition));
+	builder.method("localPosition", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<>&)>(&MV::Scene::PathAgent::localPosition), jai::serial);
 
 	builder.method("gridGoal", static_cast<MV::Point<MV::PointPrecision>(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::gridGoal));
-	builder.method("gridGoal", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<int>&)>(&MV::Scene::PathAgent::gridGoal));
-	builder.method("gridGoal", [](MV::Scene::PathAgent& a_self, const MV::Point<int>& a_goal, double a_distance, int64_t a_mode) { return a_self.gridGoal(a_goal, static_cast<MV::PointPrecision>(a_distance), static_cast<MV::PathMode>(a_mode)); });
-	builder.method("gridGoal", [](MV::Scene::PathAgent& a_self, const MV::Point<>& a_goal, double a_distance, int64_t a_mode) { return a_self.gridGoal(a_goal, static_cast<MV::PointPrecision>(a_distance), static_cast<MV::PathMode>(a_mode)); });
-	builder.method("pathMode", [](MV::Scene::PathAgent& a_self) -> int64_t { return static_cast<int64_t>(a_self.pathMode()); });
-	builder.method("pathMode", [](MV::Scene::PathAgent& a_self, int64_t a_mode) { return a_self.pathMode(static_cast<MV::PathMode>(a_mode)); });
+	builder.method("gridGoal", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<int>&)>(&MV::Scene::PathAgent::gridGoal), jai::serial);
+	builder.method("gridGoal", [](MV::Scene::PathAgent& a_self, const MV::Point<int>& a_goal, double a_distance, int64_t a_mode) { return a_self.gridGoal(a_goal, static_cast<MV::PointPrecision>(a_distance), static_cast<MV::PathMode>(a_mode)); }, jai::serial);
+	builder.method("gridGoal", [](MV::Scene::PathAgent& a_self, const MV::Point<>& a_goal, double a_distance, int64_t a_mode) { return a_self.gridGoal(a_goal, static_cast<MV::PointPrecision>(a_distance), static_cast<MV::PathMode>(a_mode)); }, jai::serial);
+	builder.method("pathMode", [](MV::Scene::PathAgent& a_self) -> int64_t { return static_cast<int64_t>(a_self.pathMode()); }, jai::serial);
+	builder.method("pathMode", [](MV::Scene::PathAgent& a_self, int64_t a_mode) { return a_self.pathMode(static_cast<MV::PathMode>(a_mode)); }, jai::serial);
 	builder.method("localGoal", static_cast<MV::Point<MV::PointPrecision>(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::localGoal));
-	builder.method("localGoal", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<>&)>(&MV::Scene::PathAgent::localGoal));
+	builder.method("localGoal", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<>&)>(&MV::Scene::PathAgent::localGoal), jai::serial);
 
 	builder.method("gridSpeed", static_cast<MV::PointPrecision(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::gridSpeed));
-	builder.method("gridSpeed", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(MV::PointPrecision)>(&MV::Scene::PathAgent::gridSpeed));
+	builder.method("gridSpeed", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(MV::PointPrecision)>(&MV::Scene::PathAgent::gridSpeed), jai::serial);
 	builder.method("localSpeed", static_cast<MV::PointPrecision(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::localSpeed));
-	builder.method("localSpeed", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(MV::PointPrecision)>(&MV::Scene::PathAgent::localSpeed));
+	builder.method("localSpeed", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(MV::PointPrecision)>(&MV::Scene::PathAgent::localSpeed), jai::serial);
 
 	builder.method("pathfinding", &MV::Scene::PathAgent::pathfinding);
-	builder.method("stop", &MV::Scene::PathAgent::stop);
-	builder.method("path", &MV::Scene::PathAgent::path);
+	builder.method("stop", &MV::Scene::PathAgent::stop, jai::serial);
+	builder.method("path", &MV::Scene::PathAgent::path, jai::serial);
 
 	builder.method("gridSize", &MV::Scene::PathAgent::gridSize);
 	builder.method("gridOverlaps", &MV::Scene::PathAgent::gridOverlaps);
 	builder.method("localOverlaps", &MV::Scene::PathAgent::localOverlaps);
-	builder.method("disableFootprint", &MV::Scene::PathAgent::disableFootprint);
-	builder.method("enableFootprint", &MV::Scene::PathAgent::enableFootprint);
+	builder.method("disableFootprint", &MV::Scene::PathAgent::disableFootprint, jai::serial);
+	builder.method("enableFootprint", &MV::Scene::PathAgent::enableFootprint, jai::serial);
 	builder.method("hasFootprint", &MV::Scene::PathAgent::hasFootprint);
 });
 

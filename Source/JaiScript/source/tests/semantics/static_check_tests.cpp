@@ -3592,14 +3592,23 @@ public:
             check_eq((size_t)0, error_count(e->check("string n = \"a\";\nprint(string::to_upper(n));\nstring::join([\"a\"], \",\");")));
 
             auto host = make_engine();
-            host->add_function("try_open", [](script_int n) -> bool { return n > 0; });
+            host->add_function("try_open", [](script_int n) -> bool { return n > 0; }, jai::nodiscard);
             host->add_function("plain_open", [](script_int n) -> bool { return n > 0; });
-            dynamic_binder<probe_object>(*host, "ProbeObject").constructor<>().method("doubled", &probe_object::doubled).build();
-            host->nodiscard_function("try_open");
-            host->nodiscard_function("ProbeObject.doubled");
+            host->add_function("try_read", [](const std::string& path) -> bool { return !path.empty(); }, jai::nodiscard | jai::filesystem);
+            host->add_variadic_function("try_any", [h = host.get()](const std::vector<script_value>& args) -> script_value { return h->make_value(!args.empty()); }, jai::nodiscard);
+            dynamic_binder<probe_object>(*host, "ProbeObject").constructor<>()
+                .method("doubled", &probe_object::doubled, jai::nodiscard)
+                .method("tripled", [](probe_object& self) { return self.doubled() + 1; }, jai::nodiscard)
+                .static_method("made", []() -> script_int { return 4; }, jai::nodiscard)
+                .build();
             check_true(host->is_nodiscard_function("try_open") && !host->is_nodiscard_function("plain_open"));
-            auto hr = host->check("try_open(1);\nplain_open(1);\nProbeObject p = ProbeObject();\np.doubled();\nprint(1);");
-            check_eq((size_t)2, error_count(hr), hr.format());
+            check_true(host->is_nodiscard_function("try_read") && host->is_nodiscard_function("try_any"));
+            check_true(host->is_nodiscard_function("ProbeObject.doubled") && host->is_nodiscard_function("ProbeObject.tripled"));
+            auto hr = host->check("try_open(1);\nplain_open(1);\ntry_read(\"a\");\ntry_any(1);\nProbeObject p = ProbeObject();\np.doubled();\np.tripled();\nProbeObject::made();\nprint(1);");
+            check_eq((size_t)6, error_count(hr), hr.format());
+            check_true(has_diag(hr, dlevel::error, "the result of 'ProbeObject.made' is discarded"), hr.format());
+            check_true(has_diag(hr, dlevel::error, "the result of 'try_read' is discarded"), hr.format());
+            check_true(has_diag(hr, dlevel::error, "the result of 'ProbeObject.tripled' is discarded"), hr.format());
             check_true(has_diag(hr, dlevel::error, "the result of 'try_open' is discarded, but 'try_open' is [[nodiscard]]"), hr.format());
             check_true(has_diag(hr, dlevel::error, "the result of 'ProbeObject.doubled' is discarded"), hr.format());
 

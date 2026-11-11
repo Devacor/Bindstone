@@ -6,11 +6,10 @@
 
 static jai::registrar<Team, MV::Services> _hookTeam("Team",
 	[](jai::dynamic_binder<Team>& builder, const MV::Services&) {
-	builder.serial_method("damage");
 	builder.method("ourWell", &Team::ourWell);
 	builder.method("enemyWell", &Team::enemyWell);
 	builder.method("health", &Team::health);
-	builder.method("damage", &Team::damage);
+	builder.method("damage", &Team::damage, jai::serial);
 	builder.method("creaturesInRange", [](Team& a_self, const MV::Point<>& a_location, double a_radius) {
 		return a_self.creaturesInRange(a_location, static_cast<float>(a_radius));
 	});

@@ -10,7 +10,6 @@
 
 static jai::registrar<MV::Scene::Grid, MV::Services> _hookGrid("Grid",
 	[](jai::dynamic_binder<MV::Scene::Grid>& builder, const MV::Services&) {
-	builder.serial_method("layoutCells").serial_method("nodeFromGrid").serial_method("nodeFromLocal");
 	builder.base_class<MV::Scene::Drawable>();
 
 	builder.method("padding", static_cast<std::pair<MV::Point<>, MV::Point<>>(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::padding));
@@ -34,10 +33,10 @@ static jai::registrar<MV::Scene::Grid, MV::Services> _hookGrid("Grid",
 	builder.method("layoutPolicy", static_cast<MV::Scene::Grid::AutoLayoutPolicy(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::layoutPolicy));
 	builder.method("layoutPolicy", static_cast<std::shared_ptr<MV::Scene::Grid>(MV::Scene::Grid::*)(MV::Scene::Grid::AutoLayoutPolicy)>(&MV::Scene::Grid::layoutPolicy));
 
-	builder.method("layoutCells", &MV::Scene::Grid::layoutCells);
+	builder.method("layoutCells", &MV::Scene::Grid::layoutCells, jai::serial);
 
-	builder.method("nodeFromGrid", &MV::Scene::Grid::nodeFromGrid);
-	builder.method("nodeFromLocal", &MV::Scene::Grid::nodeFromLocal);
+	builder.method("nodeFromGrid", &MV::Scene::Grid::nodeFromGrid, jai::serial);
+	builder.method("nodeFromLocal", &MV::Scene::Grid::nodeFromLocal, jai::serial);
 });
 
 namespace MV {

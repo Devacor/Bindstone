@@ -374,13 +374,17 @@ refuses the rest, however they arrived (a <code>var</code>, a function value, <c
 refused.</li>
 </ul>
 <h2 id="nodiscard-host">A result the script must use<a class="hlink" href="#nodiscard-host" aria-label="link">&#8203;</a></h2>
-<p>A binding cannot read C++'s <code>[[nodiscard]]</code> off a function, so the host declares it:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_function("try_connect", [](const std::string&amp; host) -&gt; bool { return open_socket(host); });
-eng-&gt;nodiscard_function("try_connect");      // before any script loads; "Inventory.take" names a bound method</code></pre></div>
+<p>A binding cannot read C++'s <code>[[nodiscard]]</code> off a function, so the host declares it in the registration's
+trailing option, before any script loads:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_function("try_connect", [](const std::string&amp; host) -&gt; bool { return open_socket(host); }, jai::nodiscard);
+jai::dynamic_binder&lt;Inventory&gt;(*eng, "Inventory")
+    .method("take", &amp;Inventory::take, jai::nodiscard);</code></pre></div>
 <p>A script statement that drops the result then fails the load, under the language's
 <a href="../guide/06-functions.html#nodiscard">[[nodiscard]]</a> rule: <code>the result of 'try_connect' is discarded,
 but 'try_connect' is [[nodiscard]]: use it, or keep it in the placeholder (auto _ = try_connect(...);)</code>. For a
-method this holds wherever the checker knows the receiver's class. <code>is_nodiscard_function(callable)</code> asks. A
+method this holds wherever the checker knows the receiver's class. <code>add_variadic_function</code> and <code>.static_method</code>
+take the option too, and it combines with the others: <code>jai::nodiscard | jai::serial | jai::filesystem</code>.
+<code>is_nodiscard_function(callable)</code> asks, by <code>"name"</code> or <code>"Class.method"</code>. A
 namespace entry described with a <code>host_entry_signature</code> sets its <code>nodiscard</code> field;
 <code>in_place_twin</code> adds that the entry copies what the same-named method changes in place, and the error then
 names that method.</p>

@@ -8,11 +8,10 @@
 
 static jai::registrar<MV::Scene::Scroller, MV::Services> _hookScroller("Scroller",
 	[](jai::dynamic_binder<MV::Scene::Scroller>& builder, const MV::Services&) {
-	builder.serial_method("content");
 	builder.base_class<MV::Scene::Clickable>();
 
 	builder.method("content", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Scroller::*)() const>(&MV::Scene::Scroller::content));
-	builder.method("content", static_cast<std::shared_ptr<MV::Scene::Scroller>(MV::Scene::Scroller::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Scroller::content));
+	builder.method("content", static_cast<std::shared_ptr<MV::Scene::Scroller>(MV::Scene::Scroller::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Scroller::content), jai::serial);
 });
 
 namespace MV {

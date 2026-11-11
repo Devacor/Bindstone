@@ -7,10 +7,6 @@
 
 static jai::registrar<MV::Scene::Text, MV::Services> _hookText("Text",
 	[](jai::dynamic_binder<MV::Scene::Text>& builder, const MV::Services&) {
-	builder.serial_method("text").serial_method("number").serial_method("justification").serial_method("wrapping")
-		.serial_method("wrappingWidth").serial_method("append").serial_method("insertAtCursor").serial_method("backspace")
-		.serial_method("minimumLineHeight").serial_method("passwordField").serial_method("useBoundsForLineHeight").serial_method("enableCursor")
-		.serial_method("disableCursor");
 	builder.base_class<MV::Scene::Drawable>();
 
 	jai::bind_signal_type<MV::Scene::Text::TextSignalSignature>(builder.bound_engine(), "SignalText");
@@ -18,36 +14,36 @@ static jai::registrar<MV::Scene::Text, MV::Services> _hookText("Text",
 	builder.property("onChange", [](MV::Scene::Text& a_self) -> jai::signal<MV::Scene::Text::TextSignalSignature>& { return a_self.onChange; }, nullptr);
 
 	builder.method("text", static_cast<MV::UtfString(MV::Scene::Text::*)() const>(&MV::Scene::Text::text));
-	builder.method("text", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(const MV::UtfString&)>(&MV::Scene::Text::text));
+	builder.method("text", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(const MV::UtfString&)>(&MV::Scene::Text::text), jai::serial);
 
 	builder.method("number", static_cast<MV::PointPrecision(MV::Scene::Text::*)() const>(&MV::Scene::Text::number));
-	builder.method("number", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::PointPrecision)>(&MV::Scene::Text::number));
-	builder.method("number", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(int)>(&MV::Scene::Text::number));
+	builder.method("number", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::PointPrecision)>(&MV::Scene::Text::number), jai::serial);
+	builder.method("number", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(int)>(&MV::Scene::Text::number), jai::serial);
 
 	builder.method("justification", static_cast<MV::TextJustification(MV::Scene::Text::*)() const>(&MV::Scene::Text::justification));
-	builder.method("justification", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::TextJustification)>(&MV::Scene::Text::justification));
+	builder.method("justification", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::TextJustification)>(&MV::Scene::Text::justification), jai::serial);
 
 	builder.method("wrapping", static_cast<MV::TextWrapMethod(MV::Scene::Text::*)() const>(&MV::Scene::Text::wrapping));
-	builder.method("wrapping", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::TextWrapMethod)>(&MV::Scene::Text::wrapping));
-	builder.method("wrapping", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::TextWrapMethod, MV::PointPrecision)>(&MV::Scene::Text::wrapping));
+	builder.method("wrapping", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::TextWrapMethod)>(&MV::Scene::Text::wrapping), jai::serial);
+	builder.method("wrapping", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::TextWrapMethod, MV::PointPrecision)>(&MV::Scene::Text::wrapping), jai::serial);
 	builder.method("wrappingWidth", static_cast<MV::PointPrecision(MV::Scene::Text::*)() const>(&MV::Scene::Text::wrappingWidth));
-	builder.method("wrappingWidth", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::PointPrecision)>(&MV::Scene::Text::wrappingWidth));
+	builder.method("wrappingWidth", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::PointPrecision)>(&MV::Scene::Text::wrappingWidth), jai::serial);
 
-	builder.method("append", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(const MV::UtfString&)>(&MV::Scene::Text::append));
-	builder.method("insertAtCursor", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(const MV::UtfString&)>(&MV::Scene::Text::insertAtCursor));
-	builder.method("backspace", &MV::Scene::Text::backspace);
+	builder.method("append", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(const MV::UtfString&)>(&MV::Scene::Text::append), jai::serial);
+	builder.method("insertAtCursor", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(const MV::UtfString&)>(&MV::Scene::Text::insertAtCursor), jai::serial);
+	builder.method("backspace", &MV::Scene::Text::backspace, jai::serial);
 
-	builder.method("enableCursor", &MV::Scene::Text::enableCursor);
-	builder.method("disableCursor", &MV::Scene::Text::disableCursor);
+	builder.method("enableCursor", &MV::Scene::Text::enableCursor, jai::serial);
+	builder.method("disableCursor", &MV::Scene::Text::disableCursor, jai::serial);
 
 	builder.method("minimumLineHeight", static_cast<MV::PointPrecision(MV::Scene::Text::*)() const>(&MV::Scene::Text::minimumLineHeight));
-	builder.method("minimumLineHeight", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::PointPrecision)>(&MV::Scene::Text::minimumLineHeight));
+	builder.method("minimumLineHeight", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::PointPrecision)>(&MV::Scene::Text::minimumLineHeight), jai::serial);
 
 	builder.method("passwordField", static_cast<bool(MV::Scene::Text::*)() const>(&MV::Scene::Text::passwordField));
-	builder.method("passwordField", static_cast<void(MV::Scene::Text::*)(bool)>(&MV::Scene::Text::passwordField));
+	builder.method("passwordField", static_cast<void(MV::Scene::Text::*)(bool)>(&MV::Scene::Text::passwordField), jai::serial);
 
 	builder.method("useBoundsForLineHeight", static_cast<bool(MV::Scene::Text::*)() const>(&MV::Scene::Text::useBoundsForLineHeight));
-	builder.method("useBoundsForLineHeight", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(bool)>(&MV::Scene::Text::useBoundsForLineHeight));
+	builder.method("useBoundsForLineHeight", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(bool)>(&MV::Scene::Text::useBoundsForLineHeight), jai::serial);
 });
 
 namespace MV{

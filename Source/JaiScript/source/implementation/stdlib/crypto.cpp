@@ -880,7 +880,7 @@ namespace crypto_detail {
 	void register_crypto_functions(engine& eng_ref) {
 		using namespace crypto_detail;
 		engine* eng = &eng_ref;
-		eng_ref.serial_function("crypto::sha256_file");
+		detail::engine_access::serial_function(eng_ref, "crypto::sha256_file");
 		auto& ns = detail::engine_access::script_namespaces(eng_ref)[detail::engine_access::symbolize(eng_ref, "crypto")];
 		if (!ns) { ns = std::make_shared<script_namespace_data>(); }
 		using svt = script_value_type;

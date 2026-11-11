@@ -276,11 +276,11 @@ try { parallel_for (auto&amp; x : xs) { print(x); } } catch (e) { print(e); }</c
 parallel_for: call target 'pick' is not a function known at admission time at 10:45
 parallel_for: call target 'f' is not statically resolvable in a parallel body at 7:34
 parallel_for: captured name 'twice' is a function value (only direct calls to statically-known functions are allowed in a parallel body)
-parallel_for: host function 'print' is marked serial_function() and cannot be called in a parallel body at 15:37</code></pre></div>
+parallel_for: host function 'print' is marked jai::serial and cannot be called in a parallel body at 15:37</code></pre></div>
 <h3 id="cpp-calls">C++ calls<a class="hlink" href="#cpp-calls" aria-label="link">&#8203;</a></h3>
-<p>Bound C++ functions, static methods and methods run on the worker unless the host registered them <code>serial_function</code>, <code>serial_static_method</code> or <code>serial_method</code> (<a href="../embedding/02-dynamic-binder.html#parallel-calls">the binder</a>).</p>
+<p>Bound C++ functions, static methods and methods run on the worker unless the host registered them with the <code>jai::serial</code> option (<a href="../embedding/02-dynamic-binder.html#parallel-calls">the binder</a>).</p>
 <ul>
-<li>A serial function or static method refuses the statement before any element runs. A serial method is refused when it is called, since its receiver&#x27;s class is known only then. The mark covers the method&#x27;s non-const overloads, so a const getter of the same name stays parallel.</li>
+<li>A serial function or static method refuses the statement before any element runs. A serial method is refused when it is called, since its receiver&#x27;s class is known only then. A mark on a non-const overload covers the method&#x27;s non-const overloads, so a const getter of the same name stays parallel; a mark on a const overload covers every one.</li>
 <li>A non-const C++ method, or a store to a C++ property, runs only on an object the body owns: its element, a <code>parallel_reduce</code> accumulator, or an object it made. On any other object only const methods run.</li>
 <li>The library&#x27;s builtins follow the same rule. The <a href="#what-a-body-may-do">table</a> lists the serial ones; <code>print</code> is among them.</li>
 </ul>

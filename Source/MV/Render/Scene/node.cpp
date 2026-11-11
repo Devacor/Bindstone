@@ -20,14 +20,11 @@
 
 static jai::registrar<MV::Scene::Node, MV::Services> _hookNode("Node",
 	[](jai::dynamic_binder<MV::Scene::Node>& builder, const MV::Services&) {
-	builder.serial_method("make").serial_method("makeOrGet").serial_method("removeFromParent").serial_method("clear").serial_method("id")
-		.serial_method("depth").serial_method("position").serial_method("visible").serial_method("show").serial_method("hide")
-		.serial_method("bounds").serial_method("worldBounds").serial_method("screenBounds").serial_method("clone");
-	builder.method("make", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)()>(&MV::Scene::Node::make));
-	builder.method("make", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const std::string&)>(&MV::Scene::Node::make));
-	builder.method("makeOrGet", &MV::Scene::Node::makeOrGet);
-	builder.method("removeFromParent", &MV::Scene::Node::removeFromParent);
-	builder.method("clear", &MV::Scene::Node::clear);
+	builder.method("make", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)()>(&MV::Scene::Node::make), jai::serial);
+	builder.method("make", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const std::string&)>(&MV::Scene::Node::make), jai::serial);
+	builder.method("makeOrGet", &MV::Scene::Node::makeOrGet, jai::serial);
+	builder.method("removeFromParent", &MV::Scene::Node::removeFromParent, jai::serial);
+	builder.method("clear", &MV::Scene::Node::clear, jai::serial);
 	builder.method("root", &MV::Scene::Node::root);
 	builder.method("has", &MV::Scene::Node::has);
 	builder.method("hasParent", &MV::Scene::Node::hasParent);
@@ -45,24 +42,24 @@ static jai::registrar<MV::Scene::Node, MV::Services> _hookNode("Node",
 	});
 
 	builder.method("id", static_cast<std::string(MV::Scene::Node::*)() const>(&MV::Scene::Node::id));
-	builder.method("id", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const std::string&)>(&MV::Scene::Node::id));
+	builder.method("id", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const std::string&)>(&MV::Scene::Node::id), jai::serial);
 
 	builder.method("depth", static_cast<MV::PointPrecision(MV::Scene::Node::*)() const>(&MV::Scene::Node::depth));
-	builder.method("depth", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(MV::PointPrecision)>(&MV::Scene::Node::depth));
+	builder.method("depth", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(MV::PointPrecision)>(&MV::Scene::Node::depth), jai::serial);
 
 	builder.method("position", static_cast<MV::Point<>(MV::Scene::Node::*)() const>(&MV::Scene::Node::position));
-	builder.method("position", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const MV::Point<>&)>(&MV::Scene::Node::position));
+	builder.method("position", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const MV::Point<>&)>(&MV::Scene::Node::position), jai::serial);
 
 	builder.method("visible", static_cast<bool(MV::Scene::Node::*)() const>(&MV::Scene::Node::visible));
-	builder.method("visible", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(bool)>(&MV::Scene::Node::visible));
-	builder.method("show", &MV::Scene::Node::show);
-	builder.method("hide", &MV::Scene::Node::hide);
+	builder.method("visible", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(bool)>(&MV::Scene::Node::visible), jai::serial);
+	builder.method("show", &MV::Scene::Node::show, jai::serial);
+	builder.method("hide", &MV::Scene::Node::hide, jai::serial);
 
-	builder.method("bounds", &MV::Scene::Node::bounds);
-	builder.method("worldBounds", &MV::Scene::Node::worldBounds);
-	builder.method("screenBounds", &MV::Scene::Node::screenBounds);
+	builder.method("bounds", &MV::Scene::Node::bounds, jai::serial);
+	builder.method("worldBounds", &MV::Scene::Node::worldBounds, jai::serial);
+	builder.method("screenBounds", &MV::Scene::Node::screenBounds, jai::serial);
 
-	builder.method("clone", &MV::Scene::Node::clone);
+	builder.method("clone", &MV::Scene::Node::clone, jai::serial);
 
 	builder.property("onChildAdd", &MV::Scene::Node::onChildAdd);
 	builder.property("onChildRemove", &MV::Scene::Node::onChildRemove);

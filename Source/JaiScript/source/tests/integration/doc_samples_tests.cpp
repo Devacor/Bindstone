@@ -1012,11 +1012,9 @@ public:
 			    .constructor<>()
 			    .method("add", &Meter::add)
 			    .method("reading", &Meter::reading)
-			    .method("publish", &Meter::publish)
-			    .serial_method("publish", jai::serial_overloads::every);  // const, but it reaches a shared manager
+			    .method("publish", &Meter::publish, jai::serial);  // const, but it reaches a shared manager
 			eng->add_function("master", []() { return master_meter; });        // the program's one Meter (level 100)
-			eng->add_function("log_line", [](const std::string& line) { logger().write(line); });
-			eng->serial_function("log_line");
+			eng->add_function("log_line", [](const std::string& line) { logger().write(line); }, jai::serial);
 			// [/sample]
 			host.finish();
 			expect_script("embedding/02-dynamic-binder.html", "binder-meter", eng);

@@ -8,17 +8,16 @@
 
 static jai::registrar<MV::Scene::Slider, MV::Services> _hookSlider("Slider",
 	[](jai::dynamic_binder<MV::Scene::Slider>& builder, const MV::Services&) {
-	builder.serial_method("percent").serial_method("handle");
 	builder.base_class<MV::Scene::Clickable>();
 
 	jai::bind_signal_type<MV::Scene::Slider::SliderSignalSignature>(builder.bound_engine(), "SignalSlider");
 	builder.property("onPercentChange", [](MV::Scene::Slider& a_self) -> jai::signal<MV::Scene::Slider::SliderSignalSignature>& { return a_self.onPercentChange; }, nullptr);
 
 	builder.method("percent", static_cast<MV::PointPrecision(MV::Scene::Slider::*)() const>(&MV::Scene::Slider::percent));
-	builder.method("percent", static_cast<std::shared_ptr<MV::Scene::Slider>(MV::Scene::Slider::*)(MV::PointPrecision, bool)>(&MV::Scene::Slider::percent));
+	builder.method("percent", static_cast<std::shared_ptr<MV::Scene::Slider>(MV::Scene::Slider::*)(MV::PointPrecision, bool)>(&MV::Scene::Slider::percent), jai::serial);
 
 	builder.method("handle", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Slider::*)() const>(&MV::Scene::Slider::handle));
-	builder.method("handle", static_cast<std::shared_ptr<MV::Scene::Slider>(MV::Scene::Slider::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Slider::handle));
+	builder.method("handle", static_cast<std::shared_ptr<MV::Scene::Slider>(MV::Scene::Slider::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Slider::handle), jai::serial);
 });
 
 namespace MV {

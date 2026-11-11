@@ -14,6 +14,9 @@ import sys
 SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
 
 OLD_TEXTS = [
+    r"is marked serial_function\(\)",
+    r"is marked serial_static_method\(\)",
+    r"is marked serial_method\(\)",
     r"Member '[^']*' accessed on null",
     r"String has no method",
     r"Array has no method",

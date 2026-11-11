@@ -356,11 +356,6 @@ namespace jai {
             std::vector<param_type_info> param_types;
         };
         bool host_function_signatures(const std::string& name, std::vector<host_overload_signature>& out) const;
-        // A free host function that touches state other objects share: a parallel body may not call it. Every other
-        // registered host function, the library's own included, is taken to be safe on any thread. A namespace entry is
-        // marked by its qualified name (serial_function("game::save")).
-        void serial_function(const std::string& name);
-
         // Constant arguments: a host function ("name") or a bound method ("Class.method") whose argument `index` only the
         // program's own constants may fill: a string literal, a const holding one, a ternary or + of them, an array literal of
         // them. Register before loading scripts. The checker refuses any other argument at load with "argument N of 'name' is
@@ -369,10 +364,7 @@ namespace jai {
         // a unit that was never gathered, is refused: the host raises the refusal).
         void constant_argument(const std::string& callable, size_t index, std::string refusal);
         bool constant_argument_admits(const std::string& callable, size_t index, std::string_view text) const;
-        // [[nodiscard]] for a host function ("name") or a bound method ("Class.method"), as a script declares it on its own: an
-        // expression statement that drops the result of a call the checker resolves to it fails the load. Register before
-        // loading scripts.
-        void nodiscard_function(const std::string& callable);
+        // Whether a host function ("name") or a bound method ("Class.method") was registered with jai::nodiscard.
         bool is_nodiscard_function(const std::string& callable) const;
 
         // Global registration
@@ -642,6 +634,10 @@ namespace jai {
         // Use this for functions like print(), max(), or functions with optional parameters
         // Example: engine.add_variadic_function("print", [](const std::vector<script_value>& args) { ... });
         void add_variadic_function(const std::string& name, script_function func, privilege required = privilege::none);
+        void add_variadic_function(const std::string& name, script_function func, function_options options) {
+            add_variadic_function(name, std::move(func), options.required);
+            apply_function_options(name, options);
+        }
         void add_variadic_function(const std::string& name, script_function func, std::span<const std::string_view> names) {
             add_variadic_function(name, guard_function(std::move(func), names));
         }
@@ -690,6 +686,12 @@ namespace jai {
                 // Register normally but store arity info for future overloading
                 add_function_with_arity_and_full_types(name, wrapped_func, arity, param_types);
             }
+        }
+
+        template<typename Func>
+        void add_function(const std::string& name, Func&& func, function_options options) {
+            add_function(name, std::forward<Func>(func), options.required);
+            apply_function_options(name, options);
         }
 
         template<typename Func>
@@ -885,6 +887,15 @@ namespace jai {
     private:
         friend struct detail::engine_access;
         friend class caught_error_scope;
+        // [[nodiscard]] for a host function ("name") or a bound method ("Class.method"): what jai::nodiscard records.
+        void nodiscard_function(const std::string& callable);
+        // A host function a parallel body may not call: what jai::serial records. Every other registered host function, the
+        // library's own included, is taken to be safe on any thread. A namespace entry is marked by its qualified name.
+        void serial_function(const std::string& name);
+        void apply_function_options(const std::string& name, function_options options) {
+            if (options.nodiscard) { nodiscard_function(name); }
+            if (options.serial) { serial_function(name); }
+        }
 
         // Attach a requirement to the actual callable, so aliases, overload dispatch
         // and worker-local copies all recheck this engine's current grants. An empty

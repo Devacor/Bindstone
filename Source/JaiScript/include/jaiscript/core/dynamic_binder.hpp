@@ -702,17 +702,6 @@ public:
         class_def_->serial_only_construction(true);
         return *this;
     }
-    // The method (every overload of the name) touches state other objects share: a parallel body may not call it. Every other
-    // bound method is taken to be safe on any thread, a non-const one only over an object the calling chunk made.
-    dynamic_binder& serial_method(const std::string& name, serial_overloads which = serial_overloads::non_const) {
-        class_def_->mark_serial_method(engine_.symbolize(name), which);
-        return *this;
-    }
-    // The static method touches state other objects share: a parallel body may not call it
-    dynamic_binder& serial_static_method(const std::string& name) {
-        class_def_->mark_serial_static_method(engine_.symbolize(name));
-        return *this;
-    }
 
     // Hold every bound method of this class to its C++ signature in the strict checker
     dynamic_binder& strict_signatures() {
@@ -955,6 +944,25 @@ public:
     template<typename ArgsTuple, size_t... Is>
     static constexpr bool self_lane_params(std::index_sequence<Is...>) { return (lane_param<std::tuple_element_t<Is + 1, ArgsTuple>>() && ...); }
 
+    // The trailing function_options: the privilege the call requires, nodiscard (Class.method drops no result) and serial (a
+    // parallel body may not call it). serial on a non-const overload covers the name's non-const overloads; on a const one, all.
+    template<typename R, typename... Args>
+    dynamic_binder& method(const std::string& name, R(T::*member)(Args...), function_options options) {
+        bind_member_method<false, R, R(T::*)(Args...), Args...>(name, member, options.required);
+        return apply_method_options(name, false, options);
+    }
+    template<typename R, typename... Args>
+    dynamic_binder& method(const std::string& name, R(T::*member)(Args...) const, function_options options) {
+        bind_member_method<true, R, R(T::*)(Args...) const, Args...>(name, member, options.required);
+        return apply_method_options(name, true, options);
+    }
+    template<typename Callable>
+    dynamic_binder& method(const std::string& name, Callable&& callable, function_options options) {
+        constexpr bool is_const = !first_param_is_mutable_self<typename detail::function_traits<std::decay_t<Callable>>::argument_types>();
+        method(name, std::forward<Callable>(callable), options.required);
+        return apply_method_options(name, is_const, options);
+    }
+
     // Add method binding - member function pointer version
     template<typename R, typename... Args, typename Requirements = privilege>
     dynamic_binder& method(const std::string& name, R(T::*method)(Args...), Requirements required = privilege::none) {
@@ -1036,6 +1044,15 @@ public:
     }
 
     template<typename Tuple>
+    static constexpr bool first_param_is_mutable_self() {
+        if constexpr (std::tuple_size_v<Tuple> == 0) {
+            return false;
+        } else {
+            return std::is_same_v<std::tuple_element_t<0, Tuple>, T&>;
+        }
+    }
+
+    template<typename Tuple>
     static constexpr bool second_param_is_self() {
         if constexpr (std::tuple_size_v<Tuple> != 2) {
             return false;
@@ -1070,12 +1087,22 @@ public:
     // A static method marshals exactly like engine::add_function; the class adds the receiver-free call and its arity text
     template<typename Callable>
     dynamic_binder& static_method(const std::string& name, Callable&& callable) {
+        return static_method(name, std::forward<Callable>(callable), function_options{});
+    }
+    template<typename Callable>
+    dynamic_binder& static_method(const std::string& name, Callable&& callable, privilege required) {
+        return static_method(name, std::forward<Callable>(callable), function_options{required});
+    }
+    template<typename Callable>
+    dynamic_binder& static_method(const std::string& name, Callable&& callable, function_options options) {
         static_assert(!std::is_member_pointer_v<std::decay_t<Callable>>,
             "Member pointers cannot be passed to static_method(). Use method() or property() instead.");
         binding_traits::check_binding_validity<Callable>(name);
         using traits = detail::function_traits<std::decay_t<Callable>>;
         constexpr uint64_t writeback = detail::tuple_writeback_mask<typename traits::argument_types>::value;
-        class_def_->add_static_method(name, writeback_tagged<writeback>(make_function_binder(std::forward<Callable>(callable), &engine_).bind()), traits::arity);
+        class_def_->add_static_method(name, writeback_tagged<writeback>(engine_.guard_function(make_function_binder(std::forward<Callable>(callable), &engine_).bind(), options.required)), traits::arity);
+        if (options.nodiscard) { engine_.nodiscard_function(class_name_ + "." + name); }
+        if (options.serial) { class_def_->mark_serial_static_method(engine_.symbolize(name)); }
         return *this;
     }
 
@@ -1103,6 +1130,16 @@ public:
     }
 
 private:
+    dynamic_binder& apply_method_options(const std::string& name, bool is_const, function_options options) {
+        if (options.nodiscard) { engine_.nodiscard_function(class_name_ + "." + name); }
+        if (options.serial) {
+            const uint64_t name_id = engine_.symbolize(name);
+            const serial_overloads* marked = class_def_->serial_method(name_id);
+            if (is_const || !marked) { class_def_->mark_serial_method(name_id, is_const ? serial_overloads::every : serial_overloads::non_const); }
+        }
+        return *this;
+    }
+
     template<typename P>
     using property_state = detail::member_call_state<sizeof(P T::*)>;
 

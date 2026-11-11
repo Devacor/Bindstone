@@ -380,6 +380,7 @@ dot 11.0</code></pre></div>
 <div class="tablewrap"><table><thead><tr><th>Verb</th><th>What it binds</th></tr></thead><tbody>
 <tr><td><code>.constructor&lt;Args...&gt;()</code></td><td>A constructor overload, resolved by arity and C++ parameter types.</td></tr>
 <tr><td><code>.method(name, &amp;T::fn)</code>, <code>.method(name, lambda)</code></td><td>A member function, or a lambda whose first parameter is <code>T&amp;</code> or <code>const T&amp;</code>.</td></tr>
+<tr><td><code>.method(name, fn, option)</code>, <code>.static_method(name, fn, option)</code></td><td>The trailing option: a privilege the call requires, <code>jai::nodiscard</code> (<a href="17-host-api.html#nodiscard-host">a result the script must use</a>) and <code>jai::serial</code> (<a href="#parallel-calls">kept out of parallel bodies</a>), combined with <code>|</code>: <code>jai::nodiscard | jai::serial | jai::filesystem</code>. <code>add_function</code> and <code>add_variadic_function</code> take the same slot.</td></tr>
 <tr><td><code>.property(name, &amp;T::member)</code></td><td>Field access, and a key of the class&#x27;s archive record when it has no route of its own.</td></tr>
 <tr><td><code>.transient_property(name, &amp;T::member)</code></td><td>Field access its archive record leaves out.</td></tr>
 <tr><td><code>.base_class&lt;Base&gt;()</code></td><td>An inheritance edge.</td></tr>
@@ -418,11 +419,11 @@ parallel_for: class 'Glowing' has a C++ base 'Sprite' marked serial_only_constru
 <p>The mark covers the destructor too. An object of a marked class that loses its last reference on a worker is released on the calling thread once the workers are done, in the order of the elements that dropped it.</p>
 
 <h3 id="parallel-calls">Calls from parallel bodies<a class="hlink" href="#parallel-calls" aria-label="link">&#8203;</a></h3>
-<p>Bound functions, static methods and methods run on the worker thread unless registered serial. Leaving a call unmarked declares it safe to call from any worker at once, so mark every call that touches shared state (a manager, a registry, the scene graph beyond the object, a connection, a log):</p>
-<div class="tablewrap"><table><thead><tr><th>Mark</th><th>Covers</th><th>Refused</th></tr></thead><tbody>
-<tr><td><code>.serial_method("name")</code></td><td>The method&#x27;s non-const overloads; a const getter of the same name stays parallel. <code>.serial_method("name", jai::serial_overloads::every)</code> covers the const ones too.</td><td>When called, since the receiver&#x27;s class is known only then.</td></tr>
-<tr><td><code>.serial_static_method("name")</code></td><td>A static method.</td><td rowspan="2">When the statement is reached.</td></tr>
-<tr><td><code>engine::serial_function("name")</code></td><td>A registered free function, by its qualified name (<code>"game::save"</code>).</td></tr>
+<p>Bound functions, static methods and methods run on the worker thread unless registered with the <code>jai::serial</code> option. Leaving a call unmarked declares it safe to call from any worker at once, so mark every call that touches shared state (a manager, a registry, the scene graph beyond the object, a connection, a log):</p>
+<div class="tablewrap"><table><thead><tr><th>Registration</th><th>Covers</th><th>Refused</th></tr></thead><tbody>
+<tr><td><code>.method("name", f, jai::serial)</code></td><td>On a non-const overload, the method&#x27;s non-const overloads; a const getter of the same name stays parallel. On a const overload (a const member function, a <code>const T&amp;</code>-self lambda), every overload of the name.</td><td>When called, since the receiver&#x27;s class is known only then.</td></tr>
+<tr><td><code>.static_method("name", f, jai::serial)</code></td><td>A static method.</td><td rowspan="2">When the statement is reached.</td></tr>
+<tr><td><code>add_function("name", f, jai::serial)</code>, <code>add_variadic_function</code></td><td>A free function, under the name it registers (<code>"game::save"</code>).</td></tr>
 </tbody></table></div>
 <p>The receiver follows the C++ signature. A non-const member function, a <code>T&amp;</code>-self lambda or a property store runs only on an object the worker owns: the element it is running, a <code>parallel_reduce</code> accumulator, or an object it constructed or copied. A const member function also runs on an object the worker did not make, such as one a C++ function returns or one captured from the enclosing scope. A non-const <code>T&amp;</code> parameter cannot take enclosing state. The library&#x27;s own builtins follow the same rule; the guide lists <a href="../guide/16-parallel.html#cpp-calls">which are serial</a>.</p>
 <div class="codeblock cb-cpp" data-sample="binder-meter-host"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Meter {
@@ -436,11 +437,9 @@ jai::dynamic_binder&lt;Meter&gt;(*eng, "Meter")
     .constructor&lt;&gt;()
     .method("add", &amp;Meter::add)
     .method("reading", &amp;Meter::reading)
-    .method("publish", &amp;Meter::publish)
-    .serial_method("publish", jai::serial_overloads::every);  // const, but it reaches a shared manager
+    .method("publish", &amp;Meter::publish, jai::serial);  // const, but it reaches a shared manager
 eng-&gt;add_function("master", []() { return master_meter; });        // the program's one Meter (level 100)
-eng-&gt;add_function("log_line", [](const std::string&amp; line) { logger().write(line); });
-eng-&gt;serial_function("log_line");</code></pre></div>
+eng-&gt;add_function("log_line", [](const std::string&amp; line) { logger().write(line); }, jai::serial);</code></pre></div>
 <div class="codeblock cb-jai" data-host="Meter parallel binder" data-sample="binder-meter"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">array&lt;float&gt; xs = [1.0, 2.0, 3.0];
 parallel_for (auto&amp; x : xs) {
     Meter m;
@@ -453,8 +452,8 @@ try { parallel_for (auto&amp; x : xs) { Meter m; m.publish(); } } catch (e) { pr
 try { parallel_for (auto&amp; x : xs) { log_line("x"); } } catch (e) { print(e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[110.0,120.0,130.0]
 C++ method 'add' of 'Meter' changes an object this parallel body did not make (only its const methods may run on it)
-C++ method 'publish' of 'Meter' is marked serial_method() and cannot be called in a parallel body
-parallel_for: host function 'log_line' is marked serial_function() and cannot be called in a parallel body at 10:37</code></pre></div>
+C++ method 'publish' of 'Meter' is marked jai::serial and cannot be called in a parallel body
+parallel_for: host function 'log_line' is marked jai::serial and cannot be called in a parallel body at 10:37</code></pre></div>
 
 <h2 id="signals-one-view-every-signature">Signals: one view, every signature<a class="hlink" href="#signals-one-view-every-signature" aria-label="link">&#8203;</a></h2>
 <p>A <code>JAI_SIGNAL_PROPERTY</code> is exposed by <code>auto_bind</code>; a plain <code>jai::signal&lt;Sig&gt;</code> or <code>signal_emitter&lt;Sig&gt;</code> member by one <code>.property("name", &amp;T::member)</code> line. Script sees the same three verbs either way:</p>

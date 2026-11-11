@@ -10,18 +10,17 @@
 
 static jai::registrar<MV::Scene::Button, MV::Services> _hookButton("Button",
 	[](jai::dynamic_binder<MV::Scene::Button>& builder, const MV::Services&) {
-	builder.serial_method("activeNode").serial_method("idleNode").serial_method("disabledNode").serial_method("text");
 	builder.base_class<MV::Scene::Clickable>();
 
 	builder.method("activeNode", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Button::*)() const>(&MV::Scene::Button::activeNode));
-	builder.method("activeNode", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Button::activeNode));
+	builder.method("activeNode", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Button::activeNode), jai::serial);
 	builder.method("idleNode", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Button::*)() const>(&MV::Scene::Button::idleNode));
-	builder.method("idleNode", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Button::idleNode));
+	builder.method("idleNode", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Button::idleNode), jai::serial);
 	builder.method("disabledNode", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Button::*)() const>(&MV::Scene::Button::disabledNode));
-	builder.method("disabledNode", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Button::disabledNode));
+	builder.method("disabledNode", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Button::disabledNode), jai::serial);
 
 	builder.method("text", static_cast<std::string(MV::Scene::Button::*)() const>(&MV::Scene::Button::text));
-	builder.method("text", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::string&)>(&MV::Scene::Button::text));
+	builder.method("text", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::string&)>(&MV::Scene::Button::text), jai::serial);
 });
 
 namespace MV {

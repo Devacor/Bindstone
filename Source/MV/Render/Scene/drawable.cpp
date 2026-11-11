@@ -11,27 +11,25 @@
 
 static jai::registrar<MV::Scene::Drawable, MV::Services> _hookDrawable("Drawable",
 	[](jai::dynamic_binder<MV::Scene::Drawable>& builder, const MV::Services&) {
-	builder.serial_method("show").serial_method("hide").serial_method("shader").serial_method("texture").serial_method("clearTexture")
-		.serial_method("clearTextures");
 	builder.base_class<MV::Scene::Component>();
 
 	builder.method("visible", &MV::Scene::Drawable::visible);
-	builder.method("show", &MV::Scene::Drawable::show);
-	builder.method("hide", &MV::Scene::Drawable::hide);
+	builder.method("show", &MV::Scene::Drawable::show, jai::serial);
+	builder.method("hide", &MV::Scene::Drawable::hide, jai::serial);
 
 	builder.method("color", static_cast<MV::Color(MV::Scene::Drawable::*)() const>(&MV::Scene::Drawable::color));
 	builder.method("color", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(const MV::Color&)>(&MV::Scene::Drawable::color));
 	builder.method("colors", &MV::Scene::Drawable::colors);
 
 	builder.method("shader", static_cast<std::string(MV::Scene::Drawable::*)() const>(&MV::Scene::Drawable::shader));
-	builder.method("shader", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(const std::string&)>(&MV::Scene::Drawable::shader));
+	builder.method("shader", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(const std::string&)>(&MV::Scene::Drawable::shader), jai::serial);
 	builder.method("material", static_cast<std::shared_ptr<MV::Material>(MV::Scene::Drawable::*)() const>(&MV::Scene::Drawable::material));
 	builder.method("material", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(std::shared_ptr<MV::Material>)>(&MV::Scene::Drawable::material));
 
 	builder.method("texture", static_cast<std::shared_ptr<MV::TextureHandle>(MV::Scene::Drawable::*)(size_t) const>(&MV::Scene::Drawable::texture));
-	builder.method("texture", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(std::shared_ptr<MV::TextureHandle>, size_t)>(&MV::Scene::Drawable::texture));
-	builder.method("clearTexture", &MV::Scene::Drawable::clearTexture);
-	builder.method("clearTextures", &MV::Scene::Drawable::clearTextures);
+	builder.method("texture", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(std::shared_ptr<MV::TextureHandle>, size_t)>(&MV::Scene::Drawable::texture), jai::serial);
+	builder.method("clearTexture", &MV::Scene::Drawable::clearTexture, jai::serial);
+	builder.method("clearTextures", &MV::Scene::Drawable::clearTextures, jai::serial);
 
 	builder.method("blend", static_cast<MV::BlendMode(MV::Scene::Drawable::*)() const>(&MV::Scene::Drawable::blend));
 	builder.method("blend", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(MV::BlendMode)>(&MV::Scene::Drawable::blend));

@@ -234,7 +234,8 @@ for them: safe on any thread by default, refused with every script class over th
 is bound `.serial_only_constructor()`. A worker gets a copy of each host constructor a construction
 reaches (`make_parallel_host_function_copy`), and a hybrid's script layer joins the engine's
 script-layer map at the join (`pending_script_layers`). C++ calls are parallel unless registered serial
-(`serial_function`, `serial_method`, `serial_static_method`; the library marks its own serial builtins the same way, and
+(the `jai::serial` option of `add_function`, `add_variadic_function`, `method` and `static_method`; the library marks its
+own serial builtins the same way, a name it registers some other way through `engine_access::serial_function`, and
 whole namespaces with `serial_namespace` (`reflect`, `time`, `spider`); the test
 `every_library_builtin_is_classified_parallel_or_serial` lists every builtin's choice). A namespaced host entry is marked by
 its qualified name. A free function or static method
@@ -243,8 +244,8 @@ in C++ gets a worker pin (a copy of the bound value), and a serial one's pin rai
 safety follows constness, per overload by arity (`class_definition::host_overloads`): a non-const one or a property
 store runs only on an instance whose `region_tag` is this region's (a range or zipped element, or a reduce accumulator,
 the element proof found backed by a C++ object it proved the only element of; or a constructor's or copy's object made on
-this chunk), a const one on any. A method's serial mark covers its non-const overloads unless it says
-`serial_overloads::every`.
+this chunk), a const one on any. A method's serial mark covers its non-const overloads, or every overload once a const one
+was bound serial (`serial_overloads::every`).
 A serial-only chain's C++ object that dies on a chunk anyway
 (`class_instance::defer_serial_native`) waits in the chunk's `deferred_releases`; the join releases them on the calling
 thread by element, then in death order (`release_deferred_in_order`). Each worker gets a constructor value of its own for every

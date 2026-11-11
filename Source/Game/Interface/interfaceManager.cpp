@@ -19,24 +19,22 @@ namespace {
 
 static jai::registrar<MV::Interface, MV::Services> _hookInterface("Interface",
 	[](jai::dynamic_binder<MV::Interface>& builder, const MV::Services&) {
-	builder.serial_method("show").serial_method("hide").serial_method("focus").serial_method("removeFocus");
-	builder.method("show", &MV::Interface::show);
-	builder.method("hide", &MV::Interface::hide);
+	builder.method("show", &MV::Interface::show, jai::serial);
+	builder.method("hide", &MV::Interface::hide, jai::serial);
 	builder.method("visible", &MV::Interface::visible);
 	builder.method("id", &MV::Interface::id);
 	builder.method("root", &MV::Interface::root);
-	builder.method("focus", &MV::Interface::focus);
-	builder.method("removeFocus", &MV::Interface::removeFocus);
+	builder.method("focus", &MV::Interface::focus, jai::serial);
+	builder.method("removeFocus", &MV::Interface::removeFocus, jai::serial);
 });
 
 static jai::registrar<MV::InterfaceManager, MV::Services> _hookInterfaceManager("InterfaceManager",
 	[](jai::dynamic_binder<MV::InterfaceManager>& builder, const MV::Services&) {
-	builder.serial_method("make");
 	builder.method("root", &MV::InterfaceManager::root);
 	// make()/page() return a non-copyable Interface& — expose as a non-owning shared_ptr
 	builder.method("make", [](MV::InterfaceManager& a_self, const std::string& a_pageId) {
 		return std::shared_ptr<MV::Interface>(&a_self.make(a_pageId), [](MV::Interface*) {});
-	});
+	}, jai::serial);
 	builder.method("page", [](MV::InterfaceManager& a_self, const std::string& a_pageId) {
 		return std::shared_ptr<MV::Interface>(&a_self.page(a_pageId), [](MV::Interface*) {});
 	});

@@ -10,20 +10,18 @@
 
 static jai::registrar<MV::Scene::Clickable, MV::Services> _hookClickable("Clickable",
 	[](jai::dynamic_binder<MV::Scene::Clickable>& builder, const MV::Services&) {
-	builder.serial_method("clickDetectionType").serial_method("disable").serial_method("cancelPress").serial_method("press")
-		.serial_method("mouseInBounds");
 	builder.base_class<MV::Scene::Sprite>();
 
 	builder.method("clickDetectionType", static_cast<MV::Scene::Clickable::BoundsType(MV::Scene::Clickable::*)() const>(&MV::Scene::Clickable::clickDetectionType));
-	builder.method("clickDetectionType", static_cast<std::shared_ptr<MV::Scene::Clickable>(MV::Scene::Clickable::*)(MV::Scene::Clickable::BoundsType)>(&MV::Scene::Clickable::clickDetectionType));
+	builder.method("clickDetectionType", static_cast<std::shared_ptr<MV::Scene::Clickable>(MV::Scene::Clickable::*)(MV::Scene::Clickable::BoundsType)>(&MV::Scene::Clickable::clickDetectionType), jai::serial);
 
-	builder.method("disable", &MV::Scene::Clickable::disable);
+	builder.method("disable", &MV::Scene::Clickable::disable, jai::serial);
 	builder.method("disabled", &MV::Scene::Clickable::disabled);
 	builder.method("enabled", &MV::Scene::Clickable::enabled);
 
-	builder.method("cancelPress", &MV::Scene::Clickable::cancelPress);
+	builder.method("cancelPress", &MV::Scene::Clickable::cancelPress, jai::serial);
 	builder.method("inPressEvent", &MV::Scene::Clickable::inPressEvent);
-	builder.method("press", &MV::Scene::Clickable::press);
+	builder.method("press", &MV::Scene::Clickable::press, jai::serial);
 
 	builder.method("startEatingTouches", &MV::Scene::Clickable::startEatingTouches);
 	builder.method("stopEatingTouches", &MV::Scene::Clickable::stopEatingTouches);
@@ -38,7 +36,7 @@ static jai::registrar<MV::Scene::Clickable, MV::Services> _hookClickable("Clicka
 	builder.method("appendPriority", static_cast<int64_t(MV::Scene::Clickable::*)() const>(&MV::Scene::Clickable::appendPriority));
 	builder.method("appendPriority", static_cast<std::shared_ptr<MV::Scene::Clickable>(MV::Scene::Clickable::*)(int64_t)>(&MV::Scene::Clickable::appendPriority));
 
-	builder.method("mouseInBounds", static_cast<bool(MV::Scene::Clickable::*)()>(&MV::Scene::Clickable::mouseInBounds));
+	builder.method("mouseInBounds", static_cast<bool(MV::Scene::Clickable::*)()>(&MV::Scene::Clickable::mouseInBounds), jai::serial);
 });
 
 namespace MV {

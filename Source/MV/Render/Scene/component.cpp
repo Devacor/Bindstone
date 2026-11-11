@@ -7,21 +7,20 @@
 
 static jai::registrar<MV::Scene::Component, MV::Services> _hookComponent("Component",
 	[](jai::dynamic_binder<MV::Scene::Component>& builder, const MV::Services&) {
-	builder.serial_method("bounds").serial_method("screenBounds").serial_method("worldBounds").serial_method("detach");
 	builder.method("id", static_cast<std::string(MV::Scene::Component::*)() const>(&MV::Scene::Component::id));
 	builder.method("id", static_cast<std::shared_ptr<MV::Scene::Component>(MV::Scene::Component::*)(const std::string&)>(&MV::Scene::Component::id));
 
-	builder.method("bounds", static_cast<MV::BoxAABB<>(MV::Scene::Component::*)()>(&MV::Scene::Component::bounds));
-	builder.method("bounds", static_cast<std::shared_ptr<MV::Scene::Component>(MV::Scene::Component::*)(const MV::BoxAABB<>&)>(&MV::Scene::Component::bounds));
-	builder.method("screenBounds", static_cast<MV::BoxAABB<int>(MV::Scene::Component::*)()>(&MV::Scene::Component::screenBounds));
-	builder.method("worldBounds", static_cast<MV::BoxAABB<>(MV::Scene::Component::*)()>(&MV::Scene::Component::worldBounds));
+	builder.method("bounds", static_cast<MV::BoxAABB<>(MV::Scene::Component::*)()>(&MV::Scene::Component::bounds), jai::serial);
+	builder.method("bounds", static_cast<std::shared_ptr<MV::Scene::Component>(MV::Scene::Component::*)(const MV::BoxAABB<>&)>(&MV::Scene::Component::bounds), jai::serial);
+	builder.method("screenBounds", static_cast<MV::BoxAABB<int>(MV::Scene::Component::*)()>(&MV::Scene::Component::screenBounds), jai::serial);
+	builder.method("worldBounds", static_cast<MV::BoxAABB<>(MV::Scene::Component::*)()>(&MV::Scene::Component::worldBounds), jai::serial);
 
 	builder.method("serializable", static_cast<bool(MV::Scene::Component::*)() const>(&MV::Scene::Component::serializable));
 	builder.method("serializable", static_cast<std::shared_ptr<MV::Scene::Component>(MV::Scene::Component::*)(bool)>(&MV::Scene::Component::serializable));
 
 	builder.method("owner", &MV::Scene::Component::owner);
 	builder.method("ownerIsAlive", &MV::Scene::Component::ownerIsAlive);
-	builder.method("detach", &MV::Scene::Component::detach);
+	builder.method("detach", &MV::Scene::Component::detach, jai::serial);
 	builder.method("task", &MV::Scene::Component::task);
 });
 

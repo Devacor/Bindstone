@@ -39,24 +39,23 @@ static jai::registrar<StandardScriptMethods<Creature>, MV::Services> _hookCreatu
 
 static jai::registrar<TargetPolicy, MV::Services> _hookTargetPolicy("TargetPolicy",
 	[](jai::dynamic_binder<TargetPolicy>& builder, const MV::Services&) {
-	builder.serial_method("target");
 	builder.method("target", [](TargetPolicy& a_self, int64_t a_target, double a_range, jai::script_value a_succeed) {
 		a_self.target(a_target, static_cast<float>(a_range), jai::convert_script_function<void(TargetPolicy&)>(a_succeed));
-	});
+	}, jai::serial);
 	builder.method("target", [](TargetPolicy& a_self, int64_t a_target, double a_range, jai::script_value a_succeed, jai::script_value a_fail) {
 		a_self.target(a_target, static_cast<float>(a_range),
 			jai::convert_script_function<void(TargetPolicy&)>(a_succeed),
 			jai::convert_script_function<void(TargetPolicy&)>(a_fail));
-	});
+	}, jai::serial);
 	builder.method("target", [](TargetPolicy& a_self, const MV::Point<>& a_location, jai::script_value a_succeed) {
 		a_self.target(a_location, 0.0f, jai::convert_script_function<void(TargetPolicy&)>(a_succeed));
-	});
+	}, jai::serial);
 	builder.method("target", [](TargetPolicy& a_self, const MV::Point<>& a_location, int64_t a_mode, jai::script_value a_succeed) {
 		a_self.target(a_location, 0.0f, static_cast<MV::PathMode>(a_mode), jai::convert_script_function<void(TargetPolicy&)>(a_succeed));
-	});
+	}, jai::serial);
 	builder.method("target", [](TargetPolicy& a_self, const MV::Point<>& a_location, double a_range, int64_t a_mode, jai::script_value a_succeed) {
 		a_self.target(a_location, static_cast<float>(a_range), static_cast<MV::PathMode>(a_mode), jai::convert_script_function<void(TargetPolicy&)>(a_succeed));
-	});
+	}, jai::serial);
 	builder.method("self", &TargetPolicy::self);
 	builder.method("active", &TargetPolicy::active);
 	builder.method("stunned", &TargetPolicy::stunned);
@@ -79,7 +78,6 @@ void Creature::jai_auto_bind(jai::dynamic_binder<Creature>& builder) {
 
 static jai::registrar<Creature, MV::Services, jai::bases<MV::Scene::Component>> _hookCreature("Creature",
 	[](jai::dynamic_binder<Creature>& builder, const MV::Services&) {
-	builder.serial_method("changeHealth");
 	builder.base_class<MV::Scene::Component>();
 	auto& eng = builder.bound_engine();
 	jai::bind_signal_type<Creature::CallbackSignature>(eng, "SignalCreature");
@@ -91,7 +89,7 @@ static jai::registrar<Creature, MV::Services, jai::bases<MV::Scene::Component>> 
 	builder.method("health", &Creature::health);
 	builder.method("element", &Creature::element);
 	builder.method("elements", &Creature::elements);
-	builder.method("changeHealth", &Creature::changeHealth);
+	builder.method("changeHealth", &Creature::changeHealth, jai::serial);
 	builder.method("assetPath", &Creature::assetPath);
 	builder.method("player", &Creature::player);
 });
@@ -122,15 +120,13 @@ void ServerCreature::jai_auto_bind(jai::dynamic_binder<ServerCreature>& builder)
 
 static jai::registrar<ServerCreature, MV::Services> _hookServerCreature("ServerCreature",
 	[](jai::dynamic_binder<ServerCreature>& builder, const MV::Services&) {
-	builder.serial_method("heal").serial_method("stun").serial_method("root").serial_method("damage").serial_method("tickDamage")
-		.serial_method("absorbFor").serial_method("spawnCreature").serial_method("fall");
 	builder.base_class<Creature>();
 	builder.method("agent", &ServerCreature::agent);
-	builder.method("fall", &ServerCreature::fall);
+	builder.method("fall", &ServerCreature::fall, jai::serial);
 
-	builder.method("damage", [](ServerCreature& a_self, int64_t a_amount, int64_t a_source) { return static_cast<int64_t>(a_self.damage(static_cast<int>(a_amount), a_source)); });
-	builder.method("tickDamage", [](ServerCreature& a_self, int64_t a_amount, int64_t a_source) { return static_cast<int64_t>(a_self.tickDamage(static_cast<int>(a_amount), a_source)); });
-	builder.method("heal", [](ServerCreature& a_self, int64_t a_amount) { a_self.heal(static_cast<int>(a_amount)); });
+	builder.method("damage", [](ServerCreature& a_self, int64_t a_amount, int64_t a_source) { return static_cast<int64_t>(a_self.damage(static_cast<int>(a_amount), a_source)); }, jai::serial);
+	builder.method("tickDamage", [](ServerCreature& a_self, int64_t a_amount, int64_t a_source) { return static_cast<int64_t>(a_self.tickDamage(static_cast<int>(a_amount), a_source)); }, jai::serial);
+	builder.method("heal", [](ServerCreature& a_self, int64_t a_amount) { a_self.heal(static_cast<int>(a_amount)); }, jai::serial);
 	builder.method("shield", [](ServerCreature& a_self, int64_t a_amount) { a_self.shield(static_cast<int>(a_amount)); });
 	builder.method("shieldAmount", [](ServerCreature& a_self) { return static_cast<int64_t>(a_self.shieldAmount()); });
 	builder.method("dot", [](ServerCreature& a_self, double a_perSecond, double a_seconds, int64_t a_source) { a_self.dot(a_perSecond, a_seconds, a_source); });
@@ -146,16 +142,16 @@ static jai::registrar<ServerCreature, MV::Services> _hookServerCreature("ServerC
 	builder.method("abilitySpeedMultiplier", &ServerCreature::abilitySpeedMultiplier);
 	builder.method("moveSpeed", static_cast<double(ServerCreature::*)() const>(&ServerCreature::moveSpeed));
 	builder.method("moveSpeed", static_cast<void(ServerCreature::*)(double)>(&ServerCreature::moveSpeed));
-	builder.method("stun", &ServerCreature::stun);
-	builder.method("root", &ServerCreature::root);
+	builder.method("stun", &ServerCreature::stun, jai::serial);
+	builder.method("root", &ServerCreature::root, jai::serial);
 	builder.method("visible", static_cast<bool(ServerCreature::*)() const>(&ServerCreature::visible));
 	builder.method("visible", static_cast<void(ServerCreature::*)(bool)>(&ServerCreature::visible));
 	builder.method("taunt", [](ServerCreature& a_self, int64_t a_attacker, double a_seconds) { a_self.taunt(a_attacker, a_seconds); });
 	builder.method("tauntedBy", &ServerCreature::tauntedBy);
 	builder.method("untargetable", static_cast<bool(ServerCreature::*)() const>(&ServerCreature::untargetable));
 	builder.method("untargetable", static_cast<void(ServerCreature::*)(bool)>(&ServerCreature::untargetable));
-	builder.method("absorbFor", [](ServerCreature& a_self, int64_t a_host, double a_fraction, double a_statusScale) { a_self.absorbFor(a_host, a_fraction, a_statusScale); });
-	builder.method("spawnCreature", &ServerCreature::spawnCreature);
+	builder.method("absorbFor", [](ServerCreature& a_self, int64_t a_host, double a_fraction, double a_statusScale) { a_self.absorbFor(a_host, a_fraction, a_statusScale); }, jai::serial);
+	builder.method("spawnCreature", &ServerCreature::spawnCreature, jai::serial);
 });
 
 static jai::registrar<ClientCreature, MV::Services> _hookClientCreature("ClientCreature",

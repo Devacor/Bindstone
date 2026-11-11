@@ -21,8 +21,8 @@
 
 namespace jai {
 
-// Which overloads of a method dynamic_binder::serial_method marks: the non-const ones (a const getter of the same name stays
-// parallel), or every one (a const overload that still touches shared state)
+// Which overloads of a method jai::serial marks: the non-const ones, when only non-const overloads were bound serial (a const
+// getter of the same name stays parallel), or every one, once a const overload was
 enum class serial_overloads : uint8_t { non_const, every };
 
 namespace detail {
@@ -1216,8 +1216,8 @@ public:
 
     // A host class whose constructor or destructor touches state other objects share (a registry, a cache, a service): a
     // parallel body may not construct it, nor any script class over it (dynamic_binder::serial_only_constructor)
-    // A host method or static method that touches state other objects share (dynamic_binder::serial_method,
-    // serial_static_method): a parallel body may not call it. A method's mark covers its non-const overloads, or every one
+    // A host method or static method that touches state other objects share (bound jai::serial): a parallel body may not call
+    // it. A method's mark covers its non-const overloads, or every one
     void mark_serial_method(uint64_t name_id, serial_overloads which) { serial_methods_[name_id] = which; }
     const serial_overloads* serial_method(uint64_t name_id) const {
         const auto found = serial_methods_.find(name_id);

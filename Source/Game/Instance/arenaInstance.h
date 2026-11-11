@@ -28,8 +28,7 @@ class ArenaGameInstance : public GameInstance {
 			auto effectNode = gameObjectContainer()->make("E_" + std::to_string(networkBattleEffect->id()));
 			effectNode->position(networkBattleEffect->self()->position);
 			return effectNode->attach<ServerBattleEffect>(networkBattleEffect, *this).self();
-		});
-		script().engine().serial_function("spawnOnNetwork");   // the network pool and the scene graph
+		}, jai::serial);   // the network pool and the scene graph
 	}
 public:
 	static std::unique_ptr<ArenaGameInstance> make(const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_data, MV::TapDevice& a_mouse, const std::shared_ptr<InGamePlayer> &a_leftPlayer, const std::shared_ptr<InGamePlayer> &a_rightPlayer) {

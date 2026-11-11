@@ -18,30 +18,28 @@ static jai::registrar<MV::PathNode, MV::Services> _hookPathNode("PathNode",
 
 static jai::registrar<MV::NavigationAgent, MV::Services> _hookNavigationAgent("NavigationAgent",
 	[](jai::dynamic_binder<MV::NavigationAgent>& builder, const MV::Services&) {
-	builder.serial_method("path").serial_method("stop").serial_method("position").serial_method("goal").serial_method("speed")
-		.serial_method("disableFootprint").serial_method("enableFootprint");
 	builder.auto_bind();
 	builder.serial_only_constructor();   // the destructor releases its flow field's user count and vacates the map it blocks
 
 	builder.method("pathfinding", &MV::NavigationAgent::pathfinding);
-	builder.method("stop", &MV::NavigationAgent::stop);
-	builder.method("path", &MV::NavigationAgent::path);
+	builder.method("stop", &MV::NavigationAgent::stop, jai::serial);
+	builder.method("path", &MV::NavigationAgent::path, jai::serial);
 	builder.method("hasFootprint", &MV::NavigationAgent::hasFootprint);
-	builder.method("disableFootprint", &MV::NavigationAgent::disableFootprint);
-	builder.method("enableFootprint", &MV::NavigationAgent::enableFootprint);
+	builder.method("disableFootprint", &MV::NavigationAgent::disableFootprint, jai::serial);
+	builder.method("enableFootprint", &MV::NavigationAgent::enableFootprint, jai::serial);
 
 	builder.method("speed", static_cast<MV::PointPrecision(MV::NavigationAgent::*)() const>(&MV::NavigationAgent::speed));
-	builder.method("speed", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(MV::PointPrecision)>(&MV::NavigationAgent::speed));
+	builder.method("speed", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(MV::PointPrecision)>(&MV::NavigationAgent::speed), jai::serial);
 
 	builder.method("goal", static_cast<MV::Point<MV::PointPrecision>(MV::NavigationAgent::*)() const>(&MV::NavigationAgent::goal));
-	builder.method("goal", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<>&)>(&MV::NavigationAgent::goal));
-	builder.method("goal", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<int>&)>(&MV::NavigationAgent::goal));
-	builder.method("goal", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<>&, MV::PointPrecision)>(&MV::NavigationAgent::goal));
-	builder.method("goal", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<int>&, MV::PointPrecision)>(&MV::NavigationAgent::goal));
+	builder.method("goal", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<>&)>(&MV::NavigationAgent::goal), jai::serial);
+	builder.method("goal", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<int>&)>(&MV::NavigationAgent::goal), jai::serial);
+	builder.method("goal", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<>&, MV::PointPrecision)>(&MV::NavigationAgent::goal), jai::serial);
+	builder.method("goal", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<int>&, MV::PointPrecision)>(&MV::NavigationAgent::goal), jai::serial);
 
 	builder.method("position", static_cast<MV::Point<MV::PointPrecision>(MV::NavigationAgent::*)() const>(&MV::NavigationAgent::position));
-	builder.method("position", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<>&)>(&MV::NavigationAgent::position));
-	builder.method("position", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<int>&)>(&MV::NavigationAgent::position));
+	builder.method("position", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<>&)>(&MV::NavigationAgent::position), jai::serial);
+	builder.method("position", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<int>&)>(&MV::NavigationAgent::position), jai::serial);
 });
 
 namespace MV {

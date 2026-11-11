@@ -51,7 +51,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <li><strong>Scripts reach only what you bind.</strong> A binder chain names the constructors, members and methods of one class for one engine.</li>
 <li><strong>Objects cross the boundary by identity, never by copy.</strong> Once in script, a bound object follows the language&#x27;s value rules: a value copies through the C++ copy constructor, a handle (<code>shared_ptr</code>) or a reference shares.</li>
 <li><strong>One declaration can do three jobs.</strong> A field declared with <code>JAI_PROPERTY</code> on a <code>jai::property_owner</code> is reflected (C++ enumerates it by name), script-visible, and serialized to JSON and binary, so the three never drift apart.</li>
-<li><strong>A <code>jai::registrar</code> makes a class known to every engine</strong> that calls <code>bind_registrar</code>. Registration order never matters.</li>
+<li><strong>A <code>jai::property_owner</code> class, or one with a <code>jai::registrar</code>, is known to every engine</strong> that calls <code>bind_registrar</code>. Registration order never matters.</li>
 <li><strong>An engine and its objects belong to one thread at a time.</strong></li>
 </ul>
 <p>Every C++ sample here is compiled against the library and run on both backends.</p>
@@ -137,39 +137,40 @@ public:
     void spawn_wave() { total_waves_ += 1; onWaveSignal(total_waves_); }
     int64_t total_waves() const { return total_waves_; }
 
-private:
-    int64_t total_waves_ = 0;   // not a property: private, unreflected, unsaved
-};
-
-static jai::registrar&lt;Spawner, void&gt; _regSpawner("Spawner",
-    [](jai::dynamic_binder&lt;Spawner&gt;&amp; b) {
+    static void jai_auto_bind(auto&amp; b) {               // what the declarations cannot say
         b.method("spawn_wave", &amp;Spawner::spawn_wave);
         b.method("total_waves", &amp;Spawner::total_waves);
-    });</code></pre></div>
+    }
+
+private:
+    int64_t total_waves_ = 0;   // not a property: private, unreflected, unsaved
+};</code></pre></div>
 <ul>
-<li><code>property_owner&lt;Spawner&gt;</code> gives the class a <code>property_mgr</code> and registers its serialization identity (the <code>$type</code> name and the polymorphic load factory) at program start.</li>
+<li><code>property_owner&lt;Spawner&gt;</code> gives the class a <code>property_mgr</code> and, at program start, registers its serialization identity (the <code>$type</code> name and the polymorphic load factory) and its binding, under that same name.</li>
 <li><code>JAI_PROPERTY((type), name, default)</code> declares a <code>jai::property&lt;T&gt;</code> member that behaves like a <code>T</code> in C++. The type is parenthesized so template commas survive the macro.</li>
 <li><code>JAI_OBSERVABLE_PROPERTY</code> adds an <code>on_change(old, new)</code> signal that fires on a write that changes the value, from either side.</li>
 <li><code>JAI_SIGNAL_PROPERTY(signature, name)</code> declares a private emitter you fire (<code>name</code> + <code>Signal</code>, here <code>onWaveSignal(n)</code>), a public <code>jai::signal</code> view others connect to, and a hidden property that saves it. <code>JAI_SIGNAL_PROPERTY_AS(signature, name, emitter)</code> names the emitter yourself.</li>
-<li><code>jai::registrar</code> is a self-registering static. Its configure function names only what the declarations cannot say, the methods; the binder binds the rest by itself (<a href="#automatic-surface">below</a>).</li>
+<li><code>jai_auto_bind</code> names only what the declarations cannot say, the methods; the binder binds the rest by itself (<a href="#automatic-surface">below</a>). A class shared by several files declares it in the header, <code>static void jai_auto_bind(jai::dynamic_binder&lt;Spawner&gt;&amp; b);</code> (<code>&lt;jaiscript/jaiscript_fwd.hpp&gt;</code> declares the binder), and defines it in its <code>.cpp</code> file, so its bindings compile once.</li>
 </ul>
-<p>The host replays every registrar in the binary into an engine with one call:</p>
+<p>The host binds every <code>property_owner</code> class and every <code>jai::registrar</code> in the binary into an engine with one call:</p>
 <div class="codeblock cb-cpp" data-sample="binder-spawner-engine"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto eng = jai::engine::make();
 jai::stdlib::register_all(eng);   // formatted print, containers, math, json
-jai::bind_registrar(*eng);         // every jai::registrar in the binary, one call</code></pre></div>
-<p>A host whose bindings need its own services gives the registrar a context type (<code>jai::registrar&lt;Monster, HostContext&gt;</code>); each configure function then receives the context that <code>jai::bind_registrar&lt;HostContext&gt;(*eng, ctx)</code> passes.</p>
-<p>An engine that should not know some registered types filters them by exact type: <code>jai::bind_registrar(*eng, jai::except&lt;EditorPanel, DebugOverlay&gt;())</code> runs every registrar but those two, and <code>jai::bind_registrar(*eng, jai::only&lt;Monster, Loot&gt;())</code> runs only those. The context form takes the filter after its context. A filter that admits a class and leaves out a registered class it derives from throws <code>bind_registrar: 'Glow' derives from 'Sprite', which the filter leaves out; bind both or leave out 'Glow' too</code>, and one that names a type with no registrar for the context throws as well. The filter decides which types a script can name; <a href="05-safety-rails.html">privileges</a> decide what their calls may do.</p>
+jai::bind_registrar(*eng);         // every property_owner and jai::registrar in the binary, one call</code></pre></div>
+<p>A <code>property_owner</code> class queues its binding where C++ instantiates one of its constructors, so a class C++ never constructs (implicit constructors nothing uses) does not bind: define a constructor in a <code>.cpp</code> file, or give it a registrar. A file that instantiates the constructor includes <code>&lt;jaiscript/core/dynamic_binder.hpp&gt;</code> (<code>registrar.hpp</code> includes it); when none does, the link fails naming <code>jai::detail::bind_declared_class&lt;T&gt;</code>.</p>
+<p>A <code>jai::registrar&lt;T, Context&gt;</code> binds a class that is not a <code>property_owner</code>, a template instantiation, or a class under another name, and a registrar for a <code>property_owner</code> class, in any context, replaces the class&#x27;s own binding. A host whose bindings need its own services gives the registrar a context type (<code>jai::registrar&lt;Monster, HostContext&gt;</code>); each configure function then receives the context that <code>jai::bind_registrar&lt;HostContext&gt;(*eng, ctx)</code> passes. A <code>property_owner</code> class binds in every context.</p>
+<p>An engine that should not know some registered types filters them by exact type: <code>jai::bind_registrar(*eng, jai::except&lt;EditorPanel, DebugOverlay&gt;())</code> binds every class but those two, and <code>jai::bind_registrar(*eng, jai::only&lt;Monster, Loot&gt;())</code> only those. The context form takes the filter after its context. A filter that admits a class and leaves out a registrar&#x27;s class it derives from throws <code>bind_registrar: 'Glow' derives from 'Sprite', which the filter leaves out; bind both or leave out 'Glow' too</code>, and one that names a type with neither a registrar for the context nor a binding of its own throws as well. A left-out <code>property_owner</code> base with no registrar binds anyway, as the base of the class the filter admits. The filter decides which types a script can name; <a href="05-safety-rails.html">privileges</a> decide what their calls may do.</p>
 
 <h3 id="three-doors">What makes a type visible, and when<a class="hlink" href="#three-doors" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th>Step</th><th>Effect</th></tr></thead><tbody>
-<tr><td>Declaring (<code>property_owner</code> and the macros)</td><td>Identity, inheritance, properties and serialization. Not script-visible.</td></tr>
-<tr><td><code>jai::registrar&lt;T&gt;</code></td><td>Every engine handed to <code>bind_registrar</code> knows the type. An engine that never makes that call knows none of them.</td></tr>
+<tr><td>Declaring (<code>property_owner</code> and the macros)</td><td>Identity, inheritance, properties and serialization, and every engine handed to <code>bind_registrar</code> knows the type.</td></tr>
+<tr><td><code>jai::registrar&lt;T&gt;</code></td><td>Every engine handed to <code>bind_registrar</code> with its context knows the type. An engine that never makes that call knows none of them.</td></tr>
 <tr><td><code>dynamic_binder&lt;T&gt;(eng, "Name")</code></td><td>One engine knows the type, under the name and with the methods you choose.</td></tr>
 </tbody></table></div>
 <p>Registration decides which host types and functions a script can name; it is not a sandbox. An engine with nothing registered still runs the whole language, reads files through <code>include</code> and <code>import</code>, and has no memory cap. <a href="05-safety-rails.html">Safety Rails</a> lists what a default engine can reach and gives the <a href="05-safety-rails.html#putting-it-together-running-untrusted-script">recipe for untrusted script</a>.</p>
 <ul>
-<li><strong>One name everywhere.</strong> A type is named by its <code>JAI_PROPERTY_OWNER(Name)</code> or <code>JAI_PROPERTY_OWNER_AS(Class, "Name")</code> pin when it declares one, else by its bare class name, and that is also its serialization <code>$type</code>.</li>
-<li><strong>Static phase.</strong> Declarations, schemas, serialization identities and the registrar queue set themselves up at program start, in any file order, touching no engine.</li>
+<li><strong>One name everywhere.</strong> A type is named by its <code>JAI_PROPERTY_OWNER(Name)</code> or <code>JAI_PROPERTY_OWNER_AS(Class, "Name")</code> pin when it declares one, else by its bare class name, and that is also its serialization <code>$type</code>. A template instantiation without a pin has no name and binds only through a registrar.</li>
+<li><strong>One type per name.</strong> Two C++ types reaching one engine under one script name throw from <code>bind_registrar</code> before it binds anything, whatever order their files initialize in: <code>bind_registrar: the script name 'Beacon' belongs to two C++ types, 'game::Beacon' and 'tools::Beacon'; name one another way (JAI_PROPERTY_OWNER_AS, or a jai::registrar with its own name) or leave one out with jai::except&lt;&gt;()</code>, and so does a <code>property_owner</code> class whose name a script class of the engine already holds. A <code>property_owner</code> class the engine already binds, under any name, keeps that binding.</li>
+<li><strong>Static phase.</strong> Declarations, schemas, serialization identities and the binding queue set themselves up at program start, in any file order, touching no engine.</li>
 <li><strong>Runtime phase.</strong> The host calls <code>engine::make()</code>, <code>jai::stdlib::register_all</code>, <code>jai::bind_registrar</code> once per engine, then any explicit binder chains, then scripts. Registrations may come in any order: a derived class registered before its <code>property_owner</code> base registers that base under its own name, and a later explicit registration of the base adopts the same definition and gives it the explicit name.</li>
 <li><strong>A bound member may name a class that registers later</strong>, its own class included. The engine's first load, check or host call into script raises one error listing every type still unregistered; register them and load again.</li>
 <li><strong>Registering after scripts have run</strong> is supported. Re-registering an explicitly bound type replaces its binding for objects constructed from then on; existing objects keep their shape.</li>
@@ -396,7 +397,7 @@ dot 11.0</code></pre></div>
 <tr><td>A public copy constructor</td><td>The copy every value of the class makes: <code>T b = a;</code>, a by-value argument, an element stored by value. Script copies a host object and never moves one, so a move constructor binds nothing.</td></tr>
 <tr><td>An operator over <code>T</code> operands, as a member or a free function argument-dependent lookup finds</td><td>The operator: <code>+ - * / % &amp; | ^ &lt;&lt; &gt;&gt;</code>, <code>== != &lt; &lt;= &gt; &gt;= &lt;=&gt;</code>, the compound forms, unary <code>- + ~</code>, <code>++</code> and <code>--</code> in both forms, <code>[]</code> by an integer or a string index, and a single <code>()</code>. One reached only through a conversion, or one C++ rewrites from another, binds nothing: script derives <code>!=</code> from <code>==</code> and the comparisons from <code>&lt;=&gt;</code> itself.</td></tr>
 <tr><td>A trivial copy assignment</td><td><code>=</code>.</td></tr>
-<tr><td><code>static void jai_auto_bind(dynamic_binder&lt;T&gt;&amp;)</code></td><td>Whatever it binds, last: the hook reaches private members.</td></tr>
+<tr><td><code>static void jai_auto_bind(dynamic_binder&lt;T&gt;&amp;)</code>, or <code>(auto&amp;)</code></td><td>Whatever it binds, last: the hook reaches private members. Defined in a <code>.cpp</code> file, its bindings compile once; the <code>auto&amp;</code> form, defined in the class, compiles in every file that binds the class or a class derived from it.</td></tr>
 </tbody></table></div>
 <p>Everything else is a verb in the chain: methods (<code>to_string</code>, <code>size</code> and <code>empty</code> included), plain members, operators taking another type, and the <code>base_class</code> of a class that is not a <code>property_owner</code>. An automatic constructor takes an option the way an explicit one does, by binding it: <code>.constructor&lt;&gt;(jai::serial)</code> replaces the automatic <code>T()</code> and marks every constructor of the class serial.</p>
 <p><strong>Parameters.</strong> These hold for methods, static methods, constructors and <code>add_function</code> alike:</p>

@@ -11,10 +11,35 @@
 #include <jaiscript/core/script_extensible.hpp>
 #include <jaiscript/signals/receiver_owner.hpp>
 #include <jaiscript/detail/first_type.hpp>
+#include <jaiscript/detail/static_type_name.hpp>
+#include <typeindex>
 
 namespace jai {
 	// Forward declarations
 	class engine;
+
+	namespace detail {
+		// A property_owner class with a portable name queues its binding at program start; every bind_registrar runs the
+		// queue beside its context's registrars. bind_declared_class is defined with dynamic_binder: the file that
+		// instantiates the class's constructor includes core/dynamic_binder.hpp, or the link names the missing binding.
+		using declared_binding_fn = void (*)(engine&);
+		void queue_declared_binding(std::type_index a_type, std::string_view a_name, declared_binding_fn a_bind);
+		template<typename T> void bind_declared_class(engine& a_engine);
+
+		template<typename T>
+		bool queue_declared_binding_of() {
+			constexpr auto name = declared_or_derived_type_name<T>();
+			if constexpr (!name.empty()) {
+				queue_declared_binding(std::type_index(typeid(T)), name, &bind_declared_class<T>);
+			}
+			return true;
+		}
+
+		// A variable template, not a static member: MSVC instantiates a class template's inline static members wherever the
+		// class is complete, and this one instantiates the class's whole binding
+		template<typename T>
+		inline const bool declared_binding_queued = queue_declared_binding_of<T>();
+	}
 
 	namespace serialization {
 		class any_archive_writer;
@@ -235,8 +260,10 @@ namespace jai {
 		// must not wait for first construction: every dynamic_binder of the class calls this at
 		// REGISTRATION time so schema-driven binding sees inherited properties before any
 		// instance exists; constructors keep calling it too (idempotent magic static).
+		// The class's own binding queues from here, at the same points.
 		static void register_inheritance() {
 			(void)_jai_poly_registered;
+			(void)detail::declared_binding_queued<Derived>;
 			static const auto _inheritance_registered = []() {
 				if constexpr (sizeof...(Bases) > 0) {
 					(type_registry::instance().add_base(std::type_index(typeid(Derived)), std::type_index(typeid(Bases))), ...);

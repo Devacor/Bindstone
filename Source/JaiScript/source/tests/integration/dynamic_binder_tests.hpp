@@ -182,6 +182,31 @@ inline registrar<OwnerChainMiddle, owner_chain_context> owner_chain_middle_regis
     builder.method("middleMethod", &OwnerChainMiddle::middleMethod);
 });
 
+// A property_owner binds itself in every bind_registrar, its in-class hook binding the rest; a registrar of any context
+// replaces that binding
+class DeclaredBeacon : public property_owner<DeclaredBeacon> {
+public:
+    JAI_PROPERTY((int64_t), range, 4);
+    DeclaredBeacon() {}
+    static void jai_auto_bind(auto& a_binder) {
+        a_binder.method("boosted", &DeclaredBeacon::boosted);
+    }
+private:
+    int64_t boosted() const { return range.get() * 10; }
+};
+class DeclaredRenamed : public property_owner<DeclaredRenamed> {
+public:
+    DeclaredRenamed() {}
+};
+struct declared_name_rival { int64_t seats = 1; };
+struct declared_binding_context {};
+struct declared_rename_context {};
+struct declared_collision_context {};
+inline registrar<DeclaredRenamed, declared_rename_context> declared_renamed_registrar("RenamedBeacon");
+inline registrar<declared_name_rival, declared_collision_context> declared_name_rival_registrar("DeclaredBeacon", [](dynamic_binder<declared_name_rival>& builder, const declared_collision_context&) {
+    builder.property("seats", &declared_name_rival::seats);
+});
+
 // In-place member lanes (detail/host_member.hpp): every member type a lane reads, a const member, a second base at a
 // nonzero offset, and a polymorphic schema owner whose unregistered subclass shadows a property name
 struct LaneMembers {
@@ -2529,7 +2554,57 @@ public:
             auto base_left_out = make_engine();
             check_eq(std::string("bind_registrar: 'OwnerChainLeaf' derives from 'OwnerChainMiddle', which the filter leaves out; bind both or leave out 'OwnerChainLeaf' too"),
                 failure_of([&] { bind_registrar(*base_left_out, owner_chain_context{}, jai::except<OwnerChainMiddle>()); }));
-            check_true(failure_of([&] { bind_registrar(*make_engine(), owner_chain_context{}, jai::only<OwnerChainRoot>()); }).starts_with("bind_registrar: the filter names the C++ type '"));
+            check_true(failure_of([&] { bind_registrar(*make_engine(), owner_chain_context{}, jai::only<binder_chain_root>()); }).starts_with("bind_registrar: the filter names the C++ type '"));
+
+            auto declared_only = make_engine();
+            bind_registrar(*declared_only, owner_chain_context{}, jai::only<DeclaredBeacon>());
+            check_true(declared_only->is_type_registered("DeclaredBeacon") && !declared_only->is_type_registered("OwnerChainMiddle"));
+            auto declared_except = make_engine();
+            bind_registrar(*declared_except, owner_chain_context{}, jai::except<DeclaredBeacon>());
+            check_true(!declared_except->is_type_registered("DeclaredBeacon") && declared_except->is_type_registered("OwnerChainMiddle"));
+        });
+        test("a_property_owner_binds_itself_in_every_bind_registrar", [this]() {
+            auto eng = make_engine();
+            bind_registrar(*eng, declared_binding_context{});
+            check_eq((int64_t)57, eng->execute("var b = DeclaredBeacon(); b.range = 5; b.boosted() + 7;").as_int());
+            check_true(!eng->is_type_registered("DeclaredRenamed") && !eng->is_type_registered("RenamedBeacon"));
+
+            auto no_context = make_engine();
+            bind_registrar(*no_context);
+            check_eq((int64_t)40, no_context->execute("DeclaredBeacon().boosted();").as_int());
+
+            auto renamed = make_engine();
+            bind_registrar(*renamed, declared_rename_context{});
+            check_true(renamed->is_type_registered("RenamedBeacon") && !renamed->is_type_registered("DeclaredRenamed"));
+
+            auto hosted = make_engine();
+            dynamic_binder<DeclaredBeacon>(*hosted, "HostBeacon");
+            bind_registrar(*hosted, declared_binding_context{});
+            check_true(hosted->is_type_registered("HostBeacon") && !hosted->is_type_registered("DeclaredBeacon"));
+        });
+        test("two_types_under_one_script_name_refuse_to_bind", [this]() {
+            const auto failure_of = [](auto&& a_run) {
+                try { a_run(); } catch (const std::exception& e) { return std::string(e.what()); }
+                return std::string("no error");
+            };
+            const std::string collision = "bind_registrar: the script name 'DeclaredBeacon' belongs to two C++ types, 'jai::foundry::tests::DeclaredBeacon' and "
+                "'jai::foundry::tests::declared_name_rival'; name one another way (JAI_PROPERTY_OWNER_AS, or a jai::registrar with its own name) or leave one out with jai::except<>()";
+            auto registered = make_engine();
+            check_eq(collision, failure_of([&] { bind_registrar(*registered, declared_collision_context{}); }));
+            check_true(!registered->is_type_registered("DeclaredBeacon"));
+
+            auto hosted = make_engine();
+            dynamic_binder<declared_name_rival>(*hosted, "DeclaredBeacon");
+            check_eq(collision, failure_of([&] { bind_registrar(*hosted, declared_binding_context{}); }));
+
+            auto left_out = make_engine();
+            bind_registrar(*left_out, declared_collision_context{}, jai::except<DeclaredBeacon>());
+            check_eq((int64_t)1, left_out->execute("DeclaredBeacon().seats;").as_int());
+
+            auto scripted = make_engine();
+            scripted->execute("class DeclaredBeacon { int seats = 2; }");
+            check_eq(std::string("bind_registrar: the script name 'DeclaredBeacon' already names a script class, so the C++ type 'jai::foundry::tests::DeclaredBeacon' cannot bind under it"),
+                failure_of([&] { bind_registrar(*scripted, declared_binding_context{}); }));
         });
         test("mutual_references_register_in_either_order", [this]() {
             const char* script = "var h = Hangar(); var p = Plane(); p.home = h; h.plane = p; p.home.bays + h.plane.seats;";

@@ -198,15 +198,14 @@ public:
     void spawn_wave() { total_waves_ += 1; onWaveSignal(total_waves_); }
     int64_t total_waves() const { return total_waves_; }
 
+    static void jai_auto_bind(auto& b) {               // what the declarations cannot say
+        b.method("spawn_wave", &Spawner::spawn_wave);
+        b.method("total_waves", &Spawner::total_waves);
+    }
+
 private:
     int64_t total_waves_ = 0;   // not a property: private, unreflected, unsaved
 };
-
-static jai::registrar<Spawner, void> _regSpawner("Spawner",
-    [](jai::dynamic_binder<Spawner>& b) {
-        b.method("spawn_wave", &Spawner::spawn_wave);
-        b.method("total_waves", &Spawner::total_waves);
-    });
 // [/sample]
 }
 
@@ -923,7 +922,7 @@ public:
 			// [sample binder-spawner-engine]
 			auto eng = jai::engine::make();
 			jai::stdlib::register_all(eng);   // formatted print, containers, math, json
-			jai::bind_registrar(*eng);         // every jai::registrar in the binary, one call
+			jai::bind_registrar(*eng);         // every property_owner and jai::registrar in the binary, one call
 			// [/sample]
 			engine_block.finish();
 			expect_script(page, "binder-spawner", eng);

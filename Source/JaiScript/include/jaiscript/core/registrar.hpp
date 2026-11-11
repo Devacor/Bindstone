@@ -112,6 +112,8 @@ template<typename... T>
 
 namespace detail {
 	// Registrations apply in script-name order, the same on every compiler; a type registered again replaces its entry.
+	// run_all also runs every property_owner class that binds itself (property_manager.hpp) and that no registrar of
+	// any context claims, merged into the same order; two types under one script name throw, naming both.
 	// One type for every context (the context travels as const void*), defined in the library (class_registry.cpp).
 	class registration_order {
 	public:
@@ -129,6 +131,9 @@ namespace detail {
 		std::multimap<std::string, std::pair<std::type_index, erased_fn>> entries_;
 		std::unordered_map<std::type_index, std::string> names_;
 	};
+
+	// The spelling a host writes (engine.cpp): demangled under GCC and Clang, no class key under MSVC
+	std::string readable_cpp_type_name(const std::type_index& type);
 }
 
 template<typename Context>
@@ -198,6 +203,10 @@ private:
 //   static jai::registrar<Player, HostContext> _player([](auto& builder, const HostContext& ctx) { ... });
 // Template instantiations have no portable derived name and must pass one explicitly
 // (e.g. Point<int> -> "Pointi"); omitting it is a compile error directing you here.
+//
+// A property_owner class needs none: it binds itself under its serialization name in every bind_registrar call,
+// its static void jai_auto_bind(jai::dynamic_binder<T>&) (or (auto&)) binding the rest. A registrar for it, in any
+// context, replaces that binding.
 //
 // At engine initialization:
 //   jai::bind_registrar(engine);                     // No context

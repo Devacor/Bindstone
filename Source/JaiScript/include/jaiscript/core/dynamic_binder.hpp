@@ -2289,6 +2289,15 @@ private:
 // to avoid MSVC template instantiation issues with incomplete archive_reader type.
 // The make_context_extractor function is instantiated at call sites where archive_reader is fully defined.
 
+namespace detail {
+	// A property_owner's own binding (property_manager.hpp queues it), named as its serialization $type
+	template<typename T>
+	void bind_declared_class(engine& a_engine) {
+		dynamic_binder<T> builder(a_engine, std::string(declared_or_derived_type_name<T>()));
+		builder.build();
+	}
+}
+
 } // namespace jai
 
 // A binding record's property routes and its polymorphic registration instantiate any_archive dispatch

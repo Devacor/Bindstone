@@ -11,8 +11,10 @@
 #include <tuple>
 #include <set>
 #include <algorithm>
+#include <unordered_set>
 
 #include <jaiscript/core/registrar.hpp>
+#include <jaiscript/properties/property_manager.hpp>
 
 namespace jai {
 
@@ -46,11 +48,45 @@ bool type_name_registry::has_name(std::type_index ti) const {
 
 namespace detail {
 
+namespace {
+
+struct declared_binding {
+    std::string name;
+    declared_binding_fn bind;
+};
+
+// Program-wide, filled at program start: the property_owner classes that queue their own binding, and the types a
+// jai::registrar of any context claims (its registration replaces the declared one)
+struct declared_binding_store {
+    std::unordered_map<std::type_index, declared_binding> queued;
+    std::unordered_set<std::type_index> claimed;
+};
+
+declared_binding_store& declared_bindings() {
+    static declared_binding_store store;
+    return store;
+}
+
+[[noreturn]] void throw_script_name_collision(const std::string& a_name, std::type_index a_first, std::type_index a_second) {
+    std::string first = readable_cpp_type_name(a_first);
+    std::string second = readable_cpp_type_name(a_second);
+    if (second < first) { std::swap(first, second); }
+    throw std::runtime_error("bind_registrar: the script name '" + a_name + "' belongs to two C++ types, '" + first + "' and '" + second +
+        "'; name one another way (JAI_PROPERTY_OWNER_AS, or a jai::registrar with its own name) or leave one out with jai::except<>()");
+}
+
+} // namespace
+
+void queue_declared_binding(std::type_index a_type, std::string_view a_name, declared_binding_fn a_bind) {
+    declared_bindings().queued.insert_or_assign(a_type, declared_binding{ std::string(a_name), a_bind });
+}
+
 registration_order::registration_order() = default;
 
 registration_order::~registration_order() = default;
 
 void registration_order::add(std::type_index ti, const std::string& name, erased_fn fn) {
+    declared_bindings().claimed.insert(ti);
     if (auto it = names_.find(ti); it != names_.end()) {
         auto range = entries_.equal_range(it->second);
         for (auto entry = range.first; entry != range.second; ++entry) {
@@ -62,29 +98,77 @@ void registration_order::add(std::type_index ti, const std::string& name, erased
 }
 
 void registration_order::run_all(engine& eng, const void* context, const registrar_filter* filter) {
-    if (filter == nullptr) {
-        for (auto& [name, entry] : entries_) { entry.second(eng, context); }
-        return;
+    struct step {
+        const std::string* name;
+        std::type_index type;
+        erased_fn* registered;
+        declared_binding_fn declared;
+    };
+    const declared_binding_store& store = declared_bindings();
+    std::vector<step> steps;
+    steps.reserve(entries_.size() + store.queued.size());
+    for (auto& [name, entry] : entries_) {
+        steps.push_back({ &name, entry.first, &entry.second, nullptr });
     }
-    for (const std::type_index& listed : filter->listed()) {
-        if (!names_.contains(listed)) {
-            throw std::runtime_error(std::string("bind_registrar: the filter names the C++ type '") + listed.name() + "', which has no registrar for this context");
+    const size_t registered_count = steps.size();
+    for (const auto& [type, declared] : store.queued) {
+        if (!store.claimed.contains(type)) { steps.push_back({ &declared.name, type, nullptr, declared.bind }); }
+    }
+    // one name never runs two types (the check below), so name order alone is the whole order
+    const auto by_name = [](const step& a_left, const step& a_right) { return *a_left.name < *a_right.name; };
+    std::sort(steps.begin() + static_cast<std::ptrdiff_t>(registered_count), steps.end(), by_name);
+    std::inplace_merge(steps.begin(), steps.begin() + static_cast<std::ptrdiff_t>(registered_count), steps.end(), by_name);
+
+    if (filter) {
+        for (const std::type_index& listed : filter->listed()) {
+            if (!names_.contains(listed) && !(store.queued.contains(listed) && !store.claimed.contains(listed))) {
+                throw std::runtime_error(std::string("bind_registrar: the filter names the C++ type '") + listed.name() + "', which has no registrar for this context");
+            }
         }
     }
+    const auto admitted = [&](const step& a_step) { return filter == nullptr || filter->admits(a_step.type); };
+
+    // two types under one name would bind in static-initialization order; a declared class never replaces what the host bound
+    std::unordered_map<std::string_view, std::type_index> claimants;
+    for (const step& candidate : steps) {
+        if (!admitted(candidate)) { continue; }
+        if (auto [it, inserted] = claimants.try_emplace(*candidate.name, candidate.type); !inserted && it->second != candidate.type) {
+            throw_script_name_collision(*candidate.name, it->second, candidate.type);
+        }
+        if (candidate.declared) {
+            if (auto bound = engine_access::get_class_definition_by_type(eng, candidate.type); bound && !bound->auto_registered()) { continue; }
+            if (auto named = engine_access::get_class_definition(eng, *candidate.name); named && !named->auto_registered()) {
+                if (!named->cpp_type()) {
+                    throw std::runtime_error("bind_registrar: the script name '" + *candidate.name + "' already names a script class, so the C++ type '" +
+                        readable_cpp_type_name(candidate.type) + "' cannot bind under it");
+                }
+                throw_script_name_collision(*candidate.name, std::type_index(*named->cpp_type()), candidate.type);
+            }
+        }
+    }
+
     // a left-out class an admitted one derives from would bind as a bare base, or not at all: what is bound beforehand is the host's
     std::vector<std::type_index> left_out;
-    for (const auto& [type, name] : names_) {
-        if (!filter->admits(type) && !engine_access::get_class_definition_by_type(eng, type)) { left_out.push_back(type); }
+    if (filter) {
+        for (const auto& [type, name] : names_) {
+            if (!filter->admits(type) && !engine_access::get_class_definition_by_type(eng, type)) { left_out.push_back(type); }
+        }
     }
-    for (auto& [name, entry] : entries_) {
-        if (filter->admits(entry.first)) { entry.second(eng, context); }
+    std::vector<std::type_index> admitted_types;
+    for (const step& current : steps) {
+        if (!admitted(current)) { continue; }
+        admitted_types.push_back(current.type);
+        if (current.registered) {
+            (*current.registered)(eng, context);
+        } else if (auto bound = engine_access::get_class_definition_by_type(eng, current.type); !bound || bound->auto_registered()) {
+            current.declared(eng);
+        }
     }
     for (const std::type_index& type : left_out) {
         std::vector<std::string> derived = engine_access::classes_awaiting_base(eng, type);
         if (auto base = engine_access::get_class_definition_by_type(eng, type)) {
-            for (const auto& [admitted, name] : names_) {
-                if (!filter->admits(admitted)) { continue; }
-                if (auto bound = engine_access::get_class_definition_by_type(eng, admitted)) {
+            for (const std::type_index& admitted_type : admitted_types) {
+                if (auto bound = engine_access::get_class_definition_by_type(eng, admitted_type)) {
                     const auto& parents = bound->get_parent_classes();
                     if (std::find(parents.begin(), parents.end(), base) != parents.end()) { derived.push_back(bound->get_name()); }
                 }

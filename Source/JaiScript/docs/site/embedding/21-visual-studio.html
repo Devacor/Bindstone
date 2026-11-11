@@ -50,7 +50,8 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 (version 17). Install Visual Studio once, then take one of two routes:</p>
 <ul>
 <li><a href="#project-route">Route A, a Visual Studio project</a>: the Console App template, one JaiScript file added and
-three properties set. Take this one if you have not used CMake.</li>
+three properties set, or the same file in a static library project of its own. Take this one if you have not used
+CMake.</li>
 <li><a href="#cmake-route">Route B, a CMake folder</a>: three small files opened with File &rarr; Open &rarr; Folder,
 and nothing to set by hand.</li>
 </ul>
@@ -104,16 +105,23 @@ JaiScript\
 MyGame\
     MyGame.vcxproj
     MyGame.cpp</code></pre></div>
-<h3 id="add-the-source">A3. Add jaiscript.cpp to the project<a class="hlink" href="#add-the-source" aria-label="link">&#8203;</a></h3>
+<h3 id="add-the-source">A3. Add JaiScript to the solution<a class="hlink" href="#add-the-source" aria-label="link">&#8203;</a></h3>
+<p>JaiScript compiles from one file, <code>source\jaiscript.cpp</code>, which includes every other JaiScript source
+file. Put that file in MyGame itself, or in a static library project that MyGame links:</p>
+<div class="tabs" id="setup-tabs">
+<div class="tab-list" role="tablist" aria-label="Ways to add JaiScript to the solution" hidden>
+<button type="button" role="tab" id="setup-tab-direct" aria-controls="setup-direct" aria-selected="true">Directly included</button>
+<button type="button" role="tab" id="setup-tab-static" aria-controls="setup-static" aria-selected="false" tabindex="-1">Static library</button>
+</div>
+<div class="tab-panel" id="setup-direct" role="tabpanel" aria-labelledby="setup-tab-direct" tabindex="0">
+<p><code>jaiscript.cpp</code> becomes one of MyGame's own source files. This is the shortest setup, and JaiScript always
+compiles with the same runtime library and defines as your code. MyGame's other settings reach it too: its warning
+level, its precompiled header, its whole-program optimization.</p>
 <ol>
 <li>In <strong>Solution Explorer</strong>, right-click <strong>Source Files</strong> under MyGame and choose
 <strong>Add &rarr; Existing Item</strong>.</li>
-<li>Pick <code>C:\dev\MyGame\JaiScript\source\jaiscript.cpp</code> and click <strong>Add</strong>.</li>
-</ol>
-<p>That one file is the whole library: it includes every other JaiScript source file, so add none of them.</p>
-<figure class="shot shot-step" id="shot-solution-explorer"><a href="../assets/vs/solution-explorer.png"><img src="../assets/vs/solution-explorer.png" width="700" height="628" loading="lazy" alt="Solution Explorer showing Solution MyGame with one project, MyGame, expanded: References, External Dependencies, Header Files, Resource Files, and Source Files holding jaiscript.cpp and MyGame.cpp."></a><figcaption><em>Source Files</em> holds jaiscript.cpp beside MyGame.cpp.</figcaption></figure>
-<h3 id="set-the-properties">A4. Set three properties<a class="hlink" href="#set-the-properties" aria-label="link">&#8203;</a></h3>
-<ol>
+<li>Pick <code>C:\dev\MyGame\JaiScript\source\jaiscript.cpp</code> and click <strong>Add</strong>. Add no other
+JaiScript file.</li>
 <li>Right-click the <strong>MyGame</strong> project and choose <strong>Properties</strong>.</li>
 <li>At the top of the dialog, set <strong>Configuration</strong> to <strong>All Configurations</strong> and
 <strong>Platform</strong> to <strong>All Platforms</strong>, so Debug and Release both get the settings.</li>
@@ -124,15 +132,57 @@ MyGame\
 <tr><td>C/C++ &rarr; Language</td><td>C++ Language Standard</td><td>ISO C++20 Standard (<code>/std:c++20</code>) or later</td></tr>
 <tr><td>C/C++ &rarr; Command Line</td><td>Additional Options</td><td><code>/bigobj</code></td></tr>
 </tbody></table></div>
-<p>Check the language standard even if you do not change it: Visual Studio 2022's Console App starts at Default (ISO
-C++14), which cannot compile JaiScript. Leave everything else as the template set it. JaiScript compiles inside your
-project, so it always gets the same runtime library and defines as your own code.</p>
+<figure class="shot shot-step" id="shot-solution-explorer"><a href="../assets/vs/solution-explorer.png"><img src="../assets/vs/solution-explorer.png" width="700" height="628" loading="lazy" alt="Solution Explorer showing Solution MyGame with one project, MyGame, expanded: References, External Dependencies, Header Files, Resource Files, and Source Files holding jaiscript.cpp and MyGame.cpp."></a><figcaption><em>Source Files</em> holds jaiscript.cpp beside MyGame.cpp.</figcaption></figure>
 <div class="shots" id="shot-properties">
 <figure class="shot shot-wide"><a href="../assets/vs/properties-include.png"><img src="../assets/vs/properties-include.png" width="1596" height="1087" loading="lazy" alt="MyGame Property Pages with Configuration set to All Configurations and Platform set to All Platforms. The C/C++ General page is selected and Additional Include Directories reads $(SolutionDir)JaiScript\include."></a><figcaption>C/C++ &rarr; General: the include directory.</figcaption></figure>
 <figure class="shot"><a href="../assets/vs/properties-language.png"><img src="../assets/vs/properties-language.png" width="1596" height="1087" loading="lazy" alt="MyGame Property Pages on the C/C++ Language page, with C++ Language Standard set to ISO C++20 Standard (/std:c++20)."></a><figcaption>C/C++ &rarr; Language: the language standard.</figcaption></figure>
 <figure class="shot"><a href="../assets/vs/properties-command-line.png"><img src="../assets/vs/properties-command-line.png" width="1596" height="1087" loading="lazy" alt="MyGame Property Pages on the C/C++ Command Line page, with /bigobj typed in the Additional Options box."></a><figcaption>C/C++ &rarr; Command Line: <code>/bigobj</code> in Additional Options.</figcaption></figure>
 </div>
-<h3 id="write-main">A5. Run a script from main<a class="hlink" href="#write-main" aria-label="link">&#8203;</a></h3>
+</div>
+<div class="tab-panel" id="setup-static" role="tabpanel" aria-labelledby="setup-tab-static" tabindex="0">
+<p>JaiScript builds in a project of its own, JaiScriptLib, and MyGame links the library it makes. MyGame's warning
+level and precompiled header never reach JaiScript's code, and a second program in the solution links the same
+library instead of compiling it again.</p>
+<ol>
+<li>In <strong>Solution Explorer</strong>, right-click <strong>Solution 'MyGame'</strong> and choose
+<strong>Add &rarr; New Project</strong>. Pick <strong>Empty Project</strong> (tagged C++, Windows, Console), name it
+<code>JaiScriptLib</code> and click <strong>Create</strong>.</li>
+<li>Right-click <strong>Source Files</strong> under JaiScriptLib, choose <strong>Add &rarr; Existing Item</strong>,
+pick <code>C:\dev\MyGame\JaiScript\source\jaiscript.cpp</code> and click <strong>Add</strong>. Add no other
+JaiScript file. The C/C++ property pages appear once the project holds a source file.</li>
+<li>Right-click the <strong>JaiScriptLib</strong> project and choose <strong>Properties</strong>. Set
+<strong>Configuration</strong> to <strong>All Configurations</strong> and <strong>Platform</strong> to <strong>All
+Platforms</strong>, set these four, then click <strong>OK</strong>:</li>
+</ol>
+<div class="tablewrap"><table><thead><tr><th>Page</th><th>Property</th><th>Value</th></tr></thead><tbody>
+<tr><td>General</td><td>Configuration Type</td><td>Static library (.lib)</td></tr>
+<tr><td>C/C++ &rarr; General</td><td>Additional Include Directories</td><td><code>$(SolutionDir)JaiScript\include</code></td></tr>
+<tr><td>C/C++ &rarr; Language</td><td>C++ Language Standard</td><td>ISO C++20 Standard (<code>/std:c++20</code>) or later</td></tr>
+<tr><td>C/C++ &rarr; Command Line</td><td>Additional Options</td><td><code>/bigobj</code></td></tr>
+</tbody></table></div>
+<ol start="4">
+<li>Under MyGame, right-click <strong>References</strong> and choose <strong>Add Reference</strong>. Tick
+<strong>JaiScriptLib</strong> and click <strong>OK</strong>. MyGame now builds the library first and links it.
+Solution Explorer shows the startup project in bold: if that is JaiScriptLib, right-click <strong>MyGame</strong> and
+choose <strong>Set as Startup Project</strong>.</li>
+<li>Right-click the <strong>MyGame</strong> project and choose <strong>Properties</strong>. Under <strong>All
+Configurations</strong> and <strong>All Platforms</strong>, set C/C++ &rarr; General &rarr; Additional Include
+Directories to <code>$(SolutionDir)JaiScript\include</code> and C/C++ &rarr; Language &rarr; C++ Language Standard to
+ISO C++20 Standard or later, then click <strong>OK</strong>.</li>
+</ol>
+<div class="shots" id="shot-static-library">
+<figure class="shot"><a href="../assets/vs/static-solution-explorer.png"><img src="../assets/vs/static-solution-explorer.png" width="700" height="960" loading="lazy" alt="Solution Explorer showing Solution MyGame with two projects. JaiScriptLib holds jaiscript.cpp under Source Files. MyGame, in bold, lists JaiScriptLib under References and holds MyGame.cpp under Source Files."></a><figcaption>JaiScriptLib holds jaiscript.cpp, and MyGame lists the library under <em>References</em>.</figcaption></figure>
+<figure class="shot"><a href="../assets/vs/static-properties-general.png"><img src="../assets/vs/static-properties-general.png" width="1596" height="1087" loading="lazy" alt="JaiScriptLib Property Pages with Configuration set to All Configurations and Platform set to All Platforms. On the General page, Configuration Type reads Static library (.lib) and C++ Language Standard reads ISO C++20 Standard (/std:c++20)."></a><figcaption>General: Configuration Type set to Static library (.lib).</figcaption></figure>
+</div>
+<p>The two projects have to agree on what shapes the library: both build the same configuration (the reference pairs
+Debug with Debug and Release with Release), both keep the same C/C++ &rarr; Code Generation &rarr; Runtime Library,
+and a JaiScript define such as <code>JAISCRIPT_ENABLE_DEBUGGER</code> goes in both or in neither. The two templates
+start out agreeing.</p>
+</div>
+</div>
+<p>Check the language standard even if you do not change it: Visual Studio 2022's templates start at Default (ISO
+C++14), which cannot compile JaiScript. Leave everything else as the template set it.</p>
+<h3 id="write-main">A4. Run a script from main<a class="hlink" href="#write-main" aria-label="link">&#8203;</a></h3>
 <p>Replace everything in <code>MyGame.cpp</code> with:</p>
 <div class="codeblock cb-cpp" data-sample="vs-first-main"><span class="cb-label">C++ &mdash; MyGame.cpp</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/engine.hpp&gt;
 #include &lt;jaiscript/stdlib/stdlib.hpp&gt;
@@ -160,7 +210,7 @@ caught: static check failed:
         ^</code></pre></div>
 <p><code>execute&lt;int&gt;</code> runs the text and returns the value of its last expression as an
 <code>int</code>. A script that fails to check or to run throws, and the message says where.</p>
-<h3 id="build-and-run">A6. Build and run<a class="hlink" href="#build-and-run" aria-label="link">&#8203;</a></h3>
+<h3 id="build-and-run">A5. Build and run<a class="hlink" href="#build-and-run" aria-label="link">&#8203;</a></h3>
 <p>Press <strong>Ctrl+F5</strong> (<strong>Debug &rarr; Start Without Debugging</strong>). The first build compiles the
 library and takes a minute or two; after that <code>jaiscript.cpp</code> recompiles only when a JaiScript file
 changes. The console window shows the output above.</p>
@@ -168,7 +218,7 @@ changes. The console window shows the output above.</p>
 <p>Before you measure anything, switch the toolbar's configuration from <strong>Debug</strong> to
 <strong>Release</strong>. A Debug build checks the library's invariants as it goes and runs script many times
 slower.</p>
-<h3 id="faster-release-builds">A7. Optional: faster Release builds<a class="hlink" href="#faster-release-builds" aria-label="link">&#8203;</a></h3>
+<h3 id="faster-release-builds">A6. Optional: faster Release builds<a class="hlink" href="#faster-release-builds" aria-label="link">&#8203;</a></h3>
 <p>The Console App template turns on whole-program optimization for Release, so every Release build re-links the
 whole library: a minute or more, even after a one-line edit to your own code. To link in seconds instead:</p>
 <ol>
@@ -182,15 +232,15 @@ Platforms</strong>.</li>
 <h3 id="if-the-build-fails">If the build fails<a class="hlink" href="#if-the-build-fails" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th>The first error</th><th>The fix</th></tr></thead><tbody>
 <tr><td><code>C1083: Cannot open include file: &#x27;jaiscript/core/engine.hpp&#x27;</code></td><td>The include
-directory is missing (A4), or the folder is misplaced: <code>C:\dev\MyGame\JaiScript</code> must hold
+directory is missing from the project the error names (A3), or the folder is misplaced: <code>C:\dev\MyGame\JaiScript</code> must hold
 <code>include\</code> and <code>source\</code> directly, not another <code>jaiscript-main\</code> folder from the
 ZIP.</td></tr>
 <tr><td><code>LNK2019: unresolved external symbol</code> naming <code>jai::</code> functions, then
-<code>LNK1120</code></td><td><code>jaiscript.cpp</code> is not in the project (A3).</td></tr>
+<code>LNK1120</code></td><td><code>jaiscript.cpp</code> is not in the project, or MyGame has no reference to JaiScriptLib (A3).</td></tr>
 <tr><td><code>C1128: number of sections exceeded object file format limit: compile with /bigobj</code></td><td>Add
-<code>/bigobj</code> (A4).</td></tr>
+<code>/bigobj</code> to the project that holds <code>jaiscript.cpp</code> (A3).</td></tr>
 <tr><td><code>C7525: inline variables require at least &#x27;/std:c++17&#x27;</code>, or <code>C2039: &#x27;same_as&#x27;:
-is not a member of &#x27;std&#x27;</code></td><td>The language standard is below C++20 (A4).</td></tr>
+is not a member of &#x27;std&#x27;</code></td><td>The language standard is below C++20 (A3).</td></tr>
 <tr><td><code>C1010: unexpected end of file while looking for precompiled header</code></td><td>Your project uses
 precompiled headers (<code>pch.h</code>). Open the Properties of <code>jaiscript.cpp</code> itself and set C/C++
 &rarr; Precompiled Headers &rarr; Precompiled Header to <strong>Not Using Precompiled Headers</strong>.</td></tr>
@@ -200,7 +250,7 @@ configuration selected. Set it again under <strong>All Configurations</strong>.<
 <h3 id="script-debugger">Optional: debug scripts from VS Code<a class="hlink" href="#script-debugger" aria-label="link">&#8203;</a></h3>
 <p>To set breakpoints in scripts, select the <strong>Debug</strong> configuration in the Properties dialog and add
 <code>JAISCRIPT_ENABLE_DEBUGGER</code> to C/C++ &rarr; Preprocessor &rarr; Preprocessor Definitions. Leave it out of
-Release. <a href="12-debugging.html">Debugging</a> covers the attach.</p>
+Release. With the static library setup, add it to both projects. <a href="12-debugging.html">Debugging</a> covers the attach.</p>
 <h2 id="cmake-route">Route B: a CMake folder<a class="hlink" href="#cmake-route" aria-label="link">&#8203;</a></h2>
 <p>Visual Studio opens a folder that holds a <code>CMakeLists.txt</code> directly. Linking the
 <code>JaiScript::jaiscript</code> target brings the include path, C++20 and <code>/bigobj</code>, so there is no
@@ -208,7 +258,7 @@ Properties dialog to fill in.</p>
 <h3 id="cmake-folder">B1. Make the folder<a class="hlink" href="#cmake-folder" aria-label="link">&#8203;</a></h3>
 <div class="codeblock cb-plain"><span class="cb-label">C:\dev\MyGame</span><pre><code class="lang-plain">CMakeLists.txt
 CMakePresets.json
-main.cpp              the program from A5
+main.cpp              the program from A4
 JaiScript\            cloned or unzipped as in A2</code></pre></div>
 <h3 id="cmake-lists">B2. Write CMakeLists.txt<a class="hlink" href="#cmake-lists" aria-label="link">&#8203;</a></h3>
 <div class="codeblock cb-plain"><span class="cb-label">CMakeLists.txt</span><pre><code class="lang-plain">cmake_minimum_required(VERSION 3.20)
@@ -250,15 +300,12 @@ MSVC and the Ninja that comes with the workload.</p>
 configures the project and shows CMake's messages in the Output window.</li>
 <li>In the toolbar, pick <strong>x64 Debug</strong> as the configuration and <strong>MyGame.exe</strong> as the
 startup item.</li>
-<li>Press <strong>Ctrl+F5</strong>. The output is the same as in A6.</li>
+<li>Press <strong>Ctrl+F5</strong>. The output is the same as in A5.</li>
 </ol>
 <p>The program lands in <code>build\debug\MyGame.exe</code>, or <code>build\release\</code> for x64 Release.
 JaiScript builds as a library of about fifty files compiled in parallel, and an edit to one of them rebuilds only that
 file.</p>
-<figure class="shot shot-pending" id="shot-open-folder"><p><strong>Screenshot to come:</strong> Visual Studio with
-C:\dev\MyGame opened as a folder: the toolbar showing the <em>x64 Debug</em> configuration and <em>MyGame.exe</em> as
-the startup item, and Solution Explorer's folder view listing CMakeLists.txt, CMakePresets.json, main.cpp and
-JaiScript.</p></figure><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/20-foundry.html"><span>&larr; previous</span>Foundry: Testing a Host</a><a class="next" rel="next" href="../examples/index.html"><span>next &middot; examples &rarr;</span>The Example Games</a></nav></article>
+<figure class="shot shot-wide" id="shot-open-folder"><a href="../assets/vs/cmake-folder.png"><img src="../assets/vs/cmake-folder.png" width="2174" height="1387" loading="lazy" alt="Visual Studio with the folder C:\dev\MyGame open. The toolbar shows Local Machine, the x64 Debug configuration and the Select Startup Item box. main.cpp is open in the editor, the Output window ends with CMake generation finished, and Solution Explorer's folder view lists build, JaiScript, CMakeLists.txt, CMakePresets.json and main.cpp."></a><figcaption>The folder open in Visual Studio with x64 Debug selected. <em>Select Startup Item</em>, beside it, is where MyGame.exe is picked.</figcaption></figure><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/20-foundry.html"><span>&larr; previous</span>Foundry: Testing a Host</a><a class="next" rel="next" href="../examples/index.html"><span>next &middot; examples &rarr;</span>The Example Games</a></nav></article>
 </main>
 </div>
 <footer class="site-footer">

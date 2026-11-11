@@ -56,7 +56,7 @@ namespace jai {
 		void clone_to_target(property_base&) override {}
 
 		// The generic "Signal" script view connects through this erased table,
-		// so auto_bind exposes the property with no per-signature registration.
+		// so the class's binder exposes the property with no per-signature registration.
 		bool signal_ops(signal_script_ops& ops) override {
 			ops = make_signal_script_ops(emitter());
 			return true;
@@ -73,7 +73,7 @@ namespace jai {
 // Emit through the emitter: emitter(args). Requires the enclosing class to be a property_owner
 // (have a property_mgr). Leaves member access at public:. A moved owner takes the receivers, a copied
 // one starts with none, and either way name is its own emitter's facade. The schema entry (is_signal) lets
-// dynamic_binder's auto_bind expose the generic Signal view — declaring the signal is the whole
+// every dynamic_binder of the class expose the generic Signal view — declaring the signal is the whole
 // registration. JAI_SIGNAL_PROPERTY(Sig, name) names the emitter nameSignal. Both are unsynchronized;
 // JAI_SYNCHRONIZED_SIGNAL_PROPERTY declares the jai::signal_synchronized pair for a signal used from several threads.
 #define JAI_SIGNAL_PROPERTY_WITH_POLICY(signature, name, emitter, policy) \

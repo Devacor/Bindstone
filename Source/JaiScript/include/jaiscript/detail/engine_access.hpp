@@ -37,6 +37,7 @@ namespace jai::detail {
         JAI_FORCEINLINE static int* active_run_pins(const engine& a_engine) noexcept { return a_engine.active_run_pins(); }
         JAI_FORCEINLINE static void active_run_pins(engine& a_engine, int* pins) noexcept { return a_engine.active_run_pins(pins); }
         JAI_FORCEINLINE static void debug_sync_point(engine& a_engine) { return a_engine.debug_sync_point(); }
+        static std::vector<std::string> classes_awaiting_base(const engine& a_engine, std::type_index base) { return a_engine.classes_awaiting_base(base); }
         JAI_FORCEINLINE static detail::run_registry& run_registry(engine& a_engine) { return a_engine.run_registry(); }
         JAI_FORCEINLINE static void swap_run_entry_state(engine& a_engine, detail::run_entry_state& state) noexcept { return a_engine.swap_run_entry_state(state); }
         JAI_FORCEINLINE static uint64_t aggregate_lowered_locals(const engine& a_engine) { return a_engine.aggregate_lowered_locals(); }

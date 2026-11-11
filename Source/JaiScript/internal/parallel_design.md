@@ -231,7 +231,7 @@ index-written array holds, their fields' classes (an untyped field: every class)
 Class code may call script functions and the whitelisted host functions; their worker copies live in
 the method sandbox. A host constructor and destructor run code no walk sees, so the binder vouches
 for them: safe on any thread by default, refused with every script class over the host class when it
-is bound `.serial_only_constructor()`. A worker gets a copy of each host constructor a construction
+is bound with a constructor marked `jai::serial`. A worker gets a copy of each host constructor a construction
 reaches (`make_parallel_host_function_copy`), and a hybrid's script layer joins the engine's
 script-layer map at the join (`pending_script_layers`). C++ calls are parallel unless registered serial
 (the `jai::serial` option of `add_function`, `add_variadic_function`, `method` and `static_method`; the library marks its

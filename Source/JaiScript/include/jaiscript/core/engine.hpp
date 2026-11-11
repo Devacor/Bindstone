@@ -14,6 +14,7 @@
 #include "bound_map.hpp"
 #include "jaibite.hpp"
 #include "privilege.hpp"
+#include "overload.hpp"
 #include "hot_reload_report.hpp"
 #include <jaiscript/detail/type_checker.hpp>
 #include <jaiscript/detail/first_type.hpp>
@@ -1719,6 +1720,8 @@ namespace jai {
         // Records a base link whose base class has not registered yet (registrar order is
         // type_index order, not dependency order); resolved when the base arrives.
         void defer_base_link(std::type_index base, std::shared_ptr<class_definition> derived);
+        // The classes still waiting on base
+        std::vector<std::string> classes_awaiting_base(std::type_index base) const;
 
         // A bound member of a class type no binder has registered yet is recorded; settle_bindings reports those still missing
         void require_bound_type(const std::string& class_name, const std::string& member, const std::type_info& type);

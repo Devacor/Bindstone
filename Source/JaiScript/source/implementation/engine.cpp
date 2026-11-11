@@ -4944,6 +4944,14 @@ void engine::defer_base_link(std::type_index base, std::shared_ptr<class_definit
     impl->pendingBaseLinks[base].push_back(std::move(derived));
 }
 
+std::vector<std::string> engine::classes_awaiting_base(std::type_index base) const {
+    std::vector<std::string> result;
+    if (auto pending = impl->pendingBaseLinks.find(base); pending != impl->pendingBaseLinks.end()) {
+        for (const auto& derived : pending->second) { result.push_back(derived->get_name()); }
+    }
+    return result;
+}
+
 std::shared_ptr<class_definition> engine::get_class_definition_by_type(const std::type_index& type) const {
     auto it = impl->classesByType.find(type);
     if (it != impl->classesByType.end()) {

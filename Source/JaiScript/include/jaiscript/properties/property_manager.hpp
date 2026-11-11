@@ -232,7 +232,7 @@ namespace jai {
 
 	public:
 		// The schema's base chain is compile-time knowledge (the CRTP Bases pack), so it
-		// must not wait for first construction: dynamic_binder::auto_bind calls this at
+		// must not wait for first construction: every dynamic_binder of the class calls this at
 		// REGISTRATION time so schema-driven binding sees inherited properties before any
 		// instance exists; constructors keep calling it too (idempotent magic static).
 		static void register_inheritance() {
@@ -471,28 +471,6 @@ namespace jai {
 		template<typename Base>
 		property_base* try_find_base(...) { return nullptr; }
 	};
-
-	template<typename T, typename = void>
-	struct has_property_owner : std::false_type {};
-
-	template<typename T>
-	struct has_property_owner<T, std::void_t<typename T::_jai_owner_type>> : std::true_type {};
-
-	template<typename T>
-	inline constexpr bool has_property_owner_v = has_property_owner<T>::value;
-
-	template<typename T, typename = void>
-	struct get_base_types {
-		using type = std::tuple<>;
-	};
-
-	template<typename T>
-	struct get_base_types<T, std::void_t<typename T::_jai_base_types>> {
-		using type = typename T::_jai_base_types;
-	};
-
-	template<typename T>
-	using get_base_types_t = typename get_base_types<T>::type;
 
 } // namespace jai
 

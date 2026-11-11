@@ -2115,7 +2115,7 @@ public:
         // saved value that no longer fits keeps the constructed value and is recorded as a retype
         test("a_load_notifies_no_observer_and_records_a_value_that_no_longer_fits", [&]() {
             auto eng = hybrid_engine();
-            dynamic_binder<WatchCreature>(*eng, "WatchCreature").auto_bind().constructor<>().build();
+            dynamic_binder<WatchCreature>(*eng, "WatchCreature").constructor<>().build();
             eng->execute(R"(
                 int fired = 0;
                 class Watchkin : WatchCreature {
@@ -2181,7 +2181,7 @@ public:
         // JSON and binary, script values and the C++ archive)
         test("saving_what_a_load_restored_writes_the_same_bytes_for_every_class_shape", [&]() {
             auto eng = hybrid_engine();
-            dynamic_binder<WatchCreature>(*eng, "WatchCreature").auto_bind().constructor<>().build();
+            dynamic_binder<WatchCreature>(*eng, "WatchCreature").constructor<>().build();
             eng->execute(R"(
                 int hooks = 0;
                 class Pt { int x = 0; int y = 0; }
@@ -2521,7 +2521,6 @@ public:
         dynamic_binder<NativeGadget>(*eng, "NativeGadget")
             .constructor<>()
             .method("spark", &NativeGadget::spark)
-            .auto_bind()
             .build();
         eng->execute(R"(
             class Voidkin : HybridCreature {

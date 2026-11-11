@@ -157,6 +157,31 @@ public:
     PropChainDerived() = default;
 };
 
+// A subclass of a property_owner level that is not one itself: it declares its base edge, which it must not inherit
+class OwnerChainRoot : public property_owner<OwnerChainRoot> {
+public:
+    JAI_PROPERTY((int64_t), rootValue, 1);
+};
+
+class OwnerChainMiddle : public property_owner<OwnerChainMiddle, OwnerChainRoot> {
+public:
+    JAI_PROPERTY((int64_t), middleValue, 2);
+    int64_t middleMethod() const { return 8; }
+};
+
+class OwnerChainLeaf : public OwnerChainMiddle {
+public:
+    int64_t leafMethod() const { return 9; }
+};
+
+struct owner_chain_context {};
+inline registrar<OwnerChainLeaf, owner_chain_context> owner_chain_leaf_registrar("OwnerChainLeaf", [](dynamic_binder<OwnerChainLeaf>& builder, const owner_chain_context&) {
+    builder.base_class<OwnerChainMiddle>().method("leafMethod", &OwnerChainLeaf::leafMethod);
+});
+inline registrar<OwnerChainMiddle, owner_chain_context> owner_chain_middle_registrar("OwnerChainMiddle", [](dynamic_binder<OwnerChainMiddle>& builder, const owner_chain_context&) {
+    builder.method("middleMethod", &OwnerChainMiddle::middleMethod);
+});
+
 // In-place member lanes (detail/host_member.hpp): every member type a lane reads, a const member, a second base at a
 // nonzero offset, and a polymorphic schema owner whose unregistered subclass shadows a property name
 struct LaneMembers {
@@ -296,6 +321,7 @@ class base_shape {
 public:
     virtual ~base_shape() = default;
     double base_val() const { return 1.0; }
+    double base_scaled(double a_by) { return a_by * 2.0; }
 };
 class derived_shape : public base_shape {
 public:
@@ -320,12 +346,10 @@ public:
             .constructor<>()
             .method("d0", [](LaneSchemaOwner& self) -> int64_t { return self.depth.get(); })
             .method("bump", [](LaneSchemaOwner& self, int64_t by) -> int64_t { self.depth = self.depth.get() + static_cast<int>(by); return self.depth.get(); })
-            .auto_bind()
             .build();
         dynamic_binder<LaneSchemaShadow>(*eng, "LaneSchemaShadow")
             .constructor<>()
             .base_class<LaneSchemaOwner>()
-            .auto_bind()
             .build();
         jai::engine* raw = eng.get();
         eng->add_function("held", [raw, keep]() -> script_value {
@@ -342,7 +366,7 @@ public:
     static std::shared_ptr<engine> method_lane_engine() {
         auto eng = make_engine();
         jai::stdlib::register_all(*eng);
-        dynamic_binder<RefInner>(*eng, "RefInner").constructor<>().property("v", &RefInner::v).auto_bind().build();
+        dynamic_binder<RefInner>(*eng, "RefInner").constructor<>().property("v", &RefInner::v).build();
         dynamic_binder<RefFixed>(*eng, "RefFixed").constructor<>().property("v", &RefFixed::v).build();
         dynamic_binder<RefOwner>(*eng, "RefOwner")
             .constructor<>()
@@ -497,7 +521,6 @@ public:
             jai::stdlib::register_all(*eng);
             dynamic_binder<LaneSchemaOwner>(*eng, "LaneSchemaOwner")
                 .constructor<>()
-                .auto_bind()
                 .build();
             jai::engine* raw_eng = eng.get();
             eng->add_function("shadowed", [raw_eng]() -> script_value {
@@ -606,7 +629,6 @@ public:
             jai::stdlib::register_all(*eng);
             dynamic_binder<LaneSchemaOwner>(*eng, "LaneSchemaOwner")
                 .constructor<>()
-                .auto_bind()
                 .build();
             auto shared = std::make_shared<LaneSchemaOwner>();
             jai::engine* raw_eng = eng.get();
@@ -1389,22 +1411,38 @@ public:
                 int add(int a) { return a; }
                 int add(int a, int b) { return a + b; }
                 int add(int a, int b, int c) { return a + b + c; }
+                double scale() const { return factor; }
+                Calculator& scale(double a_factor) { factor = a_factor; return *this; }
+                int64_t peek() { return 1; }
+                int64_t peek() const { return 2; }
+                static int64_t twice(int64_t a_value) { return a_value * 2; }
+                static double twice(double a_value) { return a_value * 2.5; }
+                double factor = 1.0;
             };
-            
+            static_assert(jai::overload<int, int>(&Calculator::add) == static_cast<int(Calculator::*)(int, int)>(&Calculator::add));
+            static_assert(jai::overload<>(&Calculator::scale) == static_cast<double(Calculator::*)() const>(&Calculator::scale));
+            static_assert(jai::const_overload<>(&Calculator::peek) == static_cast<int64_t(Calculator::*)() const>(&Calculator::peek));
+
             dynamic_binder<Calculator>(*eng, "Calculator")
                 .constructor<>()
-                .method("add", 
-                    static_cast<int(Calculator::*)(int)>(&Calculator::add))
-                .method("add", 
-                    static_cast<int(Calculator::*)(int, int)>(&Calculator::add))
-                .method("add", 
-                    static_cast<int(Calculator::*)(int, int, int)>(&Calculator::add))
+                .method("add", jai::overload<int>(&Calculator::add))
+                .method("add", jai::overload<int, int>(&Calculator::add))
+                .method("add", jai::overload<int, int, int>(&Calculator::add))
+                .method("scale", jai::overload<>(&Calculator::scale))
+                .method("scale", jai::overload<double>(&Calculator::scale), jai::serial)
+                .method("peek", jai::const_overload<>(&Calculator::peek))
+                .static_method("twice", jai::overload<int64_t>(&Calculator::twice))
                 .build();
+            eng->add_function("twice", jai::overload<double>(&Calculator::twice));
             
             eng->execute("auto calc = Calculator();");
             check_eq(eng->execute("calc.add(5)").as<int>(), 5);
             check_eq(eng->execute("calc.add(5, 3)").as<int>(), 8);
             check_eq(eng->execute("calc.add(5, 3, 2)").as<int>(), 10);
+            check_near(2.5, eng->execute("calc.scale(2.5).scale()").as<double>(), 1e-9);
+            check_eq((int64_t)2, eng->execute("calc.peek()").as_int());
+            check_eq((int64_t)8, eng->execute("Calculator::twice(4)").as_int());
+            check_near(10.0, eng->execute("twice(4.0)").as<double>(), 1e-9);
         });
 
         // Same NAME, same ARITY, different parameter TYPES must resolve by argument type. A color type
@@ -1779,13 +1817,11 @@ public:
                 .build();
 
             dynamic_binder<TestB>(*eng, "TestB")
-                .auto_bind()  // Should auto-register TestC as base
                 .constructor<>()
                 .method("b_method", &TestB::b_method)
                 .build();
 
             dynamic_binder<TestA>(*eng, "TestA")
-                .auto_bind()  // Should auto-register TestB as base
                 .constructor<>()
                 .method("a_method", &TestA::a_method)
                 .build();
@@ -1809,13 +1845,11 @@ public:
                 auto bindBase = [&]() {
                     dynamic_binder<PropChainBase>(*eng, "PropChainBase")
                         .constructor<>()
-                        .auto_bind()
                         .build();
                 };
                 auto bindDerived = [&]() {
                     dynamic_binder<PropChainDerived>(*eng, "PropChainDerived")
                         .constructor<>()
-                        .auto_bind()
                         .build();
                 };
                 if (a_baseFirst) { bindBase(); bindDerived(); } else { bindDerived(); bindBase(); }
@@ -1839,7 +1873,6 @@ public:
             auto eng = make_engine();
             dynamic_binder<AutoChainDerived>(*eng, "AutoChainDerived")
                 .constructor<>()
-                .auto_bind()
                 .build();
             eng->execute("auto d = AutoChainDerived();");
             check_eq(eng->execute("d.base_shout()").as<std::string>(), "from_base",
@@ -1855,7 +1888,6 @@ public:
             auto eng = make_engine();
             dynamic_binder<AutoChainDerived>(*eng, "AutoChainDerived")
                 .constructor<>()
-                .auto_bind()
                 .build();
             dynamic_binder<AutoChainBase>(*eng, "NiceBase")
                 .method("extra", [](AutoChainBase&) { return (int64_t)42; })
@@ -1874,7 +1906,6 @@ public:
             auto eng = make_engine();
             dynamic_binder<PinnedNameDerived>(*eng, "PinnedNameDerived")
                 .constructor<>()
-                .auto_bind()
                 .build();
             eng->execute("auto p = NicePinned();");
             check_eq(eng->execute("p.pin_field").as_int(), (int64_t)9,
@@ -1890,7 +1921,6 @@ public:
                 .build();
             dynamic_binder<CollideNameDerived>(*eng, "CollideNameDerived")
                 .constructor<>()
-                .auto_bind()
                 .build();
             eng->execute("auto d = CollideNameDerived();");
             check_eq(eng->execute("d.collide_field").as_int(), (int64_t)5,
@@ -1906,7 +1936,6 @@ public:
             auto eng = make_engine();
             dynamic_binder<AutoChainDerived>(*eng, "AutoChainDerived")
                 .constructor<>()
-                .auto_bind()
                 .build();
             eng->execute("auto stray = AutoChainBase();");   // placeholder identity, alive
             check_throws([&]() {
@@ -1917,12 +1946,10 @@ public:
         });
 
         test("explicit_property_after_auto_bind_wins", [this]() {
-            // The precedence contract: an explicit .property() placed AFTER auto_bind()
-            // overrides the schema-generated accessor for that name.
+            // The precedence contract: an explicit .property() overrides the schema-generated accessor for that name
             auto eng = make_engine();
             dynamic_binder<PropChainBase>(*eng, "PropChainBase")
                 .constructor<>()
-                .auto_bind()
                 .property("armor",
                     [](PropChainBase&) { return (int64_t)999; },
                     [](PropChainBase&, int64_t) {})
@@ -1964,9 +1991,8 @@ public:
                 .method("right_method", &Right::right_method)
                 .build();
 
-            // Register Multi with auto_bind - should auto-register both Left and Right as bases
+            // Multi's binder registers both Left and Right as bases
             dynamic_binder<Multi>(*eng, "Multi")
-                .auto_bind()  // Should register both Left AND Right as bases
                 .constructor<>()
                 .method("multi_method", &Multi::multi_method)
                 .build();
@@ -2027,19 +2053,16 @@ public:
                 .build();
 
             dynamic_binder<ParentA>(*eng, "ParentA")
-                .auto_bind()
                 .constructor<>()
                 .method("pa_method", &ParentA::pa_method)
                 .build();
 
             dynamic_binder<ParentB>(*eng, "ParentB")
-                .auto_bind()
                 .constructor<>()
                 .method("pb_method", &ParentB::pb_method)
                 .build();
 
             dynamic_binder<DeepChild>(*eng, "DeepChild")
-                .auto_bind()
                 .constructor<>()
                 .method("child_method", &DeepChild::child_method)
                 .build();
@@ -2067,7 +2090,6 @@ public:
             auto eng = make_engine();
 
             dynamic_binder<EqualityTest>(*eng, "EqualityTest")
-                .auto_bind()  // Should auto-detect operator== and register == and !=
                 .constructor<int>()
                 .property("value", &EqualityTest::value);
 
@@ -2089,7 +2111,6 @@ public:
             auto eng = make_engine();
 
             dynamic_binder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
-                .auto_bind()  // Should auto-detect JAI_PROPERTY macros and bind them
                 .constructor<>()
                 .method("get_health_cpp", &PropertyOwnerTest::get_health_cpp)
                 .build();
@@ -2108,7 +2129,6 @@ public:
             auto eng = make_engine();
 
             dynamic_binder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
-                .auto_bind()
                 .constructor<>()
                 .method("get_health_cpp", &PropertyOwnerTest::get_health_cpp)
                 .build();
@@ -2144,7 +2164,6 @@ public:
             auto eng = make_engine();
 
             dynamic_binder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
-                .auto_bind()
                 .constructor<>()
                 .build();
 
@@ -2173,7 +2192,6 @@ public:
             auto eng = make_engine();
 
             dynamic_binder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
-                .auto_bind()
                 .constructor<>()
                 .method("set_health_cpp", &PropertyOwnerTest::set_health_cpp)
                 .build();
@@ -2198,7 +2216,6 @@ public:
             auto eng = make_engine();
 
             dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
-                .auto_bind()
                 .constructor<>()
                 .method("set_score_cpp", &ObservableOwnerTest::set_score_cpp)
                 .build();
@@ -2223,7 +2240,6 @@ public:
             auto eng = make_engine();
 
             dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
-                .auto_bind()
                 .constructor<>()
                 .method("set_score_cpp", &ObservableOwnerTest::set_score_cpp)
                 .build();
@@ -2270,7 +2286,6 @@ public:
             auto eng = make_engine();
 
             dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
-                .auto_bind()
                 .constructor<>()
                 .build();
 
@@ -2296,7 +2311,6 @@ public:
             auto eng = make_engine();
 
             dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
-                .auto_bind()
                 .constructor<>()
                 .build();
 
@@ -2345,7 +2359,6 @@ public:
             // raises at the store that changed the value, in both spellings, on both backends
             auto eng = make_engine();
             dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
-                .auto_bind()
                 .constructor<>()
                 .build();
             auto cpp_obj = std::make_shared<ObservableOwnerTest>();
@@ -2355,7 +2368,6 @@ public:
                 "the property ref's on_change");
             auto second = make_engine();
             dynamic_binder<ObservableOwnerTest>(*second, "ObservableOwnerTest")
-                .auto_bind()
                 .constructor<>()
                 .build();
             auto other = std::make_shared<ObservableOwnerTest>();
@@ -2375,7 +2387,6 @@ public:
             {
                 auto eng = make_engine();
                 dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
-                    .auto_bind()
                     .constructor<>()
                     .build();
                 eng->add_function("note", [&noted](int v) { noted += v; });
@@ -2402,7 +2413,6 @@ public:
             auto eng = make_engine();
 
             dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
-                .auto_bind()
                 .constructor<>()
                 .build();
 
@@ -2485,6 +2495,41 @@ public:
             check_near(1.0, eng->execute("shape.base_val();").as<double>(), 0.0001);
             eng->add_global("shape2", eng->make_object(std::make_shared<derived_shape>()));
             check_near(1.0, eng->execute("shape2.base_val();").as<double>(), 0.0001);
+        });
+        test("a_member_declared_in_a_base_binds_through_the_derived_class", [this]() {
+            auto eng = make_engine();
+            dynamic_binder<derived_shape>(*eng, "DerivedShape")
+                .method("base_val", &derived_shape::base_val)
+                .method("base_scaled", &derived_shape::base_scaled)
+                .method("serial_val", &derived_shape::base_val, jai::serial)
+                .method("serial_scaled", &derived_shape::base_scaled, jai::serial)
+                .method("derived_val", &derived_shape::derived_val);
+            check_near(12.0, eng->execute("var d = DerivedShape(); d.base_val() + d.base_scaled(3.0) + d.serial_val() + d.serial_scaled(1.0) + d.derived_val();").as<double>(), 0.0001);
+        });
+        test("a_subclass_of_a_property_owner_level_keeps_that_level_through_a_registrar", [this]() {
+            auto eng = make_engine();
+            bind_registrar(*eng, owner_chain_context{});
+            check_eq((int64_t)20, eng->execute("var l = OwnerChainLeaf(); l.rootValue + l.middleValue + l.middleMethod() + l.leafMethod();").as_int());
+        });
+        test("bind_registrar_runs_only_the_registrars_a_filter_admits", [this]() {
+            const auto failure_of = [](auto&& a_run) {
+                try { a_run(); } catch (const std::exception& e) { return std::string(e.what()); }
+                return std::string("no error");
+            };
+            auto only = make_engine();
+            bind_registrar(*only, owner_chain_context{}, jai::only<OwnerChainMiddle>());
+            check_eq((int64_t)10, only->execute("var m = OwnerChainMiddle(); m.middleValue + m.middleMethod();").as_int());
+            check_true(failure_of([&] { only->execute("var l = OwnerChainLeaf();"); }) != "no error");
+
+            auto except = make_engine();
+            bind_registrar(*except, owner_chain_context{}, jai::except<OwnerChainLeaf>());
+            check_eq((int64_t)8, except->execute("OwnerChainMiddle().middleMethod();").as_int());
+            check_true(failure_of([&] { except->execute("var l = OwnerChainLeaf();"); }) != "no error");
+
+            auto base_left_out = make_engine();
+            check_eq(std::string("bind_registrar: 'OwnerChainLeaf' derives from 'OwnerChainMiddle', which the filter leaves out; bind both or leave out 'OwnerChainLeaf' too"),
+                failure_of([&] { bind_registrar(*base_left_out, owner_chain_context{}, jai::except<OwnerChainMiddle>()); }));
+            check_true(failure_of([&] { bind_registrar(*make_engine(), owner_chain_context{}, jai::only<OwnerChainRoot>()); }).starts_with("bind_registrar: the filter names the C++ type '"));
         });
         test("mutual_references_register_in_either_order", [this]() {
             const char* script = "var h = Hangar(); var p = Plane(); p.home = h; h.plane = p; p.home.bays + h.plane.seats;";

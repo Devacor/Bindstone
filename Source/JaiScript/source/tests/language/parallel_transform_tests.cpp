@@ -3329,17 +3329,17 @@ public:
 				auto e = make_engine();
 				jai::stdlib::register_all(*e);
 				e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				dynamic_binder<host_registry>(*e, "HostRegistry").constructor<>().serial_only_constructor().property("v", &host_registry::v).build();
+				dynamic_binder<host_registry>(*e, "HostRegistry").constructor<>(jai::serial).property("v", &host_registry::v).build();
 				e->parallel_thread_count(8);
 				auto refused = [&](const char* src) -> std::string {
 					try { e->execute(src); } catch (const std::exception& ex) { return ex.what(); }
 					return "no error";
 				};
 				const std::string derived = refused("class Script : HostRegistry { int w = 1; Script() : super() {} } array<int> xs = [1, 2]; parallel_for (auto& x : xs) { Script s; x = s.w; }");
-				check_true(derived.rfind("parallel_for: class 'Script' has a C++ base 'HostRegistry' marked serial_only_constructor() and cannot be constructed in a parallel body at 1:", 0) == 0,
+				check_true(derived.rfind("parallel_for: class 'Script' has a C++ base 'HostRegistry' with a constructor marked jai::serial and cannot be constructed in a parallel body at 1:", 0) == 0,
 				           std::string("serial-only base ") + (vm ? "vm" : "interp") + ": " + derived);
 				const std::string host = refused("array<int> xs = [1, 2]; parallel_for (auto& x : xs) { HostRegistry r; x = 1; }");
-				check_true(host.rfind("parallel_for: C++ class 'HostRegistry' is marked serial_only_constructor() and cannot be constructed in a parallel body at 1:", 0) == 0,
+				check_true(host.rfind("parallel_for: C++ class 'HostRegistry' has a constructor marked jai::serial and cannot be constructed in a parallel body at 1:", 0) == 0,
 				           std::string("serial-only class ") + (vm ? "vm" : "interp") + ": " + host);
 			}
 		});
@@ -3413,8 +3413,8 @@ public:
 			                  "Glowing one;                              // a serial construction is unaffected\n"
 			                  "print(\"{} {}\", one.alpha, one.glow);\n";
 			const std::string expected =
-				"parallel_for: C++ class 'Sprite' is marked serial_only_constructor() and cannot be constructed in a parallel body at 3:48\n"
-				"parallel_for: class 'Glowing' has a C++ base 'Sprite' marked serial_only_constructor() and cannot be constructed in a parallel body at 4:49\n"
+				"parallel_for: C++ class 'Sprite' has a constructor marked jai::serial and cannot be constructed in a parallel body at 3:48\n"
+				"parallel_for: class 'Glowing' has a C++ base 'Sprite' with a constructor marked jai::serial and cannot be constructed in a parallel body at 4:49\n"
 				"1.0 0.5\n";
 			for (bool vm : {false, true}) {
 				auto e = make_engine();
@@ -3422,7 +3422,7 @@ public:
 				e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				auto out = std::make_shared<std::ostringstream>();
 				e->set_output_stream(out);
-				jai::dynamic_binder<doc_sprite>(*e, "Sprite").constructor<>().serial_only_constructor().property("alpha", &doc_sprite::alpha).build();
+				jai::dynamic_binder<doc_sprite>(*e, "Sprite").constructor<>(jai::serial).property("alpha", &doc_sprite::alpha).build();
 				try { e->execute(src); } catch (const std::exception& ex) { *out << "threw: " << ex.what(); }
 				check_eq(expected, out->str(), vm ? "vm" : "interp");
 			}
@@ -3444,7 +3444,7 @@ public:
 				parallel_serial_deaths.clear();
 				auto e = make_engine();
 				e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				dynamic_binder<serial_host>(*e, "SerialHost").constructor<>().serial_only_constructor().property("id", &serial_host::id).build();
+				dynamic_binder<serial_host>(*e, "SerialHost").constructor<>(jai::serial).property("id", &serial_host::id).build();
 				dynamic_binder<plain_host>(*e, "PlainHost").constructor<>().property("id", &plain_host::id).build();
 				e->execute("class Glow : SerialHost { int glow = 1; Glow() : super() {} }\n"
 				           "SerialHost serial(int k) { SerialHost s; s.id = k; return s; }\n"

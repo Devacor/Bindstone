@@ -1219,7 +1219,6 @@ void register_net_channel(jai::engine& eng) {
 		.method("client_count", &net_server::client_count)
 		.method("listening", &net_server::listening)
 		.method("close", &net_server::close)
-		.auto_bind()
 		.build();
 	jai::dynamic_binder<net_channel>(eng, "NetChannel")
 		.constructor<>()
@@ -1230,7 +1229,6 @@ void register_net_channel(jai::engine& eng) {
 		.method("close", &net_channel::close)
 		.method("connected", &net_channel::connected)
 		.method("status", &net_channel::status)
-		.auto_bind()   // JAI_SIGNAL_PROPERTYs expose the generic Signal view
 		.build();
 	// what a host shows its players so they know what to type: the machine's name and its IPv4 addresses
 	eng.add_function("net_host_name", []() -> std::string {

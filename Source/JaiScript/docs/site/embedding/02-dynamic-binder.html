@@ -151,13 +151,14 @@ static jai::registrar&lt;Spawner, void&gt; _regSpawner("Spawner",
 <li><code>JAI_PROPERTY((type), name, default)</code> declares a <code>jai::property&lt;T&gt;</code> member that behaves like a <code>T</code> in C++. The type is parenthesized so template commas survive the macro.</li>
 <li><code>JAI_OBSERVABLE_PROPERTY</code> adds an <code>on_change(old, new)</code> signal that fires on a write that changes the value, from either side.</li>
 <li><code>JAI_SIGNAL_PROPERTY(signature, name)</code> declares a private emitter you fire (<code>name</code> + <code>Signal</code>, here <code>onWaveSignal(n)</code>), a public <code>jai::signal</code> view others connect to, and a hidden property that saves it. <code>JAI_SIGNAL_PROPERTY_AS(signature, name, emitter)</code> names the emitter yourself.</li>
-<li><code>jai::registrar</code> is a self-registering static. Its configure function names only what the macros cannot know, the methods; it calls <code>auto_bind()</code> for the rest.</li>
+<li><code>jai::registrar</code> is a self-registering static. Its configure function names only what the declarations cannot say, the methods; the binder binds the rest by itself (<a href="#automatic-surface">below</a>).</li>
 </ul>
 <p>The host replays every registrar in the binary into an engine with one call:</p>
 <div class="codeblock cb-cpp" data-sample="binder-spawner-engine"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto eng = jai::engine::make();
 jai::stdlib::register_all(eng);   // formatted print, containers, math, json
 jai::bind_registrar(*eng);         // every jai::registrar in the binary, one call</code></pre></div>
 <p>A host whose bindings need its own services gives the registrar a context type (<code>jai::registrar&lt;Monster, HostContext&gt;</code>); each configure function then receives the context that <code>jai::bind_registrar&lt;HostContext&gt;(*eng, ctx)</code> passes.</p>
+<p>An engine that should not know some registered types filters them by exact type: <code>jai::bind_registrar(*eng, jai::except&lt;EditorPanel, DebugOverlay&gt;())</code> runs every registrar but those two, and <code>jai::bind_registrar(*eng, jai::only&lt;Monster, Loot&gt;())</code> runs only those. The context form takes the filter after its context. A filter that admits a class and leaves out a registered class it derives from throws <code>bind_registrar: 'Glow' derives from 'Sprite', which the filter leaves out; bind both or leave out 'Glow' too</code>, and one that names a type with no registrar for the context throws as well. The filter decides which types a script can name; <a href="05-safety-rails.html">privileges</a> decide what their calls may do.</p>
 
 <h3 id="three-doors">What makes a type visible, and when<a class="hlink" href="#three-doors" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th>Step</th><th>Effect</th></tr></thead><tbody>
@@ -224,7 +225,7 @@ threat 5 -&gt; 7</code></pre></div>
 <tr><td>A reference: <code>var&amp; g = gate;</code>, a <code>&amp;</code> parameter</td><td>The same object.</td></tr>
 <tr><td>A handle: <code>new Turret(...)</code>, a <code>std::shared_ptr&lt;Turret&gt;</code> the host returns</td><td>Every copy of the handle shares the one object.</td></tr>
 </tbody></table></div>
-<p>The bound <code>=</code> is the <code>"="</code> method: <code>.method("=", &amp;C::operator=)</code>, or a lambda taking <code>(C&amp;, const C&amp;)</code>; overloads from other types resolve like any overload set. <code>auto_bind</code> binds it only for a trivially copy-assignable class. Assigning through a reference to a class that binds none raises <code>Cannot assign to a reference to 'C': its binding has no operator=</code>. Binding <code>"="</code> on a class whose assignment cannot compile fails at the binding, as in C++.</p>
+<p>The bound <code>=</code> is the <code>"="</code> method: <code>.method("=", &amp;C::operator=)</code>, or a lambda taking <code>(C&amp;, const C&amp;)</code>; overloads from other types resolve like any overload set. The binder binds it by itself only for a trivially copy-assignable class. A script class over the class does not inherit it: as C++'s implicit <code>operator=</code> hides the base's, assigning one instance of the script class to another copies its fields and its C++ part. Assigning through a reference to a class that binds none raises <code>Cannot assign to a reference to 'C': its binding has no operator=</code>. Binding <code>"="</code> on a class whose assignment cannot compile fails at the binding, as in C++.</p>
 
 <h2 id="reflected">Reflected<a class="hlink" href="#reflected" aria-label="link">&#8203;</a></h2>
 <p>The same declaration is what an editor inspector or debug panel walks. Writing through the property keeps change signals firing:</p>
@@ -339,19 +340,18 @@ print("reloaded: level={} aggression={} burst={} waves={}",
     Vec2(double x, double y) : x(x), y(y) {}
     double length() const { return std::sqrt(x * x + y * y); }
     Vec2&amp; scale(double k) { x *= k; y *= k; return *this; }
+    Vec2&amp; scale(double kx, double ky) { x *= kx; y *= ky; return *this; }
     Vec2&amp; translate(double dx, double dy) { x += dx; y += dy; return *this; }
     Vec2 operator+(const Vec2&amp; o) const { return {x + o.x, y + o.y}; }
     bool operator==(const Vec2&amp; o) const { return x == o.x &amp;&amp; y == o.y; }
 };
 
-jai::dynamic_binder&lt;Vec2&gt;(*eng, "Vec2")
-    .constructor&lt;&gt;()
+jai::dynamic_binder&lt;Vec2&gt;(*eng, "Vec2")         // Vec2(), a copy, + and == bind by themselves
     .constructor&lt;double, double&gt;()             // overloaded ctors resolve by arity + type
     .method("length", &amp;Vec2::length)
-    .method("scale", &amp;Vec2::scale)             // Vec2&amp; scale(double) -&gt; chainable
+    .method("scale", jai::overload&lt;double&gt;(&amp;Vec2::scale))           // Vec2&amp; scale(double) -&gt; chainable
+    .method("scale", jai::overload&lt;double, double&gt;(&amp;Vec2::scale))   // an overload, picked by its parameters
     .method("translate", &amp;Vec2::translate)
-    .method("+", &amp;Vec2::operator+)             // operators are methods named by token
-    .method("==", &amp;Vec2::operator==)
     .static_method("axes", []() { return 2; })
     .static_method("dot", [](const Vec2&amp; a, const Vec2&amp; b) { return a.x * b.x + a.y * b.y; })
     .property("x", &amp;Vec2::x)
@@ -361,6 +361,7 @@ print("length {}", v.length());
 var a = Vec2(1.0, 2.0) + Vec2(3.0, 4.0);
 print("sum ({}, {})", a.x, a.y);
 print("chain {}", Vec2(1.0, 1.0).scale(3.0).translate(1.0, 0.0).x);
+print("stretch {}", Vec2(1.0, 1.0).scale(2.0, 3.0).y);
 v.x = 30.0;                                    // property writes hit the C++ member
 print("after write {}", v.length());
 print("eq {}", Vec2(1.0, 2.0) == Vec2(1.0, 2.0));
@@ -370,15 +371,16 @@ print("dot {}", Vec2::dot(Vec2(1.0, 2.0), Vec2(3.0, 4.0)));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">length 5.0
 sum (4.0, 6.0)
 chain 4.0
+stretch 3.0
 after write 30.265491900843113
 eq true
 neq true
 axes 2
 dot 11.0</code></pre></div>
-<p>A method that returns <code>T&amp;</code> hands script the object it refers to, and the receiver is kept alive across a chain, so <code>Vec2(1.0, 1.0).scale(3.0).translate(1.0, 0.0).x</code> is safe on temporaries. <code>!=</code> worked without being bound because <code>==</code> supplies it.</p>
+<p>A method that returns <code>T&amp;</code> hands script the object it refers to, and the receiver is kept alive across a chain, so <code>Vec2(1.0, 1.0).scale(3.0).translate(1.0, 0.0).x</code> is safe on temporaries. <code>+</code> and <code>==</code> are bound because <code>Vec2</code> declares them, and <code>!=</code> because <code>==</code> supplies it (<a href="#automatic-surface">what a binder binds by itself</a>). <code>jai::overload&lt;Args...&gt;(&amp;T::f)</code> names the overload of <code>f</code> taking exactly <code>Args</code>, a free function's too, so the return type is never restated; <code>jai::overload&lt;&gt;</code> is the one taking none, and <code>jai::const_overload&lt;Args...&gt;</code> the const one where a const and a non-const overload take the same parameters.</p>
 <p>Every verb with its rules: <a href="../reference/host.html#binder-verbs">binder verbs</a>. The ones most chains use:</p>
 <div class="tablewrap"><table><thead><tr><th>Verb</th><th>What it binds</th></tr></thead><tbody>
-<tr><td><code>.constructor&lt;Args...&gt;()</code></td><td>A constructor overload, resolved by arity and C++ parameter types.</td></tr>
+<tr><td><code>.constructor&lt;Args...&gt;(option)</code></td><td>A constructor overload, resolved by arity and C++ parameter types. The option is optional and is <code>.method</code>'s.</td></tr>
 <tr><td><code>.method(name, &amp;T::fn)</code>, <code>.method(name, lambda)</code></td><td>A member function, or a lambda whose first parameter is <code>T&amp;</code> or <code>const T&amp;</code>.</td></tr>
 <tr><td><code>.method(name, fn, option)</code>, <code>.static_method(name, fn, option)</code></td><td>The trailing option: a privilege the call requires, <code>jai::nodiscard</code> (<a href="17-host-api.html#nodiscard-host">a result the script must use</a>) and <code>jai::serial</code> (<a href="#parallel-calls">kept out of parallel bodies</a>), combined with <code>|</code>: <code>jai::nodiscard | jai::serial | jai::filesystem</code>. <code>add_function</code> and <code>add_variadic_function</code> take the same slot.</td></tr>
 <tr><td><code>.property(name, &amp;T::member)</code></td><td>Field access, and a key of the class&#x27;s archive record when it has no route of its own.</td></tr>
@@ -386,6 +388,17 @@ dot 11.0</code></pre></div>
 <tr><td><code>.base_class&lt;Base&gt;()</code></td><td>An inheritance edge.</td></tr>
 <tr><td><code>.build()</code></td><td>Optional: commits the binding at that point and throws what fails. A chain commits when its statement ends, and a binder still in scope when the first script loads is committed then; a failure in either is raised by the next load.</td></tr>
 </tbody></table></div>
+<h3 id="automatic-surface">What a binder binds by itself<a class="hlink" href="#automatic-surface" aria-label="link">&#8203;</a></h3>
+<p>A <code>dynamic_binder&lt;T&gt;</code>, a registrar's included, binds what <code>T</code> declares before the chain's first verb. A verb that binds the same name and signature replaces the automatic binding.</p>
+<div class="tablewrap"><table><thead><tr><th>What T declares</th><th>What binds</th></tr></thead><tbody>
+<tr><td>A <code>property_owner</code> level</td><td>Its base chain, its <code>JAI_PROPERTY</code> fields of number, <code>bool</code> and string type, its observables and its <code>JAI_SIGNAL_PROPERTY</code> signals.</td></tr>
+<tr><td>A public default constructor</td><td><code>T()</code> (or <code>T(engine*)</code>), for a class that is not abstract.</td></tr>
+<tr><td>A public copy constructor</td><td>The copy every value of the class makes: <code>T b = a;</code>, a by-value argument, an element stored by value. Script copies a host object and never moves one, so a move constructor binds nothing.</td></tr>
+<tr><td>An operator over <code>T</code> operands, as a member or a free function argument-dependent lookup finds</td><td>The operator: <code>+ - * / % &amp; | ^ &lt;&lt; &gt;&gt;</code>, <code>== != &lt; &lt;= &gt; &gt;= &lt;=&gt;</code>, the compound forms, unary <code>- + ~</code>, <code>++</code> and <code>--</code> in both forms, <code>[]</code> by an integer or a string index, and a single <code>()</code>. One reached only through a conversion, or one C++ rewrites from another, binds nothing: script derives <code>!=</code> from <code>==</code> and the comparisons from <code>&lt;=&gt;</code> itself.</td></tr>
+<tr><td>A trivial copy assignment</td><td><code>=</code>.</td></tr>
+<tr><td><code>static void jai_auto_bind(dynamic_binder&lt;T&gt;&amp;)</code></td><td>Whatever it binds, last: the hook reaches private members.</td></tr>
+</tbody></table></div>
+<p>Everything else is a verb in the chain: methods (<code>to_string</code>, <code>size</code> and <code>empty</code> included), plain members, operators taking another type, and the <code>base_class</code> of a class that is not a <code>property_owner</code>. An automatic constructor takes an option the way an explicit one does, by binding it: <code>.constructor&lt;&gt;(jai::serial)</code> replaces the automatic <code>T()</code> and marks every constructor of the class serial.</p>
 <p><strong>Parameters.</strong> These hold for methods, static methods, constructors and <code>add_function</code> alike:</p>
 <ul>
 <li>A non-const <code>T&amp;</code> parameter writes the callee&#x27;s final value back into the script argument (<a href="17-host-api.html#the-exact-width-as-aliasing-rules">Host API</a>): <code>gate.add(total, 5)</code> with <code>void add(int64_t&amp; target, int64_t by)</code> leaves the sum in <code>total</code>.</li>
@@ -395,7 +408,7 @@ dot 11.0</code></pre></div>
 <p>The tokens, the operators one binding supplies, <code>++</code> and <code>--</code>, compound and reflected forms, overload choice and the no-match error: <a href="../reference/host.html#binder-operators">bound operators</a>.</p>
 
 <h3 id="serial-only-constructors">Serial-only constructors<a class="hlink" href="#serial-only-constructors" aria-label="link">&#8203;</a></h3>
-<p>A <code>parallel_for</code> body may construct bound classes and script classes over them (<a href="../guide/16-parallel.html#constructing-objects">parallel loops</a>); the constructor and destructor then run on a worker thread. That is safe for a constructor that only builds its own members. One that touches state other objects share (a registry, a cache, a service lookup, a signal hub) is marked <code>.serial_only_constructor()</code>. A body that constructs the class, or a script class over it, is refused when the statement is reached, before any element runs.</p>
+<p>A <code>parallel_for</code> body may construct bound classes and script classes over them (<a href="../guide/16-parallel.html#constructing-objects">parallel loops</a>); the constructor and destructor then run on a worker thread. That is safe for a constructor that only builds its own members. One that touches state other objects share (a registry, a cache, a service lookup, a signal hub) is bound with <code>jai::serial</code>, the trailing option <code>.method</code> takes: <code>.constructor&lt;&gt;(jai::serial)</code>. The mark covers every constructor of the class, the automatic ones included. A body that constructs the class, or a script class over it, is refused when the statement is reached, before any element runs.</p>
 <div class="codeblock cb-cpp" data-sample="binder-sprite-host"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Sprite {
     static std::vector&lt;Sprite*&gt;&amp; registry() { static std::vector&lt;Sprite*&gt; all; return all; }
     double alpha = 1.0;
@@ -404,8 +417,7 @@ dot 11.0</code></pre></div>
 };
 
 jai::dynamic_binder&lt;Sprite&gt;(*eng, "Sprite")
-    .constructor&lt;&gt;()
-    .serial_only_constructor()
+    .constructor&lt;&gt;(jai::serial)
     .property("alpha", &amp;Sprite::alpha);</code></pre></div>
 <div class="codeblock cb-jai" data-host="Sprite serial-only binder" data-sample="binder-sprite"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">class Glowing : Sprite { float glow = 0.5; Glowing() : super() {} }
 array&lt;int&gt; lights = [1, 2, 3];
@@ -413,8 +425,8 @@ try { parallel_for (auto&amp; n : lights) { Sprite s; n = 0; } } catch (e) { pri
 try { parallel_for (auto&amp; n : lights) { Glowing g; n = 0; } } catch (e) { print(e); }
 Glowing one;                              // a serial construction is unaffected
 print("{} {}", one.alpha, one.glow);</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">parallel_for: C++ class 'Sprite' is marked serial_only_constructor() and cannot be constructed in a parallel body at 3:48
-parallel_for: class 'Glowing' has a C++ base 'Sprite' marked serial_only_constructor() and cannot be constructed in a parallel body at 4:49
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">parallel_for: C++ class 'Sprite' has a constructor marked jai::serial and cannot be constructed in a parallel body at 3:48
+parallel_for: class 'Glowing' has a C++ base 'Sprite' with a constructor marked jai::serial and cannot be constructed in a parallel body at 4:49
 1.0 0.5</code></pre></div>
 <p>The mark covers the destructor too. An object of a marked class that loses its last reference on a worker is released on the calling thread once the workers are done, in the order of the elements that dropped it.</p>
 
@@ -456,7 +468,7 @@ C++ method 'publish' of 'Meter' is marked jai::serial and cannot be called in a 
 parallel_for: host function 'log_line' is marked jai::serial and cannot be called in a parallel body at 10:37</code></pre></div>
 
 <h2 id="signals-one-view-every-signature">Signals: one view, every signature<a class="hlink" href="#signals-one-view-every-signature" aria-label="link">&#8203;</a></h2>
-<p>A <code>JAI_SIGNAL_PROPERTY</code> is exposed by <code>auto_bind</code>; a plain <code>jai::signal&lt;Sig&gt;</code> or <code>signal_emitter&lt;Sig&gt;</code> member by one <code>.property("name", &amp;T::member)</code> line. Script sees the same three verbs either way:</p>
+<p>A <code>JAI_SIGNAL_PROPERTY</code> is exposed by the binder itself; a plain <code>jai::signal&lt;Sig&gt;</code> or <code>signal_emitter&lt;Sig&gt;</code> member by one <code>.property("name", &amp;T::member)</code> line. Script sees the same three verbs either way:</p>
 <div class="codeblock cb-jai" data-host="Spawner registration" data-sample="binder-connect"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">s.onWave.connect("hud", [=](int wave) -&gt; void { print("wave {}", wave); });   // named function receiver
 s.onWave.connect("logger", "print(\"wave logged\");");     // named script-text receiver
 s.onWave.connected("hud");                                 // true
@@ -486,10 +498,8 @@ public:
 // Registration order does not matter — either class may register first, or the base
 // not at all: a derived registration materializes an unregistered property_owner base.
 jai::dynamic_binder&lt;Pickup&gt;(*eng, "Pickup")
-    .auto_bind()
     .method("kind", [](Pickup&amp; p) { return std::string("pickup:") + p.name.get(); });
-jai::dynamic_binder&lt;HealthPickup&gt;(*eng, "HealthPickup")
-    .auto_bind();     // derives the Pickup base edge: healing and the inherited name both bind</code></pre></div>
+jai::dynamic_binder&lt;HealthPickup&gt;(*eng, "HealthPickup");   // derives the Pickup base edge: healing and the inherited name both bind</code></pre></div>
 <p>A save through the base pointer records the concrete <code>$type</code>, and a load through the base pointer returns the derived object, with no factory map and no slicing:</p>
 <div class="codeblock cb-cpp" data-sample="binder-pickup-json"><span class="cb-label">C++</span><pre><code class="lang-cpp">std::shared_ptr&lt;Pickup&gt; loot = std::make_shared&lt;HealthPickup&gt;();
 loot-&gt;name = std::string(&quot;elixir&quot;);
@@ -595,9 +605,9 @@ the host reads 12</code></pre></div>
 
 <h2 id="what-this-doesn-t-do-and-what-to-use-instead">Limits<a class="hlink" href="#what-this-doesn-t-do-and-what-to-use-instead" aria-label="link">&#8203;</a></h2>
 <ul>
-<li><strong><code>auto_bind</code> exposes primitive, string and signal properties.</strong> <code>JAI_PROPERTY</code> fields of the int family, <code>float</code>/<code>double</code>, <code>bool</code> and <code>std::string</code> are script-visible automatically. Container- and class-typed properties still reflect and serialize, but script access needs an explicit <code>.property()</code> or <code>.method()</code> in the configure function.</li>
+<li><strong>The binder exposes primitive, string and signal properties by itself.</strong> <code>JAI_PROPERTY</code> fields of the int family, <code>float</code>/<code>double</code>, <code>bool</code> and <code>std::string</code> are script-visible automatically. Container- and class-typed properties still reflect and serialize, but script access needs an explicit <code>.property()</code> or <code>.method()</code> in the configure function.</li>
 <li><strong>Reading an observable property yields its wrapper.</strong> It unwraps in expressions and in <code>print</code>; assign it to a typed local for the value itself.</li>
-<li><strong>A <code>static_method</code> cannot return a bound class</strong>, and <strong>a <code>std::weak_ptr&lt;T&gt;</code> cannot be returned to script</strong> (both above).</li>
+<li><strong>A <code>std::weak_ptr&lt;T&gt;</code> cannot be returned to script</strong> (above).</li>
 <li><strong>No bound object is shared across threads</strong> except an <a href="#atomics">atomic</a>. Use one engine per thread and pass values by copy.</li>
 </ul>
 <nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/01-embedding-quickstart.html"><span>&larr; previous</span>Embedding Quickstart</a><a class="next" rel="next" href="../embedding/03-backends.html"><span>next &rarr;</span>Backends: Interpreter vs VM</a></nav></article>

@@ -32,7 +32,7 @@ public:
 };
 
 // A button shape: the signal lives on the BASE (a clickable base declares onAccept) and
-// script connects through a DERIVED registration (base_class + auto_bind).
+// script connects through a DERIVED registration.
 class base_widget : public jai::property_owner<base_widget> {
 public:
 	typedef void PressSignature(int);
@@ -81,7 +81,6 @@ public:
 			.method("score", &scoreboard::score)
 			.method("tick", &scoreboard::tick)
 			.property("onTicked", &scoreboard::onTicked)
-			.auto_bind()
 			.build();
 		return eng;
 	}
@@ -92,7 +91,6 @@ public:
 			dynamic_binder<door>(*eng, "Door")
 				.constructor<>()
 				.method("open", &door::open)
-				.auto_bind()
 				.build();
 			eng->execute("var got = -1; var d = new Door();");
 			eng->execute("d.on_open.connect(\"t\", [](var v) { got = v; });");
@@ -176,22 +174,20 @@ public:
 		});
 
 		// Red-locked from an editor panel host: loadButton.onAccept threw "Object has
-		// no member 'onAccept'" — onAccept is Clickable's, Button registers with
-		// base_class + auto_bind. Both registration orders (static registrar order is
+		// no member 'onAccept'" — onAccept is Clickable's, Button registers its
+		// base. Both registration orders (static registrar order is
 		// arbitrary in a host).
 		test("inherited_signal_property_through_derived_registration", [this]() {
 			auto bindBase = [](engine& a_engine) {
 				dynamic_binder<base_widget>(a_engine, "BaseWidget")
 					.constructor<>()
 					.method("press", &base_widget::press)
-					.auto_bind()
 					.build();
 			};
 			auto bindDerived = [](engine& a_engine) {
 				dynamic_binder<derived_widget>(a_engine, "DerivedWidget")
 					.constructor<>()
 					.base_class<base_widget>()
-					.auto_bind()
 					.build();
 			};
 			auto run = [&](bool a_baseFirst) {
@@ -238,7 +234,6 @@ public:
 				.method("ping", &relay::ping)
 				.method("pulse", &relay::pulse)
 				.property("onPulse", &relay::onPulse)
-				.auto_bind()
 				.build();
 			eng->execute("var got = 0; var r = new Relay();");
 			eng->execute("r.on_ping.connect(\"t\", [](var v) { got = got + v; });");

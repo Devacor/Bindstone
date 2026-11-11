@@ -61,8 +61,40 @@ void registration_order::add(std::type_index ti, const std::string& name, erased
     entries_.emplace(name, std::pair<std::type_index, erased_fn>{ ti, std::move(fn) });
 }
 
-void registration_order::run_all(engine& eng, const void* context) {
-    for (auto& [name, entry] : entries_) { entry.second(eng, context); }
+void registration_order::run_all(engine& eng, const void* context, const registrar_filter* filter) {
+    if (filter == nullptr) {
+        for (auto& [name, entry] : entries_) { entry.second(eng, context); }
+        return;
+    }
+    for (const std::type_index& listed : filter->listed()) {
+        if (!names_.contains(listed)) {
+            throw std::runtime_error(std::string("bind_registrar: the filter names the C++ type '") + listed.name() + "', which has no registrar for this context");
+        }
+    }
+    // a left-out class an admitted one derives from would bind as a bare base, or not at all: what is bound beforehand is the host's
+    std::vector<std::type_index> left_out;
+    for (const auto& [type, name] : names_) {
+        if (!filter->admits(type) && !engine_access::get_class_definition_by_type(eng, type)) { left_out.push_back(type); }
+    }
+    for (auto& [name, entry] : entries_) {
+        if (filter->admits(entry.first)) { entry.second(eng, context); }
+    }
+    for (const std::type_index& type : left_out) {
+        std::vector<std::string> derived = engine_access::classes_awaiting_base(eng, type);
+        if (auto base = engine_access::get_class_definition_by_type(eng, type)) {
+            for (const auto& [admitted, name] : names_) {
+                if (!filter->admits(admitted)) { continue; }
+                if (auto bound = engine_access::get_class_definition_by_type(eng, admitted)) {
+                    const auto& parents = bound->get_parent_classes();
+                    if (std::find(parents.begin(), parents.end(), base) != parents.end()) { derived.push_back(bound->get_name()); }
+                }
+            }
+        }
+        if (!derived.empty()) {
+            throw std::runtime_error("bind_registrar: '" + derived.front() + "' derives from '" + names_.at(type) +
+                "', which the filter leaves out; bind both or leave out '" + derived.front() + "' too");
+        }
+    }
 }
 
 bool registration_order::has(std::type_index ti) const {

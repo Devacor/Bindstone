@@ -355,10 +355,9 @@ public:
         });
 
         test("function_property_lambda_assign", [&]() {
-            // auto_bind() must reach jai_auto_bind (regression: shadowed fwd-decl falsified has_jai_auto_bind).
+            // The binder must reach jai_auto_bind (regression: shadowed fwd-decl falsified has_jai_auto_bind).
             auto eng = make_engine();
             dynamic_binder<callback_host> b(*eng, "callback_host");
-            b.auto_bind();
             b.build();
             auto host = std::make_shared<callback_host>();
             eng->add_global("self", eng->make_object(host));
@@ -396,10 +395,8 @@ public:
             // fall back to holder identity (which is always false for two T& reads).
             auto eng = make_engine();
             dynamic_binder<pair_value> pv(*eng, "pair_value");
-            pv.auto_bind();
             pv.build();
             dynamic_binder<pair_host> dh(*eng, "pair_host");
-            dh.auto_bind();
             dh.build();
             auto host = std::make_shared<pair_host>();
             host->a.x = 1.0; host->a.y = 2.0;
@@ -414,10 +411,8 @@ public:
             // Truthiness of a cpp_bound object must consult its bound to_bool method.
             auto eng = make_engine();
             dynamic_binder<pair_value> pv(*eng, "pair_value");
-            pv.auto_bind();
             pv.build();
             dynamic_binder<pair_host> dh(*eng, "pair_host");
-            dh.auto_bind();
             dh.build();
             auto host = std::make_shared<pair_host>();
             eng->add_global("host", eng->make_object(host));
@@ -432,10 +427,8 @@ public:
             // (keep_alive) like chained method calls do, or the member read dangles.
             auto eng = make_engine();
             dynamic_binder<pair_value> pv(*eng, "pair_value");
-            pv.auto_bind();
             pv.build();
             dynamic_binder<pair_host> dh(*eng, "pair_host");
-            dh.auto_bind();
             dh.build();
             eng->add_function("makePair", [engPtr = eng.get()]() {
                 auto fresh = std::make_shared<pair_host>();
@@ -452,19 +445,15 @@ public:
             // instance's field map) as T.
             auto eng = make_engine();
             dynamic_binder<pair_value> pv(*eng, "pair_value");
-            pv.auto_bind();
             pv.build();
             dynamic_binder<base_thing> bt(*eng, "base_thing");
-            bt.auto_bind();
             bt.build();
             dynamic_binder<derived_thing> dt(*eng, "derived_thing");
             dt.base_class<base_thing>();
             dt.build();
             dynamic_binder<thing_host> th(*eng, "thing_host");
-            th.auto_bind();
             th.build();
             dynamic_binder<pair_host> dh(*eng, "pair_host");
-            dh.auto_bind();
             dh.method("takeRef", [](pair_host&, const pair_value& a_v) { return a_v.x; });
             dh.build();
             auto host = std::make_shared<pair_host>();
@@ -492,10 +481,8 @@ public:
             // registered class, not reject them for lacking a class_instance.
             auto eng = make_engine();
             dynamic_binder<pair_value> pv(*eng, "pair_value");
-            pv.auto_bind();
             pv.build();
             dynamic_binder<pair_host> dh(*eng, "pair_host");
-            dh.auto_bind();
             dh.method("measure", [](pair_host&, const pair_value&) { return script_int(1); });
             dh.method("measure", [](pair_host&, script_int) { return script_int(2); });
             dh.build();
@@ -517,13 +504,11 @@ public:
             // mutation of the live object goes through direct member writes.
             auto eng = make_engine();
             dynamic_binder<base_thing> bt(*eng, "base_thing");
-            bt.auto_bind();
             bt.build();
             dynamic_binder<derived_thing> dt(*eng, "derived_thing");
             dt.base_class<base_thing>();
             dt.build();
             dynamic_binder<thing_host> dh(*eng, "thing_host");
-            dh.auto_bind();
             dh.build();
             auto host = std::make_shared<thing_host>();
             eng->add_global("host", eng->make_object(host));
@@ -537,7 +522,6 @@ public:
             // A property_owner (schema-bound) class materialized via make_object and read from script.
             auto eng = make_engine();
             dynamic_binder<test_object> b(*eng, "test_object");
-            b.auto_bind();
             b.build();
             auto obj = std::make_shared<test_object>();
             eng->add_global("obj", eng->make_object(obj));
@@ -547,12 +531,9 @@ public:
         });
 
         test("make_object_self_referential_schema", [&]() {
-            // Node-shaped: self-referential vector property + double auto_bind (registrar's
-            // implicit call plus the configure lambda's explicit one).
+            // Node-shaped: a self-referential vector property
             auto eng = make_engine();
             dynamic_binder<tree_object> b(*eng, "tree_object");
-            b.auto_bind();
-            b.auto_bind();
             b.build();
             auto obj = std::make_shared<tree_object>();
             obj->name = "root";
@@ -566,7 +547,6 @@ public:
             // outer hook keeps running and chains a call on the returned object.
             auto eng = make_engine();
             dynamic_binder<callback_host> b(*eng, "callback_host");
-            b.auto_bind();
             b.build();
             auto outer = std::make_shared<callback_host>();
             auto inner = std::make_shared<callback_host>();
@@ -591,7 +571,6 @@ public:
             // reference-param binding (literal -> spurious error, identifier -> hijacked var).
             auto eng = make_engine();
             dynamic_binder<callback_host> b(*eng, "callback_host");
-            b.auto_bind();
             b.build();
             auto host = std::make_shared<callback_host>();
             eng->add_global("self", eng->make_object(host));
@@ -609,7 +588,6 @@ public:
             auto eng = make_engine();
             bind_signal_type<void(const std::string&)>(*eng, "SignalString");
             dynamic_binder<emitter_host> b(*eng, "emitter_host");
-            b.auto_bind();
             b.build();
             auto host = std::make_shared<emitter_host>();
             eng->add_global("messages", eng->make_object(host));

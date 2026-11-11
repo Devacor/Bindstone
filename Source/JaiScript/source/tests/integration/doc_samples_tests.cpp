@@ -218,6 +218,7 @@ struct Vec2 {
     Vec2(double x, double y) : x(x), y(y) {}
     double length() const { return std::sqrt(x * x + y * y); }
     Vec2& scale(double k) { x *= k; y *= k; return *this; }
+    Vec2& scale(double kx, double ky) { x *= kx; y *= ky; return *this; }
     Vec2& translate(double dx, double dy) { x += dx; y += dy; return *this; }
     Vec2 operator+(const Vec2& o) const { return {x + o.x, y + o.y}; }
     bool operator==(const Vec2& o) const { return x == o.x && y == o.y; }
@@ -1023,14 +1024,12 @@ public:
 			jai::stdlib::register_all(eng);
 			cpp_sample host(*this, "embedding/02-dynamic-binder.html", "binder-vec2-host");
 			// [sample binder-vec2-host]
-			jai::dynamic_binder<Vec2>(*eng, "Vec2")
-			    .constructor<>()
+			jai::dynamic_binder<Vec2>(*eng, "Vec2")         // Vec2(), a copy, + and == bind by themselves
 			    .constructor<double, double>()             // overloaded ctors resolve by arity + type
 			    .method("length", &Vec2::length)
-			    .method("scale", &Vec2::scale)             // Vec2& scale(double) -> chainable
+			    .method("scale", jai::overload<double>(&Vec2::scale))           // Vec2& scale(double) -> chainable
+			    .method("scale", jai::overload<double, double>(&Vec2::scale))   // an overload, picked by its parameters
 			    .method("translate", &Vec2::translate)
-			    .method("+", &Vec2::operator+)             // operators are methods named by token
-			    .method("==", &Vec2::operator==)
 			    .static_method("axes", []() { return 2; })
 			    .static_method("dot", [](const Vec2& a, const Vec2& b) { return a.x * b.x + a.y * b.y; })
 			    .property("x", &Vec2::x)
@@ -1047,8 +1046,7 @@ public:
 			cpp_sample host(*this, "embedding/02-dynamic-binder.html", "binder-sprite-host");
 			// [sample binder-sprite-host]
 			jai::dynamic_binder<Sprite>(*eng, "Sprite")
-			    .constructor<>()
-			    .serial_only_constructor()
+			    .constructor<>(jai::serial)
 			    .property("alpha", &Sprite::alpha);
 			// [/sample]
 			host.finish();
@@ -1106,10 +1104,8 @@ public:
 			// Registration order does not matter — either class may register first, or the base
 			// not at all: a derived registration materializes an unregistered property_owner base.
 			jai::dynamic_binder<Pickup>(*eng, "Pickup")
-			    .auto_bind()
 			    .method("kind", [](Pickup& p) { return std::string("pickup:") + p.name.get(); });
-			jai::dynamic_binder<HealthPickup>(*eng, "HealthPickup")
-			    .auto_bind();     // derives the Pickup base edge: healing and the inherited name both bind
+			jai::dynamic_binder<HealthPickup>(*eng, "HealthPickup");   // derives the Pickup base edge: healing and the inherited name both bind
 			// [/sample]
 			host.finish();
 			cpp_sample json_block(*this, page, "binder-pickup-json");
@@ -1221,7 +1217,7 @@ public:
 			expect_script(page, "math-body-script", eng);
 			cpp_sample marker_block(*this, page, "math-marker");
 			// [sample math-marker]
-			jai::dynamic_binder<Marker>(*eng, "Marker").auto_bind();
+			jai::dynamic_binder<Marker>(*eng, "Marker");
 
 			auto marker = std::make_shared<Marker>();
 			int changes = 0;
@@ -1324,8 +1320,8 @@ public:
 			    .base_class<Entity>()
 			    .constructor<>()
 			    .constructor<std::string, int64_t>()
-			    .method("damage", static_cast<void (Monster::*)(int64_t)>(&Monster::damage))
-			    .method("damage", static_cast<void (Monster::*)(int64_t, double)>(&Monster::damage))
+			    .method("damage", jai::overload<int64_t>(&Monster::damage))
+			    .method("damage", jai::overload<int64_t, double>(&Monster::damage))
 			    .method("alive", &Monster::alive)
 			    .method("==", &Monster::operator==)
 			    .property("hp", &Monster::health, &Monster::setHealth)

@@ -113,13 +113,13 @@ std::cout &lt;&lt; &quot;final hp: &quot; &lt;&lt; hp.get() &lt;&lt; &quot;\n&qu
 <ul>
 <li>Assignment, <code>++</code>, <code>--</code> and the compound operators emit, and only when the value actually changes. <code>set_silent</code> changes it without notifying.</li>
 <li><code>on_change</code> is a public <code>signal&lt;void(const T&amp;, const T&amp;)&gt;</code> over a private emitter.</li>
-<li>A property registers itself with its <code>property_manager</code>, which is what <code>auto_bind</code> and the archives read.</li>
+<li>A property registers itself with its <code>property_manager</code>, which is what the class's binder and the archives read.</li>
 <li>A translation unit that instantiates <code>property&lt;T&gt;</code> includes <code>properties/property_serialization.hpp</code>, where the property&#x27;s virtual <code>serialize</code> is defined. <code>dynamic_binder.hpp</code> already includes it.</li>
 </ul>
 <p>Hosts coming from Qt&#x27;s <code>Q_PROPERTY</code>, RTTR or refl-cpp have a mapping in <a href="../bridges/11-from-qt-properties.html">From Qt Properties, RTTR and refl-cpp</a>.</p>
 <h2 id="script-facing-integration">Connecting from script<a class="hlink" href="#script-facing-integration" aria-label="link">&#8203;</a></h2>
 <p>A script handler is a function (its parameters take the emit arguments positionally) or a string of source (run with the emitter&#x27;s <code>parameter_names</code> in scope). A C++ emit fires both. A signal reaches script by one of three routes:</p>
-<p id="auto-bound-signals"><strong>1. Auto-bound.</strong> On a <code>property_owner</code> class, <code>JAI_SIGNAL_PROPERTY(void(int64_t), onWave)</code> is the whole registration: <code>auto_bind</code> exposes the member. This is the route to reach for first. With the <code>Spawner</code> of the <a href="02-dynamic-binder.html#scripted">binder chapter</a>:</p>
+<p id="auto-bound-signals"><strong>1. Auto-bound.</strong> On a <code>property_owner</code> class, <code>JAI_SIGNAL_PROPERTY(void(int64_t), onWave)</code> is the whole registration: the class's binder exposes the member by itself. This is the route to reach for first. With the <code>Spawner</code> of the <a href="02-dynamic-binder.html#scripted">binder chapter</a>:</p>
 <div class="codeblock cb-jai" data-host="Spawner registration" data-sample="signals-spawner"><span class="cb-label">jaiscript &middot; needs the Spawner registration from the binder chapter</span><pre><code class="lang-jai">auto s = Spawner();
 s.onWave.connect("hud", [=](int wave) -&gt; void {
     print("wave {} incoming", wave);
@@ -147,7 +147,7 @@ silent after disconnect: true</code></pre></div>
 <p>Connecting never requires it. Use it to give a signature a name that registration-time type checks can see, or to register a shared signature once at engine setup, independent of any owning class; the call is idempotent, and a registrar&#x27;s configure function reaches the engine through <code>binder.bound_engine()</code>. A typed registration takes precedence: a <code>.property</code> read of that signature hands out the typed object instead of the generic view, with identical behavior.</p>
 <ul id="script-facing-notes">
 <li><strong>The checker</strong> leaves a signal member untyped: <code>connect</code>, <code>disconnect</code>, <code>connected</code> and their arguments are checked at run time. A handler lambda&#x27;s body is checked like any lambda (<a href="06-static-checking.html">Static Checking</a>).</li>
-<li><strong>Observable members</strong> exposed by <code>auto_bind</code> reach script as transparent wrappers: <code>player.score + 5</code> uses the value, and <code>player.score.on_change</code> resolves on the wrapper.</li>
+<li><strong>Observable members</strong> the binder exposes reach script as transparent wrappers: <code>player.score + 5</code> uses the value, and <code>player.score.on_change</code> resolves on the wrapper.</li>
 <li><strong>Calling a script function from C++ outside a script call</strong> (a converted callback, a hand-written receiver) goes inside a <code>jai::engine::external_call_guard</code>, so reference parameters do not bind against a script call that happens to be in flight. Signals do this themselves.</li>
 </ul>
 <h2 id="receivers-in-detail">Receivers in detail<a class="hlink" href="#receivers-in-detail" aria-label="link">&#8203;</a></h2>

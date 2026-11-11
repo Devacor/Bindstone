@@ -256,7 +256,7 @@ public:
 };
 ```
 
-The inheritance information is exposed via `_jai_base_types` and used by `dynamic_binder::auto_bind()` to automatically register base classes in JaiScript.
+The inheritance information is exposed via `_jai_base_types` and used by every `dynamic_binder` of the class to register its base classes in JaiScript.
 
 ## Version Migration
 

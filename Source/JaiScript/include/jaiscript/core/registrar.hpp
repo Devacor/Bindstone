@@ -13,6 +13,7 @@
 #include <optional>
 #include <algorithm>
 #include <type_traits>
+#include <vector>
 
 #include <jaiscript/detail/static_type_name.hpp>
 
@@ -85,6 +86,30 @@ private:
 // Registrar Registry - Stores registration functions per context type
 // ============================================================================
 
+// Which registrars one bind_registrar call runs: jai::only<A, B>() runs those, jai::except<A, B>() all but those
+class registrar_filter {
+public:
+	enum class mode { only, except };
+
+	registrar_filter(mode a_mode, std::vector<std::type_index> a_types) : filter_mode(a_mode), types(std::move(a_types)) {}
+
+	[[nodiscard]] bool admits(std::type_index a_type) const {
+		const bool listed = std::find(types.begin(), types.end(), a_type) != types.end();
+		return filter_mode == mode::only ? listed : !listed;
+	}
+	[[nodiscard]] const std::vector<std::type_index>& listed() const { return types; }
+
+private:
+	mode filter_mode;
+	std::vector<std::type_index> types;
+};
+
+template<typename... T>
+[[nodiscard]] registrar_filter only() { return registrar_filter(registrar_filter::mode::only, {std::type_index(typeid(T))...}); }
+
+template<typename... T>
+[[nodiscard]] registrar_filter except() { return registrar_filter(registrar_filter::mode::except, {std::type_index(typeid(T))...}); }
+
 namespace detail {
 	// Registrations apply in script-name order, the same on every compiler; a type registered again replaces its entry.
 	// One type for every context (the context travels as const void*), defined in the library (class_registry.cpp).
@@ -96,7 +121,8 @@ namespace detail {
 		~registration_order();
 
 		void add(std::type_index ti, const std::string& name, erased_fn fn);
-		void run_all(engine& eng, const void* context);
+		// A filter that leaves out a class an admitted one derives from throws, naming both
+		void run_all(engine& eng, const void* context, const registrar_filter* filter = nullptr);
 		[[nodiscard]] bool has(std::type_index ti) const;
 
 	private:
@@ -119,8 +145,8 @@ public:
         ordered_.add(ti, name, [fn = std::move(fn)](engine& eng, const void* context) { fn(eng, *static_cast<const Context*>(context)); });
     }
 
-    void register_all(engine& eng, const Context& ctx) {
-        ordered_.run_all(eng, &ctx);
+    void register_all(engine& eng, const Context& ctx, const registrar_filter* filter = nullptr) {
+        ordered_.run_all(eng, &ctx, filter);
     }
 
     [[nodiscard]] bool has(std::type_index ti) const {
@@ -146,8 +172,8 @@ public:
         ordered_.add(ti, name, [fn = std::move(fn)](engine& eng, const void*) { fn(eng); });
     }
 
-    void register_all(engine& eng) {
-        ordered_.run_all(eng, nullptr);
+    void register_all(engine& eng, const registrar_filter* filter = nullptr) {
+        ordered_.run_all(eng, nullptr, filter);
     }
 
     [[nodiscard]] bool has(std::type_index ti) const {
@@ -176,6 +202,7 @@ private:
 // At engine initialization:
 //   jai::bind_registrar(engine);                     // No context
 //   jai::bind_registrar<HostContext>(engine, ctx);   // With context
+//   jai::bind_registrar(engine, jai::except<EditorPanel>());   // every registrar but EditorPanel's (jai::only<...>: just those)
 
 // Shared by the auto-named registrar constructors: the ONE naming ladder (self-owned
 // jai_type_name pin, else the bare C++ type name — also the serialization $type, so the
@@ -206,7 +233,6 @@ class registrar {
             std::type_index(typeid(T)), name_str,
             [name_str](engine& eng, const Context&) {
                 dynamic_binder<T> builder(eng, name_str);
-                builder.auto_bind();
                 builder.build();
             }
         );
@@ -221,7 +247,6 @@ class registrar {
             std::type_index(typeid(T)), name_str,
             [name_str, configure = std::forward<F>(configure)](engine& eng, const Context& ctx) {
                 dynamic_binder<T> builder(eng, name_str);
-                builder.auto_bind();
                 configure(builder, ctx);
                 builder.build();
             }
@@ -253,7 +278,6 @@ class registrar<T, void, BasesTag> {
             std::type_index(typeid(T)), name_str,
             [name_str](engine& eng) {
                 dynamic_binder<T> builder(eng, name_str);
-                builder.auto_bind();
                 builder.build();
             }
         );
@@ -268,7 +292,6 @@ class registrar<T, void, BasesTag> {
             std::type_index(typeid(T)), name_str,
             [name_str, configure = std::forward<F>(configure)](engine& eng) {
                 dynamic_binder<T> builder(eng, name_str);
-                builder.auto_bind();
                 configure(builder);
                 builder.build();
             }
@@ -294,21 +317,39 @@ public:
 // ============================================================================
 
 template<typename Context>
+    requires (!std::is_same_v<Context, registrar_filter>)
 void bind_registrar(engine& eng, const Context& ctx) {
     registrar_registry<Context>::instance().register_all(eng, ctx);
+}
+
+template<typename Context>
+void bind_registrar(engine& eng, const Context& ctx, const registrar_filter& filter) {
+    registrar_registry<Context>::instance().register_all(eng, ctx, &filter);
 }
 
 inline void bind_registrar(engine& eng) {
     registrar_registry<void>::instance().register_all(eng);
 }
 
+inline void bind_registrar(engine& eng, const registrar_filter& filter) {
+    registrar_registry<void>::instance().register_all(eng, &filter);
+}
+
 // shared_ptr / raw-pointer convenience (engine::make() returns a shared_ptr)
 template<typename Context>
+    requires (!std::is_same_v<Context, registrar_filter>)
 void bind_registrar(const std::shared_ptr<engine>& eng, const Context& ctx) { bind_registrar(*eng, ctx); }
 template<typename Context>
+    requires (!std::is_same_v<Context, registrar_filter>)
 void bind_registrar(engine* eng, const Context& ctx) { bind_registrar(*eng, ctx); }
+template<typename Context>
+void bind_registrar(const std::shared_ptr<engine>& eng, const Context& ctx, const registrar_filter& filter) { bind_registrar(*eng, ctx, filter); }
+template<typename Context>
+void bind_registrar(engine* eng, const Context& ctx, const registrar_filter& filter) { bind_registrar(*eng, ctx, filter); }
 inline void bind_registrar(const std::shared_ptr<engine>& eng) { bind_registrar(*eng); }
 inline void bind_registrar(engine* eng) { bind_registrar(*eng); }
+inline void bind_registrar(const std::shared_ptr<engine>& eng, const registrar_filter& filter) { bind_registrar(*eng, filter); }
+inline void bind_registrar(engine* eng, const registrar_filter& filter) { bind_registrar(*eng, filter); }
 
 } // namespace jai
 

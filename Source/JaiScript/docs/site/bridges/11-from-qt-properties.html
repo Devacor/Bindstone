@@ -76,7 +76,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 </tbody></table></div>
 <h3 id="from-script">From script<a class="hlink" href="#from-script" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th>Qt (QML / QJSEngine)</th><th>JaiScript</th></tr></thead><tbody>
-<tr><td><code>turret.ammo</code> in QML</td><td><code>turret.ammo</code>: a property of <code>int</code>, <code>float</code>, <code>bool</code> or <code>string</code> type binds to script by itself, through <code>auto_bind</code>; another type takes a binder <code>.property</code> line</td></tr>
+<tr><td><code>turret.ammo</code> in QML</td><td><code>turret.ammo</code>: a property of <code>int</code>, <code>float</code>, <code>bool</code> or <code>string</code> type binds to script by itself, through the class's binder; another type takes a binder <code>.property</code> line</td></tr>
 <tr><td><code>onAmmoChanged: ...</code></td><td><code>turret.ammo.on_change([=](int old_value, int new_value) -&gt; void { ... });</code> on an observable property</td></tr>
 <tr><td>enumerating properties from JavaScript</td><td><code>reflect::fields(turret)</code> (name, type, kind), <code>reflect::get(turret, "ammo")</code>, <code>reflect::set(turret, "ammo", 3)</code></td></tr>
 </tbody></table></div>

@@ -104,7 +104,8 @@ public:
 	}
 };
 
-class BattleEffect : public MV::Scene::Component {
+class BattleEffect : public jai::property_owner<BattleEffect, MV::Scene::Component> {
+	friend jai::access;
 	friend MV::Script;
 public:
 	typedef void CallbackSignature(std::shared_ptr<BattleEffect>);
@@ -167,10 +168,24 @@ protected:
 	// Survives the target: its position at death, or the best snapshot when it was already gone
 	MV::Point<> lastTargetPosition;
 	bool targetPositionKnown = false;
+
+protected:
+	template<class Archive>
+	void save(Archive& archive, std::uint32_t const) const {
+		property_mgr.save(archive);
+		Component::save(archive, 0);
+	}
+
+	template<class Archive>
+	void load(Archive& archive, std::uint32_t const) {
+		property_mgr.load(archive);
+		Component::load(archive, 0);
+	}
 };
 
 
-class ServerBattleEffect : public BattleEffect {
+class ServerBattleEffect : public jai::property_owner<ServerBattleEffect, BattleEffect> {
+	friend jai::access;
 	friend MV::Scene::Node;
 
 public:
@@ -208,9 +223,23 @@ private:
 	void animateDeathAndRemove(); // in battleEffect.cpp: fires the script death hook (needs GameInstance)
 
 	virtual void updateImplementation(double a_delta) override;
+
+protected:
+	template<class Archive>
+	void save(Archive& archive, std::uint32_t const) const {
+		property_mgr.save(archive);
+		BattleEffect::save(archive, 0);
+	}
+
+	template<class Archive>
+	void load(Archive& archive, std::uint32_t const) {
+		property_mgr.load(archive);
+		BattleEffect::load(archive, 0);
+	}
 };
 
-class ClientBattleEffect : public BattleEffect {
+class ClientBattleEffect : public jai::property_owner<ClientBattleEffect, BattleEffect> {
+	friend jai::access;
 	friend MV::Scene::Node;
 public:
 	ComponentDerivedAccessors(ClientBattleEffect)
@@ -243,6 +272,19 @@ private:
 	double accumulatedDuration = 0.0f;
 	MV::TimeDeltaAggregate networkDelta;
 	MV::PointPrecision offsetDepth = 0.0f;
+
+protected:
+	template<class Archive>
+	void save(Archive& archive, std::uint32_t const) const {
+		property_mgr.save(archive);
+		BattleEffect::save(archive, 0);
+	}
+
+	template<class Archive>
+	void load(Archive& archive, std::uint32_t const) {
+		property_mgr.load(archive);
+		BattleEffect::load(archive, 0);
+	}
 };
 
 

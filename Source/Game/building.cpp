@@ -34,6 +34,12 @@ static jai::registrar<StandardScriptMethods<Building>, MV::Services> _hookBuildi
 });
 
 void Building::jai_auto_bind(jai::dynamic_binder<Building>& builder) {
+	builder.method("current", [](Building& a_self) -> const BuildTree& { return *a_self.current(); });
+	builder.method("upgrade", &Building::upgrade, jai::serial);
+	builder.method("player", &Building::player);
+	builder.method("assetPath", &Building::assetPath);
+	builder.method("skin", &Building::skin);
+	builder.method("slot", &Building::slotIndex);
 	builder.property("onUpgraded", &Building::onUpgraded);
 	builder.method("data", [](Building& a_self) { return a_self.buildingData; });
 	builder.method("networkId", [](Building& a_self) { return static_cast<int64_t>(a_self.slot); });
@@ -49,18 +55,8 @@ void Building::jai_auto_bind(jai::dynamic_binder<Building>& builder) {
 	});
 }
 
-static jai::registrar<Building, MV::Services, jai::bases<MV::Scene::Component>> _hookBuilding([](jai::dynamic_binder<Building>& builder, const MV::Services&) {
-	builder.base_class<MV::Scene::Component>();
-	builder.method("current", [](Building& a_self) -> const BuildTree& { return *a_self.current(); });
-	builder.method("upgrade", &Building::upgrade, jai::serial);
-	builder.method("player", &Building::player);
-	builder.method("assetPath", &Building::assetPath);
-	builder.method("skin", &Building::skin);
-	builder.method("slot", &Building::slotIndex);
-});
-
 Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, int a_slot, int a_loadoutSlot, const std::shared_ptr<InGamePlayer> &a_player, GameInstance& a_instance) :
-	Component(a_owner),
+	jai::property_owner<Building, MV::Scene::Component>(a_owner),
 	buildingData(a_instance.data().buildings().data(a_player->loadout.buildings[a_loadoutSlot])),
 	slot(a_slot),
 	loadoutSlot(a_loadoutSlot),

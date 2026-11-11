@@ -10,6 +10,7 @@
 #include "MV/Utility/generalUtility.h"
 
 #include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/overload.hpp>
 #include <jaiscript/signals/signal.hpp>
 
 static jai::registrar<CreatureData, MV::Services> _hookCreatureData([](jai::dynamic_binder<CreatureData>& builder, const MV::Services&) {
@@ -62,6 +63,15 @@ static jai::registrar<TargetPolicy, MV::Services> _hookTargetPolicy([](jai::dyna
 });
 
 void Creature::jai_auto_bind(jai::dynamic_binder<Creature>& builder) {
+	builder.method("spine", &Creature::spine);
+	builder.method("alive", &Creature::alive);
+	builder.method("networkId", &Creature::netId);
+	builder.method("health", &Creature::health);
+	builder.method("element", &Creature::element);
+	builder.method("elements", &Creature::elements);
+	builder.method("changeHealth", &Creature::changeHealth, jai::serial);
+	builder.method("assetPath", &Creature::assetPath);
+	builder.method("player", &Creature::player);
 	builder.property("onStatus", &Creature::onStatus);
 	builder.property("onHealthChange", &Creature::onHealthChange);
 	builder.property("onDeath", &Creature::onDeath);
@@ -74,20 +84,38 @@ void Creature::jai_auto_bind(jai::dynamic_binder<Creature>& builder) {
 	builder.method("enemyTeam", [](Creature& a_self) -> Team& { return a_self.gameInstance.teamAgainstPlayer(a_self.player()); });
 }
 
-static jai::registrar<Creature, MV::Services, jai::bases<MV::Scene::Component>> _hookCreature([](jai::dynamic_binder<Creature>& builder, const MV::Services&) {
-	builder.base_class<MV::Scene::Component>();
-	builder.method("spine", &Creature::spine);
-	builder.method("alive", &Creature::alive);
-	builder.method("networkId", &Creature::netId);
-	builder.method("health", &Creature::health);
-	builder.method("element", &Creature::element);
-	builder.method("elements", &Creature::elements);
-	builder.method("changeHealth", &Creature::changeHealth, jai::serial);
-	builder.method("assetPath", &Creature::assetPath);
-	builder.method("player", &Creature::player);
-});
-
 void ServerCreature::jai_auto_bind(jai::dynamic_binder<ServerCreature>& builder) {
+	builder.method("agent", &ServerCreature::agent);
+	builder.method("fall", &ServerCreature::fall, jai::serial);
+
+	builder.method("damage", &ServerCreature::damage, jai::serial);
+	builder.method("tickDamage", &ServerCreature::tickDamage, jai::serial);
+	builder.method("heal", &ServerCreature::heal, jai::serial);
+	builder.method("shield", &ServerCreature::shield);
+	builder.method("shieldAmount", &ServerCreature::shieldAmount);
+	builder.method("dot", &ServerCreature::dot);
+	builder.method("hot", &ServerCreature::hot);
+	builder.method("slow", &ServerCreature::slow);
+	builder.method("haste", &ServerCreature::haste);
+	builder.method("attackHaste", &ServerCreature::attackHaste);
+	builder.method("attackSlow", &ServerCreature::attackSlow);
+	builder.method("abilityHaste", &ServerCreature::abilityHaste);
+	builder.method("abilitySlow", &ServerCreature::abilitySlow);
+	builder.method("moveSpeedMultiplier", &ServerCreature::moveSpeedMultiplier);
+	builder.method("attackSpeedMultiplier", &ServerCreature::attackSpeedMultiplier);
+	builder.method("abilitySpeedMultiplier", &ServerCreature::abilitySpeedMultiplier);
+	builder.method("moveSpeed", jai::overload<>(&ServerCreature::moveSpeed));
+	builder.method("moveSpeed", jai::overload<double>(&ServerCreature::moveSpeed));
+	builder.method("stun", &ServerCreature::stun, jai::serial);
+	builder.method("root", &ServerCreature::root, jai::serial);
+	builder.method("visible", jai::overload<>(&ServerCreature::visible));
+	builder.method("visible", jai::overload<bool>(&ServerCreature::visible));
+	builder.method("taunt", &ServerCreature::taunt);
+	builder.method("tauntedBy", &ServerCreature::tauntedBy);
+	builder.method("untargetable", jai::overload<>(&ServerCreature::untargetable));
+	builder.method("untargetable", jai::overload<bool>(&ServerCreature::untargetable));
+	builder.method("absorbFor", &ServerCreature::absorbFor, jai::serial);
+	builder.method("spawnCreature", &ServerCreature::spawnCreature, jai::serial);
 	builder.property("onArrive", &ServerCreature::onArrive);
 	builder.property("onDamaged", &ServerCreature::onDamaged);
 	builder.property("onBlocked", &ServerCreature::onBlocked);
@@ -111,47 +139,8 @@ void ServerCreature::jai_auto_bind(jai::dynamic_binder<ServerCreature>& builder)
 	});
 }
 
-static jai::registrar<ServerCreature, MV::Services> _hookServerCreature([](jai::dynamic_binder<ServerCreature>& builder, const MV::Services&) {
-	builder.base_class<Creature>();
-	builder.method("agent", &ServerCreature::agent);
-	builder.method("fall", &ServerCreature::fall, jai::serial);
-
-	builder.method("damage", &ServerCreature::damage, jai::serial);
-	builder.method("tickDamage", &ServerCreature::tickDamage, jai::serial);
-	builder.method("heal", &ServerCreature::heal, jai::serial);
-	builder.method("shield", &ServerCreature::shield);
-	builder.method("shieldAmount", &ServerCreature::shieldAmount);
-	builder.method("dot", &ServerCreature::dot);
-	builder.method("hot", &ServerCreature::hot);
-	builder.method("slow", &ServerCreature::slow);
-	builder.method("haste", &ServerCreature::haste);
-	builder.method("attackHaste", &ServerCreature::attackHaste);
-	builder.method("attackSlow", &ServerCreature::attackSlow);
-	builder.method("abilityHaste", &ServerCreature::abilityHaste);
-	builder.method("abilitySlow", &ServerCreature::abilitySlow);
-	builder.method("moveSpeedMultiplier", &ServerCreature::moveSpeedMultiplier);
-	builder.method("attackSpeedMultiplier", &ServerCreature::attackSpeedMultiplier);
-	builder.method("abilitySpeedMultiplier", &ServerCreature::abilitySpeedMultiplier);
-	builder.method("moveSpeed", static_cast<double(ServerCreature::*)() const>(&ServerCreature::moveSpeed));
-	builder.method("moveSpeed", static_cast<void(ServerCreature::*)(double)>(&ServerCreature::moveSpeed));
-	builder.method("stun", &ServerCreature::stun, jai::serial);
-	builder.method("root", &ServerCreature::root, jai::serial);
-	builder.method("visible", static_cast<bool(ServerCreature::*)() const>(&ServerCreature::visible));
-	builder.method("visible", static_cast<void(ServerCreature::*)(bool)>(&ServerCreature::visible));
-	builder.method("taunt", &ServerCreature::taunt);
-	builder.method("tauntedBy", &ServerCreature::tauntedBy);
-	builder.method("untargetable", static_cast<bool(ServerCreature::*)() const>(&ServerCreature::untargetable));
-	builder.method("untargetable", static_cast<void(ServerCreature::*)(bool)>(&ServerCreature::untargetable));
-	builder.method("absorbFor", &ServerCreature::absorbFor, jai::serial);
-	builder.method("spawnCreature", &ServerCreature::spawnCreature, jai::serial);
-});
-
-static jai::registrar<ClientCreature, MV::Services> _hookClientCreature([](jai::dynamic_binder<ClientCreature>& builder, const MV::Services&) {
-	builder.base_class<Creature>();
-});
-
 Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, GameInstance& a_gameInstance, const std::string& a_skin, const CreatureData& a_statTemplate, std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> a_state) :
-	Component(a_owner),
+	jai::property_owner<Creature, MV::Scene::Component>(a_owner),
 	gameInstance(a_gameInstance),
 	onStatus(onStatusSignal),
 	onDeath(onDeathSignal),
@@ -175,7 +164,7 @@ ServerCreature::ServerCreature(const std::weak_ptr<MV::Scene::Node> &a_owner, co
 }
 
 ServerCreature::ServerCreature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData &a_statTemplate, int a_buildingSlot, GameInstance& a_gameInstance) :
-	Creature(a_owner, a_gameInstance, a_gameInstance.building(a_buildingSlot)->skin(), a_statTemplate, a_gameInstance.networkPool().spawn(std::make_shared<CreatureNetworkState>(a_statTemplate, a_buildingSlot))),
+	jai::property_owner<ServerCreature, Creature>(a_owner, a_gameInstance, a_gameInstance.building(a_buildingSlot)->skin(), a_statTemplate, a_gameInstance.networkPool().spawn(std::make_shared<CreatureNetworkState>(a_statTemplate, a_buildingSlot))),
 	onArrive(onArriveSignal),
 	onDamaged(onDamagedSignal),
 	onBlocked(onBlockedSignal),
@@ -574,7 +563,7 @@ void TargetPolicy::registerPathfindingListeners() {
 
 
 ClientCreature::ClientCreature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> &a_state, GameInstance& a_gameInstance) :
-	Creature(a_owner, a_gameInstance, 
+	jai::property_owner<ClientCreature, Creature>(a_owner, a_gameInstance, 
 		a_gameInstance.building(*a_state->self()->buildingSlot)->skin(),
 		a_gameInstance.data().creatures().data(*a_state->self()->creatureTypeId),
 		a_state

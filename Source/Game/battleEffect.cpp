@@ -29,6 +29,10 @@ static jai::registrar<StandardScriptMethods<BattleEffect>, MV::Services> _hookBa
 });
 
 void BattleEffect::jai_auto_bind(jai::dynamic_binder<BattleEffect>& builder) {
+	builder.method("game", &BattleEffect::game);
+	builder.method("alive", &BattleEffect::alive);
+	builder.method("networkId", &BattleEffect::netId);
+	builder.method("assetPath", &BattleEffect::assetPath);
 	builder.property("onArrive", &BattleEffect::onArrive);
 	builder.property("onFizzle", &BattleEffect::onFizzle);
 	builder.method("stats", [](BattleEffect& a_self) { return a_self.statTemplate; });
@@ -48,22 +52,6 @@ static jai::registrar<BattleEffectData, MV::Services> _hookBattleEffectData([](j
 	builder.property("id", &BattleEffectData::id);
 });
 
-static jai::registrar<BattleEffect, MV::Services, jai::bases<MV::Scene::Component>> _hookBattleEffect([](jai::dynamic_binder<BattleEffect>& builder, const MV::Services&) {
-	builder.base_class<MV::Scene::Component>();
-	builder.method("game", &BattleEffect::game);
-	builder.method("alive", &BattleEffect::alive);
-	builder.method("networkId", &BattleEffect::netId);
-	builder.method("assetPath", &BattleEffect::assetPath);
-});
-
-static jai::registrar<ServerBattleEffect, MV::Services> _hookServerBattleEffect([](jai::dynamic_binder<ServerBattleEffect>& builder, const MV::Services&) {
-	builder.base_class<BattleEffect>();
-});
-
-static jai::registrar<ClientBattleEffect, MV::Services> _hookClientBattleEffect([](jai::dynamic_binder<ClientBattleEffect>& builder, const MV::Services&) {
-	builder.base_class<BattleEffect>();
-});
-
 BattleEffectNetworkState::BattleEffectNetworkState(GameInstance& a_gameInstance, const std::string &a_effectTypeId, int64_t a_creatureOwnerId, const std::string &a_creatureAttachPosition) :
 	creatureOwnerId(a_creatureOwnerId),
 	effectTypeId(a_effectTypeId){
@@ -80,7 +68,7 @@ std::string BattleEffect::assetPath() const {
 }
 
 BattleEffect::BattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, GameInstance& a_gameInstance, const std::string& a_skin, const BattleEffectData& a_statTemplate, std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> a_state) :
-	Component(a_owner),
+	jai::property_owner<BattleEffect, MV::Scene::Component>(a_owner),
 	gameInstance(a_gameInstance),
 	onArrive(onArriveSignal),
 	onFizzle(onFizzleSignal),
@@ -128,11 +116,11 @@ ServerBattleEffect::ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_o
 }
 
 ServerBattleEffect::ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const BattleEffectData &a_statTemplate, int64_t a_creatureId, const std::string &a_creatureBoneAttachment, GameInstance& a_gameInstance) :
-	BattleEffect(a_owner, a_gameInstance, a_gameInstance.building(a_gameInstance.creature(a_creatureId)->buildingSlot())->skin(), a_statTemplate, a_gameInstance.networkPool().spawn(std::make_shared<BattleEffectNetworkState>(a_gameInstance, a_statTemplate.id, a_creatureId, a_creatureBoneAttachment))) {
+	jai::property_owner<ServerBattleEffect, BattleEffect>(a_owner, a_gameInstance, a_gameInstance.building(a_gameInstance.creature(a_creatureId)->buildingSlot())->skin(), a_statTemplate, a_gameInstance.networkPool().spawn(std::make_shared<BattleEffectNetworkState>(a_gameInstance, a_statTemplate.id, a_creatureId, a_creatureBoneAttachment))) {
 }
 
 ServerBattleEffect::ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> &a_suppliedState, GameInstance& a_gameInstance) :
-	BattleEffect(a_owner, a_gameInstance, a_gameInstance.building(a_suppliedState->self()->buildingSlot)->skin(), a_gameInstance.data().battleEffects().data(a_suppliedState->self()->effectTypeId), a_suppliedState) {
+	jai::property_owner<ServerBattleEffect, BattleEffect>(a_owner, a_gameInstance, a_gameInstance.building(a_suppliedState->self()->buildingSlot)->skin(), a_gameInstance.data().battleEffects().data(a_suppliedState->self()->effectTypeId), a_suppliedState) {
 }
 
 void ServerBattleEffect::initialize() {
@@ -183,7 +171,7 @@ void ServerBattleEffect::updateImplementation(double a_delta) {
 
 
 ClientBattleEffect::ClientBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> &a_state, GameInstance& a_gameInstance) :
-	BattleEffect (a_owner, a_gameInstance,
+	jai::property_owner<ClientBattleEffect, BattleEffect>(a_owner, a_gameInstance,
 		a_gameInstance.building(a_state->self()->buildingSlot)->skin(),
 		a_gameInstance.data().battleEffects().data(a_state->self()->effectTypeId),
 		a_state

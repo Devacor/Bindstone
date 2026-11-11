@@ -301,7 +301,8 @@ struct CreatureNetworkState {
 	}
 };
 
-class Creature : public MV::Scene::Component {
+class Creature : public jai::property_owner<Creature, MV::Scene::Component> {
+	friend jai::access;
 	friend MV::Script;
 public:
 	typedef void CallbackSignature(std::shared_ptr<Creature>);
@@ -369,9 +370,23 @@ protected:
 	std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> state;
 
 	std::shared_ptr<MV::Scene::Spine> spineAnimator;
+
+protected:
+	template<class Archive>
+	void save(Archive& archive, std::uint32_t const) const {
+		property_mgr.save(archive);
+		Component::save(archive, 0);
+	}
+
+	template<class Archive>
+	void load(Archive& archive, std::uint32_t const) {
+		property_mgr.load(archive);
+		Component::load(archive, 0);
+	}
 };
 
-class ServerCreature : public Creature {
+class ServerCreature : public jai::property_owner<ServerCreature, Creature> {
+	friend jai::access;
 	friend MV::Scene::Node;
 	friend TargetPolicy;
 	friend MV::Script;
@@ -538,9 +553,23 @@ private:
 	double absorbStatusScale = 1.0;
 	double baseMoveSpeed = 0.0;
 	double appliedMoveSpeed = -1.0;
+
+protected:
+	template<class Archive>
+	void save(Archive& archive, std::uint32_t const) const {
+		property_mgr.save(archive);
+		Creature::save(archive, 0);
+	}
+
+	template<class Archive>
+	void load(Archive& archive, std::uint32_t const) {
+		property_mgr.load(archive);
+		Creature::load(archive, 0);
+	}
 };
 
-class ClientCreature : public Creature {
+class ClientCreature : public jai::property_owner<ClientCreature, Creature> {
+	friend jai::access;
 	friend MV::Scene::Node;
 	friend MV::Script;
 public:
@@ -599,6 +628,19 @@ private:
 	MV::Point<> startClientPosition;
 	double accumulatedDuration = 0.0f;
 	MV::TimeDeltaAggregate networkDelta;
+
+protected:
+	template<class Archive>
+	void save(Archive& archive, std::uint32_t const) const {
+		property_mgr.save(archive);
+		Creature::save(archive, 0);
+	}
+
+	template<class Archive>
+	void load(Archive& archive, std::uint32_t const) {
+		property_mgr.load(archive);
+		Creature::load(archive, 0);
+	}
 };
 
 #endif

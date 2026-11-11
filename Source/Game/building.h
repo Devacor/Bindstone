@@ -131,7 +131,8 @@ struct BuildingNetworkState {
 	}
 };
 
-class Building : public MV::Scene::Component {
+class Building : public jai::property_owner<Building, MV::Scene::Component> {
+	friend jai::access;
 	friend MV::Scene::Node;
 	friend MV::Script;
 	jai::signal_emitter<void(std::shared_ptr<Building>)> onUpgradedSignal;
@@ -225,6 +226,19 @@ private:
 	GameInstance& gameInstance;
 
 	std::shared_ptr<MV::Scene::Spine> spineAnimator;
+
+protected:
+	template<class Archive>
+	void save(Archive& archive, std::uint32_t const) const {
+		property_mgr.save(archive);
+		Component::save(archive, 0);
+	}
+
+	template<class Archive>
+	void load(Archive& archive, std::uint32_t const) {
+		property_mgr.load(archive);
+		Component::load(archive, 0);
+	}
 };
 
 

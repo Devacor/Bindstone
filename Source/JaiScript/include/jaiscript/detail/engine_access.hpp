@@ -269,6 +269,8 @@ namespace jai::detail {
         template<typename T> JAI_FORCEINLINE static param_type_info map_cpp_type_to_param_info() { return engine::map_cpp_type_to_param_info<T>(); }
     };
 
+    std::string readable_cpp_type_name(const std::type_index& type);
+
 } // namespace jai::detail
 
 #endif

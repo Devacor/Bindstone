@@ -4804,7 +4804,7 @@ void engine::register_class_by_type(std::type_index type, std::shared_ptr<class_
     }
 }
 
-namespace {
+namespace detail {
 
 // The spelling a host writes: MSVC names carry class keys, the Itanium ABI names are mangled
 std::string readable_cpp_type_name(const std::type_index& type) {
@@ -4825,6 +4825,10 @@ std::string readable_cpp_type_name(const std::type_index& type) {
     }
     return result;
 }
+
+}
+
+namespace {
 
 std::string unqualified_cpp_type_name(const std::string& readable) {
     const size_t arguments = readable.find('<');
@@ -4859,7 +4863,7 @@ void engine::settle_bindings() {
 
     std::string message = "Bindings are incomplete:";
     for (const auto& unresolved : impl->unresolved_binding_types_) {
-        const std::string type_name = readable_cpp_type_name(unresolved.type);
+        const std::string type_name = detail::readable_cpp_type_name(unresolved.type);
         message += "\n  '" + unresolved.class_name + "." + unresolved.member + "' uses the C++ type '" + type_name +
                    "', which is not registered. Register it: jai::dynamic_binder<" + type_name + ">(engine, \"" + unqualified_cpp_type_name(type_name) + "\");";
     }

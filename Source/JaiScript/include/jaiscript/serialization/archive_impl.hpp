@@ -80,8 +80,8 @@ namespace serialization {
 [[noreturn]] void throw_archive_value_range(uint64_t value, const char* field);
 // A value with no route, reached where only run time settles the route: a property (its mode is a run-time value), a
 // registered type (registration also binds types nothing saves), a pointer to a polymorphic base (the dynamic type's route)
-[[noreturn]] void throw_not_serializable(const char* type_name);
-[[noreturn]] void throw_not_deserializable(const char* type_name);
+[[noreturn]] void throw_not_serializable(std::type_index type);
+[[noreturn]] void throw_not_deserializable(std::type_index type);
 
 // A binding record (binding_record_v) through the binding of its type in eng, into or out of the object already open. A base
 // level the engine does not bind holds nothing; any other type it does not bind throws.
@@ -747,7 +747,7 @@ public:
             }
         } else {
             if constexpr (Deferred) {
-                throw_not_serializable(typeid(T).name());
+                throw_not_serializable(typeid(T));
             } else {
                 no_route_to_write<T>();
             }
@@ -1443,7 +1443,7 @@ public:
             self()->end_object();
         } else {
             if constexpr (Deferred) {
-                throw_not_deserializable(typeid(T).name());
+                throw_not_deserializable(typeid(T));
             } else {
                 no_route_to_read<T>();
             }

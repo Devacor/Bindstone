@@ -12,13 +12,13 @@ void throw_archive_expected(const char* expected, std::string_view found) {
     throw serialization_error(std::string("Expected ") + expected + " in the archive, found " + std::string(found));
 }
 
-void throw_not_serializable(const char* type_name) {
-    throw serialization_error("Type '" + std::string(type_name) + "' is not serializable. "
+void throw_not_serializable(std::type_index type) {
+    throw serialization_error("Type '" + detail::readable_cpp_type_name(type) + "' is not serializable. "
         "Add save/load, serialize, property_owner, or ADL functions, bind it in the archive's engine — or mark the property transient.");
 }
 
-void throw_not_deserializable(const char* type_name) {
-    throw serialization_error("Type '" + std::string(type_name) + "' is not deserializable. "
+void throw_not_deserializable(std::type_index type) {
+    throw serialization_error("Type '" + detail::readable_cpp_type_name(type) + "' is not deserializable. "
         "Add save/load, serialize, property_owner, or ADL functions, bind it in the archive's engine — or mark the property transient.");
 }
 
@@ -54,7 +54,7 @@ void write_binding_record(any_archive_writer& ar, engine* eng, std::type_index t
         if (base_level) {
             return;
         }
-        throw_not_serializable(type.name());
+        throw_not_serializable(type);
     }
     for (const base_archive_route& base : record->bases) {
         write_binding_record(ar, eng, base.type, base.upcast(const_cast<void*>(object)), true);
@@ -73,7 +73,7 @@ void read_binding_record(any_archive_reader& ar, engine* eng, std::type_index ty
         if (base_level) {
             return;
         }
-        throw_not_deserializable(type.name());
+        throw_not_deserializable(type);
     }
     for (const base_archive_route& base : record->bases) {
         read_binding_record(ar, eng, base.type, base.upcast(object), true);

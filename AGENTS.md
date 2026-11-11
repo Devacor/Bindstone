@@ -53,11 +53,13 @@ Configurations (x64):
   without `/GL`, `/LTCG` and `/OPT:REF,ICF` and links incrementally: a one-file edit takes seconds instead of over a
   minute, and the client runs a few percent slower than Shipping. `/p:BindstoneFastIteration=false` puts LTCG back
   into Release (the `/GL` flip recompiles everything).
-- `Shipping` is the full-LTCG build (`/GL`, `/LTCG`, `/OPT:REF,ICF`, non-incremental link; output
+- `Shipping` is the LTCG build of the engine and the game (`/GL`, `/LTCG`, `/OPT:REF,ICF`, non-incremental link; output
   `Builds\Windows\x64\Shipping\`). It is what ships, and Bindstone performance numbers (arena sim, pathfinding bench,
   frame timing) are measured on it.
-- MutedVision compiles JaiScript's `Source\JaiScript\source\implementation\**\*.cpp` as separate translation units
-  through one wildcard item, so a JaiScript edit recompiles one file. The tree-walking interpreter
+- `JaiScript_Windows` (`VSProjects\JaiScript`) compiles JaiScript's `Source\JaiScript\source\implementation\**\*.cpp`
+  as separate translation units through one wildcard item into `jaiscript.lib`, in every configuration without `/GL`,
+  and MutedVision folds that library into `mutedvision.lib`: whatever links the engine gets JaiScript with it, and a
+  JaiScript edit recompiles one file. The tree-walking interpreter
   (`source\interpreter\`) is JaiScript's parity oracle and stays out of every Bindstone build: the engine runs the VM.
   `source\jaiscript.cpp` is the one-file build for other hosts and is not part of the Windows build; JaiScript's CMake
   configure fails when it, the files on disk and `JAISCRIPT_SOURCES`/`JAISCRIPT_INTERPRETER_SOURCES` disagree. Any other new `.cpp` goes into the right `.vcxitems` (see `VSProjects/AGENTS.md`).

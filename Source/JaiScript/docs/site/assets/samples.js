@@ -21,6 +21,19 @@
     gutter.textContent = nums;
   }
 
+  function typeText(code, text) {
+    if (document.execCommand && document.execCommand("insertText", false, text)) return;
+    var selection = window.getSelection();
+    if (!selection.rangeCount) return;
+    var range = selection.getRangeAt(0);
+    range.deleteContents();
+    range.insertNode(document.createTextNode(text));
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    code.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
   function makeEditable(block, onRun) {
     var code = codeOf(block);
     if (!code) return null;
@@ -40,12 +53,22 @@
       painted = code.textContent;
       code.innerHTML = window.JaiDocs.highlight(painted);
     });
+    // Tab types a tab. Escape then Tab, or Shift+Tab, moves focus on, so the keyboard can still leave the sample
+    var leaving = false;
     code.addEventListener("keydown", function (event) {
       if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && onRun) {
         event.preventDefault();
         onRun();
+      } else if (event.key === "Escape") {
+        leaving = true;
+        return;
+      } else if (event.key === "Tab" && !leaving && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        event.preventDefault();
+        typeText(code, "\t");
       }
+      leaving = false;
     });
+    code.addEventListener("blur", function () { leaving = false; });
     return function reset() {
       code.innerHTML = original.html;
       painted = original.text;

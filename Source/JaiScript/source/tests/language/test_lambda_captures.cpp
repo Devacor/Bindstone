@@ -250,7 +250,7 @@ public:
                 "  int fexr() { auto l = [&g]() { g = g + 1; return g; }; int r = l(); return r * 100 + g; }\n"
                 "}\n";
             expect(cls + "to_string(C().fref()) + \"|\" + to_string(g)", "7171|500", "[&] cell-shares the field");
-            expect(cls + "to_string(C().fval()) + \"|\" + to_string(g)", "70|500", "[=] snapshots the field");
+            expect(cls + "to_string(C().fval()) + \"|\" + to_string(g)", "71|500", "[=] reads the live field");
             expect(cls + "string m = \"\"; try { C().fex(); } catch (e) { m = e; } m + \"|\" + to_string(g)",
                    "Cannot capture undefined variable 'g'|500", "[g] names a member: not capturable, global untouched");
             expect(cls + "string m = \"\"; try { C().fexr(); } catch (e) { m = e; } m + \"|\" + to_string(g)",
@@ -281,7 +281,7 @@ public:
                 "  int secret(int a_x) { return a_x + 50; }\n"
                 "}\n";
             expect(cls + "C c; `${c.arrow()}|${c.byRef()}|${c.byCopy()}|${c.functionForm()}`", "15|15|15|15", "a bare method call in each default-capture form");
-            expect(cls + "C c; to_string(c.snapshot())", "304", "[=] still copies the field beside the method call");
+            expect(cls + "C c; to_string(c.snapshot())", "404", "[=] reads the live field beside the method call");
             expect(cls + "C c; `${c.base()}|${c.hidden()}|${c.local()}`", "1001|51|7", "inherited, private and a local of the method's name");
             expect(cls + "var f = C().escaping(); to_string(f(2))", "7", "the lambda keeps the instance");
             expect("[[warn_mode]];\n" + cls + "class D : C { int none() { var f = [](int x) { return x + twice(1); }; return f(10); } }\n"
@@ -292,6 +292,7 @@ public:
         test("a_lambda_captures_the_members_its_nested_lambdas_name", [expect]() {
             const std::string cls =
                 "int bonus = -100;\n"
+                "int died = 0;\n"
                 "int twice(int a_x) { return -1; }\n"
                 "class Caller { int bonus = 500; int twice(int a_x) { return -7; } int run(var a_f) { return a_f(); } }\n"
                 "class C {\n"
@@ -305,13 +306,20 @@ public:
                 "  int copyMethod() { var f = [=]() { var g = [=](int x) { return twice(x); }; return g(5); }; return f(); }\n"
                 "  int threeDeep() { var f = () => { var g = () => { var h = x => bonus + twice(x); return h(5); }; return g(); }; return f(); }\n"
                 "  int write() { var f = [&]() { var g = [&]() { bonus = bonus + 1; }; g(); }; f(); return bonus; }\n"
-                "  int snapshot() { var f = [=]() { var g = [=]() { return bonus; }; return g(); }; bonus = 9; return f(); }\n"
+                "  int liveCopy() { var f = [=]() { var g = [=]() { return bonus; }; return g(); }; bonus = 9; return f(); }\n"
+                "  int liveInner() { var f = [&]() { var g = [=]() { return bonus; }; bonus = 5; return g(); }; bonus = 9; return f(); }\n"
+                "  int writeCopy() { var f = [=]() { var g = [&]() { bonus += 1; }; g(); return bonus; }; int r = f(); return r * 100 + bonus; }\n"
+                "  var fieldOnly() { return [&]() { return bonus; }; }\n"
+                "  ~C() { died += 1; }\n"
                 "  int ownLocal() { var f = () => { int bonus = 40; var g = x => bonus + x; return g(5); }; return f(); }\n"
                 "  var escaping() { return () => { var g = x => bonus + twice(x); return g(5); }; }\n"
                 "}\n";
             expect(cls + "C c; `${c.arrowField()}|${c.arrowMethod()}|${c.refField()}|${c.refMethod()}|${c.copyField()}|${c.copyMethod()}`",
                    "8|13|8|13|8|13", "a nested lambda's field and method in each default-capture form");
-            expect(cls + "C c; `${c.threeDeep()}|${c.write()}|${c.snapshot()}|${c.ownLocal()}`", "16|4|4|45", "three deep, a write through [&], a [=] copy, the outer lambda's own local");
+            expect(cls + "C c; `${c.threeDeep()}|${c.write()}|${c.ownLocal()}`", "16|4|45", "three deep, a write through [&], the outer lambda's own local");
+            expect(cls + "`${C().liveCopy()}|${C().liveInner()}|${C().writeCopy()}`", "9|5|404", "[=] reads and writes the instance's field, as C++'s captured this does");
+            expect(cls + "string r = \"\"; void run() { var f; { C c; f = c.fieldOnly(); } r = `${died}`; f = null; r += `|${died}`; } run(); r", "0|1",
+                   "a lambda that names a field keeps its instance");
             expect(cls + "to_string(Caller().run(C().escaping()))", "16", "called from another class's method");
             expect("[[warn_mode]];\n" + cls + "class D : C { int none() { var f = []() { var g = [&](int x) { return bonus + x; }; return g(5); }; return f(); } }\n"
                    "string m = \"\"; try { D().none(); } catch (e) { m = e; } m",

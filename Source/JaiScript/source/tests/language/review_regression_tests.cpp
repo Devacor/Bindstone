@@ -2776,7 +2776,7 @@ public:
                 check_eq((int64_t)101, e->execute("w.live()").as_int(), "[&] sees the C++-side change");
                 e->execute("w.write();");
                 check_eq((int64_t)10, cpp->value, "[&] writes land in the member");
-                check_eq((int64_t)10, e->execute("w.snap()").as_int(), "[=] still snapshots");
+                check_eq((int64_t)110, e->execute("w.snap()").as_int(), "[=] reads the live property");
                 check_eq((int64_t)110, cpp->value);
             }
         });

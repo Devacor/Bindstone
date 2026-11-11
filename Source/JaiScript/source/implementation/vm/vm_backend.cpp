@@ -14029,8 +14029,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 				// outer frame's slot, the member scope, then the env chain - a same-named
 				// global never wins over a local or a field. [&] cell-shares the source
 				// (escape-legal; share_env_ref also demotes counted-for cached pointers),
-				// [=] snapshots it; a hybrid's C++ property follows the field rule through
-				// its accessors (internal/reference_model.md CPP-MEMBER / PROPERTY). KEEP BYTE-PARALLEL
+				// [=] snapshots it; a member of the instance is reached through the captured instance. KEEP BYTE-PARALLEL
 				// with the interpreter's visit_lambda_expr default-capture loop.
 				script_value* slot_val = nullptr;
 				detail::member_scope_ctx scope;
@@ -14049,27 +14048,19 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 					return raise_from(*src.access_error);
 				}
 				if (src.global) { continue; }   // a global resolves when the lambda runs (KEEP BYTE-PARALLEL with the interpreter)
-				if (!captures_this && detail::default_capture_takes_instance(src, scope)) {
-					captureEnv->define(this_id_, script_value(scope.this_storage->deref()));
-					captures_this = true;
+				if (detail::default_capture_takes_instance(src, scope)) {
+					if (!captures_this) {
+						captureEnv->define(this_id_, script_value(scope.this_storage->deref()));
+						captures_this = true;
+					}
 					continue;
 				}
 				if (src.cell) {
-					if (capture_by_ref_default) {
+					if (detail::default_capture_shares(src, capture_by_ref_default)) {
 						captureEnv->define(var_id, share_env_ref(*src.cell));
 					} else {
 						captureEnv->define(var_id, detail::clone_for_capture(src.cell->deref()));
 					}
-				} else if (src.what == detail::capture_source::kind::cpp_property) {
-					auto read = capture_by_ref_default
-						? detail::bind_cpp_property_ref(*f.locals->scope_this, var_id, engine_, symbolizer_)
-						: detail::read_bare_cpp_property(*f.locals->scope_this, src.property.instance,
-						                                 src.property.method_value, src.property.getter_id, var_id);
-					if (!read) {
-						return raise_from(read);
-					}
-					captureEnv->define(var_id, capture_by_ref_default ? std::move(read.value())
-					                                                  : detail::clone_for_capture(read.value()));
 				}
 			}
 		}

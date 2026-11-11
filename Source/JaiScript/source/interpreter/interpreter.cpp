@@ -5114,8 +5114,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     // the outer frame's slot, the member scope, then the env chain - a
                     // same-named global never wins over a local or a field. [&] cell-shares
                     // the source (escape-legal: the cell outlives the frame), [=] snapshots
-                    // it; a hybrid's C++ property follows the field rule through its
-                    // accessors (internal/reference_model.md CPP-MEMBER / PROPERTY).
+                    // it; a member of the instance is reached through the captured instance.
                     script_value* slot_val = nullptr;
                     if (!call_stack_.empty()) {
                         for (const auto& ref : outer_slot_refs) {
@@ -5130,27 +5129,19 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                         return *src.access_error;
                     }
                     if (src.global) { continue; }   // a global resolves when the lambda runs (KEEP BYTE-PARALLEL with vm exec_closure)
-                    if (!captures_this && detail::default_capture_takes_instance(src, member_scope_)) {
-                        captureEnv->define(this_id, script_value(member_scope_.this_storage->deref()));
-                        captures_this = true;
+                    if (detail::default_capture_takes_instance(src, member_scope_)) {
+                        if (!captures_this) {
+                            captureEnv->define(this_id, script_value(member_scope_.this_storage->deref()));
+                            captures_this = true;
+                        }
                         continue;
                     }
                     if (src.cell) {
-                        if (capture_by_ref) {
+                        if (detail::default_capture_shares(src, capture_by_ref)) {
                             captureEnv->define(var_id, share_boxed_slot(*src.cell));
                         } else {
                             captureEnv->define(var_id, detail::clone_for_capture(src.cell->deref()));
                         }
-                    } else if (src.what == detail::capture_source::kind::cpp_property) {
-                        auto read = capture_by_ref
-                            ? detail::bind_cpp_property_ref(*member_scope_.this_storage, var_id, engine_, string_symbolizer_)
-                            : detail::read_bare_cpp_property(*member_scope_.this_storage, src.property.instance,
-                                                             src.property.method_value, src.property.getter_id, var_id);
-                        if (!read) {
-                            return read.error_value();
-                        }
-                        captureEnv->define(var_id, capture_by_ref ? std::move(read.value())
-                                                                  : detail::clone_for_capture(read.value()));
                     }
                 }
             }

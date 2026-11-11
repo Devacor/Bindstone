@@ -111,6 +111,12 @@ print(loaded.hero.name, " ", loaded.hero.gold, " ", loaded.hero.bag[0], " ", loa
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ada 120 lantern true</code></pre></div>
 <p>A field added to the class after a save loads with its initializer. A field like <code>version</code> lets a loader convert older files explicitly.</p>
 <h2 id="c-side-the-convenience-api">C++ side: the convenience API<a class="hlink" href="#c-side-the-convenience-api" aria-label="link">&#8203;</a></h2>
+<h3 id="four-ways">Four ways a class serializes<a class="hlink" href="#four-ways" aria-label="link">&#8203;</a></h3>
+<div class="tablewrap"><table><thead><tr><th></th><th>In the class (intrusive)</th><th>Beside the class (non-intrusive)</th></tr></thead><tbody>
+<tr><td>One declaration, also scripted</td><td><code>property_owner</code> + <code>JAI_PROPERTY</code> (<a href="02-dynamic-binder.html#serialized">dynamic_binder</a>)</td><td>the binding&#x27;s <code>.property</code> list (<a href="#binding-records">a class you cannot edit</a>)</td></tr>
+<tr><td>Hand-written</td><td>a member <code>serialize</code>, or <code>save</code> and <code>load</code> (the sample below)</td><td>a free <code>serialize</code>, or <code>save</code> and <code>load</code>, found by ADL</td></tr>
+</tbody></table></div>
+<p>A class&#x27;s own functions and <code>property_owner</code> win over its binding; <a href="#dispatch-priority-cereal-style-provide-either-serialize-or-save-load">Dispatch priority</a> has the full order.</p>
 <div class="codeblock cb-cpp" data-sample="serialization-savegame"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/serialization/convenience.hpp&gt;
 
 struct SaveGame {

@@ -307,7 +307,7 @@ std::cout &lt;&lt; json &lt;&lt; &quot;\n&quot;;
 std::cout &lt;&lt; back-&gt;name &lt;&lt; &quot; has &quot; &lt;&lt; std::dynamic_pointer_cast&lt;Archer&gt;(back)-&gt;arrows &lt;&lt; &quot; arrows\n&quot;;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;value0&quot;: {&quot;$id&quot;: 1,&quot;$type&quot;: &quot;Archer&quot;,&quot;$val&quot;: {&quot;name&quot;: &quot;robin&quot;,&quot;arrows&quot;: 12}}}
 robin has 12 arrows</code></pre></div>
-<p>The record, its loads and the property a binding keeps out of it: <a href="08-serialization.html#binding-records">a class you cannot edit</a>. <a href="08-serialization.html">Serialization</a> covers versioning, hooks, <code>$ref</code> aliasing and custom archives.</p>
+<p>The record, its loads and the property a binding keeps out of it: <a href="08-serialization.html#binding-records">a class you cannot edit</a>. <a href="08-serialization.html#four-ways">Four ways a class serializes</a> sets the intrusive and non-intrusive routes side by side, and <a href="08-serialization.html">Serialization</a> covers versioning, hooks, <code>$ref</code> aliasing and custom archives.</p>
 
 <h2 id="hot-reload-with-state-intact">Hot reload with state intact<a class="hlink" href="#hot-reload-with-state-intact" aria-label="link">&#8203;</a></h2>
 <p>A script class can derive a bound C++ class with no extra registration; <code>super(...)</code> calls the bound constructor. The C++ half of such an object is the same live object across reloads:</p>

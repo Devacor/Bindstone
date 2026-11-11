@@ -61,6 +61,20 @@ struct Routed {
 	template<class Archive> void serialize(Archive& a_archive) { a_archive("routed", value); }
 };
 
+// a free serialize, or a free save and load pair, beside a class the tests cannot edit also wins
+struct FreeRouted {
+	int value = 1;
+};
+
+template<class Archive> void serialize(Archive& a_archive, FreeRouted& a_routed) { a_archive("free", a_routed.value); }
+
+struct FreeSaved {
+	int value = 1;
+};
+
+template<class Archive> void save(Archive& a_archive, const FreeSaved& a_saved) { a_archive("saved", a_saved.value); }
+template<class Archive> void load(Archive& a_archive, FreeSaved& a_saved) { a_archive("saved", a_saved.value); }
+
 struct Unbound {
 	int value = 1;
 };
@@ -111,6 +125,8 @@ public:
 		dynamic_binder<Square>(a_engine, "Square").base_class<Shape>().property("edge", &Square::edge).build();
 		dynamic_binder<Circle>(a_engine, "Circle").base_class<Shape>().property("radius", &Circle::radius).build();
 		dynamic_binder<Routed>(a_engine, "Routed").property("value", &Routed::value).build();
+		dynamic_binder<FreeRouted>(a_engine, "FreeRouted").property("value", &FreeRouted::value).build();
+		dynamic_binder<FreeSaved>(a_engine, "FreeSaved").property("value", &FreeSaved::value).build();
 		dynamic_binder<Healed>(a_engine, "Healed").property("hp", &Healed::hp).transient_property("doubled", &Healed::doubled)
 			.post_load_hook([](Healed& a_self) { a_self.doubled = a_self.hp * 2; }).build();
 		dynamic_binder<Registered>(a_engine, "BindingRecordBase").property("level", &Registered::level).build();
@@ -231,6 +247,10 @@ public:
 			auto eng = make_engine();
 			bind_all(*eng);
 			check_eq(std::string("{\"routed\": 1}"), to_json(*eng, Routed{}, 0));
+			check_eq(std::string("{\"free\": 1}"), to_json(*eng, FreeRouted{}, 0));
+			check_eq(7, from_json<FreeRouted>(*eng, "{\"free\": 7}").value);
+			check_eq(std::string("{\"saved\": 1}"), to_json(*eng, FreeSaved{}, 0));
+			check_eq(8, from_json<FreeSaved>(*eng, "{\"saved\": 8}").value);
 			const std::string unwritable = failure([&]() { to_json(*eng, Unbound{}); });
 			check(unwritable.find("Unbound' is not serializable. Add save/load, serialize, property_owner, or ADL functions, bind it in the archive's engine") != std::string::npos,
 				unwritable);

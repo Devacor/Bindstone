@@ -121,6 +121,8 @@ EMBEDDING = [
      "jai_spider serves a JaiScript program over HTTP/1.1: the handler the app hands to spider::spin, Request and a Router in script, spider::Response shared with the spider:: client, SQLite bound as a class, cookie sessions, static files, and modules that reload on the request after they are saved."),
     ("20-foundry.html", "Foundry: Testing a Host",
      "Foundry is the test framework JaiScript's own suite is written in, one header and one runner source file: suites, checks, the runner's flags, and a test executable for a project of your own."),
+    ("21-visual-studio.html", "Visual Studio, Step by Step",
+     "From a fresh Windows install to a C++ program that runs a script: install Visual Studio's C++ workload, then add JaiScript to a Console App project or open a CMake folder, with the errors a missed step gives and their fixes."),
 ]
 
 LANGUAGE_BRIDGES = [

@@ -52,6 +52,31 @@ int main() {
 // [/sample]
 }
 
+// [sample vs-first-main]
+#include <jaiscript/core/engine.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
+#include <iostream>
+// [/sample]
+
+namespace doc_vs_first_main {
+// [sample vs-first-main]
+int main() {
+    auto eng = jai::engine::make();
+    jai::stdlib::register_all(eng);     // print, strings, JSON, time and more
+
+    std::cout << "2 + 2 = " << eng->execute<int>("2 + 2") << "\n";
+    eng->execute(R"(print("hello from {}", "JaiScript");)");
+
+    try {
+        eng->execute(R"(int x = "not a number";)");
+    } catch (const std::exception& e) {
+        std::cout << "caught: " << e.what() << "\n";
+    }
+    return 0;
+}
+// [/sample]
+}
+
 namespace doc_quickstart_bind {
 // [sample quickstart-bind]
 struct Player {
@@ -619,6 +644,10 @@ public:
 	void forge_tests() override {
 		test("quickstart_run", [this]() {
 			expect_cpp("embedding/01-embedding-quickstart.html", "quickstart-run", [] { doc_quickstart_run::main(); });
+		});
+
+		test("vs_first_main", [this]() {
+			expect_cpp("embedding/21-visual-studio.html", "vs-first-main", [] { doc_vs_first_main::main(); });
 		});
 
 		test("quickstart_bind", [this]() {

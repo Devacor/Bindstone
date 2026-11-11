@@ -246,6 +246,18 @@ public:
 // [/sample]
 }
 
+namespace doc_binder_archer {
+// [sample binder-binding-record]
+struct Actor {
+    virtual ~Actor() = default;
+    std::string name;
+};
+struct Archer : Actor {
+    int arrows = 12;
+};
+// [/sample]
+}
+
 namespace doc_signals {
 // [sample signals-door]
 class Door {
@@ -317,6 +329,14 @@ struct SaveGame {
         ar("hero", hero);
         ar("inventory", inventory);
     }
+};
+// [/sample]
+// [sample serialization-binding-record]
+// a third-party header: no serialize, save, load or property_owner
+struct Enemy {
+    std::string name = "rat";
+    int hp = 10;
+    std::vector<std::string> loot;
 };
 // [/sample]
 // [sample serialization-link]
@@ -874,6 +894,25 @@ public:
 			expect_script(page, "binder-connect", eng);
 		});
 
+		test("binder_binding_record", [this]() {
+			using doc_binder_archer::Actor;
+			using doc_binder_archer::Archer;
+			auto eng = make_engine();
+			cpp_sample block(*this, "embedding/02-dynamic-binder.html", "binder-binding-record");
+			// [sample binder-binding-record]
+			jai::dynamic_binder<Actor>(*eng, "Actor").property("name", &Actor::name);
+			jai::dynamic_binder<Archer>(*eng, "Archer").base_class<Actor>().property("arrows", &Archer::arrows);
+
+			std::shared_ptr<Actor> hero = std::make_shared<Archer>();
+			hero->name = "robin";
+			std::string json = jai::to_json(*eng, hero, 0);
+			auto back = jai::from_json<std::shared_ptr<Actor>>(*eng, json);
+			std::cout << json << "\n";
+			std::cout << back->name << " has " << std::dynamic_pointer_cast<Archer>(back)->arrows << " arrows\n";
+			// [/sample]
+			block.finish();
+		});
+
 		test("binder_vec2", [this]() {
 			using doc_binder_vec2::Vec2;
 			auto eng = make_engine();
@@ -1228,6 +1267,21 @@ public:
 			std::cout << jai::to_json(*eng, link, 0) << "\n";
 			// [/sample]
 			link_block.finish();
+			using doc_serialization::Enemy;
+			cpp_sample enemy_block(*this, page, "serialization-binding-record");
+			// [sample serialization-binding-record]
+			jai::dynamic_binder<Enemy>(*eng, "Enemy")
+			    .property("name", &Enemy::name)
+			    .property("hp", &Enemy::hp)
+			    .property("loot", &Enemy::loot);
+
+			Enemy boss{"troll", 40, {"club", "tooth"}};
+			std::string record = jai::to_json(*eng, boss, 0);
+			Enemy back = jai::from_json<Enemy>(*eng, record);
+			std::cout << record << "\n";
+			std::cout << "loaded: " << back.name << " hp=" << back.hp << " loot=" << back.loot.size() << "\n";
+			// [/sample]
+			enemy_block.finish();
 		});
 
 		test("coroutine_driving", [this]() {

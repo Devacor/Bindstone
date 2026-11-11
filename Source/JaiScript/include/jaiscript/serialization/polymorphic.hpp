@@ -52,6 +52,9 @@ public:
         load_into_fn_t load_into_fn = nullptr;
         std::type_index type = std::type_index(typeid(void));
         bool implicit = false; //registered via property_owner's derived name; any explicit registration wins
+        // A binding record's entry: each engine names it as its binding does (bound_type_name, binding_entry_named), so the
+        // registry keeps no name for it
+        bool named_by_binding = false;
     };
 
     static polymorphic_registry& instance();
@@ -61,6 +64,9 @@ public:
     // Static-init order between the two is unspecified, so both orders must converge:
     // implicit-after-explicit no-ops; explicit-after-implicit replaces.
     void register_entry(std::type_index ti, type_entry entry, bool a_implicit = false);
+
+    // A binding record's entry, by its type alone; never over another entry
+    void register_binding_entry(std::type_index ti, type_entry entry);
 
     const type_entry* find(std::type_index ti) const;
 
@@ -133,6 +139,19 @@ public:
             if constexpr (!ladderName.empty()) {
                 register_implicit_entry<T>(std::string(ladderName));
             }
+        }
+    }
+
+    // A class whose binding is its archive route (binding_record_v) takes its identity from its binding in the archive's
+    // engine, as a property_owner takes its own from its declaration: never over another registration
+    template<typename T>
+    static void try_auto_register_binding() {
+        if constexpr (std::is_polymorphic_v<T>) {
+            type_entry entry;
+            entry.save_fn = make_save_fn<T>();
+            entry.load_fn = make_load_fn<T>();
+            entry.load_into_fn = make_load_into_fn<T>();
+            instance().register_binding_entry(std::type_index(typeid(T)), std::move(entry));
         }
     }
 
@@ -242,7 +261,7 @@ private:
     template<typename T>
     static constexpr bool loads_in_place = has_member_load_in_place<T>::value || has_simple_member_load_in_place<T>::value ||
         has_member_serialize_in_place<T>::value || has_simple_member_serialize_in_place<T>::value ||
-        has_free_load_in_place<T>::value || has_free_serialize_in_place<T>::value;
+        has_free_load_in_place<T>::value || has_free_serialize_in_place<T>::value || binding_record_v<T>;
 
     template<typename T>
     static load_into_fn_t make_load_into_fn() {

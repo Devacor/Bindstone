@@ -438,4 +438,75 @@ using serialization_traits::property_element_t;
 
 } // namespace jai
 
+namespace jai {
+
+class script_value;
+
+namespace serialization {
+
+// ADL-findable free-function detection. Must live at namespace scope: inside the
+// archive classes, unqualified save/load/serialize would bind to the archives' own
+// member functions at template-definition time on conforming compilers.
+namespace adl_detect {
+	template<typename Archive, typename T, typename = void>
+	struct has_adl_save : std::false_type {};
+	template<typename Archive, typename T>
+	struct has_adl_save<Archive, T, std::void_t<decltype(save(std::declval<Archive&>(), std::declval<const T&>()))>> : std::true_type {};
+
+	template<typename Archive, typename T, typename = void>
+	struct has_adl_load : std::false_type {};
+	template<typename Archive, typename T>
+	struct has_adl_load<Archive, T, std::void_t<decltype(load(std::declval<Archive&>(), std::declval<T&>()))>> : std::true_type {};
+
+	template<typename Archive, typename T, typename = void>
+	struct has_adl_serialize : std::false_type {};
+	template<typename Archive, typename T>
+	struct has_adl_serialize<Archive, T, std::void_t<decltype(serialize(std::declval<Archive&>(), std::declval<T&>()))>> : std::true_type {};
+
+	// inside an archive class the member serialize(name, value) hides the free function from ADL
+	template<typename Archive, typename T>
+	void call_adl_serialize(Archive& archive, T& value) { serialize(archive, value); }
+
+	// the shapes an archive writes itself, ahead of any free function
+	template<typename T>
+	inline constexpr bool is_archive_shape_v =
+		std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string> ||
+		serialization_traits::is_std_shared_ptr_v<T> || serialization_traits::is_std_weak_ptr_v<T> || serialization_traits::is_std_unique_ptr_v<T> ||
+		serialization_traits::is_std_pair_v<T> || serialization_traits::is_std_optional_v<T> || serialization_traits::is_std_variant_v<T> ||
+		serialization_traits::is_std_tuple_v<T> || serialization_traits::is_std_array_v<T> || serialization_traits::is_map_like_v<T> ||
+		serialization_traits::is_set_like_v<T> || serialization_traits::is_sequence_container_v<T> || serialization_traits::is_jai_property_v<T>;
+}
+
+
+// Stands for every archive where a trait asks whether a class has a route of its own
+struct route_probe_archive {
+	static constexpr bool is_jai_archive = true;
+	static constexpr bool is_text_format = false;
+	template<typename... Args> void operator()(Args&&...) {}
+	template<typename... Args> void serialize(Args&&...) {}
+};
+
+template<typename T>
+inline constexpr bool has_member_route_v =
+	requires(route_probe_archive& a, const T& t) { ::jai::access::member_save(a, t); } ||
+	requires(route_probe_archive& a, const T& t) { ::jai::access::member_save(a, t, std::uint32_t(0)); } ||
+	requires(route_probe_archive& a, T& t) { ::jai::access::member_load(a, t); } ||
+	requires(route_probe_archive& a, T& t) { ::jai::access::member_load(a, t, std::uint32_t(0)); } ||
+	requires(route_probe_archive& a, T& t) { ::jai::access::member_serialize(a, t); } ||
+	requires(route_probe_archive& a, T& t) { ::jai::access::member_serialize(a, t, std::uint32_t(0)); };
+
+// A class the archives write and read as the properties its engine binding declares (dynamic_binder::property): it has no
+// route of its own, and no serialization member jai::access cannot reach (a forgotten friend stays a compile error)
+template<typename T>
+inline constexpr bool binding_record_v = std::is_class_v<T> && !adl_detect::is_archive_shape_v<T> && !std::is_same_v<T, script_value> &&
+	!serialization_traits::is_property_owner_v<T> && !has_member_route_v<T> &&
+	!adl_detect::has_adl_serialize<route_probe_archive, T>::value && !adl_detect::has_adl_save<route_probe_archive, T>::value &&
+	!adl_detect::has_adl_load<route_probe_archive, T>::value &&
+	serialization_traits::serialize_member_verdict_v<T> != serialization_traits::member_name_verdict::unreachable &&
+	serialization_traits::save_member_verdict_v<T> != serialization_traits::member_name_verdict::unreachable &&
+	serialization_traits::load_member_verdict_v<T> != serialization_traits::member_name_verdict::unreachable;
+
+} // namespace serialization
+} // namespace jai
+
 #endif // JAISCRIPT_SERIALIZATION_TRAITS_HPP

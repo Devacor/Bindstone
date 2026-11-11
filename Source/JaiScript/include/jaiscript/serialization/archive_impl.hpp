@@ -83,6 +83,15 @@ namespace serialization {
 [[noreturn]] void throw_not_serializable(const char* type_name);
 [[noreturn]] void throw_not_deserializable(const char* type_name);
 
+// A binding record (binding_record_v) through the binding of its type in eng, into or out of the object already open. A base
+// level the engine does not bind holds nothing; any other type it does not bind throws.
+void write_binding_record(any_archive_writer& ar, engine* eng, std::type_index type, const void* object, bool base_level = false);
+void read_binding_record(any_archive_reader& ar, engine* eng, std::type_index type, void* object, bool base_level = false);
+// A polymorphic binding record's $type: its binding's name in eng, empty where eng does not bind it
+std::string bound_type_name(engine* eng, std::type_index type);
+// The registry entry of the binding record eng binds under name, or null
+const polymorphic_registry::type_entry* binding_entry_named(engine* eng, const std::string& name);
+
 #define JAI_DETAIL_SERIALIZATION_ROUTES \
     "give the type a member serialize(Archive&), or save(Archive&) and load(Archive&) (non-public ones with 'friend jai::access;'), " \
     "a free serialize, save or load the archive finds by argument-dependent lookup, or JAI_PROPERTY members of a jai::property_owner"
@@ -189,39 +198,6 @@ inline void enter_host_record(size_t open_records) {
     if (jai::detail::native_stack_low()) [[unlikely]] { throw_host_record_stack(); }
 }
 
-// ADL-findable free-function detection. Must live at namespace scope: inside the
-// archive classes, unqualified save/load/serialize would bind to the archives' own
-// member functions at template-definition time on conforming compilers.
-namespace adl_detect {
-	template<typename Archive, typename T, typename = void>
-	struct has_adl_save : std::false_type {};
-	template<typename Archive, typename T>
-	struct has_adl_save<Archive, T, std::void_t<decltype(save(std::declval<Archive&>(), std::declval<const T&>()))>> : std::true_type {};
-
-	template<typename Archive, typename T, typename = void>
-	struct has_adl_load : std::false_type {};
-	template<typename Archive, typename T>
-	struct has_adl_load<Archive, T, std::void_t<decltype(load(std::declval<Archive&>(), std::declval<T&>()))>> : std::true_type {};
-
-	template<typename Archive, typename T, typename = void>
-	struct has_adl_serialize : std::false_type {};
-	template<typename Archive, typename T>
-	struct has_adl_serialize<Archive, T, std::void_t<decltype(serialize(std::declval<Archive&>(), std::declval<T&>()))>> : std::true_type {};
-
-	// inside an archive class the member serialize(name, value) hides the free function from ADL
-	template<typename Archive, typename T>
-	void call_adl_serialize(Archive& archive, T& value) { serialize(archive, value); }
-
-	// the shapes an archive writes itself, ahead of any free function
-	template<typename T>
-	inline constexpr bool is_archive_shape_v =
-		std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string> ||
-		serialization_traits::is_std_shared_ptr_v<T> || serialization_traits::is_std_weak_ptr_v<T> || serialization_traits::is_std_unique_ptr_v<T> ||
-		serialization_traits::is_std_pair_v<T> || serialization_traits::is_std_optional_v<T> || serialization_traits::is_std_variant_v<T> ||
-		serialization_traits::is_std_tuple_v<T> || serialization_traits::is_std_array_v<T> || serialization_traits::is_map_like_v<T> ||
-		serialization_traits::is_set_like_v<T> || serialization_traits::is_sequence_container_v<T> || serialization_traits::is_jai_property_v<T>;
-}
-
 // A type an archive writes or reads through its free serialize, save or load: a record of named values, as a type with the
 // member forms is
 template<typename Archive, typename T>
@@ -255,6 +231,10 @@ protected:
 
     // The id of raw_ptr, and whether this call assigned it (its first sighting); 0 for null
     std::pair<uint32_t, bool> track_shared_ptr(const void* raw_ptr);
+    // A script handle's id: a C++ object's every handle shares its object's, as its C++ shared_ptrs do
+    std::pair<uint32_t, bool> track_handle(const script_value::object_holder* holder);
+    // The bound class of an object value that is a C++ object and no instance (a registered class member bound by reference)
+    std::shared_ptr<class_definition> bound_class_of(const script_value& value) const;
 
     engine* engine_ref_;
     // Hashed on std::type_index: libstdc++'s type_info::before is not a strict weak order between internal-linkage and other types.
@@ -468,6 +448,11 @@ public:
     template<typename T>
     static constexpr bool writes_member_record_v = has_save_method<T>::value || has_serialize_method<T>::value || has_property_mgr<T>::value;
 
+    // A record the archive writes as its type's binding declares, where the caller opened an object
+    template<typename T>
+    static constexpr bool writes_binding_record_v = binding_record_v<T> && !writes_member_record_v<T> &&
+        !has_adl_serialize<T>::value && !has_adl_save<T>::value;
+
     // operator() for types with member save method
     // Prefers versioned save(Archive&, uint32_t), falls back to simple save(Archive&)
     // Context-aware: wraps in begin_object/end_object when called from array/root context
@@ -534,6 +519,21 @@ public:
         }
     }
 
+    template<typename T, std::enable_if_t<writes_binding_record_v<T>, int> = 0>
+    void operator()(const T& obj) {
+        bool wrap = needs_object_wrapper();
+        if (wrap) {
+            self()->begin_object();
+            push_context(SerializationContext::ObjectBody);
+        }
+        any_archive_writer type_erased(*self());
+        write_binding_record(type_erased, engine_ref_, std::type_index(typeid(T)), &obj);
+        if (wrap) {
+            pop_context();
+            self()->end_object();
+        }
+    }
+
     template<typename T>
     std::enable_if_t<std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string>>
     operator()(const T& value) {
@@ -544,6 +544,7 @@ public:
         !has_save_method<T>::value &&
         !has_serialize_method<T>::value &&
         !has_property_mgr<T>::value &&
+        !writes_binding_record_v<T> &&
         !std::is_arithmetic_v<T> &&
         !std::is_enum_v<T> &&
         !std::is_same_v<T, std::string>, int> = 0>
@@ -762,7 +763,7 @@ public:
         if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string>) {
             write_primitive(value);
         }
-        else if constexpr (writes_member_record_v<T>) {
+        else if constexpr (writes_member_record_v<T> || writes_binding_record_v<T>) {
             (*self())(value);
         }
         else {
@@ -863,6 +864,9 @@ private:
                 // script class name, $script its script-level fields, $val the C++ payload
                 // through the dynamic C++ type's registered save (base bytes unchanged).
                 auto* entry = polymorphic_registry::instance().find(std::type_index(actual_type));
+                if (entry && entry->named_by_binding && bound_type_name(engine_ref_, std::type_index(actual_type)).empty()) {
+                    entry = nullptr;
+                }
                 if (!entry || !entry->save_fn) {
                     throw serialization_error(std::string("Cannot serialize hybrid script class '") + hybrid_type +
                         "': its C++ base '" + actual_type.name() +
@@ -875,8 +879,10 @@ private:
             }
             if (actual_type != typeid(elem_type)) {
                 auto* entry = polymorphic_registry::instance().find(std::type_index(actual_type));
-                if (entry && entry->save_fn) {
-                    self()->serialize("$type", entry->name);
+                const std::string type_name = entry && entry->named_by_binding ? bound_type_name(engine_ref_, std::type_index(actual_type)) :
+                                              entry ? entry->name : std::string();
+                if (entry && entry->save_fn && !type_name.empty()) {
+                    self()->serialize("$type", type_name);
                     write_registered_payload(*entry, complete);
                     return;
                 }
@@ -1113,6 +1119,10 @@ public:
     template<typename T>
     static constexpr bool reads_member_record_v = has_load_method<T>::value || has_serialize_method<T>::value || has_property_mgr<T>::value;
 
+    template<typename T>
+    static constexpr bool reads_binding_record_v = binding_record_v<T> && !reads_member_record_v<T> &&
+        !has_adl_serialize<T>::value && !has_adl_load<T>::value;
+
 private:
     // Helper to load variant alternatives by index
     template<bool Deferred, typename Variant, std::size_t I = 0>
@@ -1176,6 +1186,14 @@ public:
         scope.done();
     }
 
+    template<typename T, std::enable_if_t<reads_binding_record_v<T>, int> = 0>
+    void operator()(T& obj) {
+        read_scope scope(this);
+        any_archive_reader type_erased(*self());
+        read_binding_record(type_erased, engine_ref_, std::type_index(typeid(T)), &obj);
+        scope.done();
+    }
+
     template<typename T>
     std::enable_if_t<std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string>>
     operator()(T& value) {
@@ -1186,6 +1204,7 @@ public:
         !has_load_method<T>::value &&
         !has_serialize_method<T>::value &&
         !has_property_mgr<T>::value &&
+        !reads_binding_record_v<T> &&
         !std::is_arithmetic_v<T> &&
         !std::is_enum_v<T> &&
         !std::is_same_v<T, std::string>, int> = 0>
@@ -1196,7 +1215,8 @@ public:
     // operator()'s dispatch; Deferred as archive_writer_impl::write_unrouted takes it
     template<bool Deferred, typename T>
     void read_value(T& value) {
-        if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string> || reads_member_record_v<T>) {
+        if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string> || reads_member_record_v<T> ||
+                      reads_binding_record_v<T>) {
             (*self())(value);
         } else {
             read_scope scope(this);
@@ -1220,7 +1240,7 @@ public:
     // A record's named values from the object already open, as serialize_object_content writes them
     template<typename T>
     void read_object_content(T& value) {
-        if constexpr (has_load_method<T>::value || has_serialize_method<T>::value || has_property_mgr<T>::value) {
+        if constexpr (reads_member_record_v<T> || reads_binding_record_v<T>) {
             (*self())(value);
         } else {
             read_scope scope(this);
@@ -1443,7 +1463,7 @@ public:
         // since their serialize() will read named properties.
         // DON'T wrap smart pointers - they have their own array format,
         // and their pointed-to object will be wrapped when read_element(*ptr) is called.
-        if constexpr (reads_member_record_v<T>) {
+        if constexpr (reads_member_record_v<T> || reads_binding_record_v<T>) {
             self()->begin_object();
             (*self())(value);
             self()->end_object();
@@ -1500,6 +1520,9 @@ private:
             }
             if (!poly_type.empty()) {
                 auto* entry = polymorphic_registry::instance().find(poly_type);
+                if (!entry) {
+                    entry = binding_entry_named(engine_ref_, poly_type);
+                }
                 std::string hybrid_class;
                 std::string hybrid_base;
                 if (!entry && engine_ref_) {
@@ -1508,6 +1531,9 @@ private:
                     std::string base_name = detail::engine_access::script_layer_base_name(*engine_ref_, poly_type);
                     if (!base_name.empty()) {
                         entry = polymorphic_registry::instance().find(base_name);
+                        if (!entry) {
+                            entry = binding_entry_named(engine_ref_, base_name);
+                        }
                         if (entry) {
                             hybrid_class = poly_type;
                             hybrid_base = base_name;
@@ -1672,6 +1698,13 @@ public:
             no_unreachable_member_to_read<T>();
             self()->begin_object(type_name, version);
             value.load_owned_properties(*self());  // walks the inheritance chain
+            self()->end_object();
+        }
+        else if constexpr (reads_binding_record_v<T>) {
+            std::string type_name;
+            uint32_t version;
+            self()->begin_object(type_name, version);
+            (*self())(value);
             self()->end_object();
         }
         else {

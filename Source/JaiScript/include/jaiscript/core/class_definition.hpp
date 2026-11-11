@@ -1034,6 +1034,11 @@ public:
 
     inline void set_unwrap_function(std::function<script_value(script_value&, engine*)> fn);
 
+    // The value the script archives write in place of an object of this class: a bound C++ vector's elements
+    using archive_form_function = script_value (*)(const script_value& object, const class_definition& cls, engine* eng);
+    void set_archive_form(archive_form_function fn) { archive_form_ = fn; }
+    archive_form_function archive_form() const { return archive_form_; }
+
     const std::string& get_name() const { return name_; }
     // the name's view in the engine's interned table, looked up once (instances and handles name their type by it)
     std::string_view interned_name() const { intern_name_once(); return interned_name_; }
@@ -1431,6 +1436,7 @@ private:
 
     bool is_transparent_wrapper_ = false;
     std::function<script_value(script_value&, engine*)> unwrap_function_;
+    archive_form_function archive_form_ = nullptr;
 
     copy_function copy_function_;
     bool nocopy_ = false;

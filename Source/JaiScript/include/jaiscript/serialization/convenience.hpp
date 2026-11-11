@@ -108,13 +108,15 @@ inline std::string base64_decode(const std::string& input) {
 } // namespace detail
 
 namespace detail {
-// A record writes named values: through its properties, a member save or serialize jai::access reaches, or a free
-// serialize or save
+// A record writes named values: through its properties, a member save or serialize jai::access reaches, a free serialize or
+// save, or its type's binding
 template<typename Archive, typename T>
-constexpr bool writes_record_v = Archive::template writes_member_record_v<T> || serialization::writes_free_record_v<Archive, T>;
+constexpr bool writes_record_v = Archive::template writes_member_record_v<T> || Archive::template writes_binding_record_v<T> ||
+	serialization::writes_free_record_v<Archive, T>;
 
 template<typename Archive, typename T>
-constexpr bool reads_record_v = Archive::template reads_member_record_v<T> || serialization::reads_free_record_v<Archive, T>;
+constexpr bool reads_record_v = Archive::template reads_member_record_v<T> || Archive::template reads_binding_record_v<T> ||
+	serialization::reads_free_record_v<Archive, T>;
 
 // The root object every archive's document is: a record writes its named values into the root; anything else is the
 // root's value0, so an owning pointer goes through the archive's smart-ptr path ($id/$type/$val) and keeps its dynamic

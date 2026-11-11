@@ -287,7 +287,27 @@ again-&gt;spawn_wave();   // receivers persist in binary too</code></pre></div>
 <li><strong>By value or by pointer.</strong> A <code>property_owner</code> copies and moves, so <code>jai::from_json&lt;Spawner&gt;(*eng, jai::to_json(*eng, *gate))</code> returns one by value: its properties sit flat at the root, under its static type. A <code>shared_ptr</code> keeps identity and a derived object&#x27;s <code>$type</code>.</li>
 <li><strong>Across releases.</strong> JSON is the readable form for debugging and diffs, binary the compact one. Fields are found by name, so adding or removing one needs no migration, but neither layout is promised to load across 0.x releases (<a href="../stability.html">Stability</a>).</li>
 </ul>
-<p><a href="08-serialization.html">Serialization</a> covers versioning, hooks, <code>$ref</code> aliasing and custom archives.</p>
+<p>A class that is not a <code>property_owner</code> and has no <code>serialize</code>, <code>save</code> or <code>load</code> serializes through its binder chain: the <code>.property</code> names are its record&#x27;s keys, and <code>.base_class&lt;B&gt;()</code> adds the base&#x27;s properties and the <code>$type</code> a base pointer loads by:</p>
+<div class="codeblock cb-cpp" data-sample="binder-binding-record"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Actor {
+    virtual ~Actor() = default;
+    std::string name;
+};
+struct Archer : Actor {
+    int arrows = 12;
+};
+
+jai::dynamic_binder&lt;Actor&gt;(*eng, &quot;Actor&quot;).property(&quot;name&quot;, &amp;Actor::name);
+jai::dynamic_binder&lt;Archer&gt;(*eng, &quot;Archer&quot;).base_class&lt;Actor&gt;().property(&quot;arrows&quot;, &amp;Archer::arrows);
+
+std::shared_ptr&lt;Actor&gt; hero = std::make_shared&lt;Archer&gt;();
+hero-&gt;name = &quot;robin&quot;;
+std::string json = jai::to_json(*eng, hero, 0);
+auto back = jai::from_json&lt;std::shared_ptr&lt;Actor&gt;&gt;(*eng, json);
+std::cout &lt;&lt; json &lt;&lt; &quot;\n&quot;;
+std::cout &lt;&lt; back-&gt;name &lt;&lt; &quot; has &quot; &lt;&lt; std::dynamic_pointer_cast&lt;Archer&gt;(back)-&gt;arrows &lt;&lt; &quot; arrows\n&quot;;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;value0&quot;: {&quot;$id&quot;: 1,&quot;$type&quot;: &quot;Archer&quot;,&quot;$val&quot;: {&quot;name&quot;: &quot;robin&quot;,&quot;arrows&quot;: 12}}}
+robin has 12 arrows</code></pre></div>
+<p>The record, its loads and the property a binding keeps out of it: <a href="08-serialization.html#binding-records">a class you cannot edit</a>. <a href="08-serialization.html">Serialization</a> covers versioning, hooks, <code>$ref</code> aliasing and custom archives.</p>
 
 <h2 id="hot-reload-with-state-intact">Hot reload with state intact<a class="hlink" href="#hot-reload-with-state-intact" aria-label="link">&#8203;</a></h2>
 <p>A script class can derive a bound C++ class with no extra registration; <code>super(...)</code> calls the bound constructor. The C++ half of such an object is the same live object across reloads:</p>
@@ -360,7 +380,8 @@ dot 11.0</code></pre></div>
 <div class="tablewrap"><table><thead><tr><th>Verb</th><th>What it binds</th></tr></thead><tbody>
 <tr><td><code>.constructor&lt;Args...&gt;()</code></td><td>A constructor overload, resolved by arity and C++ parameter types.</td></tr>
 <tr><td><code>.method(name, &amp;T::fn)</code>, <code>.method(name, lambda)</code></td><td>A member function, or a lambda whose first parameter is <code>T&amp;</code> or <code>const T&amp;</code>.</td></tr>
-<tr><td><code>.property(name, &amp;T::member)</code></td><td>Field access.</td></tr>
+<tr><td><code>.property(name, &amp;T::member)</code></td><td>Field access, and a key of the class&#x27;s archive record when it has no route of its own.</td></tr>
+<tr><td><code>.transient_property(name, &amp;T::member)</code></td><td>Field access its archive record leaves out.</td></tr>
 <tr><td><code>.base_class&lt;Base&gt;()</code></td><td>An inheritance edge.</td></tr>
 <tr><td><code>.build()</code></td><td>Optional: commits the binding at that point and throws what fails. A chain commits when its statement ends, and a binder still in scope when the first script loads is committed then; a failure in either is raised by the next load.</td></tr>
 </tbody></table></div>

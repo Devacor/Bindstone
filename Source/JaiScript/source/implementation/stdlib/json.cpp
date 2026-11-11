@@ -38,6 +38,9 @@ namespace stdlib {
         const std::string& base_name = base.get_name();
         std::shared_ptr<void> object;
         const auto* entry = serialization::polymorphic_registry::instance().find(base_name);
+        if (!entry) {
+            entry = serialization::binding_entry_named(eng, base_name);
+        }
         if (entry && entry->load_fn) {
             script_value host_part = script_value::make_map(detail::engine_access::get_type_info_string(*eng), nullptr, eng);
             auto& host_map = const_cast<script_map&>(host_part.as_map());

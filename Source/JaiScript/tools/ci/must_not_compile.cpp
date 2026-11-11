@@ -8,15 +8,14 @@
 // must_not_compile 4: declares load_and_construct() but jai::access cannot reach it
 // must_not_compile 5: the archive cannot write this type, it has no serialization route
 // must_not_compile 6: the archive cannot read this type, it has no serialization route
-// must_not_compile 7: public member save is not an archive function
-// must_not_compile 8: the archive cannot write this type, it has no serialization route
-// must_not_compile 9: declares serialize() but jai::access cannot reach it
-// must_not_compile 10: declares load_and_construct() but jai::access cannot reach it
-// must_not_compile 11: the archive cannot construct this type on a load
-// must_not_compile 12: declares load_and_construct() but jai::access cannot reach it
-// must_not_compile 13: declares save() but jai::access cannot reach it
-// must_not_compile 14: declares load() but jai::access cannot reach it
-// must_not_compile 15: declares serialize() but jai::access cannot reach it
+// must_not_compile 7: the archive cannot write this type, it has no serialization route
+// must_not_compile 8: declares serialize() but jai::access cannot reach it
+// must_not_compile 9: declares load_and_construct() but jai::access cannot reach it
+// must_not_compile 10: the archive cannot construct this type on a load
+// must_not_compile 11: declares load_and_construct() but jai::access cannot reach it
+// must_not_compile 12: declares save() but jai::access cannot reach it
+// must_not_compile 13: declares load() but jai::access cannot reach it
+// must_not_compile 14: declares serialize() but jai::access cannot reach it
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/properties.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
@@ -97,6 +96,11 @@ struct NoRoute {
 	int capacity = 20;
 };
 
+union NoRouteUnion {
+	int capacity;
+	float ratio;
+};
+
 struct NoWayToConstruct {
 	explicit NoWayToConstruct(int a_capacity) : capacity(a_capacity) {}
 	int capacity;
@@ -111,7 +115,7 @@ struct SavesToAPath {
 };
 
 // a property_owner registers itself where it is defined, so each of these is an error as a declaration
-#if JAI_MUST_NOT_COMPILE == 13 || JAI_MUST_NOT_COMPILE == 14
+#if JAI_MUST_NOT_COMPILE == 12 || JAI_MUST_NOT_COMPILE == 13
 class ForgottenFriendOwner : public jai::property_owner<ForgottenFriendOwner> {
 public:
 	JAI_PROPERTY((int), capacity, 20);
@@ -120,7 +124,7 @@ protected:
 	template<class Archive> void load(Archive& a_archive, std::uint32_t const) { property_mgr.load(a_archive); }
 };
 
-#elif JAI_MUST_NOT_COMPILE == 15
+#elif JAI_MUST_NOT_COMPILE == 14
 class ForgottenFriendLevel : public jai::property_owner<ForgottenFriendLevel> {
 public:
 	JAI_PROPERTY((int), capacity, 20);
@@ -151,41 +155,41 @@ inline std::string exercise(jai::engine& a_engine) {
 	jai::from_json<std::shared_ptr<ForgottenFriendConstruct>>(a_engine, "{}");
 	return {};
 #elif JAI_MUST_NOT_COMPILE == 5
-	return jai::to_json(a_engine, NoRoute{});
+	return jai::to_json(a_engine, NoRouteUnion{});
 #elif JAI_MUST_NOT_COMPILE == 6
-	jai::from_binary<NoRoute>(a_engine, {});
+	jai::from_binary<NoRouteUnion>(a_engine, {});
 	return {};
 #elif JAI_MUST_NOT_COMPILE == 7
-	return jai::to_json(a_engine, SavesToAPath{});
+	return jai::to_json(a_engine, std::map<std::string, std::vector<NoRouteUnion>>{});
 #elif JAI_MUST_NOT_COMPILE == 8
-	return jai::to_json(a_engine, std::map<std::string, std::vector<NoRoute>>{});
-#elif JAI_MUST_NOT_COMPILE == 9
 	jai::serialization::json_archive_writer writer(0, &a_engine);
 	ForgottenFriendSerialize forgotten;
 	writer.begin_object();
 	writer(JAI_NVP(forgotten));
 	writer.end_object();
 	return writer.str();
-#elif JAI_MUST_NOT_COMPILE == 10
+#elif JAI_MUST_NOT_COMPILE == 9
 	static jai::registrar<ForgottenFriendRegistered, void> registered("ForgottenFriendRegistered");
 	return {};
-#elif JAI_MUST_NOT_COMPILE == 11
+#elif JAI_MUST_NOT_COMPILE == 10
 	jai::from_json<std::shared_ptr<NoWayToConstruct>>(a_engine, "{}");
 	return {};
-#elif JAI_MUST_NOT_COMPILE == 12
+#elif JAI_MUST_NOT_COMPILE == 11
 	static jai::registrar<InheritsConstruct, void, jai::bases<ForgottenFriendRegistered>> registered("InheritsConstruct");
 	return {};
-#elif JAI_MUST_NOT_COMPILE == 13
+#elif JAI_MUST_NOT_COMPILE == 12
 	return jai::to_json(a_engine, ForgottenFriendOwner{});
-#elif JAI_MUST_NOT_COMPILE == 14
+#elif JAI_MUST_NOT_COMPILE == 13
 	jai::from_binary<ForgottenFriendOwner>(a_engine, {});
 	return {};
-#elif JAI_MUST_NOT_COMPILE == 15
+#elif JAI_MUST_NOT_COMPILE == 14
 	return jai::to_json(a_engine, std::vector<std::shared_ptr<ForgottenFriendLevel>>{});
 #else
 	static jai::registrar<SavesToAPath, void> boundOnly("SavesToAPath");
 	static jai::registrar<BuiltAtRunTime, void, jai::bases<RegisteredBase>> builtAtRunTime("BuiltAtRunTime");
-	return jai::to_json(a_engine, Owner{});
+	// a class with no route of its own writes and reads as its binding in the archive's engine declares
+	jai::from_binary<NoRoute>(a_engine, jai::to_binary(a_engine, NoRoute{}));
+	return jai::to_json(a_engine, Owner{}) + jai::to_json(a_engine, SavesToAPath{}) + jai::to_json(a_engine, std::map<std::string, std::vector<NoRoute>>{});
 #endif
 }
 

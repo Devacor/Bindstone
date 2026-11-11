@@ -84,9 +84,10 @@ window.</li>
 MyGame\
     MyGame.vcxproj    the project
     MyGame.cpp        main</code></pre></div>
-<figure class="shot shot-pending" id="shot-new-project"><p><strong>Screenshot to come:</strong> the <em>Create a new
-project</em> dialog with <em>Console App</em> (C++, Windows, Console) selected, then its <em>Configure your new
-project</em> page with the name MyGame and the location C:\dev.</p></figure>
+<div class="shots" id="shot-new-project">
+<figure class="shot"><a href="../assets/vs/new-project-select.png"><img src="../assets/vs/new-project-select.png" width="1776" height="1148" loading="lazy" alt="The Create a new project dialog with Console App typed in the search box. Four templates are listed; the one tagged C++, Windows, Console is selected."></a><figcaption>Search for Console App and pick the one tagged C++.</figcaption></figure>
+<figure class="shot"><a href="../assets/vs/new-project-configure.png"><img src="../assets/vs/new-project-configure.png" width="1776" height="1148" loading="lazy" alt="The Configure your new project page for Console App (C++, Windows, Console): project name MyGame, location C:\dev, solution name MyGame, and the line Project will be created in C:\dev\MyGame\MyGame."></a><figcaption>Name the project MyGame and choose where it goes.</figcaption></figure>
+</div>
 <h3 id="get-jaiscript">A2. Put JaiScript beside the solution<a class="hlink" href="#get-jaiscript" aria-label="link">&#8203;</a></h3>
 <p>JaiScript goes in the folder that holds the solution file, in a folder named <code>JaiScript</code>. With Git, in a
 terminal:</p>
@@ -110,8 +111,7 @@ MyGame\
 <li>Pick <code>C:\dev\MyGame\JaiScript\source\jaiscript.cpp</code> and click <strong>Add</strong>.</li>
 </ol>
 <p>That one file is the whole library: it includes every other JaiScript source file, so add none of them.</p>
-<figure class="shot shot-pending" id="shot-solution-explorer"><p><strong>Screenshot to come:</strong> Solution
-Explorer with MyGame expanded and <em>Source Files</em> holding jaiscript.cpp and MyGame.cpp.</p></figure>
+<figure class="shot shot-step" id="shot-solution-explorer"><a href="../assets/vs/solution-explorer.png"><img src="../assets/vs/solution-explorer.png" width="700" height="628" loading="lazy" alt="Solution Explorer showing Solution MyGame with one project, MyGame, expanded: References, External Dependencies, Header Files, Resource Files, and Source Files holding jaiscript.cpp and MyGame.cpp."></a><figcaption><em>Source Files</em> holds jaiscript.cpp beside MyGame.cpp.</figcaption></figure>
 <h3 id="set-the-properties">A4. Set three properties<a class="hlink" href="#set-the-properties" aria-label="link">&#8203;</a></h3>
 <ol>
 <li>Right-click the <strong>MyGame</strong> project and choose <strong>Properties</strong>.</li>
@@ -127,10 +127,11 @@ Explorer with MyGame expanded and <em>Source Files</em> holding jaiscript.cpp an
 <p>Check the language standard even if you do not change it: Visual Studio 2022's Console App starts at Default (ISO
 C++14), which cannot compile JaiScript. Leave everything else as the template set it. JaiScript compiles inside your
 project, so it always gets the same runtime library and defines as your own code.</p>
-<figure class="shot shot-pending" id="shot-properties"><p><strong>Screenshot to come:</strong> MyGame Property Pages
-with Configuration <em>All Configurations</em> and Platform <em>All Platforms</em>: the C/C++ &rarr; Language page
-showing C++ Language Standard set to ISO C++20, and the C/C++ &rarr; General page showing
-<code>$(SolutionDir)JaiScript\include</code>.</p></figure>
+<div class="shots" id="shot-properties">
+<figure class="shot shot-wide"><a href="../assets/vs/properties-include.png"><img src="../assets/vs/properties-include.png" width="1596" height="1087" loading="lazy" alt="MyGame Property Pages with Configuration set to All Configurations and Platform set to All Platforms. The C/C++ General page is selected and Additional Include Directories reads $(SolutionDir)JaiScript\include."></a><figcaption>C/C++ &rarr; General: the include directory.</figcaption></figure>
+<figure class="shot"><a href="../assets/vs/properties-language.png"><img src="../assets/vs/properties-language.png" width="1596" height="1087" loading="lazy" alt="MyGame Property Pages on the C/C++ Language page, with C++ Language Standard set to ISO C++20 Standard (/std:c++20)."></a><figcaption>C/C++ &rarr; Language: the language standard.</figcaption></figure>
+<figure class="shot"><a href="../assets/vs/properties-command-line.png"><img src="../assets/vs/properties-command-line.png" width="1596" height="1087" loading="lazy" alt="MyGame Property Pages on the C/C++ Command Line page, with /bigobj typed in the Additional Options box."></a><figcaption>C/C++ &rarr; Command Line: <code>/bigobj</code> in Additional Options.</figcaption></figure>
+</div>
 <h3 id="write-main">A5. Run a script from main<a class="hlink" href="#write-main" aria-label="link">&#8203;</a></h3>
 <p>Replace everything in <code>MyGame.cpp</code> with:</p>
 <div class="codeblock cb-cpp" data-sample="vs-first-main"><span class="cb-label">C++ &mdash; MyGame.cpp</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/engine.hpp&gt;

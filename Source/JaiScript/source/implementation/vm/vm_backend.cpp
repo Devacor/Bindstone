@@ -14088,6 +14088,12 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 					}
 				}
 			}
+			if (!slot_val && capture.weak_instance && (environment_->contains(this_id_) || environment_->get_value_ptr(this_id_))) {
+				auto instance = environment_->get(this_id_);   // KEEP BYTE-PARALLEL with the interpreter
+				if (!instance) { return raise_from(instance); }
+				captureEnv->define(capture.symbol_id, script_value::make_weak_instance(instance.value(), engine_));
+				continue;
+			}
 			if (!slot_val && capture.symbol_id == this_id_) {
 				// 'this' - the method env provides it via get() even though contains()
 				// might return false

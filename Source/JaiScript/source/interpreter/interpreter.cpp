@@ -5163,6 +5163,12 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     }
                 }
             }
+            if (!slot_val && detail::is_weak_this_capture(capture) && (environment_->contains(this_id) || environment_->get_value_ptr(this_id))) {
+                auto instance = environment_->get(this_id);   // KEEP BYTE-PARALLEL with vm_backend::exec_closure
+                if (!instance) { return instance.error_value(); }
+                captureEnv->define(capture.symbol_id, script_value::make_weak_instance(instance.value(), engine_));
+                continue;
+            }
             if (!slot_val && capture.symbol_id == this_id) {
                 // 'this' - method_environment provides it via get() / get_value_ptr()
                 // even though contains() might return false

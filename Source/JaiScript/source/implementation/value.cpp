@@ -1151,6 +1151,14 @@ script_value script_value::make_invalid(engine* eng) {
     return val;
 }
 
+script_value script_value::make_weak_instance(const script_value& instance, engine* eng) {
+    const script_value& object = instance.deref();
+    script_value v(std::monostate{}, eng);
+    v.set_stamp(detail::engine_access::get_type_info_weak_ptr(*eng, object.get_type_info()));
+    v.storage_ = jai::weaker_ptr<object_holder>(object.get_object_holder());
+    return v;
+}
+
 checked_result<script_value> script_value::make_weak_ptr(const script_value& value, engine* eng) {
     if (!eng) {
         return checked_result<script_value>(

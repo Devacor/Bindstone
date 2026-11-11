@@ -326,6 +326,29 @@ public:
                    "Lambda capture list does not capture enclosing name 'bonus'; name it, or use [this], [=] or [&]", "[] admits no member for a nested lambda");
         });
 
+        test("weak_this_captures_the_instance_without_keeping_it", [expect]() {
+            const std::string cls =
+                "int died = 0;\n"
+                "class Timer {\n"
+                "  int ticks = 0;\n"
+                "  var callback;\n"
+                "  ~Timer() { died += 1; }\n"
+                "  var weak() { return [weak_this]() { if (weak_this.expired()) { return -1; } var self = weak_this.lock(); self.ticks += 1; return self.ticks; }; }\n"
+                "  var weakBesideDefault(int a_step) { return [=, weak_this]() { if (weak_this.expired()) { return -1; } return weak_this.lock().ticks + a_step; }; }\n"
+                "  var insideStrong() { return () => { var inner = [weak_this]() { return weak_this.expired(); }; return inner(); }; }\n"
+                "  var insideWeak() { return [weak_this]() { var inner = [weak_this]() { return weak_this.expired(); }; return inner(); }; }\n"
+                "  void tie() { callback = [weak_this]() { return weak_this.expired(); }; }\n"
+                "}\n";
+            expect(cls + "string r = \"\"; void run() { var f; var g; var n; { Timer t; f = t.weak(); g = t.weakBesideDefault(10); n = t.insideWeak(); "
+                   "r = `${f()}|${g()}|${n()}|${died}`; } r += `|${died}|${f()}|${g()}|${n()}`; } run(); r",
+                   "1|11|false|0|1|-1|-1|true", "the instance dies with its scope; the lambdas find it expired");
+            expect(cls + "string r = \"\"; void run() { var s; { Timer t; s = t.insideStrong(); } r = `${died}|${s()}`; s = null; r += `|${died}`; } run(); r",
+                   "0|false|1", "an enclosing default capture holds the instance a nested [weak_this] is made from");
+            expect(cls + "void run() { Timer t; t.tie(); } run(); to_string(died)", "1", "an instance that holds its own [weak_this] lambda is no cycle");
+            expect("[[warn_mode]];\nstring m = \"\"; try { var f = [weak_this]() { return 1; }; } catch (e) { m = e; } m",
+                   "Cannot capture undefined variable 'weak_this'", "no instance to capture");
+        });
+
         test("mutation_through_ref_capture_visible_in_enclosing_scope_with_global", [expect, with_global, report]() {
             const std::string f = "int f() { int a = 1; auto lam = [&]() { a = a + 100; return 0; }; lam(); return a; }";
             expect(with_global + f + report, "101|5", "the enclosing local sees the write, the global does not");

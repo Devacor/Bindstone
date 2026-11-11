@@ -6,6 +6,7 @@
 #include "ast.hpp"
 #include "string_symbolizer.hpp"
 #include "native_stack.hpp"
+#include <algorithm>
 #include <functional>
 #include <unordered_set>
 #include <vector>
@@ -210,6 +211,11 @@ namespace jai::detail {
 		}
 	};
 
+	// [weak_this]: the lambda's own weak_ptr to the enclosing instance, which it does not keep alive
+	inline bool is_weak_this_capture(const lambda_expr::capture& cap) {
+		return !cap.by_reference && !cap.initializer && cap.name == "weak_this";
+	}
+
 	// The names a lambda's body reads from outside it, in first-use order (this_id for this/super): its own, the names its
 	// nested lambdas capture from outside them (a default capture admits its lambda's free names, a capture list its entries)
 	// and the enclosing locals the parser chained through it. Both backends capture from this one list.
@@ -240,11 +246,13 @@ namespace jai::detail {
 			if (!ident->global_qualified) { note(ident->symbol_id); }
 		};
 		walker.on_instance = [&]() { note(this_id); };
+		const bool holds_weak_this = std::any_of(lambda.captures.begin(), lambda.captures.end(), is_weak_this_capture);
 		walker.on_lambda = [&](const lambda_expr& nested) {
 			std::unordered_set<uint64_t> own;   // an init-capture is the nested lambda's own variable
 			for (const auto& cap : nested.captures) {
 				const uint64_t id = cap.symbol_id != UINT64_MAX ? cap.symbol_id : symbolizer->intern(cap.name);
 				if (cap.initializer) { own.insert(id); } else { note(id); }
+				if (is_weak_this_capture(cap) && !holds_weak_this) { note(this_id); }   // made from this lambda's instance
 			}
 			if (nested.default_capture == lambda_expr::capture_default::none) { return; }
 			for (uint64_t id : free_names_of(nested, symbolizer).names) {

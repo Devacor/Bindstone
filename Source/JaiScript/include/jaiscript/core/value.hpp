@@ -2895,6 +2895,8 @@ namespace detail {
         // Create a weak_ptr from an object (implemented in value.cpp)
         // Returns checked_result to avoid throwing exceptions
         static checked_result<script_value> make_weak_ptr(const script_value& obj, engine* eng);
+        // A weak_ptr to an instance itself, value or handle (a lambda's weak_this)
+        static script_value make_weak_instance(const script_value& instance, engine* eng);
         
         // Set type info for special cases (like weak_ptr creation)
         JAI_FORCEINLINE void set_type_info(type_info_ptr type) {

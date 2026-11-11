@@ -14,6 +14,7 @@
 #include <jaiscript/detail/inline_variable.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/native_stack.hpp>
+#include <jaiscript/detail/body_walker.hpp>
 #include <jaiscript/detail/method_value.hpp>
 #include <jaiscript/detail/construction.hpp>
 #include <jaiscript/detail/map_entry_binding.hpp>
@@ -8547,6 +8548,7 @@ private:
             if (cap.initializer) { infer(cap.initializer.get()); continue; }   // an init-capture: its expression, in the enclosing scope
             if (cap.name == "this") { continue; }   // capture-list entries are not identifier uses
             if (find_local(cap.name)) { continue; }
+            if (class_ctx_ && detail::is_weak_this_capture(cap)) { continue; }
             if (class_ctx_) {
                 member_hit hit = lookup_member(class_ctx_name_, cap.name, false);
                 if (hit.found || hit.unresolved) { continue; }
@@ -8575,8 +8577,8 @@ private:
         define_params(l->parameters, l->location);
         for (const auto& cap : l->captures) {
             if (!cap.initializer) {   // a named capture is the lambda's own copy of the variable, typed as it
-                if (var_entry* original = find_local(cap.name)) { scopes_.back().emplace(cap.name, *original); }
-                continue;
+                if (var_entry* original = find_local(cap.name)) { scopes_.back().emplace(cap.name, *original); continue; }
+                if (!class_ctx_ || !detail::is_weak_this_capture(cap)) { continue; }
             }
             var_entry entry;
             entry.dynamic = true;   // the lambda's own copy, typed by the value it holds

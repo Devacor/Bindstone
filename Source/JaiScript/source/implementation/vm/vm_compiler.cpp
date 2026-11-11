@@ -9517,7 +9517,7 @@ JAI_NOINLINE closure_proto vm_compiler::closure_proto_of(const std::shared_ptr<l
 	};
 	for (const auto& cap : expr->captures) {
 		uint64_t id = cap.symbol_id != UINT64_MAX ? cap.symbol_id : symbolizer_->intern(cap.name);
-		proto.captures.push_back({id, cap.by_reference, prologue_slot(id, cap.outer_slot), cap.initializer != nullptr});
+		proto.captures.push_back({id, cap.by_reference, prologue_slot(id, cap.outer_slot), cap.initializer != nullptr, detail::is_weak_this_capture(cap)});
 		if (id == this_id) proto.captures_this = true;
 	}
 	for (const auto& cap : expr->captures) {

@@ -26,3 +26,4 @@ docs/site/guide/01-hello.html	machine-path	C:\games\save.dat say(	the raw-string
 source/tests/stdlib/string_tests.cpp	machine-path	R"(C:\games\save.dat)"	raw-string test data
 docs/site/guide/19-templates.html	email	ada@example.org	a template sample's placeholder address (example.org is reserved for documentation)
 docs/site/assets/search-text.js	ledger	"ledger"	the search text carries the variable name from the nocopy example in guide/07-classes.html
+docs/site/embedding/21-visual-studio.html	machine-path	C:\dev	the example project location the Visual Studio walkthrough uses

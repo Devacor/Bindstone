@@ -171,51 +171,6 @@ saved edit to the next request.</p>
 </div>
 
 <div class="home-section">
-<h2 id="the-seven-pillars">The seven pillars</h2>
-<div class="pillars">
-  <div class="pillar"><h3><span class="pnum">01</span>The type ladder</h3>
-    <p><code>int x</code> is enforced, <code>auto x</code> inferred then enforced, <code>var x</code> dynamic. The
-    checker is always on: a typed mistake stops the load, before anything runs.</p>
-    <p><a href="guide/02-type-ladder.html">The Type Ladder →</a></p></div>
-  <div class="pillar"><h3><span class="pnum">02</span>Value semantics</h3>
-    <p>Assignment, parameters and returns copy. Your data changes only where a signature says <code>&amp;</code>.</p>
-    <p><a href="guide/03-value-semantics.html">Value Semantics →</a></p></div>
-  <div class="pillar"><h3><span class="pnum">03</span>Two implementations, one spec</h3>
-    <p>An interpreter and a VM agree byte for byte, error text included, held there by 4,700+ tests and a
-    differential fuzzer.</p>
-    <p><a href="embedding/03-backends.html">Backends →</a></p></div>
-  <div class="pillar"><h3><span class="pnum">04</span>Zero global state</h3>
-    <p>Every value carries its engine. Two engines on two threads need no locks, and <code>parallel_for</code> gives
-    the same answer at any worker count.</p>
-    <p><a href="embedding/01-embedding-quickstart.html">Quickstart →</a></p></div>
-  <div class="pillar"><h3><span class="pnum">05</span>Hot reload that never bricks</h3>
-    <p>Live instances migrate and keep their fields. A file that doesn&#x27;t check doesn&#x27;t load, and the old
-    code keeps running.</p>
-    <p><a href="embedding/07-hot-reload.html">Hot Reload →</a></p></div>
-  <div class="pillar"><h3><span class="pnum">06</span>Safe at the boundary</h3>
-    <p>Scripts reach only what the host registered. Overflow checks and an execution budget are on by default; a
-    memory cap is one call.</p>
-    <p><a href="embedding/05-safety-rails.html">Safety Rails →</a></p></div>
-  <div class="pillar"><h3><span class="pnum">07</span>Parse once, run anywhere</h3>
-    <p>A <code>.jaibite</code> ships precompiled and loads into any engine; even <code>execute(str)</code> in a loop
-    parses once.</p>
-    <p><a href="embedding/04-jaibite.html">jaibite →</a></p></div>
-</div>
-</div>
-
-<div class="home-section">
-<h2 id="the-receipts">The receipts</h2>
-<div class="receipts">
-  <div class="receipt"><span class="big">4,700+</span><span class="what">tests green on both backends every commit, plus a <a href="embedding/03-backends.html">differential fuzzer</a></span></div>
-  <div class="receipt"><span class="big">16 bytes</span><span class="what">per <code>script_value</code>, static-assert-gated: four per cache line</span></div>
-  <div class="receipt"><span class="big">5 programs</span><span class="what">in the repository, over 11,000 lines of pure JaiScript: a <a href="examples/index.html#gloom">raycaster</a>, a <a href="examples/index.html#grubwell">crawler</a>, a <a href="examples/index.html#demoreel">demoreel</a>, a 16-player <a href="examples/index.html#gatorquest">RPG</a> and <a href="examples/index.html#jaidoom">DOOM</a></span></div>
-  <div class="receipt"><span class="big">5 languages</span><span class="what">run one raycaster to identical state hashes, so the <a href="embedding/11-performance.html#whole-games-measured">comparison</a> measures runtimes alone</span></div>
-  <div class="receipt"><span class="big">always strict</span><span class="what">line-and-column diagnostics before a statement runs</span></div>
-  <div class="receipt"><span class="big">measured</span><span class="what">hot loops, calls, boot and features on one page: <a href="embedding/11-performance.html">Performance</a></span></div>
-</div>
-</div>
-
-<div class="home-section">
 <h2 id="get-jaiscript">Get JaiScript</h2>
 <p class="section-lead">git, CMake 3.25+ and a C++20 compiler: Visual Studio 2022 or newer with the C++ workload, the Xcode
 command line tools, or GCC 11 / Clang 14.</p>
@@ -288,6 +243,42 @@ options, Debug trees and the Visual Studio Open Folder presets.</p>
 Visual Studio or Xcode project. <a href="embedding/18-build-integration.html">Building JaiScript into a Host</a> covers
 each route. New to Visual Studio? <a href="embedding/21-visual-studio.html">Visual Studio, Step by Step</a> goes
 from a fresh install to a C++ program that runs a script.</p>
+</div>
+
+<div class="home-section">
+<h2 id="pillars">Six pillars</h2>
+<div class="pillars">
+  <div class="pillar"><h3><span class="pnum">01</span>Zero-code binding</h3>
+    <p>One <code>JAI_PROPERTY</code>, or one binder chain for a class you don&#x27;t own, makes a field scripted, saved and reflected.</p>
+    <p><a href="embedding/02-dynamic-binder.html">The Dynamic Binder →</a></p></div>
+  <div class="pillar"><h3><span class="pnum">02</span>Hot reload that keeps the world</h3>
+    <p>Edit a class mid-game and live instances migrate with their fields. An edit that doesn&#x27;t check is rejected, and the old code keeps running.</p>
+    <p><a href="embedding/07-hot-reload.html">Hot Reload →</a></p></div>
+  <div class="pillar"><h3><span class="pnum">03</span>C++ semantics, all the way down</h3>
+    <p>Assignment copies, <code>T&amp;</code> aliases, and a destructor runs when its value dies. Data changes only where a signature says <code>&amp;</code>.</p>
+    <p><a href="guide/03-value-semantics.html">Value Semantics →</a></p></div>
+  <div class="pillar"><h3><span class="pnum">04</span>Typesafe with an escape hatch</h3>
+    <p><code>int</code> is enforced, <code>auto</code> inferred then enforced, <code>var</code> dynamic. The checker reads the whole program before a line runs.</p>
+    <p><a href="guide/02-type-ladder.html">The Type Ladder →</a></p></div>
+  <div class="pillar"><h3><span class="pnum">05</span>Parallel loops that can&#x27;t race</h3>
+    <p><code>parallel_for</code> proves each body touches only its own element, then uses every core and gives the same answer at any worker count.</p>
+    <p><a href="guide/16-parallel.html">Parallel →</a></p></div>
+  <div class="pillar"><h3><span class="pnum">06</span>Safe to embed</h3>
+    <p>No global state, so engines run side by side on threads. Scripts reach only what you bind, under a time budget and an optional memory cap.</p>
+    <p><a href="embedding/05-safety-rails.html">Safety Rails →</a></p></div>
+</div>
+</div>
+
+<div class="home-section">
+<h2 id="the-receipts">The receipts</h2>
+<div class="receipts">
+  <div class="receipt"><span class="big">4,700+</span><span class="what">tests green on both backends every commit, plus a <a href="embedding/03-backends.html">differential fuzzer</a></span></div>
+  <div class="receipt"><span class="big">16 bytes</span><span class="what">per <code>script_value</code>, static-assert-gated: four per cache line</span></div>
+  <div class="receipt"><span class="big">5 programs</span><span class="what">in the repository, over 11,000 lines of pure JaiScript: a <a href="examples/index.html#gloom">raycaster</a>, a <a href="examples/index.html#grubwell">crawler</a>, a <a href="examples/index.html#demoreel">demoreel</a>, a 16-player <a href="examples/index.html#gatorquest">RPG</a> and <a href="examples/index.html#jaidoom">DOOM</a></span></div>
+  <div class="receipt"><span class="big">5 languages</span><span class="what">run one raycaster to identical state hashes, so the <a href="embedding/11-performance.html#whole-games-measured">comparison</a> measures runtimes alone</span></div>
+  <div class="receipt"><span class="big">always strict</span><span class="what">line-and-column diagnostics before a statement runs</span></div>
+  <div class="receipt"><span class="big">measured</span><span class="what">hot loops, calls, boot and features on one page: <a href="embedding/11-performance.html">Performance</a></span></div>
+</div>
 </div>
 
 <div class="home-section">

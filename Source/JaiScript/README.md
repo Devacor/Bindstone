@@ -4,7 +4,7 @@ JaiScript is an embedded scripting language for C++ engines: C++-flavored syntax
 classes with hot reload, coroutines, a three-rung type ladder (`int` / `auto` / `var`) with a
 static checker that is strict by default, value semantics with references by declaration, and
 two interchangeable backends — a tree-walking interpreter and a bytecode VM — kept at
-byte-for-byte parity by 4,700+ tests and a differential fuzzer. It has no dependencies and
+byte-for-byte parity by 3,900+ tests and a differential fuzzer. It has no dependencies and
 builds as a static library plus headers.
 
 ## Get JaiScript
@@ -294,7 +294,7 @@ Bugs and questions: [github.com/Devacor/jaiscript/issues](https://github.com/Dev
 ## Status
 
 JaiScript 0.5 beta, released @RELEASE_DATE@. The language, both backends, the embedding API and
-the `.jaibite` format are complete and covered by 4,700+ tests run on both backends and a
+the `.jaibite` format are complete and covered by 3,900+ tests run on both backends and a
 differential fuzzer. Beta means the C++ API may still change between minor versions;
 [`docs/site/stability.html`](docs/site/stability.html) lists what is settled and what may change
 before 1.0.

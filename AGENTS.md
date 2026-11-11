@@ -48,14 +48,13 @@ powershell.exe -Command "& cmd /c '\"C:\Program Files\Microsoft Visual Studio\18
 
 Swap in `VSProjects\BindstoneClient\BindstoneClient_Windows\BindstoneClient_Windows.vcxproj` for the client.
 
-Configurations (x64):
-- `Release` is the edit loop. `BindstoneFastIteration` (`<repo>\Directory.Build.props`, default `true`) builds it
-  without `/GL`, `/LTCG` and `/OPT:REF,ICF` and links incrementally: a one-file edit takes seconds instead of over a
-  minute, and the client runs a few percent slower than Shipping. `/p:BindstoneFastIteration=false` puts LTCG back
-  into Release (the `/GL` flip recompiles everything).
-- `Shipping` is the LTCG build of the engine and the game (`/GL`, `/LTCG`, `/OPT:REF,ICF`, non-incremental link; output
-  `Builds\Windows\x64\Shipping\`). It is what ships, and Bindstone performance numbers (arena sim, pathfinding bench,
-  frame timing) are measured on it.
+Configurations (x64): `Debug` and `Release`.
+- `Release` is the one optimized configuration and the edit loop: no `/GL`, `/LTCG` or `/OPT:REF,ICF`, and an
+  incremental client link, so a one-file edit rebuilds in seconds.
+- The build that ships adds `/p:BindstoneFastIteration=false` (the switch lives in `<repo>\Directory.Build.props`,
+  default `true`): `/GL`, `/LTCG` and `/OPT:REF,ICF` for the engine and the game, a non-incremental link, and a full
+  recompile each time the switch flips. Bindstone performance numbers (arena sim, pathfinding bench, frame timing) are
+  taken on that build.
 - `JaiScript_Windows` (`VSProjects\JaiScript`) compiles JaiScript's `Source\JaiScript\source\implementation\**\*.cpp`
   as separate translation units through one wildcard item into `jaiscript.lib`, in every configuration without `/GL`,
   and MutedVision folds that library into `mutedvision.lib`: whatever links the engine gets JaiScript with it, and a

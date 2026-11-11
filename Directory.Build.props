@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <!-- Release|x64 is the edit loop: no /GL, /LTCG or /OPT:REF,ICF, incremental client link (~5-8% slower at run time). Shipping|x64 is the full-LTCG build that ships and that perf numbers are taken on. -->
+    <!-- Release|x64 builds without /GL, /LTCG and /OPT:REF,ICF and links the client incrementally. /p:BindstoneFastIteration=false turns them on for the build that ships; JaiScript_Windows stays without /GL either way. -->
     <BindstoneFastIteration Condition="'$(BindstoneFastIteration)'==''">true</BindstoneFastIteration>
   </PropertyGroup>
 </Project>

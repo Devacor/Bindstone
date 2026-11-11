@@ -50,17 +50,17 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <ul><li><code>int op int</code> is an <code>int</code> (<code>7 / 2</code> is <code>3</code>); a float operand makes the result a float.</li><li>Integer overflow and integer division by zero raise catchable errors. Float arithmetic is IEEE: it gives <code>inf</code> and <code>nan</code>.</li><li><code>+</code> joins text with text. A number beside a string is an error, never a conversion.</li><li>A <code>char</code> is an unsigned integer 0–255 in arithmetic and text beside a string.</li><li>Evaluation order is fixed: the callee, then the arguments left to right; in an assignment, the right side first.</li></ul>
 <h2 id="the-table">The table<a class="hlink" href="#the-table" aria-label="link">&#8203;</a></h2>
 <div class="tablewrap"><table><thead><tr><th>Category</th><th>Operators</th><th>Notes</th></tr></thead><tbody><tr><td>Arithmetic</td><td><code>+ - * / %</code></td><td>int stays int; any float operand promotes</td></tr><tr><td>Unary</td><td><code>- + ! ~ ++ --</code></td><td><code>++</code>/<code>--</code> prefix and postfix; <code>+</code> is the number itself</td></tr><tr><td>Assignment</td><td><code>= += -= *= /= %= &amp;= |= ^= &lt;&lt;= &gt;&gt;=</code></td><td>the target is evaluated once; a typed target converts the result C++-style (<a href="02-type-ladder.html#compound-assignment-typed-targets-convert-c-style-var-keeps-the-dynamic-result">Type Ladder</a>)</td></tr><tr><td>Comparison</td><td><code>== != &lt; &gt; &lt;= &gt;= &lt;=&gt;</code></td><td><code>1 == 1.0</code> is true; the builtin <code>&lt;=&gt;</code> is -1, 0 or 1; arrays, maps and class values compare memberwise (<a href="#equality">Equality</a>)</td></tr><tr><td>Logical</td><td><code>&amp;&amp; || !</code></td><td>short-circuit</td></tr><tr><td>Bitwise</td><td><code>&amp; | ^ ~ &lt;&lt; &gt;&gt;</code></td><td>integer or char operands; a shift count is 0 to 63 (<code>Shift amount must be between 0 and 63</code>) and its result wraps</td></tr><tr><td>Null</td><td><code>?. ?? ??=</code></td><td><a href="#null-chains-and-defaults">below</a></td></tr><tr><td>Ternary</td><td><code>?:</code></td><td>right-associative; <code>throw</code> is an expression, so <code>x &gt; 0 ? x : throw "negative"</code> works</td></tr><tr><td>Member, index</td><td><code>. -&gt; [] ::</code></td><td><code>-&gt;</code> is a synonym for <code>.</code> on values and handles alike; <code>::</code> reaches statics and namespaces</td></tr><tr><td>Cast</td><td><code>cast&lt;T&gt;(e)</code> <code>cast&lt;T&amp;&gt;(e)</code> <code>cast&lt;shared_ptr&lt;T&gt;&gt;(e)</code></td><td>the explicit conversion: a copy, a reference, a handle (<a href="02-type-ladder.html#cast-the-explicit-boundary">Type Ladder</a>)</td></tr></tbody></table></div>
-<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(7 / 2, " ", 7.0 / 2, " ", 7 % 3, " ", 2 + 3 * 4);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(`${7 / 2} ${7.0 / 2} ${7 % 3} ${2 + 3 * 4}`);
 auto x = 5;
-print(x++, " ", x, " ", --x, " ", -x);
-print(6 &amp; 3, " ", 6 | 3, " ", 6 ^ 3, " ", ~0, " ", 1 &lt;&lt; 4, " ", 32 &gt;&gt; 2);
-print(3 &lt;=&gt; 7, " ", 7 &lt;=&gt; 7, " ", "a" &lt; "b", " ", 1 == 1.0);
+print(`${x++} ${x} ${--x} ${-x}`);
+print(`${6 &amp; 3} ${6 | 3} ${6 ^ 3} ${~0} ${1 &lt;&lt; 4} ${32 &gt;&gt; 2}`);
+print(`${3 &lt;=&gt; 7} ${7 &lt;=&gt; 7} ${"a" &lt; "b"} ${1 == 1.0}`);
 auto calls = 0;
 function tick() { calls += 1; return true; }
 auto skipped = false &amp;&amp; tick();       // short-circuit: tick never runs
 print(calls);
-try { print(1 / 0); } catch (e) { print("caught: ", e); }
-print(1.0 / 0.0, " ", -1 / 0.0, " ", 0.0 % 0.0);</code></pre></div>
+try { print(1 / 0); } catch (e) { print(`caught: ${e}`); }
+print(`${1.0 / 0.0} ${-1 / 0.0} ${0.0 % 0.0}`);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3 3.5 1 14
 5 6 5 -5
 2 7 5 -1 16 8

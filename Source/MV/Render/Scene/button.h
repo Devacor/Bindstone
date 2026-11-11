@@ -13,6 +13,8 @@ namespace MV {
 			friend jai::access;
 			friend Node;
 		public:
+			static void jai_auto_bind(jai::dynamic_binder<Button>& a_binder);
+
 			ClickableComponentDerivedAccessors(Button)
 
 			std::shared_ptr<Node> activeNode() const {

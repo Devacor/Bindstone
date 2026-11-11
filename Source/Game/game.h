@@ -17,7 +17,7 @@
 #include <ctime>
 
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/jaiscript_fwd.hpp>
 
 class Game {
 	friend jai::engine;

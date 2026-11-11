@@ -1,30 +1,28 @@
 #include "component.h"
 #include "node.h"
 
-#include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
-#include "MV/Utility/services.hpp"
-
-static jai::registrar<MV::Scene::Component, MV::Services> _hookComponent([](jai::dynamic_binder<MV::Scene::Component>& builder, const MV::Services&) {
-	builder.method("id", static_cast<std::string(MV::Scene::Component::*)() const>(&MV::Scene::Component::id));
-	builder.method("id", static_cast<std::shared_ptr<MV::Scene::Component>(MV::Scene::Component::*)(const std::string&)>(&MV::Scene::Component::id));
-
-	builder.method("bounds", static_cast<MV::BoxAABB<>(MV::Scene::Component::*)()>(&MV::Scene::Component::bounds), jai::serial);
-	builder.method("bounds", static_cast<std::shared_ptr<MV::Scene::Component>(MV::Scene::Component::*)(const MV::BoxAABB<>&)>(&MV::Scene::Component::bounds), jai::serial);
-	builder.method("screenBounds", static_cast<MV::BoxAABB<int>(MV::Scene::Component::*)()>(&MV::Scene::Component::screenBounds), jai::serial);
-	builder.method("worldBounds", static_cast<MV::BoxAABB<>(MV::Scene::Component::*)()>(&MV::Scene::Component::worldBounds), jai::serial);
-
-	builder.method("serializable", static_cast<bool(MV::Scene::Component::*)() const>(&MV::Scene::Component::serializable));
-	builder.method("serializable", static_cast<std::shared_ptr<MV::Scene::Component>(MV::Scene::Component::*)(bool)>(&MV::Scene::Component::serializable));
-
-	builder.method("owner", &MV::Scene::Component::owner);
-	builder.method("ownerIsAlive", &MV::Scene::Component::ownerIsAlive);
-	builder.method("detach", &MV::Scene::Component::detach, jai::serial);
-	builder.method("task", &MV::Scene::Component::task);
-});
 
 namespace MV {
 	namespace Scene {
+		void Component::jai_auto_bind(jai::dynamic_binder<Component>& a_binder) {
+			a_binder.method("id", static_cast<std::string(Component::*)() const>(&Component::id));
+			a_binder.method("id", static_cast<std::shared_ptr<Component>(Component::*)(const std::string&)>(&Component::id));
+
+			a_binder.method("bounds", static_cast<BoxAABB<>(Component::*)()>(&Component::bounds), jai::serial);
+			a_binder.method("bounds", static_cast<std::shared_ptr<Component>(Component::*)(const BoxAABB<>&)>(&Component::bounds), jai::serial);
+			a_binder.method("screenBounds", static_cast<BoxAABB<int>(Component::*)()>(&Component::screenBounds), jai::serial);
+			a_binder.method("worldBounds", static_cast<BoxAABB<>(Component::*)()>(&Component::worldBounds), jai::serial);
+
+			a_binder.method("serializable", static_cast<bool(Component::*)() const>(&Component::serializable));
+			a_binder.method("serializable", static_cast<std::shared_ptr<Component>(Component::*)(bool)>(&Component::serializable));
+
+			a_binder.method("owner", &Component::owner);
+			a_binder.method("ownerIsAlive", &Component::ownerIsAlive);
+			a_binder.method("detach", &Component::detach, jai::serial);
+			a_binder.method("task", &Component::task);
+		}
+
 		/*Vertex Indices*\
 		     0     3
 

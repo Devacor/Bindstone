@@ -20,6 +20,7 @@
 #include "MV/Utility/services.hpp"
 #include <jaiscript/properties.hpp>
 #include <jaiscript/serialization/archive.hpp>
+#include <jaiscript/jaiscript_fwd.hpp>
 
 #define ComponentDerivedAccessors(ComponentType) \
 MV::Scene::SafeComponent<ComponentType> clone(const std::shared_ptr<MV::Scene::Node> &a_parent) { \
@@ -144,6 +145,8 @@ namespace MV {
 			friend jai::access;
 
 		public:
+			static void jai_auto_bind(jai::dynamic_binder<Component>& a_binder);
+
 			virtual ~Component() {detachImplementation();}
 
 			virtual bool draw() { return true; }

@@ -1,49 +1,47 @@
 #include "text.h"
 
-#include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/signals/signal.hpp>
-#include "MV/Utility/services.hpp"
-
-static jai::registrar<MV::Scene::Text, MV::Services> _hookText([](jai::dynamic_binder<MV::Scene::Text>& builder, const MV::Services&) {
-	builder.property("onEnter", &MV::Scene::Text::onEnter);
-	builder.property("onChange", &MV::Scene::Text::onChange);
-
-	builder.method("text", static_cast<MV::UtfString(MV::Scene::Text::*)() const>(&MV::Scene::Text::text));
-	builder.method("text", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(const MV::UtfString&)>(&MV::Scene::Text::text), jai::serial);
-
-	builder.method("number", static_cast<MV::PointPrecision(MV::Scene::Text::*)() const>(&MV::Scene::Text::number));
-	builder.method("number", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::PointPrecision)>(&MV::Scene::Text::number), jai::serial);
-	builder.method("number", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(int)>(&MV::Scene::Text::number), jai::serial);
-
-	builder.method("justification", static_cast<MV::TextJustification(MV::Scene::Text::*)() const>(&MV::Scene::Text::justification));
-	builder.method("justification", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::TextJustification)>(&MV::Scene::Text::justification), jai::serial);
-
-	builder.method("wrapping", static_cast<MV::TextWrapMethod(MV::Scene::Text::*)() const>(&MV::Scene::Text::wrapping));
-	builder.method("wrapping", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::TextWrapMethod)>(&MV::Scene::Text::wrapping), jai::serial);
-	builder.method("wrapping", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::TextWrapMethod, MV::PointPrecision)>(&MV::Scene::Text::wrapping), jai::serial);
-	builder.method("wrappingWidth", static_cast<MV::PointPrecision(MV::Scene::Text::*)() const>(&MV::Scene::Text::wrappingWidth));
-	builder.method("wrappingWidth", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::PointPrecision)>(&MV::Scene::Text::wrappingWidth), jai::serial);
-
-	builder.method("append", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(const MV::UtfString&)>(&MV::Scene::Text::append), jai::serial);
-	builder.method("insertAtCursor", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(const MV::UtfString&)>(&MV::Scene::Text::insertAtCursor), jai::serial);
-	builder.method("backspace", &MV::Scene::Text::backspace, jai::serial);
-
-	builder.method("enableCursor", &MV::Scene::Text::enableCursor, jai::serial);
-	builder.method("disableCursor", &MV::Scene::Text::disableCursor, jai::serial);
-
-	builder.method("minimumLineHeight", static_cast<MV::PointPrecision(MV::Scene::Text::*)() const>(&MV::Scene::Text::minimumLineHeight));
-	builder.method("minimumLineHeight", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::PointPrecision)>(&MV::Scene::Text::minimumLineHeight), jai::serial);
-
-	builder.method("passwordField", static_cast<bool(MV::Scene::Text::*)() const>(&MV::Scene::Text::passwordField));
-	builder.method("passwordField", static_cast<void(MV::Scene::Text::*)(bool)>(&MV::Scene::Text::passwordField), jai::serial);
-
-	builder.method("useBoundsForLineHeight", static_cast<bool(MV::Scene::Text::*)() const>(&MV::Scene::Text::useBoundsForLineHeight));
-	builder.method("useBoundsForLineHeight", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(bool)>(&MV::Scene::Text::useBoundsForLineHeight), jai::serial);
-});
 
 namespace MV{
 	namespace Scene {
+		void Text::jai_auto_bind(jai::dynamic_binder<Text>& a_binder) {
+			a_binder.property("onEnter", &Text::onEnter);
+			a_binder.property("onChange", &Text::onChange);
+
+			a_binder.method("text", static_cast<UtfString(Text::*)() const>(&Text::text));
+			a_binder.method("text", static_cast<std::shared_ptr<Text>(Text::*)(const UtfString&)>(&Text::text), jai::serial);
+
+			a_binder.method("number", static_cast<PointPrecision(Text::*)() const>(&Text::number));
+			a_binder.method("number", static_cast<std::shared_ptr<Text>(Text::*)(PointPrecision)>(&Text::number), jai::serial);
+			a_binder.method("number", static_cast<std::shared_ptr<Text>(Text::*)(int)>(&Text::number), jai::serial);
+
+			a_binder.method("justification", static_cast<TextJustification(Text::*)() const>(&Text::justification));
+			a_binder.method("justification", static_cast<std::shared_ptr<Text>(Text::*)(TextJustification)>(&Text::justification), jai::serial);
+
+			a_binder.method("wrapping", static_cast<TextWrapMethod(Text::*)() const>(&Text::wrapping));
+			a_binder.method("wrapping", static_cast<std::shared_ptr<Text>(Text::*)(TextWrapMethod)>(&Text::wrapping), jai::serial);
+			a_binder.method("wrapping", static_cast<std::shared_ptr<Text>(Text::*)(TextWrapMethod, PointPrecision)>(&Text::wrapping), jai::serial);
+			a_binder.method("wrappingWidth", static_cast<PointPrecision(Text::*)() const>(&Text::wrappingWidth));
+			a_binder.method("wrappingWidth", static_cast<std::shared_ptr<Text>(Text::*)(PointPrecision)>(&Text::wrappingWidth), jai::serial);
+
+			a_binder.method("append", static_cast<std::shared_ptr<Text>(Text::*)(const UtfString&)>(&Text::append), jai::serial);
+			a_binder.method("insertAtCursor", static_cast<std::shared_ptr<Text>(Text::*)(const UtfString&)>(&Text::insertAtCursor), jai::serial);
+			a_binder.method("backspace", &Text::backspace, jai::serial);
+
+			a_binder.method("enableCursor", &Text::enableCursor, jai::serial);
+			a_binder.method("disableCursor", &Text::disableCursor, jai::serial);
+
+			a_binder.method("minimumLineHeight", static_cast<PointPrecision(Text::*)() const>(&Text::minimumLineHeight));
+			a_binder.method("minimumLineHeight", static_cast<std::shared_ptr<Text>(Text::*)(PointPrecision)>(&Text::minimumLineHeight), jai::serial);
+
+			a_binder.method("passwordField", static_cast<bool(Text::*)() const>(&Text::passwordField));
+			a_binder.method("passwordField", static_cast<void(Text::*)(bool)>(&Text::passwordField), jai::serial);
+
+			a_binder.method("useBoundsForLineHeight", static_cast<bool(Text::*)() const>(&Text::useBoundsForLineHeight));
+			a_binder.method("useBoundsForLineHeight", static_cast<std::shared_ptr<Text>(Text::*)(bool)>(&Text::useBoundsForLineHeight), jai::serial);
+		}
+
 
 		const double Text::BLINK_DURATION = .35;
 

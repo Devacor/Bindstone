@@ -6,23 +6,11 @@
 #include <jaiscript/signals/signal.hpp>
 #include "MV/Utility/services.hpp"
 
-static jai::registrar<MV::Scene::Environment, MV::Services, jai::bases<MV::Scene::Component>> _hookEnvironment;
-
 static jai::registrar<MV::Scene::CollisionParameters, MV::Services> _hookCollisionParameters([](jai::dynamic_binder<MV::Scene::CollisionParameters>& builder, const MV::Services&) {
 	builder.method("colliderA", [](MV::Scene::CollisionParameters& a_self) { return a_self.safeColliderA().self(); });
 	builder.method("colliderB", [](MV::Scene::CollisionParameters& a_self) { return a_self.safeColliderB().self(); });
 	builder.method("fixtureIdA", [](MV::Scene::CollisionParameters& a_self) { return a_self.fixtureA ? a_self.fixtureA->id() : std::string(); });
 	builder.method("fixtureIdB", [](MV::Scene::CollisionParameters& a_self) { return a_self.fixtureB ? a_self.fixtureB->id() : std::string(); });
-});
-
-static jai::registrar<MV::Scene::Collider, MV::Services, jai::bases<MV::Scene::Component>> _hookCollider([](jai::dynamic_binder<MV::Scene::Collider>& builder, const MV::Services&) {
-	builder.property("onCollisionStart", &MV::Scene::Collider::onCollisionStart);
-	builder.property("onCollisionEnd", &MV::Scene::Collider::onCollisionEnd);
-	builder.property("onContactStart", &MV::Scene::Collider::onContactStart);
-	builder.property("onContactEnd", &MV::Scene::Collider::onContactEnd);
-	builder.property("onCollisionKilled", &MV::Scene::Collider::onCollisionKilled);
-	builder.property("onContactKilled", &MV::Scene::Collider::onContactKilled);
-	builder.property("onShouldCollide", &MV::Scene::Collider::onShouldCollide);
 });
 
 bool operator!=(const b2Vec2 &a_lhs, const b2Vec2 &a_rhs) {
@@ -35,6 +23,16 @@ namespace MV {
 	}
 
 	namespace Scene {
+		void Collider::jai_auto_bind(jai::dynamic_binder<Collider>& a_binder) {
+			a_binder.property("onCollisionStart", &Collider::onCollisionStart);
+			a_binder.property("onCollisionEnd", &Collider::onCollisionEnd);
+			a_binder.property("onContactStart", &Collider::onContactStart);
+			a_binder.property("onContactEnd", &Collider::onContactEnd);
+			a_binder.property("onCollisionKilled", &Collider::onCollisionKilled);
+			a_binder.property("onContactKilled", &Collider::onContactKilled);
+			a_binder.property("onShouldCollide", &Collider::onShouldCollide);
+		}
+
 
 		Collider::Collider(const std::weak_ptr<Node> &a_owner, CollisionBodyAttributes a_collisionAttributes, bool a_maintainOwnerPosition):
 			jai::property_owner<Collider, Component>(a_owner),

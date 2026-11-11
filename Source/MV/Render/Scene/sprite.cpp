@@ -1,21 +1,19 @@
 #include "sprite.h"
 #include <numeric>
 
-#include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
-#include "MV/Utility/services.hpp"
-
-static jai::registrar<MV::Scene::Sprite, MV::Services> _hookSprite([](jai::dynamic_binder<MV::Scene::Sprite>& builder, const MV::Services&) {
-	builder.method("corners", &MV::Scene::Sprite::corners<MV::Point<>>, jai::serial);
-
-	builder.method("subdivide", &MV::Scene::Sprite::subdivide);
-	builder.method("subdivisions", &MV::Scene::Sprite::subdivisions);
-
-	builder.method("hasSlice", &MV::Scene::Sprite::hasSlice);
-});
 
 namespace MV {
 	namespace Scene {
+		void Sprite::jai_auto_bind(jai::dynamic_binder<Sprite>& a_binder) {
+			a_binder.method("corners", &Sprite::corners<Point<>>, jai::serial);
+
+			a_binder.method("subdivide", &Sprite::subdivide);
+			a_binder.method("subdivisions", &Sprite::subdivisions);
+
+			a_binder.method("hasSlice", &Sprite::hasSlice);
+		}
+
 		/*Vertex Indices*\
 			0 15  14  3
 			8  4   7 13

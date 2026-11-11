@@ -1,32 +1,30 @@
 #include "palette.h"
 #include <jaiscript/signals/signal_impl.hpp>
 
-#include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
-#include "MV/Utility/services.hpp"
-
-static jai::registrar<MV::Scene::Palette, MV::Services> _hookPalette([](jai::dynamic_binder<MV::Scene::Palette>& builder, const MV::Services&) {
-	builder.property("onColorChange", &MV::Scene::Palette::onColorChange);
-	builder.property("onSwatchClicked", &MV::Scene::Palette::onSwatchClicked);
-
-	builder.method("color", static_cast<MV::Color(MV::Scene::Palette::*)() const>(&MV::Scene::Palette::color));
-	builder.method("color", static_cast<std::shared_ptr<MV::Scene::Palette>(MV::Scene::Palette::*)(const MV::Color&)>(&MV::Scene::Palette::color), jai::serial);
-	builder.method("padding", &MV::Scene::Palette::padding);
-	builder.method("selectorPercent", &MV::Scene::Palette::selectorPercent);
-	builder.method("colorAlphaSelector", &MV::Scene::Palette::colorAlphaSelector, jai::serial);
-
-	builder.method("globalPriority", static_cast<int64_t(MV::Scene::Palette::*)() const>(&MV::Scene::Palette::globalPriority));
-	builder.method("globalPriority", static_cast<std::shared_ptr<MV::Scene::Palette>(MV::Scene::Palette::*)(int64_t)>(&MV::Scene::Palette::globalPriority));
-	builder.method("overridePriority", static_cast<std::vector<int64_t>(MV::Scene::Palette::*)() const>(&MV::Scene::Palette::overridePriority));
-	builder.method("overridePriority", static_cast<std::shared_ptr<MV::Scene::Palette>(MV::Scene::Palette::*)(const std::vector<int64_t>&)>(&MV::Scene::Palette::overridePriority));
-
-	builder.method("startEatingTouches", &MV::Scene::Palette::startEatingTouches);
-	builder.method("stopEatingTouches", &MV::Scene::Palette::stopEatingTouches);
-	builder.method("eatingTouches", &MV::Scene::Palette::eatingTouches);
-});
 
 namespace MV {
 	namespace Scene {
+		void Palette::jai_auto_bind(jai::dynamic_binder<Palette>& a_binder) {
+			a_binder.property("onColorChange", &Palette::onColorChange);
+			a_binder.property("onSwatchClicked", &Palette::onSwatchClicked);
+
+			a_binder.method("color", static_cast<Color(Palette::*)() const>(&Palette::color));
+			a_binder.method("color", static_cast<std::shared_ptr<Palette>(Palette::*)(const Color&)>(&Palette::color), jai::serial);
+			a_binder.method("padding", &Palette::padding);
+			a_binder.method("selectorPercent", &Palette::selectorPercent);
+			a_binder.method("colorAlphaSelector", &Palette::colorAlphaSelector, jai::serial);
+
+			a_binder.method("globalPriority", static_cast<int64_t(Palette::*)() const>(&Palette::globalPriority));
+			a_binder.method("globalPriority", static_cast<std::shared_ptr<Palette>(Palette::*)(int64_t)>(&Palette::globalPriority));
+			a_binder.method("overridePriority", static_cast<std::vector<int64_t>(Palette::*)() const>(&Palette::overridePriority));
+			a_binder.method("overridePriority", static_cast<std::shared_ptr<Palette>(Palette::*)(const std::vector<int64_t>&)>(&Palette::overridePriority));
+
+			a_binder.method("startEatingTouches", &Palette::startEatingTouches);
+			a_binder.method("stopEatingTouches", &Palette::stopEatingTouches);
+			a_binder.method("eatingTouches", &Palette::eatingTouches);
+		}
+
 
 		const std::vector<Color> Palette::colorBarList = {
 			{ 1.0f, 0.0f, 0.0f },

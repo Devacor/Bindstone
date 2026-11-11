@@ -1,75 +1,73 @@
 #include "path.h"
 
-#include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/signals/signal.hpp>
-#include "MV/Utility/services.hpp"
-
-static jai::registrar<MV::Scene::PathMap, MV::Services> _hookPathMap([](jai::dynamic_binder<MV::Scene::PathMap>& builder, const MV::Services&) {
-	builder.method("resizeGrid", &MV::Scene::PathMap::resizeGrid, jai::serial);
-	builder.method("cellSize", static_cast<MV::Size<>(MV::Scene::PathMap::*)() const>(&MV::Scene::PathMap::cellSize));
-	builder.method("cellSize", static_cast<std::shared_ptr<MV::Scene::PathMap>(MV::Scene::PathMap::*)(const MV::Size<>&)>(&MV::Scene::PathMap::cellSize), jai::serial);
-	builder.method("searchBudget", [](MV::Scene::PathMap& a_self) -> int64_t { return a_self.searchBudget(); }, jai::serial);
-	builder.method("searchBudget", [](MV::Scene::PathMap& a_self, int64_t a_nodes) { return a_self.searchBudget(a_nodes); }, jai::serial);
-	builder.method("searchLimit", [](MV::Scene::PathMap& a_self) -> int64_t { return a_self.searchLimit(); }, jai::serial);
-	builder.method("searchLimit", [](MV::Scene::PathMap& a_self, int64_t a_nodes) { return a_self.searchLimit(a_nodes); }, jai::serial);
-	builder.method("fieldsPerTick", [](MV::Scene::PathMap& a_self) -> int64_t { return a_self.fieldsPerTick(); }, jai::serial);
-	builder.method("fieldsPerTick", [](MV::Scene::PathMap& a_self, int64_t a_fields) { return a_self.fieldsPerTick(static_cast<int>(a_fields)); }, jai::serial);
-	builder.method("maxFlowFields", [](MV::Scene::PathMap& a_self) -> int64_t { return a_self.maxFlowFields(); }, jai::serial);
-	builder.method("maxFlowFields", [](MV::Scene::PathMap& a_self, int64_t a_fields) { return a_self.maxFlowFields(a_fields); }, jai::serial);
-	builder.method("gridSize", &MV::Scene::PathMap::gridSize);
-
-	builder.method("nodeFromGrid", static_cast<MV::MapNode&(MV::Scene::PathMap::*)(const MV::Point<int>&)>(&MV::Scene::PathMap::nodeFromGrid));
-	builder.method("nodeFromLocal", &MV::Scene::PathMap::nodeFromLocal);
-
-	builder.method("gridFromLocal", static_cast<MV::Point<>(MV::Scene::PathMap::*)(const MV::Point<>&)>(&MV::Scene::PathMap::gridFromLocal));
-	builder.method("localFromGrid", static_cast<MV::Point<>(MV::Scene::PathMap::*)(const MV::Point<int>&)>(&MV::Scene::PathMap::localFromGrid));
-
-	builder.method("inBounds", &MV::Scene::PathMap::inBounds);
-	builder.method("blocked", &MV::Scene::PathMap::blocked);
-	builder.method("staticallyBlocked", &MV::Scene::PathMap::staticallyBlocked);
-	builder.method("traverseCorners", &MV::Scene::PathMap::traverseCorners);
-});
-
-static jai::registrar<MV::Scene::PathAgent, MV::Services> _hookPathAgent([](jai::dynamic_binder<MV::Scene::PathAgent>& builder, const MV::Services&) {
-	builder.property("onArrive", &MV::Scene::PathAgent::onArrive);
-	builder.property("onBlocked", &MV::Scene::PathAgent::onBlocked);
-	builder.property("onStop", &MV::Scene::PathAgent::onStop);
-	builder.property("onStart", &MV::Scene::PathAgent::onStart);
-
-	builder.method("gridPosition", static_cast<MV::Point<MV::PointPrecision>(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::gridPosition));
-	builder.method("gridPosition", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<int>&)>(&MV::Scene::PathAgent::gridPosition), jai::serial);
-	builder.method("localPosition", static_cast<MV::Point<MV::PointPrecision>(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::localPosition));
-	builder.method("localPosition", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<>&)>(&MV::Scene::PathAgent::localPosition), jai::serial);
-
-	builder.method("gridGoal", static_cast<MV::Point<MV::PointPrecision>(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::gridGoal));
-	builder.method("gridGoal", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<int>&)>(&MV::Scene::PathAgent::gridGoal), jai::serial);
-	builder.method("gridGoal", [](MV::Scene::PathAgent& a_self, const MV::Point<int>& a_goal, double a_distance, int64_t a_mode) { return a_self.gridGoal(a_goal, static_cast<MV::PointPrecision>(a_distance), static_cast<MV::PathMode>(a_mode)); }, jai::serial);
-	builder.method("gridGoal", [](MV::Scene::PathAgent& a_self, const MV::Point<>& a_goal, double a_distance, int64_t a_mode) { return a_self.gridGoal(a_goal, static_cast<MV::PointPrecision>(a_distance), static_cast<MV::PathMode>(a_mode)); }, jai::serial);
-	builder.method("pathMode", [](MV::Scene::PathAgent& a_self) -> int64_t { return static_cast<int64_t>(a_self.pathMode()); }, jai::serial);
-	builder.method("pathMode", [](MV::Scene::PathAgent& a_self, int64_t a_mode) { return a_self.pathMode(static_cast<MV::PathMode>(a_mode)); }, jai::serial);
-	builder.method("localGoal", static_cast<MV::Point<MV::PointPrecision>(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::localGoal));
-	builder.method("localGoal", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<>&)>(&MV::Scene::PathAgent::localGoal), jai::serial);
-
-	builder.method("gridSpeed", static_cast<MV::PointPrecision(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::gridSpeed));
-	builder.method("gridSpeed", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(MV::PointPrecision)>(&MV::Scene::PathAgent::gridSpeed), jai::serial);
-	builder.method("localSpeed", static_cast<MV::PointPrecision(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::localSpeed));
-	builder.method("localSpeed", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(MV::PointPrecision)>(&MV::Scene::PathAgent::localSpeed), jai::serial);
-
-	builder.method("pathfinding", &MV::Scene::PathAgent::pathfinding);
-	builder.method("stop", &MV::Scene::PathAgent::stop, jai::serial);
-	builder.method("path", &MV::Scene::PathAgent::path, jai::serial);
-
-	builder.method("gridSize", &MV::Scene::PathAgent::gridSize);
-	builder.method("gridOverlaps", &MV::Scene::PathAgent::gridOverlaps);
-	builder.method("localOverlaps", &MV::Scene::PathAgent::localOverlaps);
-	builder.method("disableFootprint", &MV::Scene::PathAgent::disableFootprint, jai::serial);
-	builder.method("enableFootprint", &MV::Scene::PathAgent::enableFootprint, jai::serial);
-	builder.method("hasFootprint", &MV::Scene::PathAgent::hasFootprint);
-});
 
 namespace MV {
 	namespace Scene {
+		void PathAgent::jai_auto_bind(jai::dynamic_binder<PathAgent>& a_binder) {
+			a_binder.property("onArrive", &PathAgent::onArrive);
+			a_binder.property("onBlocked", &PathAgent::onBlocked);
+			a_binder.property("onStop", &PathAgent::onStop);
+			a_binder.property("onStart", &PathAgent::onStart);
+
+			a_binder.method("gridPosition", static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::gridPosition));
+			a_binder.method("gridPosition", static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<int>&)>(&PathAgent::gridPosition), jai::serial);
+			a_binder.method("localPosition", static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::localPosition));
+			a_binder.method("localPosition", static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<>&)>(&PathAgent::localPosition), jai::serial);
+
+			a_binder.method("gridGoal", static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::gridGoal));
+			a_binder.method("gridGoal", static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<int>&)>(&PathAgent::gridGoal), jai::serial);
+			a_binder.method("gridGoal", [](PathAgent& a_self, const Point<int>& a_goal, double a_distance, int64_t a_mode) { return a_self.gridGoal(a_goal, static_cast<PointPrecision>(a_distance), static_cast<PathMode>(a_mode)); }, jai::serial);
+			a_binder.method("gridGoal", [](PathAgent& a_self, const Point<>& a_goal, double a_distance, int64_t a_mode) { return a_self.gridGoal(a_goal, static_cast<PointPrecision>(a_distance), static_cast<PathMode>(a_mode)); }, jai::serial);
+			a_binder.method("pathMode", [](PathAgent& a_self) -> int64_t { return static_cast<int64_t>(a_self.pathMode()); }, jai::serial);
+			a_binder.method("pathMode", [](PathAgent& a_self, int64_t a_mode) { return a_self.pathMode(static_cast<PathMode>(a_mode)); }, jai::serial);
+			a_binder.method("localGoal", static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::localGoal));
+			a_binder.method("localGoal", static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<>&)>(&PathAgent::localGoal), jai::serial);
+
+			a_binder.method("gridSpeed", static_cast<PointPrecision(PathAgent::*)() const>(&PathAgent::gridSpeed));
+			a_binder.method("gridSpeed", static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(PointPrecision)>(&PathAgent::gridSpeed), jai::serial);
+			a_binder.method("localSpeed", static_cast<PointPrecision(PathAgent::*)() const>(&PathAgent::localSpeed));
+			a_binder.method("localSpeed", static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(PointPrecision)>(&PathAgent::localSpeed), jai::serial);
+
+			a_binder.method("pathfinding", &PathAgent::pathfinding);
+			a_binder.method("stop", &PathAgent::stop, jai::serial);
+			a_binder.method("path", &PathAgent::path, jai::serial);
+
+			a_binder.method("gridSize", &PathAgent::gridSize);
+			a_binder.method("gridOverlaps", &PathAgent::gridOverlaps);
+			a_binder.method("localOverlaps", &PathAgent::localOverlaps);
+			a_binder.method("disableFootprint", &PathAgent::disableFootprint, jai::serial);
+			a_binder.method("enableFootprint", &PathAgent::enableFootprint, jai::serial);
+			a_binder.method("hasFootprint", &PathAgent::hasFootprint);
+		}
+
+		void PathMap::jai_auto_bind(jai::dynamic_binder<PathMap>& a_binder) {
+			a_binder.method("resizeGrid", &PathMap::resizeGrid, jai::serial);
+			a_binder.method("cellSize", static_cast<Size<>(PathMap::*)() const>(&PathMap::cellSize));
+			a_binder.method("cellSize", static_cast<std::shared_ptr<PathMap>(PathMap::*)(const Size<>&)>(&PathMap::cellSize), jai::serial);
+			a_binder.method("searchBudget", [](PathMap& a_self) -> int64_t { return a_self.searchBudget(); }, jai::serial);
+			a_binder.method("searchBudget", [](PathMap& a_self, int64_t a_nodes) { return a_self.searchBudget(a_nodes); }, jai::serial);
+			a_binder.method("searchLimit", [](PathMap& a_self) -> int64_t { return a_self.searchLimit(); }, jai::serial);
+			a_binder.method("searchLimit", [](PathMap& a_self, int64_t a_nodes) { return a_self.searchLimit(a_nodes); }, jai::serial);
+			a_binder.method("fieldsPerTick", [](PathMap& a_self) -> int64_t { return a_self.fieldsPerTick(); }, jai::serial);
+			a_binder.method("fieldsPerTick", [](PathMap& a_self, int64_t a_fields) { return a_self.fieldsPerTick(static_cast<int>(a_fields)); }, jai::serial);
+			a_binder.method("maxFlowFields", [](PathMap& a_self) -> int64_t { return a_self.maxFlowFields(); }, jai::serial);
+			a_binder.method("maxFlowFields", [](PathMap& a_self, int64_t a_fields) { return a_self.maxFlowFields(a_fields); }, jai::serial);
+			a_binder.method("gridSize", &PathMap::gridSize);
+
+			a_binder.method("nodeFromGrid", static_cast<MapNode&(PathMap::*)(const Point<int>&)>(&PathMap::nodeFromGrid));
+			a_binder.method("nodeFromLocal", &PathMap::nodeFromLocal);
+
+			a_binder.method("gridFromLocal", static_cast<Point<>(PathMap::*)(const Point<>&)>(&PathMap::gridFromLocal));
+			a_binder.method("localFromGrid", static_cast<Point<>(PathMap::*)(const Point<int>&)>(&PathMap::localFromGrid));
+
+			a_binder.method("inBounds", &PathMap::inBounds);
+			a_binder.method("blocked", &PathMap::blocked);
+			a_binder.method("staticallyBlocked", &PathMap::staticallyBlocked);
+			a_binder.method("traverseCorners", &PathMap::traverseCorners);
+		}
+
 
 		const std::vector<Color> PathMap::alternatingDebugTiles{ {0.1f, 0.7f, 0.1f, 0.5f}, { 0.1f, 0.1f, 0.7f, 0.5f } };
 		const Color PathMap::staticBlockedDebugTile{ 0.7f, 0.1f, 0.1f, 0.5f };

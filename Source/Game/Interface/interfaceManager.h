@@ -5,7 +5,7 @@
 #include "Game/state.h"
 #include "MV/Interface/tapDevice.h"
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/jaiscript_fwd.hpp>
 
 namespace MV {
 	class InterfaceManager;

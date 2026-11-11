@@ -2,17 +2,15 @@
 
 #include "text.h"
 
-#include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
-#include "MV/Utility/services.hpp"
-
-static jai::registrar<MV::Scene::Scroller, MV::Services> _hookScroller([](jai::dynamic_binder<MV::Scene::Scroller>& builder, const MV::Services&) {
-	builder.method("content", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Scroller::*)() const>(&MV::Scene::Scroller::content));
-	builder.method("content", static_cast<std::shared_ptr<MV::Scene::Scroller>(MV::Scene::Scroller::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Scroller::content), jai::serial);
-});
 
 namespace MV {
 	namespace Scene {
+		void Scroller::jai_auto_bind(jai::dynamic_binder<Scroller>& a_binder) {
+			a_binder.method("content", static_cast<std::shared_ptr<Node>(Scroller::*)() const>(&Scroller::content));
+			a_binder.method("content", static_cast<std::shared_ptr<Scroller>(Scroller::*)(const std::shared_ptr<Node>&)>(&Scroller::content), jai::serial);
+		}
+
 
 		Scroller::Scroller(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse) :
 			jai::property_owner<Scroller, Clickable>(a_owner, a_mouse) {

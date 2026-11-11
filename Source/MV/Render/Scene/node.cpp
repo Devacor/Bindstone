@@ -7,7 +7,6 @@
 
 #include "MV/Utility/scopeGuard.hpp"
 
-#include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include "MV/Utility/services.hpp"
@@ -18,73 +17,73 @@
 #include "MV/Serialization/serialize.h"
 #include <jaiscript/properties/property_serialization.hpp>
 
-static jai::registrar<MV::Scene::Node, MV::Services> _hookNode([](jai::dynamic_binder<MV::Scene::Node>& builder, const MV::Services&) {
-	builder.method("make", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)()>(&MV::Scene::Node::make), jai::serial);
-	builder.method("make", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const std::string&)>(&MV::Scene::Node::make), jai::serial);
-	builder.method("makeOrGet", &MV::Scene::Node::makeOrGet, jai::serial);
-	builder.method("removeFromParent", &MV::Scene::Node::removeFromParent, jai::serial);
-	builder.method("clear", &MV::Scene::Node::clear, jai::serial);
-	builder.method("root", &MV::Scene::Node::root);
-	builder.method("has", &MV::Scene::Node::has);
-	builder.method("hasParent", &MV::Scene::Node::hasParent);
-	builder.method("size", &MV::Scene::Node::size);
-	builder.method("empty", &MV::Scene::Node::empty);
-	builder.method("task", &MV::Scene::Node::task);
-
-	// Interface-script helpers: descendant-by-id lookup + typed component fetch.
-	builder.method("get", [](MV::Scene::Node& a_self, const std::string& a_id) { return a_self.get(a_id); });
-	builder.method("componentText", [](MV::Scene::Node& a_self) {
-		return a_self.componentInChildren<MV::Scene::Text>(false, true, true).self();
-	});
-	builder.method("componentButton", [](MV::Scene::Node& a_self) {
-		return a_self.componentInChildren<MV::Scene::Clickable>(false, true, true).self();
-	});
-
-	builder.method("id", static_cast<std::string(MV::Scene::Node::*)() const>(&MV::Scene::Node::id));
-	builder.method("id", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const std::string&)>(&MV::Scene::Node::id), jai::serial);
-
-	builder.method("depth", static_cast<MV::PointPrecision(MV::Scene::Node::*)() const>(&MV::Scene::Node::depth));
-	builder.method("depth", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(MV::PointPrecision)>(&MV::Scene::Node::depth), jai::serial);
-
-	builder.method("position", static_cast<MV::Point<>(MV::Scene::Node::*)() const>(&MV::Scene::Node::position));
-	builder.method("position", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const MV::Point<>&)>(&MV::Scene::Node::position), jai::serial);
-
-	builder.method("visible", static_cast<bool(MV::Scene::Node::*)() const>(&MV::Scene::Node::visible));
-	builder.method("visible", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(bool)>(&MV::Scene::Node::visible), jai::serial);
-	builder.method("show", &MV::Scene::Node::show, jai::serial);
-	builder.method("hide", &MV::Scene::Node::hide, jai::serial);
-
-	builder.method("bounds", &MV::Scene::Node::bounds, jai::serial);
-	builder.method("worldBounds", &MV::Scene::Node::worldBounds, jai::serial);
-	builder.method("screenBounds", &MV::Scene::Node::screenBounds, jai::serial);
-
-	builder.method("clone", &MV::Scene::Node::clone, jai::serial);
-
-	builder.property("onChildAdd", &MV::Scene::Node::onChildAdd);
-	builder.property("onChildRemove", &MV::Scene::Node::onChildRemove);
-	builder.property("onChildOrderChange", &MV::Scene::Node::onChildOrderChange);
-	builder.property("onAdd", &MV::Scene::Node::onAdd);
-	builder.property("onRemove", &MV::Scene::Node::onRemove);
-	builder.property("onEnable", &MV::Scene::Node::onEnable);
-	builder.property("onDisable", &MV::Scene::Node::onDisable);
-	builder.property("onPause", &MV::Scene::Node::onPause);
-	builder.property("onResume", &MV::Scene::Node::onResume);
-	builder.property("onShow", &MV::Scene::Node::onShow);
-	builder.property("onHide", &MV::Scene::Node::onHide);
-	builder.property("onBoundsRequest", &MV::Scene::Node::onBoundsRequest);
-	builder.property("onTransformChange", &MV::Scene::Node::onTransformChange);
-	builder.property("onLocalBoundsChange", &MV::Scene::Node::onLocalBoundsChange);
-	builder.property("onChildBoundsChange", &MV::Scene::Node::onChildBoundsChange);
-	builder.property("onOrderChange", &MV::Scene::Node::onOrderChange);
-	builder.property("onAlphaChange", &MV::Scene::Node::onAlphaChange);
-	builder.property("onChange", &MV::Scene::Node::onChange);
-	builder.property("onAttach", &MV::Scene::Node::onAttach);
-	builder.property("onDetach", &MV::Scene::Node::onDetach);
-	builder.property("onComponentUpdate", &MV::Scene::Node::onComponentUpdate);
-});
-
 namespace MV {
 	namespace Scene {
+		void Node::jai_auto_bind(jai::dynamic_binder<Node>& a_binder) {
+			a_binder.method("make", static_cast<std::shared_ptr<Node>(Node::*)()>(&Node::make), jai::serial);
+			a_binder.method("make", static_cast<std::shared_ptr<Node>(Node::*)(const std::string&)>(&Node::make), jai::serial);
+			a_binder.method("makeOrGet", &Node::makeOrGet, jai::serial);
+			a_binder.method("removeFromParent", &Node::removeFromParent, jai::serial);
+			a_binder.method("clear", &Node::clear, jai::serial);
+			a_binder.method("root", &Node::root);
+			a_binder.method("has", &Node::has);
+			a_binder.method("hasParent", &Node::hasParent);
+			a_binder.method("size", &Node::size);
+			a_binder.method("empty", &Node::empty);
+			a_binder.method("task", &Node::task);
+
+			// Interface-script helpers: descendant-by-id lookup + typed component fetch.
+			a_binder.method("get", [](Node& a_self, const std::string& a_id) { return a_self.get(a_id); });
+			a_binder.method("componentText", [](Node& a_self) {
+				return a_self.componentInChildren<Text>(false, true, true).self();
+			});
+			a_binder.method("componentButton", [](Node& a_self) {
+				return a_self.componentInChildren<Clickable>(false, true, true).self();
+			});
+
+			a_binder.method("id", static_cast<std::string(Node::*)() const>(&Node::id));
+			a_binder.method("id", static_cast<std::shared_ptr<Node>(Node::*)(const std::string&)>(&Node::id), jai::serial);
+
+			a_binder.method("depth", static_cast<PointPrecision(Node::*)() const>(&Node::depth));
+			a_binder.method("depth", static_cast<std::shared_ptr<Node>(Node::*)(PointPrecision)>(&Node::depth), jai::serial);
+
+			a_binder.method("position", static_cast<Point<>(Node::*)() const>(&Node::position));
+			a_binder.method("position", static_cast<std::shared_ptr<Node>(Node::*)(const Point<>&)>(&Node::position), jai::serial);
+
+			a_binder.method("visible", static_cast<bool(Node::*)() const>(&Node::visible));
+			a_binder.method("visible", static_cast<std::shared_ptr<Node>(Node::*)(bool)>(&Node::visible), jai::serial);
+			a_binder.method("show", &Node::show, jai::serial);
+			a_binder.method("hide", &Node::hide, jai::serial);
+
+			a_binder.method("bounds", &Node::bounds, jai::serial);
+			a_binder.method("worldBounds", &Node::worldBounds, jai::serial);
+			a_binder.method("screenBounds", &Node::screenBounds, jai::serial);
+
+			a_binder.method("clone", &Node::clone, jai::serial);
+
+			a_binder.property("onChildAdd", &Node::onChildAdd);
+			a_binder.property("onChildRemove", &Node::onChildRemove);
+			a_binder.property("onChildOrderChange", &Node::onChildOrderChange);
+			a_binder.property("onAdd", &Node::onAdd);
+			a_binder.property("onRemove", &Node::onRemove);
+			a_binder.property("onEnable", &Node::onEnable);
+			a_binder.property("onDisable", &Node::onDisable);
+			a_binder.property("onPause", &Node::onPause);
+			a_binder.property("onResume", &Node::onResume);
+			a_binder.property("onShow", &Node::onShow);
+			a_binder.property("onHide", &Node::onHide);
+			a_binder.property("onBoundsRequest", &Node::onBoundsRequest);
+			a_binder.property("onTransformChange", &Node::onTransformChange);
+			a_binder.property("onLocalBoundsChange", &Node::onLocalBoundsChange);
+			a_binder.property("onChildBoundsChange", &Node::onChildBoundsChange);
+			a_binder.property("onOrderChange", &Node::onOrderChange);
+			a_binder.property("onAlphaChange", &Node::onAlphaChange);
+			a_binder.property("onChange", &Node::onChange);
+			a_binder.property("onAttach", &Node::onAttach);
+			a_binder.property("onDetach", &Node::onDetach);
+			a_binder.property("onComponentUpdate", &Node::onComponentUpdate);
+		}
+
 		int64_t Node::recalculateLocalBoundsCalls = 0;
 		int64_t Node::recalculateChildBoundsCalls = 0;
 		int64_t Node::recalculateMatrixCalls = 0;

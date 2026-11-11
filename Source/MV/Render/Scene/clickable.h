@@ -42,6 +42,8 @@ namespace MV {
 			friend jai::access;
 			friend Node;
 		public:
+			static void jai_auto_bind(jai::dynamic_binder<Clickable>& a_binder);
+
 			typedef void ButtonSignalSignature(const std::shared_ptr<Clickable>&);
 			typedef void DragSignalSignature(const std::shared_ptr<Clickable>&, const Point<int>& startPosition, const Point<int>& deltaPosition);
 			typedef void DropSignalSignature(const std::shared_ptr<Clickable>&, const Point<MV::PointPrecision>& velocity);

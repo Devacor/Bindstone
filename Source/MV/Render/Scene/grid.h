@@ -13,6 +13,8 @@ namespace MV {
 			friend jai::access;
 
 		public:
+			static void jai_auto_bind(jai::dynamic_binder<Grid>& a_binder);
+
 			enum class AutoLayoutPolicy {None, Self, Local, Child, Comprehensive};
 
 			DrawableDerivedAccessors(Grid)

@@ -35,6 +35,8 @@ namespace MV {
 			};
 
 		public:
+			static void jai_auto_bind(jai::dynamic_binder<Node>& a_binder);
+
 			typedef void ParentInteractionSignature(const std::shared_ptr<Node> &a_parent, const std::shared_ptr<Node> &a_child);
 			typedef void BasicSignature(const std::shared_ptr<Node> &a_this);
 			typedef void ComponentSignature(const std::shared_ptr<Component> &a_this);

@@ -20,6 +20,8 @@ namespace MV {
 			friend jai::access;
 
 		public:
+			static void jai_auto_bind(jai::dynamic_binder<Sprite>& a_binder);
+
 			DrawableDerivedAccessors(Sprite)
 
 			template<typename PointAssign>

@@ -2,11 +2,7 @@
 #include <jaiscript/signals/signal_impl.hpp>
 #include <memory>
 
-#include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
-#include "MV/Utility/services.hpp"
-
-static jai::registrar<MV::Scene::Stencil, MV::Services> _hookStencil;
 
 namespace MV {
 	namespace Scene {

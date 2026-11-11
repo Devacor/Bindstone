@@ -4,7 +4,6 @@
 #include "MV/Utility/generalUtility.h"
 #include <jaiscript/serialization/archive.hpp>
 
-#include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
@@ -13,23 +12,23 @@
 #include <atomic>
 #include <limits>
 
-static jai::registrar<MV::Scene::Emitter, MV::Services> _hookEmitter([](jai::dynamic_binder<MV::Scene::Emitter>& builder, const MV::Services&) {
-	builder.method("relativeEmission", static_cast<std::weak_ptr<MV::Scene::Node>(MV::Scene::Emitter::*)() const>(&MV::Scene::Emitter::relativeEmission));
-	builder.method("relativeEmission", static_cast<std::shared_ptr<MV::Scene::Emitter>(MV::Scene::Emitter::*)(std::shared_ptr<MV::Scene::Node>)>(&MV::Scene::Emitter::relativeEmission));
-	builder.method("removeRelativeEmission", &MV::Scene::Emitter::removeRelativeEmission);
-	builder.method("makeRelativeToParent", &MV::Scene::Emitter::makeRelativeToParent);
-
-	builder.method("properties", static_cast<const MV::Scene::EmitterSpawnProperties&(MV::Scene::Emitter::*)() const>(&MV::Scene::Emitter::properties));
-	builder.method("properties", static_cast<std::shared_ptr<MV::Scene::Emitter>(MV::Scene::Emitter::*)(const MV::Scene::EmitterSpawnProperties&)>(&MV::Scene::Emitter::properties));
-
-	builder.method("enabled", &MV::Scene::Emitter::enabled);
-	builder.method("disabled", &MV::Scene::Emitter::disabled);
-	builder.method("enable", &MV::Scene::Emitter::enable);
-	builder.method("disable", &MV::Scene::Emitter::disable);
-});
-
 namespace MV {
 	namespace Scene {
+		void Emitter::jai_auto_bind(jai::dynamic_binder<Emitter>& a_binder) {
+			a_binder.method("relativeEmission", static_cast<std::weak_ptr<Node>(Emitter::*)() const>(&Emitter::relativeEmission));
+			a_binder.method("relativeEmission", static_cast<std::shared_ptr<Emitter>(Emitter::*)(std::shared_ptr<Node>)>(&Emitter::relativeEmission));
+			a_binder.method("removeRelativeEmission", &Emitter::removeRelativeEmission);
+			a_binder.method("makeRelativeToParent", &Emitter::makeRelativeToParent);
+
+			a_binder.method("properties", static_cast<const EmitterSpawnProperties&(Emitter::*)() const>(&Emitter::properties));
+			a_binder.method("properties", static_cast<std::shared_ptr<Emitter>(Emitter::*)(const EmitterSpawnProperties&)>(&Emitter::properties));
+
+			a_binder.method("enabled", &Emitter::enabled);
+			a_binder.method("disabled", &Emitter::disabled);
+			a_binder.method("enable", &Emitter::enable);
+			a_binder.method("disable", &Emitter::disable);
+		}
+
 
 		const double Emitter::MAX_TIME_STEP  = .25;
 

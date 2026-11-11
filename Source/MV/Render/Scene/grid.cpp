@@ -4,40 +4,38 @@
 #include "MV/Utility/scopeGuard.hpp"
 #include "MV/Utility/generalUtility.h"
 
-#include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
-#include "MV/Utility/services.hpp"
-
-static jai::registrar<MV::Scene::Grid, MV::Services> _hookGrid([](jai::dynamic_binder<MV::Scene::Grid>& builder, const MV::Services&) {
-	builder.method("padding", static_cast<std::pair<MV::Point<>, MV::Point<>>(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::padding));
-	builder.method("padding", static_cast<std::shared_ptr<MV::Scene::Grid>(MV::Scene::Grid::*)(const MV::Size<>&)>(&MV::Scene::Grid::padding));
-
-	builder.method("margin", static_cast<std::pair<MV::Point<>, MV::Point<>>(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::margin));
-	builder.method("margin", static_cast<std::shared_ptr<MV::Scene::Grid>(MV::Scene::Grid::*)(const MV::Size<>&)>(&MV::Scene::Grid::margin));
-
-	builder.method("cellSize", static_cast<MV::Size<>(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::cellSize));
-	builder.method("cellSize", static_cast<std::shared_ptr<MV::Scene::Grid>(MV::Scene::Grid::*)(const MV::Size<>&)>(&MV::Scene::Grid::cellSize));
-
-	builder.method("gridWidth", static_cast<MV::PointPrecision(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::gridWidth));
-	builder.method("gridWidth", static_cast<std::shared_ptr<MV::Scene::Grid>(MV::Scene::Grid::*)(MV::PointPrecision)>(&MV::Scene::Grid::gridWidth));
-
-	builder.method("gridOffset", static_cast<MV::Point<>(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::gridOffset));
-	builder.method("gridOffset", static_cast<std::shared_ptr<MV::Scene::Grid>(MV::Scene::Grid::*)(const MV::Point<>&)>(&MV::Scene::Grid::gridOffset));
-
-	builder.method("columns", static_cast<size_t(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::columns));
-	builder.method("columns", static_cast<std::shared_ptr<MV::Scene::Grid>(MV::Scene::Grid::*)(size_t, bool)>(&MV::Scene::Grid::columns));
-
-	builder.method("layoutPolicy", static_cast<MV::Scene::Grid::AutoLayoutPolicy(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::layoutPolicy));
-	builder.method("layoutPolicy", static_cast<std::shared_ptr<MV::Scene::Grid>(MV::Scene::Grid::*)(MV::Scene::Grid::AutoLayoutPolicy)>(&MV::Scene::Grid::layoutPolicy));
-
-	builder.method("layoutCells", &MV::Scene::Grid::layoutCells, jai::serial);
-
-	builder.method("nodeFromGrid", &MV::Scene::Grid::nodeFromGrid, jai::serial);
-	builder.method("nodeFromLocal", &MV::Scene::Grid::nodeFromLocal, jai::serial);
-});
 
 namespace MV {
 	namespace Scene {
+		void Grid::jai_auto_bind(jai::dynamic_binder<Grid>& a_binder) {
+			a_binder.method("padding", static_cast<std::pair<Point<>, Point<>>(Grid::*)() const>(&Grid::padding));
+			a_binder.method("padding", static_cast<std::shared_ptr<Grid>(Grid::*)(const Size<>&)>(&Grid::padding));
+
+			a_binder.method("margin", static_cast<std::pair<Point<>, Point<>>(Grid::*)() const>(&Grid::margin));
+			a_binder.method("margin", static_cast<std::shared_ptr<Grid>(Grid::*)(const Size<>&)>(&Grid::margin));
+
+			a_binder.method("cellSize", static_cast<Size<>(Grid::*)() const>(&Grid::cellSize));
+			a_binder.method("cellSize", static_cast<std::shared_ptr<Grid>(Grid::*)(const Size<>&)>(&Grid::cellSize));
+
+			a_binder.method("gridWidth", static_cast<PointPrecision(Grid::*)() const>(&Grid::gridWidth));
+			a_binder.method("gridWidth", static_cast<std::shared_ptr<Grid>(Grid::*)(PointPrecision)>(&Grid::gridWidth));
+
+			a_binder.method("gridOffset", static_cast<Point<>(Grid::*)() const>(&Grid::gridOffset));
+			a_binder.method("gridOffset", static_cast<std::shared_ptr<Grid>(Grid::*)(const Point<>&)>(&Grid::gridOffset));
+
+			a_binder.method("columns", static_cast<size_t(Grid::*)() const>(&Grid::columns));
+			a_binder.method("columns", static_cast<std::shared_ptr<Grid>(Grid::*)(size_t, bool)>(&Grid::columns));
+
+			a_binder.method("layoutPolicy", static_cast<Grid::AutoLayoutPolicy(Grid::*)() const>(&Grid::layoutPolicy));
+			a_binder.method("layoutPolicy", static_cast<std::shared_ptr<Grid>(Grid::*)(Grid::AutoLayoutPolicy)>(&Grid::layoutPolicy));
+
+			a_binder.method("layoutCells", &Grid::layoutCells, jai::serial);
+
+			a_binder.method("nodeFromGrid", &Grid::nodeFromGrid, jai::serial);
+			a_binder.method("nodeFromLocal", &Grid::nodeFromLocal, jai::serial);
+		}
+
 
 		void Grid::updateImplementation(double a_delta) {
 			if (dirtyGrid) {

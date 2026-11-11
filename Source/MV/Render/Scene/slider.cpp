@@ -1,23 +1,21 @@
 #include "slider.h"
 #include <memory>
 
-#include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/signals/signal.hpp>
-#include "MV/Utility/services.hpp"
-
-static jai::registrar<MV::Scene::Slider, MV::Services> _hookSlider([](jai::dynamic_binder<MV::Scene::Slider>& builder, const MV::Services&) {
-	builder.property("onPercentChange", &MV::Scene::Slider::onPercentChange);
-
-	builder.method("percent", static_cast<MV::PointPrecision(MV::Scene::Slider::*)() const>(&MV::Scene::Slider::percent));
-	builder.method("percent", static_cast<std::shared_ptr<MV::Scene::Slider>(MV::Scene::Slider::*)(MV::PointPrecision, bool)>(&MV::Scene::Slider::percent), jai::serial);
-
-	builder.method("handle", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Slider::*)() const>(&MV::Scene::Slider::handle));
-	builder.method("handle", static_cast<std::shared_ptr<MV::Scene::Slider>(MV::Scene::Slider::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Slider::handle), jai::serial);
-});
 
 namespace MV {
 	namespace Scene {
+		void Slider::jai_auto_bind(jai::dynamic_binder<Slider>& a_binder) {
+			a_binder.property("onPercentChange", &Slider::onPercentChange);
+
+			a_binder.method("percent", static_cast<PointPrecision(Slider::*)() const>(&Slider::percent));
+			a_binder.method("percent", static_cast<std::shared_ptr<Slider>(Slider::*)(PointPrecision, bool)>(&Slider::percent), jai::serial);
+
+			a_binder.method("handle", static_cast<std::shared_ptr<Node>(Slider::*)() const>(&Slider::handle));
+			a_binder.method("handle", static_cast<std::shared_ptr<Slider>(Slider::*)(const std::shared_ptr<Node>&)>(&Slider::handle), jai::serial);
+		}
+
 
 		MV::PointPrecision Slider::percent() const {
 			return dragPercent;

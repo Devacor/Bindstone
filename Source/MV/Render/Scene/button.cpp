@@ -4,24 +4,22 @@
 
 #include "text.h"
 
-#include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
-#include "MV/Utility/services.hpp"
-
-static jai::registrar<MV::Scene::Button, MV::Services> _hookButton([](jai::dynamic_binder<MV::Scene::Button>& builder, const MV::Services&) {
-	builder.method("activeNode", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Button::*)() const>(&MV::Scene::Button::activeNode));
-	builder.method("activeNode", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Button::activeNode), jai::serial);
-	builder.method("idleNode", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Button::*)() const>(&MV::Scene::Button::idleNode));
-	builder.method("idleNode", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Button::idleNode), jai::serial);
-	builder.method("disabledNode", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Button::*)() const>(&MV::Scene::Button::disabledNode));
-	builder.method("disabledNode", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Button::disabledNode), jai::serial);
-
-	builder.method("text", static_cast<std::string(MV::Scene::Button::*)() const>(&MV::Scene::Button::text));
-	builder.method("text", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::string&)>(&MV::Scene::Button::text), jai::serial);
-});
 
 namespace MV {
 	namespace Scene {
+		void Button::jai_auto_bind(jai::dynamic_binder<Button>& a_binder) {
+			a_binder.method("activeNode", static_cast<std::shared_ptr<Node>(Button::*)() const>(&Button::activeNode));
+			a_binder.method("activeNode", static_cast<std::shared_ptr<Button>(Button::*)(const std::shared_ptr<Node>&)>(&Button::activeNode), jai::serial);
+			a_binder.method("idleNode", static_cast<std::shared_ptr<Node>(Button::*)() const>(&Button::idleNode));
+			a_binder.method("idleNode", static_cast<std::shared_ptr<Button>(Button::*)(const std::shared_ptr<Node>&)>(&Button::idleNode), jai::serial);
+			a_binder.method("disabledNode", static_cast<std::shared_ptr<Node>(Button::*)() const>(&Button::disabledNode));
+			a_binder.method("disabledNode", static_cast<std::shared_ptr<Button>(Button::*)(const std::shared_ptr<Node>&)>(&Button::disabledNode), jai::serial);
+
+			a_binder.method("text", static_cast<std::string(Button::*)() const>(&Button::text));
+			a_binder.method("text", static_cast<std::shared_ptr<Button>(Button::*)(const std::string&)>(&Button::text), jai::serial);
+		}
+
 
 		Button::Button(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse) :
 			jai::property_owner<Button, Clickable>(a_owner, a_mouse) {

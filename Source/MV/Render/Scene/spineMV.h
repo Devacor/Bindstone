@@ -114,6 +114,8 @@ namespace MV {
 			jai::signal_emitter<void(Spine*, int)> onDisposeSignal;
 			jai::signal_emitter<void(std::shared_ptr<Spine>, int, const AnimationEventData &)> onEventSignal;
 		public:
+			static void jai_auto_bind(jai::dynamic_binder<Spine>& a_binder);
+
 			jai::signal<void(std::shared_ptr<Spine>, int)> onStart;
 			jai::signal<void(std::shared_ptr<Spine>, int)> onEnd;
 			jai::signal<void(std::shared_ptr<Spine>, int, int)> onComplete;

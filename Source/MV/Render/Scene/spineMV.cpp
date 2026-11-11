@@ -30,39 +30,6 @@ static jai::registrar<MV::Scene::AnimationTrack, MV::Services> _hookAnimationTra
 	builder.method("trackIndex", &MV::Scene::AnimationTrack::trackIndex);
 });
 
-static jai::registrar<MV::Scene::Spine, MV::Services> _hookSpine([](jai::dynamic_binder<MV::Scene::Spine>& builder, const MV::Services&) {
-	builder.property("onStart", &MV::Scene::Spine::onStart);
-	builder.property("onEnd", &MV::Scene::Spine::onEnd);
-	builder.property("onEvent", &MV::Scene::Spine::onEvent);
-	builder.property("onComplete", &MV::Scene::Spine::onComplete);
-	builder.property("onDispose", &MV::Scene::Spine::onDispose);
-
-	builder.method("bindNode", &MV::Scene::Spine::bindNode);
-	builder.method("unbindSlot", &MV::Scene::Spine::unbindSlot);
-	builder.method("unbindNode", &MV::Scene::Spine::unbindNode);
-	builder.method("unbindAll", &MV::Scene::Spine::unbindAll);
-	builder.method("boundSlots", &MV::Scene::Spine::boundSlots);
-	builder.method("slotPosition", &MV::Scene::Spine::slotPosition);
-
-	builder.method("timeScale", static_cast<double(MV::Scene::Spine::*)() const>(&MV::Scene::Spine::timeScale));
-	builder.method("timeScale", static_cast<std::shared_ptr<MV::Scene::Spine>(MV::Scene::Spine::*)(double)>(&MV::Scene::Spine::timeScale));
-
-	builder.method("crossfade", &MV::Scene::Spine::crossfade);
-
-	builder.method("track", static_cast<MV::Scene::AnimationTrack&(MV::Scene::Spine::*)(int)>(&MV::Scene::Spine::track));
-	builder.method("track", static_cast<MV::Scene::AnimationTrack&(MV::Scene::Spine::*)()>(&MV::Scene::Spine::track));
-	builder.method("currentTrack", &MV::Scene::Spine::currentTrack);
-
-	builder.method("animate", &MV::Scene::Spine::animate, jai::serial);
-	builder.method("queueAnimation", static_cast<std::shared_ptr<MV::Scene::Spine>(MV::Scene::Spine::*)(const std::string&, double, bool)>(&MV::Scene::Spine::queueAnimation), jai::serial);
-	builder.method("queueAnimation", static_cast<std::shared_ptr<MV::Scene::Spine>(MV::Scene::Spine::*)(const std::string&, bool)>(&MV::Scene::Spine::queueAnimation), jai::serial);
-
-	builder.method("load", [](MV::Scene::Spine& self, const MV::Scene::Spine::FileBundle& bundle) { return self.load(bundle); }, jai::serial);
-	builder.method("unload", &MV::Scene::Spine::unload, jai::serial);
-	builder.method("loaded", &MV::Scene::Spine::loaded);
-	builder.method("bundle", &MV::Scene::Spine::bundle);
-});
-
 namespace {
 	// File reads go through the engine's search paths (user overrides, Assets/ prefix), not fopen
 	class MVSpineExtension : public spine::DefaultSpineExtension {
@@ -126,6 +93,39 @@ namespace MV{
 	}
 
 	namespace Scene {
+		void Spine::jai_auto_bind(jai::dynamic_binder<Spine>& a_binder) {
+			a_binder.property("onStart", &Spine::onStart);
+			a_binder.property("onEnd", &Spine::onEnd);
+			a_binder.property("onEvent", &Spine::onEvent);
+			a_binder.property("onComplete", &Spine::onComplete);
+			a_binder.property("onDispose", &Spine::onDispose);
+
+			a_binder.method("bindNode", &Spine::bindNode);
+			a_binder.method("unbindSlot", &Spine::unbindSlot);
+			a_binder.method("unbindNode", &Spine::unbindNode);
+			a_binder.method("unbindAll", &Spine::unbindAll);
+			a_binder.method("boundSlots", &Spine::boundSlots);
+			a_binder.method("slotPosition", &Spine::slotPosition);
+
+			a_binder.method("timeScale", static_cast<double(Spine::*)() const>(&Spine::timeScale));
+			a_binder.method("timeScale", static_cast<std::shared_ptr<Spine>(Spine::*)(double)>(&Spine::timeScale));
+
+			a_binder.method("crossfade", &Spine::crossfade);
+
+			a_binder.method("track", static_cast<AnimationTrack&(Spine::*)(int)>(&Spine::track));
+			a_binder.method("track", static_cast<AnimationTrack&(Spine::*)()>(&Spine::track));
+			a_binder.method("currentTrack", &Spine::currentTrack);
+
+			a_binder.method("animate", &Spine::animate, jai::serial);
+			a_binder.method("queueAnimation", static_cast<std::shared_ptr<Spine>(Spine::*)(const std::string&, double, bool)>(&Spine::queueAnimation), jai::serial);
+			a_binder.method("queueAnimation", static_cast<std::shared_ptr<Spine>(Spine::*)(const std::string&, bool)>(&Spine::queueAnimation), jai::serial);
+
+			a_binder.method("load", [](Spine& self, const Spine::FileBundle& bundle) { return self.load(bundle); }, jai::serial);
+			a_binder.method("unload", &Spine::unload, jai::serial);
+			a_binder.method("loaded", &Spine::loaded);
+			a_binder.method("bundle", &Spine::bundle);
+		}
+
 
 		static FileTextureDefinition* textureOf(spine::TextureRegion* a_region) {
 			return a_region ? static_cast<FileTextureDefinition*>(a_region->getRendererObject()) : nullptr;

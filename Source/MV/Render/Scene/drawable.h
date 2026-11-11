@@ -144,6 +144,7 @@ namespace MV {
 			friend Render::DeviceBindings;
 
 		public:
+			static void jai_auto_bind(jai::dynamic_binder<Drawable>& a_binder);
 
 			ComponentDerivedAccessors(Drawable)
 

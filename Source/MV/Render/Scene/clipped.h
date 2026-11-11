@@ -14,6 +14,8 @@ namespace MV {
 			friend jai::access;
 
 		public:
+			static void jai_auto_bind(jai::dynamic_binder<Clipped>& a_binder);
+
 			DrawableDerivedAccessors(Clipped)
 
 			template<typename PointAssign>

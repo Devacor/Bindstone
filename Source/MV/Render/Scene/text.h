@@ -14,6 +14,8 @@ namespace MV {
 			friend jai::access;
 
 		public:
+			static void jai_auto_bind(jai::dynamic_binder<Text>& a_binder);
+
 			typedef void TextSignalSignature(std::shared_ptr<Text>);
 
 		private:

@@ -5,40 +5,38 @@
 
 #include "MV/Utility/log.h"
 
-#include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
-#include "MV/Utility/services.hpp"
-
-static jai::registrar<MV::Scene::Drawable, MV::Services> _hookDrawable([](jai::dynamic_binder<MV::Scene::Drawable>& builder, const MV::Services&) {
-	builder.method("visible", &MV::Scene::Drawable::visible);
-	builder.method("show", &MV::Scene::Drawable::show, jai::serial);
-	builder.method("hide", &MV::Scene::Drawable::hide, jai::serial);
-
-	builder.method("color", static_cast<MV::Color(MV::Scene::Drawable::*)() const>(&MV::Scene::Drawable::color));
-	builder.method("color", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(const MV::Color&)>(&MV::Scene::Drawable::color));
-	builder.method("colors", &MV::Scene::Drawable::colors);
-
-	builder.method("shader", static_cast<std::string(MV::Scene::Drawable::*)() const>(&MV::Scene::Drawable::shader));
-	builder.method("shader", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(const std::string&)>(&MV::Scene::Drawable::shader), jai::serial);
-	builder.method("material", static_cast<std::shared_ptr<MV::Material>(MV::Scene::Drawable::*)() const>(&MV::Scene::Drawable::material));
-	builder.method("material", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(std::shared_ptr<MV::Material>)>(&MV::Scene::Drawable::material));
-
-	builder.method("texture", static_cast<std::shared_ptr<MV::TextureHandle>(MV::Scene::Drawable::*)(size_t) const>(&MV::Scene::Drawable::texture));
-	builder.method("texture", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(std::shared_ptr<MV::TextureHandle>, size_t)>(&MV::Scene::Drawable::texture), jai::serial);
-	builder.method("clearTexture", &MV::Scene::Drawable::clearTexture, jai::serial);
-	builder.method("clearTextures", &MV::Scene::Drawable::clearTextures, jai::serial);
-
-	builder.method("blend", static_cast<MV::BlendMode(MV::Scene::Drawable::*)() const>(&MV::Scene::Drawable::blend));
-	builder.method("blend", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(MV::BlendMode)>(&MV::Scene::Drawable::blend));
-
-	builder.method("pointSize", &MV::Scene::Drawable::pointSize);
-	builder.method("getPoints", &MV::Scene::Drawable::getPoints);
-
-	builder.method("anchors", &MV::Scene::Drawable::anchors);
-});
 
 namespace MV {
 	namespace Scene {
+		void Drawable::jai_auto_bind(jai::dynamic_binder<Drawable>& a_binder) {
+			a_binder.method("visible", &Drawable::visible);
+			a_binder.method("show", &Drawable::show, jai::serial);
+			a_binder.method("hide", &Drawable::hide, jai::serial);
+
+			a_binder.method("color", static_cast<Color(Drawable::*)() const>(&Drawable::color));
+			a_binder.method("color", static_cast<std::shared_ptr<Drawable>(Drawable::*)(const Color&)>(&Drawable::color));
+			a_binder.method("colors", &Drawable::colors);
+
+			a_binder.method("shader", static_cast<std::string(Drawable::*)() const>(&Drawable::shader));
+			a_binder.method("shader", static_cast<std::shared_ptr<Drawable>(Drawable::*)(const std::string&)>(&Drawable::shader), jai::serial);
+			a_binder.method("material", static_cast<std::shared_ptr<Material>(Drawable::*)() const>(&Drawable::material));
+			a_binder.method("material", static_cast<std::shared_ptr<Drawable>(Drawable::*)(std::shared_ptr<Material>)>(&Drawable::material));
+
+			a_binder.method("texture", static_cast<std::shared_ptr<TextureHandle>(Drawable::*)(size_t) const>(&Drawable::texture));
+			a_binder.method("texture", static_cast<std::shared_ptr<Drawable>(Drawable::*)(std::shared_ptr<TextureHandle>, size_t)>(&Drawable::texture), jai::serial);
+			a_binder.method("clearTexture", &Drawable::clearTexture, jai::serial);
+			a_binder.method("clearTextures", &Drawable::clearTextures, jai::serial);
+
+			a_binder.method("blend", static_cast<BlendMode(Drawable::*)() const>(&Drawable::blend));
+			a_binder.method("blend", static_cast<std::shared_ptr<Drawable>(Drawable::*)(BlendMode)>(&Drawable::blend));
+
+			a_binder.method("pointSize", &Drawable::pointSize);
+			a_binder.method("getPoints", &Drawable::getPoints);
+
+			a_binder.method("anchors", &Drawable::anchors);
+		}
+
 
 		Drawable::~Drawable() {
 			// The tracked device, not owner() (gone during teardown, would throw).

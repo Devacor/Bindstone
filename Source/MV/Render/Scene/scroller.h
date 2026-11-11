@@ -12,6 +12,8 @@ namespace MV {
 			friend jai::access;
 			friend Node;
 		public:
+			static void jai_auto_bind(jai::dynamic_binder<Scroller>& a_binder);
+
 			ClickableComponentDerivedAccessors(Scroller)
 
 			std::shared_ptr<Node> content() const {

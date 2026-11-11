@@ -11,6 +11,8 @@ namespace MV {
 			friend jai::access;
 
 		public:
+			static void jai_auto_bind(jai::dynamic_binder<Parallax>& a_binder);
+
 			ComponentDerivedAccessors(Parallax)
 
 			std::shared_ptr<Parallax> translateRatio(const Point<> &a_ratio) {

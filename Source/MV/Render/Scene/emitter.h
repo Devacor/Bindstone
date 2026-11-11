@@ -226,6 +226,8 @@ namespace MV {
 			friend Node;
 			friend jai::access;
 		public:
+			static void jai_auto_bind(jai::dynamic_binder<Emitter>& a_binder);
+
 			DrawableDerivedAccessors(Emitter)
 
 			std::shared_ptr<Emitter> relativeEmission(std::shared_ptr<MV::Scene::Node> a_newRelativePosition);

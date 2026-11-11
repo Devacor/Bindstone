@@ -4,40 +4,38 @@
 #include "clipped.h"
 #include "stencil.h"
 
-#include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
-#include "MV/Utility/services.hpp"
-
-static jai::registrar<MV::Scene::Clickable, MV::Services> _hookClickable([](jai::dynamic_binder<MV::Scene::Clickable>& builder, const MV::Services&) {
-	builder.method("clickDetectionType", static_cast<MV::Scene::Clickable::BoundsType(MV::Scene::Clickable::*)() const>(&MV::Scene::Clickable::clickDetectionType));
-	builder.method("clickDetectionType", static_cast<std::shared_ptr<MV::Scene::Clickable>(MV::Scene::Clickable::*)(MV::Scene::Clickable::BoundsType)>(&MV::Scene::Clickable::clickDetectionType), jai::serial);
-
-	builder.method("disable", &MV::Scene::Clickable::disable, jai::serial);
-	builder.method("disabled", &MV::Scene::Clickable::disabled);
-	builder.method("enabled", &MV::Scene::Clickable::enabled);
-
-	builder.method("cancelPress", &MV::Scene::Clickable::cancelPress, jai::serial);
-	builder.method("inPressEvent", &MV::Scene::Clickable::inPressEvent);
-	builder.method("press", &MV::Scene::Clickable::press, jai::serial);
-
-	builder.method("startEatingTouches", &MV::Scene::Clickable::startEatingTouches);
-	builder.method("stopEatingTouches", &MV::Scene::Clickable::stopEatingTouches);
-	builder.method("eatingTouches", &MV::Scene::Clickable::eatingTouches);
-
-	builder.method("dragDelta", &MV::Scene::Clickable::dragDelta);
-	builder.method("totalDragDistance", &MV::Scene::Clickable::totalDragDistance);
-	builder.method("dragTime", &MV::Scene::Clickable::dragTime);
-
-	builder.method("globalPriority", static_cast<int64_t(MV::Scene::Clickable::*)() const>(&MV::Scene::Clickable::globalPriority));
-	builder.method("globalPriority", static_cast<std::shared_ptr<MV::Scene::Clickable>(MV::Scene::Clickable::*)(int64_t)>(&MV::Scene::Clickable::globalPriority));
-	builder.method("appendPriority", static_cast<int64_t(MV::Scene::Clickable::*)() const>(&MV::Scene::Clickable::appendPriority));
-	builder.method("appendPriority", static_cast<std::shared_ptr<MV::Scene::Clickable>(MV::Scene::Clickable::*)(int64_t)>(&MV::Scene::Clickable::appendPriority));
-
-	builder.method("mouseInBounds", static_cast<bool(MV::Scene::Clickable::*)()>(&MV::Scene::Clickable::mouseInBounds), jai::serial);
-});
 
 namespace MV {
 	namespace Scene {
+		void Clickable::jai_auto_bind(jai::dynamic_binder<Clickable>& a_binder) {
+			a_binder.method("clickDetectionType", static_cast<Clickable::BoundsType(Clickable::*)() const>(&Clickable::clickDetectionType));
+			a_binder.method("clickDetectionType", static_cast<std::shared_ptr<Clickable>(Clickable::*)(Clickable::BoundsType)>(&Clickable::clickDetectionType), jai::serial);
+
+			a_binder.method("disable", &Clickable::disable, jai::serial);
+			a_binder.method("disabled", &Clickable::disabled);
+			a_binder.method("enabled", &Clickable::enabled);
+
+			a_binder.method("cancelPress", &Clickable::cancelPress, jai::serial);
+			a_binder.method("inPressEvent", &Clickable::inPressEvent);
+			a_binder.method("press", &Clickable::press, jai::serial);
+
+			a_binder.method("startEatingTouches", &Clickable::startEatingTouches);
+			a_binder.method("stopEatingTouches", &Clickable::stopEatingTouches);
+			a_binder.method("eatingTouches", &Clickable::eatingTouches);
+
+			a_binder.method("dragDelta", &Clickable::dragDelta);
+			a_binder.method("totalDragDistance", &Clickable::totalDragDistance);
+			a_binder.method("dragTime", &Clickable::dragTime);
+
+			a_binder.method("globalPriority", static_cast<int64_t(Clickable::*)() const>(&Clickable::globalPriority));
+			a_binder.method("globalPriority", static_cast<std::shared_ptr<Clickable>(Clickable::*)(int64_t)>(&Clickable::globalPriority));
+			a_binder.method("appendPriority", static_cast<int64_t(Clickable::*)() const>(&Clickable::appendPriority));
+			a_binder.method("appendPriority", static_cast<std::shared_ptr<Clickable>(Clickable::*)(int64_t)>(&Clickable::appendPriority));
+
+			a_binder.method("mouseInBounds", static_cast<bool(Clickable::*)()>(&Clickable::mouseInBounds), jai::serial);
+		}
+
 
 		Clickable::BoundsType Clickable::clickDetectionType() const {
 			return hitDetectionType;

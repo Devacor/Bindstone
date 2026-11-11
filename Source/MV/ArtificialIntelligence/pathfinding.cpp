@@ -8,18 +8,14 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
-static jai::registrar<MV::PathNode, MV::Services> _hookPathNode("PathNode",
-	[](jai::dynamic_binder<MV::PathNode>& builder, const MV::Services&) {
-	builder.auto_bind();
+static jai::registrar<MV::PathNode, MV::Services> _hookPathNode([](jai::dynamic_binder<MV::PathNode>& builder, const MV::Services&) {
 	builder.constructor<const MV::Point<int>&, float>();
 	builder.method("position", &MV::PathNode::position);
 	builder.method("cost", &MV::PathNode::cost);
 });
 
-static jai::registrar<MV::NavigationAgent, MV::Services> _hookNavigationAgent("NavigationAgent",
-	[](jai::dynamic_binder<MV::NavigationAgent>& builder, const MV::Services&) {
-	builder.auto_bind();
-	builder.serial_only_constructor();   // the destructor releases its flow field's user count and vacates the map it blocks
+static jai::registrar<MV::NavigationAgent, MV::Services> _hookNavigationAgent([](jai::dynamic_binder<MV::NavigationAgent>& builder, const MV::Services&) {
+	builder.constructor<>(jai::serial);   // the destructor releases its flow field's user count and vacates the map it blocks
 
 	builder.method("pathfinding", &MV::NavigationAgent::pathfinding);
 	builder.method("stop", &MV::NavigationAgent::stop, jai::serial);
@@ -27,6 +23,7 @@ static jai::registrar<MV::NavigationAgent, MV::Services> _hookNavigationAgent("N
 	builder.method("hasFootprint", &MV::NavigationAgent::hasFootprint);
 	builder.method("disableFootprint", &MV::NavigationAgent::disableFootprint, jai::serial);
 	builder.method("enableFootprint", &MV::NavigationAgent::enableFootprint, jai::serial);
+	builder.method("size", &MV::NavigationAgent::size);
 
 	builder.method("speed", static_cast<MV::PointPrecision(MV::NavigationAgent::*)() const>(&MV::NavigationAgent::speed));
 	builder.method("speed", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(MV::PointPrecision)>(&MV::NavigationAgent::speed), jai::serial);

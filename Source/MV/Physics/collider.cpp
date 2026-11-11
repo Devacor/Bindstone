@@ -3,43 +3,26 @@
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
-#include <jaiscript/signals/signal_binding.hpp>
+#include <jaiscript/signals/signal.hpp>
 #include "MV/Utility/services.hpp"
 
-static jai::registrar<MV::Scene::Environment, MV::Services, jai::bases<MV::Scene::Component>> _hookEnvironment("Environment",
-	[](jai::dynamic_binder<MV::Scene::Environment>& builder, const MV::Services&) {
-	builder.base_class<MV::Scene::Component>();
-	builder.auto_bind();
-});
+static jai::registrar<MV::Scene::Environment, MV::Services, jai::bases<MV::Scene::Component>> _hookEnvironment;
 
-static jai::registrar<MV::Scene::CollisionParameters, MV::Services> _hookCollisionParameters("CollisionParameters",
-	[](jai::dynamic_binder<MV::Scene::CollisionParameters>& builder, const MV::Services&) {
+static jai::registrar<MV::Scene::CollisionParameters, MV::Services> _hookCollisionParameters([](jai::dynamic_binder<MV::Scene::CollisionParameters>& builder, const MV::Services&) {
 	builder.method("colliderA", [](MV::Scene::CollisionParameters& a_self) { return a_self.safeColliderA().self(); });
 	builder.method("colliderB", [](MV::Scene::CollisionParameters& a_self) { return a_self.safeColliderB().self(); });
 	builder.method("fixtureIdA", [](MV::Scene::CollisionParameters& a_self) { return a_self.fixtureA ? a_self.fixtureA->id() : std::string(); });
 	builder.method("fixtureIdB", [](MV::Scene::CollisionParameters& a_self) { return a_self.fixtureB ? a_self.fixtureB->id() : std::string(); });
 });
 
-static jai::registrar<MV::Scene::Collider, MV::Services, jai::bases<MV::Scene::Component>> _hookCollider("Collider",
-	[](jai::dynamic_binder<MV::Scene::Collider>& builder, const MV::Services&) {
-	builder.base_class<MV::Scene::Component>();
-
-	auto& eng = builder.bound_engine();
-	jai::bind_signal_type<void(MV::Scene::CollisionParameters)>(eng, "SignalCollision");
-	jai::bind_signal_type<void(size_t, MV::Scene::CollisionParameters, const MV::Point<> &)>(eng, "SignalContactStart");
-	jai::bind_signal_type<void(size_t, MV::Scene::CollisionParameters)>(eng, "SignalContactEnd");
-	jai::bind_signal_type<void(bool, MV::Scene::CollisionParameters)>(eng, "SignalCollisionKilled");
-	jai::bind_signal_type<void(bool, size_t, MV::Scene::CollisionParameters)>(eng, "SignalContactKilled");
-	jai::bind_signal_type<void(MV::Scene::CollisionParameters, const MV::Point<> &, bool&)>(eng, "SignalShouldCollide");
-	builder.property("onCollisionStart", [](MV::Scene::Collider& a_self) -> jai::signal<void(MV::Scene::CollisionParameters)>& { return a_self.onCollisionStart; }, nullptr);
-	builder.property("onCollisionEnd", [](MV::Scene::Collider& a_self) -> jai::signal<void(MV::Scene::CollisionParameters)>& { return a_self.onCollisionEnd; }, nullptr);
-	builder.property("onContactStart", [](MV::Scene::Collider& a_self) -> jai::signal<void(size_t, MV::Scene::CollisionParameters, const MV::Point<> &)>& { return a_self.onContactStart; }, nullptr);
-	builder.property("onContactEnd", [](MV::Scene::Collider& a_self) -> jai::signal<void(size_t, MV::Scene::CollisionParameters)>& { return a_self.onContactEnd; }, nullptr);
-	builder.property("onCollisionKilled", [](MV::Scene::Collider& a_self) -> jai::signal<void(bool, MV::Scene::CollisionParameters)>& { return a_self.onCollisionKilled; }, nullptr);
-	builder.property("onContactKilled", [](MV::Scene::Collider& a_self) -> jai::signal<void(bool, size_t, MV::Scene::CollisionParameters)>& { return a_self.onContactKilled; }, nullptr);
-	builder.property("onShouldCollide", [](MV::Scene::Collider& a_self) -> jai::signal<void(MV::Scene::CollisionParameters, const MV::Point<> &, bool&)>& { return a_self.onShouldCollide; }, nullptr);
-
-	builder.auto_bind();
+static jai::registrar<MV::Scene::Collider, MV::Services, jai::bases<MV::Scene::Component>> _hookCollider([](jai::dynamic_binder<MV::Scene::Collider>& builder, const MV::Services&) {
+	builder.property("onCollisionStart", &MV::Scene::Collider::onCollisionStart);
+	builder.property("onCollisionEnd", &MV::Scene::Collider::onCollisionEnd);
+	builder.property("onContactStart", &MV::Scene::Collider::onContactStart);
+	builder.property("onContactEnd", &MV::Scene::Collider::onContactEnd);
+	builder.property("onCollisionKilled", &MV::Scene::Collider::onCollisionKilled);
+	builder.property("onContactKilled", &MV::Scene::Collider::onContactKilled);
+	builder.property("onShouldCollide", &MV::Scene::Collider::onShouldCollide);
 });
 
 bool operator!=(const b2Vec2 &a_lhs, const b2Vec2 &a_rhs) {

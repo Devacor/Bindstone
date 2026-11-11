@@ -11,10 +11,7 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
-static jai::registrar<MV::DynamicVariable, MV::Services> _hookDynamicVariable("DynamicVariable",
-	[](jai::dynamic_binder<MV::DynamicVariable>& builder, const MV::Services&) {
-	builder.auto_bind();
-
+static jai::registrar<MV::DynamicVariable, MV::Services> _hookDynamicVariable([](jai::dynamic_binder<MV::DynamicVariable>& builder, const MV::Services&) {
 	builder.constructor<>();
 	builder.constructor<bool>();
 	builder.constructor<int64_t>();
@@ -47,12 +44,10 @@ static jai::registrar<MV::DynamicVariable, MV::Services> _hookDynamicVariable("D
 	builder.method("string", [](MV::DynamicVariable& self) { return self.getString(); });
 
 	builder.method("clear", [](MV::DynamicVariable& self) { return self.clear(); });
+	builder.method("empty", &MV::DynamicVariable::empty);
 });
 
-static jai::registrar<MV::Client, MV::Services> _hookClient("Client",
-	[](jai::dynamic_binder<MV::Client>& builder, const MV::Services&) {
-	builder.auto_bind();
-
+static jai::registrar<MV::Client, MV::Services> _hookClient([](jai::dynamic_binder<MV::Client>& builder, const MV::Services&) {
 	builder.method("send", &MV::Client::send, jai::serial);
 	builder.method("connected", &MV::Client::connected);
 	builder.method("disconnect", [](MV::Client& self) { self.disconnect(); }, jai::serial);

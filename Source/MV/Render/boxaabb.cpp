@@ -10,7 +10,6 @@
 
 template<typename T>
 void hookBoxAABBType(jai::dynamic_binder<MV::BoxAABB<T>>& builder) {
-	builder.auto_bind();
 	builder.constructor<>();
 	builder.constructor<const MV::Point<T>&>();
 	builder.constructor<const MV::Size<T>&>();

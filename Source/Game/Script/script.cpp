@@ -30,8 +30,7 @@ namespace MV {
 		int64_t search = static_cast<int64_t>(MV::PathMode::search);
 		int64_t flowField = static_cast<int64_t>(MV::PathMode::flowField);
 	};
-	static jai::registrar<PathModeValues, MV::Services> _hookPathModeValues("PathModeValues",
-		[](jai::dynamic_binder<PathModeValues>& builder, const MV::Services&) {
+	static jai::registrar<PathModeValues, MV::Services> _hookPathModeValues([](jai::dynamic_binder<PathModeValues>& builder, const MV::Services&) {
 		builder.property("search", &PathModeValues::search);
 		builder.property("flowField", &PathModeValues::flowField);
 	});

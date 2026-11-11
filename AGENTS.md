@@ -290,14 +290,15 @@ types (`NetworkAction` subclasses, `BattleEffectData`) implement `void serialize
 
 ### Polymorphic identity
 ```cpp
-static jai::registrar<MV::Scene::Collider, MV::Services, jai::bases<MV::Scene::Component>> _hookCollider("Collider",
-	[](jai::dynamic_binder<MV::Scene::Collider>& builder, const MV::Services&) {
-	builder.base_class<MV::Scene::Component>();
-	builder.auto_bind();
+static jai::registrar<MV::Scene::Collider, MV::Services, jai::bases<MV::Scene::Component>> _hookCollider([](jai::dynamic_binder<MV::Scene::Collider>& builder, const MV::Services&) {
+	builder.property("onCollisionStart", &MV::Scene::Collider::onCollisionStart);
 });
 ```
 One registrar per concrete type, in its `.cpp` (`collider.cpp`, `clickable.cpp`), gives the script
-name, the `$type` tag and the base links a load through `shared_ptr<Base>` needs. `jai::bases<...>`
+name (the bare class name unless one is passed first), the `$type` tag and the base links a load through
+`shared_ptr<Base>` needs. The binder binds a `property_owner`'s base chain, declared properties and signals
+itself; the configure function names the rest (methods, plain signal members, a non-`property_owner`'s
+`base_class`). `jai::bases<...>`
 lists the C++ bases an archive may hold the type as. Types with no registrar relate through
 `jai::serialization::register_relation<Derived, Base>` (`textures.cpp`). A level with neither is
 saved sliced as its nearest registered base.

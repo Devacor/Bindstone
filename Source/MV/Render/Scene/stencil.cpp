@@ -6,11 +6,7 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
-static jai::registrar<MV::Scene::Stencil, MV::Services> _hookStencil("Stencil",
-	[](jai::dynamic_binder<MV::Scene::Stencil>& builder, const MV::Services&) {
-	builder.base_class<MV::Scene::Sprite>();
-	builder.auto_bind();
-});
+static jai::registrar<MV::Scene::Stencil, MV::Services> _hookStencil;
 
 namespace MV {
 	namespace Scene {

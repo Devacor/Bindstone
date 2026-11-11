@@ -5,15 +5,10 @@
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
-#include <jaiscript/signals/signal_binding.hpp>
+#include <jaiscript/signals/signal.hpp>
 #include "MV/Script/script.h"
 
-static jai::registrar<StandardMessages, MV::Services> _hookStandardMessages("StandardMessages",
-	[](jai::dynamic_binder<StandardMessages>& builder, const MV::Services&) {
-	auto& eng = builder.bound_engine();
-	jai::bind_signal_type<void()>(eng, "SignalVoid");
-	jai::bind_signal_type<void(const std::string&)>(eng, "SignalString");
-	jai::bind_signal_type<void(bool, const std::string&)>(eng, "SignalBoolString");
+static jai::registrar<StandardMessages, MV::Services> _hookStandardMessages([](jai::dynamic_binder<StandardMessages>& builder, const MV::Services&) {
 	builder.property("lobbyConnected", &StandardMessages::lobbyConnected);
 	builder.property("lobbyDisconnect", &StandardMessages::lobbyDisconnect);
 	builder.property("lobbyAuthenticated", &StandardMessages::lobbyAuthenticated);
@@ -25,8 +20,7 @@ void Game::jai_auto_bind(jai::dynamic_binder<Game>& builder) {
 	builder.property("client", [](Game& a_self) { return a_self.lobbyClient(); }, nullptr);
 }
 
-static jai::registrar<Game, MV::Services> _hookGame("Game",
-	[](jai::dynamic_binder<Game>& builder, const MV::Services&) {
+static jai::registrar<Game, MV::Services> _hookGame([](jai::dynamic_binder<Game>& builder, const MV::Services&) {
 	builder.method("gui", &Game::gui);
 	builder.method("instance", [](Game& a_self) {
 		return std::shared_ptr<GameInstance>(a_self.instance(), [](GameInstance*) {});

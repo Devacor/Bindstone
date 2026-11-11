@@ -14,14 +14,14 @@
 
 // Polymorphic wire registrations: without these, toBinaryStringCast<NetworkAction> writes a
 // typeless base payload and the receiving side cannot reconstruct the action.
-static jai::registrar<GameServerAvailable, MV::Services, jai::bases<NetworkAction>> _regGameServerAvailable("GameServerAvailable");
-static jai::registrar<GameServerStateChange, MV::Services, jai::bases<NetworkAction>> _regGameServerStateChange("GameServerStateChange");
-static jai::registrar<MatchResult, MV::Services, jai::bases<NetworkAction>> _regMatchResult("MatchResult");
-static jai::registrar<AssignPlayersToGame, MV::Services, jai::bases<NetworkAction>> _regAssignPlayersToGame("AssignPlayersToGame");
-static jai::registrar<GetInitialGameState, MV::Services, jai::bases<NetworkAction>> _regGetInitialGameState("GetInitialGameState");
-static jai::registrar<SuppliedInitialGameState, MV::Services, jai::bases<NetworkAction>> _regSuppliedInitialGameState("SuppliedInitialGameState");
-static jai::registrar<RequestBuildingUpgrade, MV::Services, jai::bases<NetworkAction>> _regRequestBuildingUpgrade("RequestBuildingUpgrade");
-static jai::registrar<RequestFullGameState, MV::Services, jai::bases<NetworkAction>> _regRequestFullGameState("RequestFullGameState");
+static jai::registrar<GameServerAvailable, MV::Services, jai::bases<NetworkAction>> _regGameServerAvailable;
+static jai::registrar<GameServerStateChange, MV::Services, jai::bases<NetworkAction>> _regGameServerStateChange;
+static jai::registrar<MatchResult, MV::Services, jai::bases<NetworkAction>> _regMatchResult;
+static jai::registrar<AssignPlayersToGame, MV::Services, jai::bases<NetworkAction>> _regAssignPlayersToGame;
+static jai::registrar<GetInitialGameState, MV::Services, jai::bases<NetworkAction>> _regGetInitialGameState;
+static jai::registrar<SuppliedInitialGameState, MV::Services, jai::bases<NetworkAction>> _regSuppliedInitialGameState;
+static jai::registrar<RequestBuildingUpgrade, MV::Services, jai::bases<NetworkAction>> _regRequestBuildingUpgrade;
+static jai::registrar<RequestFullGameState, MV::Services, jai::bases<NetworkAction>> _regRequestFullGameState;
 
 #ifdef BINDSTONE_SERVER
 // 22326 is mutual TLS, so the CA vouched for the certificate; it must be a game server's and name the host players are sent to.

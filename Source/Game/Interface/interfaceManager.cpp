@@ -17,8 +17,7 @@ namespace {
 	}
 }
 
-static jai::registrar<MV::Interface, MV::Services> _hookInterface("Interface",
-	[](jai::dynamic_binder<MV::Interface>& builder, const MV::Services&) {
+static jai::registrar<MV::Interface, MV::Services> _hookInterface([](jai::dynamic_binder<MV::Interface>& builder, const MV::Services&) {
 	builder.method("show", &MV::Interface::show, jai::serial);
 	builder.method("hide", &MV::Interface::hide, jai::serial);
 	builder.method("visible", &MV::Interface::visible);
@@ -28,8 +27,7 @@ static jai::registrar<MV::Interface, MV::Services> _hookInterface("Interface",
 	builder.method("removeFocus", &MV::Interface::removeFocus, jai::serial);
 });
 
-static jai::registrar<MV::InterfaceManager, MV::Services> _hookInterfaceManager("InterfaceManager",
-	[](jai::dynamic_binder<MV::InterfaceManager>& builder, const MV::Services&) {
+static jai::registrar<MV::InterfaceManager, MV::Services> _hookInterfaceManager([](jai::dynamic_binder<MV::InterfaceManager>& builder, const MV::Services&) {
 	builder.method("root", &MV::InterfaceManager::root);
 	// make()/page() return a non-copyable Interface& — expose as a non-owning shared_ptr
 	builder.method("make", [](MV::InterfaceManager& a_self, const std::string& a_pageId) {

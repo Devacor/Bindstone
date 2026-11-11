@@ -4,8 +4,7 @@
 #include <jaiscript/core/registrar.hpp>
 #include <algorithm>
 
-static jai::registrar<Team, MV::Services> _hookTeam("Team",
-	[](jai::dynamic_binder<Team>& builder, const MV::Services&) {
+static jai::registrar<Team, MV::Services> _hookTeam([](jai::dynamic_binder<Team>& builder, const MV::Services&) {
 	builder.method("ourWell", &Team::ourWell);
 	builder.method("enemyWell", &Team::enemyWell);
 	builder.method("health", &Team::health);

@@ -24,13 +24,11 @@ static jai::registrar<Catalog<BuildingData>, MV::Services> _hookBuildingCatalog(
 static jai::registrar<Catalog<BattleEffectData>, MV::Services> _hookBattleEffectCatalog("BattleEffectCatalog",
 	[](jai::dynamic_binder<Catalog<BattleEffectData>>& builder, const MV::Services&) { bindCatalog(builder); });
 
-static jai::registrar<Constants, MV::Services> _hookConstants("Constants",
-	[](jai::dynamic_binder<Constants>& builder, const MV::Services&) {
+static jai::registrar<Constants, MV::Services> _hookConstants([](jai::dynamic_binder<Constants>& builder, const MV::Services&) {
 	builder.property("startHealth", &Constants::startHealth);
 });
 
-static jai::registrar<GameData, MV::Services> _hookGameData("GameData",
-	[](jai::dynamic_binder<GameData>& builder, const MV::Services&) {
+static jai::registrar<GameData, MV::Services> _hookGameData([](jai::dynamic_binder<GameData>& builder, const MV::Services&) {
 	builder.method("buildings", [](GameData& a_self) -> Catalog<BuildingData>& { return a_self.buildings(); });
 	builder.method("creatures", [](GameData& a_self) -> Catalog<CreatureData>& { return a_self.creatures(); });
 	builder.method("battleEffects", [](GameData& a_self) -> Catalog<BattleEffectData>& { return a_self.battleEffects(); });

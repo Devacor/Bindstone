@@ -5,10 +5,7 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
-static jai::registrar<MV::Scene::Sprite, MV::Services> _hookSprite("Sprite",
-	[](jai::dynamic_binder<MV::Scene::Sprite>& builder, const MV::Services&) {
-	builder.base_class<MV::Scene::Drawable>();
-
+static jai::registrar<MV::Scene::Sprite, MV::Services> _hookSprite([](jai::dynamic_binder<MV::Scene::Sprite>& builder, const MV::Services&) {
 	builder.method("corners", &MV::Scene::Sprite::corners<MV::Point<>>, jai::serial);
 
 	builder.method("subdivide", &MV::Scene::Sprite::subdivide);

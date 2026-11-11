@@ -5,11 +5,11 @@
 
 #include <jaiscript/core/registrar.hpp>
 
-static jai::registrar<MessageAction, MV::Services, jai::bases<NetworkAction>> _regMessageAction("MessageAction");
-static jai::registrar<LoginResponse, MV::Services, jai::bases<NetworkAction>> _regLoginResponse("LoginResponse");
-static jai::registrar<IllegalResponse, MV::Services, jai::bases<NetworkAction>> _regIllegalResponse("IllegalResponse");
-static jai::registrar<ServerDetails, MV::Services, jai::bases<NetworkAction>> _regServerDetails("ServerDetails");
-static jai::registrar<MatchedResponse, MV::Services, jai::bases<NetworkAction>> _regMatchedResponse("MatchedResponse");
+static jai::registrar<MessageAction, MV::Services, jai::bases<NetworkAction>> _regMessageAction;
+static jai::registrar<LoginResponse, MV::Services, jai::bases<NetworkAction>> _regLoginResponse;
+static jai::registrar<IllegalResponse, MV::Services, jai::bases<NetworkAction>> _regIllegalResponse;
+static jai::registrar<ServerDetails, MV::Services, jai::bases<NetworkAction>> _regServerDetails;
+static jai::registrar<MatchedResponse, MV::Services, jai::bases<NetworkAction>> _regMatchedResponse;
 
 
 void LoginResponse::execute(Game& a_game) {

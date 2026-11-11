@@ -11,18 +11,16 @@
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 
-static jai::registrar<CreatePlayer, MV::Services, jai::bases<NetworkAction>> _regCreatePlayer("CreatePlayer");
-static jai::registrar<LoginRequest, MV::Services, jai::bases<NetworkAction>> _regLoginRequest("LoginRequest",
-	[](jai::dynamic_binder<LoginRequest>& builder, const MV::Services&) {
+static jai::registrar<CreatePlayer, MV::Services, jai::bases<NetworkAction>> _regCreatePlayer;
+static jai::registrar<LoginRequest, MV::Services, jai::bases<NetworkAction>> _regLoginRequest([](jai::dynamic_binder<LoginRequest>& builder, const MV::Services&) {
 	builder.constructor<std::string, std::string>();
 	builder.method("toNetworkString", [](LoginRequest& a_self) { return a_self.toNetworkString(); }, jai::serial);
 });
-static jai::registrar<FindMatchRequest, MV::Services, jai::bases<NetworkAction>> _regFindMatchRequest("FindMatchRequest",
-	[](jai::dynamic_binder<FindMatchRequest>& builder, const MV::Services&) {
+static jai::registrar<FindMatchRequest, MV::Services, jai::bases<NetworkAction>> _regFindMatchRequest([](jai::dynamic_binder<FindMatchRequest>& builder, const MV::Services&) {
 	builder.constructor<std::string>();
 	builder.method("toNetworkString", [](FindMatchRequest& a_self) { return a_self.toNetworkString(); }, jai::serial);
 });
-static jai::registrar<ExpectedPlayersNoted, MV::Services, jai::bases<NetworkAction>> _regExpectedPlayersNoted("ExpectedPlayersNoted");
+static jai::registrar<ExpectedPlayersNoted, MV::Services, jai::bases<NetworkAction>> _regExpectedPlayersNoted;
 
 
 #ifdef BINDSTONE_SERVER

@@ -6,8 +6,10 @@
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/serialization/polymorphic.hpp>
-static jai::registrar<MV::PackedTextureDefinition, MV::Services> _regPackedTexDef("PackedTextureDefinition");
-static jai::registrar<MV::TexturePack, MV::Services> _regTexturePack("TexturePack");
+static jai::registrar<MV::PackedTextureDefinition, MV::Services> _regPackedTexDef;
+static jai::registrar<MV::TexturePack, MV::Services> _regTexturePack([](jai::dynamic_binder<MV::TexturePack>& builder, const MV::Services&) {
+	builder.method("size", &MV::TexturePack::size);
+});
 static jai::serialization::register_relation<MV::PackedTextureDefinition, MV::DynamicTextureDefinition> _relPackedTexDef;
 
 namespace MV{

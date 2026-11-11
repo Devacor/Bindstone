@@ -9,10 +9,7 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
-static jai::registrar<MV::Scene::Drawable, MV::Services> _hookDrawable("Drawable",
-	[](jai::dynamic_binder<MV::Scene::Drawable>& builder, const MV::Services&) {
-	builder.base_class<MV::Scene::Component>();
-
+static jai::registrar<MV::Scene::Drawable, MV::Services> _hookDrawable([](jai::dynamic_binder<MV::Scene::Drawable>& builder, const MV::Services&) {
 	builder.method("visible", &MV::Scene::Drawable::visible);
 	builder.method("show", &MV::Scene::Drawable::show, jai::serial);
 	builder.method("hide", &MV::Scene::Drawable::hide, jai::serial);

@@ -2,16 +2,12 @@
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
-#include <jaiscript/signals/signal_binding.hpp>
+#include <jaiscript/signals/signal.hpp>
 #include "MV/Utility/services.hpp"
 
-static jai::registrar<MV::Scene::Text, MV::Services> _hookText("Text",
-	[](jai::dynamic_binder<MV::Scene::Text>& builder, const MV::Services&) {
-	builder.base_class<MV::Scene::Drawable>();
-
-	jai::bind_signal_type<MV::Scene::Text::TextSignalSignature>(builder.bound_engine(), "SignalText");
-	builder.property("onEnter", [](MV::Scene::Text& a_self) -> jai::signal<MV::Scene::Text::TextSignalSignature>& { return a_self.onEnter; }, nullptr);
-	builder.property("onChange", [](MV::Scene::Text& a_self) -> jai::signal<MV::Scene::Text::TextSignalSignature>& { return a_self.onChange; }, nullptr);
+static jai::registrar<MV::Scene::Text, MV::Services> _hookText([](jai::dynamic_binder<MV::Scene::Text>& builder, const MV::Services&) {
+	builder.property("onEnter", &MV::Scene::Text::onEnter);
+	builder.property("onChange", &MV::Scene::Text::onChange);
 
 	builder.method("text", static_cast<MV::UtfString(MV::Scene::Text::*)() const>(&MV::Scene::Text::text));
 	builder.method("text", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(const MV::UtfString&)>(&MV::Scene::Text::text), jai::serial);

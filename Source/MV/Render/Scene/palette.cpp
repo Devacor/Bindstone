@@ -5,13 +5,9 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
-static jai::registrar<MV::Scene::Palette, MV::Services> _hookPalette("Palette",
-	[](jai::dynamic_binder<MV::Scene::Palette>& builder, const MV::Services&) {
-	builder.base_class<MV::Scene::Drawable>();
-	builder.auto_bind();
-
-	builder.property("onColorChange", [](MV::Scene::Palette& a_self) -> jai::signal<MV::Scene::Palette::PaletteSignalSignture>& { return a_self.onColorChange; }, nullptr);
-	builder.property("onSwatchClicked", [](MV::Scene::Palette& a_self) -> jai::signal<MV::Scene::Palette::PaletteSignalSignture>& { return a_self.onSwatchClicked; }, nullptr);
+static jai::registrar<MV::Scene::Palette, MV::Services> _hookPalette([](jai::dynamic_binder<MV::Scene::Palette>& builder, const MV::Services&) {
+	builder.property("onColorChange", &MV::Scene::Palette::onColorChange);
+	builder.property("onSwatchClicked", &MV::Scene::Palette::onSwatchClicked);
 
 	builder.method("color", static_cast<MV::Color(MV::Scene::Palette::*)() const>(&MV::Scene::Palette::color));
 	builder.method("color", static_cast<std::shared_ptr<MV::Scene::Palette>(MV::Scene::Palette::*)(const MV::Color&)>(&MV::Scene::Palette::color), jai::serial);

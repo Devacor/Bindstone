@@ -4,9 +4,7 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "services.hpp"
 
-static jai::registrar<MV::Task, MV::Services> _hookTask("Task", [](jai::dynamic_binder<MV::Task>& builder, const MV::Services&) {
-	builder.auto_bind();
-
+static jai::registrar<MV::Task, MV::Services> _hookTask([](jai::dynamic_binder<MV::Task>& builder, const MV::Services&) {
 	builder.constructor<const std::string&>();
 	builder.constructor<const std::string&, bool>();
 	builder.constructor<const std::string&, bool, bool>();

@@ -13,39 +13,29 @@
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
-#include <jaiscript/signals/signal_binding.hpp>
+#include <jaiscript/signals/signal.hpp>
 #include "MV/Utility/services.hpp"
 
-static jai::registrar<MV::Scene::AnimationEventData, MV::Services> _hookAnimationEventData("AnimationEventData",
-	[](jai::dynamic_binder<MV::Scene::AnimationEventData>& builder, const MV::Services&) {
+static jai::registrar<MV::Scene::AnimationEventData, MV::Services> _hookAnimationEventData([](jai::dynamic_binder<MV::Scene::AnimationEventData>& builder, const MV::Services&) {
 	builder.property("name", &MV::Scene::AnimationEventData::name);
 	builder.property("stringValue", &MV::Scene::AnimationEventData::stringValue);
 	builder.property("intValue", &MV::Scene::AnimationEventData::intValue);
 	builder.property("floatValue", &MV::Scene::AnimationEventData::floatValue);
 });
 
-static jai::registrar<MV::Scene::AnimationTrack, MV::Services> _hookAnimationTrack("AnimationTrack",
-	[](jai::dynamic_binder<MV::Scene::AnimationTrack>& builder, const MV::Services&) {
+static jai::registrar<MV::Scene::AnimationTrack, MV::Services> _hookAnimationTrack([](jai::dynamic_binder<MV::Scene::AnimationTrack>& builder, const MV::Services&) {
 	builder.method("name", &MV::Scene::AnimationTrack::name);
 	builder.method("duration", &MV::Scene::AnimationTrack::duration);
 	builder.method("looping", &MV::Scene::AnimationTrack::looping);
 	builder.method("trackIndex", &MV::Scene::AnimationTrack::trackIndex);
 });
 
-static jai::registrar<MV::Scene::Spine, MV::Services> _hookSpine("Spine",
-	[](jai::dynamic_binder<MV::Scene::Spine>& builder, const MV::Services&) {
-	builder.base_class<MV::Scene::Drawable>();
-
-	auto& eng = builder.bound_engine();
-	jai::bind_signal_type<void(std::shared_ptr<MV::Scene::Spine>, int)>(eng, "SignalSpineTrack");
-	jai::bind_signal_type<void(std::shared_ptr<MV::Scene::Spine>, int, const MV::Scene::AnimationEventData&)>(eng, "SignalSpineEvent");
-	jai::bind_signal_type<void(std::shared_ptr<MV::Scene::Spine>, int, int)>(eng, "SignalSpineComplete");
-	jai::bind_signal_type<void(MV::Scene::Spine*, int)>(eng, "SignalSpineDispose");
-	builder.property("onStart", [](MV::Scene::Spine& a_self) -> jai::signal<void(std::shared_ptr<MV::Scene::Spine>, int)>& { return a_self.onStart; }, nullptr);
-	builder.property("onEnd", [](MV::Scene::Spine& a_self) -> jai::signal<void(std::shared_ptr<MV::Scene::Spine>, int)>& { return a_self.onEnd; }, nullptr);
-	builder.property("onEvent", [](MV::Scene::Spine& a_self) -> jai::signal<void(std::shared_ptr<MV::Scene::Spine>, int, const MV::Scene::AnimationEventData&)>& { return a_self.onEvent; }, nullptr);
-	builder.property("onComplete", [](MV::Scene::Spine& a_self) -> jai::signal<void(std::shared_ptr<MV::Scene::Spine>, int, int)>& { return a_self.onComplete; }, nullptr);
-	builder.property("onDispose", [](MV::Scene::Spine& a_self) -> jai::signal<void(MV::Scene::Spine*, int)>& { return a_self.onDispose; }, nullptr);
+static jai::registrar<MV::Scene::Spine, MV::Services> _hookSpine([](jai::dynamic_binder<MV::Scene::Spine>& builder, const MV::Services&) {
+	builder.property("onStart", &MV::Scene::Spine::onStart);
+	builder.property("onEnd", &MV::Scene::Spine::onEnd);
+	builder.property("onEvent", &MV::Scene::Spine::onEvent);
+	builder.property("onComplete", &MV::Scene::Spine::onComplete);
+	builder.property("onDispose", &MV::Scene::Spine::onDispose);
 
 	builder.method("bindNode", &MV::Scene::Spine::bindNode);
 	builder.method("unbindSlot", &MV::Scene::Spine::unbindSlot);

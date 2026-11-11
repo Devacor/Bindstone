@@ -10,10 +10,9 @@
 #include "MV/Utility/generalUtility.h"
 
 #include <jaiscript/core/registrar.hpp>
-#include <jaiscript/signals/signal_binding.hpp>
+#include <jaiscript/signals/signal.hpp>
 
-static jai::registrar<CreatureData, MV::Services> _hookCreatureData("CreatureData",
-	[](jai::dynamic_binder<CreatureData>& builder, const MV::Services&) {
+static jai::registrar<CreatureData, MV::Services> _hookCreatureData([](jai::dynamic_binder<CreatureData>& builder, const MV::Services&) {
 	builder.property("id", &CreatureData::id);
 	builder.property("name", &CreatureData::name);
 	builder.property("description", &CreatureData::description);
@@ -37,8 +36,7 @@ static jai::registrar<StandardScriptMethods<Creature>, MV::Services> _hookCreatu
 	builder.property("death", &StandardScriptMethods<Creature>::scriptDeath);
 });
 
-static jai::registrar<TargetPolicy, MV::Services> _hookTargetPolicy("TargetPolicy",
-	[](jai::dynamic_binder<TargetPolicy>& builder, const MV::Services&) {
+static jai::registrar<TargetPolicy, MV::Services> _hookTargetPolicy([](jai::dynamic_binder<TargetPolicy>& builder, const MV::Services&) {
 	builder.method("target", [](TargetPolicy& a_self, int64_t a_target, double a_range, jai::script_value a_succeed) {
 		a_self.target(a_target, static_cast<float>(a_range), jai::convert_script_function<void(TargetPolicy&)>(a_succeed));
 	}, jai::serial);
@@ -64,10 +62,10 @@ static jai::registrar<TargetPolicy, MV::Services> _hookTargetPolicy("TargetPolic
 });
 
 void Creature::jai_auto_bind(jai::dynamic_binder<Creature>& builder) {
-	builder.property("onStatus", [](Creature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onStatus; }, nullptr);
-	builder.property("onHealthChange", [](Creature& a_self) -> jai::signal<void(std::shared_ptr<Creature>, int)>& { return a_self.onHealthChange; }, nullptr);
-	builder.property("onDeath", [](Creature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onDeath; }, nullptr);
-	builder.property("onFall", [](Creature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onFall; }, nullptr);
+	builder.property("onStatus", &Creature::onStatus);
+	builder.property("onHealthChange", &Creature::onHealthChange);
+	builder.property("onDeath", &Creature::onDeath);
+	builder.property("onFall", &Creature::onFall);
 	builder.method("game", [](Creature& a_self) -> GameInstance& { return a_self.gameInstance; });
 	builder.method("stats", [](Creature& a_self) -> const CreatureData& { return a_self.statTemplate; });
 	builder.method("attackRange", [](Creature& a_self) -> double { return a_self.statTemplate.attackRange; });
@@ -76,13 +74,8 @@ void Creature::jai_auto_bind(jai::dynamic_binder<Creature>& builder) {
 	builder.method("enemyTeam", [](Creature& a_self) -> Team& { return a_self.gameInstance.teamAgainstPlayer(a_self.player()); });
 }
 
-static jai::registrar<Creature, MV::Services, jai::bases<MV::Scene::Component>> _hookCreature("Creature",
-	[](jai::dynamic_binder<Creature>& builder, const MV::Services&) {
+static jai::registrar<Creature, MV::Services, jai::bases<MV::Scene::Component>> _hookCreature([](jai::dynamic_binder<Creature>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Component>();
-	auto& eng = builder.bound_engine();
-	jai::bind_signal_type<Creature::CallbackSignature>(eng, "SignalCreature");
-	jai::bind_signal_type<void(std::shared_ptr<Creature>, int)>(eng, "SignalCreatureHealth");
-	jai::bind_signal_type<void(std::shared_ptr<Creature>, int, int64_t)>(eng, "SignalCreatureDamaged");
 	builder.method("spine", &Creature::spine);
 	builder.method("alive", &Creature::alive);
 	builder.method("networkId", &Creature::netId);
@@ -95,11 +88,11 @@ static jai::registrar<Creature, MV::Services, jai::bases<MV::Scene::Component>> 
 });
 
 void ServerCreature::jai_auto_bind(jai::dynamic_binder<ServerCreature>& builder) {
-	builder.property("onArrive", [](ServerCreature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onArrive; }, nullptr);
-	builder.property("onDamaged", [](ServerCreature& a_self) -> jai::signal<void(std::shared_ptr<Creature>, int, int64_t)>& { return a_self.onDamaged; }, nullptr);
-	builder.property("onBlocked", [](ServerCreature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onBlocked; }, nullptr);
-	builder.property("onStop", [](ServerCreature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onStop; }, nullptr);
-	builder.property("onStart", [](ServerCreature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onStart; }, nullptr);
+	builder.property("onArrive", &ServerCreature::onArrive);
+	builder.property("onDamaged", &ServerCreature::onDamaged);
+	builder.property("onBlocked", &ServerCreature::onBlocked);
+	builder.property("onStop", &ServerCreature::onStop);
+	builder.property("onStart", &ServerCreature::onStart);
 	builder.method("targeting", [](ServerCreature& a_self) -> TargetPolicy& { return a_self.targeting; });
 	builder.method("enemiesInRange", [](ServerCreature& a_self, double a_range) {
 		return a_self.gameInstance.teamAgainstPlayer(a_self.player()).creaturesInRange(a_self.agent()->gridPosition(), static_cast<float>(a_range));
@@ -118,25 +111,24 @@ void ServerCreature::jai_auto_bind(jai::dynamic_binder<ServerCreature>& builder)
 	});
 }
 
-static jai::registrar<ServerCreature, MV::Services> _hookServerCreature("ServerCreature",
-	[](jai::dynamic_binder<ServerCreature>& builder, const MV::Services&) {
+static jai::registrar<ServerCreature, MV::Services> _hookServerCreature([](jai::dynamic_binder<ServerCreature>& builder, const MV::Services&) {
 	builder.base_class<Creature>();
 	builder.method("agent", &ServerCreature::agent);
 	builder.method("fall", &ServerCreature::fall, jai::serial);
 
-	builder.method("damage", [](ServerCreature& a_self, int64_t a_amount, int64_t a_source) { return static_cast<int64_t>(a_self.damage(static_cast<int>(a_amount), a_source)); }, jai::serial);
-	builder.method("tickDamage", [](ServerCreature& a_self, int64_t a_amount, int64_t a_source) { return static_cast<int64_t>(a_self.tickDamage(static_cast<int>(a_amount), a_source)); }, jai::serial);
-	builder.method("heal", [](ServerCreature& a_self, int64_t a_amount) { a_self.heal(static_cast<int>(a_amount)); }, jai::serial);
-	builder.method("shield", [](ServerCreature& a_self, int64_t a_amount) { a_self.shield(static_cast<int>(a_amount)); });
-	builder.method("shieldAmount", [](ServerCreature& a_self) { return static_cast<int64_t>(a_self.shieldAmount()); });
-	builder.method("dot", [](ServerCreature& a_self, double a_perSecond, double a_seconds, int64_t a_source) { a_self.dot(a_perSecond, a_seconds, a_source); });
-	builder.method("hot", [](ServerCreature& a_self, double a_perSecond, double a_seconds) { a_self.hot(a_perSecond, a_seconds); });
-	builder.method("slow", [](ServerCreature& a_self, double a_fraction, double a_seconds) { a_self.slow(a_fraction, a_seconds); });
-	builder.method("haste", [](ServerCreature& a_self, double a_fraction, double a_seconds) { a_self.haste(a_fraction, a_seconds); });
-	builder.method("attackHaste", [](ServerCreature& a_self, double a_fraction, double a_seconds) { a_self.attackHaste(a_fraction, a_seconds); });
-	builder.method("attackSlow", [](ServerCreature& a_self, double a_fraction, double a_seconds) { a_self.attackSlow(a_fraction, a_seconds); });
-	builder.method("abilityHaste", [](ServerCreature& a_self, double a_fraction, double a_seconds) { a_self.abilityHaste(a_fraction, a_seconds); });
-	builder.method("abilitySlow", [](ServerCreature& a_self, double a_fraction, double a_seconds) { a_self.abilitySlow(a_fraction, a_seconds); });
+	builder.method("damage", &ServerCreature::damage, jai::serial);
+	builder.method("tickDamage", &ServerCreature::tickDamage, jai::serial);
+	builder.method("heal", &ServerCreature::heal, jai::serial);
+	builder.method("shield", &ServerCreature::shield);
+	builder.method("shieldAmount", &ServerCreature::shieldAmount);
+	builder.method("dot", &ServerCreature::dot);
+	builder.method("hot", &ServerCreature::hot);
+	builder.method("slow", &ServerCreature::slow);
+	builder.method("haste", &ServerCreature::haste);
+	builder.method("attackHaste", &ServerCreature::attackHaste);
+	builder.method("attackSlow", &ServerCreature::attackSlow);
+	builder.method("abilityHaste", &ServerCreature::abilityHaste);
+	builder.method("abilitySlow", &ServerCreature::abilitySlow);
 	builder.method("moveSpeedMultiplier", &ServerCreature::moveSpeedMultiplier);
 	builder.method("attackSpeedMultiplier", &ServerCreature::attackSpeedMultiplier);
 	builder.method("abilitySpeedMultiplier", &ServerCreature::abilitySpeedMultiplier);
@@ -146,16 +138,15 @@ static jai::registrar<ServerCreature, MV::Services> _hookServerCreature("ServerC
 	builder.method("root", &ServerCreature::root, jai::serial);
 	builder.method("visible", static_cast<bool(ServerCreature::*)() const>(&ServerCreature::visible));
 	builder.method("visible", static_cast<void(ServerCreature::*)(bool)>(&ServerCreature::visible));
-	builder.method("taunt", [](ServerCreature& a_self, int64_t a_attacker, double a_seconds) { a_self.taunt(a_attacker, a_seconds); });
+	builder.method("taunt", &ServerCreature::taunt);
 	builder.method("tauntedBy", &ServerCreature::tauntedBy);
 	builder.method("untargetable", static_cast<bool(ServerCreature::*)() const>(&ServerCreature::untargetable));
 	builder.method("untargetable", static_cast<void(ServerCreature::*)(bool)>(&ServerCreature::untargetable));
-	builder.method("absorbFor", [](ServerCreature& a_self, int64_t a_host, double a_fraction, double a_statusScale) { a_self.absorbFor(a_host, a_fraction, a_statusScale); }, jai::serial);
+	builder.method("absorbFor", &ServerCreature::absorbFor, jai::serial);
 	builder.method("spawnCreature", &ServerCreature::spawnCreature, jai::serial);
 });
 
-static jai::registrar<ClientCreature, MV::Services> _hookClientCreature("ClientCreature",
-	[](jai::dynamic_binder<ClientCreature>& builder, const MV::Services&) {
+static jai::registrar<ClientCreature, MV::Services> _hookClientCreature([](jai::dynamic_binder<ClientCreature>& builder, const MV::Services&) {
 	builder.base_class<Creature>();
 });
 

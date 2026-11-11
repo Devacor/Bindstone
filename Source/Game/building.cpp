@@ -4,23 +4,20 @@
 #include "MV/Utility/generalUtility.h"
 
 #include <jaiscript/core/registrar.hpp>
-#include <jaiscript/signals/signal_binding.hpp>
+#include <jaiscript/signals/signal.hpp>
 
-static jai::registrar<BuildTree, MV::Services> _hookBuildTree("BuildTree",
-	[](jai::dynamic_binder<BuildTree>& builder, const MV::Services&) {
+static jai::registrar<BuildTree, MV::Services> _hookBuildTree([](jai::dynamic_binder<BuildTree>& builder, const MV::Services&) {
 	builder.property("id", &BuildTree::id);
 	builder.property("cost", &BuildTree::cost);
 	builder.property("income", &BuildTree::income);
 });
 
-static jai::registrar<SkinData, MV::Services> _hookSkinData("SkinData",
-	[](jai::dynamic_binder<SkinData>& builder, const MV::Services&) {
+static jai::registrar<SkinData, MV::Services> _hookSkinData([](jai::dynamic_binder<SkinData>& builder, const MV::Services&) {
 	builder.property("id", &SkinData::id);
 	builder.property("costs", &SkinData::costs);
 });
 
-static jai::registrar<BuildingData, MV::Services> _hookBuildingData("BuildingData",
-	[](jai::dynamic_binder<BuildingData>& builder, const MV::Services&) {
+static jai::registrar<BuildingData, MV::Services> _hookBuildingData([](jai::dynamic_binder<BuildingData>& builder, const MV::Services&) {
 	builder.property("id", &BuildingData::id);
 	// BuildTree owns its upgrade children (unique_ptr) - share the live tree, never copy.
 	builder.method("game", [](BuildingData& a_self) -> BuildTree& { return a_self.game; });
@@ -37,7 +34,7 @@ static jai::registrar<StandardScriptMethods<Building>, MV::Services> _hookBuildi
 });
 
 void Building::jai_auto_bind(jai::dynamic_binder<Building>& builder) {
-	builder.property("onUpgraded", [](Building& a_self) -> jai::signal<void(std::shared_ptr<Building>)>& { return a_self.onUpgraded; }, nullptr);
+	builder.property("onUpgraded", &Building::onUpgraded);
 	builder.method("data", [](Building& a_self) { return a_self.buildingData; });
 	builder.method("networkId", [](Building& a_self) { return static_cast<int64_t>(a_self.slot); });
 	builder.method("spawnCreature", [](Building& a_self, const std::string& a_key) {
@@ -52,10 +49,8 @@ void Building::jai_auto_bind(jai::dynamic_binder<Building>& builder) {
 	});
 }
 
-static jai::registrar<Building, MV::Services, jai::bases<MV::Scene::Component>> _hookBuilding("Building",
-	[](jai::dynamic_binder<Building>& builder, const MV::Services&) {
+static jai::registrar<Building, MV::Services, jai::bases<MV::Scene::Component>> _hookBuilding([](jai::dynamic_binder<Building>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Component>();
-	jai::bind_signal_type<void(std::shared_ptr<Building>)>(builder.bound_engine(), "SignalBuilding");
 	builder.method("current", [](Building& a_self) -> const BuildTree& { return *a_self.current(); });
 	builder.method("upgrade", &Building::upgrade, jai::serial);
 	builder.method("player", &Building::player);

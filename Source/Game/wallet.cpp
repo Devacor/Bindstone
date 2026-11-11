@@ -5,8 +5,7 @@
 #include <jaiscript/core/registrar.hpp>
 
 // Currency slots from script side are plain ints (GAME=0, SOFT=1, HARD=2).
-static jai::registrar<Wallet, MV::Services> _hookWallet("Wallet",
-	[](jai::dynamic_binder<Wallet>& builder, const MV::Services&) {
+static jai::registrar<Wallet, MV::Services> _hookWallet([](jai::dynamic_binder<Wallet>& builder, const MV::Services&) {
 	builder.method("name", [](Wallet& a_self, int64_t a_type) { return a_self.name(static_cast<Wallet::CurrencyType>(a_type)); });
 	builder.method("value", [](Wallet& a_self, int64_t a_type) { return a_self.value(static_cast<Wallet::CurrencyType>(a_type)); });
 	builder.method("add", [](Wallet& a_self, int64_t a_type, int64_t a_amount) { return a_self.add(static_cast<Wallet::CurrencyType>(a_type), a_amount); }, jai::serial);

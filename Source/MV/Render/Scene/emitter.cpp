@@ -13,10 +13,7 @@
 #include <atomic>
 #include <limits>
 
-static jai::registrar<MV::Scene::Emitter, MV::Services> _hookEmitter("Emitter",
-	[](jai::dynamic_binder<MV::Scene::Emitter>& builder, const MV::Services&) {
-	builder.base_class<MV::Scene::Drawable>();
-
+static jai::registrar<MV::Scene::Emitter, MV::Services> _hookEmitter([](jai::dynamic_binder<MV::Scene::Emitter>& builder, const MV::Services&) {
 	builder.method("relativeEmission", static_cast<std::weak_ptr<MV::Scene::Node>(MV::Scene::Emitter::*)() const>(&MV::Scene::Emitter::relativeEmission));
 	builder.method("relativeEmission", static_cast<std::shared_ptr<MV::Scene::Emitter>(MV::Scene::Emitter::*)(std::shared_ptr<MV::Scene::Node>)>(&MV::Scene::Emitter::relativeEmission));
 	builder.method("removeRelativeEmission", &MV::Scene::Emitter::removeRelativeEmission);

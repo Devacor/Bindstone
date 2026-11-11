@@ -4,25 +4,21 @@
 #include "Game/player.h"
 
 #include <jaiscript/core/registrar.hpp>
-#include <jaiscript/signals/signal_binding.hpp>
+#include <jaiscript/signals/signal.hpp>
 
-static jai::registrar<BattleEffectNetworkState, MV::Services> _hookBattleEffectNetworkState("BattleEffectNetworkState",
-	[](jai::dynamic_binder<BattleEffectNetworkState>& builder, const MV::Services&) {
+static jai::registrar<BattleEffectNetworkState, MV::Services> _hookBattleEffectNetworkState([](jai::dynamic_binder<BattleEffectNetworkState>& builder, const MV::Services&) {
 	auto& eng = builder.bound_engine();
 	// TargetType constants: enums travel as ints through script
 	eng.add_global("TargetType_NONE", eng.make_value(static_cast<int64_t>(TargetType::NONE)));
 	eng.add_global("TargetType_CREATURE", eng.make_value(static_cast<int64_t>(TargetType::CREATURE)));
 	eng.add_global("TargetType_GROUND", eng.make_value(static_cast<int64_t>(TargetType::GROUND)));
-	builder.constructor<GameInstance&, const std::string&, int64_t>();
-	builder.serial_only_constructor();   // reads the owner creature from the GameInstance and its node's scene-graph position
+	builder.constructor<GameInstance&, const std::string&, int64_t>(jai::serial);   // reads the owner creature from the GameInstance and its node's scene-graph position
 	builder.property("dying", &BattleEffectNetworkState::dying);
 	builder.property("buildingSlot", &BattleEffectNetworkState::buildingSlot);
 	builder.property("creatureOwnerId", &BattleEffectNetworkState::creatureOwnerId);
 	builder.property("targetCreatureId", &BattleEffectNetworkState::targetCreatureId);
 	builder.property("duration", &BattleEffectNetworkState::duration);
-	builder.property("targetType",
-		[](BattleEffectNetworkState& a_self) { return static_cast<int64_t>(a_self.targetType); },
-		[](BattleEffectNetworkState& a_self, int64_t a_value) { a_self.targetType = static_cast<TargetType>(a_value); });
+	builder.property("targetType", &BattleEffectNetworkState::targetType);
 });
 
 static jai::registrar<StandardScriptMethods<BattleEffect>, MV::Services> _hookBattleEffectScriptMethods("BattleEffectScriptMethods",
@@ -33,8 +29,8 @@ static jai::registrar<StandardScriptMethods<BattleEffect>, MV::Services> _hookBa
 });
 
 void BattleEffect::jai_auto_bind(jai::dynamic_binder<BattleEffect>& builder) {
-	builder.property("onArrive", [](BattleEffect& a_self) -> jai::signal<BattleEffect::CallbackSignature>& { return a_self.onArrive; }, nullptr);
-	builder.property("onFizzle", [](BattleEffect& a_self) -> jai::signal<BattleEffect::CallbackSignature>& { return a_self.onFizzle; }, nullptr);
+	builder.property("onArrive", &BattleEffect::onArrive);
+	builder.property("onFizzle", &BattleEffect::onFizzle);
 	builder.method("stats", [](BattleEffect& a_self) { return a_self.statTemplate; });
 	builder.method("ourElapsedTime", [](BattleEffect& a_self) { return a_self.ourElapsedTime; });
 	builder.method("sourceCreature", [](BattleEffect& a_self) { return a_self.sourceCreature; });
@@ -48,28 +44,23 @@ void BattleEffect::jai_auto_bind(jai::dynamic_binder<BattleEffect>& builder) {
 	});
 }
 
-static jai::registrar<BattleEffectData, MV::Services> _hookBattleEffectData("BattleEffectData",
-	[](jai::dynamic_binder<BattleEffectData>& builder, const MV::Services&) {
+static jai::registrar<BattleEffectData, MV::Services> _hookBattleEffectData([](jai::dynamic_binder<BattleEffectData>& builder, const MV::Services&) {
 	builder.property("id", &BattleEffectData::id);
 });
 
-static jai::registrar<BattleEffect, MV::Services, jai::bases<MV::Scene::Component>> _hookBattleEffect("BattleEffect",
-	[](jai::dynamic_binder<BattleEffect>& builder, const MV::Services&) {
+static jai::registrar<BattleEffect, MV::Services, jai::bases<MV::Scene::Component>> _hookBattleEffect([](jai::dynamic_binder<BattleEffect>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Component>();
-	jai::bind_signal_type<BattleEffect::CallbackSignature>(builder.bound_engine(), "SignalBattleEffect");
 	builder.method("game", &BattleEffect::game);
 	builder.method("alive", &BattleEffect::alive);
 	builder.method("networkId", &BattleEffect::netId);
 	builder.method("assetPath", &BattleEffect::assetPath);
 });
 
-static jai::registrar<ServerBattleEffect, MV::Services> _hookServerBattleEffect("ServerBattleEffect",
-	[](jai::dynamic_binder<ServerBattleEffect>& builder, const MV::Services&) {
+static jai::registrar<ServerBattleEffect, MV::Services> _hookServerBattleEffect([](jai::dynamic_binder<ServerBattleEffect>& builder, const MV::Services&) {
 	builder.base_class<BattleEffect>();
 });
 
-static jai::registrar<ClientBattleEffect, MV::Services> _hookClientBattleEffect("ClientBattleEffect",
-	[](jai::dynamic_binder<ClientBattleEffect>& builder, const MV::Services&) {
+static jai::registrar<ClientBattleEffect, MV::Services> _hookClientBattleEffect([](jai::dynamic_binder<ClientBattleEffect>& builder, const MV::Services&) {
 	builder.base_class<BattleEffect>();
 });
 

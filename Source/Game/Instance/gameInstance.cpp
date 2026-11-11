@@ -8,8 +8,7 @@
 
 #include <jaiscript/core/registrar.hpp>
 
-static jai::registrar<GameInstance, MV::Services> _hookGameInstance("GameInstance",
-	[](jai::dynamic_binder<GameInstance>& builder, const MV::Services&) {
+static jai::registrar<GameInstance, MV::Services> _hookGameInstance([](jai::dynamic_binder<GameInstance>& builder, const MV::Services&) {
 	builder.method("creature", [](GameInstance& a_self, int64_t a_id) { return a_self.creature(a_id); });
 	builder.method("spawnCreature", [](GameInstance& a_self, int64_t a_slot, const std::string& a_id) {
 		a_self.spawnCreature(static_cast<int>(a_slot), a_id);

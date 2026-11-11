@@ -8,10 +8,7 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
-static jai::registrar<MV::Scene::Button, MV::Services> _hookButton("Button",
-	[](jai::dynamic_binder<MV::Scene::Button>& builder, const MV::Services&) {
-	builder.base_class<MV::Scene::Clickable>();
-
+static jai::registrar<MV::Scene::Button, MV::Services> _hookButton([](jai::dynamic_binder<MV::Scene::Button>& builder, const MV::Services&) {
 	builder.method("activeNode", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Button::*)() const>(&MV::Scene::Button::activeNode));
 	builder.method("activeNode", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Button::activeNode), jai::serial);
 	builder.method("idleNode", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Button::*)() const>(&MV::Scene::Button::idleNode));

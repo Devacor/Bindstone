@@ -8,10 +8,7 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
-static jai::registrar<MV::Scene::Grid, MV::Services> _hookGrid("Grid",
-	[](jai::dynamic_binder<MV::Scene::Grid>& builder, const MV::Services&) {
-	builder.base_class<MV::Scene::Drawable>();
-
+static jai::registrar<MV::Scene::Grid, MV::Services> _hookGrid([](jai::dynamic_binder<MV::Scene::Grid>& builder, const MV::Services&) {
 	builder.method("padding", static_cast<std::pair<MV::Point<>, MV::Point<>>(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::padding));
 	builder.method("padding", static_cast<std::shared_ptr<MV::Scene::Grid>(MV::Scene::Grid::*)(const MV::Size<>&)>(&MV::Scene::Grid::padding));
 

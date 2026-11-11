@@ -3,15 +3,11 @@
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
-#include <jaiscript/signals/signal_binding.hpp>
+#include <jaiscript/signals/signal.hpp>
 #include "MV/Utility/services.hpp"
 
-static jai::registrar<MV::Scene::Slider, MV::Services> _hookSlider("Slider",
-	[](jai::dynamic_binder<MV::Scene::Slider>& builder, const MV::Services&) {
-	builder.base_class<MV::Scene::Clickable>();
-
-	jai::bind_signal_type<MV::Scene::Slider::SliderSignalSignature>(builder.bound_engine(), "SignalSlider");
-	builder.property("onPercentChange", [](MV::Scene::Slider& a_self) -> jai::signal<MV::Scene::Slider::SliderSignalSignature>& { return a_self.onPercentChange; }, nullptr);
+static jai::registrar<MV::Scene::Slider, MV::Services> _hookSlider([](jai::dynamic_binder<MV::Scene::Slider>& builder, const MV::Services&) {
+	builder.property("onPercentChange", &MV::Scene::Slider::onPercentChange);
 
 	builder.method("percent", static_cast<MV::PointPrecision(MV::Scene::Slider::*)() const>(&MV::Scene::Slider::percent));
 	builder.method("percent", static_cast<std::shared_ptr<MV::Scene::Slider>(MV::Scene::Slider::*)(MV::PointPrecision, bool)>(&MV::Scene::Slider::percent), jai::serial);

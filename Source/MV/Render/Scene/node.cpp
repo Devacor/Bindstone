@@ -18,8 +18,7 @@
 #include "MV/Serialization/serialize.h"
 #include <jaiscript/properties/property_serialization.hpp>
 
-static jai::registrar<MV::Scene::Node, MV::Services> _hookNode("Node",
-	[](jai::dynamic_binder<MV::Scene::Node>& builder, const MV::Services&) {
+static jai::registrar<MV::Scene::Node, MV::Services> _hookNode([](jai::dynamic_binder<MV::Scene::Node>& builder, const MV::Services&) {
 	builder.method("make", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)()>(&MV::Scene::Node::make), jai::serial);
 	builder.method("make", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const std::string&)>(&MV::Scene::Node::make), jai::serial);
 	builder.method("makeOrGet", &MV::Scene::Node::makeOrGet, jai::serial);

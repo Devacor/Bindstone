@@ -72,7 +72,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>m.def("load_level", &amp;load_level);</code>, <code>bp::def(...)</code></td><td><code>eng-&gt;add_function("load_level", &amp;load_level);</code></td></tr>
 <tr><td>two <code>m.def</code> of one name with <code>py::overload_cast&lt;int64_t&gt;(&amp;f)</code> (a <code>static_cast</code> in Boost.Python)</td><td>two <code>add_function</code> of one name, with <code>static_cast</code> for an overloaded C++ name; the call resolves by argument types</td></tr>
 <tr><td><code>py::arg("speed") = 1.0</code>, keyword arguments</td><td>none: script calls are positional, as in C++. A parameter with a default becomes an overload without it</td></tr>
-<tr><td><code>py::args</code>, <code>py::kwargs</code></td><td><code>eng-&gt;add_variadic_function("f", fn)</code>, whose <code>fn</code> receives a <code>const std::vector&lt;jai::script_value&gt;&amp;</code></td></tr>
+<tr><td><code>py::args</code>, <code>py::kwargs</code></td><td><code>eng-&gt;add_variadic_function("f", fn)</code>, whose <code>fn</code> takes <code>(jai::engine&amp;, std::span&lt;const jai::script_value&gt;)</code></td></tr>
 <tr><td><code>std::function</code> parameters through <code>pybind11/functional.h</code></td><td>a <code>std::function</code> parameter takes a script function or lambda as is</td></tr>
 </tbody></table></div>
 <h3 id="classes">Classes<a class="hlink" href="#classes" aria-label="link">&#8203;</a></h3>

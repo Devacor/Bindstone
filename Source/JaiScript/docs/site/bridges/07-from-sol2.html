@@ -65,7 +65,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <div class="tablewrap"><table><thead><tr><th>sol2</th><th>JaiScript</th></tr></thead><tbody>
 <tr><td><code>lua.set_function("f", &amp;f);</code>, <code>lua["f"] = [](double v) { ... };</code></td><td><code>eng-&gt;add_function("f", &amp;f);</code>, <code>eng-&gt;add_function("f", [](double v) { ... });</code></td></tr>
 <tr><td><code>lua.set_function("label", sol::overload(f1, f2));</code></td><td><code>eng-&gt;add_function("label", f1);</code> and <code>eng-&gt;add_function("label", f2);</code>: one name, an overload set resolved by argument types</td></tr>
-<tr><td>a <code>sol::variadic_args</code> parameter</td><td><code>eng-&gt;add_variadic_function("f", fn)</code>, whose <code>fn</code> receives a <code>const std::vector&lt;jai::script_value&gt;&amp;</code></td></tr>
+<tr><td>a <code>sol::variadic_args</code> parameter</td><td><code>eng-&gt;add_variadic_function("f", fn)</code>, whose <code>fn</code> takes <code>(jai::engine&amp;, std::span&lt;const jai::script_value&gt;)</code></td></tr>
 <tr><td>a <code>sol::this_state</code> parameter</td><td>the lambda captures the engine pointer</td></tr>
 </tbody></table></div>
 <h3 id="usertypes">Usertypes<a class="hlink" href="#usertypes" aria-label="link">&#8203;</a></h3>

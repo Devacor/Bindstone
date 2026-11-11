@@ -60,29 +60,45 @@ their engine.</li>
 <code>nodiscard</code>) come before the scripts that use them.</li>
 </ul>
 <h2 id="registering-c-functions">Registering C++ functions<a class="hlink" href="#registering-c-functions" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// Typed: signature drives conversion and overload resolution
+<div class="codeblock cb-cpp" data-sample="host-api-register"><span class="cb-label">C++</span><pre><code class="lang-cpp">// Typed: the signature drives conversion and overload resolution
 eng-&gt;add_function(&quot;square&quot;, [](jai::script_int n) { return n * n; });
-eng-&gt;execute(&quot;square(12)&quot;).as_int();      // 144
+std::cout &lt;&lt; eng-&gt;execute(&quot;square(12)&quot;).as_int() &lt;&lt; &quot;\n&quot;;
 
-// Variadic: you receive the raw argument vector
-eng-&gt;add_variadic_function(&quot;sum_all&quot;, [&amp;eng](const std::vector&lt;jai::script_value&gt;&amp; args) {
+// Variadic: the engine and every argument of the call
+eng-&gt;add_variadic_function(&quot;sum_all&quot;, [](jai::engine&amp;, std::span&lt;const jai::script_value&gt; args) {
     jai::script_int total = 0;
-    for (auto&amp; a : args) total += a.as_int();
-    return jai::script_value(total, eng.get());
+    for (const auto&amp; a : args) total += a.as_int();
+    return total;
 });
-eng-&gt;execute(&quot;sum_all(1, 2, 3, 4)&quot;).as_int();   // 10</code></pre></div>
-<p>Registering a name again with another signature adds an overload, resolved by argument types at the call. A
-<code>script_value</code> you construct takes the engine pointer, as above, or comes from <code>eng-&gt;make_value(v)</code>,
-<code>make_null()</code>, <code>make_array()</code> or <code>make_map()</code>.</p>
+std::cout &lt;&lt; eng-&gt;execute(&quot;sum_all(1, 2, 3, 4)&quot;).as_int() &lt;&lt; &quot;\n&quot;;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">144
+10</code></pre></div>
+<p>Registering a name again with another signature adds an overload, resolved by argument types at the call. A variadic
+function returns what a typed one returns, a <code>script_value</code>, or a <code>checked_result&lt;script_value&gt;</code>
+whose error the script receives. A <code>script_value</code> it constructs takes the engine it is given
+(<code>jai::script_value(total, &amp;eng)</code>) or comes from <code>eng.make_value(v)</code>, <code>make_null()</code>,
+<code>make_array()</code> or <code>make_map()</code>. A callable of the argument vector alone,
+<code>const std::vector&lt;jai::script_value&gt;&amp;</code>, returning a <code>checked_result&lt;script_value&gt;</code>,
+registers as a variadic function too, and captures the engine it needs.</p>
 <p id="more-registration-calls">The raw-arity and overload registrations, custom and container conversions, class and backend queries, <code>text_of</code>, the app folders and <code>set_output_stream</code>: <a href="../reference/host.html#hostapi-registration">registration and engine queries</a>.</p>
 <h3 id="host-direct-entries">A direct entry for a hot variadic function<a class="hlink" href="#host-direct-entries" aria-label="link">&#8203;</a></h3>
 <p>A typed <code>add_function</code> binding has a fast call path unless a parameter is a non-const reference to a value
 (a <code>T&amp;</code> that writes back). <code>const std::string&amp;</code>, a bound object's <code>T&amp;</code>,
 <code>const std::vector&lt;jai::script_value&gt;&amp;</code> and <code>const jai::script_value&amp;</code> parameters
-receive the script's own values, never copies. A variadic function instead pays a <code>std::function</code> call and an
-argument vector per call. For one that scripts call in tight loops, <code>add_host_direct(name, arity, invoke,
-target)</code> adds an entry over the arguments where they are:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// one body for both: the function and its direct entry
+receive the script's own values, never copies. An engine-first variadic function has one as well: bound alone under its
+name, with no requirement, it runs on the arguments where they are for a VM call of 1 to 8 arguments, none of them a
+reference, with no argument vector and no <code>std::function</code> call. Every other call reaches the same callable
+through the function.</p>
+<div class="codeblock cb-cpp" data-sample="host-api-direct-variadic"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_variadic_function(&quot;label&quot;, [](jai::engine&amp;, std::span&lt;const jai::script_value&gt; args) -&gt; std::string {
+    if (args.size() != 1) return &quot;?&quot;;
+    return args[0].is_int() ? &quot;int&quot; : args[0].is_float() ? &quot;float&quot; : &quot;other&quot;;
+});
+std::cout &lt;&lt; eng-&gt;execute(&quot;label(2.5)&quot;).as_string() &lt;&lt; &quot;\n&quot;;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">float</code></pre></div>
+<p>A variadic function of the argument vector pays a <code>std::function</code> call and an argument vector per call.
+<code>add_host_direct(name, arity, invoke, target)</code> gives it, or any function a name binds, an entry over the
+arguments where they are:</p>
+<div class="codeblock cb-cpp" data-sample="host-api-direct-entry"><span class="cb-label">C++</span><pre><code class="lang-cpp">// one body for both: the function and its direct entry
 static jai::checked_result&lt;jai::script_value&gt; label_of(const void* target, const jai::script_value* args, size_t count) {
     auto* eng = static_cast&lt;jai::engine*&gt;(const_cast&lt;void*&gt;(target));
     if (count != 1) return jai::script_value(std::string(&quot;?&quot;), eng);
@@ -93,7 +109,8 @@ eng-&gt;add_variadic_function(&quot;label&quot;, [e = eng.get()](const std::vect
     return label_of(e, args.data(), args.size());
 });
 eng-&gt;add_host_direct(&quot;label&quot;, 1, &amp;label_of, eng.get());   // after the function: it keys on the function &quot;label&quot; binds now
-eng-&gt;execute(&quot;label(2.5)&quot;).as_string();                  // &quot;float&quot;</code></pre></div>
+std::cout &lt;&lt; eng-&gt;execute(&quot;label(2.5)&quot;).as_string() &lt;&lt; &quot;\n&quot;;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">float</code></pre></div>
 <p>The VM calls <code>invoke(target, args, arity)</code> for a call of exactly <code>arity</code> arguments, none of them a
 reference; <code>jai::engine::host_direct_any_arity</code> takes any call of 1 to 8 arguments. Every other call (another
 count, a reference argument, a name re-registered or rebound) calls the function, so <code>invoke</code> must return what

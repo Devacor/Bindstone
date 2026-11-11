@@ -377,6 +377,17 @@ struct Link {
 // [/sample]
 }
 
+namespace doc_host_direct {
+// [sample host-api-direct-entry]
+// one body for both: the function and its direct entry
+static jai::checked_result<jai::script_value> label_of(const void* target, const jai::script_value* args, size_t count) {
+    auto* eng = static_cast<jai::engine*>(const_cast<void*>(target));
+    if (count != 1) return jai::script_value(std::string("?"), eng);
+    return jai::script_value(std::string(args[0].is_int() ? "int" : args[0].is_float() ? "float" : "other"), eng);
+}
+// [/sample]
+}
+
 namespace doc_samples {
 
 std::filesystem::path source_root() { return std::filesystem::path(JAISCRIPT_TESTS_SOURCE_ROOT); }
@@ -716,6 +727,70 @@ public:
 				    if (!r) { std::cout << "frame " << frame << ": " << eng->format_error(r) << "\n"; continue; }
 				    std::cout << "frame " << frame << ": " << r.value().as_int() << "\n";
 				}
+				// [/sample]
+			});
+		});
+
+		test("guide_variadic_sum", [this]() {
+			expect_cpp("guide/06-functions.html", "guide-variadic-sum", [] {
+				auto eng = jai::engine::make();
+				jai::stdlib::register_all(eng);
+				// [sample guide-variadic-sum]
+				eng->add_variadic_function("sum_all", [](jai::engine&, std::span<const jai::script_value> args) {
+				    jai::script_int total = 0;
+				    for (const auto& a : args) total += a.as_int();
+				    return total;
+				});
+				eng->execute("print(sum_all(1, 2, 3, 4));");
+				// [/sample]
+			});
+		});
+
+		test("host_api_register", [this]() {
+			expect_cpp("embedding/17-host-api.html", "host-api-register", [] {
+				auto eng = jai::engine::make();
+				jai::stdlib::register_all(eng);
+				// [sample host-api-register]
+				// Typed: the signature drives conversion and overload resolution
+				eng->add_function("square", [](jai::script_int n) { return n * n; });
+				std::cout << eng->execute("square(12)").as_int() << "\n";
+
+				// Variadic: the engine and every argument of the call
+				eng->add_variadic_function("sum_all", [](jai::engine&, std::span<const jai::script_value> args) {
+				    jai::script_int total = 0;
+				    for (const auto& a : args) total += a.as_int();
+				    return total;
+				});
+				std::cout << eng->execute("sum_all(1, 2, 3, 4)").as_int() << "\n";
+				// [/sample]
+			});
+		});
+
+		test("host_api_direct_variadic", [this]() {
+			expect_cpp("embedding/17-host-api.html", "host-api-direct-variadic", [] {
+				auto eng = jai::engine::make();
+				jai::stdlib::register_all(eng);
+				// [sample host-api-direct-variadic]
+				eng->add_variadic_function("label", [](jai::engine&, std::span<const jai::script_value> args) -> std::string {
+				    if (args.size() != 1) return "?";
+				    return args[0].is_int() ? "int" : args[0].is_float() ? "float" : "other";
+				});
+				std::cout << eng->execute("label(2.5)").as_string() << "\n";
+				// [/sample]
+			});
+		});
+
+		test("host_api_direct_entry", [this]() {
+			expect_cpp("embedding/17-host-api.html", "host-api-direct-entry", [] {
+				using doc_host_direct::label_of;
+				auto eng = jai::engine::make();
+				jai::stdlib::register_all(eng);
+				// [sample host-api-direct-entry]
+				eng->add_variadic_function("label", [e = eng.get()](const std::vector<jai::script_value>& args) {
+				    return label_of(e, args.data(), args.size());
+				});
+				eng->add_host_direct("label", 1, &label_of, eng.get());   // after the function: it keys on the function "label" binds now
+				std::cout << eng->execute("label(2.5)").as_string() << "\n";
 				// [/sample]
 			});
 		});

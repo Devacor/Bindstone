@@ -3765,8 +3765,9 @@ public:
 		});
 		test("a_host_direct_entry_runs_for_its_function_and_arity_only", [this]() {
 			// the embedding guide's add_host_direct sample: one body behind the variadic function and its direct entry; another
-			// argument count, a reference argument and a script rebinding call the function
-			auto run = [](bool use_vm, const char* program) -> std::string {
+			// argument count, a reference argument and a script rebinding call the function. An engine-first variadic function
+			// carries its own entry, alone under its name and unguarded, and returns what a typed binding returns
+			auto run = [this](bool use_vm, const char* program) -> std::string {
 				auto e = jai::foundry::make_default_engine();
 				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				e->execution_budget(0);
@@ -3780,14 +3781,48 @@ public:
 					return label_of(eng, args.data(), args.size());
 				});
 				e->add_host_direct("label", 1, label_of, e.get());
-				try { return e->execute(program).to_string(); } catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
+				e->add_variadic_function("sum_all", [](jai::engine&, std::span<const jai::script_value> args) {
+					jai::script_int total = 0;
+					for (const auto& a : args) { total += a.as_int(); }
+					return total;
+				});
+				e->add_variadic_function("kind_of", [](jai::engine& eng, std::span<const jai::script_value> args) {
+					return jai::script_value(std::string(args.empty() ? "none" : args[0].is_int() ? "int" : args[0].is_string() ? "string" : "other"), &eng);
+				});
+				e->add_variadic_function("first_of", [](jai::engine&, std::span<const jai::script_value> args) -> jai::checked_result<jai::script_value> {
+					if (args.empty()) { return jai::checked_result<jai::script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "first_of needs an argument"); }
+					return args[0];
+				});
+				e->add_variadic_function("try_count", [](jai::engine&, std::span<const jai::script_value> args) { return !args.empty(); }, jai::nodiscard);
+				e->add_variadic_function("io_count", [](jai::engine&, std::span<const jai::script_value> args) { return static_cast<jai::script_int>(args.size()); }, jai::filesystem);
+				e->register_privilege("app.count");
+				e->add_variadic_function("app_count", [](jai::engine&, std::span<const jai::script_value> args) { return static_cast<jai::script_int>(args.size()); }, "app.count");
+				e->add_variadic_function("both_count", [](jai::engine&, std::span<const jai::script_value> args) { return static_cast<jai::script_int>(args.size()); }, {"filesystem", "app.count"});
+				auto row_of = [&](const char* name) {
+					const jai::script_value fn = detail::engine_access::get_variable_unheld(*e, name);
+					return detail::engine_access::host_direct_for(*e, &fn.unchecked_as_function()) != nullptr;
+				};
+				check_true(row_of("sum_all") && row_of("kind_of") && row_of("try_count"), "an unguarded engine-first function has its direct entry");
+				check_false(row_of("io_count") || row_of("app_count") || row_of("both_count"), "a guarded one runs its guard on every call");
+				check_true(e->is_nodiscard_function("try_count") && !e->is_nodiscard_function("sum_all"));
+				const auto dropped = e->check("try_count(1);\nprint(1);");
+				check_true(dropped.format().find("the result of 'try_count' is discarded") != std::string::npos, dropped.format());
+				std::string denied;
+				try { e->execute("app_count(1);"); } catch (const std::exception& ex) { denied = ex.what(); }
+				e->enable(std::string_view("app.count"));
+				try { return denied + "|" + e->execute(program).to_string(); } catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
 			};
 			const char* program =
 				"string out = \"\"; float f = 2.5;\n"
 				"for (int i = 0; i < 3; ++i) { out += label(i) + label(f) + label(\"s\") + label() + label(1, 2) + \" \"; }\n"
 				"array<float> fs = [1.5]; for (auto& r : fs) { out += label(r); }\n"
+				"int total = 0; for (int i = 0; i < 3; ++i) { total += sum_all() + sum_all(i) + sum_all(1, 2, 3) + sum_all(1, 2, 3, 4, 5, 6, 7, 8, 9); }\n"
+				"array<int> xs = [40]; for (auto& x : xs) { total += sum_all(x, 2); }\n"
+				"out += ` ${total} ${kind_of()}${kind_of(1)}${kind_of(\"s\")}${kind_of(1.5)} ${first_of(7, 8)}`;\n"
+				"try { first_of(); } catch (e) { out += ` ${e}`; }\n"
+				"bool any = try_count(); out += ` ${any} ${io_count(1, 2)} ${app_count(1, 2, 3)} ${both_count()}`;\n"
 				"out;";
-			check_eq(std::string("intfloatother?? intfloatother?? intfloatother?? float"), run(false, program), "interpreter");
+			check_eq(std::string("Insufficient privilege: app.count.|intfloatother?? intfloatother?? intfloatother?? float 198 noneintstringother 7 first_of needs an argument false 2 3 0"), run(false, program), "interpreter");
 			check_eq(run(false, program), run(true, program), "parity");
 		});
 		test("map_stores_borrow_their_key_and_element_reads_write_back_only_through_mutators", [this]() {

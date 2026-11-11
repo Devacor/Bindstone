@@ -630,9 +630,35 @@ namespace jai {
         
         // === FUNCTION REGISTRATION ===
         
-        // Variadic functions - handle any number of arguments at runtime
-        // Use this for functions like print(), max(), or functions with optional parameters
-        // Example: engine.add_variadic_function("print", [](const std::vector<script_value>& args) { ... });
+        // Variadic functions: any number of arguments, as print() and max() take them. The engine-first form returns what a
+        // typed binding returns, a script_value or a checked_result<script_value>; alone under its name, the VM runs it on the
+        // arguments where they are. The vector form returns a checked_result<script_value>.
+        // Example: engine.add_variadic_function("sum_all", [](jai::engine&, std::span<const jai::script_value> args) { ... });
+        template<detail::engine_first_variadic Func>
+        void add_variadic_function(const std::string& name, Func&& func, privilege required = privilege::none) {
+            using call_t = detail::engine_variadic_call<std::decay_t<Func>>;
+            add_engine_variadic_function(name, guard_function(call_t{std::forward<Func>(func), this}, required), {&call_t::invoke, &call_t::locate},
+                                         host_result_kind<typename call_t::result_type>());
+        }
+        template<detail::engine_first_variadic Func>
+        void add_variadic_function(const std::string& name, Func&& func, function_options options) {
+            add_variadic_function(name, std::forward<Func>(func), options.required);
+            apply_function_options(name, options);
+        }
+        template<detail::engine_first_variadic Func>
+        void add_variadic_function(const std::string& name, Func&& func, std::span<const std::string_view> names) {
+            using call_t = detail::engine_variadic_call<std::decay_t<Func>>;
+            add_engine_variadic_function(name, guard_function(call_t{std::forward<Func>(func), this}, names), {&call_t::invoke, &call_t::locate},
+                                         host_result_kind<typename call_t::result_type>());
+        }
+        template<detail::engine_first_variadic Func>
+        void add_variadic_function(const std::string& name, Func&& func, std::string_view required) {
+            add_variadic_function(name, std::forward<Func>(func), std::span(&required, 1));
+        }
+        template<detail::engine_first_variadic Func>
+        void add_variadic_function(const std::string& name, Func&& func, std::initializer_list<std::string_view> names) {
+            add_variadic_function(name, std::forward<Func>(func), std::span(names.begin(), names.size()));
+        }
         void add_variadic_function(const std::string& name, script_function func, privilege required = privilege::none);
         void add_variadic_function(const std::string& name, script_function func, function_options options) {
             add_variadic_function(name, std::move(func), options.required);
@@ -1615,6 +1641,7 @@ namespace jai {
             const void* (*locate)(const script_function&) = nullptr;
         };
         void stage_host_direct(host_direct_entry entry);
+        void add_engine_variadic_function(const std::string& name, script_function func, host_direct_entry direct, script_value_type result);
 
         // The single overloaded-function registration algorithm shared by every public entry point
         // (add_function*, add_overloaded_function*, add_variadic_function). create_set_on_first is the

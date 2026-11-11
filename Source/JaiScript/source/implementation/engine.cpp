@@ -4274,37 +4274,60 @@ void engine::publish_namespace_entry(const std::string& name) {
 
 // A variadic callable takes its arguments by value: an element reference an argument site minted (`f(a[i])`) reaches it
 // as the element's value, as a typed parameter's conversion already reads it
+static checked_result<void> variadic_values(const std::vector<script_value>& args, std::vector<script_value>& values) {
+    values.reserve(args.size());
+    for (const script_value& arg : args) {
+        if (!arg.is_reference()) { values.push_back(arg); continue; }
+        auto value = detail::ref_checked_deref(arg);
+        if (!value) { return value.error_value(); }
+        values.push_back(std::move(value.value()));
+    }
+    return {};
+}
+
+static bool holds_reference(const std::vector<script_value>& args) {
+    return std::any_of(args.begin(), args.end(), [](const script_value& arg) { return arg.is_reference(); });
+}
+
+checked_result<script_value> detail::call_variadic_by_value(const std::vector<script_value>& args,
+                                                            checked_result<script_value> (*invoke)(const void*, const script_value*, size_t), const void* self) {
+    if (!holds_reference(args)) [[likely]] { return invoke(self, args.data(), args.size()); }
+    std::vector<script_value> values;
+    if (auto read = variadic_values(args, values); !read) { return read.error_value(); }
+    return invoke(self, values.data(), values.size());
+}
+
 static script_function variadic_by_value(script_function func) {
     return [inner = std::move(func)](const std::vector<script_value>& args) -> checked_result<script_value> {
-        for (size_t i = 0; i < args.size(); ++i) {
-            if (args[i].is_reference()) [[unlikely]] {
-                std::vector<script_value> values;
-                values.reserve(args.size());
-                for (const script_value& arg : args) {
-                    if (!arg.is_reference()) { values.push_back(arg); continue; }
-                    auto value = detail::ref_checked_deref(arg);
-                    if (!value) { return value.error_value(); }
-                    values.push_back(std::move(value.value()));
-                }
-                return inner(values);
-            }
-        }
-        return inner(args);
+        if (!holds_reference(args)) [[likely]] { return inner(args); }
+        std::vector<script_value> values;
+        if (auto read = variadic_values(args, values); !read) { return read.error_value(); }
+        return inner(values);
     };
 }
 
-void engine::add_variadic_function(const std::string& name, script_function func, privilege required) {
-    func = variadic_by_value(guard_function(std::move(func), required));
-    // Variadic function registration - handles any number of arguments
-    // Register with SIZE_MAX to indicate it's a wildcard function
-    constexpr size_t VARIADIC = SIZE_MAX;
-    if (has_function(name)) {
-        // Add as overload with SIZE_MAX (wildcard - accepts any number of args)
-        add_overloaded_function(name, VARIADIC, func);
+// Registered with SIZE_MAX, the arity that accepts any count: an overload beside a function the name already binds
+static void register_variadic(engine& eng, const std::string& name, script_function func) {
+    if (eng.has_function(name)) {
+        eng.add_overloaded_function(name, SIZE_MAX, std::move(func));
     } else {
-        // Register with SIZE_MAX to mark it as variadic
-        add_function_with_arity(name, func, VARIADIC);
+        eng.add_function_with_arity(name, std::move(func), SIZE_MAX);
     }
+}
+
+void engine::add_variadic_function(const std::string& name, script_function func, privilege required) {
+    register_variadic(*this, name, variadic_by_value(guard_function(std::move(func), required)));
+}
+
+// The engine-first callable reads its arguments by value itself; a guard around it takes them by value first, as the vector
+// form's does, and leaves the name no direct entry
+void engine::add_engine_variadic_function(const std::string& name, script_function func, host_direct_entry direct, script_value_type result) {
+    if (!direct.locate(func)) { func = variadic_by_value(std::move(func)); }
+    stage_host_result(result);
+    register_variadic(*this, name, std::move(func));
+    const script_value* bound = impl->global_environment_->get_value_ptr(impl->string_symbolizer_.intern(name));
+    if (!bound || bound->raw_storage_index() != script_value::TYPEID_FUNCTION) { return; }
+    if (const void* target = direct.locate(bound->unchecked_as_function())) { add_host_direct(*bound, host_direct_any_arity, direct.invoke, target); }
 }
 
 // One overloaded-function registration algorithm shared by every entry point. State:

@@ -102,6 +102,11 @@ class Game {
 	int ep_secret_total = 0;
 	int ep_ticks = 0;
 	int deaths = 0;
+	// what the player walked onto the floor with, which a death on it gives back
+	array<int> entry_have = {1, 0, 0};
+	array<int> entry_ammo = {48, 0, 0};
+	int entry_armor = 0;
+	int entry_weapon = 0;
 
 	// render scratch (allocated once; bg rebaked per map)
 	array<int> pix;
@@ -135,6 +140,25 @@ class Game {
 		bob = 0.0;
 	}
 
+	void remember_loadout() {
+		entry_have = have;
+		entry_ammo = ammo;
+		entry_armor = armor;
+		entry_weapon = weapon;
+	}
+
+	// a death restarts the floor with full health and the arsenal brought in, every gun at least half stocked
+	void respawn_player() {
+		reset_player();
+		have = entry_have;
+		armor = entry_armor;
+		weapon = entry_weapon;
+		array<int> least = {48, 16, 40};
+		for (int t = 0; t < 3; t++) {
+			ammo[t] = (have[t] == 1 && entry_ammo[t] < least[t]) ? least[t] : entry_ammo[t];
+		}
+	}
+
 	void start_episode() {
 		map_i = 0;
 		ep_kills = 0;
@@ -144,6 +168,7 @@ class Game {
 		ep_ticks = 0;
 		deaths = 0;
 		reset_player();
+		remember_loadout();
 		begin_map();
 	}
 
@@ -169,6 +194,7 @@ class Game {
 			mode = 4;
 			mode_t = 0;
 		} else {
+			remember_loadout();
 			begin_map();
 		}
 	}
@@ -216,8 +242,8 @@ class Game {
 			mode_t = mode_t + 1;
 			if (start_pressed && mode_t > 25) {
 				deaths = deaths + 1;
-				reset_player();
-				begin_map();       // the floor repopulates; the Well remembers nothing
+				respawn_player();
+				begin_map();       // the floor repopulates; you keep the arsenal you brought to it
 			}
 			accumulate_hash();
 			return;

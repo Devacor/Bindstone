@@ -169,7 +169,8 @@ gloom_hashes() {
 	if [ "$look" = showcase ]; then want "gloom showcase: expected sound: $GLOOM_SOUND" "^sound: $GLOOM_SOUND\$"; fi
 }
 
-# the drag-drop shim on the runner, as played: its frames, its sound bank, and the --dev hot-reload self-test in a scratch copy
+# the drag-drop shim on the runner, as played: its frames, its sound bank, the --dev hot-reload self-test in a scratch copy,
+# and the respawn self-test (no checkpoint dies past the first floor)
 gloom_shim() {
 	vm_only gloom || return 0
 	cd "$ROOT/examples/gloom"
@@ -186,6 +187,8 @@ gloom_shim() {
 	(cd "$scratch" && run_logged "$BIN/jaiscript" gloom.jai -- --reload-test)
 	rm -rf "$scratch"
 	want "gloom shim: expected the hot-reload self-test to pass" "^RELOAD TEST: PASS"
+	run_logged "$BIN/jaiscript" gloom.jai -- --respawn-test
+	want "gloom shim: expected a death on the last floor to keep the arsenal brought to it" "^RESPAWN TEST: PASS"
 }
 
 gate_gloom() {

@@ -71,6 +71,10 @@ class Game {
 	var ep_secret_total
 	var ep_ticks
 	var deaths
+	var entry_have
+	var entry_ammo
+	var entry_armor
+	var entry_weapon
 	// render scratch (allocated once)
 	var pix
 	var zbuf
@@ -142,6 +146,10 @@ class Game {
 		this.ep_secret_total = 0;
 		this.ep_ticks = 0;
 		this.deaths = 0;
+		this.entry_have = [1, 0, 0];
+		this.entry_ammo = [48, 0, 0];
+		this.entry_armor = 0;
+		this.entry_weapon = 0;
 		this.pix = [];
 		for (var i = 0; i < this.vw * this.vh; ++i) { this.pix.push_back(0); }
 		this.zbuf = [];
@@ -166,6 +174,30 @@ class Game {
 		this.bob = 0.0;
 	}
 
+	// what the player walked onto the floor with, which a death on it gives back
+	def remember_loadout() {
+		this.entry_have = [this.have[0], this.have[1], this.have[2]];
+		this.entry_ammo = [this.ammo[0], this.ammo[1], this.ammo[2]];
+		this.entry_armor = this.armor;
+		this.entry_weapon = this.weapon;
+	}
+
+	// a death restarts the floor with full health and the arsenal brought in, every gun at least half stocked
+	def respawn_player() {
+		this.reset_player();
+		this.have = [this.entry_have[0], this.entry_have[1], this.entry_have[2]];
+		this.armor = this.entry_armor;
+		this.weapon = this.entry_weapon;
+		var least = [48, 16, 40];
+		for (var t = 0; t < 3; ++t) {
+			if (this.have[t] == 1 && this.entry_ammo[t] < least[t]) {
+				this.ammo[t] = least[t];
+			} else {
+				this.ammo[t] = this.entry_ammo[t];
+			}
+		}
+	}
+
 	def start_episode() {
 		this.map_i = 0;
 		this.ep_kills = 0;
@@ -175,6 +207,7 @@ class Game {
 		this.ep_ticks = 0;
 		this.deaths = 0;
 		this.reset_player();
+		this.remember_loadout();
 		this.begin_map();
 	}
 
@@ -200,6 +233,7 @@ class Game {
 			this.mode = 4;
 			this.mode_t = 0;
 		} else {
+			this.remember_loadout();
 			this.begin_map();
 		}
 	}
@@ -243,8 +277,8 @@ class Game {
 			this.mode_t += 1;
 			if (start_pressed && this.mode_t > 25) {
 				this.deaths += 1;
-				this.reset_player();
-				this.begin_map();       // the floor repopulates; the Well remembers nothing
+				this.respawn_player();
+				this.begin_map();       // the floor repopulates; you keep the arsenal you brought to it
 			}
 			this.accumulate_hash();
 			return;

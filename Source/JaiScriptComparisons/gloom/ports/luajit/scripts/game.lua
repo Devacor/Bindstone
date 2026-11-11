@@ -111,6 +111,30 @@ function Game:reset_player()
 	self.bob = 0.0
 end
 
+-- what the player walked onto the floor with, which a death on it gives back
+function Game:remember_loadout()
+	self.entry_have = {self.have[1], self.have[2], self.have[3]}
+	self.entry_ammo = {self.ammo[1], self.ammo[2], self.ammo[3]}
+	self.entry_armor = self.armor
+	self.entry_weapon = self.weapon
+end
+
+-- a death restarts the floor with full health and the arsenal brought in, every gun at least half stocked
+function Game:respawn_player()
+	self:reset_player()
+	self.have = {self.entry_have[1], self.entry_have[2], self.entry_have[3]}
+	self.armor = self.entry_armor
+	self.weapon = self.entry_weapon
+	local least = {48, 16, 40}
+	for t = 1, 3 do
+		if self.have[t] == 1 then
+			self.ammo[t] = math.max(self.entry_ammo[t], least[t])
+		else
+			self.ammo[t] = self.entry_ammo[t]
+		end
+	end
+end
+
 function Game:start_episode()
 	self.map_i = 0
 	self.ep_kills = 0
@@ -120,6 +144,7 @@ function Game:start_episode()
 	self.ep_ticks = 0
 	self.deaths = 0
 	self:reset_player()
+	self:remember_loadout()
 	self:begin_map()
 end
 
@@ -145,6 +170,7 @@ function Game:finish_map()
 		self.mode = 4
 		self.mode_t = 0
 	else
+		self:remember_loadout()
 		self:begin_map()
 	end
 end
@@ -204,8 +230,8 @@ function Game:run_tick()
 		self.mode_t = self.mode_t + 1
 		if start_pressed and self.mode_t > 25 then
 			self.deaths = self.deaths + 1
-			self:reset_player()
-			self:begin_map()       -- the floor repopulates; the Well remembers nothing
+			self:respawn_player()
+			self:begin_map()       -- the floor repopulates; you keep the arsenal you brought to it
 		end
 		self:accumulate_hash()
 		return

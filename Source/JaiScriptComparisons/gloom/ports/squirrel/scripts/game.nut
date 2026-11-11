@@ -75,6 +75,12 @@ class Game {
 	ep_ticks = 0;
 	deaths = 0;
 
+	// what the player walked onto the floor with, which a death on it gives back
+	entry_have = null;
+	entry_ammo = null;
+	entry_armor = 0;
+	entry_weapon = 0;
+
 	// render scratch (allocated once; bg rebaked per map)
 	bg = null;
 	zbuf = null;
@@ -112,6 +118,25 @@ class Game {
 		bob = 0.0;
 	}
 
+	function remember_loadout() {
+		entry_have = clone have;
+		entry_ammo = clone ammo;
+		entry_armor = armor;
+		entry_weapon = weapon;
+	}
+
+	// a death restarts the floor with full health and the arsenal brought in, every gun at least half stocked
+	function respawn_player() {
+		reset_player();
+		have = clone entry_have;
+		armor = entry_armor;
+		weapon = entry_weapon;
+		local least = [48, 16, 40];
+		for (local t = 0; t < 3; t++) {
+			ammo[t] = (have[t] == 1 && entry_ammo[t] < least[t]) ? least[t] : entry_ammo[t];
+		}
+	}
+
 	function start_episode() {
 		map_i = 0;
 		ep_kills = 0;
@@ -121,6 +146,7 @@ class Game {
 		ep_ticks = 0;
 		deaths = 0;
 		reset_player();
+		remember_loadout();
 		begin_map();
 	}
 
@@ -146,6 +172,7 @@ class Game {
 			mode = 4;
 			mode_t = 0;
 		} else {
+			remember_loadout();
 			begin_map();
 		}
 	}
@@ -192,8 +219,8 @@ class Game {
 			mode_t = mode_t + 1;
 			if (start_pressed && mode_t > 25) {
 				deaths = deaths + 1;
-				reset_player();
-				begin_map();       // the floor repopulates; the RNG stream continues
+				respawn_player();
+				begin_map();       // the floor repopulates; you keep the arsenal you brought to it
 			}
 			accumulate_hash();
 			return;

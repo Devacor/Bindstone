@@ -130,6 +130,23 @@ class Game:
 		self.cooldown = 0
 		self.bob = 0.0
 
+	def remember_loadout(self):
+		"""what the player walked onto the floor with, which a death on it gives back"""
+		self.entry_have = list(self.have)
+		self.entry_ammo = list(self.ammo)
+		self.entry_armor = self.armor
+		self.entry_weapon = self.weapon
+
+	def respawn_player(self):
+		"""a death restarts the floor with full health and the arsenal brought in, every gun at least half stocked"""
+		self.reset_player()
+		self.have = list(self.entry_have)
+		self.armor = self.entry_armor
+		self.weapon = self.entry_weapon
+		least = [48, 16, 40]
+		for t in range(3):
+			self.ammo[t] = max(self.entry_ammo[t], least[t]) if self.have[t] == 1 else self.entry_ammo[t]
+
 	def start_episode(self):
 		self.map_i = 0
 		self.ep_kills = 0
@@ -139,6 +156,7 @@ class Game:
 		self.ep_ticks = 0
 		self.deaths = 0
 		self.reset_player()
+		self.remember_loadout()
 		self.begin_map()
 
 	def begin_map(self):
@@ -162,6 +180,7 @@ class Game:
 			self.mode = 4
 			self.mode_t = 0
 		else:
+			self.remember_loadout()
 			self.begin_map()
 
 	def gather_input(self):
@@ -218,8 +237,8 @@ class Game:
 			self.mode_t += 1
 			if start_pressed and self.mode_t > 25:
 				self.deaths += 1
-				self.reset_player()
-				self.begin_map()       # the floor repopulates; the Well remembers nothing
+				self.respawn_player()
+				self.begin_map()       # the floor repopulates; you keep the arsenal you brought to it
 			self.accumulate_hash()
 			return
 		if mode == 4:

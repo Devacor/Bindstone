@@ -34,6 +34,10 @@
 
 namespace fs = std::filesystem;
 
+// the host's own privileges take the slots after the engine's
+enum class GamePrivilege : std::uint8_t { cheats = jai::privilege_count };
+void jai_privilege_enum(GamePrivilege);
+
 struct Vec2 {
 	double x = 0, y = 0;
 	Vec2() = default;
@@ -299,8 +303,8 @@ static int run(int argc, char** argv) {
 	sandbox->set_backend(eng->get_backend_type());
 	jai::stdlib::register_all(sandbox);
 	sandbox->disable(jai::filesystem);
-	sandbox->register_privilege("game.cheats");
-	sandbox->add_function("give_gold", [](int64_t n) { return n * 2; }, "game.cheats");
+	sandbox->register_privilege(GamePrivilege::cheats, "game.cheats");
+	sandbox->add_function("give_gold", [](int64_t n) { return n * 2; }, GamePrivilege::cheats);
 	try {
 		sandbox->execute("import \"rules.jai\";");
 		expect(false, "import should be refused without the filesystem privilege");
@@ -314,7 +318,7 @@ static int run(int argc, char** argv) {
 	} catch (const std::exception& e) {
 		expect(true, std::string("custom privilege enforced: ") + e.what());
 	}
-	sandbox->enable("game.cheats");
+	sandbox->enable(GamePrivilege::cheats);
 	expect(sandbox->execute("give_gold(5)").as_int() == 10, "give_gold works once game.cheats is enabled");
 
 	section("script errors in C++");

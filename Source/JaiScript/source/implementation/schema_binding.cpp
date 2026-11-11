@@ -183,7 +183,7 @@ void bind_observable_change_method(engine& a_engine, class_definition& class_def
 		return script_value(std::monostate{}, eng);
 	};
 
-	class_def.add_method(observe_method_name, engine_access::guard_function(a_engine, std::move(method_func), privilege::none), 1,
+	class_def.add_method(observe_method_name, engine_access::guard_function(a_engine, std::move(method_func), privilege_set{}), 1,
 		std::vector<param_type_info>{ engine_access::map_cpp_type_to_param_info<script_value>() }, engine_access::map_cpp_type_to_param_info<script_value>());
 }
 

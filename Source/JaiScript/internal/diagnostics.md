@@ -45,13 +45,13 @@ authorize an operation. Protected operations share `engine::require_privilege`.
 | Text | Meaning |
 | --- | --- |
 | `Insufficient privilege: filesystem.` | A filesystem operation or location query was refused (`insufficient_privilege`). Catchable; an unhandled error reaches the host. |
-| `Insufficient privilege: {name}.` | A binding requires a disabled custom privilege (`insufficient_privilege`). The name uses its engine-interned symbol; no interning or allocation in the checked error path. |
-| `reflect::is_enabled expects at least 1 argument` | The query needs one or more flag or name arguments. |
-| `reflect::is_enabled expects valid privilege flags` | An argument is neither a name string nor an integer flag set, or contains unimplemented bits. |
-| `Invalid privilege flags` | A host grant/requirement request contains unimplemented bits. |
-| `Unknown privilege name` | A host tries to grant, revoke, require, or attach an unregistered name. Checked require calls return an error; boolean queries return false. Neither operation interns or registers an unknown name. |
-| `Privilege name must not be empty` | Host registration needs a nonempty name. |
-| `Cannot change privileges during a parallel region` | A host attempted to register a privilege or modify grants before the region's workers joined. |
+| `Insufficient privilege: scoped_template.`, `Insufficient privilege: network.` | The other built-in slots, the same way. |
+| `Insufficient privilege: {name}.` | A binding requires a disabled host privilege (`insufficient_privilege`): its `register_privilege` name, else its slot number, parked when the guard is made so a denial in a parallel region needs no interning. |
+| `reflect::is_enabled expects at least 1 argument` | The query needs one or more slot numbers. |
+| `reflect::is_enabled expects valid privilege flags` | An argument is not an integer from 0 to 255. |
+| `Privilege slot out of range` | A privilege enum value outside 0 to 255 (a compile error in a constant expression), or `register_privilege` on a built-in slot. |
+| `Privilege name must not be empty` | `register_privilege` needs a nonempty name. |
+| `Cannot change privileges during a parallel region` | A host attempted to name a privilege or modify grants before the region's workers joined. |
 
 Grant changes apply to future operations, not work already started. Configure on
 the engine thread (including a reentrant C++ callback) or while idle, never

@@ -24,7 +24,6 @@
 #include "core/value.hpp"
 
 // 5. Binding traits and containers (depends on value)
-#include "core/binding_traits.hpp"
 #include "core/bound_array.hpp"
 #include "core/bound_map.hpp"
 

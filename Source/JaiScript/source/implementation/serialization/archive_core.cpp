@@ -22,6 +22,25 @@ void throw_not_deserializable(std::type_index type) {
         "Add save/load, serialize, property_owner, or ADL functions, bind it in the archive's engine — or mark the property transient.");
 }
 
+void throw_unregistered_hybrid_base(const std::string& hybrid_type, std::type_index base) {
+    throw serialization_error("Cannot serialize hybrid script class '" + hybrid_type + "': its C++ base '" + detail::readable_cpp_type_name(base) +
+        "' is not registered. Register it with jai::registrar<T, Context>(\"Name\") or derive from jai::property_owner<T, ...>.");
+}
+
+void throw_unregistered_polymorphic(std::type_index actual, std::type_index base) {
+    throw serialization_error("Cannot serialize unregistered polymorphic type '" + detail::readable_cpp_type_name(actual) + "' through pointer-to-base '" +
+        detail::readable_cpp_type_name(base) + "'. Register it with jai::registrar<T, Context, jai::bases<Base>>(\"Name\") or derive from jai::property_owner<T, Base>.");
+}
+
+void throw_unrelated_polymorphic(const std::string& poly_type, std::type_index base) {
+    throw serialization_error("Polymorphic type '" + poly_type + "' is not a registered subtype of requested base '" + detail::readable_cpp_type_name(base) +
+        "' (declare it: static jai::serialization::register_relation<" + poly_type + ", Base>, or .base<Base>() on its registrar)");
+}
+
+void throw_no_construct_route(std::type_index type) {
+    throw serialization_error("Cannot deserialize shared_ptr<" + detail::readable_cpp_type_name(type) + ">: type is not default constructible and has no load_and_construct");
+}
+
 namespace {
 
     std::shared_ptr<class_definition> binding_of(engine* eng, std::type_index type, const class_metadata*& record) {

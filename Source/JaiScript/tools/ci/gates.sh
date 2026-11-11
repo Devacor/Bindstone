@@ -509,7 +509,7 @@ gate_headers() {
 			echo "::error::a page's C++ samples need an include the page does not show ($cxx)"
 			grep -A 6 "^FAIL" "$work/samples.log" | head -14 | cut -c1-240
 		fi
-		echo "headers: $cxx, the programs the serialization headers reject"
+		echo "headers: $cxx, the programs the headers reject"
 		must_not_compile "$cxx" "$work" || failed=1
 		echo "headers: $cxx, the host file under -Wall -Wextra -Werror"
 		if ! "$cxx" -std=c++20 -I"$ROOT/include" -Wall -Wextra -Werror -O2 -c "$ROOT/tools/ci/host_warnings.cpp" -o "$work/host_warnings.o" > "$work/host.log" 2>&1; then

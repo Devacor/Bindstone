@@ -1413,8 +1413,8 @@ print(reflect::invoke(Orc(), &quot;add&quot;, 2, 3));</code></pre></div>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="reflect::is_cpp_bound(value: var) -&gt; bool observe  register_all() or area registration"><h3 id="api-15481cb7ffa0"><code>reflect::is_cpp_bound(value: var) -&gt; bool</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="reflect::is_enabled(privileges: int or string...) -&gt; bool observe at least one privilege; scripts query grants, hosts change them. every engine"><h3 id="api-40e9deee02a2"><code>reflect::is_enabled(privileges: int or string...) -&gt; bool</code></h3><p><strong>Every engine</strong> &middot; observe</p>
-<p>At least one privilege; scripts query grants, hosts change them.</p>
+<div class="api-entry" data-provider="core" data-search="reflect::is_enabled(privileges: int...) -&gt; bool observe at least one privilege slot; scripts query grants, hosts change them. every engine"><h3 id="api-c3ed21529aea"><code>reflect::is_enabled(privileges: int...) -&gt; bool</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>At least one privilege slot; scripts query grants, hosts change them.</p>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="reflect::method_arguments(object_or_class: var, name: string) -&gt; array&lt;array&lt;map&lt;string,var&gt;&gt;&gt; observe one parameter-description array per overload. register_all() or area registration"><h3 id="api-2fb244a65849"><code>reflect::method_arguments(object_or_class: var, name: string) -&gt; array&lt;array&lt;map&lt;string,var&gt;&gt;&gt;</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
 <p>One parameter-description array per overload.</p>
@@ -2125,8 +2125,10 @@ print(u.to_string());</code></pre></div>
 <tr><td><code>ARGS</code></td><td>array&lt;string&gt;</td><td>read/write / runner</td><td>Arguments following --, not the executable flags.</td></tr>
 <tr><td><code>skip_flush</code></td><td>print token</td><td>constant / stdlib</td><td></td></tr>
 <tr><td><code>skip_newline</code></td><td>print token</td><td>constant / stdlib</td><td></td></tr>
-<tr><td><code>jai::filesystem</code></td><td>int privilege flag</td><td>constant / core</td><td></td></tr>
+<tr><td><code>jai::filesystem</code></td><td>int privilege slot</td><td>constant / core</td><td></td></tr>
 <tr><td><code>jai::force</code></td><td>import directive</td><td>constant / core</td><td>Trailing argument to import(paths, jai::force).</td></tr>
+<tr><td><code>jai::network</code></td><td>int privilege slot</td><td>constant / core</td><td></td></tr>
+<tr><td><code>jai::scoped_template</code></td><td>int privilege slot</td><td>constant / core</td><td></td></tr>
 <tr><td><code>math::E</code></td><td>float</td><td>constant / core</td><td>Engine-core math constant; use math::E.</td></tr>
 <tr><td><code>math::PI</code></td><td>float</td><td>constant / core</td><td>Engine-core math constant; use math::PI.</td></tr>
 <tr><td><code>math::color.a</code></td><td>float</td><td>read/write / core</td><td>float32 component.</td></tr>

@@ -6517,14 +6517,14 @@
     {
       "owner": "reflect",
       "name": "is_enabled",
-      "signature": "is_enabled(privileges: int or string...) -> bool",
+      "signature": "is_enabled(privileges: int...) -> bool",
       "provider": "core",
       "effect": "observe",
       "source": "source/implementation/engine.cpp",
-      "notes": "At least one privilege; scripts query grants, hosts change them.",
+      "notes": "At least one privilege slot; scripts query grants, hosts change them.",
       "form": "function",
       "availability": "Every engine",
-      "display": "reflect::is_enabled(privileges: int or string...) -> bool"
+      "display": "reflect::is_enabled(privileges: int...) -> bool"
     },
     {
       "owner": "global",
@@ -8069,7 +8069,23 @@
     {
       "owner": "jai",
       "name": "filesystem",
-      "type": "int privilege flag",
+      "type": "int privilege slot",
+      "provider": "core",
+      "access": "constant",
+      "notes": ""
+    },
+    {
+      "owner": "jai",
+      "name": "scoped_template",
+      "type": "int privilege slot",
+      "provider": "core",
+      "access": "constant",
+      "notes": ""
+    },
+    {
+      "owner": "jai",
+      "name": "network",
+      "type": "int privilege slot",
       "provider": "core",
       "access": "constant",
       "notes": ""

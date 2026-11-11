@@ -299,7 +299,7 @@ public:
 			auto render = [&](const std::string& a_call) {
 				return eng->execute("map<string, var> m = {\"who\": \"y\"}; string p = \"card.spider\"; string e = \"\"; try { e = " + a_call + ".to_string(); } catch (err) { e = err; } e;").as_string();
 			};
-			check_eq(std::string("true true"), eng->execute("to_string(reflect::is_enabled(jai::scoped_template)) + \" \" + to_string(reflect::is_enabled(\"scoped_template\"));").as_string(), "on by default");
+			check_eq(std::string("true true"), eng->execute("to_string(reflect::is_enabled(jai::scoped_template)) + \" \" + to_string(reflect::is_enabled(jai::filesystem, jai::scoped_template));").as_string(), "on by default");
 			eng->disable(privilege::filesystem);
 			check_eq(std::string("<b>y</b>"), render("scoped_template(\"card.spider\", m)"), "a literal path with filesystem off");
 			check_eq(std::string("<b>y</b>"), render("scoped_template(p, m)"), "a path known at run time with filesystem off");
@@ -307,7 +307,7 @@ public:
 			check_eq(std::string("Insufficient privilege: scoped_template."), render("scoped_template(\"card.spider\", m)"), "a literal path");
 			check_eq(std::string("Insufficient privilege: scoped_template."), render("scoped_template(p, m)"), "a path known at run time");
 			check_eq(std::string("Insufficient privilege: scoped_template."), render("scoped_template_text(\"<i>${args[\\\"who\\\"]}</i>\", m)"), "template text");
-			check_eq(std::string("false"), eng->execute("to_string(reflect::is_enabled(\"scoped_template\"));").as_string());
+			check_eq(std::string("false"), eng->execute("to_string(reflect::is_enabled(jai::scoped_template));").as_string());
 			eng->enable(privilege::scoped_template);
 			check_eq(std::string("<i>y</i>"), render("scoped_template_text(\"<i>${args[\\\"who\\\"]}</i>\", m)"), "granted again");
 		});

@@ -532,10 +532,9 @@ private:
 
 // A download reaches the network and writes a file: start needs both privileges
 inline void register_fetch(jai::engine& eng) {
-	eng.register_privilege("network");
 	jai::dynamic_binder<download>(eng, "Download")
 		.constructor<>()
-		.method("start", &download::start, {"filesystem", "network"})
+		.method("start", &download::start, jai::filesystem, jai::network)
 		.method("pump", &download::pump)
 		.method("done", &download::done)
 		.method("success", &download::success)

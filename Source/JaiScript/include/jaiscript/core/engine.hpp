@@ -6,7 +6,6 @@
 #include "types.hpp"
 #include "value.hpp"
 #include "function_binder.hpp"
-#include "binding_traits.hpp"
 #include "conversion_registry.hpp"
 #include "conversion_registry_impl.hpp"
 // conversion_registry_templates.hpp moved to after engine class definition
@@ -126,33 +125,25 @@ namespace jai {
     public:
         ~engine();
 
-        // Filesystem access is enabled by default. Changes affect the next protected
-        // operation, including after a reentrant C++ callback; started work is not
-        // cancelled. Grants are per-engine, not shared through script variables.
-        // Configure on the engine thread (or while idle), outside parallel regions.
-        // Concurrent cross-thread grant changes are not supported.
-        void enable(privilege flags);
-        void disable(privilege flags);
-        bool is_enabled(privilege flags) const noexcept;
-        checked_result<void> require_privilege(privilege flags) const noexcept;
+        // Every privilege is a slot (core/privilege.hpp): filesystem and scoped_template are enabled by default, network and a
+        // host's own start disabled. Changes affect the next protected operation, including after a reentrant C++ callback;
+        // started work is not cancelled. Grants are per-engine, not shared through script variables. Configure on the engine
+        // thread (or while idle), outside parallel regions. Concurrent cross-thread grant changes are not supported.
+        template<detail::privilege_enum... Privileges>
+        void enable(Privileges... privileges) { set_privileges(detail::privilege_set_of(privileges...), true); }
+        template<detail::privilege_enum... Privileges>
+        void disable(Privileges... privileges) { set_privileges(detail::privilege_set_of(privileges...), false); }
+        // True when every one is enabled
+        template<detail::privilege_enum... Privileges>
+        bool is_enabled(Privileges... privileges) const noexcept { return privileges_enabled(detail::privilege_set_of(privileges...)); }
+        template<detail::privilege_enum... Privileges>
+        checked_result<void> require_privilege(Privileges... privileges) const noexcept { return require_privileges(detail::privilege_set_of(privileges...)); }
+        // The name a host privilege's denial shows (Insufficient privilege: game.cheats.); without one it shows the slot number
+        template<detail::privilege_enum Privilege>
+        void register_privilege(Privilege privilege, std::string_view name) {
+            name_privilege(static_cast<size_t>(static_cast<std::underlying_type_t<Privilege>>(privilege)), name);
+        }
 
-        // Custom names are interned once, start disabled, and register idempotently.
-        // "filesystem" refers to the existing builtin, without changing its grant.
-        // The host uses names, never engine-local IDs. Bindings resolve names once.
-        void register_privilege(std::string_view name);
-        void enable(std::span<const std::string_view> names);
-        void disable(std::span<const std::string_view> names);
-        bool is_enabled(std::span<const std::string_view> names) const noexcept;
-        checked_result<void> require_privilege(std::span<const std::string_view> names) const noexcept;
-        void enable(std::string_view name) { enable(std::span(&name, 1)); }
-        void disable(std::string_view name) { disable(std::span(&name, 1)); }
-        bool is_enabled(std::string_view name) const noexcept { return is_enabled(std::span(&name, 1)); }
-        checked_result<void> require_privilege(std::string_view name) const noexcept { return require_privilege(std::span(&name, 1)); }
-        void enable(std::initializer_list<std::string_view> names) { enable(std::span(names.begin(), names.size())); }
-        void disable(std::initializer_list<std::string_view> names) { disable(std::span(names.begin(), names.size())); }
-        bool is_enabled(std::initializer_list<std::string_view> names) const noexcept { return is_enabled(std::span(names.begin(), names.size())); }
-        checked_result<void> require_privilege(std::initializer_list<std::string_view> names) const noexcept { return require_privilege(std::span(names.begin(), names.size())); }
-        
         // Factory method to ensure engines are always created as shared_ptr
         static std::shared_ptr<engine> make() {
             auto eng = std::shared_ptr<engine>(new engine());
@@ -635,55 +626,31 @@ namespace jai {
         // typed binding returns, a script_value or a checked_result<script_value>; alone under its name, the VM runs it on the
         // arguments where they are. The vector form returns a checked_result<script_value>.
         // Example: engine.add_variadic_function("sum_all", [](jai::engine&, std::span<const jai::script_value> args) { ... });
-        template<detail::engine_first_variadic Func>
-        void add_variadic_function(const std::string& name, Func&& func, privilege required = privilege::none) {
+        // The trailing options (core/privilege.hpp) are any number of privileges, jai::nodiscard and jai::serial
+        template<detail::engine_first_variadic Func, detail::function_option... Options>
+        void add_variadic_function(const std::string& name, Func&& func, const Options&... options) {
             using call_t = detail::engine_variadic_call<std::decay_t<Func>>;
-            add_engine_variadic_function(name, guard_function(call_t{std::forward<Func>(func), this}, required), {&call_t::invoke, &call_t::locate},
+            const function_options folded = detail::fold_function_options(options...);
+            add_engine_variadic_function(name, guard_function(call_t{std::forward<Func>(func), this}, folded.required), {&call_t::invoke, &call_t::locate},
                                          host_result_kind<typename call_t::result_type>());
+            apply_function_options(name, folded);
         }
-        template<detail::engine_first_variadic Func>
-        void add_variadic_function(const std::string& name, Func&& func, function_options options) {
-            add_variadic_function(name, std::forward<Func>(func), options.required);
-            apply_function_options(name, options);
-        }
-        template<detail::engine_first_variadic Func>
-        void add_variadic_function(const std::string& name, Func&& func, std::span<const std::string_view> names) {
-            using call_t = detail::engine_variadic_call<std::decay_t<Func>>;
-            add_engine_variadic_function(name, guard_function(call_t{std::forward<Func>(func), this}, names), {&call_t::invoke, &call_t::locate},
-                                         host_result_kind<typename call_t::result_type>());
-        }
-        template<detail::engine_first_variadic Func>
-        void add_variadic_function(const std::string& name, Func&& func, std::string_view required) {
-            add_variadic_function(name, std::forward<Func>(func), std::span(&required, 1));
-        }
-        template<detail::engine_first_variadic Func>
-        void add_variadic_function(const std::string& name, Func&& func, std::initializer_list<std::string_view> names) {
-            add_variadic_function(name, std::forward<Func>(func), std::span(names.begin(), names.size()));
-        }
-        void add_variadic_function(const std::string& name, script_function func, privilege required = privilege::none);
-        void add_variadic_function(const std::string& name, script_function func, function_options options) {
-            add_variadic_function(name, std::move(func), options.required);
-            apply_function_options(name, options);
-        }
-        void add_variadic_function(const std::string& name, script_function func, std::span<const std::string_view> names) {
-            add_variadic_function(name, guard_function(std::move(func), names));
-        }
-        void add_variadic_function(const std::string& name, script_function func, std::string_view required) {
-            add_variadic_function(name, std::move(func), std::span(&required, 1));
-        }
-        void add_variadic_function(const std::string& name, script_function func, std::initializer_list<std::string_view> names) {
-            add_variadic_function(name, std::move(func), std::span(names.begin(), names.size()));
+        void add_variadic_function(const std::string& name, script_function func);
+        template<detail::function_option... Options>
+        void add_variadic_function(const std::string& name, script_function func, const Options&... options) {
+            const function_options folded = detail::fold_function_options(options...);
+            add_variadic_function(name, guard_function(std::move(func), folded.required));
+            apply_function_options(name, folded);
         }
         void add_function_with_arity(const std::string& name, script_function func, size_t arity);
         
         // Typed function registration with automatic overloading
         // Use this for functions with specific C++ signatures
         // Example: engine.add_function("add", [](int a, int b) -> int { return a + b; });
-        template<typename Func, typename Requirements = privilege>
-        void add_function(const std::string& name, Func&& func, Requirements required = privilege::none) {
-            // Check for rejected container references
-            binding_traits::check_binding_validity<Func>(name);
-            
+        // The trailing options are add_variadic_function's
+        template<typename Func, detail::function_option... Options>
+        void add_function(const std::string& name, Func&& func, const Options&... options) {
+            const function_options folded = detail::fold_function_options(options...);
             using traits = detail::function_traits<std::decay_t<Func>>;
             using return_type = typename traits::return_type;
             constexpr size_t arity = traits::arity;
@@ -691,14 +658,14 @@ namespace jai {
             auto binder = make_function_binder(std::forward<Func>(func), this);
             script_function bound_func = binder.bind();
             stage_host_result(host_result_kind<return_type>());
-            if constexpr (detail::host_lane_params<typename traits::argument_types>() && std::is_same_v<Requirements, privilege>) {
-                if (required == privilege::none) {
+            if constexpr (detail::host_lane_params<typename traits::argument_types>()) {
+                if (folded.required.empty()) {
                     using call_t = typename decltype(binder)::by_value_call;
                     stage_host_direct({&call_t::invoke, &call_t::locate});
                 }
             }
             
-            script_function wrapped_func = guard_function(std::move(bound_func), std::move(required));
+            script_function wrapped_func = guard_function(std::move(bound_func), folded.required);
             if constexpr (constexpr uint64_t writeback = detail::tuple_writeback_mask<typename traits::argument_types>::value; writeback != 0) {
                 wrapped_func = host_writeback_function{ std::move(wrapped_func), writeback };
             }
@@ -713,18 +680,9 @@ namespace jai {
                 // Register normally but store arity info for future overloading
                 add_function_with_arity_and_full_types(name, wrapped_func, arity, param_types);
             }
+            apply_function_options(name, folded);
         }
 
-        template<typename Func>
-        void add_function(const std::string& name, Func&& func, function_options options) {
-            add_function(name, std::forward<Func>(func), options.required);
-            apply_function_options(name, options);
-        }
-
-        template<typename Func>
-        void add_function(const std::string& name, Func&& func, std::initializer_list<std::string_view> names) {
-            add_function(name, std::forward<Func>(func), std::span(names.begin(), names.size()));
-        }
         // Overloaded function registration
         void add_overloaded_function(const std::string& name, size_t arg_count, script_function func);
         
@@ -927,14 +885,7 @@ namespace jai {
         // Attach a requirement to the actual callable, so aliases, overload dispatch
         // and worker-local copies all recheck this engine's current grants. An empty
         // requirement returns the original callable with no invocation overhead.
-        script_function guard_function(script_function function, privilege required);
-        script_function guard_function(script_function function, std::span<const std::string_view> names);
-        script_function guard_function(script_function function, std::string_view name) {
-            return guard_function(std::move(function), std::span(&name, 1));
-        }
-        script_function guard_function(script_function function, std::initializer_list<std::string_view> names) {
-            return guard_function(std::move(function), std::span(names.begin(), names.size()));
-        }
+        script_function guard_function(script_function function, const privilege_set& required);
         // include: the file runs at the include site, in the current scope and under the running unit, so
         // its declarations are the includer's (internal/global_shadowing.md). scope names the function or block the
         // include runs in (empty at program scope): an enum the file declares there stays local to it.
@@ -1672,16 +1623,11 @@ namespace jai {
         script_run launch_run(std::unique_ptr<detail::run_record> run);   // start's first switch into the run (script_run.cpp)
         void cancel_suspended_runs() noexcept;   // the engine's teardown: every run still suspended is cancelled
         void register_privilege_builtins();
-        void set_privileges(privilege flags, bool enabled);
-        void set_privileges(std::span<const std::string_view> names, bool enabled);
+        void set_privileges(const privilege_set& privileges, bool enabled);
         void check_privilege_mutation() const;
-        std::optional<uint64_t> find_custom_privilege(std::string_view name) const noexcept;
-        struct resolved_privileges {
-            privilege builtins = privilege::none;
-            std::vector<uint64_t> custom;
-        };
-        resolved_privileges resolve_privileges(std::span<const std::string_view> names) const;
-        checked_result<void> require_privileges(privilege flags, std::span<const uint64_t> slots) const noexcept;
+        bool privileges_enabled(const privilege_set& privileges) const noexcept;
+        checked_result<void> require_privileges(const privilege_set& required) const noexcept;
+        void name_privilege(size_t slot, std::string_view name);
         std::unique_ptr<std::mutex> parallel_compile_mutex_ = std::make_unique<std::mutex>();
         int load_depth_ = 0;
         std::vector<std::pair<script_value, script_int>> deferred_post_loads_;

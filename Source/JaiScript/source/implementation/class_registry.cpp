@@ -12,6 +12,7 @@
 #include <set>
 #include <algorithm>
 #include <unordered_set>
+#include <span>
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/properties/property_manager.hpp>
@@ -52,14 +53,13 @@ namespace {
 
 struct declared_binding {
     std::string name;
+    std::type_index context;
     declared_binding_fn bind;
 };
 
-// Program-wide, filled at program start: the property_owner classes that queue their own binding, and the types a
-// jai::registrar of any context claims (its registration replaces the declared one)
+// Program-wide, filled at program start: the property_owner classes that queue their own binding
 struct declared_binding_store {
     std::unordered_map<std::type_index, declared_binding> queued;
-    std::unordered_set<std::type_index> claimed;
 };
 
 declared_binding_store& declared_bindings() {
@@ -77,8 +77,13 @@ declared_binding_store& declared_bindings() {
 
 } // namespace
 
-void queue_declared_binding(std::type_index a_type, std::string_view a_name, declared_binding_fn a_bind) {
-    declared_bindings().queued.insert_or_assign(a_type, declared_binding{ std::string(a_name), a_bind });
+void queue_declared_binding(std::type_index a_type, std::string_view a_name, std::type_index a_context, declared_binding_fn a_bind) {
+    declared_bindings().queued.insert_or_assign(a_type, declared_binding{ std::string(a_name), a_context, a_bind });
+}
+
+[[noreturn]] void throw_registrar_renames_owner(std::type_index a_type, const std::string& a_name, std::string_view a_serialization_name) {
+    throw std::runtime_error("bind_registrar: the jai::registrar of the property_owner class '" + readable_cpp_type_name(a_type) + "' names it '" + a_name +
+        "'; it binds under its serialization name '" + std::string(a_serialization_name) + "'");
 }
 
 registration_order::registration_order() = default;
@@ -86,7 +91,6 @@ registration_order::registration_order() = default;
 registration_order::~registration_order() = default;
 
 void registration_order::add(std::type_index ti, const std::string& name, erased_fn fn) {
-    declared_bindings().claimed.insert(ti);
     if (auto it = names_.find(ti); it != names_.end()) {
         auto range = entries_.equal_range(it->second);
         for (auto entry = range.first; entry != range.second; ++entry) {
@@ -97,7 +101,32 @@ void registration_order::add(std::type_index ti, const std::string& name, erased
     entries_.emplace(name, std::pair<std::type_index, erased_fn>{ ti, std::move(fn) });
 }
 
-void registration_order::run_all(engine& eng, const void* context, const registrar_filter* filter) {
+void registration_order::check_filter(const registrar_filter* filter, std::span<const registration_order* const> orders) {
+    if (!filter) { return; }
+    const declared_binding_store& store = declared_bindings();
+    for (const std::type_index& listed : filter->listed()) {
+        const bool registered = std::any_of(orders.begin(), orders.end(), [&](const registration_order* a_order) { return a_order->names_.contains(listed); });
+        if (!registered && !store.queued.contains(listed)) {
+            throw std::runtime_error("bind_registrar: the filter names the C++ type '" + readable_cpp_type_name(listed) + "', which has no registrar for this context");
+        }
+    }
+}
+
+void registration_order::run_all(engine& eng, const void* context, std::type_index context_type, const registrar_filter* filter) {
+    const context_run run{ this, context, context_type };
+    run_chain(eng, std::span(&run, 1), filter);
+}
+
+void registration_order::run_chain(engine& eng, std::span<const context_run> runs, const registrar_filter* filter) {
+    std::vector<const registration_order*> orders;
+    orders.reserve(runs.size());
+    for (const context_run& run : runs) { orders.push_back(run.order); }
+    check_filter(filter, orders);
+    for (const context_run& run : runs) { run.order->run_checked(eng, run, orders, filter); }
+}
+
+void registration_order::run_checked(engine& eng, const context_run& run, std::span<const registration_order* const> chain, const registrar_filter* filter) {
+    const void* context = run.context;
     struct step {
         const std::string* name;
         std::type_index type;
@@ -111,21 +140,18 @@ void registration_order::run_all(engine& eng, const void* context, const registr
         steps.push_back({ &name, entry.first, &entry.second, nullptr });
     }
     const size_t registered_count = steps.size();
+    // a class binds itself where no registrar of the call's contexts adds to it: untagged in every call, tagged in the run of its context
+    const std::type_index untagged(typeid(void));
     for (const auto& [type, declared] : store.queued) {
-        if (!store.claimed.contains(type)) { steps.push_back({ &declared.name, type, nullptr, declared.bind }); }
+        const bool context_matches = declared.context == untagged || declared.context == run.context_type;
+        const bool claimed = std::any_of(chain.begin(), chain.end(), [&](const registration_order* a_order) { return a_order->names_.contains(type); });
+        if (context_matches && !claimed) { steps.push_back({ &declared.name, type, nullptr, declared.bind }); }
     }
     // one name never runs two types (the check below), so name order alone is the whole order
     const auto by_name = [](const step& a_left, const step& a_right) { return *a_left.name < *a_right.name; };
     std::sort(steps.begin() + static_cast<std::ptrdiff_t>(registered_count), steps.end(), by_name);
     std::inplace_merge(steps.begin(), steps.begin() + static_cast<std::ptrdiff_t>(registered_count), steps.end(), by_name);
 
-    if (filter) {
-        for (const std::type_index& listed : filter->listed()) {
-            if (!names_.contains(listed) && !(store.queued.contains(listed) && !store.claimed.contains(listed))) {
-                throw std::runtime_error(std::string("bind_registrar: the filter names the C++ type '") + listed.name() + "', which has no registrar for this context");
-            }
-        }
-    }
     const auto admitted = [&](const step& a_step) { return filter == nullptr || filter->admits(a_step.type); };
 
     // two types under one name would bind in static-initialization order; a declared class never replaces what the host bound
@@ -161,7 +187,7 @@ void registration_order::run_all(engine& eng, const void* context, const registr
         if (current.registered) {
             (*current.registered)(eng, context);
         } else if (auto bound = engine_access::get_class_definition_by_type(eng, current.type); !bound || bound->auto_registered()) {
-            current.declared(eng);
+            current.declared(eng, context);
         }
     }
     for (const std::type_index& type : left_out) {

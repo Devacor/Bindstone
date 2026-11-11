@@ -65,7 +65,8 @@ public:
             check_false(restricted->execute("reflect::is_enabled(jai::filesystem)").as_bool());
             check_true(trusted->execute("reflect::is_enabled(jai::filesystem, jai::filesystem)").as_bool());
             filesystem_enabled(*restricted, true);
-            check_true(restricted->execute("reflect::is_enabled(jai::filesystem | jai::filesystem)").as_bool());
+            check_true(restricted->execute("reflect::is_enabled(jai::filesystem, jai::scoped_template)").as_bool());
+            check_false(restricted->execute("reflect::is_enabled(jai::filesystem, jai::network)").as_bool());
         });
 
         test("all_location_queries_are_gated", [this]() {
@@ -204,7 +205,7 @@ public:
             auto eng = make_engine();
             check_eq(std::string("reflect::is_enabled expects at least 1 argument"),
                 failure([&]() { eng->execute("reflect::is_enabled()"); }));
-            for (const char* args : {"true", "-1", "4", "jai::filesystem, 4"}) {
+            for (const char* args : {"true", "-1", "256", "\"filesystem\"", "jai::filesystem, 256"}) {
                 check_eq(std::string("reflect::is_enabled expects valid privilege flags"),
                     failure([&]() { eng->execute(std::string("reflect::is_enabled(") + args + ")"); }));
             }

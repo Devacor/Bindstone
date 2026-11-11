@@ -2263,11 +2263,11 @@ int run_selftest(const console_state& con) {
 				"reenabled Download alias reaches its original validation without network access");
 			expect_privilege(eng->execute("guarded_probe();").as_bool() && guarded_calls == 1,
 				"reenabled callback enters exactly once");
-			eng->disable("network");
+			eng->disable(jai::network);
 			expect_privilege(eng->execute("var m = \"\"; try { auto d = Download(); d.start(\"http://127.0.0.1:1/\", fixture + \"/net.bin\"); } "
 				"catch (e) { m = e; } m;").as_string().find("network") != std::string::npos && !fs::exists(fixture / "net.bin"),
 				"Download.start needs the network privilege too");
-			eng->enable("network");
+			eng->enable(jai::network);
 		} catch (const std::exception& error) {
 			expect_privilege(false, "fixture/setup or recovery");
 			std::printf("        unexpected: %s\n", error.what());

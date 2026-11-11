@@ -3728,7 +3728,7 @@ public:
 					.property("v", &host_counter::v).build();
 				e.add_function("scale", [](int64_t x) { return x * 3; });
 				e.add_function("log_it", [](int64_t) {}, jai::serial);
-				e.add_function("try_log", [](int64_t) { return true; }, jai::serial | jai::nodiscard);
+				e.add_function("try_log", [](int64_t) { return true; }, jai::serial, jai::nodiscard);
 				e.add_variadic_function("log_all", [&e](const std::vector<script_value>&) -> script_value { return e.make_null(); }, jai::serial);
 				e.add_function("fill", [](int64_t& out) { out = 7; });
 				e.add_function("shared_counter", [shared]() { return shared; });

@@ -1,4 +1,4 @@
-// Programs the serialization headers reject. tools/ci/gates.sh headers compiles this file once per `must_not_compile N: text`
+// Programs the headers reject. tools/ci/gates.sh headers compiles this file once per `must_not_compile N: text`
 // line below with -DJAI_MUST_NOT_COMPILE=N and wants the compile to fail with that text, and once with no case, which
 // builds: the uses under `#else` are the same types through the routes whose error waits for run time.
 //
@@ -16,10 +16,17 @@
 // must_not_compile 12: declares save() but jai::access cannot reach it
 // must_not_compile 13: declares load() but jai::access cannot reach it
 // must_not_compile 14: declares serialize() but jai::access cannot reach it
+// must_not_compile 15: a jai::context<C> may only narrow its bases' context
+// must_not_compile 16: a jai::context<C> may only narrow its bases' context
+// must_not_compile 17: its bases carry different contexts
+// must_not_compile 18: C must be the class's context
+// must_not_compile 19: use jai::const_overload
+// must_not_compile 20: T has no portable auto-name
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/properties.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
 #include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/overload.hpp>
 #include <jaiscript/serialization/construct.hpp>
 #include <jaiscript/serialization/convenience.hpp>
 #include <map>
@@ -133,6 +140,54 @@ private:
 };
 #endif
 
+struct ToolContext {};
+struct EditorContext : ToolContext {
+	using jai_context_bases = jai::bases<ToolContext>;
+};
+struct ServerContext {};
+
+class ToolOwner : public jai::property_owner<ToolOwner, jai::context<ToolContext>> {
+public:
+	ToolOwner() {}
+};
+class EditorOwner : public jai::property_owner<EditorOwner, ToolOwner, jai::context<EditorContext>> {
+public:
+	EditorOwner() {}
+};
+class ServerOwner : public jai::property_owner<ServerOwner, jai::context<ServerContext>> {
+public:
+	ServerOwner() {}
+};
+// an untagged subclass inherits its base's context
+class InheritsEditor : public jai::property_owner<InheritsEditor, EditorOwner> {
+public:
+	InheritsEditor() {}
+};
+
+#if JAI_MUST_NOT_COMPILE == 15
+class SwitchesContext : public jai::property_owner<SwitchesContext, ToolOwner, jai::context<ServerContext>> {};
+#elif JAI_MUST_NOT_COMPILE == 16
+class WidensContext : public jai::property_owner<WidensContext, EditorOwner, jai::context<ToolContext>> {};
+#elif JAI_MUST_NOT_COMPILE == 17
+class TwoContexts : public jai::property_owner<TwoContexts, ToolOwner, ServerOwner> {};
+#elif JAI_MUST_NOT_COMPILE == 18
+class WrongHookContext : public jai::property_owner<WrongHookContext, jai::context<ToolContext>> {
+public:
+	WrongHookContext() {}
+	static void jai_auto_bind(jai::dynamic_binder<WrongHookContext>&, const ServerContext&) {}
+};
+#endif
+
+struct Overloaded {
+	int text() const { return 1; }
+	int text() { return 2; }
+};
+
+template<typename T>
+struct Templated {
+	T value{};
+};
+
 class Owner : public jai::property_owner<Owner> {
 public:
 	JAI_PROPERTY((ForgottenFriendSerialize), forgotten);
@@ -184,12 +239,23 @@ inline std::string exercise(jai::engine& a_engine) {
 	return {};
 #elif JAI_MUST_NOT_COMPILE == 14
 	return jai::to_json(a_engine, std::vector<std::shared_ptr<ForgottenFriendLevel>>{});
+#elif JAI_MUST_NOT_COMPILE == 18
+	return jai::to_json(a_engine, WrongHookContext{});
+#elif JAI_MUST_NOT_COMPILE == 19
+	constexpr auto text = jai::overload<>(&Overloaded::text);
+	return std::to_string((Overloaded{}.*text)());
+#elif JAI_MUST_NOT_COMPILE == 20
+	jai::dynamic_binder<Templated<int>> binder(a_engine);
+	return {};
 #else
+	constexpr auto text = jai::const_overload<>(&Overloaded::text);
+	jai::dynamic_binder<Templated<int>> binder(a_engine, "TemplatedInt");
 	static jai::registrar<SavesToAPath, void> boundOnly("SavesToAPath");
 	static jai::registrar<BuiltAtRunTime, void, jai::bases<RegisteredBase>> builtAtRunTime("BuiltAtRunTime");
 	// a class with no route of its own writes and reads as its binding in the archive's engine declares
 	jai::from_binary<NoRoute>(a_engine, jai::to_binary(a_engine, NoRoute{}));
-	return jai::to_json(a_engine, Owner{}) + jai::to_json(a_engine, SavesToAPath{}) + jai::to_json(a_engine, std::map<std::string, std::vector<NoRoute>>{});
+	return jai::to_json(a_engine, Owner{}) + jai::to_json(a_engine, SavesToAPath{}) + jai::to_json(a_engine, std::map<std::string, std::vector<NoRoute>>{}) +
+		std::to_string((Overloaded{}.*text)()) + jai::to_json(a_engine, InheritsEditor{});
 #endif
 }
 

@@ -82,6 +82,11 @@ namespace serialization {
 // registered type (registration also binds types nothing saves), a pointer to a polymorphic base (the dynamic type's route)
 [[noreturn]] void throw_not_serializable(std::type_index type);
 [[noreturn]] void throw_not_deserializable(std::type_index type);
+// The polymorphic-route errors, each naming its C++ types as detail::readable_cpp_type_name spells them
+[[noreturn]] void throw_unregistered_hybrid_base(const std::string& hybrid_type, std::type_index base);
+[[noreturn]] void throw_unregistered_polymorphic(std::type_index actual, std::type_index base);
+[[noreturn]] void throw_unrelated_polymorphic(const std::string& poly_type, std::type_index base);
+[[noreturn]] void throw_no_construct_route(std::type_index type);
 
 // A binding record (binding_record_v) through the binding of its type in eng, into or out of the object already open. A base
 // level the engine does not bind holds nothing; any other type it does not bind throws.
@@ -867,11 +872,7 @@ private:
                 if (entry && entry->named_by_binding && bound_type_name(engine_ref_, std::type_index(actual_type)).empty()) {
                     entry = nullptr;
                 }
-                if (!entry || !entry->save_fn) {
-                    throw serialization_error(std::string("Cannot serialize hybrid script class '") + hybrid_type +
-                        "': its C++ base '" + actual_type.name() +
-                        "' is not registered. Register it with jai::registrar<T, Context>(\"Name\") or derive from jai::property_owner<T, ...>.");
-                }
+                if (!entry || !entry->save_fn) { throw_unregistered_hybrid_base(hybrid_type, std::type_index(actual_type)); }
                 self()->serialize("$type", hybrid_type);
                 self()->serialize("$script", hybrid_fields);
                 write_registered_payload(*entry, complete);
@@ -888,9 +889,7 @@ private:
                 }
                 // Writing the static type's payload here would silently slice the object
                 // and load back as the wrong type — fail loudly instead (cereal semantics).
-                throw serialization_error(std::string("Cannot serialize unregistered polymorphic type '") + actual_type.name() +
-                    "' through pointer-to-base '" + typeid(elem_type).name() +
-                    "'. Register it with jai::registrar<T, Context, jai::bases<Base>>(\"Name\") or derive from jai::property_owner<T, Base>.");
+                throw_unregistered_polymorphic(std::type_index(actual_type), std::type_index(typeid(elem_type)));
             }
         }
         // the dynamic type of a polymorphic object is settled here, so its own type's missing route is this save's error
@@ -1546,9 +1545,7 @@ private:
                 // reachable from untrusted payloads). B5.
                 const auto refuse_unrelated = [&]() {
                     if (!polymorphic_registry::instance().is_assignable(entry->type, std::type_index(typeid(elem_type)))) {
-                        throw serialization_error("Polymorphic type '" + poly_type + "' is not a registered subtype of requested base '" +
-                            std::type_index(typeid(elem_type)).name() + "' (declare it: static jai::serialization::register_relation<" +
-                            poly_type + ", Base>, or .base<Base>() on its registrar)");
+                        throw_unrelated_polymorphic(poly_type, std::type_index(typeid(elem_type)));
                     }
                 };
                 if (entry && !hybrid_class.empty() && entry->load_into_fn) {
@@ -1649,7 +1646,7 @@ private:
                 } else if constexpr (!Deferred) {
                     no_route_to_construct<elem_type>();
                 }
-                throw serialization_error("Cannot deserialize shared_ptr<" + std::string(typeid(elem_type).name()) + ">: type is not default constructible and has no load_and_construct");
+                throw_no_construct_route(std::type_index(typeid(elem_type)));
             }
         }
         return result;

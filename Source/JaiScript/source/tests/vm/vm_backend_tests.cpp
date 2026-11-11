@@ -24,6 +24,9 @@ using namespace jai::foundry;
 
 namespace jai::foundry::tests {
 
+enum class vm_test_privilege : std::uint8_t { app_count = jai::privilege_count };
+void jai_privilege_enum(vm_test_privilege);
+
 // These tests pin the VM backend explicitly (never make_engine) so they exercise the
 // bytecode VM regardless of the runner's --backend flag.
 class vm_backend_tests : public suite {
@@ -3795,9 +3798,9 @@ public:
 				});
 				e->add_variadic_function("try_count", [](jai::engine&, std::span<const jai::script_value> args) { return !args.empty(); }, jai::nodiscard);
 				e->add_variadic_function("io_count", [](jai::engine&, std::span<const jai::script_value> args) { return static_cast<jai::script_int>(args.size()); }, jai::filesystem);
-				e->register_privilege("app.count");
-				e->add_variadic_function("app_count", [](jai::engine&, std::span<const jai::script_value> args) { return static_cast<jai::script_int>(args.size()); }, "app.count");
-				e->add_variadic_function("both_count", [](jai::engine&, std::span<const jai::script_value> args) { return static_cast<jai::script_int>(args.size()); }, {"filesystem", "app.count"});
+				e->register_privilege(vm_test_privilege::app_count, "app.count");
+				e->add_variadic_function("app_count", [](jai::engine&, std::span<const jai::script_value> args) { return static_cast<jai::script_int>(args.size()); }, vm_test_privilege::app_count);
+				e->add_variadic_function("both_count", [](jai::engine&, std::span<const jai::script_value> args) { return static_cast<jai::script_int>(args.size()); }, jai::filesystem, vm_test_privilege::app_count);
 				auto row_of = [&](const char* name) {
 					const jai::script_value fn = detail::engine_access::get_variable_unheld(*e, name);
 					return detail::engine_access::host_direct_for(*e, &fn.unchecked_as_function()) != nullptr;
@@ -3809,7 +3812,7 @@ public:
 				check_true(dropped.format().find("the result of 'try_count' is discarded") != std::string::npos, dropped.format());
 				std::string denied;
 				try { e->execute("app_count(1);"); } catch (const std::exception& ex) { denied = ex.what(); }
-				e->enable(std::string_view("app.count"));
+				e->enable(vm_test_privilege::app_count);
 				try { return denied + "|" + e->execute(program).to_string(); } catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
 			};
 			const char* program =

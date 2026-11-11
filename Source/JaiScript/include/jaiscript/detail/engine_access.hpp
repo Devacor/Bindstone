@@ -21,10 +21,7 @@ namespace jai::detail {
         using construction_access_waiver = engine::construction_access_waiver;
         using load_session = engine::load_session;
         using load_field = engine::load_field;
-        template<typename F> JAI_FORCEINLINE static script_function guard_function(engine& a_engine, F&& function, privilege required) { return a_engine.guard_function(std::forward<F>(function), required); }
-        template<typename F> JAI_FORCEINLINE static script_function guard_function(engine& a_engine, F&& function, std::span<const std::string_view> names) { return a_engine.guard_function(std::forward<F>(function), names); }
-        template<typename F> JAI_FORCEINLINE static script_function guard_function(engine& a_engine, F&& function, std::string_view name) { return a_engine.guard_function(std::forward<F>(function), name); }
-        template<typename F> JAI_FORCEINLINE static script_function guard_function(engine& a_engine, F&& function, std::initializer_list<std::string_view> names) { return a_engine.guard_function(std::forward<F>(function), names); }
+        template<typename F> JAI_FORCEINLINE static script_function guard_function(engine& a_engine, F&& function, const privilege_set& required) { return a_engine.guard_function(std::forward<F>(function), required); }
         JAI_FORCEINLINE static script_value execute_include_source(engine& a_engine, const std::string& resolved_path, const std::string& content, std::string_view scope = {}) { return a_engine.execute_include_source(resolved_path, content, scope); }
         JAI_FORCEINLINE static bool read_include_file(engine& a_engine, const std::string& resolved_path, std::string& content) { return a_engine.read_include_file(resolved_path, content); }
         JAI_FORCEINLINE static checked_result<script_value> sleep_builtin(engine& a_engine, const script_value& seconds) { return a_engine.sleep_builtin(seconds); }

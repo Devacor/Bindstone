@@ -12,6 +12,7 @@
 #include <jaiscript/signals/receiver_owner.hpp>
 #include <jaiscript/detail/first_type.hpp>
 #include <jaiscript/detail/static_type_name.hpp>
+#include <jaiscript/core/binding_context.hpp>
 #include <typeindex>
 
 namespace jai {
@@ -22,15 +23,16 @@ namespace jai {
 		// A property_owner class with a portable name queues its binding at program start; every bind_registrar runs the
 		// queue beside its context's registrars. bind_declared_class is defined with dynamic_binder: the file that
 		// instantiates the class's constructor includes core/dynamic_binder.hpp, or the link names the missing binding.
-		using declared_binding_fn = void (*)(engine&);
-		void queue_declared_binding(std::type_index a_type, std::string_view a_name, declared_binding_fn a_bind);
-		template<typename T> void bind_declared_class(engine& a_engine);
+		// The context pointer is the bind_registrar call's, as the class's context type; null for an untagged class
+		using declared_binding_fn = void (*)(engine&, const void* a_context);
+		void queue_declared_binding(std::type_index a_type, std::string_view a_name, std::type_index a_context, declared_binding_fn a_bind);
+		template<typename T> void bind_declared_class(engine& a_engine, const void* a_context);
 
 		template<typename T>
 		bool queue_declared_binding_of() {
 			constexpr auto name = declared_or_derived_type_name<T>();
 			if constexpr (!name.empty()) {
-				queue_declared_binding(std::type_index(typeid(T)), name, &bind_declared_class<T>);
+				queue_declared_binding(std::type_index(typeid(T)), name, std::type_index(typeid(typename T::_jai_context_type)), &bind_declared_class<T>);
 			}
 			return true;
 		}
@@ -178,13 +180,34 @@ namespace jai {
 	// Every property_owner is script_extensible (docs/site/embedding/13-script-extensible.html): the slot comes
 	// from the first extensible base when one exists (so multiple property_owner bases never
 	// leave two ambiguous slots), else from deriving the mixin here.
+	// One jai::context<Ctx> among Bases tags the level (core/binding_context.hpp); it is no base, and every use of the bases below
+	// leaves it out.
 	template<typename Derived, typename... Bases>
-	class property_owner : public Bases...,
+	class property_owner : public detail::owner_base_t<Derived, Bases>...,
 	                       public std::conditional_t<detail::any_script_extensible_v<Bases...>, detail::no_script_slot<Derived>, script_extensible> {
+		static_assert((detail::is_context_tag<Bases>::value + ... + 0) <= 1, "jai::property_owner: a level takes one jai::context<>");
+		using _jai_declared_context = typename detail::declared_context<Bases...>::type;
+		using _jai_inherited_context = typename detail::inherited_context<void, Bases...>::type;
+		static_assert(!std::is_void_v<_jai_declared_context> || !std::is_same_v<_jai_inherited_context, detail::conflicting_contexts>,
+			"jai::property_owner: its bases carry different contexts; tag the class with a jai::context<C> whose jai_context_bases lists each");
+		static_assert(std::is_void_v<_jai_declared_context> || detail::narrows_every_base_context_v<_jai_declared_context, Bases...>,
+			"jai::property_owner: a jai::context<C> may only narrow its bases' context: C must be that context or list it in jai_context_bases");
+		static constexpr bool _jai_tagged_level = !std::is_void_v<_jai_declared_context>;
+
+		template<typename... Reals>
+		static void add_base_edges(std::tuple<Reals...>*) {
+			(type_registry::instance().add_base(std::type_index(typeid(Derived)), std::type_index(typeid(Reals))), ...);
+		}
+		template<typename... Reals>
+		static void register_base_relations(std::tuple<Reals...>*) {
+			if constexpr (sizeof...(Reals) > 0) { serialization::register_relation<Derived, Reals...>{}; }
+		}
+
 	public:
 		using _jai_owner_type = Derived;
-		using _jai_base_types = std::tuple<Bases...>;
-		static constexpr size_t _jai_base_count = sizeof...(Bases);
+		using _jai_base_types = detail::real_bases_t<Bases...>;
+		using _jai_context_type = detail::effective_context_t<_jai_declared_context, _jai_inherited_context>;
+		static constexpr size_t _jai_base_count = std::tuple_size_v<_jai_base_types>;
 
 		script_extensible& jai_script_slot() {
 			if constexpr (detail::any_script_extensible_v<Bases...>) {
@@ -225,13 +248,13 @@ namespace jai {
 		static constexpr bool _jai_is_relocation_v = sizeof...(Args) == 1 && (std::is_convertible_v<std::remove_reference_t<Args>*, const property_owner*> && ...);
 
 		template<typename... Args>
-		explicit property_owner(Args&&... args) requires (sizeof...(Bases) == 1 && !_jai_is_relocation_v<Args...>)
-			: detail::first_type_t<Bases...>(std::forward<Args>(args)...) {
+		explicit property_owner(Args&&... args) requires (_jai_base_count == 1 && !_jai_is_relocation_v<Args...>)
+			: std::tuple_element_t<0, detail::real_bases_t<Bases...>>(std::forward<Args>(args)...) {
 			register_inheritance();
 		}
 
 		template<typename... Args>
-		explicit property_owner(Args&&... args) requires (sizeof...(Bases) > 1 && sizeof...(Bases) == sizeof...(Args))
+		explicit property_owner(Args&&... args) requires (!_jai_tagged_level && sizeof...(Bases) > 1 && sizeof...(Bases) == sizeof...(Args))
 			: Bases(std::forward<Args>(args))... {
 			register_inheritance();
 		}
@@ -249,9 +272,7 @@ namespace jai {
 			// type is Derived reconstructs the correct Base subobject under multiple
 			// inheritance (each base is also a property_owner and records its own bases,
 			// so adjust_to_base composes them transitively).
-			if constexpr (sizeof...(Bases) > 0) {
-				serialization::register_relation<Derived, Bases...>{};
-			}
+			register_base_relations(static_cast<detail::real_bases_t<Bases...>*>(nullptr));
 			return true;
 		}();
 
@@ -265,9 +286,7 @@ namespace jai {
 			(void)_jai_poly_registered;
 			(void)detail::declared_binding_queued<Derived>;
 			static const auto _inheritance_registered = []() {
-				if constexpr (sizeof...(Bases) > 0) {
-					(type_registry::instance().add_base(std::type_index(typeid(Derived)), std::type_index(typeid(Bases))), ...);
-				}
+				add_base_edges(static_cast<detail::real_bases_t<Bases...>*>(nullptr));
 				return true;
 			}();
 			(void)_inheritance_registered;
@@ -280,7 +299,7 @@ namespace jai {
 		// Uses type-erased archive for polymorphic dispatch
 		virtual void post_load(serialization::any_archive_reader& ar) {
 			if constexpr (sizeof...(Bases) > 0) {
-				(try_post_load_base<Bases>(ar), ...);
+				(try_post_load_base<Bases>(ar, 0), ...);
 			}
 		}
 
@@ -321,7 +340,7 @@ namespace jai {
 
 		void collect_owned_properties(std::vector<std::pair<const std::string*, property_base*>>& out) const {
 			if constexpr (sizeof...(Bases) > 0) {
-				(try_collect_base<Bases>(out), ...);
+				(try_collect_base<Bases>(out, 0), ...);
 			}
 			for (property_base* prop : property_mgr.all()) {
 				out.emplace_back(&prop->name(), prop);
@@ -345,7 +364,7 @@ namespace jai {
 		template<typename Archive>
 		void load_owned_properties(Archive& ar) {
 			if constexpr (sizeof...(Bases) > 0) {
-				(try_load_base<Bases>(ar), ...);
+				(try_load_base<Bases>(ar, 0), ...);
 			}
 			property_mgr.load(ar);
 		}
@@ -358,7 +377,7 @@ namespace jai {
 			}
 			property_base* found = nullptr;
 			if constexpr (sizeof...(Bases) > 0) {
-				((found = found ? found : try_find_base<Bases>(name)), ...);
+				((found = found ? found : try_find_base<Bases>(name, 0)), ...);
 			}
 			return found;
 		}
@@ -435,13 +454,13 @@ namespace jai {
 		using _jai_script_slot_base = std::conditional_t<detail::any_script_extensible_v<Bases...>, detail::no_script_slot<Derived>, script_extensible>;
 
 		property_owner(const property_owner& a_other) requires (detail::base_copy_constructible_v<Bases> && ...)
-			: Bases(static_cast<const Bases&>(a_other))...
+			: detail::owner_base_t<Derived, Bases>(static_cast<const detail::owner_base_t<Derived, Bases>&>(a_other))...
 			, _jai_script_slot_base()
 			, property_mgr(a_other.property_mgr, static_cast<const Derived*>(&a_other), sizeof(Derived)) {
 		}
 
 		property_owner(property_owner&& a_other) noexcept requires (detail::base_move_constructible_v<Bases> && ...)
-			: Bases(std::move(static_cast<Bases&>(a_other)))...
+			: detail::owner_base_t<Derived, Bases>(std::move(static_cast<detail::owner_base_t<Derived, Bases>&>(a_other)))...
 			, _jai_script_slot_base()
 			, property_mgr(a_other.property_mgr, static_cast<const Derived*>(&a_other), sizeof(Derived))
 			, receivers_(std::move(a_other.receivers_)) {
@@ -450,7 +469,7 @@ namespace jai {
 
 		property_owner& operator=(const property_owner& a_other) requires (std::is_copy_assignable_v<Bases> && ...) {
 			if (this != &a_other) {
-				(static_cast<void>(static_cast<Bases&>(*this) = static_cast<const Bases&>(a_other)), ...);
+				(static_cast<void>(static_cast<detail::owner_base_t<Derived, Bases>&>(*this) = static_cast<const detail::owner_base_t<Derived, Bases>&>(a_other)), ...);
 				a_other.property_mgr.clone_to_target(property_mgr);
 			}
 			return *this;
@@ -458,7 +477,7 @@ namespace jai {
 
 		property_owner& operator=(property_owner&& a_other) noexcept requires (std::is_move_assignable_v<Bases> && ...) {
 			if (this != &a_other) {
-				(static_cast<void>(static_cast<Bases&>(*this) = std::move(static_cast<Bases&>(a_other))), ...);
+				(static_cast<void>(static_cast<detail::owner_base_t<Derived, Bases>&>(*this) = std::move(static_cast<detail::owner_base_t<Derived, Bases>&>(a_other))), ...);
 				property_mgr.script_receivers() = std::move(a_other.property_mgr.script_receivers());
 				receivers_ = std::move(a_other.receivers_);
 			}
@@ -466,37 +485,38 @@ namespace jai {
 		}
 
 	private:
+		// Each base level's walk; the long overloads skip a base that is no level (and the context tag)
 		template<typename Base>
-		auto try_post_load_base(serialization::any_archive_reader& ar)
+		auto try_post_load_base(serialization::any_archive_reader& ar, int)
 			-> decltype(static_cast<Base*>(this)->post_load(ar), void()) {
 			static_cast<Base*>(this)->post_load(ar);
 		}
 		template<typename Base>
-		void try_post_load_base(...) {}
+		void try_post_load_base(serialization::any_archive_reader&, long) {}
 
 		template<typename Base>
-		auto try_collect_base(std::vector<std::pair<const std::string*, property_base*>>& out) const
+		auto try_collect_base(std::vector<std::pair<const std::string*, property_base*>>& out, int) const
 			-> decltype(static_cast<const Base*>(this)->collect_owned_properties(out), void()) {
 			static_cast<const Base*>(this)->collect_owned_properties(out);
 		}
 		template<typename Base>
-		void try_collect_base(...) const {}
+		void try_collect_base(std::vector<std::pair<const std::string*, property_base*>>&, long) const {}
 
 		template<typename Base, typename Archive>
-		auto try_load_base(Archive& ar)
+		auto try_load_base(Archive& ar, int)
 			-> decltype(static_cast<Base*>(this)->load_owned_properties(ar), void()) {
 			static_cast<Base*>(this)->load_owned_properties(ar);
 		}
-		template<typename Base>
-		void try_load_base(...) {}
+		template<typename Base, typename Archive>
+		void try_load_base(Archive&, long) {}
 
 		template<typename Base>
-		auto try_find_base(const std::string& name)
+		auto try_find_base(const std::string& name, int)
 			-> decltype(static_cast<Base*>(this)->find_owned_property(name)) {
 			return static_cast<Base*>(this)->find_owned_property(name);
 		}
 		template<typename Base>
-		property_base* try_find_base(...) { return nullptr; }
+		property_base* try_find_base(const std::string&, long) { return nullptr; }
 	};
 
 } // namespace jai

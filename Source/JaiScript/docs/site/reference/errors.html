@@ -618,12 +618,13 @@ try {
 </tbody></table></div>
 <h4 id="host-errors-privileges">Privileges<a class="hlink" href="#host-errors-privileges" aria-label="link">&#8203;</a></h4>
 <div class="tablewrap"><table><thead><tr><th>Text</th><th>When</th><th>Fix</th></tr></thead><tbody>
-<tr id="err-unknown-privilege-name"><td><code>Unknown privilege name</code></td><td>A named privilege no registration defines.</td><td>Register it first, or correct the name.</td></tr>
-<tr id="err-invalid-privilege-flags"><td><code>Invalid privilege flags</code></td><td>Flags hold bits no privilege defines.</td><td>Build flags from defined privileges.</td></tr>
-<tr id="err-privilege-name-empty"><td><code>Privilege name must not be empty</code></td><td>A privilege registered or named with an empty string.</td><td>Name the privilege.</td></tr>
+<tr id="err-insufficient-privilege-host"><td><code>Insufficient privilege: 7.</code>, <code>Insufficient privilege: game.cheats.</code></td><td>A call that requires a host privilege the host disabled, named by its slot number, or by the name <code>register_privilege</code> gave it.</td><td>The host enables it, or the script checks <code>reflect::is_enabled(7)</code> first.</td></tr>
+<tr id="err-insufficient-privilege-network"><td><code>Insufficient privilege: network.</code></td><td>A <code>spider::</code> request or the runner&#x27;s <code>Download.start</code> on an engine whose host has not enabled <code>jai::network</code>.</td><td>The host enables <code>jai::network</code>.</td></tr>
+<tr id="err-privilege-slot-out-of-range"><td><code>Privilege slot out of range</code></td><td>A privilege enum value outside 0 to 255, or <code>register_privilege</code> naming a built-in slot.</td><td>Keep host privileges in a <code>std::uint8_t</code> enum starting at <code>jai::privilege_count</code>.</td></tr>
+<tr id="err-privilege-name-empty"><td><code>Privilege name must not be empty</code></td><td><code>register_privilege</code> given an empty name.</td><td>Name the privilege.</td></tr>
 <tr id="err-cannot-change-privileges-in-parallel"><td><code>Cannot change privileges during a parallel region</code></td><td>A host function called from a parallel body enables or disables a privilege.</td><td>Change privileges outside parallel regions.</td></tr>
 <tr id="err-is-enabled-expects-argument"><td><code>reflect::is_enabled expects at least 1 argument</code></td><td>Script calls <code>reflect::is_enabled</code> with no argument.</td><td>Pass the privilege to test.</td></tr>
-<tr id="err-is-enabled-expects-valid-flags"><td><code>reflect::is_enabled expects valid privilege flags</code></td><td>Script passes <code>reflect::is_enabled</code> flags no privilege defines.</td><td>Pass a defined privilege.</td></tr>
+<tr id="err-is-enabled-expects-valid-flags"><td><code>reflect::is_enabled expects valid privilege flags</code></td><td>Script passes <code>reflect::is_enabled</code> something other than a slot number from 0 to 255.</td><td>Pass <code>jai::filesystem</code>, <code>jai::scoped_template</code>, <code>jai::network</code> or a host&#x27;s slot.</td></tr>
 </tbody></table></div>
 <h4 id="host-errors-callbacks">Callbacks<a class="hlink" href="#host-errors-callbacks" aria-label="link">&#8203;</a></h4>
 <div class="tablewrap"><table><thead><tr><th>Text</th><th>When</th><th>Fix</th></tr></thead><tbody>

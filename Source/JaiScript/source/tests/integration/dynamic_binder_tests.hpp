@@ -9,6 +9,7 @@
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/detail/engine_access.hpp>
 #include <jaiscript/core/registrar.hpp>
+#include <jaiscript/serialization/convenience.hpp>
 #include <map>
 #include <memory>
 #include <string>
@@ -182,8 +183,8 @@ inline registrar<OwnerChainMiddle, owner_chain_context> owner_chain_middle_regis
     builder.method("middleMethod", &OwnerChainMiddle::middleMethod);
 });
 
-// A property_owner binds itself in every bind_registrar, its in-class hook binding the rest; a registrar of any context
-// replaces that binding
+// A property_owner binds itself in every bind_registrar, its in-class hook binding the rest; a registrar adds to that binding
+// in its own context's engines
 class DeclaredBeacon : public property_owner<DeclaredBeacon> {
 public:
     JAI_PROPERTY((int64_t), range, 4);
@@ -206,6 +207,111 @@ inline registrar<DeclaredRenamed, declared_rename_context> declared_renamed_regi
 inline registrar<declared_name_rival, declared_collision_context> declared_name_rival_registrar("DeclaredBeacon", [](dynamic_binder<declared_name_rival>& builder, const declared_collision_context&) {
     builder.property("seats", &declared_name_rival::seats);
 });
+class DeclaredAdded : public property_owner<DeclaredAdded> {
+public:
+    DeclaredAdded() {}
+    static void jai_auto_bind(dynamic_binder<DeclaredAdded>& a_binder) {
+        a_binder.method("own", [](DeclaredAdded&) { return (int64_t)1; });
+    }
+};
+struct declared_add_context { int64_t extra = 20; };
+inline registrar<DeclaredAdded, declared_add_context> declared_added_registrar([](dynamic_binder<DeclaredAdded>& builder, const declared_add_context& a_context) {
+    builder.method("added", [extra = a_context.extra](DeclaredAdded&) { return extra; });
+});
+struct declared_other_context {};
+struct declared_other_registered { int64_t seats = 3; };
+inline registrar<declared_other_registered, declared_other_context> declared_other_registrar("DeclaredOtherRegistered", [](dynamic_binder<declared_other_registered>& builder, const declared_other_context&) {
+    builder.property("seats", &declared_other_registered::seats);
+});
+
+// noexcept members and functions, const container references, the auto-named binder and decayed context spellings
+struct NoexceptGauge {
+    int64_t value = 5;
+    int64_t read() const noexcept { return value; }
+    void write(int64_t a_value) noexcept { value = a_value; }
+    static int64_t total(const std::vector<int64_t>& a_values) noexcept {
+        int64_t result = 0;
+        for (int64_t each : a_values) { result += each; }
+        return result;
+    }
+};
+inline int64_t noexcept_double(int64_t a_value) noexcept { return a_value * 2; }
+// a member pointer of a class with several bases is wider than one with a single base
+struct OverloadSideBase { int64_t side = 40; };
+struct OverloadedLamp : NoexceptGauge, OverloadSideBase {
+    bool lit = false;
+    void visible(bool a_lit) { lit = a_lit; }
+    bool visible() const { return lit; }
+    int64_t bright() { return side; }
+    int64_t bright() const { return side + 1; }
+};
+struct spelled_context { int64_t offset = 100; };
+struct SpelledConst { int64_t seats = 1; };
+struct SpelledReference { int64_t seats = 2; };
+inline registrar<SpelledConst, const spelled_context> spelled_const_registrar([](dynamic_binder<SpelledConst>& builder, const spelled_context& a_context) {
+    builder.method("offset", [offset = a_context.offset](SpelledConst&) { return offset; });
+});
+inline registrar<SpelledReference, spelled_context&> spelled_reference_registrar([](dynamic_binder<SpelledReference>& builder, const spelled_context&) {
+    builder.property("seats", &SpelledReference::seats);
+});
+// a context that extends another binds both registries, the base's first, with the context as its base
+struct chain_base_context { int64_t floor = 30; };
+struct chain_derived_context : chain_base_context {
+    using jai_context_bases = jai::bases<chain_base_context>;
+};
+struct ChainBaseOnly { int64_t seats = 4; };
+struct ChainDerivedOnly { int64_t seats = 5; };
+inline registrar<ChainBaseOnly, chain_base_context> chain_base_registrar([](dynamic_binder<ChainBaseOnly>& builder, const chain_base_context& a_context) {
+    builder.method("floor", [floor = a_context.floor](ChainBaseOnly&) { return floor; });
+});
+inline registrar<ChainDerivedOnly, chain_derived_context> chain_derived_registrar;
+
+// No file constructs it: the file that defines its hook queues its binding
+class HookOnlyBeacon : public property_owner<HookOnlyBeacon> {
+public:
+    static void jai_auto_bind(dynamic_binder<HookOnlyBeacon>& a_binder);
+};
+inline void HookOnlyBeacon::jai_auto_bind(dynamic_binder<HookOnlyBeacon>& a_binder) {
+    a_binder.method("ping", [](HookOnlyBeacon&) { return (int64_t)7; });
+}
+
+// Context tags: a tagged class binds only where bind_registrar's context is its context or extends it
+struct tag_root_context { int64_t bonus = 3; };
+struct tag_server_context : tag_root_context {
+    using jai_context_bases = jai::bases<tag_root_context>;
+};
+struct tag_tool_context : tag_root_context {
+    using jai_context_bases = jai::bases<tag_root_context>;
+};
+struct tag_dedicated_context : tag_server_context, tag_tool_context {
+    using jai_context_bases = jai::bases<tag_server_context, tag_tool_context>;
+};
+class TaggedRoot : public property_owner<TaggedRoot, jai::context<tag_root_context>> {
+public:
+    JAI_PROPERTY((int64_t), level, 2);
+    TaggedRoot() {}
+    static void jai_auto_bind(dynamic_binder<TaggedRoot>& a_binder, const tag_root_context& a_context) {
+        a_binder.method("bonus", [bonus = a_context.bonus](TaggedRoot&) { return bonus; });
+    }
+};
+class TaggedServer : public property_owner<TaggedServer, TaggedRoot, jai::context<tag_server_context>> {
+public:
+    TaggedServer() {}
+};
+class UntaggedLeaf : public property_owner<UntaggedLeaf, TaggedRoot> {
+public:
+    UntaggedLeaf() {}
+};
+class TaggedTool : public property_owner<TaggedTool, jai::context<tag_tool_context>> {
+public:
+    TaggedTool() {}
+};
+class TaggedDedicated : public property_owner<TaggedDedicated, TaggedServer, TaggedTool, jai::context<tag_dedicated_context>> {
+public:
+    TaggedDedicated() {}
+};
+static_assert(std::is_same_v<UntaggedLeaf::_jai_context_type, tag_root_context>);
+static_assert(std::is_same_v<TaggedDedicated::_jai_base_types, std::tuple<TaggedServer, TaggedTool>>);
 
 // In-place member lanes (detail/host_member.hpp): every member type a lane reads, a const member, a second base at a
 // nonzero offset, and a polymorphic schema owner whose unregistered subclass shadows a property name
@@ -2554,7 +2660,8 @@ public:
             auto base_left_out = make_engine();
             check_eq(std::string("bind_registrar: 'OwnerChainLeaf' derives from 'OwnerChainMiddle', which the filter leaves out; bind both or leave out 'OwnerChainLeaf' too"),
                 failure_of([&] { bind_registrar(*base_left_out, owner_chain_context{}, jai::except<OwnerChainMiddle>()); }));
-            check_true(failure_of([&] { bind_registrar(*make_engine(), owner_chain_context{}, jai::only<binder_chain_root>()); }).starts_with("bind_registrar: the filter names the C++ type '"));
+            check_eq(std::string("bind_registrar: the filter names the C++ type 'jai::foundry::tests::binder_chain_root', which has no registrar for this context"),
+                failure_of([&] { bind_registrar(*make_engine(), owner_chain_context{}, jai::only<binder_chain_root>()); }));
 
             auto declared_only = make_engine();
             bind_registrar(*declared_only, owner_chain_context{}, jai::only<DeclaredBeacon>());
@@ -2564,23 +2671,132 @@ public:
             check_true(!declared_except->is_type_registered("DeclaredBeacon") && declared_except->is_type_registered("OwnerChainMiddle"));
         });
         test("a_property_owner_binds_itself_in_every_bind_registrar", [this]() {
+            const auto failure_of = [](auto&& a_run) {
+                try { a_run(); } catch (const std::exception& e) { return std::string(e.what()); }
+                return std::string("no error");
+            };
             auto eng = make_engine();
+            stdlib::register_all(*eng);
             bind_registrar(*eng, declared_binding_context{});
             check_eq((int64_t)57, eng->execute("var b = DeclaredBeacon(); b.range = 5; b.boosted() + 7;").as_int());
-            check_true(!eng->is_type_registered("DeclaredRenamed") && !eng->is_type_registered("RenamedBeacon"));
+            check_true(eng->is_type_registered("DeclaredRenamed") && !eng->is_type_registered("RenamedBeacon"));
 
             auto no_context = make_engine();
             bind_registrar(*no_context);
             check_eq((int64_t)40, no_context->execute("DeclaredBeacon().boosted();").as_int());
+            check_eq((int64_t)7, no_context->execute("HookOnlyBeacon().ping();").as_int());
 
             auto renamed = make_engine();
-            bind_registrar(*renamed, declared_rename_context{});
-            check_true(renamed->is_type_registered("RenamedBeacon") && !renamed->is_type_registered("DeclaredRenamed"));
+            check_eq(std::string("bind_registrar: the jai::registrar of the property_owner class 'jai::foundry::tests::DeclaredRenamed' names it 'RenamedBeacon'; "
+                "it binds under its serialization name 'DeclaredRenamed'"), failure_of([&] { bind_registrar(*renamed, declared_rename_context{}); }));
+
+            auto added = make_engine();
+            bind_registrar(*added, declared_add_context{});
+            check_eq((int64_t)21, added->execute("var a = DeclaredAdded(); a.own() + a.added();").as_int());
+            check_eq((int64_t)1, eng->execute("DeclaredAdded().own();").as_int());
+            check_false(eng->execute("reflect::has_method(DeclaredAdded(), \"added\");").as_bool());
 
             auto hosted = make_engine();
             dynamic_binder<DeclaredBeacon>(*hosted, "HostBeacon");
             bind_registrar(*hosted, declared_binding_context{});
             check_true(hosted->is_type_registered("HostBeacon") && !hosted->is_type_registered("DeclaredBeacon"));
+        });
+        test("noexcept_members_and_functions_and_const_container_references_bind_everywhere", [this]() {
+            auto eng = make_engine();
+            dynamic_binder<NoexceptGauge>(*eng)
+                .constructor<>()
+                .method("read", &NoexceptGauge::read)
+                .method("write", &NoexceptGauge::write, jai::serial)
+                .method("lambda", [](const NoexceptGauge& a_self) noexcept { return a_self.value + 1; })
+                .static_method("total", &NoexceptGauge::total);
+            eng->add_function("noexcept_double", &noexcept_double);
+            eng->add_function("sum_of", [](const std::vector<int64_t>& a_values) noexcept { return NoexceptGauge::total(a_values); });
+            eng->add_function("count_keys", [](const std::map<std::string, int64_t>& a_values) { return static_cast<int64_t>(a_values.size()); });
+            check_eq((int64_t)5, eng->execute("var g = NoexceptGauge(); g.read();").as_int());
+            check_eq((int64_t)6, eng->execute("g.lambda();").as_int());
+            eng->execute("g.write(7);");
+            check_eq((int64_t)15, eng->execute("g.read() + g.lambda();").as_int());
+            check_eq((int64_t)3, eng->execute("NoexceptGauge::total([1, 2]);").as_int());
+            check_eq((int64_t)17, eng->execute("noexcept_double(3) + sum_of([4, 5]) + count_keys({\"a\": 1, \"b\": 2});").as_int());
+
+            dynamic_binder<OverloadedLamp>(*eng)
+                .method("visible", jai::overload<bool>(&OverloadedLamp::visible))
+                .method("visible", jai::overload<>(&OverloadedLamp::visible))
+                .method("bright", jai::const_overload<>(&OverloadedLamp::bright));
+            check_eq((int64_t)42, eng->execute("var lamp = OverloadedLamp(); lamp.visible(true); lamp.visible() ? lamp.bright() + 1 : 0;").as_int());
+        });
+        test("the_binder_auto_names_and_context_spellings_decay_to_one_registry", [this]() {
+            auto eng = make_engine();
+            spelled_context context;
+            context.offset = 9;
+            bind_registrar<spelled_context&>(*eng, context);
+            check_eq((int64_t)11, eng->execute("SpelledConst().offset() + SpelledReference().seats;").as_int());
+
+            auto chained = make_engine();
+            bind_registrar(*chained, chain_derived_context{}, jai::only<ChainBaseOnly, ChainDerivedOnly>());
+            check_eq((int64_t)30, chained->execute("ChainBaseOnly().floor();").as_int());
+            check_true(chained->is_type_registered("ChainDerivedOnly"));
+            auto exact = make_engine();
+            bind_registrar(*exact, chain_derived_context{}, jai::match_exact_context_type);
+            check_true(exact->is_type_registered("ChainDerivedOnly") && !exact->is_type_registered("ChainBaseOnly"));
+        });
+        test("one_engine_binds_two_unrelated_contexts_and_its_own_classes_once", [this]() {
+            auto eng = make_engine();
+            stdlib::register_all(*eng);
+            bind_registrar(*eng, declared_add_context{});
+            const auto beacon = detail::engine_access::get_class_definition(*eng, "DeclaredBeacon");
+            eng->execute("var kept = DeclaredBeacon(); kept.range = 6;");
+            bind_registrar(*eng, declared_other_context{});
+            check_true(beacon == detail::engine_access::get_class_definition(*eng, "DeclaredBeacon"));
+            check_eq((int64_t)84, eng->execute("kept.boosted() + DeclaredAdded().added() + DeclaredOtherRegistered().seats + 1;").as_int());
+        });
+        test("a_context_tag_binds_a_class_where_the_context_is_its_own_or_extends_it", [this]() {
+            const auto bound = [](engine& a_engine, const char* a_name) { return a_engine.is_type_registered(a_name); };
+            auto root = make_engine();
+            bind_registrar(*root, tag_root_context{});
+            check_true(bound(*root, "TaggedRoot") && bound(*root, "UntaggedLeaf") && bound(*root, "DeclaredBeacon"));
+            check_false(bound(*root, "TaggedServer") || bound(*root, "TaggedTool") || bound(*root, "TaggedDedicated"));
+            check_eq((int64_t)5, root->execute("var r = TaggedRoot(); r.level + r.bonus();").as_int());
+
+            auto server = make_engine();
+            tag_server_context server_context;
+            server_context.bonus = 7;
+            bind_registrar(*server, server_context);
+            check_true(bound(*server, "TaggedRoot") && bound(*server, "TaggedServer") && bound(*server, "UntaggedLeaf"));
+            check_false(bound(*server, "TaggedTool") || bound(*server, "TaggedDedicated"));
+            check_eq((int64_t)9, server->execute("var s = TaggedServer(); s.level + s.bonus();").as_int());
+
+            auto dedicated = make_engine();
+            bind_registrar(*dedicated, tag_dedicated_context{});
+            check_true(bound(*dedicated, "TaggedServer") && bound(*dedicated, "TaggedTool") && bound(*dedicated, "TaggedDedicated"));
+            check_eq((int64_t)5, dedicated->execute("var d = TaggedDedicated(); d.level + d.bonus();").as_int());
+
+            auto exact = make_engine();
+            stdlib::register_all(*exact);
+            bind_registrar(*exact, tag_server_context{}, jai::match_exact_context_type);
+            check_true(bound(*exact, "TaggedServer") && bound(*exact, "DeclaredBeacon"));
+            check_false(bound(*exact, "UntaggedLeaf"));
+            check_false(exact->execute("reflect::has_method(TaggedServer(), \"bonus\");").as_bool());
+            auto exact_filtered = make_engine();
+            bind_registrar(*exact_filtered, tag_server_context{}, jai::match_exact_context_type, jai::only<TaggedServer>());
+            check_true(bound(*exact_filtered, "TaggedServer") && !bound(*exact_filtered, "DeclaredBeacon"));
+
+            auto none = make_engine();
+            bind_registrar(*none);
+            check_true(bound(*none, "DeclaredBeacon"));
+            check_false(bound(*none, "TaggedRoot") || bound(*none, "UntaggedLeaf") || bound(*none, "TaggedServer"));
+        });
+        test("a_tagged_class_saves_and_loads_where_its_context_never_bound", [this]() {
+            auto eng = make_engine();
+            bind_registrar(*eng);
+            std::shared_ptr<TaggedRoot> saved = std::make_shared<TaggedServer>();
+            saved->level = 11;
+            const std::string text = jai::to_json(*eng, saved);
+            check_true(text.find("TaggedServer") != std::string::npos, text);
+            auto loaded = jai::from_json<std::shared_ptr<TaggedRoot>>(*eng, text);
+            check_true(std::dynamic_pointer_cast<TaggedServer>(loaded) != nullptr);
+            check_eq((int64_t)11, loaded->level.get());
+            check_eq(text, jai::to_json(*eng, jai::from_binary<std::shared_ptr<TaggedRoot>>(*eng, jai::to_binary(*eng, saved))));
         });
         test("two_types_under_one_script_name_refuse_to_bind", [this]() {
             const auto failure_of = [](auto&& a_run) {

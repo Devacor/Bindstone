@@ -25,6 +25,9 @@ using namespace jai::foundry;
 
 namespace jai::foundry::tests {
 
+enum class spec_privilege : std::uint8_t { app_b = jai::privilege_count, app_a };
+void jai_privilege_enum(spec_privilege);
+
 namespace spec {
 
 // A host class whose accessors, methods and operators throw (docs/site/guide/05-control-flow.html "try / catch / throw": a C++ exception a bound
@@ -2548,14 +2551,14 @@ private:
 		});
 	}
 
-	// docs/site/embedding/05-safety-rails.html: the first missing built-in, then custom names in registration order
+	// docs/site/embedding/05-safety-rails.html: a denial names the lowest missing slot, the engine's own before a host's
 	void privilege_order() {
-		test("a_denial_names_the_first_missing_permission_in_registration_order", [this]() {
+		test("a_denial_names_the_first_missing_permission_in_slot_order", [this]() {
 			every_config("denial order", "Insufficient privilege: app.b.|Insufficient privilege: filesystem.", [](engine& e) {
-				e.register_privilege("app.b");
-				e.register_privilege("app.a");
-				e.add_function("f", []() -> script_int { return 1; }, {"app.a", "app.b"});
-				e.add_function("g2", []() -> script_int { return 2; }, {"filesystem", "app.a"});
+				e.register_privilege(spec_privilege::app_a, "app.a");
+				e.register_privilege(spec_privilege::app_b, "app.b");
+				e.add_function("f", []() -> script_int { return 1; }, spec_privilege::app_a, spec_privilege::app_b);
+				e.add_function("g2", []() -> script_int { return 2; }, jai::filesystem, spec_privilege::app_a);
 				e.disable(jai::filesystem);
 				std::string out = e.execute("var r = \"\"; try { f(); } catch (x) { r = x; } r;").as_string();
 				out += "|" + e.execute("var r2 = \"\"; try { g2(); } catch (x) { r2 = x; } r2;").as_string();

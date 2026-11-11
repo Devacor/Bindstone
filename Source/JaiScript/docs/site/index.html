@@ -103,11 +103,13 @@ public:
     JAI_PROPERTY((int64_t), level, 1);
     JAI_SIGNAL_PROPERTY(void(int64_t), onWave);      // script-connectable, saved too
     void spawn_wave();
+    void spawn_wave(int64_t count, bool elite);       // overloaded in C++
 };
 
 static jai::registrar&lt;Spawner, void&gt; _regSpawner("Spawner",
     [](jai::dynamic_binder&lt;Spawner&gt;&amp; b) {
-        b.method("spawn_wave", &amp;Spawner::spawn_wave);   // a method is one line
+        b.method("spawn_wave", [](Spawner&amp; s) { s.spawn_wave(); })   // a lambda picks the overload
+         .method("spawn_elites", [](Spawner&amp; s, int64_t count) { s.spawn_wave(count, true); });
     });</code></pre></div>
 <p>Each <code>JAI_PROPERTY</code> is the field, its script binding, its save key and its reflection, so the four never drift apart.</p>
 </div>
@@ -117,6 +119,7 @@ struct Turret {
     std::string name = "north";
     int64_t ammo = 10;
     void fire();
+    void aim(float yaw, float pitch);
 };
 
 // your binding file: the class stays untouched
@@ -125,7 +128,10 @@ static jai::registrar&lt;Turret, void&gt; _regTurret("Turret",
         b.constructor&lt;&gt;()
          .property("name", &amp;Turret::name)   // scripted and saved
          .property("ammo", &amp;Turret::ammo)
-         .method("fire", &amp;Turret::fire);
+         .method("fire", &amp;Turret::fire)            // a method is one line
+         .method("aim", [](Turret&amp; t, double yaw) {    // a lambda adapts any signature
+             t.aim(float(yaw), 0.0f);
+         });
     });</code></pre></div>
 <p>Third-party and engine types bind from the outside, with the same script access and saves keyed by the property names.</p>
 </div>

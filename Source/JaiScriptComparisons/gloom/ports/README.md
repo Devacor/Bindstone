@@ -132,6 +132,46 @@ Cross-checks: seeds 7/99/4242 at 3000 → 1696980843 / 1855347375 / 2848371116;
 `--god --seed 5` at 12000 → 576425398. Sim hashes are `--pix`-independent
 (run half/quad/sext to prove your renderer doesn't touch sim state or RNG).
 
+### 4a. The two looks
+
+GLOOM draws two looks over one simulation; the host passes `--look` to the
+adapter, which binds it as the `HOST_LOOK` global (`reference` or `showcase`,
+`reference` under `--smoke` unless asked). Section 4.2 specifies the
+**reference look**. The **showcase look** has no separate spec: the
+JaiScript scripts are its definition (`look.jai`, `lights.jai`, `feel.jai`,
+`viewmodel.jai`, `canvas.jai`, `screens.jai`, `tune.jai` and the `SHOWCASE`
+branches of `render.jai`, `particles.jai`, `hud.jai`). A port of it leaves out
+`sound.jai` and `dev.jai` (audio and `--dev` reload) and the sound-cue
+bookkeeping in `feel.jai`; none of it reaches a frame.
+
+`math::color` holds four binary32 components and every color operation
+lands binary32 (`mix_rgb` computes in binary64 and rounds once), so the
+showcase's lit tables come out identical only when a port rounds each color
+operation to binary32 too: `string.pack`/`unpack` in Lua, a reused blob
+(`writen`/`readn` with `'f'`; the Squirrel adapter registers the blob library)
+in Squirrel, the native `float` in ChaiScript, `struct` in Python.
+
+| look | ports that draw it |
+|---|---|
+| reference | all: AngelScript, ChaiScript, Lua 5.4/5.5, LuaJIT, Python, Squirrel |
+| showcase | ChaiScript, Lua 5.4/5.5, Python, Squirrel (the AngelScript and LuaJIT adapters refuse `--look showcase`) |
+
+Showcase checkpoints (seed 666, quad unless named; STATE_HASH is the
+reference look's at the same tick count):
+
+| `--smoke --look showcase` | frame hash | STATE_HASH |
+|---|---|---|
+| `--ticks 100` | 73d8643bb319fa08 | 2414528911 |
+| `--ticks 300` | 1b6efa4fcae4e573 | 3580805725 |
+| `--ticks 600` (also after `--warmup 600`) | 78100966e954bb83 | 1503537018 |
+| `--ticks 300 --pix sext` | 858885a335d69102 | 3580805725 |
+| `--ticks 300 --pix half` | e1e62cb65c9774fe | 3580805725 |
+
+ChaiScript 6.1 parses some decimal literals one or more ulps away from the
+nearest double (it sums `digit / 10^k` terms), so its port spells those
+literals in a form the parser lands exactly (`78e-2` for `0.78`); a literal
+off by an ulp shows up first as a particle drawn one column over.
+
 ### 5. CMake wiring
 
 `jai_gloom` always builds; each port is an option, OFF by default, and its
@@ -237,9 +277,27 @@ through sol2's ordinary default constructor.
 
 ### Workload and validation
 
-The required 300-tick reference is frame `7fecc09815bb64e0`, state `3580805725`.
-The 600-tick reference is frame `dfd969ed5a336dca`, state `1503537018`.
-Both use seed 666. Every normal and padded configuration must reproduce both.
+`--look` picks the look every configuration draws: `showcase` (the default) or
+`reference`. A showcase campaign leaves out AngelScript and LuaJIT, which draw
+the reference look only.
+
+| look | 300 ticks | 600 ticks |
+|---|---|---|
+| reference | frame `7fecc09815bb64e0`, state `3580805725` | frame `dfd969ed5a336dca`, state `1503537018` |
+| showcase | frame `1b6efa4fcae4e573`, state `3580805725` | frame `78100966e954bb83`, state `1503537018` |
+
+All use seed 666. Every normal and padded configuration must reproduce both
+rows of its look.
+
+The runner times the compiled ports with padding controls. The ChaiScript 6.1
+port (`gloom_chai`, `-DGLOOM_PORT_CHAI=ON`) and the standalone Python 3 port
+(`python gloom.py`, which takes the same `--smoke --look --warmup --ticks`
+flags and prints the same report row) are outside it: neither has a padding
+build. ChaiScript takes hundreds of milliseconds a showcase tick, too slow for
+600 + 600 ticks, so its rows are timed over a shorter window after a shorter
+warm-up, ending on a checkpoint. Python hashes each frame outside its timed
+window (pure-Python FNV-1a costs milliseconds a frame), where the C++ host
+hashes inside it.
 
 `--warmup 600` runs 600 untimed frames, then boots the same runtime again with
 the original seed and a new game state. Runtime caches and JIT traces survive.

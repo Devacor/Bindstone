@@ -29,6 +29,11 @@ PORT_SCRIPTS = {"gloom_squirrel": ("gloom/ports/squirrel/scripts", "*.nut"),
 ENGINE_TARGETS = {"jai": ("jai_gloom",), "jai-lua": ("jai_gloom", "gloom_lua"),
 	"jai-angelscript": ("jai_gloom", "gloom_angelscript")}
 HASHES = ((300, "7fecc09815bb64e0", 3580805725), (600, "dfd969ed5a336dca", 1503537018))
+# The look decides the frames; the simulation, and so STATE_HASH, is the same in both
+LOOK_HASHES = {"reference": HASHES,
+	"showcase": ((300, "1b6efa4fcae4e573", 3580805725), (600, "78100966e954bb83", 1503537018))}
+# Ports that draw the reference look only; their adapters refuse --look showcase
+REFERENCE_ONLY = ("gloom_angelscript", "gloom_luajit")
 ROW = re.compile(r"^(\S+)\s+\|\s+([\d.]+)\s+\|\s+([\d.]+)\s+\|\s+([0-9a-f]{16})\s+\|\s+(\d+)\s*$", re.M)
 
 def file_hash(path):
@@ -192,14 +197,16 @@ def validate_timedemo_conformance(directory, builds, workload_root, comparison_r
 	return {"directory":str(directory),"comparison_sha256":file_hash(directory/"comparison.json"),
 		"inputs_sha256":file_hash(directory/"inputs.json"),"records_per_configuration":7968}
 
-def selected_configurations(workloads, engines):
+def selected_configurations(workloads, engines, look="reference"):
 	configs=[]
 	if "gloom" in workloads:
 		for label,target,backend,workers,cores in CONFIGURATIONS:
 			if engines!="all" and target not in ENGINE_TARGETS[engines]:
 				continue
+			if look!="reference" and target in REFERENCE_ONLY:
+				continue
 			configs.append({"workload":"gloom","name":label,"target":target,"backend":backend,
-				"workers":workers,"cores":cores,"unit":"ms/tick"})
+				"workers":workers,"cores":cores,"unit":"ms/tick","look":look})
 	if "timedemo" in workloads:
 		configs.append({"workload":"timedemo","name":"JaiDOOM VM timedemo","target":"jaiscript",
 			"backend":"vm","workers":0,"cores":1,"unit":"ms/tic"})
@@ -232,7 +239,7 @@ def validate_resume(previous, current, records, configs, builds, out):
 	for key in ("jai_workload_root", "builds", "binary_sha256", "workload_sha256",
 		"cpu_sets", "performance_cpus", "rounds", "recording", "max_background_cores",
 		"order", "warmup", "units", "padding", "competitor_poll_interval_seconds",
-		"build_input_manifests", "variant_order", "timedemo_conformance"):
+		"build_input_manifests", "variant_order", "timedemo_conformance", "look"):
 		if previous.get(key) != current.get(key):
 			raise RuntimeError("Cannot resume: changed " + key)
 	if [r["sequence"] for r in records] != list(range(1,len(records)+1)):
@@ -270,7 +277,7 @@ def validate_resume(previous, current, records, configs, builds, out):
 		else:
 			found=ROW.findall(output)
 			ticks=int(row["command"][row["command"].index("--ticks")+1])
-			expected=next(h for h in HASHES if h[0]==ticks)
+			expected=next(h for h in LOOK_HASHES[config.get("look","reference")] if h[0]==ticks)
 			parsed={"hash_match":len(found)==1 and found[0][3]==expected[1] and int(found[0][4])==expected[2],
 				"metric_ms":float(found[0][2]) if len(found)==1 else None}
 		if parsed["hash_match"]!=row["hash_match"] or parsed["metric_ms"]!=row["metric_ms"]:
@@ -347,6 +354,7 @@ def main():
 	parser.add_argument("--max-attempts",type=int,default=10,help="Busy attempts per required timing; acceptance threshold is unchanged.")
 	parser.add_argument("--workloads",default="gloom,timedemo")
 	parser.add_argument("--engines",choices=("all",*ENGINE_TARGETS),default="all")
+	parser.add_argument("--look",choices=tuple(LOOK_HASHES),default="showcase",help="The GLOOM look the ports draw; AngelScript and LuaJIT draw the reference look only.")
 	parser.add_argument("--max-background-cores",type=float,default=0.20)
 	parser.add_argument("--conformance-only",action="store_true")
 	parser.add_argument("--timedemo-conformance",type=pathlib.Path,help="Reuse a complete frame certificate for these exact Lua binaries and workload; otherwise generate it before timing.")
@@ -366,7 +374,7 @@ def main():
 	out.mkdir(parents=True,exist_ok=True)
 	if (out/"runs.json").exists() and not args.resume:
 		parser.error("Use a new output directory; existing raw runs are never overwritten.")
-	configs=selected_configurations(workloads,args.engines)
+	configs=selected_configurations(workloads,args.engines,args.look)
 	try:builds=variant_builds(args.build,args.compare_build,args.variant_build)
 	except ValueError as error:parser.error(str(error))
 	machine=WindowsMachine()
@@ -404,7 +412,7 @@ def main():
 		"head":subprocess.check_output(["git","rev-parse","HEAD"],cwd=root,text=True).strip(),
 		"jai_workload_root":str(jai_workload_root),"builds":{k:str(v) for k,v in builds.items()},"binary_sha256":binaries,"workload_sha256":workload_hashes,
 		"cpu_sets":machine.cpu_sets,"performance_cpus":machine.performance_cpus,
-		"rounds":args.rounds,"recording":args.recording,"max_background_cores":args.max_background_cores,
+		"rounds":args.rounds,"recording":args.recording,"look":args.look if "gloom" in workloads else None,"max_background_cores":args.max_background_cores,
 		"order":"For each workload/round: normal baseline/candidate, padding baseline/candidate, repeated twice; timedemo languages interleave inside each variant/layout.",
 		"warmup":{"gloom":"600 ticks then reboot in the same runtime","timedemo":"initial file/main execution then another main() in the same engine"},
 		"units":{"gloom":"ms/tick","timedemo":"reported elapsed integer ms / reported tic count"},
@@ -444,7 +452,7 @@ def main():
 		exe=builds[variant]/"bin"/(config["target"]+("_padding" if layout=="padding" else "")+".exe")
 		if config["workload"]=="gloom":
 			command=[str(exe),"--smoke","--backend",config["backend"],"--workers",str(config["workers"]),
-				"--ticks",str(ticks),"--warmup","0" if cold else "600","--seed","666","--pix","quad"]
+				"--ticks",str(ticks),"--warmup","0" if cold else "600","--seed","666","--pix","quad","--look",config["look"]]
 			if config["target"]=="jai_gloom":command+=["--scripts",str(jai_workload_root/"examples/gloom/scripts")]
 			elif config["target"] in PORT_SCRIPTS:command+=["--scripts",str(comparison_root/PORT_SCRIPTS[config["target"]][0])]
 		elif config["target"]=="jai_doom_lua":
@@ -490,7 +498,7 @@ def main():
 		text=output.decode("utf-8",errors="replace")
 		if config["workload"]=="gloom":
 			rows=ROW.findall(text)
-			expected=next(h for h in HASHES if h[0]==ticks)
+			expected=next(h for h in LOOK_HASHES[config["look"]] if h[0]==ticks)
 			ok=len(rows)==1 and rows[0][3]==expected[1] and int(rows[0][4])==expected[2]
 			parsed={"hash_match":ok,"metric_ms":float(rows[0][2]) if len(rows)==1 else None,
 				"frame_hash":rows[0][3] if len(rows)==1 else None,"state_hash":int(rows[0][4]) if len(rows)==1 else None}

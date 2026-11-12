@@ -207,6 +207,39 @@ class AngelScriptConfigurationTests(unittest.TestCase):
 		self.assertIn("main.as",[p.name for p in scripts])
 
 
+class LookTests(unittest.TestCase):
+	def test_showcase_campaign_omits_the_reference_only_ports(self):
+		targets=[c["target"] for c in comparison.selected_configurations(["gloom"],"all","showcase")]
+		self.assertEqual(["jai_gloom","jai_gloom","gloom_squirrel","gloom_lua","gloom_lua55"],targets)
+		self.assertIn("gloom_luajit",[c["target"] for c in comparison.selected_configurations(["gloom"],"all")])
+
+	def test_both_looks_share_the_state_hash_and_differ_in_frames(self):
+		for reference,showcase in zip(comparison.LOOK_HASHES["reference"],comparison.LOOK_HASHES["showcase"]):
+			self.assertEqual((reference[0],reference[2]),(showcase[0],showcase[2]))
+			self.assertNotEqual(reference[1],showcase[1])
+
+	def test_resume_checks_logs_against_the_campaign_look(self):
+		with tempfile.TemporaryDirectory() as name:
+			out=pathlib.Path(name)
+			config={"name":"fixture Lua","workload":"gloom","target":"gloom_lua","cores":1,"look":"showcase"}
+			meta={"rounds":3,"performance_cpus":[0],"cpu_sets":[{"logical_cpu":0,"core":0}],"max_background_cores":1.0,"look":"showcase"}
+			records=[]
+			for layout,ticks,warm in (("normal",300,0),("normal",600,600),("padding",300,0),("padding",600,600)):
+				_,frame,state=next(h for h in comparison.LOOK_HASHES["showcase"] if h[0]==ticks)
+				filename=f"{len(records)+1}.log"
+				(out/filename).write_text(f"lua | 600.000 | 1.000000 | {frame} | {state}\n")
+				records.append({"sequence":len(records)+1,"configuration":"fixture Lua","workload":"gloom",
+					"variant":"baseline","layout":layout,"phase":"gate","round":0,
+					"command":["fixture.exe","--ticks",str(ticks),"--warmup",str(warm)],"affinity_cpus":[0],"log":filename,
+					"hash_match":True,"metric_ms":1.0,"exit_code":0,"background_core_equivalents":0.5,
+					"competitors_at_end":[],"competitors_during_run":[],"accepted":True})
+			builds={"baseline":out/"build"}
+			self.assertEqual([config],comparison.validate_resume(meta,meta,records,[config],builds,out)[0])
+			reference=dict(config,look="reference")
+			with self.assertRaisesRegex(RuntimeError,"disagrees with log"):
+				comparison.validate_resume(meta,meta,records,[reference],builds,out)
+
+
 class FrameCertificateTests(unittest.TestCase):
 	def setUp(self):
 		import json

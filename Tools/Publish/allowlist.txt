@@ -28,7 +28,6 @@
 # Internal notes and Bindstone-only material
 - internal/**
 - .internal/**
-- bench/**
 - CMakeSettings.json
 - tools/publish/**
 

@@ -1,0 +1,196 @@
+--- a/include/chaiscript/chaiscript.hpp
++++ b/include/chaiscript/chaiscript.hpp
+@@ -832,11 +832,12 @@
+     public:
+       ChaiScript(std::vector<std::string> t_modulepaths = {},
+           std::vector<std::string> t_usepaths = {},
++          std::function<std::string (const std::string&)> t_load_file_custom = {},
+           const std::vector<Options> &t_opts = chaiscript::default_options())
+         : ChaiScript_Basic(
+             chaiscript::Std_Lib::library(),
+             std::make_unique<parser::ChaiScript_Parser<eval::Noop_Tracer, optimizer::Optimizer_Default>>(),
+-            t_modulepaths, t_usepaths, t_opts)
++            t_modulepaths, t_usepaths, t_load_file_custom, t_opts)
+         {
+         }
+   };
+--- a/include/chaiscript/dispatchkit/bootstrap.hpp
++++ b/include/chaiscript/dispatchkit/bootstrap.hpp
+@@ -425,6 +425,17 @@
+ 
+         m.add(fun(&Boxed_Value::is_undef), "is_var_undef");
+         m.add(fun(&Boxed_Value::is_null), "is_var_null");
++
++        // Add null support - allows "x = null" and cloning null values
++        m.add(fun([](Boxed_Value &lhs, std::nullptr_t) -> Boxed_Value & {
++            lhs = null_var();
++            return lhs;
++          }), "=");
++
++        // Clone function for null - called by clone_if_necessary
++        m.add(fun([](std::nullptr_t) -> Boxed_Value {
++            return null_var();
++          }), "clone");
+         m.add(fun(&Boxed_Value::is_const), "is_var_const");
+         m.add(fun(&Boxed_Value::is_ref), "is_var_reference");
+         m.add(fun(&Boxed_Value::is_pointer), "is_var_pointer");
+--- a/include/chaiscript/dispatchkit/boxed_value.hpp
++++ b/include/chaiscript/dispatchkit/boxed_value.hpp
+@@ -32,6 +32,11 @@
+       {
+       };
+ 
++      /// used for explicitly creating a "null" object
++      struct Null_Type
++      {
++      };
++
+     private:
+       /// structure which holds the internal state of a Boxed_Value
+       /// \todo Get rid of Any and merge it with this, reducing an allocation in the process
+@@ -85,13 +90,27 @@
+         {
+           return std::make_shared<Data>(
+                 detail::Get_Type_Info<void>::get(),
+-                chaiscript::detail::Any(), 
++                chaiscript::detail::Any(),
+                 false,
+                 nullptr,
+                 t_return_value)
+               ;
+         }
+ 
++        static auto get(Boxed_Value::Null_Type, bool t_return_value)
++        {
++          // Use a static nullptr instance so we have a valid pointer to store
++          // This prevents "dereference null Boxed_Value" errors during dispatch
++          static std::nullptr_t null_instance = nullptr;
++          return std::make_shared<Data>(
++                detail::Get_Type_Info<std::nullptr_t>::get(),
++                chaiscript::detail::Any(std::ref(null_instance)),
++                false,
++                &null_instance,
++                t_return_value)
++              ;
++        }
++
+         template<typename T>
+           static auto get(const std::shared_ptr<T> *obj, bool t_return_value)
+           {
+@@ -280,7 +299,9 @@
+ 
+       bool is_null() const noexcept
+       {
+-        return (m_data->m_data_ptr == nullptr && m_data->m_const_data_ptr == nullptr);
++        // Check for our explicit Null_Type (nullptr_t type info) OR original null pointer check
++        return m_data->m_type_info == detail::Get_Type_Info<std::nullptr_t>::get()
++            || (m_data->m_data_ptr == nullptr && m_data->m_const_data_ptr == nullptr);
+       }
+ 
+       const chaiscript::detail::Any & get() const noexcept
+@@ -468,6 +489,16 @@
+     return v;
+   }
+ 
++  inline Boxed_Value null_var() {
++    static const auto n = Boxed_Value(Boxed_Value::Null_Type());
++    return n;
++  }
++
++  /// Returns true if the Boxed_Value contains a null value (our Null_Type or null pointers)
++  inline bool is_null(const Boxed_Value &bv) {
++    return bv.is_null();
++  }
++
+   inline Boxed_Value const_var(bool b) {
+     static const auto t = detail::const_var_impl(true);
+     static const auto f = detail::const_var_impl(false);
+--- a/include/chaiscript/language/chaiscript_common.hpp
++++ b/include/chaiscript/language/chaiscript_common.hpp
+@@ -35,7 +35,7 @@
+     {
+       static const std::set<std::string> m_reserved_words 
+         = {"def", "fun", "while", "for", "if", "else", "&&", "||", ",", "auto", 
+-          "return", "break", "true", "false", "class", "attr", "var", "global", "GLOBAL", "_",
++          "return", "break", "true", "false", "null", "class", "attr", "var", "global", "GLOBAL", "_",
+           "__LINE__", "__FILE__", "__FUNC__", "__CLASS__"};
+       return m_reserved_words.count(name) > 0;
+     }
+--- a/include/chaiscript/language/chaiscript_engine.hpp
++++ b/include/chaiscript/language/chaiscript_engine.hpp
+@@ -77,6 +77,8 @@
+     std::vector<std::string> m_module_paths;
+     std::vector<std::string> m_use_paths;
+ 
++    std::function<std::string(const std::string &)> m_load_file_custom;
++
+     std::unique_ptr<parser::ChaiScript_Parser_Base> m_parser;
+ 
+     chaiscript::detail::Dispatch_Engine m_engine;
+@@ -227,7 +229,14 @@
+     }
+ 
+     /// Helper function for loading a file
+-    static std::string load_file(const std::string &t_filename) {
++    std::string load_file(const std::string &t_filename) const {
++      if (m_load_file_custom) { 
++          try {
++              return m_load_file_custom(t_filename);
++          } catch (...) {
++              throw chaiscript::exception::file_not_found_error(t_filename);
++          }
++      }
+       std::ifstream infile(t_filename.c_str(), std::ios::in | std::ios::ate | std::ios::binary );
+ 
+       if (!infile.is_open()) {
+@@ -270,9 +279,11 @@
+                      std::unique_ptr<parser::ChaiScript_Parser_Base> &&parser,
+                      std::vector<std::string> t_module_paths = {},
+                      std::vector<std::string> t_use_paths = {},
++                     std::function<std::string (const std::string &)> t_load_file_custom = {},
+                      const std::vector<chaiscript::Options> &t_opts = chaiscript::default_options())
+       : m_module_paths(ensure_minimum_path_vec(std::move(t_module_paths))),
+         m_use_paths(ensure_minimum_path_vec(std::move(t_use_paths))),
++        m_load_file_custom(t_load_file_custom),
+         m_parser(std::move(parser)),
+         m_engine(*m_parser)
+     {
+@@ -323,8 +334,9 @@
+     explicit ChaiScript_Basic(std::unique_ptr<parser::ChaiScript_Parser_Base> &&parser,
+                      std::vector<std::string> t_module_paths = {},
+                      std::vector<std::string> t_use_paths = {},
++                     std::function<std::string (const std::string &)> t_load_file_custom = {},
+                      const std::vector<chaiscript::Options> &t_opts = chaiscript::default_options())
+-      : ChaiScript_Basic({}, std::move(parser), t_module_paths, t_use_paths, t_opts)
++      : ChaiScript_Basic({}, std::move(parser), t_module_paths, t_use_paths, t_load_file_custom, t_opts)
+     {
+       try {
+         // attempt to load the stdlib
+--- a/include/chaiscript/language/chaiscript_parser.hpp
++++ b/include/chaiscript/language/chaiscript_parser.hpp
+@@ -926,6 +926,9 @@
+             case utility::fnv1a_32("false"): {
+               m_match_stack.push_back(make_node<eval::Constant_AST_Node<Tracer>>(std::move(text), start.line, start.col, const_var(false)));
+             } break;
++            case utility::fnv1a_32("null"): {
++              m_match_stack.push_back(make_node<eval::Constant_AST_Node<Tracer>>(std::move(text), start.line, start.col, null_var()));
++            } break;
+             case utility::fnv1a_32("Infinity"): {
+               m_match_stack.push_back(make_node<eval::Constant_AST_Node<Tracer>>(std::move(text), start.line, start.col,
+                 const_var(std::numeric_limits<double>::infinity())));
+--- a/include/chaiscript/language/chaiscript_windows.hpp
++++ b/include/chaiscript/language/chaiscript_windows.hpp
+@@ -33,7 +33,12 @@
+       template<typename T>
+         static std::string to_string(const T &t_str)
+         {
+-          return std::string(t_str.begin(), t_str.end());
++          std::string result;
++          result.reserve(t_str.size());
++          for (auto&& v : t_str) {
++              result.push_back(static_cast<char>(v));
++          }
++          return result;
+         }
+ 
+ #if defined(_UNICODE) || defined(UNICODE)

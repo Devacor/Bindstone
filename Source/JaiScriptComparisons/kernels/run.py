@@ -8,19 +8,22 @@ per kernel. Writes RESULTS_<date>.md beside this file.
 
     python run.py [--runs 5] [--kernels a,b] [--impls a,b] [--no-lock] [--out FILE]
 
-AS_RUN names the angelscript_run.exe (default: the comparisons build's out/release/bin).
+JAI_BUILD names the comparison build whose bin/ holds jaiscript.exe, jai_kernel_host.exe and angelscript_run.exe
+(default: out/release); AS_RUN names another angelscript_run.exe.
 """
 import argparse, datetime, os, re, statistics, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.normpath(os.path.join(HERE, "..", "..", "JaiScript"))   # the JaiScript kernels and their host live in its bench/kernels
-JAI_KERNELS = os.path.join(ROOT, "bench", "kernels")
+sys.path.insert(0, os.path.dirname(HERE))
+import comparison_paths
+
 BIN = os.path.join(HERE, "bin")
-RUNNER = os.path.join(os.environ.get("JAI_BUILD") or os.path.join(ROOT, "build"), "bin", "jaiscript.exe")
-HOST = os.path.join(JAI_KERNELS, "bin", "jai_kernel_host.exe")
+BUILD_BIN = os.path.join(os.environ.get("JAI_BUILD") or str(comparison_paths.BUILD), "bin")
+RUNNER = os.path.join(BUILD_BIN, "jaiscript.exe")
+HOST = os.path.join(BUILD_BIN, "jai_kernel_host.exe")
 LUA = os.path.join(BIN, "lua_kernel_host.exe")
 LUAJIT = os.path.join(BIN, "luajit.exe")
-ANGELSCRIPT = os.environ.get("AS_RUN") or os.path.join(HERE, "..", "out", "release", "bin", "angelscript_run.exe")
+ANGELSCRIPT = os.environ.get("AS_RUN") or os.path.join(BUILD_BIN, "angelscript_run.exe")
 LOCK = os.environ.get("TIMING_LOCK", "")
 
 # kernel id, dasProfile board name
@@ -78,10 +81,10 @@ def command(impl, kernel):
     if impl.startswith("jai_"):
         backend = "interp" if "_interp_" in impl else "vm"
         flavor = "dyn" if impl.endswith("_dyn") else "typed"
-        script = os.path.join(JAI_KERNELS, "jai", f"{kernel}_{flavor}.jai")
+        script = os.path.join(HERE, "jai", f"{kernel}_{flavor}.jai")
         if kernel == "interop":
-            return [HOST, f"--backend={backend}", script], os.path.join(JAI_KERNELS, "jai")
-        return [RUNNER, "--no-pause", f"--backend={backend}", script], os.path.join(JAI_KERNELS, "jai")
+            return [HOST, f"--backend={backend}", script], os.path.join(HERE, "jai")
+        return [RUNNER, "--no-pause", f"--backend={backend}", script], os.path.join(HERE, "jai")
     if impl == "angelscript":
         return [ANGELSCRIPT, f"{kernel}.as"], os.path.join(HERE, "angelscript")
     lua_dir = os.path.join(HERE, "lua")

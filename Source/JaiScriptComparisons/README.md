@@ -1,28 +1,99 @@
-# JaiScriptComparisons
+# JaiScript benchmarks
 
-JaiScript against AngelScript, ChaiScript, Lua, LuaJIT, Luau and Squirrel. Everything comparison-related lives here,
-so the JaiScript build carries none of it: this project adds `../JaiScript` as a subdirectory, and nothing in JaiScript
-refers back here.
+JaiScript against Lua 5.4 and 5.5, LuaJIT, Luau, Squirrel 3.2, ChaiScript 6.1, AngelScript 2.38 and CPython: the same
+programs ported to each runtime, every port held to the JaiScript original's output hash. The results are on the
+JaiScript site's performance page; its headline table is at
+<https://jaiscript.com/embedding/11-performance.html#measured-results>.
 
-## Path map (from the JaiScript tree)
+The published numbers were measured on Windows with MSVC (x64, Release, whole-program optimization) on JaiScript
+v0.5.4, the release the `jaiscript/` submodule pins. The runners pin processes with Windows affinity masks, so timing
+runs are Windows-only; the ports themselves are portable C++ and script.
 
-| was (under `Source/JaiScript/`) | now (under `Source/JaiScriptComparisons/`) |
+## What is compared
+
+| folder | programs | runtimes |
+| --- | --- | --- |
+| `demoreel/` | the demoreel's three heaviest scenes (OSSUARY, MAELSTROM, GLOBHUNTER), one shared terminal host | JaiScript VM (serial, 8 workers), Lua 5.4 + sol2, Squirrel, ChaiScript, Python |
+| `gloom/` | GLOOM, a terminal raycaster: the whole game's simulation and renderer on one shared host | JaiScript VM (serial, 8 workers), Lua 5.4 and 5.5 + sol2, LuaJIT, Squirrel, AngelScript, ChaiScript, Python |
+| `jaidoom/` | JaiDOOM's 3984-tic recorded timedemo, headless, frame-checked tic by tic | JaiScript VM and interpreter, Lua 5.4 |
+| `gatorquest/` | the Gator Quest smoke simulation (world generation, mobiles, combat, bots) | JaiScript VM, Lua 5.4/5.5, LuaJIT, Luau |
+| `apps/` | Richards, DeltaBlue, a bytecode VM and a spatial-hash simulation | JaiScript VM and interpreter, Lua 5.4, Squirrel, AngelScript, CPython |
+| `kernels/` | the sixteen interpreter kernels of daScript's dasProfile, typed and dynamic | JaiScript VM and interpreter, Lua 5.5, LuaJIT, AngelScript |
+| `benchmarks/` | `comparison_benchmarks`: microbenchmark suites in one process | JaiScript, Lua (sol2), Squirrel, ChaiScript, AngelScript |
+
+The folders' READMEs state each protocol: what one sample is, warm-up, interleaving, pinning, the hash gate.
+
+## Getting the sources
+
+```
+git clone --recursive https://github.com/Devacor/jaiscript_benchmarks.git
+cd jaiscript_benchmarks
+python gloom/ports/prepare_comparison.py
+```
+
+JaiScript is found by one rule, in the build and in every runner (`comparison_paths.cmake`, `comparison_paths.py`):
+the `JAISCRIPT_DIR` environment variable if set, else the `jaiscript/` submodule, else a JaiScript tree beside this
+folder (`../JaiScript`). `-DJAISCRIPT_DIR=<dir>` overrides it for the build.
+
+None of the compared runtimes ship here. `prepare_comparison.py` downloads each pinned archive into `out/deps`, checks
+its SHA-256, applies the two source patches the measurements used (sol2's Lua 5.5 version guards;
+`gloom/ports/chaiscript-6.1.0.patch`, a `null` literal and a file loader hook for ChaiScript) and copies the trees the
+build reads by default into `third_party/` (see `third_party/README.md`):
+
+| runtime | pin |
 | --- | --- |
-| `lua/`, `sol2/`, `squirrel/` (local checkouts) | `third_party/lua/`, `third_party/sol2/`, `third_party/squirrel/` (move yours) |
-| `source/tests/performance/{chaiscript,sol2,squirrel}_comparison.cpp` | `benchmarks/` (target `comparison_benchmarks`) |
-| `examples/gloom/ports/`, `gloom_adapter_{chai,lua,squirrel}.cpp` | `gloom/ports/`, `gloom/` (which adds `gloom_adapter_angelscript.cpp`) |
-| `examples/demoreel/ports/`, `demoreel_adapter_{lua,squirrel}.cpp`, the README's Porting section | `demoreel/ports/`, `demoreel/`, `demoreel/README.md` |
-| `internal/examples/demoreel/ports/COMPARISON.md`, `internal/examples/jaidoom/ports/PORTING.md` | `demoreel/ports/`, `jaidoom/ports/` |
-| `examples/jaidoom/ports/` | `jaidoom/ports/` |
-| `examples/gatorquest/lua/` | `gatorquest/lua/` |
-| `bench/kernels/lua/`, `run.py` | `kernels/` |
-| `bench/kernels/host/lua_kernel_host.c`, `addOne.c` | `kernels/host/` |
-| `bench/kernels/host/build.cmd` (peers + JaiScript host) | `kernels/host/build_peers.cmd` (Lua, LuaJIT) and `JaiScript/bench/kernels/host/build.cmd` (the JaiScript host) |
-| `bench/kernels/bin/{lua_kernel_host.exe,luajit.exe,addOne.dll}` | `kernels/bin/` (move yours; `jai_kernel_host.exe` stays in `JaiScript/bench/kernels/bin`) |
-| `out/astra/` (the comparison scripts' builds, dependencies and evidence) | `out/` |
-| `-DGLOOM_PORT_*`, `-DDEMOREEL_PORT_*`, `-DDEMOREEL_PADDING_CONTROLS`, `-DGLOOM_COMPARISON_PADDING_CONTROLS`, `-DJAIDOOM_PORT_*` on the JaiScript build | the same options on this project (`-S Source/JaiScriptComparisons`) |
+| Lua 5.4.8, Lua 5.5.1 | lua.org release tarballs |
+| LuaJIT 2.1 | `24c20c94e7db195b640854619577441f9b4bc6be` |
+| sol2 | v3.3.0 |
+| Squirrel 3.2 | `f77074bdd6152d230609146a3d424c6f49e3770f` |
+| ChaiScript | v6.1.0 |
+| AngelScript | the 2.38.0 SDK |
 
-Unchanged: the games (`JaiScript/examples/*`), `JaiScript/bench/kernels/jai/` and `JaiScript/bench/kernels/host/jai_kernel_host.cpp`.
+The configure step looks for each runtime and prints what it found. A microbenchmark suite whose runtime is missing
+compiles to a skip; a port option that is ON with its sources missing is a configure error. Each root is a cache path:
+
+| comparison | default location | variable |
+|---|---|---|
+| Lua 5.4 + sol2 | `third_party/lua`, `third_party/sol2` | `COMPARISONS_THIRD_PARTY` |
+| Squirrel | `third_party/squirrel` | `COMPARISONS_THIRD_PARTY` |
+| ChaiScript | `third_party/chaiscript` | `COMPARISONS_CHAISCRIPT_ROOT` |
+| AngelScript | `third_party/angelscript` | `COMPARISONS_ANGELSCRIPT_ROOT` |
+
+## Building
+
+From an x64 Visual Studio developer prompt (`VsDevCmd.bat -arch=x64`), with CMake and Ninja:
+
+```
+cmake -S . -B out/release -G Ninja -DCMAKE_BUILD_TYPE=Release ^
+      -DDEMOREEL_PORT_LUA=ON -DDEMOREEL_PORT_SQUIRREL=ON -DDEMOREEL_PORT_CHAI=ON ^
+      -DGLOOM_PORT_LUA=ON -DGLOOM_PORT_SQUIRREL=ON -DGLOOM_PORT_CHAI=ON -DGLOOM_PORT_ANGELSCRIPT=ON ^
+      -DAPPS_PEERS=ON -DANGELSCRIPT_PEERS=ON
+cmake --build out/release
+```
+
+JaiScript builds inside it as a subproject (static runtime, whole-program Release), and every program lands in
+`out/release/bin` next to `jai_gloom`, `jai_demoreel` and `jaiscript`. The whole-program GLOOM and JaiDOOM gates have
+their own pinned build with the Lua 5.5, LuaJIT, JaiDOOM and cold-function padding targets:
+`gloom/ports/build_comparison.ps1` (see `gloom/ports/README.md`). Every script keeps its builds, dependencies and
+evidence under `out/`.
+
+## Running
+
+| comparison | timed run | hash check only |
+| --- | --- | --- |
+| demoreel | `python demoreel/ports/run_comparison.py --output out/demoreel/<fresh folder>` | add `--conformance-only --no-lock` |
+| GLOOM, JaiDOOM | `python gloom/ports/run_comparison.py --build out/release --output out/whole-program/<fresh folder>` | add `--conformance-only` |
+| JaiDOOM frames | | `python jaidoom/ports/verify_conformance.py --build out/release --output out/<fresh folder>` |
+| Gator Quest | `python gatorquest/lua/run_comparison.py --jai out/release/bin/jaiscript.exe --lua54 <lua.exe> --output <folder>` | `python gatorquest/lua/parity.py --jai out/release/bin/jaiscript.exe --lua <lua.exe>` |
+| apps | `python apps/run.py` | `python apps/run.py --rounds 1 --no-lock` (every sample is hash-checked) |
+| kernels | `python kernels/run.py` | `python kernels/run.py --runs 1 --no-lock` (the report lists every checksum) |
+| microbenchmarks | `out/release/bin/comparison_benchmarks.exe` | |
+
+The timing runners hold the machine-wide timing lock (JaiScript's `tools/ci/timing_lock.sh`, run through Git's bash)
+unless told otherwise, so two timing runs never overlap. JaiDOOM needs the shareware `doom1.wad`, which JaiScript's
+`examples/jaidoom/bootstrap.bat` fetches into the submodule. Gator Quest takes its interpreters as arguments
+(`out/release/bin/apps_lua.exe` is Lua 5.4.8's own `lua.c`). The runner unit tests are
+`python -m unittest discover -s demoreel/ports/tests` and `python -m unittest discover -s gloom/ports/tests`.
 
 ## Layout
 
@@ -31,40 +102,15 @@ Unchanged: the games (`JaiScript/examples/*`), `JaiScript/bench/kernels/jai/` an
 | `benchmarks/` | `comparison_benchmarks`: Foundry suites timing JaiScript against AngelScript, ChaiScript, Lua (sol2) and Squirrel in one process |
 | `gloom/` | the GLOOM ports (AngelScript, ChaiScript, Squirrel, Lua 5.4/5.5, LuaJIT, Python) and their runners; `gloom/ports/README.md` holds the adapter contract |
 | `demoreel/` | the demoreel's three heaviest scenes ported to Lua, Squirrel, ChaiScript and Python, their adapter contract (`README.md`) and the scene-set runner (`ports/COMPARISON.md`) |
-| `jaidoom/` | the headless Lua JaiDoom port, its transpiler and conformance checker |
-| `gatorquest/` | the Lua, LuaJIT and Luau twins of the Gator Quest smoke session |
-| `kernels/` | the kernel suite's Lua side and `run.py`, the cross-language runner |
-| `apps/` | the benchmark apps (Richards, DeltaBlue, a bytecode VM, a spatial-hash simulation) in JaiScript, Lua, Squirrel and Python, the hash-checked runner and the `apps_lua`/`apps_sq` interpreters (`APPS_PEERS`); see `apps/README.md` |
-| `third_party/` | where the Lua, sol2 and Squirrel checkouts and the AngelScript SDK go |
+| `jaidoom/` | the headless Lua JaiDOOM port, its transpiler and conformance checker |
+| `gatorquest/` | the Lua, LuaJIT and Luau twins of the Gator Quest smoke simulation |
+| `kernels/` | the kernel suite in JaiScript, Lua and AngelScript, its hosts and `run.py`, the cross-language runner |
+| `apps/` | the benchmark apps in JaiScript, Lua, Squirrel, AngelScript and Python, the hash-checked runner and the `apps_lua`/`apps_sq` interpreters (`APPS_PEERS`); see `apps/README.md` |
+| `angelscript/` | `angelscript_run`, the stand-alone AngelScript host of the apps and kernels (`ANGELSCRIPT_PEERS`) |
+| `third_party/` | where the fetched runtime sources go |
 
-## Dependencies
+## License
 
-None of the compared languages ship here. Supply the sources yourself; the configure step looks for each one, prints
-what it found, and skips a benchmark comparison whose sources are missing (Lua, sol2, Squirrel and ChaiScript are
-MIT-licensed, AngelScript zlib-licensed):
-
-| comparison | expected location | variable |
-|---|---|---|
-| Lua 5.4 + sol2 | `third_party/lua/src/lua.h` and `third_party/sol2/include/sol/sol.hpp` | `COMPARISONS_THIRD_PARTY` |
-| Squirrel 3 | `third_party/squirrel/include/squirrel.h` | `COMPARISONS_THIRD_PARTY` |
-| ChaiScript 6.1.0 | `include/chaiscript/chaiscript.hpp` under the given folder | `COMPARISONS_CHAISCRIPT_ROOT` |
-| AngelScript 2.38 | the SDK folder holding `angelscript/include/angelscript.h`, by default `third_party/angelscript` | `COMPARISONS_ANGELSCRIPT_ROOT` |
-
-All three variables are cache paths, so `-DCOMPARISONS_THIRD_PARTY=<dir>`, `-DCOMPARISONS_CHAISCRIPT_ROOT=<dir>` or
-`-DCOMPARISONS_ANGELSCRIPT_ROOT=<dir>` points elsewhere; `COMPARISONS_ANGELSCRIPT_ROOT` defaults to `angelscript/` under
-`COMPARISONS_THIRD_PARTY`. The GLOOM and demoreel ports read the same locations behind their own options (`GLOOM_PORT_LUA`,
-`GLOOM_PORT_SQUIRREL`, `GLOOM_PORT_CHAI`, `GLOOM_PORT_ANGELSCRIPT`, `DEMOREEL_PORT_LUA`, `DEMOREEL_PORT_SQUIRREL`, `DEMOREEL_PORT_CHAI`, all OFF); unlike the
-benchmarks, a port option that is ON with its sources missing is a configure error rather than a skip.
-
-## Building
-
-```
-cmake -S Source/JaiScriptComparisons -B Source/JaiScriptComparisons/out/release -G Ninja -DCMAKE_BUILD_TYPE=Release ^
-      -DGLOOM_PORT_LUA=ON -DGLOOM_PORT_SQUIRREL=ON -DDEMOREEL_PORT_LUA=ON -DDEMOREEL_PORT_SQUIRREL=ON
-cmake --build Source/JaiScriptComparisons/out/release --target comparison_benchmarks gloom_lua demoreel_lua
-```
-
-JaiScript builds inside it with its in-tree layout (static runtime, whole-program Release); every program lands in the
-build's `bin/` next to `jai_gloom`, `jai_demoreel` and `jaiscript`. The whole-program GLOOM/JaiDoom comparison has its
-own pinned build (`gloom/ports/build_comparison.ps1`, see `gloom/ports/README.md`); every script keeps its builds, dependencies and evidence under `out/`; the demoreel scene runner is described in
-`demoreel/ports/COMPARISON.md`, the kernel suite in `kernels/README.md`.
+The benchmarks and ports are MIT-licensed (`LICENSE`). The runtimes they are compared with, fetched into `out/deps` and
+`third_party/`, keep their own licenses: Lua, LuaJIT, sol2 and Squirrel are MIT, ChaiScript BSD-3-Clause, AngelScript
+zlib. The kernel suite's Lua scripts (`kernels/lua`) are daScript's dasProfile scripts and keep dasProfile's license.

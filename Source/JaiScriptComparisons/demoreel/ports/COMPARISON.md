@@ -53,7 +53,7 @@ scenes were ported. It is hash-checked, not timed.
   (12 sampled frames). The window total is projected from that mean (x 60).
 - The VM serial row is `--workers 1`; the parallel row the VM's default worker count, the eight P cores. Serial
   processes are pinned to logical CPU 10 (`start /affinity 400`), the parallel row to the eight P cores (`C03C03`).
-- Every process holds the machine's timing lock (`JaiScript/tools/ci/timing_lock.sh`) while it runs, so no build or
+- Every process holds the machine's timing lock (JaiScript's `tools/ci/timing_lock.sh`) while it runs, so no build or
   other benchmark overlaps it. Builds: MSVC x64 Release, `/O2`, `/GL` and `/LTCG` for JaiScript and for every port's
   runtime and executable; the static CRT; Lua 5.4.8 and sol2 3.3.0 pinned by `gloom/ports/prepare_comparison.py`;
   Squirrel 3.2 with `_SQ64` and `SQUSEDOUBLE`; ChaiScript 6.1.0 with `CHAISCRIPT_NO_THREADS`; CPython 3.11.0
@@ -114,16 +114,17 @@ calls are the VM's slowest ground, as Richards and DeltaBlue show.
 
 ## Running it
 
-From a VsDevCmd x64 prompt, configure the comparison tree with the ports on (see `../README.md` for the roots):
+From a VsDevCmd x64 prompt at the comparison project's root, fetch the runtimes into `third_party/` and configure with
+the ports on (see `../README.md` for the roots):
 
 ```
-cmake -S Source/JaiScriptComparisons -B Source/JaiScriptComparisons/out/release -G Ninja -DCMAKE_BUILD_TYPE=Release ^
-      -DDEMOREEL_PORT_LUA=ON -DDEMOREEL_LUA_ROOT=<out/deps/lua-5.4.8> -DDEMOREEL_SOL2_ROOT=<out/deps/sol2-3.3.0> ^
-      -DDEMOREEL_PORT_SQUIRREL=ON -DDEMOREEL_PORT_CHAI=ON
-python Source/JaiScriptComparisons/demoreel/ports/run_comparison.py --build --output Source/JaiScriptComparisons/out/demoreel/<fresh folder>
+python gloom/ports/prepare_comparison.py
+cmake -S . -B out/release -G Ninja -DCMAKE_BUILD_TYPE=Release ^
+      -DDEMOREEL_PORT_LUA=ON -DDEMOREEL_PORT_SQUIRREL=ON -DDEMOREEL_PORT_CHAI=ON
+python demoreel/ports/run_comparison.py --build --output out/demoreel/<fresh folder>
 ```
 
 `--runtimes` and `--scenes` narrow the set, `--conformance-only` checks the hashes without timing, `--rounds` (at least
 five) and `--chai-rounds` (at least three) lengthen the session. The folder receives `metadata.json`, `runs.json`
 (every run: command, log, hash verdict, ms/frame), `summary.json` and `table.md`, and every process log. The unit tests
-are `python -m unittest discover -s Source/JaiScriptComparisons/demoreel/ports/tests`.
+are `python -m unittest discover -s demoreel/ports/tests`.

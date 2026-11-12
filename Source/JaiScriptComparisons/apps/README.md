@@ -51,14 +51,14 @@ by this project: `apps_lua` (Lua 5.4's `lua.c`) and `apps_sq` (Squirrel 3.2's `s
 points elsewhere:
 
 ```
-cmake -S Source/JaiScriptComparisons -B Source/JaiScriptComparisons/out/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DAPPS_PEERS=ON -DANGELSCRIPT_PEERS=ON
-cmake --build Source/JaiScriptComparisons/out/release --target jaiscript_runner apps_lua apps_sq angelscript_run
-python Source/JaiScriptComparisons/apps/run.py [--rounds 5] [--apps richards,deltablue,bytecode,spatial]
+cmake -S . -B out/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DAPPS_PEERS=ON -DANGELSCRIPT_PEERS=ON
+cmake --build out/release --target jaiscript_runner apps_lua apps_sq angelscript_run
+python apps/run.py [--rounds 5] [--apps richards,deltablue,bytecode,spatial]
        [--impls jai_vm,jai_interp,lua,squirrel,angelscript,python] [--bin DIR] [--python EXE] [--no-lock]
 ```
 
 CPython is the interpreter running `run.py` unless `--python` names another. Each sample is one process; samples are
 interleaved round robin across implementations, and a cell is the median of `--rounds` samples with its spread (half
 the sample range as a share of the median). A sample whose hash differs from the app's first implementation, or that
-exits non-zero, fails the run. The whole run holds the machine-wide timing lock (`JaiScript/tools/ci/timing_lock.sh`)
+exits non-zero, fails the run. The whole run holds the machine-wide timing lock (JaiScript's `tools/ci/timing_lock.sh`)
 unless `--no-lock`. The report lands in `out/apps/RESULTS_<date>.md`.

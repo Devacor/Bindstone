@@ -3,19 +3,6 @@
 # build (ports/python/demoreel.py).
 set(DEMOREEL_DIR "${JAISCRIPT_DIR}/examples/demoreel")
 
-# The runtimes get the whole-program Release JaiScript gets (its /GL reaches only its own tree)
-function(demoreel_port_ltcg target)
-    if(MSVC AND JAISCRIPT_LTCG)
-        target_compile_options(${target} PRIVATE $<$<CONFIG:Release>:/GL>)
-        get_target_property(kind ${target} TYPE)
-        if(kind STREQUAL "EXECUTABLE")
-            target_link_options(${target} PRIVATE $<$<CONFIG:Release>:/LTCG>)
-        else()
-            set_property(TARGET ${target} APPEND PROPERTY STATIC_LIBRARY_OPTIONS $<$<CONFIG:Release>:/LTCG>)
-        endif()
-    endif()
-endfunction()
-
 # --- demoreel_lua: Lua 5.4 + sol2 port (opt-in; builds Lua from source) ---
 option(DEMOREEL_PORT_LUA "Build demoreel_lua, the Lua/sol2 port of the demoreel" OFF)
 if(DEMOREEL_PORT_LUA)
@@ -44,8 +31,8 @@ if(DEMOREEL_PORT_LUA)
         DEMOREEL_LUA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ports/lua"
     )
     demoreel_msvc_settings(demoreel_lua)
-    demoreel_port_ltcg(demoreel_lua_runtime)
-    demoreel_port_ltcg(demoreel_lua)
+    comparison_ltcg(demoreel_lua_runtime)
+    comparison_ltcg(demoreel_lua)
     add_custom_command(TARGET demoreel_lua POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_CURRENT_SOURCE_DIR}/ports/lua
@@ -78,8 +65,8 @@ if(DEMOREEL_PORT_SQUIRREL)
         DEMOREEL_SQUIRREL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ports/squirrel"
     )
     demoreel_msvc_settings(demoreel_squirrel)
-    demoreel_port_ltcg(demoreel_squirrel_runtime)
-    demoreel_port_ltcg(demoreel_squirrel)
+    comparison_ltcg(demoreel_squirrel_runtime)
+    comparison_ltcg(demoreel_squirrel)
     add_custom_command(TARGET demoreel_squirrel POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_CURRENT_SOURCE_DIR}/ports/squirrel
@@ -101,7 +88,7 @@ if(DEMOREEL_PORT_CHAI)
         DEMOREEL_CHAI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ports/chai"
     )
     demoreel_msvc_settings(demoreel_chai)
-    demoreel_port_ltcg(demoreel_chai)
+    comparison_ltcg(demoreel_chai)
     add_custom_command(TARGET demoreel_chai POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_CURRENT_SOURCE_DIR}/ports/chai

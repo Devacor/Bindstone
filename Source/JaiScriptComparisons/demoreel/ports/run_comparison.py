@@ -7,8 +7,8 @@ fails the session. The full protocol (VM serial and parallel, Lua, Squirrel, Pyt
 frames on the same runtime. ChaiScript is too slow for it: it times short slices spread across the same 60-frame
 window, each after one warm-up frame, and its window total is projected from their mean. Serial processes are pinned to
 one P core, the parallel VM row to the eight; runtimes interleave within each round, the order rotating between rounds,
-with cooldown gaps; each process holds the machine's timing lock (Source/JaiScript/tools/ci/timing_lock.sh) while it
-runs and releases it after. Output: runs.json, summary.json and a markdown table under Source/JaiScriptComparisons/out.
+with cooldown gaps; each process holds the machine's timing lock (JaiScript's tools/ci/timing_lock.sh) while it
+runs and releases it after. Output: runs.json, summary.json and a markdown table under the comparison project's out/.
 """
 import argparse
 import json
@@ -23,7 +23,10 @@ import time
 
 PORTS = Path(__file__).resolve().parent
 COMPARISONS = PORTS.parents[1]
-LOCK = COMPARISONS.parent / "JaiScript" / "tools" / "ci" / "timing_lock.sh"
+sys.path.insert(0, str(COMPARISONS))
+import comparison_paths
+
+LOCK = comparison_paths.TIMING_LOCK
 # Git's bash runs the POSIX lock script; the bash.exe in System32 is WSL's
 GIT_BASHES = (Path(r"C:\Program Files\Git\usr\bin\bash.exe"), Path(r"C:\Program Files\Git\bin\bash.exe"))
 BASH = os.environ.get("DEMOREEL_BASH") or next((str(p) for p in GIT_BASHES if p.exists()), shutil.which("bash"))
@@ -155,7 +158,7 @@ def main():
 		raise SystemExit("This runner pins processes with Windows affinity masks.")
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument("--bin", type=Path, default=COMPARISONS / "out" / "release" / "bin", help="the comparison build's bin folder")
-	parser.add_argument("--output", type=Path, required=True, help="a fresh evidence folder under Source/JaiScriptComparisons/out")
+	parser.add_argument("--output", type=Path, required=True, help="a fresh evidence folder under the comparison project's out/")
 	parser.add_argument("--build", action="store_true", help="build the four executables first (run inside a VsDevCmd x64 prompt)")
 	parser.add_argument("--rounds", type=int, default=5)
 	parser.add_argument("--chai-rounds", type=int, default=3)

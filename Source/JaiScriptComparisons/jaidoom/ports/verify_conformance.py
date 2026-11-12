@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Compare per-tic JaiDOOM state, frame length and frame-byte stream hashes."""
-import argparse, hashlib, json, pathlib, re, subprocess, time
+import argparse, hashlib, json, pathlib, re, subprocess, sys, time
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+import comparison_paths
 
 def digest(path):
 	return hashlib.sha256(path.read_bytes()).hexdigest()
 
 def main():
-	root=pathlib.Path(__file__).resolve().parents[3]/"JaiScript"
+	root=comparison_paths.JAISCRIPT
 	parser=argparse.ArgumentParser(description=__doc__)
 	parser.add_argument("--build",type=pathlib.Path,required=True)
 	parser.add_argument("--game-root",type=pathlib.Path,default=root/"examples/jaidoom")

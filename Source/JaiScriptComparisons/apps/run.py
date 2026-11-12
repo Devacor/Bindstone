@@ -20,8 +20,11 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TIMING_LOCK = os.path.normpath(os.path.join(HERE, "..", "..", "JaiScript", "tools", "ci", "timing_lock.sh"))
-DEFAULT_BIN = os.path.normpath(os.path.join(HERE, "..", "out", "release", "bin"))
+sys.path.insert(0, os.path.dirname(HERE))
+import comparison_paths
+
+TIMING_LOCK = str(comparison_paths.TIMING_LOCK)
+DEFAULT_BIN = str(comparison_paths.BUILD / "bin")
 
 APPS = ["richards", "deltablue", "bytecode", "spatial"]
 IMPLS = ["jai_vm", "jai_interp", "lua", "squirrel", "angelscript", "python"]

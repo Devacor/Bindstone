@@ -6,7 +6,7 @@ simulation drawn as a lit 3D view) and GLOBHUNTER (scene 6, a textured grid rayc
 check scene each port's harness was validated with. Every port prints the JaiScript VM's scene hash, byte for byte.
 `ports/COMPARISON.md` holds the measurements and the runner; this page is the porting contract.
 
-The JaiScript reel is the reference: `../../JaiScript/examples/demoreel/scenes/*.jai`, and
+The JaiScript reel is the reference: JaiScript's `examples/demoreel/scenes/*.jai`, and
 `demoreel_adapter_jai.cpp` beside them for the adapter shape. The pattern is GLOOM's (`../gloom/ports/README.md`): one
 shared host, a thin adapter per language, the scripts own everything else.
 

@@ -6,7 +6,7 @@ against JaiScript.
 
 ## Porting
 
-**[reference/README.md](../../../JaiScript/examples/gloom/reference/README.md) is the normative game/host
+**[reference/README.md](https://github.com/Devacor/jaiscript/blob/main/examples/gloom/reference/README.md) is the normative game/host
 spec** (tick order, RNG contract, STATE_HASH recipe, checkpoint hashes); this
 section covers the mechanics: the C++ adapter contract, the CMake wiring, the
 measurement protocol, and the feedback rubric each porter fills in.
@@ -179,9 +179,9 @@ runtime need not exist when OFF:
 
 | option | target | runtime location (checked at configure) |
 |---|---|---|
-| `-DGLOOM_PORT_CHAI=ON` | `gloom_chai` | `External/ChaiScript-6.1.0` two levels above the package root (header-only) |
-| `-DGLOOM_PORT_SQUIRREL=ON` | `gloom_squirrel` | `squirrel/` at the package root (built as `gloom_squirrel_runtime`) |
-| `-DGLOOM_PORT_LUA=ON` | `gloom_lua` | `lua/` + `sol2/` at the package root (Lua built as `gloom_lua_runtime`) |
+| `-DGLOOM_PORT_CHAI=ON` | `gloom_chai` | ChaiScript 6.1.0 at `COMPARISONS_CHAISCRIPT_ROOT` (default `third_party/chaiscript`; header-only) |
+| `-DGLOOM_PORT_SQUIRREL=ON` | `gloom_squirrel` | `third_party/squirrel` (built as `gloom_squirrel_runtime`) |
+| `-DGLOOM_PORT_LUA=ON` | `gloom_lua` | `third_party/lua` + `third_party/sol2` (Lua built as `gloom_lua_runtime`) |
 | `-DGLOOM_PORT_ANGELSCRIPT=ON` | `gloom_angelscript` | the AngelScript 2.38 SDK at `COMPARISONS_ANGELSCRIPT_ROOT` (default `third_party/angelscript`; built as `angelscript_runtime` by `angelscript/angelscript.cmake`) |
 
 Port targets link `gloom_host` + their runtime only — NOT `jaiscript`. Keep it
@@ -206,7 +206,7 @@ Numbers reported per reference/README.md section 3.4:
 3. **Interactive split**: `--bench 300` sim/draw ms per frame (quad).
 4. Optional ablation for stage-level parity with the JaiScript numbers:
    sim-only / rays / paint / rows, measured by early-returning the render
-   pipeline (see [the GLOOM README](../../../JaiScript/examples/gloom/README.md)).
+   pipeline (see [the GLOOM README](https://github.com/Devacor/jaiscript/blob/main/examples/gloom/README.md)).
 
 The whole-program gates below are the timed comparison.
 
@@ -253,32 +253,37 @@ platforms that forbid runtime code generation (iOS).
 ### Build on Windows
 
 Use Python 3.11 or newer, CMake, Ninja, and an x64 Visual Studio Native Tools
-environment. From the JaiScript package root:
+environment. From the comparison project's root:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File examples/gloom/ports/build_comparison.ps1
-python examples/gloom/ports/run_comparison.py
+powershell -ExecutionPolicy Bypass -File gloom/ports/build_comparison.ps1
+python gloom/ports/run_comparison.py
 ```
 
 All downloaded sources, object files, binaries and evidence stay under the
-scripts' git-ignored output root inside the package's `out/` directory (their
+scripts' git-ignored output root inside the project's `out/` directory (their
 default). `build_comparison.ps1 -OutputRoot` accepts another directory inside
 that root. Pass its `release` child to the runner's `--build` option and an
 evidence directory inside the same root to `--output`.
 
 `prepare_comparison.py` pins archive SHA256 hashes for Lua 5.4.8, Lua 5.5.1,
 sol2 3.3.0, LuaJIT JIT branch `v2.1` at
-`24c20c94e7db195b640854619577441f9b4bc6be`, and the AngelScript 2.38.0 SDK
-zip, whose `sdk` folder the build passes as `COMPARISONS_ANGELSCRIPT_ROOT`. The script patches only its isolated sol2 dependency copy: it admits
+`24c20c94e7db195b640854619577441f9b4bc6be`, the AngelScript 2.38.0 SDK
+zip, whose `sdk` folder the build passes as `COMPARISONS_ANGELSCRIPT_ROOT`, ChaiScript 6.1.0 and Squirrel at
+`f77074bdd6152d230609146a3d424c6f49e3770f` (the repository head after the 3.2 release; it reports itself as
+Squirrel 3.2). The script patches only its isolated dependency copies. For sol2 it admits
 Lua version 505, supplies the removed error-code fallback, and passes Lua 5.5's
 seed argument in the custom-allocator state constructor. The actual Lua 5.5
 header and version number remain visible. The adapter uses `luaL_newstate`
-through sol2's ordinary default constructor.
+through sol2's ordinary default constructor. ChaiScript gets `chaiscript-6.1.0.patch`: a `null` literal (the
+demoreel port's cue table holds null entries) and a custom file loader hook. Then it copies Lua 5.4.8, sol2,
+Squirrel, ChaiScript and the AngelScript SDK into `third_party/`, where the default configure looks; a
+`third_party/` folder that already exists is kept.
 
 ### Workload and validation
 
 `--look` picks the look every configuration draws: `showcase` (the default) or
-`reference`. A showcase campaign leaves out AngelScript and LuaJIT, which draw
+`reference`. A showcase run leaves out AngelScript and LuaJIT, which draw
 the reference look only.
 
 | look | 300 ticks | 600 ticks |
@@ -354,11 +359,11 @@ the timedemo runs JaiScript alone). For JaiScript increments, omit
 the rival configurations with:
 
 ```powershell
-python examples/gloom/ports/run_comparison.py --engines jai --workloads gloom,timedemo --rounds 3 --build <output root>/release --output <output root>/<evidence directory>
+python gloom/ports/run_comparison.py --engines jai --workloads gloom,timedemo --rounds 3 --build <output root>/release --output <output root>/<evidence directory>
 ```
 
-Run `Source/JaiScript/examples/jaidoom/bootstrap.bat` once as described in its README to
-provide the git-ignored `Source/JaiScript/examples/jaidoom/wads/doom1.wad`. The timedemo
+Run JaiScript's `examples/jaidoom/bootstrap.bat` once as described in its README to
+provide the git-ignored `examples/jaidoom/wads/doom1.wad`. The timedemo
 requires that WAD and `demo.json` before the runner can hash its inputs.
 
 JaiDOOM uses `examples/jaidoom/scripts/p10_timedemo.jai`, `demo.json` and
@@ -417,7 +422,7 @@ and checks them again at the end; an input change invalidates the session.
 Build all normal and padding targets with symbols and markers:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File examples/gloom/ports/build_comparison.ps1 -OutputRoot <output root>/gates-profile -ProfileMarkers
+powershell -ExecutionPolicy Bypass -File gloom/ports/build_comparison.ps1 -OutputRoot <output root>/gates-profile -ProfileMarkers
 ```
 
 Run `capture_profile.ps1` in Administrator PowerShell. It calls the same
@@ -456,7 +461,7 @@ A completed timing run prints its accepted/required count. It never publishes a
 successful partial timing summary. JSON checkpoints are replaced atomically.
 
 The competitor list is `cl.exe`, `link.exe`, `ninja.exe`,
-`msbuild.exe`, `bindstone.exe` and names beginning `jai_gloom`,
+`msbuild.exe`, the names in `COMPARISON_COMPETITORS` (comma-separated) and names beginning `jai_gloom`,
 `gloom_` (every GLOOM port), `jaiscript`, `jai_doom_`, `reference_host`,
 `jai_demoreel` or `demoreel_`. Other processes are covered only by the
 background CPU screen and the coordinated quiet window.

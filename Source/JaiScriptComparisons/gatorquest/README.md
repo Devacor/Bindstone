@@ -1,6 +1,6 @@
 # Gator Quest: the Lua twin
 
-The Lua side of the Gator Quest comparison: the game itself is `JaiScript/examples/gatorquest`.
+The Lua side of the Gator Quest comparison: the game itself is JaiScript's `examples/gatorquest`.
 
 `lua/` is a port of what the smoke session runs (world generation, the content tables, mobiles, spawners,
 combat, items, quests, actions, bots, the tick and the state hash) to Lua 5.4+, one module per `.jai` file, with

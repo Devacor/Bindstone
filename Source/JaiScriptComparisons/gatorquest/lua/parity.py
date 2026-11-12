@@ -10,7 +10,10 @@ STATE_HASH included, must match byte for byte. --ref reuses saved JaiScript outp
 import argparse, itertools, os, re, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-GAME = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(HERE))), 'JaiScript', 'examples', 'gatorquest')
+sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
+import comparison_paths
+
+GAME = str(comparison_paths.JAISCRIPT / 'examples' / 'gatorquest')
 
 def mask(text):
 	text = text.replace('\r\n', '\n')

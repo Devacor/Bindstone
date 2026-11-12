@@ -1,5 +1,5 @@
 @echo off
-rem Builds the Lua and LuaJIT peers into kernels\bin (the JaiScript host builds from JaiScript\bench\kernels\host\build.cmd).
+rem Builds the Lua and LuaJIT peers into kernels\bin (the JaiScript host is the comparison build's jai_kernel_host target).
 rem   set LUA_SRC=<lua-5.5.x source root>    (the folder holding src\lua.h)
 rem   set LUAJIT_SRC=<LuaJIT checkout root>  (the folder holding src\msvcbuild.bat)
 setlocal enabledelayedexpansion
@@ -29,7 +29,7 @@ copy /y "%LUAJIT_SRC%\src\luajit.exe" . >nul
 cl /nologo /O2 /MT /LD "%HERE%addOne.c" /Fe:addOne.dll /link /nologo || goto :fail
 del /q *.obj
 
-:jai
+:done
 
 del /q *.obj
 popd

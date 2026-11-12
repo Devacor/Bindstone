@@ -4,7 +4,7 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 
 // Note: This requires Squirrel to be available
-// The squirrel source is at: Source/JaiScript/squirrel
+// The squirrel source is at: third_party/squirrel
 #ifdef HAVE_SQUIRREL
 #include <squirrel.h>
 #include <sqstdio.h>
@@ -1188,8 +1188,7 @@ public:
         test("Squirrel Not Available", [this]() {
             std::cout << "\n";
             std::cout << "Squirrel comparison benchmarks are DISABLED.\n";
-            std::cout << "To enable: Build Squirrel library and rebuild with -DHAVE_SQUIRREL=ON\n";
-            std::cout << "Squirrel source is at: Source/JaiScript/squirrel\n";
+            std::cout << "To enable: place Squirrel at third_party/squirrel and reconfigure the comparison project\n";
         });
 #endif
     }

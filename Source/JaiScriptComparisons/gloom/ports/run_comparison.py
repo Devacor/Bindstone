@@ -12,7 +12,11 @@ import re
 import statistics
 import struct
 import subprocess
+import sys
 import time
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+import comparison_paths
 
 CONFIGURATIONS = (
 	("JaiScript VM serial", "jai_gloom", "vm", 0, 1),
@@ -35,6 +39,9 @@ LOOK_HASHES = {"reference": HASHES,
 # Ports that draw the reference look only; their adapters refuse --look showcase
 REFERENCE_ONLY = ("gloom_angelscript", "gloom_luajit")
 ROW = re.compile(r"^(\S+)\s+\|\s+([\d.]+)\s+\|\s+([\d.]+)\s+\|\s+([0-9a-f]{16})\s+\|\s+(\d+)\s*$", re.M)
+# Build tools, plus whatever else the machine runs that must not overlap a sample (COMPARISON_COMPETITORS, comma-separated)
+COMPETITOR_NAMES = ("cl.exe", "link.exe", "ninja.exe", "msbuild.exe") + tuple(
+	name.strip().lower() for name in os.environ.get("COMPARISON_COMPETITORS", "").split(",") if name.strip())
 
 def file_hash(path):
 	return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -109,7 +116,7 @@ class WindowsMachine:
 			more = self.kernel.Process32FirstW(handle,ctypes.byref(entry))
 			while more:
 				name = entry.name.lower()
-				if name in ("cl.exe","link.exe","ninja.exe","msbuild.exe","bindstone.exe") or name.startswith(("jai_gloom","gloom_","jaiscript","jai_doom_","reference_host","jai_demoreel","demoreel_")):
+				if name in COMPETITOR_NAMES or name.startswith(("jai_gloom","gloom_","jaiscript","jai_doom_","reference_host","jai_demoreel","demoreel_")):
 					result.append({"name":name,"pid":entry.pid})
 				more = self.kernel.Process32NextW(handle,ctypes.byref(entry))
 		finally:
@@ -341,11 +348,11 @@ def main():
 	if os.name!="nt":
 		raise SystemExit("This runner records Windows topology and affinity.")
 	comparisons=pathlib.Path(__file__).resolve().parents[2]
-	root=comparisons.parent/"JaiScript"
+	root=comparison_paths.JAISCRIPT
 	parser=argparse.ArgumentParser(description=__doc__)
 	parser.add_argument("--build",type=pathlib.Path,default=comparisons/"out/release")
-	parser.add_argument("--jai-workload-root",type=pathlib.Path,default=root,help="JaiScript source root containing examples/gloom and examples/jaidoom; use a frozen copy for campaign measurements.")
-	parser.add_argument("--comparison-root",type=pathlib.Path,default=comparisons,help="JaiScriptComparisons root containing the ports; use a frozen copy for campaign measurements.")
+	parser.add_argument("--jai-workload-root",type=pathlib.Path,default=root,help="JaiScript source root containing examples/gloom and examples/jaidoom; use a frozen copy for measurement runs.")
+	parser.add_argument("--comparison-root",type=pathlib.Path,default=comparisons,help="JaiScriptComparisons root containing the ports; use a frozen copy for measurement runs.")
 	parser.add_argument("--compare-build",type=pathlib.Path,help="Interleave a candidate build against the baseline.")
 	parser.add_argument("--variant-build",action="append",default=[],metavar="NAME=PATH",help="Add a named build; every pair retains the interleaved normal/padding order.")
 	parser.add_argument("--output",type=pathlib.Path,default=comparisons/"out/whole-program")
@@ -393,7 +400,7 @@ def main():
 					"--build",str(next(iter(builds.values()))),"--game-root",str(jai_workload_root/"examples/jaidoom"),
 					"--output",str(certificate)],check=True)
 		timedemo_certificate=validate_timedemo_conformance(certificate,builds,jai_workload_root,comparison_root)
-	# Pin executable identities. Runtime source may advance in Fable's lane after a build.
+	# Pin executable identities: the runtime sources may change after a build.
 	binaries={}
 	for build in builds.values():
 		for config in configs:

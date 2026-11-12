@@ -80,14 +80,14 @@ migration and what is built. The measurements come from throwaway harnesses desc
 ### 3.1 The baseline: what a `dynamic_binder` Point costs
 
 Harness (throwaway, not committed):
-- `mathbench_host.cpp` is the kernel suite's host, `bench/kernels/host/jai_kernel_host.cpp`, extended with two types:
+- `mathbench_host.cpp` is the kernel suite's host, `Source/JaiScriptComparisons/kernels/host/jai_kernel_host.cpp`, extended with two types:
   - `BPoint`, a copy of `MV::Point<float>` bound with MV's own `hookPointType` calls (`auto_bind`, three constructors,
     properties `x`/`y`/`z`, `set`/`magnitude`/`normalized`/`atOrigin`/`clear`).
   - `BNode`, which carries MV `Node`'s fluent `position()` / `position(p)` pair and a plain `pos` member property.
 - `mathbench.jai` has one function per kernel. Each loops 200,000 times over frame-slot locals, and the time reported
   is the best of three calls.
 - Build: Release lib (`/O2 /GL`, `/MT`), and the host linked with `/LTCG`, exactly as
-  `bench/kernels/host/build.cmd` does it.
+  the comparison project's `jai_kernel_host` target builds it.
 - Timing: taken under the shared timing lock after four quiet 15 s checks. There were 5 rounds, interleaving the VM and
   interpreter processes. Each cell below is the median of the 5 rounds.
 - Spread (max − min over the median): under 2% on 15 of the 23 VM rows. The exceptions are the single-digit-nanosecond

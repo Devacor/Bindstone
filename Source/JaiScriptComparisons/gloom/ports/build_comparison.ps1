@@ -5,14 +5,13 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $comparisonRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
-$jaiRoot = [IO.Path]::GetFullPath((Join-Path $comparisonRoot '..\JaiScript'))
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
 	$OutputRoot = Join-Path $comparisonRoot 'out'
 }
 $OutputRoot = [IO.Path]::GetFullPath($OutputRoot)
 $outPrefix = [IO.Path]::GetFullPath((Join-Path $comparisonRoot 'out')) + [IO.Path]::DirectorySeparatorChar
 if ($OutputRoot -ne $outPrefix.TrimEnd([IO.Path]::DirectorySeparatorChar) -and -not $OutputRoot.StartsWith($outPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-	throw 'The comparison build must be under Source/JaiScriptComparisons/out/.'
+	throw 'The comparison build must be under the comparison project''s out/.'
 }
 if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
 	throw 'Run this script in an x64 Visual Studio Native Tools environment.'

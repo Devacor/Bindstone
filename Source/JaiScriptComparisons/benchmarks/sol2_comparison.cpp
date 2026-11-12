@@ -4,7 +4,7 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 
 // Note: This requires Lua + sol2 to be available
-// Lua 5.4 source: Source/JaiScript/lua, sol2: Source/JaiScript/sol2
+// Lua 5.4 source: third_party/lua, sol2: third_party/sol2
 #ifdef HAVE_SOL2
 #include <sol/sol.hpp>
 #endif
@@ -1200,8 +1200,8 @@ public:
 		test("Lua/sol2 Not Available", [this]() {
 			std::cout << "\n";
 			std::cout << "Lua (sol2) comparison benchmarks are DISABLED.\n";
-			std::cout << "To enable: place Lua at Source/JaiScript/lua and sol2 at Source/JaiScript/sol2,\n";
-			std::cout << "then reconfigure with -DJAISCRIPT_ENABLE_BENCHMARKS=ON\n";
+			std::cout << "To enable: place Lua at third_party/lua and sol2 at third_party/sol2,\n";
+			std::cout << "then reconfigure the comparison project\n";
 		});
 #endif
 	}

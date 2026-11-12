@@ -11,7 +11,7 @@ which removes startup, loading and world generation and holds up under load wher
       --luau luau.exe --output DIR [--rounds 5] [--max-background-cores 1.5] [--desktop-load] [--interp]
       [--cpu-baseline]
 
-Screening reuses the 09-29 runner's machine (examples/gloom/ports/run_comparison.py): wait for a window
+Screening reuses the GLOOM runner's machine (gloom/ports/run_comparison.py): wait for a window
 below the background ceiling with no competing build/test process, reject and rerun a sample whose
 background exceeded the ceiling or that overlapped a competitor. --desktop-load records the background
 instead of rejecting (a desktop-load snapshot, reported as such).
@@ -19,7 +19,10 @@ instead of rejecting (a desktop-load snapshot, reported as such).
 import argparse, importlib.util, json, os, pathlib, re, statistics, subprocess, sys, time
 
 HERE = pathlib.Path(__file__).resolve().parent
-ROOT = HERE.parents[2] / "JaiScript"
+sys.path.insert(0, str(HERE.parents[1]))
+import comparison_paths
+
+ROOT = comparison_paths.JAISCRIPT
 GAME = ROOT / "examples/gatorquest"
 SPEC = importlib.util.spec_from_file_location("gloom_comparison", HERE.parents[1] / "gloom/ports/run_comparison.py")
 COMMON = importlib.util.module_from_spec(SPEC)

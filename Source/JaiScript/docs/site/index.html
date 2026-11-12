@@ -323,9 +323,11 @@ from a fresh install to a C++ program that runs a script.</p>
 idiom. <a href="bridges/index.html#code-migrations">Code Migrations</a> convert real code off Cereal,
 Boost.Serialization, Boost.Signals2, ChaiScript, sol2, Squirrel, pybind11, nlohmann::json, Qt properties, RTTR or a
 coroutine scheduler.</p>
-<p>Against the others, on the <a href="embedding/11-performance.html">Performance</a> page: ChaiScript is 12 to 19 times slower in the microbenchmarks,
-and the VM is 1.6 to 3.1 times faster than Squirrel on loop- and math-heavy programs (Squirrel is ahead on call-heavy ones). Against Lua
-it is about 10% slower on average (1.09 times Lua 5.5.1 over sixteen kernels), from 24% faster to 2.7 times slower on whole programs.</p>
+<p>Against the others, on the <a href="embedding/11-performance.html">Performance</a> page: ChaiScript takes 124 to 1,750 times the VM's time
+on recursive calls, and the gap widens as the run grows. Against Squirrel 3.2 the VM is 1.8 times faster on a bytecode
+interpreter written in script, while Squirrel is 1.4 to 2.0 times faster on programs made of small calls over shared objects.
+Against Lua the VM takes 1.09 times Lua 5.5.1's time on average over sixteen kernels, and from 0.86 to 2.35 times Lua 5.4's on
+whole programs.</p>
 </div>
 
 <div class="home-section">

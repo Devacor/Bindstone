@@ -11,6 +11,7 @@
   --bg: #0b0d13; --bg2: #10131c; --panel: #141826; --panel2: #191e2e;
   --border: #252b3d; --border-strong: #3d4560;
   --fg: #d5dae6; --fg-dim: #8f98ae; --head: #f1f3f8;
+  --ratio-best: #7ee08a; --ratio-serial: #8f98ae;
   --accent: #ffb43c; --on-accent: #0b0d13; --link: #66cfff; --link-hover: #a3e2ff;
   --code-bg: #0f121c; --output-bg: #0c1611; --output-fg: #9eeab2; --output-border: #1d3a27;
   --capture-bg: #05070a; --capture-fg: #c8d2e0;
@@ -28,6 +29,7 @@
     --bg: #f6f5f1; --bg2: #eceae3; --panel: #fffefb; --panel2: #f1efe8;
     --border: #dcd7cb; --border-strong: #aaa392;
     --fg: #2a2e37; --fg-dim: #5a6070; --head: #14161b;
+    --ratio-best: #1f6b2c; --ratio-serial: #5a6070;
     --accent: #9a5400; --on-accent: #fffefb; --link: #0a5f9c; --link-hover: #07446f;
     --code-bg: #fbfaf6; --output-bg: #edf5ee; --output-fg: #285a33; --output-border: #c6dbc8;
     --capture-bg: #23262d; --capture-fg: #d5dae3;
@@ -43,6 +45,7 @@
   --bg: #f6f5f1; --bg2: #eceae3; --panel: #fffefb; --panel2: #f1efe8;
   --border: #dcd7cb; --border-strong: #aaa392;
   --fg: #2a2e37; --fg-dim: #5a6070; --head: #14161b;
+  --ratio-best: #1f6b2c; --ratio-serial: #5a6070;
   --accent: #9a5400; --on-accent: #fffefb; --link: #0a5f9c; --link-hover: #07446f;
   --code-bg: #fbfaf6; --output-bg: #edf5ee; --output-fg: #285a33; --output-border: #c6dbc8;
   --capture-bg: #23262d; --capture-fg: #d5dae3;
@@ -58,6 +61,7 @@
   --bg: #0b0d13; --bg2: #10131c; --panel: #141826; --panel2: #191e2e;
   --border: #252b3d; --border-strong: #3d4560;
   --fg: #d5dae6; --fg-dim: #8f98ae; --head: #f1f3f8;
+  --ratio-best: #7ee08a; --ratio-serial: #8f98ae;
   --accent: #ffb43c; --on-accent: #0b0d13; --link: #66cfff; --link-hover: #a3e2ff;
   --code-bg: #0f121c; --output-bg: #0c1611; --output-fg: #9eeab2; --output-border: #1d3a27;
   --capture-bg: #05070a; --capture-fg: #c8d2e0;
@@ -478,6 +482,9 @@ th {
 th code { text-transform: none; letter-spacing: 0; }
 td:first-child { color: var(--head); }
 td code { font-size: .86em; }
+/* a speed ratio: the runtime at its best (green), then its serial run (grey) */
+.ratio-best { color: var(--ratio-best); font-weight: 700; }
+.ratio-serial { color: var(--ratio-serial); }
 tbody tr:hover td { background: var(--mark); }
 tr:last-child td { border-bottom: none; }
 tr[id] { scroll-margin-top: 5rem; }

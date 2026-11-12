@@ -954,7 +954,6 @@ public:
 			const auto external_run = doc_samples::find_block(page, "home-bind-run-external");
 			check_true(intrusive_run.found && external_run.found, page + ": a tab has no run block");
 			check_eq(intrusive_run.code, external_run.code, page + ": the two tabs run different host code");
-			check_eq(intrusive_run.output, external_run.output, page + ": the two tabs show different output");
 			const bool interpreted = make_engine()->get_backend_type() == backend_type::interpreter;
 			const size_t script_start = intrusive_run.code.find("R\"(");
 			const size_t script_end = intrusive_run.code.find(")\"", script_start);
@@ -972,13 +971,17 @@ public:
 				}
 				const auto run = doc_samples::run_program(program, interpreted ? std::vector<std::string>{ "--interpreter", script.string() } : std::vector<std::string>{});
 				check_eq(0, run.exit_code, std::string(tab) + ": " + run.output);
-				// The interpreter run feeds only the script; the page's last two lines come from the C++ call on the returned object
-				std::string expected = doc_samples::trim_lines(intrusive_run.output);
+				// The tabs' outputs differ only where their classes save differently (a JAI_SIGNAL is saved, a bound emitter is not).
+				// The interpreter run feeds only the script: its output opens the page's, and the C++ after it prints the rest
+				const std::string expected = doc_samples::trim_lines((std::string_view(tab) == "intrusive" ? intrusive_run : external_run).output);
+				const std::string got = doc_samples::trim_lines(run.output);
 				if (interpreted) {
 					check_true(intrusive_run.code.find("gate->spawn_wave(5, false);") != std::string::npos, page + ": the C++ call on the returned object moved");
-					expected = expected.substr(0, expected.find_last_of('\n', expected.find_last_of('\n') - 1));
+					check_true(!got.empty() && got.size() < expected.size() && expected.compare(0, got.size(), got) == 0 && expected[got.size()] == '\n',
+						page + " " + tab + ": the script's output does not open the page's: " + got);
+				} else {
+					check_eq(expected, got, page + " " + tab + ": output");
 				}
-				check_eq(expected, doc_samples::trim_lines(run.output), page + " " + tab + ": output");
 			}
 #endif
 		});

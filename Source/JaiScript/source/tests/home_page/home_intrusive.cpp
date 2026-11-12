@@ -16,7 +16,7 @@ public:
     JAI_PROPERTY((int64_t), level, 1);
     JAI_SIGNAL(void(int64_t), onWave);               // script-connectable, saved too
     JAI_METHOD(void, spawn_wave, ()) { spawn_wave(level, false); }
-    JAI_METHOD(void, spawn_wave, (int64_t size, bool elite)) { onWaveSignal(elite ? size * 2 : size); }
+    JAI_METHOD(void, spawn_wave, (int64_t size, bool elite)) { level = size; onWaveSignal(elite ? size * 2 : size); }
 };
 // [/sample]
 
@@ -29,12 +29,16 @@ int main() {
         Spawner gate;
         gate.onWave.connect("hud", [](int size) { print("wave of ", size); });
         gate.level = 3;
-        gate.spawn_wave(); gate.spawn_wave(4, true);
+        gate.spawn_wave();
+        gate.spawn_wave(4, true);
         gate
     )");
-    gate->spawn_wave(5, false);     // script created C++ class interactable in both environments
-    std::cout << "Wave Level Roundtrip Serialize: "
-              << jai::from_json<std::shared_ptr<Spawner>>(*engine, jai::to_json(*engine, gate))->level << "\n";
+    gate->spawn_wave(5, false);     // Emits and is caught by the script-bound lambda
+
+    //Serialization Example:
+    std::string spawnerJson = jai::to_json(*engine, gate);
+    auto roundTrip = jai::from_json<std::shared_ptr<Spawner>>(*engine, spawnerJson);
+    std::cout << "Wave Level: " << roundTrip->level << "\nContents: " << spawnerJson << "\n";
     return 0;
 }
 // [/sample]

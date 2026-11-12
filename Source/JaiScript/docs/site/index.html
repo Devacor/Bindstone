@@ -102,7 +102,7 @@ public:
     JAI_PROPERTY((int64_t), level, 1);
     JAI_SIGNAL(void(int64_t), onWave);               // script-connectable, saved too
     JAI_METHOD(void, spawn_wave, ()) { spawn_wave(level, false); }
-    JAI_METHOD(void, spawn_wave, (int64_t size, bool elite)) { onWaveSignal(elite ? size * 2 : size); }
+    JAI_METHOD(void, spawn_wave, (int64_t size, bool elite)) { level = size; onWaveSignal(elite ? size * 2 : size); }
 };</code></pre></div>
 <div class="codeblock cb-cpp" data-sample="home-bind-run-intrusive"><span class="cb-label">C++ &middot; the host, the same in both tabs</span><pre><code class="lang-cpp">int main() {
     auto engine = jai::engine::make();
@@ -111,18 +111,36 @@ public:
         Spawner gate;
         gate.onWave.connect("hud", [](int size) { print("wave of ", size); });
         gate.level = 3;
-        gate.spawn_wave(); gate.spawn_wave(4, true);
+        gate.spawn_wave();
+        gate.spawn_wave(4, true);
         gate
     )");
-    gate-&gt;spawn_wave(5, false);     // script created C++ class interactable in both environments
-    std::cout &lt;&lt; "Wave Level Roundtrip Serialize: "
-              &lt;&lt; jai::from_json&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*engine, jai::to_json(*engine, gate))-&gt;level &lt;&lt; "\n";
+    gate-&gt;spawn_wave(5, false);     // Emits and is caught by the script-bound lambda
+
+    //Serialization Example:
+    std::string spawnerJson = jai::to_json(*engine, gate);
+    auto roundTrip = jai::from_json&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*engine, spawnerJson);
+    std::cout &lt;&lt; "Wave Level: " &lt;&lt; roundTrip-&gt;level &lt;&lt; "\nContents: " &lt;&lt; spawnerJson &lt;&lt; "\n";
     return 0;
 }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave of 3
 wave of 8
 wave of 5
-Wave Level Roundtrip Serialize: 3</code></pre></div>
+Wave Level: 5
+Contents: {
+  "value0": {
+    "$id": 1,
+    "$val": {
+      "id": "north-gate",
+      "level": 5,
+      "onWave": {
+        "parameter_names": [],
+        "observers": [],
+        "owned_observers": {}
+      }
+    }
+  }
+}</code></pre></div>
 <p>Each <code>JAI_PROPERTY</code> is the field, its script binding, its save key and its reflection; each <code>JAI_METHOD</code> is the member function and its script binding. No registrar, no glue, nothing to drift.</p>
 </div>
 <div class="tab-panel" id="bind-external" role="tabpanel" aria-labelledby="bind-tab-external" tabindex="0">
@@ -133,7 +151,7 @@ public:
     int64_t level = 1;
     jai::signal_emitter&lt;void(int64_t)&gt; onWave;
     void spawn_wave() { spawn_wave(level, false); }
-    void spawn_wave(int64_t size, bool elite) { onWave(elite ? size * 2 : size); }
+    void spawn_wave(int64_t size, bool elite) { level = size; onWave(elite ? size * 2 : size); }
 };
 
 // your binding file
@@ -151,18 +169,31 @@ static jai::registrar&lt;Spawner, void&gt; spawnerBinding("Spawner", [](jai::dyn
         Spawner gate;
         gate.onWave.connect("hud", [](int size) { print("wave of ", size); });
         gate.level = 3;
-        gate.spawn_wave(); gate.spawn_wave(4, true);
+        gate.spawn_wave();
+        gate.spawn_wave(4, true);
         gate
     )");
-    gate-&gt;spawn_wave(5, false);     // script created C++ class interactable in both environments
-    std::cout &lt;&lt; "Wave Level Roundtrip Serialize: "
-              &lt;&lt; jai::from_json&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*engine, jai::to_json(*engine, gate))-&gt;level &lt;&lt; "\n";
+    gate-&gt;spawn_wave(5, false);     // Emits and is caught by the script-bound lambda
+
+    //Serialization Example:
+    std::string spawnerJson = jai::to_json(*engine, gate);
+    auto roundTrip = jai::from_json&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*engine, spawnerJson);
+    std::cout &lt;&lt; "Wave Level: " &lt;&lt; roundTrip-&gt;level &lt;&lt; "\nContents: " &lt;&lt; spawnerJson &lt;&lt; "\n";
     return 0;
 }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave of 3
 wave of 8
 wave of 5
-Wave Level Roundtrip Serialize: 3</code></pre></div>
+Wave Level: 5
+Contents: {
+  "value0": {
+    "$id": 1,
+    "$val": {
+      "id": "north-gate",
+      "level": 5
+    }
+  }
+}</code></pre></div>
 <p>Third-party and engine types bind from the outside: the same names reach script, and saves are keyed by the property names.</p>
 </div>
 </div>

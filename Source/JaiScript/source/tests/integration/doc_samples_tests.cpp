@@ -14,6 +14,7 @@
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/core/engine_time.hpp>
 #include <jaiscript/core/script_run.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -195,18 +196,37 @@ public:
     JAI_OBSERVABLE_PROPERTY((int64_t), threat, 0);     // emits on_change(old, new)
     JAI_SIGNAL(void(int64_t), onWave);                 // script-connectable, serializable
 
-    void spawn_wave() { total_waves_ += 1; onWaveSignal(total_waves_); }
-    int64_t total_waves() const { return total_waves_; }
-
-    static void jai_auto_bind(jai::dynamic_binder<Spawner>& b) {   // what the declarations cannot say
-        b.method("spawn_wave", &Spawner::spawn_wave);
-        b.method("total_waves", &Spawner::total_waves);
-    }
+    JAI_METHOD(void, spawn_wave, ()) { total_waves_ += 1; onWaveSignal(total_waves_); }
+    JAI_METHOD(int64_t, total_waves, () const) { return total_waves_; }
 
 private:
     int64_t total_waves_ = 0;   // not a property: private, unreflected, unsaved
 };
 // [/sample]
+}
+
+namespace doc_binder_watchtower {
+// [sample binder-jai-method]
+class Watchtower : public jai::property_owner<Watchtower> {
+public:
+    JAI_PROPERTY((int64_t), arrows, 10);
+
+    JAI_METHOD(void, fire, ()) { fire(1); }
+    JAI_METHOD(void, fire, (int64_t volley));                     // defined in the .cpp
+    JAI_METHOD(int64_t, range, () const noexcept) { return 4 + arrows / 5; }
+    JAI_METHOD((std::map<std::string, int64_t>), report, () const) { return {{"arrows", arrows}}; }
+    JAI_METHOD(void, restock, (), jai::serial, jai::permissions::filesystem);
+    JAI_METHOD(Watchtower&, operator+=, (int64_t extra)) { arrows += extra; return *this; }
+
+    static int64_t built() { return 3; }
+    static void jai_auto_bind(jai::dynamic_binder<Watchtower>& b) {   // what JAI_METHOD does not say
+        b.static_method("built", &Watchtower::built);
+        b.method("volley", jai::overload<int64_t>(&Watchtower::fire));
+    }
+};
+// [/sample]
+inline void Watchtower::fire(int64_t volley) { arrows -= volley; }
+inline void Watchtower::restock() { arrows = 10; }
 }
 
 namespace doc_binder_vec2 {
@@ -488,9 +508,9 @@ std::string dedent(const std::vector<std::string>& lines) {
 	return result;
 }
 
-// The regions of this file marked with the id, each dedented, joined with a blank line
-std::string sample_source(const std::string& id) {
-	const std::string self = read_file(source_root() / "source" / "tests" / "integration" / "doc_samples_tests.cpp");
+// The regions of this file (or of a_file, under source/tests) marked with the id, each dedented, joined with a blank line
+std::string sample_source(const std::string& id, const std::string& a_file = "integration/doc_samples_tests.cpp") {
+	const std::string self = read_file(source_root() / "source" / "tests" / a_file);
 	std::istringstream in(self);
 	std::string line, result;
 	std::vector<std::string> region;
@@ -560,6 +580,26 @@ std::string missing_lines(const std::string& expected, const std::string& got) {
 void dump(const std::string& id, const std::string& got) {
 	const char* dir = std::getenv("JAI_DOC_SAMPLES_DUMP");
 	if (dir && *dir) { std::ofstream(std::filesystem::path(dir) / (id + ".txt"), std::ios::binary) << got; }
+}
+
+// A program's exit code and everything it printed, its arguments quoted
+struct program_run {
+	int exit_code = -1;
+	std::string output;
+};
+
+program_run run_program(const std::string& a_program, const std::vector<std::string>& a_arguments) {
+	const std::filesystem::path captured = jai::foundry::test_temp_directory() / "doc_program_output.txt";
+	std::string command = "\"" + a_program + "\"";
+	for (const std::string& argument : a_arguments) { command += " \"" + argument + "\""; }
+	command += " > \"" + captured.string() + "\" 2>&1";
+#ifdef _WIN32
+	command = "\"" + command + "\"";   // cmd.exe strips one pair of outer quotes
+#endif
+	program_run result;
+	result.exit_code = std::system(command.c_str());
+	result.output = read_file(captured);
+	return result;
 }
 
 class cout_capture {
@@ -904,6 +944,47 @@ public:
 				std::cout << run.result().value().to_string() << "\n";
 				// [/sample]
 			});
+		});
+
+		// The landing page's binding tabs: two programs (source/tests/home_page), one class surface, the same host code and script
+		test("home_binding_tabs", [this]() {
+#if defined(JAI_HOME_INTRUSIVE) && defined(JAI_HOME_EXTERNAL)
+			const std::string page = "index.html";
+			const auto intrusive_run = doc_samples::find_block(page, "home-bind-run-intrusive");
+			const auto external_run = doc_samples::find_block(page, "home-bind-run-external");
+			check_true(intrusive_run.found && external_run.found, page + ": a tab has no run block");
+			check_eq(intrusive_run.code, external_run.code, page + ": the two tabs run different host code");
+			check_eq(intrusive_run.output, external_run.output, page + ": the two tabs show different output");
+			const bool interpreted = make_engine()->get_backend_type() == backend_type::interpreter;
+			const size_t script_start = intrusive_run.code.find("R\"(");
+			const size_t script_end = intrusive_run.code.find(")\"", script_start);
+			check_true(script_start != std::string::npos && script_end != std::string::npos, page + ": the run block holds no raw-string script");
+			const std::filesystem::path script = jai::foundry::test_temp_directory() / "home_binding_tab.jai";
+			std::ofstream(script, std::ios::binary) << intrusive_run.code.substr(script_start + 3, script_end - script_start - 3);
+			const std::pair<const char*, const char*> tabs[] = { {"intrusive", JAI_HOME_INTRUSIVE}, {"external", JAI_HOME_EXTERNAL} };
+			for (const auto& [tab, program] : tabs) {
+				const std::string file = std::string("home_page/home_") + tab + ".cpp";
+				for (const std::string id : {std::string("home-bind-") + tab, std::string("home-bind-run-") + tab}) {
+					const auto block = doc_samples::find_block(page, id);
+					check_true(block.found, page + ": no block marked data-sample=\"" + id + "\"");
+					check_eq(doc_samples::trim_lines(doc_samples::sample_source(id, file)), doc_samples::trim_lines(block.code),
+						page + " " + id + ": the page's code and " + file + " differ");
+				}
+				const auto run = doc_samples::run_program(program, interpreted ? std::vector<std::string>{ "--interpreter", script.string() } : std::vector<std::string>{});
+				check_eq(0, run.exit_code, std::string(tab) + ": " + run.output);
+				check_eq(doc_samples::trim_lines(intrusive_run.output), doc_samples::trim_lines(run.output), page + " " + tab + ": output");
+			}
+#endif
+		});
+
+		test("binder_jai_method", [this]() {
+			const std::string page = "embedding/02-dynamic-binder.html";
+			cpp_sample class_block(*this, page, "binder-jai-method");
+			class_block.finish();
+			auto eng = make_engine();
+			jai::stdlib::register_all(eng);
+			jai::bind_registrar(*eng);
+			expect_script(page, "binder-jai-method-script", eng);
 		});
 
 		test("binder_turret", [this]() {

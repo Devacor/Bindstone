@@ -97,47 +97,66 @@ Gator gator;  <span class="tk-com">// kept by every reload</span>
 <button type="button" role="tab" id="bind-tab-external" aria-controls="bind-external" aria-selected="false" tabindex="-1">Non-intrusive: a class you don&#x27;t own</button>
 </div>
 <div class="tab-panel" id="bind-intrusive" role="tabpanel" aria-labelledby="bind-tab-intrusive" tabindex="0">
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">class Spawner : public jai::property_owner&lt;Spawner&gt; {
+<div class="codeblock cb-cpp" data-sample="home-bind-intrusive"><span class="cb-label">C++</span><pre><code class="lang-cpp">class Spawner : public jai::property_owner&lt;Spawner&gt; {
 public:
     JAI_PROPERTY((std::string), id, "north-gate");   // scripted and saved
     JAI_PROPERTY((int64_t), level, 1);
     JAI_SIGNAL(void(int64_t), onWave);               // script-connectable, saved too
-    void spawn_wave();
-    void spawn_wave(int64_t count, bool elite);       // overloaded in C++
-};
-
-static jai::registrar&lt;Spawner, void&gt; _regSpawner("Spawner",
-    [](jai::dynamic_binder&lt;Spawner&gt;&amp; b) {
-        b.method("spawn_wave", [](Spawner&amp; s) { s.spawn_wave(); })   // a lambda picks the overload
-         .method("spawn_elites", [](Spawner&amp; s, int64_t count) { s.spawn_wave(count, true); });
-    });</code></pre></div>
-<p>Each <code>JAI_PROPERTY</code> is the field, its script binding, its save key and its reflection, so the four never drift apart.</p>
+    JAI_METHOD(void, spawn_wave, ()) { spawn_wave(level, false); }
+    JAI_METHOD(void, spawn_wave, (int64_t size, bool elite)) { onWaveSignal(elite ? size * 2 : size); }
+};</code></pre></div>
+<div class="codeblock cb-cpp" data-sample="home-bind-run-intrusive"><span class="cb-label">C++ &middot; the host, the same in both tabs</span><pre><code class="lang-cpp">int main() {
+    auto engine = jai::engine::make();
+    jai::bind_registrar(*engine);   // every property_owner and registrar in the program
+    engine-&gt;execute(R"(
+        Spawner gate;
+        gate.onWave.connect("hud", [](int size) { print("wave of ", size); });
+        gate.level = 3;
+        gate.spawn_wave(); gate.spawn_wave(4, true);
+    )");
+    return 0;
+}</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave of 3
+wave of 8</code></pre></div>
+<p>Each <code>JAI_PROPERTY</code> is the field, its script binding, its save key and its reflection; each <code>JAI_METHOD</code> is the member function and its script binding. No registrar, no glue, nothing to drift.</p>
 </div>
 <div class="tab-panel" id="bind-external" role="tabpanel" aria-labelledby="bind-tab-external" tabindex="0">
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// turret.h comes from a library you can't edit
-struct Turret {
-    std::string name = "north";
-    int64_t ammo = 10;
-    void fire();
-    void aim(float yaw, float pitch);
+<div class="codeblock cb-cpp" data-sample="home-bind-external"><span class="cb-label">C++</span><pre><code class="lang-cpp">// spawner.h belongs to another module: you bind it without editing it
+class Spawner {
+public:
+    std::string id = "north-gate";
+    int64_t level = 1;
+    jai::signal_emitter&lt;void(int64_t)&gt; onWave;
+    void spawn_wave() { spawn_wave(level, false); }
+    void spawn_wave(int64_t size, bool elite) { onWave(elite ? size * 2 : size); }
 };
 
-// your binding file: the class stays untouched
-static jai::registrar&lt;Turret, void&gt; _regTurret("Turret",
-    [](jai::dynamic_binder&lt;Turret&gt;&amp; b) {
-        b.constructor&lt;&gt;()
-         .property("name", &amp;Turret::name)   // scripted and saved
-         .property("ammo", &amp;Turret::ammo)
-         .method("fire", &amp;Turret::fire)            // a method is one line
-         .method("aim", [](Turret&amp; t, double yaw) {    // a lambda adapts any signature
-             t.aim(float(yaw), 0.0f);
-         });
-    });</code></pre></div>
-<p>Third-party and engine types bind from the outside, with the same script access and saves keyed by the property names.</p>
+// your binding file
+static jai::registrar&lt;Spawner, void&gt; spawnerBinding("Spawner", [](jai::dynamic_binder&lt;Spawner&gt;&amp; b) {
+    b.property("id", &amp;Spawner::id)          // scripted and saved
+     .property("level", &amp;Spawner::level)
+     .property("onWave", &amp;Spawner::onWave)  // script-connectable
+     .method("spawn_wave", jai::overload&lt;&gt;(&amp;Spawner::spawn_wave))
+     .method("spawn_wave", jai::overload&lt;int64_t, bool&gt;(&amp;Spawner::spawn_wave));
+});</code></pre></div>
+<div class="codeblock cb-cpp" data-sample="home-bind-run-external"><span class="cb-label">C++ &middot; the host, the same in both tabs</span><pre><code class="lang-cpp">int main() {
+    auto engine = jai::engine::make();
+    jai::bind_registrar(*engine);   // every property_owner and registrar in the program
+    engine-&gt;execute(R"(
+        Spawner gate;
+        gate.onWave.connect("hud", [](int size) { print("wave of ", size); });
+        gate.level = 3;
+        gate.spawn_wave(); gate.spawn_wave(4, true);
+    )");
+    return 0;
+}</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave of 3
+wave of 8</code></pre></div>
+<p>Third-party and engine types bind from the outside: the same names reach script, and saves are keyed by the property names.</p>
 </div>
 </div>
-<p>Either way, script sees a native class (<code>auto t = Turret(); t.ammo = 3;</code>) and the same object saves
-to JSON or binary. <a href="embedding/02-dynamic-binder.html">The Dynamic Binder</a> walks a class through being <a href="embedding/02-dynamic-binder.html#scripted">scripted</a>,
+<p>Either way, the script is the same four lines and sees the same native class, and the same object saves to JSON or
+binary. <a href="embedding/02-dynamic-binder.html">The Dynamic Binder</a> walks a class through being <a href="embedding/02-dynamic-binder.html#scripted">scripted</a>,
 <a href="embedding/02-dynamic-binder.html#reflected">reflected</a>,
 <a href="embedding/02-dynamic-binder.html#serialized">serialized</a> and
 <a href="embedding/02-dynamic-binder.html#hot-reload-with-state-intact">hot-reloaded with its state intact</a>.</p>

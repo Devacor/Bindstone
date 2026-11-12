@@ -74,9 +74,9 @@ namespace jai {
 // (have a property_mgr). Leaves member access at public:. A moved owner takes the receivers, a copied
 // one starts with none, and either way name is its own emitter's facade. The schema entry (is_signal) lets
 // every dynamic_binder of the class expose the generic Signal view — declaring the signal is the whole
-// registration. JAI_SIGNAL_PROPERTY(Sig, name) names the emitter nameSignal. Both are unsynchronized;
-// JAI_SYNCHRONIZED_SIGNAL_PROPERTY declares the jai::signal_synchronized pair for a signal used from several threads.
-#define JAI_SIGNAL_PROPERTY_WITH_POLICY(signature, name, emitter, policy) \
+// registration. JAI_SIGNAL(Sig, name) names the emitter nameSignal. Both are unsynchronized;
+// JAI_SYNCHRONIZED_SIGNAL declares the jai::signal_synchronized pair for a signal used from several threads.
+#define JAI_SIGNAL_WITH_POLICY(signature, name, emitter, policy) \
 	private: \
 		inline static const int _jai_schema_reg_##name = []{ \
 			using OwnerT = _jai_owner_type; \
@@ -92,9 +92,9 @@ namespace jai {
 	public: \
 		using _jai_signal_declared_##name = void
 
-#define JAI_SIGNAL_PROPERTY_AS(signature, name, emitter) JAI_SIGNAL_PROPERTY_WITH_POLICY(signature, name, emitter, jai::signal_unsynchronized)
-#define JAI_SIGNAL_PROPERTY(signature, name) JAI_SIGNAL_PROPERTY_AS(signature, name, name##Signal)
-#define JAI_SYNCHRONIZED_SIGNAL_PROPERTY_AS(signature, name, emitter) JAI_SIGNAL_PROPERTY_WITH_POLICY(signature, name, emitter, jai::signal_synchronized)
-#define JAI_SYNCHRONIZED_SIGNAL_PROPERTY(signature, name) JAI_SYNCHRONIZED_SIGNAL_PROPERTY_AS(signature, name, name##Signal)
+#define JAI_SIGNAL_AS(signature, name, emitter) JAI_SIGNAL_WITH_POLICY(signature, name, emitter, jai::signal_unsynchronized)
+#define JAI_SIGNAL(signature, name) JAI_SIGNAL_AS(signature, name, name##Signal)
+#define JAI_SYNCHRONIZED_SIGNAL_AS(signature, name, emitter) JAI_SIGNAL_WITH_POLICY(signature, name, emitter, jai::signal_synchronized)
+#define JAI_SYNCHRONIZED_SIGNAL(signature, name) JAI_SYNCHRONIZED_SIGNAL_AS(signature, name, name##Signal)
 
 #endif

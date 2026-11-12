@@ -568,12 +568,67 @@ concept has_base_types = is_property_owner<T> && requires {
     typename T::_jai_base_types;
 };
 
-// T::jai_auto_bind(builder) binds what only T can reach (private members), after the automatic surface
-// (needs the real jai::dynamic_binder — a fwd-decl in this namespace shadows it and falsifies the concept for every T)
-template<typename T>
-concept has_jai_auto_bind = requires(dynamic_binder<T>& builder) {
-    { T::jai_auto_bind(builder) } -> std::same_as<void>;
+// T::jai_auto_bind binds what only T can reach (private members), after the automatic surface. A class declares one, non-template:
+// static void jai_auto_bind(jai::dynamic_binder<T>&) with no context, static void jai_auto_bind(jai::dynamic_binder<T>&, const C&)
+// with context C. A subclass that declares none finds its base's by name, which takes the base's binder: not the subclass's hook.
+// (needs the real jai::dynamic_binder — a fwd-decl in this namespace shadows it and falsifies the checks for every T)
+template<typename T, typename Hook>
+struct own_hook {
+    static constexpr int kind = 0;
+    using context = void;
 };
+template<typename T>
+struct own_hook<T, void (*)(dynamic_binder<T>&)> {
+    static constexpr int kind = 1;
+    using context = void;
+};
+template<typename T, typename C>
+struct own_hook<T, void (*)(dynamic_binder<T>&, const C&)> {
+    static constexpr int kind = 2;
+    using context = C;
+};
+
+template<typename T>
+struct class_context {
+    using type = void;
+};
+template<typename T>
+    requires requires { typename T::_jai_context_type; }
+struct class_context<T> {
+    using type = typename T::_jai_context_type;
+};
+
+template<typename T>
+inline constexpr bool hook_check_failed = false;
+
+// 0: T has no hook of its own, 1: the plain hook, 2: the context hook; any other declaration is a compile error
+template<typename T>
+consteval int hook_kind() {
+    using context_type = typename class_context<T>::type;
+    if constexpr (requires { &T::jai_auto_bind; }) {
+        using hook = own_hook<T, decltype(&T::jai_auto_bind)>;
+        if constexpr (hook::kind == 1) {
+            static_assert(std::is_void_v<context_type>,
+                "jai_auto_bind: a class with a context C declares static void jai_auto_bind(jai::dynamic_binder<T>&, const C&)");
+        } else if constexpr (hook::kind == 2) {
+            static_assert(!std::is_void_v<context_type>,
+                "jai_auto_bind: a class with no context declares static void jai_auto_bind(jai::dynamic_binder<T>&), without a context");
+            static_assert(std::is_void_v<context_type> || std::is_same_v<typename hook::context, context_type>,
+                "jai_auto_bind(jai::dynamic_binder<T>&, const C&): C must be the class's context, the jai::context<C> it or a base is tagged with");
+            if constexpr (std::is_void_v<context_type> || !std::is_same_v<typename hook::context, context_type>) { return 0; }
+        }
+        if constexpr (hook::kind == 1 && !std::is_void_v<context_type>) { return 0; }
+        return hook::kind;
+    } else if constexpr (requires(dynamic_binder<T>& a_builder) { T::jai_auto_bind(a_builder); }) {
+        static_assert(hook_check_failed<T>, "jai_auto_bind: a class declares exactly one jai_auto_bind, and not a template");
+        return 0;
+    } else if constexpr (!std::is_void_v<context_type> && requires(dynamic_binder<T>& a_builder, const context_type& a_context) { T::jai_auto_bind(a_builder, a_context); }) {
+        static_assert(hook_check_failed<T>, "jai_auto_bind: a class declares exactly one jai_auto_bind, and not a template");
+        return 0;
+    } else {
+        return 0;
+    }
+}
 
 } // namespace auto_bind_concepts
 
@@ -672,7 +727,7 @@ public:
     {
     }
 
-    // The trailing options are .method's: privileges a construction requires, nodiscard (a dropped instance is an error) and
+    // The trailing options are .method's: permissions a construction requires, nodiscard (a dropped instance is an error) and
     // serial (a parallel body may not construct the class, or a script class over it); nodiscard and serial cover every constructor
     template<typename... Args, detail::function_option... Options>
     dynamic_binder& constructor(const Options&... options) {
@@ -686,7 +741,7 @@ public:
 
 private:
     template<typename... Args>
-    void add_constructor(const privilege_set& required = {}) {
+    void add_constructor(const permission_set& required = {}) {
         if constexpr (sizeof...(Args) == 0) {
             engine_.add_overloaded_function(class_name_, 0, engine_.guard_function(detail::host_method_call{ &native_constructor_call<>, constructor_state() }, required));
         } else {
@@ -982,7 +1037,7 @@ public:
     template<typename ArgsTuple, size_t... Is>
     static constexpr bool self_lane_params(std::index_sequence<Is...>) { return (lane_param<std::tuple_element_t<Is + 1, ArgsTuple>>() && ...); }
 
-    // The trailing options: privileges the call requires, nodiscard (Class.method drops no result) and serial (a parallel body
+    // The trailing options: permissions the call requires, nodiscard (Class.method drops no result) and serial (a parallel body
     // may not call it). serial on a non-const overload covers the name's non-const overloads; on a const one, all. A noexcept
     // member binds as the same member without it.
     template<typename R, typename... Args, bool Noexcept, detail::function_option... Options>
@@ -1800,7 +1855,7 @@ private:
             method("=", [](T& self, const T& other) -> T& { return self = other; });
         }
 
-        if constexpr (auto_bind_concepts::has_jai_auto_bind<T>) {
+        if constexpr (auto_bind_concepts::hook_kind<T>() == 1) {
             T::jai_auto_bind(*this);
         }
     }
@@ -1883,7 +1938,7 @@ private:
             const std::type_index value_type = prop_meta->value_type_id;
             const bool is_observable = prop_meta->is_observable;
 
-            // JAI_SIGNAL_PROPERTY entries expose the generic Signal view —
+            // JAI_SIGNAL entries expose the generic Signal view —
             // declaring the signal is the whole registration.
             if (prop_meta->is_signal) {
                 bind_signal_property_view(prop_name);
@@ -1900,7 +1955,7 @@ private:
         }
     }
 
-    // JAI_SIGNAL_PROPERTY schema entries become read-only properties returning
+    // JAI_SIGNAL schema entries become read-only properties returning
     // the generic Signal view over the live property's erased connect table.
     // Lookup is find_reflected_property (virtual, whole chain), so inherited
     // signal properties resolve against the most-derived live object.
@@ -2278,39 +2333,10 @@ private:
 // The make_context_extractor function is instantiated at call sites where archive_reader is fully defined.
 
 namespace detail {
-	// The C of a static void jai_auto_bind(jai::dynamic_binder<T>&, const C&) T declares; void for none
-	template<typename T, typename Hook>
-	struct context_hook_parameter {
-		using type = void;
-	};
-	template<typename T, typename C>
-	struct context_hook_parameter<T, void (*)(dynamic_binder<T>&, const C&)> {
-		using type = C;
-	};
-	template<typename T>
-	struct declared_context_hook {
-		using type = void;
-	};
-	template<typename T>
-		requires requires { &T::jai_auto_bind; }
-	struct declared_context_hook<T> {
-		using type = typename context_hook_parameter<T, decltype(&T::jai_auto_bind)>::type;
-	};
-
-	template<typename T>
-	constexpr bool check_context_hook() {
-		using hook_context = typename declared_context_hook<T>::type;
-		static_assert(std::is_void_v<hook_context> || std::is_same_v<hook_context, typename T::_jai_context_type>,
-			"jai_auto_bind(jai::dynamic_binder<T>&, const C&): C must be the class's context, the jai::context<C> it or a base is tagged with");
-		return !std::is_void_v<hook_context>;
-	}
-
 	template<typename T>
 	void run_context_hook(dynamic_binder<T>& a_builder, const void* a_context) {
-		if constexpr (requires { typename T::_jai_context_type; }) {
-			if constexpr (check_context_hook<T>()) {
-				T::jai_auto_bind(a_builder, *static_cast<const typename T::_jai_context_type*>(a_context));
-			}
+		if constexpr (auto_bind_concepts::hook_kind<T>() == 2) {
+			T::jai_auto_bind(a_builder, *static_cast<const typename T::_jai_context_type*>(a_context));
 		}
 	}
 
@@ -2328,7 +2354,7 @@ namespace detail {
 		if constexpr (requires { typename T::_jai_context_type; }) {
 			using class_context = typename T::_jai_context_type;
 			if constexpr (!std::is_void_v<class_context> && (std::is_same_v<class_context, Context> || std::is_base_of_v<class_context, Context>)) {
-				if constexpr (check_context_hook<T>()) { T::jai_auto_bind(a_builder, static_cast<const class_context&>(a_context)); }
+				if constexpr (auto_bind_concepts::hook_kind<T>() == 2) { T::jai_auto_bind(a_builder, static_cast<const class_context&>(a_context)); }
 			}
 		}
 	}

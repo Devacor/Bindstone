@@ -101,7 +101,7 @@ Gator gator;  <span class="tk-com">// kept by every reload</span>
 public:
     JAI_PROPERTY((std::string), id, "north-gate");   // scripted and saved
     JAI_PROPERTY((int64_t), level, 1);
-    JAI_SIGNAL_PROPERTY(void(int64_t), onWave);      // script-connectable, saved too
+    JAI_SIGNAL(void(int64_t), onWave);               // script-connectable, saved too
     void spawn_wave();
     void spawn_wave(int64_t count, bool elite);       // overloaded in C++
 };

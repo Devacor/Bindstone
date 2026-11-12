@@ -285,11 +285,11 @@ public:
     }
 };
 
-// A JAI_SIGNAL_PROPERTY rides property_mgr serialization: its owned script receivers persist.
+// A JAI_SIGNAL rides property_mgr serialization: its owned script receivers persist.
 class signal_test_object : public property_owner<signal_test_object> {
 public:
     typedef void PingSignature(int);
-    JAI_SIGNAL_PROPERTY(PingSignature, onPing);
+    JAI_SIGNAL(PingSignature, onPing);
 
     void addOwned(const std::string& id, const std::string& script) { onPingSignal.connect(id, script); }
     bool hasOwned(const std::string& id) { return onPingSignal.connected(id); }

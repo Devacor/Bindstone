@@ -636,7 +636,7 @@ the vector rows of the interpolation family, and the vec2 rotation set (`math::a
 | `isLittleEndian`, `swapBytes*` | stays | scripts have no raw byte buffers |
 | `transform_if`, `MultiArray`, `make`, `moveAppend`, `moveCopy`, `InstanceCounter`, `CallbackQueue`, `MainThreadCallback`, `TimeDeltaAggregate` | stays | C++ template and threading machinery with no script meaning |
 | `Stopwatch`, `programTime`, `systemTime*` | stays | the time source is the host's; a deterministic game feeds scripts the simulation clock |
-| file helpers (`fileContents`, `fileExists*`, `writeToFile`, `deleteFile`, `lastFileWriteTime`, `sdlFileHandle`, `playerPreferencesPath`, `fileNameFromPath`) | stays | filesystem is a host privilege; JaiScript has `file_name` / `parent_dir` / `resolve_path` and host `read_file` / `write_file` |
+| file helpers (`fileContents`, `fileExists*`, `writeToFile`, `deleteFile`, `lastFileWriteTime`, `sdlFileHandle`, `playerPreferencesPath`, `fileNameFromPath`) | stays | filesystem is a host permission; JaiScript has `file_name` / `parent_dir` / `resolve_path` and host `read_file` / `write_file` |
 | `simpleFilter` | stays | engine input sanitizing, not a general string operation |
 | `explode`, `toLower`, `toUpper`, `replaceFirst`, `replaceAll`, `filenameFromPath` | exist (`split`, `to_lower`, `to_upper`, `replace_first`, `replace`, `file_name`) | already covered |
 | `startsWith` | exists (`starts_with`) | MV's version is inverted (3.2) |

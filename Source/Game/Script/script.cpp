@@ -132,7 +132,7 @@ namespace MV {
 		jai::stdlib::register_all(*engine);
 		jai::stdlib::register_spider(*engine);   // spider::catch / sling / get / post over MV downloads: HTTPS on every platform
 		engine->http_transport(makeScriptHttpTransport());
-		engine->enable(jai::network);
+		engine->enable(jai::permissions::network);
 		jai::bind_registrar<MV::Services>(*engine, a_services);
 		engine->add_global("InEditMode", jai::script_value(editMode(), engine.get()));
 		engine->add_global("PathMode", engine->make_object(std::make_shared<PathModeValues>()));

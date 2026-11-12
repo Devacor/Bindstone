@@ -12,7 +12,7 @@
 #include "bound_array.hpp"
 #include "bound_map.hpp"
 #include "jaibite.hpp"
-#include "privilege.hpp"
+#include "permission.hpp"
 #include "overload.hpp"
 #include "hot_reload_report.hpp"
 #include <jaiscript/detail/type_checker.hpp>
@@ -125,24 +125,22 @@ namespace jai {
     public:
         ~engine();
 
-        // Every privilege is a slot (core/privilege.hpp): filesystem and scoped_template are enabled by default, network and a
-        // host's own start disabled. Changes affect the next protected operation, including after a reentrant C++ callback;
+        // Every permission is an int32_t id (core/permission.hpp): filesystem and scoped_template are enabled by default, every
+        // other one starts disabled. Changes affect the next protected operation, including after a reentrant C++ callback;
         // started work is not cancelled. Grants are per-engine, not shared through script variables. Configure on the engine
         // thread (or while idle), outside parallel regions. Concurrent cross-thread grant changes are not supported.
-        template<detail::privilege_enum... Privileges>
-        void enable(Privileges... privileges) { set_privileges(detail::privilege_set_of(privileges...), true); }
-        template<detail::privilege_enum... Privileges>
-        void disable(Privileges... privileges) { set_privileges(detail::privilege_set_of(privileges...), false); }
+        template<detail::permission_enum... Permissions>
+        void enable(Permissions... permissions) { set_permissions(detail::permission_set_of(permissions...), true); }
+        template<detail::permission_enum... Permissions>
+        void disable(Permissions... permissions) { set_permissions(detail::permission_set_of(permissions...), false); }
         // True when every one is enabled
-        template<detail::privilege_enum... Privileges>
-        bool is_enabled(Privileges... privileges) const noexcept { return privileges_enabled(detail::privilege_set_of(privileges...)); }
-        template<detail::privilege_enum... Privileges>
-        checked_result<void> require_privilege(Privileges... privileges) const noexcept { return require_privileges(detail::privilege_set_of(privileges...)); }
-        // The name a host privilege's denial shows (Insufficient privilege: game.cheats.); without one it shows the slot number
-        template<detail::privilege_enum Privilege>
-        void register_privilege(Privilege privilege, std::string_view name) {
-            name_privilege(static_cast<size_t>(static_cast<std::underlying_type_t<Privilege>>(privilege)), name);
-        }
+        template<detail::permission_enum... Permissions>
+        bool is_enabled(Permissions... permissions) const noexcept { return permissions_enabled(detail::permission_set_of(permissions...)); }
+        template<detail::permission_enum... Permissions>
+        checked_result<void> require_permission(Permissions... permissions) const noexcept { return require_permissions(detail::permission_set_of(permissions...)); }
+        // The name a host permission's denial shows (Insufficient permission: game.cheats.); without one it shows the id
+        template<detail::permission_enum Permission>
+        void register_permission(Permission permission, std::string_view name) { name_permission(detail::permission_id(permission), name); }
 
         // Factory method to ensure engines are always created as shared_ptr
         static std::shared_ptr<engine> make() {
@@ -453,17 +451,17 @@ namespace jai {
         // The most bytes one template() render writes (default 10 MiB, 10485760) and one scoped_template or scoped_template_text
         // render writes (default 1 MiB, 1048576); a render that would write past its limit raises a catchable error naming the
         // limit. Zero is no limit. Scripts read them (reflect::template_output_limit()) and cannot change them; a change follows
-        // the privilege rules: idle or on the execution thread, never inside a parallel region, and a render already started
+        // the permission rules: idle or on the execution thread, never inside a parallel region, and a render already started
         // keeps the limit it started with.
         void template_output_limit(size_t bytes);
         size_t template_output_limit() const;
         void scoped_template_output_limit(size_t bytes);
         size_t scoped_template_output_limit() const;
-        // The folders a scoped_template(path, map) file is read from, under the scoped_template privilege alone. The path is
+        // The folders a scoped_template(path, map) file is read from, under the scoped_template permission alone. The path is
         // relative with no .. segment; it is tried in each folder in list order, and the first file that exists and canonically lies
         // inside its folder (links resolved) is the template. A relative folder is relative to the directory of the script that
         // calls; the default is {"template"}, and a folder that does not exist holds nothing. Scripts read the list with
-        // reflect::scoped_template_dirs() and cannot change it; a change follows the privilege rules.
+        // reflect::scoped_template_dirs() and cannot change it; a change follows the permission rules.
         void add_scoped_template_dir(const std::string& dir);
         void remove_scoped_template_dir(const std::string& dir);
         void set_scoped_template_dirs(std::vector<std::string> dirs);
@@ -626,7 +624,7 @@ namespace jai {
         // typed binding returns, a script_value or a checked_result<script_value>; alone under its name, the VM runs it on the
         // arguments where they are. The vector form returns a checked_result<script_value>.
         // Example: engine.add_variadic_function("sum_all", [](jai::engine&, std::span<const jai::script_value> args) { ... });
-        // The trailing options (core/privilege.hpp) are any number of privileges, jai::nodiscard and jai::serial
+        // The trailing options (core/permission.hpp) are any number of permissions, jai::nodiscard and jai::serial
         template<detail::engine_first_variadic Func, detail::function_option... Options>
         void add_variadic_function(const std::string& name, Func&& func, const Options&... options) {
             using call_t = detail::engine_variadic_call<std::decay_t<Func>>;
@@ -885,7 +883,7 @@ namespace jai {
         // Attach a requirement to the actual callable, so aliases, overload dispatch
         // and worker-local copies all recheck this engine's current grants. An empty
         // requirement returns the original callable with no invocation overhead.
-        script_function guard_function(script_function function, const privilege_set& required);
+        script_function guard_function(script_function function, const permission_set& required);
         // include: the file runs at the include site, in the current scope and under the running unit, so
         // its declarations are the includer's (internal/global_shadowing.md). scope names the function or block the
         // include runs in (empty at program scope): an enum the file declares there stays local to it.
@@ -1622,12 +1620,12 @@ namespace jai {
         void register_location_builtins();   // engine-core script builtins: root/current_script_dir, resolve_path, app dirs
         script_run launch_run(std::unique_ptr<detail::run_record> run);   // start's first switch into the run (script_run.cpp)
         void cancel_suspended_runs() noexcept;   // the engine's teardown: every run still suspended is cancelled
-        void register_privilege_builtins();
-        void set_privileges(const privilege_set& privileges, bool enabled);
-        void check_privilege_mutation() const;
-        bool privileges_enabled(const privilege_set& privileges) const noexcept;
-        checked_result<void> require_privileges(const privilege_set& required) const noexcept;
-        void name_privilege(size_t slot, std::string_view name);
+        void register_permission_builtins();
+        void set_permissions(const permission_set& permissions, bool enabled);
+        void check_permission_mutation() const;
+        bool permissions_enabled(const permission_set& permissions) const noexcept;
+        checked_result<void> require_permissions(const permission_set& required) const noexcept;
+        void name_permission(std::int32_t id, std::string_view name);
         std::unique_ptr<std::mutex> parallel_compile_mutex_ = std::make_unique<std::mutex>();
         int load_depth_ = 0;
         std::vector<std::pair<script_value, script_int>> deferred_post_loads_;
@@ -1710,8 +1708,8 @@ namespace jai {
                                                      bool for_import = false);
     checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr);   // from the executing file
     namespace detail {
-        // The same ladder without the filesystem privilege's gate: a scoped template folder resolves as an import's file does,
-        // under the scoped_template privilege (detail/template_library.hpp)
+        // The same ladder without the filesystem permission's gate: a scoped template folder resolves as an import's file does,
+        // under the scoped_template permission (detail/template_library.hpp)
         checked_result<std::string> resolve_on_import_ladder(const std::string& path, engine* engine_ptr, const std::string& from_file);
     }
 

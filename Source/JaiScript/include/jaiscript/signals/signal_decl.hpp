@@ -751,7 +751,7 @@ private:
 static_assert(!std::is_move_constructible_v<signal_emitter<void()>> && !std::is_move_assignable_v<signal_emitter<void()>>);
 static_assert(!std::is_move_constructible_v<signal_emitter<void(), signal_synchronized>> && !std::is_move_assignable_v<signal_emitter<void(), signal_synchronized>>);
 
-// An emitter that is a member of a copyable, movable object (JAI_SIGNAL_PROPERTY and observable_property hold one). A copy
+// An emitter that is a member of a copyable, movable object (JAI_SIGNAL and observable_property hold one). A copy
 // keeps the script engine and parameter names and starts with no receivers; a move takes the receivers; move assignment
 // lets go of its own first; copy assignment changes nothing.
 template<typename T, typename Sync = signal_unsynchronized>

@@ -2497,7 +2497,7 @@ public:
 
 struct NativeGadget : jai::property_owner<NativeGadget> {
     JAI_PROPERTY((int), charge, 5);
-    JAI_SIGNAL_PROPERTY(void(int), on_spark);
+    JAI_SIGNAL(void(int), on_spark);
     void spark(int amount) { charge = charge.get() + amount; on_sparkSignal(amount); }
     void note(const std::string& id, const std::string& script) { on_sparkSignal.connect(id, script); }
 };

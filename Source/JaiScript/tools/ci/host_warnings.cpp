@@ -33,7 +33,7 @@ public:
 	JAI_PROPERTY((int64_t), count, 0);
 	JAI_PROPERTY((double), scale, 1.5);
 	JAI_OBSERVABLE_PROPERTY((int), level, 1);
-	JAI_SIGNAL_PROPERTY(void(int64_t), onPoke);
+	JAI_SIGNAL(void(int64_t), onPoke);
 	void poke(int64_t a_amount) { count = count + a_amount; onPokeSignal(count); }
 	int64_t total() const { return count; }
 	std::string label(const std::string& a_prefix) const { return a_prefix + name.get(); }

@@ -6,7 +6,7 @@ entry-shape details, parity) lives in the companion: [reflection_design.md](refl
 Read this one first; dip into the companion only when you need the *why*.
 
 Reflection is three small groups of builtins over data the runtime already keeps: registered
-classes and functions, live objects, and the engine's enabled privileges. Class queries are
+classes and functions, live objects, and the engine's enabled permissions. Class queries are
 live — hot reload a class and the next call sees the new shape. Returned arrays/maps have
 ordinary value semantics: what you already hold never mutates under you.
 
@@ -60,7 +60,7 @@ reach private members and private constructors of script classes; `private` is a
 that level. Typed fields still convert-or-error and observable properties still fire their change
 signals. The security boundary is the host and the engine: a C++ binding exposes only what it
 registered, builtin values expose no internals, and a host function registered with a required
-privilege keeps that check through a function alias or `reflect::call`; reflection cannot grant
+permission keeps that check through a function alias or `reflect::call`; reflection cannot grant
 permission.
 
 Spawn-by-name, the canonical use:
@@ -81,7 +81,7 @@ reflect::bases(x)              // -> array<string>, declaration order; [] at a r
 reflect::instances("Creature") // -> array of live instances of the class (engine-scoped), in creation order
 reflect::generation("Creature")// -> int, bumps on hot reload/migration — poll this, re-ask on change
 reflect::methods(x)            // -> signature list; the detailed entry shape is companion §2
-reflect::is_enabled(jai::filesystem) // -> bool: may this engine perform gated filesystem operations?
+jai::permissions::is_enabled(jai::permissions::filesystem) // -> bool: may this engine perform gated filesystem operations?
 ```
 
 Namespaces need no machinery of their own: `reflect::functions()` returns qualified names, so
@@ -93,56 +93,47 @@ only when it moved. Queries concern **this engine**, not another engine's host r
 Builtins are still present on a fresh engine; an unregistered host class does not become
 visible merely because its C++ type exists (the three-doors rule; see the binder chapter).
 
-### Enabled privileges
+### Enabled permissions
 
-`reflect::is_enabled(requirements...)` requires at least one argument and returns true only
-if **all** supplied requirements are enabled. Arguments may mix built-in integer flags and
-permission-name strings. Invalid bits or other argument types raise; unknown names return
-false without interning or registering anything. `jai::filesystem` is the only built-in
-flag, enabled by default, and `"filesystem"` queries the same grant.
+`jai::permissions::is_enabled(ids...)` requires at least one argument and returns true only if
+**all** supplied permissions are enabled. Each argument is an id that fits an `int32_t`: a
+`jai::permissions` value (`filesystem`, `scoped_template`, `network`, `debug`, `trusted`,
+`untrusted`) or a host's. Anything else raises.
 
 ```jaiscript
-reflect::is_enabled(jai::filesystem)                    // built-in integer flag
-reflect::is_enabled("filesystem")                       // same grant by name
-reflect::is_enabled(jai::filesystem, "savegame.write")   // BOTH required; unknown name = false
+jai::permissions::is_enabled(jai::permissions::filesystem)
+jai::permissions::is_enabled(jai::permissions::filesystem, 7)   // BOTH required; 7 is a host's id
 ```
 
-The host defines custom permissions; the script query can neither register nor grant one:
+The host defines its own as an enum over `std::int32_t` starting at `jai::permissions::count`;
+any enum passed where a permission goes is one, its underlying value its id. The script query
+can neither define nor grant one:
 
 ```cpp
-eng->register_privilege("savegame.write");  // starts disabled
-eng->add_function("save_game", saveGame, {"filesystem", "savegame.write"});
-eng->enable("savegame.write");
-bool allowed = eng->is_enabled({"filesystem", "savegame.write"});
-auto checked = eng->require_privilege("savegame.write");  // checked_result<void>
+enum class GamePermission : std::int32_t { saves = jai::permissions::count };
+eng->add_function("save_game", saveGame, jai::permissions::filesystem, GamePermission::saves);
+eng->enable(GamePermission::saves);
+bool allowed = eng->is_enabled(jai::permissions::filesystem, GamePermission::saves);
+auto checked = eng->require_permission(GamePermission::saves);  // checked_result<void>
+eng->register_permission(GamePermission::saves, "savegame.write");  // optional: the name a denial shows
 ```
 
-`register_privilege` returns nothing. Re-registering a name preserves its grant; registering
-`"filesystem"` refers to the existing builtin without granting it. A string name or an
-initializer list of names works with `enable`, `disable`, `is_enabled`, `require_privilege`
-and the optional requirement on `add_function`, `add_variadic_function` and
-`dynamic_binder::method`. All names in a list are required. Built-in flag overloads remain.
+Grants and names are per engine. A requirement is a set fixed at binding: ids 0 to 255 as
+four words, any other in a sorted spill. A call's check over the low ids is four word tests,
+no lookup or allocation. A denial names the lowest missing id.
 
-Names can be reused across engines with independent registration and grants. Unknown queries
-return false; enabling, disabling, requiring or binding an unknown name rejects it, never
-auto-registers it. Register names before attaching them to callables. Names are stored in
-the engine's interner; binding resolves requirements once into internal slot IDs. Invocation
-checks add no name lookups or allocations, although registration and binding may allocate.
-A missing builtin is reported first, then missing custom permissions in registration order,
-not list order.
-
-A disabled filesystem privilege makes gated operations raise
-`Insufficient privilege: filesystem.` on both backends. The error is catchable; unhandled,
+A disabled filesystem permission makes gated operations raise
+`Insufficient permission: filesystem.` on both backends. The error is catchable; unhandled,
 it reaches the host. A C++ callback can revoke access during execution, so a successful query
 does not reserve permission for a later call. Already-started work completes; subsequent
-operations check again. Native bindings participate by checking the privilege or declaring
+operations check again. Native bindings participate by checking the permission or declaring
 it with an optional callable requirement as above. Custom denial names the missing permission,
-for example `Insufficient privilege: savegame.write.`. Register/change grants only while idle
+for example `Insufficient permission: savegame.write.`. Register/change grants only while idle
 or on the engine execution thread, never concurrently from another thread or during an active
 parallel region. No new synchronization is added. Arbitrary callbacks, streams and shared native
 objects remain the
 host's responsibility, not a process sandbox. See the
-[filesystem boundary](../docs/site/embedding/05-safety-rails.html#filesystem-privilege) for the exact
+[filesystem boundary](../docs/site/embedding/05-safety-rails.html#filesystem-permission) for the exact
 scope, including skipped disk caches and allowed in-memory programs.
 
 ---

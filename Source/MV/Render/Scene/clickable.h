@@ -42,7 +42,7 @@ namespace MV {
 			friend jai::access;
 			friend Node;
 		public:
-			static void jai_auto_bind(jai::dynamic_binder<Clickable>& a_binder);
+			static void jai_auto_bind(jai::dynamic_binder<Clickable>& a_builder);
 
 			typedef void ButtonSignalSignature(const std::shared_ptr<Clickable>&);
 			typedef void DragSignalSignature(const std::shared_ptr<Clickable>&, const Point<int>& startPosition, const Point<int>& deltaPosition);
@@ -62,12 +62,12 @@ namespace MV {
 
 			// Serialized through property_mgr (script receivers persist across save/load);
 			// emit through the generated onXSignal(args) emitter as before.
-			JAI_SIGNAL_PROPERTY(ButtonSignalSignature, onPress);
-			JAI_SIGNAL_PROPERTY(DropSignalSignature, onRelease);
-			JAI_SIGNAL_PROPERTY(ButtonSignalSignature, onAccept);
-			JAI_SIGNAL_PROPERTY(ButtonSignalSignature, onCancel);
-			JAI_SIGNAL_PROPERTY(DragSignalSignature, onDrag);
-			JAI_SIGNAL_PROPERTY(DropSignalSignature, onDrop);
+			JAI_SIGNAL(ButtonSignalSignature, onPress);
+			JAI_SIGNAL(DropSignalSignature, onRelease);
+			JAI_SIGNAL(ButtonSignalSignature, onAccept);
+			JAI_SIGNAL(ButtonSignalSignature, onCancel);
+			JAI_SIGNAL(DragSignalSignature, onDrag);
+			JAI_SIGNAL(DropSignalSignature, onDrop);
 
 			std::shared_ptr<Clickable> clickDetectionType(BoundsType a_type);
 

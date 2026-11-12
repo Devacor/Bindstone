@@ -493,7 +493,7 @@ public:
 			auto engine = jai::engine::make();
 			jai::stdlib::register_all(*engine);
 			jai::stdlib::register_spider(*engine);
-			engine->enable(jai::network);
+			engine->enable(jai::permissions::network);
 			engine->http_transport(MV::makeScriptHttpTransport());
 			auto text = [&](const std::string& a_source) { return engine->execute(a_source).as<std::string>(); };
 			{

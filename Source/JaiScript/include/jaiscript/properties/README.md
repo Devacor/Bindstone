@@ -347,7 +347,7 @@ Player back = jai::from_json<Player>(*eng, jai::to_json(*eng, players.front()));
 - The new object's `property_mgr` registers its own properties; the source keeps its
   registrations and stays destructible and assignable.
 - A copy or assignment carries plain values. `clone_to_target` is the copy that runs a custom clone.
-- A move takes the receivers the owner tracks and those of its `JAI_SIGNAL_PROPERTY` and
+- A move takes the receivers the owner tracks and those of its `JAI_SIGNAL` and
   observable members; a copy starts with none.
 - A class that declares properties is a `property_owner` level: properties declared by a
   subclass that is not one are not registered in its copies.

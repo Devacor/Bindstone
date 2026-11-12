@@ -434,7 +434,7 @@ class relocated_listener : public property_owner<relocated_listener> {
 public:
     JAI_PROPERTY((int), volume, 5);
     JAI_OBSERVABLE_PROPERTY((int), health, 100);
-    JAI_SIGNAL_PROPERTY(void(int), onHeard);
+    JAI_SIGNAL(void(int), onHeard);
 
     void hear(int a_value) { onHeardSignal(a_value); }
     void follow(jai::signal<void(int)>& a_signal, int& a_total) {

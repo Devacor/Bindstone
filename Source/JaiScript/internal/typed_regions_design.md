@@ -902,7 +902,7 @@ once, at compile time, and the run time keeps only the guards that keep those de
   parameters are values that convert without failing (bool, integers in range, numbers for a floating parameter, strings, any
   `script_value`): the vm calls the bound method with the ordinary conversions, the receiver and the arguments read in place, no
   bound method minted and no argument vector built. An argument of another kind or count declines to the ordinary call; an
-  overloaded name, a guarded binding (a privilege) or a class parameter has no lane; a field of the name keeps the ordinary call.
+  overloaded name, a guarded binding (a permission) or a class parameter has no lane; a field of the name keeps the ordinary call.
 
 Not built: typed host thunks for scalar host functions, one armed slow-path flag for depth, budget and debugger, compile-time
 frame shapes and site plans for general calls, proven initialization (a slot written before read still takes the null

@@ -54,7 +54,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <li><strong>An emit runs, on the emitting thread, the receivers connected when it started.</strong> A receiver that fails throws out of the emit.</li>
 <li><strong>Script sees every signal the same way:</strong> <code>connect(name, handler)</code>, <code>disconnect(name)</code>, <code>connected(name)</code>.</li>
 </ul>
-<p>Putting signal members on bound classes with <code>JAI_SIGNAL_PROPERTY</code> is covered in the <a href="02-dynamic-binder.html">binder chapter</a>. Code written against Boost.Signals2, Qt or a sigslot library has a mapping in <a id="coming-from-another-signal-library" href="../bridges/05-from-boost-signals2.html">From Boost.Signals2</a>.</p>
+<p>Putting signal members on bound classes with <code>JAI_SIGNAL</code> is covered in the <a href="02-dynamic-binder.html">binder chapter</a>. Code written against Boost.Signals2, Qt or a sigslot library has a mapping in <a id="coming-from-another-signal-library" href="../bridges/05-from-boost-signals2.html">From Boost.Signals2</a>.</p>
 <h2 id="jai-signal-private-emitter-public-view">jai::signal: private emitter, public view<a class="hlink" href="#jai-signal-private-emitter-public-view" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-cpp" data-sample="signals-door"><span class="cb-label">C++</span><pre><code class="lang-cpp">class Door {
 private:
@@ -119,7 +119,7 @@ std::cout &lt;&lt; &quot;final hp: &quot; &lt;&lt; hp.get() &lt;&lt; &quot;\n&qu
 <p>Hosts coming from Qt&#x27;s <code>Q_PROPERTY</code>, RTTR or refl-cpp have a mapping in <a href="../bridges/11-from-qt-properties.html">From Qt Properties, RTTR and refl-cpp</a>.</p>
 <h2 id="script-facing-integration">Connecting from script<a class="hlink" href="#script-facing-integration" aria-label="link">&#8203;</a></h2>
 <p>A script handler is a function (its parameters take the emit arguments positionally) or a string of source (run with the emitter&#x27;s <code>parameter_names</code> in scope). A C++ emit fires both. A signal reaches script by one of three routes:</p>
-<p id="auto-bound-signals"><strong>1. Auto-bound.</strong> On a <code>property_owner</code> class, <code>JAI_SIGNAL_PROPERTY(void(int64_t), onWave)</code> is the whole registration: the class's binder exposes the member by itself. This is the route to reach for first. With the <code>Spawner</code> of the <a href="02-dynamic-binder.html#scripted">binder chapter</a>:</p>
+<p id="auto-bound-signals"><strong>1. Auto-bound.</strong> On a <code>property_owner</code> class, <code>JAI_SIGNAL(void(int64_t), onWave)</code> is the whole registration: the class's binder exposes the member by itself. This is the route to reach for first. With the <code>Spawner</code> of the <a href="02-dynamic-binder.html#scripted">binder chapter</a>:</p>
 <div class="codeblock cb-jai" data-host="Spawner registration" data-sample="signals-spawner"><span class="cb-label">jaiscript &middot; needs the Spawner registration from the binder chapter</span><pre><code class="lang-jai">auto s = Spawner();
 s.onWave.connect("hud", [=](int wave) -&gt; void {
     print("wave {} incoming", wave);
@@ -178,7 +178,7 @@ silent after disconnect: true</code></pre></div>
 <li><strong>A named function passed directly</strong> (<code>connect("hud", on_wave)</code>) keeps the body it had when connected. Wrap it in a lambda, or re-run the connect, to follow reloads.</li>
 </ul>
 <h3 id="copies-and-moves">Copies and moves<a class="hlink" href="#copies-and-moves" aria-label="link">&#8203;</a></h3>
-<p>A <code>signal_emitter</code> neither copies nor moves. The emitter <code>JAI_SIGNAL_PROPERTY</code> declares (a <code>jai::member_signal_emitter</code>) and the one inside an <code>observable_property</code> follow the <code>property_owner</code> that holds them:</p>
+<p>A <code>signal_emitter</code> neither copies nor moves. The emitter <code>JAI_SIGNAL</code> declares (a <code>jai::member_signal_emitter</code>) and the one inside an <code>observable_property</code> follow the <code>property_owner</code> that holds them:</p>
 <ul>
 <li><strong>A move</strong> takes the receivers: they stay connected and run when the new object emits, and the moved-from object emits to nobody. Move assignment lets go of the target&#x27;s receivers first.</li>
 <li><strong>A copy</strong> keeps the script engine and parameter names and starts with no receivers. Copy assignment leaves the target&#x27;s receivers connected and sends an observable property&#x27;s receivers no change.</li>
@@ -186,7 +186,7 @@ silent after disconnect: true</code></pre></div>
 <li>A receiver that captured the old object&#x27;s address still holds that address. Reconnect one that reaches back into its owner.</li>
 </ul>
 <h3 id="connections-that-save">Connections that save<a class="hlink" href="#connections-that-save" aria-label="link">&#8203;</a></h3>
-<p><code>JAI_SIGNAL_PROPERTY</code> gives the signal a hidden property that serializes with the owner&#x27;s other properties, in JSON or binary.</p>
+<p><code>JAI_SIGNAL</code> gives the signal a hidden property that serializes with the owner&#x27;s other properties, in JSON or binary.</p>
 <ul>
 <li><strong>Saved:</strong> the signal&#x27;s <code>parameter_names</code> and each script-text receiver with its source, a named one under its id.</li>
 <li><strong>Not saved:</strong> C++ callbacks and script function receivers. The host reconnects them after a load.</li>

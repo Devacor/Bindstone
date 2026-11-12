@@ -193,12 +193,12 @@ public:
     JAI_PROPERTY((int64_t), level, 1);
     JAI_PROPERTY((double), interval, 2.5);
     JAI_OBSERVABLE_PROPERTY((int64_t), threat, 0);     // emits on_change(old, new)
-    JAI_SIGNAL_PROPERTY(void(int64_t), onWave);        // script-connectable, serializable
+    JAI_SIGNAL(void(int64_t), onWave);                 // script-connectable, serializable
 
     void spawn_wave() { total_waves_ += 1; onWaveSignal(total_waves_); }
     int64_t total_waves() const { return total_waves_; }
 
-    static void jai_auto_bind(auto& b) {               // what the declarations cannot say
+    static void jai_auto_bind(jai::dynamic_binder<Spawner>& b) {   // what the declarations cannot say
         b.method("spawn_wave", &Spawner::spawn_wave);
         b.method("total_waves", &Spawner::total_waves);
     }

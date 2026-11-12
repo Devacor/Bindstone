@@ -132,12 +132,12 @@ public:
     JAI_PROPERTY((int64_t), level, 1);
     JAI_PROPERTY((double), interval, 2.5);
     JAI_OBSERVABLE_PROPERTY((int64_t), threat, 0);     // emits on_change(old, new)
-    JAI_SIGNAL_PROPERTY(void(int64_t), onWave);        // script-connectable, serializable
+    JAI_SIGNAL(void(int64_t), onWave);                 // script-connectable, serializable
 
     void spawn_wave() { total_waves_ += 1; onWaveSignal(total_waves_); }
     int64_t total_waves() const { return total_waves_; }
 
-    static void jai_auto_bind(auto&amp; b) {               // what the declarations cannot say
+    static void jai_auto_bind(jai::dynamic_binder&lt;Spawner&gt;&amp; b) {   // what the declarations cannot say
         b.method("spawn_wave", &amp;Spawner::spawn_wave);
         b.method("total_waves", &amp;Spawner::total_waves);
     }
@@ -149,7 +149,7 @@ private:
 <li><code>property_owner&lt;Spawner&gt;</code> gives the class a <code>property_mgr</code> and, at program start, registers its serialization identity (the <code>$type</code> name and the polymorphic load factory) and its binding, under that same name.</li>
 <li><code>JAI_PROPERTY((type), name, default)</code> declares a <code>jai::property&lt;T&gt;</code> member that behaves like a <code>T</code> in C++. The type is parenthesized so template commas survive the macro.</li>
 <li><code>JAI_OBSERVABLE_PROPERTY</code> adds an <code>on_change(old, new)</code> signal that fires on a write that changes the value, from either side.</li>
-<li><code>JAI_SIGNAL_PROPERTY(signature, name)</code> declares a private emitter you fire (<code>name</code> + <code>Signal</code>, here <code>onWaveSignal(n)</code>), a public <code>jai::signal</code> view others connect to, and a hidden property that saves it. <code>JAI_SIGNAL_PROPERTY_AS(signature, name, emitter)</code> names the emitter yourself.</li>
+<li><code>JAI_SIGNAL(signature, name)</code> declares a private emitter you fire (<code>name</code> + <code>Signal</code>, here <code>onWaveSignal(n)</code>), a public <code>jai::signal</code> view others connect to, and a hidden property that saves it. <code>JAI_SIGNAL_AS(signature, name, emitter)</code> names the emitter yourself.</li>
 <li><code>jai_auto_bind</code> names only what the declarations cannot say, the methods; the binder binds the rest by itself (<a href="#automatic-surface">below</a>). A class shared by several files declares it in the header, <code>static void jai_auto_bind(jai::dynamic_binder&lt;Spawner&gt;&amp; b);</code> (<code>&lt;jaiscript/jaiscript_fwd.hpp&gt;</code> declares the binder), and defines it in its <code>.cpp</code> file, so its bindings compile once.</li>
 </ul>
 <p>The host binds every <code>property_owner</code> class and every <code>jai::registrar</code> in the binary into an engine with one call:</p>
@@ -169,7 +169,7 @@ public:
 jai::bind_registrar(*eng, toolContext);                                 // HostContext's registrars, then ToolContext's
 jai::bind_registrar(*other, toolContext, jai::match_exact_context_type);  // ToolContext's alone</code></pre></div>
 <p>A class tagged with <code>jai::context&lt;Ctx&gt;</code> binds only in a call whose context is <code>Ctx</code> or extends it; an untagged one binds in every call. A subclass inherits its base&#x27;s context, and a tag of its own may only narrow it: a context that lists the base&#x27;s. Widening it, an unrelated context, or bases with different contexts and no tag narrowing both are compile errors. The tag decides where a class binds, never its <code>$type</code>: a tagged class saves and loads in any engine.</p>
-<p>An engine that should not know some registered types filters them by exact type: <code>jai::bind_registrar(*eng, jai::except&lt;EditorPanel, DebugOverlay&gt;())</code> binds every class but those two, and <code>jai::bind_registrar(*eng, jai::only&lt;Monster, Loot&gt;())</code> only those. The context form takes the filter after its context, beside <code>jai::match_exact_context_type</code> in either order. A filter that admits a class and leaves out a registrar&#x27;s class it derives from throws <code>bind_registrar: 'Glow' derives from 'Sprite', which the filter leaves out; bind both or leave out 'Glow' too</code>, and one that names a type with neither a registrar for the context nor a binding of its own throws as well. A left-out <code>property_owner</code> base with no registrar binds anyway, as the base of the class the filter admits. The filter decides which types a script can name; <a href="05-safety-rails.html">privileges</a> decide what their calls may do.</p>
+<p>An engine that should not know some registered types filters them by exact type: <code>jai::bind_registrar(*eng, jai::except&lt;EditorPanel, DebugOverlay&gt;())</code> binds every class but those two, and <code>jai::bind_registrar(*eng, jai::only&lt;Monster, Loot&gt;())</code> only those. The context form takes the filter after its context, beside <code>jai::match_exact_context_type</code> in either order. A filter that admits a class and leaves out a registrar&#x27;s class it derives from throws <code>bind_registrar: 'Glow' derives from 'Sprite', which the filter leaves out; bind both or leave out 'Glow' too</code>, and one that names a type with neither a registrar for the context nor a binding of its own throws as well. A left-out <code>property_owner</code> base with no registrar binds anyway, as the base of the class the filter admits. The filter decides which types a script can name; <a href="05-safety-rails.html">permissions</a> decide what their calls may do.</p>
 
 <h3 id="three-doors">What makes a type visible, and when<a class="hlink" href="#three-doors" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th>Step</th><th>Effect</th></tr></thead><tbody>
@@ -394,7 +394,7 @@ dot 11.0</code></pre></div>
 <div class="tablewrap"><table><thead><tr><th>Verb</th><th>What it binds</th></tr></thead><tbody>
 <tr><td><code>.constructor&lt;Args...&gt;(options...)</code></td><td>A constructor overload, resolved by arity and C++ parameter types. The options are <code>.method</code>'s.</td></tr>
 <tr><td><code>.method(name, &amp;T::fn)</code>, <code>.method(name, lambda)</code></td><td>A member function, or a lambda whose first parameter is <code>T&amp;</code> or <code>const T&amp;</code>.</td></tr>
-<tr><td><code>.method(name, fn, options...)</code>, <code>.static_method(name, fn, options...)</code></td><td>The trailing options, any number in any order: privileges the call requires, <code>jai::nodiscard</code> (<a href="17-host-api.html#nodiscard-host">a result the script must use</a>) and <code>jai::serial</code> (<a href="#parallel-calls">kept out of parallel bodies</a>): <code>jai::nodiscard, jai::serial, jai::filesystem</code>. <code>add_function</code> and <code>add_variadic_function</code> take the same list.</td></tr>
+<tr><td><code>.method(name, fn, options...)</code>, <code>.static_method(name, fn, options...)</code></td><td>The trailing options, any number in any order: permissions the call requires, <code>jai::nodiscard</code> (<a href="17-host-api.html#nodiscard-host">a result the script must use</a>) and <code>jai::serial</code> (<a href="#parallel-calls">kept out of parallel bodies</a>): <code>jai::nodiscard, jai::serial, jai::permissions::filesystem</code>. <code>add_function</code> and <code>add_variadic_function</code> take the same list.</td></tr>
 <tr><td><code>.property(name, &amp;T::member)</code></td><td>Field access, and a key of the class&#x27;s archive record when it has no route of its own.</td></tr>
 <tr><td><code>.transient_property(name, &amp;T::member)</code></td><td>Field access its archive record leaves out.</td></tr>
 <tr><td><code>.base_class&lt;Base&gt;()</code></td><td>An inheritance edge.</td></tr>
@@ -403,7 +403,7 @@ dot 11.0</code></pre></div>
 <h3 id="automatic-surface">What a binder binds by itself<a class="hlink" href="#automatic-surface" aria-label="link">&#8203;</a></h3>
 <p>A <code>dynamic_binder&lt;T&gt;</code>, a registrar's included, binds what <code>T</code> declares before the chain's first verb. A verb that binds the same name and signature replaces the automatic binding.</p>
 <div class="tablewrap"><table><thead><tr><th>What T declares</th><th>What binds</th></tr></thead><tbody>
-<tr><td>A <code>property_owner</code> level</td><td>Its base chain, its <code>JAI_PROPERTY</code> fields of number, <code>bool</code> and string type, its observables and its <code>JAI_SIGNAL_PROPERTY</code> signals.</td></tr>
+<tr><td>A <code>property_owner</code> level</td><td>Its base chain, its <code>JAI_PROPERTY</code> fields of number, <code>bool</code> and string type, its observables and its <code>JAI_SIGNAL</code> signals.</td></tr>
 <tr><td>A public default constructor</td><td><code>T()</code> (or <code>T(engine*)</code>), for a class that is not abstract.</td></tr>
 <tr><td>A public copy constructor</td><td>The copy every value of the class makes: <code>T b = a;</code>, a by-value argument, an element stored by value. Script copies a host object and never moves one, so a move constructor binds nothing.</td></tr>
 <tr><td>An operator over <code>T</code> operands, as a member or a free function argument-dependent lookup finds</td><td>The operator: <code>+ - * / % &amp; | ^ &lt;&lt; &gt;&gt;</code>, <code>== != &lt; &lt;= &gt; &gt;= &lt;=&gt;</code>, the compound forms, unary <code>- + ~</code>, <code>++</code> and <code>--</code> in both forms, <code>[]</code> by an integer or a string index, and a single <code>()</code>. One reached only through a conversion, or one C++ rewrites from another, binds nothing: script derives <code>!=</code> from <code>==</code> and the comparisons from <code>&lt;=&gt;</code> itself.</td></tr>
@@ -480,7 +480,7 @@ C++ method 'publish' of 'Meter' is marked jai::serial and cannot be called in a 
 parallel_for: host function 'log_line' is marked jai::serial and cannot be called in a parallel body at 10:37</code></pre></div>
 
 <h2 id="signals-one-view-every-signature">Signals: one view, every signature<a class="hlink" href="#signals-one-view-every-signature" aria-label="link">&#8203;</a></h2>
-<p>A <code>JAI_SIGNAL_PROPERTY</code> is exposed by the binder itself; a plain <code>jai::signal&lt;Sig&gt;</code> or <code>signal_emitter&lt;Sig&gt;</code> member by one <code>.property("name", &amp;T::member)</code> line. Script sees the same three verbs either way:</p>
+<p>A <code>JAI_SIGNAL</code> is exposed by the binder itself; a plain <code>jai::signal&lt;Sig&gt;</code> or <code>signal_emitter&lt;Sig&gt;</code> member by one <code>.property("name", &amp;T::member)</code> line. Script sees the same three verbs either way:</p>
 <div class="codeblock cb-jai" data-host="Spawner registration" data-sample="binder-connect"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">s.onWave.connect("hud", [=](int wave) -&gt; void { print("wave {}", wave); });   // named function receiver
 s.onWave.connect("logger", "print(\"wave logged\");");     // named script-text receiver
 s.onWave.connected("hud");                                 // true

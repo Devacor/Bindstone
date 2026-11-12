@@ -1,4 +1,4 @@
-// Signal auto-binding: declaring a JAI_SIGNAL_PROPERTY (or exposing a plain
+// Signal auto-binding: declaring a JAI_SIGNAL (or exposing a plain
 // signal member via .property) is the whole registration — script connects
 // through the generic "Signal" view with no bind_signal_type ceremony, and
 // typed per-signature bindings keep precedence when present.
@@ -22,7 +22,7 @@ class scoreboard : public jai::property_owner<scoreboard> {
 public:
 	typedef void ScoreSignature(int);
 
-	JAI_SIGNAL_PROPERTY(ScoreSignature, on_scored);
+	JAI_SIGNAL(ScoreSignature, on_scored);
 
 	jai::signal_emitter<void(int)> onTickedSignal;   // plain pair, the Clickable onEnabled shape
 	jai::signal<void(int)> onTicked{ onTickedSignal };
@@ -36,7 +36,7 @@ public:
 class base_widget : public jai::property_owner<base_widget> {
 public:
 	typedef void PressSignature(int);
-	JAI_SIGNAL_PROPERTY(PressSignature, on_press);
+	JAI_SIGNAL(PressSignature, on_press);
 	void press(int v) { on_pressSignal(v); }
 };
 
@@ -49,7 +49,7 @@ public:
 class door : public jai::property_owner<door> {
 public:
 	typedef void OpenSignature(int);
-	JAI_SIGNAL_PROPERTY_AS(OpenSignature, on_open, open_emitter);
+	JAI_SIGNAL_AS(OpenSignature, on_open, open_emitter);
 	void open(int v) { open_emitter(v); }
 	void add_text_receiver(const std::string& id, const std::string& script) { open_emitter.connect(id, script); }
 	bool has_receiver(const std::string& id) { return open_emitter.connected(id); }
@@ -59,7 +59,7 @@ public:
 class relay : public jai::property_owner<relay> {
 public:
 	typedef void PingSignature(int);
-	JAI_SYNCHRONIZED_SIGNAL_PROPERTY(PingSignature, on_ping);
+	JAI_SYNCHRONIZED_SIGNAL(PingSignature, on_ping);
 
 	jai::signal_emitter<void(int), jai::signal_synchronized> onPulseSignal;
 	jai::signal<void(int), jai::signal_synchronized> onPulse{ onPulseSignal };

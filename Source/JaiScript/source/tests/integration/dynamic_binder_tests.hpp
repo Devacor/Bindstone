@@ -189,7 +189,7 @@ class DeclaredBeacon : public property_owner<DeclaredBeacon> {
 public:
     JAI_PROPERTY((int64_t), range, 4);
     DeclaredBeacon() {}
-    static void jai_auto_bind(auto& a_binder) {
+    static void jai_auto_bind(dynamic_binder<DeclaredBeacon>& a_binder) {
         a_binder.method("boosted", &DeclaredBeacon::boosted);
     }
 private:
@@ -524,7 +524,7 @@ public:
             .method("wide", static_cast<std::string (LaneUser::*)(int64_t) const>(&LaneUser::wide))
             .method("wide", static_cast<std::string (LaneUser::*)(int32_t) const>(&LaneUser::wide))
             .method("add_to", &LaneUser::add_to)
-            .method("version", &LaneUser::version, jai::filesystem)
+            .method("version", &LaneUser::version, jai::permissions::filesystem)
             .build();
         return eng;
     }

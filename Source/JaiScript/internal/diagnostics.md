@@ -37,21 +37,21 @@ Symbol arguments: `{0}`/`{1}` are the two `checked_result` symbol slots. Base-ty
 are interned once at backend init (`base_type_symbols`), arity counts once at init
 (`arity_count_symbols`), names come from parse-time symbols, class names from their definitions.
 
-## Engine privileges
+## Engine permissions
 
-The engine owns the grants; script-visible flags and `reflect::is_enabled` do not
-authorize an operation. Protected operations share `engine::require_privilege`.
+The engine owns the grants; script-visible flags and `jai::permissions::is_enabled` do not
+authorize an operation. Protected operations share `engine::require_permission`.
 
 | Text | Meaning |
 | --- | --- |
-| `Insufficient privilege: filesystem.` | A filesystem operation or location query was refused (`insufficient_privilege`). Catchable; an unhandled error reaches the host. |
-| `Insufficient privilege: scoped_template.`, `Insufficient privilege: network.` | The other built-in slots, the same way. |
-| `Insufficient privilege: {name}.` | A binding requires a disabled host privilege (`insufficient_privilege`): its `register_privilege` name, else its slot number, parked when the guard is made so a denial in a parallel region needs no interning. |
-| `reflect::is_enabled expects at least 1 argument` | The query needs one or more slot numbers. |
-| `reflect::is_enabled expects valid privilege flags` | An argument is not an integer from 0 to 255. |
-| `Privilege slot out of range` | A privilege enum value outside 0 to 255 (a compile error in a constant expression), or `register_privilege` on a built-in slot. |
-| `Privilege name must not be empty` | `register_privilege` needs a nonempty name. |
-| `Cannot change privileges during a parallel region` | A host attempted to name a privilege or modify grants before the region's workers joined. |
+| `Insufficient permission: filesystem.` | A filesystem operation or location query was refused (`insufficient_permission`). Catchable; an unhandled error reaches the host. |
+| `Insufficient permission: scoped_template.`, `network.`, `debug.`, `trusted.`, `untrusted.` | The other built-in permissions, the same way; the engine itself enforces only filesystem, scoped_template and network. |
+| `Insufficient permission: {name}.` | A binding requires a disabled host permission (`insufficient_permission`): its `register_permission` name, else its id, parked when the guard is made so a denial in a parallel region needs no interning. |
+| `jai::permissions::is_enabled expects at least 1 argument` | The query needs one or more ids. |
+| `jai::permissions::is_enabled expects permission ids` | An argument is not an integer that fits an `int32_t`. |
+| `A built-in permission keeps its name` | `register_permission` on one of `jai::permissions`. |
+| `Permission name must not be empty` | `register_permission` needs a nonempty name. |
+| `Cannot change permissions during a parallel region` | A host attempted to name a permission or modify grants before the region's workers joined. |
 
 Grant changes apply to future operations, not work already started. Configure on
 the engine thread (including a reentrant C++ callback) or while idle, never

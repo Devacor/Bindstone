@@ -8,7 +8,7 @@ program scope; the connector answers `evaluate` empty and does not handle `setVa
 `jai::debug::listen(engine&, port = default_port, host)` builds a connector, attaches it and returns it
 (`connector.hpp`); `jai::debug::default_port` is 52472. Incoming DAP breakpoint paths normalize on the script
 thread at its next debug sync, through `std::filesystem::canonical` (`normalize_bp_path` in controller.cpp) while
-the engine's filesystem privilege is enabled, so a VS Code path binds against the engine's canonical node paths
+the engine's filesystem permission is enabled, so a VS Code path binds against the engine's canonical node paths
 regardless of drive-letter case or slash direction. With filesystem access disabled, incoming paths stay exact
 virtual source labels and no normalization metadata calls run. Native `controller::set_breakpoints` always takes
 exact labels. The listener takes no password, so nothing in the package listens unasked: the runner takes
@@ -213,7 +213,7 @@ sketch above is the shape; these are the rules.
   and DAP source paths. Empty line sets are tombstones. At a debug sync the script thread applies
   changed records in sequence order to its own installed table, so equivalent path spellings
   replace or clear each other deterministically. Only this thread reads the engine's plain
-  privilege state or normalizes paths. Permission is checked when the update is applied, not when
+  permission state or normalizes paths. Permission is checked when the update is applied, not when
   the transport acknowledges it; previously installed breakpoints are not canceled by revocation.
   Repeated requests replace a record: retained metadata is bounded by distinct raw paths since
   `clear_breakpoints()`, which also resets the installed table at the next enabled sync. There is

@@ -76,7 +76,7 @@ namespaces' `Rect`s are two classes and a global `Rect` is a third.
 ## Host-registered entries
 
 The host can place values in a namespace directly (`script_namespace_data::variables`), the way the engine
-registers `string::to_lower`, `jai::filesystem` and `reflect::is_enabled`. A qualified host registration (`add_global("game::tick", v)`, `add_function("game::spawn", f)`) is
+registers `string::to_lower`, `jai::permissions::filesystem` and `jai::permissions::is_enabled`. A qualified host registration (`add_global("game::tick", v)`, `add_function("game::spawn", f)`) is
 published into the namespace's entries the same way, and the qualified global stays what the host API names.
 Such an entry is read through `ns::name`, and by its bare name in the namespace's code (a function's per-call
 layer, a class's layer refilled at each declaration and registration); it is read-only from script: a

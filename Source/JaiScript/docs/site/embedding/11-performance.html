@@ -107,11 +107,11 @@ ratio ranged from 1.8 to 2.3 round to round).</p>
 the kernel for 0.5&nbsp;s, median of five, implementations interleaved, checksums equal), idiomatic typed JaiScript
 takes a geometric mean of <strong>1.09×</strong> Lua 5.5.1's time, and the same algorithms with <code>var</code>
 everywhere 1.35× (measured 2026-11-12 with every sample pinned to one P core; the four noisiest kernels took ten
-samples).</p>
+samples; LuaJIT's row, 2026-11-04).</p>
 <div class="tablewrap" data-shared="kernels" data-source><table><thead><tr><th>VM time / Lua time</th><th>kernels</th></tr></thead><tbody>
 <tr><td>widest wins</td><td>mandelbrot 0.04 (two float locals against Lua's complex-number tables), sha256 0.13, float-to-string 0.32, string-to-float 0.93</td></tr>
 <tr><td>widest losses</td><td>treap 5.5, host calls 4.1, n-queens 3.2, dictionary 2.5, n-bodies 2.4, sort 1.9, recursive fibonacci 1.5</td></tr>
-<tr><td>LuaJIT's JIT, for scale (2026-11-04)</td><td>0.01 to 0.73 across the suite</td></tr>
+<tr><td>LuaJIT's JIT, for scale</td><td>0.01 to 0.73 across the suite</td></tr>
 </tbody></table></div>
 <p><strong>Microbenchmarks</strong>, µs per iteration, fastest of five runs:</p>
 <div class="tablewrap" data-shared="micro" data-source><table><thead><tr><th>benchmark</th><th>Jai VM</th><th>Lua 5.4</th><th>Squirrel</th><th>ChaiScript</th></tr></thead><tbody>

@@ -347,7 +347,7 @@ suite: sorting, hashing, trees, number formatting), each the VM's time over Lua 
 <div class="tablewrap" data-shared="kernels"><table><thead><tr><th>VM time / Lua time</th><th>kernels</th></tr></thead><tbody>
 <tr><td>widest wins</td><td>mandelbrot 0.04 (two float locals against Lua's complex-number tables), sha256 0.13, float-to-string 0.32, string-to-float 0.93</td></tr>
 <tr><td>widest losses</td><td>treap 5.5, host calls 4.1, n-queens 3.2, dictionary 2.5, n-bodies 2.4, sort 1.9, recursive fibonacci 1.5</td></tr>
-<tr><td>LuaJIT's JIT, for scale (2026-11-04)</td><td>0.01 to 0.73 across the suite</td></tr>
+<tr><td>LuaJIT's JIT, for scale</td><td>0.01 to 0.73 across the suite</td></tr>
 </tbody></table></div>
 <p><strong>Recursion against ChaiScript</strong> measures the cost of a script function call: <code>fib(n)</code>,
 called from C++, in milliseconds per call tree.</p>

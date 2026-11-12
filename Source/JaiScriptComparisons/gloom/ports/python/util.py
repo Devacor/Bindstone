@@ -49,6 +49,7 @@ PAL_KEYS = {}   # r<<16|g<<8|b -> index
 PAL_FG = []     # ESC[38;2;r;g;bm per index
 PAL_BG = []     # ESC[48;2;r;g;bm per index
 PAL_LUM = []    # 2r+3g+b per index
+PAL_RGB = []    # r<<16|g<<8|b per index (the showcase tints read it back)
 
 
 def rgb_idx(r, g, b):
@@ -64,6 +65,7 @@ def rgb_idx(r, g, b):
 	PAL_FG.append(f"{ESC}[38;2;{r};{g};{b}m")
 	PAL_BG.append(f"{ESC}[48;2;{r};{g};{b}m")
 	PAL_LUM.append(r * 2 + g * 3 + b)
+	PAL_RGB.append(key)
 	return idx
 
 

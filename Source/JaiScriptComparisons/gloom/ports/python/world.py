@@ -13,9 +13,11 @@ TILE_TO_KIND = (0, 1, 2, 3, 4, 5, 6, 1, 7, 8)
 
 
 def rebuild_mapkind():
+	"""bumps g.mapgen like the reference's mappack rebuild (the showcase light bake keys on it)"""
 	g = state.G
 	t2k = TILE_TO_KIND
 	g.mapkind = [t2k[t] for t in g.tiles]
+	g.mapgen += 1
 
 
 def tile_at(x, y):

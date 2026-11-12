@@ -1,19 +1,27 @@
 """The renderer. A flat truecolor palette-index pixel grid blitted to the
 terminal through sub-cell block glyphs (half / quad / sext), a straight serial
-transliteration of the reference pipeline: one DDA ray per cell column,
-prebaked background copy, lazy texture strips, far-to-near billboards,
-z-clipped particles, then the glyph row builders. Locals-heavy throughout:
-every hot table and function is hoisted (that IS idiomatic fast Python)."""
+transliteration of the reference pipeline. The reference look: one DDA ray per
+cell column, prebaked background copy, lazy texture strips. The showcase look
+(look.py tables): one ray per pixel column, then each column top to bottom:
+textured ceiling, the lit wall slice, textured floor with its stains, every
+surface through its light texel. Then far-to-near billboards, z-clipped
+particles, (showcase) the gun in hand and the feel's overlays, then the glyph
+row builders. Locals-heavy throughout: every hot table and function is hoisted
+(that IS idiomatic fast Python)."""
 
 from math import cos, floor, sin
 from operator import itemgetter
 
 import enemies
+import look
 import particles
 import state
-from data import ENEMY_DEFS, ITEM_DEFS, MAPS
+from colors import cclamp, cmul, color_idx, cadd, cscale, mix_rgb, rgb
+from data import ENEMY_DEFS, ITEM_DEFS, MAPS, WEAPONS
 from defs import ARTS
+from look import FAR_TEXTURE, FLOOR_TONES, MOODS, TONE_BLOOD, TONE_BLOOD_DRY, TONE_SCORCH, WALL_TABLE_STRIDE
 from util import ESC, idivt, PAL_BG, PAL_FG, PAL_LUM, rgb_idx, trunc
+from viewmodel import VIEWMODEL_NAMES, VIEWMODELS
 
 PIXW = 2        # pixels per cell horizontally (set by gloom.boot)
 PIXH = 2        # pixels per cell vertically
@@ -30,11 +38,29 @@ AM_SELF = 0
 AM_HEAD = 0
 HURT_RED = 0
 STRIPS = {}     # lazy 33-tall wall texture strips keyed by (kind,side,shade,tx)
+PIX = []        # the pixel grid (G.pix), for the feel's overlays
+HORIZON = 0     # the pixel row the eye looks along: vh // 2, moved by bob and shake (showcase)
+
+# the showcase look's per-map tables (build_showcase_tables)
+LWALL = []      # [kind][variant][side][shade][tone] palette indices
+LFLOOR = []     # [variant][shade][tone]
+LCEIL = []
+WALLTEX = []    # wall tones [far][kind][ty][tx]
+FLOORTEX = []   # floor tones [far][variant][v][u]
+CEILTEX = []
+FLOOR_VAR = []  # per tile: which floor variant, times 256
+CEIL_VAR = []   # per tile: 256 under a lamp
+STAINS = []     # per tile 8x8 decal tones, 0 none
+ROWD = []       # per pixel row: floor or ceiling distance
+ROWS_SHADE = []
+ROWS_FAR = []   # per pixel row: 1 past FAR_TEXTURE
 
 
 def init_render():
 	global RESET, HALFG, QUADG, SEXTG, AM_COLS, AM_FLOOR, AM_BLINK, AM_ITEM
-	global AM_ENEMY, AM_SELF, AM_HEAD, HURT_RED
+	global AM_ENEMY, AM_SELF, AM_HEAD, HURT_RED, PIX, HORIZON
+	PIX = state.G.pix
+	HORIZON = state.G.vh // 2
 	RESET = ESC + "[0m"
 	rgb_idx(0, 0, 0)                 # first interned color is black
 	HALFG = chr(0x2580)
@@ -94,6 +120,10 @@ def _push_wall_tones(base, accent):
 def build_render_tables(mi):
 	global STRIPS
 	g = state.G
+	g.lutc = {}
+	if state.SHOWCASE:
+		build_showcase_tables(mi)
+		return
 	theme = MAPS[mi]["theme"]
 	WALLT.clear()
 	# kind 0 (never rendered): flat dark
@@ -141,7 +171,6 @@ def build_render_tables(mi):
 	g.bg = bg
 	# wall tone strips build lazily per (kind, side, shade, tx) combination
 	STRIPS = {}
-	g.lutc = {}
 
 
 def _tex_tone(kind, tx, ty):
@@ -194,11 +223,15 @@ def build_strip(kind, side, shade, tx):
 _BAND_LUM = (1.0, 0.88, 0.76, 0.64, 0.52, 0.42, 0.32, 0.24)
 
 
-def sprite_lut(name, band, flash):
+def sprite_lut(name, band, flash, variant):
 	g = state.G
-	key = (name, band, flash)
+	key = (name, band, flash, variant)
 	lut = g.lutc.get(key)
 	if lut is not None:
+		return lut
+	if state.SHOWCASE:
+		lut = look.showcase_sprite_lut(name, band, flash, variant)
+		g.lutc[key] = lut
 		return lut
 	art = ARTS[name]
 	lum = _BAND_LUM[band]
@@ -220,13 +253,113 @@ def render_view():
 	zbuf = g.zbuf
 	vw = g.vw
 	vh = g.vh
-	pang = g.pang
+	showcase = state.SHOWCASE
+	pang = g.pang + g.feel.yaw if showcase else g.pang
 	dirx = cos(pang)
 	diry = sin(pang)
 	planex = 0.0 - diry * 0.78
 	planey = dirx * 0.78
 	px = g.px
 	py = g.py
+	if showcase:
+		showcase_view(px, py, dirx, diry, planex, planey)
+	else:
+		reference_view(px, py, dirx, diry, planex, planey)
+
+	# --- 3. billboards: enemies, pickups, projectiles (far to near) ---
+	det = planex * diry - dirx * planey
+	if -0.0001 < det < 0.0001:
+		det = 0.0001
+	inv = 1.0 / det
+	sp = []
+	for e in g.enemies:
+		collect_billboard(sp, e.x, e.y, enemies.enemy_art(e), ENEMY_DEFS[e.kind]["size"], 0.0,
+			1 if e.flash > 0 else 0, inv, dirx, diry, planex, planey)
+	for it in g.items:
+		if it[3] != 1:
+			idef = ITEM_DEFS[it[0]]
+			collect_billboard(sp, it[1], it[2], idef["art"], idef["size"], 0.0,
+				0, inv, dirx, diry, planex, planey)
+	for s in g.shots:
+		sk = s[0]
+		art = "pr_spit" if sk == 1 else ("pr_fire" if sk == 2 else "pr_hex")
+		collect_billboard(sp, s[1], s[2], art, 0.16, 0.35, 0, inv, dirx, diry, planex, planey)
+	# far first (stable sort keeps equal depths in collect order)
+	sp.sort(key=itemgetter(0), reverse=True)
+	for rec in sp:
+		draw_billboard(rec, pix, zbuf)
+
+	# --- 4. particles: pixel confetti with z-buffer clipping ---
+	pcols = particles.PART_COLS
+	half2 = HORIZON
+	pxw = PIXW
+	pxh = PIXH
+	for prt in g.fx.pool:
+		pk = prt[0]
+		if pk != 0:
+			rx = prt[1] - px
+			ry = prt[2] - py
+			depth = inv * (planex * ry - planey * rx)
+			if 0.15 <= depth <= 14.0:
+				ttx = inv * (diry * rx - dirx * ry)
+				scx = trunc((vw / 2.0) * (1.0 + ttx / depth))
+				if 0 <= scx < vw:
+					if depth < zbuf[scx]:
+						span = 1.0 * vh / depth
+						pyx = trunc(half2 + span * 0.5 - prt[3] * span)
+						life = prt[7]
+						phase = 3 - min(3, life // 5)
+						color = pcols[pk * 4 + phase]
+						psz = trunc(0.07 * span) + 1
+						if psz > 3:
+							psz = 3
+						psx = (psz * 2 * pxw) // pxh     # square-ish
+						if psx < 1:
+							psx = 1
+						for oy in range(psz):
+							yy = pyx + oy
+							if 0 <= yy < vh:
+								rowb = yy * vw
+								for ox in range(psx):
+									xx = scx + ox
+									if xx < vw and depth < zbuf[xx]:
+										pix[rowb + xx] = color
+
+	# --- 5. the gun in hand, overlays: the feel's (showcase), automap, hurt flash (reference) ---
+	if showcase:
+		draw_viewmodel()
+		g.feel.overlay(vw, vh)
+	if g.automap:
+		draw_automap(pix, g.tiles)
+	if not showcase and g.hurt_flash > 0:
+		red = HURT_RED
+		thick = pxw * 2
+		for x4 in range(vw):
+			pix[x4] = red
+			pix[vw + x4] = red
+			pix[(vh - 2) * vw + x4] = red
+			pix[(vh - 1) * vw + x4] = red
+		for y4 in range(vh):
+			rb = y4 * vw
+			for t4 in range(thick):
+				pix[rb + t4] = red
+				pix[rb + vw - 1 - t4] = red
+
+	# --- 6. pixel grid -> sub-cell glyph rows ---
+	if PIXH == 3:
+		return rows_sext(pix)
+	if PIXW == 2:
+		return rows_quad(pix)
+	return rows_half(pix)
+
+
+def reference_view(px, py, dirx, diry, planex, planey):
+	"""the reference look's rays and columns"""
+	g = state.G
+	pix = g.pix
+	zbuf = g.zbuf
+	vw = g.vw
+	vh = g.vh
 	mw = g.mw
 	mk = g.mapkind
 
@@ -322,87 +455,294 @@ def render_view():
 				tacc += tstep
 				gi += vw
 
-	# --- 3. billboards: enemies, pickups, projectiles (far to near) ---
-	det = planex * diry - dirx * planey
-	if -0.0001 < det < 0.0001:
-		det = 0.0001
-	inv = 1.0 / det
-	sp = []
-	for e in g.enemies:
-		collect_billboard(sp, e.x, e.y, enemies.enemy_art(e), ENEMY_DEFS[e.kind]["size"], 0.0,
-			1 if e.flash > 0 else 0, inv, dirx, diry, planex, planey)
-	for it in g.items:
-		if it[3] != 1:
-			idef = ITEM_DEFS[it[0]]
-			collect_billboard(sp, it[1], it[2], idef["art"], idef["size"], 0.0,
-				0, inv, dirx, diry, planex, planey)
-	for s in g.shots:
-		sk = s[0]
-		art = "pr_spit" if sk == 1 else ("pr_fire" if sk == 2 else "pr_hex")
-		collect_billboard(sp, s[1], s[2], art, 0.16, 0.35, 0, inv, dirx, diry, planex, planey)
-	# far first (stable sort keeps equal depths in collect order)
-	sp.sort(key=itemgetter(0), reverse=True)
-	for rec in sp:
-		draw_billboard(rec, pix, zbuf)
 
-	# --- 4. particles: pixel confetti with z-buffer clipping ---
-	pcols = particles.PART_COLS
-	half2 = vh // 2
-	pxh = PIXH
-	for prt in g.fx.pool:
-		pk = prt[0]
-		if pk != 0:
-			rx = prt[1] - px
-			ry = prt[2] - py
-			depth = inv * (planex * ry - planey * rx)
-			if 0.15 <= depth <= 14.0:
-				ttx = inv * (diry * rx - dirx * ry)
-				scx = trunc((vw / 2.0) * (1.0 + ttx / depth))
-				if 0 <= scx < vw:
-					if depth < zbuf[scx]:
-						span = 1.0 * vh / depth
-						pyx = trunc(half2 + span * 0.5 - prt[3] * span)
-						life = prt[7]
-						phase = 3 - min(3, life // 5)
-						color = pcols[pk * 4 + phase]
-						psz = trunc(0.07 * span) + 1
-						if psz > 3:
-							psz = 3
-						psx = (psz * 2 * pxw) // pxh     # square-ish
-						if psx < 1:
-							psx = 1
-						for oy in range(psz):
-							yy = pyx + oy
-							if 0 <= yy < vh:
-								rowb = yy * vw
-								for ox in range(psx):
-									xx = scx + ox
-									if xx < vw and depth < zbuf[xx]:
-										pix[rowb + xx] = color
+def showcase_view(px, py, dirx, diry, planex, planey):
+	"""the showcase look's view: a ray per pixel column, then each column top to
+	bottom: textured ceiling, the lit wall slice, textured floor with its stains.
+	Every surface reads its light texel and a lit table."""
+	global HORIZON
+	g = state.G
+	pix = g.pix
+	zb = g.zbuf
+	vw = g.vw
+	vh = g.vh
+	mw = g.mw
+	mk = g.mapkind
+	horizon = vh // 2 + g.feel.pitch
+	HORIZON = horizon
+	lights = g.lights
+	lights.frame(g.feel.sources)
 
-	# --- 5. overlays: automap, hurt flash ---
+	# the floor or ceiling distance and shade of every pixel row
+	hz = float(horizon)
+	rowd = ROWD
+	rows_shade = ROWS_SHADE
+	rows_far = ROWS_FAR
+	for y in range(vh):
+		k = y + 0.5 - hz
+		if k < 0.0:
+			k = 0.0 - k
+		d = vh / (2.0 * k) if k > 0.3 else 60.0
+		rowd[y] = d
+		shade = 15 - int(d * 1.55)
+		rows_shade[y] = 0 if shade < 0 else shade
+		rows_far[y] = 1 if d > FAR_TEXTURE else 0
+
+	lg = lights.grid
+	gw = lights.gw
+	walls = LWALL
+	floors = LFLOOR
+	ceilings = LCEIL
+	wtex = WALLTEX
+	ftex = FLOORTEX
+	ctex = CEILTEX
+	fvar = FLOOR_VAR
+	cvar = CEIL_VAR
+	stain = STAINS
+	far_texture = FAR_TEXTURE
+	floor_tones = FLOOR_TONES
+	stride = WALL_TABLE_STRIDE
+	xstep = 2.0 / (vw - 1.0)
+	for x in range(vw):
+		camx = x * xstep - 1.0
+		rdx = dirx + planex * camx
+		rdy = diry + planey * camx
+		# the ray: pure.gloom_ray's DDA, one per pixel column
+		mx = int(px)
+		my = int(py)
+		adx = -rdx if rdx < 0.0 else rdx
+		ady = -rdy if rdy < 0.0 else rdy
+		ddx = 100000000.0 if adx < 0.00000001 else 1.0 / adx
+		ddy = 100000000.0 if ady < 0.00000001 else 1.0 / ady
+		if rdx < 0.0:
+			stepx = -1
+			sdx = (px - mx) * ddx
+		else:
+			stepx = 1
+			sdx = (mx + 1.0 - px) * ddx
+		if rdy < 0.0:
+			stepy = -1
+			sdy = (py - my) * ddy
+		else:
+			stepy = 1
+			sdy = (my + 1.0 - py) * ddy
+		side = 0
+		kind = 1
+		guard = 0
+		while guard < 128:
+			if sdx < sdy:
+				sdx += ddx
+				mx += stepx
+				side = 0
+			else:
+				sdy += ddy
+				my += stepy
+				side = 1
+			c = mk[my * mw + mx]
+			if c != 0:
+				kind = c
+				break
+			guard += 1
+		dist = sdx - ddx if side == 0 else sdy - ddy
+		if dist < 0.02:
+			dist = 0.02
+		wallx = py + dist * rdy if side == 0 else px + dist * rdx
+		wallx -= floor(wallx)
+		tx = int(wallx * 64.0) >> 1
+
+		zb[x] = dist
+		# the wall's rows are those whose centers lie within half of the horizon,
+		# so every ceiling and floor pixel is strictly nearer than the wall
+		half = 0.5 * vh / dist
+		ytop = hz - half
+		y0 = 0 - floor(0.5 - ytop)
+		y1 = floor(hz - 0.5 + half) + 1
+		cy0 = 0 if y0 < 0 else (vh if y0 > vh else y0)
+		cy1 = vh if y1 > vh else (cy0 if y1 < cy0 else y1)
+
+		# ceiling
+		gi = x
+		for y in range(cy0):
+			d = rowd[y]
+			fx = px + rdx * d
+			fy = py + rdy * d
+			ix = int(fx)
+			iy = int(fy)
+			u = int((fx - ix) * 16.0)
+			v = int((fy - iy) * 16.0)
+			lx = int(fx * 4.0)
+			ly = int(fy * 4.0)
+			tone = ctex[rows_far[y] * 512 + cvar[iy * mw + ix] + v * 16 + u]
+			pix[gi] = ceilings[(lg[ly * gw + lx] * 16 + rows_shade[y]) * 8 + tone]
+			gi += vw
+
+		# wall
+		shade = 15 - int(dist * 1.55)
+		shade = 0 if shade < 0 else (15 if shade > 15 else shade)
+		back = dist - 0.03
+		wlx = int((px + rdx * back) * 4.0)
+		wly = int((py + rdy * back) * 4.0)
+		light = lg[wly * gw + wlx]
+		wbase = kind * stride + ((light * 2 + side) * 16 + shade) * 8
+		tbase = (9216 if dist > far_texture else 0) + kind * 1024 + tx
+		tscale = 65536.0 / (2.0 * half)
+		tstep = int(tscale)
+		tacc = int((cy0 + 0.5 - ytop) * tscale)
+		gi = cy0 * vw + x
+		for _ in range(cy0, cy1):
+			pix[gi] = walls[wbase + wtex[tbase + ((tacc >> 11) & 31) * 32]]
+			tacc += tstep
+			gi += vw
+
+		# floor
+		for y in range(cy1, vh):
+			d = rowd[y]
+			fx = px + rdx * d
+			fy = py + rdy * d
+			ix = int(fx)
+			iy = int(fy)
+			u = int((fx - ix) * 16.0)
+			v = int((fy - iy) * 16.0)
+			lx = int(fx * 4.0)
+			ly = int(fy * 4.0)
+			ti = iy * mw + ix
+			tone = stain[ti * 64 + (v >> 1) * 8 + (u >> 1)]
+			if tone == 0:
+				tone = ftex[rows_far[y] * 1024 + fvar[ti] + v * 16 + u]
+			pix[gi] = floors[(lg[ly * gw + lx] * 16 + rows_shade[y]) * floor_tones + tone]
+			gi += vw
+
+
+def build_showcase_tables(mi):
+	"""the showcase look's lit tables, textures and lamps for floor mi"""
+	global LWALL, LFLOOR, LCEIL, WALLTEX, FLOORTEX, CEILTEX, FLOOR_VAR, CEIL_VAR, STAINS, ROWD, ROWS_SHADE, ROWS_FAR
+	g = state.G
+	LWALL = look.showcase_lit_wall_tones(mi)
+	LFLOOR = look.showcase_floor_tones(mi)
+	LCEIL = look.showcase_ceiling_tones(mi)
+	WALLTEX = look.showcase_wall_texture()
+	FLOORTEX = look.showcase_floor_texture(mi)
+	CEILTEX = look.showcase_ceiling_texture()
+	lights = g.lights
+	lights.load()
+	mw = g.mw
+	noise = look.texel_noise
+	lamps = lights.lamps
+	FLOOR_VAR = []
+	CEIL_VAR = []
+	for ty in range(g.mh):
+		for tx in range(mw):
+			FLOOR_VAR.append((noise(31, tx, ty) & 3) * 256)
+			CEIL_VAR.append(256 if lamps[ty * mw + tx] else 0)
+	STAINS = [0] * (mw * g.mh * 64)
+	ROWD = [0.0] * g.vh
+	ROWS_SHADE = [0] * g.vh
+	ROWS_FAR = [0] * g.vh
+
+
+def stain_floor(x, y, radius, tone, keep):
+	"""a decal on the floor: tone over the texels within radius of (x, y), each kept with chance keep/256"""
+	g = state.G
+	mw = g.mw
+	tiles = g.tiles
+	stains = STAINS
+	noise = look.texel_noise
+	x0 = int((x - radius) * 8.0)
+	x1 = int((x + radius) * 8.0)
+	y0 = int((y - radius) * 8.0)
+	y1 = int((y + radius) * 8.0)
+	r2 = radius * radius * 64.0
+	for sy in range(max(0, y0), min(g.mh * 8 - 1, y1) + 1):
+		for sx in range(max(0, x0), min(mw * 8 - 1, x1) + 1):
+			dx = sx + 0.5 - x * 8.0
+			dy = sy + 0.5 - y * 8.0
+			if dx * dx + dy * dy > r2:
+				continue
+			if (noise(41, sx, sy) & 255) >= keep:
+				continue
+			tile = (sy >> 3) * mw + (sx >> 3)
+			if tiles[tile] != 0:
+				continue
+			i = tile * 64 + (sy & 7) * 8 + (sx & 7)
+			if tone == TONE_BLOOD and stains[i] == TONE_SCORCH:
+				continue
+			stains[i] = tone
+
+
+def dry_stains(tick):
+	"""old blood dries: one pass a second darkens a slice of the stains"""
+	stains = STAINS
+	noise = look.texel_noise
+	n = len(stains)
+	slc = n // 30 + 1
+	start = (tick % 30) * slc
+	for i in range(start, min(n, start + slc)):
+		if stains[i] == TONE_BLOOD and (noise(43, i, tick // 30) & 7) == 0:
+			stains[i] = TONE_BLOOD_DRY
+
+
+def draw_viewmodel():
+	"""the showcase look's gun in hand: sways with the walk, kicks on each shot"""
+	g = state.G
 	if g.automap:
-		draw_automap(pix, g.tiles)
-	if g.hurt_flash > 0:
-		red = HURT_RED
-		thick = pxw * 2
-		for x4 in range(vw):
-			pix[x4] = red
-			pix[vw + x4] = red
-			pix[(vh - 2) * vw + x4] = red
-			pix[(vh - 1) * vw + x4] = red
-		for y4 in range(vh):
-			rb = y4 * vw
-			for t4 in range(thick):
-				pix[rb + t4] = red
-				pix[rb + vw - 1 - t4] = red
+		return
+	firing = g.cooldown > WEAPONS[g.weapon]["cd"] - 4 or g.gun_kick > 0
+	name = VIEWMODEL_NAMES[g.weapon]
+	if firing and g.muzzle > 0:
+		name = name + "_fire"
+	art = VIEWMODELS[name]
+	lut = viewmodel_lut(name, g.muzzle > 0, g.lights.at(g.px, g.py))
+	vw = g.vw
+	vh = g.vh
+	aw = art.w
+	ah = art.h
+	apix = art.pix
+	# art pixels are square: a view pixel is PIXW x PIXH of a 1:2 cell
+	scale = vh * 0.4 / 24.0
+	ph = int(ah * scale)
+	pw = ph * aw * 2 * PIXW // (ah * PIXH)
+	sway = int(sin(g.bob * 0.5) * vw * 0.025)
+	lift = int(abs(cos(g.bob * 0.5)) * scale * 1.5) + g.gun_kick * int(scale * 0.9)
+	x0 = vw // 2 - pw // 2 + sway
+	y0 = vh - ph + lift + idivt(HORIZON - vh // 2, 2)
+	cx0 = max(0, x0)
+	cx1 = min(vw, x0 + pw)
+	cy1 = min(vh, y0 + ph)
+	pix = g.pix
+	for y in range(max(0, y0), cy1):
+		row = ((y - y0) * ah // ph) * aw
+		base = y * vw
+		for x in range(cx0, cx1):
+			code = apix[row + (x - x0) * aw // pw]
+			if code > 0:
+				pix[base + x] = lut[code]
 
-	# --- 6. pixel grid -> sub-cell glyph rows ---
-	if PIXH == 3:
-		return rows_sext(pix)
-	if PIXW == 2:
-		return rows_quad(pix)
-	return rows_half(pix)
+
+_VM_WHITE = rgb(255, 255, 255)
+
+
+def viewmodel_lut(name, flashing, variant):
+	"""palette code -> index for a gun under this floor's light, brighter in its own flash"""
+	g = state.G
+	key = ("vm", name, flashing, variant)
+	lut = g.lutc.get(key)
+	if lut is not None:
+		return lut
+	mood = MOODS[g.map_i]
+	art = VIEWMODELS[name]
+	light = cadd(cscale(mix_rgb(mood.light, _VM_WHITE, 0.4), 1.25 if flashing else 0.7),
+		cscale(look.sprite_light(mood, variant), 0.8))
+	lut = [0]
+	keys = art.keys
+	for c in range(1, len(art.rgb)):
+		r, gg, b = art.rgb[c]
+		col = rgb(r, gg, b)
+		if "A" <= keys[c] <= "Z":
+			lut.append(color_idx(col))
+		else:
+			lut.append(color_idx(cclamp(cmul(col, light), 0.0, 1.0)))
+	g.lutc[key] = lut
+	return lut
 
 
 def rows_half(pix):
@@ -634,7 +974,7 @@ def rows_sext(pix):
 
 
 def collect_billboard(sp, wx, wy, art, size, zlift, flash, inv, dirx, diry, planex, planey):
-	"""world -> camera -> screen; appends (depth, scx, art, size, zlift, flash)"""
+	"""world -> camera -> screen; appends (depth, scx, art, size, zlift, flash, wx, wy)"""
 	g = state.G
 	rx = wx - g.px
 	ry = wy - g.py
@@ -645,11 +985,11 @@ def collect_billboard(sp, wx, wy, art, size, zlift, flash, inv, dirx, diry, plan
 	scx = trunc((g.vw / 2.0) * (1.0 + ttx / depth))
 	if scx < -g.vw or scx > g.vw * 2:
 		return
-	sp.append((depth, scx, art, size, zlift, flash))
+	sp.append((depth, scx, art, size, zlift, flash, wx, wy))
 
 
 def draw_billboard(rec, pix, zbuf):
-	depth, scx, name, size, zlift, flash = rec
+	depth, scx, name, size, zlift, flash, wx, wy = rec
 	art = ARTS[name]
 	aw = art.w
 	ah = art.h
@@ -670,8 +1010,8 @@ def draw_billboard(rec, pix, zbuf):
 		band = 0
 	elif band > 7:
 		band = 7
-	lut = sprite_lut(name, band, flash)
-	bottom = trunc(vh // 2 + span * 0.5 - zlift * span)
+	lut = sprite_lut(name, band, flash, g.lights.at(wx, wy) if state.SHOWCASE else 0)
+	bottom = trunc(HORIZON + span * 0.5 - zlift * span)
 	top = bottom - ph
 	x0 = scx - pw // 2
 	x1 = x0 + pw

@@ -127,4 +127,10 @@ _RAMPS = (
 
 
 def build_particle_colors():
+	"""the showcase look's ramps come from look.py"""
+	if state.SHOWCASE:
+		from colors import color_idx
+		from look import SHOWCASE_PARTICLE_RAMPS
+		PART_COLS[:] = [color_idx(c) for ramp in SHOWCASE_PARTICLE_RAMPS for c in ramp]
+		return
 	PART_COLS[:] = [rgb_idx(r, g, b) for ramp in _RAMPS for (r, g, b) in ramp]

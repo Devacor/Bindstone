@@ -7,7 +7,9 @@ from math import atan2, floor, sqrt
 from typing import NamedTuple
 
 import combat
+import feel
 import hud
+import lights
 import maps
 import render
 import sim
@@ -63,6 +65,7 @@ class Game:
 		self.mh = 0
 		self.tiles = []
 		self.mapkind = None    # per-cell render kinds (raycast snapshot)
+		self.mapgen = 0        # bumps with every mapkind rebuild
 
 		# player
 		self.px = 2.5
@@ -116,6 +119,11 @@ class Game:
 		self.bg = []
 		self.zbuf = [99.0] * self.vw
 		self.lutc = {}
+		self.lights = lights.LightGrid()    # the showcase look's light texels
+
+		# the showcase look's eyes on all of the above, and its HUD and pages
+		self.feel = feel.Feel()
+		self.screens = None
 
 		# the autopilot: a generator handle living in a field
 		self.pilot = None

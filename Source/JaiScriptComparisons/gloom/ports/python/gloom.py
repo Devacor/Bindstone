@@ -6,7 +6,11 @@ gloom_host.cpp faithfully — the xorshift64* Rng, the VT console (alt screen,
 truecolor, UTF-8), held-key + edge-key input, frame timing/pacing, the flags,
 and the --smoke / --bench harnesses with the same hashes and report formats.
 Everything below gloom_frame lives in the game modules, a transliteration of
-the reference per reference/README.md.
+the reference per reference/README.md. Both looks over the one simulation, as
+the host resolves them: --look reference (the default under --smoke) and
+--look showcase (look.py, lights.py, feel.py, screens.py; the default
+otherwise). --warmup N runs N untimed smoke frames, then boots a fresh game
+with the original seed before the timed ticks.
 
 Timing protocol: the shared C++ host times session->frame() (sim + full frame
 string build, no console write) for --smoke, and reports the sim/draw split
@@ -24,7 +28,9 @@ import game
 import hud
 import maps
 import render
+import screens
 import state
+import viewmodel
 from util import MASK64, TICK
 
 FNV_OFFSET = 14695981039346656037
@@ -76,6 +82,7 @@ FORCE_PILOT = False
 
 def gloom_boot(w, h):
 	state.RNG = Rng(state.HOST_SEED)
+	state.SHOWCASE = state.HOST_LOOK == "showcase"
 	if state.HOST_PIX == 0:
 		render.PIXW, render.PIXH = 1, 2
 	elif state.HOST_PIX == 2:
@@ -83,9 +90,12 @@ def gloom_boot(w, h):
 	else:
 		render.PIXW, render.PIXH = 2, 2
 	defs.parse_arts()
+	viewmodel.parse_viewmodels()
 	maps.validate_all_maps()
 	state.G = game.Game(w, h)
 	render.init_render()
+	if state.SHOWCASE:
+		state.G.screens = screens.Screens(w, h)
 	state.G.autopilot = state.HOST_SMOKE or FORCE_PILOT
 
 
@@ -249,6 +259,11 @@ def run_smoke(opt):
 	print("-------------+------------+-----------+--------------------+------------")
 
 	gloom_boot(w, h)
+	if opt["warmup"] > 0:
+		# untimed frames, then a fresh game on the same interpreter with the original seed
+		for _ in range(opt["warmup"]):
+			gloom_frame(dt, "", 0.0, 0.0, 0.0)
+		gloom_boot(w, h)
 	frame_hash = FNV_OFFSET
 	hash_ms = 0.0
 	timed = 0.0
@@ -343,6 +358,8 @@ USAGE = """gloom.py - GLOOM, a terminal raycast shooter (standalone Python port)
   --seed N        run seed (default 666)
   --smoke         headless deterministic autoplay; hash report
   --ticks N       smoke tick budget (default 2000)
+  --warmup N      untimed smoke ticks before reboot (default 0)
+  --look L        showcase (default) | reference (the frames the ports draw; --smoke's default)
   --workers N     accepted for parity; the port is always serial
   --dump-frame N  smoke: dump frame N to gloom_frame_python.txt
   --bench N       run N frames autopilot with live rendering, report sim/draw split
@@ -358,7 +375,8 @@ keys: w/s move  a/d strafe  left/right turn  space/ctrl fire  e use
 
 def main(argv):
 	opt = {"seed": 666, "smoke": False, "ticks": 2000, "workers": 0, "dump_frame": -1,
-		"bench": 0, "fps": 30.0, "width": 0, "height": 0, "god": False, "pix": "quad"}
+		"bench": 0, "fps": 30.0, "width": 0, "height": 0, "god": False, "pix": "quad",
+		"warmup": 0, "look": ""}
 	i = 1
 	while i < len(argv):
 		a = argv[i]
@@ -393,6 +411,10 @@ def main(argv):
 			opt["god"] = True
 		elif a == "--pix":
 			opt["pix"] = next_arg()
+		elif a == "--warmup":
+			opt["warmup"] = int(next_arg())
+		elif a == "--look":
+			opt["look"] = next_arg()
 		elif a in ("--help", "-h"):
 			print(USAGE)
 			return 0
@@ -404,6 +426,14 @@ def main(argv):
 	if opt["pix"] not in ("half", "quad", "sext"):
 		print(f"unknown --pix mode: {opt['pix']} (half|quad|sext)", file=sys.stderr)
 		return 2
+	if opt["ticks"] <= 0 or opt["warmup"] < 0:
+		print("--ticks must be positive and --warmup non-negative", file=sys.stderr)
+		return 2
+	if opt["look"] == "":
+		opt["look"] = "reference" if opt["smoke"] else "showcase"
+	if opt["look"] not in ("reference", "showcase"):
+		print(f"unknown --look: {opt['look']} (reference|showcase)", file=sys.stderr)
+		return 2
 
 	state.HOST_SEED = opt["seed"]
 	state.HOST_SMOKE = opt["smoke"]
@@ -412,6 +442,7 @@ def main(argv):
 	state.HOST_GOD = opt["god"]
 	state.HOST_BACKEND = "python"
 	state.HOST_PIX = {"half": 0, "quad": 1, "sext": 2}[opt["pix"]]
+	state.HOST_LOOK = opt["look"]
 
 	console = Console()
 	live_input = opt["bench"] == 0 and not opt["smoke"]

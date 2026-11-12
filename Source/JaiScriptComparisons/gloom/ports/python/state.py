@@ -16,6 +16,10 @@ HOST_WORKERS = 0
 HOST_GOD = False
 HOST_BACKEND = "python"
 HOST_PIX = 1        # 0 half, 1 quad, 2 sext
+HOST_LOOK = "reference"   # "reference" | "showcase" (gloom.py resolves the default)
+
+# the look gloom_boot picked: HOST_LOOK == "showcase"
+SHOWCASE = False
 
 # host services (gloom.py installs the real ones; key_down is smoke/bench-gated)
 key_down = lambda name: False

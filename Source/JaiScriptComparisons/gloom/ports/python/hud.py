@@ -247,6 +247,9 @@ def render_play(fps, ms_sim, ms_draw):
 
 
 def render_frame(fps, ms_sim, ms_draw):
+	"""the showcase look hands the whole frame to screens.py"""
+	if state.SHOWCASE:
+		return state.G.screens.frame(fps, ms_sim, ms_draw)
 	mode = state.G.mode
 	if mode == 0:
 		return render_title()

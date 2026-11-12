@@ -294,8 +294,11 @@ port (`gloom_chai`, `-DGLOOM_PORT_CHAI=ON`) and the standalone Python 3 port
 (`python gloom.py`, which takes the same `--smoke --look --warmup --ticks`
 flags and prints the same report row) are outside it: neither has a padding
 build. ChaiScript takes hundreds of milliseconds a showcase tick, too slow for
-600 + 600 ticks, so its rows are timed over a shorter window after a shorter
-warm-up, ending on a checkpoint. Python hashes each frame outside its timed
+600 + 600 ticks, so it runs and hashes the same 600 measured ticks after a
+100-tick warm-up and the host times only slices of them
+(`--time-slices 0:67,267:333,533:600`, 200 ticks spread over the measured
+range; every tick still runs and hashes, so the 600-tick checkpoint still
+gates the run). Python hashes each frame outside its timed
 window (pure-Python FNV-1a costs milliseconds a frame), where the C++ host
 hashes inside it.
 

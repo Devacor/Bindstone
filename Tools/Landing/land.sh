@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Land a branch on master: cherry-pick its commits above a base one by one, then gate the result.
+# Land a branch on main: cherry-pick its commits above a base one by one, then gate the result.
 #
-#   Tools/Landing/land.sh <label> <range base> <branch> <expected master tip> [<base2>..<tip2>...]   # targeted tier
-#   Tools/Landing/land.sh --battery <label> <range base> <branch> <expected master tip> [...]          # milestone tier
-#   Tools/Landing/land.sh --battery-only <label>                                                      # milestone tier on master, no picks
+#   Tools/Landing/land.sh <label> <range base> <branch> <expected main tip> [<base2>..<tip2>...]   # targeted tier
+#   Tools/Landing/land.sh --battery <label> <range base> <branch> <expected main tip> [...]          # milestone tier
+#   Tools/Landing/land.sh --battery-only <label>                                                      # milestone tier on main, no picks
 #   Tools/Landing/land.sh --plan <rev-range>                                                          # the targeted choices, run nothing
 #
-# Picks: a commit whose subject master already carries is skipped (a mirrored commit) unless master reverted that twin; an
+# Picks: a commit whose subject main already carries is skipped (a mirrored commit) unless main reverted that twin; an
 # empty pick is skipped; a conflict confined to the union files (LAND_UNION_FILES, default the perf ledger) resolves as the
-# union; any other conflict aborts with master untouched by that pick.
+# union; any other conflict aborts with main untouched by that pick.
 #
 # The targeted tier runs what the picked paths need: Source/JaiScript/tools/ci/targeted.sh for the package, the client build
 # when MutedVision compiles a changed file, and -verifyassets when the property system, the archives, the engine or the
@@ -81,14 +81,14 @@ if [ "$TIER" = battery-only ]; then
 	[ -n "$L" ] || { echo "usage: land.sh --battery-only <label>"; exit 2; }
 else
 	BASE="${2:-}"; BR="${3:-}"; TIP="${4:-}"
-	[ -n "$L" ] && [ -n "$BASE" ] && [ -n "$BR" ] && [ -n "$TIP" ] || { echo "usage: land.sh [--battery] <label> <range base> <branch> <expected master tip> [<base>..<tip>...]"; exit 2; }
+	[ -n "$L" ] && [ -n "$BASE" ] && [ -n "$BR" ] && [ -n "$TIP" ] || { echo "usage: land.sh [--battery] <label> <range base> <branch> <expected main tip> [<base>..<tip>...]"; exit 2; }
 	shift 4
 	EXTRA_RANGES=("$@")
 fi
 
 step() { lockq_wait; echo "[$(date +%H:%M)] step: $1"; }
 
-# One landing at a time per repository: landings share master's checkout and its build trees, so a second one waits here
+# One landing at a time per repository: landings share main's checkout and its build trees, so a second one waits here
 LAND_LOCK="$(cd "$REPO" && cd "$(git rev-parse --git-common-dir)" && pwd)/bindstone-land.lock"
 LAND_LOCK_HELD=0
 land_lock_release() {
@@ -118,28 +118,28 @@ land_lock_take() {
 
 cd "$REPO" || exit 1
 land_lock_take "land.sh $L"
-[ "$(git rev-parse --abbrev-ref HEAD)" = "master" ] || { echo "not on master"; exit 1; }
+[ "$(git rev-parse --abbrev-ref HEAD)" = "main" ] || { echo "not on main"; exit 1; }
 # the comparison harness edits under examples/, the regenerated atlases and the test library are never a pick's
 DIRTY=$(git status --short | grep -v '^??' | grep -v ' Source/JaiScript/examples/' | grep -v ' Assets/Atlases/.*.png$' | grep -v ' Source/MV/Tests/mv_tests.lib$')
-[ -z "$DIRTY" ] || { echo "master has tracked modifications outside examples/; not landing"; echo "$DIRTY" | head; exit 1; }
+[ -z "$DIRTY" ] || { echo "main has tracked modifications outside examples/; not landing"; echo "$DIRTY" | head; exit 1; }
 git status --short | grep -v '^??' | grep ' Source/JaiScript/examples/' | sed 's/^/left as is (not mine): /'
 
 BEFORE=$(git rev-parse --short HEAD)
 if [ "$TIER" != battery-only ]; then
-	[ "$BEFORE" = "$TIP" ] || [ "$(git rev-parse --short "$TIP" 2>/dev/null)" = "$BEFORE" ] || { echo "master tip is $BEFORE, expected $TIP; not landing"; exit 1; }
+	[ "$BEFORE" = "$TIP" ] || [ "$(git rev-parse --short "$TIP" 2>/dev/null)" = "$BEFORE" ] || { echo "main tip is $BEFORE, expected $TIP; not landing"; exit 1; }
 	COMMITS=$(git rev-list --reverse "$BASE..$BR"; for r in "${EXTRA_RANGES[@]+"${EXTRA_RANGES[@]}"}"; do git rev-list --reverse "$r"; done)
 	echo "picking $(echo "$COMMITS" | grep -c .) commits: $BASE..$BR${EXTRA_RANGES:+ ${EXTRA_RANGES[*]}}"
 	MASTER_SUBJECTS=$(git log --format=%s -300 HEAD)
 	for c in $COMMITS; do
 		subject=$(git log -1 --format=%s "$c")
 		twin=$(git log --format='%H %s' -300 HEAD | awk -v s="$subject" 'substr($0, 42) == s { print substr($1, 1, 8); exit }')
-		if [ -n "$twin" ] && printf '%s\n' "$MASTER_SUBJECTS" | grep -q "^Revert .*$twin"; then echo "re-picking $(git log --oneline -1 "$c" | cut -c1-70) (its master twin $twin was reverted)"; twin=""; fi
-		if [ -n "$twin" ]; then echo "skipped $(git log --oneline -1 "$c" | cut -c1-70) (its subject is on master: a mirrored commit)"; continue; fi
+		if [ -n "$twin" ] && printf '%s\n' "$MASTER_SUBJECTS" | grep -q "^Revert .*$twin"; then echo "re-picking $(git log --oneline -1 "$c" | cut -c1-70) (its main twin $twin was reverted)"; twin=""; fi
+		if [ -n "$twin" ]; then echo "skipped $(git log --oneline -1 "$c" | cut -c1-70) (its subject is on main: a mirrored commit)"; continue; fi
 		if git cherry-pick "$c" > "$LOG_DIR/land_${L}_pick.log" 2>&1; then echo "picked $(git log --oneline -1 "$c" | cut -c1-70) -> $(git rev-parse --short HEAD)"; continue; fi
 		conflicted=$(git diff --name-only --diff-filter=U)
 		if [ -z "$conflicted" ] && grep -q "is now empty\|nothing to commit" "$LOG_DIR/land_${L}_pick.log"; then
-			git cherry-pick --skip > /dev/null 2>&1 || { git cherry-pick --abort; echo "could not skip an empty pick; master untouched"; exit 1; }
-			echo "skipped $(git log --oneline -1 "$c" | cut -c1-70) (already on master)"
+			git cherry-pick --skip > /dev/null 2>&1 || { git cherry-pick --abort; echo "could not skip an empty pick; main untouched"; exit 1; }
+			echo "skipped $(git log --oneline -1 "$c" | cut -c1-70) (already on main)"
 			continue
 		fi
 		resolvable=1
@@ -168,7 +168,7 @@ if [ "$TIER" != battery-only ]; then
 		echo "CHERRY-PICK FAILED at $c"
 		echo "$conflicted" | head -5
 		git cherry-pick --abort
-		# Picks that applied before the failure stay on master, so they are still checked below
+		# Picks that applied before the failure stay on main, so they are still checked below
 		if [ "$(git rev-parse HEAD)" = "$(git rev-parse "$BEFORE")" ]; then exit 1; fi
 		PARTIAL="stopped at $(git log --oneline -1 "$c" | cut -c1-60)"
 		echo "checking the picks that applied ($PARTIAL)"
@@ -183,7 +183,7 @@ if [ "$TIER" = targeted ]; then
 	RANGE="$BEFORE..HEAD"
 	step "targeted checks for $RANGE"
 	if ! bash "$REPO/Source/JaiScript/tools/ci/targeted.sh" --build "$RANGE" | tee "$LOG_DIR/land_${L}_targeted.txt"; then
-		echo "$L NOT GREEN: $(grep -aE 'TARGETED RED|BUILD FAILED' "$LOG_DIR/land_${L}_targeted.txt" | head -2 | tr '\n' ' ') (master holds the picks; fix forward)"
+		echo "$L NOT GREEN: $(grep -aE 'TARGETED RED|BUILD FAILED' "$LOG_DIR/land_${L}_targeted.txt" | head -2 | tr '\n' ' ') (main holds the picks; fix forward)"
 		exit 1
 	fi
 	grep -q "^green: tests-interp" "$LOG_DIR/land_${L}_targeted.txt" && grep -q "^green: tests-vm" "$LOG_DIR/land_${L}_targeted.txt" && touch "$LOG_DIR/debug_green_$HEADSHA"
@@ -201,7 +201,7 @@ if [ "$TIER" = targeted ]; then
 		echo "$L LANDED (targeted) $HEADSHA${PARTIAL:+ (PARTIAL: $PARTIAL)}"
 		exit 0
 	fi
-	echo "$L NOT GREEN: $(grep -aE 'CLIENT GATE FAILED' "$LOG_DIR/land_${L}_client.txt" | head -1) (master holds the picks; fix forward)"
+	echo "$L NOT GREEN: $(grep -aE 'CLIENT GATE FAILED' "$LOG_DIR/land_${L}_client.txt" | head -1) (main holds the picks; fix forward)"
 	exit 1
 fi
 

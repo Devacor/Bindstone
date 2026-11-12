@@ -1,6 +1,6 @@
 # Resolve every conflict block of the ledger as the union (ours then theirs), except that a ledger row (`| N | ...`) already
 # present on our side or elsewhere in the file keeps our version: the cherry-picked ledger commits carry rows in their
-# pre-landing state, and master's landed state wins. usage: resolve_union.py <file>
+# pre-landing state, and main's landed state wins. usage: resolve_union.py <file>
 import re, sys
 p = sys.argv[1]
 raw = open(p, "rb").read(); crlf = b"\r\n" in raw

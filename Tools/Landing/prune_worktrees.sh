@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Report every git worktree with a verdict; with --apply, remove the ones that hold nothing master lacks.
+# Report every git worktree with a verdict; with --apply, remove the ones that hold nothing main lacks.
 #
 #   Tools/Landing/prune_worktrees.sh [--repo <path>]           # dry run: one row per worktree, nothing changes
 #   Tools/Landing/prune_worktrees.sh --apply [--repo <path>]   # remove the REMOVABLE rows, prune entries whose directory is gone
 #   Tools/Landing/prune_worktrees.sh --selftest                # one throwaway worktree per verdict, both modes checked
 #
-# REMOVABLE only when all hold: not the main checkout, not on master, not locked, not holding another worktree, not the
-# worktree the caller runs in or this script lives in, no commit missing from master by patch identity (git cherry, plus any
-# merge commit master lacks, which git cherry never lists; an empty commit counts as landed only when master has its
+# REMOVABLE only when all hold: not the main checkout, not on main, not locked, not holding another worktree, not the
+# worktree the caller runs in or this script lives in, no commit missing from main by patch identity (git cherry, plus any
+# merge commit main lacks, which git cherry never lists; an empty commit counts as landed only when main has its
 # subject), git status --porcelain empty, every ignored path build output (build*/, Source/JaiScript/build*/, out/build*,
 # .cache/, *.jaibite), no running process image inside it and no file modified in the last 12 hours. HEAD is read live, not
 # from the worktree list. Every other worktree is KEEP with its reasons; one whose directory is gone is PRUNABLE (git
@@ -20,7 +20,7 @@
 set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
-MASTER=master
+MASTER=main
 RECENT_HOURS=12
 HAS_CYGPATH=0
 command -v cygpath > /dev/null 2>&1 && HAS_CYGPATH=1
@@ -115,8 +115,8 @@ selftest() {
 	git worktree add -q -b emptyb "$wt/emptyb" "$MASTER"
 	git -C "$wt/emptyb" commit -q --allow-empty -m "Experiment: Success - result only in this message"
 	git worktree add -q -b emptyland "$wt/emptyland" "$MASTER"
-	git -C "$wt/emptyland" commit -q --allow-empty -m "empty on master"
-	git commit -q --allow-empty -m "empty on master"
+	git -C "$wt/emptyland" commit -q --allow-empty -m "empty on main"
+	git commit -q --allow-empty -m "empty on main"
 	mkdir -p "$wt/picked_scratch"
 	mkdir -p "$wt/orphan" && printf 'gitdir: %s/main/.git/worktrees/orphan\n' "$root" > "$wt/orphan/.git"
 	if ps -W > /dev/null 2>&1; then
@@ -188,7 +188,7 @@ selftest() {
 	expect "$out" KEEP outer "contains worktree $wt/outer/build/inner"
 	expect "$out" KEEP outer/build/inner "1 tracked"
 	expect "$out" KEEP unlanded "1 unlanded"
-	expect "$out" KEEP resolved "1 with a subject on master"
+	expect "$out" KEEP resolved "1 with a subject on main"
 	expect "$out" KEEP merged "1 merge commit"
 	expect "$out" KEEP detached_unlanded "1 unlanded"
 	expect "$out" KEEP late "1 unlanded"
@@ -273,7 +273,7 @@ START_KEY="$(path_key "$START_DIR")"
 SELF_KEY="$(path_key "$(mixed_path "$(dirname "$SELF")")")"
 snapshot_processes
 
-# unlanded <rev>: sets UNLANDED (commits master lacks), SAME_SUBJECT (of those, how many share a subject with master) and MERGES
+# unlanded <rev>: sets UNLANDED (commits main lacks), SAME_SUBJECT (of those, how many share a subject with main) and MERGES
 unlanded() {
 	UNLANDED=0; SAME_SUBJECT=0; MERGES=0
 	git merge-base --is-ancestor "$1" "$MASTER" 2> /dev/null && return 0
@@ -293,7 +293,7 @@ unlanded() {
 		[ -n "$c" ] || continue
 		subject="${subject_of[$c]-}"
 		if [ "$mark" = - ]; then
-			# git cherry finds every empty commit equal to any empty commit on master, so an empty one needs its subject there
+			# git cherry finds every empty commit equal to any empty commit on main, so an empty one needs its subject there
 			t="${first_parent[$c]-}"
 			[ -n "$t" ] && [ "${tree[$c]-}" = "${tree[$t]-x}" ] || continue
 			[ -n "$subject" ] && [ -n "${MASTER_SUBJECT_SET[$subject]+x}" ] && continue

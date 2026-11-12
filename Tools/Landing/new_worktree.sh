@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# A new branch in its own worktree, beside the main checkout, made from a local branch (master unless named).
+# A new branch in its own worktree, beside the main checkout, made from a local branch (main unless named).
 #
-#   Tools/Landing/new_worktree.sh [--scratch] <name> [base]   # branch <name>, worktree <root>/<name>, base default master
+#   Tools/Landing/new_worktree.sh [--scratch] <name> [base]   # branch <name>, worktree <root>/<name>, base default main
 #   Tools/Landing/new_worktree.sh --selftest                  # every check below, against a throwaway repository
 #
 # The root is JAI_WORKTREE_ROOT, else JaiScriptWorktrees beside the main checkout's folder (D:/git/JaiScriptWorktrees for
@@ -39,7 +39,7 @@ main_checkout() {
 }
 
 selftest() {
-	local tmp t repo root out rc master older pass=0 bad=0 victim before
+	local tmp t repo root out rc main older pass=0 bad=0 victim before
 	tmp="${JAI_SELFTEST_TMP:-$(dirname "$(main_checkout)")/tempclaudefolders}"
 	[ -d "$tmp" ] || fail "selftest: no temp folder $tmp; make it or set JAI_SELFTEST_TMP"
 	SELFTEST_DIR="$(mktemp -d "$tmp/new_worktree_selftest.XXXXXX")" || fail "selftest: no temp directory in $tmp"
@@ -54,30 +54,30 @@ selftest() {
 	tg() { git -C "$repo" -c user.name=selftest -c user.email=selftest@invalid "$@" > /dev/null 2>&1; }
 	no_branch() { ! git -C "$repo" show-ref -q --verify "refs/heads/$1"; }
 	mkdir -p "$repo/Tools/Landing"
-	git init -q -b master "$repo" && git -C "$repo" config core.autocrlf false || fail "selftest: git init failed"
+	git init -q -b main "$repo" && git -C "$repo" config core.autocrlf false || fail "selftest: git init failed"
 	cp "$SCRIPT" "$repo/Tools/Landing/new_worktree.sh"
 	echo one > "$repo/a.txt"
 	tg add -A && tg commit -q -m "first"
 	older="$(git -C "$repo" rev-parse HEAD)"
-	git -C "$repo" update-ref refs/remotes/origin/master "$older"
+	git -C "$repo" update-ref refs/remotes/origin/main "$older"
 	git -C "$repo" config remote.origin.url "$t/nowhere"
 	git -C "$repo" config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
-	git -C "$repo" config branch.master.remote origin
-	git -C "$repo" config branch.master.merge refs/heads/master
+	git -C "$repo" config branch.main.remote origin
+	git -C "$repo" config branch.main.merge refs/heads/main
 	echo two > "$repo/a.txt"
 	tg commit -q -am "second: the tip"
-	master="$(git -C "$repo" rev-parse master)"
+	main="$(git -C "$repo" rev-parse main)"
 	local nw="$repo/Tools/Landing/new_worktree.sh"
 	victim="$t/victim"
-	git init -q -b master "$victim" && git -C "$victim" -c user.name=selftest -c user.email=selftest@invalid commit -q --allow-empty -m "victim" || fail "selftest: git init failed"
+	git init -q -b main "$victim" && git -C "$victim" -c user.name=selftest -c user.email=selftest@invalid commit -q --allow-empty -m "victim" || fail "selftest: git init failed"
 	victim_state() { git -C "$victim" for-each-ref; git -C "$victim" worktree list --porcelain; git -C "$victim" config --list --local; }
 	before="$(victim_state)"
 
 	run bash "$nw" one
-	check "creates <root>/one from local master" "$([ "$rc" = 0 ] && [ -f "$root/one/a.txt" ] && [ "$(git -C "$repo" rev-parse one)" = "$master" ]; echo $?)"
+	check "creates <root>/one from local main" "$([ "$rc" = 0 ] && [ -f "$root/one/a.txt" ] && [ "$(git -C "$repo" rev-parse one)" = "$main" ]; echo $?)"
 	check "prints the path, the branch, the base sha with its subject and the build-debug hint" \
-		"$(echo "$out" | grep -q "worktree: .*/JaiScriptWorktrees/one$" && echo "$out" | grep -q "^branch:   one$" && echo "$out" | grep -q "^base:     master $master second: the tip$" && echo "$out" | grep -q "cmake -S . -B build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug"; echo $?)"
-	check "the default base is local master, not a stale origin/master" "$([ "$(git -C "$repo" rev-parse one)" != "$older" ]; echo $?)"
+		"$(echo "$out" | grep -q "worktree: .*/JaiScriptWorktrees/one$" && echo "$out" | grep -q "^branch:   one$" && echo "$out" | grep -q "^base:     main $main second: the tip$" && echo "$out" | grep -q "cmake -S . -B build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug"; echo $?)"
+	check "the default base is local main, not a stale origin/main" "$([ "$(git -C "$repo" rev-parse one)" != "$older" ]; echo $?)"
 	check "makes no scratch directory unasked" "$([ ! -e "$root/one_scratch" ]; echo $?)"
 
 	run bash "$nw" one
@@ -88,14 +88,14 @@ selftest() {
 	run bash "$nw" two
 	check "refuses an existing directory and leaves it and the branch alone" "$([ "$rc" != 0 ] && [ -f "$root/two/keep" ] && no_branch two && echo "$out" | grep -q "exists"; echo $?)"
 
-	run bash "$nw" three origin/master
+	run bash "$nw" three origin/main
 	check "refuses a remote-tracking base" "$([ "$rc" != 0 ] && [ ! -e "$root/three" ] && no_branch three; echo $?)"
 	local upstream
-	for upstream in '@{u}' 'master@{upstream}' '@{push}' '@{u}~0' 'HEAD@{UPSTREAM}^0'; do
+	for upstream in '@{u}' 'main@{upstream}' '@{push}' '@{u}~0' 'HEAD@{UPSTREAM}^0'; do
 		run bash "$nw" three "$upstream"
 		check "refuses the upstream shorthand $upstream" "$([ "$rc" != 0 ] && [ ! -e "$root/three" ] && no_branch three && echo "$out" | grep -q "remote-tracking"; echo $?)"
 	done
-	printf '%s\t\tbranch '"'"'master'"'"' of nowhere\n' "$older" > "$repo/.git/FETCH_HEAD"
+	printf '%s\t\tbranch '"'"'main'"'"' of nowhere\n' "$older" > "$repo/.git/FETCH_HEAD"
 	run bash "$nw" three FETCH_HEAD
 	check "refuses FETCH_HEAD" "$([ "$rc" != 0 ] && [ ! -e "$root/three" ] && no_branch three && echo "$out" | grep -q "FETCH_HEAD"; echo $?)"
 
@@ -126,7 +126,7 @@ selftest() {
 
 	tg tag tagname "$older"
 	run bash "$nw" tagname
-	check "a name that is also a tag is checked as the branch" "$([ "$rc" = 0 ] && [ "$(git -C "$repo" rev-parse refs/heads/tagname)" = "$master" ]; echo $?)"
+	check "a name that is also a tag is checked as the branch" "$([ "$rc" = 0 ] && [ "$(git -C "$repo" rev-parse refs/heads/tagname)" = "$main" ]; echo $?)"
 
 	mkdir -p "$t/hooks" && printf '#!/bin/sh\nexit 1\n' > "$t/hooks/post-checkout" && chmod +x "$t/hooks/post-checkout"
 	git -C "$repo" config core.hooksPath "$t/hooks"
@@ -134,7 +134,7 @@ selftest() {
 	git -C "$repo" config --unset core.hooksPath
 	check "a failed worktree add says the branch it left" "$([ "$rc" != 0 ] && echo "$out" | grep -q "branch hookfail now exists"; echo $?)"
 
-	git -C "$repo" worktree add -q --detach "$root/Gone" master > /dev/null 2>&1
+	git -C "$repo" worktree add -q --detach "$root/Gone" main > /dev/null 2>&1
 	rm -rf "$root/Gone"
 	run bash "$nw" gone
 	check "refuses a registered worktree whose folder is gone" "$([ "$rc" != 0 ] && echo "$out" | grep -q "registered worktree" && no_branch gone; echo $?)"
@@ -193,7 +193,7 @@ while [ "$#" -gt 0 ]; do
 	shift
 done
 [ -n "$NAME" ] || { echo "usage: new_worktree.sh [--scratch] <name> [base] | --selftest" >&2; exit 2; }
-BASE="${BASE:-master}"
+BASE="${BASE:-main}"
 
 git -C "$(dirname "$SCRIPT")" rev-parse --git-dir > /dev/null 2>&1 || fail "not inside a git repository: $SCRIPT"
 REPO="$(main_checkout)" || fail "the repository is not a checkout with a .git folder"
@@ -223,7 +223,7 @@ case "$(printf '%s' "$BASE" | tr '[:upper:]' '[:lower:]')" in *fetch_head*) fail
 for ref in "$BASE" "${BASE%%[~^]*}" "${BASE%%[~^@]*}"; do
 	[ -n "$ref" ] || continue
 	case "$(git -C "$REPO" rev-parse --symbolic-full-name "$ref" 2> /dev/null)" in
-		refs/remotes/*) fail "the base $BASE is a remote-tracking ref; base on a local branch (origin/* can be far behind local master)" ;;
+		refs/remotes/*) fail "the base $BASE is a remote-tracking ref; base on a local branch (origin/* can be far behind local main)" ;;
 	esac
 done
 BASE_SHA="$(git -C "$REPO" rev-parse --verify --quiet "$BASE^{commit}")" || fail "unknown base: $BASE"

@@ -3,7 +3,10 @@
 #include <jaiscript/properties.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
 #include <jaiscript/signals/signal_property.hpp>
+#include <jaiscript/serialization/convenience.hpp>
 #include <cstdint>
+#include <iostream>
+#include <memory>
 #include <string>
 
 // [sample home-bind-intrusive]
@@ -22,12 +25,16 @@ namespace home_page {
 int main() {
     auto engine = jai::engine::make();
     jai::bind_registrar(*engine);   // every property_owner and registrar in the program
-    engine->execute(R"(
+    auto gate = engine->execute<std::shared_ptr<Spawner>>(R"(
         Spawner gate;
         gate.onWave.connect("hud", [](int size) { print("wave of ", size); });
         gate.level = 3;
         gate.spawn_wave(); gate.spawn_wave(4, true);
+        gate
     )");
+    gate->spawn_wave(5, false);     // script created C++ class interactable in both environments
+    std::cout << "Wave Level Roundtrip Serialize: "
+              << jai::from_json<std::shared_ptr<Spawner>>(*engine, jai::to_json(*engine, gate))->level << "\n";
     return 0;
 }
 // [/sample]

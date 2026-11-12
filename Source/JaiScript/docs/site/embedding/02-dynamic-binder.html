@@ -318,14 +318,14 @@ std::cout &lt;&lt; json &lt;&lt; &quot;\n&quot;;</code></pre></div>
     }
   }
 }</code></pre></div>
-<p>Loading rebuilds the object and reconnects the receiver. Pass the engine as the load context so the receiver has an engine to run on:</p>
-<div class="codeblock cb-cpp" data-sample="binder-from-json"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto loaded = jai::from_json&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*eng, json, *eng);
+<p>Loading rebuilds the object and reconnects the receiver. The archive carries the engine it was made with, so the receiver has an engine to run on; a context argument is only for host data such as a services object, and it wins when it holds an engine:</p>
+<div class="codeblock cb-cpp" data-sample="binder-from-json"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto loaded = jai::from_json&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*eng, json);
 // loaded-&gt;id.get() == "east-gate", level 7, threat 9
 loaded-&gt;spawn_wave();   // the receiver came back from the save file</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave logged</code></pre></div>
 <p>Binary is the same declaration through another archive:</p>
 <div class="codeblock cb-cpp" data-sample="binder-to-binary"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto bytes  = jai::to_binary(*eng, gate);                                   // std::vector&lt;uint8_t&gt;
-auto again  = jai::from_binary&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*eng, bytes, *eng);
+auto again  = jai::from_binary&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*eng, bytes);
 again-&gt;spawn_wave();   // receivers persist in binary too</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave logged</code></pre></div>
 <ul>

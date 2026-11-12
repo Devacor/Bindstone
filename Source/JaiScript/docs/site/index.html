@@ -108,16 +108,22 @@ public:
 <div class="codeblock cb-cpp" data-sample="home-bind-run-intrusive"><span class="cb-label">C++ &middot; the host, the same in both tabs</span><pre><code class="lang-cpp">int main() {
     auto engine = jai::engine::make();
     jai::bind_registrar(*engine);   // every property_owner and registrar in the program
-    engine-&gt;execute(R"(
+    auto gate = engine-&gt;execute&lt;std::shared_ptr&lt;Spawner&gt;&gt;(R"(
         Spawner gate;
         gate.onWave.connect("hud", [](int size) { print("wave of ", size); });
         gate.level = 3;
         gate.spawn_wave(); gate.spawn_wave(4, true);
+        gate
     )");
+    gate-&gt;spawn_wave(5, false);     // script created C++ class interactable in both environments
+    std::cout &lt;&lt; "Wave Level Roundtrip Serialize: "
+              &lt;&lt; jai::from_json&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*engine, jai::to_json(*engine, gate))-&gt;level &lt;&lt; "\n";
     return 0;
 }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave of 3
-wave of 8</code></pre></div>
+wave of 8
+wave of 5
+Wave Level Roundtrip Serialize: 3</code></pre></div>
 <p>Each <code>JAI_PROPERTY</code> is the field, its script binding, its save key and its reflection; each <code>JAI_METHOD</code> is the member function and its script binding. No registrar, no glue, nothing to drift.</p>
 </div>
 <div class="tab-panel" id="bind-external" role="tabpanel" aria-labelledby="bind-tab-external" tabindex="0">
@@ -142,20 +148,26 @@ static jai::registrar&lt;Spawner, void&gt; spawnerBinding("Spawner", [](jai::dyn
 <div class="codeblock cb-cpp" data-sample="home-bind-run-external"><span class="cb-label">C++ &middot; the host, the same in both tabs</span><pre><code class="lang-cpp">int main() {
     auto engine = jai::engine::make();
     jai::bind_registrar(*engine);   // every property_owner and registrar in the program
-    engine-&gt;execute(R"(
+    auto gate = engine-&gt;execute&lt;std::shared_ptr&lt;Spawner&gt;&gt;(R"(
         Spawner gate;
         gate.onWave.connect("hud", [](int size) { print("wave of ", size); });
         gate.level = 3;
         gate.spawn_wave(); gate.spawn_wave(4, true);
+        gate
     )");
+    gate-&gt;spawn_wave(5, false);     // script created C++ class interactable in both environments
+    std::cout &lt;&lt; "Wave Level Roundtrip Serialize: "
+              &lt;&lt; jai::from_json&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*engine, jai::to_json(*engine, gate))-&gt;level &lt;&lt; "\n";
     return 0;
 }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave of 3
-wave of 8</code></pre></div>
+wave of 8
+wave of 5
+Wave Level Roundtrip Serialize: 3</code></pre></div>
 <p>Third-party and engine types bind from the outside: the same names reach script, and saves are keyed by the property names.</p>
 </div>
 </div>
-<p>Either way, the script is the same four lines and sees the same native class, and the same object saves to JSON or
+<p>Either way, the script is the same five lines and sees the same native class, C++ gets the script's own object back, and the same object saves to JSON or
 binary. <a href="embedding/02-dynamic-binder.html">The Dynamic Binder</a> walks a class through being <a href="embedding/02-dynamic-binder.html#scripted">scripted</a>,
 <a href="embedding/02-dynamic-binder.html#reflected">reflected</a>,
 <a href="embedding/02-dynamic-binder.html#serialized">serialized</a> and
@@ -192,7 +204,8 @@ saved edit to the next request.</p>
 <div class="home-section">
 <h2 id="get-jaiscript">Get JaiScript</h2>
 <p class="section-lead">git, CMake 3.25+ and a C++20 compiler: Visual Studio 2022 or newer with the C++ workload, the Xcode
-command line tools, or GCC 11 / Clang 14.</p>
+command line tools, or GCC 11 / Clang 14. CI runs the suites on Windows, Linux and macOS; a gate cross-compiles the library and
+suites for Android; and the engine runs in your browser as WebAssembly on the <a href="play/index.html">Play</a> page.</p>
 <div class="tabs" id="get-tabs">
 <div class="tab-list" role="tablist" aria-label="Ways to get JaiScript" hidden>
 <button type="button" role="tab" id="get-tab-script" aria-controls="get-script" aria-selected="true">Install script (recommended)</button>
@@ -265,10 +278,10 @@ from a fresh install to a C++ program that runs a script.</p>
 </div>
 
 <div class="home-section">
-<h2 id="pillars">Six pillars</h2>
+<h2 id="pillars">Seven pillars</h2>
 <div class="pillars">
   <div class="pillar"><h3><span class="pnum">01</span>Zero-code binding</h3>
-    <p>One <code>JAI_PROPERTY</code>, or one binder chain for a class you don&#x27;t own, makes a field scripted, saved and reflected.</p>
+    <p>One <code>JAI_PROPERTY</code> or <code>JAI_METHOD</code>, or one binder chain for a class you don&#x27;t own, makes a field scripted, saved and reflected and a method callable.</p>
     <p><a href="embedding/02-dynamic-binder.html">The Dynamic Binder →</a></p></div>
   <div class="pillar"><h3><span class="pnum">02</span>Hot reload that keeps the world</h3>
     <p>Edit a class mid-game and live instances migrate with their fields. An edit that doesn&#x27;t check is rejected, and the old code keeps running.</p>
@@ -285,6 +298,9 @@ from a fresh install to a C++ program that runs a script.</p>
   <div class="pillar"><h3><span class="pnum">06</span>Safe to embed</h3>
     <p>No global state, so engines run side by side on threads. Scripts reach only what you bind, under a time budget and an optional memory cap.</p>
     <p><a href="embedding/05-safety-rails.html">Safety Rails →</a></p></div>
+  <div class="pillar"><h3><span class="pnum">07</span>Debug it like C++</h3>
+    <p>Breakpoints, stepping and locals in VS Code, attached to a running host; completion and diagnostics from the language server.</p>
+    <p><a href="embedding/12-debugging.html">Debugging →</a> · <a href="embedding/14-language-server.html">Language Server →</a></p></div>
 </div>
 </div>
 
@@ -307,6 +323,9 @@ from a fresh install to a C++ program that runs a script.</p>
 idiom. <a href="bridges/index.html#code-migrations">Code Migrations</a> convert real code off Cereal,
 Boost.Serialization, Boost.Signals2, ChaiScript, sol2, Squirrel, pybind11, nlohmann::json, Qt properties, RTTR or a
 coroutine scheduler.</p>
+<p>Against the others, on the <a href="embedding/11-performance.html">Performance</a> page: ChaiScript is 12 to 19 times slower in the microbenchmarks,
+and the VM is 1.6 to 3.1 times faster than Squirrel on loop- and math-heavy programs (Squirrel is ahead on call-heavy ones). Against Lua
+it is about 10% slower on average (1.09 times Lua 5.5.1 over sixteen kernels), from 24% faster to 2.7 times slower on whole programs.</p>
 </div>
 
 <div class="home-section">

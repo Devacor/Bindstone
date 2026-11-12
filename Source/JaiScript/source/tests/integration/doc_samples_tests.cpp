@@ -972,7 +972,13 @@ public:
 				}
 				const auto run = doc_samples::run_program(program, interpreted ? std::vector<std::string>{ "--interpreter", script.string() } : std::vector<std::string>{});
 				check_eq(0, run.exit_code, std::string(tab) + ": " + run.output);
-				check_eq(doc_samples::trim_lines(intrusive_run.output), doc_samples::trim_lines(run.output), page + " " + tab + ": output");
+				// The interpreter run feeds only the script; the page's last two lines come from the C++ call on the returned object
+				std::string expected = doc_samples::trim_lines(intrusive_run.output);
+				if (interpreted) {
+					check_true(intrusive_run.code.find("gate->spawn_wave(5, false);") != std::string::npos, page + ": the C++ call on the returned object moved");
+					expected = expected.substr(0, expected.find_last_of('\n', expected.find_last_of('\n') - 1));
+				}
+				check_eq(expected, doc_samples::trim_lines(run.output), page + " " + tab + ": output");
 			}
 #endif
 		});
@@ -1056,7 +1062,7 @@ public:
 
 			cpp_sample from_json_block(*this, page, "binder-from-json");
 			// [sample binder-from-json]
-			auto loaded = jai::from_json<std::shared_ptr<Spawner>>(*eng, json, *eng);
+			auto loaded = jai::from_json<std::shared_ptr<Spawner>>(*eng, json);
 			// loaded->id.get() == "east-gate", level 7, threat 9
 			loaded->spawn_wave();   // the receiver came back from the save file
 			// [/sample]
@@ -1065,7 +1071,7 @@ public:
 			cpp_sample to_binary_block(*this, page, "binder-to-binary");
 			// [sample binder-to-binary]
 			auto bytes  = jai::to_binary(*eng, gate);                                   // std::vector<uint8_t>
-			auto again  = jai::from_binary<std::shared_ptr<Spawner>>(*eng, bytes, *eng);
+			auto again  = jai::from_binary<std::shared_ptr<Spawner>>(*eng, bytes);
 			again->spawn_wave();   // receivers persist in binary too
 			// [/sample]
 			to_binary_block.finish();

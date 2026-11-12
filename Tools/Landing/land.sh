@@ -10,22 +10,38 @@
 # empty pick is skipped; a conflict confined to the union files (LAND_UNION_FILES, default the perf ledger) resolves as the
 # union; any other conflict aborts with main untouched by that pick.
 #
-# The targeted tier runs what the picked paths need: Source/JaiScript/tools/ci/targeted.sh for the package, the client build
-# when MutedVision compiles a changed file, and -verifyassets when the property system, the archives, the engine or the
-# assets changed. The milestone tier runs Source/JaiScript/tools/ci/battery.sh and the full client gate.
+# The targeted tier runs what the picked paths need: Source/JaiScript/tools/ci/targeted.sh --landing for the package (its
+# suites on the Release build), and beside it the client build when MutedVision compiles a changed file, with -verifyassets
+# when the property system, the archives, the engine or the assets changed. A gate whose stamp says it already passed on the
+# landed tree with the same configuration and toolchain is not run again (Source/JaiScript/tools/ci/ci_lib.sh; the
+# branch's own gating writes those stamps); LAND_NO_STAMPS=1 runs everything. The milestone tier runs
+# Source/JaiScript/tools/ci/battery.sh and the full client gate.
 #
 # Landings queue: one land.sh runs at a time per repository (bindstone-land.lock in its git directory; a lock whose owner
 # died is cleared). Every heavy step waits while someone holds the timing lock. Logs go to LAND_LOG_DIR (default a folder of the run's own,
 # bindstone-land/<time>-<pid>, under ../tempclaudefolders/tmp beside the checkout when that folder exists, else in the
-# system temp directory; its run folders older than a week are removed). JAI_DEBUG_DIR and JAI_RELEASE_DIR default to the Visual Studio build directories under Source/JaiScript.
+# system temp directory; its run folders older than a week are removed). Under Source/JaiScript, the targeted tier builds in
+# out/build/x64-Release-land (Release, the configuration a worktree's build has, so its stamps match) and the milestone
+# tier in the Visual Studio directories; JAI_DEBUG_DIR and JAI_RELEASE_DIR override them. The targeted tier's JAI_BUILD_JOBS
+# defaults to 12.
 set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-export JAI_DEBUG_DIR="${JAI_DEBUG_DIR:-out/build/x64-Debug}"
-export JAI_RELEASE_DIR="${JAI_RELEASE_DIR:-out/build/x64-Release BENCHMARKS}"
-export JAI_CMAKE_ARGS_RELEASE="${JAI_CMAKE_ARGS_RELEASE:--DJAISCRIPT_ENABLE_BENCHMARKS=ON}"
+case "${1:-}" in
+	--battery | --battery-only)
+		export JAI_DEBUG_DIR="${JAI_DEBUG_DIR:-out/build/x64-Debug}"
+		export JAI_RELEASE_DIR="${JAI_RELEASE_DIR:-out/build/x64-Release BENCHMARKS}"
+		export JAI_CMAKE_ARGS_RELEASE="${JAI_CMAKE_ARGS_RELEASE:--DJAISCRIPT_ENABLE_BENCHMARKS=ON}"
+		;;
+	*)
+		export JAI_RELEASE_DIR="${JAI_RELEASE_DIR:-out/build/x64-Release-land}"
+		export JAI_BUILD_JOBS="${JAI_BUILD_JOBS:-12}"
+		;;
+esac
 . "$REPO/Source/JaiScript/tools/ci/ci_lib.sh"
-# A tempclaudefolders folder beside the checkout takes every temp file and log; the timing lock stays where other runs look
+# A tempclaudefolders folder beside the checkout takes every temp file and log; the timing lock and the gate stamps stay where
+# other runs look
 LAND_TEMP_ROOT="$(dirname "$REPO")/tempclaudefolders"
+export JAI_STAMP_DIR
 if [ -d "$LAND_TEMP_ROOT" ]; then
 	export JAI_TIMING_LOCK="$LOCKQ_LOCK"
 	mkdir -p "$LAND_TEMP_ROOT/tmp"
@@ -71,7 +87,7 @@ case "${1:-}" in
 	--battery-only) TIER=battery-only; shift ;;
 	--plan)
 		[ -n "${2:-}" ] || { echo "usage: land.sh --plan <rev-range>"; exit 2; }
-		bash "$REPO/Source/JaiScript/tools/ci/targeted.sh" --plan "$2"
+		bash "$REPO/Source/JaiScript/tools/ci/targeted.sh" --plan --landing "$2"
 		client_choice "$2"
 		exit 0
 		;;
@@ -181,21 +197,33 @@ HEADSHA=$(git rev-parse --short HEAD)
 if [ "$TIER" = targeted ]; then
 	if [ "$BEFORE" = "$HEADSHA" ]; then echo "$L LANDED (targeted) $HEADSHA (nothing new to check)"; exit 0; fi
 	RANGE="$BEFORE..HEAD"
-	step "targeted checks for $RANGE"
-	if ! bash "$REPO/Source/JaiScript/tools/ci/targeted.sh" --build "$RANGE" | tee "$LOG_DIR/land_${L}_targeted.txt"; then
-		echo "$L NOT GREEN: $(grep -aE 'TARGETED RED|BUILD FAILED' "$LOG_DIR/land_${L}_targeted.txt" | head -2 | tr '\n' ' ') (main holds the picks; fix forward)"
-		exit 1
-	fi
-	grep -q "^green: tests-interp" "$LOG_DIR/land_${L}_targeted.txt" && grep -q "^green: tests-vm" "$LOG_DIR/land_${L}_targeted.txt" && touch "$LOG_DIR/debug_green_$HEADSHA"
 	client_choice "$RANGE"
+	# msbuild builds the client in trees of its own, so the client gate runs beside the package's checks; each of them waits
+	# for the timing lock itself, and only when it has something to run
+	client_pid=""
+	# and under a copy of the watchdog, which the package's build may relink meanwhile
+	client_watchdog="$LOG_DIR/client_watchdog"
+	mkdir -p "$client_watchdog/bin"
+	cp -f "$JAI_RELEASE_DIR/bin/jai_gate_run.exe" "$client_watchdog/bin/" 2>/dev/null
 	if [ -n "$CLIENT_VERIFY_WHY" ]; then
-		step "client gate"
-		bash "$REPO/Tools/Landing/client_gate.sh" --no-loginshot "land_$L" | tee "$LOG_DIR/land_${L}_client.txt"
+		echo "[$(date +%H:%M)] step: client gate, beside the targeted checks"
+		JAI_RELEASE_DIR="$client_watchdog" bash "$REPO/Tools/Landing/client_gate.sh" --landing --no-loginshot "land_$L" > "$LOG_DIR/land_${L}_client.txt" 2>&1 &
+		client_pid=$!
 	elif [ -n "$CLIENT_BUILD_WHY" ]; then
-		step "client build"
-		bash "$REPO/Tools/Landing/client_gate.sh" --build-only "land_$L" | tee "$LOG_DIR/land_${L}_client.txt"
+		echo "[$(date +%H:%M)] step: client build, beside the targeted checks"
+		JAI_RELEASE_DIR="$client_watchdog" bash "$REPO/Tools/Landing/client_gate.sh" --landing --build-only "land_$L" > "$LOG_DIR/land_${L}_client.txt" 2>&1 &
+		client_pid=$!
 	else
 		echo "CLIENT GATE DONE (not needed)" > "$LOG_DIR/land_${L}_client.txt"
+	fi
+	echo "[$(date +%H:%M)] step: targeted checks for $RANGE"
+	bash "$REPO/Source/JaiScript/tools/ci/targeted.sh" --build --landing "$RANGE" | tee "$LOG_DIR/land_${L}_targeted.txt"
+	targeted_rc=${PIPESTATUS[0]}
+	[ -z "$client_pid" ] || wait "$client_pid"
+	cat "$LOG_DIR/land_${L}_client.txt"
+	if [ "$targeted_rc" != 0 ]; then
+		echo "$L NOT GREEN: $(grep -aE 'TARGETED RED|BUILD FAILED' "$LOG_DIR/land_${L}_targeted.txt" | head -2 | tr '\n' ' ')$(grep -aE 'CLIENT GATE FAILED' "$LOG_DIR/land_${L}_client.txt" | head -1) (main holds the picks; fix forward)"
+		exit 1
 	fi
 	if grep -q "CLIENT GATE DONE" "$LOG_DIR/land_${L}_client.txt"; then
 		echo "$L LANDED (targeted) $HEADSHA${PARTIAL:+ (PARTIAL: $PARTIAL)}"
@@ -206,7 +234,6 @@ if [ "$TIER" = targeted ]; then
 fi
 
 step "battery at $HEADSHA"
-[ -f "$LOG_DIR/debug_green_$HEADSHA" ] && export BATTERY_SKIP_DEBUG=1 && echo "debug suites: already green at $HEADSHA"
 bash "$REPO/Source/JaiScript/tools/ci/battery.sh" --build | tee "$LOG_DIR/land_${L}_battery.txt"
 grep -q "^BATTERY GREEN" "$LOG_DIR/land_${L}_battery.txt" && echo "MASTER GATES DONE"
 step "client gate"

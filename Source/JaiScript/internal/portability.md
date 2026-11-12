@@ -113,7 +113,7 @@ to `strtod` (locale decimal point swapped in, ERANGE → `result_out_of_range`).
 GCC/Clang warn `-Winvalid-offsetof` at the one `strong_ptr` site (§2); the offset is correct.
 
 The Android NDK (r27c: Clang 18, libc++) builds every target for arm64-v8a, armeabi-v7a, x86_64 and x86;
-`tools/ci/gates.sh android` cross-compiles the library and the suites (targeted.sh picks it when the library changes).
+`tools/ci/gates.sh android` cross-compiles the library and the suites; it runs by hand (targeted.sh never picks it).
 An NDK under a path with spaces needs `-DCMAKE_CXX_FLAGS=--driver-mode=g++`: CMake hands clang++ its 8.3 short name,
 which no longer selects the C++ driver, so libc++ goes unlinked (the gate adds it). A 32-bit Windows build (MSVC x86)
 runs the suites; it is the 32-bit runtime check while no Android device or emulator runs them.

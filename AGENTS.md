@@ -72,6 +72,18 @@ is the verdict:
 - `-loginshot [frames]` — renders the Login page for N frames and writes `login_shot.bmp`.
 - `-workbenchsmoke` / `-workbenchshot` — 120-frame Workbench self-test; the latter writes `workbench_shot.bmp`.
 
+`Tools/Landing/client_gate.sh` builds the client in Release and runs `-verifyassets` and `-loginshot`.
+
+### Landing
+
+`Tools/Landing/land.sh` cherry-picks a branch onto main, then gates the result: `targeted.sh --build --landing` for
+JaiScript (its suites on Release, no Debug build) and, beside it, the client gate when the picks touch what the client
+builds or loads. A branch is gated in its worktree first, with `Source/JaiScript/tools/ci/targeted.sh --build <base>..HEAD`
+and `Tools/Landing/client_gate.sh`; run on a committed tree, both write a stamp for each gate they pass, and the landing
+skips every gate stamped for the tree it lands with the same configuration and toolchain. A branch cut from main's tip
+therefore lands without rerunning its gates; `targeted.sh --build --landing <base>..HEAD` in the worktree also stamps the
+Release suites. `LAND_NO_STAMPS=1` runs everything. The Android gate (`gates.sh android`) runs by hand only.
+
 ### JaiScript work
 
 JaiScript has its own CMake build and test suite; `Source/JaiScript/AGENTS.md` has the workflow. In short:

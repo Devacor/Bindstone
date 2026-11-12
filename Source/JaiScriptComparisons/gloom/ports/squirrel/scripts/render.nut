@@ -7,7 +7,10 @@
 //
 // The reference computes wall columns via parallel_transform over chunk
 // records; ports run the serial-equivalent loop (outputs defined identical) —
-// here the DDA is inlined per column, reading the tile array directly.
+// here the DDA is inlined per column, reading the tile array directly. The
+// reference look casts a ray per cell column over a prebaked floor and ceiling
+// (reference_view); the showcase look casts one per pixel column and textures
+// and lights every pixel (showcase_view, tables from look.nut).
 
 ::PIXW <- 2;        // pixels per cell horizontally (set by gloom_boot)
 ::PIXH <- 2;        // pixels per cell vertically
@@ -82,6 +85,11 @@ function push_wall_tones(tone_rgb, accent) {   // ('base' is reserved in Squirre
 
 function build_render_tables(mi) {
 	local g = ::G;
+	g.lutc = {};
+	if (::SHOWCASE) {
+		::build_showcase_tables(mi);
+		return;
+	}
 	local theme = ::MAPS[mi].theme;
 	::WALLT = [];
 	// kind 0 (never rendered): flat dark
@@ -140,7 +148,6 @@ function build_render_tables(mi) {
 	local nstrips = 10 * 2 * 16 * 32;
 	::STRIPS = ::array(nstrips, 0);
 	::STRIP_SET = ::array(nstrips, 0);
-	g.lutc = {};
 }
 
 // texture tone at (tx, ty) in 0..31 for a wall kind: 0 base, 1 accent, 2 mortar
@@ -189,13 +196,19 @@ function build_strip(kind, side, shade, tx) {
 }
 
 // ---------------------------------------------------------- sprite LUTs -----
-// per (art, shade band 0..7, flash) palette-code -> palette-index table, cached
+// per (art, shade band 0..7, flash, light variant) palette-code -> palette-index
+// table, cached
 ::BAND_LUM <- [1.0, 0.88, 0.76, 0.64, 0.52, 0.42, 0.32, 0.24];
 
-function sprite_lut(name, band, flash) {
+function sprite_lut(name, band, flash, variant) {
 	local g = ::G;
-	local key = name + ":" + band + ":" + flash;
+	local key = name + ":" + band + ":" + flash + ":" + variant;
 	if (key in g.lutc) { return g.lutc[key]; }
+	if (::SHOWCASE) {
+		local slut = ::showcase_sprite_lut(name, band, flash, variant);
+		g.lutc[key] <- slut;
+		return slut;
+	}
 	local art = ::ARTS[name];
 	local rgb = art.rgb;
 	local lum = ::BAND_LUM[band];
@@ -215,24 +228,17 @@ function sprite_lut(name, band, flash) {
 	return lut;
 }
 
-// -------------------------------------------------------------- the view ----
-function render_view() {
+// the reference look's rays and columns: one ray per cell column over the
+// prebaked background, cached texture strips
+function reference_view(pix, px, py, dirx, diry, planex, planey) {
 	local g = ::G;
 	local vw = g.vw;
 	local vh = g.vh;
-	local dirx = ::cos(g.pang);
-	local diry = ::sin(g.pang);
-	local planex = 0.0 - diry * 0.78;
-	local planey = dirx * 0.78;
-	local px = g.px;
-	local py = g.py;
 	local mw = g.mw;
 	local tiles = g.tiles;
 	local t2k = ::TILE_TO_KIND;
-
-	// --- 1+2. prebaked background, then one ray per CELL column with the
-	// wall slice painted immediately (serial equivalent of the chunk bodies)
-	local pix = clone g.bg;
+	// one ray per CELL column with the wall slice painted immediately (serial
+	// equivalent of the chunk bodies)
 	local zbuf = g.zbuf;
 	local strips = ::STRIPS;
 	local stripset = ::STRIP_SET;
@@ -310,6 +316,31 @@ function render_view() {
 			}
 		}
 	}
+}
+
+// -------------------------------------------------------------- the view ----
+function render_view() {
+	local g = ::G;
+	local vw = g.vw;
+	local vh = g.vh;
+	local pang = ::SHOWCASE ? g.pang + g.feel.yaw : g.pang;
+	local dirx = ::cos(pang);
+	local diry = ::sin(pang);
+	local planex = 0.0 - diry * 0.78;
+	local planey = dirx * 0.78;
+	local px = g.px;
+	local py = g.py;
+	local zbuf = g.zbuf;
+	local pxw = ::PIXW;
+	local pix = null;
+	if (::SHOWCASE) {
+		pix = g.pix;
+		::showcase_view(px, py, dirx, diry, planex, planey);
+	} else {
+		pix = clone g.bg;
+		::reference_view(pix, px, py, dirx, diry, planex, planey);
+	}
+	local horizon = g.horizon;
 
 	// --- 3. billboards: enemies, pickups, projectiles (far to near) ---
 	local det = planex * diry - dirx * planey;
@@ -332,7 +363,7 @@ function render_view() {
 		local s = g.shots[i2];
 		::collect_billboard(sp, s[1], s[2], shot_art[s[0]], 0.16, 0.35, 0, inv, dirx, diry, planex, planey);
 	}
-	// insertion sort, far first (records: [depth, scx, name, size, zlift, flash])
+	// insertion sort, far first (records: [depth, scx, name, size, zlift, flash, wx, wy])
 	for (local i3 = 1; i3 < sp.len(); ++i3) {
 		local rec = sp[i3];
 		local j = i3 - 1;
@@ -344,11 +375,11 @@ function render_view() {
 		}
 		sp[j + 1] = rec;
 	}
-	foreach (rec2 in sp) { ::draw_billboard(rec2, pix, zbuf); }
+	foreach (rec2 in sp) { ::draw_billboard(rec2, pix, zbuf, horizon); }
 
 	// --- 4. particles: pixel confetti with z-buffer clipping ---
 	local pcols = ::PART_COLS;
-	local half2 = vh / 2;
+	local half2 = horizon;
 	local pxh = ::PIXH;
 	foreach (prt in g.fx.pool) {
 		local pk = prt[0];
@@ -381,9 +412,13 @@ function render_view() {
 		}
 	}
 
-	// --- 5. overlays: automap, hurt flash ---
+	// --- 5. the gun in hand and the look's overlays, the automap, the hurt flash ---
+	if (::SHOWCASE) {
+		::draw_viewmodel(pix);
+		g.feel.overlay(vw, vh);
+	}
 	if (g.automap) { ::draw_automap(pix, g.tiles); }
-	if (g.hurt_flash > 0) {
+	if (!::SHOWCASE && g.hurt_flash > 0) {
 		local red = ::HURT_RED;
 		local thick = pxw * 2;
 		for (local x4 = 0; x4 < vw; ++x4) {
@@ -577,7 +612,7 @@ function rows_sext(pix) {
 	return rows;
 }
 
-// world -> camera -> screen; appends [depth, scx, art, size, zlift, flash]
+// world -> camera -> screen; appends [depth, scx, art, size, zlift, flash, wx, wy]
 function collect_billboard(sp, wx, wy, art, size, zlift, flash, inv, dirx, diry, planex, planey) {
 	local g = ::G;
 	local rx = wx - g.px;
@@ -587,10 +622,10 @@ function collect_billboard(sp, wx, wy, art, size, zlift, flash, inv, dirx, diry,
 	local ttx = inv * (diry * rx - dirx * ry);
 	local scx = ((g.vw / 2.0) * (1.0 + ttx / depth)).tointeger();
 	if (scx < -g.vw || scx > g.vw * 2) { return; }
-	sp.push([depth, scx, art, size, zlift, flash]);
+	sp.push([depth, scx, art, size, zlift, flash, wx, wy]);
 }
 
-function draw_billboard(rec, pix, zbuf) {
+function draw_billboard(rec, pix, zbuf, horizon) {
 	local g = ::G;
 	local depth = rec[0];
 	local scx = rec[1];
@@ -612,8 +647,8 @@ function draw_billboard(rec, pix, zbuf) {
 	if (pw < 2) { pw = 2; }
 	local band = (depth * 0.85).tointeger() - (g.muzzle > 0 ? 1 : 0);
 	band = band < 0 ? 0 : (band > 7 ? 7 : band);
-	local lut = ::sprite_lut(name, band, flash);
-	local bottom = (vh / 2 + span * 0.5 - zlift * span).tointeger();
+	local lut = ::sprite_lut(name, band, flash, ::SHOWCASE ? g.lights.at(rec[6], rec[7]) : 0);
+	local bottom = (horizon + span * 0.5 - zlift * span).tointeger();
 	local top = bottom - ph;
 	local x0 = scx - pw / 2;
 	local x1 = x0 + pw;
@@ -679,4 +714,291 @@ function blip(pix, bx, by, c) {
 	pix[by * vw + bx + 1] = c;
 	pix[(by + 1) * vw + bx] = c;
 	pix[(by + 1) * vw + bx + 1] = c;
+}
+
+// ------------------------------------------------------- the showcase look ----
+// One ray per pixel column, then each column top to bottom: textured ceiling,
+// the lit wall slice, textured floor with its stains. Every surface reads its
+// light texel and a lit table (look.nut builds the tables, lights.nut the light).
+
+::LWALL <- [];        // [kind][variant][side][shade][tone]
+::LFLOOR <- [];       // [variant][shade][tone]
+::LCEIL <- [];
+::WALLTEX <- [];      // wall tones [far][kind][ty][tx]
+::FLOORTEX <- [];     // floor tones [far][variant][v][u]
+::CEILTEX <- [];
+::FLOOR_VAR <- [];    // per tile: which floor variant, times 256
+::CEIL_VAR <- [];     // per tile: 256 under a lamp
+::STAINS <- [];       // per tile 8x8 decal tones, 0 none
+::ROWD <- [];         // per pixel row: floor or ceiling distance
+::ROWS_SHADE <- [];
+::ROWS_FAR <- [];     // per pixel row: 1 past FAR_TEXTURE
+
+// the showcase look's lit tables, textures and lamps for floor mi
+function build_showcase_tables(mi) {
+	local g = ::G;
+	::LWALL = ::showcase_lit_wall_tones(mi);
+	::LFLOOR = ::showcase_floor_tones(mi);
+	::LCEIL = ::showcase_ceiling_tones(mi);
+	::WALLTEX = ::showcase_wall_texture();
+	::FLOORTEX = ::showcase_floor_texture(mi);
+	::CEILTEX = ::showcase_ceiling_texture();
+	g.lights.load();
+	local lamps = g.lights.lamps;
+	local mw = g.mw;
+	local fvar = [];
+	local cvar = [];
+	for (local ty = 0; ty < g.mh; ++ty) {
+		for (local tx = 0; tx < mw; ++tx) {
+			fvar.push((::texel_noise(31, tx, ty) & 3) * 256);
+			cvar.push(lamps[ty * mw + tx] ? 256 : 0);
+		}
+	}
+	::FLOOR_VAR = fvar;
+	::CEIL_VAR = cvar;
+	::STAINS = ::array(mw * g.mh * 64, 0);
+	::ROWD = ::array(g.vh, 0.0);
+	::ROWS_SHADE = ::array(g.vh, 0);
+	::ROWS_FAR = ::array(g.vh, 0);
+}
+
+// a decal on the floor: tone over the texels within radius of (x, y), each kept with chance keep/256
+function stain_floor(x, y, radius, tone, keep) {
+	local g = ::G;
+	local mw = g.mw;
+	local tiles = g.tiles;
+	local stains = ::STAINS;
+	local x0 = ((x - radius) * 8.0).tointeger();
+	local x1 = ((x + radius) * 8.0).tointeger();
+	local y0 = ((y - radius) * 8.0).tointeger();
+	local y1 = ((y + radius) * 8.0).tointeger();
+	local r2 = radius * radius * 64.0;
+	local sy_end = ::imin(g.mh * 8 - 1, y1);
+	local sx_end = ::imin(mw * 8 - 1, x1);
+	for (local sy = ::imax(0, y0); sy <= sy_end; ++sy) {
+		for (local sx = ::imax(0, x0); sx <= sx_end; ++sx) {
+			local dx = sx + 0.5 - x * 8.0;
+			local dy = sy + 0.5 - y * 8.0;
+			if (dx * dx + dy * dy > r2) { continue; }
+			if ((::texel_noise(41, sx, sy) & 255) >= keep) { continue; }
+			local tile = (sy >> 3) * mw + (sx >> 3);
+			if (tiles[tile] != 0) { continue; }
+			local i = tile * 64 + (sy & 7) * 8 + (sx & 7);
+			local old = stains[i];
+			if (tone == ::TONE_BLOOD && old == ::TONE_SCORCH) { continue; }
+			stains[i] = tone;
+		}
+	}
+}
+
+// old blood dries: one pass a second darkens a slice of the stains
+function dry_stains(tick) {
+	local stains = ::STAINS;
+	local n = stains.len();
+	local slice = n / 30 + 1;
+	local start = (tick % 30) * slice;
+	local stop = ::imin(n, start + slice);
+	for (local i = start; i < stop; ++i) {
+		if (stains[i] == ::TONE_BLOOD && (::texel_noise(43, i, tick / 30) & 7) == 0) { stains[i] = ::TONE_BLOOD_DRY; }
+	}
+}
+
+function showcase_view(px, py, dirx, diry, planex, planey) {
+	local g = ::G;
+	local vw = g.vw;
+	local vh = g.vh;
+	local horizon = vh / 2 + g.feel.pitch;
+	g.horizon = horizon;
+	local lights = g.lights;
+	lights.frame(g.feel.sources);
+
+	// the floor or ceiling distance and shade of every pixel row
+	local hz = horizon;
+	local rowd = ::ROWD;
+	local rows_shade = ::ROWS_SHADE;
+	local rows_far = ::ROWS_FAR;
+	local far_texture = ::FAR_TEXTURE;
+	for (local y = 0; y < vh; ++y) {
+		local k = y + 0.5 - hz;
+		if (k < 0.0) { k = 0.0 - k; }
+		local d = k > 0.3 ? vh / (2.0 * k) : 60.0;
+		rowd[y] = d;
+		local shade = 15 - (d * 1.55).tointeger();
+		rows_shade[y] = shade < 0 ? 0 : shade;
+		rows_far[y] = d > far_texture ? 1 : 0;
+	}
+
+	local pix = g.pix;
+	local zb = g.zbuf;
+	local lg = lights.grid;
+	local gw = lights.gw;
+	local mw = g.mw;
+	local tiles = g.tiles;
+	local t2k = ::TILE_TO_KIND;
+	local walls = ::LWALL;
+	local floors = ::LFLOOR;
+	local ceilings = ::LCEIL;
+	local wtex = ::WALLTEX;
+	local ftex = ::FLOORTEX;
+	local ctex = ::CEILTEX;
+	local fvar = ::FLOOR_VAR;
+	local cvar = ::CEIL_VAR;
+	local stain = ::STAINS;
+	local stride = ::WALL_TABLE_STRIDE;
+	local floor_tones = ::FLOOR_TONES;
+	local xstep = 2.0 / (vw - 1.0);
+	for (local x = 0; x < vw; ++x) {
+		local camx = x * xstep - 1.0;
+		local rdx = dirx + planex * camx;
+		local rdy = diry + planey * camx;
+
+		// the wall ray: the reference's chunk DDA over the tile kinds
+		local mx = px.tointeger();
+		local my = py.tointeger();
+		local adx = rdx < 0.0 ? -rdx : rdx;
+		local ady = rdy < 0.0 ? -rdy : rdy;
+		local ddx = adx < 0.00000001 ? 100000000.0 : 1.0 / adx;
+		local ddy = ady < 0.00000001 ? 100000000.0 : 1.0 / ady;
+		local stepx = rdx < 0.0 ? -1 : 1;
+		local stepy = rdy < 0.0 ? -1 : 1;
+		local sdx = rdx < 0.0 ? (px - mx) * ddx : (mx + 1.0 - px) * ddx;
+		local sdy = rdy < 0.0 ? (py - my) * ddy : (my + 1.0 - py) * ddy;
+		local side = 0;
+		local kind = 1;
+		local guard = 0;
+		local hit = false;
+		while (!hit && guard < 128) {
+			if (sdx < sdy) { sdx += ddx; mx += stepx; side = 0; }
+			else { sdy += ddy; my += stepy; side = 1; }
+			local c = t2k[tiles[my * mw + mx]];
+			if (c != 0) { hit = true; kind = c; }
+			guard++;
+		}
+		local dist = side == 0 ? sdx - ddx : sdy - ddy;
+		dist = dist < 0.02 ? 0.02 : dist;
+		local wallx = side == 0 ? py + dist * rdy : px + dist * rdx;
+		wallx = wallx - ::floor(wallx);
+		local tx = (wallx * 64.0).tointeger() >> 1;
+		zb[x] = dist;
+
+		// the wall's rows are those whose centers lie within half of the horizon,
+		// so every ceiling and floor pixel is strictly nearer than the wall
+		local half = 0.5 * vh / dist;
+		local ytop = hz - half;
+		local y0 = 0 - ::floor(0.5 - ytop).tointeger();
+		local y1 = ::floor(hz - 0.5 + half).tointeger() + 1;
+		local cy0 = y0 < 0 ? 0 : (y0 > vh ? vh : y0);
+		local cy1 = y1 > vh ? vh : (y1 < cy0 ? cy0 : y1);
+
+		// ceiling
+		local gi = x;
+		for (local y = 0; y < cy0; ++y) {
+			local d = rowd[y];
+			local fx = px + rdx * d;
+			local fy = py + rdy * d;
+			local ix = fx.tointeger();
+			local iy = fy.tointeger();
+			local u = ((fx - ix) * 16.0).tointeger();
+			local v = ((fy - iy) * 16.0).tointeger();
+			local lx = (fx * 4.0).tointeger();
+			local ly = (fy * 4.0).tointeger();
+			local tone = ctex[rows_far[y] * 512 + cvar[iy * mw + ix] + v * 16 + u];
+			pix[gi] = ceilings[(lg[ly * gw + lx] * 16 + rows_shade[y]) * 8 + tone];
+			gi += vw;
+		}
+
+		// wall
+		local shade = 15 - (dist * 1.55).tointeger();
+		shade = shade < 0 ? 0 : (shade > 15 ? 15 : shade);
+		local back = dist - 0.03;
+		local wlx = ((px + rdx * back) * 4.0).tointeger();
+		local wly = ((py + rdy * back) * 4.0).tointeger();
+		local light = lg[wly * gw + wlx];
+		local wbase = kind * stride + ((light * 2 + side) * 16 + shade) * 8;
+		local tbase = (dist > far_texture ? 9216 : 0) + kind * 1024 + tx;
+		local tscale = 65536.0 / (2.0 * half);
+		local tstep = tscale.tointeger();
+		local tacc = ((cy0 + 0.5 - ytop) * tscale).tointeger();
+		gi = cy0 * vw + x;
+		for (local y = cy0; y < cy1; ++y) {
+			pix[gi] = walls[wbase + wtex[tbase + ((tacc >> 11) & 31) * 32]];
+			tacc += tstep;
+			gi += vw;
+		}
+
+		// floor
+		for (local y = cy1; y < vh; ++y) {
+			local d = rowd[y];
+			local fx = px + rdx * d;
+			local fy = py + rdy * d;
+			local ix = fx.tointeger();
+			local iy = fy.tointeger();
+			local u = ((fx - ix) * 16.0).tointeger();
+			local v = ((fy - iy) * 16.0).tointeger();
+			local lx = (fx * 4.0).tointeger();
+			local ly = (fy * 4.0).tointeger();
+			local ti = iy * mw + ix;
+			local tone = stain[ti * 64 + (v >> 1) * 8 + (u >> 1)];
+			if (tone == 0) { tone = ftex[rows_far[y] * 1024 + fvar[ti] + v * 16 + u]; }
+			pix[gi] = floors[(lg[ly * gw + lx] * 16 + rows_shade[y]) * floor_tones + tone];
+			gi += vw;
+		}
+	}
+}
+
+// the showcase look's gun in hand: sways with the walk, kicks on each shot
+function draw_viewmodel(pix) {
+	local g = ::G;
+	if (g.automap) { return; }
+	local firing = g.cooldown > ::WEAPONS[g.weapon].cd - 4 || g.gun_kick > 0;
+	local name = ::VIEWMODEL_NAMES[g.weapon];
+	if (firing && g.muzzle > 0) { name = name + "_fire"; }
+	local art = ::VIEWMODELS[name];
+	local lut = ::viewmodel_lut(name, g.muzzle > 0, g.lights.at(g.px, g.py));
+	local vw = g.vw;
+	local vh = g.vh;
+	local aw = art.w;
+	local ah = art.h;
+	local apix = art.pix;
+	// art pixels are square: a view pixel is PIXW x PIXH of a 1:2 cell
+	local scale = vh * 0.4 / 24.0;
+	local ph = (ah * scale).tointeger();
+	local pw = ph * aw * 2 * ::PIXW / (ah * ::PIXH);
+	local sway = (::sin(g.bob * 0.5) * vw * 0.025).tointeger();
+	local lift = (::fabs(::cos(g.bob * 0.5)) * scale * 1.5).tointeger() + g.gun_kick * (scale * 0.9).tointeger();
+	local x0 = vw / 2 - pw / 2 + sway;
+	local y0 = vh - ph + lift + (g.horizon - vh / 2) / 2;
+	local cx0 = ::imax(0, x0);
+	local cx1 = ::imin(vw, x0 + pw);
+	local cy1 = ::imin(vh, y0 + ph);
+	for (local y = ::imax(0, y0); y < cy1; ++y) {
+		local row = ((y - y0) * ah / ph) * aw;
+		local rb = y * vw;
+		for (local x = cx0; x < cx1; ++x) {
+			local code = apix[row + (x - x0) * aw / pw];
+			if (code > 0) { pix[rb + x] = lut[code]; }
+		}
+	}
+}
+
+// palette code -> index for a gun under this floor's light, brighter in its own flash
+function viewmodel_lut(name, flashing, variant) {
+	local g = ::G;
+	local key = name + ":" + flashing + ":" + variant;
+	if (key in g.lutc) { return g.lutc[key]; }
+	local mood = ::MOODS[g.map_i];
+	local art = ::VIEWMODELS[name];
+	local light = ::cadd(::cscale(::mix_rgb(mood.light, ::rgb(255, 255, 255), 0.4), flashing ? 1.25 : 0.7),
+		::cscale(::sprite_light(mood, variant), 0.8));
+	local lut = [0];
+	local rgbs = art.rgb;
+	local keys = art.keys;
+	for (local c = 1; c < rgbs.len(); ++c) {
+		local col = ::rgb(rgbs[c][0], rgbs[c][1], rgbs[c][2]);
+		local key_char = keys[c];
+		if (key_char >= 'A' && key_char <= 'Z') { lut.push(::color_idx(col)); }
+		else { lut.push(::color_idx(::cclamp01(::cmul(col, light)))); }
+	}
+	g.lutc[key] <- lut;
+	return lut;
 }

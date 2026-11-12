@@ -541,35 +541,40 @@
 		".rr."]}
 };
 
-// parsed at boot: name -> {w, h, pix (flat codes, 0 transparent), rgb ([[r,g,b]...])}
+// parsed at boot: name -> {w, h, pix (flat codes, 0 transparent), rgb ([[r,g,b]...]),
+// keys (the palette character code per code)}
 ::ARTS <- {};
 
 function parse_arts() {
 	::ARTS = {};
-	foreach (name, src in ::ART_SRC) {
-		local rows = src.rows;
-		local pal = src.pal;
-		local codes = {};    // char code -> art code
-		local rgb = [[0, 0, 0]];
-		local next_code = 1;
-		local h = rows.len();
-		local w = rows[0].len();
-		local pix = [];
-		for (local y = 0; y < h; ++y) {
-			local row = rows[y];
-			for (local x = 0; x < w; ++x) {
-				local ch = row[x];
-				if (ch == '.') { pix.push(0); continue; }
-				if (!(ch in codes)) {
-					codes[ch] <- next_code;
-					next_code++;
-					rgb.push(pal[ch.tochar()]);
-				}
-				pix.push(codes[ch]);
+	foreach (name, src in ::ART_SRC) { ::ARTS[name] <- ::parse_art(src); }
+}
+
+function parse_art(src) {
+	local rows = src.rows;
+	local pal = src.pal;
+	local codes = {};    // char code -> art code
+	local rgb = [[0, 0, 0]];
+	local keys = ['.'];
+	local next_code = 1;
+	local h = rows.len();
+	local w = rows[0].len();
+	local pix = [];
+	for (local y = 0; y < h; ++y) {
+		local row = rows[y];
+		for (local x = 0; x < w; ++x) {
+			local ch = row[x];
+			if (ch == '.') { pix.push(0); continue; }
+			if (!(ch in codes)) {
+				codes[ch] <- next_code;
+				next_code++;
+				rgb.push(pal[ch.tochar()]);
+				keys.push(ch);
 			}
+			pix.push(codes[ch]);
 		}
-		::ARTS[name] <- {w = w, h = h, pix = pix, rgb = rgb};
 	}
+	return {w = w, h = h, pix = pix, rgb = rgb, keys = keys};
 }
 
 // ------------------------------------------------------- weapon HUD art -----

@@ -78,6 +78,7 @@ function use_tile(tx, ty, t) {
 	}
 	if (t == 7) {
 		g.tiles[ty * g.mw + tx] = 0;
+		g.mapgen++;
 		g.secrets++;
 		::fx_secret_glitter(tx + 0.5, ty + 0.5);
 		::show_msg("you found a secret!", "96");
@@ -95,6 +96,7 @@ function use_tile(tx, ty, t) {
 function open_door(tx, ty, msg) {
 	local g = ::G;
 	g.tiles[ty * g.mw + tx] = 0;
+	g.mapgen++;
 	::fx_door_puff(tx + 0.5, ty + 0.5);
 	g.noise = ::imax(g.noise, 10);
 	::show_msg(msg, "97");

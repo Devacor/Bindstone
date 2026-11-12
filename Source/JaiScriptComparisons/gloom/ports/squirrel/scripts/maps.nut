@@ -196,6 +196,7 @@ function load_map(mi) {
 			}
 		}
 	}
+	g.mapgen++;
 	::build_render_tables(mi);
 }
 

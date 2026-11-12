@@ -12,7 +12,14 @@
 ::include("enemies.nut");
 ::include("combat.nut");
 ::include("sim.nut");
+::include("look.nut");
+::include("tune.nut");
+::include("lights.nut");
+::include("viewmodel.nut");
 ::include("render.nut");
+::include("canvas.nut");
+::include("feel.nut");
+::include("screens.nut");
 ::include("hud.nut");
 ::include("game.nut");
 
@@ -22,13 +29,16 @@ function gloom_force_autopilot() { ::FORCE_PILOT = true; }
 
 function gloom_boot(w, h) {
 	::RNG = ::Rng(::HOST_SEED);
+	::SHOWCASE = ::HOST_LOOK == "showcase";
 	if (::HOST_PIX == 0) { ::PIXW = 1; ::PIXH = 2; }
 	else if (::HOST_PIX == 2) { ::PIXW = 2; ::PIXH = 3; }
 	else { ::PIXW = 2; ::PIXH = 2; }
 	::parse_arts();
+	::parse_viewmodels();
 	::validate_all_maps();
 	::G = ::Game(w, h);
 	::init_render();
+	if (::SHOWCASE) { ::G.screens = ::Screens(w, h); }
 	::G.autopilot = ::HOST_SMOKE || ::FORCE_PILOT;
 }
 

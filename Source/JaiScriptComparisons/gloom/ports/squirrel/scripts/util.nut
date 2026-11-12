@@ -54,6 +54,7 @@ function join_arr(parts, sep) {
 ::PAL_FG <- [];      // ESC[38;2;r;g;bm per index
 ::PAL_BG <- [];      // ESC[48;2;r;g;bm per index
 ::PAL_LUM <- [];     // 2r+3g+b per index
+::PAL_RGB <- [];     // r<<16|g<<8|b per index
 
 function rgb_idx(r, g, b) {
 	r = ::iclamp(r, 0, 255);
@@ -66,6 +67,7 @@ function rgb_idx(r, g, b) {
 	::PAL_FG.push(::ESC + "[38;2;" + r + ";" + g + ";" + b + "m");
 	::PAL_BG.push(::ESC + "[48;2;" + r + ";" + g + ";" + b + "m");
 	::PAL_LUM.push(r * 2 + g * 3 + b);
+	::PAL_RGB.push(key);
 	return idx;
 }
 

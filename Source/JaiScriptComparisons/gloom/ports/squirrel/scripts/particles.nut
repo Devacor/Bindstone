@@ -102,6 +102,13 @@ function fx_secret_glitter(x, y) {
 ::PART_COLS <- [];
 
 function build_particle_colors() {
+	::PART_COLS = [];
+	if (::SHOWCASE) {
+		foreach (ramp in ::SHOWCASE_PARTICLE_RAMPS) {
+			foreach (c in ramp) { ::PART_COLS.push(::color_idx(c)); }
+		}
+		return;
+	}
 	local ramps = [
 		[[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]],                          // 0 dead (unused)
 		[[255, 240, 160], [255, 200, 90], [230, 130, 50], [140, 70, 30]],      // 1 spark
@@ -111,7 +118,6 @@ function build_particle_colors() {
 		[[255, 252, 220], [255, 236, 160], [255, 190, 90], [200, 120, 50]],    // 5 flash
 		[[150, 255, 170], [110, 235, 200], [90, 190, 250], [80, 120, 220]]     // 6 hexmote
 	];
-	::PART_COLS = [];
 	foreach (ramp in ramps) {
 		foreach (rgb in ramp) {
 			::PART_COLS.push(::rgb_idx(rgb[0], rgb[1], rgb[2]));

@@ -237,6 +237,7 @@ function render_play(fps, ms_sim, ms_draw) {
 
 function render_frame(fps, ms_sim, ms_draw) {
 	local g = ::G;
+	if (::SHOWCASE) { return g.screens.frame(fps, ms_sim, ms_draw); }
 	if (g.mode == 0) { return ::render_title(); }
 	if (g.mode == 2) { return ::render_tally(); }
 	if (g.mode == 3) { return ::render_dead(); }

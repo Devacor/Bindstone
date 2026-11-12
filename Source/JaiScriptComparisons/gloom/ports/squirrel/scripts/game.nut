@@ -85,6 +85,14 @@ class Game {
 	bg = null;
 	zbuf = null;
 	lutc = null;
+	mapgen = 0;        // bumps with every tile change; the showcase light bake keys on it
+
+	// the showcase look: its pixel grid, light, feel and pages
+	pix = null;
+	horizon = 0;       // the pixel row the eye looks along: vh / 2, moved by bob and shake
+	lights = null;     // LightGrid
+	feel = null;       // Feel: the look's eyes on the game
+	screens = null;    // Screens: the panel and the pages
 
 	// the autopilot: a generator handle living in a field
 	pilot = null;
@@ -106,6 +114,10 @@ class Game {
 		lutc = {};
 		input = {};
 		zbuf = ::array(vw, 99.0);
+		pix = ::array(vw * vh, 0);
+		horizon = vh / 2;
+		lights = ::LightGrid();
+		feel = ::Feel();
 	}
 
 	function reset_player() {

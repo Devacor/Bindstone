@@ -119,8 +119,7 @@ public:
 
     //Serialization Example:
     std::string spawnerJson = jai::to_json(engine, *gate);
-    Spawner roundTrip;
-    jai::from_json(engine, spawnerJson, roundTrip);
+    Spawner roundTrip = jai::from_json&lt;Spawner&gt;(engine, spawnerJson);
     std::cout &lt;&lt; "Wave Level: " &lt;&lt; roundTrip.level &lt;&lt; "\nContents:\n" &lt;&lt; spawnerJson &lt;&lt; "\n";
     return 0;
 }</code></pre></div>
@@ -174,8 +173,7 @@ static jai::registrar&lt;Spawner, void&gt; spawnerBinding("Spawner", [](jai::dyn
 
     //Serialization Example:
     std::string spawnerJson = jai::to_json(engine, *gate);
-    Spawner roundTrip;
-    jai::from_json(engine, spawnerJson, roundTrip);
+    Spawner roundTrip = jai::from_json&lt;Spawner&gt;(engine, spawnerJson);
     std::cout &lt;&lt; "Wave Level: " &lt;&lt; roundTrip.level &lt;&lt; "\nContents:\n" &lt;&lt; spawnerJson &lt;&lt; "\n";
     return 0;
 }</code></pre></div>

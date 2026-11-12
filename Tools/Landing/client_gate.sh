@@ -30,6 +30,7 @@ for arg in "$@"; do
 done
 LOG_DIR="${LAND_LOG_DIR:-$(lockq_temp_dir)/bindstone-land/$(date +%Y%m%d-%H%M%S)-$$}"
 mkdir -p "$LOG_DIR"
+JAI_CI_LOG_DIR="$LOG_DIR"
 LOG="$LOG_DIR/${LABEL}_bindstone.log"
 : > "$LOG"
 STEPS=(client-build)

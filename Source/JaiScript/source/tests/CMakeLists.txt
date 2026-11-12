@@ -171,7 +171,8 @@ foreach(home_tab intrusive external)
     target_link_libraries(jai_home_${home_tab} PRIVATE ${JAISCRIPT_VERIFIER_LIBRARY})
     add_dependencies(jaiscript_tests jai_home_${home_tab})
 endforeach()
-set_property(SOURCE integration/doc_samples_tests.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+# on the target, not the source file: Xcode resolves a per-configuration path only in target properties
+target_compile_definitions(jaiscript_tests PRIVATE
     JAI_HOME_INTRUSIVE="$<TARGET_FILE:jai_home_intrusive>"
     JAI_HOME_EXTERNAL="$<TARGET_FILE:jai_home_external>"
 )

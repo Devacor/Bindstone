@@ -1,0 +1,6 @@
+# Justified leak-scan hits for export_benchmarks.py, in leak_exceptions.txt's format. One per line, tab-separated:
+#   <path glob>	<check id>	<text the hit's line must contain>	<reason>
+
+LICENSE	email	mike@m2tm.net	the license holder's contact, as in JaiScript's LICENSE
+demoreel/ports/COMPARISON.md	iso-date	Measured 	the date the published demoreel measurement was taken
+kernels/run.py	iso-date	dasProfile's published interpreter board	the date the dasProfile board the estimates scale by was read

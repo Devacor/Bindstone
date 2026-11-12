@@ -38,7 +38,7 @@ int main() {
     //Serialization Example:
     std::string spawnerJson = jai::to_json(*engine, gate);
     auto roundTrip = jai::from_json<std::shared_ptr<Spawner>>(*engine, spawnerJson);
-    std::cout << "Wave Level: " << roundTrip->level << "\nContents: " << spawnerJson << "\n";
+    std::cout << "Wave Level: " << roundTrip->level << "\nContents:\n" << spawnerJson << "\n";
     return 0;
 }
 // [/sample]

@@ -22,6 +22,7 @@
 #include <jaiscript/properties/observable_property.hpp>
 #include <jaiscript/signals/signal_impl.hpp>
 #include <jaiscript/signals/signal_view.hpp>
+#include <jaiscript/signals/signal_serialization.hpp>
 #include <string>
 #include <memory>
 #include <optional>
@@ -184,6 +185,13 @@ namespace dynamic_binder_validation {
 
     template<typename Sig, typename Sync>
     struct is_signal_type<member_signal_emitter<Sig, Sync>> : std::true_type {};
+
+    // A view refers to an emitter elsewhere and holds nothing to save; an emitter saves its script-text receivers
+    template<typename T>
+    struct is_signal_view : std::false_type {};
+
+    template<typename Sig, typename Sync>
+    struct is_signal_view<signal<Sig, Sync>> : std::true_type {};
 
     // std::function members are callback hooks (script lambdas assign into them);
     // like signals, they are opaque to scripts and need no registration.
@@ -1421,9 +1429,9 @@ private:
 
         using State = property_state<P>;
         auto state = std::make_shared<const State>(State{ std::bit_cast<std::array<std::byte, sizeof(P T::*)>>(member), &engine_, class_def_->get_type_id() });
-        // a const member cannot load back, and a signal or callback is a connect surface, not data: the record leaves them out
+        // a const member cannot load back, and a signal view or callback holds no data: the record leaves them out
         if constexpr (Archived && serialization::binding_record_v<T> && !std::is_const_v<P> &&
-                      !dynamic_binder_validation::is_signal_type<P>::value && !dynamic_binder_validation::is_std_function<P>::value) {
+                      !dynamic_binder_validation::is_signal_view<P>::value && !dynamic_binder_validation::is_std_function<P>::value) {
             prop_meta.archive = { &save_member_record<P>, &load_member_record<P>, state };
         }
         serialization_metadata_.properties.push_back(std::move(prop_meta));

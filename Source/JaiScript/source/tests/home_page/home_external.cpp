@@ -23,7 +23,7 @@ public:
 static jai::registrar<Spawner, void> spawnerBinding("Spawner", [](jai::dynamic_binder<Spawner>& b) {
     b.property("id", &Spawner::id)          // scripted and saved
      .property("level", &Spawner::level)
-     .property("onWave", &Spawner::onWave)  // script-connectable
+     .property("onWave", &Spawner::onWave)  // script-connectable, saved too
      .method("spawn_wave", jai::overload<>(&Spawner::spawn_wave))
      .method("spawn_wave", jai::overload<int64_t, bool>(&Spawner::spawn_wave));
 });
@@ -47,7 +47,7 @@ int main() {
     //Serialization Example:
     std::string spawnerJson = jai::to_json(*engine, gate);
     auto roundTrip = jai::from_json<std::shared_ptr<Spawner>>(*engine, spawnerJson);
-    std::cout << "Wave Level: " << roundTrip->level << "\nContents: " << spawnerJson << "\n";
+    std::cout << "Wave Level: " << roundTrip->level << "\nContents:\n" << spawnerJson << "\n";
     return 0;
 }
 // [/sample]

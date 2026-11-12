@@ -7,6 +7,7 @@
 #include <jaiscript/signals/signal_property.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
+#include <jaiscript/serialization/convenience.hpp>
 #include <jaiscript/serialization/serialization_metadata.hpp>  // For any_archive_reader
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/core/dynamic_binder_serialization.hpp>
@@ -599,6 +600,17 @@ public:
             check_eq(std::string("hello"), host->received);
             eng->execute("messages.onNotice.disconnect(\"greet\");");
             check_false(host->onNotice.connected("greet"));
+
+            // a bound emitter saves its script-text receivers as a JAI_SIGNAL does, and a load re-arms them
+            host->onNotice.connect("echo", "messages.received = \"echoed\";");
+            const auto json_copy = jai::from_json<std::shared_ptr<emitter_host>>(*eng, jai::to_json(*eng, host));
+            const auto binary_copy = jai::from_binary<std::shared_ptr<emitter_host>>(*eng, jai::to_binary(*eng, host));
+            for (const auto& copy : { json_copy, binary_copy }) {
+                check_true(copy->onNotice.connected("echo"));
+                host->received.clear();
+                copy->onNotice("x");
+                check_eq(std::string("echoed"), host->received);
+            }
         });
 
         test("property_transparent_conversion", [&]() {

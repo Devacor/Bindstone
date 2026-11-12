@@ -186,7 +186,7 @@ silent after disconnect: true</code></pre></div>
 <li>A receiver that captured the old object&#x27;s address still holds that address. Reconnect one that reaches back into its owner.</li>
 </ul>
 <h3 id="connections-that-save">Connections that save<a class="hlink" href="#connections-that-save" aria-label="link">&#8203;</a></h3>
-<p><code>JAI_SIGNAL</code> gives the signal a hidden property that serializes with the owner&#x27;s other properties, in JSON or binary.</p>
+<p><code>JAI_SIGNAL</code> gives the signal a hidden property that serializes with the owner&#x27;s other properties, in JSON or binary. A <code>signal_emitter</code> member bound with <code>.property</code> saves the same way with its class&#x27;s binding; a bound <code>jai::signal</code> view holds nothing to save.</p>
 <ul>
 <li><strong>Saved:</strong> the signal&#x27;s <code>parameter_names</code> and each script-text receiver with its source, a named one under its id.</li>
 <li><strong>Not saved:</strong> C++ callbacks and script function receivers. The host reconnects them after a load.</li>

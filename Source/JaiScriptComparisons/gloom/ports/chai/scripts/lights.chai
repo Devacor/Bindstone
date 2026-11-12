@@ -1,0 +1,185 @@
+// The showcase look's light: a grid of light texels, LIGHT_SUB to a tile edge,
+// each holding a light variant (a channel and a level, 0 unlit). Ceiling lamps
+// and the glowing fixtures (the exit switch, the lock lights) are baked when a
+// floor loads or a door opens; the muzzle flash, projectiles and blasts are
+// stamped over the bake every frame. Light flows through open tiles only, so it
+// rounds corners and stops at walls. Surfaces read their texel and look the lit
+// color up in a table per variant (look.chai builds them).
+
+global LIGHT_SUB = 4
+global LIGHT_LEVELS = 4
+global LIGHT_LAMP = 0
+global LIGHT_FIRE = 1
+global LIGHT_HEX = 2
+global LIGHT_ACID = 3
+global LIGHT_RED = 4
+global LIGHT_BLUE = 5
+global LIGHT_VARIANTS = 25     // unlit + channels x levels
+
+global NEIGHBORS = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+
+// ordered dither over the light texels: light falls off in a fine stipple, not in rings
+global BAYER4 = [0.0, 0.5, 0.125, 0.625, 0.75, 0.25, 875e-3, 0.375, 0.1875, 6875e-4, 0.0625, 0.5625, 0.9375,
+	4375e-4, 0.8125, 0.3125]
+
+def light_level(variant) { return variant == 0 ? 0 : (variant - 1) % LIGHT_LEVELS + 1; }
+
+// a light for one frame: [x, y, channel, radius, power]
+def light_source(x, y, channel, radius, power) { return [x, y, channel, radius, power]; }
+
+class LightGrid {
+	var gw          // texels across
+	var gh
+	var grid        // this frame's light
+	var lamps       // per tile: a lamp hangs over it
+	var baked
+	var baked_gen
+	var seen        // per tile: the stamp that last reached it
+	var stamp_id
+	var queue
+
+	def LightGrid() {
+		this.gw = 0;
+		this.gh = 0;
+		this.grid = [];
+		this.lamps = [];
+		this.baked = [];
+		this.baked_gen = -1;
+		this.seen = [];
+		this.stamp_id = 0;
+		this.queue = [];
+	}
+
+	// a floor's lamps: open tiles, LAMP_SPACING apart, picked in a fixed order from a hash
+	def load() {
+		var mw = G.mw;
+		var mh = G.mh;
+		this.gw = mw * LIGHT_SUB;
+		this.gh = mh * LIGHT_SUB;
+		this.lamps = [];
+		this.seen = [];
+		for (var i = 0; i < mw * mh; ++i) {
+			this.lamps.push_back(false);
+			this.seen.push_back(0);
+		}
+		for (var ty = 1; ty < mh - 1; ++ty) {
+			for (var tx = 1; tx < mw - 1; ++tx) {
+				if (G.tiles[ty * mw + tx] != 0 || texel_noise(11, tx, ty) % 3 != 0) { continue; }
+				if (!this.lamp_near(tx, ty)) { this.lamps[ty * mw + tx] = true; }
+			}
+		}
+		this.baked_gen = -1;
+	}
+
+	// the bake, redone when a door or a secret opens; then this frame's lights over it
+	def frame(sources) {
+		if (this.baked_gen != G.mapgen) {
+			this.bake();
+			this.baked_gen = G.mapgen;
+		}
+		// grid = baked, by value: a vector copy would share the elements' storage
+		var grid := this.grid;
+		var baked := this.baked;
+		var n = vlen(baked);
+		if (vlen(grid) != n) {
+			grid.clear();
+			for (var i = 0; i < n; ++i) { grid.push_back(0); }
+		}
+		for (var i = 0; i < n; ++i) { grid[i] = baked[i]; }
+		for (s : sources) { this.stamp(grid, s[0], s[1], s[2], s[3], s[4]); }
+	}
+
+	def at(x, y) {
+		var gx = itrunc(x * LIGHT_SUB);
+		var gy = itrunc(y * LIGHT_SUB);
+		if (gx < 0 || gy < 0 || gx >= this.gw || gy >= this.gh) { return 0; }
+		return this.grid[gy * this.gw + gx];
+	}
+
+	def lamp_near(tx, ty) {
+		var mw = G.mw;
+		var lamps := this.lamps;
+		var y1 = imin(G.mh, ty + LAMP_SPACING);
+		var x1 = imin(mw, tx + LAMP_SPACING);
+		for (var y = imax(0, ty - LAMP_SPACING + 1); y < y1; ++y) {
+			for (var x = imax(0, tx - LAMP_SPACING + 1); x < x1; ++x) {
+				if (lamps[y * mw + x]) { return true; }
+			}
+		}
+		return false;
+	}
+
+	def bake() {
+		var mw = G.mw;
+		var mh = G.mh;
+		this.baked = [];
+		var baked := this.baked;
+		var n = this.gw * this.gh;
+		for (var i = 0; i < n; ++i) { baked.push_back(0); }
+		for (var ty = 0; ty < mh; ++ty) {
+			for (var tx = 0; tx < mw; ++tx) {
+				var t = G.tiles[ty * mw + tx];
+				if (this.lamps[ty * mw + tx]) { this.stamp(baked, tx + 0.5, ty + 0.5, LIGHT_LAMP, LAMP_RADIUS, LAMP_POWER); }
+				var channel = t == 6 ? LIGHT_ACID : (t == 8 ? LIGHT_RED : (t == 9 ? LIGHT_BLUE : -1));
+				if (channel < 0) { continue; }
+				for (step : NEIGHBORS) {
+					if (tile_at(tx + step[0], ty + step[1]) != 0) { continue; }
+					this.stamp(baked, tx + 0.5 + step[0] * 0.55, ty + 0.5 + step[1] * 0.55, channel, 2.4, 0.75);
+				}
+			}
+		}
+	}
+
+	// light from (lx, ly) over the open tiles a walk of the radius reaches; a
+	// texel keeps the brighter of what it had and what this light gives it
+	def stamp(into, lx, ly, channel, radius, power) {
+		var mw = G.mw;
+		var sx = itrunc(lx);
+		var sy = itrunc(ly);
+		if (tile_at(sx, sy) != 0) { return; }
+		this.stamp_id += 1;
+		var id = this.stamp_id;
+		var seen := this.seen;
+		var queue := this.queue;
+		var gw = this.gw;
+		var steps = itrunc(radius) + 1;
+		queue.clear();
+		queue.push_back(sy * mw + sx);
+		seen[sy * mw + sx] = id;
+		var head = 0;
+		var inv_r = 1.0 / radius;
+		var base = 1 + channel * LIGHT_LEVELS;
+		var bayer := BAYER4;
+		while (head < vlen(queue)) {
+			var tile = queue[head];
+			head += 1;
+			var tx = tile % mw;
+			var ty = tile / mw;
+			for (var sv = 0; sv < LIGHT_SUB; ++sv) {
+				var wy = ty + (sv + 0.5) / LIGHT_SUB - ly;
+				var row = (ty * LIGHT_SUB + sv) * gw + tx * LIGHT_SUB;
+				for (var su = 0; su < LIGHT_SUB; ++su) {
+					var wx = tx + (su + 0.5) / LIGHT_SUB - lx;
+					var d = sqrt(wx * wx + wy * wy) * inv_r;
+					if (d >= 1.0) { continue; }
+					var f = power * (1.0 - d) * (1.0 - d * 0.5);
+					var level = itrunc(f * LIGHT_LEVELS + bayer[((ty * LIGHT_SUB + sv) & 3) * 4 + ((tx * LIGHT_SUB + su) & 3)]);
+					if (level <= 0) { continue; }
+					if (level > LIGHT_LEVELS) { level = LIGHT_LEVELS; }
+					var i = row + su;
+					if (level >= light_level(into[i])) { into[i] = base + level - 1; }
+				}
+			}
+			if (iabs(tx - sx) + iabs(ty - sy) >= steps) { continue; }
+			for (step : NEIGHBORS) {
+				var nx = tx + step[0];
+				var ny = ty + step[1];
+				if (tile_at(nx, ny) != 0) { continue; }
+				var next = ny * mw + nx;
+				if (seen[next] == id) { continue; }
+				seen[next] = id;
+				queue.push_back(next);
+			}
+		}
+	}
+}

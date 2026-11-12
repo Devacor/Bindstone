@@ -210,6 +210,7 @@ def rebuild_mapstr() {
 	var pack = [];
 	for (var i = 0; i < n; ++i) { pack.push_back(TILE_TO_KIND[G.tiles[i]]); }
 	RKIND = pack;
+	G.mapgen += 1;
 }
 
 def tile_at(x, y) {

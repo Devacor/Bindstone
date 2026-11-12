@@ -240,6 +240,7 @@ def render_play(fps, ms_sim, ms_draw) {
 }
 
 def render_frame(fps, ms_sim, ms_draw) {
+	if (SHOWCASE) { return G.screens.frame(fps, ms_sim, ms_draw); }
 	if (G.mode == 0) { return render_title(); }
 	if (G.mode == 2) { return render_tally(); }
 	if (G.mode == 3) { return render_dead(); }

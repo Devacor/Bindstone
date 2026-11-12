@@ -17,8 +17,8 @@ global AMMO_MAX = [200, 50, 120]
 // ---------------------------------------------------------------- bestiary --
 // kind indexes: 0 grunt (melee rusher), 1 spitter (ranged), 2 turret, 3 warden (boss)
 global ENEMY_DEFS = [
-	["name": "GRUNT",   "hp": 30,  "speed": 3.1, "radius": 0.34, "pain": 55, "size": 0.72, "melee_lo": 4, "melee_hi": 10],
-	["name": "SPITTER", "hp": 45,  "speed": 2.2, "radius": 0.36, "pain": 40, "size": 0.78, "melee_lo": 3, "melee_hi": 7],
+	["name": "GRUNT",   "hp": 30,  "speed": 3.1, "radius": 34e-2, "pain": 55, "size": 0.72, "melee_lo": 4, "melee_hi": 10],
+	["name": "SPITTER", "hp": 45,  "speed": 2.2, "radius": 0.36, "pain": 40, "size": 78e-2, "melee_lo": 3, "melee_hi": 7],
 	["name": "TURRET",  "hp": 60,  "speed": 0.0, "radius": 0.38, "pain": 15, "size": 0.60, "melee_lo": 0, "melee_hi": 0],
 	["name": "WARDEN",  "hp": 260, "speed": 2.0, "radius": 0.45, "pain": 8,  "size": 1.05, "melee_lo": 10, "melee_hi": 22]
 ]
@@ -32,7 +32,7 @@ global ITEM_DEFS = [
 	["name": "flak vest",    "art": "it_armor",  "size": 0.30],
 	["name": "bullet clip",  "art": "it_clip",   "size": 0.20],
 	["name": "shell box",    "art": "it_shell",  "size": 0.22],
-	["name": "hex cells",    "art": "it_cell",   "size": 0.24],
+	["name": "hex cells",    "art": "it_cell",   "size": 24e-2],
 	["name": "RED keycard",  "art": "it_rkey",   "size": 0.22],
 	["name": "BLUE keycard", "art": "it_bkey",   "size": 0.22],
 	["name": "SCATTERGUN",   "art": "it_sgun",   "size": 0.26],
@@ -541,35 +541,40 @@ global ART_SRC = [
 		".rr."]]
 ]
 
-// parsed at boot: name -> [w, h, pix (flat codes, 0 transparent), rgb ([[r,g,b]...])]
+// parsed at boot: name -> [w, h, pix (flat codes, 0 transparent), rgb ([[r,g,b]...]),
+// keys (the palette character per code)]
 global ARTS = Map()
 
 def parse_arts() {
-	for (kv : ART_SRC) {
-		var name = kv.first;
-		var rows := ART_SRC[name]["rows"];
-		var pal := ART_SRC[name]["pal"];
-		var codes = Map();    // char string -> code
-		var rgb = [[0, 0, 0]];
-		var next_code = 1;
-		var h = vlen(rows);
-		var w = slen(rows[0]);
-		var pix = [];
-		for (var y = 0; y < h; ++y) {
-			var row := rows[y];
-			for (var x = 0; x < w; ++x) {
-				var ch = row.substr(x, 1);
-				if (ch == ".") { pix.push_back(0); continue; }
-				if (codes.count(ch) == 0) {
-					codes[ch] = next_code;
-					next_code += 1;
-					rgb.push_back(pal[ch]);
-				}
-				pix.push_back(codes[ch]);
+	// kv.second is const, and ChaiScript's Map has no const []
+	for (kv : ART_SRC) { ARTS[kv.first] = parse_art(ART_SRC[kv.first]); }
+}
+
+def parse_art(src) {
+	var rows := src["rows"];
+	var pal := src["pal"];
+	var codes = Map();    // char string -> code
+	var rgb = [[0, 0, 0]];
+	var keys = ["."];
+	var next_code = 1;
+	var h = vlen(rows);
+	var w = slen(rows[0]);
+	var pix = [];
+	for (var y = 0; y < h; ++y) {
+		var row := rows[y];
+		for (var x = 0; x < w; ++x) {
+			var ch = row.substr(x, 1);
+			if (ch == ".") { pix.push_back(0); continue; }
+			if (codes.count(ch) == 0) {
+				codes[ch] = next_code;
+				next_code += 1;
+				rgb.push_back(pal[ch]);
+				keys.push_back(ch);
 			}
+			pix.push_back(codes[ch]);
 		}
-		ARTS[name] = ["w": w, "h": h, "pix": pix, "rgb": rgb];
 	}
+	return ["w": w, "h": h, "pix": pix, "rgb": rgb, "keys": keys];
 }
 
 // ------------------------------------------------------- weapon HUD art -----

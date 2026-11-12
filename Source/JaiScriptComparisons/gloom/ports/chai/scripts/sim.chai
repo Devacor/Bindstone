@@ -15,8 +15,8 @@ def player_move(input) {
 	if (input["tl"]) { turn -= 1.0; }
 	if (input["tr"]) { turn += 1.0; }
 	G.pang = G.pang + turn * 2.7 * TICK;
-	while (G.pang > 6.2831853) { G.pang -= 6.2831853; }
-	while (G.pang < 0.0) { G.pang += 6.2831853; }
+	while (G.pang > 6.2831853000000005) { G.pang -= 6.2831853000000005; }
+	while (G.pang < 0.0) { G.pang += 6.2831853000000005; }
 
 	var dirx = cos(G.pang);
 	var diry = sin(G.pang);

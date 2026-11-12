@@ -1,0 +1,476 @@
+// The showcase look's feel: what the game does on screen when something
+// happens. Feel watches the game from outside, frame by frame: it compares what
+// it sees with what it saw (a shot spent, an enemy flinching, ammo gone, a door
+// open) and answers with light sources, screen shake, view bob, decals on the
+// floor, hit markers, screen tints, and the iris and title card that open a
+// floor. It reads the simulation and never writes to it. The reference's sound
+// cues are left out: the ports run muted.
+
+def fabs(v) { return v < 0.0 ? -v : v; }
+
+class Feel {
+	var yaw              // shake: a turn of the view, radians
+	var pitch            // bob and shake: pixel rows the horizon moves
+	var sources          // this frame's lights over the bake: [x, y, channel, radius, power]
+	var last_tick
+	var last_map_ticks
+	var last_hp
+	var last_armor
+	var last_ammo
+	var last_key_r
+	var last_key_b
+	var last_secrets
+	var last_bob
+	var bob_amp
+	var e_flash
+	var e_alive
+	var shot_kind
+	var shot_x
+	var shot_y
+	var blasts           // a blast's afterglow: [x, y, channel, age]
+	var trauma
+	var hurt_t
+	var pickup_t
+	var secret_t
+	var blast_t
+	var hit_t
+	var hit_kill
+	var mask_w
+	var mask_h
+	var mask_px          // vignette: the pixels it darkens, and how much (0..4)
+	var mask_level
+	var mask_all         // every pixel's level, for the full-screen tints
+	var remaps           // [tint * 5 + level]: palette index -> tinted index, -1 not yet made
+	var card_shades
+
+	def Feel() {
+		this.yaw = 0.0;
+		this.pitch = 0;
+		this.sources = [];
+		this.last_tick = 0;
+		this.last_map_ticks = 0;
+		this.last_hp = 100;
+		this.last_armor = 0;
+		this.last_ammo = [48, 0, 0];
+		this.last_key_r = false;
+		this.last_key_b = false;
+		this.last_secrets = 0;
+		this.last_bob = 0.0;
+		this.bob_amp = 0.0;
+		this.e_flash = [];
+		this.e_alive = [];
+		this.shot_kind = [];
+		this.shot_x = [];
+		this.shot_y = [];
+		this.blasts = [];
+		this.trauma = 0.0;
+		this.hurt_t = 0;
+		this.pickup_t = 0;
+		this.secret_t = 0;
+		this.blast_t = 0;
+		this.hit_t = 0;
+		this.hit_kill = false;
+		this.mask_w = 0;
+		this.mask_h = 0;
+		this.mask_px = [];
+		this.mask_level = [];
+		this.mask_all = [];
+		this.remaps = [];
+		this.card_shades = [];
+	}
+
+	// once per frame, before the view draws
+	def frame() {
+		var ticks = G.tick - this.last_tick;
+		this.last_tick = G.tick;
+		if (ticks < 0) { ticks = 0; }
+		if (G.mode != 1) { return; }
+		if (G.map_ticks < this.last_map_ticks || vlen(G.enemies) != vlen(this.e_alive)) { this.new_floor(); }
+		this.last_map_ticks = G.map_ticks;
+		for (var i = 0; i < ticks; ++i) { this.age_one_tick(); }
+		this.watch_player(ticks);
+		this.watch_enemies();
+		this.watch_shots();
+		this.watch_world();
+		this.stain_landed();
+		dry_stains(G.tick);
+		this.gather_lights();
+		this.camera();
+	}
+
+	// after the view, the gun and the particles: tints, the vignette, the hit marker, the floor's opening
+	def overlay(pix, vw, vh) {
+		if (this.mask_w != vw || this.mask_h != vh) { this.build_mask(vw, vh); }
+		var base = 0;
+		var tint = -1;
+		if (this.blast_t > 0) { tint = 4; base = imin(3, this.blast_t); }
+		else if (this.hurt_t > 0) { tint = 1; base = imin(3, this.hurt_t / 2 + 1); }
+		else if (this.pickup_t > 0) { tint = 2; base = imin(2, this.pickup_t / 2); }
+		else if (this.secret_t > 0) { tint = 3; base = imin(2, this.secret_t / 3); }
+		else if (G.hp <= 25 && (G.tick % 24) < 5) { tint = 1; base = 1; }
+		this.shade_pass(pix, 0, 0);
+		if (tint >= 0) { this.shade_pass(pix, tint, base); }
+		this.draw_hit_marker(pix, vw);
+		this.opening(pix, vw, vh);
+	}
+
+	def kick(amount) { this.trauma = fclamp(this.trauma + amount, 0.0, 1.0); }
+
+	// --------------------------------------------------------------- watching
+	def new_floor() {
+		this.e_flash = [];
+		this.e_alive = [];
+		for (e : G.enemies) {
+			this.e_flash.push_back(e.flash);
+			this.e_alive.push_back(e.alive);
+		}
+		this.shot_kind = [];
+		this.shot_x = [];
+		this.shot_y = [];
+		this.blasts = [];
+		this.last_secrets = G.secrets;
+		this.last_hp = G.hp;
+		this.last_armor = G.armor;
+		this.last_ammo = [G.ammo[0], G.ammo[1], G.ammo[2]];
+		this.card_shades = [];
+		this.trauma = 0.0;
+		this.hurt_t = 0;
+		this.pickup_t = 0;
+		this.secret_t = 0;
+		this.blast_t = 0;
+		this.hit_t = 0;
+	}
+
+	def age_one_tick() {
+		this.trauma = this.trauma * 86e-2;
+		if (this.trauma < 0.01) { this.trauma = 0.0; }
+		if (this.hurt_t > 0) { this.hurt_t -= 1; }
+		if (this.pickup_t > 0) { this.pickup_t -= 1; }
+		if (this.secret_t > 0) { this.secret_t -= 1; }
+		if (this.blast_t > 0) { this.blast_t -= 1; }
+		if (this.hit_t > 0) { this.hit_t -= 1; }
+		var kept = [];
+		for (b : this.blasts) {
+			b[3] += 1;
+			if (b[3] < 14) { kept.push_back(b); }
+		}
+		this.blasts = kept;
+	}
+
+	// everything that fades does so per tick, so the feel is the same at any frame rate
+	def watch_player(ticks) {
+		var lost = (this.last_hp - G.hp) + (this.last_armor - G.armor);
+		if (G.hp < this.last_hp) {
+			this.hurt_t = 8;
+			this.kick(0.25 + lost / 30.0);
+		}
+		for (var pool = 0; pool < 3; ++pool) {
+			if (G.ammo[pool] < this.last_ammo[pool]) {
+				var weapon = G.weapon;
+				if (weapon == 0) { this.kick(0.10); }
+				else if (weapon == 1) { this.kick(42e-2); }
+				else { this.kick(0.18); }
+			} else if (G.ammo[pool] > this.last_ammo[pool]) {
+				this.pickup_t = 5;
+			}
+		}
+		if ((G.key_r && !this.last_key_r) || (G.key_b && !this.last_key_b)) { this.pickup_t = 6; }
+		if (G.hp > this.last_hp || G.armor > this.last_armor) { this.pickup_t = 5; }
+		this.last_hp = G.hp;
+		this.last_armor = G.armor;
+		this.last_ammo = [G.ammo[0], G.ammo[1], G.ammo[2]];
+		this.last_key_r = G.key_r;
+		this.last_key_b = G.key_b;
+		var moved = G.bob - this.last_bob;
+		this.last_bob = G.bob;
+		for (var i = 0; i < ticks; ++i) { this.bob_amp = moved > 0.0 ? fclamp(this.bob_amp + 0.25, 0.0, 1.0) : this.bob_amp * 0.8; }
+	}
+
+	def watch_enemies() {
+		var n = vlen(G.enemies);
+		var e_flash := this.e_flash;
+		var e_alive := this.e_alive;
+		for (var i = 0; i < n; ++i) {
+			var e := G.enemies[i];
+			if (e.flash > e_flash[i] && e_alive[i]) {
+				this.hit_t = 6;
+				this.hit_kill = false;
+			}
+			if (e_alive[i] && !e.alive) {
+				this.hit_t = 9;
+				this.hit_kill = true;
+				this.kick(e.kind == 3 ? 0.6 : 12e-2);
+				stain_floor(e.x, e.y, e.kind == 2 ? 0.0 : 34e-2, TONE_BLOOD, 170);
+			}
+			e_flash[i] = e.flash;
+			e_alive[i] = e.alive;
+		}
+	}
+
+	// a shot gone since the last frame burst somewhere near where it was
+	def watch_shots() {
+		var shots := G.shots;
+		var nshots = vlen(shots);
+		var matched = [];
+		for (var j = 0; j < nshots; ++j) { matched.push_back(false); }
+		var nold = vlen(this.shot_kind);
+		for (var i = 0; i < nold; ++i) {
+			var found = false;
+			var sk = this.shot_kind[i];
+			var sx = this.shot_x[i];
+			var sy = this.shot_y[i];
+			for (var j = 0; j < nshots; ++j) {
+				var s := shots[j];
+				if (!matched[j] && s[0] == sk && dist2(s[1], s[2], sx, sy) < 1.2) {
+					matched[j] = true;
+					found = true;
+					break;
+				}
+			}
+			if (found) { continue; }
+			if (sk == 1) { continue; }
+			this.blasts.push_back([sx, sy, sk == 3 ? LIGHT_HEX : LIGHT_FIRE, 0]);
+			stain_floor(sx, sy, 0.55, TONE_SCORCH, 190);
+			stain_floor(sx, sy, 0.8, TONE_ASH, 40);
+			var d = sqrt(dist2(sx, sy, G.px, G.py));
+			if (d < 6.0) {
+				this.kick(0.75 * (1.0 - d / 6.0) + 0.1);
+				this.blast_t = imax(this.blast_t, d < 3.0 ? 3 : 2);
+			}
+		}
+		this.shot_kind = [];
+		this.shot_x = [];
+		this.shot_y = [];
+		for (s2 : shots) {
+			this.shot_kind.push_back(s2[0]);
+			this.shot_x.push_back(s2[1]);
+			this.shot_y.push_back(s2[2]);
+		}
+	}
+
+	def watch_world() {
+		if (G.secrets > this.last_secrets) { this.secret_t = 9; }
+		this.last_secrets = G.secrets;
+	}
+
+	// blood and meat that reached the floor leave their mark
+	def stain_landed() {
+		for (p : G.fx.pool) {
+			var pk = p[0];
+			if ((pk == 2 || pk == 3) && p[3] <= 0.021) {
+				stain_floor(p[1], p[2], pk == 3 ? 0.09 : 0.06, TONE_BLOOD, 230);
+			}
+		}
+	}
+
+	// ----------------------------------------------------------------- light
+	def gather_lights() {
+		var sources = [];
+		if (G.muzzle > 0) {
+			var dx = cos(G.pang);
+			var dy = sin(G.pang);
+			var channel = G.weapon == 2 ? LIGHT_HEX : LIGHT_FIRE;
+			sources.push_back(light_source(G.px + dx * 0.6, G.py + dy * 0.6, channel,
+				MUZZLE_RADIUS * (0.55 + 15e-2 * G.muzzle), 1.0));
+		}
+		var shot_light = [0, LIGHT_ACID, LIGHT_FIRE, LIGHT_HEX];
+		for (s : G.shots) { sources.push_back(light_source(s[1], s[2], shot_light[s[0]], SHOT_RADIUS, 0.9)); }
+		for (b : this.blasts) {
+			var t = 1.0 - b[3] / 14.0;
+			sources.push_back(light_source(b[0], b[1], b[2], BLAST_RADIUS * (0.4 + 0.6 * t), 0.35 + 0.65 * t));
+		}
+		this.sources = sources;
+	}
+
+	// ---------------------------------------------------------------- camera
+	// shake is trauma squared, so small knocks barely move the view and big ones rattle it
+	def camera() {
+		var shake = this.trauma * this.trauma * SHAKE;
+		var n1 = (mix32(G.tick, 101) % 2001) / 1000.0 - 1.0;
+		var n2 = (mix32(G.tick, 202) % 2001) / 1000.0 - 1.0;
+		this.yaw = shake * 0.045 * n1;
+		var bob = (fabs(cos(G.bob * 0.5)) - 0.5) * 2.0 * BOB_PIXELS * this.bob_amp * PIXH / 2.0;
+		this.pitch = itrunc(bob + shake * 5.0 * PIXH / 2.0 * n2);
+	}
+
+	// ------------------------------------------------------------- overlays
+	def build_mask(vw, vh) {
+		this.mask_w = vw;
+		this.mask_h = vh;
+		this.mask_px = [];
+		this.mask_level = [];
+		this.mask_all = [];
+		var mask_px := this.mask_px;
+		var mask_level := this.mask_level;
+		var mask_all := this.mask_all;
+		var cx = vw / 2.0;
+		var cy = vh / 2.0;
+		for (var y = 0; y < vh; ++y) {
+			for (var x = 0; x < vw; ++x) {
+				var dx = (x + 0.5 - cx) / cx;
+				var dy = (y + 0.5 - cy) / cy;
+				var e = dx * dx * 0.8 + dy * dy;
+				var level = iclamp(itrunc((e - 0.5) * 3.2 + BAYER4[(y & 3) * 4 + (x & 3)]), 0, 4);
+				mask_all.push_back(level);
+				if (level > 0) {
+					mask_px.push_back(y * vw + x);
+					mask_level.push_back(level);
+				}
+			}
+		}
+	}
+
+	// tint 0 darkens the corners; the others wash the screen from the edges in: 1 hurt, 2 pickup, 3 secret, 4 blast
+	def shade_pass(pix, tint, base) {
+		var remaps := this.remaps;
+		while (vlen(remaps) < 25) { remaps.push_back([]); }
+		var pal = vlen(PAL_RGB);
+		for (var level = 1; level <= 4; ++level) {
+			var table := remaps[tint * 5 + level];
+			while (vlen(table) < pal) { table.push_back(-1); }
+		}
+		if (tint == 0) {
+			if (VIGNETTE <= 0.0) { return; }
+			var mask_px := this.mask_px;
+			var mask_level := this.mask_level;
+			var nm = vlen(mask_px);
+			for (var k = 0; k < nm; ++k) {
+				var i = mask_px[k];
+				pix[i] = this.remapped(0, mask_level[k], pix[i]);
+			}
+			return;
+		}
+		var mask_all := this.mask_all;
+		var np = vlen(pix);
+		for (var i2 = 0; i2 < np; ++i2) {
+			var level2 = imin(4, mask_all[i2] + base);
+			if (level2 > 0) { pix[i2] = this.remapped(tint, level2, pix[i2]); }
+		}
+	}
+
+	def remapped(tint, level, p) {
+		var table := this.remaps[tint * 5 + level];
+		var m = table[p];
+		if (m >= 0) { return m; }
+		var key = PAL_RGB[p];
+		var r = 0.0 + ((key >> 16) & 255);
+		var g = 0.0 + ((key >> 8) & 255);
+		var b = 0.0 + (key & 255);
+		var a = level / 4.0;
+		if (tint == 0) {
+			var f = 1.0 - VIGNETTE * a;
+			m = rgb_idx(itrunc(r * f), itrunc(g * f), itrunc(b * f));
+		} else if (tint == 1) {
+			m = rgb_idx(itrunc(r + (255.0 - r) * a * 0.55), itrunc(g * (1.0 - a * 0.65)), itrunc(b * (1.0 - a * 0.65)));
+		} else {
+			var toward = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [255.0, 222.0, 120.0], [120.0, 255.0, 230.0],
+				[255.0, 236.0, 200.0]];
+			var k = tint == 4 ? a * 0.55 : a * 0.32;
+			m = rgb_idx(itrunc(r + (toward[tint][0] - r) * k), itrunc(g + (toward[tint][1] - g) * k),
+				itrunc(b + (toward[tint][2] - b) * k));
+		}
+		table[p] = m;
+		return m;
+	}
+
+	// four ticks around the aim point: white on a hit, red and wider on a kill
+	def draw_hit_marker(pix, vw) {
+		if (this.hit_t <= 0 || G.automap) { return; }
+		var color = this.hit_kill ? rgb_idx(255, 64, 48) : rgb_idx(255, 250, 236);
+		var cx = vw / 2;
+		var cy = HORIZON;
+		var gap = (this.hit_kill ? 3 : 2) * PIXW;
+		var len = 2 * PIXW;
+		var vh = G.vh;
+		for (var k = 0; k < len; ++k) {
+			var ox = gap + k;
+			var oy = (gap + k) * PIXH / PIXW / 2 + 1;
+			for (var s = 0; s < 4; ++s) {
+				var x = cx + ((s & 1) == 0 ? ox : -ox);
+				var y = cy + ((s & 2) == 0 ? oy : -oy);
+				if (x >= 0 && x < vw && y >= 0 && y < vh) { pix[y * vw + x] = color; }
+			}
+		}
+	}
+
+	// a floor opens with an iris from the center, then its name, which fades into the dark
+	def opening(pix, vw, vh) {
+		var t = G.map_ticks;
+		if (t >= 80) { return; }
+		if (t < 16) {
+			// in cell widths: a pixel is 1 / PIXW of a cell across and 2 / PIXH down
+			var cx = vw / 2.0;
+			var cy = vh / 2.0;
+			var sx = 1.0 / PIXW;
+			var sy = 2.0 / PIXH;
+			var r = (t / 16.0) * sqrt(cx * sx * cx * sx + cy * sy * cy * sy) * 1.02;
+			var r2 = r * r;
+			for (var y = 0; y < vh; ++y) {
+				var dy = (y + 0.5 - cy) * sy;
+				var row = y * vw;
+				for (var x = 0; x < vw; ++x) {
+					var dx = (x + 0.5 - cx) * sx;
+					if (dx * dx + dy * dy > r2) { pix[row + x] = 0; }
+				}
+			}
+		}
+		if (t < 6 || G.automap) { return; }
+		if (vlen(this.card_shades) == 0) { this.build_card_shades(); }
+		var fade = t < 60 ? 0 : (t - 60) / 4;
+		if (fade >= 5) { return; }
+		var name = G.map_name;
+		var code = name.substr(0, 4);
+		var title = name.substr(6, slen(name) - 6);
+		// a font pixel spans sx view pixels across and sy down, so letters stay square on 1:2 cells
+		var fsx = imax(1, PIXW * 2 / PIXH);
+		var scale = 3;
+		while (scale > 1 && lettering_width(title, scale) * fsx > vw - 8) { scale -= 1; }
+		var top = vh / 5;
+		var shades := this.card_shades;
+		this.pix_lettering(pix, code, (vw - lettering_width(code, 1) * fsx) / 2, top, 1, fsx, shades[fade + 5], shades[10]);
+		this.pix_lettering(pix, title, (vw - lettering_width(title, scale) * fsx) / 2, top + 8, scale, fsx, shades[fade],
+			shades[10]);
+	}
+
+	def build_card_shades() {
+		var mood := MOODS[G.map_i];
+		var bone = rgb(250, 240, 220);
+		var shades = [];
+		for (var i = 0; i < 5; ++i) { shades.push_back(color_idx(mix_rgb(bone, mood["fog"], i / 5.0))); }
+		for (var i = 0; i < 5; ++i) { shades.push_back(color_idx(mix_rgb(mood["light"], mood["fog"], i / 5.0))); }
+		shades.push_back(rgb_idx(4, 2, 4));
+		this.card_shades = shades;
+	}
+
+	// the 3x5 font straight into the view's pixels, a font pixel scale rows tall and scale * sx columns wide
+	def pix_lettering(pix, s, x, y, scale, sx, color, shadow) {
+		var vw = G.vw;
+		var vh = G.vh;
+		var sy = scale;
+		var cw = sx * scale;
+		var n = slen(s);
+		for (var pass = 0; pass < 2; ++pass) {
+			var ink = pass == 0 ? shadow : color;
+			var off = pass == 0 ? 1 : 0;
+			for (var i = 0; i < n; ++i) {
+				var ch = s.substr(i, 1);
+				if (FONT5.count(ch) == 0) { continue; }
+				var glyph_rows := FONT5[ch];
+				var gx = x + i * 4 * cw;
+				for (var ry = 0; ry < 5; ++ry) {
+					for (var rx = 0; rx < 3; ++rx) {
+						if (glyph_rows[ry].substr(rx, 1) != "#") { continue; }
+						for (var yy = 0; yy < sy; ++yy) {
+							var py = y + (ry + off) * sy + yy;
+							if (py < 0 || py >= vh) { continue; }
+							for (var xx = 0; xx < cw; ++xx) {
+								var qx = gx + (rx + off) * cw + xx;
+								if (qx >= 0 && qx < vw) { pix[py * vw + qx] = ink; }
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}

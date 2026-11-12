@@ -1,0 +1,177 @@
+// A cell canvas for the showcase HUD and pages. Each cell is two stacked
+// pixels (drawn as an upper half block, square on a 1:2 cell) or one character
+// over the cell's upper pixel. Colors are palette indices.
+
+// ------------------------------------------------------------ pixel font ----
+// 3x5 capitals, digits and a little punctuation; '#' is ink
+global FONT5 = [
+	"A": ["###", "#.#", "###", "#.#", "#.#"], "B": ["##.", "#.#", "##.", "#.#", "##."],
+	"C": ["###", "#..", "#..", "#..", "###"], "D": ["##.", "#.#", "#.#", "#.#", "##."],
+	"E": ["###", "#..", "##.", "#..", "###"], "F": ["###", "#..", "##.", "#..", "#.."],
+	"G": ["###", "#..", "#.#", "#.#", "###"], "H": ["#.#", "#.#", "###", "#.#", "#.#"],
+	"I": ["###", ".#.", ".#.", ".#.", "###"], "J": ["..#", "..#", "..#", "#.#", "###"],
+	"K": ["#.#", "#.#", "##.", "#.#", "#.#"], "L": ["#..", "#..", "#..", "#..", "###"],
+	"M": ["#.#", "###", "###", "#.#", "#.#"], "N": ["##.", "#.#", "#.#", "#.#", "#.#"],
+	"O": ["###", "#.#", "#.#", "#.#", "###"], "P": ["###", "#.#", "###", "#..", "#.."],
+	"Q": ["###", "#.#", "#.#", "###", "..#"], "R": ["##.", "#.#", "##.", "#.#", "#.#"],
+	"S": ["###", "#..", "###", "..#", "###"], "T": ["###", ".#.", ".#.", ".#.", ".#."],
+	"U": ["#.#", "#.#", "#.#", "#.#", "###"], "V": ["#.#", "#.#", "#.#", "#.#", ".#."],
+	"W": ["#.#", "#.#", "###", "###", "#.#"], "X": ["#.#", "#.#", ".#.", "#.#", "#.#"],
+	"Y": ["#.#", "#.#", ".#.", ".#.", ".#."], "Z": ["###", "..#", ".#.", "#..", "###"],
+	"0": ["###", "#.#", "#.#", "#.#", "###"], "1": [".#.", "##.", ".#.", ".#.", "###"],
+	"2": ["###", "..#", "###", "#..", "###"], "3": ["###", "..#", ".##", "..#", "###"],
+	"4": ["#.#", "#.#", "###", "..#", "..#"], "5": ["###", "#..", "###", "..#", "###"],
+	"6": ["###", "#..", "###", "#.#", "###"], "7": ["###", "..#", ".#.", ".#.", ".#."],
+	"8": ["###", "#.#", "###", "#.#", "###"], "9": ["###", "#.#", "###", "..#", "###"],
+	"%": ["#.#", "..#", ".#.", "#..", "#.#"], ":": ["...", ".#.", "...", ".#.", "..."],
+	"/": ["..#", "..#", ".#.", "#..", "#.."], "-": ["...", "...", "###", "...", "..."],
+	"!": [".#.", ".#.", ".#.", "...", ".#."], "'": [".#.", ".#.", "...", "...", "..."],
+	".": ["...", "...", "...", "...", ".#."], " ": ["...", "...", "...", "...", "..."]
+]
+
+// width in pixels of s in the 3x5 font at a scale, one pixel of spacing per letter
+def lettering_width(s, scale) { return slen(s) * 4 * scale - scale; }
+
+class Canvas {
+	var w
+	var h          // cells; pixel rows are 2 * h
+	var px         // palette index per pixel, row-major, w x 2h
+	var glyph      // "" or the character drawn in the cell
+	var ink        // its color
+
+	def Canvas(w_, h_) {
+		this.w = w_;
+		this.h = h_;
+		this.px = [];
+		this.glyph = [];
+		this.ink = [];
+		for (var i = 0; i < w_ * h_ * 2; ++i) { this.px.push_back(0); }
+		for (var i = 0; i < w_ * h_; ++i) {
+			this.glyph.push_back("");
+			this.ink.push_back(0);
+		}
+	}
+
+	def clear(color) {
+		var px := this.px;
+		var n = vlen(px);
+		for (var i = 0; i < n; ++i) { px[i] = color; }
+		var glyph := this.glyph;
+		var ng = vlen(glyph);
+		for (var i = 0; i < ng; ++i) { glyph[i] = ""; }
+	}
+
+	def dot(x, y, color) {
+		if (x >= 0 && x < this.w && y >= 0 && y < this.h * 2) { this.px[y * this.w + x] = color; }
+	}
+
+	def rect(x, y, rw, rh, color) {
+		var w = this.w;
+		var px := this.px;
+		var y1 = imin(this.h * 2, y + rh);
+		var x0 = imax(0, x);
+		var x1 = imin(w, x + rw);
+		for (var yy = imax(0, y); yy < y1; ++yy) {
+			for (var xx = x0; xx < x1; ++xx) { px[yy * w + xx] = color; }
+		}
+	}
+
+	// one color per pixel row from top to bottom, from rows y0 to y1 (exclusive)
+	def gradient(y0, y1, top, bottom) {
+		var w = this.w;
+		var px := this.px;
+		var ye = imin(this.h * 2, y1);
+		for (var y = imax(0, y0); y < ye; ++y) {
+			var c = color_idx(mix_rgb(top, bottom, 1.0 * (y - y0) / imax(1, y1 - y0 - 1)));
+			for (var x = 0; x < w; ++x) { px[y * w + x] = c; }
+		}
+	}
+
+	// text at cell (x, row); characters past the edge are dropped
+	def text(x, row, s, color) {
+		if (row < 0 || row >= this.h) { return; }
+		var w = this.w;
+		var n = slen(s);
+		for (var i = 0; i < n; ++i) {
+			var cx = x + i;
+			if (cx < 0 || cx >= w) { continue; }
+			this.glyph[row * w + cx] = s.substr(i, 1);
+			this.ink[row * w + cx] = color;
+		}
+	}
+
+	def text_centered(row, s, color) { this.text((this.w - slen(s)) / 2, row, s, color); }
+
+	def text_right(x_end, row, s, color) { this.text(x_end - slen(s), row, s, color); }
+
+	// an art (defs.chai record) at pixel (x, y), through a code -> color table
+	def art(a, x, y, lut) {
+		var aw = a["w"];
+		var ah = a["h"];
+		var apix := a["pix"];
+		for (var ay = 0; ay < ah; ++ay) {
+			for (var ax = 0; ax < aw; ++ax) {
+				var code = apix[ay * aw + ax];
+				if (code > 0) { this.dot(x + ax, y + ay, lut[code]); }
+			}
+		}
+	}
+
+	// s in the 3x5 font with its top-left at pixel (x, y), a color per font row, a shadow below right
+	def lettering(s, x, y, scale, shades, shadow) {
+		var n = slen(s);
+		for (var pass = 0; pass < 2; ++pass) {
+			for (var i = 0; i < n; ++i) {
+				var ch = s.substr(i, 1);
+				if (FONT5.count(ch) == 0) { continue; }
+				var glyph_rows := FONT5[ch];
+				var gx = x + i * 4 * scale;
+				for (var ry = 0; ry < 5; ++ry) {
+					for (var rx = 0; rx < 3; ++rx) {
+						if (glyph_rows[ry].substr(rx, 1) != "#") { continue; }
+						if (pass == 0 && shadow >= 0) { this.rect(gx + (rx + 1) * scale, y + (ry + 1) * scale, scale, scale, shadow); }
+						if (pass == 1) { this.rect(gx + rx * scale, y + ry * scale, scale, scale, shades[ry]); }
+					}
+				}
+			}
+		}
+	}
+
+	// rows first .. last (cells) as terminal lines
+	def rows(first, last) {
+		var out = [];
+		var w = this.w;
+		var px := this.px;
+		var glyph := this.glyph;
+		var ink := this.ink;
+		var fgs := PAL_FG;
+		var bgs := PAL_BG;
+		var hb = HALFG;
+		for (var row = first; row < last; ++row) {
+			var line = "";
+			var fg = -1;
+			var bg = -1;
+			for (var x = 0; x < w; ++x) {
+				var cell = row * w + x;
+				var upper = px[row * 2 * w + x];
+				var lower = px[(row * 2 + 1) * w + x];
+				var ch := glyph[cell];
+				if (ch != "") {
+					if (ink[cell] != fg) { fg = ink[cell]; line += fgs[fg]; }
+					if (upper != bg) { bg = upper; line += bgs[bg]; }
+					line += ch;
+				} else if (upper == lower) {
+					if (upper != bg) { bg = upper; line += bgs[bg]; }
+					line += " ";
+				} else {
+					if (upper != fg) { fg = upper; line += fgs[fg]; }
+					if (lower != bg) { bg = lower; line += bgs[bg]; }
+					line += hb;
+				}
+			}
+			line += RESET;
+			out.push_back(line);
+		}
+		return out;
+	}
+}

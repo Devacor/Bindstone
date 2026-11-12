@@ -10,7 +10,13 @@ use("particles.chai")
 use("enemies.chai")
 use("combat.chai")
 use("sim.chai")
+use("lights.chai")
+use("look.chai")
+use("viewmodel.chai")
 use("render.chai")
+use("canvas.chai")
+use("feel.chai")
+use("screens.chai")
 use("hud.chai")
 use("game.chai")
 
@@ -21,14 +27,18 @@ global FORCE_PILOT = false
 def gloom_force_autopilot() { FORCE_PILOT = true; }
 
 def gloom_boot(w, h) {
-	RNG = Rng(HOST_SEED);
+	// := rebinds: a bound Rng has no '=', and --warmup boots twice
+	RNG := Rng(HOST_SEED);
+	SHOWCASE = HOST_LOOK == "showcase";
 	if (HOST_PIX == 0) { PIXW = 1; PIXH = 2; }
 	else if (HOST_PIX == 2) { PIXW = 2; PIXH = 3; }
 	else { PIXW = 2; PIXH = 2; }
 	parse_arts();
+	parse_viewmodels();
 	validate_all_maps();
 	G = Game(w, h);
 	init_render();
+	if (SHOWCASE) { G.screens = Screens(w, h); }
 	G.autopilot = HOST_SMOKE || FORCE_PILOT;
 }
 

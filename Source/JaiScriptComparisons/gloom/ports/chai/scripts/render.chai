@@ -67,18 +67,23 @@ def push_wall_tones(base, accent) {
 	for (var side = 0; side < 2; ++side) {
 		var facing = side == 1 ? 0.70 : 1.0;
 		for (var s = 0; s < 16; ++s) {
-			var lum = (0.13 + 0.87 * s / 15.0) * facing;
+			var lum = (0.13 + 87e-2 * s / 15.0) * facing;
 			WALLT.push_back(rgb_idx(itrunc(base[0] * lum), itrunc(base[1] * lum), itrunc(base[2] * lum)));
 			var alum = lum * 1.35;
 			alum = alum > 1.0 ? 1.0 : alum;
 			WALLT.push_back(rgb_idx(itrunc(accent[0] * alum), itrunc(accent[1] * alum), itrunc(accent[2] * alum)));
-			var mlum = lum * 0.42;
+			var mlum = lum * 42e-2;
 			WALLT.push_back(rgb_idx(itrunc(base[0] * mlum), itrunc(base[1] * mlum), itrunc(base[2] * mlum)));
 		}
 	}
 }
 
 def build_render_tables(mi) {
+	if (SHOWCASE) {
+		G.lutc = Map();
+		build_showcase_tables(mi);
+		return;
+	}
 	var theme := MAPS[mi]["theme"];
 	WALLT = [];
 	// kind 0 (never rendered): flat dark
@@ -179,11 +184,16 @@ def build_strip(kind, side, shade, tx) {
 // per (art, shade band 0..7, flash) palette-code -> palette-index table,
 // cached in G.lutc. LUTs depend only on art/band/flash (never the map theme),
 // so the cache lives for the whole session.
-global BAND_LUM = [1.0, 0.88, 0.76, 0.64, 0.52, 0.42, 0.32, 0.24]
+global BAND_LUM = [1.0, 0.88, 0.76, 0.64, 0.52, 42e-2, 0.32, 24e-2]
 
-def sprite_lut(name, band, flash) {
-	var key = "${name}:${band}:${flash}";
+def sprite_lut(name, band, flash, variant) {
+	var key = SHOWCASE ? "${name}:${band}:${flash}:${variant}" : "${name}:${band}:${flash}";
 	if (G.lutc.count(key) != 0) { return G.lutc[key]; }
+	if (SHOWCASE) {
+		var slut = showcase_sprite_lut(name, band, flash, variant);
+		G.lutc[key] = slut;
+		return slut;
+	}
 	var art := ARTS[name];
 	var rgb := art["rgb"];
 	var lum = BAND_LUM[band];
@@ -208,20 +218,133 @@ def sprite_lut(name, band, flash) {
 def render_view() {
 	var vw = G.vw;
 	var vh = G.vh;
-	var dirx = cos(G.pang);
-	var diry = sin(G.pang);
-	var planex = 0.0 - diry * 0.78;
-	var planey = dirx * 0.78;
+	var pang = SHOWCASE ? G.pang + G.feel.yaw : G.pang;
+	var dirx = cos(pang);
+	var diry = sin(pang);
+	var planex = 0.0 - diry * 78e-2;
+	var planey = dirx * 78e-2;
 	var px = G.px;
 	var py = G.py;
+	var pix := G.pix;
+	var zbuf := G.zbuf;
+	if (SHOWCASE) {
+		showcase_view(pix, zbuf, px, py, dirx, diry, planex, planey);
+	} else {
+		reference_view(pix, zbuf, px, py, dirx, diry, planex, planey);
+	}
 
+	// --- 3. billboards: enemies, pickups, projectiles (far to near) ---
+	var det = planex * diry - dirx * planey;
+	if (det < 0.0001 && det > -0.0001) { det = 0.0001; }
+	var inv = 1.0 / det;
+	var sp = [];
+	for (e : G.enemies) {
+		collect_billboard(sp, e.x, e.y, enemy_art(e), ENEMY_DEFS[e.kind]["size"], 0.0,
+			e.flash > 0 ? 1 : 0, inv, dirx, diry, planex, planey, px, py);
+	}
+	var nitems = vlen(G.items);
+	for (var i = 0; i < nitems; ++i) {
+		var it := G.items[i];
+		if (it[3] == 1) { continue; }
+		var ik = it[0];
+		collect_billboard(sp, it[1], it[2], ITEM_DEFS[ik]["art"],
+			ITEM_DEFS[ik]["size"], 0.0, 0, inv, dirx, diry, planex, planey, px, py);
+	}
+	var shot_art = ["", "pr_spit", "pr_fire", "pr_hex"];
+	var nshots = vlen(G.shots);
+	for (var i2 = 0; i2 < nshots; ++i2) {
+		var s := G.shots[i2];
+		collect_billboard(sp, s[1], s[2], shot_art[s[0]], 0.16, 0.35, 0, inv, dirx, diry, planex, planey, px, py);
+	}
+	// insertion sort, far first (records: [depth, scx, name, size, zlift, flash, wx, wy])
+	var nsp = vlen(sp);
+	for (var i3 = 1; i3 < nsp; ++i3) {
+		var rec = sp[i3];
+		var j = i3 - 1;
+		while (j >= 0) {
+			if (sp[j][0] >= rec[0]) { break; }
+			sp[j + 1] = sp[j];
+			j -= 1;
+		}
+		sp[j + 1] = rec;
+	}
+	for (rec2 : sp) { draw_billboard(rec2, pix, zbuf); }
+
+	// --- 4. particles: pixel confetti with z-buffer clipping ---
+	var pcols := PART_COLS;
+	var half2 = SHOWCASE ? HORIZON : vh / 2;
+	var pxw = PIXW;
+	var pxh = PIXH;
+	for (prt : G.fx.pool) {
+		var pk = prt[0];
+		if (pk == 0) { continue; }
+		var rx = prt[1] - px;
+		var ry = prt[2] - py;
+		var depth = inv * (planex * ry - planey * rx);
+		if (depth < 15e-2 || depth > 14.0) { continue; }
+		var ttx = inv * (diry * rx - dirx * ry);
+		var scx = itrunc((vw / 2.0) * (1.0 + ttx / depth));
+		if (scx < 0 || scx >= vw) { continue; }
+		if (depth >= zbuf[scx]) { continue; }
+		var span = 1.0 * vh / depth;
+		var pyx = itrunc(half2 + span * 0.5 - prt[3] * span);
+		var life = prt[7];
+		var phase = 3 - imin(3, life / 5);
+		var color = pcols[pk * 4 + phase];
+		var psz = itrunc(0.07 * span) + 1;
+		psz = psz > 3 ? 3 : psz;
+		var psx = (psz * 2 * pxw) / pxh;           // square-ish regardless of mode
+		psx = psx < 1 ? 1 : psx;
+		for (var oy = 0; oy < psz; ++oy) {
+			var yy = pyx + oy;
+			if (yy < 0 || yy >= vh) { continue; }
+			for (var ox = 0; ox < psx; ++ox) {
+				var xx = scx + ox;
+				if (xx >= vw) { continue; }
+				if (depth < zbuf[xx]) { pix[yy * vw + xx] = color; }
+			}
+		}
+	}
+
+	// --- 5. the gun in hand and the look's overlays, the automap, hurt flash ---
+	if (SHOWCASE) {
+		draw_viewmodel(pix);
+		G.feel.overlay(pix, vw, vh);
+	}
+	if (G.automap) { draw_automap(pix); }
+	if (!SHOWCASE && G.hurt_flash > 0) {
+		var red = HURT_RED;
+		var thick = pxw * 2;
+		for (var x4 = 0; x4 < vw; ++x4) {
+			pix[x4] = red;
+			pix[vw + x4] = red;
+			pix[(vh - 2) * vw + x4] = red;
+			pix[(vh - 1) * vw + x4] = red;
+		}
+		for (var y4 = 0; y4 < vh; ++y4) {
+			var rb = y4 * vw;
+			for (var t4 = 0; t4 < thick; ++t4) {
+				pix[rb + t4] = red;
+				pix[rb + vw - 1 - t4] = red;
+			}
+		}
+	}
+
+	// --- 6. pixel grid -> sub-cell glyph rows ---
+	if (PIXH == 3) { return rows_sext(pix); }
+	if (PIXW == 2) { return rows_quad(pix); }
+	return rows_half(pix);
+}
+
+// the reference look's rays and columns
+def reference_view(pix, zbuf, px, py, dirx, diry, planex, planey) {
+	var vw = G.vw;
+	var vh = G.vh;
 	// --- 1+2. rays + columns: one ray per CELL column painting ceiling,
 	// textured wall slice, floor top-to-bottom (serial-equivalent of the
 	// reference's chunked parallel_transform + prebaked background; cy0 is
 	// always above the horizon and cy1 below it, so above = CEILP, below =
 	// FLOORP, exactly the reference's bg grid)
-	var pix := G.pix;
-	var zbuf := G.zbuf;
 	var ceilp := CEILP;
 	var floorp := FLOORP;
 	var pxw = PIXW;
@@ -298,103 +421,6 @@ def render_view() {
 			}
 		}
 	}
-
-	// --- 3. billboards: enemies, pickups, projectiles (far to near) ---
-	var det = planex * diry - dirx * planey;
-	if (det < 0.0001 && det > -0.0001) { det = 0.0001; }
-	var inv = 1.0 / det;
-	var sp = [];
-	for (e : G.enemies) {
-		collect_billboard(sp, e.x, e.y, enemy_art(e), ENEMY_DEFS[e.kind]["size"], 0.0,
-			e.flash > 0 ? 1 : 0, inv, dirx, diry, planex, planey);
-	}
-	var nitems = vlen(G.items);
-	for (var i = 0; i < nitems; ++i) {
-		var it := G.items[i];
-		if (it[3] == 1) { continue; }
-		var ik = it[0];
-		collect_billboard(sp, it[1], it[2], ITEM_DEFS[ik]["art"],
-			ITEM_DEFS[ik]["size"], 0.0, 0, inv, dirx, diry, planex, planey);
-	}
-	var shot_art = ["", "pr_spit", "pr_fire", "pr_hex"];
-	var nshots = vlen(G.shots);
-	for (var i2 = 0; i2 < nshots; ++i2) {
-		var s := G.shots[i2];
-		collect_billboard(sp, s[1], s[2], shot_art[s[0]], 0.16, 0.35, 0, inv, dirx, diry, planex, planey);
-	}
-	// insertion sort, far first (records: [depth, scx, name, size, zlift, flash])
-	var nsp = vlen(sp);
-	for (var i3 = 1; i3 < nsp; ++i3) {
-		var rec = sp[i3];
-		var j = i3 - 1;
-		while (j >= 0) {
-			if (sp[j][0] >= rec[0]) { break; }
-			sp[j + 1] = sp[j];
-			j -= 1;
-		}
-		sp[j + 1] = rec;
-	}
-	for (rec2 : sp) { draw_billboard(rec2, pix, zbuf); }
-
-	// --- 4. particles: pixel confetti with z-buffer clipping ---
-	var pcols := PART_COLS;
-	var half2 = vh / 2;
-	var pxh = PIXH;
-	for (prt : G.fx.pool) {
-		var pk = prt[0];
-		if (pk == 0) { continue; }
-		var rx = prt[1] - px;
-		var ry = prt[2] - py;
-		var depth = inv * (planex * ry - planey * rx);
-		if (depth < 0.15 || depth > 14.0) { continue; }
-		var ttx = inv * (diry * rx - dirx * ry);
-		var scx = itrunc((vw / 2.0) * (1.0 + ttx / depth));
-		if (scx < 0 || scx >= vw) { continue; }
-		if (depth >= zbuf[scx]) { continue; }
-		var span = 1.0 * vh / depth;
-		var pyx = itrunc(half2 + span * 0.5 - prt[3] * span);
-		var life = prt[7];
-		var phase = 3 - imin(3, life / 5);
-		var color = pcols[pk * 4 + phase];
-		var psz = itrunc(0.07 * span) + 1;
-		psz = psz > 3 ? 3 : psz;
-		var psx = (psz * 2 * pxw) / pxh;           // square-ish regardless of mode
-		psx = psx < 1 ? 1 : psx;
-		for (var oy = 0; oy < psz; ++oy) {
-			var yy = pyx + oy;
-			if (yy < 0 || yy >= vh) { continue; }
-			for (var ox = 0; ox < psx; ++ox) {
-				var xx = scx + ox;
-				if (xx >= vw) { continue; }
-				if (depth < zbuf[xx]) { pix[yy * vw + xx] = color; }
-			}
-		}
-	}
-
-	// --- 5. overlays: automap, hurt flash ---
-	if (G.automap) { draw_automap(pix); }
-	if (G.hurt_flash > 0) {
-		var red = HURT_RED;
-		var thick = pxw * 2;
-		for (var x4 = 0; x4 < vw; ++x4) {
-			pix[x4] = red;
-			pix[vw + x4] = red;
-			pix[(vh - 2) * vw + x4] = red;
-			pix[(vh - 1) * vw + x4] = red;
-		}
-		for (var y4 = 0; y4 < vh; ++y4) {
-			var rb = y4 * vw;
-			for (var t4 = 0; t4 < thick; ++t4) {
-				pix[rb + t4] = red;
-				pix[rb + vw - 1 - t4] = red;
-			}
-		}
-	}
-
-	// --- 6. pixel grid -> sub-cell glyph rows ---
-	if (PIXH == 3) { return rows_sext(pix); }
-	if (PIXW == 2) { return rows_quad(pix); }
-	return rows_half(pix);
 }
 
 // half mode: fg = top pixel, bg = bottom pixel, upper-half-block glyph
@@ -567,16 +593,16 @@ def rows_sext(pix) {
 	return rows;
 }
 
-// world -> camera -> screen; appends [depth, scx, art, size, zlift, flash]
-def collect_billboard(sp, wx, wy, art, size, zlift, flash, inv, dirx, diry, planex, planey) {
-	var rx = wx - G.px;
-	var ry = wy - G.py;
+// world -> camera -> screen; appends [depth, scx, art, size, zlift, flash, wx, wy]
+def collect_billboard(sp, wx, wy, art, size, zlift, flash, inv, dirx, diry, planex, planey, px, py) {
+	var rx = wx - px;
+	var ry = wy - py;
 	var depth = inv * (planex * ry - planey * rx);
 	if (depth < 0.18 || depth > 15.0) { return; }
 	var ttx = inv * (diry * rx - dirx * ry);
 	var scx = itrunc((G.vw / 2.0) * (1.0 + ttx / depth));
 	if (scx < -G.vw || scx > G.vw * 2) { return; }
-	sp.push_back([depth, scx, art, size, zlift, flash]);
+	sp.push_back([depth, scx, art, size, zlift, flash, wx, wy]);
 }
 
 def draw_billboard(rec, pix, zbuf) {
@@ -598,10 +624,10 @@ def draw_billboard(rec, pix, zbuf) {
 	// pixel aspect: a cell is ~1:2 (w:h) split into PIXW x PIXH
 	var pw = ph * aw * 2 * PIXW / (ah * PIXH);
 	if (pw < 2) { pw = 2; }
-	var band = itrunc(depth * 0.85) - (G.muzzle > 0 ? 1 : 0);
+	var band = itrunc(depth * 85e-2) - (G.muzzle > 0 ? 1 : 0);
 	band = band < 0 ? 0 : (band > 7 ? 7 : band);
-	var lut := sprite_lut(name, band, flash);
-	var bottom = itrunc(vh / 2 + span * 0.5 - zlift * span);
+	var lut := sprite_lut(name, band, flash, SHOWCASE ? G.lights.at(rec[6], rec[7]) : 0);
+	var bottom = itrunc((SHOWCASE ? HORIZON : vh / 2) + span * 0.5 - zlift * span);
 	var top = bottom - ph;
 	var x0 = scx - pw / 2;
 	var x1 = x0 + pw;
@@ -667,4 +693,261 @@ def blip(pix, bx, by, c) {
 	pix[by * vw + bx + 1] = c;
 	pix[(by + 1) * vw + bx] = c;
 	pix[(by + 1) * vw + bx + 1] = c;
+}
+
+// ------------------------------------------------------- the showcase look --
+// Its view casts one ray per pixel column, then paints each column top to
+// bottom: textured ceiling, the lit wall slice, textured floor with its stains.
+// Every surface reads its light texel and a lit table (look.chai, lights.chai).
+global HORIZON = 0     // the pixel row the eye looks along: vh / 2, moved by bob and shake
+global LWALL = []      // [kind][variant][side][shade][tone]
+global LFLOOR = []     // [variant][shade][tone]
+global LCEIL = []
+global WALLTEX = []    // wall tones [far][kind][ty][tx]
+global FLOORTEX = []   // floor tones [far][variant][v][u]
+global CEILTEX = []
+global FLOOR_VAR = []  // per tile: which floor variant, times 256
+global CEIL_VAR = []   // per tile: 256 under a lamp
+global STAINS = []     // per tile 8x8 decal tones, 0 none
+global ROWD = []       // per pixel row: floor or ceiling distance
+global ROWS_SHADE = []
+global ROWS_FAR = []   // per pixel row: 1 past FAR_TEXTURE
+
+// the showcase look's lit tables, textures and lamps for floor mi
+def build_showcase_tables(mi) {
+	LWALL = showcase_lit_wall_tones(mi);
+	LFLOOR = showcase_floor_tones(mi);
+	LCEIL = showcase_ceiling_tones(mi);
+	WALLTEX = showcase_wall_texture();
+	FLOORTEX = showcase_floor_texture(mi);
+	CEILTEX = showcase_ceiling_texture();
+	G.lights.load();
+	var lamps := G.lights.lamps;
+	var mw = G.mw;
+	var mh = G.mh;
+	FLOOR_VAR = [];
+	CEIL_VAR = [];
+	STAINS = [];
+	for (var ty = 0; ty < mh; ++ty) {
+		for (var tx = 0; tx < mw; ++tx) {
+			FLOOR_VAR.push_back((texel_noise(31, tx, ty) & 3) * 256);
+			CEIL_VAR.push_back(lamps[ty * mw + tx] ? 256 : 0);
+		}
+	}
+	for (var i = 0; i < mw * mh * 64; ++i) { STAINS.push_back(0); }
+	ROWD = [];
+	ROWS_SHADE = [];
+	ROWS_FAR = [];
+	for (var y = 0; y < G.vh; ++y) {
+		ROWD.push_back(0.0);
+		ROWS_SHADE.push_back(0);
+		ROWS_FAR.push_back(0);
+	}
+}
+
+def showcase_view(pix, zb, px, py, dirx, diry, planex, planey) {
+	var vw = G.vw;
+	var vh = G.vh;
+	HORIZON = vh / 2 + G.feel.pitch;
+	G.lights.frame(G.feel.sources);
+
+	// the floor or ceiling distance and shade of every pixel row
+	var hz = 0.0 + HORIZON;
+	var rowd := ROWD;
+	var rshade := ROWS_SHADE;
+	var rfar := ROWS_FAR;
+	var far_texture = FAR_TEXTURE;
+	for (var y = 0; y < vh; ++y) {
+		var k = y + 0.5 - hz;
+		if (k < 0.0) { k = 0.0 - k; }
+		var d = k > 0.3 ? vh / (2.0 * k) : 60.0;
+		rowd[y] = d;
+		var shade = 15 - itrunc(d * 1.55);
+		rshade[y] = shade < 0 ? 0 : shade;
+		rfar[y] = d > far_texture ? 1 : 0;
+	}
+
+	var lg := G.lights.grid;
+	var gw = G.lights.gw;
+	var mw = G.mw;
+	var walls := LWALL;
+	var floors := LFLOOR;
+	var ceilings := LCEIL;
+	var wtex := WALLTEX;
+	var ftex := FLOORTEX;
+	var ctex := CEILTEX;
+	var fvar := FLOOR_VAR;
+	var cvar := CEIL_VAR;
+	var stain := STAINS;
+	var wall_stride = WALL_TABLE_STRIDE;
+	var floor_tones = FLOOR_TONES;
+	var xstep = 2.0 / (vw - 1.0);
+	for (var x = 0; x < vw; ++x) {
+		var camx = x * xstep - 1.0;
+		var rdx = dirx + planex * camx;
+		var rdy = diry + planey * camx;
+		cast_wall_ray(px, py, rdx, rdy);
+		var dist = RAY_D;
+		var side = RAY_S;
+		var kind = RAY_K;
+		var tx = RAY_T >> 1;
+		zb[x] = dist;
+		// the wall's rows are those whose centers lie within half of the horizon,
+		// so every ceiling and floor pixel is strictly nearer than the wall
+		var half = 0.5 * vh / dist;
+		var ytop = hz - half;
+		var y0 = 0 - itrunc(floor(0.5 - ytop));
+		var y1 = itrunc(floor(hz - 0.5 + half)) + 1;
+		var cy0 = y0 < 0 ? 0 : (y0 > vh ? vh : y0);
+		var cy1 = y1 > vh ? vh : (y1 < cy0 ? cy0 : y1);
+
+		// ceiling
+		var gi = x;
+		for (var y = 0; y < cy0; ++y) {
+			var d = rowd[y];
+			var fx = px + rdx * d;
+			var fy = py + rdy * d;
+			var ix = itrunc(fx);
+			var iy = itrunc(fy);
+			var u = itrunc((fx - ix) * 16.0);
+			var v = itrunc((fy - iy) * 16.0);
+			var lx = itrunc(fx * 4.0);
+			var ly = itrunc(fy * 4.0);
+			var tone = ctex[rfar[y] * 512 + cvar[iy * mw + ix] + v * 16 + u];
+			pix[gi] = ceilings[(lg[ly * gw + lx] * 16 + rshade[y]) * 8 + tone];
+			gi += vw;
+		}
+
+		// wall
+		var shade = 15 - itrunc(dist * 1.55);
+		shade = shade < 0 ? 0 : (shade > 15 ? 15 : shade);
+		var back = dist - 0.03;
+		var wlx = itrunc((px + rdx * back) * 4.0);
+		var wly = itrunc((py + rdy * back) * 4.0);
+		var light = lg[wly * gw + wlx];
+		var wbase = kind * wall_stride + ((light * 2 + side) * 16 + shade) * 8;
+		var tbase = (dist > far_texture ? 9216 : 0) + kind * 1024 + tx;
+		var tscale = 65536.0 / (2.0 * half);
+		var tstep = itrunc(tscale);
+		var tacc = itrunc((cy0 + 0.5 - ytop) * tscale);
+		gi = cy0 * vw + x;
+		for (var y = cy0; y < cy1; ++y) {
+			pix[gi] = walls[wbase + wtex[tbase + ((tacc >> 11) & 31) * 32]];
+			tacc += tstep;
+			gi += vw;
+		}
+
+		// floor
+		for (var y = cy1; y < vh; ++y) {
+			var d = rowd[y];
+			var fx = px + rdx * d;
+			var fy = py + rdy * d;
+			var ix = itrunc(fx);
+			var iy = itrunc(fy);
+			var u = itrunc((fx - ix) * 16.0);
+			var v = itrunc((fy - iy) * 16.0);
+			var lx = itrunc(fx * 4.0);
+			var ly = itrunc(fy * 4.0);
+			var ti = iy * mw + ix;
+			var tone = stain[ti * 64 + (v >> 1) * 8 + (u >> 1)];
+			if (tone == 0) { tone = ftex[rfar[y] * 1024 + fvar[ti] + v * 16 + u]; }
+			pix[gi] = floors[(lg[ly * gw + lx] * 16 + rshade[y]) * floor_tones + tone];
+			gi += vw;
+		}
+	}
+}
+
+// a decal on the floor: tone over the texels within radius of (x, y), each kept with chance keep/256
+def stain_floor(x, y, radius, tone, keep) {
+	var mw = G.mw;
+	var tiles := G.tiles;
+	var stains := STAINS;
+	var x0 = itrunc((x - radius) * 8.0);
+	var x1 = itrunc((x + radius) * 8.0);
+	var y0 = itrunc((y - radius) * 8.0);
+	var y1 = itrunc((y + radius) * 8.0);
+	var r2 = radius * radius * 64.0;
+	var ye = imin(G.mh * 8 - 1, y1);
+	var xe = imin(mw * 8 - 1, x1);
+	for (var sy = imax(0, y0); sy <= ye; ++sy) {
+		for (var sx = imax(0, x0); sx <= xe; ++sx) {
+			var dx = sx + 0.5 - x * 8.0;
+			var dy = sy + 0.5 - y * 8.0;
+			if (dx * dx + dy * dy > r2) { continue; }
+			if ((texel_noise(41, sx, sy) & 255) >= keep) { continue; }
+			var tile = (sy >> 3) * mw + (sx >> 3);
+			if (tiles[tile] != 0) { continue; }
+			var i = tile * 64 + (sy & 7) * 8 + (sx & 7);
+			var old = stains[i];
+			if (tone == TONE_BLOOD && old == TONE_SCORCH) { continue; }
+			stains[i] = tone;
+		}
+	}
+}
+
+// old blood dries: one pass a second darkens a slice of the stains
+def dry_stains(tick) {
+	var stains := STAINS;
+	var n = vlen(stains);
+	var slice = n / 30 + 1;
+	var start = (tick % 30) * slice;
+	var stop = imin(n, start + slice);
+	for (var i = start; i < stop; ++i) {
+		if (stains[i] == TONE_BLOOD && (texel_noise(43, i, tick / 30) & 7) == 0) { stains[i] = TONE_BLOOD_DRY; }
+	}
+}
+
+// the showcase look's gun in hand: sways with the walk, kicks on each shot
+def draw_viewmodel(pix) {
+	if (G.automap) { return; }
+	var firing = G.cooldown > WEAPONS[G.weapon]["cd"] - 4 || G.gun_kick > 0;
+	var name = VIEWMODEL_NAMES[G.weapon];
+	if (firing && G.muzzle > 0) { name = name + "_fire"; }
+	var art := VIEWMODELS[name];
+	var lut := viewmodel_lut(name, G.muzzle > 0, G.lights.at(G.px, G.py));
+	var vw = G.vw;
+	var vh = G.vh;
+	var aw = art["w"];
+	var ah = art["h"];
+	var apix := art["pix"];
+	// art pixels are square: a view pixel is PIXW x PIXH of a 1:2 cell
+	var scale = vh * 0.4 / 24.0;
+	var ph = itrunc(ah * scale);
+	var pw = ph * aw * 2 * PIXW / (ah * PIXH);
+	var sway = itrunc(sin(G.bob * 0.5) * vw * 0.025);
+	var lift = itrunc(fabs(cos(G.bob * 0.5)) * scale * 1.5) + G.gun_kick * itrunc(scale * 0.9);
+	var x0 = vw / 2 - pw / 2 + sway;
+	var y0 = vh - ph + lift + (HORIZON - vh / 2) / 2;
+	var cx0 = imax(0, x0);
+	var cx1 = imin(vw, x0 + pw);
+	var cy1 = imin(vh, y0 + ph);
+	for (var y = imax(0, y0); y < cy1; ++y) {
+		var row = ((y - y0) * ah / ph) * aw;
+		var base = y * vw;
+		for (var x = cx0; x < cx1; ++x) {
+			var code = apix[row + (x - x0) * aw / pw];
+			if (code > 0) { pix[base + x] = lut[code]; }
+		}
+	}
+}
+
+// palette code -> index for a gun under this floor's light, brighter in its own flash
+def viewmodel_lut(name, flashing, variant) {
+	var key = "${name}:${flashing}:${variant}";
+	if (G.lutc.count(key) != 0) { return G.lutc[key]; }
+	var mood := MOODS[G.map_i];
+	var art := VIEWMODELS[name];
+	var light = cadd(cscale(mix_rgb(mood["light"], rgb(255, 255, 255), 0.4), flashing ? 1.25 : 0.7), cscale(sprite_light(mood, variant), 0.8));
+	var rgbs := art["rgb"];
+	var keys := art["keys"];
+	var lut = [0];
+	var nc = vlen(rgbs);
+	for (var c = 1; c < nc; ++c) {
+		var color = rgb(rgbs[c][0], rgbs[c][1], rgbs[c][2]);
+		var key_char = keys[c];
+		if (key_char >= "A" && key_char <= "Z") { lut.push_back(color_idx(color)); }
+		else { lut.push_back(color_idx(cclamp(cmul(color, light)))); }
+	}
+	G.lutc[key] = lut;
+	return lut;
 }

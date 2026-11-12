@@ -28,6 +28,7 @@ class Game {
 	var mw
 	var mh
 	var tiles
+	var mapgen        // bumps with every render-kind snapshot rebuild
 	// player
 	var px
 	var py
@@ -79,6 +80,10 @@ class Game {
 	var pix
 	var zbuf
 	var lutc
+	// the showcase look
+	var lights        // LightGrid
+	var feel          // Feel: the look's eyes on the game
+	var screens       // Screens: the look's panel and pages
 	// the autopilot's "coroutine frame"
 	var p_started
 	var p_field
@@ -107,6 +112,7 @@ class Game {
 		this.mw = 0;
 		this.mh = 0;
 		this.tiles = [];
+		this.mapgen = 0;
 		this.px = 2.5;
 		this.py = 2.5;
 		this.pang = 0.0;
@@ -155,6 +161,8 @@ class Game {
 		this.zbuf = [];
 		for (var i = 0; i < this.vw; ++i) { this.zbuf.push_back(99.0); }
 		this.lutc = Map();
+		this.lights = LightGrid();
+		this.feel = Feel();
 		this.p_started = false;
 		this.p_field = [];
 		this.p_field_age = 999;

@@ -15,7 +15,7 @@ namespace MV {
 			friend class jai::access;
 
 		public:
-			static void jai_auto_bind(jai::dynamic_binder<PathMap>& a_binder);
+			static void jai_auto_bind(jai::dynamic_binder<PathMap>& a_builder);
 
 			DrawableDerivedAccessorsNoShowHide(PathMap)
 
@@ -207,7 +207,7 @@ namespace MV {
 			friend Node;
 			friend jai::access;
 		public:
-			static void jai_auto_bind(jai::dynamic_binder<PathAgent>& a_binder);
+			static void jai_auto_bind(jai::dynamic_binder<PathAgent>& a_builder);
 
 			typedef void CallbackSignature(std::shared_ptr<PathAgent>);
 			typedef jai::signal<CallbackSignature>::shared_receiver_type SharedReceiverType;

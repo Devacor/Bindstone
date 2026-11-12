@@ -12,7 +12,7 @@ namespace MV {
 			friend jai::access;
 			friend Node;
 		public:
-			static void jai_auto_bind(jai::dynamic_binder<Scroller>& a_binder);
+			static void jai_auto_bind(jai::dynamic_binder<Scroller>& a_builder);
 
 			ClickableComponentDerivedAccessors(Scroller)
 

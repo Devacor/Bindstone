@@ -13,7 +13,7 @@ namespace MV {
 			friend jai::access;
 			friend Node;
 		public:
-			static void jai_auto_bind(jai::dynamic_binder<Palette>& a_binder);
+			static void jai_auto_bind(jai::dynamic_binder<Palette>& a_builder);
 
 			typedef void PaletteSignalSignture(std::shared_ptr<Palette>);
 

@@ -11,7 +11,7 @@ namespace MV {
 			friend jai::access;
 			friend Node;
 		public:
-			static void jai_auto_bind(jai::dynamic_binder<Slider>& a_binder);
+			static void jai_auto_bind(jai::dynamic_binder<Slider>& a_builder);
 
 			typedef void SliderSignalSignature(std::shared_ptr<Slider>);
 		private:

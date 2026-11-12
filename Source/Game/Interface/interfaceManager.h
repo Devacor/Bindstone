@@ -48,7 +48,7 @@ namespace MV {
 			return false;
 		}
 
-		static void jai_auto_bind(jai::dynamic_binder<Interface>& builder);
+		static void jai_auto_bind(jai::dynamic_binder<Interface>& a_builder);
 
 	private:
 		void initialize();
@@ -124,7 +124,7 @@ namespace MV {
 		void setActiveText(Interface* a_current);
 		void removeActiveText(Interface* a_current);
 
-		static void jai_auto_bind(jai::dynamic_binder<InterfaceManager>& builder);
+		static void jai_auto_bind(jai::dynamic_binder<InterfaceManager>& a_builder);
 
 	private:
 		std::vector<std::unique_ptr<Interface>> pages;

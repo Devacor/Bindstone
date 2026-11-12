@@ -213,7 +213,7 @@ private:
 ## Signals
 
 MV uses JaiScript's signals: a private emitter and a public signal view over it. Serialized signals are
-`JAI_SIGNAL_PROPERTY` (next chapter).
+`JAI_SIGNAL` (next chapter).
 
 ```cpp
 class MyClass {
@@ -251,7 +251,7 @@ class Sprite : public jai::property_owner<Sprite, Drawable> {      // Derived fi
 	JAI_NAMED_PROPERTY((uint16_t), "subdivisions", ourSubdivisions, 0); // file key differs from member
 	JAI_TRANSIENT_PROPERTY((BoxAABB<>), localBounds);               // reflected, never written
 	JAI_DELETED_PROPERTY((int), oldField);                          // consumes a removed key on load
-	JAI_SIGNAL_PROPERTY(ButtonSignalSignature, onAccept);           // emitter onAcceptSignal + view onAccept; script receivers persist
+	JAI_SIGNAL(ButtonSignalSignature, onAccept);                    // emitter onAcceptSignal + view onAccept; script receivers persist
 };
 ```
 Types are always parenthesized (commas in templates). Macros:
@@ -288,20 +288,24 @@ first and constructs with the `Draw2D` from the `MV::Services` user context (`no
 types (`NetworkAction` subclasses, `BattleEffectData`) implement `void serialize(Archive&)` over
 `jai::serialization::make_nvp("key", member)`.
 
-### Polymorphic identity
+### Polymorphic identity and binding
 ```cpp
-static jai::registrar<MV::Scene::Collider, MV::Services, jai::bases<MV::Scene::Component>> _hookCollider([](jai::dynamic_binder<MV::Scene::Collider>& builder, const MV::Services&) {
-	builder.property("onCollisionStart", &MV::Scene::Collider::onCollisionStart);
-});
+// collider.h, in the class: one hook, declared here and defined in the .cpp
+static void jai_auto_bind(jai::dynamic_binder<Collider>& a_builder);
+
+// collider.cpp
+void Collider::jai_auto_bind(jai::dynamic_binder<Collider>& a_builder) {
+	a_builder.property("onCollisionStart", &Collider::onCollisionStart);
+}
 ```
-One registrar per concrete type, in its `.cpp` (`collider.cpp`, `clickable.cpp`), gives the script
-name (the bare class name unless one is passed first), the `$type` tag and the base links a load through
-`shared_ptr<Base>` needs. The binder binds a `property_owner`'s base chain, declared properties and signals
-itself; the configure function names the rest (methods, plain signal members, a non-`property_owner`'s
-`base_class`). `jai::bases<...>`
-lists the C++ bases an archive may hold the type as. Types with no registrar relate through
-`jai::serialization::register_relation<Derived, Base>` (`textures.cpp`). A level with neither is
-saved sliced as its nearest registered base.
+A `property_owner` level is its own `$type` (its bare class name, or the pin of `JAI_PROPERTY_OWNER_AS`), its
+base links, and its binding: every `bind_registrar` binds it, its base chain, declared properties and signals by
+themselves, and its `jai_auto_bind` names the rest (methods, plain signal members). A class declares one hook,
+`static void jai_auto_bind(jai::dynamic_binder<T>&)`, or `(jai::dynamic_binder<T>&, const C&)` when it carries a
+`jai::context<C>`. Types that are not `property_owner`s (`NetworkAction` subclasses, data structs) and templates
+bind through a `jai::registrar` in their `.cpp`, whose `jai::bases<...>` lists the C++ bases an archive may hold the
+type as. Types with neither relate through `jai::serialization::register_relation<Derived, Base>` (`textures.cpp`);
+a level with no registration is saved sliced as its nearest registered base.
 
 ### Entry points
 - `MV::toJson` / `fromJson<T>` / `toBinaryString` / `fromBinaryString<T>` / `toBase64` (`serialize.h`)
@@ -330,10 +334,11 @@ receiver loads armed. Run it after any change to a property, registrar or loader
 
 ### Rules
 - `friend jai::access` on every level; `save`/`load`/`load_and_construct` stay protected.
-- New level = `property_owner<Derived, Base>` + registrar + the three functions above.
+- New level = `property_owner<Derived, Base>` + the three functions above, and a `jai_auto_bind` for what the
+  declarations cannot say.
 - Adding a `JAI_PROPERTY` is free; renaming one changes the file key (`JAI_NAMED_PROPERTY` keeps
   the old key).
-- Signals are `JAI_SIGNAL_PROPERTY`, never a hand-written property.
+- Signals are `JAI_SIGNAL`, never a hand-written property.
 - `cloneHelper` copies what `clone` must carry; check it when adding a property.
 
 ## Rendering / texture lifetime (RHI port)

@@ -8,32 +8,32 @@
 
 namespace MV {
 	namespace Scene {
-		void Grid::jai_auto_bind(jai::dynamic_binder<Grid>& a_binder) {
-			a_binder.method("padding", static_cast<std::pair<Point<>, Point<>>(Grid::*)() const>(&Grid::padding));
-			a_binder.method("padding", static_cast<std::shared_ptr<Grid>(Grid::*)(const Size<>&)>(&Grid::padding));
+		void Grid::jai_auto_bind(jai::dynamic_binder<Grid>& a_builder) {
+			a_builder.method("padding", static_cast<std::pair<Point<>, Point<>>(Grid::*)() const>(&Grid::padding));
+			a_builder.method("padding", static_cast<std::shared_ptr<Grid>(Grid::*)(const Size<>&)>(&Grid::padding));
 
-			a_binder.method("margin", static_cast<std::pair<Point<>, Point<>>(Grid::*)() const>(&Grid::margin));
-			a_binder.method("margin", static_cast<std::shared_ptr<Grid>(Grid::*)(const Size<>&)>(&Grid::margin));
+			a_builder.method("margin", static_cast<std::pair<Point<>, Point<>>(Grid::*)() const>(&Grid::margin));
+			a_builder.method("margin", static_cast<std::shared_ptr<Grid>(Grid::*)(const Size<>&)>(&Grid::margin));
 
-			a_binder.method("cellSize", static_cast<Size<>(Grid::*)() const>(&Grid::cellSize));
-			a_binder.method("cellSize", static_cast<std::shared_ptr<Grid>(Grid::*)(const Size<>&)>(&Grid::cellSize));
+			a_builder.method("cellSize", static_cast<Size<>(Grid::*)() const>(&Grid::cellSize));
+			a_builder.method("cellSize", static_cast<std::shared_ptr<Grid>(Grid::*)(const Size<>&)>(&Grid::cellSize));
 
-			a_binder.method("gridWidth", static_cast<PointPrecision(Grid::*)() const>(&Grid::gridWidth));
-			a_binder.method("gridWidth", static_cast<std::shared_ptr<Grid>(Grid::*)(PointPrecision)>(&Grid::gridWidth));
+			a_builder.method("gridWidth", static_cast<PointPrecision(Grid::*)() const>(&Grid::gridWidth));
+			a_builder.method("gridWidth", static_cast<std::shared_ptr<Grid>(Grid::*)(PointPrecision)>(&Grid::gridWidth));
 
-			a_binder.method("gridOffset", static_cast<Point<>(Grid::*)() const>(&Grid::gridOffset));
-			a_binder.method("gridOffset", static_cast<std::shared_ptr<Grid>(Grid::*)(const Point<>&)>(&Grid::gridOffset));
+			a_builder.method("gridOffset", static_cast<Point<>(Grid::*)() const>(&Grid::gridOffset));
+			a_builder.method("gridOffset", static_cast<std::shared_ptr<Grid>(Grid::*)(const Point<>&)>(&Grid::gridOffset));
 
-			a_binder.method("columns", static_cast<size_t(Grid::*)() const>(&Grid::columns));
-			a_binder.method("columns", static_cast<std::shared_ptr<Grid>(Grid::*)(size_t, bool)>(&Grid::columns));
+			a_builder.method("columns", static_cast<size_t(Grid::*)() const>(&Grid::columns));
+			a_builder.method("columns", static_cast<std::shared_ptr<Grid>(Grid::*)(size_t, bool)>(&Grid::columns));
 
-			a_binder.method("layoutPolicy", static_cast<Grid::AutoLayoutPolicy(Grid::*)() const>(&Grid::layoutPolicy));
-			a_binder.method("layoutPolicy", static_cast<std::shared_ptr<Grid>(Grid::*)(Grid::AutoLayoutPolicy)>(&Grid::layoutPolicy));
+			a_builder.method("layoutPolicy", static_cast<Grid::AutoLayoutPolicy(Grid::*)() const>(&Grid::layoutPolicy));
+			a_builder.method("layoutPolicy", static_cast<std::shared_ptr<Grid>(Grid::*)(Grid::AutoLayoutPolicy)>(&Grid::layoutPolicy));
 
-			a_binder.method("layoutCells", &Grid::layoutCells, jai::serial);
+			a_builder.method("layoutCells", &Grid::layoutCells, jai::serial);
 
-			a_binder.method("nodeFromGrid", &Grid::nodeFromGrid, jai::serial);
-			a_binder.method("nodeFromLocal", &Grid::nodeFromLocal, jai::serial);
+			a_builder.method("nodeFromGrid", &Grid::nodeFromGrid, jai::serial);
+			a_builder.method("nodeFromLocal", &Grid::nodeFromLocal, jai::serial);
 		}
 
 

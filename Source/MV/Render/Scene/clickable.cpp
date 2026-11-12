@@ -8,32 +8,32 @@
 
 namespace MV {
 	namespace Scene {
-		void Clickable::jai_auto_bind(jai::dynamic_binder<Clickable>& a_binder) {
-			a_binder.method("clickDetectionType", static_cast<Clickable::BoundsType(Clickable::*)() const>(&Clickable::clickDetectionType));
-			a_binder.method("clickDetectionType", static_cast<std::shared_ptr<Clickable>(Clickable::*)(Clickable::BoundsType)>(&Clickable::clickDetectionType), jai::serial);
+		void Clickable::jai_auto_bind(jai::dynamic_binder<Clickable>& a_builder) {
+			a_builder.method("clickDetectionType", static_cast<Clickable::BoundsType(Clickable::*)() const>(&Clickable::clickDetectionType));
+			a_builder.method("clickDetectionType", static_cast<std::shared_ptr<Clickable>(Clickable::*)(Clickable::BoundsType)>(&Clickable::clickDetectionType), jai::serial);
 
-			a_binder.method("disable", &Clickable::disable, jai::serial);
-			a_binder.method("disabled", &Clickable::disabled);
-			a_binder.method("enabled", &Clickable::enabled);
+			a_builder.method("disable", &Clickable::disable, jai::serial);
+			a_builder.method("disabled", &Clickable::disabled);
+			a_builder.method("enabled", &Clickable::enabled);
 
-			a_binder.method("cancelPress", &Clickable::cancelPress, jai::serial);
-			a_binder.method("inPressEvent", &Clickable::inPressEvent);
-			a_binder.method("press", &Clickable::press, jai::serial);
+			a_builder.method("cancelPress", &Clickable::cancelPress, jai::serial);
+			a_builder.method("inPressEvent", &Clickable::inPressEvent);
+			a_builder.method("press", &Clickable::press, jai::serial);
 
-			a_binder.method("startEatingTouches", &Clickable::startEatingTouches);
-			a_binder.method("stopEatingTouches", &Clickable::stopEatingTouches);
-			a_binder.method("eatingTouches", &Clickable::eatingTouches);
+			a_builder.method("startEatingTouches", &Clickable::startEatingTouches);
+			a_builder.method("stopEatingTouches", &Clickable::stopEatingTouches);
+			a_builder.method("eatingTouches", &Clickable::eatingTouches);
 
-			a_binder.method("dragDelta", &Clickable::dragDelta);
-			a_binder.method("totalDragDistance", &Clickable::totalDragDistance);
-			a_binder.method("dragTime", &Clickable::dragTime);
+			a_builder.method("dragDelta", &Clickable::dragDelta);
+			a_builder.method("totalDragDistance", &Clickable::totalDragDistance);
+			a_builder.method("dragTime", &Clickable::dragTime);
 
-			a_binder.method("globalPriority", static_cast<int64_t(Clickable::*)() const>(&Clickable::globalPriority));
-			a_binder.method("globalPriority", static_cast<std::shared_ptr<Clickable>(Clickable::*)(int64_t)>(&Clickable::globalPriority));
-			a_binder.method("appendPriority", static_cast<int64_t(Clickable::*)() const>(&Clickable::appendPriority));
-			a_binder.method("appendPriority", static_cast<std::shared_ptr<Clickable>(Clickable::*)(int64_t)>(&Clickable::appendPriority));
+			a_builder.method("globalPriority", static_cast<int64_t(Clickable::*)() const>(&Clickable::globalPriority));
+			a_builder.method("globalPriority", static_cast<std::shared_ptr<Clickable>(Clickable::*)(int64_t)>(&Clickable::globalPriority));
+			a_builder.method("appendPriority", static_cast<int64_t(Clickable::*)() const>(&Clickable::appendPriority));
+			a_builder.method("appendPriority", static_cast<std::shared_ptr<Clickable>(Clickable::*)(int64_t)>(&Clickable::appendPriority));
 
-			a_binder.method("mouseInBounds", static_cast<bool(Clickable::*)()>(&Clickable::mouseInBounds), jai::serial);
+			a_builder.method("mouseInBounds", static_cast<bool(Clickable::*)()>(&Clickable::mouseInBounds), jai::serial);
 		}
 
 

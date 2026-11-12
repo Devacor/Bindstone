@@ -14,10 +14,10 @@ static jai::registrar<StandardMessages, MV::Services> _hookStandardMessages([](j
 	builder.property("lobbyAuthenticated", &StandardMessages::lobbyAuthenticated);
 });
 
-void Game::jai_auto_bind(jai::dynamic_binder<Game>& builder) {
-	builder.property("loginId", &Game::loginId);
-	builder.property("loginPassword", &Game::loginPassword);
-	builder.property("client", [](Game& a_self) { return a_self.lobbyClient(); }, nullptr);
+void Game::jai_auto_bind(jai::dynamic_binder<Game>& a_builder) {
+	a_builder.property("loginId", &Game::loginId);
+	a_builder.property("loginPassword", &Game::loginPassword);
+	a_builder.property("client", [](Game& a_self) { return a_self.lobbyClient(); }, nullptr);
 }
 
 static jai::registrar<Game, MV::Services> _hookGame([](jai::dynamic_binder<Game>& builder, const MV::Services&) {

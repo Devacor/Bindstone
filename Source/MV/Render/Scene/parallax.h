@@ -11,7 +11,7 @@ namespace MV {
 			friend jai::access;
 
 		public:
-			static void jai_auto_bind(jai::dynamic_binder<Parallax>& a_binder);
+			static void jai_auto_bind(jai::dynamic_binder<Parallax>& a_builder);
 
 			ComponentDerivedAccessors(Parallax)
 

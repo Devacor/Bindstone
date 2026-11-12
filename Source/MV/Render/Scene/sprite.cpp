@@ -5,13 +5,13 @@
 
 namespace MV {
 	namespace Scene {
-		void Sprite::jai_auto_bind(jai::dynamic_binder<Sprite>& a_binder) {
-			a_binder.method("corners", &Sprite::corners<Point<>>, jai::serial);
+		void Sprite::jai_auto_bind(jai::dynamic_binder<Sprite>& a_builder) {
+			a_builder.method("corners", &Sprite::corners<Point<>>, jai::serial);
 
-			a_binder.method("subdivide", &Sprite::subdivide);
-			a_binder.method("subdivisions", &Sprite::subdivisions);
+			a_builder.method("subdivide", &Sprite::subdivide);
+			a_builder.method("subdivisions", &Sprite::subdivisions);
 
-			a_binder.method("hasSlice", &Sprite::hasSlice);
+			a_builder.method("hasSlice", &Sprite::hasSlice);
 		}
 
 		/*Vertex Indices*\

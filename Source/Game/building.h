@@ -185,7 +185,7 @@ public:
 		return spawn ? spawn->worldPosition() : owner()->worldPosition();
 	}
 
-	static void jai_auto_bind(jai::dynamic_binder<Building>& builder);
+	static void jai_auto_bind(jai::dynamic_binder<Building>& a_builder);
 
 protected:
 	Building(const std::weak_ptr<MV::Scene::Node> &a_owner, int a_slot, int a_loadoutSlot, const std::shared_ptr<InGamePlayer> &a_player, GameInstance& a_instance);

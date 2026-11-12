@@ -355,7 +355,7 @@ public:
 
 	int health() const { return *state->self()->health; }
 
-	static void jai_auto_bind(jai::dynamic_binder<Creature>& builder);
+	static void jai_auto_bind(jai::dynamic_binder<Creature>& a_builder);
 
 protected:
 	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, GameInstance& a_gameInstance, const std::string& a_skin, const CreatureData& a_statTemplate, std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> a_state);
@@ -484,7 +484,7 @@ public:
 	void absorbFor(int64_t a_hostId, double a_fraction, double a_statusScale);
 	int64_t spawnCreature(const std::string& a_creatureId);
 
-	static void jai_auto_bind(jai::dynamic_binder<ServerCreature>& builder);
+	static void jai_auto_bind(jai::dynamic_binder<ServerCreature>& a_builder);
 
 protected:
 	ServerCreature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, int a_buildingSlot, GameInstance& a_gameInstance);

@@ -8,16 +8,16 @@
 
 namespace MV {
 	namespace Scene {
-		void Button::jai_auto_bind(jai::dynamic_binder<Button>& a_binder) {
-			a_binder.method("activeNode", static_cast<std::shared_ptr<Node>(Button::*)() const>(&Button::activeNode));
-			a_binder.method("activeNode", static_cast<std::shared_ptr<Button>(Button::*)(const std::shared_ptr<Node>&)>(&Button::activeNode), jai::serial);
-			a_binder.method("idleNode", static_cast<std::shared_ptr<Node>(Button::*)() const>(&Button::idleNode));
-			a_binder.method("idleNode", static_cast<std::shared_ptr<Button>(Button::*)(const std::shared_ptr<Node>&)>(&Button::idleNode), jai::serial);
-			a_binder.method("disabledNode", static_cast<std::shared_ptr<Node>(Button::*)() const>(&Button::disabledNode));
-			a_binder.method("disabledNode", static_cast<std::shared_ptr<Button>(Button::*)(const std::shared_ptr<Node>&)>(&Button::disabledNode), jai::serial);
+		void Button::jai_auto_bind(jai::dynamic_binder<Button>& a_builder) {
+			a_builder.method("activeNode", static_cast<std::shared_ptr<Node>(Button::*)() const>(&Button::activeNode));
+			a_builder.method("activeNode", static_cast<std::shared_ptr<Button>(Button::*)(const std::shared_ptr<Node>&)>(&Button::activeNode), jai::serial);
+			a_builder.method("idleNode", static_cast<std::shared_ptr<Node>(Button::*)() const>(&Button::idleNode));
+			a_builder.method("idleNode", static_cast<std::shared_ptr<Button>(Button::*)(const std::shared_ptr<Node>&)>(&Button::idleNode), jai::serial);
+			a_builder.method("disabledNode", static_cast<std::shared_ptr<Node>(Button::*)() const>(&Button::disabledNode));
+			a_builder.method("disabledNode", static_cast<std::shared_ptr<Button>(Button::*)(const std::shared_ptr<Node>&)>(&Button::disabledNode), jai::serial);
 
-			a_binder.method("text", static_cast<std::string(Button::*)() const>(&Button::text));
-			a_binder.method("text", static_cast<std::shared_ptr<Button>(Button::*)(const std::string&)>(&Button::text), jai::serial);
+			a_builder.method("text", static_cast<std::string(Button::*)() const>(&Button::text));
+			a_builder.method("text", static_cast<std::shared_ptr<Button>(Button::*)(const std::string&)>(&Button::text), jai::serial);
 		}
 
 

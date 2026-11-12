@@ -540,7 +540,7 @@ namespace MV {
 			jai::signal_emitter<void(bool, size_t, CollisionParameters)> onContactKilledSignal; //first param true if A is destroyed otherwise B
 			jai::signal_emitter<void(CollisionParameters, const Point<> &, bool&)> onShouldCollideSignal;
 		public:
-			static void jai_auto_bind(jai::dynamic_binder<Collider>& a_binder);
+			static void jai_auto_bind(jai::dynamic_binder<Collider>& a_builder);
 
 			jai::signal<void(CollisionParameters)> onCollisionStart;
 			jai::signal<void(CollisionParameters)> onCollisionEnd;

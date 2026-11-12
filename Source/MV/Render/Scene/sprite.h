@@ -20,7 +20,7 @@ namespace MV {
 			friend jai::access;
 
 		public:
-			static void jai_auto_bind(jai::dynamic_binder<Sprite>& a_binder);
+			static void jai_auto_bind(jai::dynamic_binder<Sprite>& a_builder);
 
 			DrawableDerivedAccessors(Sprite)
 

@@ -141,7 +141,7 @@ public:
 		return gameInstance;
 	}
 
-	static void jai_auto_bind(jai::dynamic_binder<BattleEffect>& builder);
+	static void jai_auto_bind(jai::dynamic_binder<BattleEffect>& a_builder);
 
 protected:
 	BattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, GameInstance& a_gameInstance, const std::string& a_skin, const BattleEffectData& a_statTemplate, std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> a_state);

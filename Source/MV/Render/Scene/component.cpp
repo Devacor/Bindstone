@@ -5,22 +5,22 @@
 
 namespace MV {
 	namespace Scene {
-		void Component::jai_auto_bind(jai::dynamic_binder<Component>& a_binder) {
-			a_binder.method("id", static_cast<std::string(Component::*)() const>(&Component::id));
-			a_binder.method("id", static_cast<std::shared_ptr<Component>(Component::*)(const std::string&)>(&Component::id));
+		void Component::jai_auto_bind(jai::dynamic_binder<Component>& a_builder) {
+			a_builder.method("id", static_cast<std::string(Component::*)() const>(&Component::id));
+			a_builder.method("id", static_cast<std::shared_ptr<Component>(Component::*)(const std::string&)>(&Component::id));
 
-			a_binder.method("bounds", static_cast<BoxAABB<>(Component::*)()>(&Component::bounds), jai::serial);
-			a_binder.method("bounds", static_cast<std::shared_ptr<Component>(Component::*)(const BoxAABB<>&)>(&Component::bounds), jai::serial);
-			a_binder.method("screenBounds", static_cast<BoxAABB<int>(Component::*)()>(&Component::screenBounds), jai::serial);
-			a_binder.method("worldBounds", static_cast<BoxAABB<>(Component::*)()>(&Component::worldBounds), jai::serial);
+			a_builder.method("bounds", static_cast<BoxAABB<>(Component::*)()>(&Component::bounds), jai::serial);
+			a_builder.method("bounds", static_cast<std::shared_ptr<Component>(Component::*)(const BoxAABB<>&)>(&Component::bounds), jai::serial);
+			a_builder.method("screenBounds", static_cast<BoxAABB<int>(Component::*)()>(&Component::screenBounds), jai::serial);
+			a_builder.method("worldBounds", static_cast<BoxAABB<>(Component::*)()>(&Component::worldBounds), jai::serial);
 
-			a_binder.method("serializable", static_cast<bool(Component::*)() const>(&Component::serializable));
-			a_binder.method("serializable", static_cast<std::shared_ptr<Component>(Component::*)(bool)>(&Component::serializable));
+			a_builder.method("serializable", static_cast<bool(Component::*)() const>(&Component::serializable));
+			a_builder.method("serializable", static_cast<std::shared_ptr<Component>(Component::*)(bool)>(&Component::serializable));
 
-			a_binder.method("owner", &Component::owner);
-			a_binder.method("ownerIsAlive", &Component::ownerIsAlive);
-			a_binder.method("detach", &Component::detach, jai::serial);
-			a_binder.method("task", &Component::task);
+			a_builder.method("owner", &Component::owner);
+			a_builder.method("ownerIsAlive", &Component::ownerIsAlive);
+			a_builder.method("detach", &Component::detach, jai::serial);
+			a_builder.method("task", &Component::task);
 		}
 
 		/*Vertex Indices*\

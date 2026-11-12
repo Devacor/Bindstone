@@ -134,17 +134,17 @@ namespace MV {
 		}
 	}
 
-	void Interface::jai_auto_bind(jai::dynamic_binder<Interface>& builder) {
+	void Interface::jai_auto_bind(jai::dynamic_binder<Interface>& a_builder) {
 		// Note: manager() not bound - InterfaceManager contains non-copyable members (unique_ptr vector)
 		// and value_converter would try to copy it if not registered. Access via scripts not needed.
-		builder.property("initialize", &Interface::scriptInitialize);
-		builder.property("onShow", &Interface::scriptShow);
-		builder.property("onHide", &Interface::scriptHide);
-		builder.property("update", &Interface::scriptUpdate);
+		a_builder.property("initialize", &Interface::scriptInitialize);
+		a_builder.property("onShow", &Interface::scriptShow);
+		a_builder.property("onHide", &Interface::scriptHide);
+		a_builder.property("update", &Interface::scriptUpdate);
 	}
 
-	void InterfaceManager::jai_auto_bind(jai::dynamic_binder<InterfaceManager>& builder) {
-		builder.property("initialize", &InterfaceManager::scriptInitialize);
+	void InterfaceManager::jai_auto_bind(jai::dynamic_binder<InterfaceManager>& a_builder) {
+		a_builder.property("initialize", &InterfaceManager::scriptInitialize);
 	}
 
 }

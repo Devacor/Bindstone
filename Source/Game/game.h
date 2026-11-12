@@ -125,7 +125,7 @@ public:
 		return jaiEngine_;
 	}
 
-	static void jai_auto_bind(jai::dynamic_binder<Game>& builder);
+	static void jai_auto_bind(jai::dynamic_binder<Game>& a_builder);
 private:
 	Game(const Game &) = delete;
 	Game& operator=(const Game &) = delete;

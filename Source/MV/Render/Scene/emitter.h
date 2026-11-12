@@ -226,7 +226,7 @@ namespace MV {
 			friend Node;
 			friend jai::access;
 		public:
-			static void jai_auto_bind(jai::dynamic_binder<Emitter>& a_binder);
+			static void jai_auto_bind(jai::dynamic_binder<Emitter>& a_builder);
 
 			DrawableDerivedAccessors(Emitter)
 

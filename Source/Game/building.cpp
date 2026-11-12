@@ -33,23 +33,23 @@ static jai::registrar<StandardScriptMethods<Building>, MV::Services> _hookBuildi
 	builder.property("death", &StandardScriptMethods<Building>::scriptDeath);
 });
 
-void Building::jai_auto_bind(jai::dynamic_binder<Building>& builder) {
-	builder.method("current", [](Building& a_self) -> const BuildTree& { return *a_self.current(); });
-	builder.method("upgrade", &Building::upgrade, jai::serial);
-	builder.method("player", &Building::player);
-	builder.method("assetPath", &Building::assetPath);
-	builder.method("skin", &Building::skin);
-	builder.method("slot", &Building::slotIndex);
-	builder.property("onUpgraded", &Building::onUpgraded);
-	builder.method("data", [](Building& a_self) { return a_self.buildingData; });
-	builder.method("networkId", [](Building& a_self) { return static_cast<int64_t>(a_self.slot); });
-	builder.method("spawnCreature", [](Building& a_self, const std::string& a_key) {
+void Building::jai_auto_bind(jai::dynamic_binder<Building>& a_builder) {
+	a_builder.method("current", [](Building& a_self) -> const BuildTree& { return *a_self.current(); });
+	a_builder.method("upgrade", &Building::upgrade, jai::serial);
+	a_builder.method("player", &Building::player);
+	a_builder.method("assetPath", &Building::assetPath);
+	a_builder.method("skin", &Building::skin);
+	a_builder.method("slot", &Building::slotIndex);
+	a_builder.property("onUpgraded", &Building::onUpgraded);
+	a_builder.method("data", [](Building& a_self) { return a_self.buildingData; });
+	a_builder.method("networkId", [](Building& a_self) { return static_cast<int64_t>(a_self.slot); });
+	a_builder.method("spawnCreature", [](Building& a_self, const std::string& a_key) {
 		a_self.gameInstance.spawnCreature(a_self.slotIndex(), a_key);
 	}, jai::serial);
-	builder.method("setVar", [](Building& a_self, jai::script_value a_key, jai::script_value a_value) {
+	a_builder.method("setVar", [](Building& a_self, jai::script_value a_key, jai::script_value a_value) {
 		a_self.localVariables[a_key.as_string()] = std::move(a_value);
 	});
-	builder.method("getVar", [eng = &builder.bound_engine()](Building& a_self, jai::script_value a_key) {
+	a_builder.method("getVar", [eng = &a_builder.bound_engine()](Building& a_self, jai::script_value a_key) {
 		auto found = a_self.localVariables.find(a_key.as_string());
 		return found != a_self.localVariables.end() ? found->second : jai::script_value(std::monostate{}, eng);
 	});

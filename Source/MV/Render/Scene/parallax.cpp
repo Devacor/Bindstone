@@ -7,22 +7,22 @@
 
 namespace MV {
 	namespace Scene {
-		void Parallax::jai_auto_bind(jai::dynamic_binder<Parallax>& a_binder) {
-			a_binder.method("translateRatio", static_cast<Point<>(Parallax::*)() const>(&Parallax::translateRatio));
-			a_binder.method("translateRatio", static_cast<std::shared_ptr<Parallax>(Parallax::*)(const Point<>&)>(&Parallax::translateRatio));
+		void Parallax::jai_auto_bind(jai::dynamic_binder<Parallax>& a_builder) {
+			a_builder.method("translateRatio", static_cast<Point<>(Parallax::*)() const>(&Parallax::translateRatio));
+			a_builder.method("translateRatio", static_cast<std::shared_ptr<Parallax>(Parallax::*)(const Point<>&)>(&Parallax::translateRatio));
 
-			a_binder.method("localOffset", static_cast<Point<>(Parallax::*)() const>(&Parallax::localOffset));
-			a_binder.method("localOffset", static_cast<std::shared_ptr<Parallax>(Parallax::*)(const Point<>&)>(&Parallax::localOffset));
+			a_builder.method("localOffset", static_cast<Point<>(Parallax::*)() const>(&Parallax::localOffset));
+			a_builder.method("localOffset", static_cast<std::shared_ptr<Parallax>(Parallax::*)(const Point<>&)>(&Parallax::localOffset));
 
-			a_binder.method("worldZoomOffset", static_cast<Point<>(Parallax::*)() const>(&Parallax::worldZoomOffset));
-			a_binder.method("worldZoomOffset", static_cast<std::shared_ptr<Parallax>(Parallax::*)(const Point<>&)>(&Parallax::worldZoomOffset));
-			a_binder.method("zoomRatio", static_cast<Point<>(Parallax::*)() const>(&Parallax::zoomRatio));
-			a_binder.method("zoomRatio", static_cast<std::shared_ptr<Parallax>(Parallax::*)(const Point<>&)>(&Parallax::zoomRatio));
+			a_builder.method("worldZoomOffset", static_cast<Point<>(Parallax::*)() const>(&Parallax::worldZoomOffset));
+			a_builder.method("worldZoomOffset", static_cast<std::shared_ptr<Parallax>(Parallax::*)(const Point<>&)>(&Parallax::worldZoomOffset));
+			a_builder.method("zoomRatio", static_cast<Point<>(Parallax::*)() const>(&Parallax::zoomRatio));
+			a_builder.method("zoomRatio", static_cast<std::shared_ptr<Parallax>(Parallax::*)(const Point<>&)>(&Parallax::zoomRatio));
 
-			a_binder.method("enabled", static_cast<bool(Parallax::*)() const>(&Parallax::enabled));
-			a_binder.method("enabled", static_cast<std::shared_ptr<Parallax>(Parallax::*)(bool)>(&Parallax::enabled), jai::serial);
-			a_binder.method("enable", &Parallax::enable);
-			a_binder.method("disable", &Parallax::disable, jai::serial);
+			a_builder.method("enabled", static_cast<bool(Parallax::*)() const>(&Parallax::enabled));
+			a_builder.method("enabled", static_cast<std::shared_ptr<Parallax>(Parallax::*)(bool)>(&Parallax::enabled), jai::serial);
+			a_builder.method("enable", &Parallax::enable);
+			a_builder.method("disable", &Parallax::disable, jai::serial);
 		}
 
 		Parallax::Parallax(const std::weak_ptr<Node>& a_owner) :

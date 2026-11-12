@@ -6,14 +6,14 @@
 
 namespace MV {
 	namespace Scene {
-		void Slider::jai_auto_bind(jai::dynamic_binder<Slider>& a_binder) {
-			a_binder.property("onPercentChange", &Slider::onPercentChange);
+		void Slider::jai_auto_bind(jai::dynamic_binder<Slider>& a_builder) {
+			a_builder.property("onPercentChange", &Slider::onPercentChange);
 
-			a_binder.method("percent", static_cast<PointPrecision(Slider::*)() const>(&Slider::percent));
-			a_binder.method("percent", static_cast<std::shared_ptr<Slider>(Slider::*)(PointPrecision, bool)>(&Slider::percent), jai::serial);
+			a_builder.method("percent", static_cast<PointPrecision(Slider::*)() const>(&Slider::percent));
+			a_builder.method("percent", static_cast<std::shared_ptr<Slider>(Slider::*)(PointPrecision, bool)>(&Slider::percent), jai::serial);
 
-			a_binder.method("handle", static_cast<std::shared_ptr<Node>(Slider::*)() const>(&Slider::handle));
-			a_binder.method("handle", static_cast<std::shared_ptr<Slider>(Slider::*)(const std::shared_ptr<Node>&)>(&Slider::handle), jai::serial);
+			a_builder.method("handle", static_cast<std::shared_ptr<Node>(Slider::*)() const>(&Slider::handle));
+			a_builder.method("handle", static_cast<std::shared_ptr<Slider>(Slider::*)(const std::shared_ptr<Node>&)>(&Slider::handle), jai::serial);
 		}
 
 

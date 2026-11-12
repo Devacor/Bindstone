@@ -7,23 +7,23 @@
 
 namespace MV {
 	namespace Scene {
-		void Clipped::jai_auto_bind(jai::dynamic_binder<Clipped>& a_binder) {
-			a_binder.method("refreshTexture", &Clipped::refreshTexture, jai::serial);
-			a_binder.method("refreshEveryFrame", static_cast<bool(Clipped::*)() const>(&Clipped::refreshEveryFrame));
-			a_binder.method("refreshEveryFrame", static_cast<std::shared_ptr<Clipped>(Clipped::*)(bool)>(&Clipped::refreshEveryFrame));
+		void Clipped::jai_auto_bind(jai::dynamic_binder<Clipped>& a_builder) {
+			a_builder.method("refreshTexture", &Clipped::refreshTexture, jai::serial);
+			a_builder.method("refreshEveryFrame", static_cast<bool(Clipped::*)() const>(&Clipped::refreshEveryFrame));
+			a_builder.method("refreshEveryFrame", static_cast<std::shared_ptr<Clipped>(Clipped::*)(bool)>(&Clipped::refreshEveryFrame));
 
-			a_binder.method("clearCaptureBounds", &Clipped::clearCaptureBounds);
-			a_binder.method("captureBounds", static_cast<BoxAABB<>(Clipped::*)()>(&Clipped::captureBounds));
-			a_binder.method("captureBounds", static_cast<std::shared_ptr<Clipped>(Clipped::*)(const BoxAABB<>&)>(&Clipped::captureBounds));
+			a_builder.method("clearCaptureBounds", &Clipped::clearCaptureBounds);
+			a_builder.method("captureBounds", static_cast<BoxAABB<>(Clipped::*)()>(&Clipped::captureBounds));
+			a_builder.method("captureBounds", static_cast<std::shared_ptr<Clipped>(Clipped::*)(const BoxAABB<>&)>(&Clipped::captureBounds));
 
-			a_binder.method("clearCaptureOffset", &Clipped::clearCaptureOffset);
-			a_binder.method("captureOffset", static_cast<Point<>(Clipped::*)() const>(&Clipped::captureOffset));
-			a_binder.method("captureOffset", static_cast<std::shared_ptr<Clipped>(Clipped::*)(const Point<>&)>(&Clipped::captureOffset));
+			a_builder.method("clearCaptureOffset", &Clipped::clearCaptureOffset);
+			a_builder.method("captureOffset", static_cast<Point<>(Clipped::*)() const>(&Clipped::captureOffset));
+			a_builder.method("captureOffset", static_cast<std::shared_ptr<Clipped>(Clipped::*)(const Point<>&)>(&Clipped::captureOffset));
 
-			a_binder.method("captureSize", static_cast<std::shared_ptr<Clipped>(Clipped::*)(const Size<>&, bool)>(&Clipped::captureSize));
+			a_builder.method("captureSize", static_cast<std::shared_ptr<Clipped>(Clipped::*)(const Size<>&, bool)>(&Clipped::captureSize));
 
-			a_binder.method("refreshShader", static_cast<std::string(Clipped::*)()>(&Clipped::refreshShader));
-			a_binder.method("refreshShader", static_cast<std::shared_ptr<Clipped>(Clipped::*)(const std::string&)>(&Clipped::refreshShader));
+			a_builder.method("refreshShader", static_cast<std::string(Clipped::*)()>(&Clipped::refreshShader));
+			a_builder.method("refreshShader", static_cast<std::shared_ptr<Clipped>(Clipped::*)(const std::string&)>(&Clipped::refreshShader));
 		}
 
 

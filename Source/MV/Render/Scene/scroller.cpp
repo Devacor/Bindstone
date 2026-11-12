@@ -6,9 +6,9 @@
 
 namespace MV {
 	namespace Scene {
-		void Scroller::jai_auto_bind(jai::dynamic_binder<Scroller>& a_binder) {
-			a_binder.method("content", static_cast<std::shared_ptr<Node>(Scroller::*)() const>(&Scroller::content));
-			a_binder.method("content", static_cast<std::shared_ptr<Scroller>(Scroller::*)(const std::shared_ptr<Node>&)>(&Scroller::content), jai::serial);
+		void Scroller::jai_auto_bind(jai::dynamic_binder<Scroller>& a_builder) {
+			a_builder.method("content", static_cast<std::shared_ptr<Node>(Scroller::*)() const>(&Scroller::content));
+			a_builder.method("content", static_cast<std::shared_ptr<Scroller>(Scroller::*)(const std::shared_ptr<Node>&)>(&Scroller::content), jai::serial);
 		}
 
 

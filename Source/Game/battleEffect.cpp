@@ -28,21 +28,21 @@ static jai::registrar<StandardScriptMethods<BattleEffect>, MV::Services> _hookBa
 	builder.property("death", &StandardScriptMethods<BattleEffect>::scriptDeath);
 });
 
-void BattleEffect::jai_auto_bind(jai::dynamic_binder<BattleEffect>& builder) {
-	builder.method("game", &BattleEffect::game);
-	builder.method("alive", &BattleEffect::alive);
-	builder.method("networkId", &BattleEffect::netId);
-	builder.method("assetPath", &BattleEffect::assetPath);
-	builder.property("onArrive", &BattleEffect::onArrive);
-	builder.property("onFizzle", &BattleEffect::onFizzle);
-	builder.method("stats", [](BattleEffect& a_self) { return a_self.statTemplate; });
-	builder.method("ourElapsedTime", [](BattleEffect& a_self) { return a_self.ourElapsedTime; });
-	builder.method("sourceCreature", [](BattleEffect& a_self) { return a_self.sourceCreature; });
-	builder.method("targetCreature", [](BattleEffect& a_self) { return a_self.targetCreature; });
-	builder.method("setVar", [](BattleEffect& a_self, jai::script_value a_key, jai::script_value a_value) {
+void BattleEffect::jai_auto_bind(jai::dynamic_binder<BattleEffect>& a_builder) {
+	a_builder.method("game", &BattleEffect::game);
+	a_builder.method("alive", &BattleEffect::alive);
+	a_builder.method("networkId", &BattleEffect::netId);
+	a_builder.method("assetPath", &BattleEffect::assetPath);
+	a_builder.property("onArrive", &BattleEffect::onArrive);
+	a_builder.property("onFizzle", &BattleEffect::onFizzle);
+	a_builder.method("stats", [](BattleEffect& a_self) { return a_self.statTemplate; });
+	a_builder.method("ourElapsedTime", [](BattleEffect& a_self) { return a_self.ourElapsedTime; });
+	a_builder.method("sourceCreature", [](BattleEffect& a_self) { return a_self.sourceCreature; });
+	a_builder.method("targetCreature", [](BattleEffect& a_self) { return a_self.targetCreature; });
+	a_builder.method("setVar", [](BattleEffect& a_self, jai::script_value a_key, jai::script_value a_value) {
 		a_self.localVariables[a_key.as_string()] = std::move(a_value);
 	});
-	builder.method("getVar", [eng = &builder.bound_engine()](BattleEffect& a_self, jai::script_value a_key) {
+	a_builder.method("getVar", [eng = &a_builder.bound_engine()](BattleEffect& a_self, jai::script_value a_key) {
 		auto found = a_self.localVariables.find(a_key.as_string());
 		return found != a_self.localVariables.end() ? found->second : jai::script_value(std::monostate{}, eng);
 	});

@@ -14,19 +14,19 @@
 
 namespace MV {
 	namespace Scene {
-		void Emitter::jai_auto_bind(jai::dynamic_binder<Emitter>& a_binder) {
-			a_binder.method("relativeEmission", static_cast<std::weak_ptr<Node>(Emitter::*)() const>(&Emitter::relativeEmission));
-			a_binder.method("relativeEmission", static_cast<std::shared_ptr<Emitter>(Emitter::*)(std::shared_ptr<Node>)>(&Emitter::relativeEmission));
-			a_binder.method("removeRelativeEmission", &Emitter::removeRelativeEmission);
-			a_binder.method("makeRelativeToParent", &Emitter::makeRelativeToParent);
+		void Emitter::jai_auto_bind(jai::dynamic_binder<Emitter>& a_builder) {
+			a_builder.method("relativeEmission", static_cast<std::weak_ptr<Node>(Emitter::*)() const>(&Emitter::relativeEmission));
+			a_builder.method("relativeEmission", static_cast<std::shared_ptr<Emitter>(Emitter::*)(std::shared_ptr<Node>)>(&Emitter::relativeEmission));
+			a_builder.method("removeRelativeEmission", &Emitter::removeRelativeEmission);
+			a_builder.method("makeRelativeToParent", &Emitter::makeRelativeToParent);
 
-			a_binder.method("properties", static_cast<const EmitterSpawnProperties&(Emitter::*)() const>(&Emitter::properties));
-			a_binder.method("properties", static_cast<std::shared_ptr<Emitter>(Emitter::*)(const EmitterSpawnProperties&)>(&Emitter::properties));
+			a_builder.method("properties", static_cast<const EmitterSpawnProperties&(Emitter::*)() const>(&Emitter::properties));
+			a_builder.method("properties", static_cast<std::shared_ptr<Emitter>(Emitter::*)(const EmitterSpawnProperties&)>(&Emitter::properties));
 
-			a_binder.method("enabled", &Emitter::enabled);
-			a_binder.method("disabled", &Emitter::disabled);
-			a_binder.method("enable", &Emitter::enable);
-			a_binder.method("disable", &Emitter::disable);
+			a_builder.method("enabled", &Emitter::enabled);
+			a_builder.method("disabled", &Emitter::disabled);
+			a_builder.method("enable", &Emitter::enable);
+			a_builder.method("disable", &Emitter::disable);
 		}
 
 

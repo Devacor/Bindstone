@@ -9,32 +9,32 @@
 
 namespace MV {
 	namespace Scene {
-		void Drawable::jai_auto_bind(jai::dynamic_binder<Drawable>& a_binder) {
-			a_binder.method("visible", &Drawable::visible);
-			a_binder.method("show", &Drawable::show, jai::serial);
-			a_binder.method("hide", &Drawable::hide, jai::serial);
+		void Drawable::jai_auto_bind(jai::dynamic_binder<Drawable>& a_builder) {
+			a_builder.method("visible", &Drawable::visible);
+			a_builder.method("show", &Drawable::show, jai::serial);
+			a_builder.method("hide", &Drawable::hide, jai::serial);
 
-			a_binder.method("color", static_cast<Color(Drawable::*)() const>(&Drawable::color));
-			a_binder.method("color", static_cast<std::shared_ptr<Drawable>(Drawable::*)(const Color&)>(&Drawable::color));
-			a_binder.method("colors", &Drawable::colors);
+			a_builder.method("color", static_cast<Color(Drawable::*)() const>(&Drawable::color));
+			a_builder.method("color", static_cast<std::shared_ptr<Drawable>(Drawable::*)(const Color&)>(&Drawable::color));
+			a_builder.method("colors", &Drawable::colors);
 
-			a_binder.method("shader", static_cast<std::string(Drawable::*)() const>(&Drawable::shader));
-			a_binder.method("shader", static_cast<std::shared_ptr<Drawable>(Drawable::*)(const std::string&)>(&Drawable::shader), jai::serial);
-			a_binder.method("material", static_cast<std::shared_ptr<Material>(Drawable::*)() const>(&Drawable::material));
-			a_binder.method("material", static_cast<std::shared_ptr<Drawable>(Drawable::*)(std::shared_ptr<Material>)>(&Drawable::material));
+			a_builder.method("shader", static_cast<std::string(Drawable::*)() const>(&Drawable::shader));
+			a_builder.method("shader", static_cast<std::shared_ptr<Drawable>(Drawable::*)(const std::string&)>(&Drawable::shader), jai::serial);
+			a_builder.method("material", static_cast<std::shared_ptr<Material>(Drawable::*)() const>(&Drawable::material));
+			a_builder.method("material", static_cast<std::shared_ptr<Drawable>(Drawable::*)(std::shared_ptr<Material>)>(&Drawable::material));
 
-			a_binder.method("texture", static_cast<std::shared_ptr<TextureHandle>(Drawable::*)(size_t) const>(&Drawable::texture));
-			a_binder.method("texture", static_cast<std::shared_ptr<Drawable>(Drawable::*)(std::shared_ptr<TextureHandle>, size_t)>(&Drawable::texture), jai::serial);
-			a_binder.method("clearTexture", &Drawable::clearTexture, jai::serial);
-			a_binder.method("clearTextures", &Drawable::clearTextures, jai::serial);
+			a_builder.method("texture", static_cast<std::shared_ptr<TextureHandle>(Drawable::*)(size_t) const>(&Drawable::texture));
+			a_builder.method("texture", static_cast<std::shared_ptr<Drawable>(Drawable::*)(std::shared_ptr<TextureHandle>, size_t)>(&Drawable::texture), jai::serial);
+			a_builder.method("clearTexture", &Drawable::clearTexture, jai::serial);
+			a_builder.method("clearTextures", &Drawable::clearTextures, jai::serial);
 
-			a_binder.method("blend", static_cast<BlendMode(Drawable::*)() const>(&Drawable::blend));
-			a_binder.method("blend", static_cast<std::shared_ptr<Drawable>(Drawable::*)(BlendMode)>(&Drawable::blend));
+			a_builder.method("blend", static_cast<BlendMode(Drawable::*)() const>(&Drawable::blend));
+			a_builder.method("blend", static_cast<std::shared_ptr<Drawable>(Drawable::*)(BlendMode)>(&Drawable::blend));
 
-			a_binder.method("pointSize", &Drawable::pointSize);
-			a_binder.method("getPoints", &Drawable::getPoints);
+			a_builder.method("pointSize", &Drawable::pointSize);
+			a_builder.method("getPoints", &Drawable::getPoints);
 
-			a_binder.method("anchors", &Drawable::anchors);
+			a_builder.method("anchors", &Drawable::anchors);
 		}
 
 

@@ -93,37 +93,37 @@ namespace MV{
 	}
 
 	namespace Scene {
-		void Spine::jai_auto_bind(jai::dynamic_binder<Spine>& a_binder) {
-			a_binder.property("onStart", &Spine::onStart);
-			a_binder.property("onEnd", &Spine::onEnd);
-			a_binder.property("onEvent", &Spine::onEvent);
-			a_binder.property("onComplete", &Spine::onComplete);
-			a_binder.property("onDispose", &Spine::onDispose);
+		void Spine::jai_auto_bind(jai::dynamic_binder<Spine>& a_builder) {
+			a_builder.property("onStart", &Spine::onStart);
+			a_builder.property("onEnd", &Spine::onEnd);
+			a_builder.property("onEvent", &Spine::onEvent);
+			a_builder.property("onComplete", &Spine::onComplete);
+			a_builder.property("onDispose", &Spine::onDispose);
 
-			a_binder.method("bindNode", &Spine::bindNode);
-			a_binder.method("unbindSlot", &Spine::unbindSlot);
-			a_binder.method("unbindNode", &Spine::unbindNode);
-			a_binder.method("unbindAll", &Spine::unbindAll);
-			a_binder.method("boundSlots", &Spine::boundSlots);
-			a_binder.method("slotPosition", &Spine::slotPosition);
+			a_builder.method("bindNode", &Spine::bindNode);
+			a_builder.method("unbindSlot", &Spine::unbindSlot);
+			a_builder.method("unbindNode", &Spine::unbindNode);
+			a_builder.method("unbindAll", &Spine::unbindAll);
+			a_builder.method("boundSlots", &Spine::boundSlots);
+			a_builder.method("slotPosition", &Spine::slotPosition);
 
-			a_binder.method("timeScale", static_cast<double(Spine::*)() const>(&Spine::timeScale));
-			a_binder.method("timeScale", static_cast<std::shared_ptr<Spine>(Spine::*)(double)>(&Spine::timeScale));
+			a_builder.method("timeScale", static_cast<double(Spine::*)() const>(&Spine::timeScale));
+			a_builder.method("timeScale", static_cast<std::shared_ptr<Spine>(Spine::*)(double)>(&Spine::timeScale));
 
-			a_binder.method("crossfade", &Spine::crossfade);
+			a_builder.method("crossfade", &Spine::crossfade);
 
-			a_binder.method("track", static_cast<AnimationTrack&(Spine::*)(int)>(&Spine::track));
-			a_binder.method("track", static_cast<AnimationTrack&(Spine::*)()>(&Spine::track));
-			a_binder.method("currentTrack", &Spine::currentTrack);
+			a_builder.method("track", static_cast<AnimationTrack&(Spine::*)(int)>(&Spine::track));
+			a_builder.method("track", static_cast<AnimationTrack&(Spine::*)()>(&Spine::track));
+			a_builder.method("currentTrack", &Spine::currentTrack);
 
-			a_binder.method("animate", &Spine::animate, jai::serial);
-			a_binder.method("queueAnimation", static_cast<std::shared_ptr<Spine>(Spine::*)(const std::string&, double, bool)>(&Spine::queueAnimation), jai::serial);
-			a_binder.method("queueAnimation", static_cast<std::shared_ptr<Spine>(Spine::*)(const std::string&, bool)>(&Spine::queueAnimation), jai::serial);
+			a_builder.method("animate", &Spine::animate, jai::serial);
+			a_builder.method("queueAnimation", static_cast<std::shared_ptr<Spine>(Spine::*)(const std::string&, double, bool)>(&Spine::queueAnimation), jai::serial);
+			a_builder.method("queueAnimation", static_cast<std::shared_ptr<Spine>(Spine::*)(const std::string&, bool)>(&Spine::queueAnimation), jai::serial);
 
-			a_binder.method("load", [](Spine& self, const Spine::FileBundle& bundle) { return self.load(bundle); }, jai::serial);
-			a_binder.method("unload", &Spine::unload, jai::serial);
-			a_binder.method("loaded", &Spine::loaded);
-			a_binder.method("bundle", &Spine::bundle);
+			a_builder.method("load", [](Spine& self, const Spine::FileBundle& bundle) { return self.load(bundle); }, jai::serial);
+			a_builder.method("unload", &Spine::unload, jai::serial);
+			a_builder.method("loaded", &Spine::loaded);
+			a_builder.method("bundle", &Spine::bundle);
 		}
 
 

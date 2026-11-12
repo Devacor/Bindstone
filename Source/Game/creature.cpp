@@ -62,79 +62,79 @@ static jai::registrar<TargetPolicy, MV::Services> _hookTargetPolicy([](jai::dyna
 	builder.method("rooted", &TargetPolicy::rooted);
 });
 
-void Creature::jai_auto_bind(jai::dynamic_binder<Creature>& builder) {
-	builder.method("spine", &Creature::spine);
-	builder.method("alive", &Creature::alive);
-	builder.method("networkId", &Creature::netId);
-	builder.method("health", &Creature::health);
-	builder.method("element", &Creature::element);
-	builder.method("elements", &Creature::elements);
-	builder.method("changeHealth", &Creature::changeHealth, jai::serial);
-	builder.method("assetPath", &Creature::assetPath);
-	builder.method("player", &Creature::player);
-	builder.property("onStatus", &Creature::onStatus);
-	builder.property("onHealthChange", &Creature::onHealthChange);
-	builder.property("onDeath", &Creature::onDeath);
-	builder.property("onFall", &Creature::onFall);
-	builder.method("game", [](Creature& a_self) -> GameInstance& { return a_self.gameInstance; });
-	builder.method("stats", [](Creature& a_self) -> const CreatureData& { return a_self.statTemplate; });
-	builder.method("attackRange", [](Creature& a_self) -> double { return a_self.statTemplate.attackRange; });
-	builder.method("maxHealth", [](Creature& a_self) -> int64_t { return a_self.statTemplate.health; });
-	builder.method("team", [](Creature& a_self) -> Team& { return a_self.gameInstance.teamForPlayer(a_self.player()); });
-	builder.method("enemyTeam", [](Creature& a_self) -> Team& { return a_self.gameInstance.teamAgainstPlayer(a_self.player()); });
+void Creature::jai_auto_bind(jai::dynamic_binder<Creature>& a_builder) {
+	a_builder.method("spine", &Creature::spine);
+	a_builder.method("alive", &Creature::alive);
+	a_builder.method("networkId", &Creature::netId);
+	a_builder.method("health", &Creature::health);
+	a_builder.method("element", &Creature::element);
+	a_builder.method("elements", &Creature::elements);
+	a_builder.method("changeHealth", &Creature::changeHealth, jai::serial);
+	a_builder.method("assetPath", &Creature::assetPath);
+	a_builder.method("player", &Creature::player);
+	a_builder.property("onStatus", &Creature::onStatus);
+	a_builder.property("onHealthChange", &Creature::onHealthChange);
+	a_builder.property("onDeath", &Creature::onDeath);
+	a_builder.property("onFall", &Creature::onFall);
+	a_builder.method("game", [](Creature& a_self) -> GameInstance& { return a_self.gameInstance; });
+	a_builder.method("stats", [](Creature& a_self) -> const CreatureData& { return a_self.statTemplate; });
+	a_builder.method("attackRange", [](Creature& a_self) -> double { return a_self.statTemplate.attackRange; });
+	a_builder.method("maxHealth", [](Creature& a_self) -> int64_t { return a_self.statTemplate.health; });
+	a_builder.method("team", [](Creature& a_self) -> Team& { return a_self.gameInstance.teamForPlayer(a_self.player()); });
+	a_builder.method("enemyTeam", [](Creature& a_self) -> Team& { return a_self.gameInstance.teamAgainstPlayer(a_self.player()); });
 }
 
-void ServerCreature::jai_auto_bind(jai::dynamic_binder<ServerCreature>& builder) {
-	builder.method("agent", &ServerCreature::agent);
-	builder.method("fall", &ServerCreature::fall, jai::serial);
+void ServerCreature::jai_auto_bind(jai::dynamic_binder<ServerCreature>& a_builder) {
+	a_builder.method("agent", &ServerCreature::agent);
+	a_builder.method("fall", &ServerCreature::fall, jai::serial);
 
-	builder.method("damage", &ServerCreature::damage, jai::serial);
-	builder.method("tickDamage", &ServerCreature::tickDamage, jai::serial);
-	builder.method("heal", &ServerCreature::heal, jai::serial);
-	builder.method("shield", &ServerCreature::shield);
-	builder.method("shieldAmount", &ServerCreature::shieldAmount);
-	builder.method("dot", &ServerCreature::dot);
-	builder.method("hot", &ServerCreature::hot);
-	builder.method("slow", &ServerCreature::slow);
-	builder.method("haste", &ServerCreature::haste);
-	builder.method("attackHaste", &ServerCreature::attackHaste);
-	builder.method("attackSlow", &ServerCreature::attackSlow);
-	builder.method("abilityHaste", &ServerCreature::abilityHaste);
-	builder.method("abilitySlow", &ServerCreature::abilitySlow);
-	builder.method("moveSpeedMultiplier", &ServerCreature::moveSpeedMultiplier);
-	builder.method("attackSpeedMultiplier", &ServerCreature::attackSpeedMultiplier);
-	builder.method("abilitySpeedMultiplier", &ServerCreature::abilitySpeedMultiplier);
-	builder.method("moveSpeed", jai::overload<>(&ServerCreature::moveSpeed));
-	builder.method("moveSpeed", jai::overload<double>(&ServerCreature::moveSpeed));
-	builder.method("stun", &ServerCreature::stun, jai::serial);
-	builder.method("root", &ServerCreature::root, jai::serial);
-	builder.method("visible", jai::overload<>(&ServerCreature::visible));
-	builder.method("visible", jai::overload<bool>(&ServerCreature::visible));
-	builder.method("taunt", &ServerCreature::taunt);
-	builder.method("tauntedBy", &ServerCreature::tauntedBy);
-	builder.method("untargetable", jai::overload<>(&ServerCreature::untargetable));
-	builder.method("untargetable", jai::overload<bool>(&ServerCreature::untargetable));
-	builder.method("absorbFor", &ServerCreature::absorbFor, jai::serial);
-	builder.method("spawnCreature", &ServerCreature::spawnCreature, jai::serial);
-	builder.property("onArrive", &ServerCreature::onArrive);
-	builder.property("onDamaged", &ServerCreature::onDamaged);
-	builder.property("onBlocked", &ServerCreature::onBlocked);
-	builder.property("onStop", &ServerCreature::onStop);
-	builder.property("onStart", &ServerCreature::onStart);
-	builder.method("targeting", [](ServerCreature& a_self) -> TargetPolicy& { return a_self.targeting; });
-	builder.method("enemiesInRange", [](ServerCreature& a_self, double a_range) {
+	a_builder.method("damage", &ServerCreature::damage, jai::serial);
+	a_builder.method("tickDamage", &ServerCreature::tickDamage, jai::serial);
+	a_builder.method("heal", &ServerCreature::heal, jai::serial);
+	a_builder.method("shield", &ServerCreature::shield);
+	a_builder.method("shieldAmount", &ServerCreature::shieldAmount);
+	a_builder.method("dot", &ServerCreature::dot);
+	a_builder.method("hot", &ServerCreature::hot);
+	a_builder.method("slow", &ServerCreature::slow);
+	a_builder.method("haste", &ServerCreature::haste);
+	a_builder.method("attackHaste", &ServerCreature::attackHaste);
+	a_builder.method("attackSlow", &ServerCreature::attackSlow);
+	a_builder.method("abilityHaste", &ServerCreature::abilityHaste);
+	a_builder.method("abilitySlow", &ServerCreature::abilitySlow);
+	a_builder.method("moveSpeedMultiplier", &ServerCreature::moveSpeedMultiplier);
+	a_builder.method("attackSpeedMultiplier", &ServerCreature::attackSpeedMultiplier);
+	a_builder.method("abilitySpeedMultiplier", &ServerCreature::abilitySpeedMultiplier);
+	a_builder.method("moveSpeed", jai::overload<>(&ServerCreature::moveSpeed));
+	a_builder.method("moveSpeed", jai::overload<double>(&ServerCreature::moveSpeed));
+	a_builder.method("stun", &ServerCreature::stun, jai::serial);
+	a_builder.method("root", &ServerCreature::root, jai::serial);
+	a_builder.method("visible", jai::overload<>(&ServerCreature::visible));
+	a_builder.method("visible", jai::overload<bool>(&ServerCreature::visible));
+	a_builder.method("taunt", &ServerCreature::taunt);
+	a_builder.method("tauntedBy", &ServerCreature::tauntedBy);
+	a_builder.method("untargetable", jai::overload<>(&ServerCreature::untargetable));
+	a_builder.method("untargetable", jai::overload<bool>(&ServerCreature::untargetable));
+	a_builder.method("absorbFor", &ServerCreature::absorbFor, jai::serial);
+	a_builder.method("spawnCreature", &ServerCreature::spawnCreature, jai::serial);
+	a_builder.property("onArrive", &ServerCreature::onArrive);
+	a_builder.property("onDamaged", &ServerCreature::onDamaged);
+	a_builder.property("onBlocked", &ServerCreature::onBlocked);
+	a_builder.property("onStop", &ServerCreature::onStop);
+	a_builder.property("onStart", &ServerCreature::onStart);
+	a_builder.method("targeting", [](ServerCreature& a_self) -> TargetPolicy& { return a_self.targeting; });
+	a_builder.method("enemiesInRange", [](ServerCreature& a_self, double a_range) {
 		return a_self.gameInstance.teamAgainstPlayer(a_self.player()).creaturesInRange(a_self.agent()->gridPosition(), static_cast<float>(a_range));
 	});
 	// ids cross into script without touching the creature objects (no copies, no handles)
-	builder.method("nearestEnemyId", [](ServerCreature& a_self, double a_range) -> int64_t {
+	a_builder.method("nearestEnemyId", [](ServerCreature& a_self, double a_range) -> int64_t {
 		auto found = a_self.gameInstance.teamAgainstPlayer(a_self.player()).nearestCreature(a_self.agent()->gridPosition(), static_cast<float>(a_range));
 		return found ? found->netId() : 0;
 	});
-	builder.method("nearestAllyId", [](ServerCreature& a_self, double a_range) -> int64_t {
+	a_builder.method("nearestAllyId", [](ServerCreature& a_self, double a_range) -> int64_t {
 		auto found = a_self.gameInstance.teamForPlayer(a_self.player()).nearestCreature(a_self.agent()->gridPosition(), static_cast<float>(a_range));
 		return (found && found.get() != &a_self) ? found->netId() : 0;
 	});
-	builder.method("alliesInRange", [](ServerCreature& a_self, double a_range) {
+	a_builder.method("alliesInRange", [](ServerCreature& a_self, double a_range) {
 		return a_self.gameInstance.teamForPlayer(a_self.player()).creaturesInRange(a_self.agent()->gridPosition(), static_cast<float>(a_range));
 	});
 }

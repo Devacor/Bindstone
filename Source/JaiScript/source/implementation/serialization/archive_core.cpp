@@ -2,6 +2,7 @@
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/engine_access.hpp>
 #include <jaiscript/properties/property_manager.hpp>
+#include <jaiscript/signals/receiver_save.hpp>
 
 #include <charconv>
 #include <cmath>
@@ -212,21 +213,46 @@ std::pair<uint32_t, bool> archive_writer_core::track_shared_ptr(const void* raw_
     auto [it, inserted] = shared_ptr_ids_->try_emplace(raw_ptr, next_shared_id_);
     if (inserted) {
         ++next_shared_id_;
+    } else if (referenced_ahead_ && referenced_ahead_->erase(raw_ptr) != 0) {
+        return {it->second, true};
     }
     return {it->second, inserted};
 }
 
-std::pair<uint32_t, bool> archive_writer_core::track_handle(const script_value::object_holder* holder) {
-    const void* identity = holder;
-    if (const class_instance* instance = holder ? holder->instance() : nullptr) {
-        const class_definition* class_def = instance->get_class_definition();
-        if (class_def && !class_def->is_script_class() && instance->cpp_object_pointer()) {
-            identity = instance->cpp_object_pointer();
+namespace {
+    // The object a script handle names, as the archive keys it: a C++ object's every handle shares its object's id
+    const void* handle_identity(const script_value::object_holder* holder, bool a_native_layer) {
+        const void* identity = holder;
+        if (const class_instance* instance = holder ? holder->instance() : nullptr) {
+            const class_definition* class_def = instance->get_class_definition();
+            if (class_def && (a_native_layer || !class_def->is_script_class()) && instance->cpp_object_pointer()) {
+                identity = instance->cpp_object_pointer();
+            }
+        } else if (holder) {
+            identity = holder->object() ? holder->object() : holder->bound_object() ? holder->bound_object() : identity;
         }
-    } else if (holder) {
-        identity = holder->object() ? holder->object() : holder->bound_object() ? holder->bound_object() : identity;
+        return identity;
     }
-    return track_shared_ptr(identity);
+}
+
+std::pair<uint32_t, bool> archive_writer_core::track_handle(const script_value::object_holder* holder) {
+    return track_shared_ptr(handle_identity(holder, false));
+}
+
+// A script class over a C++ object is that object in the archive: its C++ shared_ptr carries the payload
+uint32_t archive_writer_core::reference_object(const script_value& a_object) {
+    const script_value& value = a_object.deref();
+    const auto holder = value.is_object() || value.type() == script_value_type::jai_shared_ptr_type ? value.get_object_holder() : nullptr;
+    if (!holder) {
+        return 0;
+    }
+    const void* identity = handle_identity(holder.get(), true);
+    auto [id, is_new] = track_shared_ptr(identity);
+    if (is_new) {
+        if (!referenced_ahead_) { referenced_ahead_ = std::make_unique<std::unordered_set<const void*>>(); }
+        referenced_ahead_->insert(identity);
+    }
+    return id;
 }
 
 std::shared_ptr<class_definition> archive_writer_core::bound_class_of(const script_value& value) const {

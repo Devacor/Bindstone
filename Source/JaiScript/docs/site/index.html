@@ -108,33 +108,38 @@ public:
     auto engine = jai::engine::make();
     jai::bind_registrar(engine);   // every property_owner and registrar in the program
     auto gate = engine-&gt;execute&lt;std::shared_ptr&lt;Spawner&gt;&gt;(R"(
+        void on_wave(int size) { print("wave of ", size); }
         Spawner gate;
-        gate.onWave.connect("hud", [](int size) { print("wave of ", size); });
+        gate.onWave.connect("hud", on_wave);
         gate.level = 3;
         gate.spawn_wave();
         gate.spawn_wave(4, true);
         gate
     )");
-    gate-&gt;spawn_wave(5, false);     // Emits and is caught by the script-bound lambda
+    gate-&gt;spawn_wave(5, false);     // Emits and is caught by the script function
 
     //Serialization Example:
     std::string spawnerJson = jai::to_json(engine, *gate);
     Spawner roundTrip = jai::from_json&lt;Spawner&gt;(engine, spawnerJson);
+    roundTrip.spawn_wave(6, false);  // the loaded copy&#x27;s receiver calls on_wave too
     std::cout &lt;&lt; "Wave Level: " &lt;&lt; roundTrip.level &lt;&lt; "\nContents:\n" &lt;&lt; spawnerJson &lt;&lt; "\n";
     return 0;
 }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave of 3
 wave of 8
 wave of 5
-Wave Level: 5
+wave of 6
+Wave Level: 6
 Contents:
 {
   "id": "north-gate",
   "level": 5,
   "onWave": {
-    "parameter_names": [],
-    "observers": [],
-    "owned_observers": {}
+    "receivers": {
+      "hud": {
+        "function": "on_wave"
+      }
+    }
   }
 }</code></pre></div>
 <p>Each <code>JAI_PROPERTY</code> is the field, its script binding, its save key and its reflection; each <code>JAI_METHOD</code> is the member function and its script binding. No registrar, no glue, nothing to drift.</p>
@@ -162,33 +167,38 @@ static jai::registrar&lt;Spawner, void&gt; spawnerBinding("Spawner", [](jai::dyn
     auto engine = jai::engine::make();
     jai::bind_registrar(engine);   // every property_owner and registrar in the program
     auto gate = engine-&gt;execute&lt;std::shared_ptr&lt;Spawner&gt;&gt;(R"(
+        void on_wave(int size) { print("wave of ", size); }
         Spawner gate;
-        gate.onWave.connect("hud", [](int size) { print("wave of ", size); });
+        gate.onWave.connect("hud", on_wave);
         gate.level = 3;
         gate.spawn_wave();
         gate.spawn_wave(4, true);
         gate
     )");
-    gate-&gt;spawn_wave(5, false);     // Emits and is caught by the script-bound lambda
+    gate-&gt;spawn_wave(5, false);     // Emits and is caught by the script function
 
     //Serialization Example:
     std::string spawnerJson = jai::to_json(engine, *gate);
     Spawner roundTrip = jai::from_json&lt;Spawner&gt;(engine, spawnerJson);
+    roundTrip.spawn_wave(6, false);  // the loaded copy&#x27;s receiver calls on_wave too
     std::cout &lt;&lt; "Wave Level: " &lt;&lt; roundTrip.level &lt;&lt; "\nContents:\n" &lt;&lt; spawnerJson &lt;&lt; "\n";
     return 0;
 }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave of 3
 wave of 8
 wave of 5
-Wave Level: 5
+wave of 6
+Wave Level: 6
 Contents:
 {
   "id": "north-gate",
   "level": 5,
   "onWave": {
-    "parameter_names": [],
-    "observers": [],
-    "owned_observers": {}
+    "receivers": {
+      "hud": {
+        "function": "on_wave"
+      }
+    }
   }
 }</code></pre></div>
 <p>Third-party and engine types bind from the outside: the same names reach script, and saves are keyed by the property names.</p>

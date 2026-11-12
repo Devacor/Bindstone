@@ -29,8 +29,16 @@ namespace jai {
 	// A view whose emitter is gone connects nothing; script hears it as the generic view's error
 	template<typename S>
 	void connect_from_script(S& a_signal, const std::string& a_id, const script_value& a_callback) {
+		if (a_callback.is_string()) { detail::require_source_receivers(a_callback.payload_engine()); }
 		auto connected = a_callback.is_string() ? a_signal.connect(a_id, a_callback.as_string()) : a_signal.connect(a_id, a_callback);
 		if (!connected->connected()) {
+			throw runtime_error("Signal view is not backed by a live signal");
+		}
+	}
+
+	template<typename S>
+	void connect_source_from_script(S& a_signal, const std::string& a_id, const script_value& a_lambda) {
+		if (!a_signal.connect_source(a_id, a_lambda)->connected()) {
 			throw runtime_error("Signal view is not backed by a live signal");
 		}
 	}
@@ -46,6 +54,9 @@ namespace jai {
 			builder.method("connect", [](signal<Sig, Sync>& a_self, const std::string& a_id, script_value a_callback) {
 				connect_from_script(a_self, a_id, a_callback);
 			}, serial);
+			builder.method("connect_source", [](signal<Sig, Sync>& a_self, const std::string& a_id, script_value a_lambda) {
+				connect_source_from_script(a_self, a_id, a_lambda);
+			}, serial);
 			builder.method("disconnect", [](signal<Sig, Sync>& a_self, const std::string& a_id) {
 				a_self.disconnect(a_id);
 			}, serial);
@@ -59,6 +70,9 @@ namespace jai {
 			dynamic_binder<signal_emitter<Sig, Sync>> builder(a_engine, emitter_name);
 			builder.method("connect", [](signal_emitter<Sig, Sync>& a_self, const std::string& a_id, script_value a_callback) {
 				connect_from_script(a_self, a_id, a_callback);
+			}, serial);
+			builder.method("connect_source", [](signal_emitter<Sig, Sync>& a_self, const std::string& a_id, script_value a_lambda) {
+				connect_source_from_script(a_self, a_id, a_lambda);
 			}, serial);
 			builder.method("disconnect", [](signal_emitter<Sig, Sync>& a_self, const std::string& a_id) {
 				a_self.disconnect(a_id);

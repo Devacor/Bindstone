@@ -330,8 +330,8 @@ public:
             check_eq((int64_t)3, eng->execute("1 + 2").as_int(), "engine stays usable");
         });
 
-        // A load rebuilds an unnamed text receiver with nothing outside to hold it: the emitter holds it, as it holds a named one
-        test("unnamed_text_receivers_survive_a_load", [this]() {
+        // Only a named receiver saves: an unnamed one could not be disconnected once loaded
+        test("unnamed_receivers_stay_out_of_a_save", [this]() {
             auto eng = jai::foundry::make_engine();
             eng->execute("int hits = 0;");
             signal_box box;
@@ -356,12 +356,13 @@ public:
                 r(loaded);
                 r.end_object();
             }
+            check_true(json.find("hits += v;") == std::string::npos, "the unnamed receiver is not in the save: " + json);
             loaded.sig.emit(2);
-            check_eq((int64_t)102, eng->get_variable("hits").as_int(), "the unnamed receiver and the named one both ran after the load");
+            check_eq((int64_t)100, eng->get_variable("hits").as_int(), "only the named receiver ran after the load");
             check_eq(json, save(loaded), "the loaded signal saves what it loaded");
             loaded.sig.clear();
             loaded.sig.emit(5);
-            check_eq((int64_t)102, eng->get_variable("hits").as_int(), "clear() drops the loaded receivers");
+            check_eq((int64_t)100, eng->get_variable("hits").as_int(), "clear() drops the loaded receivers");
         });
 
         test("script_receiver_errors_reach_the_script_that_fired_the_signal", [this]() {
@@ -903,7 +904,7 @@ public:
 
         test("loading_into_a_live_signal_replaces_its_saved_receivers", [this]() {
             auto eng = jai::foundry::make_engine();
-            eng->execute("int hits = 0;");
+            eng->execute("int hits = 0; void count_hit(int v) { hits += 1000; }");
             signal_box box;
             box.sig.script_engine(eng.get());
             box.sig.parameter_names({"v"});
@@ -911,6 +912,7 @@ public:
             auto cpp = box.sig.connect([&](int) { ++cpp_hits; });
             auto unnamed = box.sig.connect(std::string("hits += v;"));
             box.sig.connect("named", std::string("hits += 100;"));
+            box.sig.connect("function", eng->get_variable("count_hit"));
             serialization::json_archive_writer w(2, eng.get());
             w.begin_object("", 1);
             w.serialize_object_content(box);
@@ -925,9 +927,9 @@ public:
                 r.end_object();
             }
             box.sig.emit(1);
-            check_eq((int64_t)101, eng->get_variable("hits").as_int(), "each saved receiver runs once after two loads into the same signal");
+            check_eq((int64_t)1101, eng->get_variable("hits").as_int(), "each saved receiver runs once after two loads into the same signal");
             check_eq(1, cpp_hits, "the C++ receiver stays connected");
-            check_false(unnamed->connected(), "the load replaced the text receiver C++ held with the saved one");
+            check_true(unnamed->connected(), "an unnamed receiver is not saved, so a load leaves it connected");
         });
 
         test("connect_immediate_joins_every_emit_on_the_stack", [this]() {

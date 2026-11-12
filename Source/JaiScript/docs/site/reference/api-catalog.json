@@ -6316,11 +6316,23 @@
       "signature": "connect(id: string, callback: function or string) -> void",
       "provider": "host-bound",
       "effect": "mutate",
-      "notes": "Callback or script text; named connection remains owned by the signal.",
+      "notes": "Callback or script text; named connection remains owned by the signal. A named function saves by name; text requires jai::permissions::source_receivers.",
       "source": "include/jaiscript/signals/signal_binding.hpp",
       "form": "method",
       "availability": "When the host binds this signal type",
       "display": "Signal.connect(id: string, callback: function or string) -> void"
+    },
+    {
+      "owner": "Signal",
+      "name": "connect_source",
+      "signature": "connect_source(id: string, lambda: function) -> void",
+      "provider": "host-bound",
+      "effect": "mutate",
+      "notes": "A [value captures](parameters) { body } lambda; a save writes its body, parameter names and captures as source. Requires jai::permissions::source_receivers.",
+      "source": "include/jaiscript/signals/signal_binding.hpp",
+      "form": "method",
+      "availability": "When the host binds this signal type",
+      "display": "Signal.connect_source(id: string, lambda: function) -> void"
     },
     {
       "owner": "Signal",
@@ -6352,11 +6364,23 @@
       "signature": "connect(id: string, callback: function or string) -> void",
       "provider": "host-bound",
       "effect": "mutate",
-      "notes": "Callback or script text; named connection remains owned by the signal.",
+      "notes": "Callback or script text; named connection remains owned by the signal. A named function saves by name; text requires jai::permissions::source_receivers.",
       "source": "include/jaiscript/signals/signal_binding.hpp",
       "form": "method",
       "availability": "When the host binds this signal type",
       "display": "SignalEmitter.connect(id: string, callback: function or string) -> void"
+    },
+    {
+      "owner": "SignalEmitter",
+      "name": "connect_source",
+      "signature": "connect_source(id: string, lambda: function) -> void",
+      "provider": "host-bound",
+      "effect": "mutate",
+      "notes": "A [value captures](parameters) { body } lambda; a save writes its body, parameter names and captures as source. Requires jai::permissions::source_receivers.",
+      "source": "include/jaiscript/signals/signal_binding.hpp",
+      "form": "method",
+      "availability": "When the host binds this signal type",
+      "display": "SignalEmitter.connect_source(id: string, lambda: function) -> void"
     },
     {
       "owner": "SignalEmitter",
@@ -8113,6 +8137,14 @@
       "provider": "core",
       "access": "constant",
       "notes": "A convention the engine enforces nothing with."
+    },
+    {
+      "owner": "jai::permissions",
+      "name": "source_receivers",
+      "type": "int permission id",
+      "provider": "core",
+      "access": "constant",
+      "notes": "Signal receivers made of source: connect_source, a text connect, and a load that arms one (on by default)."
     },
     {
       "owner": "jai::permissions",

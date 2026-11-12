@@ -13974,6 +13974,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 				auto converted = std::make_shared<script_defined_function>("<lambda>", shared_parameters_for(proto.lambda.get()),
 					proto.lambda->return_type, proto.body, nullptr, proto.lambda->local_count);
 				converted->unit = current_unit();
+				converted->saved_source = proto.lambda->saved_source;
 				converted->captures = std::make_unique<script_defined_function::converted_captures>();
 				converted->captures->cells = std::move(cells);
 				converted->captures->ids = form->ids;
@@ -14206,6 +14207,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 			needs_capture_env ? final_closure_env : nullptr,
 			proto.lambda->local_count);   // the frame a body graft or a worker copy sizes from (the interpreter's mint parity)
 		lambdaFunc->unit = decl_unit;
+		lambdaFunc->saved_source = proto.lambda->saved_source;
 		if (!needs_capture_env) { proto.lambda->mint_cache = lambdaFunc; }
 	}
 

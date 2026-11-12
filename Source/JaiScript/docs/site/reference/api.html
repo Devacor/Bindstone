@@ -130,8 +130,11 @@ print(to_json(values));</code></pre></div>
 </div>
 </section>
 <section class="api-group"><h2 id="group-signal">Signal</h2>
-<div class="api-entry" data-provider="host-bound" data-search="signal.connect(id: string, callback: function or string) -&gt; void mutate callback or script text; named connection remains owned by the signal. when the host binds this signal type"><h3 id="api-0828bac49654"><code>Signal.connect(id: string, callback: function or string) -&gt; void</code></h3><p><strong>When the host binds this signal type</strong> &middot; mutate</p>
-<p>Callback or script text; named connection remains owned by the signal.</p>
+<div class="api-entry" data-provider="host-bound" data-search="signal.connect(id: string, callback: function or string) -&gt; void mutate callback or script text; named connection remains owned by the signal. a named function saves by name; text requires jai::permissions::source_receivers. when the host binds this signal type"><h3 id="api-0828bac49654"><code>Signal.connect(id: string, callback: function or string) -&gt; void</code></h3><p><strong>When the host binds this signal type</strong> &middot; mutate</p>
+<p>Callback or script text; named connection remains owned by the signal. A named function saves by name; text requires jai::permissions::source_receivers.</p>
+</div>
+<div class="api-entry" data-provider="host-bound" data-search="signal.connect_source(id: string, lambda: function) -&gt; void mutate a [value captures](parameters) { body } lambda; a save writes its body, parameter names and captures as source. requires jai::permissions::source_receivers. when the host binds this signal type"><h3 id="api-d8f0e89cc470"><code>Signal.connect_source(id: string, lambda: function) -&gt; void</code></h3><p><strong>When the host binds this signal type</strong> &middot; mutate</p>
+<p>A [value captures](parameters) { body } lambda; a save writes its body, parameter names and captures as source. Requires jai::permissions::source_receivers.</p>
 </div>
 <div class="api-entry" data-provider="host-bound" data-search="signal.connected(id: string) -&gt; bool observe  when the host binds this signal type"><h3 id="api-4ac264dd6916"><code>Signal.connected(id: string) -&gt; bool</code></h3><p><strong>When the host binds this signal type</strong> &middot; observe</p>
 </div>
@@ -139,8 +142,11 @@ print(to_json(values));</code></pre></div>
 </div>
 </section>
 <section class="api-group"><h2 id="group-signalemitter">SignalEmitter</h2>
-<div class="api-entry" data-provider="host-bound" data-search="signalemitter.connect(id: string, callback: function or string) -&gt; void mutate callback or script text; named connection remains owned by the signal. when the host binds this signal type"><h3 id="api-8dabd05bf511"><code>SignalEmitter.connect(id: string, callback: function or string) -&gt; void</code></h3><p><strong>When the host binds this signal type</strong> &middot; mutate</p>
-<p>Callback or script text; named connection remains owned by the signal.</p>
+<div class="api-entry" data-provider="host-bound" data-search="signalemitter.connect(id: string, callback: function or string) -&gt; void mutate callback or script text; named connection remains owned by the signal. a named function saves by name; text requires jai::permissions::source_receivers. when the host binds this signal type"><h3 id="api-8dabd05bf511"><code>SignalEmitter.connect(id: string, callback: function or string) -&gt; void</code></h3><p><strong>When the host binds this signal type</strong> &middot; mutate</p>
+<p>Callback or script text; named connection remains owned by the signal. A named function saves by name; text requires jai::permissions::source_receivers.</p>
+</div>
+<div class="api-entry" data-provider="host-bound" data-search="signalemitter.connect_source(id: string, lambda: function) -&gt; void mutate a [value captures](parameters) { body } lambda; a save writes its body, parameter names and captures as source. requires jai::permissions::source_receivers. when the host binds this signal type"><h3 id="api-4c96295d4d66"><code>SignalEmitter.connect_source(id: string, lambda: function) -&gt; void</code></h3><p><strong>When the host binds this signal type</strong> &middot; mutate</p>
+<p>A [value captures](parameters) { body } lambda; a save writes its body, parameter names and captures as source. Requires jai::permissions::source_receivers.</p>
 </div>
 <div class="api-entry" data-provider="host-bound" data-search="signalemitter.connected(id: string) -&gt; bool observe  when the host binds this signal type"><h3 id="api-35adce8a1502"><code>SignalEmitter.connected(id: string) -&gt; bool</code></h3><p><strong>When the host binds this signal type</strong> &middot; observe</p>
 </div>
@@ -2133,6 +2139,7 @@ print(u.to_string());</code></pre></div>
 <tr><td><code>jai::permissions.filesystem</code></td><td>int permission id</td><td>constant / core</td><td></td></tr>
 <tr><td><code>jai::permissions.network</code></td><td>int permission id</td><td>constant / core</td><td></td></tr>
 <tr><td><code>jai::permissions.scoped_template</code></td><td>int permission id</td><td>constant / core</td><td></td></tr>
+<tr><td><code>jai::permissions.source_receivers</code></td><td>int permission id</td><td>constant / core</td><td>Signal receivers made of source: connect_source, a text connect, and a load that arms one (on by default).</td></tr>
 <tr><td><code>jai::permissions.trusted</code></td><td>int permission id</td><td>constant / core</td><td>A convention the engine enforces nothing with.</td></tr>
 <tr><td><code>jai::permissions.untrusted</code></td><td>int permission id</td><td>constant / core</td><td>A convention the engine enforces nothing with.</td></tr>
 <tr><td><code>math::E</code></td><td>float</td><td>constant / core</td><td>Engine-core math constant; use math::E.</td></tr>

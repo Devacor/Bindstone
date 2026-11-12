@@ -448,6 +448,12 @@ namespace jai {
         void binary_scan_limit(size_t bytes);
         size_t binary_scan_limit() const;
 
+        // A load meeting a saved signal receiver it cannot connect (a name the program does not define, an object the archive
+        // does not hold, source while jai::permissions::source_receivers is off) throws a serialization_error naming it; with
+        // skipping on (default off) it leaves that receiver out and loads the rest.
+        void skip_unknown_receivers(bool skip) { skip_unknown_receivers_ = skip; }
+        bool skip_unknown_receivers() const { return skip_unknown_receivers_; }
+
         // The most bytes one template() render writes (default 10 MiB, 10485760) and one scoped_template or scoped_template_text
         // render writes (default 1 MiB, 1048576); a render that would write past its limit raises a catchable error naming the
         // limit. Zero is no limit. Scripts read them (reflect::template_output_limit()) and cannot change them; a change follows
@@ -1613,6 +1619,7 @@ namespace jai {
         size_t hot_reload_field_migrations_ = 0;
         uint64_t trace_graft_frame_reads_ = 0;
         bool hot_reload_reporting_ = false;
+        bool skip_unknown_receivers_ = false;
         bool parallel_region_active_ = false;
         bool construction_access_waived_ = false;
         int* active_run_pins_ = nullptr;

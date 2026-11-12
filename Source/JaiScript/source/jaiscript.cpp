@@ -27,6 +27,7 @@
 #include "implementation/type_checker.cpp"
 #include "implementation/aggregate_lowering.cpp"
 #include "implementation/schema_binding.cpp"
+#include "implementation/signal_receivers.cpp"
 #include "implementation/serialization/archive_core.cpp"
 #include "implementation/serialization/json_archive.cpp"
 #include "implementation/serialization/binary_archive.cpp"

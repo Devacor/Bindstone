@@ -20,6 +20,7 @@ enum class permission : std::int32_t {
     debug,
     trusted,
     untrusted,
+    source_receivers,
 };
 
 namespace permissions {
@@ -28,12 +29,14 @@ namespace permissions {
     inline constexpr permission filesystem = permission::filesystem;
     inline constexpr permission scoped_template = permission::scoped_template;
     inline constexpr permission network = permission::network;
+    // saved signal receivers that are source text: a script's text connect and connect_source, and a load that arms one
+    inline constexpr permission source_receivers = permission::source_receivers;
     // conventions the engine enforces nothing with: what each one guards is the host's to decide
     inline constexpr permission debug = permission::debug;
     inline constexpr permission trusted = permission::trusted;
     inline constexpr permission untrusted = permission::untrusted;
     // the first id of a host's own
-    inline constexpr std::int32_t count = 6;
+    inline constexpr std::int32_t count = 7;
 }
 
 namespace detail {

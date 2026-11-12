@@ -131,6 +131,7 @@ token lexer::next_token() {
     skip_whitespace();
     token_line_ = line_;
     token_column_ = column_;
+    token_offset_ = current_;
 
     if (is_at_end()) {
         return make_token(token_type::eof);
@@ -432,11 +433,15 @@ token lexer::make_token(token_type type) {
             break;
     }
 
-    return token(type, lexeme, token_start());
+    token result(type, lexeme, token_start());
+    result.offset = static_cast<uint32_t>(token_offset_);
+    return result;
 }
 
 token lexer::make_token(token_type type, std::string_view lexeme) {
-    return token(type, lexeme, token_start());
+    token result(type, lexeme, token_start());
+    result.offset = static_cast<uint32_t>(token_offset_);
+    return result;
 }
 
 source_location lexer::token_start() const {

@@ -3611,7 +3611,25 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
 checked_result<expression_ptr> parser::lambda_expression() {
     auto lambda = std::make_shared<lambda_expr>(peek().location);
     JAISCRIPT_TRY(lambda_captures(*lambda));
-    return finish_lambda_after_captures(std::move(lambda));
+    JAISCRIPT_TRY(lambda_signature(*lambda));
+    const token body_open = peek();
+    lambda_expr& made = *lambda;
+    auto result = finish_lambda_body(std::move(lambda), false);
+    if (result) { note_saved_source(made, body_open); }
+    return result;
+}
+
+void parser::note_saved_source(lambda_expr& lambda, const token& body_open) {
+    const token& body_close = previous();
+    if (lambda.default_capture != lambda_expr::capture_default::none || splice_depth_ != 0 || !template_barriers_.empty() ||
+        body_open.type != token_type::left_brace || body_close.type != token_type::right_brace || body_close.offset <= body_open.offset ||
+        body_close.offset >= source_.size() || source_[body_open.offset] != '{' || source_[body_close.offset] != '}') {
+        return;
+    }
+    for (const auto& capture : lambda.captures) {
+        if (capture.by_reference || capture.name == "this") { return; }
+    }
+    lambda.saved_source = symbolizer_->intern_with_view(source_.substr(body_open.offset, body_close.offset + 1 - body_open.offset)).second;
 }
 
 JAI_NOINLINE checked_result<void> parser::lambda_captures(lambda_expr& lambda) {

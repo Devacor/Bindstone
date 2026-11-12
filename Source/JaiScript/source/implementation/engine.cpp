@@ -434,7 +434,7 @@ static int compute_param_match_cost(
 struct engine::implementation {
     // Engine-thread state. A C++ callback may change grants before returning to
     // script; parallel regions keep them immutable until their workers join.
-    permission_set permissions_ = detail::permission_set_of(permissions::filesystem, permissions::scoped_template);
+    permission_set permissions_ = detail::permission_set_of(permissions::filesystem, permissions::scoped_template, permissions::source_receivers);
     std::vector<std::string> scoped_template_dirs_{"template"};   // engine::scoped_template_dirs, relative ones from the calling script's directory
     // Per-engine reference_holder block pool, type-erased (value.cpp owns the type).
     // Before other owning members so it is destroyed LAST - members releasing reference
@@ -5493,6 +5493,7 @@ checked_result<void> engine::require_permissions(const permission_set& required)
     static constexpr const char* built_in_denials[] = {
         "Insufficient permission: filesystem.", "Insufficient permission: scoped_template.", "Insufficient permission: network.",
         "Insufficient permission: debug.", "Insufficient permission: trusted.", "Insufficient permission: untrusted.",
+        "Insufficient permission: source_receivers.",
     };
     static_assert(std::size(built_in_denials) == permissions::count);
     if (missing >= 0 && missing < permissions::count) {
@@ -5527,6 +5528,7 @@ void engine::register_permission_builtins() {
     const std::pair<const char*, permission> built_ins[] = {
         {"filesystem", permissions::filesystem}, {"scoped_template", permissions::scoped_template}, {"network", permissions::network},
         {"debug", permissions::debug}, {"trusted", permissions::trusted}, {"untrusted", permissions::untrusted},
+        {"source_receivers", permissions::source_receivers},
     };
     for (const auto& [name, id] : built_ins) {
         permissions_namespace->variables[symbolize(name)] = script_value(static_cast<script_int>(detail::permission_id(id)), this);

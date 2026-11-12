@@ -5301,6 +5301,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
     auto lambdaFunc = std::make_shared<script_defined_function>("<lambda>", shared_parameters_for(expr), expr->return_type, lambdaBody,
         needs_capture_env ? final_closure_env : nullptr, expr->local_count);
     lambdaFunc->unit = current_unit();
+    lambdaFunc->saved_source = expr->saved_source;
 
     // Create a script_function wrapper resolving the live backend at call time.
     // Named thunk (not an anonymous lambda) so callers can recover the payload via

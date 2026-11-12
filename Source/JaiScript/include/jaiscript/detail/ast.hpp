@@ -469,6 +469,9 @@ namespace jai {
         // mints one per includer: internal/global_shadowing.md).
         mutable std::shared_ptr<const std::vector<parameter>> shared_params_cache;
         mutable std::shared_ptr<script_defined_function> mint_cache;
+        // A [value captures](parameters) { body } lambda's body block as written (symbolizer storage): what connect_source saves.
+        // Empty for every other lambda.
+        std::string_view saved_source;
 
         lambda_expr(const source_location& loc) : expression(loc, node_type::lambda_expr), local_count(0) {}
     };

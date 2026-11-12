@@ -290,9 +290,10 @@ threat 7 -&gt; 9</code></pre></div>
 <p>The walk is virtual: a base pointer to a derived object shows the whole chain. Each property carries <code>value_type_id()</code> (its C++ type) and <code>allow_save()</code>, and <code>Spawner::schema()</code> and <code>Spawner::all_property_names()</code> answer without an instance.</p>
 
 <h2 id="serialized">Serialized<a class="hlink" href="#serialized" aria-label="link">&#8203;</a></h2>
-<p>No save or load method was written; one call walks the same property manager. The outer level is the archive&#x27;s root record, whose <code>value0</code> holds the pointer you passed with its <code>$id</code>; the object is the <code>$val</code>. The signal&#x27;s named script-text receiver is saved with it:</p>
+<p>No save or load method was written; one call walks the same property manager. The outer level is the archive&#x27;s root record, whose <code>value0</code> holds the pointer you passed with its <code>$id</code>; the object is the <code>$val</code>. The signal&#x27;s named function receiver is saved with it, by name; the <code>hud</code> lambda is runtime-only:</p>
 <div class="codeblock cb-cpp" data-sample="binder-to-json"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute(R&quot;JAI(
-    gate.onWave.connect(&quot;logger&quot;, &quot;print(\&quot;wave logged\&quot;);&quot;);   // named script-text receiver
+    void log_wave(int wave) { print(&quot;wave logged&quot;); }
+    gate.onWave.connect(&quot;logger&quot;, log_wave);   // a named function: saved by its name
 )JAI&quot;);
 auto json = jai::to_json(*eng, gate);
 std::cout &lt;&lt; json &lt;&lt; &quot;\n&quot;;</code></pre></div>
@@ -304,12 +305,9 @@ std::cout &lt;&lt; json &lt;&lt; &quot;\n&quot;;</code></pre></div>
       "interval": 2.5,
       "level": 7,
       "onWave": {
-        "parameter_names": [],
-        "observers": [],
-        "owned_observers": {
+        "receivers": {
           "logger": {
-            "parameter_names": [],
-            "script": "print(\"wave logged\");"
+            "function": "log_wave"
           }
         }
       },
@@ -328,7 +326,7 @@ auto again  = jai::from_binary&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*eng, bytes
 again-&gt;spawn_wave();   // receivers persist in binary too</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave logged</code></pre></div>
 <ul>
-<li><strong>Which receivers save.</strong> Script-text receivers persist. Function receivers (script lambdas and C++ callbacks) are runtime-only and are skipped without error.</li>
+<li><strong>Which receivers save.</strong> Named ones a load can find again: a script function by its name, a bound method by its object, a <code>connect_source</code> lambda or a text receiver as source. Plain lambdas and C++ callbacks are runtime-only (<a href="10-signals-properties.html#connections-that-save">Connections that save</a>).</li>
 <li><strong>By value or by pointer.</strong> A <code>property_owner</code> copies and moves, so <code>jai::from_json&lt;Spawner&gt;(*eng, jai::to_json(*eng, *gate))</code> returns one by value: its properties sit flat at the root, under its static type. A <code>shared_ptr</code> keeps identity and a derived object&#x27;s <code>$type</code>.</li>
 <li><strong>Across releases.</strong> JSON is the readable form for debugging and diffs, binary the compact one. Fields are found by name, so adding or removing one needs no migration, but neither layout is promised to load across 0.x releases (<a href="../stability.html">Stability</a>).</li>
 </ul>

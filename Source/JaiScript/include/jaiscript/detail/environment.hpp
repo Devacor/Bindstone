@@ -690,6 +690,7 @@ struct call_frame {
         bool declared = false;   // a function declaration's (never a lambda's): another signature of its name joins it in an overload set
         size_t line = 0;   // the declaration's line (an overload's diagnostics name it)
         uint64_t context = 0;   // the host entry that declared it (engine::host_entry_generation)
+        std::string_view saved_source;   // a lambda's lambda_expr::saved_source (connect_source saves it)
         std::shared_ptr<const function_decl> decl;   // the vm's mint pins its declaration, so the inliner's stamps on it resolve while the function lives (the interpreter's decl already owns its mint)
         // A converted closure (internal/closure_conversion_design.md): closure_env is null, backend_body_cache is the chunk compiled
         // with a slot per captured name, and captures holds each name's cell in capture_ids' order (body stays the lambda's own)

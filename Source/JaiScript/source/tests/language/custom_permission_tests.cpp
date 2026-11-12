@@ -56,7 +56,7 @@ public:
             check_eq(denied(), failure([&]() { eng.execute("edit()"); }));
             check_eq(script_int(42), other->execute("edit()").as_int());
             other->disable(app_permission::edit);
-            check_eq(std::string("Insufficient permission: 6."), failure([&]() { other->execute("edit()"); }));
+            check_eq(std::string("Insufficient permission: 7."), failure([&]() { other->execute("edit()"); }));
             eng.enable(app_permission::edit);
             check_eq(script_int(42), eng.execute("edit()").as_int());
             check_true(eng.is_enabled(app_permission::edit, jai::permissions::filesystem));
@@ -160,7 +160,7 @@ public:
             auto result = eng.require_permission(app_permission::edit);
             check_false(bool(result));
             check_eq(std::string("Insufficient permission: app.edit."), eng.format_error(result));
-            check_eq(std::string("Insufficient permission: 9."), eng.format_error(eng.require_permission(jai::permissions::filesystem, app_permission::unnamed)));
+            check_eq(std::string("Insufficient permission: 10."), eng.format_error(eng.require_permission(jai::permissions::filesystem, app_permission::unnamed)));
             eng.add_function("edit", []() {}, app_permission::edit);
             auto output = std::make_shared<std::ostringstream>();
             eng.set_output_stream(output);
@@ -173,10 +173,10 @@ public:
 
         custom_test("scripts_ask_by_id_through_jai_permissions", [](engine& eng) {
             eng.enable(app_permission::edit);
-            check_true(eng.execute("jai::permissions::is_enabled(jai::permissions::filesystem, 6, jai::permissions::scoped_template)").as_bool());
-            check_false(eng.execute("jai::permissions::is_enabled(jai::permissions::filesystem, 7)").as_bool());
+            check_true(eng.execute("jai::permissions::is_enabled(jai::permissions::filesystem, 7, jai::permissions::scoped_template)").as_bool());
+            check_false(eng.execute("jai::permissions::is_enabled(jai::permissions::filesystem, 8)").as_bool());
             check_false(eng.execute("jai::permissions::is_enabled(jai::permissions::network)").as_bool());
-            check_eq(script_int(6), eng.execute("jai::permissions::count;").as_int());
+            check_eq(script_int(7), eng.execute("jai::permissions::count;").as_int());
             check_eq(script_int(15), eng.execute("jai::permissions::filesystem + jai::permissions::scoped_template + jai::permissions::network + "
                 "jai::permissions::debug + jai::permissions::trusted + jai::permissions::untrusted;").as_int());
             const std::string expects = "jai::permissions::is_enabled expects permission ids";
@@ -262,7 +262,7 @@ public:
                 ~thaw_guard() { symbols->set_frozen(false); }
             } thaw{symbols};
             symbols->set_frozen(true);
-            check_eq(std::string("Insufficient permission: 9."), eng.format_error(unnamed_copy.as_function()({})));
+            check_eq(std::string("Insufficient permission: 10."), eng.format_error(unnamed_copy.as_function()({})));
         });
 
         custom_test("nested_execute_sees_reentrant_revocation", [](engine& eng) {

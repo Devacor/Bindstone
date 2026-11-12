@@ -26,18 +26,20 @@ int main() {
     auto engine = jai::engine::make();
     jai::bind_registrar(engine);   // every property_owner and registrar in the program
     auto gate = engine->execute<std::shared_ptr<Spawner>>(R"(
+        void on_wave(int size) { print("wave of ", size); }
         Spawner gate;
-        gate.onWave.connect("hud", [](int size) { print("wave of ", size); });
+        gate.onWave.connect("hud", on_wave);
         gate.level = 3;
         gate.spawn_wave();
         gate.spawn_wave(4, true);
         gate
     )");
-    gate->spawn_wave(5, false);     // Emits and is caught by the script-bound lambda
+    gate->spawn_wave(5, false);     // Emits and is caught by the script function
 
     //Serialization Example:
     std::string spawnerJson = jai::to_json(engine, *gate);
     Spawner roundTrip = jai::from_json<Spawner>(engine, spawnerJson);
+    roundTrip.spawn_wave(6, false);  // the loaded copy's receiver calls on_wave too
     std::cout << "Wave Level: " << roundTrip.level << "\nContents:\n" << spawnerJson << "\n";
     return 0;
 }

@@ -1054,7 +1054,8 @@ public:
 			cpp_sample to_json_block(*this, page, "binder-to-json");
 			// [sample binder-to-json]
 			eng->execute(R"JAI(
-			    gate.onWave.connect("logger", "print(\"wave logged\");");   // named script-text receiver
+			    void log_wave(int wave) { print("wave logged"); }
+			    gate.onWave.connect("logger", log_wave);   // a named function: saved by its name
 			)JAI");
 			auto json = jai::to_json(*eng, gate);
 			std::cout << json << "\n";

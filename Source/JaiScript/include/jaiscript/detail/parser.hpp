@@ -267,6 +267,8 @@ namespace jai {
         checked_result<expression_ptr> lambda_expression();
         checked_result<void> lambda_captures(lambda_expr& lambda);
         checked_result<void> lambda_signature(lambda_expr& lambda);
+        // the body text connect_source saves, for a lambda that captures only values and whose body is a block from this source
+        void note_saved_source(lambda_expr& lambda, const token& body_open);
         checked_result<expression_ptr> anonymous_function_expression();
         checked_result<expression_ptr> finish_lambda_after_captures(std::shared_ptr<lambda_expr> lambda);
         // the scope, the parameter slots and the body of a lambda whose parameters are parsed; an arrow function's body may

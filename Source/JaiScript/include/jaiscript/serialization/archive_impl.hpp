@@ -13,7 +13,10 @@
 #define JAI_MAX_HOST_RECORD_DEPTH 1024
 #endif
 
-namespace jai::detail { bool native_stack_low() noexcept; }
+namespace jai::detail {
+bool native_stack_low() noexcept;
+struct deferred_receivers;   // signals/receiver_save.hpp
+}
 
 #include <jaiscript/serialization/serialization_metadata.hpp>
 #include <jaiscript/serialization/traits.hpp>
@@ -31,6 +34,7 @@ namespace jai::detail { bool native_stack_low() noexcept; }
 #include <memory>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <optional>
 #include <tuple>
@@ -247,6 +251,8 @@ protected:
     std::unique_ptr<std::unordered_map<std::type_index, void*>> user_contexts_;
 
     std::unique_ptr<std::unordered_map<const void*, uint32_t>> shared_ptr_ids_;
+    // ids a signal receiver named before the archive wrote their objects: the object's first write still carries its payload
+    std::unique_ptr<std::unordered_set<const void*>> referenced_ahead_;
     uint32_t next_shared_id_ = 1;  // 0 reserved for null
 
     std::stack<SerializationContext, std::vector<SerializationContext>> context_stack_;
@@ -298,6 +304,9 @@ public:
 
     std::pair<uint32_t, bool> get_or_assign_shared_id(const void* raw_ptr) { return track_shared_ptr(raw_ptr); }
     uint32_t lookup_shared_id(const void* raw_ptr) const;
+    // The id a method receiver's object has in this archive (0 for no object); one the archive writes later keeps its payload
+    // for that write
+    uint32_t reference_object(const script_value& a_object);
 
     void set_version(uint32_t version) { version_ = version; }
     uint32_t get_version() const { return version_; }
@@ -940,6 +949,10 @@ protected:
     // The outermost read is one load: a load session opens there and completes when it returns, so the script
     // post_load hooks of everything it loaded run once the whole archive is loaded (a read that throws drops them)
     int read_depth_ = 0;
+    // the saved signal receivers read so far, connected once the outermost read is whole (signal_receivers.cpp)
+    std::unique_ptr<std::vector<detail::deferred_receivers>> deferred_receivers_;
+    void arm_deferred_receivers();
+    void drop_deferred_receivers() noexcept;
 
     // C++ shared_ptr tracking for property serialization (type-erased). The stored pointer
     // is the COMPLETE object (most-derived) and `type` its dynamic type, so a back-reference
@@ -999,6 +1012,9 @@ public:
     // address. Used by both the templated get above and any_archive_reader.
     std::shared_ptr<void> get_deserialized_shared_adjusted(uint32_t id, std::type_index target) const;
 
+    // A signal's saved receivers: connected when the outermost read completes, or now outside of one
+    void defer_receivers(detail::deferred_receivers&& a_receivers);
+
     // Type-erased registration: `complete` is the most-derived pointer, `type` its dynamic
     // type (computed by the caller, which still has the static type).
     void register_deserialized_shared_typed(uint32_t id, std::shared_ptr<void> complete, std::type_index type) {
@@ -1039,10 +1055,13 @@ protected:
         explicit read_scope(archive_reader_impl* a_reader) : reader(a_reader) {
             if (reader->read_depth_++ == 0 && reader->engine_ref_) { session.emplace(reader->engine_ref_); }
         }
-        ~read_scope() { --reader->read_depth_; }
+        ~read_scope() {
+            if (--reader->read_depth_ == 0 && reader->deferred_receivers_) { reader->drop_deferred_receivers(); }
+        }
         read_scope(const read_scope&) = delete;
         read_scope& operator=(const read_scope&) = delete;
         void done() {
+            if (reader->read_depth_ == 1 && reader->deferred_receivers_) { reader->arm_deferred_receivers(); }
             if (session) { session->complete(); }
         }
     };

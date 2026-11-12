@@ -25,6 +25,9 @@
 // must_not_compile 21: declares exactly one jai_auto_bind, and not a template
 // must_not_compile 22: a class with no context declares static void jai_auto_bind(jai::dynamic_binder<T>&), without a context
 // must_not_compile 23: a class with a context C declares static void jai_auto_bind(jai::dynamic_binder<T>&, const C&)
+// must_not_compile 24: JAI_METHOD: an option is jai::nodiscard, jai::serial or a permission enum
+// must_not_compile 25: a && member cannot be called on a script receiver
+// must_not_compile 26: default arguments
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/properties.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
@@ -208,7 +211,41 @@ public:
 	TaggedPlainHook() {}
 	static void jai_auto_bind(jai::dynamic_binder<TaggedPlainHook>&) {}
 };
+#elif JAI_MUST_NOT_COMPILE == 24
+class StrayOption : public jai::property_owner<StrayOption> {
+public:
+	JAI_METHOD(void, poke, (), 42) {}
+};
+#elif JAI_MUST_NOT_COMPILE == 25
+class RvalueMethod : public jai::property_owner<RvalueMethod> {
+public:
+	RvalueMethod() {}
+	JAI_METHOD(void, consume, () &&) {}
+};
+#elif JAI_MUST_NOT_COMPILE == 26
+class DefaultedMethod : public jai::property_owner<DefaultedMethod> {
+public:
+	JAI_METHOD(void, spawn, (int64_t a_count = 1)) { (void)a_count; }
+};
 #endif
+
+// a JAI_METHOD of every shape a script reaches, in a property_owner and in a plain class a registrar binds
+class Methods : public jai::property_owner<Methods> {
+public:
+	JAI_PROPERTY((int64_t), count, 0);
+	JAI_METHOD(void, add, ()) { count = count.get() + 1; }
+	JAI_METHOD(void, add, (int64_t a_amount));
+	JAI_METHOD(int64_t, total, () const noexcept) { return count.get(); }
+	JAI_METHOD(int64_t, peek, () const &) { return count.get(); }
+	JAI_METHOD((std::map<std::string, int64_t>), tally, () const, jai::nodiscard, jai::serial, jai::permissions::filesystem) { return {}; }
+	JAI_METHOD(int64_t, operator*, (int64_t a_factor) const) { return count.get() * a_factor; }
+private:
+	JAI_METHOD(void, touch, ()) {}
+};
+inline void Methods::add(int64_t a_amount) { count = count.get() + a_amount; }
+struct PlainMethods {
+	JAI_METHOD(int64_t, read, () const) { return 1; }
+};
 
 struct Overloaded {
 	int text() const { return 1; }
@@ -279,6 +316,8 @@ inline std::string exercise(jai::engine& a_engine) {
 	return jai::to_json(a_engine, UntaggedContextHook{});
 #elif JAI_MUST_NOT_COMPILE == 23
 	return jai::to_json(a_engine, TaggedPlainHook{});
+#elif JAI_MUST_NOT_COMPILE == 25
+	return jai::to_json(a_engine, RvalueMethod{});
 #elif JAI_MUST_NOT_COMPILE == 19
 	constexpr auto text = jai::overload<>(&Overloaded::text);
 	return std::to_string((Overloaded{}.*text)());
@@ -290,10 +329,12 @@ inline std::string exercise(jai::engine& a_engine) {
 	jai::dynamic_binder<Templated<int>> binder(a_engine, "TemplatedInt");
 	static jai::registrar<SavesToAPath, void> boundOnly("SavesToAPath");
 	static jai::registrar<BuiltAtRunTime, void, jai::bases<RegisteredBase>> builtAtRunTime("BuiltAtRunTime");
+	static jai::registrar<PlainMethods, void> plainMethods("PlainMethods");
 	// a class with no route of its own writes and reads as its binding in the archive's engine declares
 	jai::from_binary<NoRoute>(a_engine, jai::to_binary(a_engine, NoRoute{}));
 	return jai::to_json(a_engine, Owner{}) + jai::to_json(a_engine, SavesToAPath{}) + jai::to_json(a_engine, std::map<std::string, std::vector<NoRoute>>{}) +
-		std::to_string((Overloaded{}.*text)()) + jai::to_json(a_engine, InheritsEditor{}) + jai::to_json(a_engine, InheritsPlainHook{});
+		std::to_string((Overloaded{}.*text)()) + jai::to_json(a_engine, InheritsEditor{}) + jai::to_json(a_engine, InheritsPlainHook{}) +
+		jai::to_json(a_engine, Methods{});
 #endif
 }
 

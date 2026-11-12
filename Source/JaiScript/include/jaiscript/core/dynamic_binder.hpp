@@ -14,6 +14,7 @@
 #include "bound_map.hpp"
 #include "bound_cpp_vector.hpp"
 #include "script_extensible.hpp"
+#include "declared_methods.hpp"
 #include <jaiscript/serialization/archive_impl.hpp>
 #include <jaiscript/detail/static_type_name.hpp>
 #include <jaiscript/detail/host_member.hpp>
@@ -990,9 +991,9 @@ public:
         // args[0] is 'this'; the class's dispatch called this overload for its arity
         T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], st.native_type_id);
         if constexpr (IsConst) {
-            return dynamic_binder<T>::call_const_method(cpp_obj, std::bit_cast<Method>(st.method), args, std::index_sequence_for<Args...>{}, st.eng);
+            return dynamic_binder<T>::call_const_method<R, Args...>(cpp_obj, std::bit_cast<Method>(st.method), args, std::index_sequence_for<Args...>{}, st.eng);
         } else {
-            return dynamic_binder<T>::call_method(cpp_obj, std::bit_cast<Method>(st.method), args, std::index_sequence_for<Args...>{}, st.eng);
+            return dynamic_binder<T>::call_method<R, Args...>(cpp_obj, std::bit_cast<Method>(st.method), args, std::index_sequence_for<Args...>{}, st.eng);
         }
     }
 
@@ -1047,6 +1048,25 @@ public:
     template<typename R, typename... Args, bool Noexcept, detail::function_option... Options>
     dynamic_binder& method(const std::string& name, R(T::*member)(Args...) const noexcept(Noexcept), const Options&... options) {
         return bind_member_method<true, R, R(T::*)(Args...) const, Args...>(name, member, detail::fold_function_options(options...));
+    }
+    // a script receiver is an lvalue: & and const & bind as the members they are, && cannot be called on one
+    template<typename R, typename... Args, bool Noexcept, detail::function_option... Options>
+    dynamic_binder& method(const std::string& name, R(T::*member)(Args...) & noexcept(Noexcept), const Options&... options) {
+        return bind_member_method<false, R, R(T::*)(Args...) &, Args...>(name, member, detail::fold_function_options(options...));
+    }
+    template<typename R, typename... Args, bool Noexcept, detail::function_option... Options>
+    dynamic_binder& method(const std::string& name, R(T::*member)(Args...) const & noexcept(Noexcept), const Options&... options) {
+        return bind_member_method<true, R, R(T::*)(Args...) const &, Args...>(name, member, detail::fold_function_options(options...));
+    }
+    template<typename R, typename... Args, bool Noexcept, detail::function_option... Options>
+    dynamic_binder& method(const std::string&, R(T::*)(Args...) && noexcept(Noexcept), const Options&...) {
+        static_assert(sizeof...(Args) != sizeof...(Args), "a && member cannot be called on a script receiver, which is an lvalue: bind it through a lambda");
+        return *this;
+    }
+    template<typename R, typename... Args, bool Noexcept, detail::function_option... Options>
+    dynamic_binder& method(const std::string&, R(T::*)(Args...) const && noexcept(Noexcept), const Options&...) {
+        static_assert(sizeof...(Args) != sizeof...(Args), "a && member cannot be called on a script receiver, which is an lvalue: bind it through a lambda");
+        return *this;
     }
 
     // &Derived::f names the base that declares f: bound as the derived class's member, the same instantiation
@@ -1831,8 +1851,8 @@ public:
 
 private:
     // The constructor binds what the class declares: a property_owner's base chain, properties and signals, the default
-    // constructor, the operators T declares over T operands, a trivial =, then T::jai_auto_bind (build() adds the copy a
-    // copyable class's values make). The binder's explicit bindings come after and replace these.
+    // constructor, the operators T declares over T operands, a trivial =, its JAI_METHODs, then T::jai_auto_bind (build()
+    // adds the copy a copyable class's values make). The binder's explicit bindings come after and replace these.
     void bind_automatic_surface() {
         if constexpr (auto_bind_concepts::has_base_types<T>) {
             apply_base_classes_from_tuple(std::type_identity<typename T::_jai_base_types>{});
@@ -1854,6 +1874,8 @@ private:
         if constexpr (std::is_trivially_copy_assignable_v<T> && !std::is_empty_v<T>) {
             method("=", [](T& self, const T& other) -> T& { return self = other; });
         }
+
+        detail::method_access::bind(*this);
 
         if constexpr (auto_bind_concepts::hook_kind<T>() == 1) {
             T::jai_auto_bind(*this);
@@ -2225,8 +2247,8 @@ private:
     }
 
     // Helper method for calling member functions
-    template<typename R, typename... Args, size_t... Is>
-    static auto call_method(T* obj, R(T::*method)(Args...), const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+    template<typename R, typename... Args, typename Method, size_t... Is>
+    static auto call_method(T* obj, Method method, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
         // Create parameter storage on stack
         detail::parameter_storage storage;
         detail::parameter_storage::scope_guard guard(eng, &storage);
@@ -2244,8 +2266,8 @@ private:
     }
     
     // Helper method for calling const member functions
-    template<typename R, typename... Args, size_t... Is>
-    static auto call_const_method(const T* obj, R(T::*method)(Args...) const, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+    template<typename R, typename... Args, typename Method, size_t... Is>
+    static auto call_const_method(const T* obj, Method method, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
         // Create parameter storage on stack
         detail::parameter_storage storage;
         detail::parameter_storage::scope_guard guard(eng, &storage);

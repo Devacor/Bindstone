@@ -87,6 +87,22 @@ JAI_NAMED_PROPERTY((int), "healthPoints", health, 100);
 // Variable name in code: health
 ```
 
+### JAI_METHOD(return_type, name, (parameters) qualifiers, options...)
+Declares a member function and binds it to script under its name wherever the class binds, a `property_owner` or a
+registrar's class. A body or a `;` follows. It binds only: what the archives write does not change.
+
+```cpp
+JAI_METHOD(void, spawn_wave, ());                                    // defined in the .cpp
+JAI_METHOD(void, spawn_wave, (int64_t count, bool elite));           // an overload is one more line
+JAI_METHOD(int64_t, health, () const noexcept) { return hp; }
+JAI_METHOD((std::map<std::string, int64_t>), tallies, () const);     // a comma: parenthesize the type
+JAI_METHOD(void, save, (), jai::serial, jai::permissions::filesystem);
+JAI_METHOD(Vec, operator+, (const Vec& a_other) const);              // the script operator +
+```
+
+Default arguments, `virtual` and `static` members and other script names go in `jai_auto_bind`
+(`docs/site/embedding/02-dynamic-binder.html#jai-method`).
+
 ## Property Features
 
 ### Transparent Access

@@ -224,6 +224,68 @@ inline registrar<declared_other_registered, declared_other_context> declared_oth
     builder.property("seats", &declared_other_registered::seats);
 });
 
+// JAI_METHOD declares a member and binds it under its name: overloads, qualifiers, options, operators, a private one, beside the
+// hook and under a subclass's own; a plain class bound by a registrar takes them too
+class MethodTally : public property_owner<MethodTally> {
+public:
+    JAI_PROPERTY((int64_t), count, 0);
+    MethodTally() {}
+    JAI_METHOD(void, add, ()) { count = count.get() + 1; }
+    JAI_METHOD(void, add, (int64_t a_amount)) { count = count.get() + a_amount; }
+    JAI_METHOD(void, add, (int64_t a_amount, int64_t a_times));
+    JAI_METHOD(int64_t, total, () const) { return count.get(); }
+    JAI_METHOD(int64_t, doubled, () const noexcept) { return count.get() * 2; }
+    JAI_METHOD(int64_t, peek, () const &) { return count.get(); }
+    JAI_METHOD((std::map<std::string, int64_t>), tally, () const) { return {{"count", count.get()}}; }
+    JAI_METHOD(int64_t, checked, (), jai::nodiscard) { return count.get(); }
+    JAI_METHOD(void, reset, (), jai::serial) { count = 0; }
+    JAI_METHOD(int64_t, stored, () const, jai::permissions::filesystem) { return count.get(); }
+    JAI_METHOD(MethodTally, operator+, (const MethodTally& a_other) const) {
+        MethodTally result;
+        result.count = count.get() + a_other.count.get();
+        return result;
+    }
+    JAI_METHOD(int64_t, operator*, (int64_t a_factor) const) { return count.get() * a_factor; }
+    JAI_METHOD(int64_t, operator[], (int64_t a_index) const) { return count.get() + a_index; }
+    JAI_METHOD(int64_t, operator(), (int64_t a_by) const) { return count.get() - a_by; }
+    static void jai_auto_bind(dynamic_binder<MethodTally>& a_builder) {
+        a_builder.method("scaled", [](const MethodTally& a_self, int64_t a_by) { return a_self.secret() * a_by; });
+    }
+private:
+    JAI_METHOD(int64_t, secret, () const) { return 42; }
+};
+inline void MethodTally::add(int64_t a_amount, int64_t a_times) { count = count.get() + a_amount * a_times; }
+class MethodTallyPlus : public property_owner<MethodTallyPlus, MethodTally> {
+public:
+    MethodTallyPlus() {}
+    JAI_METHOD(int64_t, bonus, () const) { return count.get() * 10; }
+};
+// the same property without a JAI_METHOD: the archives write the two alike
+class MethodlessTally : public property_owner<MethodlessTally> {
+public:
+    JAI_PROPERTY((int64_t), count, 0);
+    MethodlessTally() {}
+};
+struct method_registrar_context {};
+struct MethodMeter {
+    int64_t level = 3;
+    JAI_METHOD(int64_t, read, () const) { return level; }
+    JAI_METHOD(void, read, (int64_t a_level)) { level = a_level; }
+};
+// a plain subclass counts on from its base's slots and binds only its own
+struct MethodMeterChild : MethodMeter {
+    JAI_METHOD(int64_t, twice, () const) { return level * 2; }
+};
+struct MethodMeterBare : MethodMeter {};
+static_assert(detail::method_access::slot_count<MethodTally>() == 15 &&detail::method_access::slot_count<MethodTallyPlus>() == 1);
+static_assert(detail::method_access::slot_count<MethodlessTally>() == 0 && detail::method_access::slot_count<MethodMeterChild>() == 3);
+static_assert(!detail::method_access::owns_slot<MethodMeterBare, 1>() && detail::method_access::owns_slot<MethodMeterChild, 2>());
+inline registrar<MethodMeter, method_registrar_context> method_meter_registrar("MethodMeter");
+inline registrar<MethodMeterChild, method_registrar_context> method_meter_child_registrar("MethodMeterChild",
+    [](dynamic_binder<MethodMeterChild>& a_builder, const method_registrar_context&) { a_builder.base_class<MethodMeter>(); });
+inline registrar<MethodMeterBare, method_registrar_context> method_meter_bare_registrar("MethodMeterBare",
+    [](dynamic_binder<MethodMeterBare>& a_builder, const method_registrar_context&) { a_builder.base_class<MethodMeter>(); });
+
 // noexcept members and functions, const container references, the auto-named binder and decayed context spellings
 struct NoexceptGauge {
     int64_t value = 5;
@@ -2724,6 +2786,43 @@ public:
                 .method("visible", jai::overload<>(&OverloadedLamp::visible))
                 .method("bright", jai::const_overload<>(&OverloadedLamp::bright));
             check_eq((int64_t)42, eng->execute("var lamp = OverloadedLamp(); lamp.visible(true); lamp.visible() ? lamp.bright() + 1 : 0;").as_int());
+        });
+        test("jai_method_declares_the_member_and_binds_it_under_its_name", [this]() {
+            const auto failure_of = [](auto&& a_run) {
+                try { a_run(); } catch (const std::exception& e) { return std::string(e.what()); }
+                return std::string("no error");
+            };
+            auto eng = make_engine();
+            stdlib::register_all(*eng);
+            bind_registrar(*eng, method_registrar_context{});
+            check_eq((int64_t)11, eng->execute("var t = MethodTally(); t.add(); t.add(4); t.add(2, 3); t.total();").as_int());
+            check_eq((int64_t)22 + 11 + 11 + 11 + 33 + 22 + 84, eng->execute(
+                "t.doubled() + t.peek() + t.tally()[\"count\"] + t.checked() + t * 3 + (t + t).total() + t.scaled(2);").as_int());
+            check_eq((int64_t)42 + 13 + 9, eng->execute("t.secret() + t[2] + t(2);").as_int());
+
+            check_true(eng->is_nodiscard_function("MethodTally.checked") && !eng->is_nodiscard_function("MethodTally.total"));
+            const auto dropped = eng->check("MethodTally kept = MethodTally();\nkept.checked();\nkept.total();\n");
+            check_true(dropped.format().find("the result of 'MethodTally.checked' is discarded") != std::string::npos, dropped.format());
+            check_true(dropped.format().find("MethodTally.total") == std::string::npos, dropped.format());
+            const auto tally = detail::engine_access::get_class_definition(*eng, "MethodTally");
+            check_true(tally->serial_method(detail::engine_access::symbolize(*eng, "reset")) != nullptr);
+            check_true(tally->serial_method(detail::engine_access::symbolize(*eng, "add")) == nullptr);
+            check_eq((int64_t)11, eng->execute("t.stored();").as_int());
+            eng->disable(jai::permissions::filesystem);
+            check_eq(std::string("Insufficient permission: filesystem."), failure_of([&] { eng->execute("t.stored();"); }));
+            eng->enable(jai::permissions::filesystem);
+            check_eq((int64_t)0, eng->execute("t.reset(); t.total();").as_int());
+
+            check_eq((int64_t)880, eng->execute("var p = MethodTallyPlus(); p.add(); p.add(5); p.add(1, 2); p.bonus() + p.total() * 100;").as_int());
+            check_eq((int64_t)8, eng->execute("var m = MethodMeterChild(); m.read(4); m.read() + m.twice() - MethodMeterBare().read() - 1;").as_int());
+            check_true(eng->execute("reflect::has_method(MethodMeterBare(), \"read\") && !reflect::has_method(MethodMeter(), \"twice\");").as_bool());
+
+            MethodTally with_methods;
+            MethodlessTally without;
+            with_methods.count = 7;
+            without.count = 7;
+            check_eq(jai::to_json(*eng, without), jai::to_json(*eng, with_methods));
+            check_true(jai::to_binary(*eng, without) == jai::to_binary(*eng, with_methods));
         });
         test("the_binder_auto_names_and_context_spellings_decay_to_one_registry", [this]() {
             auto eng = make_engine();

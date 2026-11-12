@@ -13,6 +13,7 @@
 #include <jaiscript/detail/first_type.hpp>
 #include <jaiscript/detail/static_type_name.hpp>
 #include <jaiscript/core/binding_context.hpp>
+#include <jaiscript/core/declared_methods.hpp>
 #include <typeindex>
 
 namespace jai {
@@ -208,6 +209,8 @@ namespace jai {
 		using _jai_base_types = detail::real_bases_t<Bases...>;
 		using _jai_context_type = detail::effective_context_t<_jai_declared_context, _jai_inherited_context>;
 		static constexpr size_t _jai_base_count = std::tuple_size_v<_jai_base_types>;
+		// each level's JAI_METHOD slots count from 0: this hides its bases' counters (core/declared_methods.hpp)
+		static detail::method_index<0> jai_method_counter(detail::method_rank<0>);
 
 		script_extensible& jai_script_slot() {
 			if constexpr (detail::any_script_extensible_v<Bases...>) {

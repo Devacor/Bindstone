@@ -1,6 +1,7 @@
 #pragma once
 
 #include <jaiscript/properties/property_schema.hpp>
+#include <jaiscript/core/declared_methods.hpp>
 #include <cstddef>
 
 // Helper macros for removing parentheses

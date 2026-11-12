@@ -121,6 +121,18 @@ end
 PART_COLS = {}
 
 function build_particle_colors()
+	if SHOWCASE then
+		PART_COLS = {}
+		local n = 0
+		for r = 1, #SHOWCASE_PARTICLE_RAMPS do
+			local ramp = SHOWCASE_PARTICLE_RAMPS[r]
+			for p = 1, 4 do
+				n = n + 1
+				PART_COLS[n] = color_idx(ramp[p])
+			end
+		end
+		return
+	end
 	local ramps = {
 		{{0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}},                          -- 0 dead (unused)
 		{{255, 240, 160}, {255, 200, 90}, {230, 130, 50}, {140, 70, 30}},      -- 1 spark

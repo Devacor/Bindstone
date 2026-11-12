@@ -41,6 +41,7 @@ PAL_KEYS = {}    -- r<<16|g<<8|b -> index
 PAL_FG = {}      -- ESC[38;2;r;g;bm per index
 PAL_BG = {}      -- ESC[48;2;r;g;bm per index
 PAL_LUM = {}     -- 2r+3g+b per index
+PAL_RGB = {}     -- r<<16|g<<8|b per index
 
 function rgb_idx(r, g, b)
 	if r < 0 then r = 0 elseif r > 255 then r = 255 end
@@ -54,7 +55,44 @@ function rgb_idx(r, g, b)
 	PAL_FG[idx] = ESC .. "[38;2;" .. r .. ";" .. g .. ";" .. b .. "m"
 	PAL_BG[idx] = ESC .. "[48;2;" .. r .. ";" .. g .. ";" .. b .. "m"
 	PAL_LUM[idx] = r * 2 + g * 3 + b
+	PAL_RGB[idx] = key
 	return idx
+end
+
+-- ------------------------------------------------------ binary32 colors --
+-- The reference's math::color: r, g, b as binary32 (alpha is never read, so it
+-- is not carried). A color is {r, g, b} of doubles that hold binary32 values;
+-- every operation rounds its result to binary32 as the reference computes it.
+local pack, unpack = string.pack, string.unpack
+
+function f32(x) return (unpack("f", pack("f", x))) end
+
+function color(r, g, b) return {f32(r), f32(g), f32(b)} end
+
+-- color * scalar: the scalar rounds to binary32 first
+function cscale(c, s)
+	s = f32(s)
+	return {f32(c[1] * s), f32(c[2] * s), f32(c[3] * s)}
+end
+
+function cadd(a, b) return {f32(a[1] + b[1]), f32(a[2] + b[2]), f32(a[3] + b[3])} end
+
+function cmul(a, b) return {f32(a[1] * b[1]), f32(a[2] * b[2]), f32(a[3] * b[3])} end
+
+-- math::mix_rgb: in double, rounded once
+function cmix(a, b, t)
+	return {f32(a[1] + (b[1] - a[1]) * t), f32(a[2] + (b[2] - a[2]) * t), f32(a[3] + (b[3] - a[3]) * t)}
+end
+
+-- math::clamp(color, lo, hi), per component
+function cclamp(c, lo, hi)
+	local out = {}
+	for i = 1, 3 do
+		local x = c[i]
+		if x < lo then x = lo elseif x > hi then x = hi end
+		out[i] = f32(x)
+	end
+	return out
 end
 
 function col(code, text)

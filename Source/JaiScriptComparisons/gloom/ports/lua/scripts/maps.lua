@@ -77,6 +77,7 @@ function rebuild_mapstr()
 	local mk = g.mapkind
 	if mk == nil then mk = {}; g.mapkind = mk end
 	for i = 1, n do mk[i] = t2k[tiles[i] + 1] end
+	g.mapgen = (g.mapgen or 0) + 1   -- bumps with every rebuild (the showcase's light bake watches it)
 end
 
 function tile_at(x, y)

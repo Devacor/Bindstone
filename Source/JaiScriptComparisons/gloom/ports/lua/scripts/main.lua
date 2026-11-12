@@ -15,7 +15,14 @@ require("particles")
 require("enemies")
 require("combat")
 require("sim")
+require("tune")
+require("look")
+require("lights")
+require("viewmodel")
 require("render")
+require("canvas")
+require("feel")
+require("screens")
 require("hud")
 require("game")
 
@@ -25,13 +32,16 @@ function gloom_force_autopilot() FORCE_PILOT = true end
 
 function gloom_boot(w, h)
 	RNG = Rng.new(HOST_SEED)
+	SHOWCASE = HOST_LOOK == "showcase"
 	if HOST_PIX == 0 then PIXW = 1; PIXH = 2
 	elseif HOST_PIX == 2 then PIXW = 2; PIXH = 3
 	else PIXW = 2; PIXH = 2 end
 	parse_arts()
+	parse_viewmodels()
 	validate_all_maps()
 	G = Game.new(w, h)
 	init_render()
+	if SHOWCASE then G.screens = Screens.new(w, h) end
 	G.autopilot = HOST_SMOKE or FORCE_PILOT
 end
 

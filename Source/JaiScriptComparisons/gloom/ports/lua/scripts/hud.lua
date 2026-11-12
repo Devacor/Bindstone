@@ -242,6 +242,7 @@ function render_play(fps, ms_sim, ms_draw)
 end
 
 function render_frame(fps, ms_sim, ms_draw)
+	if SHOWCASE then return G.screens:frame(fps, ms_sim, ms_draw) end
 	local mode = G.mode
 	if mode == 0 then return render_title() end
 	if mode == 2 then return render_tally() end

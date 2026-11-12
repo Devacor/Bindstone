@@ -93,6 +93,13 @@ function Game.new(w, h)
 	self.zbuf = zbuf
 	self.rowparts = {}
 	self.lutc = {}
+	self.horizon = self.vh // 2   -- the pixel row the eye looks along; the showcase moves it by bob and shake
+
+	-- the showcase look: the light grid and the feel's eyes on all of the above
+	if SHOWCASE then
+		self.lights = LightGrid.new()
+		self.feel = Feel.new()
+	end
 
 	-- the autopilot: a coroutine handle living in a field
 	self.pilot = nil

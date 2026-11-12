@@ -611,6 +611,21 @@ public:
                 copy->onNotice("x");
                 check_eq(std::string("echoed"), host->received);
             }
+
+            // a plain class holding an emitter returns by value, its named and unnamed text receivers armed
+            host->onNotice.disconnect("echo");
+            host->onNotice.connect("named", "messages.received += \"n\";");
+            auto unnamed = host->onNotice.connect("messages.received += \"u\";");
+            auto json_value = jai::from_json<emitter_host>(*eng, jai::to_json(*eng, *host));
+            auto binary_value = jai::from_binary<emitter_host>(*eng, jai::to_binary(*eng, *host));
+            for (auto* copy : { &json_value, &binary_value }) {
+                check_true(copy->onNotice.connected("named"));
+                check_eq((size_t)2, copy->onNotice.observer_count());
+                host->received.clear();
+                copy->onNotice("x");
+                check_eq((size_t)2, host->received.size());
+                check_true(host->received.find('n') != std::string::npos && host->received.find('u') != std::string::npos);
+            }
         });
 
         test("property_transparent_conversion", [&]() {

@@ -32,16 +32,33 @@ namespace jai {
 		signal<T, Sync>& facade() const {
 			return *reinterpret_cast<signal<T, Sync>*>(const_cast<char*>(reinterpret_cast<const char*>(this)) + m_facade_offset);
 		}
+		void view_own_emitter() noexcept {
+			detail::signal_state_access::state(facade()) = detail::signal_state_access::state(emitter());
+		}
 	public:
 		// a_facade is declared before this property, so the copy or move of an owner has made it by the time this runs
 		signal_property(property_manager& reg, std::string name, signal_emitter<T, Sync>& a_emitter, signal<T, Sync>& a_facade)
 			: property_base(reg, std::move(name)), m_emitter_offset(offset_to(this, a_emitter)), m_facade_offset(offset_to(this, a_facade)) {}
 
+		// the owner's emitter and facade copy or move first: each side's facade then views its own emitter
 		signal_property(const signal_property& a_other) noexcept
 			: property_base(a_other), m_emitter_offset(a_other.m_emitter_offset), m_facade_offset(a_other.m_facade_offset) {
-			facade().emitter_ = &emitter();
+			view_own_emitter();
 		}
-		signal_property& operator=(const signal_property&) noexcept { return *this; }
+		signal_property(signal_property&& a_other) noexcept
+			: property_base(std::move(a_other)), m_emitter_offset(a_other.m_emitter_offset), m_facade_offset(a_other.m_facade_offset) {
+			view_own_emitter();
+			a_other.view_own_emitter();
+		}
+		signal_property& operator=(const signal_property&) noexcept {
+			view_own_emitter();
+			return *this;
+		}
+		signal_property& operator=(signal_property&& a_other) noexcept {
+			view_own_emitter();
+			a_other.view_own_emitter();
+			return *this;
+		}
 
 		void serialize(serialization::any_archive_writer& ar) const override {
 			ar.dispatch([this](auto& concrete_ar) {

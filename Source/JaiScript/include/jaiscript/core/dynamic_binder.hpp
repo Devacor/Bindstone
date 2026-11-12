@@ -1363,6 +1363,10 @@ private:
             // when present; otherwise the generic "Signal" view serves the
             // member ceremony-free through the erased connect table.
             if (engine_ptr->template has_registered_class<P>()) {
+                // a copy of a view shares its emitter's state, so script keeps reaching it through the owner's moves
+                if constexpr (dynamic_binder_validation::is_signal_view<P>::value) {
+                    return convert_custom_type_with_registry<P>(cpp_obj->*member, engine_ptr);
+                }
                 return convert_reference_with_registry(cpp_obj->*member, engine_ptr);
             }
             return detail::make_signal_view(engine_ptr, make_signal_script_ops(cpp_obj->*member));

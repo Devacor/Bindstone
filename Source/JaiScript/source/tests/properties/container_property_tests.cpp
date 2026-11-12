@@ -673,7 +673,7 @@ public:
             check_eq(0, heard);
             signal_script_ops copyOps;
             check_true(copy.property_mgr.get("onHeard")->signal_ops(copyOps));
-            check_true(copyOps.connected_fn(copyOps.source, "named") == false);
+            check_true(copyOps.connected_fn(copyOps.source.get(), "named") == false);
 
             relocated_listener moved = std::move(source);
             check_eq((size_t)2, moved.onHeard.observer_count(), "a move carries the receivers");
@@ -684,6 +684,12 @@ public:
             check_eq(303, heard);
             source.hear(50);
             check_eq(303, heard, "the moved-from owner emits to nobody");
+            int sourceHeard = 0;
+            auto sourceConnection = source.onHeard.connect([&sourceHeard](int a_value) { sourceHeard += a_value; });
+            source.hear(6);
+            check_eq(6, sourceHeard, "the moved-from owner's signal is its own emitter's");
+            check_eq(303, heard);
+            check_eq((size_t)2, moved.onHeard.observer_count());
             moved.health = 70;
             check_eq(2, healthChanges);
             source.health = 60;
@@ -694,7 +700,7 @@ public:
             check_eq(4, followedTotal);
             signal_script_ops movedOps;
             check_true(moved.property_mgr.get("onHeard")->signal_ops(movedOps));
-            check_true(movedOps.connected_fn(movedOps.source, "named"));
+            check_true(movedOps.connected_fn(movedOps.source.get(), "named"));
 
             relocated_listener assigned;
             int dropped = 0;

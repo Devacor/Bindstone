@@ -522,7 +522,7 @@ s.onWave.disconnect("hud");</code></pre></div>
 <li><strong>One generic <code>Signal</code> class serves every signature.</strong> Reading a signal member hands script a view over three type-erased operations (connect, disconnect, connected) built where the emitter&#x27;s type is known.</li>
 <li><strong>The lookup walks the inheritance chain</strong>, so a signal declared on a base connects through a derived registration, in either registration order.</li>
 <li><strong>Script-text receivers work however the object was made</strong> (in script, in C++, or by a load): connecting gives the emitter the binding engine.</li>
-<li><strong>A view does not own the signal.</strong> It is a member read of a live object and dangles past its owner.</li>
+<li><strong>A view shares the signal&#x27;s state.</strong> It follows its owner through moves; once the owner is gone it reports nothing connected and its <code>connect</code> fails with <code>Signal view is not backed by a live signal</code>.</li>
 <li><strong>A view does not set <code>parameter_names</code>.</strong> A text receiver sees the names the owner set in C++ (none by default). A function receiver takes the emit arguments positionally and needs no names.</li>
 <li><strong><code>jai::bind_signal_type&lt;Sig&gt;</code></strong> registers a named class for one signature, which takes precedence over the generic view (<a href="10-signals-properties.html#bind-signal-type">when to use it</a>).</li>
 </ul>

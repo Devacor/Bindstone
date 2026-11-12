@@ -69,6 +69,7 @@ public:
 		lua_["HOST_GOD"] = opt.god;
 		lua_["HOST_BACKEND"] = backend;
 		lua_["HOST_PIX"] = gloom::pix_mode_index(opt.pix);
+		lua_["HOST_LOOK"] = opt.look;
 	}
 
 	void load_scripts() override {
@@ -140,6 +141,10 @@ public:
 	std::unique_ptr<gloom::script_session> make_session(const std::string& backend,
 			const gloom::host_services& services, const gloom::host_options& opt,
 			bool /*live_input — services.key_down is already gated*/) override {
+#ifdef GLOOM_LUAJIT
+		// the LuaJIT overrides draw the reference look only
+		if (opt.look != "reference") { throw std::runtime_error(GLOOM_LUA_PROGRAM " draws the reference look only (--look reference)"); }
+#endif
 		return std::make_unique<lua_session>(backend, services, opt);
 	}
 };

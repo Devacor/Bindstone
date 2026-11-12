@@ -63,6 +63,7 @@ public:
 		chai_.add_global_const(const_var(opt.god), "HOST_GOD");
 		chai_.add_global_const(const_var(backend), "HOST_BACKEND");
 		chai_.add_global_const(const_var(gloom::pix_mode_index(opt.pix)), "HOST_PIX");
+		chai_.add_global_const(const_var(opt.look), "HOST_LOOK");
 	}
 
 	void load_scripts() override {

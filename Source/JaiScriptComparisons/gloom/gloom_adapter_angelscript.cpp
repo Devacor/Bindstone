@@ -407,6 +407,7 @@ public:
 	std::vector<std::string> backends() const override { return {"angelscript"}; }
 	std::unique_ptr<gloom::script_session> make_session(const std::string& a_backend,
 		const gloom::host_services& a_services, const gloom::host_options& a_options, bool) override {
+		if (a_options.look != "reference") { throw std::runtime_error("gloom_angelscript draws the reference look only (--look reference)"); }
 		return std::make_unique<angelscript_session>(a_services, a_options, a_backend);
 	}
 };

@@ -10,6 +10,7 @@
 
 #include <squirrel.h>
 #include <sqstdaux.h>
+#include <sqstdblob.h>
 #include <sqstdmath.h>
 #include <sqstdstring.h>
 
@@ -126,6 +127,7 @@ public:
 		sq_setforeignptr(vm_, this);
 		sq_setprintfunc(vm_, &squirrel_session::print_func, &squirrel_session::error_func);
 		sq_pushroottable(vm_);
+		sqstd_register_bloblib(vm_);   // blob.writen/readn 'f' round a float to binary32, as math::color stores it
 		sqstd_register_mathlib(vm_);
 		sqstd_register_stringlib(vm_);
 		sq_pop(vm_, 1);
@@ -148,6 +150,7 @@ public:
 		set_global_bool("HOST_GOD", opt.god);
 		set_global_string("HOST_BACKEND", backend.c_str());
 		set_global_int("HOST_PIX", gloom::pix_mode_index(opt.pix));
+		set_global_string("HOST_LOOK", opt.look.c_str());
 
 		// Rng: the shared gloom_rng embedded in the instance's user-data area
 		sq_pushstring(vm_, "Rng", -1);

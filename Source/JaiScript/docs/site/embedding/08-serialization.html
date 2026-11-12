@@ -154,9 +154,10 @@ std::cout &lt;&lt; &quot;binary: &quot; &lt;&lt; blob.size() &lt;&lt; &quot; byt
 loaded: level=7 hero=Alice items=3
 binary: 114 bytes, hero=Alice</code></pre></div>
 <ul>
+<li>The engine argument takes the engine however the host holds it: the <code>std::shared_ptr</code> <code>engine::make()</code> returns, a raw pointer, a <code>std::unique_ptr</code> or a reference (<code>jai::engine_ref</code>). <code>jai::bind_registrar</code>, <code>dynamic_binder</code> and <code>bind_signal_type</code> take it the same way.</li>
 <li>The third argument of <code>to_json</code> is the indent: 2 by default, 0 for one line.</li>
 <li>Also: <code>to_binary_string</code> / <code>from_binary_string</code>, <code>to_base64</code> / <code>from_base64</code>, and a <code>Context&amp;</code> overload of each (<code>jai::from_json&lt;T&gt;(*eng, json, ctx)</code>) that hands a user context to nested <code>save</code> and <code>load</code> calls as <code>ar.get_user_context&lt;Context&gt;()</code>.</li>
-<li>A load that returns <code>T</code> by value needs a default-constructible, movable <code>T</code>; a <code>property_owner</code> is both. <code>jai::from_json&lt;std::shared_ptr&lt;T&gt;&gt;</code> keeps a derived object&#x27;s <code>$type</code>.</li>
+<li>A load that returns <code>T</code> by value needs a default-constructible, movable <code>T</code>; a <code>property_owner</code> is both. <code>jai::from_json(eng, json, object)</code> and <code>jai::from_binary(eng, bytes, object)</code> load into an object you already hold instead, for a type that cannot move or a load that keeps the object&#x27;s other state. <code>jai::from_json&lt;std::shared_ptr&lt;T&gt;&gt;</code> keeps a derived object&#x27;s <code>$type</code>.</li>
 <li>Every failure in either direction throws <code>jai::serialization_error</code>, a <code>jai::runtime_error</code>.</li>
 </ul>
 <h3 id="binding-records">A class you cannot edit<a class="hlink" href="#binding-records" aria-label="link">&#8203;</a></h3>

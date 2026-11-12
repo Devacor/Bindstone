@@ -24,7 +24,7 @@ namespace home_page {
 // [sample home-bind-run-intrusive]
 int main() {
     auto engine = jai::engine::make();
-    jai::bind_registrar(*engine);   // every property_owner and registrar in the program
+    jai::bind_registrar(engine);   // every property_owner and registrar in the program
     auto gate = engine->execute<std::shared_ptr<Spawner>>(R"(
         Spawner gate;
         gate.onWave.connect("hud", [](int size) { print("wave of ", size); });
@@ -36,9 +36,10 @@ int main() {
     gate->spawn_wave(5, false);     // Emits and is caught by the script-bound lambda
 
     //Serialization Example:
-    std::string spawnerJson = jai::to_json(*engine, gate);
-    auto roundTrip = jai::from_json<std::shared_ptr<Spawner>>(*engine, spawnerJson);
-    std::cout << "Wave Level: " << roundTrip->level << "\nContents:\n" << spawnerJson << "\n";
+    std::string spawnerJson = jai::to_json(engine, *gate);
+    Spawner roundTrip;
+    jai::from_json(engine, spawnerJson, roundTrip);
+    std::cout << "Wave Level: " << roundTrip.level << "\nContents:\n" << spawnerJson << "\n";
     return 0;
 }
 // [/sample]

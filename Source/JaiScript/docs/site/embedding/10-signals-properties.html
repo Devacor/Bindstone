@@ -96,7 +96,6 @@ C++ receiver: opened to 7</code></pre></div>
 <p><strong>Includes.</strong> A header that only declares signal members includes <code>signals/signal_decl.hpp</code>. A translation unit that emits includes <code>signals/signal.hpp</code> (or <code>signal_impl.hpp</code>): an emit instantiates the script-receiver path defined there, and without it the link fails with unresolved symbols.</p>
 <h2 id="observable-property">observable_property<a class="hlink" href="#observable-property" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-cpp" data-sample="signals-observable"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/properties/property_manager.hpp&gt;
-#include &lt;jaiscript/properties/property_serialization.hpp&gt;   // property&lt;T&gt; vtable lives here
 #include &lt;jaiscript/properties/observable_property.hpp&gt;
 
 jai::property_manager mgr;
@@ -114,7 +113,6 @@ std::cout &lt;&lt; &quot;final hp: &quot; &lt;&lt; hp.get() &lt;&lt; &quot;\n&qu
 <li>Assignment, <code>++</code>, <code>--</code> and the compound operators emit, and only when the value actually changes. <code>set_silent</code> changes it without notifying.</li>
 <li><code>on_change</code> is a public <code>signal&lt;void(const T&amp;, const T&amp;)&gt;</code> over a private emitter.</li>
 <li>A property registers itself with its <code>property_manager</code>, which is what the class's binder and the archives read.</li>
-<li>A translation unit that instantiates <code>property&lt;T&gt;</code> includes <code>properties/property_serialization.hpp</code>, where the property&#x27;s virtual <code>serialize</code> is defined. <code>dynamic_binder.hpp</code> already includes it.</li>
 </ul>
 <p>Hosts coming from Qt&#x27;s <code>Q_PROPERTY</code>, RTTR or refl-cpp have a mapping in <a href="../bridges/11-from-qt-properties.html">From Qt Properties, RTTR and refl-cpp</a>.</p>
 <h2 id="script-facing-integration">Connecting from script<a class="hlink" href="#script-facing-integration" aria-label="link">&#8203;</a></h2>

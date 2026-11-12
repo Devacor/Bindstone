@@ -51,7 +51,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <p>The declaration is documented in <a href="../embedding/02-dynamic-binder.html#the-declaration">dynamic_binder</a>, observable values and signals in <a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a>, and script-side reflection in the guide's <a href="../guide/12-reflection.html">Reflection</a>.</p>
 
 <h2 id="the-concept-map">The concept map<a class="hlink" href="#the-concept-map" aria-label="link">&#8203;</a></h2>
-<p>Headers: <code>&lt;jaiscript/properties/macros.hpp&gt;</code> and <code>&lt;jaiscript/properties/property_serialization.hpp&gt;</code> for the declarations, <code>&lt;jaiscript/properties/observable_property.hpp&gt;</code> for observable values, <code>&lt;jaiscript/signals/signal_property.hpp&gt;</code> for <code>JAI_SIGNAL</code>, and <code>&lt;jaiscript/core/registrar.hpp&gt;</code> to make the class scriptable.</p>
+<p>Headers: <code>&lt;jaiscript/properties/macros.hpp&gt;</code> for the declarations, <code>&lt;jaiscript/properties/observable_property.hpp&gt;</code> for observable values, <code>&lt;jaiscript/signals/signal_property.hpp&gt;</code> for <code>JAI_SIGNAL</code>, and <code>&lt;jaiscript/core/registrar.hpp&gt;</code> to make the class scriptable.</p>
 <h3 id="declaring">Declaring<a class="hlink" href="#declaring" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th>Qt / RTTR / refl-cpp</th><th>JaiScript</th></tr></thead><tbody>
 <tr><td>a <code>QObject</code> with <code>Q_OBJECT</code>; RTTR and refl-cpp work on any class</td><td><code>class Turret : public jai::property_owner&lt;Turret&gt;</code> (<code>property_owner&lt;Derived, Base&gt;</code> for a derived level)</td></tr>
@@ -139,7 +139,6 @@ for_each(refl::reflect&lt;Turret&gt;().members, [&amp;](auto member) {
 });</code></pre></div>
 <div class="codeblock cb-cpp"><span class="cb-label">C++ (JaiScript)</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/registrar.hpp&gt;
 #include &lt;jaiscript/properties/macros.hpp&gt;
-#include &lt;jaiscript/properties/property_serialization.hpp&gt;
 #include &lt;jaiscript/properties/observable_property.hpp&gt;
 
 class Turret : public jai::property_owner&lt;Turret&gt; {

@@ -530,3 +530,6 @@ namespace jai {
 // at the bottom of polymorphic.hpp).
 #include <jaiscript/serialization/polymorphic.hpp>
 #include <jaiscript/serialization/archive_dispatch.hpp>
+
+// property<T>'s serialize overrides, after both classes they use are complete, whichever header came first
+#include <jaiscript/properties/property_serialization.hpp>

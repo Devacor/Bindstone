@@ -106,7 +106,7 @@ public:
 };</code></pre></div>
 <div class="codeblock cb-cpp" data-sample="home-bind-run-intrusive"><span class="cb-label">C++ &middot; the host, the same in both tabs</span><pre><code class="lang-cpp">int main() {
     auto engine = jai::engine::make();
-    jai::bind_registrar(*engine);   // every property_owner and registrar in the program
+    jai::bind_registrar(engine);   // every property_owner and registrar in the program
     auto gate = engine-&gt;execute&lt;std::shared_ptr&lt;Spawner&gt;&gt;(R"(
         Spawner gate;
         gate.onWave.connect("hud", [](int size) { print("wave of ", size); });
@@ -118,9 +118,10 @@ public:
     gate-&gt;spawn_wave(5, false);     // Emits and is caught by the script-bound lambda
 
     //Serialization Example:
-    std::string spawnerJson = jai::to_json(*engine, gate);
-    auto roundTrip = jai::from_json&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*engine, spawnerJson);
-    std::cout &lt;&lt; "Wave Level: " &lt;&lt; roundTrip-&gt;level &lt;&lt; "\nContents:\n" &lt;&lt; spawnerJson &lt;&lt; "\n";
+    std::string spawnerJson = jai::to_json(engine, *gate);
+    Spawner roundTrip;
+    jai::from_json(engine, spawnerJson, roundTrip);
+    std::cout &lt;&lt; "Wave Level: " &lt;&lt; roundTrip.level &lt;&lt; "\nContents:\n" &lt;&lt; spawnerJson &lt;&lt; "\n";
     return 0;
 }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave of 3
@@ -129,17 +130,12 @@ wave of 5
 Wave Level: 5
 Contents:
 {
-  "value0": {
-    "$id": 1,
-    "$val": {
-      "id": "north-gate",
-      "level": 5,
-      "onWave": {
-        "parameter_names": [],
-        "observers": [],
-        "owned_observers": {}
-      }
-    }
+  "id": "north-gate",
+  "level": 5,
+  "onWave": {
+    "parameter_names": [],
+    "observers": [],
+    "owned_observers": {}
   }
 }</code></pre></div>
 <p>Each <code>JAI_PROPERTY</code> is the field, its script binding, its save key and its reflection; each <code>JAI_METHOD</code> is the member function and its script binding. No registrar, no glue, nothing to drift.</p>
@@ -165,7 +161,7 @@ static jai::registrar&lt;Spawner, void&gt; spawnerBinding("Spawner", [](jai::dyn
 });</code></pre></div>
 <div class="codeblock cb-cpp" data-sample="home-bind-run-external"><span class="cb-label">C++ &middot; the host, the same in both tabs</span><pre><code class="lang-cpp">int main() {
     auto engine = jai::engine::make();
-    jai::bind_registrar(*engine);   // every property_owner and registrar in the program
+    jai::bind_registrar(engine);   // every property_owner and registrar in the program
     auto gate = engine-&gt;execute&lt;std::shared_ptr&lt;Spawner&gt;&gt;(R"(
         Spawner gate;
         gate.onWave.connect("hud", [](int size) { print("wave of ", size); });
@@ -177,9 +173,10 @@ static jai::registrar&lt;Spawner, void&gt; spawnerBinding("Spawner", [](jai::dyn
     gate-&gt;spawn_wave(5, false);     // Emits and is caught by the script-bound lambda
 
     //Serialization Example:
-    std::string spawnerJson = jai::to_json(*engine, gate);
-    auto roundTrip = jai::from_json&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*engine, spawnerJson);
-    std::cout &lt;&lt; "Wave Level: " &lt;&lt; roundTrip-&gt;level &lt;&lt; "\nContents:\n" &lt;&lt; spawnerJson &lt;&lt; "\n";
+    std::string spawnerJson = jai::to_json(engine, *gate);
+    Spawner roundTrip;
+    jai::from_json(engine, spawnerJson, roundTrip);
+    std::cout &lt;&lt; "Wave Level: " &lt;&lt; roundTrip.level &lt;&lt; "\nContents:\n" &lt;&lt; spawnerJson &lt;&lt; "\n";
     return 0;
 }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave of 3
@@ -188,17 +185,12 @@ wave of 5
 Wave Level: 5
 Contents:
 {
-  "value0": {
-    "$id": 1,
-    "$val": {
-      "id": "north-gate",
-      "level": 5,
-      "onWave": {
-        "parameter_names": [],
-        "observers": [],
-        "owned_observers": {}
-      }
-    }
+  "id": "north-gate",
+  "level": 5,
+  "onWave": {
+    "parameter_names": [],
+    "observers": [],
+    "owned_observers": {}
   }
 }</code></pre></div>
 <p>Third-party and engine types bind from the outside: the same names reach script, and saves are keyed by the property names.</p>

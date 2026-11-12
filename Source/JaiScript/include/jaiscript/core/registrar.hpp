@@ -18,6 +18,7 @@
 
 #include <jaiscript/detail/static_type_name.hpp>
 #include <jaiscript/core/binding_context.hpp>
+#include <jaiscript/core/engine_ref.hpp>
 
 #include <concepts>
 
@@ -423,20 +424,15 @@ namespace detail {
 // The trailing options: a jai::only<...>() or jai::except<...>() filter and jai::match_exact_context_type, in either order
 template<typename Context, detail::bind_registrar_option... Options>
     requires (!detail::bind_registrar_option<Context>)
-void bind_registrar(engine& eng, const Context& ctx, const Options&... options) {
-    detail::bind_context_registrars<std::remove_cvref_t<Context>>(eng, ctx, detail::fold_bind_registrar_options(options...));
+void bind_registrar(engine_ref eng, const Context& ctx, const Options&... options) {
+    detail::bind_context_registrars<std::remove_cvref_t<Context>>(*eng, ctx, detail::fold_bind_registrar_options(options...));
 }
 
 template<detail::bind_registrar_option... Options>
-void bind_registrar(engine& eng, const Options&... options) {
-    registrar_registry<void>::instance().register_all(eng, detail::fold_bind_registrar_options(options...).filter);
+void bind_registrar(engine_ref eng, const Options&... options) {
+    registrar_registry<void>::instance().register_all(*eng, detail::fold_bind_registrar_options(options...).filter);
 }
 
-// shared_ptr / raw-pointer convenience (engine::make() returns a shared_ptr)
-template<typename... Arguments>
-void bind_registrar(const std::shared_ptr<engine>& eng, const Arguments&... arguments) { bind_registrar(*eng, arguments...); }
-template<typename... Arguments>
-void bind_registrar(engine* eng, const Arguments&... arguments) { bind_registrar(*eng, arguments...); }
 
 } // namespace jai
 

@@ -98,13 +98,11 @@ struct Player {
 // [sample binder-spawner-class]
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/properties/macros.hpp>
-#include <jaiscript/properties/property_serialization.hpp>
 #include <jaiscript/signals/signal_property.hpp>
 #include <jaiscript/serialization/convenience.hpp>   // to_json / from_json / to_binary below
 // [/sample]
 // [sample signals-observable]
 #include <jaiscript/properties/property_manager.hpp>
-#include <jaiscript/properties/property_serialization.hpp>   // property<T> vtable lives here
 #include <jaiscript/properties/observable_property.hpp>
 // [/sample]
 // [sample math-marker-class]

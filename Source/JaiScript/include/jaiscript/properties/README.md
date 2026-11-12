@@ -15,10 +15,7 @@ A generic, reflection-enabled property system with built-in serialization suppor
 ## Quick Start
 
 ```cpp
-#include <jaiscript/properties/property.hpp>
-#include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/properties/macros.hpp>
-#include <jaiscript/properties/property_serialization.hpp>
 
 // CRTP pattern: property_owner<DerivedClass, OptionalBases...>
 class Player : public jai::property_owner<Player> {

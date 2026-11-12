@@ -4,6 +4,7 @@
 #define __JAISCRIPT_CORE_dynamic_binder_HPP__
 
 #include "engine.hpp"
+#include "engine_ref.hpp"
 #include "engine_impl.hpp"
 #include "value.hpp"
 #include "types.hpp"
@@ -658,18 +659,18 @@ template<typename T>
 class dynamic_binder : private detail::pending_binder {
     static_assert(!math_adapted<T>, "T binds as a native math type (math_adapter); delete its dynamic_binder registration");
 public:
-    dynamic_binder(engine& engine, const std::string& class_name)
-        : detail::pending_binder(engine, class_name, &commit_pending), engine_(engine) {
+    dynamic_binder(engine_ref a_engine, const std::string& class_name)
+        : detail::pending_binder(*a_engine, class_name, &commit_pending), engine_(*a_engine) {
         // Extract base template name if this is a templated type
         std::string baseTemplateName = extract_base_template_name(class_name);
 
         // Register the base template name if it contains template syntax
         if (baseTemplateName != class_name) {
-            engine.register_template_type(baseTemplateName);
+            engine_.register_template_type(baseTemplateName);
         }
 
         // Intern the class name for fast type comparisons
-        uint64_t type_id = engine.symbolize(class_name);
+        uint64_t type_id = engine_.symbolize(class_name);
 
         // Adopt an auto-registered projection of this type (base_class<B> materializes
         // unregistered property_owner bases under their derived name): the explicit
@@ -679,7 +680,7 @@ public:
         // rename under live instances would break their interned type checks — so
         // explicit registrations must land before scripts construct auto-registered
         // placeholders. Violations throw here, loudly, at the registration site.
-        if (auto existing = engine.get_class_definition_by_type(std::type_index(typeid(T)));
+        if (auto existing = engine_.get_class_definition_by_type(std::type_index(typeid(T)));
             existing && existing->auto_registered()) {
             if (existing->has_live_instances()) {
                 throw std::runtime_error("dynamic_binder<T>(engine, \"" + class_name +
@@ -712,9 +713,7 @@ public:
     }
 
     // Named as the auto-named registrar names it, which is also the class's serialization $type
-    explicit dynamic_binder(engine& engine) : dynamic_binder(engine, detail::binder_auto_name<T>()) {}
-    explicit dynamic_binder(const std::shared_ptr<engine>& engine_ptr) : dynamic_binder(*engine_ptr) {}
-    explicit dynamic_binder(engine* engine_ptr) : dynamic_binder(*engine_ptr) {}
+    explicit dynamic_binder(engine_ref a_engine) : dynamic_binder(a_engine, detail::binder_auto_name<T>()) {}
 
     // The binding commits here unless build() or the engine's first load already committed it
     ~dynamic_binder() {

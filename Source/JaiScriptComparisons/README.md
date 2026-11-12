@@ -30,7 +30,7 @@ Unchanged: the games (`JaiScript/examples/*`), `JaiScript/bench/kernels/jai/` an
 | --- | --- |
 | `benchmarks/` | `comparison_benchmarks`: Foundry suites timing JaiScript against AngelScript, ChaiScript, Lua (sol2) and Squirrel in one process |
 | `gloom/` | the GLOOM ports (AngelScript, ChaiScript, Squirrel, Lua 5.4/5.5, LuaJIT, Python) and their runners; `gloom/ports/README.md` holds the adapter contract |
-| `demoreel/` | the demoreel ports (Lua, Squirrel), their adapter contract (`README.md`) and the OSSUARY comparison runner |
+| `demoreel/` | the demoreel's three heaviest scenes ported to Lua, Squirrel, ChaiScript and Python, their adapter contract (`README.md`) and the scene-set runner (`ports/COMPARISON.md`) |
 | `jaidoom/` | the headless Lua JaiDoom port, its transpiler and conformance checker |
 | `gatorquest/` | the Lua, LuaJIT and Luau twins of the Gator Quest smoke session |
 | `kernels/` | the kernel suite's Lua side and `run.py`, the cross-language runner |
@@ -53,7 +53,7 @@ MIT-licensed, AngelScript zlib-licensed):
 All three variables are cache paths, so `-DCOMPARISONS_THIRD_PARTY=<dir>`, `-DCOMPARISONS_CHAISCRIPT_ROOT=<dir>` or
 `-DCOMPARISONS_ANGELSCRIPT_ROOT=<dir>` points elsewhere; `COMPARISONS_ANGELSCRIPT_ROOT` defaults to `angelscript/` under
 `COMPARISONS_THIRD_PARTY`. The GLOOM and demoreel ports read the same locations behind their own options (`GLOOM_PORT_LUA`,
-`GLOOM_PORT_SQUIRREL`, `GLOOM_PORT_CHAI`, `GLOOM_PORT_ANGELSCRIPT`, `DEMOREEL_PORT_LUA`, `DEMOREEL_PORT_SQUIRREL`, all OFF); unlike the
+`GLOOM_PORT_SQUIRREL`, `GLOOM_PORT_CHAI`, `GLOOM_PORT_ANGELSCRIPT`, `DEMOREEL_PORT_LUA`, `DEMOREEL_PORT_SQUIRREL`, `DEMOREEL_PORT_CHAI`, all OFF); unlike the
 benchmarks, a port option that is ON with its sources missing is a configure error rather than a skip.
 
 ## Building
@@ -66,5 +66,5 @@ cmake --build Source/JaiScriptComparisons/out/release --target comparison_benchm
 
 JaiScript builds inside it with its in-tree layout (static runtime, whole-program Release); every program lands in the
 build's `bin/` next to `jai_gloom`, `jai_demoreel` and `jaiscript`. The whole-program GLOOM/JaiDoom comparison has its
-own pinned build (`gloom/ports/build_comparison.ps1`, see `gloom/ports/README.md`); every script keeps its builds, dependencies and evidence under `out/`; the OSSUARY runner is described in
+own pinned build (`gloom/ports/build_comparison.ps1`, see `gloom/ports/README.md`); every script keeps its builds, dependencies and evidence under `out/`; the demoreel scene runner is described in
 `demoreel/ports/COMPARISON.md`, the kernel suite in `kernels/README.md`.

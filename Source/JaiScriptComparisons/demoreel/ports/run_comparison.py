@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import statistics
 import subprocess
 import sys
@@ -23,6 +24,9 @@ import time
 PORTS = Path(__file__).resolve().parent
 COMPARISONS = PORTS.parents[1]
 LOCK = COMPARISONS.parent / "JaiScript" / "tools" / "ci" / "timing_lock.sh"
+# Git's bash runs the POSIX lock script; the bash.exe in System32 is WSL's
+GIT_BASHES = (Path(r"C:\Program Files\Git\usr\bin\bash.exe"), Path(r"C:\Program Files\Git\bin\bash.exe"))
+BASH = os.environ.get("DEMOREEL_BASH") or next((str(p) for p in GIT_BASHES if p.exists()), shutil.which("bash"))
 SCENES = {6: "GLOBHUNTER", 9: "OSSUARY", 10: "MAELSTROM"}
 SERIAL_MASK = "400"          # logical CPU 10, a P core
 PARALLEL_MASK = "C03C03"     # the eight P cores: 0, 1, 10-13, 22, 23
@@ -73,9 +77,11 @@ def parse_row(output, scene, frames, at):
 def run(config, args_tail, out, records, label, lock):
 	command = ["cmd", "/c", "start", "", "/b", "/wait", "/affinity", config["mask"]] + config["cmd"] + args_tail
 	if lock:
-		command = ["bash", str(LOCK), "run", f"demoreel-ports: {label}", "--"] + command
+		command = [BASH, str(LOCK), "run", f"demoreel-ports: {label}", "--"] + command
 	start = time.perf_counter()
-	done = subprocess.run(command, cwd=out, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=7200)
+	# keep MSYS from rewriting cmd's /c, /b, /wait and /affinity into paths on their way through bash
+	env = dict(os.environ, MSYS_NO_PATHCONV="1", MSYS2_ARG_CONV_EXCL="*")
+	done = subprocess.run(command, cwd=out, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=7200)
 	name = f"{len(records) + 1:04d}-{label.replace(' ', '_')}.log"
 	(out / name).write_bytes(done.stdout)
 	return done.returncode, done.stdout.decode("utf-8", errors="replace"), time.perf_counter() - start, name

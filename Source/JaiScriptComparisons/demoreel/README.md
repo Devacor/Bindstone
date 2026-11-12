@@ -1,117 +1,93 @@
 # demoreel ports
 
-How to port the demoreel to another embedded scripting language for the
-cross-language comparison. The JaiScript implementation is the reference:
-`scenes/*.jai` for the reel, `demoreel_adapter_jai.cpp` for the adapter shape.
-The pattern is GLOOM's (`../gloom/ports/README.md`): one shared host, a thin
-adapter per language, the scripts own everything else.
+The demoreel's three heaviest scenes of different kinds, ported to Lua 5.4, Squirrel 3.2, ChaiScript 6.1 and Python 3
+for the cross-language comparison: OSSUARY (scene 9, a per-pixel raymarch), MAELSTROM (scene 10, a stable-fluids
+simulation drawn as a lit 3D view) and GLOBHUNTER (scene 6, a textured grid raycaster), plus JULIA (scene 2), the
+check scene each port's harness was validated with. Every port prints the JaiScript VM's scene hash, byte for byte.
+`ports/COMPARISON.md` holds the measurements and the runner; this page is the porting contract.
+
+The JaiScript reel is the reference: `../../JaiScript/examples/demoreel/scenes/*.jai`, and
+`demoreel_adapter_jai.cpp` beside them for the adapter shape. The pattern is GLOOM's (`../gloom/ports/README.md`): one
+shared host, a thin adapter per language, the scripts own everything else.
 
 ## Architecture
 
 ```
-demoreel_host.hpp / demoreel_host.cpp   the SHARED host (no scripting-runtime deps)
-demoreel_adapter_jai.cpp                JaiScript adapter + main()  -> jai_demoreel
-demoreel_adapter_<lang>.cpp             your adapter + main()       -> demoreel_<lang>
-scenes/                                 the JaiScript reel (reference)
-ports/<lang>/                           your scripts
+demoreel_host.hpp / .cpp        the SHARED host (JaiScript/examples/demoreel; no scripting-runtime deps)
+demoreel_adapter_jai.cpp        JaiScript adapter + main()   -> jai_demoreel
+demoreel_adapter_<lang>.cpp     a port's adapter + main()    -> demoreel_lua, demoreel_squirrel, demoreel_chai
+ports/<lang>/                   the port's scripts (lua, squirrel, chai)
+ports/python/                   the Python port and demoreel.py, its standalone driver (no C++ host)
 ```
 
-**The host owns** (do not reimplement): the VT console (alt screen, UTF-8, the
-SGR output filter and row-diff redraw), key polling, frame timing and pacing,
-the `demo_rng` xorshift64\* struct, every `--flag`, the `--smoke` parity table
-and its FNV-1a frame-stream hash, `--perf` (per-scene ms/frame and scene hash),
-`--bench`, `--capture` and `--reload-test`.
+**The host owns** (do not reimplement): the VT console, key polling, frame timing, the `demo_rng` xorshift64\*
+struct, every `--flag`, and the harnesses; the comparison uses `--perf N --scene I` (ms/frame and an FNV-1a scene hash
+over the N frame strings).
 
-**Your adapter owns**: creating the runtime, binding the host API (below),
-loading your scripts, forwarding the entry points (the `script_session` table).
+**An adapter owns**: creating the runtime, binding the host API (below), loading the scripts, forwarding the entry
+points (the `script_session` table in `demoreel_host.hpp`).
 
-**Your scripts own**: the reel: `Reel`, the presenter, palettes, transitions,
-title cards, HUD, and all 17 scenes. The host only blits the string
-`demo_frame` returns.
-
-`main()` is two lines: construct your adapter, `return demoreel::run_demoreel(argc, argv, adapter);`.
+**The scripts own** the part of the reel the perf path runs: the presenter, palettes, the score (`music.jai`'s Cue),
+the `Scene` base, the `Reel`'s boot, jump and frame, and the scenes. Transitions, title cards, the HUD, keys and the
+cold open are not ported: the perf window starts mid-scene and reaches none of them, and a port's `frame` raises an
+error rather than skip one silently. Each scene file registers its class under its index; the reel composes a cue only
+for the scenes a port has.
 
 ## The adapter contract (`demoreel_host.hpp`)
 
-`script_adapter`:
-
-| virtual | guarantee |
-|---|---|
-| `program_name()` | exe name used in messages, e.g. `"demoreel_lua"` |
-| `language()` | human name, e.g. `"Lua 5.4 / sol2"` |
-| `backends()` | runtimes `--smoke`/`--perf` run in order and `--backend` accepts. Every adapter returns one name (`{"lua"}`, `{"squirrel"}`, JaiScript `{"vm"}`) |
-| `default_backend()` | defaults to `backends().back()` |
-| `normalize_backend(b)` | optional alias for a `--backend` name |
-| `parse_flag(argc, argv, i)` / `usage()` | optional adapter-only flags; return the number of args consumed, 0 = unknown |
-| `make_session(backend, services, opt)` | a fresh runtime with every host-API binding in place; scripts NOT loaded yet |
+`script_adapter`: `program_name()`, `language()`, `backends()` (one name per port: `{"lua"}`, `{"squirrel"}`,
+`{"chai"}`; JaiScript `{"vm"}`), `make_session(backend, services, opt)` (a fresh runtime with every host-API binding,
+scripts not loaded yet).
 
 `script_session`:
 
-| virtual | script entry point | when / guarantee |
+| virtual | script entry point | guarantee |
 |---|---|---|
-| `load()` | - | resolve the scenes dir (`demoreel::locate_scenes_dir(opt.scenes_dir, opt.argv0, <compiled-in source dir>, "demoreel_<lang>_scenes", "main.<ext>")`) and load every script. Throw on failure. The host times it. |
-| `load_kind()` | - | 4-char tag for the smoke table (`prse`, `bite`, `lua`, ...) |
-| `boot(w, h, seed, backend, smoke, hud)` | `demo_boot(w, h, seed, backend, smoke, hud)` | builds a fresh `Reel`; called again to restart (perf boots once per scene) |
-| `frame(a)` | `demo_frame(t, dt, key, fps, ms_sim, ms_draw, ms_other) -> string` | the FULL frame, rows joined by `\n`; hashed byte for byte. Smoke/perf pass `key=""` and zero perf floats |
-| `scene_index()` / `scene_time()` | `demo_scene_index()` / `demo_scene_time()` | `--reload-test`'s jump back onto the scene |
-| `scene_count()` / `scene_name()` | `demo_scene_count()` / `demo_scene_name()` | perf rows |
-| `jump(idx, at_t)` | `demo_jump(idx, at_t)` | start scene idx at scene time at_t (stateful scenes replay up to 3 s) |
-| `reload()` | re-execute scene files + `demo_reload()` | optional hot reload; return false when unsupported |
-| `reload_notice()` | - | the line the host flashes after a reload (default `reloaded scene scripts from disk`); `""` when the scripts show the reload themselves (JaiScript's reel names the changed files or the error) |
-| `stack_trace()` | - | script backtrace of the last error, `""` if none |
-
-Errors: script failures surface as `std::exception` throws; the host prints
-`<prog>: script error: ...` (smoke/perf add the frame, scene and backend).
+| `load()` | - | resolve the scenes dir (`demoreel::locate_scenes_dir(opt.scenes_dir, opt.argv0, <compiled-in source dir>, "demoreel_<lang>_scenes", "main.<ext>")`) and load every script; throw on failure |
+| `boot(w, h, seed, backend, smoke, hud)` | `demo_boot(...)` | a fresh `Reel`; perf boots again before each measured scene |
+| `frame(a)` | `demo_frame(t, dt, key, fps, ms_sim, ms_draw, ms_other) -> string` | the FULL frame, rows joined by `\n`; hashed byte for byte |
+| `scene_count()` / `scene_name()` / `scene_index()` / `scene_time()` | `demo_scene_count()` ... | the perf rows (12 scenes) |
+| `jump(idx, at_t)` | `demo_jump(idx, at_t)` | start scene idx at at_t, replaying `min(at_t, replay)` seconds of updates |
+| `stack_trace()` | - | the script backtrace of the last error |
 
 ## Host API the scripts use
 
-Bind all of these in `make_session`:
+- **`Rng`**: the shared `demoreel::demo_rng`, exactly: constructor `(int seed)`, `next(n) roll(lo, hi) chance(p)
+  nextf()`. Never the language's own RNG: every scene seeds one and draws in the reference's order. Python, having no
+  host, reimplements it bit for bit with 64-bit masking.
+- **`host_log(string)`**, **`ESC`**, **`itrunc(float) -> int`** (C truncation) and **`ifloor(float) -> int`**.
+- ChaiScript ships no math library: its adapter binds the C functions the scripts call (`sqrt sin cos floor exp log
+  log2 fabs atan2 pow`).
 
-- **`Rng`**: the shared `demoreel::demo_rng`, exactly: constructor `(int seed)`,
-  methods `next(n) roll(lo, hi) chance(p) nextf()`. Never reimplement it with
-  your language's RNG; every scene seeds one (`seed + idx * 7919`), and the
-  draws must happen in the reference's order.
-- **`host_log(string)`**: forward to `services.log` (stdout, never hashed).
-- **`itrunc(float) -> int`** (C cast: truncation toward zero) and
-  **`ifloor(float) -> int`**. Plain script-language helpers are fine when the
-  language has exact equivalents.
-- **`ESC`**: the escape character as a one-character string global.
+## What the scripts must reproduce
 
-## What the scripts must reproduce for frame parity
-
-- Same algorithms, same resolution, same operation order: IEEE-754 doubles
-  evaluated in source order, the same libm calls (`sin cos sqrt atan2 log2 floor`).
-- JaiScript `int` is int64 with C semantics: `/` truncates toward zero, `%`
-  takes the dividend's sign, `>>` is arithmetic, a typed `int` slot truncates a
-  float stored into it. Lua's `//` and `%` floor and its `>>` is logical, so a
-  possibly-negative operand needs the truncating form.
-- Ints print as digits; the reel never stringifies a float.
-- `parallel_transform` bodies (donut/julia/lava/sponge/chrome/skull rows) are
-  pure functions of their inputs: run them as serial loops, writing the grid
-  directly (the row arrays exist for the parallel contract, not the picture).
-- A class-typed or array-typed value copies on assignment and by-value
-  parameters (C++ semantics); Lua/Squirrel tables alias. The reel only relies on
-  this in POWDER's Rng parameter (above); everything else is read-only or `var&`.
-- The presenter emits a color escape only when the palette index changes along a
-  row and collapses uniform cells to a space or a full block (`util.jai hb_row`).
+- Same algorithms, same resolution, same operation order: IEEE-754 doubles evaluated in source order, the same libm
+  calls. Squirrel builds with `_SQ64` and `SQUSEDOUBLE` (the adapter static_asserts both).
+- JaiScript `int` is int64 with C semantics: `/` truncates toward zero, `%` takes the dividend's sign, `>>` is
+  arithmetic, a typed `int` slot truncates a float stored into it. Lua's `//` and `%` floor and its `>>` is logical;
+  Python's `//` and `%` floor; ChaiScript's integer literals are 32-bit (`1ll` where a value can pass 2^31).
+- ChaiScript 6.1 parses some decimal literals one ulp off (`parse_num` adds the fraction digit by digit): the chai
+  scripts spell those as exact quotients, `(82.0 / 100.0)`, which fold at parse time; `ports/chai/check_literals.py`
+  lists them (`--fix` rewrites them).
+- A class-typed or array-typed value copies on assignment and by-value parameters (C++ semantics); the ports copy
+  explicitly where the original copies and then mutates either side (MAELSTROM's `u = u1`, `MS_FU = u`).
+- `parallel_transform` bodies are pure functions of their inputs: the ports run them as serial loops over the same
+  per-row functions and keep the row arrays the original builds.
 
 ## CMake
 
-`jai_demoreel` always builds. Each port is an option, OFF by default, linking
-`demoreel_host` plus its runtime only, never `jaiscript`:
+`jai_demoreel` always builds. Each port is an option, OFF by default, linking `demoreel_host` and its runtime, never
+`jaiscript`; in Release the runtime and the executable build with `/GL` and `/LTCG`, as JaiScript does:
 
 | option | target | runtime |
 |---|---|---|
-| `-DDEMOREEL_PORT_LUA=ON` | `demoreel_lua` | `lua/` + `sol2/` at the package root (both git-ignored checkouts; `DEMOREEL_LUA_ROOT` / `DEMOREEL_SOL2_ROOT` override) |
-| `-DDEMOREEL_PORT_SQUIRREL=ON` | `demoreel_squirrel` | `squirrel/` at the package root (Squirrel 3.2, `_SQ64` + `SQUSEDOUBLE`; `DEMOREEL_SQUIRREL_ROOT` overrides the path) |
+| `-DDEMOREEL_PORT_LUA=ON` | `demoreel_lua` | Lua 5.4 + sol2 at `DEMOREEL_LUA_ROOT` / `DEMOREEL_SOL2_ROOT` (default `third_party/lua`, `third_party/sol2`; the measurements use the pinned Lua 5.4.8 and sol2 3.3.0 that `gloom/ports/prepare_comparison.py` fetches into `out/deps`) |
+| `-DDEMOREEL_PORT_SQUIRREL=ON` | `demoreel_squirrel` | Squirrel 3.2 at `DEMOREEL_SQUIRREL_ROOT` (default `third_party/squirrel`) |
+| `-DDEMOREEL_PORT_CHAI=ON` | `demoreel_chai` | ChaiScript 6.1.0 at `COMPARISONS_CHAISCRIPT_ROOT` (header-only, `CHAISCRIPT_NO_THREADS`) |
 
-## Measurement
+The Python port needs no build: `python ports/python/demoreel.py --perf N --scene I --w 100 --h 40`, standard library
+only. Its driver times `demo_frame` as the host does and hashes outside the timed window, since a pure-Python FNV-1a
+over a 40 KB frame costs 2 to 3 ms (in the C++ host it is noise).
 
-Release build, quiet machine, 100x40:
-
-1. `--smoke` (1700 frames, the whole reel on short 3 s scenes): the stream hash
-   must equal the JaiScript one; the table's ms/frame is the whole-reel time.
-2. `--perf 90`: every scene from t=3.0 for 90 frames on a fresh reel; ms/frame
-   and a per-scene frame hash (per-scene parity). JaiScript adds
-   `--workers 1` (serial) against the default (parallel sections on workers).
-
+`DEMOREEL_PADDING_CONTROLS=ON` builds each enabled executable a second time with 40 retained volatile statements in
+the host's cold help function, a code-layout control.

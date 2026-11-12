@@ -242,7 +242,7 @@ jai_stamp_begin() {
 	JAI_STAMP_TREE="$(git -C "$JAI_ROOT" rev-parse 'HEAD^{tree}' 2>/dev/null)" || JAI_STAMP_TREE=""
 	if [ -z "$JAI_STAMP_TREE" ] || ! jai_stamp_clean "$@"; then
 		JAI_STAMP_TREE=""
-		echo "stamps: none written by this run (the checkout has uncommitted changes)"
+		echo "stamps: none written by this run (the checkout has a change or an untracked file its commit lacks)"
 	fi
 }
 
@@ -265,7 +265,7 @@ jai_stamp_write() {
 		printf '%s\n' "$key"
 		echo "commit $(git -C "$JAI_ROOT" rev-parse HEAD)"
 		echo "checkout $(git -C "$JAI_ROOT" rev-parse --show-toplevel)"
-		echo "log $JAI_CI_LOG_DIR"
+		echo "log $(cygpath -m "$JAI_CI_LOG_DIR" 2>/dev/null || echo "$JAI_CI_LOG_DIR")"
 		echo "time $(date +%s) $(date '+%Y-%m-%d %H:%M')"
 	} > "$file.$$.tmp" && mv -f "$file.$$.tmp" "$file"
 	find "$JAI_STAMP_DIR" -maxdepth 1 -name '*.stamp' -mtime +"$(jai_stamp_days)" -delete 2>/dev/null
@@ -332,7 +332,9 @@ jai_gate_key() {
 			toolchain="$toolchain bash=$BASH_VERSION shells=sh$shells" ;;
 		headers | wasm) toolchain="$toolchain $(bash "$JAI_ROOT/tools/ci/gates.sh" --toolchain "$gate")" ;;
 	esac
-	printf 'config gate=%s%s\ntoolchain python=%s %s\n' "$gate" "${config:+ $config}" "$(jai_stamp_python)" "$toolchain"
+	config="${config# }"
+	toolchain="${toolchain# }"
+	printf 'config gate=%s%s\ntoolchain python=%s%s\n' "$gate" "${config:+ $config}" "$(jai_stamp_python)" "${toolchain:+ ${toolchain% }}"
 }
 
 # jai_gate_stamp <gate> <debug|release>: jai_stamp_write for a gate of this package's build

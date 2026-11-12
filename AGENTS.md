@@ -252,10 +252,17 @@ class Sprite : public jai::property_owner<Sprite, Drawable> {      // Derived fi
 	JAI_TRANSIENT_PROPERTY((BoxAABB<>), localBounds);               // reflected, never written
 	JAI_DELETED_PROPERTY((int), oldField);                          // consumes a removed key on load
 	JAI_SIGNAL(ButtonSignalSignature, onAccept);                    // emitter onAcceptSignal + view onAccept; script receivers persist
+	JAI_METHOD(void, press, ());                                    // the member + its script binding; a body or ; follows
+	JAI_METHOD(bool, enabled, () const) { return isEnabled; }       // an overload is one more line
 };
 ```
 Types are always parenthesized (commas in templates). Macros:
-`Source/JaiScript/include/jaiscript/properties/macros.hpp` and `signals/signal_property.hpp`.
+`Source/JaiScript/include/jaiscript/properties/macros.hpp`, `signals/signal_property.hpp` and
+`core/declared_methods.hpp`. `JAI_METHOD(R, name, (params) qualifiers, options...)` declares the member function and
+binds it under its name wherever the class binds, a `property_owner` or a registrar's class; `operator+` binds as `+`.
+It binds only: no archive changes. A return type with a comma is parenthesized; `const`/`noexcept`/`&` follow the
+parameters; the options are `.method`'s (`jai::serial`, `jai::nodiscard`, a permission). One per source line. Default
+arguments, `virtual`/`static` members, other script names and lambdas stay in `jai_auto_bind`.
 A `jai::property<T>` reads and assigns like the member it wraps (`sprite->points[0]`,
 `ourTextures->find(0)` through a smart pointer).
 
@@ -300,7 +307,8 @@ void Collider::jai_auto_bind(jai::dynamic_binder<Collider>& a_builder) {
 ```
 A `property_owner` level is its own `$type` (its bare class name, or the pin of `JAI_PROPERTY_OWNER_AS`), its
 base links, and its binding: every `bind_registrar` binds it, its base chain, declared properties and signals by
-themselves, and its `jai_auto_bind` names the rest (methods, plain signal members). A class declares one hook,
+themselves, its `JAI_METHOD`s bind themselves, and its `jai_auto_bind` names the rest (defaulted, virtual,
+static or renamed methods, plain signal members). A class declares one hook,
 `static void jai_auto_bind(jai::dynamic_binder<T>&)`, or `(jai::dynamic_binder<T>&, const C&)` when it carries a
 `jai::context<C>`. Types that are not `property_owner`s (`NetworkAction` subclasses, data structs) and templates
 bind through a `jai::registrar` in their `.cpp`, whose `jai::bases<...>` lists the C++ bases an archive may hold the

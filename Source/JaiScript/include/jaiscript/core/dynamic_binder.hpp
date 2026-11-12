@@ -1239,7 +1239,7 @@ public:
         return property_impl<P, true>(name, member);
     }
 
-    // A property scripts reach and the class's binding record leaves out, as a property_owner's leaves out a JAI_TRANSIENT_PROPERTY
+    // A property scripts reach and the class's archives leave out, as a property_owner's leave out a JAI_TRANSIENT_PROPERTY
     template<typename P>
     dynamic_binder& transient_property(const std::string& name, P T::*member) {
         return property_impl<P, false>(name, member);
@@ -1320,6 +1320,25 @@ private:
     template<typename Base>
     static void* upcast_record(void* object) {
         return static_cast<Base*>(static_cast<T*>(object));
+    }
+
+    // A binding record's properties are its record; a property_owner's travel with its property_mgr
+    static constexpr bool archives_bound_properties() {
+        return serialization::binding_record_v<T> || serialization_traits::is_property_owner_v<T>;
+    }
+
+    static const property_manager* own_property_manager(const void* object) {
+        return &static_cast<const T*>(object)->property_mgr;
+    }
+
+    template<typename Base>
+    void add_archive_base() {
+        for (const serialization::base_archive_route& base : serialization_metadata_.bases) {
+            if (base.type == std::type_index(typeid(Base))) {
+                return;
+            }
+        }
+        serialization_metadata_.bases.push_back({ std::type_index(typeid(Base)), &upcast_record<Base> });
     }
 
     template<typename P>
@@ -1428,8 +1447,9 @@ private:
 
         using State = property_state<P>;
         auto state = std::make_shared<const State>(State{ std::bit_cast<std::array<std::byte, sizeof(P T::*)>>(member), &engine_, class_def_->get_type_id() });
-        // a const member cannot load back, and a signal view or callback holds no data: the record leaves them out
-        if constexpr (Archived && serialization::binding_record_v<T> && !std::is_const_v<P> &&
+        // a const member cannot load back, a signal view or callback holds no data, and a property_owner's own property is
+        // its property_mgr's: the archives leave them out
+        if constexpr (Archived && archives_bound_properties() && !std::is_const_v<P> && !std::is_base_of_v<property_base, P> &&
                       !dynamic_binder_validation::is_signal_view<P>::value && !dynamic_binder_validation::is_std_function<P>::value) {
             prop_meta.archive = { &save_member_record<P>, &load_member_record<P>, state };
         }
@@ -1540,7 +1560,7 @@ private:
 
         using archived_getter = std::decay_t<Getter>;
         using archived_setter = std::decay_t<Setter>;
-        if constexpr (Archived && serialization::binding_record_v<T> && accessors_archive<archived_getter, archived_setter>()) {
+        if constexpr (Archived && archives_bound_properties() && accessors_archive<archived_getter, archived_setter>()) {
             using State = accessor_record_state<archived_getter, archived_setter>;
             prop_meta.archive = { &save_accessor_record<archived_getter, archived_setter>, &load_accessor_record<archived_getter, archived_setter>,
                 std::make_shared<const State>(State{ getter, setter }) };
@@ -1702,8 +1722,8 @@ public:
         serialization::register_relation<T, Base>{};
 
         // a base with a route of its own hands it to T, so a binding record's bases are binding records
-        if constexpr (serialization::binding_record_v<T>) {
-            serialization_metadata_.bases.push_back({ std::type_index(typeid(Base)), &upcast_record<Base> });
+        if constexpr (archives_bound_properties()) {
+            add_archive_base<Base>();
         }
 
         return *this;
@@ -2045,6 +2065,9 @@ public:
         class_def_->set_cpp_type(&typeid(T));
         engine_.add_class<T>(class_name_, class_def_);
 
+        if constexpr (serialization_traits::is_property_owner_v<T>) {
+            serialization_metadata_.level_manager = &own_property_manager;
+        }
         // Register serialization metadata with the engine's registry (with type_index for runtime lookup)
         engine_.get_serialization_registry().register_class(class_name_, serialization_metadata_);
         if constexpr (serialization::binding_record_v<T>) {
@@ -2104,6 +2127,9 @@ private:
     template<typename Base>
     void collect_base_definition(std::vector<std::shared_ptr<class_definition>>& parent_defs) {
 		class_def_->template add_cpp_base_cast<T, Base>();
+        if constexpr (serialization_traits::is_property_owner_v<T>) {
+            add_archive_base<Base>();
+        }
         static_assert(std::is_base_of_v<Base, T>,
                       "Specified type is not a base class of this class");
         auto base_def = engine_.get_class_definition_by_type(std::type_index(typeid(Base)));

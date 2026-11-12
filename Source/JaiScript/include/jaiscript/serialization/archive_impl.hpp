@@ -253,7 +253,20 @@ protected:
 
     uint32_t version_ = 0;
 
+    struct record_frame {
+        const void* object;
+        std::type_index type;
+    };
+    std::vector<record_frame> records_;
+
 public:
+    // The property_owner a member route is writing, so each property_manager the route saves writes its level's bound
+    // properties (dynamic_binder::property) beside its own
+    void push_record(const void* object, std::type_index type);
+    void pop_record();
+    // The bound properties of the levels of the record being written whose property_mgr is level, of every level where it is null
+    void write_bound_properties(any_archive_writer& ar, const property_manager* level);
+
     SerializationContext current_context() const;
     void push_context(SerializationContext ctx);
     void pop_context();
@@ -464,6 +477,7 @@ public:
     // Uses access:: to support protected methods that friend jai::access
     template<typename T, std::enable_if_t<has_save_method<T>::value, int> = 0>
     void operator()(const T& obj) {
+        record_scope<has_property_mgr<T>::value, archive_writer_core> record(*this, &obj, typeid(T));
         bool wrap = needs_object_wrapper();
         if (wrap) {
             self()->begin_object();
@@ -488,6 +502,7 @@ public:
         !has_save_method<T>::value &&
         has_serialize_method<T>::value, int> = 0>
     void operator()(const T& obj) {
+        record_scope<has_property_mgr<T>::value, archive_writer_core> record(*this, &obj, typeid(T));
         bool wrap = needs_object_wrapper();
         if (wrap) {
             self()->begin_object();
@@ -512,6 +527,7 @@ public:
         has_property_mgr<T>::value, int> = 0>
     void operator()(const T& obj) {
         no_unreachable_member_to_write<T>();
+        record_scope<true, archive_writer_core> record(*this, &obj, typeid(T));
         bool wrap = needs_object_wrapper();
         if (wrap) {
             self()->begin_object();
@@ -939,9 +955,22 @@ protected:
 
     uint32_t version_ = 0;
 
+    struct record_frame {
+        void* object;
+        std::type_index type;
+    };
+    std::vector<record_frame> records_;
+
 public:
     void set_engine(engine* eng) { engine_ref_ = eng; }
     engine* get_engine() const { return engine_ref_; }
+
+    // The property_owner a member route is reading, as archive_writer_core::push_record; load_and_construct names its
+    // object once construct makes it
+    void push_record(void* object, std::type_index type);
+    void pop_record();
+    void set_record_object(void* object);
+    void read_bound_properties(any_archive_reader& ar, const property_manager* level);
 
     template<typename T>
     void register_deserialized_shared(uint32_t id, const std::shared_ptr<T>& ptr) {
@@ -1148,6 +1177,7 @@ public:
     template<typename T, std::enable_if_t<has_load_method<T>::value, int> = 0>
     void operator()(T& obj) {
         read_scope scope(this);
+        record_scope<has_property_mgr<T>::value, archive_reader_core> record(*this, &obj, typeid(T));
         if constexpr (has_versioned_load_method<T>::value) {
             ::jai::access::member_load(*self(), obj, 0);
         } else {
@@ -1165,6 +1195,7 @@ public:
         has_serialize_method<T>::value, int> = 0>
     void operator()(T& obj) {
         read_scope scope(this);
+        record_scope<has_property_mgr<T>::value, archive_reader_core> record(*this, &obj, typeid(T));
         if constexpr (has_versioned_serialize_method<T>::value) {
             ::jai::access::member_serialize(*self(), obj, 0);
         } else {
@@ -1181,6 +1212,7 @@ public:
     void operator()(T& obj) {
         no_unreachable_member_to_read<T>();
         read_scope scope(this);
+        record_scope<true, archive_reader_core> record(*this, &obj, typeid(T));
         obj.load_owned_properties(*self());  // walks the inheritance chain (not just the derived mgr)
         scope.done();
     }
@@ -1632,7 +1664,11 @@ private:
                 uint32_t version = 0;
                 self()->begin_object(type_name, version);
                 construct<elem_type> c(result);
-                c.set_on_construct([&]() { self()->register_deserialized_shared(id, result); });
+                record_scope<has_property_mgr<elem_type>::value, archive_reader_core> record(*this, static_cast<elem_type*>(nullptr), typeid(elem_type));
+                c.set_on_construct([&]() {
+                    self()->register_deserialized_shared(id, result);
+                    if constexpr (has_property_mgr<elem_type>::value) { set_record_object(result.get()); }
+                });
                 ::jai::access::load_and_construct(*self(), c);
                 self()->end_object();
             } else if constexpr (::jai::serialization::load_default_constructible<elem_type>) {
@@ -1661,6 +1697,7 @@ public:
 
     template<bool Deferred, typename T>
     void read_custom_as(T& value) {
+        record_scope<has_property_mgr<T>::value, archive_reader_core> record(*this, &value, typeid(T));
         if constexpr (has_versioned_load_method<T>::value) {
             std::string type_name;
             uint32_t version;

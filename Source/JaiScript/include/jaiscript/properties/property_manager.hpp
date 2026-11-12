@@ -360,6 +360,9 @@ namespace jai {
 					prop->serialize(type_erased);
 				}
 			});
+			if constexpr (requires(serialization::any_archive_writer& a_writer) { ar.write_bound_properties(a_writer, nullptr); }) {
+				ar.write_bound_properties(type_erased, nullptr);
+			}
 		}
 
 		// Load (concrete archive): each level seeks its own properties by name from the same flat

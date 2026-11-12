@@ -128,7 +128,7 @@ def julia_row(y):
 			continue
 		lg = log2(m2)
 		nu = k + 1.0 - log2(lg * 0.5)
-		unit = 1.0 / sqrt(m2 * d2)
+		unit = 1.0 / sqrt(m2 * d2 + 1.0e-300)
 		# the distance to the set, in pixels: |z| ln|z| / |z'|
 		de = m2 * unit * lg * 0.34657 * pixels
 		# the potential's gradient runs along z * conj(z')

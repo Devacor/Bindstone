@@ -130,7 +130,7 @@ local function julia_row(y)
 		else
 			local lg = log(m2, 2)
 			local nu = k + 1.0 - log(lg * 0.5, 2)
-			local unit = 1.0 / sqrt(m2 * d2)
+			local unit = 1.0 / sqrt(m2 * d2 + 1.0e-300)
 			-- the distance to the set, in pixels: |z| ln|z| / |z'|
 			local de = m2 * unit * lg * 0.34657 * pixels
 			-- the potential's gradient runs along z * conj(z')

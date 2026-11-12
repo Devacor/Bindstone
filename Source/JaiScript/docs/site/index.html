@@ -323,11 +323,50 @@ from a fresh install to a C++ program that runs a script.</p>
 idiom. <a href="bridges/index.html#code-migrations">Code Migrations</a> convert real code off Cereal,
 Boost.Serialization, Boost.Signals2, ChaiScript, sol2, Squirrel, pybind11, nlohmann::json, Qt properties, RTTR or a
 coroutine scheduler.</p>
-<p>Against the others, on the <a href="embedding/11-performance.html">Performance</a> page: ChaiScript takes 124 to 1,750 times the VM's time
-on recursive calls, and the gap widens as the run grows. Against Squirrel 3.2 the VM is 1.8 times faster on a bytecode
-interpreter written in script, while Squirrel is 1.4 to 2.0 times faster on programs made of small calls over shared objects.
-Against Lua the VM takes 1.09 times Lua 5.5.1's time on average over sixteen kernels, and from 0.86 to 2.35 times Lua 5.4's on
-whole programs.</p>
+<p>Against the others, on the <a href="embedding/11-performance.html">Performance</a> page: ChaiScript 6.1 takes 23 to 137
+times the VM's time on whole programs, and 124 to 1,750 times on recursive calls, a gap that widens as the run grows.
+Squirrel 3.2 runs 1.2 to 2.2 times faster than the VM on most whole programs; the VM is 1.5 times faster on GLOOM's
+reference look and 1.8 times faster on a bytecode interpreter written in script. On one core the VM takes 1.09 times
+Lua 5.5.1's time on average over sixteen kernels and 0.86 to 4.9 times Lua 5.4's on whole programs. Its parallel loops
+change that where a program has them: on eight cores the demoreel's raymarched OSSUARY runs in 0.40 of Lua's time.</p>
+<details>
+<summary>The benchmark tables: whole programs, kernels, recursion, microbenchmarks</summary>
+<p><strong>Whole programs</strong> measure what a host ships: complete games and demo scenes ported whole to every
+language, hash-checked frame for frame, timing each frame or tick. Green is the VM's faster run (eight workers or one
+core) over Lua's; grey is its one-core run.</p>
+<div class="tablewrap" data-shared="headline"><table><thead><tr><th>program</th><th>shape</th><th>Jai VM</th><th>Jai VM, N workers</th><th>Lua 5.4</th><th>Squirrel 3.2</th><th>ChaiScript 6.1</th><th>Python 3.11</th><th>VM / Lua (best &middot; serial)</th></tr></thead><tbody>
+<tr><td>OSSUARY, the demoreel's raymarched skull-spider</td><td>a per-pixel float raymarch: small distance functions over float arguments, called tens of thousands of times a frame</td><td>117.2 ms/frame</td><td>18.5 (8)</td><td>45.7</td><td>97.6</td><td>5,964<sup><a href="embedding/11-performance.html#headline-footnotes">a</a></sup></td><td>143.0<sup><a href="embedding/11-performance.html#headline-footnotes">b</a></sup></td><td><span class="ratio-best">0.40</span> &middot; <span class="ratio-serial">2.56</span></td></tr>
+<tr><td>MAELSTROM, the demoreel's fluid simulation</td><td>a fluid grid: stencil passes (ripples, advection, pressure) over float arrays, then a ray per column</td><td>24.5 ms/frame</td><td>9.5 (8)</td><td>7.08</td><td>13.7</td><td>768<sup><a href="embedding/11-performance.html#headline-footnotes">a</a></sup></td><td>23.8<sup><a href="embedding/11-performance.html#headline-footnotes">b</a></sup></td><td><span class="ratio-best">1.34</span> &middot; <span class="ratio-serial">3.46</span></td></tr>
+<tr><td>GLOOM, reference look</td><td>a raycaster: a ray per cell column over a prebaked floor and ceiling, cached wall strips, many small entity updates</td><td>0.773 ms/tick</td><td>0.606 (8)</td><td>0.413</td><td>1.177</td><td>106.2<sup><a href="embedding/11-performance.html#headline-footnotes">a</a></sup></td><td>0.985<sup><a href="embedding/11-performance.html#headline-footnotes">b</a></sup></td><td><span class="ratio-best">1.47</span> &middot; <span class="ratio-serial">1.87</span></td></tr>
+<tr><td>GLOBHUNTER, the demoreel's textured raycaster</td><td>a grid raycaster: integer DDA and per-pixel floor and ceiling texture lookups through class fields; no parallel loop</td><td>6.53 ms/frame</td><td>n/a</td><td>2.20</td><td>4.40</td><td>152<sup><a href="embedding/11-performance.html#headline-footnotes">a</a></sup></td><td>5.87<sup><a href="embedding/11-performance.html#headline-footnotes">b</a></sup></td><td><span class="ratio-best">2.97</span></td></tr>
+<tr><td>GLOOM, the game as played (showcase look)</td><td>a raycaster: a ray per pixel column, textured lamp-lit floor and ceiling spans per pixel, a light grid, sprites, many small entity updates</td><td>10.94 ms/tick</td><td>11.51 (8)</td><td>2.21</td><td>5.08</td><td>407.5<sup><a href="embedding/11-performance.html#headline-footnotes">a</a></sup></td><td>5.19<sup><a href="embedding/11-performance.html#headline-footnotes">b</a></sup></td><td><span class="ratio-best">4.94</span></td></tr>
+</tbody></table></div>
+<p><strong>Kernels</strong> measure the interpreter on sixteen small, single-purpose programs (daScript's dasProfile
+suite: sorting, hashing, trees, number formatting), each the VM's time over Lua 5.5.1's. Their geometric mean is
+1.09.</p>
+<div class="tablewrap" data-shared="kernels"><table><thead><tr><th>VM time / Lua time</th><th>kernels</th></tr></thead><tbody>
+<tr><td>widest wins</td><td>mandelbrot 0.04 (two float locals against Lua's complex-number tables), sha256 0.13, float-to-string 0.32, string-to-float 0.93</td></tr>
+<tr><td>widest losses</td><td>treap 5.5, host calls 4.1, n-queens 3.2, dictionary 2.5, n-bodies 2.4, sort 1.9, recursive fibonacci 1.5</td></tr>
+<tr><td>LuaJIT's JIT, for scale (2026-11-04)</td><td>0.01 to 0.73 across the suite</td></tr>
+</tbody></table></div>
+<p><strong>Recursion against ChaiScript</strong> measures the cost of a script function call: <code>fib(n)</code>,
+called from C++, in milliseconds per call tree.</p>
+<div class="tablewrap" data-shared="chai-recursion"><table><thead><tr><th>call</th><th>Jai VM</th><th>ChaiScript 6.1</th><th>ChaiScript / VM</th></tr></thead><tbody>
+<tr><td>fib(15): 1,973 calls</td><td>0.040 ms</td><td>4.99 ms</td><td>124</td></tr>
+<tr><td>fib(20): 21,891 calls</td><td>0.397 ms</td><td>108 ms</td><td>273</td></tr>
+<tr><td>fib(25): 242,785 calls</td><td>4.37 ms</td><td>7,668 ms</td><td>1,750</td></tr>
+</tbody></table></div>
+<p><strong>Microbenchmarks</strong> measure single operations in tight loops, µs per iteration, the fastest of five
+runs; the harness prints whole microseconds, so only these rows resolve.</p>
+<div class="tablewrap" data-shared="micro"><table><thead><tr><th>benchmark</th><th>Jai VM</th><th>Lua 5.4</th><th>Squirrel</th><th>ChaiScript</th></tr></thead><tbody>
+<tr><td>Hot loop, 1000 iterations (<code>sum += i</code>)</td><td>9</td><td>3</td><td>10</td><td>n/a</td></tr>
+<tr><td>BST 15 nodes, <code>&amp;</code> parameters</td><td>18</td><td>8</td><td>11</td><td>n/a</td></tr>
+<tr><td>Fibonacci(15)</td><td>69</td><td>25</td><td>55</td><td>n/a</td></tr>
+<tr><td>For loop, 100 iterations</td><td>1</td><td>1</td><td>3</td><td>12</td></tr>
+<tr><td>String concat, 20 iterations</td><td>1</td><td>1</td><td>3</td><td>19</td></tr>
+</tbody></table></div>
+<p>Protocols, dates and footnotes are on the <a href="embedding/11-performance.html#measured-results">Performance</a> page.</p>
+</details>
 </div>
 
 <div class="home-section">

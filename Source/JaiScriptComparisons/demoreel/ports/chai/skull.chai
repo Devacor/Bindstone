@@ -1,0 +1,2113 @@
+// OSSUARY (ChaiScript port of scenes/skull.jai): a horned, three-eyed skull on a spider's body wakes in its orb web,
+// casts the spokes, runs the spiral, catches a moth, cocoons it and lunges at the lens. The creature, the moth and its
+// cocoon are distance fields in one march of about 6400 rays; the silk is drawn over the trace, depth-tested.
+// A literal written (82.0 / 100.0) is 0.82: chai sums a literal's fraction digit by digit, an ulp off for some values,
+// and folds a quotient of two exact constants once, at parse time, into the correctly rounded double.
+
+global SK_T = 0.0;
+global SK_EX = 0.0; global SK_EY = 0.0; global SK_EZ = 0.0;
+global SK_FX = 0.0; global SK_FY = 0.0; global SK_FZ = 1.0;
+global SK_RX = 1.0; global SK_RY = 0.0; global SK_RZ = 0.0;
+global SK_UX = 0.0; global SK_UY = 1.0; global SK_UZ = 0.0;
+global SK_BCX = 0.0; global SK_BCY = 0.0; global SK_BCZ = 0.0; global SK_BR = 1.0;
+global SK_AX = 0.0; global SK_AY = 0.0; global SK_AZ = 0.0; global SK_AR = (24.0 / 100.0);
+global SK_TX = 0.0; global SK_TY = 0.0; global SK_TZ = 0.0; global SK_TR = 0.14;
+global SK_HX = 0.0; global SK_HY = 0.0; global SK_HZ = 0.0; global SK_HR = (24.0 / 100.0);
+global SK_NX = 0.0; global SK_NY = 0.0; global SK_NZ = 0.0;
+global SK_JX = 0.0; global SK_JY = 0.0; global SK_JZ = 0.0;
+global SK_PFX = 0.0; global SK_PFY = 0.0; global SK_PFZ = 1.0;
+global SK_PUX = 0.0; global SK_PUY = 1.0; global SK_PUZ = 0.0;
+global SK_PRX = 1.0; global SK_PRY = 0.0; global SK_PRZ = 0.0;
+global SK_QFX = 0.0; global SK_QFY = 0.0; global SK_QFZ = 1.0;
+global SK_QUX = 0.0; global SK_QUY = 1.0; global SK_QUZ = 0.0;
+global SK_LX = 0.0; global SK_LY = 0.0; global SK_LZ = 0.0;
+global SK_FLICK = 0.0;
+global SK_KAGE = 9.0;
+global SK_KICK = 0.0;
+global SK_ZOOM = 0.5;
+global SK_PUNCH = 0.0;
+global SK_WAKE = 1.0;
+global SK_GLARE = 0.0;
+global SK_CAX = [];
+global SK_CAY = [];
+global SK_CAZ = [];
+global SK_CDX = [];
+global SK_CDY = [];
+global SK_CDZ = [];
+global SK_CID = [];
+global SK_CR = [];
+global SK_CMX = [];
+global SK_CMY = [];
+global SK_CMZ = [];
+global SK_CB = [];
+global SK_HGX = 0.0; global SK_HGY = 0.0; global SK_HGZ = 0.0;
+global SK_BGX = 0.0; global SK_BGY = 0.0; global SK_BGZ = 0.0;
+global SK_NC = 0;
+global SK_NBONE = 5;
+global SK_CROWN0 = 0;
+global SK_CRX = 0.0; global SK_CRY = 0.0; global SK_CRZ = 0.0;
+global SK_SKB = 0.4;
+global SK_CRB = 0.4;
+global SK_GMX = 0.0; global SK_GMY = 0.0; global SK_GMZ = 0.0;
+global SK_GAX = 1.0; global SK_GAY = 0.0; global SK_GAZ = 0.0;
+global SK_GBX = 0.0; global SK_GBY = 0.0; global SK_GBZ = 1.0;
+global SK_GX = [];
+global SK_GY = [];
+global SK_GZ = [];
+global SK_GR = [];
+global SK_NG = 0;
+global SK_NSOCK = 3;
+global SK_W = 0;
+global SK_H = 0;
+global SK_BONE = 0;
+global SK_CHIT = 0;
+global SK_EYE = 0;
+global SK_MARK = 0;
+global SK_SPARK = 0;
+global SK_GEM = 0;
+global SK_ROWS = [];
+global SK_BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+global SK_KX = 0.0; global SK_KY = 1.0; global SK_KZ = 0.0;
+global SK_MOTH = false;
+global SK_MX = 0.0; global SK_MY = 0.0; global SK_MZ = 0.0; global SK_MB = 0.6;
+global SK_MFX = 0.0; global SK_MFY = 1.0; global SK_MFZ = 0.0;
+global SK_MUX = 0.0; global SK_MUY = 0.0; global SK_MUZ = 1.0;
+global SK_MRX = 1.0; global SK_MRY = 0.0; global SK_MRZ = 0.0;
+global SK_WSC = 1.0;
+global SK_COC = 0.0;
+global SK_SPIN = 0.0;
+global SK_WOX = [0.0, 0.0, 0.0, 0.0]; global SK_WOY = [0.0, 0.0, 0.0, 0.0]; global SK_WOZ = [0.0, 0.0, 0.0, 0.0];
+global SK_WSX = [0.0, 0.0, 0.0, 0.0]; global SK_WSY = [0.0, 0.0, 0.0, 0.0]; global SK_WSZ = [0.0, 0.0, 0.0, 0.0];
+global SK_WNX = [0.0, 0.0, 0.0, 0.0]; global SK_WNY = [0.0, 0.0, 0.0, 0.0]; global SK_WNZ = [0.0, 0.0, 0.0, 0.0];
+global SK_WCA = [0.22, 0.22, (15.0 / 100.0), (15.0 / 100.0)];
+global SK_WCB = [0.0, 0.0, -(75.0 / 1000.0), -(75.0 / 1000.0)];
+global SK_WSA = [0.22, 0.22, (15.0 / 100.0), (15.0 / 100.0)];
+global SK_WSB = [(105.0 / 1000.0), (105.0 / 1000.0), 0.09, 0.09];
+global SK_WSW = [-0.25, -0.25, -0.35, -0.35];
+global SK_WING = 0;
+global SK_FUR = 0;
+global SK_COCOON = 0;
+global SK_SILK = 0;
+global SK_BACK = 0;
+global SK_BACK_HUE = 0;
+global SK_BACK_COLS = 0;
+global SK_BACK_LIGHT = [];
+global SK_BACK_WARM = [];
+
+// a moth's wing k (0, 1 fore, 2, 3 hind): an ellipse swept back along the body, in a plane through its root
+def sk_wing(x, y, z, k) {
+	var px = x - SK_WOX[k]; var py = y - SK_WOY[k]; var pz = z - SK_WOZ[k];
+	var a = px * SK_WSX[k] + py * SK_WSY[k] + pz * SK_WSZ[k];
+	var b = px * SK_MFX + py * SK_MFY + pz * SK_MFZ;
+	var c = px * SK_WNX[k] + py * SK_WNY[k] + pz * SK_WNZ[k];
+	var u = (a - SK_WCA[k]) / SK_WSA[k];
+	var v = (b - SK_WCB[k] - a * SK_WSW[k]) / SK_WSB[k];
+	var d = (sqrt(u * u + v * v) - 1.0) * SK_WSB[k];
+	var dc = fabs(c) - 0.007;
+	return d > dc ? d : dc;
+}
+
+// the wing's pattern: 0 gold, 1 umber vein or band, 2 black ring, 3 iris, 4 pupil, 5 violet margin
+def sk_wing_tone(x, y, z, k) {
+	var px = x - SK_WOX[k]; var py = y - SK_WOY[k]; var pz = z - SK_WOZ[k];
+	var a = px * SK_WSX[k] + py * SK_WSY[k] + pz * SK_WSZ[k];
+	var b = px * SK_MFX + py * SK_MFY + pz * SK_MFZ;
+	var u = (a - SK_WCA[k]) / SK_WSA[k];
+	var v = (b - SK_WCB[k] - a * SK_WSW[k]) / SK_WSB[k];
+	var r = sqrt(u * u + v * v);
+	if (r > (82.0 / 100.0)) { return 5; }
+	var fore = k < 2;
+	var eu = u - (fore ? 0.3 : 0.05);
+	var ev = v - (fore ? -0.08 : 0.05);
+	var e = sqrt(eu * eu + ev * ev) / (fore ? 0.3 : 0.45);
+	if (e < (34.0 / 100.0)) { return 4; }
+	if (e < 0.74) { return 3; }
+	if (e < 1.0) { return 2; }
+	var band = u * 0.8 + v * 0.5 + (fore ? 0.45 : -0.2);
+	if (band > -0.1 && band < 0.1) { return 1; }
+	var vein = sin(atan2(v, u + 1.05) * 11.0);
+	return vein > 0.9 ? 1 : 0;
+}
+
+// the moth: a furred body and head, four wings, and the cocoon the spider wraps around it
+def sk_moth(x, y, z) {
+	var ox = x - SK_MX; var oy = y - SK_MY; var oz = z - SK_MZ;
+	var f = ox * SK_MFX + oy * SK_MFY + oz * SK_MFZ;
+	var fc = f < -0.25 ? -0.25 : (f > 0.09 ? 0.09 : f);
+	var qx = ox - SK_MFX * fc; var qy = oy - SK_MFY * fc; var qz = oz - SK_MFZ * fc;
+	var d = sqrt(qx * qx + qy * qy + qz * qz) - (0.066 + (fc < 0.0 ? fc * (12.0 / 100.0) : 0.0));
+	var hx = ox - SK_MFX * (15.0 / 100.0); var hy = oy - SK_MFY * (15.0 / 100.0); var hz = oz - SK_MFZ * (15.0 / 100.0);
+	var dh = sqrt(hx * hx + hy * hy + hz * hz) - 0.058;
+	d = d < dh ? d : dh;
+	if (SK_WSC > 0.05) {
+		for (var k = 0; k < 4; ++k) {
+			var dw = sk_wing(x, y, z, k);
+			d = d < dw ? d : dw;
+		}
+	}
+	if (SK_COC > 0.0) {
+		var cf = f + 0.07;
+		var rr = ox * ox + oy * oy + oz * oz - f * f;
+		rr = rr < 0.0 ? 0.0 : sqrt(rr);
+		var ca = 0.18 + 0.22 * SK_COC;
+		var cb = 0.05 + 0.14 * SK_COC;
+		var dc = (sqrt(cf * cf / (ca * ca) + rr * rr / (cb * cb)) - 1.0) * cb;
+		d = d < dc ? d : dc;
+	}
+	return d;
+}
+
+// which part of the moth is nearest: -1 body, -2 cocoon, else the wing's index
+def sk_moth_part(x, y, z) {
+	var ox = x - SK_MX; var oy = y - SK_MY; var oz = z - SK_MZ;
+	var f = ox * SK_MFX + oy * SK_MFY + oz * SK_MFZ;
+	var fc = f < -0.25 ? -0.25 : (f > 0.09 ? 0.09 : f);
+	var qx = ox - SK_MFX * fc; var qy = oy - SK_MFY * fc; var qz = oz - SK_MFZ * fc;
+	var best = sqrt(qx * qx + qy * qy + qz * qz) - (0.066 + (fc < 0.0 ? fc * (12.0 / 100.0) : 0.0));
+	var hx = ox - SK_MFX * (15.0 / 100.0); var hy = oy - SK_MFY * (15.0 / 100.0); var hz = oz - SK_MFZ * (15.0 / 100.0);
+	var dh = sqrt(hx * hx + hy * hy + hz * hz) - 0.058;
+	best = best < dh ? best : dh;
+	var result = -1;
+	if (SK_WSC > 0.05) {
+		for (var k = 0; k < 4; ++k) {
+			var dw = sk_wing(x, y, z, k);
+			if (dw < best) { best = dw; result = k; }
+		}
+	}
+	if (SK_COC > 0.0) {
+		var cf = f + 0.07;
+		var rr = ox * ox + oy * oy + oz * oz - f * f;
+		rr = rr < 0.0 ? 0.0 : sqrt(rr);
+		var ca = 0.18 + 0.22 * SK_COC;
+		var cb = 0.05 + 0.14 * SK_COC;
+		var dc = (sqrt(cf * cf / (ca * ca) + rr * rr / (cb * cb)) - 1.0) * cb;
+		if (dc < best) { result = -2; }
+	}
+	return result;
+}
+
+// capsules [first, last) against best: a capsule whose bounding sphere cannot beat best is skipped without a root
+def sk_capsules(x, y, z, first, last, best_in) {
+	auto& cmx = SK_CMX; auto& cmy = SK_CMY; auto& cmz = SK_CMZ; auto& cb = SK_CB;
+	auto& cax = SK_CAX; auto& cay = SK_CAY; auto& caz = SK_CAZ;
+	auto& cdx = SK_CDX; auto& cdy = SK_CDY; auto& cdz = SK_CDZ; auto& cid = SK_CID; auto& cr = SK_CR;
+	var best = best_in;
+	for (var i = first; i < last; ++i) {
+		var mx = x - cmx[i];
+		var my = y - cmy[i];
+		var mz = z - cmz[i];
+		var reach = best + cb[i];
+		if (mx * mx + my * my + mz * mz > reach * reach) { continue; }
+		var pax = x - cax[i];
+		var pay = y - cay[i];
+		var paz = z - caz[i];
+		var dx = cdx[i];
+		var dy = cdy[i];
+		var dz = cdz[i];
+		var hh = (pax * dx + pay * dy + paz * dz) * cid[i];
+		hh = hh < 0.0 ? 0.0 : (hh > 1.0 ? 1.0 : hh);
+		var ex = pax - dx * hh;
+		var ey = pay - dy * hh;
+		var ez = paz - dz * hh;
+		var d = sqrt(ex * ex + ey * ey + ez * ez) - cr[i];
+		best = d < best ? d : best;
+	}
+	return best;
+}
+
+def sk_glows(x, y, z) {
+	auto& gx = SK_GX; auto& gy = SK_GY; auto& gz = SK_GZ; auto& gr = SK_GR;
+	var best = 99.0;
+	var ng = SK_NG;
+	for (var i = 0; i < ng; ++i) {
+		var dx = x - gx[i];
+		var dy = y - gy[i];
+		var dz = z - gz[i];
+		var d = sqrt(dx * dx + dy * dy + dz * dz) - gr[i];
+		best = d < best ? d : best;
+	}
+	return best;
+}
+
+// the skull against best: an ellipsoid (up 1.18, forward sqrt(0.92)) with its jaw, eye sockets and nose cut in. It is no
+// nearer than sqrt(0.92) of the distance to its center less SK_SKB (the jaw's reach), so it is skipped when that cannot beat best
+def sk_skull(x, y, z, best) {
+	var hx = x - SK_HX;
+	var hy = y - SK_HY;
+	var hz = z - SK_HZ;
+	if (sqrt(hx * hx + hy * hy + hz * hz) * (959.0 / 1000.0) - SK_SKB >= best) { return best; }
+	var cu = hx * SK_PUX + hy * SK_PUY + hz * SK_PUZ;
+	var cf = hx * SK_PFX + hy * SK_PFY + hz * SK_PFZ;
+	var cr = hx * SK_PRX + hy * SK_PRY + hz * SK_PRZ;
+	cu = cu * (118.0 / 100.0);
+	var d = sqrt(cu * cu + cf * cf * 0.92 + cr * cr) - SK_HR;
+	var jx = x - SK_JX;
+	var jy = y - SK_JY;
+	var jz = z - SK_JZ;
+	var jr = jx * SK_PRX + jy * SK_PRY + jz * SK_PRZ;
+	jr = jr < -0.085 ? -0.085 : (jr > 0.085 ? 0.085 : jr);
+	var qx = jx - SK_PRX * jr;
+	var qy = jy - SK_PRY * jr;
+	var qz = jz - SK_PRZ * jr;
+	var dj = sqrt(qx * qx + qy * qy + qz * qz) - 0.09;
+	d = d < dj ? d : dj;
+	auto& gx = SK_GX; auto& gy = SK_GY; auto& gz = SK_GZ; auto& gr = SK_GR;
+	var nsock = SK_NSOCK;
+	for (var i = 0; i < nsock; ++i) {
+		var sx = x - gx[i];
+		var sy = y - gy[i];
+		var sz = z - gz[i];
+		var c = gr[i] * 2.5 - sqrt(sx * sx + sy * sy + sz * sz);
+		d = d > c ? d : c;
+	}
+	var nx = x - SK_NX; var ny = y - SK_NY; var nz = z - SK_NZ;
+	var cn = 0.042 - sqrt(nx * nx + ny * ny + nz * nz);
+	d = d > cn ? d : cn;
+	return d < best ? d : best;
+}
+
+def sk_body(x, y, z) {
+	var ax = x - SK_AX; var ay = y - SK_AY; var az = z - SK_AZ;
+	var af = ax * SK_QFX + ay * SK_QFY + az * SK_QFZ;
+	var au = ax * SK_QUX + ay * SK_QUY + az * SK_QUZ;
+	var ar = ax * SK_PRX + ay * SK_PRY + az * SK_PRZ;
+	af = af * 0.74;
+	au = au * 1.04;
+	var da = (sqrt(af * af + au * au + ar * ar) - SK_AR) * 0.74;
+	var tx = x - SK_TX; var ty = y - SK_TY; var tz = z - SK_TZ;
+	var dt = sqrt(tx * tx + ty * ty + tz * tz) - SK_TR;
+	var k = 0.09;
+	var hh = 0.5 + 0.5 * (dt - da) / k;
+	hh = hh < 0.0 ? 0.0 : (hh > 1.0 ? 1.0 : hh);
+	return dt + (da - dt) * hh - k * hh * (1.0 - hh);
+}
+
+// the crown's ring; its flames are the capsules [SK_CROWN0, SK_NC)
+def sk_ring(x, y, z) {
+	var ox = x - SK_CRX; var oy = y - SK_CRY; var oz = z - SK_CRZ;
+	var cu = ox * SK_PUX + oy * SK_PUY + oz * SK_PUZ;
+	var px = ox - SK_PUX * cu; var py = oy - SK_PUY * cu; var pz = oz - SK_PUZ * cu;
+	var ring = sqrt(px * px + py * py + pz * pz) - 0.2;
+	return sqrt(ring * ring + cu * cu) - 0.028;
+}
+
+def sk_gem(x, y, z) {
+	var ox = x - SK_GMX; var oy = y - SK_GMY; var oz = z - SK_GMZ;
+	var a = fabs(ox * SK_GAX + oy * SK_GAY + oz * SK_GAZ);
+	var b = fabs(ox * SK_PUX + oy * SK_PUY + oz * SK_PUZ);
+	var c = fabs(ox * SK_GBX + oy * SK_GBY + oz * SK_GBZ);
+	return (a + b * 0.62 + c - (75.0 / 1000.0)) * 0.54;
+}
+
+// the creature along one ray: only the parts the ray passes near (groups: 1 body, 2 head and its eyes, 4 moth; cand: capsule
+// indices, glows as 100 + index). A part the ray never enters changes the step lengths, never a hit.
+def sk_spider(x, y, z, groups, cand, nc) {
+	var d = 99.0;
+	if ((groups & 1) != 0) { d = sk_body(x, y, z); }
+	if ((groups & 2) != 0) {
+		d = sk_skull(x, y, z, d);
+		// the crown's ring and flames lie within SK_CRB of its center
+		var ox = x - SK_CRX; var oy = y - SK_CRY; var oz = z - SK_CRZ;
+		if (sqrt(ox * ox + oy * oy + oz * oz) - SK_CRB < d) {
+			var dr = sk_ring(x, y, z);
+			d = d < dr ? d : dr;
+			d = sk_capsules(x, y, z, SK_CROWN0, SK_NC, d);
+		}
+		var dg = sk_gem(x, y, z);
+		d = d < dg ? d : dg;
+		auto& gx = SK_GX; auto& gy = SK_GY; auto& gz = SK_GZ; auto& gr = SK_GR;
+		var nsock = SK_NSOCK;
+		for (var e = 0; e < nsock; ++e) {
+			var ex = x - gx[e];
+			var ey = y - gy[e];
+			var ez = z - gz[e];
+			var de = sqrt(ex * ex + ey * ey + ez * ez) - gr[e];
+			d = d < de ? d : de;
+		}
+	}
+	if ((groups & 4) != 0) {
+		var dm = sk_moth(x, y, z);
+		d = d < dm ? d : dm;
+	}
+	if (nc > 0) {
+		auto& gx = SK_GX; auto& gy = SK_GY; auto& gz = SK_GZ; auto& gr = SK_GR;
+		auto& cmx = SK_CMX; auto& cmy = SK_CMY; auto& cmz = SK_CMZ; auto& cb = SK_CB;
+		auto& cax = SK_CAX; auto& cay = SK_CAY; auto& caz = SK_CAZ;
+		auto& cdxs = SK_CDX; auto& cdys = SK_CDY; auto& cdzs = SK_CDZ; auto& cid = SK_CID; auto& cr = SK_CR;
+		for (var k = 0; k < nc; ++k) {
+			var c = cand[k];
+			if (c >= 100) {
+				var g = c - 100;
+				var gx2 = x - gx[g];
+				var gy2 = y - gy[g];
+				var gz2 = z - gz[g];
+				var dg2 = sqrt(gx2 * gx2 + gy2 * gy2 + gz2 * gz2) - gr[g];
+				d = d < dg2 ? d : dg2;
+			} else {
+				var mx = x - cmx[c];
+				var my = y - cmy[c];
+				var mz = z - cmz[c];
+				var reach = d + cb[c];
+				if (mx * mx + my * my + mz * mz > reach * reach) { continue; }
+				var pax = x - cax[c];
+				var pay = y - cay[c];
+				var paz = z - caz[c];
+				var cdx = cdxs[c];
+				var cdy = cdys[c];
+				var cdz = cdzs[c];
+				var hh = (pax * cdx + pay * cdy + paz * cdz) * cid[c];
+				hh = hh < 0.0 ? 0.0 : (hh > 1.0 ? 1.0 : hh);
+				var ex = pax - cdx * hh;
+				var ey = pay - cdy * hh;
+				var ez = paz - cdz * hh;
+				var dc = sqrt(ex * ex + ey * ey + ez * ez) - cr[c];
+				d = d < dc ? d : dc;
+			}
+		}
+	}
+	return d;
+}
+
+// the ray's candidate parts cand[first, last) against best: capsule indices in ascending order, then glows as 100 + index
+def sk_candidates(x, y, z, cand, first, last, d_in) {
+	var d = d_in;
+	if (first >= last) { return d; }
+	auto& gx = SK_GX; auto& gy = SK_GY; auto& gz = SK_GZ; auto& gr = SK_GR;
+	auto& cmx = SK_CMX; auto& cmy = SK_CMY; auto& cmz = SK_CMZ; auto& cb = SK_CB;
+	auto& cax = SK_CAX; auto& cay = SK_CAY; auto& caz = SK_CAZ;
+	auto& cdxs = SK_CDX; auto& cdys = SK_CDY; auto& cdzs = SK_CDZ; auto& cid = SK_CID; auto& cr = SK_CR;
+	for (var k = first; k < last; ++k) {
+		var c = cand[k];
+		if (c >= 100) {
+			var g = c - 100;
+			var gx2 = x - gx[g];
+			var gy2 = y - gy[g];
+			var gz2 = z - gz[g];
+			var dg2 = sqrt(gx2 * gx2 + gy2 * gy2 + gz2 * gz2) - gr[g];
+			d = d < dg2 ? d : dg2;
+		} else {
+			var mx = x - cmx[c];
+			var my = y - cmy[c];
+			var mz = z - cmz[c];
+			var reach = d + cb[c];
+			if (mx * mx + my * my + mz * mz > reach * reach) { continue; }
+			var pax = x - cax[c];
+			var pay = y - cay[c];
+			var paz = z - caz[c];
+			var cdx = cdxs[c];
+			var cdy = cdys[c];
+			var cdz = cdzs[c];
+			var hh = (pax * cdx + pay * cdy + paz * cdz) * cid[c];
+			hh = hh < 0.0 ? 0.0 : (hh > 1.0 ? 1.0 : hh);
+			var ex = pax - cdx * hh;
+			var ey = pay - cdy * hh;
+			var ez = paz - cdz * hh;
+			var dc = sqrt(ex * ex + ey * ey + ez * ez) - cr[c];
+			d = d < dc ? d : dc;
+		}
+	}
+	return d;
+}
+
+// does the ray (origin o, unit direction d) pass within r of c ahead of the origin
+def sk_ray_near(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
+	var vx = cx - ox;
+	var vy = cy - oy;
+	var vz = cz - oz;
+	var tc = vx * dx + vy * dy + vz * dz;
+	if (tc < -r) { return false; }
+	return vx * vx + vy * vy + vz * vz - tc * tc < r * r;
+}
+
+// 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby, 6 moth at a point the march stopped on: the nearest wins, ties to the earlier.
+// A capsule the ray passed no nearer than 0.01 to is farther than the march's reach from every point on it, so only the ray's
+// candidates are tried (cand[0, nbone) bone, then chitin up to ncap)
+def sk_material(x, y, z, cand, nbone, ncap) {
+	var best = 99.0;
+	var m = 0;
+	var bone = sk_candidates(x, y, z, cand, 0, nbone, sk_skull(x, y, z, best));
+	if (bone < best) { best = bone; m = 1; }
+	var db = sk_body(x, y, z);
+	var chit = sk_candidates(x, y, z, cand, nbone, ncap, db < best ? db : best);
+	if (chit < best) { best = chit; m = 2; }
+	var de = sk_glows(x, y, z);
+	de = de < best ? de : best;
+	var ox = x - SK_CRX; var oy = y - SK_CRY; var oz = z - SK_CRZ;
+	if (sqrt(ox * ox + oy * oy + oz * oz) - SK_CRB < de) {
+		var dr = sk_ring(x, y, z);
+		de = de < dr ? de : dr;
+		de = sk_capsules(x, y, z, SK_CROWN0, SK_NC, de);
+	}
+	if (de < best) { best = de; m = 3; }
+	var dgm = sk_gem(x, y, z);
+	if (dgm < best) { best = dgm; m = 5; }
+	if (SK_MOTH) {
+		var mx = x - SK_MX; var my = y - SK_MY; var mz = z - SK_MZ;
+		if (sqrt(mx * mx + my * my + mz * mz) - SK_MB < best) {
+			var dm = sk_moth(x, y, z);
+			if (dm < best) { m = 6; }
+		}
+	}
+	if (m == 2 && chit == db) {
+		// chevrons crawl down the abdomen's back, a stripe runs along its spine
+		var ax = x - SK_AX; var ay = y - SK_AY; var az = z - SK_AZ;
+		var au = ax * SK_QUX + ay * SK_QUY + az * SK_QUZ;
+		var ar = ax * SK_PRX + ay * SK_PRY + az * SK_PRZ;
+		var af = ax * SK_QFX + ay * SK_QFY + az * SK_QFZ;
+		var ar2 = ar < 0.0 ? -ar : ar;
+		if (au > 0.07 && af > -(33.0 / 100.0) && af < 0.2) {
+			var v = af * 7.0 - ar2 * 9.0 + SK_T * 1.6;
+			if (v - floor(v) < 0.3 || ar2 < (18.0 / 1000.0)) { m = 4; }
+		}
+	}
+	return m;
+}
+
+// where the ray (origin o, unit direction d) is inside the sphere (c, r): widens [t_near, t_far] to hold that stretch
+// (t_near and t_far are the caller's variables: chai parameters alias, which serves the original's float&)
+def sk_ray_span(ox, oy, oz, dx, dy, dz, cx, cy, cz, r, t_near, t_far) {
+	var vx = cx - ox;
+	var vy = cy - oy;
+	var vz = cz - oz;
+	var tc = vx * dx + vy * dy + vz * dz;
+	var h = r * r - (vx * vx + vy * vy + vz * vz - tc * tc);
+	if (h <= 0.0) { return; }
+	h = sqrt(h);
+	t_near = tc - h < t_near ? tc - h : t_near;
+	t_far = tc + h > t_far ? tc + h : t_far;
+}
+
+// a pixel's palette index plus its depth (0..254) above bit 10, for the silk and the embers drawn over it, or -1 where the ray
+// meets neither the creature nor the moth; row: the row's candidate parts (see sk_row)
+def sk_trace(dx, dy, dz, px, py, cand, row, nrow) {
+	var ox = SK_EX;
+	var oy = SK_EY;
+	var oz = SK_EZ;
+	var groups = 0;
+	var nc = 0;
+	var nbone = 0;
+	var ncap = 0;
+	if (sk_ray_near(ox, oy, oz, dx, dy, dz, SK_BGX, SK_BGY, SK_BGZ, 0.7)) { groups = 1; }
+	if (sk_ray_near(ox, oy, oz, dx, dy, dz, SK_HGX, SK_HGY, SK_HGZ, 0.74)) { groups = groups + 2; }
+	if (SK_MOTH && sk_ray_near(ox, oy, oz, dx, dy, dz, SK_MX, SK_MY, SK_MZ, SK_MB)) { groups = groups + 4; }
+	if (nrow > 0) {
+		auto& cmx = SK_CMX; auto& cmy = SK_CMY; auto& cmz = SK_CMZ; auto& cb = SK_CB;
+		auto& gx = SK_GX; auto& gy = SK_GY; auto& gz = SK_GZ; auto& gr = SK_GR;
+		var nbone_caps = SK_NBONE;
+		for (var k = 0; k < nrow; ++k) {
+			var c = row[k];
+			if (c < 100) {
+				if (sk_ray_near(ox, oy, oz, dx, dy, dz, cmx[c], cmy[c], cmz[c], cb[c] + 0.01)) {
+					cand[nc] = c;
+					nc = nc + 1;
+					ncap = nc;
+					if (c < nbone_caps) { nbone = nc; }
+				}
+			} else {
+				var g = c - 100;
+				if (sk_ray_near(ox, oy, oz, dx, dy, dz, gx[g], gy[g], gz[g], gr[g] + 0.01)) {
+					cand[nc] = c;
+					nc = nc + 1;
+				}
+			}
+		}
+	}
+	if (groups == 0 && nc == 0) { return -1; }
+	var t = 99.0;
+	var t_far = 0.0;
+	if ((groups & 3) != 0 || nc != 0) { sk_ray_span(ox, oy, oz, dx, dy, dz, SK_BCX, SK_BCY, SK_BCZ, SK_BR, t, t_far); }
+	if ((groups & 4) != 0) { sk_ray_span(ox, oy, oz, dx, dy, dz, SK_MX, SK_MY, SK_MZ, SK_MB, t, t_far); }
+	t = t < 0.04 ? 0.04 : t;
+	var hit = false;
+	var i = 0;
+	while (i < 48 && t < t_far) {
+		var d = sk_spider(ox + dx * t, oy + dy * t, oz + dz * t, groups, cand, nc);
+		var reach = 0.001 + t * 0.0015;
+		if (d < (reach < 0.0085 ? reach : 0.0085)) {
+			hit = true;
+			break;
+		}
+		t += d * (85.0 / 100.0);
+		i = i + 1;
+	}
+	if (!hit) { return -1; }
+	var dith = SK_BAYER[(py % 4) * 4 + px % 4] / 16.0 - (47.0 / 100.0);
+	var depth = itrunc(t * 18.0);
+	depth = (depth > 254 ? 254 : depth) * 1024;
+	var x = ox + dx * t;
+	var y = oy + dy * t;
+	var z = oz + dz * t;
+	var m = sk_material(x, y, z, cand, nbone, ncap);
+	var fog = 1.0 - t / 14.0;
+	fog = fog < 0.0 ? 0.0 : fog;
+	var lx = SK_LX - x;
+	var ly = SK_LY - y;
+	var lz = SK_LZ - z;
+	var ld2 = lx * lx + ly * ly + lz * lz;
+	var lil = 1.0 / sqrt(ld2 + 0.0001);
+	lx *= lil; ly *= lil; lz *= lil;
+	if (m == 3) {
+		var e = itrunc((5.4 + SK_FLICK) * SK_WAKE + dith);
+		for (var k = 0; k < SK_NSOCK; ++k) {
+			var ex = x - SK_GX[k]; var ey = y - SK_GY[k]; var ez = z - SK_GZ[k];
+			var el = sqrt(ex * ex + ey * ey + ez * ez);
+			if (el < SK_GR[k] + 0.012) {
+				// an eye burns red at its rim and yellow where it faces the viewer, with a
+				// wet glint where its sphere mirrors the key light
+				var facing = -(ex * dx + ey * dy + ez * dz) / (el + 0.0000001);
+				e = itrunc((2.6 + 3.2 * facing * facing + SK_FLICK) * SK_WAKE + dith);
+				var hx = SK_KX - dx; var hy = SK_KY - dy; var hz = SK_KZ - dz;
+				var hl = sqrt(hx * hx + hy * hy + hz * hz) * el + 0.0000001;
+				if ((ex * hx + ey * hy + ez * hz) / hl > 0.93 && SK_WAKE > 0.5) { e = 7; }
+			}
+		}
+		return SK_EYE + (e < 0 ? 0 : (e > 7 ? 7 : e)) + depth;
+	}
+	if (m == 5) {
+		var ox = x - SK_GMX; var oy = y - SK_GMY; var oz = z - SK_GMZ;
+		var a = ox * SK_GAX + oy * SK_GAY + oz * SK_GAZ;
+		var b = ox * SK_PUX + oy * SK_PUY + oz * SK_PUZ;
+		var c = ox * SK_GBX + oy * SK_GBY + oz * SK_GBZ;
+		var sa = a < 0.0 ? -1.0 : 1.0;
+		var sb = b < 0.0 ? -1.0 : 1.0;
+		var sc = c < 0.0 ? -1.0 : 1.0;
+		var gnx = SK_GAX * sa + SK_PUX * sb * 0.62 + SK_GBX * sc;
+		var gny = SK_GAY * sa + SK_PUY * sb * 0.62 + SK_GBY * sc;
+		var gnz = SK_GAZ * sa + SK_PUZ * sb * 0.62 + SK_GBZ * sc;
+		var gl = 1.0 / sqrt(gnx * gnx + gny * gny + gnz * gnz);
+		var face = -(gnx * dx + gny * dy + gnz * dz) * gl;
+		face = face < 0.0 ? 0.0 : face;
+		var facet = (sa > 0.0 ? 1 : 0) + (sb > 0.0 ? 2 : 0) + (sc > 0.0 ? 4 : 0);
+		var twinkle = sin(SK_T * 9.0 + facet * 2.3);
+		var lit = 0.25 + face * face * 0.6 + (twinkle > (85.0 / 100.0) ? 0.6 : 0.0);
+		var r = itrunc(lit * 7.0 + dith + 0.5);
+		return SK_GEM + (r < 0 ? 0 : (r > 7 ? 7 : r)) + depth;
+	}
+	var hstep = 0.0015;
+	var n0 = sk_spider(x + hstep, y - hstep, z - hstep, groups, cand, nc);
+	var n1 = sk_spider(x - hstep, y - hstep, z + hstep, groups, cand, nc);
+	var n2 = sk_spider(x - hstep, y + hstep, z - hstep, groups, cand, nc);
+	var n3 = sk_spider(x + hstep, y + hstep, z + hstep, groups, cand, nc);
+	var nx = n0 - n1 - n2 + n3;
+	var ny = -n0 - n1 + n2 + n3;
+	var nz = -n0 + n1 - n2 + n3;
+	var nl = 1.0 / sqrt(nx * nx + ny * ny + nz * nz + 0.0000001);
+	nx *= nl; ny *= nl; nz *= nl;
+	var vd = -(nx * dx + ny * dy + nz * dz);
+	vd = vd < 0.0 ? 0.0 : vd;
+	var up = nx * SK_PUX + ny * SK_PUY + nz * SK_PUZ;
+	up = up < 0.0 ? 0.0 : up;
+	var rim = 1.0 - vd;
+	rim = rim * rim * rim;
+	var eyel = nx * lx + ny * ly + nz * lz;
+	eyel = eyel < 0.0 ? 0.0 : eyel / (1.0 + ld2 * 6.0);
+	var key = nx * SK_KX + ny * SK_KY + nz * SK_KZ;
+	if (m == 6) {
+		var part = sk_moth_part(x, y, z);
+		if (part >= 0) {
+			// the wings glow through: lit from either side
+			var tl = 0.5 + 0.55 * (key < 0.0 ? -key : key) + eyel * 0.6;
+			var tone = sk_wing_tone(x, y, z, part);
+			if (tone == 3 && part >= 2) { tone = 6; }
+			var l = itrunc(tl * fog * 7.0 + dith + 0.5);
+			return SK_WING + tone * 8 + (l < 0 ? 0 : (l > 7 ? 7 : l)) + depth;
+		}
+		if (part == -2) {
+			// the cocoon: silk wound in bands that turn as the spider spins it
+			var ox2 = x - SK_MX; var oy2 = y - SK_MY; var oz2 = z - SK_MZ;
+			var f = ox2 * SK_MFX + oy2 * SK_MFY + oz2 * SK_MFZ;
+			var ang = atan2(ox2 * SK_MUX + oy2 * SK_MUY + oz2 * SK_MUZ, ox2 * SK_MRX + oy2 * SK_MRY + oz2 * SK_MRZ);
+			var band = sin(f * 70.0 + ang * 2.0 + SK_SPIN * 2.0);
+			var cl = (0.2 + vd * 0.45 + rim * 0.35 + (key > 0.0 ? key * 0.25 : 0.0)) * (0.72 + 0.28 * band);
+			var l = itrunc(cl * fog * 9.0 + dith + 0.5);
+			return SK_COCOON + (l < 0 ? 0 : (l > 9 ? 9 : l)) + depth;
+		}
+		var fl = (12.0 / 100.0) + vd * 0.55 + rim * 0.25 + eyel * 0.5;
+		var l = itrunc(fl * fog * 7.0 + dith * 1.6 + 0.5);
+		return SK_FUR + (l < 0 ? 0 : (l > 7 ? 7 : l)) + depth;
+	}
+	if (m == 1) {
+		var lit = 0.1 + vd * (0.55 + SK_GLARE * 0.4) + up * 0.22 + rim * 0.25;
+		var so = 99.0;
+		for (var k = 0; k < SK_NSOCK; ++k) {
+			var ox2 = x - SK_GX[k]; var oy2 = y - SK_GY[k]; var oz2 = z - SK_GZ[k];
+			var q = sqrt(ox2 * ox2 + oy2 * oy2 + oz2 * oz2) - (SK_GR[k] < 0.03 ? SK_GR[k] : 0.03) * 2.5;
+			so = q < so ? q : so;
+		}
+		if (so < 0.012) { lit = lit * (15.0 / 100.0) + 0.07 * (1.0 + SK_FLICK); }
+		var nsx = x - SK_NX; var nsy = y - SK_NY; var nsz = z - SK_NZ;
+		if (nsx * nsx + nsy * nsy + nsz * nsz < 0.0025) { lit = lit * 0.2; }
+		var jx = x - SK_JX; var jy = y - SK_JY; var jz = z - SK_JZ;
+		var jf = jx * SK_PFX + jy * SK_PFY + jz * SK_PFZ;
+		var ju = jx * SK_PUX + jy * SK_PUY + jz * SK_PUZ;
+		if (jf > 0.045 && ju > -0.05 && ju < 0.042) {
+			var tr = (jx * SK_PRX + jy * SK_PRY + jz * SK_PRZ) * 44.0;
+			if (tr - floor(tr) < (24.0 / 100.0) || (ju > -0.008 && ju < 0.006)) { lit = lit * 0.22; }
+		}
+		var b = itrunc(lit * fog * 11.0 + dith + 0.5);
+		return SK_BONE + (b < 0 ? 0 : (b > 11 ? 11 : b)) + depth;
+	}
+	// a glossy highlight of the key light
+	var hx = SK_KX - dx; var hy = SK_KY - dy; var hz = SK_KZ - dz;
+	var hl = 1.0 / sqrt(hx * hx + hy * hy + hz * hz + 0.0000001);
+	var spec = (nx * hx + ny * hy + nz * hz) * hl;
+	spec = spec < 0.0 ? 0.0 : spec;
+	spec = spec * spec; spec = spec * spec; spec = spec * spec; spec = spec * spec;
+	if (m == 4) {
+		var k = itrunc((0.45 + vd * 0.45 + 0.3 * sin(SK_T * 4.0) + spec * 0.6) * 5.0 + dith + 0.5);
+		return SK_MARK + (k < 0 ? 0 : (k > 5 ? 5 : k)) + depth;
+	}
+	// beetle iridescence: the shell turns from wine through violet to teal toward its rim
+	var lit = 0.1 + vd * (42.0 / 100.0) + rim * 0.45 + eyel * 0.9 + (key > 0.0 ? key * 0.3 : 0.0) + spec * 1.1;
+	var band = vd > (68.0 / 100.0) ? 0 : (vd > 0.36 ? 1 : 2);
+	var c = itrunc(lit * fog * 11.0 + dith + 0.5);
+	return SK_CHIT + band * 12 + (c < 0 ? 0 : (c > 11 ? 11 : c)) + depth;
+}
+
+// the vault behind the web at every fourth traced pixel, as light and the creature's warm aura: a ribbed dome about the hub
+// with a pale oculus at its crown, a ring of pillars nearer the eye, mist drifting across, a faint ring leaving on each kick
+def sk_backdrop(dim, flash) {
+	var cols = SK_W / 4 + 2;
+	var rows = SK_H / 4 + 2;
+	SK_BACK_COLS = cols;
+	auto& back_light = SK_BACK_LIGHT;
+	auto& back_warm = SK_BACK_WARM;
+	var n = cols * rows;
+	// resize(n, 0.0): chai's resize would share one element across the slots it adds
+	while (back_light.size() < n) { back_light.push_back(0.0); }
+	while (back_light.size() > n) { back_light.pop_back(); }
+	while (back_warm.size() < n) { back_warm.push_back(0.0); }
+	while (back_warm.size() > n) { back_warm.pop_back(); }
+	var ex = SK_EX; var ey = SK_EY; var ez = SK_EZ;
+	var fx = SK_FX; var fy = SK_FY; var fz = SK_FZ;
+	var rx = SK_RX; var ry = SK_RY; var rz = SK_RZ;
+	var ux = SK_UX; var uy = SK_UY; var uz = SK_UZ;
+	var st = SK_T;
+	var sw = SK_W;
+	var sh = SK_H;
+	var zoom = SK_ZOOM / (sh * 0.5);
+	var ee = ex * ex + ey * ey + ez * ez;
+	var exz = ex * ex + ez * ez - 21.16;
+	var vx = SK_BCX - ex;
+	var vy = SK_BCY - ey;
+	var vz = SK_BCZ - ez;
+	var vv = vx * vx + vy * vy + vz * vz;
+	var ring = SK_KAGE * 1.8;
+	var ring_gain = SK_KAGE < 0.7 ? (0.7 - SK_KAGE) * 0.16 * SK_WAKE : 0.0;
+	var aura_gain = SK_WAKE * (0.75 + 0.25 * SK_KICK);
+	for (var j = 0; j < rows; ++j) {
+		var v = (sh * 0.5 - j * 4 - 0.5) * zoom;
+		for (var i = 0; i < cols; ++i) {
+			var u = (i * 4 + 0.5 - sw * 0.5) * zoom;
+			var dx = fx + rx * u + ux * v;
+			var dy = fy + ry * u + uy * v;
+			var dz = fz + rz * u + uz * v;
+			var il = 1.0 / sqrt(dx * dx + dy * dy + dz * dz);
+			dx *= il; dy *= il; dz *= il;
+			var ed = ex * dx + ey * dy + ez * dz;
+			var t = (sqrt(ed * ed - ee + 49.0) - ed) / 7.0;
+			var qx = ex / 7.0 + dx * t;
+			var qy = ey / 7.0 + dy * t;
+			var qz = ez / 7.0 + dz * t;
+			var phi = atan2(qx, -qz);
+			var rib = fabs(sin(phi * 4.0));
+			rib = rib < 0.25 ? 1.0 - rib * 4.0 : 0.0;
+			var light = 0.2 + 0.14 * qy + rib * (0.06 + 0.06 * qy);
+			var oculus = (qy - 0.8) * 6.0;
+			light += (oculus < 0.0 ? 0.0 : (oculus > 1.0 ? 1.0 : oculus)) * 0.3;
+			light += 0.05 * sin(phi * 3.0 + qy * 4.0 + st * 0.25) * sin(qy * 6.0 - st * 0.17 + phi);
+			var off = fabs(sqrt(qx * qx + qy * qy) - ring);
+			if (off < (12.0 / 100.0)) { light += (1.0 - off / (12.0 / 100.0)) * ring_gain; }
+			var a = dx * dx + dz * dz;
+			var b = ex * dx + ez * dz;
+			var disc = b * b - a * exz;
+			if (disc > 0.0 && a > 0.000001) {
+				var tp = (sqrt(disc) - b) / a;
+				var gap = fabs(cos(atan2(ex + dx * tp, -ez - dz * tp) * 4.0));
+				if (gap < 0.5) { light *= 0.45 + gap * 1.1; }
+			}
+			light = light * dim + flash;
+			var tc = vx * dx + vy * dy + vz * dz;
+			var perp = vv - tc * tc;
+			var warm = 1.3 - sqrt(perp < 0.0 ? 0.0 : perp);
+			warm = warm < 0.0 ? 0.0 : (warm > 1.0 ? 1.0 : warm);
+			back_light[j * cols + i] = light < 0.0 ? 0.0 : (light > 1.0 ? 1.0 : light);
+			back_warm[j * cols + i] = warm * warm * aura_gain;
+		}
+	}
+}
+
+// one traced row of the vault, from the grid sk_backdrop fills; out is the caller's row (the original's array<int>&)
+def sk_backdrop_row(y, out) {
+	auto& back_light = SK_BACK_LIGHT;
+	auto& back_warm = SK_BACK_WARM;
+	auto& bayer_tab = SK_BAYER;
+	var j = y / 4;
+	var fy = (y - j * 4) * 0.25;
+	var upper = j * SK_BACK_COLS;
+	var lower = upper + SK_BACK_COLS;
+	var bayer = (y % 4) * 4;
+	var base = SK_BACK + SK_BACK_HUE + 255 * 1024;
+	var ww = SK_W;
+	var x = 0;
+	var i = 0;
+	while (x < ww) {
+		var l0 = back_light[upper + i];
+		var l1 = back_light[upper + i + 1];
+		var w0 = back_warm[upper + i];
+		var w1 = back_warm[upper + i + 1];
+		l0 += (back_light[lower + i] - l0) * fy;
+		l1 += (back_light[lower + i + 1] - l1) * fy;
+		w0 += (back_warm[lower + i] - w0) * fy;
+		w1 += (back_warm[lower + i + 1] - w1) * fy;
+		for (var k = 0; k < 4 && x < ww; ++k) {
+			var dith = bayer_tab[bayer + k] / 16.0;
+			var level = itrunc((l0 + (l1 - l0) * k * 0.25) * 15.0 + dith);
+			var warm = itrunc((w0 + (w1 - w0) * k * 0.25) * 4.0 + dith);
+			out[x] = base + (warm > 4 ? 4 : warm) * 16 + (level > 15 ? 15 : level);
+			x = x + 1;
+		}
+		i = i + 1;
+	}
+}
+
+// the pixels [first, last) of a row whose rays (A + R u, A = F + U v) pass within r of c: widens the span to hold them
+// (first and last are the caller's variables: chai parameters alias, which serves the original's int&)
+def sk_row_span(ax, ay, az, cx, cy, cz, r, zoom, first, last) {
+	var vx = cx - SK_EX;
+	var vy = cy - SK_EY;
+	var vz = cz - SK_EZ;
+	var q = vx * vx + vy * vy + vz * vz - r * r;
+	var a = vx * ax + vy * ay + vz * az;
+	var b = vx * SK_RX + vy * SK_RY + vz * SK_RZ;
+	var k = q - b * b;
+	if (k < 0.0001) {
+		first = 0;
+		last = SK_W;
+		return;
+	}
+	var disc = a * a * b * b - k * (q * (ax * ax + ay * ay + az * az) - a * a);
+	if (disc <= 0.0 || a <= 0.0) { return; }
+	disc = sqrt(disc);
+	var lo = itrunc(floor((a * b - disc) / (k * zoom) + SK_W * 0.5)) - 1;
+	var hi = itrunc(floor((a * b + disc) / (k * zoom) + SK_W * 0.5)) + 2;
+	first = lo < first ? lo : first;
+	last = hi > last ? hi : last;
+}
+
+def sk_row(y) {
+	var ww = SK_W;
+	var out = [];
+	for (var i = 0; i < ww; ++i) { out.push_back(0); }
+	sk_backdrop_row(y, out);
+	var half_h = SK_H * 0.5;
+	var zoom = SK_ZOOM / half_h;
+	var v = (half_h - y - 0.5) * zoom;
+	var ax = SK_FX + SK_UX * v;
+	var ay = SK_FY + SK_UY * v;
+	var az = SK_FZ + SK_UZ * v;
+	var first = ww;
+	var last = 0;
+	sk_row_span(ax, ay, az, SK_BCX, SK_BCY, SK_BCZ, SK_BR, zoom, first, last);
+	if (SK_MOTH) { sk_row_span(ax, ay, az, SK_MX, SK_MY, SK_MZ, SK_MB, zoom, first, last); }
+	first = first < 0 ? 0 : first;
+	last = last > ww ? ww : last;
+	if (first >= last) { return out; }
+	// the row's rays all lie in the plane through the eye spanned by R and F + U v: a capsule (0..SK_CROWN0) or a leg glow
+	// (100 + g) farther from that plane than its reach passes near none of them, so the pixels test only the rest
+	var rx = SK_RX; var ry = SK_RY; var rz = SK_RZ;
+	var ex = SK_EX; var ey = SK_EY; var ez = SK_EZ;
+	var nx = ry * az - rz * ay;
+	var ny = rz * ax - rx * az;
+	var nz = rx * ay - ry * ax;
+	var nl = 1.0 / sqrt(nx * nx + ny * ny + nz * nz);
+	var row = [];
+	auto& cmx = SK_CMX; auto& cmy = SK_CMY; auto& cmz = SK_CMZ; auto& cb = SK_CB;
+	var crown0 = SK_CROWN0;
+	for (var c = 0; c < crown0; ++c) {
+		var off = ((cmx[c] - ex) * nx + (cmy[c] - ey) * ny + (cmz[c] - ez) * nz) * nl;
+		if (fabs(off) < cb[c] + 0.02) { row.push_back(c); }
+	}
+	auto& gx = SK_GX; auto& gy = SK_GY; auto& gz = SK_GZ; auto& gr = SK_GR;
+	var ng = SK_NG;
+	for (var g = 3; g < ng; ++g) {
+		var off = ((gx[g] - ex) * nx + (gy[g] - ey) * ny + (gz[g] - ez) * nz) * nl;
+		if (fabs(off) < gr[g] + 0.02) { row.push_back(100 + g); }
+	}
+	var nrow = to_int(row.size());
+	var cand = [];
+	for (var i = 0; i < 64; ++i) { cand.push_back(0); }
+	for (var x = first; x < last; ++x) {
+		var u = (x + 0.5 - ww * 0.5) * zoom;
+		var dx = ax + rx * u;
+		var dy = ay + ry * u;
+		var dz = az + rz * u;
+		var il = 1.0 / sqrt(dx * dx + dy * dy + dz * dz);
+		var traced = sk_trace(dx * il, dy * il, dz * il, x, y, cand, row, nrow);
+		if (traced >= 0) { out[x] = traced; }
+	}
+	return out;
+}
+
+class Ossuary {
+	var name
+	var handle
+	var w
+	var h
+	var seed
+	var pal
+	var rng
+	var replay
+	var cue
+	var pixel_budget
+	var titled
+	var bx
+	var by
+	var bz
+	var fx
+	var fy
+	var fz
+	var ux
+	var uy
+	var uz
+	var rx
+	var ry
+	var rz
+	var ex
+	var ey
+	var ez
+	var cux
+	var cuy
+	var cuz
+	var lkx
+	var lky
+	var lkz
+	var placed
+	var footx
+	var footy
+	var footz
+	var fromx
+	var fromy
+	var fromz
+	var tox
+	var toy
+	var toz
+	var stept
+	var legfo
+	var legreach
+	var leglift
+	var ppx
+	var ppy
+	var ppz
+	var pvx
+	var pvy
+	var pvz
+	var plife
+	var prate
+	var depth
+	var np
+	var pnext
+	var l1
+	var l2
+	var tt
+	var spawn_acc
+	var stance
+	var t_wake
+	var t_spokes
+	var t_spoke_gap
+	var t_out
+	var t_spiral0
+	var t_spiral1
+	var t_home
+	var t_moth
+	var t_impact
+	var t_rush
+	var t_reach
+	var t_turn
+	var t_wrap0
+	var t_wrap1
+	var t_face
+	var t_stalk
+	var t_lunge
+	var nspoke
+	var spoke_reach
+	var web_rim
+	var lay_from
+	var lay_lead
+	var ring_speed
+	var spoke_ang
+	var spa
+	var spb
+	var lay_turn
+	var pa
+	var pb
+	var psi
+	var spd
+	var moth_a
+	var moth_b
+	var qa
+	var qb
+	var wx
+	var wy
+	var wz
+	var qsx
+	var qsy
+	var qzc
+	var mox
+	var moy
+	var moz
+	var mfx
+	var mfy
+	var mfz
+	var mux
+	var muy
+	var muz
+	var mrx
+	var mry
+	var mrz
+	var flap
+	var wsc
+	var coc
+	var spin
+
+	def Ossuary() {
+		scene_init(this);
+		this.pixel_budget = 16000;
+		this.bx = 0.0; this.by = 0.0; this.bz = 0.0;
+		this.fx = 0.0; this.fy = 1.0; this.fz = 0.0;
+		this.ux = 0.0; this.uy = 0.0; this.uz = 1.0;
+		this.rx = 1.0; this.ry = 0.0; this.rz = 0.0;
+		this.ex = 0.0; this.ey = 0.0; this.ez = 0.0;
+		this.cux = 0.0; this.cuy = 1.0; this.cuz = 0.0;
+		this.lkx = 0.0; this.lky = 0.0; this.lkz = 0.0;
+		this.placed = false;
+		this.footx = [];
+		this.footy = [];
+		this.footz = [];
+		this.fromx = [];
+		this.fromy = [];
+		this.fromz = [];
+		this.tox = [];
+		this.toy = [];
+		this.toz = [];
+		this.stept = [];
+		this.legfo = [0.3, 0.1, -0.1, -0.3];
+		this.legreach = [(42.0 / 100.0), 0.14, -0.08, -0.36];
+		this.leglift = [1.25, 0.8, 0.25, 0.0];
+		this.ppx = [];
+		this.ppy = [];
+		this.ppz = [];
+		this.pvx = [];
+		this.pvy = [];
+		this.pvz = [];
+		this.plife = [];
+		this.prate = [];
+		this.depth = [];
+		this.np = 120;
+		this.pnext = 0;
+		this.l1 = 0.5;
+		this.l2 = 0.52;
+		this.tt = 0.0;
+		this.spawn_acc = 0.0;
+		this.stance = 0.5;
+		this.t_wake = (3871.0 / 1000.0);
+		this.t_spokes = (4355.0 / 1000.0);
+		this.t_spoke_gap = 0.0806;
+		this.t_out = 5.5;
+		this.t_spiral0 = 5.806;
+		this.t_spiral1 = 7.742;
+		this.t_home = 8.25;
+		this.t_moth = 8.7;
+		this.t_impact = 11.613;
+		this.t_rush = (1185.0 / 100.0);
+		this.t_reach = 12.5;
+		this.t_turn = (1285.0 / 100.0);
+		this.t_wrap0 = (1295.0 / 100.0);
+		this.t_wrap1 = 15.484;
+		this.t_face = 15.7;
+		this.t_stalk = 17.419;
+		this.t_lunge = 19.355;
+		this.nspoke = 14;
+		this.spoke_reach = 4.4;
+		this.web_rim = 1.55;
+		this.lay_from = 2.24;
+		this.lay_lead = 0.7;
+		this.ring_speed = 3.0;
+		this.spoke_ang = [];
+		this.spa = [];
+		this.spb = [];
+		this.lay_turn = [];
+		this.pa = 0.0; this.pb = 0.0; this.psi = (15707963.0 / 10000000.0);
+		this.spd = 0.0;
+		this.moth_a = 1.2; this.moth_b = 0.7;
+		this.qa = 0.0; this.qb = 0.0;
+		this.wx = 0.0; this.wy = 0.0; this.wz = 0.0;
+		this.qsx = 0.0; this.qsy = 0.0; this.qzc = 0.0;
+		this.mox = 0.0; this.moy = 0.0; this.moz = 0.0;
+		this.mfx = 0.0; this.mfy = 1.0; this.mfz = 0.0;
+		this.mux = 0.0; this.muy = 0.0; this.muz = 1.0;
+		this.mrx = 1.0; this.mry = 0.0; this.mrz = 0.0;
+		this.flap = 0.0; this.wsc = 1.0; this.coc = 0.0; this.spin = 0.0;
+	}
+
+	def build() {
+		this.name = "OSSUARY";
+		this.handle = "eight legs of inverse kinematics . an orb web . a moth that came too close";
+		this.replay = 23.5;
+		auto& pal = this.pal;
+		// the vault: three chord hues, each five steps of the creature's warm aura by sixteen levels of light
+		SK_BACK = pal.size();
+		var vault = [52.0, 60.0, 112.0, 72.0, 52.0, 110.0, 40.0, 72.0, 104.0];
+		for (var hue = 0; hue < 3; ++hue) {
+			for (var warm = 0; warm < 5; ++warm) {
+				for (var level = 0; level < 16; ++level) {
+					var f = level / 15.0;
+					pal.add(4.0 + vault[hue * 3] * f + warm * 16.0, 4.0 + vault[hue * 3 + 1] * f + warm * 2.0, 9.0 + vault[hue * 3 + 2] * f + warm * 4.0);
+				}
+			}
+		}
+		SK_BONE = pal.ramp(12, 26.0, 20.0, 16.0, 250.0, 238.0, 206.0);
+		SK_CHIT = pal.size();
+		var shell = [235.0, 40.0, 90.0, 150.0, 70.0, 255.0, 40.0, 230.0, 210.0];
+		for (var band = 0; band < 3; ++band) {
+			for (var k = 0; k < 12; ++k) {
+				var f = k / 11.0;
+				var c = f * f * (85.0 / 100.0) + f * (15.0 / 100.0);
+				var wh = f > 0.8 ? (f - 0.8) * 3.5 : 0.0;
+				var r = 5.0 + shell[band * 3] * c;
+				var g = 2.0 + shell[band * 3 + 1] * c;
+				var b = 7.0 + shell[band * 3 + 2] * c;
+				pal.add(r + (255.0 - r) * wh, g + (255.0 - g) * wh, b + (255.0 - b) * wh);
+			}
+		}
+		// the eyes and the crown: three steps of dead ember, four of fire, then white
+		SK_EYE = pal.size();
+		pal.add(34.0, 12.0, 10.0);
+		pal.add(96.0, 16.0, 8.0);
+		pal.add(160.0, 22.0, 8.0);
+		pal.ramp(4, 220.0, 30.0, 10.0, 255.0, 250.0, 190.0);
+		pal.add(255.0, 255.0, 255.0);
+		SK_MARK = pal.ramp(6, 90.0, 0.0, 8.0, 255.0, 200.0, 60.0);
+		SK_SPARK = pal.size();
+		for (var k = 0; k < 8; ++k) {
+			var f = k / 7.0;
+			pal.add(90.0 + 165.0 * f, 8.0 + 120.0 * f * f + 120.0 * f * f * f * f, 4.0 + 40.0 * f * f * f + 180.0 * f * f * f * f * f * f);
+		}
+		SK_GEM = pal.size();
+		for (var k = 0; k < 8; ++k) {
+			var f = k / 7.0;
+			var wh = f > 0.75 ? (f - 0.75) * 3.2 : 0.0;
+			var r = 40.0 + 215.0 * f;
+			var g = 0.0 + 30.0 * f * f;
+			var b = 12.0 + 50.0 * f * f;
+			pal.add(r + (255.0 - r) * wh, g + (255.0 - g) * wh, b + (255.0 - b) * wh);
+		}
+		// the moth's wing tones: gold, umber, the eyespot's black ring, cyan iris, pupil, violet margin, magenta iris
+		SK_WING = pal.size();
+		var tones = [255.0, 186.0, 64.0, 120.0, 58.0, 28.0, 34.0, 10.0, 34.0, 60.0, 235.0, 255.0, 255.0, 245.0, 255.0, 160.0, 70.0, 230.0, 255.0, 50.0, 200.0];
+		for (var tone = 0; tone < 7; ++tone) {
+			for (var l = 0; l < 8; ++l) {
+				var f = (l + 1) / 8.0;
+				var k = 0.1 + 0.9 * f;
+				pal.add(tones[tone * 3] * k, tones[tone * 3 + 1] * k, tones[tone * 3 + 2] * k);
+			}
+		}
+		SK_FUR = pal.ramp(8, 22.0, 12.0, 8.0, 236.0, 196.0, 150.0);
+		SK_COCOON = pal.gradient(10, [[16.0, 12.0, 28.0], [110.0, 100.0, 150.0], [230.0, 226.0, 248.0], [255.0, 255.0, 255.0]]);
+		// silk: eight iridescent hues, six levels each
+		SK_SILK = pal.size();
+		for (var hq = 0; hq < 8; ++hq) {
+			var c = gfx.rainbow_rgb(hq * (7854.0 / 10000.0) + 0.3);
+			var cr = c[0] * (12.0 / 100.0) + 196.0;
+			var cg = c[1] * (12.0 / 100.0) + 204.0;
+			var cb = c[2] * (12.0 / 100.0) + 222.0;
+			for (var l = 0; l < 6; ++l) {
+				var f = 0.14 + (86.0 / 100.0) * (l + 1) / 6.0;
+				pal.add(cr * f, cg * f, cb * f);
+			}
+		}
+		for (var i = 0; i < 8; ++i) {
+			this.footx.push_back(0.0); this.footy.push_back(0.0); this.footz.push_back(0.0);
+			this.fromx.push_back(0.0); this.fromy.push_back(0.0); this.fromz.push_back(0.0);
+			this.tox.push_back(0.0); this.toy.push_back(0.0); this.toz.push_back(0.0);
+			this.stept.push_back(-1.0);
+		}
+		for (var i = 0; i < this.np; ++i) {
+			this.ppx.push_back(0.0); this.ppy.push_back(0.0); this.ppz.push_back(0.0);
+			this.pvx.push_back(0.0); this.pvy.push_back(0.0); this.pvz.push_back(0.0);
+			this.plife.push_back(0.0); this.prate.push_back(1.0);
+		}
+		this.plan_web();
+	}
+
+	def length_bars() { return 12; }
+
+	def hit_times() { return [(3871.0 / 1000.0), 7.742, 11.613, 15.484, 19.355]; }
+	def hit_levels() { return [1, 1, 2, 1, 2]; }
+
+	// 0 until the hunter turns from the cocoon to the viewer, then 1
+	def facing(t) { return this.smooth((t - this.t_face) / 1.2); }
+	// 0 before the stalk, rising through bar 9 to 1 at the lunge
+	def stalk(t) { return this.smooth((t - this.t_stalk) / (this.t_lunge - this.t_stalk)); }
+	// the lunge itself, 1 from just after bar 10's downbeat on
+	def lunge(t) { return this.smooth((t - this.t_lunge + 0.06) / 0.22); }
+	// the flare of the waking: 1 on bar 2's downbeat, dying away
+	def flare(t) { return t < this.t_wake ? 0.0 : exp((this.t_wake - t) * 2.5); }
+	// how wide the jaw gapes: a yawn on waking, the lunge, and a snap on every kick of the close-up
+	def gape(t) {
+		var result = 0.6 * this.flare(t);
+		var s = t - this.t_lunge;
+		if (s > -0.1) { result = exp(0.0 - (s > 0.0 ? s : 0.0) * 2.2) + 0.35 * SK_KICK; }
+		return result > 1.2 ? 1.2 : result;
+	}
+
+	// the music the scene answers: the last kick's age and envelope, the chord's hue in the vault, the hits in the lens
+	def hear(t) {
+		if (this.cue.is_var_undef()) { return; }
+		auto& cue = this.cue;
+		var k = cue.kick.last(t / MUSIC_STEP + 0.0001);
+		SK_KAGE = k < 0 ? 9.0 : t - cue.kick.at[k] * MUSIC_STEP;
+		SK_KICK = cue.kick_env(t);
+		SK_BACK_HUE = cue.chord(t) % 3 * 80;
+		var punch = cue.hit(t);
+		SK_PUNCH = punch * punch;
+		SK_ZOOM = 0.5 * (1.0 - SK_PUNCH * (12.0 / 100.0) - SK_KICK * 0.015 * SK_WAKE);
+	}
+
+	def smooth(u) {
+		var c = u < 0.0 ? 0.0 : (u > 1.0 ? 1.0 : u);
+		return c * c * (3.0 - 2.0 * c);
+	}
+
+	def turn_toward(from, to, w) {
+		var d = to - from;
+		d = d - (62831853.0 / 10000000.0) * floor((d + (31415927.0 / 10000000.0)) / (62831853.0 / 10000000.0));
+		return from + d * w;
+	}
+
+	// where a foot wants to stand: on the web about the body, the front pairs raised off it at the viewer in the stalk and the leap
+	def rest_foot(i, lead) {
+		var side = i < 4 ? 1.0 : -1.0;
+		var j = i % 4;
+		var reach = (this.legreach[j] + lead) * this.stance;
+		var span = side * (78.0 / 100.0) * this.stance;
+		this.tox[i] = this.bx + this.fx * reach + this.rx * span;
+		this.toy[i] = this.by + this.fy * reach + this.ry * span;
+		this.toz[i] = this.bz * this.leglift[j] + this.stalk(this.tt) * (j == 0 ? 0.3 : 0.0);
+	}
+
+	def jitter(n) { return (this.rng.next(n * 2 + 1) - n) / (n * 1.0); }
+
+	// the web stands in the plane z = 0 about the origin, facing +z: the spokes get their angles and the capture spiral its
+	// polygon, one vertex where it crosses each spoke, winding in from the rim; lay_turn is how far round from lay_from,
+	// in turns, the edge into each vertex begins
+	def plan_web() {
+		var nspoke = this.nspoke;
+		var web_rim = this.web_rim;
+		auto& spoke_ang = this.spoke_ang;
+		for (var k = 0; k < nspoke; ++k) {
+			var jit = k == nspoke / 2 ? 0.0 : this.jitter(100) * 0.09;
+			spoke_ang.push_back(-(15707963.0 / 10000000.0) + k * (62831853.0 / 10000000.0) / nspoke + jit);
+		}
+		var n = 4 * nspoke + nspoke / 2 + 1;
+		for (var i = 0; i < n; ++i) {
+			var r = web_rim - (web_rim - 0.5) * i / (n - 1.0);
+			var a = spoke_ang[i % nspoke] + (62831853.0 / 10000000.0) * (i / nspoke);
+			this.spa.push_back(r * cos(a));
+			this.spb.push_back(r * sin(a));
+			var turn = (spoke_ang[(i + nspoke - 1) % nspoke] - this.lay_from) / (62831853.0 / 10000000.0);
+			this.lay_turn.push_back(turn - floor(turn));
+		}
+	}
+
+	// how far round the web the spiral is laid at time t, in turns: every winding grows at once behind the running
+	// spider, and the lap closes, a spoke past full circle, on bar 4
+	def laid(t) { return (t - this.t_spiral0) / (this.t_spiral1 - this.t_spiral0) * (1.0 + 1.0 / this.nspoke); }
+
+	// the spiral's run at time t, into qa, qb: out from the hub, round with the spinnerets trailing over the laid edge, home
+	def lap_point(t) {
+		var r = this.smooth((t - this.t_out) / 0.5) * (1.0 - this.smooth((t - this.t_spiral1) / (this.t_home - this.t_spiral1)));
+		var a = this.lay_from + this.lay_lead + (62831853.0 / 10000000.0) * this.laid(t);
+		this.qa = r * cos(a);
+		this.qb = r * sin(a);
+	}
+
+	def lap_heading(t) {
+		this.lap_point(t - 0.04);
+		var a = this.qa;
+		var b = this.qb;
+		this.lap_point(t + 0.04);
+		return atan2(this.qb - b, this.qa - a);
+	}
+
+	// where it is on the web (pa, pb) and which way it faces (psi), at time t
+	def plane_path(t) {
+		if (t < this.t_out) {
+			this.pa = 0.0; this.pb = 0.0;
+			this.psi = (15707963.0 / 10000000.0);
+			return;
+		}
+		if (t < this.t_home) {
+			this.psi = this.turn_toward((15707963.0 / 10000000.0), this.lap_heading(t), this.smooth((t - this.t_out) / (15.0 / 100.0)));
+			this.lap_point(t);
+			this.pa = this.qa; this.pb = this.qb;
+			return;
+		}
+		var moth_a = this.moth_a;
+		var moth_b = this.moth_b;
+		var ml = sqrt(moth_a * moth_a + moth_b * moth_b);
+		var da = moth_a / ml; var db = moth_b / ml;
+		var toward = atan2(db, da);
+		if (t < this.t_rush) {
+			this.pa = 0.0; this.pb = 0.0;
+			this.psi = this.turn_toward(this.lap_heading(this.t_home - 0.05), (15707963.0 / 10000000.0), this.smooth((t - this.t_home) / 0.6));
+			if (t > this.t_impact) { this.psi = this.turn_toward(this.psi, toward, this.smooth((t - this.t_impact) / (this.t_rush - this.t_impact))); }
+			return;
+		}
+		var reach = ml - (85.0 / 100.0);
+		if (t < this.t_reach) {
+			reach = reach * this.smooth((t - this.t_rush) / (this.t_reach - this.t_rush));
+			this.psi = toward;
+		} else if (t < this.t_turn) {
+			var e = this.smooth((t - this.t_reach) / (this.t_turn - this.t_reach));
+			reach = reach - 0.11 * e;
+			this.psi = toward + (31415927.0 / 10000000.0) * e;
+		} else {
+			// it works the cocoon, then turns head-down and prowls across the hub at the viewer below
+			var busy = 1.0 - this.smooth((t - this.t_wrap1 + 0.3) / 0.3);
+			var prowl = this.smooth((t - this.t_face - 0.3) / (this.t_lunge - this.t_face - 0.3));
+			reach = reach - 0.11 + 0.05 * sin(t * 8.0) * busy;
+			this.psi = this.turn_toward(toward + (31415927.0 / 10000000.0) + 0.08 * sin(t * 5.0) * busy, -(15707963.0 / 10000000.0), this.facing(t));
+			this.pa = da * reach * (1.0 - prowl);
+			this.pb = db * reach * (1.0 - prowl) - 0.35 * prowl;
+			return;
+		}
+		this.pa = da * reach; this.pb = db * reach;
+	}
+
+	def web_motion(t, dt) {
+		var opa = this.pa; var opb = this.pb;
+		this.plane_path(t);
+		this.fx = cos(this.psi); this.fy = sin(this.psi); this.fz = 0.0;
+		this.rx = -this.fy; this.ry = this.fx; this.rz = 0.0;
+		this.bx = this.pa; this.by = this.pb; this.bz = 0.0;
+		var ma = this.pa - opa; var mb = this.pb - opb;
+		this.spd = dt > 0.0 ? sqrt(ma * ma + mb * mb) / dt : 0.0;
+	}
+
+	// how bright the strike's ring makes the silk at (a, b): a front running out from the moth through the threads
+	def ring_light(a, b) {
+		var s = this.tt - this.t_impact;
+		if (s < 0.0 || s > 1.6) { return 0.0; }
+		var ma = a - this.moth_a; var mb = b - this.moth_b;
+		var behind = s * this.ring_speed - sqrt(ma * ma + mb * mb);
+		if (behind < 0.0 || behind > 0.7) { return 0.0; }
+		return (1.0 - behind / 0.7) * 1.3 / (1.0 + s * 1.2);
+	}
+
+	// how far a point of the web (a, b) stands off its plane: the spider's weight, a breeze, the moth's strike
+	// ringing out through the threads and its struggle
+	def sag(a, b) {
+		var tt = this.tt;
+		var da = a - this.pa; var db = b - this.pb;
+		var result = -(12.0 / 100.0) / (1.0 + (da * da + db * db) * 3.0);
+		result += (35.0 / 1000.0) * sin(a * 0.8 + tt * 1.1) * sin(b * 0.7 - tt * 0.9 + 0.5) * (a * a + b * b) * (12.0 / 100.0);
+		if (tt > this.t_impact) {
+			var ma = a - this.moth_a; var mb = b - this.moth_b;
+			var dist = sqrt(ma * ma + mb * mb);
+			var s = tt - this.t_impact;
+			var front = s * this.ring_speed - dist;
+			if (front > 0.0) { result += (34.0 / 100.0) / (1.0 + s * s * 1.6) * sin(front * 4.5) / (1.0 + dist * 0.6); }
+			if (tt < this.t_wrap1) {
+				var fight = 0.07 * (1.0 - this.coc) * (0.55 + 0.45 * sin(tt * 2.3));
+				result += fight * sin(tt * 21.0 - dist * 4.0) / (1.0 + dist * 2.5);
+			}
+		}
+		return result;
+	}
+
+	// a point of the web in the world, into wx, wy, wz
+	def web_point(a, b) {
+		this.wx = a;
+		this.wy = b;
+		this.wz = this.sag(a, b);
+	}
+
+	def bezier(from, via, to, u) {
+		return from * (1.0 - u) * (1.0 - u) + via * 2.0 * u * (1.0 - u) + to * u * u;
+	}
+
+	// the moth at time t: it flutters in along a curve from off the frame's left, strikes the web and sticks, beats its
+	// wings against the silk, then folds them as the cocoon closes and spins
+	def moth_pose(t) {
+		if (t < this.t_impact) {
+			var u = (t - this.t_moth) / (this.t_impact - this.t_moth);
+			u = u < 0.0 ? 0.0 : u;
+			var a = this.bezier(-2.7, -0.9, this.moth_a, u);
+			var b = this.bezier(0.6, (115.0 / 100.0), this.moth_b, u);
+			var n = this.bezier(1.4, 0.9, 0.06, u);
+			var va = this.bezier(-2.7, -0.9, this.moth_a, u + 0.02) - a;
+			var vb = this.bezier(0.6, (115.0 / 100.0), this.moth_b, u + 0.02) - b;
+			var vn = this.bezier(1.4, 0.9, 0.06, u + 0.02) - n;
+			var flutter = 1.0 - u;
+			this.mox = a + flutter * 0.16 * sin(t * 6.3);
+			this.moy = b + flutter * 0.18 * sin(t * 8.9 + 1.0);
+			this.moz = n + flutter * 0.14 * sin(t * 5.2 + 2.0);
+			var vl = sqrt(va * va + vb * vb + vn * vn) + 0.000001;
+			this.mfx = va / vl; this.mfy = vb / vl + 0.5; this.mfz = vn / vl;
+			this.flap = (95.0 / 100.0) * sin(t * 31.4);
+			this.wsc = 1.0; this.coc = 0.0; this.spin = 0.0;
+		} else {
+			this.web_point(this.moth_a, this.moth_b);
+			this.mox = this.wx; this.moy = this.wy; this.moz = this.wz + 0.09;
+			this.mfx = (34.0 / 100.0); this.mfy = (94.0 / 100.0); this.mfz = 0.0;
+			this.coc = this.smooth((t - this.t_wrap0) / (this.t_wrap1 - (15.0 / 100.0) - this.t_wrap0));
+			this.spin = t > this.t_wrap0 ? ((t < this.t_wrap1 ? t : this.t_wrap1) - this.t_wrap0) * 6.0 : 0.0;
+			var beat = sin(t * 15.0);
+			this.flap = (1.0 - this.coc) * 0.55 * (beat > 0.0 ? beat : 0.0) * (0.6 + 0.4 * sin(t * 2.3)) + this.coc * 1.3;
+			this.wsc = 1.0 - 0.7 * this.coc;
+		}
+		var mfx = this.mfx; var mfy = this.mfy; var mfz = this.mfz;
+		var ml = 1.0 / sqrt(mfx * mfx + mfy * mfy + mfz * mfz);
+		mfx *= ml; mfy *= ml; mfz *= ml;
+		var mux = 0.0 - mfx * mfz; var muy = 0.0 - mfy * mfz; var muz = 1.0 - mfz * mfz;
+		var ul = 1.0 / sqrt(mux * mux + muy * muy + muz * muz + 0.0000001);
+		mux *= ul; muy *= ul; muz *= ul;
+		var mrx = muy * mfz - muz * mfy;
+		var mry = muz * mfx - mux * mfz;
+		var mrz = mux * mfy - muy * mfx;
+		if (t > this.t_impact) {
+			// the struggle jerks it about its spine; the wrapping rolls it
+			var roll = this.spin * (12.0 / 100.0) + 0.3 * (1.0 - this.coc) * sin(t * 9.0);
+			var c = cos(roll); var s = sin(roll);
+			var nux = mux * c + mrx * s; var nuy = muy * c + mry * s; var nuz = muz * c + mrz * s;
+			mrx = mrx * c - mux * s; mry = mry * c - muy * s; mrz = mrz * c - muz * s;
+			mux = nux; muy = nuy; muz = nuz;
+		}
+		this.mfx = mfx; this.mfy = mfy; this.mfz = mfz;
+		this.mux = mux; this.muy = muy; this.muz = muz;
+		this.mrx = mrx; this.mry = mry; this.mrz = mrz;
+	}
+
+	def spawn(x, y, z, vx, vy, vz, life) {
+		var i = this.pnext;
+		this.pnext = (this.pnext + 1) % this.np;
+		this.ppx[i] = x; this.ppy[i] = y; this.ppz[i] = z;
+		this.pvx[i] = vx; this.pvy[i] = vy; this.pvz[i] = vz;
+		this.plife[i] = 1.0;
+		this.prate[i] = 1.0 / life;
+	}
+
+	// an ember off the ring of the crown, thrown outward at the given speed
+	def crown_ember(speed) {
+		var a = this.rng.next(628) * 0.01;
+		var ca = cos(a) * 0.2;
+		var sa = sin(a) * 0.2;
+		var fx = this.fx; var fy = this.fy; var rx = this.rx; var ry = this.ry;
+		var cx = this.bx + fx * (0.01 + ca * (66.0 / 100.0)) + rx * sa;
+		var cy = this.by + fy * (0.01 + ca * (66.0 / 100.0)) + ry * sa;
+		this.spawn(cx, cy, this.bz + 0.6 + ca * 0.75, (fx * ca * (66.0 / 100.0) + rx * sa) * speed, 0.5 + (fy * ca * (66.0 / 100.0) + ry * sa) * speed, 0.3 + ca * 0.75 * speed, 0.45 + this.rng.next(40) * 0.01);
+	}
+
+	def reached(mark, dt) { return this.tt >= mark && this.tt - dt < mark; }
+
+	// embers leave the crown once it burns, more on the kick and many when the jaw gapes; the waking and the lunge throw
+	// a burst of them, the strike a puff of scales off the moth
+	def update_particles(dt) {
+		this.spawn_acc += dt * 5.0 * SK_WAKE * (0.3 + SK_KICK + this.gape(this.tt) * 8.0);
+		while (this.spawn_acc >= 1.0) {
+			this.spawn_acc -= 1.0;
+			this.crown_ember(1.0);
+		}
+		if (this.reached(this.t_wake, dt) || this.reached(this.t_lunge, dt)) {
+			for (var k = 0; k < 26; ++k) { this.crown_ember(5.0); }
+		}
+		if (this.reached(this.t_impact, dt)) {
+			for (var k = 0; k < 22; ++k) {
+				var a = this.rng.next(628) * 0.01;
+				var speed = 0.5 + this.rng.next(100) * 0.012;
+				this.spawn(this.moth_a, this.moth_b, (12.0 / 100.0), cos(a) * speed, sin(a) * speed, 0.3 + this.jitter(100) * 0.3, 0.5 + this.rng.next(50) * 0.01);
+			}
+		}
+		var drag = 1.0 - dt * 1.4;
+		auto& ppx = this.ppx; auto& ppy = this.ppy; auto& ppz = this.ppz;
+		auto& pvx = this.pvx; auto& pvy = this.pvy; auto& pvz = this.pvz;
+		auto& plife = this.plife; auto& prate = this.prate;
+		var np = this.np;
+		for (var i = 0; i < np; ++i) {
+			if (plife[i] <= 0.0) { continue; }
+			pvx[i] = pvx[i] * drag;
+			pvy[i] = (pvy[i] + 0.7 * dt) * drag;
+			pvz[i] = pvz[i] * drag;
+			ppx[i] = ppx[i] + pvx[i] * dt;
+			ppy[i] = ppy[i] + pvy[i] * dt;
+			ppz[i] = ppz[i] + pvz[i] * dt;
+			plife[i] = plife[i] - dt * prate[i];
+		}
+	}
+
+	def update(t, dt) {
+		this.tt = t;
+		SK_T = t;
+		SK_WAKE = this.smooth((t - this.t_wake + 0.05) / 0.35);
+		this.hear(t);
+		this.stance = 0.5 + 0.5 * this.smooth((t - this.t_wake) / 0.3);
+		this.web_motion(t, dt);
+		var spring = this.lunge(t);
+		if (spring > 0.0 && this.placed) {
+			var lx = this.ex - this.bx; var ly = this.ey - this.by; var lz = this.ez - this.bz;
+			var ll = 0.75 * spring / sqrt(lx * lx + ly * ly + lz * lz + 0.000001);
+			this.bx += lx * ll; this.by += ly * ll; this.bz += lz * ll;
+		}
+		if (!this.placed) {
+			for (var i = 0; i < 8; ++i) {
+				this.rest_foot(i, 0.0);
+				this.footx[i] = this.tox[i]; this.footy[i] = this.toy[i]; this.footz[i] = this.toz[i];
+			}
+		}
+		this.walk(dt);
+		this.update_particles(dt);
+		if (t > this.t_moth) { this.moth_pose(t); }
+		this.aim_camera(t, dt);
+		this.placed = true;
+	}
+
+	// the tetrapod gait: a foot steps when its rest spot has run off, one group at a time; at speed it scuttles, with
+	// quicker steps that lead the body and both groups free
+	def walk(dt) {
+		var scuttle = this.spd > 1.5;
+		var step_time = scuttle ? 0.08 : 0.13;
+		var lead = this.spd * 0.1;
+		lead = lead > 0.45 ? 0.45 : lead;
+		var stepping_a = false;
+		var stepping_b = false;
+		auto& stept = this.stept;
+		auto& footx = this.footx; auto& footy = this.footy; auto& footz = this.footz;
+		auto& fromx = this.fromx; auto& fromy = this.fromy; auto& fromz = this.fromz;
+		auto& tox = this.tox; auto& toy = this.toy; auto& toz = this.toz;
+		for (var i = 0; i < 8; ++i) {
+			if (stept[i] >= 0.0) {
+				if ((i + i / 4) % 2 == 0) { stepping_a = true; } else { stepping_b = true; }
+			}
+		}
+		for (var i = 0; i < 8; ++i) {
+			var group_a = (i + i / 4) % 2 == 0;
+			if (stept[i] >= 0.0) {
+				stept[i] = stept[i] + dt / step_time;
+				this.rest_foot(i, lead);
+				if (stept[i] >= 1.0) {
+					stept[i] = -1.0;
+					footx[i] = tox[i]; footy[i] = toy[i]; footz[i] = toz[i];
+				} else {
+					var e = stept[i];
+					footx[i] = fromx[i] + (tox[i] - fromx[i]) * e;
+					footy[i] = fromy[i] + (toy[i] - fromy[i]) * e;
+					footz[i] = fromz[i] + (toz[i] - fromz[i]) * e + sin(e * 3.14159265) * 0.16;
+				}
+			} else {
+				this.rest_foot(i, 0.0);
+				var ddx = footx[i] - tox[i];
+				var ddy = footy[i] - toy[i];
+				var ddz = footz[i] - toz[i];
+				var other_moving = group_a ? stepping_b : stepping_a;
+				if ((scuttle || !other_moving) && ddx * ddx + ddy * ddy + ddz * ddz > 0.05) {
+					stept[i] = 0.0;
+					fromx[i] = footx[i]; fromy[i] = footy[i]; fromz[i] = footz[i];
+					if (group_a) { stepping_a = true; } else { stepping_b = true; }
+				}
+			}
+		}
+	}
+
+	// the camera: close on the sleeper, back for the whole web while it is thrown and the moth flies in, in on the hunter
+	// and its catch, then round in front of the skull, below the line of its gaze (the face is reared 0.85 radians off
+	// the body, the camera stands 0.51 up); the lunge lifts the aim up the face, which keeps the crown in the frame
+	def aim_camera(t, dt) {
+		var fx = this.fx; var fy = this.fy;
+		var placed = this.placed;
+		var hx = this.bx; var hy = this.by; var hz = this.bz + 0.2;
+		var back = this.smooth((t - this.t_wake - 0.3) / 0.9);
+		var near = this.smooth((t - this.t_impact - 0.25) / (this.t_reach - this.t_impact - 0.25)) * (1.0 - this.facing(t));
+		var creep = this.stalk(t);
+		var onto = this.facing(t) * 0.6 + creep * 0.4;
+		var tgx = hx * (1.0 - 0.75 * back);
+		var tgy = hy * (1.0 - 0.75 * back);
+		var tgz = hz * (1.0 - back);
+		if (t > this.t_moth) {
+			tgx += ((hx + this.mox) * 0.5 - tgx) * near;
+			tgy += ((hy + this.moy) * 0.5 - tgy) * near;
+			tgz += ((hz + this.moz) * 0.5 - tgz) * near;
+		}
+		tgx += (hx + fx * (34.0 / 100.0) - tgx) * onto;
+		tgy += (hy + fy * (34.0 / 100.0) - tgy) * onto;
+		tgz += (hz - tgz) * onto;
+		var rise = (12.0 / 100.0) * this.lunge(t);
+		tgx -= fx * 0.7513 * rise;
+		tgy -= fy * 0.7513 * rise;
+		tgz += (66.0 / 100.0) * rise;
+		var dist = 2.3 - 0.3 * (t < this.t_wake ? t / this.t_wake : 1.0);
+		dist += (3.5 - dist) * back;
+		dist += (2.1 - dist) * near;
+		dist += (2.75 - dist) * this.facing(t);
+		dist = dist - creep * 0.53 - this.lunge(t) * 0.53;
+		var oa = 0.1 + (12.0 / 100.0) * sin(t * 0.19);
+		var dx = sin(oa);
+		var dy = (12.0 / 100.0) + 0.05 * sin(t * 0.31);
+		var dz = cos(oa);
+		var dn = sqrt(dx * dx + dy * dy + dz * dz);
+		dx += (fx * (8712.0 / 10000.0) * dn - dx) * onto;
+		dy += (fy * (8712.0 / 10000.0) * dn - dy) * onto;
+		dz += (0.4908 * dn - dz) * onto;
+		var dl = dist / sqrt(dx * dx + dy * dy + dz * dz);
+		var kc = placed ? dt * (2.8 + 9.0 * this.lunge(t) * (1.0 - this.smooth((t - this.t_lunge - 0.5) / 0.5))) : 1.0;
+		kc = kc > 1.0 ? 1.0 : kc;
+		this.ex += (tgx + dx * dl - this.ex) * kc; this.ey += (tgy + dy * dl - this.ey) * kc; this.ez += (tgz + dz * dl - this.ez) * kc;
+		var kl = placed ? dt * 4.0 : 1.0;
+		kl = kl > 1.0 ? 1.0 : kl;
+		this.lkx += (tgx - this.lkx) * kl; this.lky += (tgy - this.lky) * kl; this.lkz += (tgz - this.lkz) * kl;
+		var ku = placed ? dt * 2.2 : 1.0;
+		ku = ku > 1.0 ? 1.0 : ku;
+		this.cux += (0.0 - fx * 0.7513 * onto - this.cux) * ku;
+		this.cuy += (1.0 - onto - fy * 0.7513 * onto - this.cuy) * ku;
+		this.cuz += ((66.0 / 100.0) * onto - this.cuz) * ku;
+	}
+
+	def capsule(i, ax, ay, az, bx2, by2, bz2, r) {
+		var dx = bx2 - ax;
+		var dy = by2 - ay;
+		var dz = bz2 - az;
+		SK_CAX[i] = ax; SK_CAY[i] = ay; SK_CAZ[i] = az;
+		SK_CDX[i] = dx; SK_CDY[i] = dy; SK_CDZ[i] = dz;
+		SK_CID[i] = 1.0 / (dx * dx + dy * dy + dz * dz + 0.000001);
+		SK_CR[i] = r;
+		SK_CMX[i] = ax + dx * 0.5; SK_CMY[i] = ay + dy * 0.5; SK_CMZ[i] = az + dz * 0.5;
+		SK_CB[i] = sqrt(dx * dx + dy * dy + dz * dz) * 0.5 + r;
+	}
+
+	def glow(i, x, y, z, r) {
+		SK_GX[i] = x; SK_GY[i] = y; SK_GZ[i] = z; SK_GR[i] = r;
+	}
+
+	// a curved horn: base, a bend out and back, a tip up and back
+	def horn(i, side) {
+		var bx0 = SK_HX + SK_PUX * 0.16 + SK_PRX * side * (12.0 / 100.0) - SK_PFX * 0.04;
+		var by0 = SK_HY + SK_PUY * 0.16 + SK_PRY * side * (12.0 / 100.0) - SK_PFY * 0.04;
+		var bz0 = SK_HZ + SK_PUZ * 0.16 + SK_PRZ * side * (12.0 / 100.0) - SK_PFZ * 0.04;
+		var mx = bx0 + SK_PRX * side * 0.2 + SK_PUX * (12.0 / 100.0) - SK_PFX * (12.0 / 100.0);
+		var my = by0 + SK_PRY * side * 0.2 + SK_PUY * (12.0 / 100.0) - SK_PFY * (12.0 / 100.0);
+		var mz = bz0 + SK_PRZ * side * 0.2 + SK_PUZ * (12.0 / 100.0) - SK_PFZ * (12.0 / 100.0);
+		var tx = mx + SK_PRX * side * 0.04 + SK_PUX * 0.26 - SK_PFX * 0.2;
+		var ty = my + SK_PRY * side * 0.04 + SK_PUY * 0.26 - SK_PFY * 0.2;
+		var tz = mz + SK_PRZ * side * 0.04 + SK_PUZ * 0.26 - SK_PFZ * 0.2;
+		this.capsule(i, bx0, by0, bz0, mx, my, mz, 0.05);
+		this.capsule(i + 1, mx, my, mz, tx, ty, tz, 0.028);
+		return i + 2;
+	}
+
+	// a leg from hip to foot: femur and tibia by two-bone IK to an ankle held above the foot, then the tarsus
+	def leg(ci, i, hx, hy, hz, side) {
+		var ux = this.ux; var uy = this.uy; var uz = this.uz;
+		var rx = this.rx; var ry = this.ry; var rz = this.rz;
+		var l1 = this.l1; var l2 = this.l2;
+		var px = this.footx[i]; var py = this.footy[i]; var pz = this.footz[i];
+		var hdx = px - hx; var hdy = py - hy; var hdz = pz - hz;
+		var hu = hdx * ux + hdy * uy + hdz * uz;
+		hdx -= ux * hu; hdy -= uy * hu; hdz -= uz * hu;
+		var hl = 1.0 / sqrt(hdx * hdx + hdy * hdy + hdz * hdz + 0.000001);
+		hdx *= hl; hdy *= hl; hdz *= hl;
+		var ax = px + ux * 0.13 - hdx * 0.06;
+		var ay = py + uy * 0.13 - hdy * 0.06;
+		var az = pz + uz * 0.13 - hdz * 0.06;
+		var dx = ax - hx;
+		var dy = ay - hy;
+		var dz = az - hz;
+		var d = sqrt(dx * dx + dy * dy + dz * dz);
+		var dn = d < 0.0001 ? 0.0001 : d;
+		dx /= dn; dy /= dn; dz /= dn;
+		var dmax = (l1 + l2) * 0.995;
+		var dc = d > dmax ? dmax : d;
+		dc = dc < 0.08 ? 0.08 : dc;
+		var a = (l1 * l1 - l2 * l2 + dc * dc) / (2.0 * dc);
+		var hh = l1 * l1 - a * a;
+		hh = hh < 0.0 ? 0.0 : sqrt(hh);
+		var bux = ux + rx * side * 0.35;
+		var buy = uy + ry * side * 0.35;
+		var buz = uz + rz * side * 0.35;
+		var bd = bux * dx + buy * dy + buz * dz;
+		bux -= dx * bd; buy -= dy * bd; buz -= dz * bd;
+		var bl = 1.0 / sqrt(bux * bux + buy * buy + buz * buz + 0.0000001);
+		bux *= bl; buy *= bl; buz *= bl;
+		var kx = hx + dx * a + bux * hh;
+		var ky = hy + dy * a + buy * hh;
+		var kz = hz + dz * a + buz * hh;
+		var tx = hx + dx * dc;
+		var ty = hy + dy * dc;
+		var tz = hz + dz * dc;
+		this.capsule(ci, hx, hy, hz, kx, ky, kz, 0.042);
+		this.capsule(ci + 1, kx, ky, kz, tx, ty, tz, 0.03);
+		this.capsule(ci + 2, tx, ty, tz, px, py, pz, (18.0 / 1000.0));
+		this.glow(3 + i, kx, ky, kz, 0.027 + 0.006 * sin(this.tt * 7.0 + i));
+		return ci + 3;
+	}
+
+	def render(grid) {
+		// the rays trace on a grid coarser than the picture's and the trace scales up to it, coarser still where the
+		// creature fills the frame and every ray is dear; the silk and the embers draw over it at full size
+		var tt = this.tt;
+		var w = this.w;
+		var h = this.h;
+		var bx = this.bx; var by = this.by; var bz = this.bz;
+		var fx = this.fx; var fy = this.fy; var fz = this.fz;
+		var ux = this.ux; var uy = this.uy; var uz = this.uz;
+		var rx = this.rx; var ry = this.ry; var rz = this.rz;
+		var glare = this.facing(tt) * 0.3 + this.stalk(tt) * 0.7;
+		var close = 1.0 - this.smooth((tt - this.t_wake - 0.3) / 0.9);
+		var caught = this.smooth((tt - this.t_impact - 0.25) / 0.5);
+		close = close > caught ? close : caught;
+		var trace_k = sqrt((6400.0 - close * 1800.0) * (1.0 - SK_PUNCH * 0.25) / (w * h));
+		trace_k = trace_k > 1.0 ? 1.0 : trace_k;
+		var tw = itrunc(w * trace_k);
+		var th = itrunc(h * trace_k);
+		SK_W = tw;
+		SK_H = th;
+		SK_FLICK = 0.7 * sin(tt * 17.0) * sin(tt * 5.3) + 1.5 * this.flare(tt);
+		if (tt > this.t_wrap1) { SK_FLICK = SK_FLICK * 0.4 + 0.9 + glare * 1.4; }
+		var bob = 0.2 + 0.012 * sin(tt * 1.6) * (1.0 - SK_WAKE) + (18.0 / 1000.0) * sin(tt * 11.0) * SK_WAKE;
+		var cx = bx + ux * bob;
+		var cy = by + uy * bob;
+		var cz = bz + uz * bob;
+		// the sleeper's skull hangs level with its body; awake it rears back to face the viewer
+		var pitch = 0.3 + 0.55 * this.smooth((tt - this.t_wake) / 0.4);
+		var cpt = cos(pitch); var spt = sin(pitch);
+		var hfx = fx * cpt + ux * spt; var hfy = fy * cpt + uy * spt; var hfz = fz * cpt + uz * spt;
+		var hux = ux * cpt - fx * spt; var huy = uy * cpt - fy * spt; var huz = uz * cpt - fz * spt;
+		SK_PFX = hfx; SK_PFY = hfy; SK_PFZ = hfz;
+		SK_PUX = hux; SK_PUY = huy; SK_PUZ = huz;
+		SK_PRX = rx; SK_PRY = ry; SK_PRZ = rz;
+		SK_QFX = fx; SK_QFY = fy; SK_QFZ = fz;
+		SK_QUX = ux; SK_QUY = uy; SK_QUZ = uz;
+		SK_TX = cx; SK_TY = cy; SK_TZ = cz;
+		SK_AR = 0.27;
+		SK_AX = cx - fx * 0.45 + ux * (12.0 / 100.0); SK_AY = cy - fy * 0.45 + uy * (12.0 / 100.0); SK_AZ = cz - fz * 0.45 + uz * (12.0 / 100.0);
+		var nod = 0.03 * sin(tt * 2.1);
+		SK_HX = cx + fx * (34.0 / 100.0) + ux * (0.09 + nod); SK_HY = cy + fy * (34.0 / 100.0) + uy * (0.09 + nod); SK_HZ = cz + fz * (34.0 / 100.0) + uz * (0.09 + nod);
+		SK_NX = SK_HX + hfx * 0.23 - hux * 0.06; SK_NY = SK_HY + hfy * 0.23 - huy * 0.06; SK_NZ = SK_HZ + hfz * 0.23 - huz * 0.06;
+		var jaw = 0.012 * sin(tt * 6.0) + 0.1 * this.gape(tt);
+		SK_JX = SK_HX + hfx * 0.1 - hux * (0.14 + jaw); SK_JY = SK_HY + hfy * 0.1 - huy * (0.14 + jaw); SK_JZ = SK_HZ + hfz * 0.1 - huz * (0.14 + jaw);
+		SK_BCX = cx; SK_BCY = cy; SK_BCZ = cz;
+		SK_BR = 1.6;
+		var ncap = 5 + 2 + 24 + 4 + 2 + 7;
+		if (SK_CAX.size() != ncap) {
+			SK_CAX = []; SK_CAY = []; SK_CAZ = []; SK_CDX = []; SK_CDY = []; SK_CDZ = []; SK_CID = []; SK_CR = []; SK_CMX = []; SK_CMY = []; SK_CMZ = []; SK_CB = [];
+			for (var i = 0; i < ncap; ++i) {
+				SK_CAX.push_back(0.0); SK_CAY.push_back(0.0); SK_CAZ.push_back(0.0); SK_CDX.push_back(0.0); SK_CDY.push_back(0.0); SK_CDZ.push_back(0.0); SK_CID.push_back(1.0); SK_CR.push_back(0.1); SK_CMX.push_back(0.0); SK_CMY.push_back(0.0); SK_CMZ.push_back(0.0); SK_CB.push_back(1.0);
+			}
+		}
+		var nglow = 3 + 8;
+		if (SK_GX.size() != nglow) {
+			SK_GX = []; SK_GY = []; SK_GZ = []; SK_GR = [];
+			for (var i = 0; i < nglow; ++i) { SK_GX.push_back(0.0); SK_GY.push_back(0.0); SK_GZ.push_back(0.0); SK_GR.push_back(0.02); }
+		}
+		SK_NC = ncap;
+		SK_CROWN0 = ncap - 7;
+		SK_NG = nglow;
+		SK_NBONE = 5;
+		var eye = 0.03 * (1.0 + glare * 0.6);
+		SK_GLARE = glare;
+		this.glow(0, SK_HX + hfx * (175.0 / 1000.0) + hux * 0.03 + rx * 0.088, SK_HY + hfy * (175.0 / 1000.0) + huy * 0.03 + ry * 0.088, SK_HZ + hfz * (175.0 / 1000.0) + huz * 0.03 + rz * 0.088, eye);
+		this.glow(1, SK_HX + hfx * (175.0 / 1000.0) + hux * 0.03 - rx * 0.088, SK_HY + hfy * (175.0 / 1000.0) + huy * 0.03 - ry * 0.088, SK_HZ + hfz * (175.0 / 1000.0) + huz * 0.03 - rz * 0.088, eye);
+		var third = (0.024 + 0.006 * sin(tt * 3.0)) * (1.0 + glare * 0.5);
+		this.glow(2, SK_HX + hfx * 0.17 + hux * (15.0 / 100.0), SK_HY + hfy * 0.17 + huy * (15.0 / 100.0), SK_HZ + hfz * 0.17 + huz * (15.0 / 100.0), third);
+		SK_LX = SK_GX[2] * 0.4 + (SK_GX[0] + SK_GX[1]) * 0.3 + hfx * 0.1;
+		SK_LY = SK_GY[2] * 0.4 + (SK_GY[0] + SK_GY[1]) * 0.3 + hfy * 0.1;
+		SK_LZ = SK_GZ[2] * 0.4 + (SK_GZ[0] + SK_GZ[1]) * 0.3 + hfz * 0.1;
+		this.capsule(0, SK_JX - rx * 0.08, SK_JY - ry * 0.08, SK_JZ - rz * 0.08, SK_JX + rx * 0.08, SK_JY + ry * 0.08, SK_JZ + rz * 0.08, 0.05);
+		var ci = this.horn(1, 1.0);
+		ci = this.horn(ci, -1.0);
+		var fang = 0.02 * sin(tt * 6.0 + 1.0) + 0.05 * this.gape(tt);
+		for (var s = 0; s < 2; ++s) {
+			var side = s == 0 ? 1.0 : -1.0;
+			var ax = SK_JX + hfx * 0.05 + rx * side * (35.0 / 1000.0);
+			var ay = SK_JY + hfy * 0.05 + ry * side * (35.0 / 1000.0);
+			var az = SK_JZ + hfz * 0.05 + rz * side * (35.0 / 1000.0);
+			this.capsule(ci, ax, ay, az, ax + hfx * 0.07 - hux * (12.0 / 100.0) - rx * side * (0.02 + fang), ay + hfy * 0.07 - huy * (12.0 / 100.0) - ry * side * (0.02 + fang), az + hfz * 0.07 - huz * (12.0 / 100.0) - rz * side * (0.02 + fang), 0.016);
+			ci = ci + 1;
+		}
+		for (var i = 0; i < 8; ++i) {
+			var side = i < 4 ? 1.0 : -1.0;
+			var fo = this.legfo[i % 4];
+			var hx = cx + fx * fo * 0.45 + rx * side * 0.1 + ux * 0.03;
+			var hy = cy + fy * fo * 0.45 + ry * side * 0.1 + uy * 0.03;
+			var hz = cz + fz * fo * 0.45 + rz * side * 0.1 + uz * 0.03;
+			ci = this.leg(ci, i, hx, hy, hz, side);
+		}
+		// pedipalps feel the air in front of the jaw
+		for (var s = 0; s < 2; ++s) {
+			var side = s == 0 ? 1.0 : -1.0;
+			var twitch = 0.03 * sin(tt * 7.3 + s * 2.0);
+			var px = SK_HX + hfx * 0.2 - hux * 0.1 + rx * side * 0.08;
+			var py = SK_HY + hfy * 0.2 - huy * 0.1 + ry * side * 0.08;
+			var pz = SK_HZ + hfz * 0.2 - huz * 0.1 + rz * side * 0.08;
+			var mx = px + hfx * 0.11 + hux * (0.05 + twitch) + rx * side * 0.05;
+			var my = py + hfy * 0.11 + huy * (0.05 + twitch) + ry * side * 0.05;
+			var mz = pz + hfz * 0.11 + huz * (0.05 + twitch) + rz * side * 0.05;
+			this.capsule(ci, px, py, pz, mx, my, mz, 0.02);
+			this.capsule(ci + 1, mx, my, mz, mx + hfx * 0.08 - hux * 0.09, my + hfy * 0.08 - huy * 0.09, mz + hfz * 0.08 - huz * 0.09, 0.017);
+			ci = ci + 2;
+		}
+		// the spinnerets at the abdomen's tip
+		for (var s = 0; s < 2; ++s) {
+			var side = s == 0 ? 1.0 : -1.0;
+			var sx = SK_AX - fx * 0.32 + rx * side * 0.03 - ux * 0.02;
+			var sy = SK_AY - fy * 0.32 + ry * side * 0.03 - uy * 0.02;
+			var sz = SK_AZ - fz * 0.32 + rz * side * 0.03 - uz * 0.02;
+			this.capsule(ci, sx, sy, sz, sx - fx * 0.08 - ux * 0.03, sy - fy * 0.08 - uy * 0.03, sz - fz * 0.08 - uz * 0.03, 0.02);
+			ci = ci + 1;
+		}
+		var hover = 0.03 * sin(tt * 1.7);
+		SK_HGX = SK_HX + hux * 0.3; SK_HGY = SK_HY + huy * 0.3; SK_HGZ = SK_HZ + huz * 0.3;
+		SK_BGX = (SK_AX + SK_TX) * 0.5; SK_BGY = (SK_AY + SK_TY) * 0.5; SK_BGZ = (SK_AZ + SK_TZ) * 0.5;
+		SK_CRX = SK_HX + hux * (0.44 + hover); SK_CRY = SK_HY + huy * (0.44 + hover); SK_CRZ = SK_HZ + huz * (0.44 + hover);
+		for (var k = 0; k < 7; ++k) {
+			var a = k * (8976.0 / 10000.0) + tt * 0.6;
+			var ca = cos(a) * 0.2;
+			var sa = sin(a) * 0.2;
+			var flame = (0.02 + 0.08 * SK_WAKE) + (0.05 * sin(tt * 9.0 + k * 1.9) + 0.03 * sin(tt * 23.0 + k)) * SK_WAKE + 0.03 * SK_KICK * SK_WAKE + (0.07 + 0.05 * SK_KICK) * glare;
+			var bxk = SK_CRX + hfx * ca + rx * sa;
+			var byk = SK_CRY + hfy * ca + ry * sa;
+			var bzk = SK_CRZ + hfz * ca + rz * sa;
+			this.capsule(SK_CROWN0 + k, bxk, byk, bzk, bxk + hux * flame + hfx * ca * 0.25 + rx * sa * 0.25, byk + huy * flame + hfy * ca * 0.25 + ry * sa * 0.25, bzk + huz * flame + hfz * ca * 0.25 + rz * sa * 0.25, (18.0 / 1000.0));
+		}
+		// the bounding radii the distance skips on: the skull's jaw about its center, the ring and flames about the crown's
+		var jhx = SK_JX - SK_HX; var jhy = SK_JY - SK_HY; var jhz = SK_JZ - SK_HZ;
+		var jaw_reach = sqrt(jhx * jhx + jhy * jhy + jhz * jhz) + 0.085 + 0.09;
+		SK_SKB = (jaw_reach > SK_HR ? jaw_reach : SK_HR) + 0.001;
+		var crown_reach = 0.2 + 0.028;
+		for (var k = SK_CROWN0; k < SK_NC; ++k) {
+			var mx = SK_CMX[k] - SK_CRX; var my = SK_CMY[k] - SK_CRY; var mz = SK_CMZ[k] - SK_CRZ;
+			var r = sqrt(mx * mx + my * my + mz * mz) + SK_CB[k];
+			crown_reach = r > crown_reach ? r : crown_reach;
+		}
+		SK_CRB = crown_reach + 0.001;
+		var spin_gem = tt * 2.2;
+		var gl2 = 0.3 + 0.02 * sin(tt * 2.5);
+		SK_GMX = SK_CRX + hux * gl2; SK_GMY = SK_CRY + huy * gl2; SK_GMZ = SK_CRZ + huz * gl2;
+		SK_GAX = rx * cos(spin_gem) + hfx * sin(spin_gem); SK_GAY = ry * cos(spin_gem) + hfy * sin(spin_gem); SK_GAZ = rz * cos(spin_gem) + hfz * sin(spin_gem);
+		SK_GBX = hfx * cos(spin_gem) - rx * sin(spin_gem); SK_GBY = hfy * cos(spin_gem) - ry * sin(spin_gem); SK_GBZ = hfz * cos(spin_gem) - rz * sin(spin_gem);
+		this.pose_moth();
+		var ex = this.ex; var ey = this.ey; var ez = this.ez;
+		SK_EX = ex; SK_EY = ey; SK_EZ = ez;
+		var lx = this.lkx - ex;
+		var ly = this.lky - ey;
+		var lz = this.lkz - ez;
+		var ll = 1.0 / sqrt(lx * lx + ly * ly + lz * lz);
+		lx *= ll; ly *= ll; lz *= ll;
+		var cux = this.cux; var cuy = this.cuy; var cuz = this.cuz;
+		var d = cux * lx + cuy * ly + cuz * lz;
+		var upx = cux - lx * d;
+		var upy = cuy - ly * d;
+		var upz = cuz - lz * d;
+		var ul = 1.0 / sqrt(upx * upx + upy * upy + upz * upz + 0.0000001);
+		upx *= ul; upy *= ul; upz *= ul;
+		SK_FX = lx; SK_FY = ly; SK_FZ = lz;
+		SK_UX = upx; SK_UY = upy; SK_UZ = upz;
+		SK_RX = ly * upz - lz * upy;
+		SK_RY = lz * upx - lx * upz;
+		SK_RZ = lx * upy - ly * upx;
+		// the key light: above the camera, a little to its right, toward the scene
+		var kx = upx * 0.75 - lx * 0.45 + SK_RX * 0.35;
+		var ky = upy * 0.75 - ly * 0.45 + SK_RY * 0.35;
+		var kz = upz * 0.75 - lz * 0.45 + SK_RZ * 0.35;
+		var kl = 1.0 / sqrt(kx * kx + ky * ky + kz * kz);
+		SK_KX = kx * kl; SK_KY = ky * kl; SK_KZ = kz * kl;
+		if (SK_ROWS.size() != th) {
+			SK_ROWS = [];
+			for (var r = 0; r < th; ++r) { SK_ROWS.push_back(r); }
+		}
+		var strike = tt > this.t_impact ? exp((this.t_impact - tt) * 5.0) : 0.0;
+		var leap = tt > this.t_lunge ? exp((this.t_lunge - tt) * 4.0) : 0.0;
+		sk_backdrop((0.55 + 0.45 * SK_WAKE) * (1.0 - 0.5 * glare), 0.1 * this.flare(tt) + 0.14 * strike + 0.16 * leap);
+		// parallel_transform(SK_ROWS, sk_row) in the original: the same calls, in order
+		var rows = [];
+		auto& row_ids = SK_ROWS;
+		var nrows = to_int(row_ids.size());
+		for (var ri = 0; ri < nrows; ++ri) { rows.push_back(sk_row(row_ids[ri])); }
+		if (this.depth.size() != w * h) {
+			this.depth = [];
+			auto& fresh = this.depth;
+			for (var q = 0; q < w * h; ++q) { fresh.push_back(0); }
+		}
+		auto& depth = this.depth;
+		var idx = 0;
+		for (var y = 0; y < h; ++y) {
+			auto& row = rows[y * th / h];
+			for (var x = 0; x < w; ++x) {
+				var v = row[x * tw / w];
+				grid[idx] = v % 1024;
+				depth[idx] = v / 1024;
+				idx = idx + 1;
+			}
+		}
+		this.draw_web(grid);
+		this.draw_particles(grid);
+		this.strike_shake(grid);
+	}
+
+	// the strike and the lunge shake the frame for half a second
+	def strike_shake(grid) {
+		var tt = this.tt;
+		var w = this.w;
+		var h = this.h;
+		var s = tt - (tt >= this.t_lunge ? this.t_lunge : this.t_impact);
+		if (s < 0.0 || s > 0.5) { return; }
+		var amp = (0.5 - s) * w * 0.05;
+		var row = [];
+		for (var x = 0; x < w; ++x) { row.push_back(0); }
+		for (var y = 0; y < h; ++y) {
+			var off = itrunc(sin(y * 0.7 + tt * 61.0) * amp);
+			if (off == 0) { continue; }
+			var base = y * w;
+			for (var x2 = 0; x2 < w; ++x2) { row[x2] = grid[base + x2]; }
+			for (var x3 = 0; x3 < w; ++x3) {
+				var from = x3 - off;
+				from = from < 0 ? 0 : (from >= w ? w - 1 : from);
+				grid[base + x3] = row[from];
+			}
+		}
+	}
+
+	def pose_moth() {
+		SK_MOTH = this.tt > this.t_moth;
+		if (!SK_MOTH) { return; }
+		this.moth_pose(this.tt);
+		var mox = this.mox; var moy = this.moy; var moz = this.moz;
+		var mfx = this.mfx; var mfy = this.mfy; var mfz = this.mfz;
+		var mux = this.mux; var muy = this.muy; var muz = this.muz;
+		var mrx = this.mrx; var mry = this.mry; var mrz = this.mrz;
+		var wsc = this.wsc;
+		var coc = this.coc;
+		SK_MX = mox; SK_MY = moy; SK_MZ = moz;
+		SK_MFX = mfx; SK_MFY = mfy; SK_MFZ = mfz;
+		SK_MUX = mux; SK_MUY = muy; SK_MUZ = muz;
+		SK_MRX = mrx; SK_MRY = mry; SK_MRZ = mrz;
+		SK_WSC = wsc;
+		SK_COC = coc;
+		SK_SPIN = this.spin;
+		SK_MB = (68.0 / 100.0) * wsc + (12.0 / 100.0) + 0.28 * coc + 0.06;
+		SK_MB = SK_MB < 0.4 ? 0.4 : SK_MB;
+		var c = cos(this.flap); var s = sin(this.flap);
+		for (var k = 0; k < 4; ++k) {
+			var side = k % 2 == 0 ? 1.0 : -1.0;
+			var fore = k < 2;
+			var off = fore ? 0.045 : -0.07;
+			SK_WOX[k] = mox + mfx * off + mrx * side * 0.05;
+			SK_WOY[k] = moy + mfy * off + mry * side * 0.05;
+			SK_WOZ[k] = moz + mfz * off + mrz * side * 0.05;
+			SK_WSX[k] = mrx * side * c + mux * s; SK_WSY[k] = mry * side * c + muy * s; SK_WSZ[k] = mrz * side * c + muz * s;
+			SK_WNX[k] = -mrx * side * s + mux * c; SK_WNY[k] = -mry * side * s + muy * c; SK_WNZ[k] = -mrz * side * s + muz * c;
+			SK_WCA[k] = (fore ? (33.0 / 100.0) : 0.23) * wsc;
+			SK_WSA[k] = (fore ? (33.0 / 100.0) : 0.23) * wsc;
+			SK_WCB[k] = (fore ? 0.0 : -0.11) * wsc;
+			SK_WSB[k] = (fore ? 0.16 : 0.135) * wsc;
+		}
+	}
+
+	// a world point onto the screen, into qsx, qsy and its depth qzc; false behind the camera
+	def project(x, y, z) {
+		var ox = x - this.ex; var oy = y - this.ey; var oz = z - this.ez;
+		var zc = ox * SK_FX + oy * SK_FY + oz * SK_FZ;
+		if (zc < 0.08) { return false; }
+		var half_h = this.h * 0.5;
+		var scale = half_h / (SK_ZOOM * zc);
+		this.qsx = (ox * SK_RX + oy * SK_RY + oz * SK_RZ) * scale + this.w * 0.5;
+		this.qsy = half_h - (ox * SK_UX + oy * SK_UY + oz * SK_UZ) * scale;
+		this.qzc = zc;
+		return true;
+	}
+
+	// a silk thread from (x0, y0, z0) to (x1, y1, z1), depth-tested against the traced scene; its hue turns with its
+	// angle on the screen and with time, the way silk breaks light into colors
+	def thread(grid, x0, y0, z0, x1, y1, z1, bright) {
+		if (!this.project(x0, y0, z0)) { return; }
+		var sx0 = this.qsx; var sy0 = this.qsy; var z0c = this.qzc;
+		if (!this.project(x1, y1, z1)) { return; }
+		var ddx = this.qsx - sx0; var ddy = this.qsy - sy0;
+		var adx = ddx < 0.0 ? -ddx : ddx;
+		var ady = ddy < 0.0 ? -ddy : ddy;
+		var steps = itrunc((adx > ady ? adx : ady) + 1.0);
+		if (steps > 400) { return; }
+		var hue = atan2(ddy, ddx) * 0.4 + this.tt * (15.0 / 100.0) + (sx0 + sy0) * 0.006;
+		hue = hue - floor(hue / 8.0) * 8.0;
+		var hq = itrunc(hue);
+		hq = hq > 7 ? 7 : hq;
+		var ink = SK_SILK + hq * 6;
+		var ix = ddx / steps; var iy = ddy / steps; var iz = (this.qzc - z0c) / steps;
+		var w = this.w;
+		var h = this.h;
+		auto& depth = this.depth;
+		auto& bayer = SK_BAYER;
+		for (var s = 0; s <= steps; ++s) {
+			var px = itrunc(floor(sx0 + ix * s));
+			var py = itrunc(floor(sy0 + iy * s));
+			if (px < 0 || py < 0 || px >= w || py >= h) { continue; }
+			var at = py * w + px;
+			var zc = z0c + iz * s;
+			if (depth[at] <= itrunc(zc * 18.0)) { continue; }
+			var fog = 1.0 - zc / 11.0;
+			var l = itrunc(fog * bright * 5.5 + bayer[(py % 4) * 4 + px % 4] / 16.0 - 0.3);
+			if (l < 0) { continue; }
+			grid[at] = ink + (l > 5 ? 5 : l);
+		}
+	}
+
+	def glint(grid, x, y, z) {
+		if (!this.project(x, y, z)) { return; }
+		var px = itrunc(floor(this.qsx));
+		var py = itrunc(floor(this.qsy));
+		if (px < 0 || py < 0 || px >= this.w || py >= this.h) { return; }
+		var at = py * this.w + px;
+		if (this.depth[at] <= itrunc(this.qzc * 18.0)) { return; }
+		grid[at] = SK_EYE + 7;
+	}
+
+	// the silk, drawn over the trace: the dragline the sleeper hangs from and the spokes cast after it, a spark at each
+	// growing tip; the hub's mesh; the capture spiral, every winding growing at once behind the running spider on a fan
+	// of fresh thread from its spinnerets; the strands that wind the cocoon. The strike's ring lights the threads it
+	// passes, and the whole web flashes with dew as the spiral closes and again as the cocoon is sealed
+	def draw_web(grid) {
+		var tt = this.tt;
+		var nspoke = this.nspoke;
+		var shimmer = tt >= this.t_spiral1 ? exp((this.t_spiral1 - tt) * 4.0) : 0.0;
+		var sealed = tt - this.t_wrap1;
+		if (sealed >= 0.0) { shimmer = exp(0.0 - sealed * 5.0); }
+		auto& spoke_ang = this.spoke_ang;
+		for (var k = 0; k < nspoke; ++k) {
+			var order = k < nspoke / 2 ? k : k - 1;
+			var grow = k == nspoke / 2 ? 1.0 : (tt - this.t_spokes - order * this.t_spoke_gap) / 0.25;
+			if (grow <= 0.0) { continue; }
+			grow = grow > 1.0 ? 1.0 : grow;
+			var ca = cos(spoke_ang[k]) * this.spoke_reach * grow / 10.0;
+			var sa = sin(spoke_ang[k]) * this.spoke_reach * grow / 10.0;
+			this.web_point(0.0, 0.0);
+			var px = this.wx; var py = this.wy; var pz = this.wz;
+			for (var s = 1; s <= 10; ++s) {
+				this.web_point(ca * s, sa * s);
+				this.thread(grid, px, py, pz, this.wx, this.wy, this.wz, (78.0 / 100.0) + shimmer * 0.4 + this.ring_light(ca * s, sa * s));
+				px = this.wx; py = this.wy; pz = this.wz;
+			}
+			if (grow < 1.0) { this.glint(grid, px, py, pz); }
+		}
+		if (tt > this.t_out) {
+			for (var ring = 1; ring <= 2; ++ring) {
+				var rr = ring * 0.16;
+				this.web_point(rr, 0.0);
+				var px = this.wx; var py = this.wy; var pz = this.wz;
+				for (var s = 1; s <= 12; ++s) {
+					var a = s * 0.5235988;
+					this.web_point(rr * cos(a), rr * sin(a));
+					this.thread(grid, px, py, pz, this.wx, this.wy, this.wz, 0.8 + shimmer * 0.4);
+					px = this.wx; py = this.wy; pz = this.wz;
+				}
+			}
+		}
+		var sx = SK_AX - this.fx * 0.4; var sy = SK_AY - this.fy * 0.4; var sz = SK_AZ - this.fz * 0.4;
+		if (tt > this.t_spiral0) {
+			var sweep = this.laid(tt);
+			auto& spa = this.spa;
+			auto& spb = this.spb;
+			auto& lay_turn = this.lay_turn;
+			var last = to_int(spa.size()) - 1;
+			for (var i = 1; i <= last; ++i) {
+				var u = (sweep - lay_turn[i]) * nspoke;
+				if (u <= 0.0) { continue; }
+				this.web_point(spa[i - 1], spb[i - 1]);
+				var px = this.wx; var py = this.wy; var pz = this.wz;
+				if (u < 1.0) {
+					this.web_point(spa[i - 1] + (spa[i] - spa[i - 1]) * u, spb[i - 1] + (spb[i] - spb[i - 1]) * u);
+					this.thread(grid, px, py, pz, this.wx, this.wy, this.wz, 1.0);
+					this.thread(grid, this.wx, this.wy, this.wz, sx, sy, sz, 1.2);
+					this.glint(grid, this.wx, this.wy, this.wz);
+					continue;
+				}
+				this.web_point(spa[i], spb[i]);
+				this.thread(grid, px, py, pz, this.wx, this.wy, this.wz, 0.88 + shimmer * 0.4 + this.ring_light(spa[i], spb[i]));
+				if (sin(tt * 1.3 + i * 1.7) > 0.93 - shimmer * 0.9) { this.glint(grid, this.wx, this.wy, this.wz); }
+			}
+		}
+		if (tt > this.t_wrap0 && tt < this.t_wrap1) {
+			var rad = 0.07 + 0.14 * this.coc;
+			var spin = this.spin;
+			for (var j = 0; j < 4; ++j) {
+				var a = spin * 1.6 + j * 1.5708;
+				var along = -0.2 + j * 0.1 + 0.07 * sin(spin + j);
+				var tx = this.mox + this.mfx * along + (this.mrx * cos(a) + this.mux * sin(a)) * rad;
+				var ty = this.moy + this.mfy * along + (this.mry * cos(a) + this.muy * sin(a)) * rad;
+				var tz = this.moz + this.mfz * along + (this.mrz * cos(a) + this.muz * sin(a)) * rad;
+				this.thread(grid, sx, sy, sz, tx, ty, tz, 1.25);
+			}
+		}
+		if (sealed >= 0.0 && sealed < 0.4) {
+			for (var k = 0; k < 12; ++k) {
+				var a = k * 0.5235988 + 0.2;
+				var r = (24.0 / 100.0) + sealed * 1.3;
+				this.glint(grid, this.mox + cos(a) * r, this.moy + sin(a) * r, this.moz + 0.05);
+			}
+		}
+	}
+
+	def plot(grid, x, y, dq, level) {
+		if (x < 0 || y < 0 || x >= this.w || y >= this.h) { return; }
+		var at = y * this.w + x;
+		if (this.depth[at] <= dq) { return; }
+		var cur = grid[at];
+		if (cur >= SK_SPARK && cur < SK_SPARK + 8 && cur - SK_SPARK >= level) { return; }
+		grid[at] = SK_SPARK + level;
+	}
+
+	def splat(grid, x, y, z, level, size) {
+		if (!this.project(x, y, z)) { return; }
+		var px = itrunc(floor(this.qsx));
+		var py = itrunc(floor(this.qsy));
+		var dq = itrunc(this.qzc * 18.0);
+		this.plot(grid, px, py, dq, level);
+		if (size > 0) {
+			var halo = level > 2 ? level - 3 : 0;
+			this.plot(grid, px + 1, py, dq, halo);
+			this.plot(grid, px - 1, py, dq, halo);
+			this.plot(grid, px, py + 1, dq, halo);
+			this.plot(grid, px, py - 1, dq, halo);
+		}
+		if (size > 1) {
+			this.plot(grid, px + 1, py + 1, dq, level > 1 ? level - 1 : 0);
+			this.plot(grid, px + 1, py, dq, level);
+			this.plot(grid, px, py + 1, dq, level);
+		}
+	}
+
+	def draw_particles(grid) {
+		var tt = this.tt;
+		auto& ppx = this.ppx; auto& ppy = this.ppy; auto& ppz = this.ppz;
+		auto& plife = this.plife;
+		var np = this.np;
+		for (var i = 0; i < np; ++i) {
+			var life = plife[i];
+			if (life <= 0.0) { continue; }
+			var level = itrunc(life * 7.99);
+			this.splat(grid, ppx[i], ppy[i], ppz[i], level, life > 0.55 ? 1 : 0);
+		}
+		if (SK_WAKE < 0.5) { return; }
+		var ux = this.ux; var uy = this.uy; var uz = this.uz;
+		for (var s = 0; s < 6; ++s) {
+			var ph = tt * 4.0 + s * 1.047;
+			var tw = sin(tt * 11.0 + s * 2.7);
+			if (tw < 0.2) { continue; }
+			var rr = 0.1 + 0.05 * sin(tt * 3.0 + s);
+			var ca = cos(ph) * rr;
+			var sa = sin(ph) * rr;
+			var lift = 0.06 * sin(tt * 5.0 + s * 1.3);
+			this.splat(grid, SK_GMX + SK_GAX * ca + SK_GBX * sa + ux * lift, SK_GMY + SK_GAY * ca + SK_GBY * sa + uy * lift, SK_GMZ + SK_GAZ * ca + SK_GBZ * sa + uz * lift, tw > 0.7 ? 7 : 5, 1);
+		}
+	}
+}
+
+register_scene(9, fun() { return Ossuary(); });

@@ -1,7 +1,7 @@
 // demoreel_squirrel: the Squirrel 3.2 adapter for the demoreel shared host.
-// Raw Squirrel C API (as gloom_adapter_squirrel.cpp): binds the host API,
-// executes ports/squirrel/main.nut (which include()s the rest), forwards the
-// demo_* entry points.
+// Raw Squirrel C API (as gloom_adapter_squirrel.cpp): binds the host API (Rng, ESC,
+// host_log, itrunc, ifloor, log2, include) over sqstdmath and sqstdstring, executes
+// ports/squirrel/main.nut (which include()s the rest), forwards the demo_* entry points.
 
 #include "demoreel_host.hpp"
 
@@ -102,14 +102,9 @@ void bind_closure(HSQUIRRELVM v, const SQChar* name, SQFUNCTION fn, SQInteger np
 	sq_newslot(v, -3, SQFalse);
 }
 
-struct sq_flags {
-	int64_t only = -1;   // porting aid: every other scene index builds as an empty stub
-};
-
 class squirrel_session : public demoreel::script_session {
 public:
-	squirrel_session(const demoreel::host_services& services, const demoreel::host_options& opt,
-	                 const sq_flags& flags)
+	squirrel_session(const demoreel::host_services& services, const demoreel::host_options& opt)
 		: opt_(opt), services_(services), vm_(sq_open(1024)) {
 		sq_setforeignptr(vm_, this);
 		sq_setprintfunc(vm_, &squirrel_session::print_func, &squirrel_session::error_func);
@@ -129,9 +124,6 @@ public:
 		bind_closure(vm_, "include", native_include, 2, ".s");
 		sq_pushstring(vm_, "ESC", -1);
 		sq_pushstring(vm_, "\x1b", 1);
-		sq_newslot(vm_, -3, SQFalse);
-		sq_pushstring(vm_, "SQ_ONLY_SCENE", -1);
-		sq_pushinteger(vm_, flags.only);
 		sq_newslot(vm_, -3, SQFalse);
 
 		sq_pushstring(vm_, "Rng", -1);
@@ -351,22 +343,10 @@ public:
 	std::string language() const override { return "Squirrel 3.2"; }
 	std::vector<std::string> backends() const override { return {"squirrel"}; }
 
-	int parse_flag(int argc, char** argv, int i) override {
-		if (std::string(argv[i]) == "--only" && i + 1 < argc) { flags_.only = std::stoll(argv[i + 1]); return 2; }
-		return 0;
-	}
-
-	std::string usage() const override {
-		return "  --only I         porting aid: scenes other than index I build as empty stubs\n";
-	}
-
 	std::unique_ptr<demoreel::script_session> make_session(const std::string&,
 			const demoreel::host_services& services, const demoreel::host_options& opt) override {
-		return std::make_unique<squirrel_session>(services, opt, flags_);
+		return std::make_unique<squirrel_session>(services, opt);
 	}
-
-private:
-	sq_flags flags_;
 };
 
 } // namespace

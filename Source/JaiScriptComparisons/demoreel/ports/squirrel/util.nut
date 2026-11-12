@@ -1,17 +1,15 @@
-// demoreel util (Squirrel port of scenes/util.jai): palettes, the half-block
-// presenter, transitions, the pixel font. Squirrel containers are references:
-// the reference's var& parameters are plain parameters here; JaiScript's
-// value copies become explicit `clone` where the copy is mutated.
+// demoreel util (Squirrel port of scenes/util.jai): palettes, the sextant/half-block presenter, the text
+// layer, the pixel font. Squirrel containers are references: a var& parameter is a plain parameter here,
+// and a JaiScript value copy that is later mutated becomes an explicit copy.
 
-// s repeated n times (Squirrel 3.2 has no string repeat)
+// s repeated n times (Squirrel has no string repeat)
 function rep(s, n) {
-	local r = "";
-	for (local i = 0; i < n; ++i) { r += s; }
-	return r;
+	local result = "";
+	for (local i = 0; i < n; ++i) { result += s; }
+	return result;
 }
 
-// join with pairwise merging: O(bytes * log n) copying (no array join in 3.2,
-// concat copies both sides); the GLOOM port's helper
+// join with pairwise merging: O(bytes * log n) copying, where a += loop would copy O(n^2) (GLOOM's helper)
 function join_arr(parts, sep) {
 	local n = parts.len();
 	if (n == 0) { return ""; }
@@ -92,24 +90,109 @@ class Palette {
 ::HB_FG <- [];
 ::HB_BG <- [];
 ::HB_RGB <- [];
+::HB_LUM <- [];
+::HB_ROWIDX <- [];
+::HB_SRC <- [];       // sextant mode: per glyph pixel column, the grid column it shows
+::HB_SEXTG <- [];     // sextant glyphs by TL | TR<<1 | ML<<2 | MR<<3 | BL<<4 | BR<<5
+::TXT_CP <- [];
+::TXT_RGB <- [];
+::TXT_USED <- false;
+::HB_SEXT <- false;
 ::HB_W <- 0;
+::HB_PH <- 0;
+::HB_COLS <- 0;
 ::HB_ROWS <- 0;
 ::HB_HALF <- "▀";
 ::HB_FULL <- "█";
 ::HB_RESET <- ::ESC + "[0m";
 
-function hb_ensure(w, rows) {
-	if (::HB_W == w && ::HB_ROWS == rows && ::HB_PIX.len() == w * rows * 2) { return; }
-	::HB_W = w;
-	::HB_ROWS = rows;
-	::HB_PIX = ::array(w * rows * 2, 0);
+function utf8(cp) {
+	if (cp < 128) { return cp.tochar(); }
+	if (cp < 2048) { return (192 + (cp >> 6)).tochar() + (128 + (cp & 63)).tochar(); }
+	if (cp < 65536) { return (224 + (cp >> 12)).tochar() + (128 + ((cp >> 6) & 63)).tochar() + (128 + (cp & 63)).tochar(); }
+	return (240 + (cp >> 18)).tochar() + (128 + ((cp >> 12) & 63)).tochar() + (128 + ((cp >> 6) & 63)).tochar() + (128 + (cp & 63)).tochar();
 }
 
-function hb_row(cy) {
+// the grid's pixel size for cols x rows cells
+function hb_pixel_w(cols, sext) { return sext ? cols * 3 / 2 : cols; }
+function hb_pixel_h(rows, sext) { return sext ? rows * 3 : rows * 2; }
+
+function hb_ensure(cols, rows, sext) {
+	::HB_SEXT = sext;
+	local pw = ::hb_pixel_w(cols, sext);
+	local ph = ::hb_pixel_h(rows, sext);
+	if (::HB_COLS == cols && ::HB_ROWS == rows && ::HB_W == pw && ::HB_PH == ph && ::HB_PIX.len() == pw * ph) { return; }
+	::HB_COLS = cols;
+	::HB_ROWS = rows;
+	::HB_W = pw;
+	::HB_PH = ph;
+	::HB_PIX = ::array(pw * ph, 0);
+	::HB_ROWIDX = [];
+	for (local r = 0; r < rows; ++r) { ::HB_ROWIDX.push(r); }
+	::HB_SRC = [];
+	for (local g = 0; g < cols * 2; ++g) { ::HB_SRC.push(g * pw / (cols * 2)); }
+	::TXT_CP = ::array(cols * rows, 0);
+	::TXT_RGB = ::array(cols * rows, 0);
+	::TXT_USED = false;
+	::HB_SEXTG = [];
+	for (local b = 0; b < 64; ++b) {
+		if (b == 0) { ::HB_SEXTG.push(" "); }
+		else if (b == 21) { ::HB_SEXTG.push(::utf8(0x258C)); }
+		else if (b == 42) { ::HB_SEXTG.push(::utf8(0x2590)); }
+		else if (b == 63) { ::HB_SEXTG.push(::HB_FULL); }
+		else { ::HB_SEXTG.push(::utf8(0x1FB00 + b - 1 - (b > 21 ? 1 : 0) - (b > 42 ? 1 : 0))); }
+	}
+}
+
+// the text layer: cells, and the pixels they cover
+function txt_clear() {
+	if (!::TXT_USED) { return; }
+	local cps = ::TXT_CP;
+	local n = cps.len();
+	for (local i = 0; i < n; ++i) { cps[i] = 0; }
+	::TXT_USED = false;
+}
+
+function txt_glyph(col, row, cp, rgb) {
+	if (col < 0 || col >= ::HB_COLS || row < 0 || row >= ::HB_ROWS) { return; }
+	::TXT_CP[row * ::HB_COLS + col] = cp;
+	::TXT_RGB[row * ::HB_COLS + col] = rgb;
+	::TXT_USED = true;
+}
+
+// ASCII text from (col, row); spaces are written too, so a line can clear what lies under it
+function txt_put(col, row, s, rgb) {
+	local n = s.len();
+	for (local i = 0; i < n; ++i) { ::txt_glyph(col + i, row, s[i] & 255, rgb); }
+}
+
+function cell_col(px) { return px * ::HB_COLS / ::HB_W; }
+function cell_row(py) { return py * ::HB_ROWS / ::HB_PH; }
+function col_px(col) { return col * ::HB_W / ::HB_COLS; }
+function row_px(row) { return row * ::HB_PH / ::HB_ROWS; }
+
+// a text cell: its glyph over the darker of the pixels under it
+function hb_text(cell, dark, state) {
+	local result = "";
+	if (dark != state[1]) {
+		result += ::HB_BG[dark];
+		state[1] = dark;
+	}
+	local c = ::TXT_RGB[cell];
+	state[0] = -1;
+	local cp = ::TXT_CP[cell];
+	return result + ::ESC + "[38;2;" + (c >> 16) + ";" + ((c >> 8) & 255) + ";" + (c & 255) + "m" + (cp < 128 ? cp.tochar() : ::utf8(cp));
+}
+
+function hb_row(cy) { return ::HB_SEXT ? ::hb_row_sext(cy) : ::hb_row_half(cy); }
+
+function hb_row_half(cy) {
 	local parts = [];
 	local pix = ::HB_PIX;
 	local tfg = ::HB_FG;
 	local tbg = ::HB_BG;
+	local lum = ::HB_LUM;
+	local tcp = ::TXT_CP;
 	local half = ::HB_HALF;
 	local full = ::HB_FULL;
 	local vw = ::HB_W;
@@ -117,9 +200,18 @@ function hb_row(cy) {
 	local bg = -1;
 	local ti = cy * 2 * vw;
 	local bi = ti + vw;
+	local cell = cy * vw;
+	local text = ::TXT_USED;
 	for (local x = 0; x < vw; ++x) {
 		local top = pix[ti + x];
 		local bot = pix[bi + x];
+		if (text && tcp[cell + x] != 0) {
+			local state = [fg, bg];
+			parts.push(::hb_text(cell + x, lum[top] < lum[bot] ? top : bot, state));
+			fg = state[0];
+			bg = state[1];
+			continue;
+		}
 		if (top == bot) {
 			if (bot == bg) { parts.push(" "); }
 			else if (top == fg) { parts.push(full); }
@@ -134,10 +226,90 @@ function hb_row(cy) {
 	return ::join_arr(parts, "");
 }
 
-// the reference's parallel_transform path is off (HB_WORKERS = 0): serial there too
+function hb_row_sext(cy) {
+	local parts = [];
+	local pix = ::HB_PIX;
+	local tfg = ::HB_FG;
+	local tbg = ::HB_BG;
+	local lum = ::HB_LUM;
+	local src = ::HB_SRC;
+	local glyphs = ::HB_SEXTG;
+	local tcp = ::TXT_CP;
+	local vw = ::HB_W;
+	local fg = -1;
+	local bg = -1;
+	local r0 = cy * 3 * vw;
+	local r1 = r0 + vw;
+	local r2 = r1 + vw;
+	local cols = ::HB_COLS;
+	local cell = cy * cols;
+	local text = ::TXT_USED;
+	for (local cx = 0; cx < cols; ++cx) {
+		local xa = src[cx * 2];
+		local xb = src[cx * 2 + 1];
+		local p0 = pix[r0 + xa];
+		local p1 = pix[r0 + xb];
+		local p2 = pix[r1 + xa];
+		local p3 = pix[r1 + xb];
+		local p4 = pix[r2 + xa];
+		local p5 = pix[r2 + xb];
+		local flat = p0 == p1 && p0 == p2 && p0 == p3 && p0 == p4 && p0 == p5;
+		if (flat && !(text && tcp[cell] != 0)) {
+			if (p0 != bg) { parts.push(tbg[p0]); bg = p0; }
+			parts.push(" ");
+			++cell;
+			continue;
+		}
+		local l0 = lum[p0];
+		local l1 = lum[p1];
+		local l2 = lum[p2];
+		local l3 = lum[p3];
+		local l4 = lum[p4];
+		local l5 = lum[p5];
+		local lmin = l0;
+		local lmax = l0;
+		local fgp = p0;
+		local bgp = p0;
+		if (l1 < lmin) { lmin = l1; bgp = p1; }
+		if (l1 > lmax) { lmax = l1; fgp = p1; }
+		if (l2 < lmin) { lmin = l2; bgp = p2; }
+		if (l2 > lmax) { lmax = l2; fgp = p2; }
+		if (l3 < lmin) { lmin = l3; bgp = p3; }
+		if (l3 > lmax) { lmax = l3; fgp = p3; }
+		if (l4 < lmin) { lmin = l4; bgp = p4; }
+		if (l4 > lmax) { lmax = l4; fgp = p4; }
+		if (l5 < lmin) { lmin = l5; bgp = p5; }
+		if (l5 > lmax) { lmax = l5; fgp = p5; }
+		if (text && tcp[cell] != 0) {
+			local state = [fg, bg];
+			parts.push(::hb_text(cell, bgp, state));
+			fg = state[0];
+			bg = state[1];
+			++cell;
+			continue;
+		}
+		local thr = (lmin + lmax + 1) / 2;
+		local bits = 0;
+		if (l0 >= thr) { bits = 1; }
+		if (l1 >= thr) { bits += 2; }
+		if (l2 >= thr) { bits += 4; }
+		if (l3 >= thr) { bits += 8; }
+		if (l4 >= thr) { bits += 16; }
+		if (l5 >= thr) { bits += 32; }
+		if (fgp != fg) { parts.push(tfg[fgp]); fg = fgp; }
+		if (bits != 63 && bgp != bg) { parts.push(tbg[bgp]); bg = bgp; }
+		parts.push(glyphs[bits]);
+		++cell;
+	}
+	parts.push(::HB_RESET);
+	return ::join_arr(parts, "");
+}
+
+// the reference's parallel_transform branch never runs (HB_WORKERS stays 0): rows are built serially there too
 function hb_present() {
 	local rows = [];
-	for (local cy = 0; cy < ::HB_ROWS; ++cy) { rows.push(::hb_row(cy)); }
+	local n = ::HB_ROWS;
+	for (local cy = 0; cy < n; ++cy) { rows.push(::hb_row(cy)); }
 	return rows;
 }
 
@@ -187,12 +359,13 @@ class Gfx {
 	function draw_text(pix, w, h, text, x0, y0, sx, sy, row0, nramp, shadow, limit) {
 		local n = text.len() < limit ? text.len() : limit;
 		local th = 7 * sy;
+		local font = ::FONT5;
 		for (local pass = shadow < 0 ? 1 : 0; pass < 2; ++pass) {
 			local ox = pass == 0 ? 1 : 0;
 			for (local li = 0; li < n; ++li) {
 				local ch = text.slice(li, li + 1);
-				if (!(ch in ::FONT5)) { continue; }
-				local bits = ::FONT5[ch];
+				if (!(ch in font)) { continue; }
+				local bits = font[ch];
 				local lx = x0 + li * 6 * sx + ox;
 				for (local ry = 0; ry < 7; ++ry) {
 					local b = bits[ry];
@@ -214,75 +387,6 @@ class Gfx {
 		}
 	}
 
-	// kind: 0 dissolve, 1 slant wipe, 2 blinds, 3 iris, 4 melt
-	function mix_grids(ga, gb, gm, w, h, kind, prog, off, edge, melt) {
-		local kilo = (prog * 1000.0).tointeger();
-		local idx = 0;
-		if (kind == 0) {
-			for (local y = 0; y < h; ++y) {
-				for (local x = 0; x < w; ++x) {
-					local k = (((x * 73856093 + y * 19349663) & 1048575) * 1274126177 >> 12) % 1000;
-					gm[idx] = k < kilo ? gb[idx] + off : ga[idx];
-					idx = idx + 1;
-				}
-			}
-			return;
-		}
-		if (kind == 1) {
-			local e = (prog * (w + h / 2 + 8.0)).tointeger() - 4;
-			for (local y = 0; y < h; ++y) {
-				local sh = e - (h - y) / 2;
-				for (local x = 0; x < w; ++x) {
-					local d = x - sh;
-					gm[idx] = d < 0 ? gb[idx] + off : (d < 2 ? edge : ga[idx]);
-					idx = idx + 1;
-				}
-			}
-			return;
-		}
-		if (kind == 2) {
-			local band = 8;
-			local e2 = (prog * (band + 1.0)).tointeger();
-			for (local y = 0; y < h; ++y) {
-				local yb = (y + (y / band) % 2 * 3) % band;
-				for (local x = 0; x < w; ++x) {
-					gm[idx] = yb < e2 ? gb[idx] + off : (yb == e2 ? edge : ga[idx]);
-					idx = idx + 1;
-				}
-			}
-			return;
-		}
-		if (kind == 3) {
-			local cx = w / 2;
-			local cy = h / 2;
-			local rmax = cx * cx + cy * cy;
-			local r = (prog * prog * (rmax + 400.0)).tointeger();
-			local r2 = (::sqrt(r * 1.0) + 2.0).tointeger();
-			r2 = r2 * r2;
-			for (local y = 0; y < h; ++y) {
-				local dy = y - cy;
-				for (local x = 0; x < w; ++x) {
-					local dx = x - cx;
-					local d2 = dx * dx + dy * dy;
-					gm[idx] = d2 < r ? gb[idx] + off : (d2 < r2 ? edge : ga[idx]);
-					idx = idx + 1;
-				}
-			}
-			return;
-		}
-		// melt: the departing frame slides down in ragged columns
-		local fall = prog * prog * (h + 24.0);
-		for (local x = 0; x < w; ++x) {
-			local o = (fall - melt[x]).tointeger();
-			o = o < 0 ? 0 : o;
-			local gi = x;
-			for (local y = 0; y < h; ++y) {
-				gm[gi] = y < o ? gb[gi] + off : ga[gi - o * w];
-				gi += w;
-			}
-		}
-	}
-
 	// replace a full row with centered styled text (style = escape prefix)
 	function overlay_center(rows, w, y, text, style) {
 		if (y < 0 || y >= rows.len()) { return; }
@@ -294,14 +398,7 @@ class Gfx {
 		local pad = (w - n) / 2;
 		rows[y] = style + ::rep(" ", pad) + text + ::rep(" ", w - pad - n) + ::RESET;
 	}
-
-	function overlay_left(rows, w, y, text, style) {
-		if (y < 0 || y >= rows.len()) { return; }
-		local n = text.len();
-		if (n > w) {
-			text = text.slice(0, w);
-			n = w;
-		}
-		rows[y] = style + text + ::rep(" ", w - n) + ::RESET;
-	}
 }
+
+function sgr_fg(r, g, b) { return ::ESC + "[38;2;" + r + ";" + g + ";" + b + "m"; }
+function sgr_bg(r, g, b) { return ::ESC + "[48;2;" + r + ";" + g + ";" + b + "m"; }

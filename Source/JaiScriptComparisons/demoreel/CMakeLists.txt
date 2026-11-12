@@ -1,6 +1,20 @@
-# The demoreel ports (Lua 5.4 + sol2, Squirrel 3.2) on the reel's shared host (demoreel_host, built with jai_demoreel in
-# the JaiScript tree), and the placement controls for each enabled runtime.
+# The demoreel ports (Lua 5.4 + sol2, Squirrel 3.2, ChaiScript 6.1) on the reel's shared host (demoreel_host, built with
+# jai_demoreel in the JaiScript tree), and the placement controls for each enabled runtime. The Python port needs no
+# build (ports/python/demoreel.py).
 set(DEMOREEL_DIR "${JAISCRIPT_DIR}/examples/demoreel")
+
+# The runtimes get the whole-program Release JaiScript gets (its /GL reaches only its own tree)
+function(demoreel_port_ltcg target)
+    if(MSVC AND JAISCRIPT_LTCG)
+        target_compile_options(${target} PRIVATE $<$<CONFIG:Release>:/GL>)
+        get_target_property(kind ${target} TYPE)
+        if(kind STREQUAL "EXECUTABLE")
+            target_link_options(${target} PRIVATE $<$<CONFIG:Release>:/LTCG>)
+        else()
+            set_property(TARGET ${target} APPEND PROPERTY STATIC_LIBRARY_OPTIONS $<$<CONFIG:Release>:/LTCG>)
+        endif()
+    endif()
+endfunction()
 
 # --- demoreel_lua: Lua 5.4 + sol2 port (opt-in; builds Lua from source) ---
 option(DEMOREEL_PORT_LUA "Build demoreel_lua, the Lua/sol2 port of the demoreel" OFF)
@@ -30,6 +44,8 @@ if(DEMOREEL_PORT_LUA)
         DEMOREEL_LUA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ports/lua"
     )
     demoreel_msvc_settings(demoreel_lua)
+    demoreel_port_ltcg(demoreel_lua_runtime)
+    demoreel_port_ltcg(demoreel_lua)
     add_custom_command(TARGET demoreel_lua POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_CURRENT_SOURCE_DIR}/ports/lua
@@ -62,11 +78,36 @@ if(DEMOREEL_PORT_SQUIRREL)
         DEMOREEL_SQUIRREL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ports/squirrel"
     )
     demoreel_msvc_settings(demoreel_squirrel)
+    demoreel_port_ltcg(demoreel_squirrel_runtime)
+    demoreel_port_ltcg(demoreel_squirrel)
     add_custom_command(TARGET demoreel_squirrel POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_CURRENT_SOURCE_DIR}/ports/squirrel
             $<TARGET_FILE_DIR:demoreel_squirrel>/demoreel_squirrel_scenes
     )
+endif()
+
+# --- demoreel_chai: ChaiScript 6.1 port (opt-in; header-only runtime) ---
+option(DEMOREEL_PORT_CHAI "Build demoreel_chai, the ChaiScript port of the demoreel" OFF)
+if(DEMOREEL_PORT_CHAI)
+    if(NOT EXISTS "${COMPARISONS_CHAISCRIPT_ROOT}/include/chaiscript/chaiscript.hpp")
+        message(FATAL_ERROR "DEMOREEL_PORT_CHAI=ON but ChaiScript not found at ${COMPARISONS_CHAISCRIPT_ROOT}")
+    endif()
+    add_executable(demoreel_chai demoreel_adapter_chai.cpp)
+    target_link_libraries(demoreel_chai PRIVATE demoreel_host)
+    target_include_directories(demoreel_chai PRIVATE "${COMPARISONS_CHAISCRIPT_ROOT}/include")
+    target_compile_definitions(demoreel_chai PRIVATE
+        CHAISCRIPT_NO_THREADS=1
+        DEMOREEL_CHAI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ports/chai"
+    )
+    demoreel_msvc_settings(demoreel_chai)
+    demoreel_port_ltcg(demoreel_chai)
+    add_custom_command(TARGET demoreel_chai POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/ports/chai
+            $<TARGET_FILE_DIR:demoreel_chai>/demoreel_chai_scenes
+    )
+    message(STATUS "demoreel: demoreel_chai enabled (${COMPARISONS_CHAISCRIPT_ROOT})")
 endif()
 
 # Matched cold-help layout controls for each enabled runtime.
@@ -79,7 +120,7 @@ if(DEMOREEL_PADDING_CONTROLS)
     if(WIN32)
         target_link_libraries(demoreel_host_padding PUBLIC winmm)
     endif()
-    foreach(original jai_demoreel demoreel_lua demoreel_squirrel)
+    foreach(original jai_demoreel demoreel_lua demoreel_squirrel demoreel_chai)
         if(TARGET ${original})
             get_target_property(sources ${original} SOURCES)
             get_target_property(source_dir ${original} SOURCE_DIR)

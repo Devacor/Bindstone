@@ -1,10 +1,36 @@
--- Scene interface + the Reel manager: timed auto-advance, transitions, title
--- cards, HUD. Everything the host calls funnels through Reel:frame().
--- Scenes see h as PIXEL rows (two per terminal row) and paint square pixels.
+-- The Scene base and the part of the Reel the perf path runs (Lua 5.4 port of scenes/reel.jai):
+-- start a scene mid-flight, replay it, render it (scaled up past its pixel budget), the hit
+-- iris and shake, present. The port starts mid-scene and runs no transitions, title cards or HUD.
+--
+-- A scene file (julia.lua is the model) ports one scenes/*.jai whole and registers its class
+-- last: SCENES[2] = Julia (JULIA 2, GLOBHUNTER 6, OSSUARY 9, MAELSTROM 10). The Reel composes
+-- cues and probes length_bars/hit_times/hit_levels only for registered scenes; make_scene of
+-- any other index raises "scene I is not ported". Conventions:
+-- * Arrays are 1-based tables holding the original's 0-based values: `grid[i]` is grid[i + 1],
+--   a palette index p stays p and reads HB_FG[p + 1]. Lane:last returns a 1-based index or 0.
+-- * A class: Name = setmetatable({}, {__index = Scene}); Name.__index = Name; Name.new() runs
+--   Scene.init(setmetatable({}, Name)), then the field defaults, then the constructor body
+--   (set pixel_budget there; replay is set wherever the original sets it, usually build).
+--   Overrides are methods: Name:build(), :update(t, dt), :render(grid), :hit_times() ...
+-- * The scene reaches self.pal (Palette: add/ramp/gradient return 0-based indices), self.rng
+--   (the host's Rng: next/roll/chance/nextf), self.cue (Cue, nil outside the reel), self.w/h.
+--   gfx (Gfx; gfx:make_grid(n)), RESET, MUSIC_*, HB_*/TXT_* and the text layer (txt_glyph,
+--   txt_put, cell_col, ...) are globals; the reel rebinds the HB_ tables, so read them per call.
+-- * Scope: what a file shares is global (classes, util functions, the tables above); a scene's
+--   own state and functions (JU_*, julia_row) are file locals, upvalues being Lua's fast path;
+--   hot code aliases globals and math functions into locals. A chunk holds at most 200 locals.
+-- * Ints: itrunc/ifloor convert floats; idiv/imod are C's / and % where an operand can be
+--   negative (Lua's // and % floor); math.floor returns an integer; a float must never reach
+--   a string. parallel_transform(items, fn) runs fn over items serially, in order.
 
-Scene = class()
+local sqrt, sin, cos = math.sqrt, math.sin, math.cos
 
-function Scene:init()
+SCENES = {}
+
+Scene = {}
+Scene.__index = Scene
+
+function Scene.init(self)
 	self.name = "SCENE"
 	self.handle = ""
 	self.w = 0
@@ -12,6 +38,11 @@ function Scene:init()
 	self.seed = 0
 	self.pal = nil
 	self.rng = nil
+	self.replay = 3.0          -- the sim-seconds a jump replays to arrive mid-flight
+	self.cue = nil             -- the scene's music (music.lua): ask it for the kick, the chord, the energy, the hits
+	self.pixel_budget = 0      -- set in the scene's constructor: past this many pixels the scene renders smaller and scales up
+	self.titled = true         -- whether the reel lays its title card over the scene's first bar
+	return self
 end
 
 function Scene:setup(w_, h_, seed_)
@@ -27,266 +58,283 @@ function Scene:build() end
 function Scene:update(t, dt) end
 function Scene:render(grid) end
 function Scene:text_rows(rows) end
+-- the scene's big moments in its own seconds (on beats or bar lines), and how big:
+-- 2 an impact with a riser into it, 1 an accent; the composer scores them
+function Scene:hit_times() return {} end
+function Scene:hit_levels() return {} end
+-- how many bars the scene needs for its showpiece to land in full; 0 takes the reel's default
+function Scene:length_bars() return 0 end
 
-Reel = class()
+Reel = {}
+Reel.__index = Reel
 
-function Reel:init(w_, h_, seed_, backend_, smoke_, hud_)
-	self.paused = false
-	self.nscenes = 17
+function Reel.new(w_, h_, seed_, backend_, smoke_, hud_)
+	local self = setmetatable({}, Reel)
+	self.nscenes = 12
+	self.intro_idx = 12        -- the cold open: one more entry past the scenes
+	self.cues = {}             -- by scene index + 1, for the ported scenes only
 	self.cur = nil
-	self.nxt = nil
 	self.cur_idx = 0
-	self.pending_idx = 0
 	self.scene_t = 0.0
 	self.dur_cur = 10.0
-	self.title_len = 2.4
-	self.trans_len = 1.1
+	self.title_len = MUSIC_BAR
 	self.in_trans = false
 	self.finish_pending = false
 	self.trans_t = 0.0
-	self.trans_kind = 0
-	self.trans_count = 0
+	self.paused = false
+	self.flash_noise = {}      -- a threshold per pixel for the dithered flashes and the vignette
+	self.ring = {}             -- per pixel: its distance from the centre, 0 there to 1000 at the corners
+	self.small_a = {}          -- the scaled-down frame of a scene past its pixel budget
 	self.ui_off = 0
 	self.off_b = 0
 
 	self.w = w_
 	self.h = h_
-	self.ph = h_ * 2
+	self.sext = PIX_MODE == "sext" or (PIX_MODE == "" and hb_pixel_w(w_, true) * hb_pixel_h(h_, true) <= PIX_BUDGET)
+	self.pw = hb_pixel_w(w_, self.sext)
+	self.ph = hb_pixel_h(h_, self.sext)
 	self.seed = seed_
 	self.backend = backend_
 	self.smoke = smoke_
 	self.hud = hud_
-	self.grid_a = make_grid(self.w * self.ph)
-	self.grid_b = make_grid(self.w * self.ph)
-	self.melt = make_fgrid(self.w)
+	self.grid_a = gfx:make_grid(self.pw * self.ph)
+	self.grid_b = gfx:make_grid(self.pw * self.ph)
+	self.melt = gfx:make_fgrid(self.pw)
 	local ui = Palette.new()
 	self.ui = ui
-	self.ui_band = ui:size()
+	self.ui_band = ui:size()   -- 12 band shades
 	for b = 0, 11 do
 		local f = b < 6 and b / 5.0 or (11 - b) / 5.0
 		ui:add(10.0 + 14.0 * f, 8.0 + 8.0 * f, 30.0 + 26.0 * f)
 	end
-	self.ui_rule = ui:add(255, 206, 110)
+	self.ui_rule = ui:add(255, 206, 110)   -- 2 rule lines
 	ui:add(110, 200, 255)
 	self.ui_ink = ui:gradient(8, {{255.0, 250.0, 214.0}, {255.0, 214.0, 110.0}, {255.0, 128.0, 60.0}, {214.0, 52.0, 92.0}})
 	self.ui_shine = ui:add(255, 255, 255)
 	self.ui_shadow = ui:add(4, 2, 12)
 	self.ui_edge = ui:add(255, 244, 200)
-	self.durs = {12.0, 11.0, 12.0, 11.0, 11.0, 12.0, 14.0, 14.0, 12.0, 15.0, 15.0, 16.0, 16.5, 12.0, 11.0, 20.0, 24.0}
-	self:start_scene(0, 0.0)
+	self.bars = {32, 6, 6, 6, 7, 7, 8, 8, 6, 21, 8, 24, 4}               -- each scene's length in bars, at [idx + 1]
+	self.seed_slots = {16, 3, 4, 5, 6, 8, 9, 10, 13, 15, 17, 23, 21}     -- each scene seeds from its own slot
+	for i = 0, self.intro_idx do
+		if SCENES[i] then
+			local probe = self:make_scene(i)
+			if probe:length_bars() > 0 then self.bars[i + 1] = probe:length_bars() end
+			self.cues[i + 1] = Cue.new(self.bars[i + 1], music_mood(i), self.seed + self.seed_slots[i + 1] * 101, probe:hit_times(), probe:hit_levels())
+		end
+	end
+	return self
 end
 
--- looked up per call, so a hot reload's fresh classes build the next scene
 function Reel:make_scene(idx)
-	local classes = {Plasma, Starfield, Tunnel, Donut, Julia, Lava, Pipes, SandBox, Boids, GlobHunter,
-		CanyonRun, SpongeWorks, BannerFall, Chrome, Fire, Ossuary, Finale}
-	return (classes[idx + 1] or Finale).new()
+	local class = SCENES[idx]
+	if not class then error("scene " .. idx .. " is not ported", 0) end
+	return class.new()
 end
 
 function Reel:dur_for(idx)
-	return self.smoke and 3.0 or self.durs[idx + 1]
+	return self.smoke and 3.0 or self.bars[idx + 1] * MUSIC_BAR
 end
 
--- the presenter's string tables: current scene, incoming scene (during a
--- transition), then the reel's own UI entries
+-- a scene at its grid, or at the largest grid within its pixel budget
+function Reel:setup_scene(sc, idx)
+	sc.cue = self.cues[idx + 1]
+	local pw, ph = self.pw, self.ph
+	local sw = pw
+	local sh = ph
+	if sc.pixel_budget > 0 and pw * ph > sc.pixel_budget then
+		local k = sqrt(sc.pixel_budget * 1.0 / (pw * ph))
+		sw = itrunc(pw * k)
+		sh = itrunc(ph * k)
+	end
+	sc:setup(sw, sh, self.seed + self.seed_slots[idx + 1] * 7919)
+end
+
+-- render into a grid of the reel's size, scaling up a scene that renders smaller; returns the scratch grid
+function Reel:render_scene(sc, target, scratch)
+	local pw, ph = self.pw, self.ph
+	if sc.w == pw and sc.h == ph then
+		sc:render(target)
+		return scratch
+	end
+	if #scratch ~= sc.w * sc.h then
+		scratch = {}
+		for i = 1, sc.w * sc.h do scratch[i] = 0 end
+	end
+	sc:render(scratch)
+	local sw = sc.w
+	local sh = sc.h
+	local idx = 1
+	for y = 0, ph - 1 do
+		local row = (y * sh // ph) * sw + 1
+		for x = 0, pw - 1 do
+			target[idx] = scratch[row + x * sw // pw]
+			idx = idx + 1
+		end
+	end
+	return scratch
+end
+
+-- the presenter's string tables: the current scene's, then the reel's own UI entries
 function Reel:bind_palettes()
-	hb_ensure(self.w, self.h)
+	hb_ensure(self.w, self.h, self.sext)
 	HB_FG = {}
 	HB_BG = {}
 	HB_RGB = {}
+	HB_LUM = {}
 	self:absorb(self.cur.pal)
 	self.off_b = #HB_RGB
-	if self.in_trans then self:absorb(self.nxt.pal) end
 	self.ui_off = #HB_RGB
 	self:absorb(self.ui)
 end
 
 function Reel:absorb(p)
-	local fg, bg, rgb = HB_FG, HB_BG, HB_RGB
-	local n0 = #rgb
-	for i = 1, #p.rgb do
-		fg[n0 + i] = p.fg[i]
-		bg[n0 + i] = p.bg[i]
-		rgb[n0 + i] = p.rgb[i]
+	local fg, bg, rgb, lum = HB_FG, HB_BG, HB_RGB, HB_LUM
+	local n = #p.rgb
+	for i = 1, n do
+		fg[#fg + 1] = p.fg[i]
+		bg[#bg + 1] = p.bg[i]
+		local c = p.rgb[i]
+		rgb[#rgb + 1] = c
+		lum[#lum + 1] = (c >> 16) * 2 + ((c >> 8) & 255) * 3 + (c & 255)
 	end
 end
 
 function Reel:start_scene(idx, at_t)
-	local n = self.nscenes
-	self.cur_idx = ((idx % n) + n) % n
+	local nscenes = self.nscenes
+	self.cur_idx = idx == self.intro_idx and idx or ((idx % nscenes) + nscenes) % nscenes
 	self.cur = self:make_scene(self.cur_idx)
-	self.cur:setup(self.w, self.ph, self.seed + self.cur_idx * 7919)
+	self:setup_scene(self.cur, self.cur_idx)
 	self.dur_cur = self:dur_for(self.cur_idx)
 	self.scene_t = at_t
 	self.in_trans = false
 	self.finish_pending = false
-	self.nxt = nil
 	self.trans_t = 0.0
 	self:bind_palettes()
 end
 
--- runs at the top of the frame AFTER the one that finished the transition
-function Reel:complete_transition()
-	self.finish_pending = false
-	self.in_trans = false
-	self.cur = self.nxt
-	self.nxt = nil
-	self.cur_idx = self.pending_idx
-	self.dur_cur = self:dur_for(self.cur_idx)
-	self.scene_t = self.trans_t
-	self.trans_t = 0.0
-	self:bind_palettes()
-end
-
-function Reel:begin_transition()
-	self.pending_idx = (self.cur_idx + 1) % self.nscenes
-	self.nxt = self:make_scene(self.pending_idx)
-	self.nxt:setup(self.w, self.ph, self.seed + self.pending_idx * 7919)
-	self.in_trans = true
-	self.trans_t = 0.0
-	self.trans_kind = (self.trans_count + self.seed) % 5
-	self.trans_count = self.trans_count + 1
-	local m = 0
-	local melt = self.melt
-	for x = 0, self.w - 1 do
-		m = m + ((x * 7 + self.trans_count * 13 + (x * x) % 11) % 3) - 1
-		m = m < 0 and 0 or (m > 14 and 14 or m)
-		melt[x + 1] = m * 1.0
-	end
-	self:bind_palettes()
-end
-
--- backend swap lands here: same scene, same clock; stateful scenes replay
--- up to 3 sim-seconds so they arrive mid-flight instead of empty.
+-- a jump to a scene mid-flight: same scene, same clock; stateful scenes
+-- replay up to their replay seconds so they arrive mid-flight instead of empty
 function Reel:jump(idx, at_t)
 	self:start_scene(idx, at_t)
+	local cur = self.cur
 	local steps = itrunc(at_t * 30.0)
-	steps = steps > 90 and 90 or steps
+	local most = itrunc(cur.replay * 30.0)
+	steps = steps > most and most or steps
 	local ft = at_t - steps * 0.0333333333
-	for i = 1, steps do
+	for i = 0, steps - 1 do
 		ft = ft + 0.0333333333
-		self.cur:update(ft, 0.0333333333)
+		cur:update(ft, 0.0333333333)
 	end
 end
 
 function Reel:reload_current()
-	local keep_t = self.scene_t
-	self:start_scene(self.cur_idx, keep_t)
+	self:start_scene(self.cur_idx, self.scene_t)
 end
 
-function Reel:handle_key(key)
-	if key == "" then return end
-	if key == "h" then self.hud = not self.hud
-	elseif key == "f" then self.paused = not self.paused
-	elseif key == "n" or key == " " or key == "right" then self:start_scene(self.cur_idx + 1, 0.0)
-	elseif key == "p" or key == "left" then self:start_scene(self.cur_idx - 1, 0.0)
-	elseif #key == 1 then
-		local c0 = key:byte(1)
-		if c0 >= 49 and c0 <= 57 then
-			local d = c0 - 48
-			if d <= self.nscenes then self:start_scene(d - 1, 0.0) end
-		elseif c0 == 48 then self:start_scene(self.nscenes - 1, 0.0) end
+function Reel:ensure_noise()
+	local pw, ph = self.pw, self.ph
+	local n = pw * ph
+	if #self.flash_noise == n then return end
+	local noise_rng = Rng.new(self.seed + 977)
+	local flash_noise = {}
+	local ring = {}
+	for i = 0, n - 1 do
+		flash_noise[i + 1] = noise_rng:next(1000)
+		local dx = (i % pw - pw * 0.5) / (pw * 0.5)
+		local dy = (i // pw - ph * 0.5) / (ph * 0.5)
+		ring[i + 1] = itrunc((dx * dx + dy * dy) * 500.0)
 	end
+	self.flash_noise = flash_noise
+	self.ring = ring
 end
 
--- the title card: a band opens from the screen's middle, the scene name
--- types itself in big pixel letters (a shine sweeps across them), the
--- handle sits under it as crisp text, and the band folds shut again
-function Reel:title_pixels()
-	local scene_t = self.scene_t
-	local open = scene_t / 0.28
-	local close = (self.title_len - scene_t) / 0.3
-	local k = open < close and open or close
-	k = k > 1.0 and 1.0 or k
-	if k <= 0.0 then return -1 end
-	local w, ph, ui_off = self.w, self.ph, self.ui_off
-	local y0 = ((ph // 2 - 12) // 2) * 2
-	local mid = y0 + 12
-	local reach = itrunc(k * 12.0 + 0.5)
+function Reel:dither_flash(keep)
+	self:ensure_noise()
 	local pix = HB_PIX
-	local band = ui_off + self.ui_band
-	for y = mid - reach, mid + reach - 1 do
-		if y >= 0 and y < ph then
-			local ry = y - y0
-			local c = ry == 0 and ui_off + self.ui_rule or (ry == 23 and ui_off + self.ui_rule + 1 or band + ry // 2)
-			local gi = y * w
-			for x = 1, w do pix[gi + x] = c end
-		end
+	local shine = self.ui_off + self.ui_shine
+	local noise = self.flash_noise
+	for i = 1, self.pw * self.ph do
+		if noise[i] < keep then pix[i] = shine end
 	end
-	if k < 1.0 then return -1 end
-	local name = self.cur.name
-	local sx = gfx:text_width(name, 2) <= w - 6 and 2 or 1
-	local tw = gfx:text_width(name, sx)
-	local tx = (w - tw) // 2
-	local ty = y0 + 3
-	local shown = itrunc((scene_t - 0.28) * 34.0) + 1
-	gfx:draw_text(pix, w, ph, name, tx, ty, sx, 2, ui_off + self.ui_ink, 8, ui_off + self.ui_shadow, shown)
-	-- the shine: a diagonal stripe of white sweeping over the ink
-	local sweep = itrunc((scene_t - 0.6) * 90.0) - 20
-	local ink0 = ui_off + self.ui_ink
-	local shine = ui_off + self.ui_shine
-	for y2 = ty, ty + 13 do
-		local gi2 = y2 * w + 1
-		for x2 = tx, tx + tw - 1 do
-			local d = x2 + (y2 - ty) - sweep - tx
-			if d >= 0 and d < 5 then
-				local pv = pix[gi2 + x2]
-				if pv >= ink0 and pv < ink0 + 8 then pix[gi2 + x2] = shine end
+end
+
+-- every big hit lands on the whole frame: over the bar before it an iris closes in,
+-- tightest through the score's beat of silence, then the hit throws it open and
+-- shakes the picture
+function Reel:drop_fx(sc, t)
+	local cue = sc.cue
+	if cue == nil then return end
+	local hit_t, hit_level = cue.hit_t, cue.hit_level
+	local close = 0.0
+	local since = 9.0
+	for k = 1, #hit_t do
+		if hit_level[k] >= 2 then
+			local to = hit_t[k] - t
+			if to > 0.0 and to <= MUSIC_BAR then
+				local c = 1.0 - to / MUSIC_BAR
+				c = to <= MUSIC_STEP * 4.0 and 0.62 or c * c * 0.45
+				close = c > close and c or close
 			end
+			if to <= 0.0 and 0.0 - to < since then since = 0.0 - to end
 		end
 	end
-	return (y0 + 20) // 2
+	if close > 0.0 then
+		self:ensure_noise()
+		local pix = HB_PIX
+		local noise = self.flash_noise
+		local rg = self.ring
+		local dark = self.ui_off + self.ui_shadow
+		-- past the iris everything is dark, across a thin rim it dithers in
+		local edge = itrunc((1.04 - close) * 1000.0)
+		local rim = 70
+		for i = 1, self.pw * self.ph do
+			local over = rg[i] - edge + rim
+			if over > 0 and (over >= rim or noise[i] * rim < over * 1000) then pix[i] = dark end
+		end
+	end
+	if since < 0.32 then
+		local amp = (0.32 - since) / 0.32 * (self.sext and 4.0 or 2.5)
+		local dx = itrunc(sin(t * 97.0) * amp)
+		local dy = itrunc(cos(t * 71.0) * amp * 0.6)
+		if dx ~= 0 or dy ~= 0 then self:shift_frame(dx, dy) end
+	end
 end
 
-function Reel:title_text(rows, row)
-	if row < 0 then return end
-	local c = HB_RGB[self.ui_off + self.ui_band + 10 + 1]
-	local bgc = ESC .. "[48;2;" .. (c // 65536) .. ";" .. ((c // 256) % 256) .. ";" .. (c % 256) .. "m"
-	gfx:overlay_center(rows, self.w, row, self.cur.handle, bgc .. ESC .. "[38;2;170;184;240m")
-end
-
--- ms_sim = script update + frame string; ms_draw = host console write.
--- The headline number is their SUM: the honest wall cost of a frame.
-function Reel:hud_overlay(rows, fps, ms_sim, ms_draw, ms_other)
-	local other = self.backend == "lua" and "jai" or "lua"
-	local ms_o = ""
-	if ms_other > 0.0 then ms_o = " (" .. other .. " " .. gfx:fmt1(ms_other) .. ")" end
-	local flow = self.paused and " [FROZEN]" or ""
-	local txt = " LUA DEMOREEL " .. (self.cur_idx + 1) .. "/" .. self.nscenes .. " " .. self.cur.name ..
-		" | " .. self.backend .. " " .. gfx:fmt1(ms_sim + ms_draw) .. "ms = sim " .. gfx:fmt1(ms_sim) ..
-		" + draw " .. gfx:fmt1(ms_draw) .. ms_o ..
-		" | " .. gfx:fmt1(fps) .. " fps" .. flow ..
-		" | " .. self.w .. "x" .. self.ph .. " px | r h f n p q"
-	gfx:overlay_left(rows, self.w, 0, txt, ESC .. "[48;2;24;16;48m" .. ESC .. "[38;2;235;235;255m")
+-- the frame moved by (dx, dy) pixels, its edges smeared in
+function Reel:shift_frame(dx, dy)
+	local pw, ph = self.pw, self.ph
+	local pix = HB_PIX
+	local tmp = self.grid_b
+	local n = pw * ph
+	for i = 1, n do tmp[i] = pix[i] end
+	local i2 = 1
+	for y = 0, ph - 1 do
+		local sy = y - dy
+		sy = sy < 0 and 0 or (sy >= ph and ph - 1 or sy)
+		local row = sy * pw + 1
+		for x = 0, pw - 1 do
+			local sx = x - dx
+			sx = sx < 0 and 0 or (sx >= pw and pw - 1 or sx)
+			pix[i2] = tmp[row + sx]
+			i2 = i2 + 1
+		end
+	end
 end
 
 function Reel:frame(t, dt, key, fps, ms_sim, ms_draw, ms_other)
-	if self.finish_pending then self:complete_transition() end
-	self:handle_key(key)
-	hb_ensure(self.w, self.h)
+	local cur = self.cur
+	if cur == nil then error("the port starts mid-scene: jump to a scene first", 0) end
+	hb_ensure(self.w, self.h, self.sext)
+	txt_clear()
 	if #HB_RGB == 0 then self:bind_palettes() end
 	local step = self.paused and 0.0 or dt
 	self.scene_t = self.scene_t + step
-	if not self.in_trans and self.scene_t >= self.dur_cur then self:begin_transition() end
-	self.cur:update(self.scene_t, step)
-	if self.in_trans then
-		self.trans_t = self.trans_t + step
-		self.cur:render(self.grid_a)
-		self.nxt:update(self.trans_t, step)
-		self.nxt:render(self.grid_b)
-		local prog = self.trans_t / self.trans_len
-		prog = prog > 1.0 and 1.0 or prog
-		gfx:mix_grids(self.grid_a, self.grid_b, HB_PIX, self.w, self.ph, self.trans_kind, prog, self.off_b,
-			self.ui_off + self.ui_edge, self.melt)
-		if self.trans_t >= self.trans_len then self.finish_pending = true end
-	else
-		self.cur:render(HB_PIX)
-	end
-	local trow = -1
-	if not self.in_trans and not self.finish_pending and self.scene_t < self.title_len then trow = self:title_pixels() end
+	if self.scene_t >= self.dur_cur then error("the scene ran out: the port starts mid-scene and runs no transitions", 0) end
+	cur:update(self.scene_t, step)
+	self.small_a = self:render_scene(cur, HB_PIX, self.small_a)
+	self:drop_fx(cur, self.scene_t)
+	if self.scene_t < self.title_len and cur.titled then error("a title card is up: the port starts mid-scene and draws none", 0) end
 	local rows = hb_present()
-	self:title_text(rows, trow)
-	if not self.in_trans then self.cur:text_rows(rows) end
-	if self.hud then self:hud_overlay(rows, fps, ms_sim, ms_draw, ms_other) end
+	cur:text_rows(rows)
 	return table.concat(rows, "\n")
 end

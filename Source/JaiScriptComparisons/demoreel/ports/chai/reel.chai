@@ -1,0 +1,371 @@
+// demoreel reel (ChaiScript port of scenes/reel.jai): the Scene base and the part of the Reel the perf path runs.
+//
+// Scene files: one file per scene, use()d by main.chai after this one. A scene file
+// - registers its class at load: register_scene(INDEX, fun() { return MyScene(); }) (JULIA 2, GLOBHUNTER 6,
+//   OSSUARY 9, MAELSTROM 10); the reel composes cues and probes length_bars()/hit_times()/hit_levels() only for
+//   registered indices, and make_scene raises "scene I is not ported" for the rest.
+// - "inherits" Scene by hand (ChaiScript classes have no inheritance): the class declares the base fields
+//     var name; var handle; var w; var h; var seed; var pal; var rng; var replay; var cue; var pixel_budget; var titled
+//   its constructor calls scene_init(this) first, then sets its own defaults (pixel_budget there, as the original
+//   does in its constructor; replay in build()). The free functions below take the scene first and serve as the
+//   default methods (sc.build() reaches build(sc) when the class defines none); a class's own def overrides them,
+//   because ChaiScript tries a class's methods before an untyped free function.
+// - reaches its own state through this.*: this.pal (its Palette), this.rng (the host Rng: next(n), roll(lo, hi),
+//   chance(p), nextf()), this.cue (its Cue: kick_env(t), chord(t), hit(t), ...), this.w/this.h (pixels).
+//   Shared state is global: gfx, RESET, ESC, the HB_* presenter tables, the text layer (txt_glyph, txt_put, cell_col,
+//   col_px, ...), MUSIC_*.
+// - ChaiScript traps: int literals are 32-bit (write 1ll where a value can pass 2^31: an attribute or local keeps the
+//   type it was first given, so an int64 seed stays int64); `=` into an existing number converts to its type (a field
+//   first set to 0 truncates a float stored later: initialise floats with 0.0); .size() is unsigned (to_int() before
+//   subtracting); parameters alias the caller's value (never assign to one: copy it into a var); `var x = vec` copies
+//   the vector but its elements stay shared, so alias read-only containers with auto& and build an independent array
+//   with push_back; object handles rebind with := (plain = copies a class instance attribute by attribute);
+//   v.resize(n, 0) shares ONE element across the vector, so build grids with push_back (gfx.make_grid).
+
+global SCENE_MAKERS = Map();
+
+def register_scene(idx, maker) { SCENE_MAKERS[to_string(idx)] = maker; }
+
+def scene_init(sc) {
+	sc.name = "SCENE";
+	sc.handle = "";
+	sc.w = 0;
+	sc.h = 0;
+	sc.seed = 0;
+	sc.replay = 3.0;
+	sc.pixel_budget = 0;
+	sc.titled = true;
+}
+
+def setup(sc, w_, h_, seed_) {
+	sc.w = w_;
+	sc.h = h_;
+	sc.seed = seed_;
+	sc.rng := Rng(seed_);
+	sc.pal := Palette();
+	sc.build();
+}
+
+def build(sc) {}
+def update(sc, t, dt) {}
+def render(sc, grid) {}
+def text_rows(sc, rows) {}
+def hit_times(sc) { return []; }
+def hit_levels(sc) { return []; }
+def length_bars(sc) { return 0; }
+
+class Reel {
+	var w
+	var h
+	var sext
+	var pw
+	var ph
+	var seed
+	var smoke
+	var backend
+	var hud
+	var hud_full
+	var paused
+	var nscenes
+	var intro_idx
+	var bars
+	var cues
+	var seed_slots
+	var cur
+	var cur_idx
+	var pending_idx
+	var scene_t
+	var dur_cur
+	var title_len
+	var trans_len
+	var in_trans
+	var finish_pending
+	var trans_t
+	var trans_kind
+	var out_transition
+	var trans_count
+	var trans_frame
+	var grid_a
+	var grid_b
+	var flash_noise
+	var ring
+	var small_a
+	var small_b
+	var melt
+	var ui
+	var ui_off
+	var off_b
+	var ui_band
+	var ui_rule
+	var ui_ink
+	var ui_shine
+	var ui_shadow
+	var ui_edge
+	var reload_left
+
+	def Reel(w_, h_, seed_, backend_, smoke_, hud_) {
+		this.w = w_;
+		this.h = h_;
+		this.sext = PIX_MODE == "sext" || (PIX_MODE == "" && hb_pixel_w(w_, true) * hb_pixel_h(h_, true) <= PIX_BUDGET);
+		this.pw = hb_pixel_w(w_, this.sext);
+		this.ph = hb_pixel_h(h_, this.sext);
+		this.seed = seed_;
+		this.backend = backend_;
+		this.smoke = smoke_;
+		this.hud = hud_;
+		this.hud_full = false;
+		this.paused = false;
+		this.nscenes = 12;
+		this.intro_idx = 12;
+		this.cues = [];
+		this.cur_idx = 0;
+		this.pending_idx = 0;
+		this.scene_t = 0.0;
+		this.dur_cur = 10.0;
+		this.title_len = MUSIC_BAR;
+		this.trans_len = MUSIC_BEAT * 2.0;
+		this.in_trans = false;
+		this.finish_pending = false;
+		this.trans_t = 0.0;
+		this.trans_kind = 0;
+		this.out_transition = [4, 5, 8, 7, 3, 4, 5, 7, 6, 8, 5, 3, 5];
+		this.trans_count = 0;
+		this.trans_frame = 0;
+		this.flash_noise = [];
+		this.ring = [];
+		this.small_a = [];
+		this.small_b = [];
+		this.ui_off = 0;
+		this.off_b = 0;
+		this.reload_left = 0.0;
+		this.grid_a = gfx.make_grid(this.pw * this.ph);
+		this.grid_b = gfx.make_grid(this.pw * this.ph);
+		this.melt = gfx.make_fgrid(this.pw);
+		this.ui = Palette();
+		this.ui_band = this.ui.size();
+		for (var b = 0; b < 12; ++b) {
+			var f = b < 6 ? b / 5.0 : (11 - b) / 5.0;
+			this.ui.add(10.0 + 14.0 * f, 8.0 + 8.0 * f, 30.0 + 26.0 * f);
+		}
+		this.ui_rule = this.ui.add(255, 206, 110);
+		this.ui.add(110, 200, 255);
+		this.ui_ink = this.ui.gradient(8, [[255.0, 250.0, 214.0], [255.0, 214.0, 110.0], [255.0, 128.0, 60.0], [214.0, 52.0, 92.0]]);
+		this.ui_shine = this.ui.add(255, 255, 255);
+		this.ui_shadow = this.ui.add(4, 2, 12);
+		this.ui_edge = this.ui.add(255, 244, 200);
+		this.bars = [32, 6, 6, 6, 7, 7, 8, 8, 6, 21, 8, 24, 4];
+		this.seed_slots = [16, 3, 4, 5, 6, 8, 9, 10, 13, 15, 17, 23, 21];
+		// each cue depends only on its index and the seed, so only the ported scenes' are composed;
+		// cur stays unset until the first jump (the intro is not ported)
+		for (var i = 0; i <= this.intro_idx; ++i) {
+			if (SCENE_MAKERS.count(to_string(i)) == 0) {
+				this.cues.push_back(null);
+				continue;
+			}
+			var probe = this.make_scene(i);
+			if (probe.length_bars() > 0) { this.bars[i] = probe.length_bars(); }
+			this.cues.push_back(Cue(this.bars[i], music_mood(i), this.seed + this.seed_slots[i] * 101, probe.hit_times(), probe.hit_levels()));
+		}
+	}
+
+	def make_scene(idx) {
+		var key = to_string(idx);
+		if (SCENE_MAKERS.count(key) == 0) { throw("scene ${idx} is not ported"); }
+		auto& maker = SCENE_MAKERS[key];
+		return maker();
+	}
+
+	def dur_for(idx) {
+		return this.smoke ? 3.0 : this.bars[idx] * MUSIC_BAR;
+	}
+
+	def setup_scene(sc, idx) {
+		sc.cue := this.cues[idx];
+		var sw = this.pw;
+		var sh = this.ph;
+		if (sc.pixel_budget > 0 && this.pw * this.ph > sc.pixel_budget) {
+			var k = sqrt(sc.pixel_budget * 1.0 / (this.pw * this.ph));
+			sw = itrunc(this.pw * k);
+			sh = itrunc(this.ph * k);
+		}
+		sc.setup(sw, sh, this.seed + this.seed_slots[idx] * 7919);
+	}
+
+	def render_scene(sc, target, scratch) {
+		var pw = this.pw;
+		var ph = this.ph;
+		if (sc.w == pw && sc.h == ph) {
+			sc.render(target);
+			return;
+		}
+		var sw = sc.w;
+		var sh = sc.h;
+		if (scratch.size() != sw * sh) {
+			scratch = [];   // scratch aliases the reel's small_a: this empties it in place
+			for (var i = 0; i < sw * sh; ++i) { scratch.push_back(0); }
+		}
+		sc.render(scratch);
+		var idx = 0;
+		for (var y = 0; y < ph; ++y) {
+			var row = (y * sh / ph) * sw;
+			for (var x = 0; x < pw; ++x) {
+				target[idx] = scratch[row + x * sw / pw];
+				++idx;
+			}
+		}
+	}
+
+	def bind_palettes() {
+		hb_ensure(this.w, this.h, this.sext);
+		HB_FG = [];
+		HB_BG = [];
+		HB_RGB = [];
+		HB_LUM = [];
+		this.absorb(this.cur.pal);
+		this.off_b = HB_RGB.size();
+		this.ui_off = HB_RGB.size();
+		this.absorb(this.ui);
+	}
+
+	def absorb(p) {
+		auto& fg = p.fg;
+		auto& bg = p.bg;
+		auto& rgb = p.rgb;
+		var n = rgb.size();
+		for (var i = 0; i < n; ++i) {
+			HB_FG.push_back(fg[i]);
+			HB_BG.push_back(bg[i]);
+			var c = rgb[i];
+			HB_RGB.push_back(c);
+			HB_LUM.push_back((c >> 16) * 2 + ((c >> 8) & 255) * 3 + (c & 255));
+		}
+	}
+
+	def start_scene(idx, at_t) {
+		this.cur_idx = idx == this.intro_idx ? idx : ((idx % this.nscenes) + this.nscenes) % this.nscenes;
+		this.cur := this.make_scene(this.cur_idx);
+		this.setup_scene(this.cur, this.cur_idx);
+		this.dur_cur = this.dur_for(this.cur_idx);
+		this.scene_t = at_t;
+		this.in_trans = false;
+		this.finish_pending = false;
+		this.trans_t = 0.0;
+		this.bind_palettes();
+	}
+
+	def jump(idx, at_t) {
+		this.start_scene(idx, at_t);
+		var steps = itrunc(at_t * 30.0);
+		var most = itrunc(this.cur.replay * 30.0);
+		steps = steps > most ? most : steps;
+		// 0.0333333333 as an exact quotient: ChaiScript's parser misrounds the literal
+		var ft = at_t - steps * (333333333.0 / 10000000000.0);
+		for (var i = 0; i < steps; ++i) {
+			ft += (333333333.0 / 10000000000.0);
+			this.cur.update(ft, (333333333.0 / 10000000000.0));
+		}
+	}
+
+	def ensure_noise() {
+		var pw = this.pw;
+		var ph = this.ph;
+		var n = pw * ph;
+		if (this.flash_noise.size() == n) { return; }
+		var noise_rng = Rng(this.seed + 977);
+		this.flash_noise = [];
+		this.ring = [];
+		auto& noise = this.flash_noise;
+		auto& ring = this.ring;
+		for (var i = 0; i < n; ++i) {
+			noise.push_back(noise_rng.next(1000));
+			var dx = (i % pw - pw * 0.5) / (pw * 0.5);
+			var dy = (i / pw - ph * 0.5) / (ph * 0.5);
+			ring.push_back(itrunc((dx * dx + dy * dy) * 500.0));
+		}
+	}
+
+	def dither_flash(keep) {
+		this.ensure_noise();
+		auto& pix = HB_PIX;
+		var shine = this.ui_off + this.ui_shine;
+		auto& noise = this.flash_noise;
+		var n = this.pw * this.ph;
+		for (var i = 0; i < n; ++i) {
+			if (noise[i] < keep) { pix[i] = shine; }
+		}
+	}
+
+	def drop_fx(sc, t) {
+		auto& cue = sc.cue;
+		var close = 0.0;
+		var since = 9.0;
+		for (var k = 0; k < cue.hit_t.size(); ++k) {
+			if (cue.hit_level[k] < 2) { continue; }
+			var to = cue.hit_t[k] - t;
+			if (to > 0.0 && to <= MUSIC_BAR) {
+				var c = 1.0 - to / MUSIC_BAR;
+				c = to <= MUSIC_STEP * 4.0 ? 0.62 : c * c * 0.45;
+				close = c > close ? c : close;
+			}
+			if (to <= 0.0 && 0.0 - to < since) { since = 0.0 - to; }
+		}
+		if (close > 0.0) {
+			this.ensure_noise();
+			auto& pix = HB_PIX;
+			auto& noise = this.flash_noise;
+			auto& rg = this.ring;
+			var dark = this.ui_off + this.ui_shadow;
+			var edge = itrunc((1.04 - close) * 1000.0);
+			var rim = 70;
+			var n = this.pw * this.ph;
+			for (var i = 0; i < n; ++i) {
+				var over = rg[i] - edge + rim;
+				if (over > 0 && (over >= rim || noise[i] * rim < over * 1000)) { pix[i] = dark; }
+			}
+		}
+		if (since < 0.32) {
+			var amp = (0.32 - since) / 0.32 * (this.sext ? 4.0 : 2.5);
+			var dx = itrunc(sin(t * 97.0) * amp);
+			var dy = itrunc(cos(t * 71.0) * amp * 0.6);
+			if (dx != 0 || dy != 0) { this.shift_frame(dx, dy); }
+		}
+	}
+
+	def shift_frame(dx, dy) {
+		auto& pix = HB_PIX;
+		auto& tmp = this.grid_b;
+		var pw = this.pw;
+		var ph = this.ph;
+		var n = pw * ph;
+		for (var i = 0; i < n; ++i) { tmp[i] = pix[i]; }
+		var i2 = 0;
+		for (var y = 0; y < ph; ++y) {
+			var sy = y - dy;
+			sy = sy < 0 ? 0 : (sy >= ph ? ph - 1 : sy);
+			var row = sy * pw;
+			for (var x = 0; x < pw; ++x) {
+				var sx = x - dx;
+				sx = sx < 0 ? 0 : (sx >= pw ? pw - 1 : sx);
+				pix[i2] = tmp[row + sx];
+				++i2;
+			}
+		}
+	}
+
+	def frame(t, dt, key, fps, ms_sim, ms_draw, ms_other) {
+		hb_ensure(this.w, this.h, this.sext);
+		txt_clear();
+		if (HB_RGB.size() == 0) { this.bind_palettes(); }
+		var step = this.paused ? 0.0 : dt;
+		this.scene_t += step;
+		if (!this.in_trans && this.scene_t >= this.dur_cur) { throw("the chai port starts mid-scene and runs no transitions"); }
+		this.cur.update(this.scene_t, step);
+		this.render_scene(this.cur, HB_PIX, this.small_a);
+		this.drop_fx(this.cur, this.scene_t);
+		if (this.scene_t < this.title_len && this.cur.titled) { throw("the chai port starts mid-scene and draws no title cards"); }
+		var rows = hb_present();
+		this.cur.text_rows(rows);
+		if (this.hud) { throw("the chai port draws no HUD"); }
+		return join_lines(rows);
+	}
+}

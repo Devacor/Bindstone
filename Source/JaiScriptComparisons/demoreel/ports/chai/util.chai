@@ -1,0 +1,387 @@
+// demoreel util (ChaiScript port of scenes/util.jai): palettes, the half-block/sextant presenter, the text layer,
+// the pixel font, Gfx. Transitions are not ported: the perf window never reaches one.
+
+class Palette {
+	var fg
+	var bg
+	var rgb
+
+	def Palette() {
+		this.fg = [];
+		this.bg = [];
+		this.rgb = [];
+	}
+
+	def add(r, g, b) {
+		var ir = itrunc(r < 0.0 ? 0.0 : (r > 255.0 ? 255.0 : r));
+		var ig = itrunc(g < 0.0 ? 0.0 : (g > 255.0 ? 255.0 : g));
+		var ib = itrunc(b < 0.0 ? 0.0 : (b > 255.0 ? 255.0 : b));
+		var c = "${ir};${ig};${ib}m";
+		this.fg.push_back(ESC + "[38;2;" + c);
+		this.bg.push_back(ESC + "[48;2;" + c);
+		this.rgb.push_back(ir * 65536 + ig * 256 + ib);
+		return to_int(this.rgb.size()) - 1;
+	}
+
+	def ramp(n, r0, g0, b0, r1, g1, b1) {
+		var first = to_int(this.rgb.size());
+		for (var i = 0; i < n; ++i) {
+			var f = n > 1 ? i / (n - 1.0) : 0.0;
+			this.add(r0 + (r1 - r0) * f, g0 + (g1 - g0) * f, b0 + (b1 - b0) * f);
+		}
+		return first;
+	}
+
+	def gradient(n, stops) {
+		var first = to_int(this.rgb.size());
+		var ns = to_int(stops.size()) - 1;
+		for (var i = 0; i < n; ++i) {
+			var f = n > 1 ? i * ns / (n - 1.0) : 0.0;
+			var k = itrunc(f);
+			k = k >= ns ? ns - 1 : k;
+			var u = f - k;
+			auto& a = stops[k];
+			auto& b = stops[k + 1];
+			var ar = a[0]; var ag = a[1]; var ab = a[2];
+			var br = b[0]; var bg2 = b[1]; var bb = b[2];
+			this.add(ar + (br - ar) * u, ag + (bg2 - ag) * u, ab + (bb - ab) * u);
+		}
+		return first;
+	}
+
+	def size() { return to_int(this.rgb.size()); }
+}
+
+global HB_PIX = [];
+global HB_FG = [];
+global HB_BG = [];
+global HB_RGB = [];
+global HB_LUM = [];
+global HB_ROWIDX = [];
+global HB_SRC = [];
+global HB_SEXTG = [];
+global TXT_CP = [];
+global TXT_RGB = [];
+global TXT_USED = false;
+global HB_SEXT = false;
+global HB_W = 0;
+global HB_PH = 0;
+global HB_COLS = 0;
+global HB_ROWS = 0;
+global HB_WORKERS = 0;
+global HB_HALF = "▀";
+global HB_FULL = "█";
+global HB_RESET = ESC + "[0m";
+
+def utf8(cp) {
+	if (cp < 128) { return to_string(to_char(cp)); }
+	if (cp < 2048) { return to_string(to_char(192 + (cp >> 6))) + to_string(to_char(128 + (cp & 63))); }
+	if (cp < 65536) { return to_string(to_char(224 + (cp >> 12))) + to_string(to_char(128 + ((cp >> 6) & 63))) + to_string(to_char(128 + (cp & 63))); }
+	return to_string(to_char(240 + (cp >> 18))) + to_string(to_char(128 + ((cp >> 12) & 63))) + to_string(to_char(128 + ((cp >> 6) & 63))) + to_string(to_char(128 + (cp & 63)));
+}
+
+def hb_pixel_w(cols, sext) { return sext ? cols * 3 / 2 : cols; }
+def hb_pixel_h(rows, sext) { return sext ? rows * 3 : rows * 2; }
+
+def hb_ensure(cols, rows, sext) {
+	HB_SEXT = sext;
+	var pw = hb_pixel_w(cols, sext);
+	var ph = hb_pixel_h(rows, sext);
+	if (HB_COLS == cols && HB_ROWS == rows && HB_W == pw && HB_PH == ph && HB_PIX.size() == pw * ph) { return; }
+	HB_COLS = cols;
+	HB_ROWS = rows;
+	HB_W = pw;
+	HB_PH = ph;
+	HB_PIX = [];
+	for (var i = 0; i < pw * ph; ++i) { HB_PIX.push_back(0); }
+	HB_ROWIDX = [];
+	for (var r = 0; r < rows; ++r) { HB_ROWIDX.push_back(r); }
+	HB_SRC = [];
+	for (var g = 0; g < cols * 2; ++g) { HB_SRC.push_back(g * pw / (cols * 2)); }
+	TXT_CP = [];
+	TXT_RGB = [];
+	for (var c = 0; c < cols * rows; ++c) {
+		TXT_CP.push_back(0);
+		TXT_RGB.push_back(0);
+	}
+	TXT_USED = false;
+	HB_SEXTG = [];
+	for (var b = 0; b < 64; ++b) {
+		if (b == 0) { HB_SEXTG.push_back(" "); }
+		else if (b == 21) { HB_SEXTG.push_back(utf8(0x258C)); }
+		else if (b == 42) { HB_SEXTG.push_back(utf8(0x2590)); }
+		else if (b == 63) { HB_SEXTG.push_back(HB_FULL); }
+		else { HB_SEXTG.push_back(utf8(0x1FB00 + b - 1 - (b > 21 ? 1 : 0) - (b > 42 ? 1 : 0))); }
+	}
+}
+
+def txt_clear() {
+	if (!TXT_USED) { return; }
+	auto& cp = TXT_CP;
+	var n = cp.size();
+	for (var i = 0; i < n; ++i) { cp[i] = 0; }
+	TXT_USED = false;
+}
+
+def txt_glyph(col, row, cp, rgb) {
+	if (col < 0 || col >= HB_COLS || row < 0 || row >= HB_ROWS) { return; }
+	TXT_CP[row * HB_COLS + col] = cp;
+	TXT_RGB[row * HB_COLS + col] = rgb;
+	TXT_USED = true;
+}
+
+def txt_put(col, row, s, rgb) {
+	var n = s.size();
+	for (var i = 0; i < n; ++i) { txt_glyph(col + i, row, s[i] + 0, rgb); }
+}
+
+def cell_col(px) { return px * HB_COLS / HB_W; }
+def cell_row(py) { return py * HB_ROWS / HB_PH; }
+def col_px(col) { return col * HB_W / HB_COLS; }
+def row_px(row) { return row * HB_PH / HB_ROWS; }
+
+def hb_text(cell, dark, state) {
+	var result = "";
+	if (dark != state[1]) {
+		result += HB_BG[dark];
+		state[1] = dark;
+	}
+	var c = TXT_RGB[cell];
+	state[0] = -1;
+	var cp = TXT_CP[cell];
+	return result + "${ESC}[38;2;${c >> 16};${(c >> 8) & 255};${c & 255}m" + (cp < 128 ? to_string(to_char(cp)) : utf8(cp));
+}
+
+def hb_row(cy) { return HB_SEXT ? hb_row_sext(cy) : hb_row_half(cy); }
+
+def hb_row_half(cy) {
+	auto& pix = HB_PIX;
+	auto& lum = HB_LUM;
+	auto& fgs = HB_FG;
+	auto& bgs = HB_BG;
+	auto& txt = TXT_CP;
+	var row = "";
+	var vw = HB_W;
+	var fg = -1;
+	var bg = -1;
+	var ti = cy * 2 * vw;
+	var bi = ti + vw;
+	var cell = cy * vw;
+	var text = TXT_USED;
+	for (var x = 0; x < vw; ++x) {
+		var top = pix[ti + x];
+		var bot = pix[bi + x];
+		if (text && txt[cell + x] != 0) {
+			var state = [fg, bg];
+			row += hb_text(cell + x, lum[top] < lum[bot] ? top : bot, state);
+			fg = state[0];
+			bg = state[1];
+			continue;
+		}
+		if (top == bot) {
+			if (bot == bg) { row += " "; }
+			else if (top == fg) { row += HB_FULL; }
+			else { row += bgs[bot]; bg = bot; row += " "; }
+		} else {
+			if (top != fg) { row += fgs[top]; fg = top; }
+			if (bot != bg) { row += bgs[bot]; bg = bot; }
+			row += HB_HALF;
+		}
+	}
+	return row + HB_RESET;
+}
+
+def hb_row_sext(cy) {
+	auto& pix = HB_PIX;
+	auto& lum = HB_LUM;
+	auto& fgs = HB_FG;
+	auto& bgs = HB_BG;
+	auto& src = HB_SRC;
+	auto& glyphs = HB_SEXTG;
+	auto& txt = TXT_CP;
+	var row = "";
+	var vw = HB_W;
+	var fg = -1;
+	var bg = -1;
+	var r0 = cy * 3 * vw;
+	var r1 = r0 + vw;
+	var r2 = r1 + vw;
+	var cols = HB_COLS;
+	var cell = cy * cols;
+	var text = TXT_USED;
+	for (var cx = 0; cx < cols; ++cx) {
+		var xa = src[cx * 2];
+		var xb = src[cx * 2 + 1];
+		var p0 = pix[r0 + xa];
+		var p1 = pix[r0 + xb];
+		var p2 = pix[r1 + xa];
+		var p3 = pix[r1 + xb];
+		var p4 = pix[r2 + xa];
+		var p5 = pix[r2 + xb];
+		var flat = p0 == p1 && p0 == p2 && p0 == p3 && p0 == p4 && p0 == p5;
+		if (flat && !(text && txt[cell] != 0)) {
+			if (p0 != bg) { row += bgs[p0]; bg = p0; }
+			row += " ";
+			++cell;
+			continue;
+		}
+		var l0 = lum[p0];
+		var l1 = lum[p1];
+		var l2 = lum[p2];
+		var l3 = lum[p3];
+		var l4 = lum[p4];
+		var l5 = lum[p5];
+		var lmin = l0;
+		var lmax = l0;
+		var fgp = p0;
+		var bgp = p0;
+		if (l1 < lmin) { lmin = l1; bgp = p1; }
+		if (l1 > lmax) { lmax = l1; fgp = p1; }
+		if (l2 < lmin) { lmin = l2; bgp = p2; }
+		if (l2 > lmax) { lmax = l2; fgp = p2; }
+		if (l3 < lmin) { lmin = l3; bgp = p3; }
+		if (l3 > lmax) { lmax = l3; fgp = p3; }
+		if (l4 < lmin) { lmin = l4; bgp = p4; }
+		if (l4 > lmax) { lmax = l4; fgp = p4; }
+		if (l5 < lmin) { lmin = l5; bgp = p5; }
+		if (l5 > lmax) { lmax = l5; fgp = p5; }
+		if (text && txt[cell] != 0) {
+			var state = [fg, bg];
+			row += hb_text(cell, bgp, state);
+			fg = state[0];
+			bg = state[1];
+			++cell;
+			continue;
+		}
+		var thr = (lmin + lmax + 1) / 2;
+		var bits = 0;
+		if (l0 >= thr) { bits = 1; }
+		if (l1 >= thr) { bits += 2; }
+		if (l2 >= thr) { bits += 4; }
+		if (l3 >= thr) { bits += 8; }
+		if (l4 >= thr) { bits += 16; }
+		if (l5 >= thr) { bits += 32; }
+		if (fgp != fg) { row += fgs[fgp]; fg = fgp; }
+		if (bits != 63 && bgp != bg) { row += bgs[bgp]; bg = bgp; }
+		row += glyphs[bits];
+		++cell;
+	}
+	return row + HB_RESET;
+}
+
+// HB_WORKERS is always 0 here: the VM's parallel_transform runs the same rows in order
+def hb_present() {
+	var rows = [];
+	for (var cy = 0; cy < HB_ROWS; ++cy) { rows.push_back(hb_row(cy)); }
+	return rows;
+}
+
+def join_lines(rows) {
+	var result = "";
+	var n = rows.size();
+	for (var i = 0; i < n; ++i) {
+		if (i > 0) { result += "\n"; }
+		result += rows[i];
+	}
+	return result;
+}
+
+def str_repeat(s, n) {
+	var result = "";
+	for (var i = 0; i < n; ++i) { result += s; }
+	return result;
+}
+
+global FONT5 = [
+	"A": [14, 17, 17, 31, 17, 17, 17], "B": [30, 17, 17, 30, 17, 17, 30], "C": [15, 16, 16, 16, 16, 16, 15],
+	"D": [30, 17, 17, 17, 17, 17, 30], "E": [31, 16, 16, 30, 16, 16, 31], "F": [31, 16, 16, 30, 16, 16, 16],
+	"G": [15, 16, 16, 19, 17, 17, 15], "H": [17, 17, 17, 31, 17, 17, 17], "I": [31, 4, 4, 4, 4, 4, 31],
+	"J": [31, 2, 2, 2, 18, 18, 12], "K": [17, 18, 20, 24, 20, 18, 17], "L": [16, 16, 16, 16, 16, 16, 31],
+	"M": [17, 27, 21, 21, 17, 17, 17], "N": [17, 25, 21, 19, 17, 17, 17], "O": [14, 17, 17, 17, 17, 17, 14],
+	"P": [30, 17, 17, 30, 16, 16, 16], "Q": [14, 17, 17, 17, 21, 18, 13], "R": [30, 17, 17, 30, 20, 18, 17],
+	"S": [15, 16, 16, 14, 1, 1, 30], "T": [31, 4, 4, 4, 4, 4, 4], "U": [17, 17, 17, 17, 17, 17, 14],
+	"V": [17, 17, 17, 17, 17, 10, 4], "W": [17, 17, 17, 21, 21, 21, 10], "X": [17, 17, 10, 4, 10, 17, 17],
+	"Y": [17, 17, 10, 4, 4, 4, 4], "Z": [31, 1, 2, 4, 8, 16, 31],
+	"0": [14, 17, 19, 21, 25, 17, 14], "1": [4, 12, 4, 4, 4, 4, 14], "2": [14, 17, 1, 2, 4, 8, 31],
+	"3": [30, 1, 1, 14, 1, 1, 30], "4": [2, 6, 10, 18, 31, 2, 2], "5": [31, 16, 30, 1, 1, 17, 14],
+	"6": [14, 16, 16, 30, 17, 17, 14], "7": [31, 1, 2, 4, 8, 8, 8], "8": [14, 17, 17, 14, 17, 17, 14],
+	"9": [14, 17, 17, 15, 1, 1, 14], ".": [0, 0, 0, 0, 0, 12, 12], "!": [4, 4, 4, 4, 4, 0, 4],
+	"-": [0, 0, 0, 14, 0, 0, 0], ":": [0, 12, 12, 0, 12, 12, 0], "/": [1, 1, 2, 4, 8, 16, 16],
+	"+": [0, 4, 4, 31, 4, 4, 0], "?": [14, 17, 1, 2, 4, 0, 4], "'": [4, 4, 8, 0, 0, 0, 0]
+];
+
+class Gfx {
+	def Gfx() {}
+
+	def make_grid(n) {
+		var g = [];
+		for (var i = 0; i < n; ++i) { g.push_back(0); }
+		return g;
+	}
+
+	def make_fgrid(n) {
+		var g = [];
+		for (var i = 0; i < n; ++i) { g.push_back(0.0); }
+		return g;
+	}
+
+	def rainbow_rgb(phase) {
+		return [128.0 + 127.0 * sin(phase),
+			128.0 + 127.0 * sin(phase + 2.094),
+			128.0 + 127.0 * sin(phase + 4.188)];
+	}
+
+	def fmt1(v) {
+		var t = itrunc(v * 10.0 + 0.5);
+		return "${t / 10}.${t % 10}";
+	}
+
+	def text_width(text, sx) {
+		return to_int(text.size()) * 6 * sx - sx;
+	}
+
+	def draw_text(pix, w, h, text, x0, y0, sx, sy, row0, nramp, shadow, limit) {
+		var n = to_int(text.size()) < limit ? to_int(text.size()) : limit;
+		var th = 7 * sy;
+		for (var pass = shadow < 0 ? 1 : 0; pass < 2; ++pass) {
+			var ox = pass == 0 ? 1 : 0;
+			for (var li = 0; li < n; ++li) {
+				var ch = text.substr(li, 1);
+				if (FONT5.count(ch) == 0) { continue; }
+				auto& bits = FONT5[ch];
+				var lx = x0 + li * 6 * sx + ox;
+				for (var ry = 0; ry < 7; ++ry) {
+					var b = bits[ry];
+					if (b == 0) { continue; }
+					for (var dy = 0; dy < sy; ++dy) {
+						var yy = y0 + ry * sy + dy + ox;
+						if (yy < 0 || yy >= h) { continue; }
+						var c = pass == 0 ? shadow : row0 + ((ry * sy + dy) * nramp) / th;
+						for (var rx = 0; rx < 5; ++rx) {
+							if (((b >> (4 - rx)) & 1) == 0) { continue; }
+							for (var dx = 0; dx < sx; ++dx) {
+								var xx = lx + rx * sx + dx;
+								if (xx >= 0 && xx < w) { pix[yy * w + xx] = c; }
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	def overlay_center(rows, w, y, text, style) {
+		if (y < 0 || y >= rows.size()) { return; }
+		var shown = text;
+		var n = to_int(shown.size());
+		if (n > w) {
+			shown = shown.substr(0, w);
+			n = w;
+		}
+		var pad = (w - n) / 2;
+		rows[y] = style + str_repeat(" ", pad) + shown + str_repeat(" ", w - pad - n) + RESET;
+	}
+}
+
+def sgr_fg(r, g, b) { return "${ESC}[38;2;${r};${g};${b}m"; }
+def sgr_bg(r, g, b) { return "${ESC}[48;2;${r};${g};${b}m"; }

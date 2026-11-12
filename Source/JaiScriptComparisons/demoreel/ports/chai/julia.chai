@@ -1,0 +1,341 @@
+// JULIA (ChaiScript port of scenes/julia.jai): the whole Julia set, morphing in frame, its constant steered through
+// the fixed point's multiplier; half the rows are computed and mirrored (the set is its own half turn).
+
+// decimals ChaiScript's parser misrounds are written as exact integer quotients (check_literals.py finds them)
+global JU_CA = 0.0;
+global JU_CB = 0.0;
+global JU_FX = 0.0;
+global JU_FY = 0.0;
+global JU_TRAP = 0.0;
+global JU_DRIFT = 0.0;
+global JU_MAXIT = 40;
+global JU_W = 0;
+global JU_H = 0;
+global JU_UX = 0.0;
+global JU_UY = 0.0;
+global JU_VX = 0.0;
+global JU_VY = 0.0;
+global JU_PIXELS = 1.0;
+global JU_UNRESOLVED = 0.0;
+global JU_LX = 0.0;
+global JU_LY = 0.0;
+global JU_PHASE = 0.0;
+global JU_INPHASE = 0.0;
+global JU_LIFT = 0.0;
+global JU_RIM = 1.0;
+global JU_INSIDE = 0;
+global JU_ROWS = [];
+
+global JU_HUES = 64;
+global JU_LEVELS = 12;
+global JU_INHUES = 32;
+
+global JU_RHO = 0;
+global JU_THETA = 1;
+global JU_DIVE = 2;
+global JU_SPIN = 3;
+
+// one row of the top half; each entry packs the pixel and the one half a turn away
+def julia_row(y) {
+	var out = [];
+	var w = JU_W;
+	var mi = JU_MAXIT;
+	var ca = JU_CA;
+	var cb = JU_CB;
+	var ux = JU_UX;
+	var uy = JU_UY;
+	var py = y + 0.5 - JU_H * 0.5;
+	var left = 0.5 - w * 0.5;
+	var rx = py * JU_VX + left * ux;
+	var ry = py * JU_VY + left * uy;
+	var lx = JU_LX;
+	var ly = JU_LY;
+	var fx = JU_FX;
+	var fy = JU_FY;
+	var trap = JU_TRAP;
+	var drift = JU_DRIFT;
+	var pixels = JU_PIXELS;
+	var phase = JU_PHASE;
+	var inphase = JU_INPHASE;
+	var lift = JU_LIFT;
+	var rim = JU_RIM;
+	var rimfall = 0.5 / rim;
+	var inside = JU_INSIDE;
+	var unresolved = JU_UNRESOLVED;
+	var hot = (itrunc(mi * 3.5 + phase) & 63) * 12 + 11;
+	for (var x = 0; x < w; ++x) {
+		var zx = rx + x * ux;
+		var zy = ry + x * uy;
+		var x2 = zx * zx;
+		var y2 = zy * zy;
+		var dx = 1.0;
+		var dy = 0.0;
+		var e2 = 1.0;
+		var k = 0;
+		var nd = 0.0;
+		while (k < mi) {
+			nd = 2.0 * (zx * dx - zy * dy);
+			dy = 2.0 * (zx * dy + zy * dx);
+			dx = nd;
+			zy = 2.0 * zx * zy + cb;
+			zx = x2 - y2 + ca;
+			x2 = zx * zx;
+			y2 = zy * zy;
+			nd = 2.0 * (zx * dx - zy * dy);
+			dy = 2.0 * (zx * dy + zy * dx);
+			dx = nd;
+			zy = 2.0 * zx * zy + cb;
+			zx = x2 - y2 + ca;
+			x2 = zx * zx;
+			y2 = zy * zy;
+			nd = 2.0 * (zx * dx - zy * dy);
+			dy = 2.0 * (zx * dy + zy * dx);
+			dx = nd;
+			zy = 2.0 * zx * zy + cb;
+			zx = x2 - y2 + ca;
+			x2 = zx * zx;
+			y2 = zy * zy;
+			nd = 2.0 * (zx * dx - zy * dy);
+			dy = 2.0 * (zx * dy + zy * dx);
+			dx = nd;
+			zy = 2.0 * zx * zy + cb;
+			zx = x2 - y2 + ca;
+			x2 = zx * zx;
+			y2 = zy * zy;
+			k += 4;
+			if (x2 + y2 >= 64.0) { break; }
+			var ex = zx - fx;
+			var ey = zy - fy;
+			e2 = ex * ex + ey * ey;
+			if (e2 < trap) { break; }
+		}
+		var m2 = x2 + y2;
+		var d2 = dx * dx + dy * dy;
+		if (m2 < 64.0) {
+			var c = hot;
+			if (d2 < unresolved) {
+				var band = k * drift - log2(e2 + 0.000001) * 1.7 + inphase;
+				c = inside + (itrunc(band + 1024.0) & 31);
+			}
+			out.push_back(c * 1025);
+			continue;
+		}
+		var lg = log2(m2);
+		var nu = k + 1.0 - log2(lg * 0.5);
+		var unit = 1.0 / sqrt(m2 * d2);
+		var de = m2 * unit * lg * 0.34657 * pixels;
+		var nl = ((zx * dx + zy * dy) * lx + (zy * dx - zx * dy) * ly) * unit;
+		var glow = 1.0 / (1.0 + de * 0.3);
+		var lit = 0.4 + 0.3 * glow + lift + (de < rim ? 0.5 - de * rimfall : 0.0);
+		var relief = nl * 0.2;
+		var hue = (itrunc(nu * 3.5 + phase) & 63) * 12;
+		var lv = itrunc((lit + relief) * 11.99);
+		lv = lv < 0 ? 0 : (lv > 11 ? 11 : lv);
+		var lm = itrunc((lit - relief) * 11.99);
+		lm = lm < 0 ? 0 : (lm > 11 ? 11 : lm);
+		out.push_back(hue + lv + (hue + lm) * 1024);
+	}
+	return out;
+}
+
+class Julia {
+	var name
+	var handle
+	var w
+	var h
+	var seed
+	var pal
+	var rng
+	var replay
+	var cue
+	var pixel_budget
+	var titled
+	var tt
+	var key_track
+	var key_from
+	var key_to
+	var key_value
+	var key_lands
+
+	def Julia() {
+		scene_init(this);
+		this.tt = 0.0;
+		this.key_track = [];
+		this.key_from = [];
+		this.key_to = [];
+		this.key_value = [];
+		this.key_lands = [];
+	}
+
+	def hit_times() { return [MUSIC_BAR * 3.0, MUSIC_BAR * 5.0, MUSIC_BAR * 8.0, MUSIC_BAR * 9.0]; }
+	def hit_levels() { return [2, 1, 2, 1]; }
+	def length_bars() { return 10; }
+
+	def glide(track, from, to, value) {
+		this.key_track.push_back(track);
+		this.key_from.push_back(from);
+		this.key_to.push_back(to);
+		this.key_value.push_back(value);
+		this.key_lands.push_back(false);
+	}
+
+	def land(track, from, to, value) {
+		this.glide(track, from, to, value);
+		this.key_lands[to_int(this.key_lands.size()) - 1] = true;
+	}
+
+	def build() {
+		this.name = "JULIA";
+		this.handle = "one constant, every shape . by the type ladder";
+		var night = [24.0, 12.0, 66.0];
+		var stops = [[40.0, 30.0, 150.0], [120.0, 50.0, 210.0], [240.0, 50.0, 150.0], [255.0, 130.0, 50.0],
+			[255.0, 220.0, 110.0], [80.0, 230.0, 220.0], [30.0, 120.0, 235.0], [40.0, 30.0, 150.0]];
+		var ns = to_int(stops.size()) - 1;
+		for (var hq = 0; hq < JU_HUES; ++hq) {
+			var f = hq * ns * 1.0 / JU_HUES;
+			var k = itrunc(f);
+			var u = f - k;
+			auto& a = stops[k];
+			auto& b = stops[k + 1];
+			for (var l = 0; l < JU_LEVELS; ++l) {
+				var lit = l / (JU_LEVELS - 1.0);
+				var sat = lit * 1.8 > 1.0 ? 1.0 : lit * 1.8;
+				var wh = lit > 0.75 ? (lit - 0.75) * 3.0 : 0.0;
+				var rgb = [0.0, 0.0, 0.0];
+				for (var ch = 0; ch < 3; ++ch) {
+					var full = (a[ch] + (b[ch] - a[ch]) * u) * (0.5 + 0.5 * lit);
+					var v = night[ch] + (full - night[ch]) * sat;
+					rgb[ch] = v + (255.0 - v) * wh;
+				}
+				this.pal.add(rgb[0], rgb[1], rgb[2]);
+			}
+		}
+		JU_INSIDE = this.pal.gradient(JU_INHUES + 1, [[6.0, 4.0, 22.0], [60.0, 18.0, 96.0], [10.0, 8.0, 36.0], [14.0, 62.0, 96.0], [6.0, 4.0, 22.0]]);
+
+		this.glide(JU_THETA, 0.0, 2.5, 1.5708);
+		this.glide(JU_RHO, 2.0, 4.0, 1.0625);
+		this.glide(JU_RHO, 4.5, 5.5, 0.96);
+		this.glide(JU_THETA, 5.0, 7.0, 2.0944);
+		this.glide(JU_RHO, 6.5, 8.0, 1.107);
+		this.glide(JU_RHO, 9.0, 12.0, 1.3283);
+		this.glide(JU_THETA, 9.0, 12.0, 2.0866);
+		this.glide(JU_DIVE, 9.0, 12.0, 0.7);
+		this.land(JU_DIVE, 12.0, 15.5, 3.7);
+		this.land(JU_SPIN, 12.0, 20.0, 3.14159265);
+		this.glide(JU_DIVE, 15.5, 17.5, 0.0);
+		this.glide(JU_RHO, 16.5, 18.2, 1.0);
+		this.glide(JU_THETA, 17.7, 19.7, 3.14159265);
+		this.land(JU_RHO, 20.0, 21.5, 1.0723);
+		this.land(JU_THETA, 20.0, 21.5, (30068.0 / 10000.0));
+		this.glide(JU_RHO, 22.5, 24.0, 1.236);
+		this.glide(JU_THETA, 22.5, 24.0, 3.14159265);
+		this.glide(JU_RHO, 24.5, 26.0, 0.97);
+		this.glide(JU_THETA, 25.5, 28.0, 3.8832);
+		this.glide(JU_RHO, 26.5, 28.0, 1.0);
+		this.glide(JU_THETA, 28.5, 30.3, 4.7124);
+		this.glide(JU_RHO, 30.3, 32.0, (12679.0 / 10000.0));
+		this.glide(JU_THETA, 31.0, 32.0, (46648.0 / 10000.0));
+		this.glide(JU_DIVE, 29.0, 32.0, 0.6);
+		this.land(JU_DIVE, 32.0, 35.5, 3.6);
+		this.land(JU_SPIN, 32.0, 39.0, (62831853.0 / 10000000.0));
+		this.glide(JU_DIVE, 36.0, 38.0, 0.0);
+		this.glide(JU_THETA, 37.0, 39.0, 4.7124);
+		this.glide(JU_RHO, 37.0, 39.0, 1.0625);
+	}
+
+	def update(t, dt) {
+		this.tt = t;
+	}
+
+	def render(grid) {
+		var t = this.tt;
+		var beats = t / MUSIC_BEAT;
+		var kick = this.cue.kick_env(t);
+		var snare = this.cue.snare_env(t);
+		var hitv = this.cue.hit(t);
+		var track = [0.92, 0.9, 0.0, 0.0];
+		for (var i = 0; i < this.key_from.size(); ++i) {
+			var from = this.key_from[i];
+			if (beats <= from) { continue; }
+			var k = beats >= this.key_to[i] ? 1.0 : (beats - from) / (this.key_to[i] - from);
+			var back = 1.0 - k;
+			k = this.key_lands[i] ? 1.0 - back * back * back : k * k * (3.0 - 2.0 * k);
+			var which = this.key_track[i];
+			track[which] += (this.key_value[i] - track[which]) * k;
+		}
+		var rho = track[JU_RHO];
+		var theta = track[JU_THETA];
+		var dive = track[JU_DIVE];
+		var spin = track[JU_SPIN] + 0.07 * sin(t * 0.9);
+		var lr = rho * cos(theta);
+		var li = rho * sin(theta);
+		JU_FX = lr * 0.5;
+		JU_FY = li * 0.5;
+		JU_CA = lr * 0.5 - (lr * lr - li * li) * 0.25;
+		JU_CB = li * 0.5 - lr * li * 0.5;
+		var home = rho < 1.0 ? (1.0 - rho) * 0.6 : 0.0;
+		JU_TRAP = home * home;
+		JU_DRIFT = rho < 1.0 ? 3.4 * log2(rho) : 0.0;
+		var bx = 1.0 - JU_FX;
+		var by = 0.0 - JU_FY;
+		var reach = sqrt(bx * bx + by * by);
+		var half_width = reach * 1.2;
+		half_width = half_width < 1.4 ? 1.4 : half_width;
+		var scale = half_width * 2.0 / this.w * (1.0 - kick * 0.05) / pow(2.0, dive);
+		var turn = atan2(by, bx) + spin - 0.6 * sin(theta);
+		var cs = cos(turn);
+		var sn = sin(turn);
+		JU_UX = cs * scale;
+		JU_UY = sn * scale;
+		JU_VX = 0.0 - sn * scale;
+		JU_VY = cs * scale;
+		JU_PIXELS = 1.0 / scale;
+		var ox = JU_CA;
+		var oy = JU_CB;
+		var stretch = 0.0;
+		var steps = 0;
+		while (steps < 48 && ox * ox + oy * oy < 64.0) {
+			stretch += log(4.0 * (ox * ox + oy * oy) + 0.000000000001);
+			var nx = ox * ox - oy * oy + JU_CA;
+			oy = 2.0 * ox * oy + JU_CB;
+			ox = nx;
+			++steps;
+		}
+		var thin = steps > 0 ? stretch * 0.5 / steps - 0.06 : 1.0;
+		thin = thin < 0.0 ? 0.0 : (thin > 0.25 ? 0.25 : thin);
+		JU_UNRESOLVED = JU_PIXELS * JU_PIXELS * pow(2.0, 10.0 - 400.0 * thin);
+		JU_LX = -0.6 * cs + 0.8 * sn;
+		JU_LY = -0.6 * sn - 0.8 * cs;
+		JU_PHASE = 4096.0 + t * 9.0 + this.cue.chord(t) * 5.0;
+		JU_INPHASE = t * 4.0;
+		JU_LIFT = kick * 0.1 + snare * 0.06 + hitv * 0.14;
+		JU_RIM = 1.1 + kick * 0.5 + hitv * 1.5;
+		var w = this.w;
+		var h = this.h;
+		JU_W = w;
+		JU_H = h;
+		var rows_drawn = (h + 1) / 2;
+		if (JU_ROWS.size() != rows_drawn) {
+			JU_ROWS = [];
+			for (var r = 0; r < rows_drawn; ++r) { JU_ROWS.push_back(r); }
+		}
+		// parallel_transform(JU_ROWS, julia_row) in the original: the same calls, in order
+		var rows = [];
+		auto& row_ids = JU_ROWS;
+		var nrows = row_ids.size();
+		for (var ri = 0; ri < nrows; ++ri) { rows.push_back(julia_row(row_ids[ri])); }
+		var last = w * h - 1;
+		var idx = 0;
+		for (var y = 0; y < rows_drawn; ++y) {
+			auto& row = rows[y];
+			for (var x = 0; x < w; ++x) {
+				var v = row[x];
+				grid[idx] = v & 1023;
+				grid[last - idx] = v >> 10;
+				++idx;
+			}
+		}
+	}
+}
+
+register_scene(2, fun() { return Julia(); });

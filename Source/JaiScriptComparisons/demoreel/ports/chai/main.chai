@@ -1,0 +1,32 @@
+// demoreel entry points (ChaiScript port of scenes/main.jai). The adapter evals this file, then calls demo_boot once
+// and demo_jump / demo_frame; the scene files register themselves with the reel (see reel.chai).
+
+use("util.chai")
+use("music.chai")
+use("reel.chai")
+use("julia.chai")
+use("globhunter.chai")
+use("skull.chai")
+use("fluid.chai")
+
+global RESET = ESC + "[0m";
+global gfx = Gfx();
+global reel;
+global PIX_MODE = "";
+global PIX_BUDGET = 48000;
+
+def demo_boot(w, h, seed, backend, smoke, hud_on) {
+	reel := Reel(w, h, seed, backend, smoke, hud_on);
+}
+
+def demo_frame(t, dt, key, fps, ms_sim, ms_draw, ms_other) {
+	return reel.frame(t, dt, key, fps, ms_sim, ms_draw, ms_other);
+}
+
+def demo_pixels(mode) { PIX_MODE = mode == "auto" ? "" : mode; }
+def demo_scene_index() { return reel.cur_idx; }
+def demo_scene_time() { return reel.scene_t; }
+def demo_jump(idx, at_t) { reel.jump(idx, at_t); }
+def demo_reload(changed, failed) {}
+def demo_scene_count() { return reel.nscenes; }
+def demo_scene_name() { return reel.cur.name; }

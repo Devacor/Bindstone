@@ -1,7 +1,7 @@
 // demoreel_lua: the Lua 5.4 / sol2 adapter for the demoreel shared host. Binds the
 // shared demo_rng as a usertype (int64 passthrough via lua_Integer), host_log and
 // ESC, loads ports/lua/main.lua, and forwards the demo_* entry points. Hot reload
-// re-runs every scene module (main.lua's globals, the live Reel included, persist).
+// re-runs every other module (main.lua's globals, the live Reel included, persist).
 
 #include "demoreel_host.hpp"
 
@@ -12,10 +12,7 @@
 
 namespace {
 
-const char* kLuaModules[] = {
-	"util", "reel", "plasma", "starfield", "tunnel", "donut", "julia", "lava", "pipes", "fire",
-	"sand", "boids", "globhunter", "voxelspace", "marcher", "cloth", "chrome", "skull", "finale",
-};
+const char* kLuaModules[] = {"util", "music", "reel", "julia", "globhunter", "skull", "fluid"};
 
 class lua_session : public demoreel::script_session {
 public:

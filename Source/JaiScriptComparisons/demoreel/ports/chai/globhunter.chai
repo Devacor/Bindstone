@@ -1,0 +1,1618 @@
+// GLOBHUNTER (ChaiScript port of scenes/globhunter.jai): a Wolfenstein-style grid raycaster, one DDA ray per column,
+// textured walls, floor and ceiling cast per pixel, a light map rebuilt from flickering torches, billboarded globs
+// hunted by a scripted camera that fires on the beat, goo, a boss, an escape through a blown wall.
+
+// decimals ChaiScript's parser misrounds are written as exact integer quotients (check_literals.py finds them)
+global BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+
+class GlobHunter {
+	var name
+	var handle
+	var w
+	var h
+	var seed
+	var pal
+	var rng
+	var replay
+	var cue
+	var pixel_budget
+	var titled
+	var wmap
+	var mw
+	var mh
+	var wpx
+	var wpy
+	var seglen
+	var nwp
+	var path_len
+	var travel
+	var posx
+	var posy
+	var dirx
+	var diry
+	var planex
+	var planey
+	var aim
+	var pitch
+	var tex
+	var wall_base
+	var banner_base
+	var floor_base
+	var ceil_base
+	var sprite_base
+	var tt
+	var fr
+	var ex
+	var ey
+	var et
+	var es
+	var est
+	var stx
+	var sty
+	var drawn
+	var zcol
+	var wall_top
+	var wall_foot
+	var wall_hit
+	var ceil_lo
+	var ceil_hi
+	var floor_lo
+	var floor_hi
+	var gun
+	var ne
+	var boss_flash
+	var kills
+	var cool
+	var last_step
+	var muzzle_t
+	var tracer_t
+	var hot_t
+	var kick_t
+	var stop_t
+	var last_kill
+	var combo
+	var call_t
+	var callout
+	var tr_x
+	var tr_y
+	var tox
+	var toy
+	var still
+	var owner
+	var lmap
+	var lw
+	var lh
+	var vault
+	var gx
+	var gy
+	var gz
+	var gvx
+	var gvy
+	var gvz
+	var glife
+	var gtype
+	var ngoo
+	var goo_next
+	var vigx
+	var vigy
+	var rubble_base
+	var breach_x
+	var breach_y
+	var last_snare
+
+	def GlobHunter() {
+		scene_init(this);
+		this.wmap = [];
+		this.mw = 24;
+		this.mh = 27;
+		this.wpx = [];
+		this.wpy = [];
+		this.seglen = [];
+		this.nwp = 6;
+		this.path_len = 0.0;
+		this.travel = 0.0;
+		this.posx = 2.5;
+		this.posy = 2.5;
+		this.dirx = 0.0;
+		this.diry = 1.0;
+		this.planex = 0.0;
+		this.planey = 0.0;
+		this.aim = 0.0;
+		this.pitch = 0.0;
+		this.tex = [];
+		this.wall_base = 0;
+		this.banner_base = 0;
+		this.floor_base = 0;
+		this.ceil_base = 0;
+		this.sprite_base = 0;
+		this.tt = 0.0;
+		this.fr = 0;
+		this.ex = [];
+		this.ey = [];
+		this.et = [];
+		this.es = [];
+		this.est = [];
+		this.stx = [];
+		this.sty = [];
+		this.drawn = [];
+		this.zcol = [];
+		this.wall_top = [];
+		this.wall_foot = [];
+		this.wall_hit = [];
+		this.ceil_lo = [];
+		this.ceil_hi = [];
+		this.floor_lo = [];
+		this.floor_hi = [];
+		this.gun = [];
+		this.ne = 18;
+		this.boss_flash = 0.0;
+		this.kills = 0;
+		this.cool = 0.6;
+		this.last_step = -1;
+		this.muzzle_t = 0.0;
+		this.tracer_t = 0.0;
+		this.hot_t = 0.0;
+		this.kick_t = 0.0;
+		this.stop_t = 0.0;
+		this.last_kill = -9.0;
+		this.combo = 0;
+		this.call_t = 0.0;
+		this.callout = "";
+		this.tr_x = 0;
+		this.tr_y = 0;
+		this.tox = [];
+		this.toy = [];
+		this.still = [];
+		this.owner = [];
+		this.lmap = [];
+		this.lw = 48;
+		this.lh = 54;
+		this.vault = 2.0;
+		this.gx = [];
+		this.gy = [];
+		this.gz = [];
+		this.gvx = [];
+		this.gvy = [];
+		this.gvz = [];
+		this.glife = [];
+		this.gtype = [];
+		this.ngoo = 220;
+		this.goo_next = 0;
+		this.vigx = [];
+		this.vigy = [];
+		this.rubble_base = 0;
+		this.breach_x = 23;
+		this.breach_y = 13;
+		this.last_snare = 0.0;
+	}
+
+	def build() {
+		this.name = "GLOBHUNTER";
+		this.handle = "grublin keep . torchlight, one ray per column, zero mercy";
+		this.replay = 26.0;
+		// # stone  M moss  G gold pillar  B banner (rainbow-fire, animated)
+		var rows = [
+			"##################BBBB##",
+			"#.......#########......#",
+			"#......................#",
+			"#......................#",
+			"#.....G................#",
+			"#.......MMMMMMMMM......#",
+			"##...###############...#",
+			"#M...M##############...#",
+			"##...B##############...#",
+			"##...##############M...M",
+			"##...####MMMMMMMMM##...#",
+			"##...####.........##...#",
+			"##...####..............#",
+			"##...####..............#",
+			"##...####..............#",
+			"##...####.........######",
+			"##...####MMM...MMM######",
+			"##...####.........######",
+			"##...####.........######",
+			"##...####.........######",
+			"#.......#.........######",
+			"#.................######",
+			"#.................######",
+			"#.................######",
+			"#.G..G..#.........######",
+			"#.......#.........######",
+			"##BBBB##################"
+		];
+		var mw = this.mw;
+		var mh = this.mh;
+		auto& wmap = this.wmap;
+		for (var y = 0; y < mh; ++y) {
+			auto& row = rows[y];
+			for (var x = 0; x < mw; ++x) {
+				var ch = row.substr(x, 1);
+				var v = 0;
+				if (ch == "#") { v = 1; }
+				else if (ch == "M") { v = 2; }
+				else if (ch == "G") { v = 3; }
+				else if (ch == "B") { v = 4; }
+				wmap.push_back(v);
+			}
+		}
+		wmap[this.breach_y * mw + this.breach_x] = 5;
+		var fogc = [5.0, 7.0, 18.0];
+		var wall_cols = [
+			[[40.0, 36.0, 44.0], [88.0, 88.0, 100.0], [104.0, 104.0, 118.0], [120.0, 120.0, 136.0], [138.0, 138.0, 152.0], [156.0, 156.0, 170.0], [186.0, 186.0, 200.0], [70.0, 70.0, 82.0]],
+			[[34.0, 36.0, 34.0], [84.0, 90.0, 92.0], [100.0, 106.0, 108.0], [118.0, 124.0, 126.0], [60.0, 118.0, 50.0], [84.0, 150.0, 62.0], [120.0, 190.0, 80.0], [40.0, 86.0, 36.0]],
+			[[90.0, 60.0, 20.0], [140.0, 100.0, 36.0], [176.0, 130.0, 50.0], [206.0, 160.0, 64.0], [232.0, 190.0, 90.0], [252.0, 222.0, 130.0], [255.0, 246.0, 200.0], [118.0, 80.0, 28.0]]];
+		auto& pal = this.pal;
+		this.wall_base = pal.size();
+		for (var t = 0; t < 3; ++t) {
+			auto& cols = wall_cols[t];
+			for (var side = 0; side < 2; ++side) {
+				for (var f = 0; f < 8; ++f) {
+					for (var c = 0; c < 8; ++c) {
+						auto& cc = cols[c];
+						this.lit(cc[0], cc[1], cc[2], f, side, fogc);
+					}
+				}
+			}
+		}
+		this.banner_base = pal.size();
+		for (var side2 = 0; side2 < 2; ++side2) {
+			for (var f2 = 0; f2 < 8; ++f2) {
+				for (var hu = 0; hu < 4; ++hu) {
+					var rc = gfx.rainbow_rgb(hu * 1.5708);
+					var rr = rc[0]; var rg = rc[1]; var rb = rc[2];
+					var f3 = f2 < 3 ? 3 : f2;   // the banner's fire glows in the dark
+					this.lit(40.0, 16.0, 60.0, f3, side2, fogc);
+					this.lit(rr * 0.45, rg * 0.45, rb * 0.45, f3, side2, fogc);
+					this.lit(rr, rg, rb, f3, side2, fogc);
+					this.lit(255.0, 196.0, 80.0, f3, side2, fogc);
+				}
+			}
+		}
+		var floor_cols = [[46.0, 38.0, 34.0], [92.0, 80.0, 70.0], [104.0, 92.0, 80.0], [116.0, 102.0, 88.0], [128.0, 112.0, 96.0], [140.0, 124.0, 106.0], [76.0, 66.0, 58.0], [160.0, 142.0, 120.0]];
+		this.floor_base = pal.size();
+		for (var f4 = 0; f4 < 8; ++f4) {
+			for (var c3 = 0; c3 < 8; ++c3) { auto& fc = floor_cols[c3]; this.lit(fc[0], fc[1], fc[2], f4, 0, fogc); }
+		}
+		var ceil_cols = [[20.0, 12.0, 8.0], [60.0, 38.0, 22.0], [72.0, 46.0, 26.0], [84.0, 54.0, 30.0], [96.0, 62.0, 34.0], [50.0, 32.0, 18.0], [110.0, 72.0, 40.0], [36.0, 24.0, 14.0]];
+		this.ceil_base = pal.size();
+		for (var f5 = 0; f5 < 8; ++f5) {
+			for (var c4 = 0; c4 < 8; ++c4) { auto& kc = ceil_cols[c4]; this.lit(kc[0] * 0.8, kc[1] * 0.8, kc[2] * 0.8, f5, 0, fogc); }
+		}
+		// sprites + combat kit
+		this.sprite_base = pal.size();
+		pal.ramp(12, 10.0, 34.0, 12.0, 140.0, 240.0, 110.0);      // +0..11 grublin
+		pal.ramp(12, 36.0, 16.0, 10.0, 230.0, 140.0, 80.0);       // +12..23 orglis
+		pal.add(255, 255, 255);                                   // +24 hit flash
+		pal.add(250, 246, 220);                                   // +25 eye white
+		pal.add(20, 8, 8);                                        // +26 pupil / mouth
+		pal.ramp(4, 36.0, 38.0, 48.0, 150.0, 156.0, 176.0);       // +27..30 gun
+		pal.add(255, 250, 200);                                   // +31 muzzle core
+		pal.add(255, 196, 70);                                    // +32 muzzle rim
+		pal.add(255, 110, 30);                                    // +33 muzzle tip
+		for (var tr = 0; tr < 6; ++tr) {                          // +34..39 rainbow tracer
+			var ct = gfx.rainbow_rgb(tr * 1.0471975512);
+			pal.add(ct[0], ct[1], ct[2]);
+		}
+		pal.add(130, 255, 150);                                   // +40 crosshair
+		pal.add(255, 84, 64);                                     // +41 crosshair, target down
+		pal.add(255, 226, 100);                                   // +42 tally ink
+		pal.add(255, 140, 50);                                    // +43 tally ink low
+		pal.add(8, 6, 10);                                        // +44 tally shadow
+		pal.add(170, 30, 30);                                     // +45 grin
+		pal.add(226, 170, 128);                                   // +46 skin
+		pal.add(150, 100, 72);                                    // +47 skin shade
+		pal.add(255, 60, 40);                                     // +48 glowing eye
+		pal.ramp(4, 120.0, 255.0, 120.0, 230.0, 255.0, 200.0);    // +49..52 callout ink, grublin goo glint
+		pal.ramp(4, 255.0, 120.0, 220.0, 255.0, 240.0, 255.0);    // +53..56 combo ink
+		this.rubble_base = pal.size();
+		pal.ramp(12, 22.0, 20.0, 28.0, 196.0, 186.0, 172.0);
+		this.grow_textures();
+		var gun_rows = ["......dlhd......", "......dlmd......", "......dlmd......", ".....ddlmdd.....", ".....dlhmmd.....",
+			"....ddlmmmdd....", "....dlhmmmmd....", "...kdlmmmmmdk...", "..kkdmmmmmmdkk..", ".kkkkdmmmmdkkkk.",
+			"skkkkkddddkkkkks", "sskkkkkkkkkkkkss"];
+		auto& gun = this.gun;
+		for (var gr = 0; gr < gun_rows.size(); ++gr) {
+			auto& gun_row = gun_rows[gr];
+			for (var gc = 0; gc < 16; ++gc) {
+				var ch2 = gun_row.substr(gc, 1);
+				gun.push_back(ch2 == "." ? 0 : (ch2 == "d" ? 27 : (ch2 == "m" ? 28 : (ch2 == "l" ? 29 : (ch2 == "h" ? 30 : (ch2 == "k" ? 46 : 47))))));
+			}
+		}
+		// the flight loop down the middle of each hall: west hall, south room and arena, mid room, east hall
+		this.wpx = [3.5, 3.5, 13.5, 13.5, 22.5, 22.5];
+		this.wpy = [3.5, 22.5, 22.5, 13.5, 13.5, 3.5];
+		auto& wpx = this.wpx;
+		auto& wpy = this.wpy;
+		auto& seglen = this.seglen;
+		var nwp = this.nwp;
+		for (var i = 0; i < nwp; ++i) {
+			var ddx = wpx[(i + 1) % nwp] - wpx[i];
+			var ddy = wpy[(i + 1) % nwp] - wpy[i];
+			seglen.push_back(sqrt(ddx * ddx + ddy * ddy));
+			this.path_len += seglen[i];
+		}
+		// garrison along the route (three hold the south room for the frenzy, three wait along the escape);
+		// every post stands farther from the nearest wall than its kind's reach, the boss in the arena's open floor
+		this.ex = [3.5, 3.0, 4.0, 3.0, 7.0, 15.5, 13.5, 14.5, 19.0, 21.5, 20.5, 10.0, 11.5, 12.0, 11.0, 17.5, 21.0, 13.5];
+		this.ey = [7.5, 13.5, 17.5, 21.2, 21.0, 21.0, 14.0, 12.5, 13.5, 8.5, 3.0, 22.5, 23.5, 21.8, 12.5, 13.5, 13.0, 18.5];
+		this.et = [0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1];
+		var ne = this.ne;
+		auto& es = this.es;
+		auto& est = this.est;
+		for (var i2 = 0; i2 < ne; ++i2) {
+			es.push_back(0);
+			est.push_back(0.0);
+			this.stx.push_back(0.0);
+			this.sty.push_back(0.0);
+			this.drawn.push_back(0);
+		}
+		es[ne - 1] = 3;   // the boss waits for bar seven
+		for (var a = ne - 4; a < ne - 1; ++a) {
+			// the ambush rises (a downed mark stands again after 16 s) as the escape begins
+			es[a] = 3;
+			est[a] = 16.0 - MUSIC_BAR * 10.0;
+		}
+		var w = this.w;
+		var h = this.h;
+		this.zcol = gfx.make_fgrid(w);
+		auto& zcol = this.zcol;
+		for (var i3 = 0; i3 < w; ++i3) { zcol[i3] = 99.0; }
+		this.wall_top = gfx.make_grid(w);
+		this.wall_foot = gfx.make_grid(w);
+		this.wall_hit = gfx.make_grid(w);
+		this.ceil_lo = gfx.make_grid(h + 1);
+		this.ceil_hi = gfx.make_grid(h + 1);
+		this.floor_lo = gfx.make_grid(h + 1);
+		this.floor_hi = gfx.make_grid(h + 1);
+		// torches hang beside the walls along the route; each keeps its falloff over the light map
+		var spots = [[1.2, 3.5], [7.5, 1.3], [2.2, 9.5], [4.8, 15.5], [1.2, 22.5], [7.5, 20.3], [9.3, 19.5],
+			[17.7, 22.5], [11.4, 17.3], [15.6, 17.3], [9.3, 13.5], [15.5, 11.2], [20.5, 14.8], [22.8, 7.5], [22.8, 2.5], [17.2, 1.4]];
+		auto& tox = this.tox;
+		auto& toy = this.toy;
+		for (var k = 0; k < spots.size(); ++k) {
+			auto& sp = spots[k];
+			var px = sp[0];
+			var py = sp[1];
+			if (wmap[itrunc(py) * mw + itrunc(px)] != 0) { continue; }
+			tox.push_back(px);
+			toy.push_back(py);
+		}
+		var lw = this.lw;
+		var lh = this.lh;
+		auto& still = this.still;
+		auto& owner = this.owner;
+		var best = [];
+		for (var c5 = 0; c5 < lw * lh; ++c5) {
+			still.push_back(0.0);
+			owner.push_back(0);
+			best.push_back(0.0);
+		}
+		for (var k3 = 0; k3 < tox.size(); ++k3) {
+			for (var c6 = 0; c6 < lw * lh; ++c6) {
+				var lx = (c6 % lw + 0.5) * 0.5 - tox[k3];
+				var ly = (c6 / lw + 0.5) * 0.5 - toy[k3];
+				var f = 1.0 / (1.0 + (lx * lx + ly * ly) * 1.7);
+				still[c6] = still[c6] + f * 5.6 * (82.0 / 100.0);
+				if (f > best[c6]) {
+					best[c6] = f;
+					owner[c6] = k3;
+				}
+			}
+		}
+		this.lmap = gfx.make_grid(lw * lh);
+		for (var g = 0; g < this.ngoo; ++g) {
+			this.gx.push_back(0.0);
+			this.gy.push_back(0.0);
+			this.gz.push_back(0.0);
+			this.gvx.push_back(0.0);
+			this.gvy.push_back(0.0);
+			this.gvz.push_back(0.0);
+			this.glife.push_back(0.0);
+			this.gtype.push_back(0);
+		}
+		this.vigx = gfx.make_grid(w);
+		this.vigy = gfx.make_grid(h);
+		auto& vigx = this.vigx;
+		auto& vigy = this.vigy;
+		for (var vx = 0; vx < w; ++vx) {
+			var e = 2.0 * vx / (w - 1.0) - 1.0;
+			vigx[vx] = itrunc(e * e * e * e * 2.4);
+		}
+		for (var vy = 0; vy < h; ++vy) {
+			var e2 = 2.0 * vy / (h - 1.0) - 1.0;
+			vigy[vy] = itrunc(e2 * e2 * e2 * e2 * 1.6);
+		}
+	}
+
+	// one entry: a colour at light level f (0 black gloom .. 7 full torchlight):
+	// the dark sinks into a cold blue, the lit end warms toward the fire
+	def lit(r, g, b, f, side, fogc) {
+		var k = (0.07 + 0.93 * f / 7.0) * (side == 1 ? 0.72 : 1.0);
+		var warm = f >= 5 ? (f - 4) / 3.0 : 0.0;
+		var fr2 = fogc[0]; var fg = fogc[1]; var fb = fogc[2];
+		var cr = r * (1.0 + 0.32 * warm);
+		var cg = g * (1.0 + 0.06 * warm);
+		var cb = b * (1.0 - 0.28 * warm);
+		this.pal.add(cr * k + fr2 * (1.0 - k), cg * k + fg * (1.0 - k), cb * k + fb * (1.0 - k));
+	}
+
+	// int literals are 32-bit: the products need the original's 64-bit multiply
+	def hash2(a, b) {
+		var hs = (a * 73856093ll + b * 19349663ll + (this.seed & 255) * 83492791ll) & 1048575;
+		return ((hs * 1274126177ll) >> 12) & 1023;
+	}
+
+	def grow_textures() {
+		auto& tex = this.tex;
+		// 0 coursed stone, 1 stone mossy toward its foot, 2 fluted gold (16 wide, the vault's 32 tall), 3 flagstones, 4 oak planks
+		for (var t = 0; t < 5; ++t) {
+			var tall = t < 3 ? 32 : 16;
+			for (var v = 0; v < tall; ++v) {
+				for (var u = 0; u < 16; ++u) {
+					var c = 0;
+					if (t <= 1) {
+						var row = v / 4;
+						var bu = (u + (row % 2) * 4) % 8;
+						var bv = v % 4;
+						var brick = this.hash2((u + (row % 2) * 4) / 8 + row * 7, t);
+						c = 1 + brick % 4;
+						if (bv == 1) { ++c; }
+						if (bv == 3 && c > 1) { --c; }
+						if (bu == 0 || bv == 0) { c = 0; }
+						if (t == 1 && c != 0) {
+							var m = this.hash2(u * 3 + v, v * 5 + 11) % 100;
+							if (m < (v - 13) * 5) { c = 4 + m % 3; }
+						}
+						if (t == 1 && c == 0 && v > 12 && this.hash2(u, v) % 3 == 0) { c = 7; }
+					} else if (t == 2) {
+						var fl = u % 4;
+						c = fl == 0 ? 7 : (fl == 1 ? 5 : (fl == 2 ? 4 : 2));
+						if (v % 8 == 0) { c = 6; }
+						if (v % 8 == 1) { c = 1; }
+					} else if (t == 3) {
+						var su = (u + (v / 8) * 4) % 8;
+						var sv = v % 8;
+						var stone = this.hash2((u + (v / 8) * 4) / 8, v / 8 + 40);
+						c = 1 + stone % 5;
+						if (sv == 1 || su == 1) { c = 7; }
+						if (su == 0 || sv == 0) { c = 0; }
+						if (this.hash2(u + 50, v) % 11 == 0 && c != 0) { c = 6; }
+					} else {
+						var plank = v / 4;
+						var pv = v % 4;
+						c = 2 + (this.hash2(plank, 90) % 3);
+						if ((u + plank * 5) % 16 == 0) { c = 0; }
+						if (pv == 0) { c = 5; }
+						if (pv == 3) { c = 7; }
+						if (this.hash2(u, v + 90) % 13 == 0) { c = 6; }
+					}
+					tex.push_back(c);
+				}
+			}
+		}
+		// plain copies of the floor and the ceiling for their far rows: the joints over one shade
+		for (var i = 1536; i < 2048; ++i) {
+			var texel = tex[i];
+			var joint = texel == 0 || (i >= 1792 && texel == 7);
+			tex.push_back(joint ? texel : 3);
+		}
+	}
+
+	def path_at(s_) {
+		var s = s_;
+		var path_len = this.path_len;
+		s -= floor(s / path_len) * path_len;
+		auto& seglen = this.seglen;
+		auto& wpx = this.wpx;
+		auto& wpy = this.wpy;
+		var nwp = this.nwp;
+		for (var i = 0; i < nwp; ++i) {
+			var L = seglen[i];
+			if (s <= L) {
+				var f = L > 0.0001 ? s / L : 0.0;
+				var j = (i + 1) % nwp;
+				return [wpx[i] + (wpx[j] - wpx[i]) * f, wpy[i] + (wpy[j] - wpy[i]) * f];
+			}
+			s -= L;
+		}
+		return [wpx[0], wpy[0]];
+	}
+
+	// DDA toward (dx, dy) in parameter space: true if no wall before frac of the way
+	def los_clear(dx, dy, frac) {
+		var posx = this.posx;
+		var posy = this.posy;
+		auto& wmap = this.wmap;
+		var mw = this.mw;
+		var mx = itrunc(posx);
+		var my = itrunc(posy);
+		var adx = dx < 0.0 ? -dx : dx;
+		var ady = dy < 0.0 ? -dy : dy;
+		var ddx = adx < 0.00000001 ? 100000000.0 : 1.0 / adx;
+		var ddy = ady < 0.00000001 ? 100000000.0 : 1.0 / ady;
+		var stepx = dx < 0.0 ? -1 : 1;
+		var stepy = dy < 0.0 ? -1 : 1;
+		var sdx = dx < 0.0 ? (posx - mx) * ddx : (mx + 1.0 - posx) * ddx;
+		var sdy = dy < 0.0 ? (posy - my) * ddy : (my + 1.0 - posy) * ddy;
+		for (var g = 0; g < 64; ++g) {
+			var trav = sdx < sdy ? sdx : sdy;
+			if (trav >= frac) { return true; }
+			if (sdx < sdy) { sdx += ddx; mx += stepx; }
+			else { sdy += ddy; my += stepy; }
+			var cv = wmap[my * mw + mx];
+			if (cv > 0) { return false; }
+		}
+		return false;
+	}
+
+	def length_bars() { return 13; }
+	def hit_times() { return [MUSIC_BAR * 3.0, MUSIC_BAR * 5.0, MUSIC_BAR * 7.0, MUSIC_BAR * 9.0, MUSIC_BAR * 10.0, MUSIC_BAR * 12.0]; }
+	def hit_levels() { return [1, 2, 1, 2, 1, 2]; }
+
+	// the route's distance from which the walk faces the arena floor where the boss rises
+	def arena_stand() { return 19.0 + 9.8; }
+
+	// the route's distance at which the escape reaches the breach, facing it
+	def breach_stop() { return 19.0 + 10.0 + 9.0 + 8.3; }
+
+	def update(t, dt) {
+		auto& cue = this.cue;
+		var h = this.h;
+		this.tt = t;
+		this.fr += 1;
+		var fr = this.fr;
+		var aftermath = t > MUSIC_BAR * 9.0 && t < MUSIC_BAR * 10.0;
+		var escape = t >= MUSIC_BAR * 10.0 && t < MUSIC_BAR * 12.0;
+		var out = t >= MUSIC_BAR * 12.0;
+		var fight = t > MUSIC_BAR * 7.0 && t < MUSIC_BAR * 9.0;
+		var bullet = this.slow_mo(t);
+		var path_len = this.path_len;
+		var lap = this.travel - floor(this.travel / path_len) * path_len;
+		var pace = this.stop_t > 0.0 ? 0.18 : (aftermath ? 0.4 : (fight ? 0.16 : 1.0));
+		if (escape) {
+			// the run for the breach: always just fast enough to reach it on bar twelve
+			var want = (this.breach_stop() - lap) / (MUSIC_BAR * 12.0 - t + 0.05) / 2.4;
+			want = want < 0.0 ? 0.0 : (want > 3.0 ? 3.0 : want);
+			pace = this.stop_t > 0.0 ? want * 0.5 : want;
+		}
+		if (t >= MUSIC_BAR * 6.0 && t < MUSIC_BAR * 7.0) {
+			// the walk into the arena: always just fast enough to face the boss's floor on bar seven
+			var gait = (this.arena_stand() - lap) / (MUSIC_BAR * 7.0 - t + 0.05) / 2.4;
+			gait = gait < 0.3 ? 0.3 : (gait > 2.0 ? 2.0 : gait);
+			pace = this.stop_t > 0.0 ? gait * 0.5 : gait;
+		}
+		if (out) { pace = 0.0; }
+		pace *= bullet;
+		this.travel += dt * 2.4 * pace;
+		var travel = this.travel;
+		lap = travel - floor(travel / path_len) * path_len;
+		var look = 1.7;
+		if (escape || out) {
+			var to_corner = 19.0 + 10.0 + 9.0 + 9.0 - lap;
+			look = to_corner < look && to_corner > 0.0 ? to_corner : look;
+		}
+		var p = this.path_at(travel);
+		var q = this.path_at(travel + look);   // look-ahead steers the turns
+		var posx = p[0];
+		var posy = p[1];
+		if (out) {
+			// into the light: the last bar walks through the breach
+			var walk = (t - MUSIC_BAR * 12.0) / MUSIC_BAR;
+			walk = walk > 1.0 ? 1.0 : walk;
+			posx += walk * (2.0 - walk) * 0.92;
+		}
+		this.posx = posx;
+		this.posy = posy;
+		var bx = q[0] - posx;
+		var by = q[1] - posy;
+		var bl = sqrt(bx * bx + by * by);
+		if (out) { bx = 1.0; by = 0.0; bl = 1.0; }
+		if (bl > 0.0001) { bx /= bl; by /= bl; } else { bx = this.dirx; by = this.diry; }
+		// the hunt: swing toward the nearest live mark in clear sight ahead
+		var ne = this.ne;
+		auto& es = this.es;
+		auto& est = this.est;
+		auto& ex = this.ex;
+		auto& ey = this.ey;
+		var want = 0.0;
+		var near = 5.5;
+		for (var m = 0; m < ne; ++m) {
+			if (es[m] != 0) { continue; }
+			var mx = ex[m] - posx;
+			var my = ey[m] - posy;
+			var md = sqrt(mx * mx + my * my);
+			if (md > near || md < 0.6) { continue; }
+			var ang = atan2(bx * my - by * mx, bx * mx + by * my);
+			if (ang > 0.75 || ang < -0.75) { continue; }
+			if (!this.los_clear(mx, my, (95.0 / 100.0))) { continue; }
+			near = md;
+			want = ang;
+		}
+		if (out) { want = 0.0; }
+		var ease = dt * 7.0;
+		ease = ease > 1.0 ? 1.0 : ease;
+		this.aim += (want - this.aim) * ease;
+		// the quake: each kill shakes the view, the big hit hardest, and the keep rumbles as it falls
+		var kick_now = !cue.is_var_null() ? cue.kick_env(t) : 0.0;
+		var quake = (this.hot_t > 0.0 ? this.hot_t * 0.16 : 0.0) + (!cue.is_var_null() ? cue.hit(t) * 0.05 : 0.0);
+		if (escape) { quake += 0.012 + kick_now * 0.03; }
+		var view = this.aim + quake * sin(fr * 2.7);
+		var ca = cos(view);
+		var sa = sin(view);
+		var dirx = bx * ca - by * sa;
+		var diry = bx * sa + by * ca;
+		var planex = 0.0 - diry * (66.0 / 100.0);
+		var planey = dirx * (66.0 / 100.0);
+		this.dirx = dirx;
+		this.diry = diry;
+		this.planex = planex;
+		this.planey = planey;
+		// timers and the enemy state machine
+		this.cool -= dt;
+		this.muzzle_t -= dt;
+		this.tracer_t -= dt;
+		this.hot_t -= dt;
+		this.kick_t -= dt;
+		this.stop_t -= dt;
+		this.call_t -= dt;
+		this.boss_flash -= dt;
+		for (var i = 0; i < ne; ++i) {
+			var st = es[i];
+			if (st == 1) { est[i] = est[i] + dt; if (est[i] > 0.14) { es[i] = 2; est[i] = 0.0; } }
+			else if (st == 2) { est[i] = est[i] + dt; if (est[i] > 0.55) { es[i] = 3; est[i] = 0.0; } }
+			else if (st == 3) { est[i] = est[i] + dt; if (est[i] > 16.0) { es[i] = 0; est[i] = 0.0; } }
+		}
+		// auto-fire on the beat: nearest alive enemy in the crosshair cone with clear LOS
+		var e = !cue.is_var_null() ? cue.energy(t) : 0.6;
+		var eighths = e > 0.92 || (t > MUSIC_BAR * 5.0 && t < MUSIC_BAR * 6.0) || escape;
+		// the big hit: the hall floods with light and the frenzy is called
+		if (t >= MUSIC_BAR * 5.0 && t - dt < MUSIC_BAR * 5.0) {
+			this.callout = "FRENZY";
+			this.call_t = 1.2;
+		}
+		var step = ifloor(t / (eighths ? MUSIC_BEAT * 0.5 : MUSIC_BEAT));
+		var on_step = step != this.last_step;
+		this.last_step = step;
+		if (t >= MUSIC_BAR * 10.0 && t - dt < MUSIC_BAR * 10.0) {
+			this.callout = "RUN";
+			this.call_t = 1.3;
+			this.hot_t = 0.5;
+		}
+		if (t >= MUSIC_BAR * 12.0 && t - dt < MUSIC_BAR * 12.0) { this.blow_breach(); }
+		if (escape) { this.falling_stone(t); }
+		if (this.cool <= 0.0 && on_step && !aftermath && !out && t > MUSIC_BAR) {
+			var invdet = 1.0 / (planex * diry - dirx * planey);
+			var best = -1;
+			var besty = 99.0;
+			var bestx = 0.0;
+			for (var i2 = 0; i2 < ne; ++i2) {
+				var st2 = es[i2];
+				if (st2 != 0) { continue; }
+				var rx = ex[i2] - posx;
+				var ry = ey[i2] - posy;
+				var txx = invdet * (diry * rx - dirx * ry);
+				var tyy = invdet * (planex * ry - planey * rx);
+				if (tyy < 1.0 || tyy > 4.6) { continue; }
+				var off = txx < 0.0 ? -txx : txx;
+				if (off > tyy * (12.0 / 100.0)) { continue; }
+				if (!this.los_clear(rx, ry, (95.0 / 100.0))) { continue; }
+				if (tyy < besty) { best = i2; besty = tyy; bestx = txx; }
+			}
+			if (best >= 0) { this.fire(best, bestx, besty, t); }
+		}
+		// the boss rises from the arena's open floor on bar seven
+		var boss = ne - 1;
+		if (t >= MUSIC_BAR * 7.0 && t - dt < MUSIC_BAR * 7.0) {
+			es[boss] = 0;
+			est[boss] = 0.0;
+			this.callout = "BOSS GLOB";
+			this.call_t = 1.6;
+			// the garrison scatters before it
+			for (var m2 = 0; m2 < boss; ++m2) {
+				var ddx2 = ex[m2] - posx;
+				var ddy2 = ey[m2] - posy;
+				if (ddx2 * ddx2 + ddy2 * ddy2 < 64.0) {
+					es[m2] = 3;
+					est[m2] = 0.0;
+				}
+			}
+		}
+		// bar nine's downbeat: the boss bursts
+		if (t >= MUSIC_BAR * 9.0 && t - dt < MUSIC_BAR * 9.0 && es[boss] == 0) {
+			var invdet2 = 1.0 / (planex * diry - dirx * planey);
+			var rbx = ex[boss] - posx;
+			var rby = ey[boss] - posy;
+			var bsx = invdet2 * (diry * rbx - dirx * rby);
+			var bsy = invdet2 * (planex * rby - planey * rbx);
+			this.fire(boss, bsx, bsy > 0.3 ? bsy : 0.3, t);
+		}
+		this.move_goo(dt * bullet);
+		// the flicker is redrawn at 15 Hz, and every frame while the muzzle burns or the kick lands
+		var beat_light = !cue.is_var_null() ? cue.kick_env(t) + cue.hit(t) : 0.0;
+		if ((fr & 1) == 0 || this.muzzle_t > -0.05 || beat_light > 0.2 || escape || out) { this.light_up(); }
+		// the view: a footfall on each beat (each eighth on the run), the recoil's kick, a shudder
+		// while the muzzle burns, and the falling keep's tremor
+		var stride = !cue.is_var_null() ? cue.beat_phase(t) : this.travel * (83.0 / 100.0);
+		if (escape) { stride = stride * 2.0 - floor(stride * 2.0); }
+		var bob = sin(stride * (31415927.0 / 10000000.0)) * h * (escape ? 0.022 : 0.014) * (aftermath || out ? 0.4 : 1.0);
+		var kick = this.kick_t > 0.0 ? h * 0.05 * this.kick_t / 0.2 : 0.0;
+		var shud = this.muzzle_t > 0.0 ? ((fr * 7) % 3 - 1) * h * 0.012 : 0.0;
+		var tremor = escape ? sin(fr * 5.3) * h * (0.006 + kick_now * 0.02) : 0.0;
+		this.pitch = bob + kick + shud + tremor;
+	}
+
+	// the escape: on each snare stones shake loose from the vault ahead and fall
+	def falling_stone(t) {
+		auto& cue = this.cue;
+		var sn = !cue.is_var_null() ? cue.snare_env(t) : 0.0;
+		var onset = sn > this.last_snare + 0.25;
+		this.last_snare = sn;
+		if (!onset) { return; }
+		auto& rng = this.rng;
+		auto& wmap = this.wmap;
+		var mw = this.mw;
+		var ngoo = this.ngoo;
+		var posx = this.posx;
+		var posy = this.posy;
+		var dirx = this.dirx;
+		var diry = this.diry;
+		for (var k = 0; k < 14; ++k) {
+			var g = this.goo_next;
+			this.goo_next = (this.goo_next + 1) % ngoo;
+			var ahead = 1.2 + rng.nextf() * 3.2;
+			var across = (rng.nextf() - 0.5) * 2.6;
+			var sx = posx + dirx * ahead - diry * across;
+			var sy = posy + diry * ahead + dirx * across;
+			if (wmap[itrunc(sy) * mw + itrunc(sx)] != 0) { continue; }
+			this.gx[g] = sx;
+			this.gy[g] = sy;
+			this.gz[g] = this.vault - 0.05;
+			this.gvx[g] = (rng.nextf() - 0.5) * 0.6;
+			this.gvy[g] = (rng.nextf() - 0.5) * 0.6;
+			this.gvz[g] = 0.0 - rng.nextf() * 1.5;
+			this.glife[g] = 1.4 + rng.nextf() * 0.8;
+			this.gtype[g] = 2;
+		}
+	}
+
+	// bar twelve: the east wall bursts, stone flies at the camera and daylight floods in
+	def blow_breach() {
+		this.callout = "KEEP CLEARED";
+		this.call_t = 2.6;
+		this.hot_t = 0.8;
+		auto& rng = this.rng;
+		var ngoo = this.ngoo;
+		for (var k = 0; k < 70; ++k) {
+			var g = this.goo_next;
+			this.goo_next = (this.goo_next + 1) % ngoo;
+			this.gx[g] = this.breach_x - 0.05;
+			this.gy[g] = this.breach_y + 0.1 + rng.nextf() * 0.8;
+			this.gz[g] = 0.1 + rng.nextf() * 0.8;
+			this.gvx[g] = 0.0 - (1.5 + rng.nextf() * 4.5);
+			this.gvy[g] = (rng.nextf() - 0.5) * 2.4;
+			this.gvz[g] = 0.5 + rng.nextf() * 2.5;
+			this.glife[g] = 1.8 + rng.nextf() * 1.2;
+			this.gtype[g] = 2;
+		}
+	}
+
+	// 0 a wall, rising to 1 as the cracks of the breach open through the escape, 2 blown open
+	def breach_state() {
+		if (this.tt >= MUSIC_BAR * 12.0) { return 2.0; }
+		var k = (this.tt - MUSIC_BAR * 10.0) / (MUSIC_BAR * 2.0);
+		return k < 0.0 ? 0.0 : k;
+	}
+
+	// bullet time: two beats after each big hit play at a fifth of the speed
+	def slow_mo(t) {
+		var since = t - MUSIC_BAR * 5.0;
+		if (t >= MUSIC_BAR * 9.0) { since = t - MUSIC_BAR * 9.0; }
+		if (t >= MUSIC_BAR * 12.0) { since = t - MUSIC_BAR * 12.0; }
+		if (since < 0.0 || since > MUSIC_BEAT * 2.5) { return 1.0; }
+		var back = (since - MUSIC_BEAT * 2.0) / (MUSIC_BEAT * 0.5);
+		back = back < 0.0 ? 0.0 : (back > 1.0 ? 1.0 : back);
+		return 0.2 + 0.8 * back;
+	}
+
+	def fire(i, bx, by, t) {
+		var w = this.w;
+		var h = this.h;
+		var ngoo = this.ngoo;
+		auto& rng = this.rng;
+		var boss = i == this.ne - 1;
+		var boss_down = boss && t >= MUSIC_BAR * 9.0 - 0.01;
+		if (boss && !boss_down) {
+			// a hit the boss takes: the muzzle, the tracer and a flash, but it stands
+			this.boss_flash = 0.1;
+			this.cool = 0.2;
+			this.muzzle_t = (12.0 / 100.0);
+			this.tracer_t = 0.14;
+			this.kick_t = 0.2;
+			this.tr_x = itrunc(w * 0.5 * (1.0 + bx / by));
+			this.tr_y = h / 2 + itrunc(h * 0.10 / by);
+			this.callout = "";
+			for (var k0 = 0; k0 < 8; ++k0) {
+				var g0 = this.goo_next;
+				this.goo_next = (this.goo_next + 1) % ngoo;
+				var a0 = rng.nextf() * (62831853.0 / 10000000.0);
+				this.gx[g0] = this.ex[i];
+				this.gy[g0] = this.ey[i];
+				this.gz[g0] = 0.5 + rng.nextf() * 0.4;
+				this.gvx[g0] = cos(a0) * 1.2 - this.dirx * 0.8;
+				this.gvy[g0] = sin(a0) * 1.2 - this.diry * 0.8;
+				this.gvz[g0] = 1.0 + rng.nextf() * 2.0;
+				this.glife[g0] = 1.6;
+				this.gtype[g0] = 1;
+			}
+			return;
+		}
+		this.es[i] = 1;
+		this.est[i] = 0.0;
+		this.kills += 1;
+		this.cool = 0.2;
+		this.muzzle_t = (12.0 / 100.0);
+		this.tracer_t = 0.14;
+		this.hot_t = 0.35;
+		this.kick_t = 0.2;
+		this.stop_t = 0.16;
+		this.tr_x = itrunc(w * 0.5 * (1.0 + bx / by));
+		this.tr_y = h / 2 + itrunc(h * 0.10 / by);
+		this.combo = t - this.last_kill < 1.8 ? this.combo + 1 : 1;
+		this.last_kill = t;
+		var words = ["SPLAT", "GLOBBED", "SQUISH", "POP"];
+		this.callout = boss_down ? "BOSS DOWN" : (this.combo >= 3 ? "MULTI KILL" : (this.combo == 2 ? "DOUBLE KILL" : words[this.kills % 4]));
+		this.call_t = boss_down ? 2.2 : 0.9;
+		if (boss_down) { this.hot_t = 0.8; }
+		// the burst: goo flung out of the body, mostly up and back from the shot
+		for (var k = 0; k < (boss_down ? 120 : 34); ++k) {
+			var g = this.goo_next;
+			this.goo_next = (this.goo_next + 1) % ngoo;
+			var a = rng.nextf() * (62831853.0 / 10000000.0);
+			var sp = 0.8 + rng.nextf() * 2.2;
+			this.gx[g] = this.ex[i];
+			this.gy[g] = this.ey[i];
+			this.gz[g] = 0.35 + rng.nextf() * 0.3;
+			this.gvx[g] = cos(a) * sp + this.dirx * 1.2;
+			this.gvy[g] = sin(a) * sp + this.diry * 1.2;
+			this.gvz[g] = 1.2 + rng.nextf() * 2.6;
+			this.glife[g] = 2.2 + rng.nextf() * 1.5;
+			this.gtype[g] = this.et[i];
+		}
+	}
+
+	// goo falls, bounces off the flagstones and the walls, then lies there fading
+	def move_goo(dt) {
+		auto& gx = this.gx;
+		auto& gy = this.gy;
+		auto& gz = this.gz;
+		auto& gvx = this.gvx;
+		auto& gvy = this.gvy;
+		auto& gvz = this.gvz;
+		auto& glife = this.glife;
+		auto& wmap = this.wmap;
+		var mw = this.mw;
+		var ngoo = this.ngoo;
+		for (var g = 0; g < ngoo; ++g) {
+			var life = glife[g];
+			if (life <= 0.0) { continue; }
+			glife[g] = life - dt;
+			var vz = gvz[g] - 7.5 * dt;
+			var nz = gz[g] + vz * dt;
+			if (nz < 0.0) {
+				nz = 0.0;
+				vz = vz < -0.6 ? 0.0 - vz * 0.3 : 0.0;
+				gvx[g] = gvx[g] * 0.55;
+				gvy[g] = gvy[g] * 0.55;
+			}
+			gz[g] = nz;
+			gvz[g] = vz;
+			var nx = gx[g] + gvx[g] * dt;
+			var ny = gy[g] + gvy[g] * dt;
+			if (wmap[itrunc(gy[g]) * mw + itrunc(nx)] != 0) { gvx[g] = 0.0 - gvx[g] * 0.4; nx = gx[g]; }
+			if (wmap[itrunc(ny) * mw + itrunc(gx[g])] != 0) { gvy[g] = 0.0 - gvy[g] * 0.4; ny = gy[g]; }
+			gx[g] = nx;
+			gy[g] = ny;
+		}
+	}
+
+	// the light map: the torches' steady sum, each cell flickering with the torch
+	// that rules it, plus the muzzle near the camera while it burns
+	def light_up() {
+		auto& cue = this.cue;
+		var tt = this.tt;
+		var lw = this.lw;
+		var lh = this.lh;
+		var n = lw * lh;
+		var nt = to_int(this.tox.size());
+		var flick = [];
+		var kick = !cue.is_var_null() ? cue.kick_env(tt) : 0.0;
+		// on the run the torches gutter low and the kick strobes them back up
+		var run = tt >= MUSIC_BAR * 10.0 && tt < MUSIC_BAR * 12.0;
+		var gutter = run ? 0.4 + kick * 1.1 : 1.0;
+		var beat_flare = !cue.is_var_null() ? 0.45 * kick + 0.7 * cue.hit(tt) : 0.0;
+		for (var k = 0; k < nt; ++k) {
+			flick.push_back((1.0 + (12.0 / 100.0) * sin(tt * 13.0 + k * 2.3) + 0.10 * sin(tt * 29.0 + k * 5.1)) * gutter + beat_flare);
+		}
+		auto& st = this.still;
+		auto& ow = this.owner;
+		auto& lm = this.lmap;
+		var flood = !cue.is_var_null() ? itrunc(cue.hit(tt) * 4.0) : 0;
+		for (var c = 0; c < n; ++c) {
+			var lv = itrunc(st[c] * flick[ow[c]]) + flood;
+			lm[c] = lv > 5 ? 5 : lv;
+		}
+		// every burst lights the hall around it while the goo flies
+		var ne = this.ne;
+		auto& es = this.es;
+		auto& est = this.est;
+		auto& ex = this.ex;
+		auto& ey = this.ey;
+		for (var b = 0; b < ne; ++b) {
+			var sb = es[b];
+			if (sb != 1 && sb != 2) { continue; }
+			var age = sb == 1 ? est[b] : 0.14 + est[b];
+			var power = 5.0 * (1.0 - age / 0.7);
+			if (power <= 0.0) { continue; }
+			var bx0 = itrunc(ex[b] * 2.0);
+			var by0 = itrunc(ey[b] * 2.0);
+			for (var dy2 = -9; dy2 <= 9; ++dy2) {
+				var cy2 = by0 + dy2;
+				if (cy2 < 0 || cy2 >= lh) { continue; }
+				for (var dx2 = -9; dx2 <= 9; ++dx2) {
+					var cx2 = bx0 + dx2;
+					if (cx2 < 0 || cx2 >= lw) { continue; }
+					var dd = (dx2 * dx2 + dy2 * dy2) * 0.25;
+					var c3 = cy2 * lw + cx2;
+					var lv3 = lm[c3] + itrunc(power / (1.0 + dd * 0.5));
+					lm[c3] = lv3 > 5 ? 5 : lv3;
+				}
+			}
+		}
+		// daylight through the breach: a glow through its cracks, then a flood once it is open
+		var bs = this.breach_state();
+		if (bs > 0.0) {
+			var power = bs >= 2.0 ? 6.0 : bs * (2.0 + kick * 2.0);
+			var bx1 = this.breach_x * 2;
+			var by1 = this.breach_y * 2 + 1;
+			for (var dy3 = -12; dy3 <= 12; ++dy3) {
+				var cy3 = by1 + dy3;
+				if (cy3 < 0 || cy3 >= lh) { continue; }
+				for (var dx3 = -24; dx3 <= 0; ++dx3) {
+					var cx3 = bx1 + dx3;
+					if (cx3 < 0) { continue; }
+					var dd3 = (dx3 * dx3 + dy3 * dy3 * 2.0) * 0.25;
+					var c4 = cy3 * lw + cx3;
+					var lv4 = lm[c4] + itrunc(power / (1.0 + dd3 * (12.0 / 100.0)));
+					lm[c4] = lv4 > 5 ? 5 : lv4;
+				}
+			}
+		}
+		if (this.muzzle_t > 0.0) {
+			var cx0 = itrunc(this.posx * 2.0);
+			var cy0 = itrunc(this.posy * 2.0);
+			for (var dy = -10; dy <= 10; ++dy) {
+				var cy = cy0 + dy;
+				if (cy < 0 || cy >= lh) { continue; }
+				for (var dx = -10; dx <= 10; ++dx) {
+					var cx = cx0 + dx;
+					if (cx < 0 || cx >= lw) { continue; }
+					var d2 = (dx * dx + dy * dy) * 0.25;
+					var c2 = cy * lw + cx;
+					var lv2 = itrunc(st[c2] * flick[ow[c2]] + 4.5 / (1.0 + d2 * 0.35));
+					lm[c2] = lv2 > 5 ? 5 : lv2;
+				}
+			}
+		}
+	}
+
+	def light_at(x, y) {
+		var lw = this.lw;
+		var lh = this.lh;
+		var cx = itrunc(x * 2.0);
+		var cy = itrunc(y * 2.0);
+		cx = cx < 0 ? 0 : (cx >= lw ? lw - 1 : cx);
+		cy = cy < 0 ? 0 : (cy >= lh ? lh - 1 : cy);
+		return this.lmap[cy * lw + cx];
+	}
+
+	// one ray per column: the wall's depth, the rows its slice covers, and what it hit;
+	// each column is also filed under the rows where its ceiling ends and its floor begins
+	def cast_walls() {
+		var ww = this.w;
+		var hh = this.h;
+		auto& wm = this.wmap;
+		auto& zc = this.zcol;
+		auto& vx = this.vigx;
+		auto& top = this.wall_top;
+		auto& foot = this.wall_foot;
+		auto& hit = this.wall_hit;
+		auto& clo = this.ceil_lo;
+		auto& chi = this.ceil_hi;
+		auto& flo = this.floor_lo;
+		auto& fhi = this.floor_hi;
+		auto& lm = this.lmap;
+		var lcols = this.lw;
+		var lrows = this.lh;
+		var mcols = this.mw;
+		var px = this.posx;
+		var py = this.posy;
+		var dirx = this.dirx;
+		var diry = this.diry;
+		var planex = this.planex;
+		var planey = this.planey;
+		var hc = 1.0 * (hh / 2 + itrunc(this.pitch));
+		var rise = this.vault - 0.5;
+		for (var v = 0; v <= hh; ++v) {
+			clo[v] = ww;
+			chi[v] = -1;
+			flo[v] = ww;
+			fhi[v] = -1;
+		}
+		for (var x = 0; x < ww; ++x) {
+			var camx = 2.0 * x / (ww - 1.0) - 1.0;
+			var rdx = dirx + planex * camx;
+			var rdy = diry + planey * camx;
+			var mx = itrunc(px);
+			var my = itrunc(py);
+			var adx = rdx < 0.0 ? -rdx : rdx;
+			var ady = rdy < 0.0 ? -rdy : rdy;
+			var ddx = adx < 0.00000001 ? 100000000.0 : 1.0 / adx;
+			var ddy = ady < 0.00000001 ? 100000000.0 : 1.0 / ady;
+			var stepx = rdx < 0.0 ? -1 : 1;
+			var stepy = rdy < 0.0 ? -1 : 1;
+			var sdx = rdx < 0.0 ? (px - mx) * ddx : (mx + 1.0 - px) * ddx;
+			var sdy = rdy < 0.0 ? (py - my) * ddy : (my + 1.0 - py) * ddy;
+			var side = 0;
+			var hitv = 0;
+			var guard = 0;
+			while (hitv == 0 && guard < 64) {
+				if (sdx < sdy) { sdx += ddx; mx += stepx; side = 0; }
+				else { sdy += ddy; my += stepy; side = 1; }
+				hitv = wm[my * mcols + mx];
+				++guard;
+			}
+			hitv = hitv == 0 ? 1 : hitv;
+			var pdist = side == 0 ? sdx - ddx : sdy - ddy;   // perpendicular: no fisheye
+			pdist = pdist < 0.05 ? 0.05 : pdist;
+			zc[x] = pdist;
+			var wallx = side == 0 ? py + pdist * rdy : px + pdist * rdx;
+			wallx -= floor(wallx);
+			var tu = itrunc(wallx * 16.0) & 15;
+			var lineh = hh / pdist;
+			var y0 = itrunc(hc - lineh * rise);
+			var y1 = itrunc(hc + lineh * 0.5);
+			y0 = y0 < 0 ? 0 : y0;
+			y1 = y1 > hh ? hh : y1;
+			top[x] = y0;
+			foot[x] = y1;
+			if (clo[y0] > x) { clo[y0] = x; }
+			chi[y0] = x;
+			if (flo[y1] > x) { flo[y1] = x; }
+			fhi[y1] = x;
+			// light: the gloom by distance, the torches at the face, the vignette
+			var amb = itrunc(8.0 / (pdist + 1.8));
+			amb = amb > 3 ? 3 : amb;
+			var lcx = itrunc((px + rdx * (pdist - 0.05)) * 2.0);
+			var lcy = itrunc((py + rdy * (pdist - 0.05)) * 2.0);
+			lcx = lcx < 0 ? 0 : (lcx >= lcols ? lcols - 1 : lcx);
+			lcy = lcy < 0 ? 0 : (lcy >= lrows ? lrows - 1 : lcy);
+			var lv = amb + lm[lcy * lcols + lcx] - vx[x];
+			lv = lv < 0 ? 0 : (lv > 7 ? 7 : lv);
+			hit[x] = ((hitv * 2 + side) * 16 + tu) * 8 + lv;
+		}
+	}
+
+	// floor and ceiling, cast per pixel only where no wall slice covers them: each
+	// row off the horizon is a fixed distance, stepped along the camera plane across
+	// the columns whose ceiling (or floor) reaches that row
+	def cast_planes(grid) {
+		var hh = this.h;
+		var h0 = hh / 2 + itrunc(this.pitch);
+		auto& clo = this.ceil_lo;
+		auto& chi = this.ceil_hi;
+		auto& flo = this.floor_lo;
+		auto& fhi = this.floor_hi;
+		var rise = this.vault - 0.5;
+		var ceil_base = this.ceil_base;
+		var floor_base = this.floor_base;
+		var lo = clo[hh];
+		var hi = chi[hh];
+		for (var y = hh - 1; y >= 0; --y) {
+			if (y < h0 && lo <= hi) {
+				var up = h0 - y - 0.5;
+				var ceil_d = rise * hh / up;
+				// a texel is up / (16 * ceil_d) pixels tall: under two, its grain would only speckle
+				this.cast_plane_row(grid, y, ceil_d, lo, hi, ceil_base, up < ceil_d * 32.0 ? 2304 : 1792);
+			}
+			lo = clo[y] < lo ? clo[y] : lo;
+			hi = chi[y] > hi ? chi[y] : hi;
+		}
+		lo = this.w;
+		hi = -1;
+		for (var y2 = 0; y2 < hh; ++y2) {
+			lo = flo[y2] < lo ? flo[y2] : lo;
+			hi = fhi[y2] > hi ? fhi[y2] : hi;
+			if (y2 >= h0 && lo <= hi) {
+				var down = y2 - h0 + 0.5;
+				var floor_d = 0.5 * hh / down;
+				this.cast_plane_row(grid, y2, floor_d, lo, hi, floor_base, down < floor_d * 32.0 ? 2048 : 1536);
+			}
+		}
+	}
+
+	def cast_plane_row(grid, y, rowd, x0, x1, plane_base, plane_tex) {
+		var ww = this.w;
+		auto& tx = this.tex;
+		auto& lm = this.lmap;
+		auto& vx = this.vigx;
+		var lcols = this.lw;
+		var lrows = this.lh;
+		var planex = this.planex;
+		var planey = this.planey;
+		var step_x = rowd * 2.0 * planex / ww;
+		var step_y = rowd * 2.0 * planey / ww;
+		var fx = this.posx + rowd * (this.dirx - planex) + step_x * x0;
+		var fy = this.posy + rowd * (this.diry - planey) + step_y * x0;
+		var amb = itrunc(8.0 / (rowd + 1.8));
+		amb = (amb > 3 ? 3 : amb) - this.vigy[y];
+		var gi = y * ww;
+		var cell = -1;
+		var lit = 0;
+		for (var x = x0; x <= x1; ++x) {
+			var iu = itrunc(fx * 16.0);
+			var iv = itrunc(fy * 16.0);
+			// the light changes only from one light-map cell to the next
+			var lc = (iv >> 3) * 4096 + (iu >> 3);
+			if (lc != cell) {
+				cell = lc;
+				var lcx = iu >> 3;
+				var lcy = iv >> 3;
+				lcx = lcx < 0 ? 0 : (lcx >= lcols ? lcols - 1 : lcx);
+				lcy = lcy < 0 ? 0 : (lcy >= lrows ? lrows - 1 : lcy);
+				lit = amb + lm[lcy * lcols + lcx];
+			}
+			var lv = lit - vx[x];
+			lv = lv < 0 ? 0 : (lv > 7 ? 7 : lv);
+			grid[gi + x] = plane_base + lv * 8 + tx[plane_tex + (iv & 15) * 16 + (iu & 15)];
+			fx += step_x;
+			fy += step_y;
+		}
+	}
+
+	// one billboard: an ellipsoid body lit as a sphere per pixel, eyes that glow
+	// in the gloom, a grin; walls occlude per column; hit-flash paints it white
+	def draw_blob(grid, i) {
+		auto& cue = this.cue;
+		var w = this.w;
+		var h = this.h;
+		var tt = this.tt;
+		auto& zcol = this.zcol;
+		var sb = this.sprite_base;
+		var tyy = this.sty[i];
+		var txx = this.stx[i];
+		var scx = itrunc(w * 0.5 * (1.0 + txx / tyy));
+		var typ = this.et[i];
+		var boss = i == this.ne - 1;
+		var size = boss ? 1.7 + (!cue.is_var_null() ? cue.kick_env(tt) * 0.22 : 0.0) : (typ == 1 ? 1.1 : (78.0 / 100.0));
+		var sh = itrunc(h * size / tyy);
+		sh = sh < 3 ? 3 : sh;
+		sh = sh > h ? h : sh;
+		// its half-width never passes its kind's reach in world units, whatever the pixels' shape
+		var hwm = sh * (boss ? (57.0 / 100.0) : (typ == 1 ? 0.6 : 0.55));
+		var room = (boss ? 1.2 : (typ == 1 ? 0.75 : 0.5)) * w / (1.32 * tyy);
+		hwm = hwm > room ? room : hwm;
+		var feet = h / 2 + itrunc(this.pitch) + itrunc(h * 0.5 / tyy);
+		var top = feet - sh;
+		var wob = sin(tt * 5.0 + i * 2.1) * 0.10;
+		var flash = this.es[i] == 1 || (boss && this.boss_flash > 0.0);
+		var body = sb + typ * 12;
+		var fogk = 0.18 + this.light_at(this.ex[i], this.ey[i]) * (15.0 / 100.0) + 0.35 / (tyy + 0.6);
+		fogk = fogk < 0.2 ? 0.2 : (fogk > 1.0 ? 1.0 : fogk);
+		var glow = fogk < 0.55 || boss;
+		for (var dy = 0; dy < sh; ++dy) {
+			var rr = top + dy;
+			if (rr < 0 || rr >= h) { continue; }
+			var v = (dy + 0.5) / sh * 2.0 - 1.0;
+			var vv = 1.0 - v * v;
+			if (vv <= 0.0) { continue; }
+			var hwf = sqrt(vv) * hwm;
+			var hw = itrunc(hwf);
+			var cxr = scx + itrunc(wob * v * hwm);
+			var rowb = rr * w;
+			for (var dx = 0 - hw; dx <= hw; ++dx) {
+				var col = cxr + dx;
+				if (col < 0 || col >= w) { continue; }
+				if (tyy >= zcol[col]) { continue; }
+				var pi = sb + 24;
+				if (!flash) {
+					var nx = dx / (hwm + 0.5);
+					var q = 1.0 - nx * nx - v * v;
+					var nz = q > 0.0 ? sqrt(q) : 0.0;
+					var li = -0.45 * nx - 0.55 * v + 0.70 * nz;
+					li = li < 0.0 ? 0.0 : li;
+					// a rim of torchlight on the silhouette's edge
+					var rim = q < (12.0 / 100.0) && li < 0.3 ? 0.35 : 0.0;
+					var lv = itrunc((0.10 + 0.9 * li + rim) * fogk * 11.99);
+					pi = body + (lv > 11 ? 11 : lv);
+					var ax = nx < 0.0 ? -nx : nx;
+					if (v > -0.5 && v < -(12.0 / 100.0) && ax > 0.14 && ax < 0.52) {
+						var ey2 = (v + 0.31) * 5.0;
+						var ex2 = (ax - (33.0 / 100.0)) * 5.0;
+						if (ex2 * ex2 + ey2 * ey2 < 1.0) {
+							var core = ex2 * ex2 + ey2 * ey2 < 0.3;
+							pi = core ? (glow ? sb + 48 : sb + 26) : (glow ? sb + 26 : sb + 25);
+						}
+					}
+					if (v > 0.18 && v < (34.0 / 100.0) && ax < (42.0 / 100.0)) {
+						pi = (dx & 1) == 0 && v < (24.0 / 100.0) ? sb + 25 : sb + 45;
+					}
+				}
+				grid[rowb + col] = pi;
+			}
+		}
+	}
+
+	// a torch's flame: a flickering teardrop, occluded by nearer walls
+	def draw_flame(grid, k) {
+		var w = this.w;
+		var h = this.h;
+		var planex = this.planex;
+		var planey = this.planey;
+		var dirx = this.dirx;
+		var diry = this.diry;
+		var invdet = 1.0 / (planex * diry - dirx * planey);
+		var rx = this.tox[k] - this.posx;
+		var ry = this.toy[k] - this.posy;
+		var tyy = invdet * (planex * ry - planey * rx);
+		if (tyy < 0.3) { return; }
+		var txx = invdet * (diry * rx - dirx * ry);
+		var scx = itrunc(w * 0.5 * (1.0 + txx / tyy));
+		var hc = 1.0 * (h / 2 + itrunc(this.pitch));
+		var fh = itrunc(h * (24.0 / 100.0) / tyy);
+		fh = fh < 3 ? 3 : fh;
+		var fy0 = itrunc(hc - h * 0.14 / tyy) - fh;
+		var flick = sin(this.tt * 17.0 + k * 3.0);
+		auto& zcol = this.zcol;
+		var sb = this.sprite_base;
+		for (var dy = 0; dy < fh; ++dy) {
+			var v = (dy + 0.5) / fh;
+			var half = (v < 0.65 ? v / 0.65 : 1.0 - (v - 0.65) / 0.35 * 0.4) * fh * 0.28;
+			var sway = itrunc(flick * (1.0 - v) * fh * (12.0 / 100.0));
+			var hw = itrunc(half);
+			var row = fy0 + dy;
+			if (row < 0 || row >= h) { continue; }
+			for (var dx = 0 - hw; dx <= hw; ++dx) {
+				var col = scx + dx + sway;
+				if (col < 0 || col >= w || tyy >= zcol[col]) { continue; }
+				// ax is a float slot in the original, so ax / hw divides as floats
+				var ax = 1.0 * (dx < 0 ? 0 - dx : dx);
+				var e = hw > 0 ? ax / hw : 0.0;
+				var c = e < 0.4 && v > 0.45 ? 31 : (e < 0.75 ? 32 : 33);
+				grid[row * w + col] = sb + c;
+			}
+		}
+	}
+
+	def render(grid) {
+		this.cast_walls();
+		this.cast_planes(grid);
+		var ww = this.w;
+		var hh = this.h;
+		auto& tx = this.tex;
+		auto& zc = this.zcol;
+		auto& top = this.wall_top;
+		auto& foot = this.wall_foot;
+		auto& hit = this.wall_hit;
+		var wb = this.wall_base;
+		var bb = this.banner_base;
+		var tshift = itrunc(this.tt * 14.0);
+		var hc = 1.0 * (hh / 2 + itrunc(this.pitch));
+		var rise = this.vault - 0.5;
+		for (var x = 0; x < ww; ++x) {
+			var y0 = top[x];
+			var y1 = foot[x];
+			var packed = hit[x];
+			var lv = packed & 7;
+			var tu = (packed >> 3) & 15;
+			var side = (packed >> 7) & 1;
+			var hitv = packed >> 8;
+			var lineh = hh / zc[x];
+			var tstep = 16.0 / lineh;
+			var tpos = (y0 + 0.5 - (hc - lineh * rise)) * tstep;
+			var gi = y0 * ww + x;
+			if (hitv == 5) {
+				this.breach_slice(grid, x, y0, y1, tpos, tstep, tu, lv, side);
+			} else if (hitv == 4) {
+				var brow = bb + (side * 8 + lv) * 16;
+				// rainbow fire: ragged flame tongues per texel column, hue bands scroll up the cloth
+				var wave = (tu * 3 + tshift) % 12;
+				var flen = 12 + (wave < 6 ? wave : 12 - wave) * 2;
+				var bank = (((tu >> 2) + (tshift >> 3)) & 3) * 4;
+				for (var y = y0; y < y1; ++y) {
+					var tv = itrunc(tpos);
+					var up = 31 - (tv & 31);
+					var heat = up > flen ? 0 : (up * 3 > flen * 2 ? 1 : (up * 3 > flen ? 2 : 3));
+					grid[gi] = brow + bank + heat;
+					tpos += tstep;
+					gi += ww;
+				}
+			} else {
+				var wrow = wb + (((hitv - 1) * 2 + side) * 8 + lv) * 8;
+				var tbase = (hitv - 1) * 512 + tu;
+				for (var y2 = y0; y2 < y1; ++y2) {
+					var tv2 = itrunc(tpos);
+					grid[gi] = wrow + tx[tbase + (tv2 & 31) * 16];
+					tpos += tstep;
+					gi += ww;
+				}
+			}
+		}
+		for (var k = 0; k < this.tox.size(); ++k) { this.draw_flame(grid, k); }
+		// sprite pass: camera-space transforms, then paint far to near
+		var planex = this.planex;
+		var planey = this.planey;
+		var dirx = this.dirx;
+		var diry = this.diry;
+		var posx = this.posx;
+		var posy = this.posy;
+		var ne = this.ne;
+		auto& ex = this.ex;
+		auto& ey = this.ey;
+		auto& es = this.es;
+		auto& stx = this.stx;
+		auto& sty = this.sty;
+		auto& drawn = this.drawn;
+		var invdet = 1.0 / (planex * diry - dirx * planey);
+		for (var i = 0; i < ne; ++i) {
+			var rx = ex[i] - posx;
+			var ry = ey[i] - posy;
+			stx[i] = invdet * (diry * rx - dirx * ry);
+			sty[i] = invdet * (planex * ry - planey * rx);
+			drawn[i] = 0;
+		}
+		for (var pass = 0; pass < ne; ++pass) {
+			var pick = -1;
+			var pty = -1.0;
+			for (var i2 = 0; i2 < ne; ++i2) {
+				if (drawn[i2] == 1) { continue; }
+				var st = es[i2];
+				if (st >= 2) { continue; }
+				var sv = sty[i2];
+				if (sv <= 0.25) { continue; }
+				if (sv > pty) { pty = sv; pick = i2; }
+			}
+			if (pick < 0) { break; }
+			drawn[pick] = 1;
+			this.draw_blob(grid, pick);
+		}
+		this.draw_goo(grid, invdet);
+		this.daylight(grid);
+		this.draw_hud(grid);
+	}
+
+	// out through the breach: daylight blooms from the heart of the frame, its edge dithered gold
+	def daylight(grid) {
+		var tt = this.tt;
+		if (tt < MUSIC_BAR * 12.0) { return; }
+		var w = this.w;
+		var h = this.h;
+		var k = (tt - MUSIC_BAR * 12.0) / MUSIC_BAR;
+		k = k > 1.0 ? 1.0 : k;
+		// the blast whites out the frame for a moment, then the opening blooms
+		var r = k < 0.06 ? w * 1.2 : ((12.0 / 100.0) + k * k * 0.6) * w;
+		var band = 7.0;
+		var cx = w * 0.5;
+		var cy = h * 0.5 + this.pitch;
+		var sb = this.sprite_base;
+		auto& bayer = BAYER4;
+		for (var y = 0; y < h; ++y) {
+			var dy = (y + 0.5 - cy) * 1.5;
+			var oo = r * r - dy * dy;
+			if (oo <= 0.0) { continue; }
+			// per row: the white heart, the warm white ring, the dithered gold edge
+			var xo = sqrt(oo);
+			var ri = r - band;
+			var ii = ri * ri - dy * dy;
+			var xi = ii > 0.0 ? sqrt(ii) : 0.0;
+			var hh = r * r * 0.36 - dy * dy;
+			var xh = hh > 0.0 ? sqrt(hh) : 0.0;
+			var row = y * w;
+			var x0 = itrunc(cx - xo);
+			var x1 = itrunc(cx + xo) + 1;
+			x0 = x0 < 0 ? 0 : x0;
+			x1 = x1 > w ? w : x1;
+			for (var x = x0; x < x1; ++x) {
+				var dx = x + 0.5 - cx;
+				var ax = dx < 0.0 ? -dx : dx;
+				if (ax < xh) {
+					grid[row + x] = sb + 24;
+				} else if (ax < xi) {
+					grid[row + x] = sb + 31;
+				} else {
+					var over = (r - sqrt(dx * dx + dy * dy)) / band;
+					if (over * 16.0 > bayer[(y & 3) * 4 + (x & 3)]) { grid[row + x] = sb + 32; }
+				}
+			}
+		}
+	}
+
+	// the breach: stone whose cracks glow hotter through the escape, then open daylight
+	def breach_slice(grid, x, y0, y1, tpos_, tstep, tu, lv, side) {
+		var tpos = tpos_;
+		var w = this.w;
+		var bs = this.breach_state();
+		var sb = this.sprite_base;
+		var gi = y0 * w + x;
+		if (bs >= 2.0) {
+			// open: white at the heart of the opening, gold toward its edges, rays rippling up it
+			var shimmer = itrunc(this.tt * 9.0);
+			for (var y = y0; y < y1; ++y) {
+				var tv = itrunc(tpos);
+				var ev = (tv < 16 ? tv : 31 - tv) >> 1;
+				var eu = tu < 8 ? tu : 15 - tu;
+				var edge = ev < eu ? ev : eu;
+				var ray = ((tu * 5 + (tv >> 1) + shimmer) & 7) == 0 ? 1 : 0;
+				grid[gi] = edge > 3 ? sb + 24 : (edge > 1 - ray ? sb + 31 : sb + 32);
+				tpos += tstep;
+				gi += w;
+			}
+			return;
+		}
+		auto& cue = this.cue;
+		var kick = !cue.is_var_null() ? cue.kick_env(this.tt) : 0.0;
+		var heat = itrunc((bs + kick * 0.35) * 14.0);
+		var wrow = this.wall_base + (side * 8 + lv) * 8;
+		auto& tex = this.tex;
+		for (var y2 = y0; y2 < y1; ++y2) {
+			var tv2 = itrunc(tpos);
+			var ti = (tv2 & 31) * 16 + tu;
+			var crack = (this.hash2(ti, 77) & 15);
+			var c = tex[ti];
+			// mortar lines and a hashed web of cracks catch fire from the light behind
+			var pix = wrow + c;
+			if ((c == 0 && crack < heat) || crack + 6 < heat - 8) { pix = crack < heat - 6 ? sb + 31 : (crack < heat - 3 ? sb + 32 : sb + 33); }
+			grid[gi] = pix;
+			tpos += tstep;
+			gi += w;
+		}
+	}
+
+	// the goo in flight and on the floor: blobs sized by distance, lit by the map
+	def draw_goo(grid, invdet) {
+		var w = this.w;
+		var h = this.h;
+		var hc = 1.0 * (h / 2 + itrunc(this.pitch));
+		var ngoo = this.ngoo;
+		auto& gx = this.gx;
+		auto& gy = this.gy;
+		auto& gz = this.gz;
+		auto& glife = this.glife;
+		auto& gtype = this.gtype;
+		auto& zcol = this.zcol;
+		var posx = this.posx;
+		var posy = this.posy;
+		var planex = this.planex;
+		var planey = this.planey;
+		var dirx = this.dirx;
+		var diry = this.diry;
+		var sb = this.sprite_base;
+		var rubble_base = this.rubble_base;
+		for (var g = 0; g < ngoo; ++g) {
+			var life = glife[g];
+			if (life <= 0.0) { continue; }
+			var rx = gx[g] - posx;
+			var ry = gy[g] - posy;
+			var tyy = invdet * (planex * ry - planey * rx);
+			if (tyy < 0.3) { continue; }
+			var txx = invdet * (diry * rx - dirx * ry);
+			var scx = itrunc(w * 0.5 * (1.0 + txx / tyy));
+			if (scx < 0 || scx >= w || tyy >= zcol[scx]) { continue; }
+			var scy = itrunc(hc + (0.5 - gz[g]) * h / tyy);
+			var rad = itrunc(h * (gtype[g] == 2 ? 0.024 : 0.04) / tyy * (life < 0.6 ? life / 0.6 : 1.0));
+			var flat = gz[g] <= 0.0 ? 1 : 0;
+			var lk = 0.3 + this.light_at(gx[g], gy[g]) * 0.14;
+			var base = gtype[g] == 2 ? rubble_base : sb + gtype[g] * 12;
+			var body = base + itrunc(lk * 10.0);
+			body = body > base + 11 ? base + 11 : body;
+			for (var dy = 0 - rad; dy <= rad; ++dy) {
+				var row = scy + (flat == 1 ? dy / 2 : dy);
+				if (row < 0 || row >= h) { continue; }
+				for (var dx = 0 - rad - flat * rad; dx <= rad + flat * rad; ++dx) {
+					var col = scx + dx;
+					if (col < 0 || col >= w || tyy >= zcol[col]) { continue; }
+					if (dx * dx + dy * dy * (flat == 1 ? 4 : 1) > (rad + 1) * (rad + 1) * (flat == 1 ? 4 : 1)) { continue; }
+					grid[row * w + col] = dy < 0 && dx < 0 && flat == 0 && gtype[g] != 2 ? sb + 52 : body;
+				}
+			}
+		}
+	}
+
+	def draw_hud(grid) {
+		var w = this.w;
+		var h = this.h;
+		var sb = this.sprite_base;
+		var gx0 = w / 2;
+		var gs = h / 40;
+		gs = gs < 2 ? 2 : gs;
+		var flick = itrunc(this.tt * 10.0);
+		// rainbow hitscan tracer from the muzzle to the target
+		if (this.tracer_t > 0.0) {
+			var tr_x = this.tr_x;
+			var tr_y = this.tr_y;
+			var y0t = h - 11 * gs;
+			var steps = 14 * gs;
+			for (var k2 = 1; k2 < steps; ++k2) {
+				var xx = gx0 + (tr_x - gx0) * k2 / steps;
+				var yy = y0t + (tr_y - y0t) * k2 / steps;
+				for (var th = 0; th < gs / 2; ++th) {
+					if (xx + th < 0 || xx + th >= w || yy < 1 || yy >= h) { continue; }
+					grid[yy * w + xx + th] = sb + 34 + (k2 / gs + flick) % 6;
+				}
+			}
+		}
+		// the gun, drawn at gs x: bobs with the walk, kicks on the shot
+		var bob = itrunc(sin(this.travel * 5.2) * 1.25 * gs);
+		var kick = this.muzzle_t > 0.0 ? 2 * gs : 0;
+		var gw = 16;
+		auto& gn = this.gun;
+		var gh = to_int(gn.size()) / gw;
+		var gxs = gx0 - gw * gs / 2 + bob;
+		var gys = h - gh * gs + 2 * gs + kick + (bob < 0 ? 0 - bob : bob) / 2;
+		for (var ry = 0; ry < gh * gs; ++ry) {
+			var grow = (ry / gs) * gw;
+			var yy2 = gys + ry;
+			if (yy2 < 0 || yy2 >= h) { continue; }
+			for (var rx = 0; rx < gw * gs; ++rx) {
+				var c = gn[grow + rx / gs];
+				if (c == 0) { continue; }
+				var xx2 = gxs + rx;
+				if (xx2 >= 0 && xx2 < w) { grid[yy2 * w + xx2] = sb + c; }
+			}
+		}
+		if (this.muzzle_t > 0.0) {
+			var mx = gxs + gw * gs / 2 - 1;
+			var my = gys - 2 * gs;
+			var ray = 3 * gs;
+			for (var q = 0 - ray; q <= ray; ++q) {
+				var aq = q < 0 ? 0 - q : q;
+				var c2 = aq * 5 <= ray ? 31 : (aq * 5 <= ray * 3 ? 32 : 33);
+				for (var th2 = 0; th2 < gs; ++th2) {
+					if (my + q >= 0 && my + q < h && mx + th2 < w) { grid[(my + q) * w + mx + th2] = sb + c2; }
+					if (mx + q >= 0 && mx + q < w && my + th2 >= 0 && my + th2 < h) { grid[(my + th2) * w + mx + q] = sb + c2; }
+				}
+				if (aq * 5 <= ray * 3 && mx + q >= 0 && mx + q < w && my + q >= 0 && my + q < h) { grid[(my + q) * w + mx + q] = sb + 32; }
+				if (aq * 5 <= ray * 3 && mx - q >= 0 && mx - q < w && my + q >= 0 && my + q < h) { grid[(my + q) * w + mx - q] = sb + 32; }
+			}
+		}
+		var chc = this.hot_t > 0.0 ? sb + 41 : sb + 40;
+		var cy = itrunc(h * 0.5);
+		var cr = gs / 2;
+		for (var d = cr + 1; d <= cr * 2 + 2; ++d) {
+			grid[cy * w + gx0 - d] = chc;
+			grid[cy * w + gx0 + d] = chc;
+			grid[(cy - d) * w + gx0] = chc;
+			grid[(cy + d) * w + gx0] = chc;
+		}
+		var ts = h / 80;
+		ts = ts < 1 ? 1 : ts;
+		var kills = this.kills;
+		var tally = "KILLS " + (kills < 10 ? "0" : "") + to_string(kills);
+		gfx.draw_text(grid, w, h, tally, 2, 2, ts, ts, sb + 42, 2, sb + 44, 99);
+		// the callout: it punches in large and settles, rising as it fades
+		auto& callout = this.callout;
+		var cn = to_int(callout.size());
+		if (this.call_t > 0.0 && cn > 0) {
+			var age = 0.9 - this.call_t;
+			var cs = w * 3 / 5 / (cn * 6);
+			cs = cs < 1 ? 1 : (cs > 3 * ts ? 3 * ts : cs);
+			cs += age < 0.08 ? 1 : 0;
+			var tw = cn * 6 * cs;
+			var cx = (w - tw) / 2;
+			var cyy = itrunc(h * 0.22 - age * h * 0.08);
+			var ink = this.combo >= 2 ? sb + 53 + (flick & 3) : sb + 49 + (flick & 1) * 2;
+			if (cx > 0) { gfx.draw_text(grid, w, h, callout, cx, cyy, cs, cs, ink, 1, sb + 44, 99); }
+		}
+	}
+}
+
+register_scene(6, fun() { return GlobHunter(); });

@@ -1,0 +1,1633 @@
+// MAELSTROM (ChaiScript port of scenes/fluid.jai): Stam's stable fluids with vorticity confinement and warm-started
+// SOR under neon ink advected on a grid twice as fine, a wave-equation surface the drops land in, seen through a
+// shift lens that casts one ray a column across the tank.
+// ChaiScript's parser sums digit / 10^k and misrounds some decimal literals; those are written as exact integer
+// quotients, which fold to the correctly rounded double.
+
+global MS_FU = [];
+global MS_FV = [];
+global MS_INK = [];
+global MS_HOME_X = [];
+global MS_HOME_Y = [];
+global MS_SETTLE = [];
+global MS_RADIUS = [];
+global MS_Z = [];
+global MS_LIT = [];
+global MS_GLOW = [];
+global MS_DUSK = [];
+global MS_INK_ROWS = [];
+global MS_COLS = [];
+global MS_W = 0;
+global MS_H = 0;
+global MS_DW = 0;
+global MS_DH = 0;
+global MS_CW = 0;
+global MS_CH = 0;
+global MS_RUN = 0.0;
+global MS_CX = 0.0;
+global MS_CY = 0.0;
+global MS_CAM_X = 0.0;
+global MS_CAM_Y = 0.0;
+global MS_CAM_H = 1.0;
+global MS_FACE_X = 1.0;
+global MS_FACE_Y = 0.0;
+global MS_FOCAL = 1.0;
+global MS_HORIZON = 0.0;
+global MS_DEPTH = 1.0;
+global MS_LIGHT_X = 0.0;
+global MS_LIGHT_Y = 0.0;
+global MS_GLINT_X = 0.0;
+global MS_GLINT_Y = 0.0;
+global MS_GLINT_NARROW = 1.0;
+global MS_GLINT = 0.0;
+global MS_CREST = 0.0;
+global MS_TUBES = 0;
+global MS_PHASE = 0;
+global MS_FLOOR = 0;
+global MS_GRID = 1.0;
+global MS_GRID_GAIN = 0.0;
+global MS_GRID_FADE = 0.0;
+
+// one row of ink: each cell takes the flow at its centre, traces back one step, blends and settles toward home
+def maelstrom_ink_row(y) {
+	var dw = MS_DW;
+	var out = [];
+	for (var i = 0; i < dw; ++i) { out.push_back(0.0); }
+	if (y < 1 || y >= MS_DH - 1) { return out; }
+	auto& fu = MS_FU;
+	auto& fv = MS_FV;
+	auto& ink_in = MS_INK;
+	auto& home_x = MS_HOME_X;
+	auto& settle = MS_SETTLE;
+	auto& radius = MS_RADIUS;
+	var gw = MS_CW;
+	var gymax = MS_CH - 1.001;
+	var xmax = dw - 2.001;
+	var ymax = MS_DH - 2.001;
+	var run = MS_RUN;
+	var home_y = MS_HOME_Y[y];
+	var qy = y * 0.5 - 0.25;
+	qy = qy > gymax ? gymax : qy;
+	var gy = itrunc(qy);
+	var ty = qy - gy;
+	var g = gy * gw;
+	var ua = fu[g] + (fu[g + gw] - fu[g]) * ty;
+	var va = fv[g] + (fv[g + gw] - fv[g]) * ty;
+	var x = 1;
+	var radius_at = y * dw;
+	for (var gx = 1; gx < gw; ++gx) {
+		++g;
+		var ub = fu[g] + (fu[g + gw] - fu[g]) * ty;
+		var vb = fv[g] + (fv[g + gw] - fv[g]) * ty;
+		var du = (ub - ua) * 0.5;
+		var dv = (vb - va) * 0.5;
+		var u = ua + du * 0.5;
+		var v = va + dv * 0.5;
+		var xe = x + 2;
+		while (x < xe) {
+			var px = x - run * u;
+			var py = y - run * v;
+			px = px < 1.0 ? 1.0 : (px > xmax ? xmax : px);
+			py = py < 1.0 ? 1.0 : (py > ymax ? ymax : py);
+			var ix = itrunc(px);
+			var iy = itrunc(py);
+			var sx = px - ix;
+			var k = iy * dw + ix;
+			var k2 = k + dw;
+			var a = ink_in[k];
+			var b = ink_in[k2];
+			var top = a + (ink_in[k + 1] - a) * sx;
+			var bottom = b + (ink_in[k2 + 1] - b) * sx;
+			var ink = top + (bottom - top) * (py - iy);
+			out[x] = ink + (home_y + home_x[x] - ink) * settle[radius[radius_at + x]];
+			u += du;
+			v += dv;
+			++x;
+		}
+		ua = ub;
+		va = vb;
+	}
+	return out;
+}
+
+// one row of the surface's light: each cell's level from its slope and its height, at the glow of its radius
+def maelstrom_light_row(y) {
+	var dw = MS_DW;
+	var out = [];
+	for (var i = 0; i < dw; ++i) { out.push_back(0); }
+	auto& z = MS_Z;
+	auto& radii = MS_RADIUS;
+	auto& glow = MS_GLOW;
+	auto& dusk = MS_DUSK;
+	var row = y < 1 ? 1 : (y > MS_DH - 2 ? MS_DH - 2 : y);
+	var light_x = MS_LIGHT_X;
+	var light_y = MS_LIGHT_Y;
+	var glint_x = MS_GLINT_X;
+	var glint_y = MS_GLINT_Y;
+	var narrow = MS_GLINT_NARROW;
+	var glint = MS_GLINT;
+	var crest = MS_CREST;
+	var k = row * dw + 1;
+	for (var x = 1; x < dw - 1; ++x) {
+		var sx = z[k + 1] - z[k - 1];
+		var sy = z[k + dw] - z[k - dw];
+		var radius = radii[k];
+		var lift = z[k] * crest;
+		lift = lift < -2.5 ? -2.5 : (lift > 3.0 ? 3.0 : lift);
+		var level = glow[radius] + lift - sx * light_x - sy * light_y;
+		var ex = sx - glint_x;
+		var ey = sy - glint_y;
+		var near = 1.0 - (ex * ex + ey * ey) * narrow;
+		if (near > 0.0) { level += near * near * glint; }
+		if (level < 2.0) { level = 2.0; }
+		var whole = itrunc(level * dusk[radius]);
+		if (whole > 15) { whole = 15; }
+		out[x] = whole * 128;
+		++k;
+	}
+	out[0] = out[1];
+	out[dw - 1] = out[dw - 2];
+	return out;
+}
+
+// one column of the picture: the slab's cut face, then the ray walks the surface front to back; the floor shows below
+def maelstrom_column(x) {
+	var hh = MS_H;
+	var dw = MS_DW;
+	var tubes = MS_TUBES;
+	var phase = MS_PHASE;
+	var floor_pix = MS_FLOOR;
+	var out = [];
+	for (var i = 0; i < hh; ++i) { out.push_back(floor_pix); }
+	auto& zs = MS_Z;
+	auto& inks = MS_INK;
+	auto& lits = MS_LIT;
+	var focal = MS_FOCAL;
+	var camx = MS_CAM_X;
+	var camy = MS_CAM_Y;
+	var camh = MS_CAM_H;
+	var hz = MS_HORIZON;
+	var aside = (x + 0.5 - MS_W * 0.5) / focal;
+	var dx = MS_FACE_X - aside * MS_FACE_Y;
+	var dy = MS_FACE_Y + aside * MS_FACE_X;
+	var xhi = dw - 2.01;
+	var yhi = MS_DH - 2.01;
+	var t0 = 1.0;
+	var t1 = 1000000.0;
+	var face = 7.0;
+	if (dx > 0.00001) {
+		var c0 = (1.0 - camx) / dx;
+		t0 = t0 < c0 ? c0 : t0;
+		var c1 = (xhi - camx) / dx;
+		t1 = c1 < t1 ? c1 : t1;
+	} else if (dx < -0.00001) {
+		var c0 = (xhi - camx) / dx;
+		t0 = t0 < c0 ? c0 : t0;
+		var c1 = (1.0 - camx) / dx;
+		t1 = c1 < t1 ? c1 : t1;
+	} else if (camx < 1.0 || camx > xhi) {
+		t1 = 0.0;
+	}
+	var across0 = 1.0;
+	if (dy > 0.00001) {
+		across0 = (1.0 - camy) / dy;
+		var c2 = (yhi - camy) / dy;
+		t1 = c2 < t1 ? c2 : t1;
+	} else if (dy < -0.00001) {
+		across0 = (yhi - camy) / dy;
+		var c2 = (1.0 - camy) / dy;
+		t1 = c2 < t1 ? c2 : t1;
+	} else if (camy < 1.0 || camy > yhi) {
+		t1 = 0.0;
+	}
+	if (across0 > t0) {
+		t0 = across0;
+		face = 5.0;
+	}
+	var ytop = hh;
+	var ybase = hh;
+	if (t1 > t0) {
+		var px0 = camx + t0 * dx;
+		var py0 = camy + t0 * dy;
+		px0 = px0 < 1.0 ? 1.0 : (px0 > xhi ? xhi : px0);
+		py0 = py0 < 1.0 ? 1.0 : (py0 > yhi ? yhi : py0);
+		var ix0 = itrunc(px0);
+		var iy0 = itrunc(py0);
+		var k0 = iy0 * dw + ix0;
+		var scale0 = focal / t0;
+		var waterline = hz + (camh - zs[k0]) * scale0;
+		var foot = hz + (camh + MS_DEPTH) * scale0;
+		var edge_ink = itrunc(inks[k0]);
+		edge_ink = tubes + ((edge_ink + phase) & 127);
+		var dusk = MS_DUSK[MS_RADIUS[k0]];
+		var level = face * dusk;
+		var fall = (level - dusk) / (foot - waterline + 0.001);
+		var ya = 0;
+		if (waterline > 0.0) {
+			ya = itrunc(waterline);
+		} else {
+			level += fall * waterline;
+		}
+		if (ya > hh) { ya = hh; }
+		if (foot < hh) { ybase = foot < 0.0 ? 0 : itrunc(foot); }
+		if (ybase < ya) { ybase = ya; }
+		for (var yf = ya; yf < ybase; ++yf) {
+			var whole = itrunc(level);
+			out[yf] = edge_ink + whole * 128;
+			level -= fall;
+		}
+		if (ya < ybase) {
+			var meniscus = itrunc(12.0 * dusk);
+			out[ya] = edge_ink + meniscus * 128;
+		}
+		ytop = ya;
+		var t = t0;
+		var row_step = 1.0 / (camh * focal);
+		while (t < t1 && ytop > 0) {
+			var px = camx + t * dx;
+			var py = camy + t * dy;
+			var ix = itrunc(px);
+			var iy = itrunc(py);
+			var sx = px - ix;
+			var sy = py - iy;
+			var k = iy * dw + ix;
+			var k2 = k + dw;
+			var za = zs[k];
+			var zb = zs[k2];
+			var ztop = za + (zs[k + 1] - za) * sx;
+			var zbot = zb + (zs[k2 + 1] - zb) * sx;
+			var row = hz + (camh - ztop - (zbot - ztop) * sy) * focal / t;
+			if (row < ytop) {
+				var ys = row < 0.0 ? 0 : itrunc(row);
+				if (ys < ytop) {
+					var a = inks[k];
+					var b = inks[k2];
+					var top = a + (inks[k + 1] - a) * sx;
+					var bottom = b + (inks[k2 + 1] - b) * sx;
+					var ink = itrunc(top + (bottom - top) * sy);
+					var pix = tubes + lits[k] + ((ink + phase) & 127);
+					for (var yy = ys; yy < ytop; ++yy) { out[yy] = pix; }
+					ytop = ys;
+				}
+			}
+			var stride = t * t * row_step;
+			t += stride < 0.35 ? 0.35 : (stride > 1.0 ? 1.0 : stride);
+		}
+	}
+	var floor_k = (camh + MS_DEPTH) * focal;
+	var lines = MS_GRID;
+	var line_wide = lines * 1.2 / focal;
+	var gain = MS_GRID_GAIN;
+	var fade = MS_GRID_FADE;
+	var from = 0;
+	var to = ytop;
+	for (var pass = 0; pass < 2; ++pass) {
+		for (var y = from; y < to; ++y) {
+			var under = y + 0.5 - hz;
+			if (under < 1.0) { continue; }
+			var far = floor_k / under;
+			var shade = gain - far * fade;
+			if (shade < 1.0) { continue; }
+			var wide = far * line_wide;
+			var gx = (camx + far * dx) * lines + 4096.0;
+			var gy = (camy + far * dy) * lines + 4096.0;
+			var wx = itrunc(gx);
+			var wy = itrunc(gy);
+			if (gx - wx < wide || gy - wy < wide) {
+				var sh = itrunc(shade);
+				out[y] = floor_pix + (sh > 8 ? 8 : sh);
+			}
+		}
+		from = ybase;
+		to = hh;
+	}
+	return out;
+}
+
+class Maelstrom {
+	var name
+	var handle
+	var w
+	var h
+	var seed
+	var pal
+	var rng
+	var replay
+	var cue
+	var pixel_budget
+	var titled
+	var cw
+	var ch
+	var dw
+	var dh
+	var unit
+	var u
+	var v
+	var u1
+	var v1
+	var pr
+	var dv
+	var cu
+	var away_x
+	var away_y
+	var away_r
+	var radial
+	var ring_born
+	var ring_power
+	var ring_lays
+	var ring_next
+	var hw
+	var hv
+	var dish_pair
+	var dish_pool
+	var drop_x
+	var drop_y
+	var drop_z
+	var drop_vx
+	var drop_vy
+	var drop_vz
+	var drop_size
+	var drop_kind
+	var drop_entry
+	var drop_next
+	var neon
+	var tubes
+	var floor_at
+	var jets
+	var sor_iters
+	var vorticity
+	var jet_speed
+	var settling
+	var pool_settling
+	var home_rate
+	var home_turned
+	var pair_speed
+	var pool_speed
+	var drain_speed
+	var wave_speed
+	var wave_drag
+	var gravity
+	var fall_lead
+	var fall_speed
+	var tt
+	var turn
+	var orbit
+	var cam_yaw
+	var traded
+	var kick_before
+	var kick_ahead_before
+	var snare_before
+	var rain_due
+	var blob_tube
+	var blob_turn
+	var spout_turn
+	var paddle_turn
+	var t_pair
+	var t_pool
+	var t_flip
+	var t_drain
+
+	def Maelstrom() {
+		scene_init(this);
+		this.cw = 0;
+		this.ch = 0;
+		this.dw = 0;
+		this.dh = 0;
+		this.unit = 1.0;
+		this.u = [];
+		this.v = [];
+		this.u1 = [];
+		this.v1 = [];
+		this.pr = [];
+		this.dv = [];
+		this.cu = [];
+		this.away_x = [];
+		this.away_y = [];
+		this.away_r = [];
+		this.radial = [];
+		this.ring_born = [];
+		this.ring_power = [];
+		this.ring_lays = [];
+		this.ring_next = 0;
+		this.hw = [];
+		this.hv = [];
+		this.dish_pair = [];
+		this.dish_pool = [];
+		this.drop_x = [];
+		this.drop_y = [];
+		this.drop_z = [];
+		this.drop_vx = [];
+		this.drop_vy = [];
+		this.drop_vz = [];
+		this.drop_size = [];
+		this.drop_kind = [];
+		this.drop_entry = [];
+		this.drop_next = 0;
+		this.neon = [
+			1.00, 0.08, 0.55,
+			0.00, 0.80, 1.00,
+			1.00, (84.0 / 100.0), 0.04,
+			0.58, 0.20, 1.00,
+			0.55, 1.00, 0.00,
+			1.00, 0.38, 0.00,
+			0.10, 0.35, 1.00,
+			0.00, 1.00, 0.50
+		];
+		this.tubes = 0;
+		this.floor_at = 0;
+		this.jets = 5;
+		this.sor_iters = 8;
+		this.vorticity = 12.0;
+		this.jet_speed = 14.0;
+		this.settling = 0.18;
+		this.pool_settling = 0.6;
+		this.home_rate = 1.4;
+		this.home_turned = 0.0;
+		this.pair_speed = 16.0;
+		this.pool_speed = 18.0;
+		this.drain_speed = 14.0;
+		this.wave_speed = 1.0;
+		this.wave_drag = 1.0;
+		this.gravity = 1.0;
+		this.fall_lead = 0.55;
+		this.fall_speed = 1.0;
+		this.tt = 0.0;
+		this.turn = 1.0;
+		this.orbit = 0.0;
+		this.cam_yaw = -0.6;
+		this.traded = 0;
+		this.kick_before = 0.0;
+		this.kick_ahead_before = 0.0;
+		this.snare_before = 0.0;
+		this.rain_due = 0.0;
+		this.blob_tube = 0;
+		this.blob_turn = 0;
+		this.spout_turn = 0;
+		this.paddle_turn = 0;
+		this.t_pair = MUSIC_BAR * 2.0;
+		this.t_pool = MUSIC_BAR * 4.0;
+		this.t_flip = MUSIC_BAR * 6.0;
+		this.t_drain = MUSIC_BAR * 8.0;
+		// the reel picks the grid before build runs, so the budget is set at construction
+		this.pixel_budget = 30000;
+	}
+
+	def length_bars() { return 10; }
+	def hit_times() { return [this.t_pair, this.t_pool, this.t_flip, this.t_drain]; }
+	def hit_levels() { return [1, 2, 1, 2]; }
+
+	def build() {
+		this.name = "MAELSTROM";
+		this.handle = "stable fluids under a wave tank . neon ink";
+		this.replay = 20.0;
+		var w = this.w;
+		var h = this.h;
+		this.cw = (w + 2) / 3;
+		this.ch = (h + 2) / 3;
+		this.dw = this.cw * 2;
+		this.dh = this.ch * 2;
+		var cw = this.cw;
+		var ch = this.ch;
+		var dw = this.dw;
+		var dh = this.dh;
+		this.unit = dh / 80.0;
+		var unit = this.unit;
+		this.wave_speed = dh / 2.0;
+		this.wave_drag = 2.0 * unit * unit;
+		this.gravity = 120.0 * unit;
+		this.fall_speed = 30.0 * unit;
+		var cn = cw * ch;
+		var dn = dw * dh;
+		this.u = gfx.make_fgrid(cn);
+		this.v = gfx.make_fgrid(cn);
+		this.u1 = gfx.make_fgrid(cn);
+		this.v1 = gfx.make_fgrid(cn);
+		this.pr = gfx.make_fgrid(cn);
+		this.dv = gfx.make_fgrid(cn);
+		this.cu = gfx.make_fgrid(cn);
+		this.hw = gfx.make_fgrid(dn);
+		this.hv = gfx.make_fgrid(dn);
+		MS_W = w;
+		MS_H = h;
+		MS_DW = dw;
+		MS_DH = dh;
+		MS_CW = cw;
+		MS_CH = ch;
+		MS_CX = dw * 0.5 - 0.5;
+		MS_CY = dh * 0.5 - 0.5;
+		MS_DEPTH = 10.0 * unit;
+		MS_GRID = 4.0 / dh;
+		MS_INK = gfx.make_fgrid(dn);
+		MS_Z = gfx.make_fgrid(dn);
+		MS_LIT = gfx.make_grid(dn);
+		MS_HOME_X = gfx.make_fgrid(dw);
+		MS_HOME_Y = gfx.make_fgrid(dh);
+		MS_INK_ROWS = [];
+		for (var r = 0; r < dh; ++r) { MS_INK_ROWS.push_back(r); }
+		MS_COLS = [];
+		for (var c = 0; c < w; ++c) { MS_COLS.push_back(c); }
+		this.mix_tubes();
+		var reach = itrunc(sqrt(dw * dw + dh * dh * 1.0) * 0.5) + 3;
+		MS_SETTLE = gfx.make_fgrid(reach);
+		MS_GLOW = gfx.make_fgrid(reach);
+		MS_DUSK = gfx.make_fgrid(reach);
+		this.radial = gfx.make_fgrid(reach);
+		MS_RADIUS = gfx.make_grid(dn);
+		this.dish_pair = gfx.make_fgrid(dn);
+		this.dish_pool = gfx.make_fgrid(dn);
+		auto& radius = MS_RADIUS;
+		auto& dish_pair = this.dish_pair;
+		auto& dish_pool = this.dish_pool;
+		var pair_core = 5.0 * unit;
+		var pool_core = 8.0 * unit;
+		for (var y = 0; y < dh; ++y) {
+			var ey = y + 0.5 - dh * 0.5;
+			for (var x = 0; x < dw; ++x) {
+				var ex = x + 0.5 - dw * 0.5;
+				var left = ex + dw * 0.23;
+				var right = ex - dw * 0.23;
+				var at = y * dw + x;
+				radius[at] = itrunc(sqrt(ex * ex + ey * ey));
+				dish_pool[at] = 1.0 / (1.0 + (ex * ex + ey * ey) / (pool_core * pool_core));
+				dish_pair[at] = 1.0 / (1.0 + (left * left + ey * ey) / (pair_core * pair_core)) + 1.0 / (1.0 + (right * right + ey * ey) / (pair_core * pair_core));
+			}
+		}
+		this.away_x = gfx.make_fgrid(cn);
+		this.away_y = gfx.make_fgrid(cn);
+		this.away_r = gfx.make_grid(cn);
+		auto& away_x = this.away_x;
+		auto& away_y = this.away_y;
+		auto& away_r = this.away_r;
+		for (var gy = 0; gy < ch; ++gy) {
+			var fy = gy - (ch - 1) * 0.5;
+			for (var gx = 0; gx < cw; ++gx) {
+				var fx = gx - (cw - 1) * 0.5;
+				var far = sqrt(fx * fx + fy * fy);
+				var i = gy * cw + gx;
+				away_x[i] = fx / (far + 0.0001);
+				away_y[i] = fy / (far + 0.0001);
+				away_r[i] = itrunc(far * 2.0);
+			}
+		}
+		for (var k = 0; k < 8; ++k) {
+			this.ring_born.push_back(-100.0);
+			this.ring_power.push_back(0.0);
+			this.ring_lays.push_back(0.0);
+		}
+		for (var d = 0; d < 192; ++d) {
+			this.drop_x.push_back(0.0);
+			this.drop_y.push_back(0.0);
+			this.drop_z.push_back(0.0);
+			this.drop_vx.push_back(0.0);
+			this.drop_vy.push_back(0.0);
+			this.drop_vz.push_back(0.0);
+			this.drop_size.push_back(0.0);
+			this.drop_kind.push_back(-1);
+			this.drop_entry.push_back(0);
+		}
+		this.lay_bands();
+		for (var settle = 0; settle < 12; ++settle) { this.project(); }
+		this.carry_ink(0.0, 0.0);
+		this.shape_surface(0.0);
+	}
+
+	// eight tubes of sixteen entries, sixteen levels, then their negative; then the floor's dark, its grid, their negative
+	def mix_tubes() {
+		auto& pal = this.pal;
+		auto& neon = this.neon;
+		this.tubes = pal.size();
+		var gain = [0.0, 0.08, 0.16, 0.25, 0.35, 0.46, 0.58, 0.72, (86.0 / 100.0), 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+		var glare = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, (12.0 / 100.0), 0.26, (42.0 / 100.0), 0.6, 0.8, 1.0];
+		for (var negative = 0; negative < 2; ++negative) {
+			for (var shade = 0; shade < 16; ++shade) {
+				for (var e = 0; e < 128; ++e) {
+					var hue = (e / 16) * 3;
+					var off = ((e % 16) + 0.5) / 16.0 - 0.5;
+					var glow = 1.0 - off * off / (1156.0 / 10000.0);
+					glow = glow < 0.0 ? 0.0 : glow;
+					var core = glow > 0.8 ? (glow - 0.8) * 2.2 : 0.0;
+					var light = 0.05 + (95.0 / 100.0) * glow;
+					var white = core + (1.0 - core) * glare[shade] * (0.3 + 0.7 * glow);
+					var r = 3.0 + 252.0 * neon[hue] * light;
+					var g = 8.0 + 247.0 * neon[hue + 1] * light;
+					var b = 24.0 + 231.0 * neon[hue + 2] * light;
+					r = (r + (255.0 - r) * white) * gain[shade];
+					g = (g + (255.0 - g) * white) * gain[shade];
+					b = (b + (255.0 - b) * white) * gain[shade];
+					if (negative == 1) {
+						pal.add(255.0 - r, 255.0 - g, 255.0 - b);
+					} else {
+						pal.add(r, g, b);
+					}
+				}
+			}
+		}
+		this.floor_at = pal.size();
+		for (var negative2 = 0; negative2 < 2; ++negative2) {
+			for (var line = 0; line < 9; ++line) {
+				var lit = line / 8.0;
+				var r2 = 90.0 * lit;
+				var g2 = 14.0 * lit;
+				var b2 = 5.0 + 125.0 * lit;
+				if (negative2 == 1) {
+					pal.add(255.0 - r2, 255.0 - g2, 255.0 - b2);
+				} else {
+					pal.add(r2, g2, b2);
+				}
+			}
+		}
+	}
+
+	// the ramp the ink settles back to: seven tubes to the tank's height, deepening along (across, down)
+	def lay_home(across, down) {
+		auto& home_x = MS_HOME_X;
+		auto& home_y = MS_HOME_Y;
+		var dw = this.dw;
+		var dh = this.dh;
+		var cx = MS_CX;
+		var cy = MS_CY;
+		var tube = 112.0 / dh;
+		for (var x = 0; x < dw; ++x) { home_x[x] = (x - cx) * across * tube; }
+		for (var y = 0; y < dh; ++y) { home_y[y] = 1080.0 + (y - cy) * down * tube; }
+	}
+
+	// the opening: the ink in its bands, across jets that run against their neighbours, their seams rippling
+	def lay_bands() {
+		this.lay_home(0.0, 1.0);
+		auto& ink = MS_INK;
+		auto& home_y = MS_HOME_Y;
+		auto& u = this.u;
+		auto& v = this.v;
+		var dw = this.dw;
+		var dh = this.dh;
+		var cw = this.cw;
+		var ch = this.ch;
+		var jets = this.jets;
+		var unit = this.unit;
+		for (var y = 0; y < dh; ++y) {
+			var i = y * dw;
+			for (var x = 0; x < dw; ++x) {
+				ink[i] = home_y[y];
+				++i;
+			}
+		}
+		var phase = [];
+		for (var s = 0; s <= jets; ++s) {
+			phase.push_back(this.rng.nextf() * (62831853.0 / 10000000.0));
+			phase.push_back(this.rng.nextf() * (62831853.0 / 10000000.0));
+		}
+		for (var gy = 1; gy < ch - 1; ++gy) {
+			var across = (gy + 0.5) * jets / ch;
+			var seam_at = itrunc(across + 0.5);
+			var ripple = cos(3.14159265 * across);
+			ripple = (seam_at == 0 || seam_at == jets) ? 0.0 : ripple * ripple * ripple * ripple;
+			for (var gx = 1; gx < cw - 1; ++gx) {
+				var j = gy * cw + gx;
+				u[j] = this.band_jet(gy);
+				var along = gx * (62831853.0 / 10000000.0) / cw;
+				v[j] = this.jet_speed * unit * ripple * (0.3 * sin(along * 5.0 + phase[seam_at * 2]) + 0.2 * sin(along * 3.0 + phase[seam_at * 2 + 1]));
+			}
+		}
+	}
+
+	// a flow row's place in the opening's jets: alternate ways, shearing at the seams
+	def band_jet(gy) {
+		var wave = sin(3.14159265 * (gy + 0.5) * this.jets / this.ch) * 3.0;
+		var steep = exp(wave);
+		return this.jet_speed * this.unit * (steep - 1.0 / steep) / (steep + 1.0 / steep);
+	}
+
+	def smooth01(x) {
+		var c = x < 0.0 ? 0.0 : (x > 1.0 ? 1.0 : x);
+		return c * c * (3.0 - 2.0 * c);
+	}
+
+	def kick_at(t) { return this.cue.is_var_null() ? 0.0 : this.cue.kick_env(t); }
+	def snare_at(t) { return this.cue.is_var_null() ? 0.0 : this.cue.snare_env(t); }
+	def hit_at(t) { return this.cue.is_var_null() ? 0.0 : this.cue.hit(t); }
+
+	def update(t, dt) {
+		var before = this.tt;
+		this.tt = t;
+		if (dt <= 0.0) { return; }
+		this.vorticity = 9.0 + 9.0 * (this.cue.is_var_null() ? 0.6 : this.cue.energy(t));
+		var step = dt > 0.05 ? 0.05 : dt;
+		this.strike(before, t);
+		this.stir(t, step);
+		this.confine(step);
+		this.project();
+		this.advect_flow(step);
+		this.carry_ink(t, step);
+		this.throw_water(before, t, step);
+		this.ripple(step);
+		this.fall(step);
+		this.cam_yaw += this.turn * (0.35 + 0.5 * this.smooth01((t - this.t_drain) / (MUSIC_BAR * 2.0))) * step;
+		this.shape_surface(t);
+	}
+
+	// the hits, once each as the clock crosses them, and each kick a wave: off a side wall, then out of the eye
+	def strike(before, t) {
+		var dw = this.dw;
+		var dh = this.dh;
+		var unit = this.unit;
+		if (before < this.t_pair && t >= this.t_pair) { this.ring(this.t_pair, 0.8, 0.0); }
+		if (before < this.t_pool && t >= this.t_pool) { this.ring(this.t_pool, 1.0, 1.0); }
+		if (before < this.t_flip && t >= this.t_flip) {
+			this.ring(this.t_flip, 1.0, 1.0);
+			this.turn = 0.0 - this.turn;
+			this.traded += 16;
+			auto& u = this.u;
+			auto& v = this.v;
+			auto& pr = this.pr;
+			var cn = this.cw * this.ch;
+			for (var i = 0; i < cn; ++i) {
+				u[i] = 0.0 - u[i];
+				v[i] = 0.0 - v[i];
+				pr[i] = 0.0 - pr[i];
+			}
+			auto& vel = this.hv;
+			var cx = MS_CX;
+			var tilt = 12.0 * unit * this.turn / (dw * 0.5);
+			for (var y = 1; y < dh - 1; ++y) {
+				var j = y * dw + 1;
+				for (var x = 1; x < dw - 1; ++x) {
+					vel[j] += (x - cx) * tilt;
+					++j;
+				}
+			}
+		}
+		if (before < this.t_drain && t >= this.t_drain) {
+			this.ring(this.t_drain, 1.0, 1.0);
+			this.splash(MS_CX, MS_CY, 12.0 * unit, 9.0 * unit);
+			this.crown(MS_CX, MS_CY, 22, 4.0 * unit, 70.0 * unit, 5);
+		}
+		var kick = this.kick_at(t);
+		if (kick > this.kick_before + 0.3) {
+			if (t > this.t_pool) {
+				this.ring(t, 0.3 * kick, 0.0);
+				this.bump(MS_CX, MS_CY, 45.0 * unit * kick, 7.0 * unit);
+			} else {
+				this.paddle(45.0 * unit * kick);
+			}
+		}
+		this.kick_before = kick;
+	}
+
+	// a side wall shoves the water beside it up and the water beyond that down, the left wall and the right in turn
+	def paddle(speed) {
+		auto& vel = this.hv;
+		var dw = this.dw;
+		var dh = this.dh;
+		this.paddle_turn = 1 - this.paddle_turn;
+		var right = this.paddle_turn == 1;
+		for (var y = 1; y < dh - 1; ++y) {
+			var row = y * dw;
+			for (var k = 0; k < 8; ++k) {
+				var x = 1 + k;
+				if (right) { x = dw - 2 - k; }
+				vel[row + x] += speed * cos(0.44879895 * k);
+			}
+		}
+	}
+
+	def ring(born, power, lays) {
+		var at = this.ring_next;
+		this.ring_born[at] = born;
+		this.ring_power[at] = power;
+		this.ring_lays[at] = lays;
+		this.ring_next = (at + 1) % to_int(this.ring_born.size());
+	}
+
+	// the choreography: the opening's jets, then the pair with a rod between them, then the whirlpool, six nozzles orbiting
+	def stir(t, step) {
+		var cx = MS_CX;
+		var cy = MS_CY;
+		var dw = this.dw;
+		var dh = this.dh;
+		var ch = this.ch;
+		var unit = this.unit;
+		var turn = this.turn;
+		var kick = this.kick_at(t);
+		var snare = this.snare_at(t);
+		if (t < this.t_pair) {
+			this.drive_jets((0.5 + 1.6 * kick) * step);
+			return;
+		}
+		var drain = this.smooth01((t - this.t_drain) / (MUSIC_BAR * 1.5));
+		if (t >= this.t_pool) {
+			var pool = this.smooth01((t - this.t_pool) / MUSIC_BEAT);
+			this.home_turned += turn * this.home_rate * (1.0 + drain) * pool * step;
+			this.lay_home(0.0 - sin(this.home_turned), cos(this.home_turned));
+			this.whirl(cx, cy, turn * unit * (this.pool_speed + this.drain_speed * drain) * pool, ch * (0.26 - 0.1 * drain), (4.0 + 2.0 * drain) * step);
+		} else {
+			var pair = this.smooth01((t - this.t_pair) / MUSIC_BEAT);
+			this.whirl(cx - dw * 0.23, cy, 0.0 - this.pair_speed * unit * pair, ch * 0.2, 3.5 * step);
+			this.whirl(cx + dw * 0.23, cy, this.pair_speed * unit * pair, ch * 0.2, 3.5 * step);
+			var a = t * 1.3;
+			var rod_x = cx + dw * 0.3 * sin(a);
+			var rod_y = cy + dh * 0.27 * sin(a * 2.0);
+			this.drag(rod_x, rod_y, dw * 0.195 * cos(a), dh * 0.351 * cos(a * 2.0), 4.0 * unit);
+			this.bump(rod_x, rod_y, 0.0 - 90.0 * unit * step, 3.5 * unit);
+		}
+		var rush = this.cue.is_var_null() ? 0.0 : this.cue.riser(t);
+		this.orbit += turn * (0.55 + 1.2 * rush * rush + 1.4 * drain) * step;
+		var reach = 1.0 - 0.5 * drain;
+		for (var k = 0; k < 6; ++k) {
+			var a2 = this.orbit + k * (10471976.0 / 10000000.0);
+			var ca = cos(a2);
+			var sa = sin(a2);
+			var pours = k % 2 == 0;
+			var beat = pours ? kick : snare;
+			var aim = pours ? 0.55 : 1.4;
+			var speed = (5.0 + 22.0 * beat) * unit / sqrt(1.0 + aim * aim);
+			var x = cx + ca * dw * 0.37 * reach;
+			var y = cy + sa * dh * 0.37 * reach;
+			this.drag(x, y, (0.0 - sa * turn - ca * aim) * speed, (ca * turn - sa * aim) * speed, 3.5 * unit);
+			this.pour(x, y, (pours ? 1.0 : -1.0) * (12.0 + 80.0 * beat) * step, 4.5 * unit);
+		}
+	}
+
+	// the opening's jets pull the flow back toward their shear
+	def drive_jets(grip) {
+		auto& u = this.u;
+		var cw = this.cw;
+		var ch = this.ch;
+		for (var gy = 1; gy < ch - 1; ++gy) {
+			var jet = this.band_jet(gy);
+			var i = gy * cw + 1;
+			for (var gx = 1; gx < cw - 1; ++gx) {
+				u[i] += (jet - u[i]) * grip;
+				++i;
+			}
+		}
+	}
+
+	// a disc of `rad` ink cells about ink cell (x, y) pulls the flow toward (vx, vy), hardest at its centre
+	def drag(x, y, vx, vy, rad) {
+		auto& u = this.u;
+		auto& v = this.v;
+		var cw = this.cw;
+		var ch = this.ch;
+		var qx = x * 0.5 - 0.25;
+		var qy = y * 0.5 - 0.25;
+		var qr = rad * 0.5 + 0.75;
+		var qr2 = qr * qr;
+		var x0 = itrunc(qx - qr);
+		x0 = x0 < 1 ? 1 : x0;
+		var x1 = itrunc(qx + qr) + 1;
+		x1 = x1 > cw - 2 ? cw - 2 : x1;
+		var y0 = itrunc(qy - qr);
+		y0 = y0 < 1 ? 1 : y0;
+		var y1 = itrunc(qy + qr) + 1;
+		y1 = y1 > ch - 2 ? ch - 2 : y1;
+		for (var gy = y0; gy <= y1; ++gy) {
+			var ey = gy - qy;
+			for (var gx = x0; gx <= x1; ++gx) {
+				var ex = gx - qx;
+				var q = ex * ex + ey * ey;
+				if (q >= qr2) { continue; }
+				var f = (1.0 - q / qr2) * 0.6;
+				var i = gy * cw + gx;
+				u[i] += (vx - u[i]) * f;
+				v[i] += (vy - v[i]) * f;
+			}
+		}
+	}
+
+	// ink poured into (or, negative, drawn out of) a disc about ink cell (x, y), most at its centre
+	def pour(x, y, amount, rad) {
+		auto& ink = MS_INK;
+		var dw = this.dw;
+		var dh = this.dh;
+		var r2 = rad * rad;
+		var x0 = itrunc(x - rad);
+		x0 = x0 < 1 ? 1 : x0;
+		var x1 = itrunc(x + rad) + 1;
+		x1 = x1 > dw - 2 ? dw - 2 : x1;
+		var y0 = itrunc(y - rad);
+		y0 = y0 < 1 ? 1 : y0;
+		var y1 = itrunc(y + rad) + 1;
+		y1 = y1 > dh - 2 ? dh - 2 : y1;
+		for (var py = y0; py <= y1; ++py) {
+			var ey = py - y;
+			for (var px = x0; px <= x1; ++px) {
+				var ex = px - x;
+				var q = ex * ex + ey * ey;
+				if (q >= r2) { continue; }
+				var fall = 1.0 - q / r2;
+				ink[py * dw + px] += amount * fall * fall;
+			}
+		}
+	}
+
+	// a vortex at ink cell (x, y): the flow is pulled toward a swirl turning `speed` at `core` cells out
+	def whirl(x, y, speed, core, grip) {
+		auto& u = this.u;
+		auto& v = this.v;
+		var cw = this.cw;
+		var ch = this.ch;
+		var qx = x * 0.5 - 0.25;
+		var qy = y * 0.5 - 0.25;
+		var c2 = core * core;
+		var k = 2.0 * speed / core;
+		for (var gy = 1; gy < ch - 1; ++gy) {
+			var ey = gy - qy;
+			var i = gy * cw + 1;
+			for (var gx = 1; gx < cw - 1; ++gx) {
+				var ex = gx - qx;
+				var fall = 1.0 / (1.0 + (ex * ex + ey * ey) / c2);
+				var pull = grip * fall;
+				u[i] += (0.0 - ey * k * fall - u[i]) * pull;
+				v[i] += (ex * k * fall - v[i]) * pull;
+				++i;
+			}
+		}
+	}
+
+	// vorticity confinement: push along N x curl, N the unit gradient of |curl|
+	def confine(step) {
+		auto& uu = this.u;
+		auto& vv = this.v;
+		auto& c = this.cu;
+		var gw = this.cw;
+		var gh = this.ch;
+		for (var y = 1; y < gh - 1; ++y) {
+			var i = y * gw + 1;
+			for (var x = 1; x < gw - 1; ++x) {
+				c[i] = 0.5 * (vv[i + 1] - vv[i - 1] - uu[i + gw] + uu[i - gw]);
+				++i;
+			}
+		}
+		var eps = this.vorticity * step;
+		for (var y2 = 2; y2 < gh - 2; ++y2) {
+			var j = y2 * gw + 2;
+			for (var x2 = 2; x2 < gw - 2; ++x2) {
+				var cr = c[j + 1];
+				var cl = c[j - 1];
+				var cd = c[j + gw];
+				var cn = c[j - gw];
+				var gx = (cr < 0.0 ? -cr : cr) - (cl < 0.0 ? -cl : cl);
+				var gy = (cd < 0.0 ? -cd : cd) - (cn < 0.0 ? -cn : cn);
+				var f = eps * c[j] / (sqrt(gx * gx + gy * gy) + 0.00001);
+				uu[j] += gy * f;
+				vv[j] -= gx * f;
+				++j;
+			}
+		}
+	}
+
+	// make the flow divergence-free: SOR from last frame's pressure (Neumann walls), then subtract grad(p)
+	def project() {
+		auto& uu = this.u;
+		auto& vv = this.v;
+		auto& p = this.pr;
+		auto& dvg = this.dv;
+		var gw = this.cw;
+		var gh = this.ch;
+		for (var y = 1; y < gh - 1; ++y) {
+			var i = y * gw + 1;
+			for (var x = 1; x < gw - 1; ++x) {
+				dvg[i] = 0.5 * (uu[i + 1] - uu[i - 1] + vv[i + gw] - vv[i - gw]);
+				++i;
+			}
+		}
+		var last = (gh - 1) * gw;
+		var iters = this.sor_iters;
+		for (var it = 0; it < iters; ++it) {
+			for (var y2 = 1; y2 < gh - 1; ++y2) {
+				var j = y2 * gw + 1;
+				for (var x2 = 1; x2 < gw - 1; ++x2) {
+					var g = (p[j - 1] + p[j + 1] + p[j - gw] + p[j + gw] - dvg[j]) * 0.25;
+					p[j] += 1.7 * (g - p[j]);
+					++j;
+				}
+			}
+			for (var x3 = 0; x3 < gw; ++x3) {
+				p[x3] = p[x3 + gw];
+				p[last + x3] = p[last - gw + x3];
+			}
+			for (var y3 = 0; y3 < gh; ++y3) {
+				var r = y3 * gw;
+				p[r] = p[r + 1];
+				p[r + gw - 1] = p[r + gw - 2];
+			}
+		}
+		for (var y4 = 1; y4 < gh - 1; ++y4) {
+			var k = y4 * gw + 1;
+			for (var x4 = 1; x4 < gw - 1; ++x4) {
+				uu[k] -= 0.5 * (p[k + 1] - p[k - 1]);
+				vv[k] -= 0.5 * (p[k + gw] - p[k - gw]);
+				++k;
+			}
+		}
+	}
+
+	// semi-Lagrangian: each cell traces its velocity back one step and blends the four cells it lands among
+	def advect_flow(step) {
+		auto& uu = this.u;
+		auto& vv = this.v;
+		auto& un = this.u1;
+		auto& vn = this.v1;
+		var gw = this.cw;
+		var gh = this.ch;
+		var xmax = gw - 1.001;
+		var ymax = gh - 1.001;
+		var keep = 1.0 - (15.0 / 100.0) * step;
+		for (var y = 1; y < gh - 1; ++y) {
+			var i = y * gw + 1;
+			for (var x = 1; x < gw - 1; ++x) {
+				var px = x - step * uu[i];
+				var py = y - step * vv[i];
+				px = px < 0.0 ? 0.0 : (px > xmax ? xmax : px);
+				py = py < 0.0 ? 0.0 : (py > ymax ? ymax : py);
+				var ix = itrunc(px);
+				var iy = itrunc(py);
+				var sx = px - ix;
+				var sy = py - iy;
+				var k = iy * gw + ix;
+				var top = uu[k] + (uu[k + 1] - uu[k]) * sx;
+				var bot = uu[k + gw] + (uu[k + gw + 1] - uu[k + gw]) * sx;
+				un[i] = (top + (bot - top) * sy) * keep;
+				var top2 = vv[k] + (vv[k + 1] - vv[k]) * sx;
+				var bot2 = vv[k + gw] + (vv[k + gw + 1] - vv[k + gw]) * sx;
+				vn[i] = (top2 + (bot2 - top2) * sy) * keep;
+				++i;
+			}
+		}
+		// u = u1 copies in the original; a vector assignment here would share the elements, so copy each value
+		var cn = gw * gh;
+		for (var c = 0; c < cn; ++c) {
+			uu[c] = un[c];
+			vv[c] = vn[c];
+		}
+	}
+
+	// what the tank's middle sends out, by radius: the rings' crests, wakes and shoves, the drain's pull, eye and dark
+	def radiate(t, step) {
+		auto& settle = MS_SETTLE;
+		auto& push = this.radial;
+		auto& lit = MS_GLOW;
+		auto& kept = MS_DUSK;
+		auto& ring_born = this.ring_born;
+		auto& ring_power = this.ring_power;
+		auto& ring_lays = this.ring_lays;
+		var unit = this.unit;
+		var n = to_int(lit.size());
+		var drain = this.smooth01((t - this.t_drain) / MUSIC_BAR);
+		var closing = this.smooth01((t - this.t_drain - MUSIC_BAR * 0.5) / (MUSIC_BAR * 1.5));
+		var dark_at = n * (1.0 - closing) + 11.0 * unit * closing;
+		var dusk = 0.25 / unit;
+		var eye = 3.5 * unit;
+		var mouth = 9.0 * unit;
+		var pull = 26.0 * unit * drain;
+		var calm = (this.settling + (this.pool_settling - this.settling) * this.smooth01((t - this.t_pool) / MUSIC_BEAT)) * step;
+		var full = 8.0 + 2.5 * this.hit_at(t);
+		for (var r = 0; r < n; ++r) {
+			var m = r / mouth;
+			var q = r / eye;
+			push[r] = 0.0 - pull * m / (1.0 + m * m);
+			lit[r] = full + 5.0 * drain / (1.0 + q * q * q * q);
+			settle[r] = calm;
+		}
+		var wide = 3.5 * unit;
+		var rings = to_int(ring_born.size());
+		for (var k = 0; k < rings; ++k) {
+			var age = t - ring_born[k];
+			if (age < 0.0 || age > 2.2) { continue; }
+			var amp = ring_power[k] * exp(0.0 - age * 1.5);
+			var at = (3.0 + age * 48.0) * unit;
+			var r0 = itrunc(at - wide * 2.6);
+			r0 = r0 < 0 ? 0 : r0;
+			var r1 = itrunc(at + wide) + 1;
+			r1 = r1 > n - 1 ? n - 1 : r1;
+			for (var r2 = r0; r2 <= r1; ++r2) {
+				var e = (r2 - at) / wide;
+				if (e > -1.0) {
+					var crest = 1.0 - e * e;
+					if (crest > 0.0) {
+						lit[r2] += 3.4 * amp * crest;
+						push[r2] += 24.0 * unit * amp * crest;
+					}
+				} else {
+					var wake = 1.0 - (e + 1.8) * (e + 1.8) / 0.64;
+					if (wake > 0.0) {
+						lit[r2] -= 3.0 * amp * wake;
+						settle[r2] += ring_lays[k] * wake;
+					}
+				}
+			}
+		}
+		for (var r3 = 0; r3 < n; ++r3) {
+			if (settle[r3] > 1.0) { settle[r3] = 1.0; }
+			var left = (dark_at - r3) * dusk;
+			kept[r3] = left < 0.0 ? 0.0 : (left > 1.0 ? 1.0 : left);
+		}
+	}
+
+	// the ink rides the flow plus the rings' and the drain's push; its rows rebuild the ink once every row has read it
+	def carry_ink(t, step) {
+		this.radiate(t, step);
+		auto& u = this.u;
+		auto& v = this.v;
+		var cn = this.cw * this.ch;
+		// MS_FU = u copies in the original: copy each value into the flow the rows read
+		if (MS_FU.size() != cn) { MS_FU = gfx.make_fgrid(cn); }
+		if (MS_FV.size() != cn) { MS_FV = gfx.make_fgrid(cn); }
+		auto& fu = MS_FU;
+		auto& fv = MS_FV;
+		for (var c = 0; c < cn; ++c) {
+			fu[c] = u[c];
+			fv[c] = v[c];
+		}
+		auto& radial = this.radial;
+		auto& away_r = this.away_r;
+		auto& away_x = this.away_x;
+		auto& away_y = this.away_y;
+		for (var i = 0; i < cn; ++i) {
+			var out = radial[away_r[i]];
+			fu[i] += away_x[i] * out;
+			fv[i] += away_y[i] * out;
+		}
+		MS_RUN = step * 2.0;
+		// parallel_transform(MS_INK_ROWS, maelstrom_ink_row) in the original: the same calls, in order
+		var rows = [];
+		auto& row_ids = MS_INK_ROWS;
+		var nrows = to_int(row_ids.size());
+		for (var ri = 0; ri < nrows; ++ri) { rows.push_back(maelstrom_ink_row(row_ids[ri])); }
+		auto& ink = MS_INK;
+		var dw = this.dw;
+		var at = 0;
+		for (var r = 0; r < nrows; ++r) {
+			auto& row = rows[r];
+			for (var x = 0; x < dw; ++x) {
+				ink[at] = row[x];
+				++at;
+			}
+		}
+	}
+
+	// the wave equation on the ink's grid, in substeps a wave crosses less than a cell in; the walls reflect
+	def ripple(step) {
+		auto& hgt = this.hw;
+		auto& vel = this.hv;
+		var gw = this.dw;
+		var gh = this.dh;
+		var wave_speed = this.wave_speed;
+		var subs = itrunc(step * wave_speed / 0.6) + 1;
+		var part = step / subs;
+		var pull = wave_speed * wave_speed * part;
+		var calm = this.wave_drag * part;
+		var keep = 1.0 - 0.8 * part;
+		var last = (gh - 1) * gw;
+		for (var sub = 0; sub < subs; ++sub) {
+			for (var y = 1; y < gh - 1; ++y) {
+				var i = y * gw + 1;
+				for (var x = 1; x < gw - 1; ++x) {
+					var here = hgt[i];
+					var speed = vel[i];
+					vel[i] = (speed + pull * (hgt[i - 1] + hgt[i + 1] + hgt[i - gw] + hgt[i + gw] - 4.0 * here) + calm * (vel[i - 1] + vel[i + 1] + vel[i - gw] + vel[i + gw] - 4.0 * speed)) * keep;
+					++i;
+				}
+			}
+			for (var y2 = 1; y2 < gh - 1; ++y2) {
+				var j = y2 * gw + 1;
+				for (var x2 = 1; x2 < gw - 1; ++x2) {
+					hgt[j] += vel[j] * part;
+					++j;
+				}
+			}
+			for (var x3 = 0; x3 < gw; ++x3) {
+				hgt[x3] = hgt[x3 + gw];
+				hgt[last + x3] = hgt[last - gw + x3];
+			}
+			for (var y3 = 0; y3 < gh; ++y3) {
+				var r = y3 * gw;
+				hgt[r] = hgt[r + 1];
+				hgt[r + gw - 1] = hgt[r + gw - 2];
+			}
+		}
+	}
+
+	// something lands at ink cell (x, y): a crater `deep` at its middle with a raised rim holding the same water
+	def splash(x, y, deep, rad) {
+		auto& hgt = this.hw;
+		var dw = this.dw;
+		var dh = this.dh;
+		var r2 = rad * rad;
+		var x0 = itrunc(x - rad);
+		x0 = x0 < 1 ? 1 : x0;
+		var x1 = itrunc(x + rad) + 1;
+		x1 = x1 > dw - 2 ? dw - 2 : x1;
+		var y0 = itrunc(y - rad);
+		y0 = y0 < 1 ? 1 : y0;
+		var y1 = itrunc(y + rad) + 1;
+		y1 = y1 > dh - 2 ? dh - 2 : y1;
+		for (var py = y0; py <= y1; ++py) {
+			var ey = py - y;
+			for (var px = x0; px <= x1; ++px) {
+				var ex = px - x;
+				var q = (ex * ex + ey * ey) / r2;
+				if (q >= 1.0) { continue; }
+				hgt[py * dw + px] -= deep * (1.0 - q) * (1.0 - q) * (1.0 - 4.0 * q);
+			}
+		}
+	}
+
+	// a disc of the surface about ink cell (x, y) is thrown upward (or pressed down), its rim the other way
+	def bump(x, y, speed, rad) {
+		auto& vel = this.hv;
+		var dw = this.dw;
+		var dh = this.dh;
+		var r2 = rad * rad;
+		var x0 = itrunc(x - rad);
+		x0 = x0 < 1 ? 1 : x0;
+		var x1 = itrunc(x + rad) + 1;
+		x1 = x1 > dw - 2 ? dw - 2 : x1;
+		var y0 = itrunc(y - rad);
+		y0 = y0 < 1 ? 1 : y0;
+		var y1 = itrunc(y + rad) + 1;
+		y1 = y1 > dh - 2 ? dh - 2 : y1;
+		for (var py = y0; py <= y1; ++py) {
+			var ey = py - y;
+			for (var px = x0; px <= x1; ++px) {
+				var ex = px - x;
+				var q = (ex * ex + ey * ey) / r2;
+				if (q >= 1.0) { continue; }
+				vel[py * dw + px] += speed * (1.0 - q) * (1.0 - q) * (1.0 - 4.0 * q);
+			}
+		}
+	}
+
+	def drop(kind, blob_size, entry, x, y, z, vx, vy, vz) {
+		var i = this.drop_next;
+		this.drop_next = (i + 1) % to_int(this.drop_kind.size());
+		this.drop_kind[i] = kind;
+		this.drop_size[i] = blob_size;
+		this.drop_entry[i] = entry;
+		this.drop_x[i] = x;
+		this.drop_y[i] = y;
+		this.drop_z[i] = z;
+		this.drop_vx[i] = vx;
+		this.drop_vy[i] = vy;
+		this.drop_vz[i] = vz;
+	}
+
+	// the bright part of the tube the ink at ink cell (x, y) lies in
+	def tube_at(x, y) {
+		var ink = itrunc(MS_INK[itrunc(y) * this.dw + itrunc(x)]);
+		return (((ink + this.traded) & 127) / 16) * 16 + 5;
+	}
+
+	// a blob let go over ink cell (x, y) so that it lands `fall_lead` from now
+	def let_fall(x, y, blob_size) {
+		this.blob_tube = (this.blob_tube + 3) % 8;
+		var fall_speed = this.fall_speed;
+		var fall_lead = this.fall_lead;
+		var from = fall_speed * fall_lead + 0.5 * this.gravity * fall_lead * fall_lead;
+		this.drop(2, blob_size, this.blob_tube * 16 + 5, x, y, from, 0.0, 0.0, 0.0 - fall_speed);
+	}
+
+	// `count` drops of spray thrown up and outward from a ring about ink cell (x, y)
+	def crown(x, y, count, rad, up, entry) {
+		var unit = this.unit;
+		auto& rng = this.rng;
+		var from = MS_Z[itrunc(y) * this.dw + itrunc(x)] + 0.6;
+		for (var j = 0; j < count; ++j) {
+			var a = rng.nextf() * (62831853.0 / 10000000.0);
+			var out = (5.0 + 9.0 * rng.nextf()) * unit;
+			var ca = cos(a);
+			var sa = sin(a);
+			this.drop(0, 0.0, entry, x + ca * rad, y + sa * rad, from, ca * out, sa * out, up * (0.55 + 0.6 * rng.nextf()));
+		}
+	}
+
+	// what the cue throws at the water: rain, a blob ahead of every kick, the hits' blobs, spouts, and wall spray
+	def throw_water(before, t, step) {
+		var cx = MS_CX;
+		var cy = MS_CY;
+		var dw = this.dw;
+		var dh = this.dh;
+		var unit = this.unit;
+		var t_pair = this.t_pair;
+		var t_pool = this.t_pool;
+		var t_drain = this.t_drain;
+		var fall_lead = this.fall_lead;
+		auto& rng = this.rng;
+		this.rain_due += (t < t_pair ? 7.0 : (t < t_drain ? 1.5 : 0.0)) * step;
+		while (this.rain_due >= 1.0) {
+			this.rain_due -= 1.0;
+			var rx = 2.0 + rng.nextf() * (dw - 5.0);
+			var ry = 2.0 + rng.nextf() * (dh - 5.0);
+			this.drop(1, 0.0, this.tube_at(rx, ry), rx, ry, 34.0 * unit, 0.0, 0.0, -25.0 * unit);
+		}
+		var lands = t + fall_lead;
+		var ahead = this.kick_at(lands);
+		var scripted = fabs(lands - t_pair) < 0.25 || fabs(lands - t_pool) < 0.25 || fabs(lands - t_drain) < 0.25;
+		if (ahead > this.kick_ahead_before + 0.3 && !scripted && lands < t_drain + MUSIC_BAR) {
+			if (lands < t_pair) {
+				var bx = cx + (rng.nextf() - 0.5) * dw * 0.7;
+				var by = cy + (rng.nextf() - 0.5) * dh * 0.7;
+				this.let_fall(bx, by, 2.2 * unit);
+			} else {
+				var reach = 1.0 - 0.5 * this.smooth01((lands - t_drain) / (MUSIC_BAR * 1.5));
+				var a = this.orbit + this.turn * 0.55 * fall_lead + this.blob_turn * 2.0943951;
+				this.blob_turn = (this.blob_turn + 1) % 3;
+				this.let_fall(cx + cos(a) * dw * 0.37 * reach, cy + sin(a) * dh * 0.37 * reach, 2.2 * unit);
+			}
+		}
+		this.kick_ahead_before = ahead;
+		var pair_falls = t_pair - fall_lead;
+		if (before < pair_falls && t >= pair_falls) {
+			this.let_fall(cx - dw * 0.23, cy, 3.0 * unit);
+			this.let_fall(cx + dw * 0.23, cy, 3.0 * unit);
+		}
+		var pool_falls = t_pool - fall_lead;
+		if (before < pool_falls && t >= pool_falls) { this.let_fall(cx, cy, 4.5 * unit); }
+		var snare = this.snare_at(t);
+		if (t >= t_pair && t < t_drain + MUSIC_BAR && snare > this.snare_before + 0.3) {
+			var reach2 = 1.0 - 0.5 * this.smooth01((t - t_drain) / (MUSIC_BAR * 1.5));
+			var a2 = this.orbit + (1 + 2 * this.spout_turn) * (10471976.0 / 10000000.0);
+			this.spout_turn = (this.spout_turn + 1) % 3;
+			var sx = cx + cos(a2) * dw * 0.37 * reach2;
+			var sy = cy + sin(a2) * dh * 0.37 * reach2;
+			this.bump(sx, sy, 50.0 * unit, 5.0 * unit);
+			this.crown(sx, sy, 5, 1.5 * unit, 60.0 * unit, this.tube_at(sx, sy));
+		}
+		this.snare_before = snare;
+		auto& hw = this.hw;
+		auto& hv = this.hv;
+		for (var s = 0; s < 10; ++s) {
+			var side = rng.next(4);
+			var along = rng.nextf();
+			var wx = 2.0 + along * (dw - 5.0);
+			var wy = 2.0 + along * (dh - 5.0);
+			var in_x = 0.0;
+			var in_y = 0.0;
+			if (side == 0) {
+				wy = 2.0;
+				in_y = 1.0;
+			} else if (side == 1) {
+				wy = dh - 3.0;
+				in_y = -1.0;
+			} else if (side == 2) {
+				wx = 2.0;
+				in_x = 1.0;
+			} else {
+				wx = dw - 3.0;
+				in_x = -1.0;
+			}
+			var k = itrunc(wy) * dw + itrunc(wx);
+			if (hw[k] > 3.0 * unit && hv[k] > 0.0) {
+				this.drop(0, 0.0, this.tube_at(wx, wy), wx, wy, MS_Z[k] + 0.6, in_x * 5.0 * unit, in_y * 5.0 * unit, 30.0 * unit + 0.5 * hv[k]);
+			}
+		}
+	}
+
+	// everything in the air falls; what meets the water lands, and what leaves the tank falls past it to the floor
+	def fall(step) {
+		auto& drop_kind = this.drop_kind;
+		auto& drop_x = this.drop_x;
+		auto& drop_y = this.drop_y;
+		auto& drop_z = this.drop_z;
+		auto& drop_vx = this.drop_vx;
+		auto& drop_vy = this.drop_vy;
+		auto& drop_vz = this.drop_vz;
+		auto& z_of = MS_Z;
+		var dw = this.dw;
+		var pull = this.gravity * step;
+		var xhi = dw - 2.0;
+		var yhi = this.dh - 2.0;
+		var bed = 0.0 - MS_DEPTH;
+		var n = to_int(drop_kind.size());
+		for (var i = 0; i < n; ++i) {
+			var kind = drop_kind[i];
+			if (kind < 0) { continue; }
+			drop_vz[i] -= pull;
+			var x = drop_x[i] + drop_vx[i] * step;
+			var y = drop_y[i] + drop_vy[i] * step;
+			var z = drop_z[i] + drop_vz[i] * step;
+			drop_x[i] = x;
+			drop_y[i] = y;
+			drop_z[i] = z;
+			if (x < 1.0 || x > xhi || y < 1.0 || y > yhi) {
+				if (z < bed) { drop_kind[i] = -1; }
+				continue;
+			}
+			if (drop_vz[i] > 0.0 || z > z_of[itrunc(y) * dw + itrunc(x)]) { continue; }
+			drop_kind[i] = -1;
+			this.land(kind, this.drop_size[i], this.drop_entry[i], x, y);
+		}
+	}
+
+	// spray makes a ripple, rain a small crater and a couple of drops, a blob a crater to its size, a crown and its ink
+	def land(kind, blob_size, entry, x, y) {
+		var unit = this.unit;
+		if (kind == 0) {
+			var r0 = 3.0 * unit;
+			this.splash(x, y, 0.4 * unit, r0 < 2.5 ? 2.5 : r0);
+			return;
+		}
+		if (kind == 1) {
+			var r1 = 4.0 * unit;
+			this.splash(x, y, 2.0 * unit, r1 < 3.0 ? 3.0 : r1);
+			this.crown(x, y, 2, 1.0 * unit, 26.0 * unit, entry);
+			return;
+		}
+		var big = blob_size / (2.2 * unit);
+		this.splash(x, y, 8.0 * unit * big, 5.5 * unit * big);
+		this.pour(x, y, 36.0 * big, 4.5 * unit * big);
+		this.crown(x, y, itrunc(8.0 * big * big), 2.4 * unit * big, 46.0 * unit * sqrt(big), entry);
+	}
+
+	// the camera swings about the tank's long side, framing it whole; it punches in, shakes, and dives at the eye
+	def place_camera(t) {
+		var dw = this.dw;
+		var dh = this.dh;
+		var w = this.w;
+		var h = this.h;
+		var flash = this.hit_at(t);
+		var dive = this.smooth01((t - this.t_drain) / (MUSIC_BAR * 2.0));
+		var yaw = (15707963.0 / 10000000.0) + 0.36 * sin(this.cam_yaw);
+		var fx = cos(yaw);
+		var fy = sin(yaw);
+		var half_w = dw * 0.5;
+		var half_h = dh * 0.5;
+		var dist = 0.9 * sqrt(dw * dw + dh * dh * 1.0);
+		var along_a = fabs(half_w * fx + half_h * fy);
+		var aside_a = fabs(half_h * fx - half_w * fy);
+		var along_b = fabs(half_w * fx - half_h * fy);
+		var aside_b = fabs(half_h * fx + half_w * fy);
+		var along = along_a > along_b ? along_a : along_b;
+		var near = dist - along;
+		var far = dist + along;
+		var fit_a = (dist - along_a) / (aside_a + 0.001);
+		var fit_b = (dist - along_b) / (aside_b + 0.001);
+		var camh = dist * (0.5 + 0.5 * dive);
+		var wide = (48.0 / 100.0) * w * (fit_a < fit_b ? fit_a : fit_b);
+		var tall = (78.0 / 100.0) * h / ((camh + MS_DEPTH) / near - camh / far);
+		var whole = wide < tall ? wide : tall;
+		var focal = whole * (1.0 + 1.6 * dive);
+		var hz_whole = 0.61 * h - 0.5 * whole * ((camh + MS_DEPTH) / near + camh / far);
+		var hz_eye = 0.5 * h - camh * focal / dist;
+		var hz = hz_whole + (hz_eye - hz_whole) * dive;
+		var punch = 1.0 + (35.0 / 1000.0) * this.kick_at(t) + 0.08 * flash;
+		var mid = h * 0.5;
+		MS_FOCAL = focal * punch;
+		MS_HORIZON = mid - (mid - hz) * punch + sin(t * 53.0) * flash * flash * h * 0.02;
+		MS_CAM_H = camh;
+		MS_FACE_X = fx;
+		MS_FACE_Y = fy;
+		MS_CAM_X = dw * 0.5 - fx * dist;
+		MS_CAM_Y = dh * 0.5 - fy * dist;
+		MS_GLINT_X = 0.5 * fx;
+		MS_GLINT_Y = 0.5 * fy;
+		var closing = this.smooth01((t - this.t_drain - MUSIC_BAR * 0.5) / (MUSIC_BAR * 1.5));
+		var reach = far * 1.5 - near * 0.8;
+		MS_GRID_FADE = 7.0 / reach;
+		MS_GRID_GAIN = (7.0 + near * 0.8 * MS_GRID_FADE + 1.5 * this.kick_at(t)) * (1.0 - closing);
+	}
+
+	// what the picture reads: the waves with the dimples and the funnel pressed in, the camera, and the surface's light
+	def shape_surface(t) {
+		this.place_camera(t);
+		var unit = this.unit;
+		var pool = this.smooth01((t - this.t_pool) / MUSIC_BEAT);
+		var pair = this.smooth01((t - this.t_pair) / MUSIC_BEAT) * (1.0 - pool);
+		var drain = this.smooth01((t - this.t_drain) / (MUSIC_BAR * 1.5));
+		var pair_deep = 5.0 * unit * pair;
+		var pool_deep = 6.0 * unit * pool;
+		var drain_deep = 20.0 * unit * drain;
+		auto& z = MS_Z;
+		auto& hgt = this.hw;
+		auto& pair_dish = this.dish_pair;
+		auto& pool_dish = this.dish_pool;
+		var dn = this.dw * this.dh;
+		for (var i = 0; i < dn; ++i) {
+			var f = pool_dish[i];
+			z[i] = hgt[i] - pair_deep * pair_dish[i] - (pool_deep + drain_deep * f) * f;
+		}
+		MS_LIGHT_X = 1.4;
+		MS_LIGHT_Y = 1.9;
+		MS_GLINT_NARROW = 1.0 / ((42.0 / 100.0) * (42.0 / 100.0));
+		MS_GLINT = 7.0;
+		MS_CREST = 0.4 / unit;
+		// parallel_transform(MS_INK_ROWS, maelstrom_light_row) in the original: the same calls, in order
+		var rows = [];
+		auto& row_ids = MS_INK_ROWS;
+		var nrows = to_int(row_ids.size());
+		for (var ri = 0; ri < nrows; ++ri) { rows.push_back(maelstrom_light_row(row_ids[ri])); }
+		auto& lit = MS_LIT;
+		var dw = this.dw;
+		var at = 0;
+		for (var r = 0; r < nrows; ++r) {
+			auto& row = rows[r];
+			for (var x = 0; x < dw; ++x) {
+				lit[at] = row[x];
+				++at;
+			}
+		}
+	}
+
+	// what is in the air, over the finished picture: spray and rain as short streaks, blobs as discs
+	def draw_drops(grid) {
+		auto& drop_kind = this.drop_kind;
+		auto& drop_x = this.drop_x;
+		auto& drop_y = this.drop_y;
+		auto& drop_z = this.drop_z;
+		auto& drop_vz = this.drop_vz;
+		auto& drop_size = this.drop_size;
+		auto& drop_entry = this.drop_entry;
+		var fx = MS_FACE_X;
+		var fy = MS_FACE_Y;
+		var camx = MS_CAM_X;
+		var camy = MS_CAM_Y;
+		var camh = MS_CAM_H;
+		var focal = MS_FOCAL;
+		var hz = MS_HORIZON;
+		var ww = this.w;
+		var hh = this.h;
+		var mid = ww * 0.5;
+		var spray = MS_TUBES + 11 * 128;
+		var blob = MS_TUBES + 14 * 128;
+		var n = to_int(drop_kind.size());
+		for (var i = 0; i < n; ++i) {
+			if (drop_kind[i] < 0) { continue; }
+			var ex = drop_x[i] - camx;
+			var ey = drop_y[i] - camy;
+			var depth = ex * fx + ey * fy;
+			if (depth < 4.0) { continue; }
+			var scale = focal / depth;
+			var px = mid + (ey * fx - ex * fy) * scale;
+			var py = hz + (camh - drop_z[i]) * scale;
+			var rad = drop_size[i] * scale;
+			if (rad < 0.9) {
+				var tail = py + drop_vz[i] * 0.03 * scale;
+				var top = py < tail ? py : tail;
+				var bottom = py < tail ? tail : py;
+				if (px < 0.0 || px >= ww || bottom < 0.0 || top >= hh) { continue; }
+				var sx = itrunc(px);
+				var ya = top < 0.0 ? 0 : itrunc(top);
+				var yb = bottom >= hh ? hh - 1 : itrunc(bottom);
+				if (yb > ya + 3) { yb = ya + 3; }
+				var pix = spray + drop_entry[i];
+				for (var y = ya; y <= yb; ++y) { grid[y * ww + sx] = pix; }
+				continue;
+			}
+			var reach = itrunc(rad + 1.0);
+			var cx = itrunc(px + 1000.0) - 1000;
+			var cy = itrunc(py + 1000.0) - 1000;
+			var r2 = rad * rad + 0.3;
+			var core = blob + drop_entry[i];
+			var rim = spray + drop_entry[i];
+			for (var oy = 0 - reach; oy <= reach; ++oy) {
+				var y2 = cy + oy;
+				if (y2 < 0 || y2 >= hh) { continue; }
+				for (var ox = 0 - reach; ox <= reach; ++ox) {
+					var x2 = cx + ox;
+					var q = ox * ox + oy * oy;
+					if (x2 < 0 || x2 >= ww || q > r2) { continue; }
+					if (q * 2.5 < r2) {
+						grid[y2 * ww + x2] = core;
+					} else {
+						grid[y2 * ww + x2] = rim;
+					}
+				}
+			}
+		}
+	}
+
+	def render(grid) {
+		// the shocks flash the picture negative
+		var tt = this.tt;
+		var since_pool = tt - this.t_pool;
+		var since_drain = tt - this.t_drain;
+		var negative = (since_pool >= 0.0 && since_pool < 0.1) || (since_drain >= 0.0 && since_drain < 0.1);
+		var ww = this.w;
+		var hh = this.h;
+		MS_W = ww;
+		MS_H = hh;
+		MS_TUBES = negative ? this.tubes + 2048 : this.tubes;
+		MS_FLOOR = negative ? this.floor_at + 9 : this.floor_at;
+		MS_PHASE = this.traded + itrunc(3.5 * this.kick_at(tt));
+		// parallel_transform(MS_COLS, maelstrom_column) in the original: the same calls, in order
+		var cols = [];
+		auto& col_ids = MS_COLS;
+		var ncols = to_int(col_ids.size());
+		for (var ci = 0; ci < ncols; ++ci) { cols.push_back(maelstrom_column(col_ids[ci])); }
+		if (grid.size() != ww * hh) {
+			grid.clear();
+			for (var p = 0; p < ww * hh; ++p) { grid.push_back(0); }
+		}
+		for (var x = 0; x < ww; ++x) {
+			auto& col = cols[x];
+			var gi = x;
+			for (var y = 0; y < hh; ++y) {
+				grid[gi] = col[y];
+				gi += ww;
+			}
+		}
+		this.draw_drops(grid);
+	}
+}
+
+register_scene(10, fun() { return Maelstrom(); });

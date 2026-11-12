@@ -1,0 +1,496 @@
+// demoreel music (ChaiScript port of scenes/music.jai): the score each scene hears, composed from the seed and the
+// scene's mood, and the queries the scenes ask it frame by frame. MIDI writing is not ported.
+
+// decimals ChaiScript's parser misrounds are written as exact integer quotients (check_literals.py finds them)
+global MUSIC_BEAT = (48387097.0 / 100000000.0);
+global MUSIC_BAR = (193548388.0 / 100000000.0);
+global MUSIC_STEP = (12096774.0 / 100000000.0);
+
+global MUSIC_CHORDS = [[0, 4, 7, 11], [0, 3, 7, 10], [0, 4, 7, 14], [0, 3, 7, 14], [0, 5, 7, 10], [0, 4, 7, 10]];
+global MUSIC_PROGRESSIONS = [
+	[[0, 3], [8, 0], [3, 2], [10, 2]],
+	[[0, 3], [3, 2], [10, 2], [5, 1]],
+	[[8, 0], [10, 2], [0, 3], [0, 1]],
+	[[0, 1], [1, 0], [0, 3], [10, 1]],
+	[[0, 3], [10, 2], [8, 0], [10, 4]],
+	[[0, 3], [5, 1], [8, 0], [7, 1]],
+	[[0, 1], [5, 5], [10, 2], [8, 0]],
+	[[8, 0], [10, 2], [0, 2], [0, 0]]
+];
+global MUSIC_ARPS = [
+	[0, 2, 4, 2, 1, 3, 5, 3, 0, 2, 4, 6, 5, 3, 4, 2],
+	[0, 1, 2, 3, 4, 3, 2, 1, 0, 1, 2, 4, 5, 4, 2, 1],
+	[0, 1, 2, 3, 4, 3, 2, 1, 0, 1, 2, 4, 5, 4, 2, 1],
+	[0, 1, 2, 3, 4, 3, 2, 1, 0, 1, 2, 4, 5, 4, 2, 1],
+	[0, 4, 2, 4, 1, 4, 2, 4, 0, 5, 3, 5, 1, 5, 3, 5]
+];
+global MUSIC_ACCENT = [true, false, false, true, false, false, true, false, true, false, false, true, false, false, true, false];
+global MUSIC_GATE = [127, 118, 44, 127, 118, 44, 127, 44, 127, 118, 44, 127, 118, 44, 127, 44];
+
+global KIT_POWER = 16;
+global KIT_ELECTRONIC = 24;
+global KIT_808 = 25;
+
+class Mood {
+	var prog
+	var style
+	var root
+	var kit
+	var bass
+	var pad
+	var arp
+	var lead
+	var energy
+	var chord_bars
+	var cut_crash
+
+	def Mood(prog_, style_, root_, kit_, bass_, pad_, arp_, lead_, energy_, chord_bars_) {
+		this.prog = prog_;
+		this.style = style_;
+		this.root = root_;
+		this.kit = kit_;
+		this.bass = bass_;
+		this.pad = pad_;
+		this.arp = arp_;
+		this.lead = lead_;
+		this.energy = energy_;
+		this.chord_bars = chord_bars_;
+		this.cut_crash = true;
+	}
+}
+
+class Lane {
+	var at
+	var vel
+	var note
+	var len
+
+	def Lane() {
+		this.at = [];
+		this.vel = [];
+		this.note = [];
+		this.len = [];
+	}
+
+	def add(step, v, n, l) {
+		this.at.push_back(step);
+		this.vel.push_back(v);
+		this.note.push_back(n);
+		this.len.push_back(l);
+	}
+
+	def last(s) {
+		auto& at = this.at;
+		var lo = 0;
+		var hi = to_int(at.size()) - 1;
+		var result = -1;
+		while (lo <= hi) {
+			var mid = (lo + hi) / 2;
+			if (at[mid] <= s) {
+				result = mid;
+				lo = mid + 1;
+			} else {
+				hi = mid - 1;
+			}
+		}
+		return result;
+	}
+
+	def env(t, rate) {
+		var s = t / MUSIC_STEP;
+		var i = this.last(s + 0.0001);
+		if (i < 0) { return 0.0; }
+		var since = t - this.at[i] * MUSIC_STEP;
+		return this.vel[i] / 127.0 * pow((2718281828.0 / 1000000000.0), 0.0 - since * rate);
+	}
+}
+
+class Cue {
+	var bars
+	var mood
+	var seed
+	var kick
+	var snare
+	var hat
+	var crash
+	var bass_lane
+	var pad_lane
+	var arp_lane
+	var lead_lane
+	var echo
+	var stab
+	var orch
+	var swell
+	var duck
+	var gate
+	var bright
+	var energy_bar
+	var chord_root
+	var chord_q
+	var hit_t
+	var hit_level
+	var big_steps
+	var lcg_state
+
+	def Cue(bars_, mood_, seed_, hits, levels) {
+		this.bars = bars_;
+		this.mood := mood_;
+		this.seed = seed_;
+		this.kick = Lane();
+		this.snare = Lane();
+		this.hat = Lane();
+		this.crash = Lane();
+		this.bass_lane = Lane();
+		this.pad_lane = Lane();
+		this.arp_lane = Lane();
+		this.lead_lane = Lane();
+		this.echo = Lane();
+		this.stab = Lane();
+		this.orch = Lane();
+		this.swell = Lane();
+		this.duck = [];
+		this.gate = [];
+		this.bright = [];
+		this.energy_bar = [];
+		this.chord_root = [];
+		this.chord_q = [];
+		this.hit_t = hits;
+		this.hit_level = levels;
+		this.big_steps = [];
+		this.lcg_state = 1ll;   // int64: the LCG's product passes 2^31
+		this.compose();
+	}
+
+	def beat_phase(t) {
+		var b = t / MUSIC_BEAT;
+		return b - floor(b);
+	}
+
+	def bar_phase(t) {
+		var b = t / MUSIC_BAR;
+		return b - floor(b);
+	}
+
+	def bar_index(t) { return ifloor(t / MUSIC_BAR); }
+
+	def pulse(t) {
+		var f = this.beat_phase(t);
+		return (1.0 - f) * (1.0 - f);
+	}
+
+	def kick_env(t) { return this.kick.env(t, 9.0); }
+	def snare_env(t) { return this.snare.env(t, 7.0); }
+	def hat_env(t) { return this.hat.env(t, 22.0); }
+	def bass_env(t) { return this.bass_lane.env(t, 5.0); }
+	def lead_env(t) { return this.lead_lane.env(t, 3.0); }
+	def arp_env(t) { return this.arp_lane.env(t, 14.0); }
+
+	def bass_note(t) {
+		var i = this.bass_lane.last(t / MUSIC_STEP + 0.0001);
+		return i < 0 ? this.mood.root : this.bass_lane.note[i];
+	}
+
+	def lead_note(t) {
+		var i = this.lead_lane.last(t / MUSIC_STEP + 0.0001);
+		return i < 0 ? 0 : this.lead_lane.note[i];
+	}
+
+	def chord(t) {
+		var b = this.bar_index(t);
+		b = b < 0 ? 0 : (b >= this.bars ? this.bars - 1 : b);
+		return this.chord_root[b] % 12;
+	}
+
+	def energy(t) {
+		auto& energy_bar = this.energy_bar;
+		var bars = this.bars;
+		var b = t / MUSIC_BAR;
+		var i = ifloor(b);
+		if (i < 0) { return energy_bar[0]; }
+		if (i >= bars - 1) { return energy_bar[bars - 1]; }
+		var f = b - i;
+		return energy_bar[i] + (energy_bar[i + 1] - energy_bar[i]) * f * f * (3.0 - 2.0 * f);
+	}
+
+	def hit(t) {
+		var result = 0.0;
+		for (var k = 0; k < this.hit_t.size(); ++k) {
+			var since = t - this.hit_t[k];
+			if (since < 0.0 || since > 3.0) { continue; }
+			var e = (this.hit_level[k] >= 2 ? 1.0 : 0.5) * pow((2718281828.0 / 1000000000.0), 0.0 - since * 2.5);
+			result = e > result ? e : result;
+		}
+		return result;
+	}
+
+	def riser(t) {
+		var result = 0.0;
+		for (var k = 0; k < this.hit_t.size(); ++k) {
+			if (this.hit_level[k] < 2) { continue; }
+			var to = this.hit_t[k] - t;
+			if (to < 0.0 || to > MUSIC_BAR) { continue; }
+			var r = 1.0 - to / MUSIC_BAR;
+			result = r > result ? r : result;
+		}
+		return result;
+	}
+
+	def roll(n) {
+		this.lcg_state = (this.lcg_state * 1103515245 + 12345) & 2147483647;
+		return (this.lcg_state >> 16) % n;
+	}
+
+	def tone(b, i) {
+		auto& q = MUSIC_CHORDS[this.chord_q[b]];
+		var oct = ifloor(i / 4.0);
+		return q[i - oct * 4] + oct * 12;
+	}
+
+	def to_big(s) {
+		auto& big_steps = this.big_steps;
+		var result = 9999;
+		for (var k = 0; k < big_steps.size(); ++k) {
+			var d = big_steps[k] - s;
+			if (d > 0 && d < result) { result = d; }
+		}
+		return result;
+	}
+
+	def is_big(s) {
+		auto& big_steps = this.big_steps;
+		for (var k = 0; k < big_steps.size(); ++k) {
+			if (big_steps[k] == s) { return true; }
+		}
+		return false;
+	}
+
+	def compose() {
+		auto& mood = this.mood;
+		auto& hit_t = this.hit_t;
+		auto& hit_level = this.hit_level;
+		auto& energy_bar = this.energy_bar;
+		auto& chord_root = this.chord_root;
+		var bars = this.bars;
+		this.lcg_state = (this.seed & 65535) | 1;
+		auto& prog = MUSIC_PROGRESSIONS[mood.prog];
+		var steps = bars * 16;
+		for (var k0 = 0; k0 < hit_t.size(); ++k0) {
+			if (hit_level[k0] >= 2) { this.big_steps.push_back(itrunc(hit_t[k0] / MUSIC_STEP + 0.5)); }
+		}
+		for (var b = 0; b < bars; ++b) {
+			var e = b == 0 ? mood.energy * 0.55 : mood.energy + (1.0 - mood.energy) * (b / (bars * 1.0)) * 0.35;
+			energy_bar.push_back(e);
+		}
+		for (var k = 0; k < hit_t.size(); ++k) {
+			var hb = ifloor(hit_t[k] / MUSIC_BAR + 0.0001);
+			if (hb < 0 || hb >= bars) { continue; }
+			if (hit_level[k] >= 2) {
+				energy_bar[hb] = 1.0;
+				if (hb > 0) { energy_bar[hb - 1] = energy_bar[hb - 1] * 0.7 + 0.25; }
+				if (hb + 1 < bars) { energy_bar[hb + 1] = energy_bar[hb + 1] > 0.9 ? energy_bar[hb + 1] : 0.9; }
+			} else {
+				energy_bar[hb] = energy_bar[hb] + (12.0 / 100.0) > 1.0 ? 1.0 : energy_bar[hb] + (12.0 / 100.0);
+			}
+		}
+		for (var b2 = 0; b2 < bars; ++b2) {
+			var pass = b2 / (mood.chord_bars * 4);
+			auto& ch = prog[(b2 / mood.chord_bars + (pass % 4 == 2 ? 2 : 0)) % 4];
+			var off = ch[0] > 6 ? ch[0] - 12 : ch[0];
+			chord_root.push_back(mood.root + off);
+			this.chord_q.push_back(ch[1]);
+		}
+		var motif_at = [];
+		var motif_deg = [];
+		var motif_len = [];
+		var walk = 2;
+		for (var ms = 0; ms < 32; ms += 2) {
+			var r0 = this.roll(16);
+			if (ms == 0 || ms == 16 || r0 < 8) {
+				walk = walk + (r0 % 5) - 2;
+				walk = walk < 0 ? 1 : (walk > 7 ? 6 : walk);
+				motif_at.push_back(ms);
+				motif_deg.push_back(walk);
+				motif_len.push_back(r0 < 4 ? 4 : (r0 < 6 ? 3 : 2));
+			}
+		}
+		for (var s = 0; s < steps; ++s) {
+			var b3 = s / 16;
+			var st = s % 16;
+			var e = energy_bar[b3];
+			var croot = chord_root[b3];
+			var tb = this.to_big(s);
+			var gap = tb <= 4;
+			this.drums(s, st, e, tb);
+			var turning = (b3 + 1) % mood.chord_bars == 0 && b3 + 1 < bars && chord_root[b3 + 1] != croot;
+			if (e > 0.3 && !gap && !this.is_big(s)) { this.bass(s, st, e, croot, turning); }
+			if (st == 0 && b3 % mood.chord_bars == 0) {
+				for (var v = 0; v < 4; ++v) { this.pad_lane.add(s, (v == 0 ? 64 : 56) + itrunc(e * 30.0), croot + 24 + this.tone(b3, v), 16 * mood.chord_bars); }
+			}
+			if (e > 0.5 && !gap) {
+				var n = croot + 24 + this.tone(b3, MUSIC_ARPS[mood.style][st]);
+				var v2 = 58 + (MUSIC_ACCENT[st] ? 28 : 0) + itrunc(e * 14.0);
+				this.arp_lane.add(s, v2, n, 1);
+				if (MUSIC_ACCENT[st]) { this.echo.add(s + 3, v2 / 2, n, 1); }
+			}
+			if (e > (82.0 / 100.0) && !gap && tb > 16 && b3 % 2 == 1 && (st == 6 || st == 11) && (mood.style == 0 || mood.style == 4)) {
+				for (var v7 = 0; v7 < 3; ++v7) { this.stab.add(s, st == 6 ? 88 : 76, croot + 24 + this.tone(b3, v7), 1); }
+			}
+			if (e > 0.72 && !gap) {
+				var ms2 = s % 32;
+				for (var mi = 0; mi < motif_at.size(); ++mi) {
+					if (motif_at[mi] != ms2) { continue; }
+					var lift = (s / 64) % 2 == 1 && mi >= motif_at.size() / 2 ? 1 : 0;
+					var n2 = croot + 24 + this.tone(b3, motif_deg[mi] + lift);
+					this.lead_lane.add(s, 104, n2, motif_len[mi]);
+					this.echo.add(s + 3, 56, n2, motif_len[mi]);
+					this.echo.add(s + 6, 32, n2, motif_len[mi]);
+				}
+			}
+		}
+		for (var k2 = 0; k2 < hit_t.size(); ++k2) {
+			var hs = itrunc(hit_t[k2] / MUSIC_STEP + 0.5);
+			if (hs < 0 || hs >= steps) { continue; }
+			var hb3 = hs / 16;
+			var hroot = chord_root[hb3];
+			if (hit_level[k2] >= 2) {
+				this.crash.add(hs, 127, 49, 1);
+				this.crash.add(hs, 110, 57, 1);
+				this.kick.add(hs, 127, 35, 1);
+				this.bass_lane.add(hs, 127, this.bass_root(hroot), 8);
+				for (var v3 = 0; v3 < 3; ++v3) { this.orch.add(hs, 120, hroot + 24 + this.tone(hb3, v3), 4); }
+				for (var v4 = 0; v4 < 3; ++v4) { this.stab.add(hs, 112, hroot + 24 + this.tone(hb3, v4), 8); }
+				if (hs >= 16) { this.swell.add(hs - 16, 112, 60, 16); }
+			} else {
+				this.crash.add(hs, 96, 57, 1);
+				for (var v5 = 0; v5 < 3; ++v5) { this.stab.add(hs, 98, hroot + 24 + this.tone(hb3, v5), 2); }
+			}
+		}
+		this.sort_lane(this.kick);
+		this.sort_lane(this.crash);
+		this.sort_lane(this.bass_lane);
+		this.sort_lane(this.stab);
+		this.sort_lane(this.echo);
+		for (var s3 = 0; s3 < steps; ++s3) {
+			var tb2 = this.to_big(s3);
+			var open = tb2 <= 16 ? 0.2 + 0.8 * (16 - tb2) / 16.0 : 0.3 + 0.55 * energy_bar[s3 / 16];
+			this.bright.push_back(this.is_big(s3) ? 127 : itrunc(open * 127.0));
+		}
+		auto& duck = this.duck;
+		for (var s2 = 0; s2 < steps; ++s2) { duck.push_back(127); }
+		var depth = 52.0 + mood.energy * 24.0;
+		var shape = [1.0, 0.6, 0.28, 0.08];
+		auto& kick_at = this.kick.at;
+		auto& kick_vel = this.kick.vel;
+		for (var ki = 0; ki < kick_at.size(); ++ki) {
+			for (var j = 0; j < 4; ++j) {
+				var at = kick_at[ki] + j;
+				if (at >= steps) { break; }
+				var v6 = 127 - itrunc(depth * shape[j] * kick_vel[ki] / 127.0);
+				if (v6 < duck[at]) { duck[at] = v6; }
+			}
+		}
+		for (var s4 = 0; s4 < steps; ++s4) {
+			var chopped = energy_bar[s4 / 16] > 0.7 && mood.style != 2 && mood.style != 3 && this.to_big(s4) > 16;
+			this.gate.push_back(chopped ? duck[s4] * MUSIC_GATE[s4 % 16] / 127 : duck[s4]);
+		}
+	}
+
+	def bass_root(croot) { return croot - 12 < 28 ? croot : croot - 12; }
+
+	def bass(s, st, e, croot, turning) {
+		var lo = this.bass_root(croot);
+		var style = this.mood.style;
+		if ((style == 0 || style == 4) && turning && st >= 14 && e > 0.6) {
+			this.bass_lane.add(s, 104, lo + (st == 14 ? 7 : 10), 1);
+		} else if (style == 0) {
+			var groove = [116, 72, 100, 80];
+			if (e > 0.6 || st % 2 == 0) { this.bass_lane.add(s, groove[st % 4], lo + (st % 4 == 2 ? 12 : 0), 1); }
+		} else if (style == 4) {
+			if (st % 4 != 1) { this.bass_lane.add(s, st % 4 == 0 ? 118 : (st % 4 == 2 ? 88 : 98), lo + (st % 4 == 3 && e > 0.7 ? 12 : 0), st % 4 == 0 ? 2 : 1); }
+		} else if (style == 1) {
+			if (st == 0 || st == 3 || st == 6 || st == 10 || st == 12 || st == 14) { this.bass_lane.add(s, st == 0 ? 116 : 94, lo + (st == 6 || st == 14 ? 12 : 0), st == 0 ? 3 : 1); }
+		} else if (style == 2) {
+			if (st == 0 || st == 6 || st == 8 || st == 14) { this.bass_lane.add(s, st == 0 || st == 8 ? 112 : 88, lo + (st == 14 ? 12 : 0), st == 0 || st == 8 ? 5 : 2); }
+		} else {
+			if (st % 2 == 0) { this.bass_lane.add(s, 70 + itrunc(e * 36.0) + (st % 8 == 0 ? 10 : 0), lo + (st % 8 == 6 ? 12 : 0), 1); }
+		}
+	}
+
+	def drums(s, st, e, tb) {
+		var style = this.mood.style;
+		var four = style == 0 || style == 4;
+		var gap = tb <= 4;
+		if ((e > 0.4 || st == 0) && !gap) {
+			var k = false;
+			if (four) { k = st % 4 == 0 || (style == 4 && st == 14 && e > 0.8); }
+			else if (style == 1) { k = st == 0 || st == 6 || st == 10; }
+			else if (style == 2) { k = st == 0 || st == 10; }
+			else { k = (st == 0 && s % 32 == 0) || (st == 8 && e > 0.6); }
+			if (k) { this.kick.add(s, 118, 36, 1); }
+		}
+		if (e > 0.45 && !gap) {
+			var sn = false;
+			if (four || style == 1) { sn = st == 4 || st == 12; }
+			else if (style == 2) { sn = st == 8; }
+			else { sn = st == 8 && (s / 16) % 2 == 1; }
+			if (sn) {
+				this.snare.add(s, 112, 38, 1);
+				if (e > 0.55) { this.snare.add(s, 96, 39, 1); }
+			}
+			if (style == 1 && (st == 7 || st == 15) && e > 0.6) { this.snare.add(s, 52, 38, 1); }
+		}
+		if (tb <= 8) { this.snare.add(s, 64 + (8 - tb) * 8, 38, 1); }
+		var from = (s / 16) % 8 == 7 ? 8 : 12;
+		var fill = tb > 16 && e > 0.5 && (s / 16) % 4 == 3 && st >= from;
+		if (fill) {
+			var toms = [50, 50, 48, 50, 50, 48, 47, 45];
+			this.snare.add(s, 84 + (st - 8) * 5, toms[st - 8] - (from == 8 && st >= 12 ? 2 : 0), 1);
+		}
+		if (e > 0.3 && !gap) {
+			var sixteen = style == 4 || e > (85.0 / 100.0);
+			var open = e > 0.6 && st % 4 == 2 && style != 3;
+			if (open) { this.hat.add(s, 70, 46, 1); }
+			else if (sixteen || st % 2 == 0) { this.hat.add(s, st % 4 == 0 ? 74 : 50, 42, 1); }
+		}
+		if (s == 0 && this.mood.cut_crash) { this.crash.add(s, 108, 49, 1); }
+		if (st == 0 && s > 0 && (s == 16 || (s % 64 == 0 && e > 0.7)) && !gap) { this.crash.add(s, s == 16 ? 116 : 100, 49, 1); }
+	}
+
+	def sort_lane(lane) {
+		auto& at = lane.at;
+		auto& vel = lane.vel;
+		auto& note = lane.note;
+		auto& len = lane.len;
+		var n = to_int(at.size());
+		for (var i = 1; i < n; ++i) {
+			var j = i;
+			while (j > 0 && at[j - 1] > at[j]) {
+				var ta = at[j]; at[j] = at[j - 1]; at[j - 1] = ta;
+				var tv = vel[j]; vel[j] = vel[j - 1]; vel[j - 1] = tv;
+				var tn = note[j]; note[j] = note[j - 1]; note[j - 1] = tn;
+				var tl = len[j]; len[j] = len[j - 1]; len[j - 1] = tl;
+				--j;
+			}
+		}
+	}
+}
+
+def music_mood(idx) {
+	switch (idx) {
+		case (0) { return Mood(0, 0, 45, KIT_POWER, 39, 90, 81, 81, 0.76, 2); }
+		case (1) { return Mood(1, 0, 38, KIT_POWER, 38, 90, 80, 84, (78.0 / 100.0), 2); }
+		case (2) { return Mood(4, 4, 40, KIT_ELECTRONIC, 38, 95, 81, 81, (85.0 / 100.0), 1); }
+		case (3) { return Mood(6, 2, 41, KIT_808, 38, 89, 98, 80, 0.64, 2); }
+		case (4) { return Mood(5, 0, 43, KIT_POWER, 39, 90, 81, 81, (78.0 / 100.0), 2); }
+		case (5) { return Mood(0, 2, 47, KIT_808, 38, 89, 98, 82, 0.58, 2); }
+		case (6) { return Mood(3, 4, 36, KIT_ELECTRONIC, 39, 95, 87, 30, (85.0 / 100.0), 1); }
+		case (7) { return Mood(2, 0, 46, KIT_POWER, 39, 50, 81, 84, 0.76, 2); }
+		case (8) { return Mood(1, 0, 42, KIT_ELECTRONIC, 38, 89, 11, 81, 0.72, 2); }
+		case (9) { return Mood(3, 3, 37, KIT_808, 38, 91, 14, 81, 0.5, 2); }
+		case (10) { return Mood(4, 1, 44, KIT_808, 38, 94, 81, 80, 0.76, 2); }
+		case (11) { return Mood(7, 0, 40, KIT_POWER, 39, 90, 81, 81, (82.0 / 100.0), 2); }
+	}
+	var result = Mood(4, 4, 41, KIT_ELECTRONIC, 39, 95, 81, 81, (82.0 / 100.0), 1);
+	result.cut_crash = false;
+	return result;
+}

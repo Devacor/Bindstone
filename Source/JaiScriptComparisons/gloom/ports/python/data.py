@@ -73,7 +73,7 @@ ENEMY_DEFS = [
 	},
 	{
 		"name": 'WARDEN',
-		"hp": 520,
+		"hp": 260,
 		"speed": 2.0,
 		"radius": 0.45,
 		"pain": 8,

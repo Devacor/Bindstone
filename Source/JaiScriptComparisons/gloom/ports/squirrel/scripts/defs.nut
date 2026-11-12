@@ -20,7 +20,7 @@
 	{name = "GRUNT",   hp = 30,  speed = 3.1, radius = 0.34, pain = 55, size = 0.72, melee_lo = 4, melee_hi = 10},
 	{name = "SPITTER", hp = 45,  speed = 2.2, radius = 0.36, pain = 40, size = 0.78, melee_lo = 3, melee_hi = 7},
 	{name = "TURRET",  hp = 60,  speed = 0.0, radius = 0.38, pain = 15, size = 0.60, melee_lo = 0, melee_hi = 0},
-	{name = "WARDEN",  hp = 520, speed = 2.0, radius = 0.45, pain = 8,  size = 1.05, melee_lo = 10, melee_hi = 22}
+	{name = "WARDEN",  hp = 260, speed = 2.0, radius = 0.45, pain = 8,  size = 1.05, melee_lo = 10, melee_hi = 22}
 ];
 
 // ---------------------------------------------------------------- pickups ---

@@ -63,7 +63,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">float t0 = time::now();
 sleep(0.02);
 float waited = time::now() - t0;
-print(waited &gt;= 0.02, " ", time::execute_elapsed() &gt;= waited, " ", time::unix_ms() + 1 &gt; time::unix_time() * 1000.0);</code></pre></div>
+print(waited &gt;= 0.02, " ", time::execute_elapsed() &gt;= waited, " ", time::unix_time() * 1000.0 - time::unix_ms() &lt; 1000.0);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">true true true</code></pre></div>
 <p>Waiting is the language&#x27;s <code>sleep(seconds)</code> (<a href="08-coroutines.html#sleep">Coroutines</a>), on the same time source: it suspends a run the host started with <code>engine::start</code>, and blocks the thread in a plain <code>execute()</code>, counting against the execution budget.</p>
 <h2 id="stopwatches">Stopwatches<a class="hlink" href="#stopwatches" aria-label="link">&#8203;</a></h2>

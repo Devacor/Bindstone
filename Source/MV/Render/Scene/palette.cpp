@@ -6,8 +6,8 @@
 namespace MV {
 	namespace Scene {
 		void Palette::jai_auto_bind(jai::dynamic_binder<Palette>& a_builder) {
-			a_builder.property("onColorChange", &Palette::onColorChange);
-			a_builder.property("onSwatchClicked", &Palette::onSwatchClicked);
+			a_builder.transient_property("onColorChange", &Palette::onColorChange);
+			a_builder.transient_property("onSwatchClicked", &Palette::onSwatchClicked);
 
 			a_builder.method("color", static_cast<Color(Palette::*)() const>(&Palette::color));
 			a_builder.method("color", static_cast<std::shared_ptr<Palette>(Palette::*)(const Color&)>(&Palette::color), jai::serial);

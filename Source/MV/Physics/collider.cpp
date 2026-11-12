@@ -24,13 +24,13 @@ namespace MV {
 
 	namespace Scene {
 		void Collider::jai_auto_bind(jai::dynamic_binder<Collider>& a_builder) {
-			a_builder.property("onCollisionStart", &Collider::onCollisionStart);
-			a_builder.property("onCollisionEnd", &Collider::onCollisionEnd);
-			a_builder.property("onContactStart", &Collider::onContactStart);
-			a_builder.property("onContactEnd", &Collider::onContactEnd);
-			a_builder.property("onCollisionKilled", &Collider::onCollisionKilled);
-			a_builder.property("onContactKilled", &Collider::onContactKilled);
-			a_builder.property("onShouldCollide", &Collider::onShouldCollide);
+			a_builder.transient_property("onCollisionStart", &Collider::onCollisionStart);
+			a_builder.transient_property("onCollisionEnd", &Collider::onCollisionEnd);
+			a_builder.transient_property("onContactStart", &Collider::onContactStart);
+			a_builder.transient_property("onContactEnd", &Collider::onContactEnd);
+			a_builder.transient_property("onCollisionKilled", &Collider::onCollisionKilled);
+			a_builder.transient_property("onContactKilled", &Collider::onContactKilled);
+			a_builder.transient_property("onShouldCollide", &Collider::onShouldCollide);
 		}
 
 

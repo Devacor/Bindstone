@@ -72,10 +72,10 @@ void Creature::jai_auto_bind(jai::dynamic_binder<Creature>& a_builder) {
 	a_builder.method("changeHealth", &Creature::changeHealth, jai::serial);
 	a_builder.method("assetPath", &Creature::assetPath);
 	a_builder.method("player", &Creature::player);
-	a_builder.property("onStatus", &Creature::onStatus);
-	a_builder.property("onHealthChange", &Creature::onHealthChange);
-	a_builder.property("onDeath", &Creature::onDeath);
-	a_builder.property("onFall", &Creature::onFall);
+	a_builder.transient_property("onStatus", &Creature::onStatus);
+	a_builder.transient_property("onHealthChange", &Creature::onHealthChange);
+	a_builder.transient_property("onDeath", &Creature::onDeath);
+	a_builder.transient_property("onFall", &Creature::onFall);
 	a_builder.method("game", [](Creature& a_self) -> GameInstance& { return a_self.gameInstance; });
 	a_builder.method("stats", [](Creature& a_self) -> const CreatureData& { return a_self.statTemplate; });
 	a_builder.method("attackRange", [](Creature& a_self) -> double { return a_self.statTemplate.attackRange; });
@@ -116,11 +116,11 @@ void ServerCreature::jai_auto_bind(jai::dynamic_binder<ServerCreature>& a_builde
 	a_builder.method("untargetable", jai::overload<bool>(&ServerCreature::untargetable));
 	a_builder.method("absorbFor", &ServerCreature::absorbFor, jai::serial);
 	a_builder.method("spawnCreature", &ServerCreature::spawnCreature, jai::serial);
-	a_builder.property("onArrive", &ServerCreature::onArrive);
-	a_builder.property("onDamaged", &ServerCreature::onDamaged);
-	a_builder.property("onBlocked", &ServerCreature::onBlocked);
-	a_builder.property("onStop", &ServerCreature::onStop);
-	a_builder.property("onStart", &ServerCreature::onStart);
+	a_builder.transient_property("onArrive", &ServerCreature::onArrive);
+	a_builder.transient_property("onDamaged", &ServerCreature::onDamaged);
+	a_builder.transient_property("onBlocked", &ServerCreature::onBlocked);
+	a_builder.transient_property("onStop", &ServerCreature::onStop);
+	a_builder.transient_property("onStart", &ServerCreature::onStart);
 	a_builder.method("targeting", [](ServerCreature& a_self) -> TargetPolicy& { return a_self.targeting; });
 	a_builder.method("enemiesInRange", [](ServerCreature& a_self, double a_range) {
 		return a_self.gameInstance.teamAgainstPlayer(a_self.player()).creaturesInRange(a_self.agent()->gridPosition(), static_cast<float>(a_range));

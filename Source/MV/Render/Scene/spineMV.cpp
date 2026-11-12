@@ -94,11 +94,11 @@ namespace MV{
 
 	namespace Scene {
 		void Spine::jai_auto_bind(jai::dynamic_binder<Spine>& a_builder) {
-			a_builder.property("onStart", &Spine::onStart);
-			a_builder.property("onEnd", &Spine::onEnd);
-			a_builder.property("onEvent", &Spine::onEvent);
-			a_builder.property("onComplete", &Spine::onComplete);
-			a_builder.property("onDispose", &Spine::onDispose);
+			a_builder.transient_property("onStart", &Spine::onStart);
+			a_builder.transient_property("onEnd", &Spine::onEnd);
+			a_builder.transient_property("onEvent", &Spine::onEvent);
+			a_builder.transient_property("onComplete", &Spine::onComplete);
+			a_builder.transient_property("onDispose", &Spine::onDispose);
 
 			a_builder.method("bindNode", &Spine::bindNode);
 			a_builder.method("unbindSlot", &Spine::unbindSlot);

@@ -7,7 +7,7 @@
 namespace MV {
 	namespace Scene {
 		void Slider::jai_auto_bind(jai::dynamic_binder<Slider>& a_builder) {
-			a_builder.property("onPercentChange", &Slider::onPercentChange);
+			a_builder.transient_property("onPercentChange", &Slider::onPercentChange);
 
 			a_builder.method("percent", static_cast<PointPrecision(Slider::*)() const>(&Slider::percent));
 			a_builder.method("percent", static_cast<std::shared_ptr<Slider>(Slider::*)(PointPrecision, bool)>(&Slider::percent), jai::serial);

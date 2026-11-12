@@ -61,27 +61,27 @@ namespace MV {
 
 			a_builder.method("clone", &Node::clone, jai::serial);
 
-			a_builder.property("onChildAdd", &Node::onChildAdd);
-			a_builder.property("onChildRemove", &Node::onChildRemove);
-			a_builder.property("onChildOrderChange", &Node::onChildOrderChange);
-			a_builder.property("onAdd", &Node::onAdd);
-			a_builder.property("onRemove", &Node::onRemove);
-			a_builder.property("onEnable", &Node::onEnable);
-			a_builder.property("onDisable", &Node::onDisable);
-			a_builder.property("onPause", &Node::onPause);
-			a_builder.property("onResume", &Node::onResume);
-			a_builder.property("onShow", &Node::onShow);
-			a_builder.property("onHide", &Node::onHide);
-			a_builder.property("onBoundsRequest", &Node::onBoundsRequest);
-			a_builder.property("onTransformChange", &Node::onTransformChange);
-			a_builder.property("onLocalBoundsChange", &Node::onLocalBoundsChange);
-			a_builder.property("onChildBoundsChange", &Node::onChildBoundsChange);
-			a_builder.property("onOrderChange", &Node::onOrderChange);
-			a_builder.property("onAlphaChange", &Node::onAlphaChange);
-			a_builder.property("onChange", &Node::onChange);
-			a_builder.property("onAttach", &Node::onAttach);
-			a_builder.property("onDetach", &Node::onDetach);
-			a_builder.property("onComponentUpdate", &Node::onComponentUpdate);
+			a_builder.transient_property("onChildAdd", &Node::onChildAdd);
+			a_builder.transient_property("onChildRemove", &Node::onChildRemove);
+			a_builder.transient_property("onChildOrderChange", &Node::onChildOrderChange);
+			a_builder.transient_property("onAdd", &Node::onAdd);
+			a_builder.transient_property("onRemove", &Node::onRemove);
+			a_builder.transient_property("onEnable", &Node::onEnable);
+			a_builder.transient_property("onDisable", &Node::onDisable);
+			a_builder.transient_property("onPause", &Node::onPause);
+			a_builder.transient_property("onResume", &Node::onResume);
+			a_builder.transient_property("onShow", &Node::onShow);
+			a_builder.transient_property("onHide", &Node::onHide);
+			a_builder.transient_property("onBoundsRequest", &Node::onBoundsRequest);
+			a_builder.transient_property("onTransformChange", &Node::onTransformChange);
+			a_builder.transient_property("onLocalBoundsChange", &Node::onLocalBoundsChange);
+			a_builder.transient_property("onChildBoundsChange", &Node::onChildBoundsChange);
+			a_builder.transient_property("onOrderChange", &Node::onOrderChange);
+			a_builder.transient_property("onAlphaChange", &Node::onAlphaChange);
+			a_builder.transient_property("onChange", &Node::onChange);
+			a_builder.transient_property("onAttach", &Node::onAttach);
+			a_builder.transient_property("onDetach", &Node::onDetach);
+			a_builder.transient_property("onComponentUpdate", &Node::onComponentUpdate);
 		}
 
 		int64_t Node::recalculateLocalBoundsCalls = 0;

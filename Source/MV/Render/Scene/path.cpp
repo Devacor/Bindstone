@@ -6,10 +6,10 @@
 namespace MV {
 	namespace Scene {
 		void PathAgent::jai_auto_bind(jai::dynamic_binder<PathAgent>& a_builder) {
-			a_builder.property("onArrive", &PathAgent::onArrive);
-			a_builder.property("onBlocked", &PathAgent::onBlocked);
-			a_builder.property("onStop", &PathAgent::onStop);
-			a_builder.property("onStart", &PathAgent::onStart);
+			a_builder.transient_property("onArrive", &PathAgent::onArrive);
+			a_builder.transient_property("onBlocked", &PathAgent::onBlocked);
+			a_builder.transient_property("onStop", &PathAgent::onStop);
+			a_builder.transient_property("onStart", &PathAgent::onStart);
 
 			a_builder.method("gridPosition", static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::gridPosition));
 			a_builder.method("gridPosition", static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<int>&)>(&PathAgent::gridPosition), jai::serial);

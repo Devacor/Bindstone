@@ -6,8 +6,8 @@
 namespace MV{
 	namespace Scene {
 		void Text::jai_auto_bind(jai::dynamic_binder<Text>& a_builder) {
-			a_builder.property("onEnter", &Text::onEnter);
-			a_builder.property("onChange", &Text::onChange);
+			a_builder.transient_property("onEnter", &Text::onEnter);
+			a_builder.transient_property("onChange", &Text::onChange);
 
 			a_builder.method("text", static_cast<UtfString(Text::*)() const>(&Text::text));
 			a_builder.method("text", static_cast<std::shared_ptr<Text>(Text::*)(const UtfString&)>(&Text::text), jai::serial);

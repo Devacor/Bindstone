@@ -894,6 +894,7 @@ namespace MV {
 			// Note: Uses save/load_and_construct pattern because Node requires constructor args
 			template<class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
+				// TODO: port to property for save/load
 				auto* self = const_cast<Node*>(this);
 				SerializableChildrenScope serializableOnly(*self);
 				self->property_mgr.save(archive);

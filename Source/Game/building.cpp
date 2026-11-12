@@ -40,7 +40,7 @@ void Building::jai_auto_bind(jai::dynamic_binder<Building>& a_builder) {
 	a_builder.method("assetPath", &Building::assetPath);
 	a_builder.method("skin", &Building::skin);
 	a_builder.method("slot", &Building::slotIndex);
-	a_builder.property("onUpgraded", &Building::onUpgraded);
+	a_builder.transient_property("onUpgraded", &Building::onUpgraded);
 	a_builder.method("data", [](Building& a_self) { return a_self.buildingData; });
 	a_builder.method("networkId", [](Building& a_self) { return static_cast<int64_t>(a_self.slot); });
 	a_builder.method("spawnCreature", [](Building& a_self, const std::string& a_key) {

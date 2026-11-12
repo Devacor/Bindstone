@@ -670,6 +670,7 @@ namespace MV {
 
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
+				// TODO: port to property for save/load
 				property_mgr.save(archive);
 				Component::save(archive, 0);
 			}

@@ -33,8 +33,8 @@ void BattleEffect::jai_auto_bind(jai::dynamic_binder<BattleEffect>& a_builder) {
 	a_builder.method("alive", &BattleEffect::alive);
 	a_builder.method("networkId", &BattleEffect::netId);
 	a_builder.method("assetPath", &BattleEffect::assetPath);
-	a_builder.property("onArrive", &BattleEffect::onArrive);
-	a_builder.property("onFizzle", &BattleEffect::onFizzle);
+	a_builder.transient_property("onArrive", &BattleEffect::onArrive);
+	a_builder.transient_property("onFizzle", &BattleEffect::onFizzle);
 	a_builder.method("stats", [](BattleEffect& a_self) { return a_self.statTemplate; });
 	a_builder.method("ourElapsedTime", [](BattleEffect& a_self) { return a_self.ourElapsedTime; });
 	a_builder.method("sourceCreature", [](BattleEffect& a_self) { return a_self.sourceCreature; });

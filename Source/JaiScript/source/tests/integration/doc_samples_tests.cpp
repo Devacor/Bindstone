@@ -974,7 +974,7 @@ public:
 				const std::string expected = doc_samples::trim_lines(intrusive_run.output);
 				const std::string got = doc_samples::trim_lines(run.output);
 				if (interpreted) {
-					check_true(intrusive_run.code.find("gate->spawn_wave(5, false);") != std::string::npos, page + ": the C++ call on the returned object moved");
+					check_true(intrusive_run.code.find("gate->spawn_wave(3);") != std::string::npos, page + ": the C++ call on the returned object moved");
 					check_true(!got.empty() && got.size() < expected.size() && expected.compare(0, got.size(), got) == 0 && expected[got.size()] == '\n',
 						page + " " + tab + ": the script's output does not open the page's: " + got);
 				} else {

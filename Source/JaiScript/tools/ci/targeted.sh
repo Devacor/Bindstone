@@ -33,6 +33,8 @@
 # A library change also takes the wasm gate: the WebAssembly build is the one 32-bit libc++ target the gates run, so it catches
 # layout assumptions the 64-bit builds hide (a field placed in tail padding, a tag in a 4-aligned pointer's low bits).
 #
+# Whatever takes the suites takes the clang gate too: the suites built with Clang (gates.sh clang), whose names differ from MSVC's.
+#
 # --lanes declares a change confined to the VM's optimized lanes (fused, typed, cell, graft and cache code) inside the
 # general files: the general-path reason is dropped and the VM against VM-reference fuzz is the change's oracle. --interp
 # picks the interpreter tier whatever the paths.
@@ -140,6 +142,7 @@ NOTES=""
 HOST_ARCHIVES=0
 for f in "${FILES[@]}"; do classify "$f"; done
 [ "$FORCE_INTERP" = 1 ] && interp_tier "--interp"
+case " $CHECKS " in *" suites "*) pick clang "the suites built with Clang, which names some things unlike MSVC" ;; esac
 INTERP=0
 if [ -n "$INTERP_REASONS" ]; then
 	INTERP=1

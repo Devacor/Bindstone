@@ -86,6 +86,9 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
   `tools/ci/host_warnings.cpp` under `-Wall -Wextra -Werror` with each g++ and clang++ it finds, and wants each case of
   `tools/ci/must_not_compile.cpp` (a program the headers reject) to fail with its message; targeted.sh picks it for
   any `include/jaiscript` change.
+- `bash tools/ci/gates.sh clang` builds the suites with Clang (Visual Studio's on Windows) and runs them on both backends:
+  Clang names some things unlike MSVC (a function-local class is its bare name). targeted.sh picks it whenever it picks the
+  suites; it skips when no clang++ is found.
 - A compiler change: dump `jaiscript --manifest=<file> <script>` before and after over the affected programs; the
   manifests (every chunk field, exact constant bits) change only where the change intends.
 - A change to what the AST serializer writes bumps `k_jaibite_version` (`include/jaiscript/detail/ast_serializer.hpp`).

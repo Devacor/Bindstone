@@ -82,8 +82,9 @@ after 30 warm-up frames, the median of five interleaved runs, each within 4% of 
 run, so its cells sample the same window in three slices spread across it, each slice the median of three runs: twelve
 frames of each scene (projecting OSSUARY's 60-frame window at 358 seconds) and 600 of GLOOM's ticks over three processes
 (projecting the showcase look's 600 ticks at 245 seconds). <sup>b</sup> CPython hashes each frame outside its timed
-window, where the C++ hosts hash inside it (tens of microseconds a frame in C++). The ports and their runners are in the
-comparison project: <code>demoreel/ports/COMPARISON.md</code> and the GLOOM ports beside it.</p>
+window, where the C++ hosts hash inside it (tens of microseconds a frame in C++). Every port, runner and pinned runtime is in
+<a href="https://github.com/Devacor/jaiscript_benchmarks">jaiscript_benchmarks</a>, with the JaiScript release it measured as a submodule; <code>demoreel/ports/COMPARISON.md</code> there
+records this table's protocol.</p>
 <h3 id="smaller-apps">Smaller apps<a class="hlink" href="#smaller-apps" aria-label="link">&#8203;</a></h3>
 <p>Four benchmark programs with no ChaiScript port, so they sit outside the headline. Same protocol: whole programs,
 hash-checked, timing their own workload, lower is faster.</p>

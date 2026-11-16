@@ -35,6 +35,7 @@ namespace Workbench {
 		float fieldHeight() const { return theme->fieldHeight; }
 		float pad() const { return theme->pad; }
 		float labelWidth() const { return theme->labelWidth; }
+		float px(float a_logical) const { return theme->px(a_logical); }
 		void reportHeight(float a_height) { builtHeight = a_height; }
 		void place(const std::shared_ptr<MV::Scene::Node>& a_node, float a_x, float a_y) {
 			a_node->position(MV::point(a_x, a_y));

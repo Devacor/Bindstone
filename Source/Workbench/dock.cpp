@@ -27,7 +27,7 @@ namespace Workbench {
 
 		auto& library = *services.get<MV::TextLibrary>();
 		dragGhost = overlayRoot->make("dragGhost");
-		attachRoundedRect(dragGhost, services, theme, MV::size(theme.tabWidth, theme.tabHeight), theme.tabActive());
+		attachRoundedRect(dragGhost, services, theme, MV::size(theme.tabWidth, theme.tabHeight), theme.buttonIdle());
 		auto ghostLabel = dragGhost->attach<MV::Scene::Text>(library, theme.labelFont);
 		ghostLabel->bounds({ MV::Point<>(), MV::size(theme.tabWidth, theme.tabHeight) });
 		ghostLabel->justification(MV::TextJustification::CENTER)->wrapping(MV::TextWrapMethod::NONE, theme.tabWidth)->minimumLineHeight(theme.tabHeight);
@@ -110,14 +110,17 @@ namespace Workbench {
 			}
 			if (auto tabBar = leafNode->get("tabs", false)) {
 				size_t tabCount = std::max<size_t>(1, a_node->panels.size());
-				float tabGap = 2.0f;
-				float tabWidth = std::min(theme.tabWidth, std::max(40.0f, (a_rect.size.width - theme.pad) / tabCount - tabGap));
+				float tabGap = theme.px(2.0f);
+				float tabWidth = std::min(theme.tabWidth, std::max(theme.px(40.0f), (a_rect.size.width - theme.pad) / tabCount - tabGap));
 				MV::Size<> tabSize(tabWidth, theme.tabHeight);
 				size_t tabIndex = 0;
 				for (auto&& tab : *tabBar) {
 					tab->position(MV::point(static_cast<float>(tabIndex) * (tabWidth + tabGap), 0.0f));
 					if (auto tabBg = tab->component<MV::Scene::Sprite>("tabBg", false)) {
 						tabBg->bounds(tabSize);
+					}
+					if (auto tabFoot = tab->component<MV::Scene::Sprite>("tabFoot", false)) {
+						tabFoot->bounds(MV::BoxAABB<>(MV::point(0.0f, tabSize.height * 0.5f), MV::size(tabSize.width, tabSize.height * 0.5f)));
 					}
 					if (auto label = tab->component<MV::Scene::Text>(true, false)) {
 						label->bounds({ MV::Point<>(), tabSize });
@@ -136,7 +139,7 @@ namespace Workbench {
 		}
 
 		float extent = a_node->vertical ? a_rect.size.height : a_rect.size.width;
-		float minExtent = a_node->vertical ? 80.0f : 120.0f;
+		float minExtent = theme.px(a_node->vertical ? 80.0f : 120.0f);
 		float first = std::clamp(extent * a_node->ratio - theme.splitterSize * 0.5f, minExtent, std::max(minExtent, extent - minExtent - theme.splitterSize));
 		float second = std::max(theme.tabHeight, extent - first - theme.splitterSize);
 
@@ -205,7 +208,7 @@ namespace Workbench {
 		// Panel content lives in an inner body so the Stencil clips it WITHOUT clipping the
 		// tab bar (ancestor stencils gate both drawing and Clickable hit tests).
 		auto body = leafNode->make("body");
-		auto bg = attachRoundedRect(body, services, theme, MV::size(theme.tabWidth, theme.tabHeight), theme.panelBg());
+		auto bg = body->attach<MV::Scene::Sprite>()->bounds(MV::size(theme.tabWidth, theme.tabHeight))->color(theme.panelBg());
 		bg->id("bg");
 		bg->anchors().anchor(MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::point(1.0f, 1.0f))).offset(MV::BoxAABB<>(MV::point(0.0f, theme.tabHeight), MV::Point<>())).parent(sizer.self());
 		auto clip = body->attach<MV::Scene::Stencil>();
@@ -218,16 +221,18 @@ namespace Workbench {
 		}
 
 		auto tabStrip = leafNode->make("tabStrip");
-		auto stripBg = tabStrip->attach<MV::Scene::Sprite>()->id("stripBg")->bounds(MV::size(theme.tabWidth, theme.tabHeight))->color(theme.tabStrip());
+		auto stripBg = tabStrip->attach<MV::Scene::Sprite>()->id("stripBg")->bounds(MV::size(theme.tabWidth, theme.tabHeight))->color(theme.windowBg());
 		stripBg->anchors().anchor(MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::point(1.0f, 0.0f))).offset(MV::BoxAABB<>(MV::Point<>(), MV::point(0.0f, theme.tabHeight))).parent(sizer.self());
 
 		auto tabBar = leafNode->make("tabs");
 		for (size_t i = 0; i < a_leaf->panels.size(); ++i) {
 			Panel* panel = a_leaf->panels[i];
 			auto tab = tabBar->make(MV::guid("tab_"));
-			tab->position(MV::Point<>(static_cast<float>(i) * (theme.tabWidth + 2.0f), 0.0f));
+			tab->position(MV::Point<>(static_cast<float>(i) * (theme.tabWidth + theme.px(2.0f)), 0.0f));
 			MV::Size<> tabSize(theme.tabWidth, theme.tabHeight);
-			attachRoundedRect(tab, services, theme, tabSize, theme.tabIdle())->id("tabBg");
+			// rounded top, square foot: the active tab reads as one shape with the panel below it
+			attachRoundedRect(tab, services, theme, tabSize, theme.panelBg())->id("tabBg");
+			tab->attach<MV::Scene::Sprite>()->id("tabFoot")->bounds(MV::BoxAABB<>(MV::point(0.0f, tabSize.height * 0.5f), MV::size(tabSize.width, tabSize.height * 0.5f)))->color(theme.panelBg());
 			auto label = tab->attach<MV::Scene::Text>(library, theme.labelFont);
 			label->bounds({ MV::Point<>(), tabSize });
 			label->justification(MV::TextJustification::CENTER)->wrapping(MV::TextWrapMethod::NONE, tabSize.width)->minimumLineHeight(tabSize.height)->text(panel->title());
@@ -288,8 +293,14 @@ namespace Workbench {
 		if (tabBar) {
 			size_t index = 0;
 			for (auto&& tab : *tabBar) {
-				if (auto tabBg = tab->component<MV::Scene::Sprite>("tabBg", false)) {
-					tabBg->color(static_cast<int>(index) == a_leaf->active ? theme.tabActive() : theme.tabIdle());
+				for (auto&& part : { "tabBg", "tabFoot" }) {
+					if (auto sprite = tab->component<MV::Scene::Sprite>(part, false)) {
+						if (static_cast<int>(index) == a_leaf->active) {
+							sprite->show();
+						} else {
+							sprite->hide();
+						}
+					}
 				}
 				++index;
 			}

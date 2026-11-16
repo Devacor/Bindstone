@@ -33,7 +33,7 @@ namespace Workbench {
 		void layoutFooter();
 		void wireEntryInteractions(const std::shared_ptr<MV::Scene::Clickable>& a_click, const std::filesystem::path& a_target, bool a_isFolder, bool a_isPrefab);
 		float footerHeight() const { return theme->rowHeight + theme->pad; }
-		float tileSizeFor() const { return (32.0f + 80.0f * tilePercent) * theme->scaleFactor(); }
+		float tileSizeFor() const { return theme->px(48.0f + 112.0f * tilePercent); }
 		bool listModeFor() const { return tilePercent < 0.12f; }
 
 		std::function<void(const std::string&)> openScene;

@@ -6,11 +6,11 @@ namespace Workbench {
 	void SceneTreePanel::build() {
 		searchSizer = contentNode->attach<MV::Scene::Sprite>();
 		searchSizer->id("searchSizer");
-		searchSizer->bounds(MV::size(200.0f, theme->fieldHeight));
+		searchSizer->bounds(MV::size(theme->px(200.0f), theme->fieldHeight));
 		searchSizer->hide();
 
 		auto searchHost = contentNode->make("search");
-		searchText = makeTextField(searchHost, *services, *theme, *focus, "query", MV::size(200.0f, theme->fieldHeight), "", nullptr);
+		searchText = makeTextField(searchHost, *services, *theme, *focus, "query", MV::size(theme->px(200.0f), theme->fieldHeight), "", nullptr);
 		auto fullAnchor = MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::point(1.0f, 1.0f));
 		if (auto background = searchText->owner()->component<MV::Scene::Sprite>(true, false)) {
 			background->anchors().anchor(fullAnchor).parent(searchSizer.self());

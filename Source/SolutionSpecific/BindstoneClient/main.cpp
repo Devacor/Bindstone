@@ -571,12 +571,25 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 	managers.renderer.window().setTitle("Bindstone Workbench");
 
 	float workbenchUiScale = managers.renderer.window().uiScale();
-	Workbench::Theme workbenchTheme(2.0f * workbenchUiScale);
+	if (a_smoke) {
+		// the smoke modes keep one logical size on every display, so their shots compare
+		if (workbenchUiScale > 1.0f) {
+			// the world first: the window's resize rebuilds the projection from it
+			MV::Size<int> launchSize(static_cast<int>(1600 * workbenchUiScale), static_cast<int>(900 * workbenchUiScale));
+			managers.renderer.world().resize(MV::cast<MV::PointPrecision>(launchSize));
+			managers.renderer.window().resize(launchSize);
+			if (auto* sdlWindow = SDL_GL_GetCurrentWindow()) {
+				SDL_SetWindowPosition(sdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+			}
+		}
+	} else {
+		managers.renderer.window().maximize();
+	}
+	Workbench::Theme workbenchTheme(workbenchUiScale);
 	MV::FontDefinition::make(managers.textLibrary, "default", "Fonts/Verdana.ttf", 14);
 	MV::FontDefinition::make(managers.textLibrary, "small", "Fonts/Verdana.ttf", 9);
 	MV::FontDefinition::make(managers.textLibrary, "big", "Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
-	MV::FontDefinition::make(managers.textLibrary, "wb-small", "Fonts/Verdana.ttf", static_cast<int>(14 * workbenchUiScale));
-	MV::FontDefinition::make(managers.textLibrary, "wb", "Fonts/Verdana.ttf", static_cast<int>(22 * workbenchUiScale));
+	MV::FontDefinition::make(managers.textLibrary, "wb-small", "Fonts/Verdana.ttf", static_cast<int>(12 * workbenchUiScale));
 
 	// The game's animated-material shaders; without them scene materials fall back to default.
 	managers.renderer.loadShader("vortex", "Shaders/default.vert", "Shaders/vortex.frag");
@@ -589,8 +602,8 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 	int workbenchResizeBorder = std::max(6, static_cast<int>(8 * workbenchUiScale));
 	int workbenchTitleBarHeight = static_cast<int>(workbenchTheme.titleBarHeight);
 	int workbenchTitleButtonStrip = static_cast<int>(workbenchTheme.titleButtonWidth * 3.0f);
-	int workbenchTransportStart = static_cast<int>(workbenchTheme.titleBarHeight * 8.0f);
-	int workbenchTransportWidth = static_cast<int>(3.0f * (workbenchTheme.titleButtonWidth * 1.4f + 2.0f) + 8.0f);
+	int workbenchTransportStart = static_cast<int>(workbenchTheme.px(240.0f));
+	int workbenchTransportWidth = static_cast<int>(3.0f * (workbenchTheme.titleButtonWidth + workbenchTheme.px(2.0f)));
 	auto& workbenchWindow = managers.renderer.window();
 	workbenchWindow.hitTest([&workbenchWindow, workbenchResizeBorder, workbenchTitleBarHeight, workbenchTitleButtonStrip, workbenchTransportStart, workbenchTransportWidth](const MV::Point<int>& a_point, const MV::Size<int>& a_size) -> SDL_HitTestResult {
 		if (!workbenchWindow.maximized()) {

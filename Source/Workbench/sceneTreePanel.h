@@ -35,7 +35,7 @@ namespace Workbench {
 
 		void resized(const MV::Size<>& a_size) override {
 			if (searchSizer) {
-				searchSizer->bounds(MV::size(std::max(60.0f, a_size.width - theme->pad), theme->fieldHeight));
+				searchSizer->bounds(MV::size(std::max(theme->px(60.0f), a_size.width - theme->pad), theme->fieldHeight));
 			}
 			if (tree) {
 				tree->width(a_size.width);

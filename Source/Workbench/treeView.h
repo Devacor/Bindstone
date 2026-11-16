@@ -125,7 +125,7 @@ namespace Workbench {
 				}
 			}
 			auto marker = host->make("insertMarker");
-			marker->attach<MV::Scene::Sprite>()->bounds(MV::size(rowWidth, 2.0f))->color(theme.accent());
+			marker->attach<MV::Scene::Sprite>()->bounds(MV::size(rowWidth, theme.px(2.0f)))->color(theme.accent());
 			marker->hide();
 		}
 
@@ -187,7 +187,7 @@ namespace Workbench {
 				rowBackgrounds[static_cast<size_t>(target)]->color(theme.dropHint());
 				hoverIndex = target;
 			} else if (marker) {
-				float markerY = (zone == RowZone::Before ? target : target + 1) * theme.rowHeight - 1.0f;
+				float markerY = (zone == RowZone::Before ? target : target + 1) * theme.rowHeight - theme.px(1.0f);
 				marker->position(MV::point(0.0f, markerY));
 				marker->show();
 			}
@@ -241,7 +241,7 @@ namespace Workbench {
 			row->position(MV::point(0.0f, builtHeight));
 
 			MV::Color rowColor = isSelected ? theme.selection() : (zebra ? theme.panelBg() : theme.panelAlt());
-			auto rowBackground = row->attach<MV::Scene::Sprite>()->bounds(MV::size(rowWidth, theme.rowHeight - 1.0f))->color(rowColor);
+			auto rowBackground = row->attach<MV::Scene::Sprite>()->bounds(MV::size(rowWidth, theme.rowHeight))->color(rowColor);
 			rowBackgrounds.push_back(rowBackground);
 			rowBaseColors.push_back(rowColor);
 			rowItems.push_back(a_item);
@@ -250,21 +250,21 @@ namespace Workbench {
 			if (children) {
 				auto triangleHost = row->make("fold");
 				triangleHost->position(MV::point(indent, 0.0f));
-				auto triangle = makeLabel(triangleHost, services, theme, "glyph", MV::size(14.0f, theme.rowHeight - 2.0f), isExpanded ? "v" : ">");
+				auto triangle = makeLabel(triangleHost, services, theme, "glyph", MV::size(theme.px(14.0f), theme.rowHeight), isExpanded ? "v" : ">");
 				TItem item = a_item;
-				triangleHost->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(16.0f, theme.rowHeight - 1.0f))->onAccept.connect("toggle", [this, item, isExpanded](const std::shared_ptr<MV::Scene::Clickable>&) {
+				triangleHost->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(theme.px(16.0f), theme.rowHeight))->onAccept.connect("toggle", [this, item, isExpanded](const std::shared_ptr<MV::Scene::Clickable>&) {
 					expanded[item] = !isExpanded;
 					rebuild();
 				});
 			}
 
-			float labelX = indent + 18.0f;
-			auto label = makeLabel(row, services, theme, "label", MV::size(std::max(40.0f, rowWidth - labelX - theme.pad), theme.rowHeight - 2.0f), adapter.label(a_item));
+			float labelX = indent + theme.px(16.0f);
+			auto label = makeLabel(row, services, theme, "label", MV::size(std::max(theme.px(40.0f), rowWidth - labelX - theme.pad), theme.rowHeight), adapter.label(a_item));
 			label->owner()->position(MV::point(labelX, 0.0f));
 
 			TItem item = a_item;
 			auto rowClick = row->attach<MV::Scene::Clickable>(mouse);
-			rowClick->bounds(MV::size(rowWidth, theme.rowHeight - 1.0f));
+			rowClick->bounds(MV::size(rowWidth, theme.rowHeight));
 			rowClick->onAccept.connect("select", [this, item](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
 				if (rowDragActive) {
 					return;

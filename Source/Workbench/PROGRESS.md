@@ -403,6 +403,20 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   Node section's `parallax` button (rest / preview) displaces the layers on the selected node and below it as a run
   would (`authoringPreview`); the preview ends when the selection changes, and a save writes the layers at rest.
 
+### Increment 18 (sizes and panel shape against Unreal 5.6) - LANDED, gated
+- `Theme` metrics are logical pixels scaled by the window's uiScale alone (the 2x factor is gone): 22 px rows and
+  fields, 26 px tabs and property rows, 32 px title bar, 4 px gaps, pad and corners. `Theme::px()` scales every
+  size that used to be a raw pixel constant (tree glyphs, inspector offsets, gizmo handles, script panels' `p.px`).
+- Panels are flush squares in the panel colour on the window background; the active tab is panel-coloured with a
+  rounded top and square foot so it joins its panel, inactive tabs have no fill. Rounding is left to controls.
+- Palette follows Unreal's neutrals (`#151515` background, `#242424` panel, `#2f2f2f` header, `#0f0f0f` input,
+  `#383838` button, `#0070e0` accent).
+- The editor opens maximized; the smoke modes open at 1600x900 logical pixels on any display (the world is sized
+  before the window, since the window's resize rebuilds the projection from it).
+- The title uses the label font. OPEN (engine): Verdana at 26 px drew the letters whose glyph image is 16x32
+  (n, d, o, k, b, h) at half height; the cause in MV's text path is not found.
+- Still missing against Unreal: row icons, softer label colour (Text has no colour API), input outlines, hover states.
+
 ## Known gaps (next increments)
 - Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.

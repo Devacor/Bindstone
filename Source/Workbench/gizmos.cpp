@@ -83,10 +83,10 @@ namespace Workbench {
 			}
 
 			auto handle = container->make("move")->attach<MV::Scene::Clickable>(layer.mouse);
-			handle->bounds({ MV::size(11.0f, 11.0f), true })->show()->color(moveHandleFill);
+			handle->bounds({ MV::size(layer.theme.px(7.0f), layer.theme.px(7.0f)), true })->show()->color(moveHandleFill);
 			handle->globalPriority(handle->globalPriority() + movePriorityBoost);
 			handle->owner()->worldPosition(target->worldPosition());
-			handle->owner()->attach<MV::Scene::Sprite>()->bounds({ MV::size(1.5f, 1.5f), true })->color(MV::Color(0xffffffff));
+			handle->owner()->attach<MV::Scene::Sprite>()->bounds({ MV::size(layer.theme.px(1.0f), layer.theme.px(1.0f)), true })->color(MV::Color(0xffffffff));
 
 			std::weak_ptr<MV::Scene::Node> weakTarget = target;
 			handle->onPress.connect("press", [this](std::shared_ptr<MV::Scene::Clickable>) {
@@ -179,7 +179,7 @@ namespace Workbench {
 			container->clear();
 			auto rectBox = MV::round<MV::PointPrecision>(component->worldBounds());
 			lastFrame = rectBox;
-			auto handleSize = MV::size(8.0f, 8.0f);
+			auto handleSize = MV::size(layer.theme.px(5.0f), layer.theme.px(5.0f));
 
 			body = container->make(MV::guid("body_"))->worldPosition(rectBox.topLeftPoint())->attach<MV::Scene::Clickable>(layer.mouse);
 			body->bounds({ MV::Point<>(), rectBox.size() });
@@ -216,7 +216,7 @@ namespace Workbench {
 
 		MV::Scene::SafeComponent<MV::Scene::Clickable> makeCorner(const MV::Point<>& a_at, const std::string& a_name) {
 			auto corner = container->make(MV::guid(a_name))->worldPosition(a_at)->attach<MV::Scene::Clickable>(layer.mouse);
-			corner->bounds(MV::size(8.0f, 8.0f))->color(sizeHandleFill)->show();
+			corner->bounds(MV::size(layer.theme.px(5.0f), layer.theme.px(5.0f)))->color(sizeHandleFill)->show();
 			corner->globalPriority(corner->globalPriority() + bodyPriorityBoost);
 			return corner;
 		}
@@ -380,7 +380,7 @@ namespace Workbench {
 					continue;   // welded clusters share one handle
 				}
 				auto handle = container->make(std::to_string(i))->worldPosition(position)->attach<MV::Scene::Clickable>(layer.mouse);
-				handle->bounds({ MV::size(7.0f, 7.0f), true })->color(pointHandleFill)->show();
+				handle->bounds({ MV::size(layer.theme.px(5.0f), layer.theme.px(5.0f)), true })->color(pointHandleFill)->show();
 				handle->globalPriority(handle->globalPriority() + pointPriorityBoost);
 				size_t pointIndex = i;
 				handle->onPress.connect("press", [this](std::shared_ptr<MV::Scene::Clickable>) {

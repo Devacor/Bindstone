@@ -51,8 +51,8 @@ namespace Workbench {
 		std::shared_ptr<MV::Scene::Node> makeRow(const std::string& a_label, float& a_y);
 		void notifyEdited(const std::shared_ptr<MV::Scene::Component>& a_component);
 
-		float labelWidth() const { return std::clamp(panelWidth * 0.4f, 90.0f, 160.0f); }
-		float fieldWidth() const { return std::max(60.0f, panelWidth - labelWidth() - theme->pad * 3.0f); }
+		float labelWidth() const { return std::clamp(panelWidth * 0.4f, theme->px(80.0f), theme->px(180.0f)); }
+		float fieldWidth() const { return std::max(theme->px(60.0f), panelWidth - labelWidth() - theme->pad * 3.0f); }
 
 		// One chokepoint for property writes: name-keyed (survives inspector rebuilds), applied
 		// through the reflection bridge; the returned closure is what undo/redo commands replay.

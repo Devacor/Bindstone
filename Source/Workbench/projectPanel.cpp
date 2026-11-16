@@ -40,7 +40,7 @@ namespace Workbench {
 	}
 
 	void ProjectPanel::build() {
-		treeWidth = theme->tabWidth * 1.6f;
+		treeWidth = theme->px(180.0f);
 		TreeView<std::string>::Adapter adapter;
 		adapter.children = [](const std::string& a_folder) {
 			std::vector<std::string> result;
@@ -101,7 +101,7 @@ namespace Workbench {
 		if (!footerHost) {
 			return;
 		}
-		float width = std::max(120.0f, panelSize.width - treeWidth - theme->pad);
+		float width = std::max(theme->px(120.0f), panelSize.width - treeWidth - theme->pad);
 		if (auto background = footerHost->component<MV::Scene::Sprite>("footerBg", false)) {
 			background->bounds(MV::size(width, footerHeight()));
 		}
@@ -147,7 +147,7 @@ namespace Workbench {
 			auto fitted = MV::fitAspect(MV::cast<MV::PointPrecision>(handle->bounds().size()), maxSize);
 			auto popup = popupNode->make("imagePreview");
 			popup->position(MV::point((worldSize.width - fitted.width) * 0.5f, (worldSize.height - fitted.height) * 0.5f));
-			popup->attach<MV::Scene::Sprite>()->bounds(MV::BoxAABB<>(MV::point(-4.0f, -4.0f), MV::Size<>(fitted.width + 8.0f, fitted.height + 8.0f)))->color(theme->header());
+			popup->attach<MV::Scene::Sprite>()->bounds(MV::BoxAABB<>(MV::point(-theme->pad, -theme->pad), MV::Size<>(fitted.width + theme->pad * 2.0f, fitted.height + theme->pad * 2.0f)))->color(theme->header());
 			popup->attach<MV::Scene::Sprite>()->bounds(fitted)->texture(handle);
 			auto& mouse = *services->get<MV::TapDevice>();
 			popup->attach<MV::Scene::Clickable>(mouse)->bounds(fitted)->onAccept.connect("close", [](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
@@ -171,11 +171,11 @@ namespace Workbench {
 			fs::path target = accumulated;
 			float scale = theme->scaleFactor();
 			float segmentWidth = std::max(30.0f * scale, segment.size() * 7.0f * scale + 12.0f * scale);
-			auto button = makeButton(breadcrumbHost, *services, *theme, MV::guid("crumb_"), MV::size(segmentWidth, theme->rowHeight - 2.0f), segment, [this, target]() {
+			auto button = makeButton(breadcrumbHost, *services, *theme, MV::guid("crumb_"), MV::size(segmentWidth, theme->rowHeight), segment, [this, target]() {
 				navigate(target);
 			});
 			button->owner()->position(MV::point(x, 0.0f));
-			x += segmentWidth + 4.0f;
+			x += segmentWidth + theme->pad;
 		}
 	}
 
@@ -236,8 +236,8 @@ namespace Workbench {
 		int index = 0;
 
 		if (listMode) {
-			float rowWidth = std::max(120.0f, panelSize.width - treeWidth - theme->pad * 2.0f);
-			float iconSize = theme->rowHeight - 4.0f;
+			float rowWidth = std::max(theme->px(120.0f), panelSize.width - treeWidth - theme->pad * 2.0f);
+			float iconSize = theme->rowHeight - theme->px(4.0f);
 			for (auto&& entry : entries) {
 				bool isFolder = fs::is_directory(entry);
 				std::string extension = entry.extension().string();
@@ -246,10 +246,10 @@ namespace Workbench {
 
 				auto row = tileHost->make(MV::guid("listRow_"));
 				row->position(MV::point(0.0f, index * theme->rowHeight));
-				row->attach<MV::Scene::Sprite>()->bounds(MV::size(rowWidth, theme->rowHeight - 1.0f))->color(index % 2 == 0 ? theme->panelAlt() : theme->panelBg());
+				row->attach<MV::Scene::Sprite>()->bounds(MV::size(rowWidth, theme->rowHeight))->color(index % 2 == 0 ? theme->panelAlt() : theme->panelBg());
 
 				auto icon = row->make("icon");
-				icon->position(MV::point(2.0f, 2.0f));
+				icon->position(MV::point(theme->px(2.0f), theme->px(2.0f)));
 				if (isImage) {
 					try {
 						auto handle = services->get<MV::SharedTextures>()->file(entry.generic_string(), false)->makeHandle();
@@ -264,7 +264,7 @@ namespace Workbench {
 				auto label = makeLabel(row, *services, *theme, "caption", MV::size(rowWidth - iconSize - theme->pad * 2.0f, theme->rowHeight), entry.filename().string());
 				label->owner()->position(MV::point(iconSize + theme->pad, 0.0f));
 
-				auto rowClick = row->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(rowWidth, theme->rowHeight - 1.0f));
+				auto rowClick = row->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(rowWidth, theme->rowHeight));
 				wireEntryInteractions(rowClick, entry, isFolder, isPrefab);
 				++index;
 			}
@@ -272,7 +272,7 @@ namespace Workbench {
 			return;
 		}
 
-		float captionHeight = 14.0f * scale;
+		float captionHeight = 18.0f * scale;
 		float cellWidth = tileSize + 10.0f * scale;
 		float cellHeight = tileSize + captionHeight + 10.0f * scale;
 		float availableWidth = std::max(cellWidth, panelSize.width - treeWidth - theme->pad * 2.0f);
@@ -307,8 +307,8 @@ namespace Workbench {
 				glyphLabel->owner()->position(MV::point(0.0f, (tileSize - theme->rowHeight) * 0.5f));
 			}
 
-			auto caption = makeLabel(tile, *services, *theme, "caption", MV::size(cellWidth - 4.0f, captionHeight), entry.filename().string());
-			caption->owner()->position(MV::point(0.0f, tileSize + 2.0f));
+			auto caption = makeLabel(tile, *services, *theme, "caption", MV::size(cellWidth - theme->pad, captionHeight), entry.filename().string());
+			caption->owner()->position(MV::point(0.0f, tileSize + theme->px(2.0f)));
 			caption->justification(MV::TextJustification::CENTER);
 
 			auto tileClick = tile->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(tileSize, tileSize + captionHeight));

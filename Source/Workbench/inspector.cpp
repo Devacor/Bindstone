@@ -62,7 +62,7 @@ namespace Workbench {
 		float y = 0.0f;
 		auto node = inspectedNode.lock();
 		if (!node) {
-			makeLabel(contentNode, *services, *theme, "empty", MV::size(200.0f, theme->rowHeight), "Nothing selected");
+			makeLabel(contentNode, *services, *theme, "empty", MV::size(theme->px(200.0f), theme->rowHeight), "Nothing selected");
 			builtHeight = theme->rowHeight;
 			return;
 		}
@@ -83,10 +83,10 @@ namespace Workbench {
 		auto row = contentNode->make(MV::guid("header_"));
 		row->position(MV::point(0.0f, a_y));
 		row->attach<MV::Scene::Sprite>()->bounds(MV::size(panelWidth, theme->rowHeight))->color(theme->header());
-		auto triangle = makeLabel(row, *services, *theme, "fold", MV::size(14.0f, theme->rowHeight), expanded ? "v" : ">");
+		auto triangle = makeLabel(row, *services, *theme, "fold", MV::size(theme->px(14.0f), theme->rowHeight), expanded ? "v" : ">");
 		triangle->owner()->position(MV::point(theme->pad, 0.0f));
-		auto title = makeLabel(row, *services, *theme, "text", MV::size(panelWidth - 24.0f, theme->rowHeight), a_title);
-		title->owner()->position(MV::point(20.0f, 0.0f));
+		auto title = makeLabel(row, *services, *theme, "text", MV::size(panelWidth - theme->px(24.0f), theme->rowHeight), a_title);
+		title->owner()->position(MV::point(theme->px(20.0f), 0.0f));
 		auto& mouse = *services->get<MV::TapDevice>();
 		row->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(panelWidth, theme->rowHeight))->onAccept.connect("toggle", [this, a_key](const std::shared_ptr<MV::Scene::Clickable>&) {
 			bool nowCollapsed = collapsedSections.count(a_key) ? !collapsedSections[a_key] : true;
@@ -96,12 +96,12 @@ namespace Workbench {
 		if (a_gizmoComponent && onEditComponent && GizmoLayer::supports(a_gizmoComponent)) {
 			bool active = componentGizmoActive && componentGizmoActive(a_gizmoComponent);
 			float buttonWidth = theme->rowHeight * 1.5f;
-			auto gizmoButton = makeButton(row, *services, *theme, "gizmo", MV::size(buttonWidth, theme->rowHeight - 4.0f), active ? "[G]" : "G", [this, a_gizmoComponent]() {
+			auto gizmoButton = makeButton(row, *services, *theme, "gizmo", MV::size(buttonWidth, theme->rowHeight - theme->px(4.0f)), active ? "[G]" : "G", [this, a_gizmoComponent]() {
 				onEditComponent(a_gizmoComponent);
 			});
-			gizmoButton->owner()->position(MV::point(panelWidth - buttonWidth - theme->pad, 2.0f));
+			gizmoButton->owner()->position(MV::point(panelWidth - buttonWidth - theme->pad, theme->px(2.0f)));
 		}
-		a_y += theme->rowHeight + 2.0f;
+		a_y += theme->rowHeight + theme->px(2.0f);
 		return expanded;
 	}
 
@@ -109,7 +109,7 @@ namespace Workbench {
 		auto row = contentNode->make(MV::guid("row_"));
 		row->position(MV::point(0.0f, a_y));
 		makeLabel(row, *services, *theme, "label", MV::size(labelWidth(), theme->fieldHeight), a_label);
-		a_y += theme->fieldHeight + 3.0f;
+		a_y += theme->fieldHeight + theme->px(4.0f);
 		return row;
 	}
 

@@ -20,6 +20,7 @@ static jai::registrar<Workbench::ScriptPanel, MV::Services> _hookWorkbenchPanel(
 	builder.method("fieldHeight", &ScriptPanel::fieldHeight);
 	builder.method("pad", &ScriptPanel::pad);
 	builder.method("labelWidth", &ScriptPanel::labelWidth);
+	builder.method("px", &ScriptPanel::px);
 	builder.method("reportHeight", &ScriptPanel::reportHeight);
 	builder.method("place", &ScriptPanel::place);
 
@@ -110,7 +111,7 @@ namespace Workbench {
 			focus->cancel();
 		}
 		contentNode->clear();
-		makeLabel(contentNode, *services, *theme, "error", MV::size(std::max(120.0f, panelSize.width), theme->rowHeight * 2.0f), "script error: " + a_message);
+		makeLabel(contentNode, *services, *theme, "error", MV::size(std::max(theme->px(120.0f), panelSize.width), theme->rowHeight * 2.0f), "script error: " + a_message);
 	}
 
 }

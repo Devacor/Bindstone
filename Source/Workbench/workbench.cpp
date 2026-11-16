@@ -209,17 +209,17 @@ namespace Workbench {
 		sizer->id("titleSizer");
 		sizer->bounds(MV::size(1600.0f, theme.titleBarHeight));
 		sizer->hide();
-		auto titleBg = bar->attach<MV::Scene::Sprite>()->id("titleBg")->bounds(MV::size(1600.0f, theme.titleBarHeight))->color(theme.header());
+		auto titleBg = bar->attach<MV::Scene::Sprite>()->id("titleBg")->bounds(MV::size(1600.0f, theme.titleBarHeight))->color(theme.windowBg());
 		titleBg->anchors().anchor(MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::point(1.0f, 1.0f))).parent(sizer.self());
 		auto title = bar->attach<MV::Scene::Text>(library, theme.titleFont);
-		title->bounds({ MV::point(10.0f, 0.0f), MV::size(400.0f, theme.titleBarHeight) });
-		title->justification(MV::TextJustification::LEFT)->wrapping(MV::TextWrapMethod::NONE, 400.0f)->minimumLineHeight(theme.titleBarHeight)->text("Bindstone Workbench");
+		title->bounds({ MV::point(theme.px(10.0f), 0.0f), MV::size(theme.px(220.0f), theme.titleBarHeight) });
+		title->justification(MV::TextJustification::LEFT)->wrapping(MV::TextWrapMethod::NONE, theme.px(220.0f))->minimumLineHeight(theme.titleBarHeight)->text("Bindstone Workbench");
 
 		// Scene-animation transport: pause/step/speed of the viewport's drawUpdate clock
 		// (particle, spine, and shader-time preview).
 		auto transport = bar->make("transport");
-		transport->position(MV::point(theme.titleBarHeight * 8.0f, theme.pad * 0.5f));
-		MV::Size<> transportSize(theme.titleButtonWidth * 1.4f, theme.titleBarHeight - theme.pad);
+		transport->position(MV::point(theme.px(240.0f), theme.pad));
+		MV::Size<> transportSize(theme.titleButtonWidth, theme.titleBarHeight - theme.pad * 2.0f);
 		auto pauseButton = makeButton(transport, managers.services, theme, "pause", transportSize, "||", nullptr);
 		std::weak_ptr<MV::Scene::Button> weakPause = pauseButton;
 		pauseButton->onAccept.connect("toggle", [this, weakPause](const std::shared_ptr<MV::Scene::Clickable>&) {
@@ -233,13 +233,13 @@ namespace Workbench {
 				sceneStepQueued = true;
 			}
 		});
-		stepButton->owner()->position(MV::point(transportSize.width + 2.0f, 0.0f));
+		stepButton->owner()->position(MV::point(transportSize.width + theme.px(2.0f), 0.0f));
 		auto speedButton = makeCycleButton(transport, managers.services, theme, "speed", transportSize,
 			{ "1x", "2x", "4x", ".25x", ".5x" }, 0, [this](int a_index) {
 				static constexpr float speeds[] = { 1.0f, 2.0f, 4.0f, 0.25f, 0.5f };
 				sceneSpeed = speeds[a_index];
 			});
-		speedButton->owner()->position(MV::point((transportSize.width + 2.0f) * 2.0f, 0.0f));
+		speedButton->owner()->position(MV::point((transportSize.width + theme.px(2.0f)) * 2.0f, 0.0f));
 
 		auto buttons = bar->make("buttons");
 		MV::Size<> buttonSize(theme.titleButtonWidth, theme.titleBarHeight);

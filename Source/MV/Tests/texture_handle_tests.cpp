@@ -10,6 +10,7 @@
 #include <cmath>
 #include <memory>
 #include <string>
+#include <vector>
 
 using namespace jai::foundry;
 using MV::Scene::Node;
@@ -73,6 +74,33 @@ namespace mv_tests {
 				auto handle = texture->makeHandle()->rawPercent(MV::BoxAABB<>(MV::point(0.25f, 0.25f), MV::point(0.75f, 0.75f)));
 				checkNear(64.0f, handle->logicalSize().width, 1e-4f, "logicalSize scaled by contentSize");
 				checkNear(32.0f, handle->logicalSize().height, 1e-4f, "logicalSize scaled by contentSize");
+			});
+
+			// SDL_ttf hands back glyphs with padded rows; the upload takes the pixels as tight rows.
+			test("a surface with padded rows normalizes to tight rows, power-of-two and already in the engine's format included", [] {
+				const int width = 16, height = 32, paddedPitch = 128;
+				std::vector<uint32_t> padded(static_cast<size_t>(paddedPitch / 4) * height, 0xDEADBEEFu);
+				for (int y = 0; y < height; ++y) {
+					for (int x = 0; x < width; ++x) {
+						padded[static_cast<size_t>(y) * (paddedPitch / 4) + x] = 0xFF000000u | static_cast<uint32_t>(y << 8 | x);
+					}
+				}
+				for (bool powerOfTwo : { true, false }) {
+					auto source = MV::OwnedSurface::make(SDL_CreateRGBSurfaceWithFormatFrom(padded.data(), width, height, 32, paddedPitch, SDL_PIXELFORMAT_ABGR8888));
+					auto normalized = powerOfTwo ? MV::convertToPowerOfTwoSurface(source) : MV::convertToBGRSurface(source);
+					auto* surface = normalized->get();
+					check_eq(width * 4, surface->pitch, "normalized rows are tight");
+					check_eq(width, surface->w);
+					check_eq(height, surface->h);
+					bool pixelsMatch = true;
+					auto* pixels = static_cast<const uint32_t*>(surface->pixels);
+					for (int y = 0; y < height && pixelsMatch; ++y) {
+						for (int x = 0; x < width && pixelsMatch; ++x) {
+							pixelsMatch = pixels[y * width + x] == (0xFF000000u | static_cast<uint32_t>(y << 8 | x));
+						}
+					}
+					check_true(pixelsMatch, "every pixel keeps its place");
+				}
 			});
 		}
 	};

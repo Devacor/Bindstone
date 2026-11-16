@@ -85,9 +85,14 @@ namespace MV {
 		}
 	}
 
+	// The upload reads a surface's pixels as tight rows; SDL_ttf pads the rows of the glyphs it renders.
+	static bool rowsArePadded(const SDL_Surface* a_surface) {
+		return a_surface->pitch != a_surface->w * a_surface->format->BytesPerPixel;
+	}
+
 	std::shared_ptr<OwnedSurface> convertToPowerOfTwoSurface(const std::shared_ptr<OwnedSurface>& a_img) {
 		static const auto FORMAT = SDL_PIXELFORMAT_ABGR8888;
-		if (a_img != nullptr && a_img->get() != nullptr && (!isPowerOfTwo(a_img->get()->w) || !isPowerOfTwo(a_img->get()->h) || a_img->get()->format->format != FORMAT)) {
+		if (a_img != nullptr && a_img->get() != nullptr && (!isPowerOfTwo(a_img->get()->w) || !isPowerOfTwo(a_img->get()->h) || a_img->get()->format->format != FORMAT || rowsArePadded(a_img->get()))) {
 			int widthPowerOfTwo = roundUpPowerOfTwo(a_img->get()->w);
 			int heightPowerOfTwo = roundUpPowerOfTwo(a_img->get()->h);
 			int bpp;
@@ -105,7 +110,7 @@ namespace MV {
 
 	std::shared_ptr<OwnedSurface> convertToBGRSurface(const std::shared_ptr<OwnedSurface>& a_img) {
 		static const auto FORMAT = SDL_PIXELFORMAT_ABGR8888;
-		if (a_img != nullptr && a_img->get() != nullptr && a_img->get()->format->format != FORMAT) {
+		if (a_img != nullptr && a_img->get() != nullptr && (a_img->get()->format->format != FORMAT || rowsArePadded(a_img->get()))) {
 			int bpp;
 			Uint32 Rmask, Gmask, Bmask, Amask;
 			SDL_PixelFormatEnumToMasks(FORMAT, &bpp, &Rmask, &Gmask, &Bmask, &Amask);

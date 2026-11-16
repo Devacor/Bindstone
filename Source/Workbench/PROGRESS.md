@@ -413,8 +413,9 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   `#383838` button, `#0070e0` accent).
 - The editor opens maximized; the smoke modes open at 1600x900 logical pixels on any display (the world is sized
   before the window, since the window's resize rebuilds the projection from it).
-- The title uses the label font. OPEN (engine): Verdana at 26 px drew the letters whose glyph image is 16x32
-  (n, d, o, k, b, h) at half height; the cause in MV's text path is not found.
+- The title uses the label font. The 26 px title font drew the letters whose glyph image is 16x32 (n, d, o, k, b,
+  h) garbled: SDL_ttf pads its glyphs' rows, and a surface already power-of-two and in the engine's format skipped
+  the copy that makes rows tight. Fixed in MV (`convertToPowerOfTwoSurface` / `convertToBGRSurface`).
 - Still missing against Unreal: row icons, softer label colour (Text has no colour API), input outlines, hover states.
 
 ## Known gaps (next increments)

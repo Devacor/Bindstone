@@ -9,6 +9,8 @@
 #include "sceneTreePanel.h"
 #include "inspector.h"
 #include "menu.h"
+#include "sceneGrid.h"
+#include "sceneToolbar.h"
 #include "MV/Render/Scene/parallax.h"
 
 namespace Workbench {
@@ -44,9 +46,13 @@ namespace Workbench {
 		DockRect viewport() const { return dock->viewportRect(); }
 
 		// The transform handles on the selection: Q select, W move, E rotate, R scale.
-		void gizmoTool(Tool a_tool) { gizmos->tool(a_tool); }
+		void gizmoTool(Tool a_tool);
 		Tool gizmoTool() const { return gizmos->tool(); }
 		GizmoLayer& gizmoLayer() { return *gizmos; }
+		SceneToolbar& sceneTools() { return *sceneToolbar; }
+		SceneGrid& grid() { return *sceneGrid; }
+		MenuBar& menus() { return *menuBar; }
+		const std::string& document() const { return documentPath; }
 
 		// Displaces the Parallax layers on the selected node and below it as a run would, until the selection changes.
 		// A save writes the layers at rest either way.
@@ -93,6 +99,8 @@ namespace Workbench {
 
 		std::shared_ptr<MV::Scene::Node> gizmoOverlay;
 		std::unique_ptr<GizmoLayer> gizmos;
+		std::unique_ptr<SceneGrid> sceneGrid;
+		std::unique_ptr<SceneToolbar> sceneToolbar;
 		std::shared_ptr<MV::Scene::Node> selectedNode;
 		std::vector<std::weak_ptr<MV::Scene::Parallax>> previewedParallax;
 

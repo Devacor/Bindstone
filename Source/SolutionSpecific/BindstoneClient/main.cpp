@@ -676,6 +676,44 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 	};
 	checkTransformGizmos();
 
+	// Scene toolbar and menu bar, pressed on the simulated mouse
+	{
+		auto& mouse = *a_managers.services.get<MV::TapDevice>();
+		auto click = [&](const MV::Point<int>& a_at) {
+			for (bool down : { false, true, false }) {
+				mouse.simulate(a_at, down);
+				a_app.runFrames(2);
+			}
+			mouse.stopSimulating();
+		};
+		auto selectedBefore = a_app.selected();
+		click(a_app.sceneTools().buttonScreenPoint(2));
+		expect(a_app.gizmoTool() == Workbench::Tool::ROTATE, "the toolbar's rotate button picks the rotate tool");
+		click(a_app.sceneTools().buttonScreenPoint(1));
+		expect(a_app.gizmoTool() == Workbench::Tool::MOVE, "the toolbar's move button picks the move tool");
+		expect(a_app.selected() == selectedBefore, "a press on the toolbar does not pick in the scene behind it");
+		click(a_app.sceneTools().buttonScreenPoint(4));
+		expect(a_app.gizmoLayer().snapAlways, "the magnet turns snapping on");
+		click(a_app.sceneTools().buttonScreenPoint(4));
+		expect(!a_app.gizmoLayer().snapAlways, "the magnet turns snapping off again");
+		bool gridShown = a_app.grid().visible();
+		click(a_app.sceneTools().buttonScreenPoint(5));
+		expect(a_app.grid().visible() != gridShown, "the grid button toggles the grid");
+		click(a_app.sceneTools().buttonScreenPoint(5));
+
+		click(a_app.menus().titleScreenPoint(0));
+		expect(a_app.menus().isOpen(), "a press on File opens its menu");
+		SDL_Event escape{};
+		escape.type = SDL_KEYDOWN;
+		escape.key.keysym.sym = SDLK_ESCAPE;
+		SDL_PushEvent(&escape);
+		a_app.runFrames(2);
+		expect(!a_app.menus().isOpen(), "Escape closes the menu");
+		click(a_app.menus().titleScreenPoint(0));
+		click(a_app.menus().rowScreenPoint(0));
+		expect(!a_app.menus().isOpen() && a_app.scene()->empty() && a_app.document().empty(), "File > New Scene from the menu leaves an empty, untitled scene");
+	}
+
 	// Parallax: at rest while editing, displaced only by the preview, saved at rest either way
 	expect(a_app.loadScene("Scenes/map.scene"), "the map loads");
 	std::shared_ptr<MV::Scene::Parallax> layer;

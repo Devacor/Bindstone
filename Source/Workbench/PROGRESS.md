@@ -464,6 +464,19 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Every docked panel has a scrollbar thumb when its content overflows (drag or wheel), and lays out beside a
   10 px gutter. The Project footer is a status bar across the whole panel; tiles spread across the width.
 
+### Increment 21 (Scene toolbar, grid) - LANDED, gated
+- A toolbar along the top of the Scene view (`sceneToolbar.h/.cpp`): select, move, rotate, scale | snap, grid |
+  frame selected. It reports presses; `App` owns the state, so Q/W/E/R and the buttons always agree. Presses on it
+  do not pan or pick in the scene behind.
+- The magnet sets `GizmoLayer::snapAlways`: gestures snap without Ctrl, and Ctrl then lifts the snap for a gesture.
+- `SceneGrid` (`sceneGrid.h/.cpp`): lines behind the scene at the move snap step, widening by tens as the camera
+  zooms out, every tenth brighter, the two axes tinted. One pixel wide at any zoom (an unscaled node laid out from
+  the camera).
+- Icons are drawn, not typed (`icons.h/.cpp`: supersampled shapes at the theme's scale, `IconButton`).
+- The inspector follows a gizmo drag as it happens (`GizmoLayer::onEditing`).
+- The self-test presses the toolbar buttons and the File menu on the simulated mouse (`TapDevice::simulate`).
+- No perspective/orthographic switch: the scene camera is 2D only.
+
 ## Known gaps (next increments)
 - Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.

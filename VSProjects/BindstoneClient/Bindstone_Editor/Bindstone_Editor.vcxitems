@@ -30,6 +30,9 @@
     <ClCompile Include="$(SolutionDir)Source\Workbench\gizmos.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\menu.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\fileDialog.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Workbench\icons.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Workbench\sceneGrid.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Workbench\sceneToolbar.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Game\gameEditor.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -56,5 +59,8 @@
     <ClInclude Include="$(SolutionDir)Source\Workbench\gizmos.h" />
     <ClInclude Include="$(SolutionDir)Source\Workbench\menu.h" />
     <ClInclude Include="$(SolutionDir)Source\Workbench\fileDialog.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\icons.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\sceneGrid.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\sceneToolbar.h" />
   </ItemGroup>
 </Project>

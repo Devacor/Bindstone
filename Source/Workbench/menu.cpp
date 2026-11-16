@@ -37,6 +37,7 @@ namespace Workbench {
 		MV::Size<> titleSize(menu.width, theme.titleBarHeight - theme.pad * 2.0f);
 		auto titleNode = barHost->make(MV::guid("menuTitle_"));
 		titleNode->position(MV::point(menu.x, theme.pad));
+		menu.titleNode = titleNode;
 		menu.highlight = attachRoundedRect(titleNode, services, theme, titleSize, theme.buttonIdle());
 		menu.highlight->hide();
 		auto label = makeLabel(titleNode, services, theme, "label", titleSize, a_title);
@@ -63,6 +64,7 @@ namespace Workbench {
 		hoveredRow = -1;
 		rowHighlights.clear();
 		rowTops.clear();
+		rowNodes.clear();
 		if (popup) {
 			popup->removeFromParent();
 			popup.reset();
@@ -118,6 +120,7 @@ namespace Workbench {
 			highlight->hide();
 			rowHighlights.push_back(highlight);
 			rowTops.push_back(y);
+			rowNodes.push_back(row);
 
 			auto label = makeLabel(row, services, theme, "label", MV::size(rowWidth - textInset * 2.0f, rowSize.height), item.label);
 			label->owner()->position(MV::point(textInset, 0.0f));
@@ -181,6 +184,14 @@ namespace Workbench {
 			}
 		}
 		hoverRow(row);
+	}
+
+	MV::Point<int> MenuBar::titleScreenPoint(int a_menu) const {
+		return menus[static_cast<size_t>(a_menu)].titleNode->screenBounds().centerPoint();
+	}
+
+	MV::Point<int> MenuBar::rowScreenPoint(int a_row) const {
+		return rowNodes[static_cast<size_t>(a_row)]->screenBounds().centerPoint();
 	}
 
 	void MenuBar::handleInput(SDL_Event& a_event) {

@@ -31,11 +31,16 @@ namespace Workbench {
 		void close();
 		void handleInput(SDL_Event& a_event);
 
+		// Centres on screen of a menu's title and of a row of the open menu.
+		MV::Point<int> titleScreenPoint(int a_menu) const;
+		MV::Point<int> rowScreenPoint(int a_row) const;
+
 	private:
 		struct Menu {
 			std::string title;
 			std::vector<MenuItem> items;
 			std::shared_ptr<MV::Scene::Sprite> highlight;
+			std::shared_ptr<MV::Scene::Node> titleNode;
 			float x = 0.0f;
 			float width = 0.0f;
 		};
@@ -60,6 +65,7 @@ namespace Workbench {
 		MV::Size<> popupSize;
 		std::vector<std::shared_ptr<MV::Scene::Sprite>> rowHighlights;
 		std::vector<float> rowTops;
+		std::vector<std::shared_ptr<MV::Scene::Node>> rowNodes;
 		int hoveredRow = -1;
 		MV::TapDevice::SignalType hoverReceiver;
 	};

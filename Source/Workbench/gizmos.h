@@ -43,6 +43,8 @@ namespace Workbench {
 		Tool tool() const { return activeTool; }
 
 		GizmoSnapSteps snapSteps;
+		// Snapping on without Ctrl (the toolbar's magnet); Ctrl then turns it off for a gesture.
+		bool snapAlways = false;
 
 		// One whole gesture on the selected node, as a handle drag applies it: the same begin, apply and end,
 		// so one undo command. The move is in the node's parent space; false when nothing is selected or a drag is running.

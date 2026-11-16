@@ -32,6 +32,8 @@ namespace Workbench {
 		viewportClip = visor->make("viewportClip");
 		viewportStencil = viewportClip->attach<MV::Scene::Stencil>();
 		viewportStencil->id("sceneClip");
+		// made before the camera, so it draws behind the scene
+		sceneGrid = std::make_unique<SceneGrid>(viewportClip->make("sceneGrid"), theme);
 		viewCamera = viewportClip->make("viewCamera");
 		sceneRoot = viewCamera->make("root");
 		// Sibling after the camera: draws above the scene, stencil-clipped, never serialized, and
@@ -113,6 +115,27 @@ namespace Workbench {
 		Panel* projectPanel = dock->registerPanel(std::move(project));
 
 		menuPanels = { treePanel, filePanel, viewportPanel, projectPanel, inspectorPanel };
+
+		SceneToolbar::Actions toolbarActions;
+		toolbarActions.onTool = [this](int a_toolIndex) { gizmoTool(static_cast<Tool>(a_toolIndex)); };
+		toolbarActions.onSnapToggle = [this]() {
+			gizmos->snapAlways = !gizmos->snapAlways;
+			sceneToolbar->snap(gizmos->snapAlways);
+		};
+		toolbarActions.onGridToggle = [this]() {
+			sceneGrid->visible(!sceneGrid->visible());
+			sceneToolbar->grid(sceneGrid->visible());
+		};
+		toolbarActions.onFrame = [this]() { frameSelectionInViewport(); };
+		sceneToolbar = std::make_unique<SceneToolbar>(uiRoot->make("sceneToolbar"), managers.services, theme, toolbarActions);
+		sceneToolbar->tool(static_cast<int>(gizmos->tool()));
+		sceneToolbar->grid(sceneGrid->visible());
+		sceneGrid->spacing(gizmos->snapSteps.move);
+		gizmos->onEditing = [this]() {
+			if (inspectorPanel) {
+				inspectorPanel->inspect(selectedNode);
+			}
+		};
 		dock->root(DockSpace::split(false, 0.18f,
 			DockSpace::leaf({ treePanel, filePanel }),
 			DockSpace::split(false, 0.72f,
@@ -133,8 +156,19 @@ namespace Workbench {
 		}
 	}
 
+	void App::gizmoTool(Tool a_tool) {
+		gizmos->tool(a_tool);
+		if (sceneToolbar) {
+			sceneToolbar->tool(static_cast<int>(gizmos->tool()));
+		}
+	}
+
 	void App::beginPan(PanButton a_button, const MV::Point<int>& a_screenPoint) {
-		if (panButton == PanButton::NONE && dock->viewportAt(managers.renderer.worldFromScreen(a_screenPoint))) {
+		auto worldPoint = managers.renderer.worldFromScreen(a_screenPoint);
+		if (sceneToolbar && sceneToolbar->contains(worldPoint)) {
+			return;
+		}
+		if (panButton == PanButton::NONE && dock->viewportAt(worldPoint)) {
 			panButton = a_button;
 			panMoved = false;
 			panStart = a_screenPoint;
@@ -538,6 +572,8 @@ namespace Workbench {
 		if (view.size.width <= 0.0f || view.size.height <= 0.0f) {
 			return;
 		}
+		sceneToolbar->position(MV::point(view.position.x + theme.px(8.0f), view.position.y + theme.px(8.0f)));
+		sceneGrid->update(viewCamera->position(), viewCamera->scale().x, MV::BoxAABB<>(view.position, view.size));
 		if (view.position.x != lastViewportRect.position.x || view.position.y != lastViewportRect.position.y ||
 			view.size.width != lastViewportRect.size.width || view.size.height != lastViewportRect.size.height) {
 			lastViewportRect = view;

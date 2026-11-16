@@ -106,6 +106,8 @@ namespace Workbench {
 		inspectorPanel->componentGizmoActive = [this](const std::shared_ptr<MV::Scene::Component>& a_component) {
 			return gizmos->editedComponent() == a_component;
 		};
+		inspectorPanel->onParallaxPreview = [this](bool a_preview) { parallaxPreview(a_preview); };
+		inspectorPanel->parallaxPreviewActive = [this]() { return parallaxPreviewing(); };
 		Panel* viewportPanel = dock->registerPanel(std::move(viewport));
 		Panel* filePanel = dock->registerPanel(std::move(file));
 		Panel* projectPanel = dock->registerPanel(std::move(project));
@@ -181,6 +183,7 @@ namespace Workbench {
 			sceneRoot->add(prefab);
 			prefab->position(dropPosition);
 			prefab->postLoadStep();
+			forEachParallax(prefab, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
 			history.record("place " + a_fileName,
 				[scene, prefab, dropPosition]() {
 					scene->add(prefab);
@@ -272,7 +275,36 @@ namespace Workbench {
 		}
 	}
 
+	void App::forEachParallax(const std::shared_ptr<MV::Scene::Node>& a_node, const std::function<void(const std::shared_ptr<MV::Scene::Parallax>&)>& a_visit) {
+		if (auto parallax = a_node->component<MV::Scene::Parallax>(true, false)) {
+			a_visit(parallax.self());
+		}
+		for (auto&& child : *a_node) {
+			forEachParallax(child, a_visit);
+		}
+	}
+
+	void App::parallaxPreview(bool a_preview) {
+		for (auto&& weakParallax : previewedParallax) {
+			if (auto parallax = weakParallax.lock()) {
+				parallax->authoringPreview(false);
+			}
+		}
+		previewedParallax.clear();
+		if (a_preview && selectedNode) {
+			forEachParallax(selectedNode, [this](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) {
+				if (a_parallax->enabled()) {
+					a_parallax->authoringPreview(true);
+					previewedParallax.push_back(a_parallax);
+				}
+			});
+		}
+	}
+
 	void App::select(const std::shared_ptr<MV::Scene::Node>& a_node) {
+		if (a_node != selectedNode) {
+			parallaxPreview(false);
+		}
 		selectedNode = a_node;
 		gizmos->select(a_node);
 		if (treePanel) {
@@ -304,6 +336,7 @@ namespace Workbench {
 			sceneRoot = newRoot;
 			viewCamera->add(sceneRoot);
 			sceneRoot->postLoadStep();
+			forEachParallax(sceneRoot, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
 			if (treePanel) {
 				treePanel->refresh();
 			}
@@ -317,15 +350,26 @@ namespace Workbench {
 	}
 
 	bool App::saveScene(const std::string& a_fileName) {
+		// a previewed layer is displaced: it goes back to rest for the write
+		auto previewLayers = [this](bool a_preview) {
+			for (auto&& weakParallax : previewedParallax) {
+				if (auto parallax = weakParallax.lock()) {
+					parallax->authoringPreview(a_preview);
+				}
+			}
+		};
+		bool result = true;
+		previewLayers(false);
 		try {
 			auto assetPath = assetFile(a_fileName);
 			sceneRoot->saveJai(assetPath, managers.services, false);
 			std::cout << "Workbench saved: " << assetPath << std::endl;
-			return true;
 		} catch (const std::exception& a_error) {
 			reportError("save failed (" + a_fileName + "): " + a_error.what());
-			return false;
+			result = false;
 		}
+		previewLayers(true);
+		return result;
 	}
 
 	void App::frameScene(const DockRect& a_view) {

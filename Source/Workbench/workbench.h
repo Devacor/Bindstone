@@ -8,6 +8,7 @@
 #include "gizmos.h"
 #include "sceneTreePanel.h"
 #include "inspector.h"
+#include "MV/Render/Scene/parallax.h"
 
 namespace Workbench {
 
@@ -32,6 +33,11 @@ namespace Workbench {
 		// Fits the whole scene in the viewport (next laid-out frame).
 		void frameSceneInViewport() { sceneFramePending = true; }
 
+		// Displaces the Parallax layers on the selected node and below it as a run would, until the selection changes.
+		// A save writes the layers at rest either way.
+		void parallaxPreview(bool a_preview);
+		bool parallaxPreviewing() const { return !previewedParallax.empty(); }
+
 		// Every failure the editor survives is counted; the smoke modes exit nonzero on any.
 		void reportError(const std::string& a_message);
 		int errors() const { return errorCount; }
@@ -48,6 +54,7 @@ namespace Workbench {
 		void pickSceneNode(const MV::Point<int>& a_screenPoint);
 		bool inScene(const std::shared_ptr<MV::Scene::Node>& a_node) const;
 		static std::string assetFile(const std::string& a_fileName);
+		static void forEachParallax(const std::shared_ptr<MV::Scene::Node>& a_node, const std::function<void(const std::shared_ptr<MV::Scene::Parallax>&)>& a_visit);
 		void frameScene(const DockRect& a_view);
 		template <typename Step>
 		void guarded(const char* a_stage, Step&& a_step);
@@ -70,6 +77,7 @@ namespace Workbench {
 		std::shared_ptr<MV::Scene::Node> gizmoOverlay;
 		std::unique_ptr<GizmoLayer> gizmos;
 		std::shared_ptr<MV::Scene::Node> selectedNode;
+		std::vector<std::weak_ptr<MV::Scene::Parallax>> previewedParallax;
 
 		std::unique_ptr<DockSpace> dock;
 		SceneTreePanel* treePanel = nullptr;

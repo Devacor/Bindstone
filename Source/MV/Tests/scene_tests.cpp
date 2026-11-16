@@ -9,6 +9,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include "MV/Render/render.h"
 #include "MV/Render/Scene/node.h"
+#include "MV/Render/Scene/parallax.h"
 
 #include <random>
 #include <cstring>
@@ -119,6 +120,46 @@ public:
                 c->localTransform());
             check(sameMatrix(manual, c->worldTransform()),
                   "worldTransform diverged from the manual ancestor-chain product");
+        });
+
+        test("Parallax authoring rests at localOffset, follows a moved node and previews without changing the rest", [] {
+            Draw2D r; r.makeHeadless();
+            auto root = Node::make(r, "root");
+            auto container = root->make("container");
+            auto layer = container->make("layer");
+            auto parallax = layer->attach<MV::Scene::Parallax>().self();
+            const Point<> rest(10.0f, 20.0f, 0.0f);
+            parallax->translateRatio(Point<>(0.5f, 0.5f, 0.0f))->localOffset(rest)->zoomRatio(Point<>(0.5f, 0.5f, 1.0f))->enable();
+            container->position(Point<>(100.0f, 40.0f, 0.0f));
+            container->scale(Scale(4.0f, 4.0f, 1.0f));
+            root->update(0.016);
+            check(!(layer->position() == rest), "a running layer is displaced when its parent has moved");
+            check(!(layer->scale() == Scale(1.0f, 1.0f, 1.0f)), "a running layer takes its share of the parent's zoom");
+
+            layer->scale(Scale(1.0f, 1.0f, 1.0f));
+            parallax->authoring(true);
+            root->update(0.016);
+            check(layer->position() == rest, "an authored layer rests at localOffset");
+            container->position(Point<>(-300.0f, 80.0f, 0.0f));
+            root->update(0.016);
+            check(layer->position() == rest, "an authored layer holds still when its parent moves");
+            check(layer->scale() == Scale(1.0f, 1.0f, 1.0f), "an authored layer keeps its scale");
+
+            const Point<> moved(15.0f, 25.0f, 0.0f);
+            layer->position(moved);
+            root->update(0.016);
+            check(parallax->localOffset() == moved, "moving an authored layer carries localOffset with it");
+
+            parallax->authoringPreview(true);
+            root->update(0.016);
+            check(!(layer->position() == moved), "the preview displaces the layer");
+            check(!(layer->scale() == Scale(1.0f, 1.0f, 1.0f)), "the preview zooms the layer");
+            check(parallax->localOffset() == moved, "the preview leaves localOffset alone");
+            parallax->authoringPreview(false);
+            check(layer->position() == moved, "ending the preview puts the layer back at rest");
+            check(layer->scale() == Scale(1.0f, 1.0f, 1.0f), "ending the preview restores the authored scale");
+            root->update(0.016);
+            check(parallax->localOffset() == moved && layer->position() == moved, "the rest survives the next update");
         });
     }
 };

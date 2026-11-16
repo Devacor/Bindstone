@@ -490,6 +490,61 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 	expect(!a_app.selected(), "undo deselects a node that left the scene");
 	pressWithControl(SDLK_y);
 	expect(childCount() == countBeforeDrop + 1, "redo places the BindSnap again");
+
+	// Parallax: at rest while editing, displaced only by the preview, saved at rest either way
+	expect(a_app.loadScene("Scenes/map.scene"), "the map loads");
+	std::shared_ptr<MV::Scene::Parallax> layer;
+	std::function<void(const std::shared_ptr<MV::Scene::Node>&)> findLayer = [&](const std::shared_ptr<MV::Scene::Node>& a_node) {
+		auto parallax = a_node->component<MV::Scene::Parallax>(true, false);
+		if (!layer && parallax && parallax->enabled() && parallax->translateRatio().x != 1.0f && !a_node->id().empty()) {
+			layer = parallax.self();
+		}
+		for (auto&& child : *a_node) {
+			findLayer(child);
+		}
+	};
+	findLayer(a_app.scene());
+	expect(layer != nullptr, "the map has an enabled Parallax layer");
+	if (!layer) {
+		return;
+	}
+	auto layerNode = layer->owner();
+	auto layerRest = layer->localOffset();
+	a_app.runFrames(10);
+	expect(sameXY(layerNode->position(), layerRest) && sameXY(layer->localOffset(), layerRest), "a Parallax layer rests at its localOffset while the camera frames the map");
+	a_app.select(layerNode->parent());
+	a_app.parallaxPreview(true);
+	a_app.runFrames(5);
+	expect(a_app.parallaxPreviewing() && !sameXY(layerNode->position(), layerRest), "the preview displaces the layer");
+	expect(sameXY(layer->localOffset(), layerRest), "the preview leaves localOffset alone");
+
+	auto savedMap = (std::filesystem::temp_directory_path() / "workbench_selftest_map.scene").string();
+	expect(a_app.saveScene(savedMap), "the map saves during a preview");
+	try {
+		auto saved = MV::Scene::Node::load(savedMap, a_managers.services, false);
+		std::shared_ptr<MV::Scene::Node> savedLayer;
+		std::function<void(const std::shared_ptr<MV::Scene::Node>&)> findSaved = [&](const std::shared_ptr<MV::Scene::Node>& a_node) {
+			if (!savedLayer && a_node->id() == layerNode->id() && a_node->component<MV::Scene::Parallax>(true, false)) {
+				savedLayer = a_node;
+			}
+			for (auto&& child : *a_node) {
+				findSaved(child);
+			}
+		};
+		findSaved(saved);
+		expect(savedLayer != nullptr, "the saved map still has the layer");
+		if (savedLayer) {
+			expect(sameXY(savedLayer->position(), layerRest), "a save during a preview writes the layer at rest");
+			expect(sameXY(savedLayer->component<MV::Scene::Parallax>()->localOffset(), layerRest), "the saved localOffset is the authored one");
+		}
+	} catch (const std::exception& a_error) {
+		expect(false, std::string("the saved map loads back: ") + a_error.what());
+	}
+	std::filesystem::remove(savedMap, ignored);
+	a_app.runFrames(3);
+	expect(!sameXY(layerNode->position(), layerRest), "the preview resumes after the save");
+	a_app.select(nullptr);
+	expect(!a_app.parallaxPreviewing() && sameXY(layerNode->position(), layerRest), "deselecting ends the preview and puts the layer back at rest");
 }
 
 static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", bool a_loadDefaultScene = false, bool a_selectForGizmo = false, bool a_selfTest = false) {

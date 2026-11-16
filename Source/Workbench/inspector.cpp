@@ -113,6 +113,20 @@ namespace Workbench {
 		return row;
 	}
 
+	namespace {
+		bool hasEnabledParallax(const std::shared_ptr<MV::Scene::Node>& a_node) {
+			if (auto parallax = a_node->component<MV::Scene::Parallax>(true, false); parallax && parallax->enabled()) {
+				return true;
+			}
+			for (auto&& child : *a_node) {
+				if (hasEnabledParallax(child)) {
+					return true;
+				}
+			}
+			return false;
+		}
+	}
+
 	void InspectorPanel::buildNodeSection(float& a_y) {
 		auto node = inspectedNode.lock();
 		std::weak_ptr<MV::Scene::Node> weakNode = node;
@@ -192,6 +206,16 @@ namespace Workbench {
 		scrubAt("depth", node->depth(), [weakNode](float a_value) {
 			if (auto locked = weakNode.lock()) { locked->depth(a_value); }
 		});
+
+		if (onParallaxPreview && hasEnabledParallax(node)) {
+			auto row = makeRow("parallax", a_y);
+			auto fieldHost = row->make("field");
+			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
+			bool previewing = parallaxPreviewActive && parallaxPreviewActive();
+			makeCycleButton(fieldHost, *services, *theme, "value", MV::size(fieldWidth(), theme->fieldHeight), { "rest", "preview" }, previewing ? 1 : 0, [this](int a_index) {
+				onParallaxPreview(a_index == 1);
+			});
+		}
 	}
 
 	void InspectorPanel::buildComponentSection(const std::shared_ptr<MV::Scene::Component>& a_component, float& a_y) {

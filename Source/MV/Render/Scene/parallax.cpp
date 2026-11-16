@@ -73,7 +73,52 @@ namespace MV {
 			needsUpdate = true;
 		}
 
+		std::shared_ptr<Parallax> Parallax::authoring(bool a_authoring) {
+			if (isAuthoring != a_authoring) {
+				if (isAuthoring && isPreviewing) {
+					rest();
+				}
+				isAuthoring = a_authoring;
+				isPreviewing = false;
+				restingAtLocalOffset = false;
+				needsUpdate = true;
+			}
+			return std::static_pointer_cast<Parallax>(shared_from_this());
+		}
+
+		std::shared_ptr<Parallax> Parallax::authoringPreview(bool a_preview) {
+			if (isAuthoring && isPreviewing != a_preview) {
+				isPreviewing = a_preview;
+				needsUpdate = true;
+				if (!isPreviewing) {
+					rest();
+				}
+			}
+			return std::static_pointer_cast<Parallax>(shared_from_this());
+		}
+
+		void Parallax::rest() {
+			if (isEnabled && owner()) {
+				owner()->position(*ourLocalOffset);
+				if (authoredScaleKnown) {
+					owner()->scale(authoredScale);
+					authoredScaleKnown = false;
+				}
+				restingAtLocalOffset = true;
+			}
+		}
+
 		void Parallax::updateImplementation(double) {
+			if (isAuthoring && !isPreviewing) {
+				if (isEnabled && owner()) {
+					if (!restingAtLocalOffset) {
+						rest();
+					} else if (!(owner()->position() == *ourLocalOffset)) {
+						ourLocalOffset = owner()->position();
+					}
+				}
+				return;
+			}
 			if (needsUpdate && isEnabled && owner()) {
 				if (auto ownerParent = owner()->parent()) {
 					needsUpdate = false;

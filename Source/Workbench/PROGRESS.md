@@ -398,7 +398,10 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - The smoke modes count load failures, script errors and caught frame-loop exceptions and exit nonzero on any;
   `-workbenchselftest` drives load, select, save, BindSnap drop and undo/redo and checks each result.
   `Tools/Landing/client_gate.sh` runs `-workbenchsmoke`, `-workbenchselftest` and `-workbenchgizmoshot`.
-- OPEN: Parallax layers follow the editor camera, so a framed map.scene shows its layers spread apart.
+- Parallax (Dev ruling): the editor puts every Parallax it loads into authoring (`Parallax::authoring`): an enabled
+  layer rests at `localOffset` whatever the camera does, and a layer moved at rest carries `localOffset` with it. The
+  Node section's `parallax` button (rest / preview) displaces the layers on the selected node and below it as a run
+  would (`authoringPreview`); the preview ends when the selection changes, and a save writes the layers at rest.
 
 ## Known gaps (next increments)
 - Tab drag to empty space = no-op (floating windows next).

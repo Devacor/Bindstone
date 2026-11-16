@@ -23,6 +23,10 @@ namespace Workbench {
 		std::function<void(const std::shared_ptr<MV::Scene::Component>&)> onEditComponent;
 		std::function<bool(const std::shared_ptr<MV::Scene::Component>&)> componentGizmoActive;
 
+		// Parallax preview bridge: the row shows on a node that has an enabled Parallax layer on it or below it.
+		std::function<void(bool)> onParallaxPreview;
+		std::function<bool()> parallaxPreviewActive;
+
 		void resized(const MV::Size<>& a_size) override {
 			if (std::abs(a_size.width - panelWidth) > 0.5f) {
 				panelWidth = a_size.width;

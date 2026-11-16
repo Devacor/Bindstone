@@ -76,6 +76,19 @@ namespace MV {
 				return std::static_pointer_cast<Parallax>(shared_from_this());
 			}
 
+			// Authoring (an editor's mode, never saved): an enabled layer rests at localOffset with its authored scale
+			// whatever the camera does, and a node moved while it rests carries localOffset with it.
+			bool authoring() const {
+				return isAuthoring;
+			}
+			std::shared_ptr<Parallax> authoring(bool a_authoring);
+
+			// While authoring, the preview displaces the layer as a run would. Turning it off puts the layer back at rest.
+			bool authoringPreview() const {
+				return isAuthoring && isPreviewing;
+			}
+			std::shared_ptr<Parallax> authoringPreview(bool a_preview);
+
 		protected:
 			Parallax(const std::weak_ptr<Node> &a_owner);
 
@@ -113,6 +126,7 @@ namespace MV {
 			void updateImplementation(double a_delta) override;
 
 			Point<> absolutePosition() const;
+			void rest();
 
 			JAI_NAMED_PROPERTY((bool), "enabled", isEnabled, false);
 			bool needsUpdate = false;
@@ -123,6 +137,9 @@ namespace MV {
 			JAI_NAMED_PROPERTY((Point<>), "zoomRatio", ourZoomRatio, (Point<>(1.0f, 1.0f, 1.0f)));
 			Scale authoredScale;   // the node's own scale before zoom is applied on top of it
 			bool authoredScaleKnown = false;
+			bool isAuthoring = false;
+			bool isPreviewing = false;
+			bool restingAtLocalOffset = false;
 			JAI_DELETED_PROPERTY((int32_t), space);
 			Node::BasicReceiverType parentObserver;
 			Draw2D::CameraRecieveType cameraObserver;

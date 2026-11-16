@@ -418,6 +418,35 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   the copy that makes rows tight. Fixed in MV (`convertToPowerOfTwoSurface` / `convertToBGRSurface`).
 - Still missing against Unreal: row icons, softer label colour (Text has no colour API), input outlines, hover states.
 
+### Increment 19 (transform gizmos) - gated
+- Tools on Unity's keys, acting only when no text field has focus: Q select (no handles), W move (the default),
+  E rotate, R scale; `GizmoLayer::tool` / `App::gizmoTool` for a toolbar or menu. WASD no longer pans: the arrow
+  keys do, and so does a middle or right drag on the viewport (a left drag on empty space still pans, a click picks).
+- Move: a red X arrow and a green Y arrow along the parent's axes (Y points down, the scene's +Y) and a centre
+  square for a free move. Rotate: a ring about the pivot; the drag turns the node by the angle the cursor sweeps
+  in parent space, with the swept pie and its angle shown. Scale: square-ended handles along the node's own axes
+  and a centre square for both; one handle length of drag doubles the scale. The handle under the cursor and the
+  one being dragged turn yellow. Sizes are logical pixels through `Theme::px`.
+- Ctrl snaps the result, not the delta: position to multiples of 10 parent units, rotation to 15 degrees, scale
+  to 0.1 (`GizmoLayer::snapSteps`).
+- One undo command per gesture (`move`/`rotate`/`scale <id>`), rotation kept in radians so undo restores it
+  exactly. `onEditing` fires for each change a drag applies, `onEdited` at its end.
+- The handles hang off one node at the pivot: a drag moves that node with the target and never rebuilds the
+  Clickable being dragged. A Clickable hit-tests one box, so the ring's hit area is a fan of 32 boxes. Dropping the
+  handles cancels a press first, since a pressed Clickable keeps itself alive through its move receiver.
+- The selection outline is the node's bounds as four transformed corners, so it turns and scales with the node
+  and follows a drag.
+- A component gizmo that takes input (bounds, points, the PathMap painter) hides the transform handles until it
+  is switched off, as Unity's collider edit mode does; the passive highlight does not.
+- F fits the selection in the viewport (70% fill, zoom clamped to 0.05..20), or the whole scene when nothing is
+  selected; `App::frameNode` is the one fit both use. A frame request waits for one draw, because Parallax layers
+  settle to rest in the update a draw runs: a request made before the first frame measured them displaced.
+- `GizmoLayer::moveSelected` / `rotateSelected` / `scaleSelected` run a whole gesture through the begin, apply
+  and end a handle drag uses. `-workbenchselftest` checks each with its undo, then drags the real handles through
+  `TapDevice::simulate` (X arrow, Ctrl-snapped Y arrow, centre square, a quarter of the ring, the X scale handle),
+  pans with the middle and right buttons, presses Q/W/E/R/F and checks the framed bounds sit inside the viewport.
+- Not done: multi-selection, a local/global axis toggle for move, snapping settings in the UI, a live inspector
+  during a drag (`onEditing` is there to hook).
 ### Increment 20 (menu bar, readable inspector, control polish; Dev's annotated review) - LANDED, gated
 - Menu bar in the title bar (`menu.h/.cpp`): File (New Scene, Open..., Save, Save As..., Exit), Edit (Undo, Redo),
   Window (one entry per panel, brings its tab forward). Dropdowns have an outline, a drop shadow, row hover and
@@ -446,4 +475,4 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Bindstone_Common.vcxitems is shared with the Android client project — Workbench compiles
   there too; verify Android build when next touched.
 - Landed and no longer gaps: enum rows + Palette color picker + VectorRows (increment 4),
-  tree hover + drag-reparent (5), undo/redo (6), gizmos (13).
+  tree hover + drag-reparent (5), undo/redo (6), gizmos (13), move/rotate/scale tools and F framing (19).

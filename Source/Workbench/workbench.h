@@ -36,10 +36,17 @@ namespace Workbench {
 		// Left part of the title bar that takes presses (menus and transport); the rest drags the window.
 		float titleBarInteractiveWidth() const { return titleInteractiveWidth; }
 
-		// Pans the viewport so the selected node sits at its center (next laid-out frame).
-		void frameSelectionInViewport() { selectionFramePending = true; }
+		// Fits the selected node in the viewport, or the whole scene when nothing is selected (next laid-out frame).
+		void frameSelectionInViewport() { selectionFramePending = true; frameAwaitsDraw = true; }
 		// Fits the whole scene in the viewport (next laid-out frame).
-		void frameSceneInViewport() { sceneFramePending = true; }
+		void frameSceneInViewport() { sceneFramePending = true; frameAwaitsDraw = true; }
+		// The Scene panel's content rectangle in world coordinates; zero-size before the first layout.
+		DockRect viewport() const { return dock->viewportRect(); }
+
+		// The transform handles on the selection: Q select, W move, E rotate, R scale.
+		void gizmoTool(Tool a_tool) { gizmos->tool(a_tool); }
+		Tool gizmoTool() const { return gizmos->tool(); }
+		GizmoLayer& gizmoLayer() { return *gizmos; }
 
 		// Displaces the Parallax layers on the selected node and below it as a run would, until the selection changes.
 		// A save writes the layers at rest either way.
@@ -55,6 +62,7 @@ namespace Workbench {
 		void handleInput();
 		void render();
 		void updateCameraKeys(double a_dt);
+		bool handleShortcutKey(SDL_Keycode a_key);
 		void buildTitleBar();
 		void refreshTitle();
 		void layoutTitleBar(const MV::Size<>& a_worldSize);
@@ -64,7 +72,7 @@ namespace Workbench {
 		bool inScene(const std::shared_ptr<MV::Scene::Node>& a_node) const;
 		static std::string assetFile(const std::string& a_fileName);
 		static void forEachParallax(const std::shared_ptr<MV::Scene::Node>& a_node, const std::function<void(const std::shared_ptr<MV::Scene::Parallax>&)>& a_visit);
-		void frameScene(const DockRect& a_view);
+		void frameNode(const DockRect& a_view, const std::shared_ptr<MV::Scene::Node>& a_node, float a_fill, float a_maximumZoom);
 		template <typename Step>
 		void guarded(const char* a_stage, Step&& a_step);
 
@@ -110,17 +118,22 @@ namespace Workbench {
 
 		bool selectionFramePending = false;
 		bool sceneFramePending = false;
+		// A frame request waits for one draw: Parallax layers settle to rest in the update a draw runs.
+		bool frameAwaitsDraw = false;
 
 		int errorCount = 0;
 		std::string lastErrorMessage;
 
-		bool panning = false;
+		// A left drag on the empty viewport pans and a left click picks; a middle or right drag only pans.
+		enum class PanButton { NONE, LEFT, MIDDLE, RIGHT };
+		void beginPan(PanButton a_button, const MV::Point<int>& a_screenPoint);
+		void endPan(PanButton a_button, const MV::Point<int>& a_screenPoint);
+
+		PanButton panButton = PanButton::NONE;
 		bool panMoved = false;
 		MV::Point<int> panStart;
 		MV::Point<int> panLast;
-		MV::TapDevice::SignalType panDownReceiver;
-		MV::TapDevice::SignalType panMoveReceiver;
-		MV::TapDevice::SignalType panUpReceiver;
+		std::vector<MV::TapDevice::SignalType> panReceivers;
 
 		SDL_Cursor* cursorArrow = nullptr;
 		SDL_Cursor* cursorResizeH = nullptr;

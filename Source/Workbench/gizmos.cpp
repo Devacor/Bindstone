@@ -1,21 +1,46 @@
 #include "gizmos.h"
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdio>
+#include <utility>
 #include <vector>
 #include "MV/Utility/generalUtility.h"
 
 namespace Workbench {
 
 	namespace {
-		// Old-editor handle palette (editorDefines.h): translucent yellow move handle, amber corners.
-		const MV::Color moveHandleFill(0x44ffff00);
+		// Old-editor handle palette (editorDefines.h): amber corners.
 		const MV::Color sizeHandleFill(0x44ffb400);
 		const MV::Color pointHandleFill(1.0f, 0.0f, 1.0f, 0.25f);
 		const MV::Color highlightFill(0x11ffffff);
-		// Dock chrome Clickables sit at the default 100; +100 wins inside the viewport. The move
-		// handle sits above a bounds body, point handles between, so overlaps resolve smallest-first.
+		// Dock chrome Clickables sit at the default 100; +100 wins inside the viewport. The transform
+		// handles sit above a bounds body, point handles between, so overlaps resolve smallest-first.
 		constexpr int64_t bodyPriorityBoost = 100;
 		constexpr int64_t pointPriorityBoost = 105;
-		constexpr int64_t movePriorityBoost = 110;
+		constexpr int64_t axisPriorityBoost = 110;
+		constexpr int64_t centerPriorityBoost = 112;
+
+		const MV::Color axisXColor(0xe5412b);
+		const MV::Color axisYColor(0x7ed63a);
+		const MV::Color axisZColor(0x3a7bf8);
+		const MV::Color handleHighlightColor(0xf6e532);
+		const MV::Color centerHandleColor(0xe0e0e0);
+		const MV::Color sweepFill(0x55f6e532);
+		const MV::Color sweepLabelBackground(0xcc151515);
+
+		// logical pixels
+		constexpr float axisLength = 84.0f;
+		constexpr float axisThickness = 2.0f;
+		constexpr float axisHitThickness = 14.0f;
+		constexpr float arrowHeadLength = 16.0f;
+		constexpr float arrowHeadWidth = 11.0f;
+		constexpr float scaleEndSize = 11.0f;
+		constexpr float centerHandleSize = 12.0f;
+		constexpr float pivotDotSize = 5.0f;
+		constexpr float ringRadius = 72.0f;
+		constexpr GLuint ringSegments = 96;
+		constexpr int ringHitBoxes = 32;
 	}
 
 	struct GizmoLayer::Gizmo {
@@ -31,91 +56,568 @@ namespace Workbench {
 		// resetHandles relied on the same contract.
 		virtual void sync() = 0;
 		virtual bool dirty() const = 0;
+		virtual void update() {
+			if (!dragging && dirty()) {
+				sync();
+			}
+		}
+		virtual bool takesInput() const { return true; }
 
 		bool dragging = false;
 		GizmoLayer& layer;
 		std::shared_ptr<MV::Scene::Node> container;
 	};
 
+	// The selection's bounds outline plus the active tool's transform handles. The handles hang off one node
+	// at the target's pivot: a drag moves that node with the target and never rebuilds what is being dragged.
 	struct GizmoLayer::NodeGizmo : GizmoLayer::Gizmo {
+		enum class Gesture { NONE, MOVE, ROTATE, SCALE };
+
+		struct Handle {
+			std::string name;
+			Gesture gesture = Gesture::NONE;
+			GizmoAxis axis = GizmoAxis::BOTH;
+			MV::Color idle;
+			std::vector<std::shared_ptr<MV::Scene::Clickable>> hitAreas;
+			std::vector<std::shared_ptr<MV::Scene::Drawable>> visuals;
+			std::shared_ptr<MV::Scene::Node> grip;
+			MV::Point<> gripPoint;
+			bool highlighted = false;
+		};
+
 		NodeGizmo(GizmoLayer& a_layer, const std::shared_ptr<MV::Scene::Node>& a_target) :
 			Gizmo(a_layer),
 			target(a_target) {
 			container = a_layer.overlay->make("nodeGizmo");
+			outline = container->make("outline")->attach<MV::Scene::Drawable>().self();
+			handleRoot = container->make("handles");
 			sync();
 		}
 
-		MV::BoxAABB<> targetFrame() const {
-			// World space, not screen: the overlay is identity in visor world, and screen
-			// coordinates diverge from world under DPI scaling.
-			auto box = target->worldBounds(false);
-			if (box.size().width < 1.0f && box.size().height < 1.0f) {
-				box = target->worldBounds(true);
+		~NodeGizmo() override {
+			releaseHandles();
+		}
+
+		// The target's own bounds (its children's when it has none) as four corners, so the outline turns with the node.
+		// World space, not screen: the overlay is identity in visor world, and screen coordinates diverge from world under DPI scaling.
+		std::array<MV::Point<>, 4> targetCorners() const {
+			auto box = target->bounds(false);
+			if (box.size().width <= 0.0f && box.size().height <= 0.0f) {
+				box = target->bounds(true);
 			}
-			return MV::round<MV::PointPrecision>(box);
+			std::array<MV::Point<>, 4> result{ box.topLeftPoint(), box.topRightPoint(), box.bottomRightPoint(), box.bottomLeftPoint() };
+			for (auto&& corner : result) {
+				corner = MV::round<MV::PointPrecision>(target->worldFromLocal(corner));
+			}
+			return result;
+		}
+
+		MV::Point<> targetAnchor() const {
+			return MV::round<MV::PointPrecision>(target->worldPosition());
+		}
+
+		// Overlay-space angle in degrees of a direction given in the target's parent space.
+		float overlayAngleOfParentDirection(const MV::Point<>& a_parentDirection, float a_fallback) const {
+			auto parent = target->parent();
+			if (!parent) {
+				return a_fallback;
+			}
+			auto from = parent->worldFromLocal(target->position());
+			auto to = parent->worldFromLocal(target->position() + a_parentDirection * 100.0f);
+			if (MV::distance(from, to) < 0.0001f) {
+				return a_fallback;
+			}
+			return MV::toDegrees(std::atan2(to.y - from.y, to.x - from.x));
+		}
+
+		// Move and rotate work in the parent's axes; scale works in the target's own, so its handles turn with it.
+		std::pair<float, float> handleAxisAngles() const {
+			if (layer.shownTool() == Tool::SCALE) {
+				float turned = target->rotationRad().z;
+				return {
+					overlayAngleOfParentDirection(MV::point(std::cos(turned), std::sin(turned)), 0.0f),
+					overlayAngleOfParentDirection(MV::point(-std::sin(turned), std::cos(turned)), 90.0f)
+				};
+			}
+			return { overlayAngleOfParentDirection(MV::point(1.0f, 0.0f), 0.0f), overlayAngleOfParentDirection(MV::point(0.0f, 1.0f), 90.0f) };
+		}
+
+		bool outlineDirty() const {
+			return targetCorners() != lastCorners;
+		}
+
+		bool handlesDirty() const {
+			if (builtTool != layer.shownTool()) {
+				return true;
+			}
+			auto angles = handleAxisAngles();
+			return std::abs(angles.first - builtAngles.first) > 0.01f || std::abs(angles.second - builtAngles.second) > 0.01f;
 		}
 
 		bool dirty() const override {
-			auto frame = targetFrame();
-			return !(frame.minPoint == lastFrame.minPoint) || !(frame.maxPoint == lastFrame.maxPoint) ||
-				!(target->worldPosition() == lastAnchor);
+			return outlineDirty() || handlesDirty() || !(targetAnchor() == lastAnchor);
 		}
 
 		void sync() override {
-			container->clear();
-			lastFrame = targetFrame();
-			lastAnchor = target->worldPosition();
+			syncOutline();
+			if (handlesDirty()) {
+				buildHandles();
+			}
+			followTarget();
+		}
 
-			auto box = lastFrame;
-			if (box.size().width >= 1.0f || box.size().height >= 1.0f) {
+		void update() override {
+			if (dragging) {
+				followTarget();
+			} else if (dirty()) {
+				sync();
+			}
+			highlightHandles();
+		}
+
+		void followTarget() {
+			if (outlineDirty()) {
+				syncOutline();
+			}
+			lastAnchor = targetAnchor();
+			handleRoot->worldPosition(lastAnchor);
+		}
+
+		void syncOutline() {
+			lastCorners = targetCorners();
+			std::vector<MV::DrawPoint> points;
+			std::vector<GLuint> indices;
+			if (MV::distance(lastCorners[0], lastCorners[2]) >= 1.0f) {
 				MV::Color edge = layer.theme.accent();
 				edge.A = 0.85f;
-				float thickness = 1.5f;
-				auto edgeAt = [&](const MV::Point<>& a_at, const MV::Size<>& a_size) {
-					auto sprite = container->make(MV::guid("edge_"))->attach<MV::Scene::Sprite>();
-					sprite->bounds(a_size)->color(edge);
-					sprite->owner()->worldPosition(a_at);
-				};
-				edgeAt(box.topLeftPoint(), MV::size(box.size().width, thickness));
-				edgeAt(MV::point(box.minPoint.x, box.maxPoint.y - thickness), MV::size(box.size().width, thickness));
-				edgeAt(box.topLeftPoint(), MV::size(thickness, box.size().height));
-				edgeAt(MV::point(box.maxPoint.x - thickness, box.minPoint.y), MV::size(thickness, box.size().height));
+				float halfThickness = layer.theme.px(1.0f) * 0.5f;
+				for (size_t i = 0; i < lastCorners.size(); ++i) {
+					auto from = lastCorners[i];
+					auto to = lastCorners[(i + 1) % lastCorners.size()];
+					auto along = (to - from).normalized() * halfThickness;
+					MV::Point<> across(-along.y, along.x);
+					auto first = static_cast<GLuint>(points.size());
+					for (auto&& point : { from - along - across, from - along + across, to + along + across, to + along - across }) {
+						points.emplace_back(point, edge);
+					}
+					indices.insert(indices.end(), { first, first + 1, first + 2, first + 2, first + 3, first });
+				}
+			}
+			outline->setPoints(points, indices);
+		}
+
+		void releaseHandles() {
+			// a pressed Clickable keeps itself alive through its move receiver, and its callbacks point here
+			for (auto&& handle : handles) {
+				for (auto&& hitArea : handle->hitAreas) {
+					hitArea->cancelPress(false);
+				}
+			}
+			handles.clear();
+			activeHandle = nullptr;
+			sweepWedge.reset();
+			sweepLabel.reset();
+			handleRoot->clear();
+		}
+
+		void buildHandles() {
+			releaseHandles();
+			builtTool = layer.shownTool();
+			builtAngles = handleAxisAngles();
+			switch (builtTool) {
+				case Tool::MOVE:
+					makeAxisHandle("moveX", Gesture::MOVE, GizmoAxis::X, builtAngles.first, axisXColor, true);
+					makeAxisHandle("moveY", Gesture::MOVE, GizmoAxis::Y, builtAngles.second, axisYColor, true);
+					makeCenterHandle("moveFree", Gesture::MOVE);
+				break;
+				case Tool::ROTATE:
+					makeRingHandle();
+				break;
+				case Tool::SCALE:
+					makeAxisHandle("scaleX", Gesture::SCALE, GizmoAxis::X, builtAngles.first, axisXColor, false);
+					makeAxisHandle("scaleY", Gesture::SCALE, GizmoAxis::Y, builtAngles.second, axisYColor, false);
+					makeCenterHandle("scaleUniform", Gesture::SCALE);
+				break;
+				default:
+				break;
+			}
+		}
+
+		Handle& addHandle(const std::string& a_name, Gesture a_gesture, GizmoAxis a_axis, const MV::Color& a_idle) {
+			auto& result = *handles.emplace_back(std::make_unique<Handle>());
+			result.name = a_name;
+			result.gesture = a_gesture;
+			result.axis = a_axis;
+			result.idle = a_idle;
+			return result;
+		}
+
+		void addHitArea(Handle& a_handle, const std::shared_ptr<MV::Scene::Node>& a_node, const MV::BoxAABB<>& a_bounds, int64_t a_priorityBoost) {
+			auto hitArea = a_node->attach<MV::Scene::Clickable>(layer.mouse);
+			hitArea->bounds(a_bounds);
+			hitArea->globalPriority(hitArea->globalPriority() + a_priorityBoost);
+			auto* handle = &a_handle;
+			hitArea->onPress.connect("press", [this, handle](std::shared_ptr<MV::Scene::Clickable> a_hitArea) {
+				pressHandle(*handle, a_hitArea->mouse().position());
+			});
+			hitArea->onDrag.connect("drag", [this](std::shared_ptr<MV::Scene::Clickable> a_hitArea, const MV::Point<int>&, const MV::Point<int>&) {
+				dragHandle(a_hitArea->mouse().position());
+			});
+			hitArea->onRelease.connect("release", [this](std::shared_ptr<MV::Scene::Clickable>, const MV::Point<MV::PointPrecision>&) {
+				endGesture();
+			});
+			a_handle.hitAreas.push_back(hitArea.self());
+		}
+
+		// A shaft along the node's +x with an arrow head (move) or a square end (scale); the node is turned to the axis.
+		void makeAxisHandle(const std::string& a_name, Gesture a_gesture, GizmoAxis a_axis, float a_angle, const MV::Color& a_color, bool a_arrowHead) {
+			auto& theme = layer.theme;
+			auto& handle = addHandle(a_name, a_gesture, a_axis, a_color);
+			auto node = handleRoot->make(a_name);
+			node->rotation(MV::AxisAngles(0.0f, 0.0f, a_angle));
+
+			float length = theme.px(axisLength);
+			float start = theme.px(centerHandleSize) * 0.5f;
+			float halfThickness = theme.px(axisThickness) * 0.5f;
+			float endLength = theme.px(a_arrowHead ? arrowHeadLength : scaleEndSize);
+			float endHalfWidth = theme.px(a_arrowHead ? arrowHeadWidth : scaleEndSize) * 0.5f;
+			float halfHit = theme.px(axisHitThickness) * 0.5f;
+
+			auto shaft = node->attach<MV::Scene::Sprite>();
+			shaft->bounds(MV::BoxAABB<>(MV::point(start, -halfThickness), MV::point(length - endLength, halfThickness)))->color(a_color);
+			handle.visuals.push_back(shaft.self());
+
+			auto end = node->attach<MV::Scene::Drawable>();
+			if (a_arrowHead) {
+				end->setPoints({
+					MV::DrawPoint(MV::point(length - endLength, -endHalfWidth), a_color),
+					MV::DrawPoint(MV::point(length, 0.0f), a_color),
+					MV::DrawPoint(MV::point(length - endLength, endHalfWidth), a_color)
+				}, { 0, 1, 2 });
+			} else {
+				end->setPoints({
+					MV::DrawPoint(MV::point(length - endLength, -endHalfWidth), a_color),
+					MV::DrawPoint(MV::point(length, -endHalfWidth), a_color),
+					MV::DrawPoint(MV::point(length, endHalfWidth), a_color),
+					MV::DrawPoint(MV::point(length - endLength, endHalfWidth), a_color)
+				}, { 0, 1, 2, 2, 3, 0 });
+			}
+			handle.visuals.push_back(end.self());
+
+			addHitArea(handle, node, MV::BoxAABB<>(MV::point(start, -halfHit), MV::point(length, halfHit)), axisPriorityBoost);
+			handle.grip = node;
+			handle.gripPoint = MV::point(length * 0.6f, 0.0f);
+		}
+
+		void makeCenterHandle(const std::string& a_name, Gesture a_gesture) {
+			auto& handle = addHandle(a_name, a_gesture, GizmoAxis::BOTH, centerHandleColor);
+			auto node = handleRoot->make(a_name);
+			MV::BoxAABB<> square(MV::size(layer.theme.px(centerHandleSize), layer.theme.px(centerHandleSize)), true);
+			auto fill = node->attach<MV::Scene::Sprite>();
+			fill->bounds(square)->color(centerHandleColor);
+			handle.visuals.push_back(fill.self());
+			addHitArea(handle, node, square, centerPriorityBoost);
+			handle.grip = node;
+		}
+
+		void makeRingHandle() {
+			auto& theme = layer.theme;
+			auto& handle = addHandle("rotate", Gesture::ROTATE, GizmoAxis::BOTH, axisZColor);
+			float radius = theme.px(ringRadius);
+			float halfThickness = theme.px(axisThickness) * 0.5f;
+
+			sweepWedge = handleRoot->make("sweep")->attach<MV::Scene::Drawable>().self();
+
+			auto ringNode = handleRoot->make("rotate");
+			std::vector<MV::DrawPoint> ringPoints;
+			std::vector<GLuint> ringIndices;
+			for (GLuint i = 0; i < ringSegments; ++i) {
+				float angle = static_cast<float>(MV::PIE) * 2.0f * static_cast<float>(i) / static_cast<float>(ringSegments);
+				MV::Point<> direction(std::cos(angle), std::sin(angle));
+				ringPoints.emplace_back(direction * (radius - halfThickness), axisZColor);
+				ringPoints.emplace_back(direction * (radius + halfThickness), axisZColor);
+				GLuint next = (i + 1) % ringSegments;
+				ringIndices.insert(ringIndices.end(), { i * 2, i * 2 + 1, next * 2 + 1, next * 2 + 1, next * 2, i * 2 });
+			}
+			auto ring = ringNode->attach<MV::Scene::Drawable>();
+			ring->setPoints(ringPoints, ringIndices);
+			handle.visuals.push_back(ring.self());
+			auto pivotDot = ringNode->attach<MV::Scene::Sprite>();
+			pivotDot->bounds(MV::BoxAABB<>(MV::size(theme.px(pivotDotSize), theme.px(pivotDotSize)), true))->color(axisZColor);
+			handle.visuals.push_back(pivotDot.self());
+
+			// a Clickable hit-tests one box, so the ring is a fan of them
+			float halfHit = theme.px(axisHitThickness) * 0.5f;
+			float halfChord = (radius + halfHit) * std::tan(static_cast<float>(MV::PIE) / static_cast<float>(ringHitBoxes));
+			for (int i = 0; i < ringHitBoxes; ++i) {
+				auto hitNode = ringNode->make("hit_" + std::to_string(i));
+				hitNode->rotation(MV::AxisAngles(0.0f, 0.0f, 360.0f * static_cast<float>(i) / static_cast<float>(ringHitBoxes)));
+				addHitArea(handle, hitNode, MV::BoxAABB<>(MV::point(radius - halfHit, -halfChord), MV::point(radius + halfHit, halfChord)), axisPriorityBoost);
+				if (!handle.grip) {
+					handle.grip = hitNode;
+					handle.gripPoint = MV::point(radius, 0.0f);
+				}
 			}
 
-			auto handle = container->make("move")->attach<MV::Scene::Clickable>(layer.mouse);
-			handle->bounds({ MV::size(layer.theme.px(7.0f), layer.theme.px(7.0f)), true })->show()->color(moveHandleFill);
-			handle->globalPriority(handle->globalPriority() + movePriorityBoost);
-			handle->owner()->worldPosition(target->worldPosition());
-			handle->owner()->attach<MV::Scene::Sprite>()->bounds({ MV::size(layer.theme.px(1.0f), layer.theme.px(1.0f)), true })->color(MV::Color(0xffffffff));
+			MV::Size<> labelSize(theme.px(72.0f), theme.rowHeight);
+			auto labelNode = handleRoot->make("sweepLabel");
+			labelNode->position(MV::point(-labelSize.width * 0.5f, -radius - labelSize.height - theme.px(8.0f)));
+			labelNode->attach<MV::Scene::Sprite>()->bounds(labelSize)->color(sweepLabelBackground);
+			sweepLabel = labelNode->attach<MV::Scene::Text>(layer.textLibrary, theme.labelFont).self();
+			sweepLabel->bounds({ MV::Point<>(), labelSize });
+			sweepLabel->justification(MV::TextJustification::CENTER)->wrapping(MV::TextWrapMethod::NONE, labelSize.width)->minimumLineHeight(labelSize.height)->text("");
+			labelNode->hide();
+		}
 
-			std::weak_ptr<MV::Scene::Node> weakTarget = target;
-			handle->onPress.connect("press", [this](std::shared_ptr<MV::Scene::Clickable>) {
-				dragging = true;
-				pressPosition = target->position();
-				layer.pressed();
-			});
-			handle->onDrag.connect("drag", [this](std::shared_ptr<MV::Scene::Clickable> a_handle, const MV::Point<int>&, const MV::Point<int>& a_delta) {
-				a_handle->owner()->translate(a_handle->owner()->renderer().worldFromScreen(a_delta));
-				target->worldPosition(a_handle->owner()->worldPosition());
-			});
-			handle->onRelease.connect("release", [this, weakTarget](std::shared_ptr<MV::Scene::Clickable>, const MV::Point<MV::PointPrecision>&) {
-				dragging = false;
-				auto newPosition = target->position();
-				if (!(newPosition == pressPosition)) {
-					auto oldPosition = pressPosition;
-					layer.history.record("move " + target->id(),
-						[weakTarget, newPosition]() { if (auto locked = weakTarget.lock()) { locked->position(newPosition); } },
-						[weakTarget, oldPosition]() { if (auto locked = weakTarget.lock()) { locked->position(oldPosition); } });
+		// The pie the drag has swept and its angle, as applied (so a snapped drag steps).
+		void showSweep(float a_degrees) {
+			if (!sweepWedge || !sweepLabel) {
+				return;
+			}
+			float handedness = std::sin(MV::toRadians(builtAngles.second - builtAngles.first)) < 0.0f ? -1.0f : 1.0f;
+			float shown = std::clamp(a_degrees * handedness, -360.0f, 360.0f);
+			float radius = layer.theme.px(ringRadius);
+			int steps = std::max(1, static_cast<int>(std::ceil(std::abs(shown) / 4.0f)));
+			std::vector<MV::DrawPoint> points{ MV::DrawPoint(MV::Point<>(), sweepFill) };
+			std::vector<GLuint> indices;
+			for (int i = 0; i <= steps; ++i) {
+				float angle = MV::toRadians(pressCursorOverlayAngle + shown * static_cast<float>(i) / static_cast<float>(steps));
+				points.emplace_back(MV::point(std::cos(angle) * radius, std::sin(angle) * radius), sweepFill);
+				if (i > 0) {
+					indices.insert(indices.end(), { 0u, static_cast<GLuint>(i), static_cast<GLuint>(i + 1) });
 				}
-				sync();
-				layer.edited();
-			});
+			}
+			sweepWedge->setPoints(points, indices);
+			char text[32];
+			std::snprintf(text, sizeof(text), "%+.1f", a_degrees);
+			sweepLabel->text(std::string(text));
+			sweepLabel->owner()->show();
+		}
+
+		void hideSweep() {
+			if (sweepWedge) {
+				sweepWedge->setPoints({}, {});
+			}
+			if (sweepLabel) {
+				sweepLabel->owner()->hide();
+			}
+		}
+
+		// Hover and drag feedback: the dragged handle, else the topmost one under the cursor, turns yellow.
+		void highlightHandles() {
+			Handle* lit = activeHandle;
+			if (!dragging) {
+				for (auto&& handle : handles) {
+					for (auto&& hitArea : handle->hitAreas) {
+						if (hitArea->mouseInBounds()) {
+							lit = handle.get();
+							break;
+						}
+					}
+				}
+			}
+			for (auto&& handle : handles) {
+				bool highlight = handle.get() == lit;
+				if (handle->highlighted != highlight) {
+					handle->highlighted = highlight;
+					for (auto&& visual : handle->visuals) {
+						visual->color(highlight ? handleHighlightColor : handle->idle);
+					}
+				}
+			}
+		}
+
+		void beginGesture(Gesture a_gesture, GizmoAxis a_axis) {
+			dragging = true;
+			activeGesture = a_gesture;
+			activeAxis = a_axis;
+			pressPosition = target->position();
+			pressRotation = target->rotationRad();
+			pressScale = target->scale();
+		}
+
+		void pressHandle(Handle& a_handle, const MV::Point<int>& a_cursor) {
+			beginGesture(a_handle.gesture, a_handle.axis);
+			activeHandle = &a_handle;
+			auto parent = target->parent();
+			pressCursorParent = parent ? parent->localFromScreen(a_cursor) : MV::Point<>();
+			pressCursorOverlay = layer.overlay->localFromScreen(a_cursor);
+			auto fromPivot = pressCursorOverlay - target->worldPosition();
+			pressCursorOverlayAngle = MV::toDegrees(std::atan2(fromPivot.y, fromPivot.x));
+			lastCursorParentAngle = parentAngleAbout(pressCursorParent);
+			sweptRadians = 0.0f;
+			layer.pressed();
+		}
+
+		float parentAngleAbout(const MV::Point<>& a_parentPoint) const {
+			return std::atan2(a_parentPoint.y - pressPosition.y, a_parentPoint.x - pressPosition.x);
+		}
+
+		// One axis length of drag along the handle doubles the scale; the centre grows right and up.
+		float scaleFactorAt(const MV::Point<>& a_cursorOverlay) const {
+			auto dragged = a_cursorOverlay - pressCursorOverlay;
+			float length = layer.theme.px(axisLength);
+			if (activeAxis == GizmoAxis::BOTH) {
+				return 1.0f + (dragged.x - dragged.y) / length;
+			}
+			float angle = MV::toRadians(activeAxis == GizmoAxis::X ? builtAngles.first : builtAngles.second);
+			return 1.0f + (dragged.x * std::cos(angle) + dragged.y * std::sin(angle)) / length;
+		}
+
+		void dragHandle(const MV::Point<int>& a_cursor) {
+			auto parent = target->parent();
+			if (!dragging || !parent) {
+				return;
+			}
+			bool snap = (SDL_GetModState() & KMOD_CTRL) != 0;
+			switch (activeGesture) {
+				case Gesture::MOVE:
+					applyMove(parent->localFromScreen(a_cursor) - pressCursorParent, snap);
+				break;
+				case Gesture::ROTATE: {
+					float angle = parentAngleAbout(parent->localFromScreen(a_cursor));
+					float turned = angle - lastCursorParentAngle;
+					float fullTurn = static_cast<float>(MV::PIE) * 2.0f;
+					sweptRadians += turned - fullTurn * std::round(turned / fullTurn);
+					lastCursorParentAngle = angle;
+					applyRotate(MV::toDegrees(sweptRadians), snap);
+				}
+				break;
+				case Gesture::SCALE:
+					applyScale(scaleFactorAt(layer.overlay->localFromScreen(a_cursor)), snap);
+				break;
+				default:
+				break;
+			}
+		}
+
+		static float snapped(float a_value, float a_step) {
+			return a_step > 0.0f ? std::round(a_value / a_step) * a_step : a_value;
+		}
+
+		void applyMove(const MV::Point<>& a_parentDelta, bool a_snap) {
+			auto result = pressPosition;
+			if (activeAxis != GizmoAxis::Y) {
+				result.x += a_parentDelta.x;
+				result.x = a_snap ? snapped(result.x, layer.snapSteps.move) : result.x;
+			}
+			if (activeAxis != GizmoAxis::X) {
+				result.y += a_parentDelta.y;
+				result.y = a_snap ? snapped(result.y, layer.snapSteps.move) : result.y;
+			}
+			target->position(result);
+			applied();
+		}
+
+		void applyRotate(float a_degrees, bool a_snap) {
+			auto result = pressRotation;
+			float pressDegrees = MV::toDegrees(pressRotation.z);
+			float appliedDegrees = a_degrees;
+			if (a_snap) {
+				appliedDegrees = snapped(pressDegrees + a_degrees, layer.snapSteps.rotate) - pressDegrees;
+				result.z = MV::toRadians(pressDegrees + appliedDegrees);
+			} else {
+				result.z = pressRotation.z + MV::toRadians(a_degrees);
+			}
+			target->rotationRad(result);
+			if (activeHandle) {
+				showSweep(appliedDegrees);
+			}
+			applied();
+		}
+
+		void applyScale(float a_factor, bool a_snap) {
+			auto result = pressScale;
+			if (activeAxis != GizmoAxis::Y) {
+				result.x = a_snap ? snapped(pressScale.x * a_factor, layer.snapSteps.scale) : pressScale.x * a_factor;
+			}
+			if (activeAxis != GizmoAxis::X) {
+				result.y = a_snap ? snapped(pressScale.y * a_factor, layer.snapSteps.scale) : pressScale.y * a_factor;
+			}
+			target->scale(result);
+			applied();
+		}
+
+		void applied() {
+			followTarget();
+			layer.editing();
+		}
+
+		void endGesture() {
+			if (activeGesture == Gesture::NONE) {
+				return;
+			}
+			auto gesture = activeGesture;
+			dragging = false;
+			activeGesture = Gesture::NONE;
+			activeHandle = nullptr;
+			hideSweep();
+			recordGesture(gesture);
+			followTarget();
+			layer.edited();
+		}
+
+		void recordGesture(Gesture a_gesture) {
+			std::weak_ptr<MV::Scene::Node> weakTarget = target;
+			switch (a_gesture) {
+				case Gesture::MOVE: {
+					auto oldPosition = pressPosition;
+					auto newPosition = target->position();
+					if (newPosition != oldPosition) {
+						layer.history.record("move " + target->id(),
+							[weakTarget, newPosition]() { if (auto locked = weakTarget.lock()) { locked->position(newPosition); } },
+							[weakTarget, oldPosition]() { if (auto locked = weakTarget.lock()) { locked->position(oldPosition); } });
+					}
+				}
+				break;
+				case Gesture::ROTATE: {
+					auto oldRotation = pressRotation;
+					auto newRotation = target->rotationRad();
+					if (newRotation != oldRotation) {
+						layer.history.record("rotate " + target->id(),
+							[weakTarget, newRotation]() { if (auto locked = weakTarget.lock()) { locked->rotationRad(newRotation); } },
+							[weakTarget, oldRotation]() { if (auto locked = weakTarget.lock()) { locked->rotationRad(oldRotation); } });
+					}
+				}
+				break;
+				case Gesture::SCALE: {
+					auto oldScale = pressScale;
+					auto newScale = target->scale();
+					if (newScale != oldScale) {
+						layer.history.record("scale " + target->id(),
+							[weakTarget, newScale]() { if (auto locked = weakTarget.lock()) { locked->scale(newScale); } },
+							[weakTarget, oldScale]() { if (auto locked = weakTarget.lock()) { locked->scale(oldScale); } });
+					}
+				}
+				break;
+				default:
+				break;
+			}
 		}
 
 		std::shared_ptr<MV::Scene::Node> target;
-		MV::Point<> pressPosition;
-		MV::BoxAABB<> lastFrame;
+		std::shared_ptr<MV::Scene::Drawable> outline;
+		std::shared_ptr<MV::Scene::Node> handleRoot;
+		std::vector<std::unique_ptr<Handle>> handles;
+		std::shared_ptr<MV::Scene::Drawable> sweepWedge;
+		std::shared_ptr<MV::Scene::Text> sweepLabel;
+
+		Tool builtTool = Tool::SELECT;
+		std::pair<float, float> builtAngles{ 0.0f, 90.0f };
+		std::array<MV::Point<>, 4> lastCorners;
 		MV::Point<> lastAnchor;
+
+		Gesture activeGesture = Gesture::NONE;
+		GizmoAxis activeAxis = GizmoAxis::BOTH;
+		Handle* activeHandle = nullptr;
+		MV::Point<> pressPosition;
+		MV::AxisAngles pressRotation;
+		MV::Scale pressScale;
+		MV::Point<> pressCursorParent;
+		MV::Point<> pressCursorOverlay;
+		float pressCursorOverlayAngle = 0.0f;
+		float lastCursorParentAngle = 0.0f;
+		float sweptRadians = 0.0f;
 	};
 
 	struct GizmoLayer::BoundsGizmo : GizmoLayer::Gizmo {
@@ -462,6 +964,8 @@ namespace Workbench {
 			return !(frame.minPoint == lastFrame.minPoint) || !(frame.maxPoint == lastFrame.maxPoint);
 		}
 
+		bool takesInput() const override { return false; }
+
 		void sync() override {
 			container->clear();
 			auto rectBox = MV::round<MV::PointPrecision>(component->worldBounds());
@@ -475,14 +979,19 @@ namespace Workbench {
 		MV::BoxAABB<> lastFrame;
 	};
 
-	GizmoLayer::GizmoLayer(const std::shared_ptr<MV::Scene::Node>& a_overlay, MV::TapDevice& a_mouse, CommandHistory& a_history, const Theme& a_theme) :
+	GizmoLayer::GizmoLayer(const std::shared_ptr<MV::Scene::Node>& a_overlay, MV::TapDevice& a_mouse, CommandHistory& a_history, const Theme& a_theme, MV::TextLibrary& a_textLibrary) :
 		overlay(a_overlay),
 		mouse(a_mouse),
 		history(a_history),
-		theme(a_theme) {
+		theme(a_theme),
+		textLibrary(a_textLibrary) {
 	}
 
 	GizmoLayer::~GizmoLayer() = default;
+
+	Tool GizmoLayer::shownTool() const {
+		return componentGizmo && componentGizmo->takesInput() ? Tool::SELECT : activeTool;
+	}
 
 	void GizmoLayer::pressed() {
 		if (onHandlePressed) {
@@ -494,6 +1003,63 @@ namespace Workbench {
 		if (onEdited) {
 			onEdited();
 		}
+	}
+
+	void GizmoLayer::editing() {
+		if (onEditing) {
+			onEditing();
+		}
+	}
+
+	void GizmoLayer::tool(Tool a_tool) {
+		if (nodeGizmo && nodeGizmo->dragging) {
+			return;
+		}
+		activeTool = a_tool;
+		if (nodeGizmo) {
+			nodeGizmo->sync();
+		}
+	}
+
+	bool GizmoLayer::moveSelected(GizmoAxis a_axis, const MV::Point<>& a_parentDelta, bool a_snap) {
+		if (!nodeGizmo || nodeGizmo->dragging) {
+			return false;
+		}
+		nodeGizmo->beginGesture(NodeGizmo::Gesture::MOVE, a_axis);
+		nodeGizmo->applyMove(a_parentDelta, a_snap);
+		nodeGizmo->endGesture();
+		return true;
+	}
+
+	bool GizmoLayer::rotateSelected(float a_degrees, bool a_snap) {
+		if (!nodeGizmo || nodeGizmo->dragging) {
+			return false;
+		}
+		nodeGizmo->beginGesture(NodeGizmo::Gesture::ROTATE, GizmoAxis::BOTH);
+		nodeGizmo->applyRotate(a_degrees, a_snap);
+		nodeGizmo->endGesture();
+		return true;
+	}
+
+	bool GizmoLayer::scaleSelected(GizmoAxis a_axis, float a_factor, bool a_snap) {
+		if (!nodeGizmo || nodeGizmo->dragging) {
+			return false;
+		}
+		nodeGizmo->beginGesture(NodeGizmo::Gesture::SCALE, a_axis);
+		nodeGizmo->applyScale(a_factor, a_snap);
+		nodeGizmo->endGesture();
+		return true;
+	}
+
+	std::optional<MV::Point<int>> GizmoLayer::handleScreenPoint(const std::string& a_handle) const {
+		if (nodeGizmo) {
+			for (auto&& handle : nodeGizmo->handles) {
+				if (handle->name == a_handle) {
+					return handle->grip->screenFromLocal(handle->gripPoint);
+				}
+			}
+		}
+		return std::nullopt;
 	}
 
 	void GizmoLayer::select(const std::shared_ptr<MV::Scene::Node>& a_node) {
@@ -560,9 +1126,9 @@ namespace Workbench {
 		if (componentTarget && componentOwner.expired()) {
 			editComponent(nullptr);
 		}
-		for (auto* gizmo : { nodeGizmo.get(), componentGizmo.get() }) {
-			if (gizmo && !gizmo->dragging && gizmo->dirty()) {
-				gizmo->sync();
+		for (Gizmo* gizmo : { static_cast<Gizmo*>(nodeGizmo.get()), componentGizmo.get() }) {
+			if (gizmo) {
+				gizmo->update();
 			}
 		}
 	}

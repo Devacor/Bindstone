@@ -16,6 +16,9 @@ namespace Workbench {
 		public:
 			ViewportPanel() : Panel("Scene", true) {}
 		};
+
+		constexpr float minimumZoom = 0.05f;
+		constexpr float maximumZoom = 20.0f;
 	}
 
 	App::App(Managers& a_managers, MV::TapDevice& a_mouse, const Theme& a_theme) :
@@ -34,8 +37,12 @@ namespace Workbench {
 		// Sibling after the camera: draws above the scene, stencil-clipped, never serialized, and
 		// stays unscaled so handles keep pixel size at any zoom.
 		gizmoOverlay = viewportClip->make("gizmoOverlay");
-		gizmos = std::make_unique<GizmoLayer>(gizmoOverlay, mouse, history, theme);
-		gizmos->onHandlePressed = [this]() { panning = false; };
+		gizmos = std::make_unique<GizmoLayer>(gizmoOverlay, mouse, history, theme, managers.textLibrary);
+		gizmos->onHandlePressed = [this]() {
+			if (panButton == PanButton::LEFT) {
+				panButton = PanButton::NONE;
+			}
+		};
 		gizmos->onEdited = [this]() {
 			if (inspectorPanel) {
 				inspectorPanel->inspect(selectedNode);
@@ -46,32 +53,24 @@ namespace Workbench {
 		cursorResizeH = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE);
 		cursorResizeV = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS);
 
-		panDownReceiver = mouse.onLeftMouseDown.connect("workbenchPan", [this](MV::TapDevice& a_mouse) {
-			auto worldPoint = managers.renderer.worldFromScreen(a_mouse.position());
-			if (dock->viewportAt(worldPoint)) {
-				panning = true;
-				panMoved = false;
-				panStart = a_mouse.position();
-				panLast = a_mouse.position();
-			}
-		});
-		panMoveReceiver = mouse.onMove.connect("workbenchPanMove", [this](MV::TapDevice& a_mouse) {
-			if (!panning) {
+		auto panWith = [this](PanButton a_button, jai::signal<MV::TapDevice::CallbackSignature>& a_down, jai::signal<MV::TapDevice::CallbackSignature>& a_up) {
+			panReceivers.push_back(a_down.connect([this, a_button](MV::TapDevice& a_mouse) { beginPan(a_button, a_mouse.position()); }));
+			panReceivers.push_back(a_up.connect([this, a_button](MV::TapDevice& a_mouse) { endPan(a_button, a_mouse.position()); }));
+		};
+		panWith(PanButton::LEFT, mouse.onLeftMouseDown, mouse.onLeftMouseUp);
+		panWith(PanButton::MIDDLE, mouse.onMiddleMouseDown, mouse.onMiddleMouseUp);
+		panWith(PanButton::RIGHT, mouse.onRightMouseDown, mouse.onRightMouseUp);
+		panReceivers.push_back(mouse.onMove.connect([this](MV::TapDevice& a_mouse) {
+			if (panButton == PanButton::NONE) {
 				return;
 			}
 			auto current = a_mouse.position();
 			if (std::abs(current.x - panStart.x) + std::abs(current.y - panStart.y) > 4) {
 				panMoved = true;
 			}
-			viewCamera->translate(MV::point(static_cast<float>(current.x - panLast.x), static_cast<float>(current.y - panLast.y)));
+			viewCamera->translate(managers.renderer.worldFromScreen(current - panLast));
 			panLast = current;
-		});
-		panUpReceiver = mouse.onLeftMouseUp.connect("workbenchPanEnd", [this](MV::TapDevice& a_mouse) {
-			if (panning && !panMoved) {
-				pickSceneNode(a_mouse.position());
-			}
-			panning = false;
-		});
+		}));
 
 		history.onAfterChange = [this]() {
 			if (treePanel) {
@@ -131,6 +130,25 @@ namespace Workbench {
 			if (cursor) {
 				SDL_FreeCursor(cursor);
 			}
+		}
+	}
+
+	void App::beginPan(PanButton a_button, const MV::Point<int>& a_screenPoint) {
+		if (panButton == PanButton::NONE && dock->viewportAt(managers.renderer.worldFromScreen(a_screenPoint))) {
+			panButton = a_button;
+			panMoved = false;
+			panStart = a_screenPoint;
+			panLast = a_screenPoint;
+		}
+	}
+
+	void App::endPan(PanButton a_button, const MV::Point<int>& a_screenPoint) {
+		if (panButton != a_button) {
+			return;
+		}
+		panButton = PanButton::NONE;
+		if (a_button == PanButton::LEFT && !panMoved) {
+			pickSceneNode(a_screenPoint);
 		}
 	}
 
@@ -441,16 +459,22 @@ namespace Workbench {
 		return result;
 	}
 
-	void App::frameScene(const DockRect& a_view) {
+	// Zooms so the node's bounds fill a_fill of the view and centres them; a node without bounds is centred at the zoom in use.
+	void App::frameNode(const DockRect& a_view, const std::shared_ptr<MV::Scene::Node>& a_node, float a_fill, float a_maximumZoom) {
+		float zoom = viewCamera->scale().x;
 		viewCamera->position(MV::Point<>());
 		viewCamera->scale(MV::Scale(1.0f, 1.0f, 1.0f));
-		auto bounds = sceneRoot->worldBounds();
-		auto size = bounds.size();
-		if (size.width < 1.0f || size.height < 1.0f) {
-			return;
+		auto local = a_node->bounds();
+		MV::BoxAABB<> bounds(a_node->worldFromLocal(local.topLeftPoint()));
+		for (auto&& corner : { local.topRightPoint(), local.bottomRightPoint(), local.bottomLeftPoint() }) {
+			bounds.expandWith(a_node->worldFromLocal(corner));
 		}
-		float zoom = std::clamp(std::min(a_view.size.width / size.width, a_view.size.height / size.height) * 0.9f, 0.05f, 1.0f);
-		auto center = bounds.centerPoint();
+		auto size = bounds.size();
+		auto center = a_node->worldPosition();
+		if (size.width >= 1.0f || size.height >= 1.0f) {
+			zoom = std::clamp(std::min(a_view.size.width / std::max(size.width, 1.0f), a_view.size.height / std::max(size.height, 1.0f)) * a_fill, minimumZoom, a_maximumZoom);
+			center = bounds.centerPoint();
+		}
 		viewCamera->scale(MV::Scale(zoom, zoom, 1.0f));
 		viewCamera->position(MV::point(
 			a_view.position.x + a_view.size.width * 0.5f - center.x * zoom,
@@ -475,20 +499,15 @@ namespace Workbench {
 		}
 		dock->update(a_dt);
 		syncViewportClip();
-		if (sceneFramePending) {
+		if ((sceneFramePending || selectionFramePending) && !frameAwaitsDraw) {
 			auto view = dock->viewportRect();
 			if (view.size.width > 0.0f && view.size.height > 0.0f) {
-				frameScene(view);
+				if (selectionFramePending && selectedNode) {
+					frameNode(view, selectedNode, 0.7f, maximumZoom);
+				} else {
+					frameNode(view, sceneRoot, 0.9f, 1.0f);
+				}
 				sceneFramePending = false;
-			}
-		}
-		if (selectionFramePending && selectedNode) {
-			auto view = dock->viewportRect();
-			if (view.size.width > 0.0f && view.size.height > 0.0f) {
-				auto nodeWorld = selectedNode->worldPosition();
-				viewCamera->translate(MV::point(
-					view.position.x + view.size.width * 0.5f - nodeWorld.x,
-					view.position.y + view.size.height * 0.5f - nodeWorld.y));
 				selectionFramePending = false;
 			}
 		}
@@ -531,13 +550,36 @@ namespace Workbench {
 		const Uint8* keys = SDL_GetKeyboardState(nullptr);
 		float speed = static_cast<float>(600.0 * a_dt);
 		MV::Point<> delta;
-		if (keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_A]) { delta.x += speed; }
-		if (keys[SDL_SCANCODE_RIGHT] || keys[SDL_SCANCODE_D]) { delta.x -= speed; }
-		if (keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_W]) { delta.y += speed; }
-		if (keys[SDL_SCANCODE_DOWN] || keys[SDL_SCANCODE_S]) { delta.y -= speed; }
+		if (keys[SDL_SCANCODE_LEFT]) { delta.x += speed; }
+		if (keys[SDL_SCANCODE_RIGHT]) { delta.x -= speed; }
+		if (keys[SDL_SCANCODE_UP]) { delta.y += speed; }
+		if (keys[SDL_SCANCODE_DOWN]) { delta.y -= speed; }
 		if (delta.x != 0.0f || delta.y != 0.0f) {
 			viewCamera->translate(delta);
 		}
+	}
+
+	bool App::handleShortcutKey(SDL_Keycode a_key) {
+		switch (a_key) {
+			case SDLK_q:
+				gizmoTool(Tool::SELECT);
+			break;
+			case SDLK_w:
+				gizmoTool(Tool::MOVE);
+			break;
+			case SDLK_e:
+				gizmoTool(Tool::ROTATE);
+			break;
+			case SDLK_r:
+				gizmoTool(Tool::SCALE);
+			break;
+			case SDLK_f:
+				frameSelectionInViewport();
+			break;
+			default:
+				return false;
+		}
+		return true;
 	}
 
 	void App::handleInput() {
@@ -580,12 +622,15 @@ namespace Workbench {
 					continue;
 				}
 			}
+			if (event.type == SDL_KEYDOWN && !event.key.repeat && !(SDL_GetModState() & (KMOD_CTRL | KMOD_ALT | KMOD_GUI)) && handleShortcutKey(event.key.keysym.sym)) {
+				continue;
+			}
 			if (event.type == SDL_MOUSEWHEEL) {
 				auto worldPoint = managers.renderer.worldFromScreen(mouse.position());
 				if (dock->viewportAt(worldPoint)) {
 					float zoom = 1.0f + 0.1f * static_cast<float>(event.wheel.y);
 					auto current = viewCamera->scale();
-					float newScale = std::clamp(current.x * zoom, 0.05f, 20.0f);
+					float newScale = std::clamp(current.x * zoom, minimumZoom, maximumZoom);
 					auto position = viewCamera->position();
 					// Keep the point under the cursor stationary while zooming.
 					MV::Point<> local((worldPoint.x - position.x) / current.x, (worldPoint.y - position.y) / current.y);
@@ -609,6 +654,7 @@ namespace Workbench {
 		} else {
 			visor->draw();
 		}
+		frameAwaitsDraw = false;
 		uiRoot->drawUpdate(lastDelta);
 		managers.renderer.updateScreen();
 	}

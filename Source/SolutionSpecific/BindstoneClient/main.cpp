@@ -494,6 +494,188 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 	pressWithControl(SDLK_y);
 	expect(childCount() == countBeforeDrop + 1, "redo places the BindSnap again");
 
+	// Transform gizmos: each gesture through the calls a handle drag makes, then real drags on a simulated mouse
+	auto checkTransformGizmos = [&]() {
+		if (a_app.scene()->empty()) {
+			return;
+		}
+		auto& gizmoLayer = a_app.gizmoLayer();
+		auto& mouse = *a_managers.services.get<MV::TapDevice>();
+		auto& renderer = a_managers.renderer;
+		auto exactXY = [](const auto& a_left, const auto& a_right) { return a_left.x == a_right.x && a_left.y == a_right.y; };
+		auto pressKey = [&a_app](SDL_Keycode a_key) {
+			SDL_Event press{};
+			press.type = SDL_KEYDOWN;
+			press.key.keysym.sym = a_key;
+			SDL_PushEvent(&press);
+			a_app.runFrames(2);
+		};
+		enum class Button { LEFT, MIDDLE, RIGHT };
+		auto drag = [&](const MV::Point<int>& a_from, const std::vector<MV::Point<int>>& a_path, Button a_button = Button::LEFT) {
+			auto hold = [&](const MV::Point<int>& a_at, bool a_down, int a_frames) {
+				mouse.simulate(a_at, a_down && a_button == Button::LEFT, a_down && a_button == Button::RIGHT, a_down && a_button == Button::MIDDLE);
+				a_app.runFrames(a_frames);
+			};
+			hold(a_from, false, 2);
+			hold(a_from, true, 2);
+			for (auto&& point : a_path) {
+				hold(point, true, 1);
+			}
+			hold(a_path.back(), false, 2);
+			mouse.stopSimulating();
+		};
+		auto insideViewport = [&](const MV::BoxAABB<>& a_worldBox) {
+			auto view = a_app.viewport();
+			return view.contains(a_worldBox.minPoint) && view.contains(a_worldBox.maxPoint);
+		};
+
+		expect(!gizmoLayer.moveSelected(Workbench::GizmoAxis::X, MV::point(5.0f, 0.0f)), "a gesture needs a selection");
+		auto subject = *std::prev(a_app.scene()->end());
+		auto parent = subject->parent();
+		a_app.select(subject);
+		a_app.frameSelectionInViewport();
+		a_app.runFrames(3);
+		auto view = a_app.viewport();
+		auto framed = subject->worldBounds();
+		expect(insideViewport(framed), "framing the selection puts its bounds inside the viewport");
+		float filled = std::max(framed.size().width / view.size.width, framed.size().height / view.size.height);
+		expect(filled > 0.65f && filled < 0.75f, "framing the selection fills about 70% of the viewport, got " + std::to_string(filled));
+
+		auto restPosition = subject->position();
+		auto restRotation = subject->rotationRad();
+		auto restScale = subject->scale();
+
+		expect(a_app.gizmoTool() == Workbench::Tool::MOVE, "the move tool is the default");
+		expect(gizmoLayer.moveSelected(Workbench::GizmoAxis::X, MV::point(37.0f, 91.0f)), "a move applies to the selection");
+		expect(sameXY(subject->position(), restPosition + MV::point(37.0f, 0.0f)), "a move on X leaves Y alone");
+		expect(gizmoLayer.moveSelected(Workbench::GizmoAxis::Y, MV::point(55.0f, -12.0f)), "a second move applies");
+		expect(sameXY(subject->position(), restPosition + MV::point(37.0f, -12.0f)), "a move on Y leaves X alone");
+		pressWithControl(SDLK_z);
+		expect(sameXY(subject->position(), restPosition + MV::point(37.0f, 0.0f)), "one undo takes back one move");
+		pressWithControl(SDLK_z);
+		expect(exactXY(subject->position(), restPosition), "undo restores the position exactly");
+		pressWithControl(SDLK_y);
+		expect(sameXY(subject->position(), restPosition + MV::point(37.0f, 0.0f)), "redo moves again");
+		pressWithControl(SDLK_z);
+		gizmoLayer.moveSelected(Workbench::GizmoAxis::BOTH, MV::point(3.3f, 16.2f), true);
+		auto snappedPosition = subject->position();
+		expect(std::abs(std::remainder(snappedPosition.x, gizmoLayer.snapSteps.move)) < 0.001f && std::abs(std::remainder(snappedPosition.y, gizmoLayer.snapSteps.move)) < 0.001f, "a snapped move lands on the grid");
+		pressWithControl(SDLK_z);
+		expect(exactXY(subject->position(), restPosition), "undo restores the position after a snapped move");
+
+		gizmoLayer.rotateSelected(40.0f);
+		expect(std::abs(subject->rotation().z - (MV::toDegrees(restRotation.z) + 40.0f)) < 0.001f, "a rotation turns about Z");
+		expect(exactXY(subject->position(), restPosition) && exactXY(subject->scale(), restScale), "a rotation leaves position and scale alone");
+		pressWithControl(SDLK_z);
+		expect(subject->rotationRad().z == restRotation.z, "undo restores the rotation exactly");
+		gizmoLayer.rotateSelected(40.0f, true);
+		expect(std::abs(std::remainder(subject->rotation().z, gizmoLayer.snapSteps.rotate)) < 0.001f, "a snapped rotation lands on a 15 degree step");
+		pressWithControl(SDLK_z);
+		expect(subject->rotationRad().z == restRotation.z, "undo restores the rotation after a snapped turn");
+
+		gizmoLayer.scaleSelected(Workbench::GizmoAxis::X, 2.0f);
+		expect(std::abs(subject->scale().x - restScale.x * 2.0f) < 0.001f && subject->scale().y == restScale.y, "a scale on X leaves Y alone");
+		pressWithControl(SDLK_z);
+		gizmoLayer.scaleSelected(Workbench::GizmoAxis::BOTH, 1.5f);
+		expect(std::abs(subject->scale().x - restScale.x * 1.5f) < 0.001f && std::abs(subject->scale().y - restScale.y * 1.5f) < 0.001f, "the centre handle scales both axes");
+		pressWithControl(SDLK_z);
+		expect(exactXY(subject->scale(), restScale), "undo restores the scale exactly");
+		gizmoLayer.scaleSelected(Workbench::GizmoAxis::Y, 1.234f, true);
+		expect(std::abs(std::remainder(subject->scale().y, gizmoLayer.snapSteps.scale)) < 0.001f, "a snapped scale lands on a 0.1 step");
+		pressWithControl(SDLK_z);
+		expect(exactXY(subject->scale(), restScale), "undo restores the scale after a snapped one");
+
+		pressKey(SDLK_q);
+		expect(a_app.gizmoTool() == Workbench::Tool::SELECT && !gizmoLayer.handleScreenPoint("moveX"), "Q shows no transform handles");
+		pressKey(SDLK_e);
+		expect(a_app.gizmoTool() == Workbench::Tool::ROTATE && gizmoLayer.handleScreenPoint("rotate"), "E shows the rotate ring");
+		pressKey(SDLK_r);
+		expect(a_app.gizmoTool() == Workbench::Tool::SCALE && gizmoLayer.handleScreenPoint("scaleX") && gizmoLayer.handleScreenPoint("scaleUniform"), "R shows the scale handles");
+		pressKey(SDLK_w);
+		expect(a_app.gizmoTool() == Workbench::Tool::MOVE && gizmoLayer.handleScreenPoint("moveX") && gizmoLayer.handleScreenPoint("moveY") && gizmoLayer.handleScreenPoint("moveFree"), "W shows the move handles");
+		if (auto editable = subject->component<MV::Scene::Clickable>(false, false)) {
+			gizmoLayer.editComponent(editable.self());
+			a_app.runFrames(2);
+			expect(gizmoLayer.editedComponent() == editable.self() && !gizmoLayer.handleScreenPoint("moveX"), "a component gizmo that takes input hides the transform handles");
+			gizmoLayer.editComponent(nullptr);
+			a_app.runFrames(2);
+			expect(gizmoLayer.handleScreenPoint("moveX").has_value(), "the transform handles return when the component gizmo is switched off");
+		}
+
+		auto grab = [&](const std::string& a_handle) {
+			auto found = gizmoLayer.handleScreenPoint(a_handle);
+			expect(found && view.contains(renderer.worldFromScreen(found.value_or(MV::Point<int>()))), "the " + a_handle + " handle is inside the viewport");
+			return found.value_or(MV::Point<int>());
+		};
+		auto cameraBefore = a_app.scene()->worldPosition();
+
+		auto moveGrab = grab("moveX");
+		auto moveDrop = moveGrab + MV::Point<int>(60, 25);
+		auto expectedMove = parent->localFromScreen(moveDrop) - parent->localFromScreen(moveGrab);
+		drag(moveGrab, { moveGrab + MV::Point<int>(20, 10), moveDrop });
+		expect(std::abs(subject->position().x - (restPosition.x + expectedMove.x)) < 0.01f && subject->position().y == restPosition.y, "dragging the X arrow moves along X by the cursor's travel");
+		expect(sameXY(a_app.scene()->worldPosition(), cameraBefore), "a handle drag does not pan the camera");
+		pressWithControl(SDLK_z);
+		expect(exactXY(subject->position(), restPosition), "undo restores the position after an arrow drag");
+
+		moveGrab = grab("moveY");
+		SDL_SetModState(static_cast<SDL_Keymod>(KMOD_CTRL));
+		drag(moveGrab, { moveGrab + MV::Point<int>(31, 47) });
+		SDL_SetModState(KMOD_NONE);
+		expect(subject->position().x == restPosition.x && subject->position().y != restPosition.y && std::abs(std::remainder(subject->position().y, gizmoLayer.snapSteps.move)) < 0.001f, "Ctrl snaps an arrow drag to the grid");
+		pressWithControl(SDLK_z);
+
+		moveGrab = grab("moveFree");
+		moveDrop = moveGrab + MV::Point<int>(-40, 33);
+		expectedMove = parent->localFromScreen(moveDrop) - parent->localFromScreen(moveGrab);
+		drag(moveGrab, { moveDrop });
+		expect(sameXY(subject->position(), restPosition + expectedMove), "dragging the centre square moves freely");
+		pressWithControl(SDLK_z);
+		expect(exactXY(subject->position(), restPosition), "undo restores the position after a free drag");
+
+		pressKey(SDLK_e);
+		auto pivot = MV::cast<float>(subject->screenPosition());
+		auto ringGrab = grab("rotate");
+		auto spoke = MV::cast<float>(ringGrab) - pivot;
+		std::vector<MV::Point<int>> arc;
+		for (int degrees = 10; degrees <= 90; degrees += 10) {
+			float turned = MV::toRadians(static_cast<float>(degrees));
+			arc.push_back(MV::round<int>(pivot + MV::point(spoke.x * std::cos(turned) - spoke.y * std::sin(turned), spoke.x * std::sin(turned) + spoke.y * std::cos(turned))));
+		}
+		drag(ringGrab, arc);
+		expect(std::abs(subject->rotation().z - (MV::toDegrees(restRotation.z) + 90.0f)) < 1.5f, "dragging a quarter of the ring turns 90 degrees, got " + std::to_string(subject->rotation().z));
+		pressWithControl(SDLK_z);
+		expect(subject->rotationRad().z == restRotation.z, "undo restores the rotation after a ring drag");
+
+		pressKey(SDLK_r);
+		auto scaleGrab = grab("scaleX");
+		auto alongAxis = MV::cast<float>(scaleGrab) - pivot;
+		drag(scaleGrab, { MV::round<int>(MV::cast<float>(scaleGrab) + alongAxis * (0.5f / 0.6f)) });
+		expect(std::abs(subject->scale().x - restScale.x * 1.5f) < 0.03f && subject->scale().y == restScale.y, "dragging the X scale handle half its length scales X by 1.5, got " + std::to_string(subject->scale().x));
+		pressWithControl(SDLK_z);
+		expect(exactXY(subject->scale(), restScale), "undo restores the scale after a handle drag");
+		pressKey(SDLK_w);
+
+		auto viewCenter = renderer.screenFromWorld(MV::point(view.position.x + view.size.width * 0.5f, view.position.y + view.size.height * 0.25f));
+		for (auto button : { Button::MIDDLE, Button::RIGHT }) {
+			cameraBefore = a_app.scene()->worldPosition();
+			drag(viewCenter, { viewCenter + MV::Point<int>(80, -40) }, button);
+			auto panned = a_app.scene()->worldPosition() - cameraBefore;
+			auto expectedPan = renderer.worldFromScreen(MV::Point<int>(80, -40));
+			expect(std::abs(panned.x - expectedPan.x) < 0.5f && std::abs(panned.y - expectedPan.y) < 0.5f, std::string(button == Button::MIDDLE ? "a middle" : "a right") + " drag pans the viewport");
+		}
+		expect(a_app.selected() == subject && exactXY(subject->position(), restPosition), "panning keeps the selection and the document");
+
+		pressKey(SDLK_f);
+		a_app.runFrames(2);
+		expect(insideViewport(subject->worldBounds()), "F frames the selection again after a pan");
+		a_app.select(nullptr);
+		pressKey(SDLK_f);
+		a_app.runFrames(2);
+		expect(insideViewport(a_app.scene()->worldBounds()), "F with nothing selected frames the whole scene");
+	};
+	checkTransformGizmos();
+
 	// Parallax: at rest while editing, displaced only by the preview, saved at rest either way
 	expect(a_app.loadScene("Scenes/map.scene"), "the map loads");
 	std::shared_ptr<MV::Scene::Parallax> layer;

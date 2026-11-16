@@ -676,6 +676,182 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 	};
 	checkTransformGizmos();
 
+	// The history: step labels in the Edit menu, a group as one step, delete and duplicate, the saved mark and the
+	// question a modified scene asks before it is replaced
+	if (std::distance(a_app.scene()->begin(), a_app.scene()->end()) >= 2) {
+		using Choice = Workbench::App::UnsavedChoice;
+		auto& history = a_app.commands();
+		auto& gizmoLayer = a_app.gizmoLayer();
+		auto& mouse = *a_managers.services.get<MV::TapDevice>();
+		auto click = [&](const MV::Point<int>& a_at) {
+			for (bool down : { false, true, false }) {
+				mouse.simulate(a_at, down);
+				a_app.runFrames(2);
+			}
+			mouse.stopSimulating();
+		};
+		auto pressKey = [&a_app](SDL_Keycode a_key) {
+			SDL_Event press{};
+			press.type = SDL_KEYDOWN;
+			press.key.keysym.sym = a_key;
+			SDL_PushEvent(&press);
+			a_app.runFrames(2);
+		};
+		auto first = *a_app.scene()->begin();
+		auto last = *std::prev(a_app.scene()->end());
+		auto firstRest = first->position();
+		auto lastRest = last->position();
+		auto moveBy = [&](const std::shared_ptr<MV::Scene::Node>& a_node, const MV::Point<>& a_delta) {
+			a_app.select(a_node);
+			a_app.runFrames(1);
+			return gizmoLayer.moveSelected(Workbench::GizmoAxis::BOTH, a_delta);
+		};
+
+		expect(moveBy(last, MV::point(20.0f, 10.0f)) && history.undoLabel() == "move " + last->id(), "a step carries a label for what it did, got " + history.undoLabel());
+		click(a_app.menus().titleScreenPoint(1));
+		expect(a_app.menus().isOpen() && a_app.menus().rowLabel(0) == "Undo move " + last->id() && a_app.menus().rowEnabled(0), "Edit names the step Undo takes back");
+		expect(a_app.menus().isOpen() && a_app.menus().rowLabel(1) == "Redo" && !a_app.menus().rowEnabled(1), "Redo is plain and disabled with nothing to redo");
+		if (a_app.menus().isOpen()) {
+			click(a_app.menus().rowScreenPoint(1));
+			expect(a_app.menus().isOpen() && !sameXY(last->position(), lastRest), "a disabled row does nothing when pressed");
+			click(a_app.menus().rowScreenPoint(0));
+			expect(!a_app.menus().isOpen() && sameXY(last->position(), lastRest), "Edit > Undo takes the move back");
+		}
+		expect(history.redoLabel() == "move " + last->id() && history.undoLabel() != history.redoLabel(), "the undone step is the one Redo names");
+
+		{
+			auto bothMoves = history.group("move both");
+			moveBy(first, MV::point(15.0f, 0.0f));
+			moveBy(last, MV::point(0.0f, 25.0f));
+			moveBy(last, MV::point(40.0f, 0.0f));
+		}
+		expect(history.undoLabel() == "move both" && !sameXY(first->position(), firstRest) && !sameXY(last->position(), lastRest), "steps recorded in a group are one step under its label");
+		pressWithControl(SDLK_z);
+		expect(sameXY(first->position(), firstRest) && sameXY(last->position(), lastRest), "one undo takes back every step of a group, last first");
+		pressWithControl(SDLK_y);
+		expect(!sameXY(first->position(), firstRest) && !sameXY(last->position(), lastRest), "one redo applies the group again");
+		pressWithControl(SDLK_z);
+		{
+			auto nothingRecorded = history.group("nothing");
+		}
+		expect(history.redoLabel() == "move both", "a group nothing was recorded in is no step");
+
+		// a step from before a delete still applies to the node undo brings back: it is the same node
+		auto countBefore = std::distance(a_app.scene()->begin(), a_app.scene()->end());
+		moveBy(last, MV::point(30.0f, 0.0f));
+		auto movedPosition = last->position();
+		auto depthBefore = last->depth();
+		pressKey(SDLK_DELETE);
+		expect(std::distance(a_app.scene()->begin(), a_app.scene()->end()) == countBefore - 1 && !last->parent() && !a_app.selected(), "Delete removes the selected node and clears the selection");
+		expect(history.undoLabel() == "delete " + last->id(), "the delete is a labelled step, got " + history.undoLabel());
+		pressWithControl(SDLK_z);
+		expect(last->parent() == a_app.scene() && *std::prev(a_app.scene()->end()) == last && last->depth() == depthBefore, "undo puts the same node back where it was");
+		expect(a_app.selected() == last, "undo of a delete selects the node again");
+		pressWithControl(SDLK_z);
+		expect(sameXY(last->position(), lastRest), "a step recorded before the delete still undoes on the restored node");
+		pressWithControl(SDLK_y);
+		pressWithControl(SDLK_y);
+		expect(!last->parent() && sameXY(last->position(), movedPosition), "redo moves the node and deletes it again");
+		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_z);
+		expect(last->parent() == a_app.scene() && sameXY(last->position(), lastRest), "both steps undo again");
+
+		a_app.select(a_app.scene());
+		expect(!a_app.deleteSelected() && !a_app.duplicateSelected(), "the scene's root is neither deleted nor duplicated");
+
+		a_app.select(last);
+		pressWithControl(SDLK_d);
+		auto copy = a_app.selected();
+		expect(copy && copy != last && copy->parent() == a_app.scene() && copy->id() != last->id(), "Ctrl+D adds a copy beside the original and selects it");
+		if (copy) {
+			expect(std::distance(copy->begin(), copy->end()) == std::distance(last->begin(), last->end()) && sameXY(copy->position(), last->position()), "the copy carries the original's children and transform");
+		}
+		pressWithControl(SDLK_z);
+		expect(std::distance(a_app.scene()->begin(), a_app.scene()->end()) == countBefore && a_app.selected() == last, "undo removes the copy and selects the original");
+		pressWithControl(SDLK_y);
+		expect(std::distance(a_app.scene()->begin(), a_app.scene()->end()) == countBefore + 1 && a_app.selected() == copy, "redo puts the same copy back, selected");
+		pressWithControl(SDLK_z);
+
+		auto historyFile = (std::filesystem::temp_directory_path() / "workbench_selftest_history.scene").string();
+		auto starred = [&a_app]() { return a_app.title().find('*') != std::string::npos; };
+		expect(a_app.saveScene(historyFile) && !a_app.modified() && !starred(), "a save leaves the scene unmodified and its title plain");
+		moveBy(last, MV::point(12.0f, 0.0f));
+		expect(a_app.modified() && starred(), "an edit marks the scene modified and stars the title");
+		pressWithControl(SDLK_z);
+		expect(!a_app.modified() && !starred(), "undoing back to the saved state clears the mark");
+		pressWithControl(SDLK_y);
+		expect(a_app.modified(), "redoing past the saved state marks it again");
+		expect(a_app.saveScene(historyFile) && !a_app.modified(), "a second save moves the saved mark");
+		pressWithControl(SDLK_z);
+		expect(a_app.modified() && starred(), "undoing behind the saved state is a modification too");
+
+		int asked = 0;
+		auto answer = Choice::CANCEL;
+		a_app.askAboutUnsavedChanges = [&](const std::string&) {
+			++asked;
+			return answer;
+		};
+		a_app.requestNewScene();
+		expect(asked == 1 && !a_app.scene()->empty() && a_app.modified(), "Cancel keeps a modified scene open");
+		a_app.requestExit();
+		expect(asked == 2 && !a_app.exiting(), "Cancel keeps the editor open");
+		answer = Choice::SAVE;
+		auto loginScene = std::string("Interface/Login/view.scene");
+		auto idOfLast = last->id();
+		expect(a_app.requestLoadScene(loginScene) && asked == 3 && a_app.document() == loginScene && !a_app.modified(), "Save writes the scene, then the other one loads");
+		try {
+			auto written = MV::Scene::Node::load(historyFile, a_managers.services, false);
+			auto writtenLast = written->get(idOfLast, false);
+			expect(writtenLast && sameXY(writtenLast->position(), lastRest), "the scene Save wrote holds the state it was asked about");
+		} catch (const std::exception& a_error) {
+			expect(false, std::string("the scene Save wrote loads back: ") + a_error.what());
+		}
+		expect(a_app.requestLoadScene(loginScene) && asked == 3, "an unmodified scene is replaced without a question");
+		auto windowSize = a_managers.renderer.window().windowSize();
+		a_app.dropPrefab("Prefabs/SimpleButton.bindsnap", MV::Point<int>(windowSize.width / 2, windowSize.height / 2));
+		answer = Choice::DISCARD;
+		a_app.requestNewScene();
+		expect(asked == 4 && a_app.scene()->empty() && a_app.document().empty() && !a_app.modified(), "Don't Save drops the changes and makes the new scene");
+
+		a_app.askAboutUnsavedChanges = [](const std::string&) { return Choice::DISCARD; };
+		std::error_code removeIgnored;
+		std::filesystem::remove(historyFile, removeIgnored);
+		expect(a_app.loadScene(loginScene), "the Login scene loads again");
+		a_app.dropPrefab("Prefabs/SimpleButton.bindsnap", MV::Point<int>(windowSize.width / 2, windowSize.height / 2));
+		// a node the rest of the scene refers to: the delete clears the reference so the file drops the node, undo restores it
+		auto placedButton = *std::prev(a_app.scene()->end());
+		auto buttonComponent = placedButton->component<MV::Scene::Button>(false, false);
+		auto idleView = buttonComponent ? buttonComponent->idleNode() : nullptr;
+		expect(idleView && idleView->parent() == placedButton, "the placed button holds its Idle view as a child");
+		if (idleView) {
+			auto viewCount = std::distance(placedButton->begin(), placedButton->end());
+			a_app.select(idleView);
+			expect(a_app.deleteSelected() && !idleView->parent() && !buttonComponent->idleNode(), "deleting a node clears the references the scene holds to it");
+			a_app.runFrames(3);
+			auto referenceFile = (std::filesystem::temp_directory_path() / "workbench_selftest_reference.scene").string();
+			expect(a_app.saveScene(referenceFile), "the scene saves after the delete");
+			try {
+				auto written = *std::prev(MV::Scene::Node::load(referenceFile, a_managers.services, false)->end());
+				auto writtenButton = written->component<MV::Scene::Button>(false, false);
+				expect(std::distance(written->begin(), written->end()) == viewCount - 1 && writtenButton && !writtenButton->idleNode() && writtenButton->activeNode(), "the saved button has neither the deleted view nor a reference to it");
+			} catch (const std::exception& a_error) {
+				expect(false, std::string("the scene saved after a delete loads back: ") + a_error.what());
+			}
+			std::filesystem::remove(referenceFile, removeIgnored);
+			expect(history.undoLabel() == "delete " + idleView->id(), "a delete with cleared references is still one step");
+			pressWithControl(SDLK_z);
+			expect(idleView->parent() == placedButton && buttonComponent->idleNode() == idleView && std::distance(placedButton->begin(), placedButton->end()) == viewCount, "undo puts the node and the reference back");
+			pressWithControl(SDLK_y);
+			expect(!idleView->parent() && !buttonComponent->idleNode(), "redo deletes and clears again");
+			pressWithControl(SDLK_z);
+			a_app.runFrames(3);
+		}
+		a_app.select(nullptr);
+		a_app.runFrames(10);
+	} else {
+		expect(false, "the scene has two nodes for the history checks");
+	}
+
 	// Scene toolbar and menu bar, pressed on the simulated mouse
 	{
 		auto& mouse = *a_managers.services.get<MV::TapDevice>();
@@ -1023,6 +1199,8 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 	if (!a_smoke) {
 		return app.run();
 	}
+	// no run without a person at it may stop on a message box
+	app.askAboutUnsavedChanges = [](const std::string&) { return Workbench::App::UnsavedChoice::DISCARD; };
 	if (a_selfTest) {
 		RunWorkbenchSelfTest(app, managers);
 	}

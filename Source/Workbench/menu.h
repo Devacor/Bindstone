@@ -16,6 +16,9 @@ namespace Workbench {
 		std::string shortcut;
 		std::function<void()> action;
 		bool separatorAbove = false;
+		// Read each time the menu opens: a label that follows the editor's state, and whether the row can be chosen.
+		std::function<std::string()> liveLabel;
+		std::function<bool()> enabled;
 	};
 
 	// The menu titles in the title bar and the one dropdown open beneath them. Moving across the titles while a menu
@@ -34,6 +37,9 @@ namespace Workbench {
 		// Centres on screen of a menu's title and of a row of the open menu.
 		MV::Point<int> titleScreenPoint(int a_menu) const;
 		MV::Point<int> rowScreenPoint(int a_row) const;
+		// The open menu's rows as shown.
+		const std::string& rowLabel(int a_row) const { return rowLabels[static_cast<size_t>(a_row)]; }
+		bool rowEnabled(int a_row) const { return rowsEnabled[static_cast<size_t>(a_row)]; }
 
 	private:
 		struct Menu {
@@ -66,6 +72,8 @@ namespace Workbench {
 		std::vector<std::shared_ptr<MV::Scene::Sprite>> rowHighlights;
 		std::vector<float> rowTops;
 		std::vector<std::shared_ptr<MV::Scene::Node>> rowNodes;
+		std::vector<std::string> rowLabels;
+		std::vector<bool> rowsEnabled;
 		int hoveredRow = -1;
 		MV::TapDevice::SignalType hoverReceiver;
 	};

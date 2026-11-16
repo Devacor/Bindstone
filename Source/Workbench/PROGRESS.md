@@ -500,10 +500,37 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Not yet: `ParticleChangeValues` (the emitter's min/max change values; it wants the particle editor's degree
   handling), `slotsToNodes`, `std::pair` rows, text content, per-point colour and UV.
 
+## Increment 23: the history (2026-11-16)
+- `CommandHistory` (`commands.h`):
+  - `group(label)` returns a scope; every `record()` made while it lives joins one step (`CommandGroup`: redone in
+    order, undone in reverse). Nested scopes join the outermost; a scope nothing was recorded in is no step.
+  - `undoLabel()` / `redoLabel()`; the Edit menu shows "Undo move Sky" and greys a row with nothing behind it
+    (`MenuItem::liveLabel` / `enabled`, read when the menu opens; `[[c|r:g:b]]` text markup draws the grey).
+  - `markSaved()` / `modified()`: each step carries a serial, the saved mark is the serial of the state on disk, so
+    undo or redo back to it reads unmodified and a saved state no undo can reach stays modified. `onMoved` fires when
+    the position or the mark moves; the title stars a modified document.
+- The rule for references: a command points at the objects it edits. Nothing leaves the scene except through a
+  command that keeps the removed object and puts the same object back, so a step recorded before a delete still
+  applies after the delete is undone. No id table.
+- Delete (Del) and Duplicate (Ctrl+D) on the selected node, both in Edit. Neither takes the scene's root.
+  - Delete is one group: `clearReferencesInto` clears what the rest of the scene holds of the leaving subtree
+    (`InspectorPanel::nodeReferences`: a component's node properties, nested owners included, and its anchor
+    parent), then the node is removed. A Button whose view was deleted would otherwise write the view into the file.
+    Undo re-adds the node at its depth, restores the references and selects it.
+  - Duplicate is `Node::clone` beside the original, its Parallax layers put into authoring, selected.
+- Unsaved changes: New Scene, Open, a scene opened from a panel, Exit and the window's close go through
+  `App::request*`, which asks `askAboutUnsavedChanges` (Save / Don't Save / Cancel, an SDL message box) when the
+  document is modified. `newScene` / `loadScene` themselves never ask; the smoke modes answer Don't Save.
+- The self-test presses Edit > Undo on the simulated mouse and checks the labels and the disabled row, a group as
+  one step undone last first, delete / undo / redo with a step from before the delete, the cleared and restored
+  Button view with a save between, duplicate, the saved mark and star, and all three answers to the question.
+- Not yet: multi-selection (the first caller of `group` besides delete), a History panel, selection changes as
+  steps.
+
 ## Known gaps (next increments)
 - Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.
-- Authoring verbs still only in Source/Editor: create/delete/duplicate node, attach/detach
+- Authoring verbs still only in Source/Editor: create node, attach/detach
   component, save selection as BindSnap, texture picker, anchor editor — old-editor deletion
   awaits that parity (Dev sign-off).
 - Gizmo residue (increment 13): aspect-lock not ported; inspector refreshes at gesture end;

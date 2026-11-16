@@ -128,6 +128,56 @@ namespace Workbench {
 		return result;
 	}
 
+	std::vector<InspectorPanel::NodeReference> InspectorPanel::nodeReferences(const std::shared_ptr<MV::Scene::Component>& a_component) {
+		std::vector<NodeReference> result;
+		std::weak_ptr<MV::Scene::Component> weakComponent = a_component;
+		auto assigning = [weakComponent](const std::string& a_path, auto a_value) {
+			return std::function<void()>([weakComponent, a_path, a_value]() {
+				auto locked = weakComponent.lock();
+				auto* property = locked ? resolveProperty(locked, a_path) : nullptr;
+				if (property && property->assign_value(a_value)) {
+					notifyEdited(locked);
+				}
+			});
+		};
+		std::function<void(const std::string&, jai::property_base*)> consider = [&](const std::string& a_path, jai::property_base* a_property) {
+			if (leafName(a_path) == "componentOwner") {
+				return;
+			}
+			if (auto* held = a_property->value_as<std::shared_ptr<MV::Scene::Node>>()) {
+				if (*held) {
+					result.push_back({ *held, assigning(a_path, std::shared_ptr<MV::Scene::Node>()), assigning(a_path, *held) });
+				}
+			} else if (auto* watched = a_property->value_as<std::weak_ptr<MV::Scene::Node>>()) {
+				if (auto target = watched->lock()) {
+					result.push_back({ target, assigning(a_path, std::weak_ptr<MV::Scene::Node>()), assigning(a_path, *watched) });
+				}
+			} else if (auto nested = nestedOwners().find(a_property->value_type_id()); nested != nestedOwners().end()) {
+				nested->second.visit(a_property, [&](const std::string& a_name, jai::property_base* a_nestedProperty) {
+					consider(a_path + "/" + a_name, a_nestedProperty);
+				});
+			}
+		};
+		a_component->visit_reflected_properties(consider);
+
+		if (auto drawable = std::dynamic_pointer_cast<MV::Scene::Drawable>(a_component); drawable && drawable->anchors().hasParent()) {
+			std::weak_ptr<MV::Scene::Drawable> weakDrawable = drawable;
+			std::weak_ptr<MV::Scene::Drawable> anchoredTo = drawable->anchors().parent();
+			result.push_back({ drawable->anchors().parent()->owner(),
+				[weakDrawable]() {
+					if (auto locked = weakDrawable.lock()) {
+						locked->anchors().removeFromParent();
+					}
+				},
+				[weakDrawable, anchoredTo]() {
+					if (auto locked = weakDrawable.lock()) {
+						locked->anchors().parent(anchoredTo);
+					}
+				} });
+		}
+		return result;
+	}
+
 	bool InspectorPanel::addGroupHeader(const std::string& a_title, const std::string& a_key, const std::string& a_summary, float& a_y) {
 		bool open = openGroups.count(a_key) && openGroups[a_key];
 		auto row = contentNode->make(MV::guid("group_"));

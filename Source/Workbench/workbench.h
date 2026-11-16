@@ -22,6 +22,23 @@ namespace Workbench {
 
 		void dropPrefab(const std::string& a_fileName, const MV::Point<int>& a_screenPoint);
 
+		// Removes the selected node, or adds a copy of it beside it; false when the selection is nothing or the scene's root.
+		bool deleteSelected();
+		bool duplicateSelected();
+		CommandHistory& commands() { return history; }
+		// The scene has edits its file does not.
+		bool modified() const { return history.modified(); }
+
+		enum class UnsavedChoice { SAVE, DISCARD, CANCEL };
+		// Asked before a modified scene is replaced or the editor closes; a native message box unless replaced.
+		std::function<UnsavedChoice(const std::string& a_documentName)> askAboutUnsavedChanges;
+		// What the menus, shortcuts and panels call: each asks about unsaved changes first.
+		void requestNewScene();
+		void requestOpenScene();
+		bool requestLoadScene(const std::string& a_fileName);
+		void requestExit();
+		bool exiting() const { return done; }
+
 		int run();
 		int runFrames(int a_frameCount, const std::string& a_screenshotPath = "");
 
@@ -33,8 +50,8 @@ namespace Workbench {
 		void newScene();
 		// File menu: the platform's pickers, and Save to the file the scene came from (Save As when it has none).
 		void openSceneWithDialog();
-		void saveSceneWithDialog();
-		void saveCurrentScene();
+		bool saveSceneWithDialog();
+		bool saveCurrentScene();
 		// Left part of the title bar that takes presses (menus and transport); the rest drags the window.
 		float titleBarInteractiveWidth() const { return titleInteractiveWidth; }
 
@@ -54,6 +71,8 @@ namespace Workbench {
 		MenuBar& menus() { return *menuBar; }
 		InspectorPanel& inspector() { return *inspectorPanel; }
 		const std::string& document() const { return documentPath; }
+		// The title bar's text: the document's name, starred while it is modified.
+		const std::string& title() const { return shownTitle; }
 
 		// Displaces the Parallax layers on the selected node and below it as a run would, until the selection changes.
 		// A save writes the layers at rest either way.
@@ -77,6 +96,10 @@ namespace Workbench {
 		void syncViewportClip();
 		void pickSceneNode(const MV::Point<int>& a_screenPoint);
 		bool inScene(const std::shared_ptr<MV::Scene::Node>& a_node) const;
+		bool selectionIsRemovable() const;
+		void clearReferencesInto(const std::shared_ptr<MV::Scene::Node>& a_leaving);
+		bool unsavedChangesResolved();
+		std::string documentName() const;
 		static std::string assetFile(const std::string& a_fileName);
 		static void forEachParallax(const std::shared_ptr<MV::Scene::Node>& a_node, const std::function<void(const std::shared_ptr<MV::Scene::Parallax>&)>& a_visit);
 		void frameNode(const DockRect& a_view, const std::shared_ptr<MV::Scene::Node>& a_node, float a_fill, float a_maximumZoom);
@@ -110,6 +133,7 @@ namespace Workbench {
 		std::vector<Panel*> menuPanels;
 		std::shared_ptr<MV::Scene::Text> titleText;
 		std::string documentPath;
+		std::string shownTitle;
 		float titleInteractiveWidth = 0.0f;
 		SceneTreePanel* treePanel = nullptr;
 		InspectorPanel* inspectorPanel = nullptr;

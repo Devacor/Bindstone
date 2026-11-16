@@ -80,6 +80,21 @@ namespace Workbench {
 			}
 			select(inScene(selectedNode) ? selectedNode : nullptr);
 		};
+		history.onMoved = [this]() { refreshTitle(); };
+		askAboutUnsavedChanges = [](const std::string& a_documentName) {
+			const SDL_MessageBoxButtonData buttons[] {
+				{ SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 0, "Save" },
+				{ 0, 1, "Don't Save" },
+				{ SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 2, "Cancel" }
+			};
+			std::string message = "Save changes to " + a_documentName + "?";
+			SDL_MessageBoxData box { SDL_MESSAGEBOX_WARNING, SDL_GetKeyboardFocus(), "Bindstone Workbench", message.c_str(), 3, buttons, nullptr };
+			int pressed = 2;
+			if (SDL_ShowMessageBox(&box, &pressed) != 0) {
+				return UnsavedChoice::CANCEL;
+			}
+			return pressed == 0 ? UnsavedChoice::SAVE : pressed == 1 ? UnsavedChoice::DISCARD : UnsavedChoice::CANCEL;
+		};
 
 		dock = std::make_unique<DockSpace>(uiRoot, managers.services, theme, focusRouter);
 		auto tree = std::make_shared<SceneTreePanel>(history,
@@ -88,12 +103,12 @@ namespace Workbench {
 		auto inspector = std::make_shared<InspectorPanel>(history);
 		auto viewport = std::make_shared<ViewportPanel>();
 		auto file = std::make_shared<ScriptPanel>("File", "Assets/Workbench/filePanel.jai");
-		file->onLoadScene = [this](const std::string& a_fileName) { loadScene(a_fileName); };
+		file->onLoadScene = [this](const std::string& a_fileName) { requestLoadScene(a_fileName); };
 		file->onSaveScene = [this](const std::string& a_fileName) { saveScene(a_fileName); };
 		file->onError = [this](const std::string& a_message) { reportError(a_message); };
 		auto project = std::make_shared<ProjectPanel>(
 			[this](const std::string& a_fileName) {
-				loadScene(a_fileName);
+				requestLoadScene(a_fileName);
 			},
 			[this](const std::string& a_fileName, const MV::Point<int>& a_screenPoint) {
 				dropPrefab(a_fileName, a_screenPoint);
@@ -242,7 +257,7 @@ namespace Workbench {
 			prefab->position(dropPosition);
 			prefab->postLoadStep();
 			forEachParallax(prefab, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
-			history.record("place " + a_fileName,
+			history.record("place " + std::filesystem::path(a_fileName).filename().string(),
 				[scene, prefab, dropPosition]() {
 					scene->add(prefab);
 					prefab->position(dropPosition);
@@ -260,6 +275,143 @@ namespace Workbench {
 		}
 	}
 
+	bool App::selectionIsRemovable() const {
+		return selectedNode && selectedNode != sceneRoot && selectedNode->parent() && inScene(selectedNode);
+	}
+
+	namespace {
+		std::string nodeLabel(const std::shared_ptr<MV::Scene::Node>& a_node) {
+			return a_node->id().empty() ? std::string("(node)") : a_node->id();
+		}
+	}
+
+	bool App::deleteSelected() {
+		if (!selectionIsRemovable()) {
+			return false;
+		}
+		auto node = selectedNode;
+		auto parent = node->parent();
+		select(nullptr);
+		{
+			auto deletion = history.group("delete " + nodeLabel(node));
+			clearReferencesInto(node);
+			parent->remove(node);
+			history.record("remove " + nodeLabel(node),
+				[parent, node]() { parent->remove(node, false); },
+				[this, parent, node]() {
+					parent->add(node, false);
+					select(node);
+				});
+		}
+		if (treePanel) {
+			treePanel->refresh();
+		}
+		return true;
+	}
+
+	// What the rest of the scene holds of a subtree about to leave it would keep the subtree in the saved file.
+	void App::clearReferencesInto(const std::shared_ptr<MV::Scene::Node>& a_leaving) {
+		auto leaves = [&a_leaving](const std::shared_ptr<MV::Scene::Node>& a_node) {
+			for (auto node = a_node; node; node = node->parent()) {
+				if (node == a_leaving) {
+					return true;
+				}
+			}
+			return false;
+		};
+		std::function<void(const std::shared_ptr<MV::Scene::Node>&)> visit = [&](const std::shared_ptr<MV::Scene::Node>& a_node) {
+			if (a_node == a_leaving) {
+				return;
+			}
+			if (auto components = a_node->property_value<std::vector<std::shared_ptr<MV::Scene::Component>>>("childComponents")) {
+				for (auto&& component : *components) {
+					for (auto&& reference : InspectorPanel::nodeReferences(component)) {
+						if (leaves(reference.target)) {
+							reference.clear();
+							history.record("clear reference", reference.clear, reference.restore);
+						}
+					}
+				}
+			}
+			for (auto&& child : *a_node) {
+				visit(child);
+			}
+		};
+		visit(sceneRoot);
+	}
+
+	bool App::duplicateSelected() {
+		if (!selectionIsRemovable()) {
+			return false;
+		}
+		// a previewed layer is displaced: the copy is taken at rest
+		parallaxPreview(false);
+		auto original = selectedNode;
+		auto parent = original->parent();
+		try {
+			auto copy = original->clone();
+			forEachParallax(copy, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
+			std::weak_ptr<MV::Scene::Node> weakOriginal = original;
+			history.record("duplicate " + nodeLabel(original),
+				[this, parent, copy]() {
+					parent->add(copy, false);
+					select(copy);
+				},
+				[this, parent, copy, weakOriginal]() {
+					parent->remove(copy, false);
+					select(weakOriginal.lock());
+				});
+			if (treePanel) {
+				treePanel->refresh();
+			}
+			select(copy);
+			return true;
+		} catch (const std::exception& a_error) {
+			reportError("duplicate failed (" + nodeLabel(original) + "): " + a_error.what());
+			return false;
+		}
+	}
+
+	std::string App::documentName() const {
+		return documentPath.empty() ? std::string("Untitled") : std::filesystem::path(documentPath).filename().string();
+	}
+
+	bool App::unsavedChangesResolved() {
+		if (!history.modified()) {
+			return true;
+		}
+		switch (askAboutUnsavedChanges ? askAboutUnsavedChanges(documentName()) : UnsavedChoice::DISCARD) {
+			case UnsavedChoice::SAVE:
+				return saveCurrentScene();
+			case UnsavedChoice::DISCARD:
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	void App::requestNewScene() {
+		if (unsavedChangesResolved()) {
+			newScene();
+		}
+	}
+
+	void App::requestOpenScene() {
+		if (unsavedChangesResolved()) {
+			openSceneWithDialog();
+		}
+	}
+
+	bool App::requestLoadScene(const std::string& a_fileName) {
+		return unsavedChangesResolved() && loadScene(a_fileName);
+	}
+
+	void App::requestExit() {
+		if (unsavedChangesResolved()) {
+			done = true;
+		}
+	}
+
 	void App::buildTitleBar() {
 		auto& library = *managers.services.get<MV::TextLibrary>();
 		auto bar = uiRoot->make("titleBar");
@@ -273,14 +425,19 @@ namespace Workbench {
 		menuHost->position(MV::point(theme.px(6.0f), 0.0f));
 		menuBar = std::make_unique<MenuBar>(menuHost, uiRoot->make("menuPopups"), managers.services, theme);
 		menuBar->add("File", {
-			{ "New Scene", "", [this]() { newScene(); } },
-			{ "Open...", "Ctrl+O", [this]() { openSceneWithDialog(); } },
+			{ "New Scene", "", [this]() { requestNewScene(); } },
+			{ "Open...", "Ctrl+O", [this]() { requestOpenScene(); } },
 			{ "Save", "Ctrl+S", [this]() { saveCurrentScene(); }, true },
 			{ "Save As...", "Ctrl+Shift+S", [this]() { saveSceneWithDialog(); } },
-			{ "Exit", "", [this]() { done = true; }, true } });
+			{ "Exit", "", [this]() { requestExit(); }, true } });
+		auto named = [](const char* a_verb, const std::string& a_label) {
+			return a_label.empty() ? std::string(a_verb) : a_verb + (" " + a_label);
+		};
 		menuBar->add("Edit", {
-			{ "Undo", "Ctrl+Z", [this]() { history.undo(); } },
-			{ "Redo", "Ctrl+Y", [this]() { history.redo(); } } });
+			{ "Undo", "Ctrl+Z", [this]() { history.undo(); }, false, [this, named]() { return named("Undo", history.undoLabel()); }, [this]() { return history.canUndo(); } },
+			{ "Redo", "Ctrl+Y", [this]() { history.redo(); }, false, [this, named]() { return named("Redo", history.redoLabel()); }, [this]() { return history.canRedo(); } },
+			{ "Duplicate", "Ctrl+D", [this]() { duplicateSelected(); }, true, {}, [this]() { return selectionIsRemovable(); } },
+			{ "Delete", "Del", [this]() { deleteSelected(); }, false, {}, [this]() { return selectionIsRemovable(); } } });
 		std::vector<MenuItem> windowItems;
 		for (auto* panel : menuPanels) {
 			windowItems.push_back({ panel->title(), "", [this, panel]() { dock->show(panel); } });
@@ -334,7 +491,7 @@ namespace Workbench {
 			}
 		});
 		auto closeButton = makeButton(buttons, managers.services, theme, "close", buttonSize, "x", [this]() {
-			done = true;
+			requestExit();
 		});
 		minimizeButton->owner()->position(MV::point(0.0f, 0.0f));
 		maximizeButton->owner()->position(MV::point(theme.titleButtonWidth, 0.0f));
@@ -381,8 +538,9 @@ namespace Workbench {
 	}
 
 	void App::refreshTitle() {
+		shownTitle = documentName() + (history.modified() ? "*" : "") + "  -  Bindstone Workbench";
 		if (titleText) {
-			titleText->text((documentPath.empty() ? std::string("Untitled") : std::filesystem::path(documentPath).filename().string()) + "  -  Bindstone Workbench");
+			titleText->text(shownTitle);
 		}
 	}
 
@@ -407,19 +565,13 @@ namespace Workbench {
 		}
 	}
 
-	void App::saveSceneWithDialog() {
+	bool App::saveSceneWithDialog() {
 		auto chosen = saveSceneFileDialog("Assets/Scenes", documentPath.empty() ? std::string("untitled.scene") : std::filesystem::path(documentPath).filename().string());
-		if (!chosen.empty()) {
-			saveScene(chosen);
-		}
+		return !chosen.empty() && saveScene(chosen);
 	}
 
-	void App::saveCurrentScene() {
-		if (documentPath.empty()) {
-			saveSceneWithDialog();
-		} else {
-			saveScene(documentPath);
-		}
+	bool App::saveCurrentScene() {
+		return documentPath.empty() ? saveSceneWithDialog() : saveScene(documentPath);
 	}
 
 	void App::select(const std::shared_ptr<MV::Scene::Node>& a_node) {
@@ -487,7 +639,7 @@ namespace Workbench {
 			auto assetPath = assetFile(a_fileName);
 			sceneRoot->saveJai(assetPath, managers.services, false);
 			documentPath = a_fileName;
-			refreshTitle();
+			history.markSaved();
 			std::cout << "Workbench saved: " << assetPath << std::endl;
 		} catch (const std::exception& a_error) {
 			reportError("save failed (" + a_fileName + "): " + a_error.what());
@@ -616,6 +768,9 @@ namespace Workbench {
 			case SDLK_f:
 				frameSelectionInViewport();
 			break;
+			case SDLK_DELETE:
+				deleteSelected();
+			break;
 			default:
 				return false;
 		}
@@ -629,7 +784,7 @@ namespace Workbench {
 				continue;
 			}
 			if (event.type == SDL_QUIT) {
-				done = true;
+				requestExit();
 				continue;
 			}
 			menuBar->handleInput(event);
@@ -646,7 +801,11 @@ namespace Workbench {
 					continue;
 				}
 				if (event.key.keysym.sym == SDLK_o) {
-					openSceneWithDialog();
+					requestOpenScene();
+					continue;
+				}
+				if (event.key.keysym.sym == SDLK_d) {
+					duplicateSelected();
 					continue;
 				}
 				if (event.key.keysym.sym == SDLK_z) {

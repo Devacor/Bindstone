@@ -9,6 +9,8 @@ namespace Workbench {
 		constexpr int64_t menuPriority = 10000;
 		const MV::Color menuFill(0x1b1b1b);
 		const MV::Color menuShadow(0.0f, 0.0f, 0.0f, 0.45f);
+		// text markup: a row that cannot be chosen is drawn in grey
+		const std::string disabledText = "[[c|0.42:0.42:0.42]]";
 	}
 
 	MenuBar::MenuBar(const std::shared_ptr<MV::Scene::Node>& a_barHost, const std::shared_ptr<MV::Scene::Node>& a_popupHost, MV::Services& a_services, const Theme& a_theme) :
@@ -65,6 +67,8 @@ namespace Workbench {
 		rowHighlights.clear();
 		rowTops.clear();
 		rowNodes.clear();
+		rowLabels.clear();
+		rowsEnabled.clear();
 		if (popup) {
 			popup->removeFromParent();
 			popup.reset();
@@ -81,7 +85,9 @@ namespace Workbench {
 		float labelColumn = 0.0f;
 		float shortcutColumn = 0.0f;
 		for (auto&& item : menu.items) {
-			labelColumn = std::max(labelColumn, textWidth(item.label));
+			rowLabels.push_back(item.liveLabel ? item.liveLabel() : item.label);
+			rowsEnabled.push_back(!item.enabled || item.enabled());
+			labelColumn = std::max(labelColumn, textWidth(rowLabels.back()));
 			shortcutColumn = std::max(shortcutColumn, textWidth(item.shortcut));
 		}
 		const float inset = theme.px(4.0f);
@@ -122,16 +128,22 @@ namespace Workbench {
 			rowTops.push_back(y);
 			rowNodes.push_back(row);
 
-			auto label = makeLabel(row, services, theme, "label", MV::size(rowWidth - textInset * 2.0f, rowSize.height), item.label);
+			bool enabled = rowsEnabled[static_cast<size_t>(rowIndex)];
+			std::string tint { enabled ? std::string() : disabledText };
+			auto label = makeLabel(row, services, theme, "label", MV::size(rowWidth - textInset * 2.0f, rowSize.height), tint + rowLabels[static_cast<size_t>(rowIndex)]);
 			label->owner()->position(MV::point(textInset, 0.0f));
 			if (!item.shortcut.empty()) {
-				auto shortcut = makeLabel(row, services, theme, "shortcut", MV::size(rowWidth - textInset * 2.0f, rowSize.height), item.shortcut);
+				auto shortcut = makeLabel(row, services, theme, "shortcut", MV::size(rowWidth - textInset * 2.0f, rowSize.height), tint + item.shortcut);
 				shortcut->owner()->position(MV::point(textInset, 0.0f));
 				shortcut->justification(MV::TextJustification::RIGHT);
 			}
 
-			auto action = item.action;
-			row->attach<MV::Scene::Clickable>(mouse)->bounds(rowSize)->globalPriority(menuPriority + rowIndex)->onAccept.connect("choose", [this, action](const std::shared_ptr<MV::Scene::Clickable>&) {
+			// a row that cannot be chosen still takes its press, so it does not reach the panel beneath
+			auto action = enabled ? item.action : std::function<void()>();
+			row->attach<MV::Scene::Clickable>(mouse)->bounds(rowSize)->globalPriority(menuPriority + rowIndex)->onAccept.connect("choose", [this, action, enabled](const std::shared_ptr<MV::Scene::Clickable>&) {
+				if (!enabled) {
+					return;
+				}
 				auto chosen = action;   // close() destroys this row and the closure with it
 				close();
 				if (chosen) {
@@ -178,7 +190,7 @@ namespace Workbench {
 		if (local.x >= 0.0f && local.x < popupSize.width) {
 			for (int index = 0; index < static_cast<int>(rowTops.size()); ++index) {
 				if (local.y >= rowTops[static_cast<size_t>(index)] && local.y < rowTops[static_cast<size_t>(index)] + rowHeight()) {
-					row = index;
+					row = rowsEnabled[static_cast<size_t>(index)] ? index : -1;
 					break;
 				}
 			}

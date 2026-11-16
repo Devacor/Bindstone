@@ -77,13 +77,25 @@ namespace Workbench {
 
 		// "spawnProperties/maximumParticles": a property inside a nested owner, named from the component down.
 		static jai::property_base* resolveProperty(const std::shared_ptr<MV::Scene::Component>& a_component, const std::string& a_path);
+
+	public:
+		// A reference a component holds to a node, with the writes that clear it and put it back.
+		struct NodeReference {
+			std::shared_ptr<MV::Scene::Node> target;
+			std::function<void()> clear;
+			std::function<void()> restore;
+		};
+		// Every node a component refers to: its node properties (nested owners included) and its anchor parent's owner.
+		static std::vector<NodeReference> nodeReferences(const std::shared_ptr<MV::Scene::Component>& a_component);
+
+	private:
 		static std::string leafName(const std::string& a_path);
 
 		bool addSectionHeader(const std::string& a_title, const std::string& a_key, float& a_y, const std::shared_ptr<MV::Scene::Component>& a_gizmoComponent = nullptr);
 		void openColorPopup(const std::weak_ptr<MV::Scene::Component>& a_component, const std::string& a_propertyName, jai::property_base* a_property, const std::weak_ptr<MV::Scene::Sprite>& a_swatch, const MV::Point<int>& a_screenPoint);
 		void closeColorPopup(bool a_keepColor);
 		std::shared_ptr<MV::Scene::Node> makeRow(const std::string& a_label, float& a_y);
-		void notifyEdited(const std::shared_ptr<MV::Scene::Component>& a_component);
+		static void notifyEdited(const std::shared_ptr<MV::Scene::Component>& a_component);
 
 		float labelWidth() const { return std::clamp(panelWidth * 0.4f, theme->px(80.0f), theme->px(180.0f)); }
 		float fieldWidth() const { return std::max(theme->px(60.0f), panelWidth - labelWidth() - theme->pad * 3.0f); }

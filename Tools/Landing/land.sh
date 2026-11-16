@@ -72,11 +72,13 @@ client_choice() {
 				CLIENT_BUILD_WHY="${CLIENT_BUILD_WHY:-$p}"; CLIENT_VERIFY_WHY="${CLIENT_VERIFY_WHY:-the property system or the archives ($p)}" ;;
 			Source/MV/* | Source/Game/* | Assets/*)
 				CLIENT_BUILD_WHY="${CLIENT_BUILD_WHY:-$p}"; CLIENT_VERIFY_WHY="${CLIENT_VERIFY_WHY:-the engine, the game or the assets ($p)}" ;;
-			Source/JaiScript/include/* | Source/JaiScript/source/implementation/* | Source/Workbench/* | Source/Editor/* | Source/SolutionSpecific/* | VSProjects/*)
+			Source/Workbench/* | Source/Editor/* | Source/SolutionSpecific/* | Tools/Landing/client_gate.sh)
+				CLIENT_BUILD_WHY="${CLIENT_BUILD_WHY:-$p}"; CLIENT_VERIFY_WHY="${CLIENT_VERIFY_WHY:-the editor, an entry point or the client gate ($p)}" ;;
+			Source/JaiScript/include/* | Source/JaiScript/source/implementation/* | VSProjects/*)
 				CLIENT_BUILD_WHY="${CLIENT_BUILD_WHY:-$p}" ;;
 		esac
 	done < <(git -C "$REPO" diff --name-only "$1" | tr -d '\r')
-	if [ -n "$CLIENT_VERIFY_WHY" ]; then echo "chose: client build + -verifyassets, because $CLIENT_VERIFY_WHY"
+	if [ -n "$CLIENT_VERIFY_WHY" ]; then echo "chose: client build + -verifyassets + the Workbench checks, because $CLIENT_VERIFY_WHY"
 	elif [ -n "$CLIENT_BUILD_WHY" ]; then echo "chose: client build, because MutedVision compiles a changed file ($CLIENT_BUILD_WHY)"
 	else echo "chose: no client step (nothing the client compiles or loads changed)"; fi
 }

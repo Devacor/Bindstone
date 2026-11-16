@@ -44,6 +44,9 @@ namespace Workbench {
 		void buildNodeSection(float& a_y);
 		void buildComponentSection(const std::shared_ptr<MV::Scene::Component>& a_component, float& a_y);
 		void addPropertyRow(const std::shared_ptr<MV::Scene::Component>& a_component, const std::string& a_name, jai::property_base* a_property, float& a_y);
+		// A value the inspector shows but cannot edit yet: plain text, no field box.
+		void addReadOnlyRow(const std::string& a_name, const std::string& a_value, float& a_y);
+		void addTextureRows(const std::string& a_name, jai::property_base* a_property, float& a_y);
 
 		bool addSectionHeader(const std::string& a_title, const std::string& a_key, float& a_y, const std::shared_ptr<MV::Scene::Component>& a_gizmoComponent = nullptr);
 		void openColorPopup(const std::weak_ptr<MV::Scene::Component>& a_component, const std::string& a_propertyName, jai::property_base* a_property, const std::weak_ptr<MV::Scene::Sprite>& a_swatch, const MV::Point<int>& a_screenPoint);

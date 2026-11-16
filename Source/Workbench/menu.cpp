@@ -1,0 +1,204 @@
+#include "menu.h"
+#include "widgets.h"
+#include <algorithm>
+
+namespace Workbench {
+
+	namespace {
+		// above every panel's Clickables, so a row takes the press that lands on it
+		constexpr int64_t menuPriority = 10000;
+		const MV::Color menuFill(0x1b1b1b);
+		const MV::Color menuShadow(0.0f, 0.0f, 0.0f, 0.45f);
+	}
+
+	MenuBar::MenuBar(const std::shared_ptr<MV::Scene::Node>& a_barHost, const std::shared_ptr<MV::Scene::Node>& a_popupHost, MV::Services& a_services, const Theme& a_theme) :
+		barHost(a_barHost),
+		popupHost(a_popupHost),
+		services(a_services),
+		theme(a_theme) {
+
+		hoverReceiver = services.get<MV::TapDevice>()->onMove.connect("menuHover", [this](MV::TapDevice& a_mouse) {
+			hover(a_mouse.position());
+		});
+	}
+
+	MV::Point<> MenuBar::worldFromScreen(const MV::Point<int>& a_screenPoint) const {
+		return barHost->renderer().worldFromScreen(a_screenPoint);
+	}
+
+	void MenuBar::add(const std::string& a_title, std::vector<MenuItem> a_items) {
+		auto& mouse = *services.get<MV::TapDevice>();
+		Menu menu;
+		menu.title = a_title;
+		menu.items = std::move(a_items);
+		menu.x = nextTitleX;
+		menu.width = textWidth(a_title) + theme.px(18.0f);
+
+		MV::Size<> titleSize(menu.width, theme.titleBarHeight - theme.pad * 2.0f);
+		auto titleNode = barHost->make(MV::guid("menuTitle_"));
+		titleNode->position(MV::point(menu.x, theme.pad));
+		menu.highlight = attachRoundedRect(titleNode, services, theme, titleSize, theme.buttonIdle());
+		menu.highlight->hide();
+		auto label = makeLabel(titleNode, services, theme, "label", titleSize, a_title);
+		label->justification(MV::TextJustification::CENTER);
+
+		int index = static_cast<int>(menus.size());
+		titleNode->attach<MV::Scene::Clickable>(mouse)->bounds(titleSize)->onAccept.connect("toggle", [this, index](const std::shared_ptr<MV::Scene::Clickable>&) {
+			if (openIndex == index) {
+				close();
+			} else {
+				open(index);
+			}
+		});
+
+		nextTitleX += menu.width;
+		menus.push_back(std::move(menu));
+	}
+
+	void MenuBar::close() {
+		if (openIndex >= 0) {
+			menus[static_cast<size_t>(openIndex)].highlight->hide();
+		}
+		openIndex = -1;
+		hoveredRow = -1;
+		rowHighlights.clear();
+		rowTops.clear();
+		if (popup) {
+			popup->removeFromParent();
+			popup.reset();
+		}
+	}
+
+	void MenuBar::open(int a_index) {
+		close();
+		openIndex = a_index;
+		auto& menu = menus[static_cast<size_t>(a_index)];
+		menu.highlight->show();
+		auto& mouse = *services.get<MV::TapDevice>();
+
+		float labelColumn = 0.0f;
+		float shortcutColumn = 0.0f;
+		for (auto&& item : menu.items) {
+			labelColumn = std::max(labelColumn, textWidth(item.label));
+			shortcutColumn = std::max(shortcutColumn, textWidth(item.shortcut));
+		}
+		const float inset = theme.px(4.0f);
+		const float textInset = theme.px(12.0f);
+		const float separatorHeight = theme.px(7.0f);
+		float rowWidth = std::max(theme.px(180.0f), labelColumn + shortcutColumn + textInset * 2.0f + theme.px(32.0f));
+
+		float height = inset * 2.0f;
+		for (auto&& item : menu.items) {
+			height += rowHeight() + (item.separatorAbove ? separatorHeight : 0.0f);
+		}
+		popupSize = MV::size(rowWidth + inset * 2.0f, height);
+
+		auto barOrigin = barHost->worldPosition();
+		popup = popupHost->make("menuPopup");
+		popup->position(MV::point(barOrigin.x + menu.x, theme.titleBarHeight - theme.px(1.0f)));
+
+		auto shadow = popup->make("shadow");
+		shadow->position(MV::point(theme.px(2.0f), theme.px(3.0f)));
+		attachRoundedRect(shadow, services, theme, popupSize, menuShadow);
+		attachOutlinedRect(popup->make("body"), services, theme, popupSize, menuFill, theme.fieldOutline());
+
+		float y = inset;
+		int rowIndex = 0;
+		for (auto&& item : menu.items) {
+			if (item.separatorAbove) {
+				auto separator = popup->make(MV::guid("separator_"));
+				separator->position(MV::point(inset, y + std::floor(separatorHeight * 0.5f)));
+				separator->attach<MV::Scene::Sprite>()->bounds(MV::size(rowWidth, theme.px(1.0f)))->color(theme.fieldOutline());
+				y += separatorHeight;
+			}
+			auto row = popup->make(MV::guid("row_"));
+			row->position(MV::point(inset, y));
+			MV::Size<> rowSize(rowWidth, rowHeight());
+			auto highlight = attachRoundedRect(row, services, theme, rowSize, theme.accent());
+			highlight->hide();
+			rowHighlights.push_back(highlight);
+			rowTops.push_back(y);
+
+			auto label = makeLabel(row, services, theme, "label", MV::size(rowWidth - textInset * 2.0f, rowSize.height), item.label);
+			label->owner()->position(MV::point(textInset, 0.0f));
+			if (!item.shortcut.empty()) {
+				auto shortcut = makeLabel(row, services, theme, "shortcut", MV::size(rowWidth - textInset * 2.0f, rowSize.height), item.shortcut);
+				shortcut->owner()->position(MV::point(textInset, 0.0f));
+				shortcut->justification(MV::TextJustification::RIGHT);
+			}
+
+			auto action = item.action;
+			row->attach<MV::Scene::Clickable>(mouse)->bounds(rowSize)->globalPriority(menuPriority + rowIndex)->onAccept.connect("choose", [this, action](const std::shared_ptr<MV::Scene::Clickable>&) {
+				auto chosen = action;   // close() destroys this row and the closure with it
+				close();
+				if (chosen) {
+					chosen();
+				}
+			});
+			y += rowSize.height;
+			++rowIndex;
+		}
+		hover(mouse.position());
+	}
+
+	void MenuBar::hoverRow(int a_row) {
+		if (a_row == hoveredRow) {
+			return;
+		}
+		if (hoveredRow >= 0 && hoveredRow < static_cast<int>(rowHighlights.size())) {
+			rowHighlights[static_cast<size_t>(hoveredRow)]->hide();
+		}
+		hoveredRow = a_row;
+		if (hoveredRow >= 0) {
+			rowHighlights[static_cast<size_t>(hoveredRow)]->show();
+		}
+	}
+
+	void MenuBar::hover(const MV::Point<int>& a_screenPoint) {
+		if (!isOpen() || !popup) {
+			return;
+		}
+		auto world = worldFromScreen(a_screenPoint);
+		auto barOrigin = barHost->worldPosition();
+		if (world.y >= 0.0f && world.y < theme.titleBarHeight) {
+			for (int index = 0; index < static_cast<int>(menus.size()); ++index) {
+				auto& menu = menus[static_cast<size_t>(index)];
+				float left = barOrigin.x + menu.x;
+				if (index != openIndex && world.x >= left && world.x < left + menu.width) {
+					open(index);
+					return;
+				}
+			}
+		}
+		auto local = world - popup->position();
+		int row = -1;
+		if (local.x >= 0.0f && local.x < popupSize.width) {
+			for (int index = 0; index < static_cast<int>(rowTops.size()); ++index) {
+				if (local.y >= rowTops[static_cast<size_t>(index)] && local.y < rowTops[static_cast<size_t>(index)] + rowHeight()) {
+					row = index;
+					break;
+				}
+			}
+		}
+		hoverRow(row);
+	}
+
+	void MenuBar::handleInput(SDL_Event& a_event) {
+		if (!isOpen()) {
+			return;
+		}
+		if (a_event.type == SDL_KEYDOWN && a_event.key.keysym.sym == SDLK_ESCAPE) {
+			close();
+		} else if (a_event.type == SDL_MOUSEBUTTONDOWN) {
+			auto world = worldFromScreen(MV::Point<int>(a_event.button.x, a_event.button.y));
+			auto local = world - popup->position();
+			bool insidePopup = local.x >= 0.0f && local.y >= 0.0f && local.x < popupSize.width && local.y < popupSize.height;
+			auto barOrigin = barHost->worldPosition();
+			bool onTitles = world.y >= 0.0f && world.y < theme.titleBarHeight && world.x >= barOrigin.x && world.x < barOrigin.x + nextTitleX;
+			if (!insidePopup && !onTitles) {
+				close();
+			}
+		}
+	}
+
+}

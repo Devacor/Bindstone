@@ -18,6 +18,17 @@ namespace Workbench {
 	// Sprite with themed rounded corners; resizing via ->bounds() re-lays the slice out.
 	std::shared_ptr<MV::Scene::Sprite> attachRoundedRect(const std::shared_ptr<MV::Scene::Node>& a_owner, MV::Services& a_services, const Theme& a_theme, const MV::Size<>& a_size, const MV::Color& a_color);
 
+	// A control's body: an outline ring (the first Sprite on the node) and a fill inset by one logical pixel, id "fill".
+	// A shaded fill darkens slightly towards its foot.
+	std::shared_ptr<MV::Scene::Sprite> attachOutlinedRect(const std::shared_ptr<MV::Scene::Node>& a_owner, MV::Services& a_services, const Theme& a_theme, const MV::Size<>& a_size, const MV::Color& a_fill, const MV::Color& a_outline, bool a_shaded = false);
+	MV::BoxAABB<> outlinedFillBounds(const Theme& a_theme, const MV::Size<>& a_size);
+
+	// White-to-grey vertical ramp: texture it onto a flat Sprite to shade it towards its foot.
+	std::shared_ptr<MV::TextureHandle> shadeHandle(MV::Services& a_services);
+
+	// Solid expander arrow, centred in a_box: pointing right when collapsed, down when expanded.
+	std::shared_ptr<MV::Scene::Sprite> makeExpanderArrow(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const MV::Size<>& a_box, bool a_expanded);
+
 	std::shared_ptr<MV::Scene::Text> makeLabel(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, const MV::Size<>& a_size, const std::string& a_text);
 
 	std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, const MV::Size<>& a_size, const std::string& a_text, std::function<void()> a_onClick);

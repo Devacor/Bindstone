@@ -18,7 +18,11 @@ namespace Workbench {
 			ACCENT = 0x0070e0,
 			SELECTION = 0x0f5fb5,
 			FIELD_BG = 0x0f0f0f,
-			BUTTON_IDLE = 0x383838,
+			FIELD_OUTLINE = 0x383838,
+			BUTTON_OUTLINE = 0x161616,
+			GLYPH = 0xb4b4b4,
+			SCROLL_THUMB = 0x4c4c4c,
+			BUTTON_IDLE = 0x3c3c3c,
 			BUTTON_ACTIVE = 0x0070e0,
 			ROW_HOVER = 0x333333,
 			DROP_HINT = 0x0070e0
@@ -65,6 +69,10 @@ namespace Workbench {
 		MV::Color accent() const { return MV::Color(uint32_t(ThemeColor::ACCENT)); }
 		MV::Color selection() const { return MV::Color(uint32_t(ThemeColor::SELECTION)); }
 		MV::Color fieldBg() const { return MV::Color(uint32_t(ThemeColor::FIELD_BG)); }
+		MV::Color fieldOutline() const { return MV::Color(uint32_t(ThemeColor::FIELD_OUTLINE)); }
+		MV::Color buttonOutline() const { return MV::Color(uint32_t(ThemeColor::BUTTON_OUTLINE)); }
+		MV::Color glyph() const { return MV::Color(uint32_t(ThemeColor::GLYPH)); }
+		MV::Color scrollThumb() const { return MV::Color(uint32_t(ThemeColor::SCROLL_THUMB)); }
 		MV::Color buttonIdle() const { return MV::Color(uint32_t(ThemeColor::BUTTON_IDLE)); }
 		MV::Color buttonActive() const { return MV::Color(uint32_t(ThemeColor::BUTTON_ACTIVE)); }
 		MV::Color rowHover() const { return MV::Color(uint32_t(ThemeColor::ROW_HOVER)); }

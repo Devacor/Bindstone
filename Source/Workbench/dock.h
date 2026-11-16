@@ -89,6 +89,8 @@ namespace Workbench {
 		static std::unique_ptr<DockNode> leaf(std::vector<Panel*> a_panels);
 		static std::unique_ptr<DockNode> split(bool a_vertical, float a_ratio, std::unique_ptr<DockNode> a_a, std::unique_ptr<DockNode> a_b);
 		void root(std::unique_ptr<DockNode> a_root);
+		// Brings a panel's tab to the front of its leaf.
+		void show(Panel* a_panel);
 
 		void layout(const MV::Size<>& a_worldSize);
 		void layout(const DockRect& a_area);
@@ -112,6 +114,10 @@ namespace Workbench {
 		void buildLeafChrome(DockNode* a_leaf);
 		void buildSplitterChrome(DockNode* a_split);
 		void refreshLeafVisuals(DockNode* a_leaf);
+		// Clamps the active panel's scroll offset to its content and sizes the leaf's scroll thumb to match.
+		void syncScroll(DockNode* a_leaf);
+		float scrollGutter() const { return theme.px(10.0f); }
+		float viewHeightOf(const DockRect& a_leafRect) const { return a_leafRect.size.height - theme.tabHeight - theme.pad * 2.0f; }
 		void activatePanel(DockNode* a_leaf, int a_index);
 
 		void beginTabDrag(Panel* a_panel, DockNode* a_sourceLeaf);

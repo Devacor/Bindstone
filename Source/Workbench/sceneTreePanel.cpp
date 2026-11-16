@@ -15,6 +15,10 @@ namespace Workbench {
 		if (auto background = searchText->owner()->component<MV::Scene::Sprite>(true, false)) {
 			background->anchors().anchor(fullAnchor).parent(searchSizer.self());
 		}
+		if (auto fill = searchText->owner()->component<MV::Scene::Sprite>("fill", false)) {
+			const float line = theme->px(1.0f);
+			fill->anchors().anchor(fullAnchor).offset(MV::BoxAABB<>(MV::point(line, line), MV::point(-line, -line))).parent(searchSizer.self());
+		}
 		if (auto clickable = searchText->owner()->component<MV::Scene::Clickable>(true, false)) {
 			clickable->anchors().anchor(fullAnchor).parent(searchSizer.self());
 		}

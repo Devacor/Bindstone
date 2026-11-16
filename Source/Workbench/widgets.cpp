@@ -13,6 +13,19 @@ namespace Workbench {
 			return out.str();
 		}
 
+		// Text has no clipping: drop digits until the number fits its field.
+		std::string formatNumberToFit(float a_value, float a_fieldWidth, const Theme& a_theme) {
+			const size_t maximumCharacters = static_cast<size_t>(std::max(3.0f, (a_fieldWidth - a_theme.px(10.0f)) / a_theme.px(7.4f)));
+			std::string result = formatNumber(a_value);
+			for (int digits = 6; digits >= 1 && result.size() > maximumCharacters; --digits) {
+				std::ostringstream out;
+				out.precision(digits);
+				out << a_value;
+				result = out.str();
+			}
+			return result;
+		}
+
 		MV::Color axisTint(const std::string& a_axis) {
 			if (a_axis == "X" || a_axis == "R") { return MV::Color(0x9c4a4a); }
 			if (a_axis == "Y" || a_axis == "G") { return MV::Color(0x4a9c5a); }
@@ -23,13 +36,71 @@ namespace Workbench {
 		// White rounded-box coverage mask (Inigo Quilez SDF, 1px AA edge). STRAIGHT alpha: the
 		// default premultiply shader multiplies rgb by alpha at the end. Power-of-two content so
 		// convertToPowerOfTwoSurface never pads (padding would shrink/blur the slice corners).
-		std::shared_ptr<MV::OwnedSurface> makeRoundedRectSurface(int a_radius) {
-			const int contentSize = MV::roundUpPowerOfTwo(2 * a_radius + 2);
+		SDL_Surface* makeStraightAlphaSurface(int a_width, int a_height) {
 			int bitsPerPixel = 0;
 			Uint32 redMask = 0, greenMask = 0, blueMask = 0, alphaMask = 0;
 			SDL_PixelFormatEnumToMasks(SDL_PIXELFORMAT_ABGR8888, &bitsPerPixel, &redMask, &greenMask, &blueMask, &alphaMask);
-			SDL_Surface* surface = SDL_CreateRGBSurface(0, contentSize, contentSize, bitsPerPixel, redMask, greenMask, blueMask, alphaMask);
+			SDL_Surface* surface = SDL_CreateRGBSurface(0, a_width, a_height, bitsPerPixel, redMask, greenMask, blueMask, alphaMask);
 			SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_NONE);
+			return surface;
+		}
+
+		// how far a shaded surface darkens from its top row to its bottom one
+		constexpr float shadeDepth = 0.16f;
+
+		uint32_t shadedWhite(int a_row, int a_rows, uint8_t a_alpha) {
+			const auto level = static_cast<uint32_t>(255.0f * (1.0f - shadeDepth * static_cast<float>(a_row) / static_cast<float>(std::max(1, a_rows - 1))) + 0.5f);
+			return (uint32_t(a_alpha) << 24) | (level << 16) | (level << 8) | level;
+		}
+
+		std::shared_ptr<MV::OwnedSurface> makeShadeSurface() {
+			const int width = 4;
+			const int height = 32;
+			SDL_Surface* surface = makeStraightAlphaSurface(width, height);
+			auto* pixels = static_cast<uint32_t*>(surface->pixels);
+			const int pitch = surface->pitch / 4;
+			for (int y = 0; y < height; ++y) {
+				for (int x = 0; x < width; ++x) {
+					pixels[y * pitch + x] = shadedWhite(y, height, 255);
+				}
+			}
+			return MV::OwnedSurface::make(surface);
+		}
+
+		// Solid triangle with 4x4 supersampled edges, in a power-of-two square.
+		std::shared_ptr<MV::OwnedSurface> makeTriangleSurface(int a_size, bool a_down) {
+			SDL_Surface* surface = makeStraightAlphaSurface(a_size, a_size);
+			auto* pixels = static_cast<uint32_t*>(surface->pixels);
+			const int pitch = surface->pitch / 4;
+			const float size = static_cast<float>(a_size);
+			const float ax = (a_down ? 0.18f : 0.30f) * size, ay = (a_down ? 0.32f : 0.18f) * size;
+			const float bx = (a_down ? 0.82f : 0.30f) * size, by = (a_down ? 0.32f : 0.82f) * size;
+			const float cx = (a_down ? 0.50f : 0.76f) * size, cy = (a_down ? 0.74f : 0.50f) * size;
+			auto side = [](float a_px, float a_py, float a_x0, float a_y0, float a_x1, float a_y1) {
+				return (a_px - a_x1) * (a_y0 - a_y1) - (a_x0 - a_x1) * (a_py - a_y1);
+			};
+			for (int y = 0; y < a_size; ++y) {
+				for (int x = 0; x < a_size; ++x) {
+					int covered = 0;
+					for (int sample = 0; sample < 16; ++sample) {
+						const float px = x + (sample % 4 + 0.5f) / 4.0f;
+						const float py = y + (sample / 4 + 0.5f) / 4.0f;
+						const float d1 = side(px, py, ax, ay, bx, by);
+						const float d2 = side(px, py, bx, by, cx, cy);
+						const float d3 = side(px, py, cx, cy, ax, ay);
+						const bool negative = d1 < 0.0f || d2 < 0.0f || d3 < 0.0f;
+						const bool positive = d1 > 0.0f || d2 > 0.0f || d3 > 0.0f;
+						covered += !(negative && positive);
+					}
+					pixels[y * pitch + x] = (uint32_t(covered * 255 / 16) << 24) | 0x00FFFFFFu;
+				}
+			}
+			return MV::OwnedSurface::make(surface);
+		}
+
+		std::shared_ptr<MV::OwnedSurface> makeRoundedRectSurface(int a_radius, bool a_shaded = false) {
+			const int contentSize = MV::roundUpPowerOfTwo(2 * a_radius + 2);
+			SDL_Surface* surface = makeStraightAlphaSurface(contentSize, contentSize);
 
 			const float radius = static_cast<float>(a_radius);
 			const float half = contentSize * 0.5f;
@@ -44,22 +115,59 @@ namespace Workbench {
 					const float distance = std::sqrt(mx * mx + my * my) + std::min(std::max(qx, qy), 0.0f) - radius;
 					const float coverage = std::clamp(0.5f - distance, 0.0f, 1.0f);
 					const auto alpha = static_cast<uint8_t>(coverage * 255.0f + 0.5f);
-					pixels[y * pitch + x] = (uint32_t(alpha) << 24) | 0x00FFFFFFu;
+					pixels[y * pitch + x] = a_shaded ? shadedWhite(y, contentSize, alpha) : (uint32_t(alpha) << 24) | 0x00FFFFFFu;
 				}
 			}
 			return MV::OwnedSurface::make(surface);
 		}
+
+		std::shared_ptr<MV::TextureHandle> roundedRectHandleOfRadius(MV::Services& a_services, int a_radius, bool a_shaded) {
+			auto definition = a_services.get<MV::SharedTextures>()->surface(std::string(a_shaded ? "workbenchRoundedShaded_r" : "workbenchRounded_r") + std::to_string(a_radius), [a_radius, a_shaded] {
+				return makeRoundedRectSurface(a_radius, a_shaded);
+			});
+			auto handle = definition->makeHandle();
+			const int contentSize = handle->texture()->size().width;
+			handle->slice(MV::BoxAABB<int>(MV::point(a_radius, a_radius), MV::point(contentSize - a_radius, contentSize - a_radius)));
+			return handle;
+		}
+
+		int themeRadius(const Theme& a_theme) {
+			return std::max(2, static_cast<int>(a_theme.cornerRadius + 0.5f));
+		}
 	}
 
 	std::shared_ptr<MV::TextureHandle> roundedRectHandle(MV::Services& a_services, const Theme& a_theme) {
-		const int radius = std::max(2, static_cast<int>(a_theme.cornerRadius + 0.5f));
-		auto definition = a_services.get<MV::SharedTextures>()->surface("workbenchRounded_r" + std::to_string(radius), [radius] {
-			return makeRoundedRectSurface(radius);
-		});
-		auto handle = definition->makeHandle();
-		const int contentSize = handle->texture()->size().width;
-		handle->slice(MV::BoxAABB<int>(MV::point(radius, radius), MV::point(contentSize - radius, contentSize - radius)));
-		return handle;
+		return roundedRectHandleOfRadius(a_services, themeRadius(a_theme), false);
+	}
+
+	MV::BoxAABB<> outlinedFillBounds(const Theme& a_theme, const MV::Size<>& a_size) {
+		const float line = a_theme.px(1.0f);
+		return MV::BoxAABB<>(MV::point(line, line), MV::size(a_size.width - line * 2.0f, a_size.height - line * 2.0f));
+	}
+
+	std::shared_ptr<MV::Scene::Sprite> attachOutlinedRect(const std::shared_ptr<MV::Scene::Node>& a_owner, MV::Services& a_services, const Theme& a_theme, const MV::Size<>& a_size, const MV::Color& a_fill, const MV::Color& a_outline, bool a_shaded) {
+		attachRoundedRect(a_owner, a_services, a_theme, a_size, a_outline);
+		const int innerRadius = std::max(2, themeRadius(a_theme) - static_cast<int>(a_theme.px(1.0f)));
+		auto fill = a_owner->attach<MV::Scene::Sprite>()->bounds(outlinedFillBounds(a_theme, a_size))->texture(roundedRectHandleOfRadius(a_services, innerRadius, a_shaded))->color(a_fill);
+		fill->id("fill");
+		return fill;
+	}
+
+	std::shared_ptr<MV::TextureHandle> shadeHandle(MV::Services& a_services) {
+		return a_services.get<MV::SharedTextures>()->surface("workbenchShade", [] {
+			return makeShadeSurface();
+		})->makeHandle();
+	}
+
+	std::shared_ptr<MV::Scene::Sprite> makeExpanderArrow(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const MV::Size<>& a_box, bool a_expanded) {
+		const float arrowSize = a_theme.px(12.0f);
+		const int surfaceSize = MV::roundUpPowerOfTwo(std::max(8, static_cast<int>(arrowSize)));
+		auto handle = a_services.get<MV::SharedTextures>()->surface(std::string(a_expanded ? "workbenchArrowDown_" : "workbenchArrowRight_") + std::to_string(surfaceSize), [surfaceSize, a_expanded] {
+			return makeTriangleSurface(surfaceSize, a_expanded);
+		})->makeHandle();
+		auto arrow = a_parent->make("arrow");
+		arrow->position(MV::point(std::round((a_box.width - arrowSize) * 0.5f), std::round((a_box.height - arrowSize) * 0.5f)));
+		return arrow->attach<MV::Scene::Sprite>()->bounds(MV::size(arrowSize, arrowSize))->texture(handle)->color(a_theme.glyph());
 	}
 
 	std::shared_ptr<MV::Scene::Sprite> attachRoundedRect(const std::shared_ptr<MV::Scene::Node>& a_owner, MV::Services& a_services, const Theme& a_theme, const MV::Size<>& a_size, const MV::Color& a_color) {
@@ -79,8 +187,8 @@ namespace Workbench {
 		auto& mouse = *a_services.get<MV::TapDevice>();
 		auto button = a_parent->make(a_id)->attach<MV::Scene::Button>(mouse)->bounds(a_size);
 
-		auto activeScene = attachRoundedRect(button->owner()->make("active"), a_services, a_theme, a_size, a_theme.buttonActive())->owner();
-		auto idleScene = attachRoundedRect(button->owner()->make("idle"), a_services, a_theme, a_size, a_theme.buttonIdle())->owner();
+		auto activeScene = attachOutlinedRect(button->owner()->make("active"), a_services, a_theme, a_size, a_theme.buttonActive(), a_theme.buttonOutline(), true)->owner();
+		auto idleScene = attachOutlinedRect(button->owner()->make("idle"), a_services, a_theme, a_size, a_theme.buttonIdle(), a_theme.buttonOutline(), true)->owner();
 		for (auto&& stateScene : { activeScene, idleScene }) {
 			auto stateText = stateScene->attach<MV::Scene::Text>(library, a_theme.buttonFont);
 			stateText->bounds({ MV::Point<>(), a_size });
@@ -99,10 +207,10 @@ namespace Workbench {
 	std::shared_ptr<MV::Scene::Text> makeTextField(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, FocusRouter& a_focus, const std::string& a_id, const MV::Size<>& a_size, const std::string& a_initial, std::function<void(const std::string&)> a_onCommit) {
 		auto& library = *a_services.get<MV::TextLibrary>();
 		auto& mouse = *a_services.get<MV::TapDevice>();
-		auto box = attachRoundedRect(a_parent->make(a_id), a_services, a_theme, a_size, a_theme.fieldBg())->owner();
+		auto box = attachOutlinedRect(a_parent->make(a_id), a_services, a_theme, a_size, a_theme.fieldBg(), a_theme.fieldOutline())->owner();
 		auto text = box->attach<MV::Scene::Text>(library, a_theme.labelFont);
-		text->bounds({ MV::Point<>(), a_size });
-		text->justification(MV::TextJustification::LEFT)->wrapping(MV::TextWrapMethod::NONE, a_size.width)->minimumLineHeight(a_size.height)->text(a_initial);
+		text->bounds({ MV::point(a_theme.px(5.0f), 0.0f), MV::size(a_size.width - a_theme.px(8.0f), a_size.height) });
+		text->justification(MV::TextJustification::LEFT)->wrapping(MV::TextWrapMethod::NONE, a_size.width - a_theme.px(8.0f))->minimumLineHeight(a_size.height)->text(a_initial);
 
 		auto clickable = box->attach<MV::Scene::Clickable>(mouse)->bounds(a_size);
 		std::weak_ptr<MV::Scene::Text> weakText = text.self();
@@ -152,10 +260,10 @@ namespace Workbench {
 	std::shared_ptr<MV::Scene::Text> makeScrubField(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, FocusRouter& a_focus, const std::string& a_id, const MV::Size<>& a_size, float a_value, std::function<void(float)> a_onChange, std::function<void(float, float)> a_onHistory) {
 		auto& library = *a_services.get<MV::TextLibrary>();
 		auto& mouse = *a_services.get<MV::TapDevice>();
-		auto box = attachRoundedRect(a_parent->make(a_id), a_services, a_theme, a_size, a_theme.fieldBg())->owner();
+		auto box = attachOutlinedRect(a_parent->make(a_id), a_services, a_theme, a_size, a_theme.fieldBg(), a_theme.fieldOutline())->owner();
 		auto text = box->attach<MV::Scene::Text>(library, a_theme.labelFont);
-		text->bounds({ MV::Point<>(), a_size });
-		text->justification(MV::TextJustification::LEFT)->wrapping(MV::TextWrapMethod::NONE, a_size.width)->minimumLineHeight(a_size.height)->text(formatNumber(a_value));
+		text->bounds({ MV::point(a_theme.px(5.0f), 0.0f), MV::size(a_size.width - a_theme.px(8.0f), a_size.height) });
+		text->justification(MV::TextJustification::LEFT)->wrapping(MV::TextWrapMethod::NONE, a_size.width - a_theme.px(8.0f))->minimumLineHeight(a_size.height)->text(formatNumberToFit(a_value, a_size.width, a_theme));
 
 		auto clickable = box->attach<MV::Scene::Clickable>(mouse)->bounds(a_size);
 		std::weak_ptr<MV::Scene::Text> weakText = text.self();
@@ -165,12 +273,19 @@ namespace Workbench {
 			bool started = false;
 			bool suppressAccept = false;
 			float committed = 0.0f;
+			float live = 0.0f;
+			std::string shown;   // the field may show fewer digits than the value has: only edited text is parsed
 		};
 		auto state = std::make_shared<ScrubState>();
 		state->committed = a_value;
+		state->live = a_value;
+		state->shown = text->text();
 
 		auto commitFromText = [weakText, state, a_onChange, a_onHistory]() {
 			if (auto locked = weakText.lock()) {
+				if (locked->text() == state->shown) {
+					return;
+				}
 				try {
 					float value = std::stof(locked->text());
 					if (a_onChange) {
@@ -180,12 +295,15 @@ namespace Workbench {
 						a_onHistory(state->committed, value);
 					}
 					state->committed = value;
+					state->live = value;
+					state->shown = locked->text();
 				} catch (...) {
+					locked->text(state->shown);
 				}
 			}
 		};
 
-		clickable->onDrag.connect("scrub", [weakText, state, a_onChange](const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const MV::Point<int>& a_start, const MV::Point<int>&) {
+		clickable->onDrag.connect("scrub", [weakText, state, a_onChange, fieldWidth = a_size.width, &a_theme](const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const MV::Point<int>& a_start, const MV::Point<int>&) {
 			auto locked = weakText.lock();
 			if (!locked) {
 				return;
@@ -198,7 +316,9 @@ namespace Workbench {
 			state->suppressAccept = true;
 			float step = std::max(0.05f, std::abs(state->committed) * 0.01f);
 			float value = state->committed + static_cast<float>(totalDelta) * step;
-			locked->text(formatNumber(value));
+			state->live = value;
+			state->shown = formatNumberToFit(value, fieldWidth, a_theme);
+			locked->text(state->shown);
 			if (a_onChange) {
 				a_onChange(value);
 			}
@@ -208,16 +328,10 @@ namespace Workbench {
 				return;
 			}
 			state->started = false;
-			if (auto locked = weakText.lock()) {
-				try {
-					float value = std::stof(locked->text());
-					if (a_onHistory && value != state->committed) {
-						a_onHistory(state->committed, value);
-					}
-					state->committed = value;
-				} catch (...) {
-				}
+			if (a_onHistory && state->live != state->committed) {
+				a_onHistory(state->committed, state->live);
 			}
+			state->committed = state->live;
 		});
 		clickable->onAccept.connect("focus", [weakText, focus, state, commitFromText](const std::shared_ptr<MV::Scene::Clickable>&) {
 			if (state->suppressAccept) {

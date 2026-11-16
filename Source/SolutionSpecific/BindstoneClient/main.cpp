@@ -446,6 +446,9 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		SDL_SetModState(KMOD_NONE);
 	};
 
+	a_app.newScene();
+	expect(a_app.scene()->empty() && !a_app.selected() && a_app.errors() == 0, "File > New Scene leaves an empty scene");
+
 	expect(a_app.loadScene("Creatures/Life_T1/Default/unit.bindsnap"), "the unit BindSnap loads");
 	expect(a_app.scene()->id() == "Life_T1", "a loaded root keeps its own id, got " + a_app.scene()->id());
 	expect(!a_app.scene()->empty(), "the unit has a child to select");
@@ -602,10 +605,10 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 	int workbenchResizeBorder = std::max(6, static_cast<int>(8 * workbenchUiScale));
 	int workbenchTitleBarHeight = static_cast<int>(workbenchTheme.titleBarHeight);
 	int workbenchTitleButtonStrip = static_cast<int>(workbenchTheme.titleButtonWidth * 3.0f);
-	int workbenchTransportStart = static_cast<int>(workbenchTheme.px(240.0f));
-	int workbenchTransportWidth = static_cast<int>(3.0f * (workbenchTheme.titleButtonWidth + workbenchTheme.px(2.0f)));
+	// the app reports how much of the title bar's left takes presses once it has built its menus
+	auto workbenchTitleInteractiveWidth = std::make_shared<int>(0);
 	auto& workbenchWindow = managers.renderer.window();
-	workbenchWindow.hitTest([&workbenchWindow, workbenchResizeBorder, workbenchTitleBarHeight, workbenchTitleButtonStrip, workbenchTransportStart, workbenchTransportWidth](const MV::Point<int>& a_point, const MV::Size<int>& a_size) -> SDL_HitTestResult {
+	workbenchWindow.hitTest([&workbenchWindow, workbenchResizeBorder, workbenchTitleBarHeight, workbenchTitleButtonStrip, workbenchTitleInteractiveWidth](const MV::Point<int>& a_point, const MV::Size<int>& a_size) -> SDL_HitTestResult {
 		if (!workbenchWindow.maximized()) {
 			bool onLeft = a_point.x < workbenchResizeBorder;
 			bool onRight = a_point.x >= a_size.width - workbenchResizeBorder;
@@ -624,8 +627,8 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 			if (a_point.x >= a_size.width - workbenchTitleButtonStrip) {
 				return SDL_HITTEST_NORMAL;
 			}
-			if (a_point.x >= workbenchTransportStart && a_point.x < workbenchTransportStart + workbenchTransportWidth) {
-				return SDL_HITTEST_NORMAL;   // transport buttons (pause/step/speed)
+			if (a_point.x < *workbenchTitleInteractiveWidth) {
+				return SDL_HITTEST_NORMAL;   // menus and transport buttons
 			}
 			return SDL_HITTEST_DRAGGABLE;
 		}
@@ -640,6 +643,7 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 	MV::TapDevice workbenchMouse;
 	managers.services.connect(&workbenchMouse);
 	Workbench::App app(managers, workbenchMouse, workbenchTheme);
+	*workbenchTitleInteractiveWidth = static_cast<int>(app.titleBarInteractiveWidth());
 	if (a_loadDefaultScene) {
 		app.loadScene("Scenes/map.scene");
 	}

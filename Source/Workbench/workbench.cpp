@@ -1,6 +1,7 @@
 #include "workbench.h"
 #include "projectPanel.h"
 #include "scriptPanel.h"
+#include "fileDialog.h"
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
@@ -112,6 +113,7 @@ namespace Workbench {
 		Panel* filePanel = dock->registerPanel(std::move(file));
 		Panel* projectPanel = dock->registerPanel(std::move(project));
 
+		menuPanels = { treePanel, filePanel, viewportPanel, projectPanel, inspectorPanel };
 		dock->root(DockSpace::split(false, 0.18f,
 			DockSpace::leaf({ treePanel, filePanel }),
 			DockSpace::split(false, 0.72f,
@@ -211,14 +213,29 @@ namespace Workbench {
 		sizer->hide();
 		auto titleBg = bar->attach<MV::Scene::Sprite>()->id("titleBg")->bounds(MV::size(1600.0f, theme.titleBarHeight))->color(theme.windowBg());
 		titleBg->anchors().anchor(MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::point(1.0f, 1.0f))).parent(sizer.self());
-		auto title = bar->attach<MV::Scene::Text>(library, theme.titleFont);
-		title->bounds({ MV::point(theme.px(10.0f), 0.0f), MV::size(theme.px(220.0f), theme.titleBarHeight) });
-		title->justification(MV::TextJustification::LEFT)->wrapping(MV::TextWrapMethod::NONE, theme.px(220.0f))->minimumLineHeight(theme.titleBarHeight)->text("Bindstone Workbench");
+		auto menuHost = bar->make("menus");
+		menuHost->position(MV::point(theme.px(6.0f), 0.0f));
+		menuBar = std::make_unique<MenuBar>(menuHost, uiRoot->make("menuPopups"), managers.services, theme);
+		menuBar->add("File", {
+			{ "New Scene", "", [this]() { newScene(); } },
+			{ "Open...", "Ctrl+O", [this]() { openSceneWithDialog(); } },
+			{ "Save", "Ctrl+S", [this]() { saveCurrentScene(); }, true },
+			{ "Save As...", "Ctrl+Shift+S", [this]() { saveSceneWithDialog(); } },
+			{ "Exit", "", [this]() { done = true; }, true } });
+		menuBar->add("Edit", {
+			{ "Undo", "Ctrl+Z", [this]() { history.undo(); } },
+			{ "Redo", "Ctrl+Y", [this]() { history.redo(); } } });
+		std::vector<MenuItem> windowItems;
+		for (auto* panel : menuPanels) {
+			windowItems.push_back({ panel->title(), "", [this, panel]() { dock->show(panel); } });
+		}
+		menuBar->add("Window", std::move(windowItems));
 
 		// Scene-animation transport: pause/step/speed of the viewport's drawUpdate clock
 		// (particle, spine, and shader-time preview).
 		auto transport = bar->make("transport");
-		transport->position(MV::point(theme.px(240.0f), theme.pad));
+		const float transportStart = theme.px(6.0f) + menuBar->width() + theme.px(20.0f);
+		transport->position(MV::point(transportStart, theme.pad));
 		MV::Size<> transportSize(theme.titleButtonWidth, theme.titleBarHeight - theme.pad * 2.0f);
 		auto pauseButton = makeButton(transport, managers.services, theme, "pause", transportSize, "||", nullptr);
 		std::weak_ptr<MV::Scene::Button> weakPause = pauseButton;
@@ -240,6 +257,12 @@ namespace Workbench {
 				sceneSpeed = speeds[a_index];
 			});
 		speedButton->owner()->position(MV::point((transportSize.width + theme.px(2.0f)) * 2.0f, 0.0f));
+		titleInteractiveWidth = transportStart + (transportSize.width + theme.px(2.0f)) * 3.0f;
+
+		auto titleHost = bar->make("title");
+		titleHost->position(MV::point(titleInteractiveWidth + theme.px(16.0f), 0.0f));
+		titleText = makeLabel(titleHost, managers.services, theme, "text", MV::size(theme.px(420.0f), theme.titleBarHeight), "");
+		refreshTitle();
 
 		auto buttons = bar->make("buttons");
 		MV::Size<> buttonSize(theme.titleButtonWidth, theme.titleBarHeight);
@@ -301,6 +324,48 @@ namespace Workbench {
 		}
 	}
 
+	void App::refreshTitle() {
+		if (titleText) {
+			titleText->text((documentPath.empty() ? std::string("Untitled") : std::filesystem::path(documentPath).filename().string()) + "  -  Bindstone Workbench");
+		}
+	}
+
+	void App::newScene() {
+		history.clear();
+		select(nullptr);
+		viewCamera->remove(sceneRoot, false);
+		sceneRoot = viewCamera->make("root");
+		viewCamera->position(MV::Point<>());
+		viewCamera->scale(MV::Scale(1.0f, 1.0f, 1.0f));
+		documentPath.clear();
+		if (treePanel) {
+			treePanel->refresh();
+		}
+		refreshTitle();
+	}
+
+	void App::openSceneWithDialog() {
+		auto chosen = openSceneFileDialog("Assets/Scenes");
+		if (!chosen.empty()) {
+			loadScene(chosen);
+		}
+	}
+
+	void App::saveSceneWithDialog() {
+		auto chosen = saveSceneFileDialog("Assets/Scenes", documentPath.empty() ? std::string("untitled.scene") : std::filesystem::path(documentPath).filename().string());
+		if (!chosen.empty()) {
+			saveScene(chosen);
+		}
+	}
+
+	void App::saveCurrentScene() {
+		if (documentPath.empty()) {
+			saveSceneWithDialog();
+		} else {
+			saveScene(documentPath);
+		}
+	}
+
 	void App::select(const std::shared_ptr<MV::Scene::Node>& a_node) {
 		if (a_node != selectedNode) {
 			parallaxPreview(false);
@@ -341,6 +406,8 @@ namespace Workbench {
 				treePanel->refresh();
 			}
 			frameSceneInViewport();
+			documentPath = a_fileName;
+			refreshTitle();
 			std::cout << "Workbench loaded: " << a_fileName << std::endl;
 			return true;
 		} catch (const std::exception& a_error) {
@@ -363,6 +430,8 @@ namespace Workbench {
 		try {
 			auto assetPath = assetFile(a_fileName);
 			sceneRoot->saveJai(assetPath, managers.services, false);
+			documentPath = a_fileName;
+			refreshTitle();
 			std::cout << "Workbench saved: " << assetPath << std::endl;
 		} catch (const std::exception& a_error) {
 			reportError("save failed (" + a_fileName + "): " + a_error.what());
@@ -481,10 +550,23 @@ namespace Workbench {
 				done = true;
 				continue;
 			}
+			menuBar->handleInput(event);
 			if (focusRouter.handleEvent(event)) {
 				continue;
 			}
 			if (event.type == SDL_KEYDOWN && (SDL_GetModState() & KMOD_CTRL)) {
+				if (event.key.keysym.sym == SDLK_s) {
+					if (SDL_GetModState() & KMOD_SHIFT) {
+						saveSceneWithDialog();
+					} else {
+						saveCurrentScene();
+					}
+					continue;
+				}
+				if (event.key.keysym.sym == SDLK_o) {
+					openSceneWithDialog();
+					continue;
+				}
 				if (event.key.keysym.sym == SDLK_z) {
 					if (SDL_GetModState() & KMOD_SHIFT) {
 						history.redo();

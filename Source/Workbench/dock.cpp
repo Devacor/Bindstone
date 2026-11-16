@@ -133,8 +133,11 @@ namespace Workbench {
 			}
 			refreshLeafVisuals(a_node);
 			if (!a_node->panels.empty()) {
-				a_node->panels[static_cast<size_t>(a_node->active)]->resized(MV::Size<>(contentSize.width - theme.pad * 2.0f, contentSize.height - theme.pad * 2.0f));
+				Panel* activePanel = a_node->panels[static_cast<size_t>(a_node->active)];
+				float gutter = activePanel->transparentWhenActive() ? 0.0f : scrollGutter();
+				activePanel->resized(MV::Size<>(contentSize.width - theme.pad * 2.0f - gutter, contentSize.height - theme.pad * 2.0f));
 			}
+			syncScroll(a_node);
 			return;
 		}
 
@@ -219,6 +222,23 @@ namespace Workbench {
 			panel->content()->parent(body);
 			panel->content()->position(MV::Point<>(theme.pad, theme.tabHeight + theme.pad - scrollOffsets[panel]));
 		}
+
+		auto scrollThumb = leafNode->make("scrollThumb")->attach<MV::Scene::Clickable>(mouse);
+		scrollThumb->id("thumb");
+		scrollThumb->texture(roundedRectHandle(services, theme))->color(theme.scrollThumb());
+		scrollThumb->hide();
+		scrollThumb->onDrag.connect("scroll", [this, a_leaf](const std::shared_ptr<MV::Scene::Clickable>&, const MV::Point<int>&, const MV::Point<int>& a_delta) {
+			auto rectIt = leafRects.find(a_leaf);
+			if (rectIt == leafRects.end() || a_leaf->panels.empty()) {
+				return;
+			}
+			Panel* activePanel = a_leaf->panels[static_cast<size_t>(a_leaf->active)];
+			float viewHeight = viewHeightOf(rectIt->second);
+			if (viewHeight > 0.0f) {
+				scrollOffsets[activePanel] += static_cast<float>(a_delta.y) * activePanel->contentHeight() / viewHeight;
+				syncScroll(a_leaf);
+			}
+		});
 
 		auto tabStrip = leafNode->make("tabStrip");
 		auto stripBg = tabStrip->attach<MV::Scene::Sprite>()->id("stripBg")->bounds(MV::size(theme.tabWidth, theme.tabHeight))->color(theme.windowBg());
@@ -309,7 +329,7 @@ namespace Workbench {
 		for (size_t i = 0; i < a_leaf->panels.size(); ++i) {
 			a_leaf->panels[i]->content()->visible(static_cast<int>(i) == a_leaf->active);
 		}
-		activePanel->content()->position(MV::Point<>(theme.pad, theme.tabHeight + theme.pad - scrollOffsets[activePanel]));
+		syncScroll(a_leaf);
 
 		auto body = leafNode->get("body", false);
 		if (body) {
@@ -320,6 +340,13 @@ namespace Workbench {
 					bg->show();
 				}
 			}
+		}
+	}
+
+	void DockSpace::show(Panel* a_panel) {
+		if (auto* leaf = findLeafContaining(a_panel, rootNode.get())) {
+			auto found = std::find(leaf->panels.begin(), leaf->panels.end(), a_panel);
+			activatePanel(leaf, static_cast<int>(found - leaf->panels.begin()));
 		}
 	}
 
@@ -459,12 +486,43 @@ namespace Workbench {
 		if (activePanel->transparentWhenActive()) {
 			return false;
 		}
-		float viewHeight = leafRects[leaf].size.height - theme.tabHeight - theme.pad * 2.0f;
-		float maxOffset = std::max(0.0f, activePanel->contentHeight() - viewHeight);
-		float& offset = scrollOffsets[activePanel];
-		offset = std::clamp(offset - a_amount * theme.rowHeight * 3.0f, 0.0f, maxOffset);
-		activePanel->content()->position(MV::Point<>(theme.pad, theme.tabHeight + theme.pad - offset));
+		scrollOffsets[activePanel] -= a_amount * theme.rowHeight * 3.0f;
+		syncScroll(leaf);
 		return true;
+	}
+
+	void DockSpace::syncScroll(DockNode* a_leaf) {
+		auto rectIt = leafRects.find(a_leaf);
+		auto chromeIt = leafChrome.find(a_leaf);
+		if (rectIt == leafRects.end() || chromeIt == leafChrome.end() || a_leaf->panels.empty()) {
+			return;
+		}
+		Panel* activePanel = a_leaf->panels[static_cast<size_t>(a_leaf->active)];
+		float viewHeight = viewHeightOf(rectIt->second);
+		float contentHeight = activePanel->contentHeight();
+		float maxOffset = std::max(0.0f, contentHeight - viewHeight);
+		float& offset = scrollOffsets[activePanel];
+		offset = std::clamp(offset, 0.0f, maxOffset);
+		activePanel->content()->position(MV::Point<>(theme.pad, theme.tabHeight + theme.pad - offset));
+
+		auto thumbNode = chromeIt->second->get("scrollThumb", false);
+		auto thumb = thumbNode ? thumbNode->component<MV::Scene::Clickable>("thumb", false) : MV::Scene::SafeComponent<MV::Scene::Clickable>();
+		if (!thumb) {
+			return;
+		}
+		if (maxOffset <= 0.0f || viewHeight <= 0.0f || activePanel->transparentWhenActive()) {
+			thumb->bounds(MV::size(0.0f, 0.0f));   // a hidden Clickable still takes presses
+			thumb->hide();
+			return;
+		}
+		float trackHeight = viewHeight + theme.pad * 2.0f - theme.px(4.0f);
+		float thumbHeight = std::max(theme.px(24.0f), trackHeight * viewHeight / contentHeight);
+		float thumbWidth = theme.px(6.0f);
+		thumb->bounds(MV::size(thumbWidth, thumbHeight));
+		thumb->show();
+		thumbNode->position(MV::point(
+			rectIt->second.size.width - thumbWidth - theme.px(2.0f),
+			theme.tabHeight + theme.px(2.0f) + (trackHeight - thumbHeight) * (offset / maxOffset)));
 	}
 
 	DockNode* DockSpace::leafUnder(const MV::Point<>& a_worldPoint, DropZone& a_zone) const {
@@ -576,6 +634,10 @@ namespace Workbench {
 	void DockSpace::update(double a_dt) {
 		for (auto&& panel : ownedPanels) {
 			panel->update(a_dt);
+		}
+		// a panel's content changes height when it rebuilds
+		for (auto&& [leaf, rect] : leafRects) {
+			syncScroll(leaf);
 		}
 	}
 

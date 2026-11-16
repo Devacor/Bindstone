@@ -250,7 +250,7 @@ namespace Workbench {
 			if (children) {
 				auto triangleHost = row->make("fold");
 				triangleHost->position(MV::point(indent, 0.0f));
-				auto triangle = makeLabel(triangleHost, services, theme, "glyph", MV::size(theme.px(14.0f), theme.rowHeight), isExpanded ? "v" : ">");
+				makeExpanderArrow(triangleHost, services, theme, MV::size(theme.px(16.0f), theme.rowHeight), isExpanded);
 				TItem item = a_item;
 				triangleHost->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(theme.px(16.0f), theme.rowHeight))->onAccept.connect("toggle", [this, item, isExpanded](const std::shared_ptr<MV::Scene::Clickable>&) {
 					expanded[item] = !isExpanded;
@@ -258,7 +258,7 @@ namespace Workbench {
 				});
 			}
 
-			float labelX = indent + theme.px(16.0f);
+			float labelX = indent + theme.px(18.0f);
 			auto label = makeLabel(row, services, theme, "label", MV::size(std::max(theme.px(40.0f), rowWidth - labelX - theme.pad), theme.rowHeight), adapter.label(a_item));
 			label->owner()->position(MV::point(labelX, 0.0f));
 

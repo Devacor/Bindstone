@@ -6,17 +6,62 @@
 namespace Workbench {
 
 	namespace {
+		// "class std::vector<struct MV::DrawPoint,class std::allocator<...> >" -> "DrawPoint list"
 		std::string friendlyTypeName(std::string a_name) {
-			for (auto&& prefix : { "class ", "struct ", "enum " }) {
-				if (a_name.rfind(prefix, 0) == 0) {
-					a_name = a_name.substr(std::string(prefix).size());
+			for (auto&& keyword : { "class ", "struct ", "enum ", "const " }) {
+				for (auto found = a_name.find(keyword); found != std::string::npos; found = a_name.find(keyword)) {
+					a_name.erase(found, std::string(keyword).size());
 				}
 			}
-			auto lastColon = a_name.rfind("::");
-			if (lastColon != std::string::npos) {
-				a_name = a_name.substr(lastColon + 2);
+			auto unqualified = [](std::string a_part) {
+				auto lastColon = a_part.rfind("::");
+				return lastColon == std::string::npos ? a_part : a_part.substr(lastColon + 2);
+			};
+			auto open = a_name.find('<');
+			if (open == std::string::npos) {
+				return unqualified(a_name);
 			}
-			return a_name;
+			std::string outer = unqualified(a_name.substr(0, open));
+			std::vector<std::string> arguments;
+			int depth = 0;
+			std::string current;
+			for (size_t i = open + 1; i < a_name.size(); ++i) {
+				char c = a_name[i];
+				if ((c == ',' && depth == 0) || (c == '>' && depth == 0)) {
+					arguments.push_back(current);
+					current.clear();
+					if (c == '>') {
+						break;
+					}
+					continue;
+				}
+				depth += c == '<' ? 1 : c == '>' ? -1 : 0;
+				current += c;
+			}
+			auto argument = [&](size_t a_index) {
+				return a_index < arguments.size() ? friendlyTypeName(arguments[a_index]) : std::string();
+			};
+			if (outer == "shared_ptr" || outer == "weak_ptr" || outer == "unique_ptr") {
+				return argument(0) + " reference";
+			}
+			if (outer == "vector" || outer == "deque" || outer == "list" || outer == "set") {
+				return argument(0) + " list";
+			}
+			if (outer == "map" || outer == "unordered_map") {
+				return argument(1) + " map";
+			}
+			if (outer == "pair") {
+				return argument(0) + ", " + argument(1);
+			}
+			return outer;
+		}
+
+		std::string nodeReferenceText(const std::shared_ptr<MV::Scene::Node>& a_node) {
+			return !a_node ? std::string("None") : a_node->id().empty() ? std::string("(unnamed node)") : a_node->id();
+		}
+
+		std::string countText(size_t a_count, const char* a_singular, const char* a_plural) {
+			return std::to_string(a_count) + " " + (a_count == 1 ? a_singular : a_plural);
 		}
 
 		std::vector<float> parseFloats(const std::string& a_text) {
@@ -82,11 +127,12 @@ namespace Workbench {
 		bool expanded = collapsedSections.count(a_key) ? !collapsedSections[a_key] : true;
 		auto row = contentNode->make(MV::guid("header_"));
 		row->position(MV::point(0.0f, a_y));
-		row->attach<MV::Scene::Sprite>()->bounds(MV::size(panelWidth, theme->rowHeight))->color(theme->header());
-		auto triangle = makeLabel(row, *services, *theme, "fold", MV::size(theme->px(14.0f), theme->rowHeight), expanded ? "v" : ">");
-		triangle->owner()->position(MV::point(theme->pad, 0.0f));
+		row->attach<MV::Scene::Sprite>()->bounds(MV::size(panelWidth, theme->rowHeight))->texture(shadeHandle(*services))->color(theme->header());
+		auto arrowHost = row->make("fold");
+		arrowHost->position(MV::point(theme->px(2.0f), 0.0f));
+		makeExpanderArrow(arrowHost, *services, *theme, MV::size(theme->px(16.0f), theme->rowHeight), expanded);
 		auto title = makeLabel(row, *services, *theme, "text", MV::size(panelWidth - theme->px(24.0f), theme->rowHeight), a_title);
-		title->owner()->position(MV::point(theme->px(20.0f), 0.0f));
+		title->owner()->position(MV::point(theme->px(22.0f), 0.0f));
 		auto& mouse = *services->get<MV::TapDevice>();
 		row->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(panelWidth, theme->rowHeight))->onAccept.connect("toggle", [this, a_key](const std::shared_ptr<MV::Scene::Clickable>&) {
 			bool nowCollapsed = collapsedSections.count(a_key) ? !collapsedSections[a_key] : true;
@@ -101,7 +147,7 @@ namespace Workbench {
 			});
 			gizmoButton->owner()->position(MV::point(panelWidth - buttonWidth - theme->pad, theme->px(2.0f)));
 		}
-		a_y += theme->rowHeight + theme->px(2.0f);
+		a_y += theme->rowHeight + theme->px(4.0f);
 		return expanded;
 	}
 
@@ -314,8 +360,54 @@ namespace Workbench {
 		}
 	}
 
+	void InspectorPanel::addReadOnlyRow(const std::string& a_name, const std::string& a_value, float& a_y) {
+		auto row = makeRow(a_name, a_y);
+		auto valueHost = row->make("field");
+		valueHost->position(MV::point(labelWidth() + theme->pad + theme->px(5.0f), 0.0f));
+		makeLabel(valueHost, *services, *theme, "value", MV::size(fieldWidth() - theme->px(5.0f), theme->fieldHeight), a_value);
+	}
+
+	// One row per texture slot: a thumbnail and the texture's name.
+	void InspectorPanel::addTextureRows(const std::string& a_name, jai::property_base* a_property, float& a_y) {
+		auto* textures = a_property->value_as<std::map<size_t, std::shared_ptr<MV::TextureHandle>>>();
+		if (!textures || textures->empty()) {
+			addReadOnlyRow(a_name, "None", a_y);
+			return;
+		}
+		for (auto&& [slot, handle] : *textures) {
+			auto row = makeRow(textures->size() == 1 ? std::string("texture") : "texture " + std::to_string(slot), a_y);
+			auto valueHost = row->make("field");
+			valueHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
+			MV::Size<> thumbnailSize(theme->fieldHeight, theme->fieldHeight);
+			attachOutlinedRect(valueHost->make("thumbnail"), *services, *theme, thumbnailSize, theme->fieldBg(), theme->fieldOutline());
+			std::string textureName = "None";
+			if (handle && handle->texture()) {
+				textureName = handle->texture()->name();
+				auto lastSlash = textureName.find_last_of("/\\");
+				if (lastSlash != std::string::npos) {
+					textureName = textureName.substr(lastSlash + 1);
+				}
+				if (!handle->name().empty() && handle->name() != textureName) {
+					textureName += " : " + handle->name();
+				}
+				auto fill = outlinedFillBounds(*theme, thumbnailSize);
+				auto fitted = MV::fitAspect(MV::cast<MV::PointPrecision>(handle->bounds().size()), fill.size());
+				auto image = valueHost->make("image");
+				image->position(fill.minPoint + MV::toPoint((fill.size() - fitted) / 2.0f));
+				image->attach<MV::Scene::Sprite>()->bounds(fitted)->texture(handle);
+			}
+			auto nameHost = valueHost->make("name");
+			nameHost->position(MV::point(thumbnailSize.width + theme->px(6.0f), 0.0f));
+			makeLabel(nameHost, *services, *theme, "value", MV::size(fieldWidth() - thumbnailSize.width - theme->px(6.0f), theme->fieldHeight), textureName);
+		}
+	}
+
 	void InspectorPanel::addPropertyRow(const std::shared_ptr<MV::Scene::Component>& a_component, const std::string& a_name, jai::property_base* a_property, float& a_y) {
 		auto typeId = a_property->value_type_id();
+		// a retired key has no value; componentOwner is the node being inspected
+		if (typeId == std::type_index(typeid(void)) || a_name == "componentOwner") {
+			return;
+		}
 		MV::Size<> fieldSize(fieldWidth(), theme->fieldHeight);
 		std::weak_ptr<MV::Scene::Component> weakComponent = a_component;
 
@@ -379,6 +471,14 @@ namespace Workbench {
 			numericField(int64_t{});
 		} else if (typeId == std::type_index(typeid(uint32_t))) {
 			numericField(uint32_t{});
+		} else if (typeId == std::type_index(typeid(uint16_t))) {
+			numericField(uint16_t{});
+		} else if (typeId == std::type_index(typeid(int16_t))) {
+			numericField(int16_t{});
+		} else if (typeId == std::type_index(typeid(uint8_t))) {
+			numericField(uint8_t{});
+		} else if (typeId == std::type_index(typeid(uint64_t))) {
+			numericField(uint64_t{});
 		} else if (typeId == std::type_index(typeid(std::string))) {
 			auto row = makeRow(a_name, a_y);
 			auto fieldHost = row->make("field");
@@ -488,11 +588,27 @@ namespace Workbench {
 			enumField(MV::TextJustification{}, { "Left", "Center", "Right" });
 		} else if (typeId == std::type_index(typeid(MV::Scene::Clickable::BoundsType))) {
 			enumField(MV::Scene::Clickable::BoundsType{}, { "Local", "Node", "Children", "NodeChildren", "None" });
+		} else if (typeId == std::type_index(typeid(std::map<size_t, std::shared_ptr<MV::TextureHandle>>))) {
+			addTextureRows(a_name, a_property, a_y);
+		} else if (typeId == std::type_index(typeid(std::shared_ptr<MV::Scene::Node>))) {
+			addReadOnlyRow(a_name, nodeReferenceText(*a_property->value_as<std::shared_ptr<MV::Scene::Node>>()), a_y);
+		} else if (typeId == std::type_index(typeid(std::weak_ptr<MV::Scene::Node>))) {
+			addReadOnlyRow(a_name, nodeReferenceText(a_property->value_as<std::weak_ptr<MV::Scene::Node>>()->lock()), a_y);
+		} else if (typeId == std::type_index(typeid(std::vector<MV::DrawPoint>))) {
+			addReadOnlyRow(a_name, countText(a_property->value_as<std::vector<MV::DrawPoint>>()->size(), "point", "points"), a_y);
+		} else if (typeId == std::type_index(typeid(std::vector<GLuint>))) {
+			addReadOnlyRow(a_name, countText(a_property->value_as<std::vector<GLuint>>()->size(), "index", "indices"), a_y);
+		} else if (typeId == std::type_index(typeid(MV::BoxAABB<>))) {
+			auto box = *a_property->value_as<MV::BoxAABB<>>();
+			std::ostringstream text;
+			text << box.minPoint.x << ", " << box.minPoint.y << "   " << box.size().width << " x " << box.size().height;
+			addReadOnlyRow(a_name, text.str(), a_y);
+		} else if (typeId == std::type_index(typeid(MV::Scene::Anchors))) {
+			auto* anchors = a_property->value_as<MV::Scene::Anchors>();
+			auto anchoredTo = anchors->hasParent() ? anchors->parent() : nullptr;
+			addReadOnlyRow(a_name, !anchoredTo ? std::string("None") : "to " + (anchoredTo->id().empty() ? friendlyTypeName(typeid(*anchoredTo).name()) : anchoredTo->id()), a_y);
 		} else {
-			auto row = makeRow(a_name, a_y);
-			auto fieldHost = row->make("field");
-			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
-			makeLabel(fieldHost, *services, *theme, "value", fieldSize, "(" + friendlyTypeName(typeId.name()) + ")");
+			addReadOnlyRow(a_name, friendlyTypeName(typeId.name()), a_y);
 		}
 	}
 

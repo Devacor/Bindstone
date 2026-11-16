@@ -418,6 +418,23 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   the copy that makes rows tight. Fixed in MV (`convertToPowerOfTwoSurface` / `convertToBGRSurface`).
 - Still missing against Unreal: row icons, softer label colour (Text has no colour API), input outlines, hover states.
 
+### Increment 20 (menu bar, readable inspector, control polish; Dev's annotated review) - LANDED, gated
+- Menu bar in the title bar (`menu.h/.cpp`): File (New Scene, Open..., Save, Save As..., Exit), Edit (Undo, Redo),
+  Window (one entry per panel, brings its tab forward). Dropdowns have an outline, a drop shadow, row hover and
+  right-aligned shortcuts; moving across the titles switches menus; Escape or a press elsewhere closes. Ctrl+O,
+  Ctrl+S, Ctrl+Shift+S. Open and Save As use the platform's picker (`fileDialog.h/.cpp`: Windows only so far).
+  The title shows the open file; `App` tracks it as `documentPath`.
+- Inspector: values it cannot edit print as plain text, not a mangled type name: node references by id, `None`,
+  `4 points`, `6 indices`, bounds as `x, y  w x h`, anchors as `to <id>`; textures get a thumbnail and name per
+  slot; `componentOwner` and retired keys are not shown; uint16/int16/uint8/uint64 are numeric fields. Numbers
+  drop digits to fit their field (Text has no clipping).
+- Expanders are drawn triangles (`makeExpanderArrow`), in the trees and on the inspector's section headers.
+- Controls follow Unreal's construction: inputs have a 1 px outline, buttons a dark ring (`attachOutlinedRect`);
+  buttons, section headers and the Project footer shade slightly towards their foot (`shadeHandle`). Unreal's own
+  controls are flat; the shade is Dev's ask.
+- Every docked panel has a scrollbar thumb when its content overflows (drag or wheel), and lays out beside a
+  10 px gutter. The Project footer is a status bar across the whole panel; tiles spread across the width.
+
 ## Known gaps (next increments)
 - Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.

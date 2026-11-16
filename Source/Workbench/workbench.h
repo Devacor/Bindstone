@@ -8,6 +8,7 @@
 #include "gizmos.h"
 #include "sceneTreePanel.h"
 #include "inspector.h"
+#include "menu.h"
 #include "MV/Render/Scene/parallax.h"
 
 namespace Workbench {
@@ -27,6 +28,13 @@ namespace Workbench {
 		void select(const std::shared_ptr<MV::Scene::Node>& a_node);
 		bool loadScene(const std::string& a_fileName);
 		bool saveScene(const std::string& a_fileName);
+		void newScene();
+		// File menu: the platform's pickers, and Save to the file the scene came from (Save As when it has none).
+		void openSceneWithDialog();
+		void saveSceneWithDialog();
+		void saveCurrentScene();
+		// Left part of the title bar that takes presses (menus and transport); the rest drags the window.
+		float titleBarInteractiveWidth() const { return titleInteractiveWidth; }
 
 		// Pans the viewport so the selected node sits at its center (next laid-out frame).
 		void frameSelectionInViewport() { selectionFramePending = true; }
@@ -48,6 +56,7 @@ namespace Workbench {
 		void render();
 		void updateCameraKeys(double a_dt);
 		void buildTitleBar();
+		void refreshTitle();
 		void layoutTitleBar(const MV::Size<>& a_worldSize);
 		void captureScreenshot(const std::string& a_path);
 		void syncViewportClip();
@@ -80,6 +89,11 @@ namespace Workbench {
 		std::vector<std::weak_ptr<MV::Scene::Parallax>> previewedParallax;
 
 		std::unique_ptr<DockSpace> dock;
+		std::unique_ptr<MenuBar> menuBar;
+		std::vector<Panel*> menuPanels;
+		std::shared_ptr<MV::Scene::Text> titleText;
+		std::string documentPath;
+		float titleInteractiveWidth = 0.0f;
 		SceneTreePanel* treePanel = nullptr;
 		InspectorPanel* inspectorPanel = nullptr;
 

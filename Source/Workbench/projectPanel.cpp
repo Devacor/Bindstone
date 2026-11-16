@@ -77,7 +77,8 @@ namespace Workbench {
 		auto background = footerHost->attach<MV::Scene::Sprite>();
 		background->id("footerBg");
 		background->bounds(MV::size(panelSize.width, footerHeight()));
-		background->color(theme->header());
+		background->texture(shadeHandle(*services))->color(theme->header());
+		footerHost->attach<MV::Scene::Sprite>()->id("footerEdge")->bounds(MV::size(panelSize.width, theme->px(1.0f)))->color(theme->windowBg());
 
 		float scale = theme->scaleFactor();
 		auto& mouse = *services->get<MV::TapDevice>();
@@ -101,13 +102,16 @@ namespace Workbench {
 		if (!footerHost) {
 			return;
 		}
-		float width = std::max(theme->px(120.0f), panelSize.width - treeWidth - theme->pad);
+		float width = panelSize.width + theme->pad * 2.0f;
 		if (auto background = footerHost->component<MV::Scene::Sprite>("footerBg", false)) {
 			background->bounds(MV::size(width, footerHeight()));
 		}
+		if (auto edge = footerHost->component<MV::Scene::Sprite>("footerEdge", false)) {
+			edge->bounds(MV::size(width, theme->px(1.0f)));
+		}
 		float scale = theme->scaleFactor();
 		if (auto sliderHost = footerHost->get("tileSlider", false)) {
-			sliderHost->position(MV::point(width - 90.0f * scale - theme->pad, (footerHeight() - 8.0f * scale) * 0.5f));
+			sliderHost->position(MV::point(width - 90.0f * scale - theme->pad * 3.0f, (footerHeight() - 8.0f * scale) * 0.5f));
 		}
 	}
 
@@ -117,7 +121,7 @@ namespace Workbench {
 		}
 		// The dock wheel-scrolls the whole content node; counter-scroll to pin the footer.
 		float offset = theme->tabHeight + theme->pad - contentNode->position().y;
-		footerHost->position(MV::point(treeWidth + theme->pad, offset + panelSize.height - footerHeight()));
+		footerHost->position(MV::point(-theme->pad, offset + panelSize.height - footerHeight() + theme->pad));
 	}
 
 	void ProjectPanel::resized(const MV::Size<>& a_size) {
@@ -277,6 +281,8 @@ namespace Workbench {
 		float cellHeight = tileSize + captionHeight + 10.0f * scale;
 		float availableWidth = std::max(cellWidth, panelSize.width - treeWidth - theme->pad * 2.0f);
 		int columns = std::max(1, static_cast<int>(availableWidth / cellWidth));
+		cellWidth = std::floor(availableWidth / static_cast<float>(columns));
+		float tileInset = std::floor((cellWidth - tileSize) * 0.5f);
 
 		for (auto&& entry : entries) {
 			bool isFolder = fs::is_directory(entry);
@@ -285,14 +291,14 @@ namespace Workbench {
 			++index;
 
 			auto tile = tileHost->make(MV::guid("tile_"));
-			tile->position(MV::point(column * cellWidth, row * cellHeight));
+			tile->position(MV::point(column * cellWidth + tileInset, row * cellHeight));
 
 			std::string extension = entry.extension().string();
 			bool isImage = extension == ".png" || extension == ".jpg";
 			bool isPrefab = extension == ".bindsnap";
 
 			if (isImage) {
-				tile->attach<MV::Scene::Sprite>()->bounds(MV::size(tileSize, tileSize))->color(theme->fieldBg());
+				attachOutlinedRect(tile, *services, *theme, MV::size(tileSize, tileSize), theme->fieldBg(), theme->fieldOutline());
 				try {
 					auto handle = services->get<MV::SharedTextures>()->file(entry.generic_string(), false)->makeHandle();
 					tile->make("thumb")->attach<MV::Scene::Sprite>()->bounds(MV::fitAspect(MV::cast<MV::PointPrecision>(handle->bounds().size()), MV::size(tileSize, tileSize)))->texture(handle);
@@ -300,7 +306,7 @@ namespace Workbench {
 				}
 			} else {
 				MV::Color tileColor = isFolder ? MV::Color(0x8a6d3a) : tileColorForExtension(extension, *theme);
-				tile->attach<MV::Scene::Sprite>()->bounds(MV::size(tileSize, tileSize))->color(tileColor);
+				attachRoundedRect(tile, *services, *theme, MV::size(tileSize, tileSize), tileColor);
 				std::string glyph = isFolder ? "[=]" : tileGlyphForExtension(extension);
 				auto glyphLabel = makeLabel(tile, *services, *theme, "glyph", MV::size(tileSize, theme->rowHeight), glyph);
 				glyphLabel->justification(MV::TextJustification::CENTER);
@@ -308,7 +314,7 @@ namespace Workbench {
 			}
 
 			auto caption = makeLabel(tile, *services, *theme, "caption", MV::size(cellWidth - theme->pad, captionHeight), entry.filename().string());
-			caption->owner()->position(MV::point(0.0f, tileSize + theme->px(2.0f)));
+			caption->owner()->position(MV::point(-tileInset + theme->pad * 0.5f, tileSize + theme->px(2.0f)));
 			caption->justification(MV::TextJustification::CENTER);
 
 			auto tileClick = tile->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(tileSize, tileSize + captionHeight));

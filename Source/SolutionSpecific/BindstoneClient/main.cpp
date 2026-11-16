@@ -852,6 +852,92 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(false, "the scene has two nodes for the history checks");
 	}
 
+	// The history strip: opened from the toolbar, a pip per step, its handle dragged back and forward
+	{
+		auto& history = a_app.commands();
+		auto& toolbar = a_app.sceneTools();
+		auto& strip = toolbar.history();
+		auto& gizmoLayer = a_app.gizmoLayer();
+		auto& mouse = *a_managers.services.get<MV::TapDevice>();
+		auto hold = [&](const MV::Point<int>& a_at, bool a_down, int a_frames = 2) {
+			mouse.simulate(a_at, a_down);
+			a_app.runFrames(a_frames);
+		};
+		auto click = [&](const MV::Point<int>& a_at) {
+			hold(a_at, false);
+			hold(a_at, true);
+			hold(a_at, false);
+			mouse.stopSimulating();
+		};
+		auto dragHandle = [&](size_t a_from, size_t a_to) {
+			hold(strip.positionScreenPoint(a_from), false);
+			hold(strip.positionScreenPoint(a_from), true);
+			for (size_t at = a_from; at != a_to; at += a_to > a_from ? 1 : -1) {
+				hold(strip.positionScreenPoint(at), true, 1);
+			}
+			hold(strip.positionScreenPoint(a_to), true, 1);
+			hold(strip.positionScreenPoint(a_to), false);
+			mouse.stopSimulating();
+		};
+		auto captionStarts = [&strip](const std::string& a_text) { return strip.caption().rfind(a_text, 0) == 0; };
+
+		expect(a_app.loadScene("Interface/Login/view.scene") && !a_app.scene()->empty(), "the Login scene loads for the history strip");
+		a_app.runFrames(10);
+		auto subject = *std::prev(a_app.scene()->end());
+		auto rest = subject->position();
+		expect(!toolbar.historyShown(), "the history starts closed");
+		click(toolbar.buttonScreenPoint(7));
+		expect(toolbar.historyShown() && strip.pipCount() == 0 && captionStarts("0 / 0"), "the toolbar's history button opens the strip, empty for a fresh scene");
+
+		a_app.select(subject);
+		a_app.runFrames(1);
+		for (int step = 0; step < 4; ++step) {
+			gizmoLayer.moveSelected(Workbench::GizmoAxis::BOTH, MV::point(10.0f, 0.0f));
+		}
+		a_app.runFrames(2);
+		expect(strip.pipCount() == 4 && captionStarts("4 / 4   move " + subject->id()), "each step adds a pip and the caption names the last one, got " + strip.caption());
+
+		hold(strip.positionScreenPoint(4), false);
+		hold(strip.positionScreenPoint(4), true);
+		hold(strip.positionScreenPoint(3), true, 1);
+		expect(history.position() == 3 && sameXY(subject->position(), rest + MV::point(30.0f, 0.0f)), "the handle undoes a step as it is dragged past it");
+		hold(strip.positionScreenPoint(1), true, 1);
+		hold(strip.positionScreenPoint(1), false);
+		mouse.stopSimulating();
+		expect(history.position() == 1 && history.length() == 4 && sameXY(subject->position(), rest + MV::point(10.0f, 0.0f)), "a drag back unwinds to where it is released");
+		expect(strip.pipCount() == 4 && captionStarts("1 / 4"), "the undone steps keep their pips, got " + strip.caption());
+		expect(a_app.selected() == subject, "a drag on the strip does not pick or pan in the scene behind it");
+		dragHandle(1, 3);
+		expect(history.position() == 3 && sameXY(subject->position(), rest + MV::point(30.0f, 0.0f)), "a drag forward redoes");
+		click(strip.positionScreenPoint(0));
+		expect(history.position() == 0 && sameXY(subject->position(), rest) && captionStarts("0 / 4   start"), "a press at the start of the row unwinds everything");
+		click(strip.positionScreenPoint(4));
+		expect(history.position() == 4 && sameXY(subject->position(), rest + MV::point(40.0f, 0.0f)), "a press at the end redoes everything");
+
+		expect(history.savedPosition() == std::optional<size_t>(0), "the saved mark sits where the scene was loaded");
+		auto stripFile = (std::filesystem::temp_directory_path() / "workbench_selftest_strip.scene").string();
+		expect(a_app.saveScene(stripFile) && history.savedPosition() == std::optional<size_t>(4), "a save moves the saved mark to the handle");
+		std::error_code stripIgnored;
+		std::filesystem::remove(stripFile, stripIgnored);
+
+		click(strip.positionScreenPoint(2));
+		gizmoLayer.moveSelected(Workbench::GizmoAxis::BOTH, MV::point(0.0f, 5.0f));
+		a_app.runFrames(2);
+		expect(history.length() == 3 && strip.pipCount() == 3 && !history.savedPosition().has_value(), "a new step drops the undone ones, their pips and a saved mark among them");
+
+		click(a_app.menus().titleScreenPoint(1));
+		expect(a_app.menus().isOpen() && a_app.menus().rowLabel(4) == "Hide History", "Edit offers to hide the open history");
+		if (a_app.menus().isOpen()) {
+			click(a_app.menus().rowScreenPoint(4));
+		}
+		expect(!toolbar.historyShown(), "Edit > Hide History closes the strip");
+		click(toolbar.buttonScreenPoint(7));
+		expect(toolbar.historyShown(), "the button opens it again");
+		click(toolbar.buttonScreenPoint(7));
+		expect(!toolbar.historyShown(), "and closes it");
+		a_app.select(nullptr);
+	}
+
 	// Scene toolbar and menu bar, pressed on the simulated mouse
 	{
 		auto& mouse = *a_managers.services.get<MV::TapDevice>();

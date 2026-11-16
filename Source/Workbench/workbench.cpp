@@ -80,7 +80,12 @@ namespace Workbench {
 			}
 			select(inScene(selectedNode) ? selectedNode : nullptr);
 		};
-		history.onMoved = [this]() { refreshTitle(); };
+		history.onMoved = [this]() {
+			refreshTitle();
+			if (sceneToolbar) {
+				sceneToolbar->history().refresh();
+			}
+		};
 		askAboutUnsavedChanges = [](const std::string& a_documentName) {
 			const SDL_MessageBoxButtonData buttons[] {
 				{ SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 0, "Save" },
@@ -146,7 +151,7 @@ namespace Workbench {
 			sceneToolbar->grid(sceneGrid->visible());
 		};
 		toolbarActions.onFrame = [this]() { frameSelectionInViewport(); };
-		sceneToolbar = std::make_unique<SceneToolbar>(uiRoot->make("sceneToolbar"), managers.services, theme, toolbarActions);
+		sceneToolbar = std::make_unique<SceneToolbar>(uiRoot->make("sceneToolbar"), managers.services, theme, history, toolbarActions);
 		sceneToolbar->tool(static_cast<int>(gizmos->tool()));
 		sceneToolbar->grid(sceneGrid->visible());
 		sceneGrid->spacing(gizmos->snapSteps.move);
@@ -437,7 +442,8 @@ namespace Workbench {
 			{ "Undo", "Ctrl+Z", [this]() { history.undo(); }, false, [this, named]() { return named("Undo", history.undoLabel()); }, [this]() { return history.canUndo(); } },
 			{ "Redo", "Ctrl+Y", [this]() { history.redo(); }, false, [this, named]() { return named("Redo", history.redoLabel()); }, [this]() { return history.canRedo(); } },
 			{ "Duplicate", "Ctrl+D", [this]() { duplicateSelected(); }, true, {}, [this]() { return selectionIsRemovable(); } },
-			{ "Delete", "Del", [this]() { deleteSelected(); }, false, {}, [this]() { return selectionIsRemovable(); } } });
+			{ "Delete", "Del", [this]() { deleteSelected(); }, false, {}, [this]() { return selectionIsRemovable(); } },
+			{ "History", "", [this]() { sceneToolbar->historyShown(!sceneToolbar->historyShown()); }, true, [this]() { return std::string(sceneToolbar->historyShown() ? "Hide History" : "Show History"); } } });
 		std::vector<MenuItem> windowItems;
 		for (auto* panel : menuPanels) {
 			windowItems.push_back({ panel->title(), "", [this, panel]() { dock->show(panel); } });
@@ -729,6 +735,7 @@ namespace Workbench {
 			return;
 		}
 		sceneToolbar->position(MV::point(view.position.x + theme.px(8.0f), view.position.y + theme.px(8.0f)));
+		sceneToolbar->viewWidth(view.size.width - theme.px(16.0f));
 		sceneGrid->update(viewCamera->position(), viewCamera->scale().x, MV::BoxAABB<>(view.position, view.size));
 		if (view.position.x != lastViewportRect.position.x || view.position.y != lastViewportRect.position.y ||
 			view.size.width != lastViewportRect.size.width || view.size.height != lastViewportRect.size.height) {

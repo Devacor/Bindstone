@@ -1,10 +1,12 @@
 #ifndef _WORKBENCH_COMMANDS_H_
 #define _WORKBENCH_COMMANDS_H_
 
+#include <algorithm>
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -110,26 +112,35 @@ namespace Workbench {
 			record(std::make_unique<LambdaCommand>(std::move(a_label), std::move(a_execute), std::move(a_undo)));
 		}
 
-		bool undo() {
-			if (undoStack.empty() || pendingGroup) {
-				return false;
-			}
-			auto step = std::move(undoStack.back());
-			undoStack.pop_back();
-			step.command->undo();
-			redoStack.push_back(std::move(step));
-			notifyReplayed();
-			return true;
+		bool undo() { return position() > 0 && moveTo(position() - 1); }
+		bool redo() { return moveTo(position() + 1); }
+
+		// Steps applied, and steps in all: the applied ones and the undone ones a redo would bring back.
+		size_t position() const { return undoStack.size(); }
+		size_t length() const { return undoStack.size() + redoStack.size(); }
+		// a_step counts from the oldest: steps below position() are applied, the rest are undone.
+		const std::string& labelAt(size_t a_step) const {
+			return a_step < undoStack.size() ? undoStack[a_step].command->label() : redoStack[redoStack.size() - 1 - (a_step - undoStack.size())].command->label();
 		}
 
-		bool redo() {
-			if (redoStack.empty() || pendingGroup) {
+		// Undoes or redoes until a_position steps are applied, then reports once.
+		bool moveTo(size_t a_position) {
+			a_position = std::min(a_position, length());
+			if (pendingGroup || a_position == position()) {
 				return false;
 			}
-			auto step = std::move(redoStack.back());
-			redoStack.pop_back();
-			step.command->execute();
-			undoStack.push_back(std::move(step));
+			while (position() > a_position) {
+				auto step = std::move(undoStack.back());
+				undoStack.pop_back();
+				step.command->undo();
+				redoStack.push_back(std::move(step));
+			}
+			while (position() < a_position) {
+				auto step = std::move(redoStack.back());
+				redoStack.pop_back();
+				step.command->execute();
+				undoStack.push_back(std::move(step));
+			}
 			notifyReplayed();
 			return true;
 		}
@@ -148,6 +159,20 @@ namespace Workbench {
 
 		// False again once undo or redo returns to the saved state; a saved state no undo can reach stays modified.
 		bool modified() const { return currentSerial() != savedSerial; }
+
+		// The position() at which the document matches its file; none when no undo or redo reaches that state.
+		std::optional<size_t> savedPosition() const {
+			if (savedSerial == baseSerial) {
+				return 0;
+			}
+			for (size_t step = 0; step < length(); ++step) {
+				const Step& candidate = step < undoStack.size() ? undoStack[step] : redoStack[redoStack.size() - 1 - (step - undoStack.size())];
+				if (candidate.serial == savedSerial) {
+					return step + 1;
+				}
+			}
+			return std::nullopt;
+		}
 
 		// A new document: no steps, and its state is the saved one.
 		void clear() {

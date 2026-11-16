@@ -9,7 +9,7 @@
 
 namespace Workbench {
 
-	enum class Icon { Select, Move, Rotate, Scale, Snap, Grid, Frame };
+	enum class Icon { Select, Move, Rotate, Scale, Snap, Grid, Frame, History };
 
 	// A white icon drawn at the theme's scale; tint it through the Sprite's colour.
 	std::shared_ptr<MV::TextureHandle> iconHandle(MV::Services& a_services, const Theme& a_theme, Icon a_icon);

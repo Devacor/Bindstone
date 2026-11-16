@@ -527,6 +527,23 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Not yet: multi-selection (the first caller of `group` besides delete), a History panel, selection changes as
   steps.
 
+## Increment 24: the history strip (2026-11-16)
+- The Scene toolbar's last button (`Icon::History`) opens a second row under it: `HistoryStrip` (`historyStrip.h`).
+  One pip per step, light when applied and dim when undone, a handle at the history's position, a green mark at the
+  saved position, and a caption ("2 / 4   move Sky"). Edit > Show History / Hide History toggles the same row.
+- A press on the row moves the handle there and a drag carries it: `CommandHistory::moveTo(position)` undoes or
+  redoes across the steps between and reports once, so a drag over many steps refreshes the panels once per move.
+  `undo()` and `redo()` are `moveTo` by one.
+- `CommandHistory` also gives `position()`, `length()`, `labelAt(step)` and `savedPosition()`.
+- The row is as wide as the view allows up to 560 (`SceneToolbar::viewWidth`), so it cannot reach over the panel
+  beside the Scene; under 360 the caption goes and the pips stay. Pips are dots while they fit and thin bars when
+  the history is long (200 steps).
+- The strip builds its pips when the step count changes and only recolours and moves the handle otherwise, so the
+  Clickable being dragged outlives the drag.
+- The self-test opens it from the button, drags the handle back and forward over steps, presses at both ends,
+  checks the saved mark, the pips a new step drops, and the Edit row.
+- Not yet: a pip's label on hover (Clickable has no hover signal), a list view of the steps.
+
 ## Known gaps (next increments)
 - Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.

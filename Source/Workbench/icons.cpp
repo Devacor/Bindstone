@@ -85,6 +85,13 @@ namespace Workbench {
 					}
 					result = result || std::hypot(a_x - 0.5f, a_y - 0.5f) <= 0.11f;
 				break;
+				case Icon::History: {
+					const float angle = std::atan2(a_y - 0.54f, a_x - 0.50f) * 57.29578f;
+					const bool inGap = angle > -165.0f && angle < -95.0f;
+					result = (nearRing(a_x, a_y, 0.50f, 0.54f, 0.31f, 0.045f) && !inGap) || inPolygon(a_x, a_y, { {0.26f, 0.24f}, {0.52f, 0.07f}, {0.52f, 0.41f} }) ||
+						nearSegment(a_x, a_y, 0.50f, 0.56f, 0.50f, 0.38f, 0.04f) || nearSegment(a_x, a_y, 0.50f, 0.56f, 0.63f, 0.62f, 0.04f);
+				}
+				break;
 			}
 			return result;
 		}

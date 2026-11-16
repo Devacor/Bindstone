@@ -33,6 +33,7 @@
     <ClCompile Include="$(SolutionDir)Source\Workbench\icons.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\sceneGrid.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\sceneToolbar.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Workbench\inspectorEditors.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Game\gameEditor.cpp" />
   </ItemGroup>
   <ItemGroup>

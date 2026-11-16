@@ -741,6 +741,132 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 	expect(a_app.parallaxPreviewing() && !sameXY(layerNode->position(), layerRest), "the preview displaces the layer");
 	expect(sameXY(layer->localOffset(), layerRest), "the preview leaves localOffset alone");
 
+	// The inspector's editors on the map's Sky sprite and an emitter, pressed and dragged on the simulated mouse
+	{
+		auto& mouse = *a_managers.services.get<MV::TapDevice>();
+		auto& inspector = a_app.inspector();
+		auto hold = [&](const MV::Point<int>& a_at, bool a_down, int a_frames = 2) {
+			mouse.simulate(a_at, a_down);
+			a_app.runFrames(a_frames);
+		};
+		auto click = [&](const MV::Point<int>& a_at) {
+			hold(a_at, false);
+			hold(a_at, true);
+			hold(a_at, false);
+			mouse.stopSimulating();
+		};
+		auto dragRight = [&](const MV::Point<int>& a_from, int a_pixels) {
+			hold(a_from, false);
+			hold(a_from, true);
+			for (int step = 1; step <= 4; ++step) {
+				hold(MV::Point<int>(a_from.x + a_pixels * step / 4, a_from.y), true, 1);
+			}
+			hold(MV::Point<int>(a_from.x + a_pixels, a_from.y), false);
+			mouse.stopSimulating();
+		};
+		auto find = [&](const std::function<bool(const std::shared_ptr<MV::Scene::Node>&)>& a_matches) {
+			std::shared_ptr<MV::Scene::Node> result;
+			std::function<void(const std::shared_ptr<MV::Scene::Node>&)> visit = [&](const std::shared_ptr<MV::Scene::Node>& a_node) {
+				if (!result && a_matches(a_node)) {
+					result = a_node;
+				}
+				for (auto&& child : *a_node) {
+					visit(child);
+				}
+			};
+			visit(a_app.scene());
+			return result;
+		};
+
+		a_app.parallaxPreview(false);
+		a_app.select(layerNode);
+		a_app.runFrames(3);
+		auto sprite = layerNode->component<MV::Scene::Sprite>(false, false);
+		expect(static_cast<bool>(sprite), "the layer has a Sprite to inspect");
+		if (sprite) {
+			expect(inspector.rowScreenPoint("owner").has_value(), "componentOwner shows as the owner reference");
+
+			auto subdivisionsField = inspector.rowScreenPoint("subdivisions");
+			expect(subdivisionsField.has_value(), "the inspector shows a subdivisions field");
+			if (subdivisionsField) {
+				auto pointsBefore = sprite->pointSize();
+				dragRight(*subdivisionsField, 40);
+				expect(sprite->subdivisions() > 0 && sprite->pointSize() > pointsBefore, "scrubbing subdivisions subdivides the sprite");
+				pressWithControl(SDLK_z);
+				expect(sprite->subdivisions() == 0 && sprite->pointSize() == pointsBefore, "undo restores the sprite's grid");
+			}
+
+			auto textureBefore = sprite->texture(size_t{0});
+			auto textureField = inspector.rowScreenPoint("texture");
+			expect(textureField.has_value(), "the inspector shows the texture slot");
+			if (textureField) {
+				click(*textureField);
+				expect(inspector.texturePickerOpen(), "a press on the texture opens the picker");
+				auto tile = inspector.texturePickerTileScreenPoint(1);
+				expect(tile.has_value(), "the picker lists textures");
+				if (tile) {
+					click(*tile);
+					expect(!inspector.texturePickerOpen() && sprite->texture(size_t{0}) != textureBefore, "choosing a tile sets the texture and closes the picker");
+					pressWithControl(SDLK_z);
+					expect(sprite->texture(size_t{0}) == textureBefore, "undo restores the texture");
+				}
+			}
+
+			auto anchorsHeader = inspector.rowScreenPoint("anchors", false);
+			expect(anchorsHeader.has_value() && !inspector.rowScreenPoint("anchor min").has_value(), "anchors is a closed group");
+			if (anchorsHeader) {
+				click(*anchorsHeader);
+				auto anchorField = inspector.rowScreenPoint("anchor max");
+				expect(anchorField.has_value(), "a press opens the anchors group");
+				if (anchorField) {
+					auto anchorBefore = sprite->anchors().anchor();
+					dragRight(*anchorField, 30);
+					expect(!(sprite->anchors().anchor() == anchorBefore), "scrubbing an anchor field moves the anchor");
+					pressWithControl(SDLK_z);
+					expect(sprite->anchors().anchor() == anchorBefore, "undo restores the anchor");
+				}
+				auto parentField = inspector.rowScreenPoint("parent");
+				auto other = find([&](const std::shared_ptr<MV::Scene::Node>& a_node) {
+					return a_node != layerNode && a_node->component<MV::Scene::Drawable>(false, false);
+				});
+				if (parentField && other) {
+					expect(inspector.dropNode(other, *parentField), "a node dropped on the anchor's parent field is taken");
+					a_app.runFrames(2);
+					expect(sprite->anchors().hasParent() && sprite->anchors().parent()->owner() == other, "the dropped node's drawable becomes the anchor parent");
+					pressWithControl(SDLK_z);
+					expect(!sprite->anchors().hasParent(), "undo clears the anchor parent");
+				}
+			}
+		}
+
+		auto emitterNode = find([](const std::shared_ptr<MV::Scene::Node>& a_node) {
+			return static_cast<bool>(a_node->component<MV::Scene::Emitter>(false, false));
+		});
+		expect(emitterNode != nullptr, "the map has an emitter");
+		if (emitterNode) {
+			auto emitter = emitterNode->component<MV::Scene::Emitter>(false, false);
+			a_app.select(emitterNode);
+			a_app.runFrames(3);
+			auto groupHeader = inspector.rowScreenPoint("spawnProperties", false);
+			expect(groupHeader.has_value(), "the emitter's spawn properties show as a group");
+			if (groupHeader) {
+				click(*groupHeader);
+				auto rateField = inspector.rowScreenPoint("maximumSpawnRate");
+				expect(rateField.has_value(), "the group opens onto the nested properties");
+				if (rateField) {
+					float rateBefore = emitter->properties().maximumSpawnRate;
+					dragRight(*rateField, 30);
+					expect(emitter->properties().maximumSpawnRate != rateBefore, "scrubbing a nested field changes the emitter");
+					pressWithControl(SDLK_z);
+					expect(emitter->properties().maximumSpawnRate == rateBefore, "undo restores the nested value");
+				}
+			}
+		}
+		a_app.select(layerNode->parent());
+		a_app.parallaxPreview(true);
+		a_app.runFrames(5);
+	}
+
 	auto savedMap = (std::filesystem::temp_directory_path() / "workbench_selftest_map.scene").string();
 	expect(a_app.saveScene(savedMap), "the map saves during a preview");
 	try {

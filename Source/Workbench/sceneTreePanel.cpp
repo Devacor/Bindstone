@@ -64,6 +64,11 @@ namespace Workbench {
 				onSelectCallback(node);
 			}
 		};
+		tree->onDropOutside = [this](const SceneTreeItem& a_item, const MV::Point<int>& a_screenPoint) {
+			if (auto node = a_item.node.lock(); node && onNodeDroppedOutside) {
+				onNodeDroppedOutside(node, a_screenPoint);
+			}
+		};
 		tree->onReparent = [this](const SceneTreeItem& a_draggedItem, const SceneTreeItem& a_targetItem, TreeView<SceneTreeItem>::RowZone a_zone) {
 			auto scene = sceneGetter();
 			auto dragged = a_draggedItem.node.lock();

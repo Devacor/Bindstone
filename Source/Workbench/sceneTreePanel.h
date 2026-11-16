@@ -30,6 +30,9 @@ namespace Workbench {
 
 		void refresh();
 
+		// A row dragged out of the tree and released elsewhere (the inspector's reference fields take these).
+		std::function<void(const std::shared_ptr<MV::Scene::Node>&, const MV::Point<int>&)> onNodeDroppedOutside;
+
 		// Highlights and reveals the app's selection; never calls back into the app.
 		void showSelection(const std::shared_ptr<MV::Scene::Node>& a_node);
 

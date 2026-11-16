@@ -477,6 +477,29 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - The self-test presses the toolbar buttons and the File menu on the simulated mouse (`TapDevice::simulate`).
 - No perspective/orthographic switch: the scene camera is 2D only.
 
+### Increment 22 (reflected editors: references, anchors, textures, lists, nested owners) - LANDED, gated
+- `inspectorEditors.cpp`: `addCustomEditor` takes a property before the plain fields do.
+  - Node references (`shared_ptr`/`weak_ptr<Node>`): a chip that selects the node when pressed; a node dragged out
+    of the Hierarchy and released on it is assigned (`TreeView::onDropOutside` -> `InspectorPanel::dropNode`); x
+    clears. `componentOwner` shows as a read-only `owner` chip.
+  - Anchors: a group with the parent (a dropped node gives its first Drawable), anchor and offset min/max, pivot
+    and use-position, each through the `Anchors` setters with undo.
+  - Textures: a row per slot (thumbnail, name, x to clear); a press opens a picker over the loose image files and
+    each atlas pack (source button, pages of 24), which sets the slot through `Drawable::texture`.
+  - `points` and `vertexIndices`: groups with a row per point (X/Y/Z through `setPoint`) or per triangle
+    (through `setPoints`), twelve to a page.
+  - `subdivisions` goes through `Sprite::subdivide`, so the grid rebuilds; `drawType` is a named choice; `Size` is
+    a W/H row.
+  - Nested property owners (`EmitterSpawnProperties`, `Spine::FileBundle`) open as a group of their own rows; a
+    nested property is addressed by path (`spawnProperties/maximumSpawnRate`, `resolveProperty`), so the same
+    fields, appliers and undo serve it. Register a new nested type in `nestedOwners()`.
+- Groups are closed until opened and show a summary beside the title (`addGroupHeader`).
+- Numbers print in fixed notation with the decimals that fit (`formatNumberCompact`): no `-0.000244141`.
+- The self-test scrubs subdivisions, picks a texture, edits and re-parents anchors, and edits a nested emitter value,
+  each with undo, on the simulated mouse (`InspectorPanel::rowScreenPoint`).
+- Not yet: `ParticleChangeValues` (the emitter's min/max change values; it wants the particle editor's degree
+  handling), `slotsToNodes`, `std::pair` rows, text content, per-point colour and UV.
+
 ## Known gaps (next increments)
 - Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.

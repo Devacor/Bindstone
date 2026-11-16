@@ -52,6 +52,7 @@ namespace Workbench {
 		SceneToolbar& sceneTools() { return *sceneToolbar; }
 		SceneGrid& grid() { return *sceneGrid; }
 		MenuBar& menus() { return *menuBar; }
+		InspectorPanel& inspector() { return *inspectorPanel; }
 		const std::string& document() const { return documentPath; }
 
 		// Displaces the Parallax layers on the selected node and below it as a run would, until the selection changes.

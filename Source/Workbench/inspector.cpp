@@ -56,34 +56,6 @@ namespace Workbench {
 			return outer;
 		}
 
-		std::string nodeReferenceText(const std::shared_ptr<MV::Scene::Node>& a_node) {
-			return !a_node ? std::string("None") : a_node->id().empty() ? std::string("(unnamed node)") : a_node->id();
-		}
-
-		std::string countText(size_t a_count, const char* a_singular, const char* a_plural) {
-			return std::to_string(a_count) + " " + (a_count == 1 ? a_singular : a_plural);
-		}
-
-		std::vector<float> parseFloats(const std::string& a_text) {
-			std::vector<float> values;
-			std::stringstream stream(a_text);
-			float value = 0.0f;
-			while (stream >> value) {
-				values.push_back(value);
-			}
-			return values;
-		}
-
-		std::string formatFloats(std::initializer_list<float> a_values) {
-			std::ostringstream out;
-			bool first = true;
-			for (auto value : a_values) {
-				if (!first) { out << " "; }
-				out << value;
-				first = false;
-			}
-			return out.str();
-		}
 	}
 
 	void InspectorPanel::build() {
@@ -103,6 +75,10 @@ namespace Workbench {
 			focus->deactivate();
 		}
 		closeColorPopup(true);
+		closeTexturePicker();
+		nodeDropZones.clear();
+		labelledRows.clear();
+		rowIndent = 0.0f;
 		contentNode->clear();
 		float y = 0.0f;
 		auto node = inspectedNode.lock();
@@ -154,7 +130,9 @@ namespace Workbench {
 	std::shared_ptr<MV::Scene::Node> InspectorPanel::makeRow(const std::string& a_label, float& a_y) {
 		auto row = contentNode->make(MV::guid("row_"));
 		row->position(MV::point(0.0f, a_y));
-		makeLabel(row, *services, *theme, "label", MV::size(labelWidth(), theme->fieldHeight), a_label);
+		auto label = makeLabel(row, *services, *theme, "label", MV::size(labelWidth() - rowIndent, theme->fieldHeight), a_label);
+		label->owner()->position(MV::point(rowIndent, 0.0f));
+		labelledRows.emplace_back(a_label, row);
 		a_y += theme->fieldHeight + theme->px(4.0f);
 		return row;
 	}
@@ -347,6 +325,14 @@ namespace Workbench {
 
 	// A press outside the picker keeps the colour and closes it; Escape restores the colour it opened with.
 	void InspectorPanel::handleInput(SDL_Event& a_event) {
+		if (texturePicker.open && popupNode) {
+			auto popup = popupNode->get("texturePopup", false);
+			bool escape = a_event.type == SDL_KEYDOWN && a_event.key.keysym.sym == SDLK_ESCAPE;
+			bool pressedOutside = a_event.type == SDL_MOUSEBUTTONDOWN && (!popup || !popup->screenBounds().contains(MV::Point<int>(a_event.button.x, a_event.button.y)));
+			if (escape || pressedOutside) {
+				closeTexturePicker();
+			}
+		}
 		if (!colorPopupClose || !popupNode) {
 			return;
 		}
@@ -367,47 +353,13 @@ namespace Workbench {
 		makeLabel(valueHost, *services, *theme, "value", MV::size(fieldWidth() - theme->px(5.0f), theme->fieldHeight), a_value);
 	}
 
-	// One row per texture slot: a thumbnail and the texture's name.
-	void InspectorPanel::addTextureRows(const std::string& a_name, jai::property_base* a_property, float& a_y) {
-		auto* textures = a_property->value_as<std::map<size_t, std::shared_ptr<MV::TextureHandle>>>();
-		if (!textures || textures->empty()) {
-			addReadOnlyRow(a_name, "None", a_y);
-			return;
-		}
-		for (auto&& [slot, handle] : *textures) {
-			auto row = makeRow(textures->size() == 1 ? std::string("texture") : "texture " + std::to_string(slot), a_y);
-			auto valueHost = row->make("field");
-			valueHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
-			MV::Size<> thumbnailSize(theme->fieldHeight, theme->fieldHeight);
-			attachOutlinedRect(valueHost->make("thumbnail"), *services, *theme, thumbnailSize, theme->fieldBg(), theme->fieldOutline());
-			std::string textureName = "None";
-			if (handle && handle->texture()) {
-				textureName = handle->texture()->name();
-				auto lastSlash = textureName.find_last_of("/\\");
-				if (lastSlash != std::string::npos) {
-					textureName = textureName.substr(lastSlash + 1);
-				}
-				if (!handle->name().empty() && handle->name() != textureName) {
-					textureName += " : " + handle->name();
-				}
-				auto fill = outlinedFillBounds(*theme, thumbnailSize);
-				auto fitted = MV::fitAspect(MV::cast<MV::PointPrecision>(handle->bounds().size()), fill.size());
-				auto image = valueHost->make("image");
-				image->position(fill.minPoint + MV::toPoint((fill.size() - fitted) / 2.0f));
-				image->attach<MV::Scene::Sprite>()->bounds(fitted)->texture(handle);
-			}
-			auto nameHost = valueHost->make("name");
-			nameHost->position(MV::point(thumbnailSize.width + theme->px(6.0f), 0.0f));
-			makeLabel(nameHost, *services, *theme, "value", MV::size(fieldWidth() - thumbnailSize.width - theme->px(6.0f), theme->fieldHeight), textureName);
-		}
-	}
-
 	void InspectorPanel::addPropertyRow(const std::shared_ptr<MV::Scene::Component>& a_component, const std::string& a_name, jai::property_base* a_property, float& a_y) {
 		auto typeId = a_property->value_type_id();
-		// a retired key has no value; componentOwner is the node being inspected
-		if (typeId == std::type_index(typeid(void)) || a_name == "componentOwner") {
+		// a retired key has no value
+		if (typeId == std::type_index(typeid(void)) || addCustomEditor(a_component, a_name, a_property, a_y)) {
 			return;
 		}
+		const std::string label = leafName(a_name);
 		MV::Size<> fieldSize(fieldWidth(), theme->fieldHeight);
 		std::weak_ptr<MV::Scene::Component> weakComponent = a_component;
 
@@ -423,7 +375,7 @@ namespace Workbench {
 
 		auto numericField = [&](auto a_sample) {
 			using ValueType = decltype(a_sample);
-			auto row = makeRow(a_name, a_y);
+			auto row = makeRow(label, a_y);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			ValueType current = *a_property->value_as<ValueType>();
@@ -439,7 +391,7 @@ namespace Workbench {
 
 		auto enumField = [&](auto a_sample, std::vector<std::string> a_labels) {
 			using EnumType = decltype(a_sample);
-			auto row = makeRow(a_name, a_y);
+			auto row = makeRow(label, a_y);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			int current = static_cast<int>(*a_property->value_as<EnumType>());
@@ -453,7 +405,7 @@ namespace Workbench {
 		};
 
 		if (typeId == std::type_index(typeid(bool))) {
-			auto row = makeRow(a_name, a_y);
+			auto row = makeRow(label, a_y);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			auto apply = propertyApplier<bool>(weakComponent, a_name);
@@ -480,7 +432,7 @@ namespace Workbench {
 		} else if (typeId == std::type_index(typeid(uint64_t))) {
 			numericField(uint64_t{});
 		} else if (typeId == std::type_index(typeid(std::string))) {
-			auto row = makeRow(a_name, a_y);
+			auto row = makeRow(label, a_y);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			auto apply = propertyApplier<std::string>(weakComponent, a_name);
@@ -496,7 +448,7 @@ namespace Workbench {
 					}
 				});
 		} else if (typeId == std::type_index(typeid(MV::Color))) {
-			auto row = makeRow(a_name, a_y);
+			auto row = makeRow(label, a_y);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			const MV::Color current = *a_property->value_as<MV::Color>();
@@ -535,7 +487,7 @@ namespace Workbench {
 					}
 				});
 		} else if (typeId == std::type_index(typeid(MV::Point<>))) {
-			auto row = makeRow(a_name, a_y);
+			auto row = makeRow(label, a_y);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			const MV::Point<> current = *a_property->value_as<MV::Point<>>();
@@ -558,7 +510,7 @@ namespace Workbench {
 					}
 				});
 		} else if (typeId == std::type_index(typeid(MV::Scale))) {
-			auto row = makeRow(a_name, a_y);
+			auto row = makeRow(label, a_y);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			const MV::Scale current = *a_property->value_as<MV::Scale>();
@@ -588,27 +540,13 @@ namespace Workbench {
 			enumField(MV::TextJustification{}, { "Left", "Center", "Right" });
 		} else if (typeId == std::type_index(typeid(MV::Scene::Clickable::BoundsType))) {
 			enumField(MV::Scene::Clickable::BoundsType{}, { "Local", "Node", "Children", "NodeChildren", "None" });
-		} else if (typeId == std::type_index(typeid(std::map<size_t, std::shared_ptr<MV::TextureHandle>>))) {
-			addTextureRows(a_name, a_property, a_y);
-		} else if (typeId == std::type_index(typeid(std::shared_ptr<MV::Scene::Node>))) {
-			addReadOnlyRow(a_name, nodeReferenceText(*a_property->value_as<std::shared_ptr<MV::Scene::Node>>()), a_y);
-		} else if (typeId == std::type_index(typeid(std::weak_ptr<MV::Scene::Node>))) {
-			addReadOnlyRow(a_name, nodeReferenceText(a_property->value_as<std::weak_ptr<MV::Scene::Node>>()->lock()), a_y);
-		} else if (typeId == std::type_index(typeid(std::vector<MV::DrawPoint>))) {
-			addReadOnlyRow(a_name, countText(a_property->value_as<std::vector<MV::DrawPoint>>()->size(), "point", "points"), a_y);
-		} else if (typeId == std::type_index(typeid(std::vector<GLuint>))) {
-			addReadOnlyRow(a_name, countText(a_property->value_as<std::vector<GLuint>>()->size(), "index", "indices"), a_y);
 		} else if (typeId == std::type_index(typeid(MV::BoxAABB<>))) {
 			auto box = *a_property->value_as<MV::BoxAABB<>>();
 			std::ostringstream text;
-			text << box.minPoint.x << ", " << box.minPoint.y << "   " << box.size().width << " x " << box.size().height;
-			addReadOnlyRow(a_name, text.str(), a_y);
-		} else if (typeId == std::type_index(typeid(MV::Scene::Anchors))) {
-			auto* anchors = a_property->value_as<MV::Scene::Anchors>();
-			auto anchoredTo = anchors->hasParent() ? anchors->parent() : nullptr;
-			addReadOnlyRow(a_name, !anchoredTo ? std::string("None") : "to " + (anchoredTo->id().empty() ? friendlyTypeName(typeid(*anchoredTo).name()) : anchoredTo->id()), a_y);
+			text << formatNumberCompact(box.minPoint.x, 2) << ", " << formatNumberCompact(box.minPoint.y, 2) << "   " << formatNumberCompact(box.size().width, 2) << " x " << formatNumberCompact(box.size().height, 2);
+			addReadOnlyRow(label, text.str(), a_y);
 		} else {
-			addReadOnlyRow(a_name, friendlyTypeName(typeId.name()), a_y);
+			addReadOnlyRow(label, friendlyTypeName(typeId.name()), a_y);
 		}
 	}
 

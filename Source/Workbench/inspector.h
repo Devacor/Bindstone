@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <map>
+#include <optional>
 #include "commands.h"
 #include "dock.h"
 #include "widgets.h"
@@ -27,6 +28,16 @@ namespace Workbench {
 		std::function<void(bool)> onParallaxPreview;
 		std::function<bool()> parallaxPreviewActive;
 
+		// A press on a reference field selects the node it names.
+		std::function<void(const std::shared_ptr<MV::Scene::Node>&)> onSelectNode;
+		// A node dragged out of the Hierarchy and released over a reference field is assigned to it. True when a field took it.
+		bool dropNode(const std::shared_ptr<MV::Scene::Node>& a_node, const MV::Point<int>& a_screenPoint);
+
+		// Where a row can be pressed, by its label (the first row with it): its field, or the whole row for a group's header.
+		std::optional<MV::Point<int>> rowScreenPoint(const std::string& a_label, bool a_field = true) const;
+		bool texturePickerOpen() const { return texturePicker.open; }
+		std::optional<MV::Point<int>> texturePickerTileScreenPoint(size_t a_index) const;
+
 		void resized(const MV::Size<>& a_size) override {
 			if (std::abs(a_size.width - panelWidth) > 0.5f) {
 				panelWidth = a_size.width;
@@ -46,7 +57,27 @@ namespace Workbench {
 		void addPropertyRow(const std::shared_ptr<MV::Scene::Component>& a_component, const std::string& a_name, jai::property_base* a_property, float& a_y);
 		// A value the inspector shows but cannot edit yet: plain text, no field box.
 		void addReadOnlyRow(const std::string& a_name, const std::string& a_value, float& a_y);
-		void addTextureRows(const std::string& a_name, jai::property_base* a_property, float& a_y);
+
+		// Editors for the kinds a plain field cannot show (inspectorEditors.cpp). addCustomEditor returns false for a
+		// property none of them takes.
+		bool addCustomEditor(const std::shared_ptr<MV::Scene::Component>& a_component, const std::string& a_path, jai::property_base* a_property, float& a_y);
+		// A foldout inside a section, closed until opened; the summary shows beside the title either way.
+		bool addGroupHeader(const std::string& a_title, const std::string& a_key, const std::string& a_summary, float& a_y);
+		// A node reference: press to select it, drop a Hierarchy node on it or press x to change it. No a_assign: read-only.
+		void addNodeReferenceRow(const std::string& a_label, const std::shared_ptr<MV::Scene::Node>& a_node, std::function<void(const std::shared_ptr<MV::Scene::Node>&)> a_assign, float& a_y);
+		void addAnchorsGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable, float& a_y);
+		void addTextureRows(const std::shared_ptr<MV::Scene::Drawable>& a_drawable, float& a_y);
+		void addPointsGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable, float& a_y);
+		void addIndicesGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable, float& a_y);
+		// Rows of a list a page at a time, with the pager; returns the first index to show.
+		size_t addPager(const std::string& a_key, size_t a_count, size_t a_perPage, float& a_y);
+		void openTexturePicker(const std::weak_ptr<MV::Scene::Drawable>& a_drawable, size_t a_slot, const MV::Point<int>& a_screenPoint);
+		void buildTexturePicker();
+		void closeTexturePicker();
+
+		// "spawnProperties/maximumParticles": a property inside a nested owner, named from the component down.
+		static jai::property_base* resolveProperty(const std::shared_ptr<MV::Scene::Component>& a_component, const std::string& a_path);
+		static std::string leafName(const std::string& a_path);
 
 		bool addSectionHeader(const std::string& a_title, const std::string& a_key, float& a_y, const std::shared_ptr<MV::Scene::Component>& a_gizmoComponent = nullptr);
 		void openColorPopup(const std::weak_ptr<MV::Scene::Component>& a_component, const std::string& a_propertyName, jai::property_base* a_property, const std::weak_ptr<MV::Scene::Sprite>& a_swatch, const MV::Point<int>& a_screenPoint);
@@ -63,7 +94,7 @@ namespace Workbench {
 		std::function<void(ValueT)> propertyApplier(const std::weak_ptr<MV::Scene::Component>& a_component, const std::string& a_name) {
 			return [this, a_component, a_name](ValueT a_value) {
 				if (auto locked = a_component.lock()) {
-					if (auto* property = locked->find_reflected_property(a_name)) {
+					if (auto* property = resolveProperty(locked, a_name)) {
 						if (property->assign_value(a_value)) {
 							notifyEdited(locked);
 						}
@@ -85,6 +116,26 @@ namespace Workbench {
 		std::weak_ptr<MV::Scene::Node> inspectedNode;
 		// Ends the open colour picker session: true records the change as one command, false restores the colour it opened with.
 		std::function<void(bool)> colorPopupClose;
+
+		struct NodeDropZone {
+			std::weak_ptr<MV::Scene::Node> row;
+			std::function<void(const std::shared_ptr<MV::Scene::Node>&)> assign;
+		};
+		std::vector<NodeDropZone> nodeDropZones;
+		std::vector<std::pair<std::string, std::weak_ptr<MV::Scene::Node>>> labelledRows;
+		float rowIndent = 0.0f;
+		std::map<std::string, bool> openGroups;
+		std::map<std::string, size_t> listPages;
+
+		struct TexturePicker {
+			std::weak_ptr<MV::Scene::Drawable> drawable;
+			size_t slot = 0;
+			size_t source = 0;
+			size_t page = 0;
+			MV::Point<> position;
+			bool open = false;
+		};
+		TexturePicker texturePicker;
 		std::map<std::string, bool> collapsedSections;
 		float panelWidth = 260.0f;
 	};

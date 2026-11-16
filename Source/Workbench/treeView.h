@@ -39,6 +39,8 @@ namespace Workbench {
 		std::function<void(const TItem&)> onDoubleClick;
 		// When set, rows become draggable: drop onto a row reparents, drop near an edge reorders.
 		std::function<void(const TItem& a_dragged, const TItem& a_target, RowZone a_zone)> onReparent;
+		// A row dragged and released off the tree: another panel may take it.
+		std::function<void(const TItem& a_dragged, const MV::Point<int>& a_screenPoint)> onDropOutside;
 
 		void root(const TItem& a_root, bool a_showRoot = true) {
 			rootItem = a_root;
@@ -204,6 +206,8 @@ namespace Workbench {
 			rowDragActive = false;
 			if (target >= 0 && !(rowItems[static_cast<size_t>(target)] == dragged) && onReparent) {
 				onReparent(dragged, rowItems[static_cast<size_t>(target)], zoneWithinRow(a_screenPoint, target));
+			} else if (target < 0 && onDropOutside) {
+				onDropOutside(dragged, a_screenPoint);
 			}
 		}
 

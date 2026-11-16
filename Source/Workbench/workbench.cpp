@@ -109,6 +109,10 @@ namespace Workbench {
 			return gizmos->editedComponent() == a_component;
 		};
 		inspectorPanel->onParallaxPreview = [this](bool a_preview) { parallaxPreview(a_preview); };
+		inspectorPanel->onSelectNode = [this](const std::shared_ptr<MV::Scene::Node>& a_node) { select(a_node); };
+		treePanel->onNodeDroppedOutside = [this](const std::shared_ptr<MV::Scene::Node>& a_node, const MV::Point<int>& a_screenPoint) {
+			inspectorPanel->dropNode(a_node, a_screenPoint);
+		};
 		inspectorPanel->parallaxPreviewActive = [this]() { return parallaxPreviewing(); };
 		Panel* viewportPanel = dock->registerPanel(std::move(viewport));
 		Panel* filePanel = dock->registerPanel(std::move(file));

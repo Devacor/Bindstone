@@ -6,24 +6,35 @@
 
 namespace Workbench {
 
-	namespace {
-		std::string formatNumber(float a_value) {
-			std::ostringstream out;
-			out << a_value;
-			return out.str();
+	std::string formatNumberCompact(float a_value, int a_maximumDecimals) {
+		std::ostringstream out;
+		out.setf(std::ios::fixed);
+		out.precision(a_maximumDecimals);
+		out << a_value;
+		std::string result = out.str();
+		if (result.find('.') != std::string::npos) {
+			result.erase(result.find_last_not_of('0') + 1);
+			if (result.back() == '.') {
+				result.pop_back();
+			}
 		}
+		return result == "-0" ? std::string("0") : result;
+	}
 
-		// Text has no clipping: drop digits until the number fits its field.
+	namespace {
+		// Text has no clipping: drop decimals until the number fits its field.
 		std::string formatNumberToFit(float a_value, float a_fieldWidth, const Theme& a_theme) {
 			const size_t maximumCharacters = static_cast<size_t>(std::max(3.0f, (a_fieldWidth - a_theme.px(10.0f)) / a_theme.px(7.4f)));
-			std::string result = formatNumber(a_value);
-			for (int digits = 6; digits >= 1 && result.size() > maximumCharacters; --digits) {
-				std::ostringstream out;
-				out.precision(digits);
-				out << a_value;
-				result = out.str();
+			for (int decimals = 4; decimals >= 0; --decimals) {
+				std::string result = formatNumberCompact(a_value, decimals);
+				if (result.size() <= maximumCharacters) {
+					return result;
+				}
 			}
-			return result;
+			std::ostringstream out;
+			out.precision(3);
+			out << a_value;
+			return out.str();
 		}
 
 		MV::Color axisTint(const std::string& a_axis) {

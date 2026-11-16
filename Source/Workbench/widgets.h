@@ -11,6 +11,9 @@
 
 namespace Workbench {
 
+	// Fixed notation, trailing zeros dropped: 993.646, 340, 0 (never -0 or 1e-05).
+	std::string formatNumberCompact(float a_value, int a_maximumDecimals = 3);
+
 	// Shared per-radius rounded-rect texture handle (9-slice; POT SDF surface, straight alpha).
 	// Attach to any Sprite-derived component via ->texture(handle) to round its corners.
 	std::shared_ptr<MV::TextureHandle> roundedRectHandle(MV::Services& a_services, const Theme& a_theme);

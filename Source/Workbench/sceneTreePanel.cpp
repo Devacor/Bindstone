@@ -30,51 +30,61 @@ namespace Workbench {
 		treeHost = contentNode->make("rows");
 		treeHost->position(MV::point(0.0f, theme->fieldHeight + theme->pad));
 
-		TreeView<MV::Scene::Node*>::Adapter adapter;
-		adapter.children = [](MV::Scene::Node* const& a_node) {
-			std::vector<MV::Scene::Node*> result;
-			for (auto&& child : *a_node) {
-				result.push_back(child.get());
+		TreeView<SceneTreeItem>::Adapter adapter;
+		adapter.children = [](const SceneTreeItem& a_item) {
+			std::vector<SceneTreeItem> result;
+			if (auto node = a_item.node.lock()) {
+				for (auto&& child : *node) {
+					result.emplace_back(child);
+				}
 			}
 			return result;
 		};
-		adapter.label = [](MV::Scene::Node* const& a_node) {
-			return a_node->id().empty() ? std::string("(node)") : a_node->id();
+		adapter.label = [](const SceneTreeItem& a_item) {
+			auto node = a_item.node.lock();
+			return !node || node->id().empty() ? std::string("(node)") : node->id();
 		};
-		adapter.hasChildren = [](MV::Scene::Node* const& a_node) {
-			return !a_node->empty();
+		adapter.hasChildren = [](const SceneTreeItem& a_item) {
+			auto node = a_item.node.lock();
+			return node && !node->empty();
 		};
-		tree = std::make_unique<TreeView<MV::Scene::Node*>>(treeHost, *services, *theme, adapter);
-		tree->onSelect = [this](MV::Scene::Node* const& a_node) {
-			builtHeight = theme->fieldHeight + theme->pad + tree->height();
-			if (onSelectCallback) {
-				onSelectCallback(a_node->shared_from_this());
-			}
-		};
-		tree->onReparent = [this](MV::Scene::Node* const& a_dragged, MV::Scene::Node* const& a_target, TreeView<MV::Scene::Node*>::RowZone a_zone) {
-			auto scene = sceneGetter();
-			if (!scene || a_dragged == scene.get()) {
+		tree = std::make_unique<TreeView<SceneTreeItem>>(treeHost, *services, *theme, adapter);
+		tree->onSelect = [this](const SceneTreeItem& a_item) {
+			auto node = a_item.node.lock();
+			if (!node) {
+				refresh();
 				return;
 			}
-			for (auto ancestor = a_target; ancestor; ancestor = ancestor->parent().get()) {
-				if (ancestor == a_dragged) {
+			builtHeight = theme->fieldHeight + theme->pad + tree->height();
+			if (onSelectCallback) {
+				onSelectCallback(node);
+			}
+		};
+		tree->onReparent = [this](const SceneTreeItem& a_draggedItem, const SceneTreeItem& a_targetItem, TreeView<SceneTreeItem>::RowZone a_zone) {
+			auto scene = sceneGetter();
+			auto dragged = a_draggedItem.node.lock();
+			auto target = a_targetItem.node.lock();
+			if (!scene || !dragged || !target || dragged == scene) {
+				refresh();
+				return;
+			}
+			for (auto ancestor = target; ancestor; ancestor = ancestor->parent()) {
+				if (ancestor == dragged) {
 					return;
 				}
 			}
-			auto dragged = a_dragged->shared_from_this();
-			auto target = a_target->shared_from_this();
 			auto oldParent = dragged->parent() ? dragged->parent() : scene;
 			float oldDepth = dragged->depth();
 			auto zone = a_zone;
 			auto performMove = [dragged, target, scene, zone]() {
-				if (zone == TreeView<MV::Scene::Node*>::RowZone::Onto) {
+				if (zone == TreeView<SceneTreeItem>::RowZone::Onto) {
 					dragged->parent(target);
 				} else {
 					auto newParent = target->parent() ? target->parent() : scene;
 					if (dragged->parent() != newParent) {
 						dragged->parent(newParent);
 					}
-					dragged->depth(target->depth() + (zone == TreeView<MV::Scene::Node*>::RowZone::Before ? -0.5f : 0.5f));
+					dragged->depth(target->depth() + (zone == TreeView<SceneTreeItem>::RowZone::Before ? -0.5f : 0.5f));
 					newParent->normalizeDepth();
 				}
 			};
@@ -99,21 +109,46 @@ namespace Workbench {
 		if (!tree) {
 			return;
 		}
-		if (auto scene = sceneGetter()) {
-			tree->root(scene.get(), true);
+		auto scene = sceneGetter();
+		tree->retainState([&scene](const SceneTreeItem& a_item) {
+			for (auto node = a_item.node.lock(); node; node = node->parent()) {
+				if (node == scene) {
+					return true;
+				}
+			}
+			return false;
+		});
+		if (scene) {
+			tree->root(SceneTreeItem(scene), true);
 		} else {
 			tree->rebuild();
 		}
 		builtHeight = theme->fieldHeight + theme->pad + tree->height();
 	}
 
-	std::shared_ptr<MV::Scene::Node> SceneTreePanel::selected() const {
-		if (tree) {
-			if (auto* nodePtr = tree->selection()) {
-				return (*nodePtr)->shared_from_this();
+	void SceneTreePanel::showSelection(const std::shared_ptr<MV::Scene::Node>& a_node) {
+		if (!tree) {
+			return;
+		}
+		if (!a_node) {
+			tree->showSelection(nullptr);
+			return;
+		}
+		auto scene = sceneGetter();
+		bool revealed = false;
+		for (auto ancestor = a_node->parent(); ancestor; ancestor = ancestor->parent()) {
+			revealed = tree->expand(SceneTreeItem(ancestor)) || revealed;
+			if (ancestor == scene) {
+				break;
 			}
 		}
-		return nullptr;
+		SceneTreeItem item(a_node);
+		bool alreadyShown = tree->selection() && *tree->selection() == item;
+		tree->showSelection(&item);
+		if (revealed && alreadyShown) {
+			tree->rebuild();
+		}
+		builtHeight = theme->fieldHeight + theme->pad + tree->height();
 	}
 
 }

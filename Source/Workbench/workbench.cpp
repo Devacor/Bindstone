@@ -3,6 +3,7 @@
 #include "scriptPanel.h"
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -27,8 +28,9 @@ namespace Workbench {
 		viewportClip = visor->make("viewportClip");
 		viewportStencil = viewportClip->attach<MV::Scene::Stencil>();
 		viewportStencil->id("sceneClip");
-		sceneRoot = viewportClip->make("root");
-		// Sibling after sceneRoot: draws above the scene, stencil-clipped, never serialized, and
+		viewCamera = viewportClip->make("viewCamera");
+		sceneRoot = viewCamera->make("root");
+		// Sibling after the camera: draws above the scene, stencil-clipped, never serialized, and
 		// stays unscaled so handles keep pixel size at any zoom.
 		gizmoOverlay = viewportClip->make("gizmoOverlay");
 		gizmos = std::make_unique<GizmoLayer>(gizmoOverlay, mouse, history, theme);
@@ -60,7 +62,7 @@ namespace Workbench {
 			if (std::abs(current.x - panStart.x) + std::abs(current.y - panStart.y) > 4) {
 				panMoved = true;
 			}
-			sceneRoot->translate(MV::point(static_cast<float>(current.x - panLast.x), static_cast<float>(current.y - panLast.y)));
+			viewCamera->translate(MV::point(static_cast<float>(current.x - panLast.x), static_cast<float>(current.y - panLast.y)));
 			panLast = current;
 		});
 		panUpReceiver = mouse.onLeftMouseUp.connect("workbenchPanEnd", [this](MV::TapDevice& a_mouse) {
@@ -74,9 +76,7 @@ namespace Workbench {
 			if (treePanel) {
 				treePanel->refresh();
 			}
-			if (inspectorPanel) {
-				inspectorPanel->inspect(treePanel ? treePanel->selected() : nullptr);
-			}
+			select(inScene(selectedNode) ? selectedNode : nullptr);
 		};
 
 		dock = std::make_unique<DockSpace>(uiRoot, managers.services, theme, focusRouter);
@@ -88,6 +88,7 @@ namespace Workbench {
 		auto file = std::make_shared<ScriptPanel>("File", "Assets/Workbench/filePanel.jai");
 		file->onLoadScene = [this](const std::string& a_fileName) { loadScene(a_fileName); };
 		file->onSaveScene = [this](const std::string& a_fileName) { saveScene(a_fileName); };
+		file->onError = [this](const std::string& a_message) { reportError(a_message); };
 		auto project = std::make_shared<ProjectPanel>(
 			[this](const std::string& a_fileName) {
 				loadScene(a_fileName);
@@ -147,11 +148,24 @@ namespace Workbench {
 			return nullptr;
 		};
 		if (auto hit = pick(sceneRoot)) {
-			if (treePanel) {
-				treePanel->selectNode(hit);
-			} else {
-				select(hit);
+			select(hit);
+		}
+	}
+
+	bool App::inScene(const std::shared_ptr<MV::Scene::Node>& a_node) const {
+		for (auto node = a_node; node; node = node->parent()) {
+			if (node == sceneRoot) {
+				return true;
 			}
+		}
+		return false;
+	}
+
+	void App::reportError(const std::string& a_message) {
+		++errorCount;
+		if (a_message != lastErrorMessage) {
+			lastErrorMessage = a_message;
+			std::cerr << "[workbench] error: " << a_message << std::endl;
 		}
 	}
 
@@ -161,11 +175,12 @@ namespace Workbench {
 			return;
 		}
 		try {
-			auto prefab = MV::Scene::Node::loadJai(a_fileName, managers.services, true);
+			auto prefab = MV::Scene::Node::loadJai(a_fileName, managers.services, false);
 			auto dropPosition = sceneRoot->localFromScreen(a_screenPoint);
 			auto scene = sceneRoot;
 			sceneRoot->add(prefab);
 			prefab->position(dropPosition);
+			prefab->postLoadStep();
 			history.record("place " + a_fileName,
 				[scene, prefab, dropPosition]() {
 					scene->add(prefab);
@@ -180,7 +195,7 @@ namespace Workbench {
 			select(prefab);
 			std::cout << "Workbench placed BindSnap: " << a_fileName << std::endl;
 		} catch (const std::exception& a_error) {
-			std::cerr << "Workbench BindSnap drop failed (" << a_fileName << "): " << a_error.what() << std::endl;
+			reportError("BindSnap drop failed (" + a_fileName + "): " + a_error.what());
 		}
 	}
 
@@ -260,40 +275,73 @@ namespace Workbench {
 	void App::select(const std::shared_ptr<MV::Scene::Node>& a_node) {
 		selectedNode = a_node;
 		gizmos->select(a_node);
+		if (treePanel) {
+			treePanel->showSelection(a_node);
+		}
 		if (inspectorPanel) {
 			inspectorPanel->inspect(a_node);
 		}
 	}
 
-	void App::loadScene(const std::string& a_fileName) {
+	// A relative name is an asset: the file beside the working directory when there is one, else under Assets/.
+	// The leading "./" keeps MV's file layer from redirecting a write to the player-preferences folder.
+	std::string App::assetFile(const std::string& a_fileName) {
+		if (std::filesystem::path(a_fileName).is_absolute() || a_fileName.starts_with("./") || a_fileName.starts_with(".\\")) {
+			return a_fileName;
+		}
+		std::error_code ignored;
+		return std::filesystem::exists(a_fileName, ignored) ? "./" + a_fileName : "./Assets/" + a_fileName;
+	}
+
+	bool App::loadScene(const std::string& a_fileName) {
 		try {
-			auto newRoot = MV::Scene::Node::load(a_fileName, managers.services, false);
+			auto assetPath = assetFile(a_fileName);
+			std::error_code ignored;
+			auto newRoot = MV::Scene::Node::load(std::filesystem::exists(assetPath, ignored) ? assetPath : a_fileName, managers.services, false);
 			history.clear();
-			viewportClip->remove(sceneRoot, false);
+			select(nullptr);
+			viewCamera->remove(sceneRoot, false);
 			sceneRoot = newRoot;
-			sceneRoot->id("root");
-			viewportClip->add(sceneRoot);
-			// Re-added roots get last+1 sortDepth; re-add the overlay so it stays above the scene.
-			viewportClip->remove(gizmoOverlay, false);
-			viewportClip->add(gizmoOverlay);
+			viewCamera->add(sceneRoot);
 			sceneRoot->postLoadStep();
 			if (treePanel) {
 				treePanel->refresh();
 			}
-			select(nullptr);
+			frameSceneInViewport();
 			std::cout << "Workbench loaded: " << a_fileName << std::endl;
+			return true;
 		} catch (const std::exception& a_error) {
-			std::cerr << "Workbench load failed (" << a_fileName << "): " << a_error.what() << std::endl;
+			reportError("load failed (" + a_fileName + "): " + a_error.what());
+			return false;
 		}
 	}
 
-	void App::saveScene(const std::string& a_fileName) {
+	bool App::saveScene(const std::string& a_fileName) {
 		try {
-			sceneRoot->saveJai(a_fileName, managers.services, false);
-			std::cout << "Workbench saved: " << a_fileName << std::endl;
+			auto assetPath = assetFile(a_fileName);
+			sceneRoot->saveJai(assetPath, managers.services, false);
+			std::cout << "Workbench saved: " << assetPath << std::endl;
+			return true;
 		} catch (const std::exception& a_error) {
-			std::cerr << "Workbench save failed (" << a_fileName << "): " << a_error.what() << std::endl;
+			reportError("save failed (" + a_fileName + "): " + a_error.what());
+			return false;
 		}
+	}
+
+	void App::frameScene(const DockRect& a_view) {
+		viewCamera->position(MV::Point<>());
+		viewCamera->scale(MV::Scale(1.0f, 1.0f, 1.0f));
+		auto bounds = sceneRoot->worldBounds();
+		auto size = bounds.size();
+		if (size.width < 1.0f || size.height < 1.0f) {
+			return;
+		}
+		float zoom = std::clamp(std::min(a_view.size.width / size.width, a_view.size.height / size.height) * 0.9f, 0.05f, 1.0f);
+		auto center = bounds.centerPoint();
+		viewCamera->scale(MV::Scale(zoom, zoom, 1.0f));
+		viewCamera->position(MV::point(
+			a_view.position.x + a_view.size.width * 0.5f - center.x * zoom,
+			a_view.position.y + a_view.size.height * 0.5f - center.y * zoom));
 	}
 
 	bool App::update(double a_dt) {
@@ -314,11 +362,18 @@ namespace Workbench {
 		}
 		dock->update(a_dt);
 		syncViewportClip();
+		if (sceneFramePending) {
+			auto view = dock->viewportRect();
+			if (view.size.width > 0.0f && view.size.height > 0.0f) {
+				frameScene(view);
+				sceneFramePending = false;
+			}
+		}
 		if (selectionFramePending && selectedNode) {
 			auto view = dock->viewportRect();
 			if (view.size.width > 0.0f && view.size.height > 0.0f) {
 				auto nodeWorld = selectedNode->worldPosition();
-				sceneRoot->translate(MV::point(
+				viewCamera->translate(MV::point(
 					view.position.x + view.size.width * 0.5f - nodeWorld.x,
 					view.position.y + view.size.height * 0.5f - nodeWorld.y));
 				selectionFramePending = false;
@@ -368,7 +423,7 @@ namespace Workbench {
 		if (keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_W]) { delta.y += speed; }
 		if (keys[SDL_SCANCODE_DOWN] || keys[SDL_SCANCODE_S]) { delta.y -= speed; }
 		if (delta.x != 0.0f || delta.y != 0.0f) {
-			sceneRoot->translate(delta);
+			viewCamera->translate(delta);
 		}
 	}
 
@@ -403,13 +458,13 @@ namespace Workbench {
 				auto worldPoint = managers.renderer.worldFromScreen(mouse.position());
 				if (dock->viewportAt(worldPoint)) {
 					float zoom = 1.0f + 0.1f * static_cast<float>(event.wheel.y);
-					auto current = sceneRoot->scale();
+					auto current = viewCamera->scale();
 					float newScale = std::clamp(current.x * zoom, 0.05f, 20.0f);
-					auto position = sceneRoot->position();
+					auto position = viewCamera->position();
 					// Keep the point under the cursor stationary while zooming.
 					MV::Point<> local((worldPoint.x - position.x) / current.x, (worldPoint.y - position.y) / current.y);
-					sceneRoot->position(MV::point(worldPoint.x - local.x * newScale, worldPoint.y - local.y * newScale, position.z));
-					sceneRoot->scale(MV::Scale(newScale, newScale, current.z));
+					viewCamera->position(MV::point(worldPoint.x - local.x * newScale, worldPoint.y - local.y * newScale, position.z));
+					viewCamera->scale(MV::Scale(newScale, newScale, current.z));
 				} else {
 					dock->wheelScroll(worldPoint, static_cast<float>(event.wheel.y));
 				}
@@ -432,12 +487,22 @@ namespace Workbench {
 		managers.renderer.updateScreen();
 	}
 
+	template <typename Step>
+	void App::guarded(const char* a_stage, Step&& a_step) {
+		try {
+			a_step();
+		} catch (const std::exception& a_error) {
+			reportError(std::string(a_stage) + ": " + a_error.what());
+		}
+	}
+
 	int App::run() {
 		managers.timer.start();
 		managers.timer.delta("workbenchTick");
-		while (update(managers.timer.delta("workbenchTick"))) {
-			handleInput();
-			render();
+		while (!done) {
+			guarded("update", [this]() { update(managers.timer.delta("workbenchTick")); });
+			guarded("input", [this]() { handleInput(); });
+			guarded("render", [this]() { render(); });
 			std::this_thread::yield();
 		}
 		return 0;
@@ -446,20 +511,23 @@ namespace Workbench {
 	int App::runFrames(int a_frameCount, const std::string& a_screenshotPath) {
 		managers.timer.start();
 		managers.timer.delta("workbenchTick");
-		for (int frame = 0; frame < a_frameCount && update(managers.timer.delta("workbenchTick")); ++frame) {
-			handleInput();
-			if (!a_screenshotPath.empty() && frame == a_frameCount - 1) {
-				managers.renderer.clearScreen();
-				visor->drawUpdate(lastDelta);
-				uiRoot->drawUpdate(lastDelta);
-				captureScreenshot(a_screenshotPath);
-				managers.renderer.updateScreen();
-			} else {
-				render();
-			}
+		for (int frame = 0; frame < a_frameCount && !done; ++frame) {
+			guarded("update", [this]() { update(managers.timer.delta("workbenchTick")); });
+			guarded("input", [this]() { handleInput(); });
+			guarded("render", [&]() {
+				if (!a_screenshotPath.empty() && frame == a_frameCount - 1) {
+					managers.renderer.clearScreen();
+					visor->drawUpdate(lastDelta);
+					uiRoot->drawUpdate(lastDelta);
+					captureScreenshot(a_screenshotPath);
+					managers.renderer.updateScreen();
+				} else {
+					render();
+				}
+			});
 		}
-		std::cout << "Workbench smoke completed (" << a_frameCount << " frames)" << std::endl;
-		return 0;
+		std::cout << "Workbench smoke completed (" << a_frameCount << " frames, " << errorCount << " errors)" << std::endl;
+		return errorCount == 0 ? 0 : 1;
 	}
 
 	void App::captureScreenshot(const std::string& a_path) {

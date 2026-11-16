@@ -37,6 +37,16 @@ namespace Workbench {
 			return !activeText.expired();
 		}
 
+		bool activeWithin(const std::shared_ptr<MV::Scene::Node>& a_ancestor) const {
+			auto locked = activeText.lock();
+			for (auto node = locked ? locked->owner() : nullptr; node; node = node->parent()) {
+				if (node == a_ancestor) {
+					return true;
+				}
+			}
+			return false;
+		}
+
 		// Returns true when the event was consumed by the focused field. Only keyboard/text
 		// events are consumed; a mouse press commits (click-away) but still routes normally.
 		bool handleEvent(SDL_Event& a_event) {

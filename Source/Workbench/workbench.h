@@ -22,12 +22,19 @@ namespace Workbench {
 		int runFrames(int a_frameCount, const std::string& a_screenshotPath = "");
 
 		std::shared_ptr<MV::Scene::Node> scene() const { return sceneRoot; }
+		std::shared_ptr<MV::Scene::Node> selected() const { return selectedNode; }
 		void select(const std::shared_ptr<MV::Scene::Node>& a_node);
-		void loadScene(const std::string& a_fileName);
-		void saveScene(const std::string& a_fileName);
+		bool loadScene(const std::string& a_fileName);
+		bool saveScene(const std::string& a_fileName);
 
 		// Pans the viewport so the selected node sits at its center (next laid-out frame).
 		void frameSelectionInViewport() { selectionFramePending = true; }
+		// Fits the whole scene in the viewport (next laid-out frame).
+		void frameSceneInViewport() { sceneFramePending = true; }
+
+		// Every failure the editor survives is counted; the smoke modes exit nonzero on any.
+		void reportError(const std::string& a_message);
+		int errors() const { return errorCount; }
 
 	private:
 		bool update(double a_dt);
@@ -39,6 +46,11 @@ namespace Workbench {
 		void captureScreenshot(const std::string& a_path);
 		void syncViewportClip();
 		void pickSceneNode(const MV::Point<int>& a_screenPoint);
+		bool inScene(const std::shared_ptr<MV::Scene::Node>& a_node) const;
+		static std::string assetFile(const std::string& a_fileName);
+		void frameScene(const DockRect& a_view);
+		template <typename Step>
+		void guarded(const char* a_stage, Step&& a_step);
 
 		Managers& managers;
 		MV::TapDevice& mouse;
@@ -48,6 +60,8 @@ namespace Workbench {
 
 		std::shared_ptr<MV::Scene::Node> visor;
 		std::shared_ptr<MV::Scene::Node> viewportClip;
+		// The editor's camera: pan and zoom live here, so the document root keeps the transform its file gave it.
+		std::shared_ptr<MV::Scene::Node> viewCamera;
 		std::shared_ptr<MV::Scene::Node> sceneRoot;
 		std::shared_ptr<MV::Scene::Node> uiRoot;
 		MV::Scene::SafeComponent<MV::Scene::Stencil> viewportStencil;
@@ -73,6 +87,10 @@ namespace Workbench {
 		double lastSceneDelta = 0.0;
 
 		bool selectionFramePending = false;
+		bool sceneFramePending = false;
+
+		int errorCount = 0;
+		std::string lastErrorMessage;
 
 		bool panning = false;
 		bool panMoved = false;

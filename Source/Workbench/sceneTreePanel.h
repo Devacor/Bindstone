@@ -7,6 +7,18 @@
 
 namespace Workbench {
 
+	// A hierarchy row: the pointer is identity only (map key, comparison); every read locks the weak handle.
+	struct SceneTreeItem {
+		SceneTreeItem() = default;
+		explicit SceneTreeItem(const std::shared_ptr<MV::Scene::Node>& a_node) : identity(a_node.get()), node(a_node) {}
+
+		bool operator==(const SceneTreeItem& a_other) const { return identity == a_other.identity; }
+		bool operator<(const SceneTreeItem& a_other) const { return std::less<const MV::Scene::Node*>{}(identity, a_other.identity); }
+
+		const MV::Scene::Node* identity = nullptr;
+		std::weak_ptr<MV::Scene::Node> node;
+	};
+
 	class SceneTreePanel : public Panel {
 	public:
 		SceneTreePanel(CommandHistory& a_history, std::function<std::shared_ptr<MV::Scene::Node>()> a_sceneGetter, std::function<void(const std::shared_ptr<MV::Scene::Node>&)> a_onSelect) :
@@ -17,13 +29,9 @@ namespace Workbench {
 		}
 
 		void refresh();
-		std::shared_ptr<MV::Scene::Node> selected() const;
 
-		void selectNode(const std::shared_ptr<MV::Scene::Node>& a_node) {
-			if (tree && a_node) {
-				tree->select(a_node.get());
-			}
-		}
+		// Highlights and reveals the app's selection; never calls back into the app.
+		void showSelection(const std::shared_ptr<MV::Scene::Node>& a_node);
 
 		void resized(const MV::Size<>& a_size) override {
 			if (searchSizer) {
@@ -42,7 +50,7 @@ namespace Workbench {
 		CommandHistory* history = nullptr;
 		std::function<std::shared_ptr<MV::Scene::Node>()> sceneGetter;
 		std::function<void(const std::shared_ptr<MV::Scene::Node>&)> onSelectCallback;
-		std::unique_ptr<TreeView<MV::Scene::Node*>> tree;
+		std::unique_ptr<TreeView<SceneTreeItem>> tree;
 		std::shared_ptr<MV::Scene::Node> treeHost;
 		std::shared_ptr<MV::Scene::Text> searchText;
 		MV::Scene::SafeComponent<MV::Scene::Sprite> searchSizer;

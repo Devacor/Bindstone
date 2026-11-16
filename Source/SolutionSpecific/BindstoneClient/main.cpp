@@ -422,16 +422,86 @@ static std::string describeJsonDifference(const std::string& a_first, const std:
 #include "Workbench/workbench.h"
 
 // Launches the Workbench editor (Source/Workbench): dockable, dark-mode, reflection-driven.
-// Run: BindstoneClient.exe -workbench   (-workbenchsmoke = 120-frame self-test, exits 0;
+// Run: BindstoneClient.exe -workbench   (-workbenchsmoke = 120-frame self-test;
 // -workbenchshot = smoke run that saves workbench_shot.bmp for visual inspection;
-// -workbenchgizmoshot = shot that loads map.scene and selects a node so the gizmos render)
-static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", bool a_loadDefaultScene = false, bool a_selectForGizmo = false) {
+// -workbenchgizmoshot = shot that loads map.scene and selects a node so the gizmos render).
+// -workbenchselftest = drives a load, save, select, BindSnap drop and undo/redo, checking each result.
+// The smoke modes exit nonzero when a load fails, a script errors or the frame loop catches an exception.
+static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
+	auto expect = [&a_app](bool a_condition, const std::string& a_what) {
+		if (!a_condition) {
+			a_app.reportError("self-test: " + a_what);
+		}
+	};
+	auto sameXY = [](const auto& a_left, const auto& a_right) {
+		return std::abs(a_left.x - a_right.x) < 0.001f && std::abs(a_left.y - a_right.y) < 0.001f;
+	};
+	auto pressWithControl = [&a_app](SDL_Keycode a_key) {
+		SDL_SetModState(static_cast<SDL_Keymod>(KMOD_CTRL));
+		SDL_Event press{};
+		press.type = SDL_KEYDOWN;
+		press.key.keysym.sym = a_key;
+		SDL_PushEvent(&press);
+		a_app.runFrames(2);
+		SDL_SetModState(KMOD_NONE);
+	};
+
+	expect(a_app.loadScene("Creatures/Life_T1/Default/unit.bindsnap"), "the unit BindSnap loads");
+	expect(a_app.scene()->id() == "Life_T1", "a loaded root keeps its own id, got " + a_app.scene()->id());
+	expect(!a_app.scene()->empty(), "the unit has a child to select");
+	if (!a_app.scene()->empty()) {
+		a_app.select(*a_app.scene()->begin());
+	}
+	a_app.runFrames(2);
+
+	expect(a_app.loadScene("Interface/Login/view.scene"), "a second scene loads over a selection");
+	expect(!a_app.selected(), "a load clears the selection");
+	auto authoredId = a_app.scene()->id();
+	auto authoredPosition = a_app.scene()->position();
+	auto authoredScale = a_app.scene()->scale();
+	auto authoredBounds = a_app.scene()->worldBounds().size();
+	expect(authoredBounds.width > 1.0f && authoredBounds.height > 1.0f, "the Login scene has bounds for the camera to frame");
+	a_app.runFrames(10);   // the load frames the scene: the camera moves, the document must not
+	auto framedBounds = a_app.scene()->worldBounds().size();
+	expect(std::abs(framedBounds.width - authoredBounds.width) > 1.0f || !sameXY(a_app.scene()->worldPosition(), authoredPosition), "framing the scene moves the camera");
+	expect(sameXY(a_app.scene()->position(), authoredPosition) && sameXY(a_app.scene()->scale(), authoredScale), "the camera leaves the document root's transform alone");
+
+	auto savedFile = (std::filesystem::temp_directory_path() / "workbench_selftest.scene").string();
+	expect(a_app.saveScene(savedFile), "the scene saves");
+	try {
+		auto saved = MV::Scene::Node::load(savedFile, a_managers.services, false);
+		expect(saved->id() == authoredId, "the saved root keeps its id, got " + saved->id());
+		expect(sameXY(saved->position(), authoredPosition) && sameXY(saved->scale(), authoredScale), "the saved root keeps its authored transform");
+	} catch (const std::exception& a_error) {
+		expect(false, std::string("the saved scene loads back: ") + a_error.what());
+	}
+	std::error_code ignored;
+	std::filesystem::remove(savedFile, ignored);
+
+	auto childCount = [&a_app]() { return std::distance(a_app.scene()->begin(), a_app.scene()->end()); };
+	auto countBeforeDrop = childCount();
+	auto windowSize = a_managers.renderer.window().windowSize();
+	a_app.dropPrefab("Prefabs/SimpleButton.bindsnap", MV::Point<int>(windowSize.width / 2, windowSize.height / 2));
+	expect(childCount() == countBeforeDrop + 1, "a BindSnap dropped on the viewport joins the scene");
+	expect(a_app.selected() && a_app.selected()->parent() == a_app.scene(), "the dropped BindSnap is selected");
+	a_app.runFrames(2);
+	pressWithControl(SDLK_z);
+	expect(childCount() == countBeforeDrop, "undo removes the dropped BindSnap");
+	expect(!a_app.selected(), "undo deselects a node that left the scene");
+	pressWithControl(SDLK_y);
+	expect(childCount() == countBeforeDrop + 1, "redo places the BindSnap again");
+}
+
+static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", bool a_loadDefaultScene = false, bool a_selectForGizmo = false, bool a_selfTest = false) {
 	MV::editMode(true);   // before engine creation: registers InEditMode + hot reload
 	Managers managers({ "", "" });
+	int scriptCallbackErrors = 0;
 	auto jaiEngine = MV::makeScriptEngine(managers.services);
-	// Editor tolerance: the sim's first spawn burst evals every creature script inside one
-	// budget window in Debug; a mid-script budget kill leaves game state (path semaphores)
-	// inconsistent. The shipped game keeps the tight default.
+	jaiEngine->set_script_error_handler([raw = jaiEngine.get(), &scriptCallbackErrors](const std::string& a_message) {
+		++scriptCallbackErrors;
+		auto trace = raw->format_stack_trace();
+		MV::error("Script callback failed: ", a_message, trace.empty() ? "" : "\n", trace);
+	});
 	jaiEngine->execution_budget(10.0);
 	managers.services.connect<jai::engine>(jaiEngine.get());
 	SDL_SetHint("SDL_BORDERLESS_WINDOWED_STYLE", "1");
@@ -487,7 +557,7 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 				return SDL_HITTEST_NORMAL;
 			}
 			if (a_point.x >= workbenchTransportStart && a_point.x < workbenchTransportStart + workbenchTransportWidth) {
-				return SDL_HITTEST_NORMAL;   // sim transport buttons (pause/step/speed/sim)
+				return SDL_HITTEST_NORMAL;   // transport buttons (pause/step/speed)
 			}
 			return SDL_HITTEST_DRAGGABLE;
 		}
@@ -506,8 +576,6 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 		app.loadScene("Scenes/map.scene");
 	}
 	if (a_selectForGizmo && app.scene()) {
-		// The sim auto-frame centers the map, so the node nearest the map center is the
-		// one guaranteed on-screen for the gizmo to render against.
 		auto mapCenter = app.scene()->bounds().centerPoint();
 		auto center = MV::point(mapCenter.x, mapCenter.y);
 		std::shared_ptr<MV::Scene::Node> best;
@@ -530,9 +598,22 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 		if (best) {
 			app.select(best);
 			app.frameSelectionInViewport();
+		} else {
+			app.reportError("the gizmo shot found no node to select");
 		}
 	}
-	return a_smoke ? app.runFrames(a_loadDefaultScene ? 240 : 120, a_screenshotPath) : app.run();
+	if (!a_smoke) {
+		return app.run();
+	}
+	if (a_selfTest) {
+		RunWorkbenchSelfTest(app, managers);
+	}
+	int result = app.runFrames(a_loadDefaultScene ? 240 : 120, a_screenshotPath);
+	if (scriptCallbackErrors > 0) {
+		std::cout << "Workbench smoke: " << scriptCallbackErrors << " script callback error(s)" << std::endl;
+		result = 1;
+	}
+	return result;
 }
 
 // Loads every shipped scene/prefab/catalog headless and reports pass/fail. Guards the
@@ -933,6 +1014,9 @@ int main(int argc, char *argv[]) {
 		}
 		if (strcmp(argv[i], "-workbenchshot") == 0) {
 			return RunWorkbench(true, "workbench_shot.bmp");
+		}
+		if (strcmp(argv[i], "-workbenchselftest") == 0) {
+			return RunWorkbench(true, "", false, false, true);
 		}
 		if (strcmp(argv[i], "-workbenchgizmoshot") == 0) {
 			return RunWorkbench(true, "workbench_shot.bmp", true, true);

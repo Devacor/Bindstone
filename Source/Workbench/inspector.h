@@ -30,6 +30,8 @@ namespace Workbench {
 			}
 		}
 
+		void handleInput(SDL_Event& a_event) override;
+
 	protected:
 		void build() override;
 
@@ -41,6 +43,7 @@ namespace Workbench {
 
 		bool addSectionHeader(const std::string& a_title, const std::string& a_key, float& a_y, const std::shared_ptr<MV::Scene::Component>& a_gizmoComponent = nullptr);
 		void openColorPopup(const std::weak_ptr<MV::Scene::Component>& a_component, const std::string& a_propertyName, jai::property_base* a_property, const std::weak_ptr<MV::Scene::Sprite>& a_swatch, const MV::Point<int>& a_screenPoint);
+		void closeColorPopup(bool a_keepColor);
 		std::shared_ptr<MV::Scene::Node> makeRow(const std::string& a_label, float& a_y);
 		void notifyEdited(const std::shared_ptr<MV::Scene::Component>& a_component);
 
@@ -73,6 +76,8 @@ namespace Workbench {
 		CommandHistory* history = nullptr;
 
 		std::weak_ptr<MV::Scene::Node> inspectedNode;
+		// Ends the open colour picker session: true records the change as one command, false restores the colour it opened with.
+		std::function<void(bool)> colorPopupClose;
 		std::map<std::string, bool> collapsedSections;
 		float panelWidth = 260.0f;
 	};

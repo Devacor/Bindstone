@@ -54,7 +54,10 @@ namespace Workbench {
 		if (!contentNode) {
 			return;
 		}
-		focus->cancel();
+		if (focus->activeWithin(contentNode)) {
+			focus->deactivate();
+		}
+		closeColorPopup(true);
 		contentNode->clear();
 		float y = 0.0f;
 		auto node = inspectedNode.lock();
@@ -216,7 +219,7 @@ namespace Workbench {
 		if (!popupNode) {
 			return;
 		}
-		popupNode->clear();
+		closeColorPopup(true);
 		auto popup = popupNode->make("colorPopup");
 		float paletteSize = 220.0f * theme->scaleFactor();
 		auto world = contentNode->renderer().worldFromScreen(a_screenPoint);
@@ -232,28 +235,59 @@ namespace Workbench {
 			colorAtOpen = *current;
 			palette->color(*current);
 		}
-		palette->onColorChange.connect("change", [this, a_component, a_property, a_swatch](const std::shared_ptr<MV::Scene::Palette>& a_palette) {
-			if (auto locked = a_component.lock()) {
-				auto color = a_palette->color();
-				if (a_property->assign_value(color)) {
-					notifyEdited(locked);
-					if (auto swatch = a_swatch.lock()) {
-						swatch->color(color);
-					}
-				}
+		auto apply = propertyApplier<MV::Color>(a_component, a_propertyName);
+		palette->onColorChange.connect("change", [apply, a_swatch](const std::shared_ptr<MV::Scene::Palette>& a_palette) {
+			auto color = a_palette->color();
+			apply(color);
+			if (auto swatch = a_swatch.lock()) {
+				swatch->color(color);
 			}
 		});
 		// One command for the whole picker session, recorded when the popup closes.
-		palette->onSwatchClicked.connect("close", [this, a_component, a_propertyName, a_property, colorAtOpen](const std::shared_ptr<MV::Scene::Palette>& a_palette) {
+		colorPopupClose = [this, a_component, a_propertyName, a_swatch, apply, colorAtOpen](bool a_keepColor) {
 			if (auto locked = a_component.lock()) {
-				auto finalColor = *a_property->value_as<MV::Color>();
-				bool changed = finalColor.R != colorAtOpen.R || finalColor.G != colorAtOpen.G || finalColor.B != colorAtOpen.B || finalColor.A != colorAtOpen.A;
-				if (changed) {
-					recordPropertyEdit<MV::Color>(a_component, a_propertyName, colorAtOpen, finalColor);
+				auto* property = locked->find_reflected_property(a_propertyName);
+				auto current = property ? property->value_as<MV::Color>() : nullptr;
+				bool changed = current && (current->R != colorAtOpen.R || current->G != colorAtOpen.G || current->B != colorAtOpen.B || current->A != colorAtOpen.A);
+				if (changed && a_keepColor) {
+					recordPropertyEdit<MV::Color>(a_component, a_propertyName, colorAtOpen, *current);
+				} else if (changed) {
+					apply(colorAtOpen);
+					if (auto swatch = a_swatch.lock()) {
+						swatch->color(colorAtOpen);
+					}
 				}
 			}
-			a_palette->owner()->removeFromParent();
+			if (auto popup = popupNode->get("colorPopup", false)) {
+				popup->removeFromParent();
+			}
+		};
+		palette->onSwatchClicked.connect("close", [this](const std::shared_ptr<MV::Scene::Palette>&) {
+			closeColorPopup(true);
 		});
+	}
+
+	void InspectorPanel::closeColorPopup(bool a_keepColor) {
+		if (colorPopupClose) {
+			auto close = std::move(colorPopupClose);
+			colorPopupClose = nullptr;
+			close(a_keepColor);
+		}
+	}
+
+	// A press outside the picker keeps the colour and closes it; Escape restores the colour it opened with.
+	void InspectorPanel::handleInput(SDL_Event& a_event) {
+		if (!colorPopupClose || !popupNode) {
+			return;
+		}
+		if (a_event.type == SDL_KEYDOWN && a_event.key.keysym.sym == SDLK_ESCAPE) {
+			closeColorPopup(false);
+		} else if (a_event.type == SDL_MOUSEBUTTONDOWN) {
+			auto popup = popupNode->get("colorPopup", false);
+			if (!popup || !popup->screenBounds().contains(MV::Point<int>(a_event.button.x, a_event.button.y))) {
+				closeColorPopup(true);
+			}
+		}
 	}
 
 	void InspectorPanel::addPropertyRow(const std::shared_ptr<MV::Scene::Component>& a_component, const std::string& a_name, jai::property_base* a_property, float& a_y) {

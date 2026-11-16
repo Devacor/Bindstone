@@ -25,6 +25,7 @@ namespace Workbench {
 		// App-injected actions.
 		std::function<void(const std::string&)> onLoadScene;
 		std::function<void(const std::string&)> onSaveScene;
+		std::function<void(const std::string&)> onError;
 
 		// Script-facing surface (bound in scriptPanel.cpp).
 		std::shared_ptr<MV::Scene::Node> root() const { return contentNode; }
@@ -50,7 +51,7 @@ namespace Workbench {
 		void resized(const MV::Size<>& a_size) override {
 			panelSize = a_size;
 			if (scriptResized) {
-				scriptResized(*this, a_size.width, a_size.height);
+				callHook("onResized", [&]() { scriptResized(*this, a_size.width, a_size.height); });
 			}
 		}
 
@@ -60,6 +61,18 @@ namespace Workbench {
 	private:
 		void runScript();
 		void showError(const std::string& a_message);
+
+		// A hook that throws is reported once and the panel's hooks stop until the script file changes.
+		template <typename Hook>
+		void callHook(const char* a_name, Hook&& a_hook) {
+			try {
+				a_hook();
+			} catch (const std::exception& a_error) {
+				scriptUpdate = nullptr;
+				scriptResized = nullptr;
+				showError(std::string(a_name) + ": " + a_error.what());
+			}
+		}
 
 		std::string scriptPath;
 		MV::Size<> panelSize{ 300.0f, 200.0f };

@@ -71,6 +71,39 @@ namespace Workbench {
 			}
 		}
 
+		// Highlights a row without firing onSelect: the owner of the selection already knows.
+		void showSelection(const TItem* a_item) {
+			if (a_item ? (hasSelection && selected == *a_item) : !hasSelection) {
+				return;
+			}
+			hasSelection = a_item != nullptr;
+			selected = a_item ? *a_item : TItem{};
+			rebuild();
+		}
+
+		// Returns true when the item was not already marked expanded; the caller rebuilds.
+		bool expand(const TItem& a_item) {
+			auto found = expanded.find(a_item);
+			if (found != expanded.end() && found->second) {
+				return false;
+			}
+			expanded[a_item] = true;
+			return true;
+		}
+
+		// Drops expansion, selection and drag state for items the model no longer holds.
+		void retainState(const std::function<bool(const TItem&)>& a_alive) {
+			std::erase_if(expanded, [&](const auto& a_entry) { return !a_alive(a_entry.first); });
+			if (hasSelection && !a_alive(selected)) {
+				hasSelection = false;
+				selected = TItem{};
+			}
+			if (rowDragActive && !a_alive(dragItem)) {
+				rowDragActive = false;
+				dragItem = TItem{};
+			}
+		}
+
 		const TItem* selection() const { return hasSelection ? &selected : nullptr; }
 		float height() const { return builtHeight; }
 
@@ -219,9 +252,8 @@ namespace Workbench {
 				triangleHost->position(MV::point(indent, 0.0f));
 				auto triangle = makeLabel(triangleHost, services, theme, "glyph", MV::size(14.0f, theme.rowHeight - 2.0f), isExpanded ? "v" : ">");
 				TItem item = a_item;
-				triangleHost->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(16.0f, theme.rowHeight - 1.0f))->onAccept.connect("toggle", [this, item](const std::shared_ptr<MV::Scene::Clickable>&) {
-					bool current = expanded.count(item) ? expanded[item] : true;
-					expanded[item] = !current;
+				triangleHost->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(16.0f, theme.rowHeight - 1.0f))->onAccept.connect("toggle", [this, item, isExpanded](const std::shared_ptr<MV::Scene::Clickable>&) {
+					expanded[item] = !isExpanded;
 					rebuild();
 				});
 			}

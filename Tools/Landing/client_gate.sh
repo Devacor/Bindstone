@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# The client gate: MutedVision and the Bindstone client built in Release from this checkout, then -verifyassets and
-# -loginshot. A failed build or check prints CLIENT GATE FAILED (never DONE).
+# The client gate: MutedVision and the Bindstone client built in Release from this checkout, then -verifyassets,
+# -loginshot and the Workbench's smoke modes (-workbenchsmoke, -workbenchselftest, which drives a load, save, drop and
+# undo, and -workbenchgizmoshot, which loads map.scene). A failed build or check prints CLIENT GATE FAILED (never DONE).
 #
-#   Tools/Landing/client_gate.sh [--build-only] [--no-loginshot] [--landing] [label]
+#   Tools/Landing/client_gate.sh [--build-only] [--no-loginshot] [--no-workbench] [--landing] [label]
 #
 # On a committed tree (no tracked change anywhere, no untracked file under Source, VSProjects, External or Assets) each step
-# that passes writes a gate stamp (Source/JaiScript/tools/ci/ci_lib.sh): client-build, client-verifyassets, client-loginshot.
+# that passes writes a gate stamp (Source/JaiScript/tools/ci/ci_lib.sh): client-build, client-verifyassets, client-loginshot,
+# client-workbenchsmoke, client-workbenchselftest, client-workbenchgizmoshot.
 # --landing runs nothing when every step it would run has a matching stamp for HEAD's tree; otherwise it waits while someone
 # holds the timing lock, then runs every step, since a skipped build leaves no client to check.
 #
@@ -18,12 +20,14 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 BUILD_ONLY=0
 LOGINSHOT=1
+WORKBENCH=1
 LANDING=0
 LABEL=client
 for arg in "$@"; do
 	case "$arg" in
 		--build-only) BUILD_ONLY=1 ;;
 		--no-loginshot) LOGINSHOT=0 ;;
+		--no-workbench) WORKBENCH=0 ;;
 		--landing) LANDING=1 ;;
 		*) LABEL="$arg" ;;
 	esac
@@ -36,6 +40,7 @@ LOG="$LOG_DIR/${LABEL}_bindstone.log"
 STEPS=(client-build)
 [ "$BUILD_ONLY" = 1 ] || STEPS+=(client-verifyassets)
 [ "$BUILD_ONLY" = 1 ] || [ "$LOGINSHOT" = 0 ] || STEPS+=(client-loginshot)
+[ "$BUILD_ONLY" = 1 ] || [ "$WORKBENCH" = 0 ] || STEPS+=(client-workbenchsmoke client-workbenchselftest client-workbenchgizmoshot)
 STAMP_SCOPE=(':(top)Source' ':(top)VSProjects' ':(top)External' ':(top)Assets' ':(top,glob)Directory.Build.*' ':(top,glob)*.sln')
 
 vsdev="$(jai_vsdevcmd)" || { echo "no Visual Studio found: set VSDEVCMD"; echo "CLIENT GATE FAILED (the client did not build)"; exit 1; }
@@ -51,6 +56,9 @@ client_key() {
 	case "$1" in
 		client-verifyassets) args=" args=-verifyassets --no-script-debug" ;;
 		client-loginshot) args=" args=-loginshot 60 --no-script-debug" ;;
+		client-workbenchsmoke) args=" args=-workbenchsmoke --no-script-debug" ;;
+		client-workbenchselftest) args=" args=-workbenchselftest --no-script-debug" ;;
+		client-workbenchgizmoshot) args=" args=-workbenchgizmoshot --no-script-debug" ;;
 	esac
 	printf 'config gate=%s configuration=Release platform=x64 fastiteration=%s%s%s\ntoolchain vs=%s msvc=%s\n' "$1" "${BindstoneFastIteration:-default}" \
 		"$(env | grep -E '^(CL|_CL_|LINK|_LINK_)=' | LC_ALL=C sort | sed 's/^/ env:/' | tr -d '\n')" "$args" "$version" "$tools"
@@ -104,5 +112,18 @@ if [ "$LOGINSHOT" = 1 ]; then
 	echo "loginshot exit=$rc"
 	[ "$rc" = 0 ] || { echo "CLIENT GATE FAILED (loginshot)"; exit 1; }
 	client_stamp client-loginshot
+fi
+if [ "$WORKBENCH" = 1 ]; then
+	for mode in workbenchsmoke workbenchselftest workbenchgizmoshot; do
+		jai_watched ./Builds/Windows/x64/Release/Bindstone.exe "-$mode" --no-script-debug > "$LOG_DIR/${LABEL}_$mode.txt" 2>&1
+		rc=$?
+		echo "$mode exit=$rc $(grep -a 'Workbench smoke completed' "$LOG_DIR/${LABEL}_$mode.txt" | tail -n 1 | cut -c1-140)"
+		if [ "$rc" != 0 ]; then
+			grep -aE '\[workbench\] error|Script callback failed' "$LOG_DIR/${LABEL}_$mode.txt" | head -5 | cut -c1-200
+			echo "CLIENT GATE FAILED ($mode)"
+			exit 1
+		fi
+		client_stamp "client-$mode"
+	done
 fi
 echo "CLIENT GATE DONE"

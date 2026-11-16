@@ -65,7 +65,7 @@ namespace Workbench {
 			}
 		}
 		if (scriptUpdate) {
-			scriptUpdate(*this, a_dt);
+			callHook("tick", [&]() { scriptUpdate(*this, a_dt); });
 		}
 	}
 
@@ -73,6 +73,9 @@ namespace Workbench {
 		scriptBuild = nullptr;
 		scriptUpdate = nullptr;
 		scriptResized = nullptr;
+		if (focus->activeWithin(contentNode)) {
+			focus->cancel();
+		}
 		contentNode->clear();
 
 		std::error_code errorCode;
@@ -98,7 +101,14 @@ namespace Workbench {
 	}
 
 	void ScriptPanel::showError(const std::string& a_message) {
-		std::cerr << "[workbench] panel script error (" << scriptPath << "): " << a_message << std::endl;
+		if (onError) {
+			onError("panel script (" + scriptPath + "): " + a_message);
+		} else {
+			std::cerr << "[workbench] panel script error (" << scriptPath << "): " << a_message << std::endl;
+		}
+		if (focus->activeWithin(contentNode)) {
+			focus->cancel();
+		}
 		contentNode->clear();
 		makeLabel(contentNode, *services, *theme, "error", MV::size(std::max(120.0f, panelSize.width), theme->rowHeight * 2.0f), "script error: " + a_message);
 	}

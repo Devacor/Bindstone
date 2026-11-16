@@ -384,6 +384,22 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Gates: client build clean, -workbenchsmoke exit 0 / 0 script errors / edit-mode line,
   -workbenchgizmoshot exit 0 + 240 frames + "Workbench loaded: Scenes/map.scene".
 
+### Increment 17 (Phase 0 of the editor campaign: stop the bleeding) - LANDED, gated
+- One selection: App owns it; the hierarchy highlights and reveals it (`SceneTreePanel::showSelection`) and holds
+  rows as `SceneTreeItem` (identity pointer + weak handle), so nothing dereferences a node after a load or undo.
+  Undo deselects a node that left the scene. The foldout toggle no longer needs two clicks below the first level.
+- The editor camera is its own node (`viewCamera`, parent of the scene root): pan, zoom and framing never touch the
+  document root, so they are never saved. A load frames the scene in the viewport.
+- A loaded root keeps its id; a relative Save writes the asset file (`./Assets/...`), not the player-preferences folder.
+- `dropPrefab` parents before `postLoadStep` (the `loadChild` order).
+- Script panels: a throwing `tick`/`onResized` is reported once and the hooks stop until the file changes.
+- Inspector: a rebuild commits the field being typed in (only when it is the inspector's own); the colour picker
+  closes on a press outside it or a selection change (one undo command), and Escape restores the colour it opened with.
+- The smoke modes count load failures, script errors and caught frame-loop exceptions and exit nonzero on any;
+  `-workbenchselftest` drives load, select, save, BindSnap drop and undo/redo and checks each result.
+  `Tools/Landing/client_gate.sh` runs `-workbenchsmoke`, `-workbenchselftest` and `-workbenchgizmoshot`.
+- OPEN: Parallax layers follow the editor camera, so a framed map.scene shows its layers spread apart.
+
 ## Known gaps (next increments)
 - Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.

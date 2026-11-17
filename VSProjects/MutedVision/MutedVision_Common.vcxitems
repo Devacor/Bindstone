@@ -16,6 +16,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\pathfinding.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\controllerDevice.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\tapDevice.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\download.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\email.cpp" />
@@ -68,6 +69,7 @@
   <ItemGroup>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\pathfinding.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Audio\package.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\controllerDevice.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\tapDevice.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\package.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\download.h" />

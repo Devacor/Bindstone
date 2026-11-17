@@ -91,6 +91,19 @@ namespace Workbench {
 			panLast = current;
 		}));
 
+		controllerReceiver = controller.onButtonDown.connect([this](MV::ControllerDevice&, MV::ControllerButton a_button) {
+			if (a_button != MV::ControllerButton::EAST) {
+				return;
+			}
+			if (menuBar && menuBar->isOpen()) {
+				menuBar->close();
+			} else if (focusRouter.hasActive()) {
+				focusRouter.cancel();
+			} else {
+				mouse.focusClear();
+			}
+		});
+
 		mouse.trackHover(true);
 		history.onAfterChange = [this]() {
 			if (treePanel) {
@@ -1276,6 +1289,8 @@ namespace Workbench {
 			mouse.updateTouch(event, managers.renderer.window().drawableSize());
 		}
 		mouse.update();
+		controller.update();
+		controller.navigate(mouse, lastDelta);
 	}
 
 	void App::render() {

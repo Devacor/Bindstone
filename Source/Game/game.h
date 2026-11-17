@@ -12,6 +12,7 @@
 #include "Game/NetworkLayer/package.h"
 #include "Game/NetworkLayer/certificates.h"
 #include "MV/Network/package.h"
+#include "MV/Interface/controllerDevice.h"
 
 #include <string>
 #include <ctime>
@@ -43,6 +44,10 @@ public:
 
 	MV::TapDevice& mouse() {
 		return ourMouse;
+	}
+
+	MV::ControllerDevice& controller() {
+		return ourController;
 	}
 
 	GameInstance* instance() {
@@ -115,6 +120,7 @@ public:
 
 	void returnFromBackground() {
 		gameData.managers().services.connect(&ourMouse);
+		gameData.managers().services.connect(&ourController);
 		gameData.managers().services.connect<jai::engine>(jaiEngine_.get());
 	}
 
@@ -155,6 +161,7 @@ private:
 	std::shared_ptr<MV::Scene::Node> uiRoot;
 	MV::Scene::SafeComponent<MV::Scene::Sprite> screenScaler;
 	MV::TapDevice ourMouse;
+	MV::ControllerDevice ourController;
 
 	std::string loginId;
 	std::string loginPassword;

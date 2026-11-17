@@ -2,5 +2,6 @@
 #define __MV_INTERFACE_PACKAGE__
 
 #include "MV/Interface/tapDevice.h"
+#include "MV/Interface/controllerDevice.h"
 
 #endif

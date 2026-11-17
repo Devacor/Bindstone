@@ -3,6 +3,7 @@
 
 #include "Game/managers.h"
 #include "MV/Interface/tapDevice.h"
+#include "MV/Interface/controllerDevice.h"
 #include "commands.h"
 #include "dock.h"
 #include "gizmos.h"
@@ -115,6 +116,8 @@ namespace Workbench {
 		MenuBar& menus() { return *menuBar; }
 		InspectorPanel& inspector() { return *inspectorPanel; }
 		SceneTreePanel& hierarchy() { return *treePanel; }
+		// The game controller: it moves the keyboard focus, presses what holds it, and its east button lets go.
+		MV::ControllerDevice& pad() { return controller; }
 		const std::string& document() const { return documentPath; }
 		// The title bar's text: the document's name, starred while it is modified.
 		const std::string& title() const { return shownTitle; }
@@ -160,6 +163,8 @@ namespace Workbench {
 
 		Managers& managers;
 		MV::TapDevice& mouse;
+		MV::ControllerDevice controller;
+		MV::ControllerDevice::ButtonSignalType controllerReceiver;
 		Theme theme;
 		FocusRouter focusRouter;
 		CommandHistory history;

@@ -164,6 +164,7 @@ bool Game::update(double dt) {
 	if (ourGui) {
 		ourGui->update(dt);
 	}
+	ourController.navigate(ourMouse, dt);
 	rootScene->update(dt);
 
 	if (done) {
@@ -213,6 +214,7 @@ void Game::handleInput() {
 		}
 	}
 	ourMouse.update();
+	ourController.update();
 }
 
 void Game::render() {

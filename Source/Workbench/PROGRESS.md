@@ -713,6 +713,22 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   buttons, a visible focus ring on authored UI, dragging to select text with the pointer, and Rename or Create rows
   in the Hierarchy menu.
 
+## Increment 35: game controllers (2026-11-16)
+- `MV::ControllerDevice` (`MV/Interface/controllerDevice.h`) sits beside `TapDevice`: polled once a frame, with
+  `simulate` for automation. Every attached pad reads as one. `down(button)`, `axis(axis)`, `leftStick()` and
+  `rightStick()` (dead zone taken out), signals `onButtonDown`, `onButtonUp`, `onConnect`, `onDisconnect`. Face
+  buttons are named by place (SOUTH, EAST, WEST, NORTH); a trigger pulled halfway counts as a button.
+- `navigate(tapDevice, dt)` turns the pad into focus moves: the d-pad (eight ways) or the left stick (a wide slice
+  for each of the four directions, a narrow one for each diagonal) moves the focus and repeats while held, SOUTH
+  presses the focused Clickable, the shoulders step to the previous and next.
+- The game owns one (`Game::controller()`, in `MV::Services`) and navigates its UI with it. The Workbench does the
+  same; its EAST button closes an open menu, else leaves a field without committing, else lets the focus go.
+- A field stops being typed in when the focus moves off it, however it moved.
+- Tests: `controller_tests.cpp`, and the self-test moves between Settings fields with the d-pad and the stick.
+- Not yet: nothing draws the focus on authored UI, so a pad moves through a game screen unseen; no rumble, no
+  per-player pads, no script binding (TapDevice has none either), and the hardware path has only been run with
+  whatever was plugged in during the self-test.
+
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.
 - Authoring verbs still only in Source/Editor: create node, attach/detach

@@ -177,6 +177,7 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\tinyutf8.cpp">
       <Filter>MV\Utility</Filter>
     </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\controllerDevice.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\tapDevice.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\parallax.cpp">
       <Filter>MV\Render\Scene</Filter>
@@ -393,6 +394,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\typestring.hpp">
       <Filter>MV\Utility</Filter>
     </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\controllerDevice.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\tapDevice.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\parallax.h">
       <Filter>MV\Render\Scene</Filter>

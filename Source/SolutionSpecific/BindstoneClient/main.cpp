@@ -1234,6 +1234,58 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		}
 	}
 
+	// A game controller moves the focus, presses what holds it and lets it go
+	{
+		auto& mouse = *a_managers.services.get<MV::TapDevice>();
+		auto& settings = a_app.settings();
+		auto& docking = a_app.docking();
+		auto& pad = a_app.pad();
+		auto click = [&](const MV::Point<int>& a_at) {
+			for (bool down : { false, true, false }) {
+				mouse.simulate(a_at, down);
+				a_app.runFrames(2);
+			}
+			mouse.stopSimulating();
+		};
+		auto press = [&](MV::ControllerButton a_button) {
+			pad.simulate(MV::ControllerState().press(a_button));
+			a_app.runFrames(2);
+			pad.simulate(MV::ControllerState());
+			a_app.runFrames(2);
+		};
+		auto editingShows = [&a_app](const std::string& a_text) {
+			auto editing = a_app.editingText();
+			return editing && std::string(editing->text()) == a_text;
+		};
+
+		a_app.showSettings();
+		a_app.runFrames(3);
+		click(settings.fieldScreenPoint("Undo steps"));
+		expect(editingShows("200"), "the first field is being typed in");
+		press(MV::ControllerButton::DPAD_DOWN);
+		expect(editingShows("100") && a_app.editingText()->hasSelection(), "the d-pad moves the focus to the field below, which takes the typing");
+		pad.simulate(MV::ControllerState().axis(MV::ControllerAxis::LEFT_Y, -1.0f));
+		a_app.runFrames(2);
+		pad.simulate(MV::ControllerState());
+		a_app.runFrames(2);
+		expect(editingShows("200"), "and the left stick moves it back up");
+		press(MV::ControllerButton::EAST);
+		expect(!a_app.editingText() && mouse.hasFocus() && a_app.undoSteps() == 200, "the east button leaves the field without changing it, the focus still on it");
+		press(MV::ControllerButton::SOUTH);
+		expect(editingShows("200"), "the south button presses what holds the focus: the field is typed in again");
+		press(MV::ControllerButton::RIGHT_SHOULDER);
+		expect(mouse.hasFocus() && !editingShows("200"), "the right shoulder steps to the next control");
+		press(MV::ControllerButton::EAST);
+		press(MV::ControllerButton::EAST);
+		expect(!a_app.editingText() && !mouse.hasFocus(), "east once more lets the focus go");
+		pad.stopSimulating();
+		a_app.runFrames(2);
+		expect(a_app.undoSteps() == 200 && a_app.gridSize().width == 100.0f && a_app.rotationSnap() == 5.0f, "and none of it changed a setting");
+		docking.closePanel(docking.panelTitled("Settings"));
+		a_app.showInspector();
+		a_app.runFrames(2);
+	}
+
 	// A right press opens the menu of what is under it: a Hierarchy row, the scene, a dock tab, a text field
 	{
 		auto& mouse = *a_managers.services.get<MV::TapDevice>();

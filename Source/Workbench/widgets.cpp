@@ -337,6 +337,12 @@ namespace Workbench {
 		clickable->focusable(true)->pressOnFocus(true);
 		std::weak_ptr<MV::Scene::Text> weakText = text.self();
 		FocusRouter* focus = &a_focus;
+		// the focus moving on ends the typing as a press elsewhere does
+		clickable->onFocusLeave.connect("endTyping", [weakText, focus](const std::shared_ptr<MV::Scene::Clickable>&) {
+			if (auto locked = weakText.lock(); locked && focus->active() == locked) {
+				focus->leave();
+			}
+		});
 		auto commit = [weakText, a_onCommit]() {
 			if (auto locked = weakText.lock()) {
 				if (a_onCommit) {
@@ -402,6 +408,12 @@ namespace Workbench {
 		clickable->focusable(true)->pressOnFocus(true);
 		std::weak_ptr<MV::Scene::Text> weakText = text.self();
 		FocusRouter* focus = &a_focus;
+		// the focus moving on ends the typing as a press elsewhere does
+		clickable->onFocusLeave.connect("endTyping", [weakText, focus](const std::shared_ptr<MV::Scene::Clickable>&) {
+			if (auto locked = weakText.lock(); locked && focus->active() == locked) {
+				focus->leave();
+			}
+		});
 
 		struct ScrubState {
 			bool started = false;

@@ -5,7 +5,8 @@ Core C++ engine code used by Bindstone.
 Submodules:
 - `ArtificialIntelligence` – grid pathfinding (`pathfinding.h`: `MapNode`, `NavigationAgent`).
 - `Audio` – empty stub (`package.h` only).
-- `Interface` – input (`tapDevice.h`: mouse/touch).
+- `Interface` – input (`tapDevice.h`: mouse/touch and the keyboard focus; `controllerDevice.h`: game controllers,
+  read as one pad, and `navigate` to turn the pad into focus moves on a TapDevice).
 - `Network` – networking utilities (`network.h`, `networkObject.h`, `webServer.h`, etc.).
 - `Physics` – `collider.*`: the Box2D-backed collider component.
 - `Render` – rendering system, textures/atlases and the scene graph (`Scene` holds `Node`, `Sprite`,

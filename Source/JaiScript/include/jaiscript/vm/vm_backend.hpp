@@ -2419,6 +2419,7 @@ namespace jai::vm {
         op_status exec_cells_back(frame& f, const vm_instruction& ins);
         op_status exec_c_mload(frame& f, const vm_instruction& ins);   // a member read site: the field's kind and payload into the cell
         op_status exec_c_mstore(frame& f, const vm_instruction& ins);   // a member store site: the field's payload written in place when the kinds agree
+        op_status exec_c_mcompound(frame& f, const vm_instruction& ins);   // a compound member store site: the field read, the operation and the store in place
         // fused cell pairs: the first instruction's executor on its own word, then the second's on the next word when the block is
         // still live and the ip fell through; out of line, so the block switch keeps its shape
         struct cell_regs;   // the block loop's registers (defined with cells_run below)
@@ -2433,7 +2434,10 @@ namespace jai::vm {
         script_array* velem_site(frame& f, const velem_proto& p, size_t& at, int& comp);   // a vector buffer's element and component for a velem site, else null
         op_status exec_velem_load(frame& f, const vm_instruction& ins);
         op_status exec_velem_store(frame& f, const vm_instruction& ins);
-        op_status exec_set_member_value(frame& f, const vm_instruction& ins);   // `base.member = operand;` in statement position: the store kernel, no result
+        op_status exec_set_member_value(frame& f, const vm_instruction& ins);   // `base.member = operand;` or `base.member op= operand;` in statement position: the store or compound kernel, no result
+        bool member_compound_row(class_instance* inst, const chunk::member_ic_entry& entry, uint32_t kind, const script_value& v);
+        op_status member_compound_general(frame& f, const vm_instruction& ins, const member_store_proto& p);
+        op_status member_store_receiver(frame& f, const member_store_proto& p, script_value& out);
         op_status store_member(frame& f, size_t ins_index, uint32_t node, script_value&& object_value, script_value&& value, bool want_result);   // SET_MEMBER's kernel: the fast lane, the ladder, the result when asked
         op_status assign_math_component(frame& f, uint32_t node, script_value& base, member_expr* member, const script_value& value, script_value& out);   // `base.x = v` on a math value
         op_status exec_cells_cfor_back(frame& f, const vm_instruction& ins);   // a counted loop's back edge: the general step and compare, then the block entry
@@ -2758,6 +2762,14 @@ namespace jai::vm {
         op_status dyn_string_add(frame& f, const vm_instruction& ins, bool& landed);
         script_value* env_store_cell(frame& f, size_t cache_slot, uint64_t symbol_id);
         bool store_slot_raw(frame& f, const vm_instruction& ins, size_t kind, script_int iv, script_float fv);
+        // A reference's referent as a typed row may compute on it: an int or a float where a store of that kind converts nothing (a plain
+        // cell, a field or an untyped element holding it under the canonical stamp, or an int or float buffer's element; the storage's
+        // constraint and the reference's declared type name that kind too). kind 0 = the general form, which converts, runs accessors and
+        // raises (a removed element, field or key included)
+        struct scalar_place { size_t kind = 0; void* payload = nullptr; };
+        scalar_place lane_ref_place(const frame& f, uint32_t slot, const script_value& ref) const;
+        bool store_ref_raw(frame& f, uint32_t slot, const script_value& ref, size_t kind, script_int iv, script_float fv);
+        bool compound_through_ref(frame& f, const compound_fused_proto& cp, const script_value& ref);
         bool store_this_field_raw(frame& f, const vm_instruction& ins, size_t kind, script_int iv, script_float fv);
         op_status exec_math_kernel(size_t base, size_t argc, detail::math_fn fn);
         op_status fused_string_add(const script_value& l, const script_value& r, std::optional<script_value>& out);

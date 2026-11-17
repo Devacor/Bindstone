@@ -198,8 +198,8 @@ C++. A copy that is only read binds in place for free, but treat that as a bonus
 <li><strong>Use <code>array&lt;int&gt;</code> and <code>array&lt;float&gt;</code> for bulk numeric data.</strong> Same API,
 raw primitive storage: a 13,600-element grid takes 109&nbsp;KB instead of 435&nbsp;KB, a copy is a <code>memcpy</code>,
 and element access skips boxing.</li>
-<li><strong>Write compound element stores.</strong> <code>a[i] += v</code> is one instruction, cheaper than the spelled-out
-read and write.</li>
+<li><strong>Write compound stores.</strong> <code>a[i] += v</code> and <code>p.x += v</code> are one instruction each, cheaper
+than the spelled-out read and write.</li>
 <li><strong>Keep calls out of the innermost loop.</strong> A call costs about ten fused loop iterations. A self tail
 call (<code>return f(args)</code>) is the exception: it reuses the frame (about 40 ns a call) and runs at any depth.</li>
 <li><strong>Parallelize the bulk stages.</strong> <code>parallel_for</code> and <code>parallel_transform</code> run bodies

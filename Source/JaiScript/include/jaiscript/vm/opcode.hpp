@@ -238,8 +238,9 @@ namespace jai::vm {
         op_c_mload,         // a = dst cell, b = member_expr node, c = the base slot: a member read site, the field's value pointer resolved
                             // at entry (cell_state::site_member), its kind and payload landed in the cell
         op_c_mstore,        // a = value (a cell, or k_typed_const_bit | constant), b = member_expr node, c = the base slot: a member store site,
-                            // the field's payload written in place when the kinds agree, the general store otherwise
-        op_set_member_value,   // a = member_store_protos index: `base.member = operand;` in statement position, the value an operand (no push, no result)
+                            // the field's payload written in place when the kinds agree, the general store otherwise; a compound site
+                            // (a | k_cell_member_compound_bit | kind << k_cell_member_kind_shift) reads the field, runs the operation and stores
+        op_set_member_value,   // a = member_store_protos index: `base.member = operand;` or `base.member op= operand;` in statement position, the value an operand (no push, no result)
         // fused cell pairs: the opcode of the first instruction of an adjacent pair, its own word; the second instruction keeps its own
         // word and opcode and runs from the fused executor when the first fell through to it (a jump into it dispatches it alone)
         op_c_arith2,        // C_ARITH_P then C_ARITH_P
@@ -369,6 +370,9 @@ namespace jai::vm {
     inline constexpr uint32_t k_typed_dst_store = 2;
     inline constexpr uint32_t k_typed_dst_compound = 3;   // `x op= y` on an int-holding slot: in place, int rows only
     inline constexpr uint32_t k_typed_env_bit = 0x40000000u;   // an operand that is an environment value: the bit | its chunk::typed_env_operands index
+    inline constexpr uint32_t k_cell_member_compound_bit = 0x40000000u;   // op_c_mstore's a: a compound site, its kind above the value
+    inline constexpr uint32_t k_cell_member_kind_shift = 26;
+    inline constexpr uint32_t k_cell_member_value_mask = (1u << k_cell_member_kind_shift) - 1;
     inline constexpr uint32_t k_dyn_dst_push = 3;   // an op_d_* arithmetic result pushed onto the operand stack (op_binary_fused's landing)
 
     inline constexpr uint32_t k_member_base_release = 0x80000000u;   // op_member_temp c: the base is an element's alias temp the read is the last to read
@@ -418,6 +422,7 @@ namespace jai::vm {
     inline constexpr uint32_t compound_flag_old_result = 0x80;  // postfix x++ on an element/member target: push the OLD value
     inline constexpr uint32_t compound_flag_incdec = 0x100;     // ++/-- desugar: the target must be numeric (identifier-path gate)
     inline constexpr uint32_t compound_flag_value_first = 0x200; // C++17 order: the right-hand side was evaluated before the target (it sits under the target's operands)
+    inline constexpr uint32_t compound_flag_ref_alias = 0x400;   // the target names a reference declaration: its slot holds the reference, never a cell's value
 
     // a compound kind's binary operator, and back
     inline token_type compound_kind_token(uint32_t kind) noexcept {

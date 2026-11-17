@@ -3802,6 +3802,88 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "member stores under an injected miss at every " + std::to_string(every)); }
 		});
+		test("a_member_compound_in_statement_position_is_one_op_and_a_block_site", [this]() {
+			// `p.x op= v;`, `++p.n;`, `p.pos.x op= v;`, `this.x op= v;` and, in a loop, `ps[i].hits op= v;` take the value as an operand
+			// (SET_MEMBER_VALUE, no pushes) and a block reads, computes and stores the field at its site (one C_MSTORE): the compound's
+			// scalar rows in place, everything else (a result of another kind, a string, a class's operator, an accessor, an overflow, a zero
+			// divisor) the general compound with its conversions and texts. A reference local or parameter computes on its referent the same
+			// way. Both backends, proofs on and off, and under an injected miss
+			const std::string prelude =
+				"class V { float x = 1.0; float y = 2.0; }\n"
+				"class Money { int cents = 0; Money operator+(Money o) { Money r; r.cents = cents + o.cents + 1; return r; } }\n"
+				"class Meter { int reads = 0; int writes = 0; int raw = 0; int _get_level() { reads += 1; return raw; } int _set_level(int v) { writes += 1; raw = v; return v; } int level = 0; }\n"
+				"class P { int n = 3; float x = 1.5; var w = 2; string name = \"p\"; V pos; Money m; int hits = 0;\n"
+				"  void bump(float k) { this.x += k; this.n -= 1; pos.x *= 2.0; x += k; n++; this.w += 1; this.hits = this.hits + 2; } }\n"
+				"array<P> PS = [P(), P(), P()];\n"
+				"var ops = function(P p, int n) { float k = 0.5; int j = 3;\n"
+				"  for (int i = 0; i < n; i++) { p.x += k; p.x -= 0.25; p.x *= 1.5; p.x /= 2.0; p.x += j; p.x %= 7.5; p.n += j; p.n -= 1; p.n *= 2; p.n /= 2; p.n %= 97; p.n &= 127; p.n |= 64; p.n ^= 5; p.n <<= 1; p.n >>= 1; p.w += 1; p.w *= 2; p.hits++; ++p.hits; p.hits--; p.x++; --p.x; }\n"
+				"  return to_string(p.x) + \"|\" + to_string(p.n) + \"|\" + to_string(p.w) + \"|\" + to_string(p.hits); };\n"
+				"var nested = function(P p, int n) { float k = 0.5; for (int i = 0; i < n; i++) { p.pos.x += k; p.pos.y -= p.pos.x * 0.5; p.pos.x *= 1.25; } return to_string(p.pos.x) + \"|\" + to_string(p.pos.y); };\n"
+				"var elems = function(int n) { for (int i = 0; i < n; i++) { PS[i % 3].hits += i; PS[i % 3].x *= 1.5; PS[i % 3].n -= 1; PS[i % 3].hits = PS[i % 3].hits + 1; } int t = 0; for (auto& q : PS) { q.x += 0.5; q.n ^= 3; q.hits++; t = t + q.hits + q.n; } return to_string(t) + \"|\" + to_string(PS[1].x); };\n"
+				"var widen = function(P p, int n) { for (int i = 0; i < n; i++) { p.w += 0.5; p.x += i; p.w -= 1; } return to_string(p.w) + \"|\" + type_of(p.w) + \"|\" + to_string(p.x); };\n"
+				"var text = function(P p, int n) { for (int i = 0; i < n; i++) { p.name += \"x\"; p.name += 'c'; p.name += to_string(i); } return p.name; };\n"
+				"var oper = function(P p, int n) { Money one; one.cents = 5; for (int i = 0; i < n; i++) { p.m += one; } return p.m.cents; };\n"
+				"var access = function(Meter g, int n) { for (int i = 0; i < n; i++) { g.level += 2; g.level++; } return to_string(g.raw) + \"|\" + to_string(g.reads) + \"|\" + to_string(g.writes); };\n"
+				"var methods = function(P p, int n) { for (int i = 0; i < n; i++) { p.bump(0.25); } return to_string(p.x) + \"|\" + to_string(p.n) + \"|\" + to_string(p.pos.x) + \"|\" + to_string(p.w) + \"|\" + to_string(p.hits); };\n"
+				"var refs = function(P p, int n) { float& ax = p.x; int& an = p.n; var& aw = p.w; array<int> xs = [1, 2, 3]; int& e = xs[1]; float l = 0.5; float& rl = l;\n"
+				"  for (int i = 0; i < n; i++) { ax += 0.5; ax = ax * 1.5; an += i; an = an - 1; an <<= 1; aw += 1; aw = aw + 0.5; e += i; e = e * 2; rl += ax; rl = rl - 1.0; }\n"
+				"  return to_string(p.x) + \"|\" + to_string(p.n) + \"|\" + to_string(p.w) + \"|\" + to_string(xs[1]) + \"|\" + to_string(l); };\n"
+				"function grow(float& r, int& c, int n) -> void { for (int i = 0; i < n; i++) { r += 0.5; r = r * 2.0; c += 1; c = c + i; } }\n"
+				"var params = function(P p) { array<float> fs = [0.5, 1.5]; array<int> cs = [1, 2]; grow(p.x, p.n, 4); grow(fs[1], cs[0], 3); return to_string(p.x) + \"|\" + to_string(p.n) + \"|\" + to_string(fs[1]) + \"|\" + to_string(cs[0]); };\n"
+				"function burst(P& p) -> int { for (int i = 0; i < 70; i++) { p.n *= 4; } return p.n; }\n"
+				"var faults = function(P p) { string out = \"\"; var big = 9223372036854775807; var zero = 0; var half = 0.5; var word = \"w\"; var wide = 64;\n"
+				"  try { p.n += big; } catch (err) { out += err + \";\"; }\n"
+				"  try { p.n /= zero; } catch (err) { out += err + \";\"; }\n"
+				"  try { p.n %= zero; } catch (err) { out += err + \";\"; }\n"
+				"  try { p.n <<= wide; } catch (err) { out += err + \";\"; }\n"
+				"  try { p.n += half; } catch (err) { out += err + \";\"; }\n"
+				"  try { p.x += word; } catch (err) { out += err + \";\"; }\n"
+				"  try { p.name -= word; } catch (err) { out += err + \";\"; }\n"
+				"  try { burst(p); } catch (err) { out += err + \";\"; }\n"
+				"  int& an = p.n; array<int> xs = [1, 2]; int& e = xs[1]; xs.pop();\n"
+				"  try { an += half; } catch (err) { out += err + \";\"; }\n"
+				"  try { an = an + half; } catch (err) { out += err + \";\"; }\n"
+				"  try { e += 1; } catch (err) { out += err + \";\"; }\n"
+				"  try { e = e + 1; } catch (err) { out += err + \";\"; }\n"
+				"  return out + to_string(p.n); };\n"
+				"var elbits = function(int n) { array<int> xs = [1, 2, 3, 4]; for (int i = 0; i < n; i++) { xs[i & 3] |= i; xs[i & 3] ^= 5; xs[i & 3] <<= 1; xs[i & 3] >>= 1; xs[i & 3] &= 255; } return to_string(xs); };\n"
+				"function touch(P& p) -> int { p.n = 100; return 5; }\n"
+				"var order = function(P p) { p.n += touch(p); P q; int v = 2; q.n += v; q.x += q.n; return to_string(p.n) + \"|\" + to_string(q.n) + \"|\" + to_string(q.x); };\n";
+			const std::string body =
+				"string run() { P a = P(); P b = P(); P c = P(); P d = P(); P e = P(); P f = P(); P g = P(); P h = P(); P k = P(); Meter mt = Meter();\n"
+				"  return ops(a, 6) + \"#\" + nested(b, 5) + \"#\" + elems(7) + \"#\" + widen(c, 4) + \"#\" + text(d, 2) + \"#\" + to_string(oper(e, 3)) + \"#\" + access(mt, 3) + \"#\" + methods(f, 3) + \"#\" + refs(g, 4) + \"#\" + params(h) + \"#\" + faults(k) + \"#\" + order(P()) + \"#\" + elbits(9); }\n"
+				"run();";
+			both(prelude + body,
+				"0.08367919921875|79|254|6#8.18115234375|-7.3623046875#38|3.875#0.0|float|7.5#pxc0xc1#18#9|6|6#3.0|3|8.0|5|6#13.6875|40|8.0|54|27.0625#39.0|13|19.0|7#"
+				"Integer overflow in '+=';Division by zero;Modulo by zero;Shift amount must be between 0 and 63;Cannot assign float to field 'n' of P (declared int);"
+				"Cannot apply '+=' to float and string;Cannot apply '-=' to string and string;Integer overflow in '*=';Cannot assign float to field 'n' of P (declared int);"
+				"Cannot assign float to field 'n' of P (declared int);Reference to a removed array element;Reference to a removed array element;3458764513820540928#105|5|6.5#[12, 2, 3, 2]",
+				"member compounds");
+			both(prelude + body, "", "member compounds, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			const std::string l = listing_of(prelude);
+			auto count_in = [](const std::string& text, const char* needle) { size_t n = 0; for (size_t at = text.find(needle); at != std::string::npos; at = text.find(needle, at + 1)) { ++n; } return n; };
+			check_eq(size_t{0}, count_in(l, "MEMBER_COMPOUND"), "no statement compound takes the stack form:\n" + l);
+			check_true(count_in(l, "C_MSTORE") >= 20, "the compounds are block sites: " + std::to_string(count_in(l, "C_MSTORE")) + "\n" + l);
+			// the compound and its expansion on one target: both loops close, the compound as the one store site its expansion ends in
+			const std::string cls = "class P { float x = 1.5; int n = 3; }\n";
+			const std::string compound = listing_of(cls + "var f = function(P p, int n) { float k = 0.5; for (int i = 0; i < n; i++) { p.x += k; p.n += 1; } return n; };\n");
+			const std::string expanded = listing_of(cls + "var f = function(P p, int n) { float k = 0.5; for (int i = 0; i < n; i++) { p.x = p.x + k; p.n = p.n + 1; } return n; };\n");
+			for (const std::string* form : { &compound, &expanded }) {
+				check_true(form->find("-- cell loop") != std::string::npos && form->find("-- open loop") == std::string::npos, "the loop closes:\n" + *form);
+				check_eq(size_t{2}, count_in(*form, "C_MSTORE"), "each field's store is a site:\n" + *form);
+				check_eq(size_t{2}, count_in(*form, "SET_MEMBER_VALUE"), "each statement ends in the operand store:\n" + *form);
+				check_eq(size_t{0}, count_in(*form, "GET_MEMBER") + count_in(*form, "(MEMBER_"), "no general member instruction:\n" + *form);
+			}
+			check_eq(size_t{0}, count_in(compound, "C_MLOAD") + count_in(compound, "MEMBER_TEMP"), "the compound's read is its store site's:\n" + compound);
+			check_eq(size_t{2}, count_in(expanded, "C_MLOAD"), "the expansion reads through its load sites:\n" + expanded);
+			if (!engine::miss_injection_available()) { return; }
+			auto injected = [&](uint32_t every) -> std::string {
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "member compounds under an injected miss at every " + std::to_string(every)); }
+		});
 		test("an_element_alias_passed_to_a_callee_passes_its_reference_and_the_loop_stays_closed", [this]() {
 			// `for (auto& p : pool) { step(p); }` with `step(var& p)` writing the element's fields: the alias is a call argument, the door
 			// pushes the element reference the general LOAD pushes, the callee's writes land in the element, the loop closes and runs without a

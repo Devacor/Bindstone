@@ -233,7 +233,8 @@ where the program reaches the read (a key erased since the reference was taken i
 site that refuses the
 entry marks the loop in the call record's cell state and the entry is not attempted again in that call (the
 refusal valve): a binding does not change within a call, and the guards would otherwise run at every back edge
-for nothing.
+for nothing. A named local whose slot holds a reference (a reference declaration, a boxed local) refuses the same
+way: the slot keeps the reference for the call.
 
 Each loop keeps a block-entry row (`chunk::entry_memos`; a parallel worker keeps its own in its record of the chunk): the
 path its last full entry reached each container site by (a frame slot or an environment binding) with the node found,
@@ -611,6 +612,26 @@ that kind's plain stamp, and misses onto the general store otherwise (its conver
 bases (`G.player`) follow in their row. An element alias passed as a call argument passes its element reference: the door
 flushes the alias (the reference its declaration binds, built into the slot) and pushes the slot's value as the general LOAD does,
 so a loop whose body calls a function on each element (`for (auto& p : pool) { step(p); }`) closes and lands without a miss.
+
+A compound in statement position on the same targets (`p.x += v;`, `++p.n;`, `p.pos.x *= v;`, a member of a bare field, `this.x -= v;`
+and, in a loop, `ps[i].hp -= d;` with the element in an alias temp) is the same instruction with the compound's kind
+(`member_store_proto::compound`). Its value is an operand the instruction reads ahead of the target (the right side first, as C++17
+orders it; any other value lands in a temp where it stood). The general form computes on the field where it lives when the store row
+names a plain field holding an int or a float under its canonical stamp and the compound kernel's scalar rows (`compound_scalar_row`:
+an int pair exact under the overflow policy, the bitwise operators on ints, a float on either side a float) keep the field's kind;
+anything else (a result of another kind, a string, a class's operator, an accessor, an overflow, a zero divisor) runs
+`op_member_compound`'s kernel over the value, the receiver and the member read in the general order (`member_compound_general`), so
+its conversions and texts stand. In a block the store site carries the kind (`op_c_mstore`'s `a` under
+`k_cell_member_compound_bit`, its own executor): the field read, the rows and the store are one cell instruction, and a miss re-runs
+the general compound. A name a read resolves ahead of a field (`same_as`, a shared_ptr method) keeps the stack form.
+
+A reference slot (`float& ax = a.x`, a `T&` parameter, an element or map entry reference, a boxed local) takes the general form's rows
+on its referent. `lane_ref_place` answers the int or float a plain cell, a field, an untyped element or a map entry holds under its
+canonical stamp, or an int or float buffer's element, when the storage's constraint and the reference's declared type name that
+kind, so a store of that kind converts nothing; `r op= v` (`compound_through_ref`) and `r = a op b` (`store_slot_raw`) then write it in
+place, and a removed referent, another kind, a property or a component reference run the general store with its texts. A compound on
+a reference declaration is never lowered to a typed row or admitted to a block (`compound_flag_ref_alias`): its slot holds the
+reference, never a cell's value.
 
 A named class reference (`Body& body = bodies[i]`) can use the same rebind operation even when the checker cannot prove its
 bind-time class admission. The plan records the original reference declaration. Each new binding checks the element's actual

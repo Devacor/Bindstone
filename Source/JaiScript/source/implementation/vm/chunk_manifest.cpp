@@ -208,7 +208,9 @@ namespace {
 			out << pre << "member_store_protos " << ch.member_store_protos.size() << "\n";
 			for (size_t i = 0; i < ch.member_store_protos.size(); ++i) {
 				const member_store_proto& p = ch.member_store_protos[i];
-				out << pre << " " << i << " node=" << u(p.node) << " base=" << u(p.base) << " value=" << operand(ch, p.value) << " release=" << b(p.release) << "\n";
+				out << pre << " " << i << " node=" << u(p.node) << " base=" << u(p.base) << " value=" << operand(ch, p.value) << " release=" << b(p.release);
+				if (p.compound) { out << " compound=" << p.kind; }
+				out << "\n";
 			}
 			if (!ch.member_folds.empty()) {
 				out << pre << "member_folds " << ch.member_folds.size() << "\n";

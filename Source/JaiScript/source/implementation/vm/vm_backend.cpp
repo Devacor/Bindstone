@@ -5250,7 +5250,8 @@ op_status vm_backend::exec_binary_fused_decl(frame& f, const vm_instruction& ins
 bool vm_backend::store_slot_raw(frame& f, const vm_instruction& ins, size_t kind, script_int iv, script_float fv) {
 	if (ins.b == k_invalid_u32 || !has_slots(f)) return false;
 	script_value* slot = frame_slot(f, ins.b);
-	if (!slot || slot->raw_storage_index() != kind) return false;
+	if (!slot) return false;
+	if (slot->raw_storage_index() != kind) { return slot->raw_storage_index() == script_value::TYPEID_REFERENCE && (ins.c & store_flag_no_result) && store_ref_raw(f, ins.b, *slot, kind, iv, fv); }
 	const bool is_int = kind == script_value::TYPEID_INT;
 	const type_info* st = slot->type_info_raw();
 	if (st && st->is_enum) return false;   // an enum slot's row decides
@@ -5262,6 +5263,39 @@ bool vm_backend::store_slot_raw(frame& f, const vm_instruction& ins, size_t kind
 	if (is_int) { slot->unchecked_set_int_payload(iv); } else { slot->unchecked_set_float_payload(fv); }
 	if (st != tag) { slot->set_type_info(type_info_ptr{tag}); }
 	if (!(ins.c & store_flag_no_result)) { stack_.push_back(*slot); }
+	return true;
+}
+
+vm_backend::scalar_place vm_backend::lane_ref_place(const frame& f, uint32_t slot, const script_value& ref) const {
+	auto* holder = const_cast<script_value&>(ref).get_reference_holder();
+	if (!holder || holder->property || holder->component_base || holder->string_base || parallel_worker_) return {};   // a worker's stores keep the general form's shared-state checks
+	scalar_place place;
+	if (holder->container && holder->container->is_typed()) {
+		script_array* node = holder->container.get();
+		if (node->kind() == script_array::kind_t::i64 && holder->container_index < node->ints().size()) { place = {script_value::TYPEID_INT, &node->ints()[holder->container_index]}; }
+		else if (node->kind() == script_array::kind_t::f64 && holder->container_index < node->floats().size()) { place = {script_value::TYPEID_FLOAT, &node->floats()[holder->container_index]}; }
+		else return {};
+	} else {
+		script_value* target = holder->resolve_target();
+		if (!target) return {};
+		const size_t k = target->raw_storage_index();
+		const type_info* canonical = k == script_value::TYPEID_INT ? ti_int_ : k == script_value::TYPEID_FLOAT ? ti_float_ : nullptr;
+		if (!canonical || target->type_info_raw() != canonical) return {};
+		const type_info* constraint = holder->container_element_type.get();
+		if (constraint && constraint != canonical && constraint->base_type != script_value_type::jai_any_type) return {};
+		place.kind = k;
+		if (k == script_value::TYPEID_INT) { place.payload = &target->unchecked_as_int_ref(); } else { place.payload = &target->unchecked_as_float_ref(); }
+	}
+	const uint8_t declared = slot != k_invalid_u32 && slot_declared_kind(f, slot) ? slot_declared_kind(f, slot) : detail::ref_declared_kind(ref);
+	if (declared && declared != place.kind) return {};
+	return place;
+}
+
+// `r = e;` through a reference slot, e an int or a float the referent's kind takes as it is
+JAI_NOINLINE bool vm_backend::store_ref_raw(frame& f, uint32_t slot, const script_value& ref, size_t kind, script_int iv, script_float fv) {
+	const scalar_place place = lane_ref_place(f, slot, ref);
+	if (place.kind != kind) return false;
+	if (kind == script_value::TYPEID_INT) { *static_cast<script_int*>(place.payload) = iv; } else { *static_cast<script_float*>(place.payload) = fv; }
 	return true;
 }
 
@@ -5685,6 +5719,9 @@ op_status vm_backend::exec_compound_fused(frame& f, const vm_instruction& ins) {
 				}
 				return {};
 			}
+		} else if (varPtr && varPtr->raw_storage_index() == script_value::TYPEID_REFERENCE && bare_rhs && (cp.kind_flags & compound_flag_no_result) &&
+		           !(cp.kind_flags & compound_flag_incdec) && compound_through_ref(f, cp, *varPtr)) {
+			return {};
 		}
 	}
 
@@ -6932,10 +6969,55 @@ namespace {
 	}
 	template <class Regs> JAI_FORCEINLINE void cell_put_float(const Regs& r, uint32_t dk, script_float v) { r.cells[dk].bits = cell_bits_of_float(v); r.cells[dk].kind = static_cast<uint8_t>(script_value::TYPEID_FLOAT); r.dirty->set(dk); }
 	inline script_float cell_float_of_bits(int64_t b) { script_float d; std::memcpy(&d, &b, sizeof d); return d; }
+	// `target op= value` over raw payloads, the compound kernel's scalar rows: an int pair exact under the overflow policy (the bitwise operators
+	// and the shifts in range too), a float on either side a float; false = a fault or any other pairing, which the general compound owns
+	JAI_FORCEINLINE bool compound_scalar_row(token_type op, size_t tk, int64_t tb, size_t vk, int64_t vb, uint8_t& rk, int64_t& rb) {
+		if (tk == script_value::TYPEID_INT && vk == script_value::TYPEID_INT) {
+			const script_int a = static_cast<script_int>(tb), b = static_cast<script_int>(vb);
+			script_int r;
+			if (detail::scalar_arith_op(op)) {
+				if (detail::int_arith(op, a, b, r) != detail::scalar_fault::none) return false;
+			} else {
+				switch (op) {
+				case token_type::ampersand: r = a & b; break;
+				case token_type::pipe: r = a | b; break;
+				case token_type::caret: r = a ^ b; break;
+				case token_type::left_shift: if (b < 0 || b > 63) return false; r = a << b; break;
+				case token_type::right_shift: if (b < 0 || b > 63) return false; r = a >> b; break;
+				default: return false;
+				}
+			}
+			rk = static_cast<uint8_t>(script_value::TYPEID_INT); rb = static_cast<int64_t>(r);
+			return true;
+		}
+		if ((tk != script_value::TYPEID_INT && tk != script_value::TYPEID_FLOAT) || (vk != script_value::TYPEID_INT && vk != script_value::TYPEID_FLOAT) || !detail::scalar_arith_op(op)) return false;
+		script_float r;
+		(void)detail::float_arith(op, tk == script_value::TYPEID_INT ? static_cast<script_float>(static_cast<script_int>(tb)) : cell_float_of_bits(tb),
+		                          vk == script_value::TYPEID_INT ? static_cast<script_float>(static_cast<script_int>(vb)) : cell_float_of_bits(vb), r);
+		rk = static_cast<uint8_t>(script_value::TYPEID_FLOAT); rb = cell_bits_of_float(r);
+		return true;
+	}
 	// an int, float or bool cell as a value (no stamp)
 	JAI_FORCEINLINE script_value cell_scalar(uint8_t kind, int64_t bits, engine* e) {
 		return kind == script_value::TYPEID_INT ? script_value(static_cast<script_int>(bits), e) : kind == script_value::TYPEID_FLOAT ? script_value(cell_float_of_bits(bits), e) : script_value(bits != 0, e);
 	}
+}
+
+// `r op= operand;` through a reference: the compound kernel's scalar rows on the referent where it lives, when the result keeps its kind
+JAI_NOINLINE bool vm_backend::compound_through_ref(frame& f, const compound_fused_proto& cp, const script_value& ref) {
+	if (operator_table_ && operator_table_->any()) return false;
+	const script_value* vp = fused_cmp_operand(f, cp.rhs, f.ip * 3);
+	if (!vp) return false;
+	const size_t vk = vp->raw_storage_index();
+	if (vk != script_value::TYPEID_INT && vk != script_value::TYPEID_FLOAT) return false;
+	const int64_t vb = vp->unchecked_payload_bits();   // read ahead of the place: the operand may be the referent
+	const scalar_place place = lane_ref_place(f, cp.slot, ref);
+	if (!place.kind) return false;
+	const bool is_int = place.kind == script_value::TYPEID_INT;
+	uint8_t rk; int64_t rb;
+	if (!compound_scalar_row(compound_kind_token(cp.kind_flags), place.kind, is_int ? static_cast<int64_t>(*static_cast<script_int*>(place.payload)) : cell_bits_of_float(*static_cast<script_float*>(place.payload)), vk, vb, rk, rb) || rk != place.kind) return false;
+	if (is_int) { *static_cast<script_int*>(place.payload) = static_cast<script_int>(rb); } else { *static_cast<script_float*>(place.payload) = cell_float_of_bits(rb); }
+	return true;
 }
 
 // Cell loops. A cell instruction never raises: anything it cannot do exactly (a kind byte that
@@ -8021,6 +8103,8 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 		    (st != canonical && !(st && st->base_type == script_value_type::jai_any_type) &&
 		     !(!st && loop.frame_program && cl.kind != 0 && cl.slot < loop.param_cells.size() && loop.param_cells[cl.slot] == k))) {
 			JAI_CELLS_COUNT(1);
+			// a local behind a reference (a reference declaration, a boxed local) stays behind it for the call: the loop is not tried again
+			if (!head && s && s->raw_storage_index() == script_value::TYPEID_REFERENCE && cl.slot < f.code->first_temp_slot) { refuse_container_site(f, loop); }
 			return false;
 		}
 		// live-in or body-defined alike: the slot holds the general form's last value of the cell's kind (checked above), so a read ahead of the body's
@@ -10025,7 +10109,8 @@ op_status vm_backend::exec_c_mstore(frame& f, const vm_instruction& ins) {
 	script_value* fv = const_cast<script_value*>(cs.site_member[f.ip - loop.copy_head]);
 	if (!fv) return miss();
 	uint8_t vk; int64_t bits;
-	if (ins.a & k_typed_const_bit) {
+	if (ins.a & (k_typed_const_bit | k_cell_member_compound_bit)) {
+		if (ins.a & k_cell_member_compound_bit) { return exec_c_mcompound(f, ins); }
 		const script_value& c = f.code->constants[ins.a & ~k_typed_const_bit];
 		vk = static_cast<uint8_t>(c.raw_storage_index());
 		if (vk != static_cast<uint8_t>(script_value::TYPEID_INT) && vk != static_cast<uint8_t>(script_value::TYPEID_FLOAT) && vk != static_cast<uint8_t>(script_value::TYPEID_BOOL)) return miss();
@@ -10037,6 +10122,30 @@ op_status vm_backend::exec_c_mstore(frame& f, const vm_instruction& ins) {
 	else if (fk == script_value::TYPEID_FLOAT) { if (fv->type_info_raw() != ti_float_) return miss(); fv->unchecked_set_float_payload(cell_float_of_bits(bits)); }
 	else if (fk == script_value::TYPEID_BOOL) { if (fv->type_info_raw() != ti_bool_) return miss(); fv->unchecked_set_bool_payload(bits != 0); }
 	else return miss();
+	++f.ip;
+	return {};
+}
+
+// a compound member store site (`base.member op= v`): the field read where it lives, the compound kernel's scalar rows and the store, when
+// the result keeps the field's kind and the field carries that kind's plain stamp; any other pair misses onto the general compound
+JAI_NOINLINE op_status vm_backend::exec_c_mcompound(frame& f, const vm_instruction& ins) {
+	JAI_CELLS_COUNT(7);
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	auto miss = [&]() -> op_status { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 3); return {}; };
+	script_value* fv = const_cast<script_value*>(cs.site_member[f.ip - loop.copy_head]);
+	if (!fv || has_custom_numeric_ops_ || (operator_table_ && operator_table_->any())) return miss();
+	size_t vk; int64_t bits;
+	const uint32_t value = ins.a & k_cell_member_value_mask;
+	if (ins.a & k_typed_const_bit) {
+		const script_value& c = f.code->constants[value];
+		vk = c.raw_storage_index(); bits = c.unchecked_payload_bits();
+	} else { vk = cs.cells[value].kind; bits = cs.cells[value].bits; }
+	const size_t fk = fv->raw_storage_index();
+	uint8_t rk; int64_t rb;
+	if (!compound_scalar_row(compound_kind_token((ins.a >> k_cell_member_kind_shift) & compound_kind_mask), fk, fv->unchecked_payload_bits(), vk, bits, rk, rb) || rk != fk) return miss();
+	if (fk == script_value::TYPEID_INT) { if (fv->type_info_raw() != ti_int_) return miss(); fv->unchecked_set_int_payload(static_cast<script_int>(rb)); }
+	else { if (fv->type_info_raw() != ti_float_) return miss(); fv->unchecked_set_float_payload(cell_float_of_bits(rb)); }
 	++f.ip;
 	return {};
 }
@@ -10121,35 +10230,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_inst
 			ek = static_cast<uint8_t>(el.raw_storage_index()); eb = el.unchecked_payload_bits();
 		}
 		else return miss();
-		const token_type op = compound_kind_token(p.compound_kind);
-		if (ek == ki && vkind == ki) {
-			const script_int a = static_cast<script_int>(eb), b = static_cast<script_int>(vbits);
-			script_int r; bool ok = true;
-			switch (op) {
-			case token_type::plus: ok = ints::try_add(a, b, r); break;
-			case token_type::minus: ok = ints::try_sub(a, b, r); break;
-			case token_type::star: ok = ints::try_mul(a, b, r); break;
-			case token_type::slash: ok = b != 0 && ints::try_div(a, b, r); break;
-			case token_type::percent: ok = b != 0; if (ok) { r = ints::mod(a, b); } break;
-			default: ok = false; break;
-			}
-			if (!ok) return miss();
-			vbits = static_cast<int64_t>(r);
-		} else {
-			const script_float a = ek == ki ? static_cast<script_float>(static_cast<script_int>(eb)) : cell_float_of_bits(eb);
-			const script_float b = vkind == ki ? static_cast<script_float>(static_cast<script_int>(vbits)) : cell_float_of_bits(vbits);
-			script_float r; bool ok = true;
-			switch (op) {
-			case token_type::plus: r = a + b; break;
-			case token_type::minus: r = a - b; break;
-			case token_type::star: r = a * b; break;
-			case token_type::slash: r = a / b; break;
-			case token_type::percent: r = std::fmod(a, b); break;
-			default: ok = false; break;
-			}
-			if (!ok) return miss();
-			vkind = kf; vbits = cell_bits_of_float(r);
-		}
+		if (!compound_scalar_row(compound_kind_token(p.compound_kind), ek, eb, vkind, vbits, vkind, vbits)) return miss();
 		vstamp = type_info_ptr{vkind == ki ? ti_int_ : ti_float_};   // the kernel's result carries the canonical stamp; an untyped element takes it
 	}
 	switch (node->kind()) {
@@ -16082,18 +16163,50 @@ op_status vm_backend::store_member(frame& f, size_t ins_index, uint32_t node, sc
 	return want_result ? land_member_store_result(f, dereferenced, member, std::move(value)) : op_status{};
 }
 
-// `base.member = operand;` in statement position: the value read as an operand (a slot, a temp, a constant; never a name whose
-// lookup could fail here), the base from its slot or the frame's this-field, the kernel with no result
+// The receiver of a statement-position member store as the general form reads it: `this`, the frame's bare field or the base slot (a
+// prefix member read after the right side)
+op_status vm_backend::member_store_receiver(frame& f, const member_store_proto& p, script_value& out) {
+	if (!(p.base & k_typed_env_bit)) { return local_member_receiver(f, static_cast<member_expr*>(f.code->nodes[p.node].get()), p.base, out); }
+	if (p.base & k_typed_slot_mask) { VM_TRY(exec_load_impl(f, vm_instruction{opcode::op_load, k_invalid_u32, f.code->member_this_symbols.at(p.node), 0})); }
+	else { VM_TRY(exec_this(f, vm_instruction{opcode::op_this, 0, 0, 0})); }
+	out = std::move(stack_.back());
+	stack_.pop_back();
+	return {};
+}
+
+// `base.member op= operand` on the plain field a store row names: the compound kernel's scalar rows on the field where it lives, when
+// the result keeps the field's kind and the field carries that kind's canonical stamp (a typed field converts nothing then; a var field
+// takes the kernel's canonical result); false = the general compound, which converts, dispatches operators and raises by its own rules
+JAI_NOINLINE bool vm_backend::member_compound_row(class_instance* inst, const chunk::member_ic_entry& entry, uint32_t kind, const script_value& v) {
+	if (!entry.scalar_type && entry.scalar_kind != k_member_ic_var_field) return false;
+	if (has_custom_numeric_ops_ || (operator_table_ && operator_table_->any())) return false;
+	script_value* current = inst->field_slot_value(entry.slot);
+	if (!current) return false;
+	const size_t ck = current->raw_storage_index();
+	uint8_t rk; int64_t rb;
+	if (!compound_scalar_row(compound_kind_token(kind), ck, current->unchecked_payload_bits(), v.raw_storage_index(), v.unchecked_payload_bits(), rk, rb) || rk != ck) return false;
+	if (ck == script_value::TYPEID_INT) {
+		if (current->type_info_raw() != ti_int_) return false;
+		current->unchecked_set_int_payload(static_cast<script_int>(rb));
+	} else {
+		if (current->type_info_raw() != ti_float_) return false;
+		current->unchecked_set_float_payload(cell_float_of_bits(rb));
+	}
+	return true;
+}
+
+// `base.member = operand;` or `base.member op= operand;` in statement position: the value read as an operand (a slot, a temp, a constant;
+// never a name whose lookup could fail here), the base from its slot or the frame's this-field, the kernel with no result
 op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins) {
 	const member_store_proto& p = f.code->member_store_protos[ins.a];
 	// the field-store cache's scalar and var rows over the slot itself: no receiver or value copy before the write
-	std::vector<chunk::member_ic_entry>* store_rows = p.value.const_index == k_invalid_u32 ? member_ic_rows(*f.code) : nullptr;
+	std::vector<chunk::member_ic_entry>* store_rows = p.compound || p.value.const_index == k_invalid_u32 ? member_ic_rows(*f.code) : nullptr;
 	if (store_rows && store_rows->size() >= f.code->code.size()) {
 		const auto* member = static_cast<const member_expr*>(f.code->nodes[p.node].get());
-		const script_value* base = (p.base & k_typed_env_bit) ? frame_this_field(f, p.base & k_typed_slot_mask)
+		const script_value* base = (p.base & k_typed_env_bit) ? ((p.base & k_typed_slot_mask) ? frame_this_field(f, p.base & k_typed_slot_mask) : current_this(f))
 		                         : member->object && member->object->get_type() == node_type::member_expr ? nullptr : frame_slot(f, p.base);
 		if (base && base->raw_storage_index() == script_value::TYPEID_REFERENCE && !lane_deref_silent(*base)) { base = nullptr; }
-		const script_value* vp = base ? fast_operand(f, p.value, f.ip * 3) : nullptr;
+		const script_value* vp = !base ? nullptr : p.value.const_index != k_invalid_u32 ? &f.code->constants[p.value.const_index] : fast_operand(f, p.value, f.ip * 3);
 		if (vp && vp->raw_storage_index() != script_value::TYPEID_REFERENCE) {
 			const script_value& objd = base->deref();
 			if (objd.raw_storage_index() == script_value::TYPEID_OBJECT) {
@@ -16104,7 +16217,9 @@ op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins)
 					class_definition* cd = inst->get_class_definition();
 					if (cd && entry.cd == cd && entry.epoch == cd->method_epoch() && entry.slot != UINT32_MAX) {
 						const size_t vi = vp->raw_storage_index();
-						if (entry.scalar_type && vi == entry.scalar_kind) {
+						if (p.compound) {
+							if (member_compound_row(inst, entry, p.kind, *vp)) return {};
+						} else if (entry.scalar_type && vi == entry.scalar_kind) {
 							if (script_value* current = inst->field_slot_value(entry.slot); current && current->raw_storage_index() == vi) {
 								if (vi == script_value::TYPEID_INT) { current->unchecked_set_int_payload(vp->unchecked_as_int()); }
 								else if (vi == script_value::TYPEID_FLOAT) { current->unchecked_set_float_payload(vp->unchecked_as_float()); }
@@ -16123,6 +16238,7 @@ op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins)
 			}
 		}
 	}
+	if (p.compound) { return member_compound_general(f, ins, p); }
 	script_value value = make_null();
 	if (p.value.const_index != k_invalid_u32) {
 		push_constant(*f.code, p.value.const_index);   // a literal takes the engine as CONST gives it (the chunk's template carries none)
@@ -16134,15 +16250,53 @@ op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins)
 		if (p.release) [[unlikely]] { kill_frame_slot(f, p.value.slot); }
 	}
 	script_value receiver = make_null();
-	if (p.base & k_typed_env_bit) {
-		VM_TRY(exec_load_impl(f, vm_instruction{opcode::op_load, k_invalid_u32, f.code->member_this_symbols.at(p.node), 0}));
-		receiver = std::move(stack_.back());
-		stack_.pop_back();
-	} else {
-		VM_TRY(local_member_receiver(f, static_cast<member_expr*>(f.code->nodes[p.node].get()), p.base, receiver));
-	}
+	VM_TRY(member_store_receiver(f, p, receiver));
 	if (is_unwinding_) { return {}; }
 	return store_member(f, static_cast<size_t>(&ins - f.code->code.data()), p.node, std::move(receiver), std::move(value), false);
+}
+
+// The compound as the general form runs it, in its order: the right side (C++17), the receiver, the member read (a getter runs here),
+// then op_member_compound's kernel over them, its result dropped
+JAI_NOINLINE op_status vm_backend::member_compound_general(frame& f, const vm_instruction& ins, const member_store_proto& p) {
+	auto* member = static_cast<member_expr*>(f.code->nodes[p.node].get());
+	const size_t ip = static_cast<size_t>(&ins - f.code->code.data());
+	const size_t depth = stack_.size();
+	if (p.value.const_index != k_invalid_u32) { push_constant(*f.code, p.value.const_index); }
+	else {
+		VM_TRY(exec_load_impl(f, vm_instruction{opcode::op_load, p.value.slot, p.value.symbol, 0}));
+		if (p.release) [[unlikely]] { kill_frame_slot(f, p.value.slot); }
+	}
+	script_value value = std::move(stack_.back());
+	stack_.pop_back();
+	script_value receiver = make_null();
+	VM_TRY(member_store_receiver(f, p, receiver));
+	if (is_unwinding_) { return {}; }
+	script_value current = make_null();
+	{
+		// the store row answers the read too: it names a plain field no accessor of the chain covers (the compiler kept the names a read
+		// resolves ahead of a field off this op)
+		const script_value* cell = nullptr;
+		const script_value& objd = receiver.deref();
+		std::vector<chunk::member_ic_entry>* rows = objd.raw_storage_index() == script_value::TYPEID_OBJECT ? member_ic_rows(*f.code) : nullptr;
+		if (rows && rows->size() > ip) {
+			const auto& holder = objd.unchecked_object_handle();
+			if (holder && holder->is_instance()) {
+				auto* inst = holder->unchecked_instance();
+				const auto& entry = (*rows)[ip];
+				if (entry.cd && entry.cd == inst->get_class_definition() && entry.epoch == entry.cd->method_epoch() && entry.slot != UINT32_MAX) { cell = inst->field_slot_value(entry.slot); }
+			}
+		}
+		if (cell) { current = *cell; }
+		else { VM_TRY(member_access_value(f, receiver, member, current)); }
+	}
+	if (is_unwinding_) { return {}; }
+	stack_.push_back(std::move(receiver));
+	stack_.push_back(std::move(current));
+	stack_.push_back(std::move(value));
+	VM_TRY(exec_member_compound(f, vm_instruction{opcode::op_member_compound, p.node, 0, p.kind | compound_flag_no_result}, ip));
+	assert(!switch_to_);
+	while (stack_.size() > depth) { stack_.pop_back(); }
+	return {};
 }
 
 
@@ -16574,7 +16728,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, 
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	const uint32_t kind = ins.c & compound_kind_mask;
 	const bool old_result = (ins.c & compound_flag_old_result) != 0;
-	const bool result_needed = assignment_result_used(f);   // member compounds carry no result flag; the POP after a statement does
+	const bool result_needed = !(ins.c & compound_flag_no_result) && assignment_result_used(f);   // a stack-form member compound carries no result flag; the POP after a statement does
 
 	if (ins.c & compound_flag_value_first) {
 		// [rhs, receiver, current] / [rhs, current] -> the target-first layout below

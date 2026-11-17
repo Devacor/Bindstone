@@ -675,6 +675,7 @@ void vm_compiler::emit_compound_store(uint32_t symbol_index, uint32_t slot, uint
 				cp.rhs.slot = code.back().a;
 				cp.rhs.symbol = code.back().b;
 				cp.rhs.load_flags = code.back().c;
+				cp.rhs.direct = cp.rhs.slot != k_invalid_u32 && cp.rhs.load_flags == 0;
 				if (chunk_->ident_nodes.size() == code.size()) { cp.rhs.ident_node = chunk_->ident_nodes.back(); }
 				fuse = true;
 			}
@@ -3062,7 +3063,7 @@ JAI_NOINLINE bool vm_compiler::compile_no_result_expression(const expression_ptr
 			} else {
 				emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident),
 				     compound_kind_for(assign->op.type) | compound_flag_no_result |
-				         (ident->global_qualified ? compound_flag_global_only : 0u),
+				         (ident->global_qualified ? compound_flag_global_only : 0u) | (ident->names_value_decl ? 0u : compound_flag_ref_alias),
 				     assign->value.get(), assign->static_operand_class);
 			}
 			return true;
@@ -3124,37 +3125,59 @@ JAI_NOINLINE bool vm_compiler::compile_no_result_expression(const expression_ptr
 				}
 			}
 		}
-		// Statement-position member store onto a frame-slot base (`p.x = v;`, `t.posx = px;`, `p.life = p.life - 1;`): the value an
-		// operand (an identifier, a literal, or the temp a computed value lands in, as the subscript store takes it), one op, no push,
-		// no result; a static member, an environment base or a value shape the temps decline keep the general form
-		if (assign->op.type == token_type::equal && assign->target->get_type() == node_type::member_expr && callable_.active) {
+		// Statement-position member store or compound onto a frame-slot base (`p.x = v;`, `t.posx = px;`, `p.life -= 1;`, `p.pos.x += v * dt;`,
+		// `++p.n;`), onto `this` (`this.x += v;`) or, in a loop, onto an element of an array of instances (`ps[i].hp -= d;`, the element in an
+		// alias temp): the value an operand (an identifier, a literal, or the temp a computed value lands in, as the subscript store takes
+		// it), one op, no push, no result; a static member, an environment base or, for a plain store, a value shape the temps decline keep
+		// the general form. A compound's value is evaluated first (C++17): the op reads its operand ahead of the target, and any other value
+		// lands in a temp; an element's subscript runs between, so only a literal or a private local stays an operand there
+		if (assign->target->get_type() == node_type::member_expr && callable_.active) {
 			auto* member = static_cast<member_expr*>(assign->target.get());
-			uint32_t base_slot = member->is_static ? k_invalid_u32 : member_base_slot(member);
-			const uint32_t this_base = member->is_static || base_slot != k_invalid_u32 ? 0 : member_this_base(member);
+			const bool compound = assign->op.type != token_type::equal;
+			// a compound reads its target: a name the read resolves ahead of a field (same_as, a shared_ptr method) keeps the general form
+			const bool plain_target = !member->is_static && !(compound && (member->place_read || member->member == "same_as" || !builtins_ || builtins_->shared_ptr_methods.count(member->member_id)));
+			uint32_t base_slot = plain_target ? member_base_slot(member) : k_invalid_u32;
+			const uint32_t this_base = !plain_target || base_slot != k_invalid_u32 ? 0 : member_this_base(member);
 			if (this_base) { base_slot = this_base | k_typed_env_bit; }
-			if (base_slot != k_invalid_u32 && (this_base || base_slot < k_typed_slot_mask)) {
+			const bool this_self = plain_target && base_slot == k_invalid_u32 && typed_lowering_ && temps_active_ && chunk_->is_function_body &&
+			                       !member->null_safe && member->object && member->object->get_type() == node_type::this_expr;
+			if (this_self) { base_slot = k_typed_env_bit; }
+			const bool elem_base = plain_target && base_slot == k_invalid_u32 && elem_member_operand(member);
+			if (elem_base || (base_slot != k_invalid_u32 && (this_base || this_self || base_slot < k_typed_slot_mask))) {
 				const expression_ptr& value = assign->value;
 				member_store_proto mp; mp.node = add_node(assign->target); mp.base = base_slot;
+				if (compound) {
+					mp.compound = true;
+					mp.kind = compound_kind_for(assign->op.type) | (assign->incdec_desugar ? compound_flag_incdec : 0u) | (assign->postfix_old_result ? compound_flag_old_result : 0u);
+				}
 				if (this_base) { chunk_->member_this_symbols[mp.node] = add_symbol(static_cast<const identifier_expr*>(member->object.get())->symbol_id); }
 				note_component_base(mp.node, member);
 				bool value_operand = false;
-				if (value->get_type() == node_type::literal_expr || (value->get_type() == node_type::identifier_expr && identifier_slot_operand(static_cast<identifier_expr*>(value.get())) != k_invalid_u32)) {
+				auto stack_value_into_temp = [&]() {
+					const uint32_t t0 = static_cast<uint32_t>(temp_next_);
+					++temp_next_;
+					if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+					mp.value = fused_operand{}; mp.value.slot = t0; mp.value.symbol = temp_symbol_index(); mp.value.direct = true;
+					value_operand = true;
+					return t0;
+				};
+				if (value->get_type() == node_type::literal_expr || (value->get_type() == node_type::identifier_expr && identifier_slot_operand(static_cast<identifier_expr*>(value.get())) != k_invalid_u32 &&
+				                                                     (!elem_base || private_local(value.get())))) {
 					mp.value = make_fused_operand(value); value_operand = true;
 				} else if (fusable_index_expr(value.get()) && compile_subscript_into_temp(value, operand_expect(static_cast<const binary_expr*>(value.get())), mp.value)) {
 					value_operand = true;
 				} else if (unary_temp_operand(value.get()) || math_temp_operand(value.get()) != detail::math_fn::none || member_temp_operand(value.get())) {
 					compile_value_into_temp(value, 0xFF, mp.value); value_operand = true;
-				} else if (value->get_type() == node_type::binary_expr && binary_lands_fused(static_cast<binary_expr*>(value.get()))) {
+				} else if (const bool lands = value->get_type() == node_type::binary_expr && binary_lands_fused(static_cast<binary_expr*>(value.get())); lands || compound || elem_base) {
 					compile_expression(value);
 					vm_instruction& last = chunk_->code.back();
-					if (last.op == opcode::op_binary_fused) {
-						const uint32_t t0 = static_cast<uint32_t>(temp_next_);
-						++temp_next_;
-						if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
-						last.op = opcode::op_binary_fused_temp; last.b = t0;
+					if (lands && last.op == opcode::op_binary_fused) {
+						last.op = opcode::op_binary_fused_temp; last.b = stack_value_into_temp();
 						note_landing(value.get());
-						mp.value = fused_operand{}; mp.value.slot = t0; mp.value.symbol = temp_symbol_index(); mp.value.direct = true;
-						value_operand = true;
+					} else if (compound || elem_base) {
+						deref_ahead_of(value.get(), member);
+						emit(opcode::op_call_temp, stack_value_into_temp());
+						note_landing(value.get());
 					} else if (this_base) {
 						compile_expression(member->object);
 						emit(opcode::op_set_member, mp.node);
@@ -3168,6 +3191,12 @@ JAI_NOINLINE bool vm_compiler::compile_no_result_expression(const expression_ptr
 					}
 				}
 				if (value_operand) {
+					if (elem_base) {
+						// the subscript as the member read evaluates it, the element into the alias temp the op reads its base from
+						compile_expression(member->object);
+						mp.base = elem_alias_temp();
+						emit(opcode::op_call_temp, mp.base);
+					}
 					chunk_->member_store_protos.push_back(mp);
 					emit(opcode::op_set_member_value, static_cast<uint32_t>(chunk_->member_store_protos.size() - 1));
 					return true;
@@ -5007,8 +5036,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				op.kind = ir::mov; op.a = st.a; op.writes = st.a;
 				if (decl && !from_const && !stamp) { op.tok = 1; }   // `auto x = y;` takes y's declared type: a var source makes x a var
 			} else if (st.op == opcode::op_set_member_value && st.a < c.member_store_protos.size()) {
-				// `base.member = operand;` onto a frame-slot instance (an alias included): a store site whose field the entry or the rebind
-				// resolves; the value a cell or a constant of a scalar kind (an environment value keeps the general form)
+				// `base.member = operand;` or `base.member op= operand;` onto a frame-slot instance (an alias included): a store site whose field
+				// the entry or the rebind resolves; the value a cell or a constant of a scalar kind (an environment value keeps the general form)
 				const member_store_proto& mp = c.member_store_protos[st.a];
 				if (mp.base == k_invalid_u32 || mp.base >= k_typed_slot_mask) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (mp.value.const_index != k_invalid_u32) {
@@ -5019,6 +5048,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					use_slot(mp.value.slot, 0, false, 0, nullptr, ip); op.b = mp.value.slot; slot_read(op, mp.value.slot);
 				} else { refuse(chunk::cell_refusal_representation, ip); break; }
 				op.kind = ir::store; op.container = mp.base; op.member = mp.node;
+				if (mp.compound) {   // the read, the operation and the store at the site
+					if (mp.value.const_index != k_invalid_u32 && mp.value.const_index > k_cell_member_value_mask) { refuse(chunk::cell_refusal_representation, ip); break; }
+					op.tok = static_cast<uint8_t>((mp.kind & compound_kind_mask) + 1);
+				}
 			} else if (st.op == opcode::op_kill_slot && st.a < k_typed_slot_mask && kills_only_cells(st)) {
 				// a body local's or a temp's end: inside the block its cell holds a scalar, an alias or nothing (an instance never lands in a
 				// cell), and a guard's snapshot is the container its name holds (the block runs no user code that could rebind it), so
@@ -5092,7 +5125,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				op = ir_op{}; op.kind = ir::skip;   // the landing is the pair's second instruction
 				++ip;
 			} else if (st.op == opcode::op_index_fused && st.a < c.fused_index_protos.size() && ip + 1 < back && code[ip + 1].op == opcode::op_compound_store
-			           && (code[ip + 1].c & compound_kind_mask) == compound_plus && (code[ip + 1].c & compound_flag_no_result) && !(code[ip + 1].c & (compound_flag_global_only | compound_flag_old_result))
+			           && (code[ip + 1].c & compound_kind_mask) == compound_plus && (code[ip + 1].c & compound_flag_no_result) && !(code[ip + 1].c & (compound_flag_global_only | compound_flag_old_result | compound_flag_ref_alias))
 			           && code[ip + 1].b != k_invalid_u32 && code[ip + 1].b < k_typed_slot_mask) {
 				// `s += a[i]` on a slot the checker could not class: the element read lands in a statement temp of the element's own kind
 				// (a string is borrowed), and the compound is the append with run-time kinds; the pair's origin is the read (a miss at
@@ -5160,10 +5193,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				op.container = fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
 			} else if (st.op == opcode::op_index_compound_operand && st.a < c.fused_index_protos.size()) {
 				// `a[i] op= v;`: the store's site with the read-modify-write of the element (int and float buffers in place; any other kind,
-				// an overflow or a zero divisor misses onto the general compound)
+				// an overflow, a zero divisor or a shift out of range misses onto the general compound)
 				const fused_index_proto& fp = c.fused_index_protos[st.a];
 				if (!array_target(fp)) { refuse(chunk::cell_refusal_representation, ip); break; }
-				if (!fp.compound || compound_kind_bitwise(fp.compound_kind) || (fp.store_value.const_index == k_invalid_u32 && fp.store_value.symbol == k_invalid_u32)) { refuse(chunk::cell_refusal_translation, ip); break; }
+				if (!fp.compound || (fp.store_value.const_index == k_invalid_u32 && fp.store_value.symbol == k_invalid_u32)) { refuse(chunk::cell_refusal_translation, ip); break; }
 				uint32_t sink;
 				const uint32_t vslot = store_value_slot(fp, ip);
 				if (fp.store_value.const_index == k_invalid_u32 && fp.store_value.slot == k_invalid_u32 && vslot == k_invalid_u32) { refuse(chunk::cell_refusal_representation, ip); break; }
@@ -5376,6 +5409,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const compound_fused_proto& cp = c.compound_fused_protos[st.a];
 				if (cp.slot >= k_typed_slot_mask && cp.slot != k_invalid_u32) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (cp.kind_flags & compound_flag_global_only) { refuse(chunk::cell_refusal_effect, ip); break; }   // `::name`
+				if (cp.kind_flags & compound_flag_ref_alias) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (!(cp.kind_flags & compound_flag_no_result) || cp.rhs_proto != k_invalid_u32 || (cp.kind_flags & compound_flag_old_result)) { refuse(chunk::cell_refusal_translation, ip); break; }
 				const uint8_t tok = static_cast<uint8_t>(compound_kind_token(cp.kind_flags));
 				if (!value(op, cp.rhs, 0, static_cast<uint32_t>(ip * 3), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
@@ -6155,7 +6189,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				break;
 			}
 			case ir::store: {
-				if (op.member != k_invalid_u32) { append(vm_instruction{opcode::op_c_mstore, (op.b & k_typed_const_bit) ? op.b : current[op.b], op.member, op.container}, ip); break; }   // a member store site
+				if (op.member != k_invalid_u32) { append(vm_instruction{opcode::op_c_mstore, ((op.b & k_typed_const_bit) ? op.b : current[op.b]) | (op.tok ? k_cell_member_compound_bit | (static_cast<uint32_t>(op.tok - 1) << k_cell_member_kind_shift) : 0u), op.member, op.container}, ip); break; }   // a member store site (op.tok: a compound's kind + 1)
 				// the copy reads environment values through synthetic-slot operands: a clone of the proto (and of its index binaries)
 				// with each environment value replaced; the original proto stays the general form's
 				// the copy's proto: a clone whose index and value operands name cells (the container stays the general operand,
@@ -8752,6 +8786,7 @@ JAI_NOINLINE void vm_compiler::compile_assignment(const std::shared_ptr<assignme
 			uint32_t kind = compound_kind_for_token(expr->op.type);
 			if (!as_statement) kind |= compound_flag_result_needed;
 			if (ident->global_qualified) kind |= compound_flag_global_only;
+			if (!ident->names_value_decl) kind |= compound_flag_ref_alias;
 			emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident), kind, expr->value.get(), expr->static_operand_class);
 		}
 		return;

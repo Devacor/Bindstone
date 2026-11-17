@@ -544,6 +544,29 @@ public:
             check_eq(std::string("VALUE 9:9:int"), step(t, use_int, "use after reloading back"));
         });
 
+        test("proof_field_compound_follows_a_retyped_field", [this, step, arm, make_twins]() {
+            // a compound on a field, in a function of another unit than the class (its chunk outlives the reload), in a loop and
+            // outside one, direct and through a reference: the lane's guards miss when the field's type, accessor or class moves
+            auto t = make_twins();
+            const std::string v1 =
+                "class R { int f = 1; float g = 0.5; }\n"
+                "R r = R();";
+            const std::string unit =
+                "string spin(R& o, int n) { var& rf = o.f; for (int i = 0; i < n; ++i) { o.f += 2; o.g *= 2.0; rf += 1; } o.f -= 1; ++o.f; rf = rf + 1; return to_string(o.f) + \":\" + to_string(o.g) + \":\" + type_of(o.f); }\n"
+                "string plain(R& o, int n) { for (int i = 0; i < n; ++i) { o.f += 2; } o.f -= 1; ++o.f; return to_string(o.f) + \":\" + to_string(o.g); }\n"
+                "spin(r, 3) + \"/\" + plain(r, 2)";
+            const std::string use = "spin(r, 2) + \"/\" + plain(r, 1)";
+            step(t, v1, "the class");
+            arm(t, unit, use);
+            check_eq(std::string("VALUE 77:65536.0:int/79:65536.0"), step(t, use, "armed"));
+            step(t, "class R { float f = 0.0; float g = 0.5; }", "reload int -> float");
+            check_eq(std::string("VALUE 86.0:262144.0:float/88.0:262144.0"), step(t, use, "the compound follows the float field"));
+            step(t, "class R { string f = \"\"; float g = 0.5; }", "reload float -> string");
+            check_eq(std::string("ERROR Cannot apply '+=' to string and int"), step(t, use, "a string field takes no number"));
+            step(t, "class R { int f = 0; float g = 0.5; int _set_f(int v) { g = 0.25; return v; } }", "reload string -> int behind a setter");
+            check_eq(std::string("VALUE 0:0.25"), step(t, "r.f = 5; r.g = 1.0; plain(r, 2)", "every store of the compound runs the setter"));
+        });
+
         test("proof_field_retype_float_to_int_truncates", [this, step, arm, make_twins]() {
             auto t = make_twins();
             const std::string v1 =

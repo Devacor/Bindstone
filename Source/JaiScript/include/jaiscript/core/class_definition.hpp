@@ -603,6 +603,7 @@ public:
         class_definition* cls;
         uint64_t name_id;
         const cpp_overloads_by_arity* overloads;   // the name's table, which registration never erases
+        bool host_code = false;   // a host registered the method: a call's time is the host's (detail/host_time.hpp)
         inline checked_result<script_value> operator()(const std::vector<script_value>& raw_args) const;
         // how the overloads taking argc arguments bind argument i (detail::arg_binding bits: 4 = the lvalue, for a C++ T& the
         // call writes back; 8 = the host's)
@@ -1090,6 +1091,7 @@ public:
         native_method plain = nullptr;
         native_lane lane = nullptr;
         std::shared_ptr<const void> state;
+        bool host_code = false;   // a host registered the lane: a call's time is the host's (detail/host_time.hpp)
         bool operator()(void* self, const script_value& receiver, script_value* args, size_t argc, script_value& out) const {
             return plain ? plain(self, receiver, args, argc, out) : lane(state.get(), self, receiver, args, argc, out);
         }

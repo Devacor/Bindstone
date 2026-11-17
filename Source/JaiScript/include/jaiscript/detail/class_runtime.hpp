@@ -12,6 +12,7 @@
 #include <jaiscript/detail/slot_site.hpp>
 #include <jaiscript/detail/arity_diagnostic.hpp>
 #include <jaiscript/detail/host_member.hpp>
+#include <jaiscript/detail/host_time.hpp>
 #include <jaiscript/detail/object_borrow.hpp>
 #include <jaiscript/detail/uniquely_held.hpp>
 #include <jaiscript/detail/truthiness.hpp>
@@ -1577,6 +1578,7 @@ inline checked_result<script_value> class_definition::cpp_method_dispatch::opera
                                             "Class definition no longer exists");
     }
     try {
+    detail::host_call_time timed(*eng, host_code);
     // C++ boundary: escape-boxed locals arrive as CELL references (script
     // parameter binding derefs them; the bound-method mint path does not) —
     // normalize so overload scoring and converters see hoisted-temp values.

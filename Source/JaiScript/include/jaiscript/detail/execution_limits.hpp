@@ -94,10 +94,18 @@ namespace jai::detail {
 		bool step_budget_spent() noexcept { return step_budget != 0 && ++steps_taken > step_budget; }
 		bool step_budget_overrun() const noexcept { return step_budget != 0 && steps_taken > step_budget; }
 
+		// The host call the thread is in (detail/host_time.hpp): the coarse-clock tick it began at, 0 outside one. What this
+		// entry's host calls were credited, in ticks (a parallel region's join reads its workers'). And a tick count added to every
+		// coarse-clock read: a test's clock runs ahead by it.
+		uint64_t host_since = 0;
+		uint64_t host_ticks_credited = 0;
+		uint64_t host_tick_skew = 0;
+
 		void reset_for_execute() noexcept {
 			terminal_error = false;
 			steps_taken = 0;
 			work_units = 0;
+			host_ticks_credited = 0;
 			vm_depth_gate = 0;
 			vm_frame_bytes = 0;
 			memory_used = 0;

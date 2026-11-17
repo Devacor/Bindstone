@@ -20,6 +20,7 @@
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/work_budget.hpp>
+#include <jaiscript/detail/host_time.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
 #include <jaiscript/thread_pool.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>   // jaibite save/load
@@ -1217,6 +1218,7 @@ struct engine::implementation {
     }
     script_value_type staged_host_result_ = script_value_type::jai_null_type;
     engine::host_direct_entry staged_host_direct_;
+    int library_registration_depth_ = 0;
 
     static void literal_unit_paths(const std::vector<declaration_ptr>& decls, std::vector<std::string>& out) {
         for (const auto& d : decls) {
@@ -2637,6 +2639,7 @@ bool engine::overload_dispatch::try_direct(const script_value* args, size_t argc
               want == script_value_type::jai_char_type || want == script_value_type::jai_string_type) || args[i].deref().type() != want) { return false; }
     }
     const script_value pin = only.function;   // a re-registration during the call cannot free the running binding
+    detail::host_call_time timed(*eng, pin.unchecked_function_node().host_code);
     out.emplace(only.direct.invoke(only.direct_target, args, argc));
     return true;
 }
@@ -2679,7 +2682,8 @@ checked_result<script_value> engine::overload_dispatch::operator()(const std::ve
             name_id, args.data(), args.size(), eng);
     }
 
-    const script_function& func = bestMatch.as_function();
+    const script_function_node& func = bestMatch.function_node();
+    detail::host_call_time timed(*eng, func.host_code);
     return func(args);
 }
 
@@ -2951,6 +2955,7 @@ uint64_t engine::compound_operator_id(uint64_t op_id) const noexcept {
 }
 
 void engine::initialize_engine_reference() {
+    detail::engine_access::library_registration own_registrations(*this);
     // Pass the engine reference to the conversion registry
     impl->conversions->set_engine(this);
 
@@ -4440,14 +4445,16 @@ void engine::register_overload_impl(const std::string& name, size_t arity, scrip
         setExists = true;
     }
 
+    script_value registered = script_value::make_function(std::move(func), this);
+    registered.unchecked_function_node().host_code = registering_host_code();
     if (setExists || createSetOnFirst || !paramTypes.empty()) {
         // A set exists (or we want one now): add this overload and (re)install the dispatcher.
-        impl->getOrCreateOverloadSet(name).add_overload_with_types(arity, script_value::make_function(std::move(func), this), paramTypes, direct);
+        impl->getOrCreateOverloadSet(name).add_overload_with_types(arity, std::move(registered), paramTypes, direct);
         impl->updateOverloadedFunction(name, this);
     } else {
         // First registration of a single untyped function: keep it a plain global. A set is built
         // only if/when a second function of this name is registered.
-        impl->global_environment_->define(name, script_value::make_function(std::move(func), this));
+        impl->global_environment_->define(name, std::move(registered));
         ++impl->definition_epoch_;
         impl->functionArities[name] = arity;
     }
@@ -5712,6 +5719,21 @@ bool detail::charge_work(engine& a_engine, size_t a_units) {
     return backend && backend->is_executing() && backend->budget_spent_now();
 }
 
+void detail::credit_host_ticks(execution_backend& a_backend, execution_limits& a_limits, uint64_t a_ticks) noexcept {
+    a_limits.host_ticks_credited += a_ticks;
+    a_backend.extend_execution_deadline(host_ticks_span(a_ticks));
+}
+
+detail::execution_limits* detail::host_call_limits(engine& a_engine, execution_backend*& a_backend) noexcept {
+    a_backend = engine_access::calling_backend(a_engine);
+    if (!a_backend || a_backend->execution_deadline() == std::chrono::steady_clock::time_point{}) { return nullptr; }
+    return &engine_access::execution_limits(a_engine);
+}
+
+void engine::library_registration(int a_step) noexcept { impl->library_registration_depth_ += a_step; }
+
+bool engine::registering_host_code() const noexcept { return impl->library_registration_depth_ == 0; }
+
 error_propagator detail::work_budget_error(engine& a_engine) noexcept {
     return raise_execution_budget(engine_access::execution_limits(a_engine));
 }
@@ -5824,7 +5846,9 @@ script_value engine::make_parallel_host_function_copy(const std::string& name) {
         snapshot->overloads.reserve(setIt->second.overloads.size());
         for (auto overload : setIt->second.overloads) {   // copy, then re-mint the value
             script_function inner = overload.function.as_function();
+            const bool host_code = overload.function.unchecked_function_node().host_code;
             overload.function = script_value::make_function(std::move(inner), this);
+            overload.function.unchecked_function_node().host_code = host_code;
             snapshot->overloads.push_back(std::move(overload));
         }
         uint64_t name_id = impl->string_symbolizer_.intern(name);
@@ -5842,7 +5866,8 @@ script_value engine::make_parallel_host_function_copy(const std::string& name) {
                 return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
                     name_id, args.data(), args.size(), const_cast<engine*>(this));
             }
-            const script_function& func = bestMatch.as_function();
+            const script_function_node& func = bestMatch.function_node();
+            detail::host_call_time timed(*const_cast<engine*>(this), func.host_code);
             return func(args);
         };
         return script_value::make_function(std::move(dispatcher), this);
@@ -5850,7 +5875,9 @@ script_value engine::make_parallel_host_function_copy(const std::string& name) {
     auto existing = impl->global_environment_->get(name);
     if (existing && existing.value().is_function()) {
         script_function inner = existing.value().as_function();
-        return script_value::make_function(std::move(inner), this);
+        script_value copy = script_value::make_function(std::move(inner), this);
+        copy.unchecked_function_node().host_code = existing.value().function_node().host_code;
+        return copy;
     }
     return script_value(std::monostate{}, this);
 }

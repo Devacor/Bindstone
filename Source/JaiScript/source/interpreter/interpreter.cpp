@@ -545,6 +545,7 @@ void interpreter::pop_instance_scope() {
 
 script_value interpreter::execute(const std::vector<declaration_ptr>& declarations, bool textual) {
     arm_native_stack();
+    detail::host_time_pause host_paused(*limits_, *this);   // script the host runs inside one of its calls is the script's time
     std::optional<detail::call_depth_guard> reentry_depth;
     checked_result<void> entry_result;
     if (is_executing()) {
@@ -1035,7 +1036,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
     // no environment probe on any operator path.
     if (op_symbol_id != 0 && operator_table_ && operator_table_->any()) {
         if (const script_value* opFunc = operator_table_->entry(detail::binary_op_slot(expr->op.type))) {
-            const script_function& func = opFunc->as_function();
+            const script_function_node& func = opFunc->function_node();
             std::vector<script_value> args = {left, right};
             auto result = call_value(func, args);
             if (!result) {
@@ -1220,7 +1221,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     // Use cached subscript operator ID
                     script_value method = instance->get_method(subscript_op_id_, false);
                     if (method.is_function()) {
-                        const script_function& func = method.as_function();
+                        const script_function_node& func = method.function_node();
                         std::vector<script_value> args = {left, right};
                         auto result = call_value(func, args);
                         if (!result) {
@@ -1238,7 +1239,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                 // Fall back to the global [] operator (flat table - no env probe)
                 if (operator_table_) {
                     if (const script_value* getMethod = operator_table_->entry(detail::op_slot::subscript)) {
-                        const script_function& func = getMethod->as_function();
+                        const script_function_node& func = getMethod->function_node();
                         std::vector<script_value> args = {left, right};
                         auto result = call_value(func, args);
                         if (!result) {
@@ -1508,7 +1509,7 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
     auto [setter_id, _] = string_symbolizer_->get_setter_id_with_view(member_id);
     script_value setter = target.user_accessor(setter_id);   // a synthesized setter takes the field rung
     if (!setter.is_null() && !setter.is_invalid() && setter.is_function()) {
-        const script_function& func = setter.as_function();
+        const script_function_node& func = setter.function_node();
         std::vector<script_value> args = {objectValue, clone_for_assignment(value)};
         auto result = call_value(func, args);
         if (!result) {
@@ -1633,7 +1634,7 @@ checked_result<void> interpreter::assign_compound_identifier(assignment_expr* ex
             }
             if (operator_table_) {
                 if (const script_value* opFunc = operator_table_->entry(op_slot)) {
-                    const script_function& func = opFunc->as_function();
+                    const script_function_node& func = opFunc->function_node();
                     std::vector<script_value> args = {target.clone(), rightValue};
                     auto result = call_value(func, args);
                     if (!result) {
@@ -2060,7 +2061,7 @@ checked_result<void> interpreter::assign_compound_element(assignment_expr* expr,
     const script_value* compound_op_fn = operator_table_ && !expr->incdec_desugar
         ? operator_table_->entry(detail::binary_op_slot(detail::compound_base(expr->op.type))) : nullptr;
     if (compound_op_fn) {
-        auto result = call_value(compound_op_fn->as_function(), {currentValue, rightValue});
+        auto result = call_value(compound_op_fn->function_node(), {currentValue, rightValue});
         if (!result) {
             return result.error_value();
         }
@@ -3435,7 +3436,7 @@ script_value interpreter::operator_value(const member_target& target, uint64_t i
     return pin ? pin->method_value : script_value::make_invalid(nullptr);
 }
 checked_result<script_value> interpreter::operator_call(const script_value& self, const script_value& method_val, uint64_t id, std::vector<script_value> args) {
-    if (!parallel_worker_) { return call_value(create_bound_method(self, method_val).as_function(), args); }
+    if (!parallel_worker_) { return call_value(create_bound_method(self, method_val).function_node(), args); }
     const detail::parallel_method_pin* pin = worker_operator_pin(self, id);
     if (!pin) { return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), worker_operator_refusal(self, { id })); }
     return detail::call_parallel_operator_pin(*this, *pin, id, self, std::move(args), engine_);
@@ -4060,17 +4061,17 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
     // (the arg expressions outlive the call - they live in this frame).
     // A plain script-function thunk enters this backend's call machinery directly (vm invoke_callee's twin); any other callee
     // runs through its trampoline, which enters engine::calling_backend (a parallel chunk's own backend)
-    const script_function* callee_func = &callee.as_function();
+    const script_function_node* callee_func = &callee.function_node();
     const auto* callee_thunk = callee_func->target<script_callable_thunk>();
     if (callee_thunk && callee_thunk->eng == engine_ && callee_thunk->payload.kind == script_callable::kind_type::overload_set &&
         callee_thunk->payload.overloads()) {
         // the member these arguments select (KEEP BYTE-PARALLEL with vm_backend::invoke_callee)
         auto picked = detail::select_overload_member(*callee_thunk->payload.overloads(), arguments.data(), arguments.size(), engine_);
         if (!picked) { return picked.error_value(); }
-        callee_func = &picked.value()->as_function();
+        callee_func = &picked.value()->function_node();
         callee_thunk = callee_func->target<script_callable_thunk>();
     }
-    const script_function& func = *callee_func;
+    const script_function_node& func = *callee_func;
     const bool direct_script_call = callee_thunk && callee_thunk->eng == engine_ &&
         callee_thunk->payload.kind == script_callable::kind_type::function && callee_thunk->payload.fn;
     detail::call_site_context ctx{&expr->arguments, &arguments};
@@ -4083,7 +4084,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
         } else if (arguments.size() == 1 && engine_->sleep_callee(&func)) {
             callOutcome.emplace(engine_->sleep_builtin(arguments[0]));   // the builtin in place (vm op_sleep's twin)
         } else if (const engine::format_literal_row* literal = expr->literal_format_call() ? engine_->format_literal_for(&func) : nullptr) {
-            callOutcome.emplace(call_value(literal->literal.unchecked_as_function(), arguments));   // its format string (vm op_format_call's twin)
+            callOutcome.emplace(call_value(literal->literal.unchecked_function_node(), arguments));   // its format string (vm op_format_call's twin)
         } else {
             callOutcome.emplace(call_value(func, arguments));
         }
@@ -5320,7 +5321,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
 template<bool Replaying>
 checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_point* rs) {
     // A new expression is a call boundary too: preserve its source expressions for reference parameters.
-    auto invoke_constructor = [&](const script_function& function, const std::vector<script_value>& args) {
+    auto invoke_constructor = [&](const script_function_node& function, const std::vector<script_value>& args) {
         detail::call_site_context ctx{&expr->arguments, &args};
         struct restore_context {
             const detail::call_site_context*& slot;
@@ -5499,7 +5500,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
             }
 
             script_value constructorFunc = std::move(ctor_result.value());
-            const script_function& func = constructorFunc.as_function();
+            const script_function_node& func = constructorFunc.function_node();
             auto result = call_value(func, {});  // Call with no args
             if (!result) {
                 return result.error_value();
@@ -5544,7 +5545,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
         }
 
         script_value constructorFunc = std::move(ctor_result.value());
-        const script_function& func = constructorFunc.as_function();
+        const script_function_node& func = constructorFunc.function_node();
         auto result = invoke_constructor(func, args);
         if (!result) {
             return result.error_value();
@@ -5580,7 +5581,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
     auto ctor_result = environment_->get(className, *string_symbolizer_);
     if (ctor_result && ctor_result.value().is_function()) {
         script_value constructorFunc = std::move(ctor_result.value());
-        const script_function& func = constructorFunc.as_function();
+        const script_function_node& func = constructorFunc.function_node();
         auto result = invoke_constructor(func, args);
         if (!result) {
             // Function returned error - propagate it up
@@ -8337,7 +8338,7 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
             auto picked = detail::select_overload_member(*payload.overloads(), args.data(), args.size(), engine_);
             if (!picked) { return picked.error_value(); }
             const script_callable* member = detail::script_callable_of(*picked.value(), engine_);
-            return member && member->fn ? call_function(*member->fn, args) : call_value(picked.value()->as_function(), args);
+            return member && member->fn ? call_function(*member->fn, args) : call_value(picked.value()->function_node(), args);
         }
         case script_callable::kind_type::method: {
             auto method_env = method_environment(payload.definition_env(), *payload.this_obj(), payload.cls().get());
@@ -8935,6 +8936,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         return detail::raise_native_stack();
     }
 
+    detail::host_time_pause host_paused(*limits_, *this);   // a script function the host calls inside one of its calls
     if (execution_limit_exhausted()) [[unlikely]] {
         return execution_limit_failure();
     }
@@ -9797,6 +9799,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         arm_execution_deadline();
         limits_->reset_for_execute();
     }
+    detail::host_time_pause host_paused(*limits_, *this);
 
     // Check before activating or moving any coroutine state. A first resume is
     // counted by call_function; continuation replay below owns its own guard.

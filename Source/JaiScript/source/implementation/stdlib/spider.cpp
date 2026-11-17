@@ -482,6 +482,7 @@ namespace spider_detail {
 } // namespace spider_detail
 
 	void register_spider(engine& eng_ref) {
+		detail::engine_access::library_registration own_registrations(eng_ref);
 		using namespace spider_detail;
 		using svt = script_value_type;
 		engine* eng = &eng_ref;

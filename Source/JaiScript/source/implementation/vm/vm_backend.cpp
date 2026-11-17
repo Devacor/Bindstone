@@ -1949,7 +1949,7 @@ script_value vm_backend::operator_value(const member_target& target, uint64_t id
 	return pin ? pin->method_value : script_value::make_invalid(nullptr);
 }
 checked_result<script_value> vm_backend::operator_call(const script_value& self, const script_value& method_val, uint64_t id, std::vector<script_value> args) {
-	if (!parallel_worker_) { return call_value(make_bound_method(self, method_val).as_function(), args); }
+	if (!parallel_worker_) { return call_value(make_bound_method(self, method_val).function_node(), args); }
 	const detail::parallel_method_pin* pin = worker_operator_pin(self, id);
 	if (!pin) { return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), worker_operator_refusal(self, { id })); }
 	return detail::call_parallel_operator_pin(*this, *pin, id, self, std::move(args), engine_);
@@ -2706,7 +2706,7 @@ checked_result<script_value> vm_backend::binary_general(token_type op, const scr
 	// test + array read, no environment probe.
 	if (operator_table_ && operator_table_->any()) {
 		if (const script_value* opFunc = operator_table_->entry(detail::binary_op_slot(op))) {
-			const script_function& func = opFunc->as_function();
+			const script_function_node& func = opFunc->function_node();
 			std::vector<script_value> args = {left, right};
 			auto result = call_value(func, args);
 			if (!result) {
@@ -3725,7 +3725,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 			}
 			if (operator_table_) {
 				if (const script_value* opFunc = operator_table_->entry(op_slot)) {
-					const script_function& func = opFunc->as_function();
+					const script_function_node& func = opFunc->function_node();
 					std::vector<script_value> args = {target.clone(), rightValue};
 					auto result = call_value(func, args);
 					if (!result) {
@@ -6090,7 +6090,7 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 			auto instance = instance_result.value();
 			script_value method = instance->get_method(subscript_op_id_, false);
 			if (method.is_function()) {
-				const script_function& func = method.as_function();
+				const script_function_node& func = method.function_node();
 				std::vector<script_value> args = {left, right};
 				auto result = call_value(func, args);
 				if (!result) {
@@ -6106,7 +6106,7 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 		// Fall back to the global [] operator (flat table - no env probe)
 		if (operator_table_) {
 			if (const script_value* getMethod = operator_table_->entry(detail::op_slot::subscript)) {
-				const script_function& func = getMethod->as_function();
+				const script_function_node& func = getMethod->function_node();
 				std::vector<script_value> args = {left, right};
 				auto result = call_value(func, args);
 				if (!result) {
@@ -6204,7 +6204,7 @@ op_status vm_backend::exec_index_compound(frame& f, const uint32_t compound) {
 	// step numbers only
 	const script_value* opFunc = operator_table_ && !incdec ? operator_table_->entry(detail::binary_op_slot(op)) : nullptr;
 	if (opFunc) {
-		auto result = call_value(opFunc->as_function(), {currentValue, rightValue});
+		auto result = call_value(opFunc->function_node(), {currentValue, rightValue});
 		if (!result) {
 			return raise_from(result);
 		}
@@ -13050,7 +13050,13 @@ JAI_NOINLINE bool vm_backend::call_host_site(const call_site& site, size_t argc,
 	struct running { uint32_t& n; explicit running(uint32_t& c) : n(c) { ++n; } ~running() { --n; } } run{host_site_calls_};
 	std::optional<checked_result<script_value>> called;
 	try {
-		JAI_CENSUS(call_native_lane); called.emplace(site.ic_host_invoke(site.ic_host_target, args, argc));
+		JAI_CENSUS(call_native_lane);
+		if (budget_active_ && site.ic_host_owner->host_code) {   // host code under an armed wall-clock budget (detail/host_time.hpp)
+			detail::host_call_time timed(limits_, this);
+			called.emplace(site.ic_host_invoke(site.ic_host_target, args, argc));
+		} else {
+			called.emplace(site.ic_host_invoke(site.ic_host_target, args, argc));
+		}
 	} catch (...) {
 		st = call_threw(base);   // a throwing entry unwinds as the general call's guarded_native_call does
 		return true;
@@ -13138,7 +13144,9 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 				script_value result = make_null();
 				bool taken = false;
 				try {
-					JAI_CENSUS(call_native_lane); taken = (*static_cast<const class_definition::native_entry*>(pc.native_entry))(self, receiver, stack_.data() + slice_base, argc, result);
+					const auto& entry = *static_cast<const class_definition::native_entry*>(pc.native_entry);
+					detail::host_call_time timed(budget_active_ && entry.host_code ? limits_ : nullptr, this);
+					JAI_CENSUS(call_native_lane); taken = entry(self, receiver, stack_.data() + slice_base, argc, result);
 				} catch (...) {
 					return call_threw(slice_base);
 				}
@@ -13768,7 +13776,7 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 		script_value member = *picked.value();
 		callee = std::move(member);
 	}
-	const script_function& func = callee.as_function();
+	const script_function_node& func = callee.function_node();
 	// Own-trampoline fast path: dispatch straight into the call machinery (Squirrel's
 	// OP_CALL→StartCall shape), skipping std::function + backend lookup + virtual hop
 	const auto* thunk = func.target<script_callable_thunk>();
@@ -13865,8 +13873,13 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 	return {};
 }
 
+JAI_NOINLINE checked_result<script_value> vm_backend::call_timed_host_value(const script_function_node& f, const std::vector<script_value>& args) {
+	detail::host_call_time timed(limits_, this);
+	return engine_->active_run_pins() ? detail::call_function_value(f, args) : f(args);
+}
+
 // An opaque (host) callable with the arguments as they are: the pending call-site context arms the callee's bind
-op_status vm_backend::invoke_native(frame& f, const script_function& func, std::vector<script_value>& arguments, const call_site& site) {
+op_status vm_backend::invoke_native(frame& f, const script_function_node& func, std::vector<script_value>& arguments, const call_site& site) {
 	std::optional<checked_result<script_value>> callOutcome;
 	try {
 		pending_call_site saved_pending = pending_site_ctx_;
@@ -16079,7 +16092,7 @@ op_status vm_backend::assign_member(frame& f, const script_value& object_value, 
 	auto [setter_id, setter_view] = symbolizer_->get_setter_id_with_view(member_id);
 	script_value setter = target.user_accessor(setter_id);   // a synthesized setter takes the field rung
 	if (!setter.is_null() && !setter.is_invalid() && setter.is_function()) {
-		const script_function& func = setter.as_function();
+		const script_function_node& func = setter.function_node();
 		std::vector<script_value> args = {object_value, clone_for_assignment(value)};
 		auto result = call_value(func, args);
 		if (!result) {
@@ -17733,7 +17746,9 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 							script_value out = make_null();
 							bool taken = false;
 							try {
-								JAI_CENSUS(call_native_lane); taken = (*static_cast<const class_definition::native_entry*>(nat_entry))(self, objd, stack_.data() + args_base, argc, out);
+								const auto& entry = *static_cast<const class_definition::native_entry*>(nat_entry);
+								detail::host_call_time timed(budget_active_ && entry.host_code ? limits_ : nullptr, this);
+								JAI_CENSUS(call_native_lane); taken = entry(self, objd, stack_.data() + args_base, argc, out);
 							} catch (...) {
 								return call_threw(args_base - 1);
 							}
@@ -17791,7 +17806,9 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 							script_value out = make_null();
 							bool taken = false;
 							try {
-								JAI_CENSUS(call_native_lane); taken = (*static_cast<const class_definition::native_entry*>(nat_entry))(self, objd, stack_.data() + args_base, argc, out);
+								const auto& entry = *static_cast<const class_definition::native_entry*>(nat_entry);
+								detail::host_call_time timed(budget_active_ && entry.host_code ? limits_ : nullptr, this);
+								JAI_CENSUS(call_native_lane); taken = entry(self, objd, stack_.data() + args_base, argc, out);
 							} catch (...) {
 								return call_threw(args_base - 1);
 							}
@@ -18322,7 +18339,7 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 				}
 			}
 			script_value constructorFunc = ctor_cell->deref();
-			const script_function& func = constructorFunc.as_function();
+			const script_function_node& func = constructorFunc.function_node();
 			auto result = call_value(func, {});
 			if (!result) {
 				return raise_from(result);
@@ -18369,7 +18386,7 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 			}
 		}
 		script_value constructorFunc = ctor_cell->deref();
-		const script_function& func = constructorFunc.as_function();
+		const script_function_node& func = constructorFunc.function_node();
 		// Typed ctor value: in-loop body entry with the shared_ptr type stamped onto
 		// the completed frame's object result (the exact post-call set_type_info below)
 		const auto* ctor_thunk = func.target<script_callable_thunk>();
@@ -18464,7 +18481,7 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 	auto ctor_result = environment_->get(className, *symbolizer_);
 	if (ctor_result && ctor_result.value().is_function()) {
 		script_value constructorFunc = std::move(ctor_result.value());
-		const script_function& func = constructorFunc.as_function();
+		const script_function_node& func = constructorFunc.function_node();
 		// Typed ctor value: construction protocol native, ctor body IN-LOOP (workers
 		// stay opaque - their rules live in execute_callable; a null definition_env
 		// with ctor asts is a shape the opaque arm defines, fall to it)
@@ -20750,6 +20767,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 checked_result<void> vm_backend::run(frame& entry) {
 	frame* fp = &entry;
 	const size_t records_base = call_records_top_;
+	detail::host_time_pause host_paused(*limits_, *this);   // script the host runs inside one of its calls is the script's time
 	if (debug_hook_) [[unlikely]] { debug_last_frame_ = nullptr; }   // a host-entered frame at ip 0 is a new frame, whatever record holds it
 	for (;;) {
 		try {
@@ -21896,7 +21914,7 @@ checked_result<script_value> vm_backend::execute_callable_from(const script_call
 			auto picked = detail::select_overload_member(*payload.overloads(), args.data(), args.size(), engine_);
 			if (!picked) { return picked.error_value(); }
 			const script_callable* member = detail::script_callable_of(*picked.value(), engine_);
-			return member && member->fn ? call_script_function(*member->fn, args) : call_value(picked.value()->as_function(), args);
+			return member && member->fn ? call_script_function(*member->fn, args) : call_value(picked.value()->function_node(), args);
 		}
 		case script_callable::kind_type::method: {
 			if (!payload.this_obj()) {

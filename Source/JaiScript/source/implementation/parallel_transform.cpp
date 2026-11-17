@@ -3080,6 +3080,9 @@ namespace {
 		slot.limits.terminal_error = false;
 		slot.limits.memory_used = 0;
 		slot.limits.memory_raises = 0;
+		slot.limits.host_since = 0;
+		slot.limits.host_ticks_credited = 0;
+		slot.limits.host_tick_skew = outer.host_tick_skew;
 		slot.limits.memory_cap = outer.memory_cap;
 		slot.limits.memory_cap_symbol_id = outer.memory_cap_symbol_id;
 		slot.limits.memory_limit = outer.memory_limit;
@@ -6492,6 +6495,13 @@ struct region_run {
 		}
 		if (rolled_up) {
 			engine_access::execution_limits(eng).memory_charge_deferred(rolled_up);
+		}
+		// The region's wall time is the caller's; the host time every worker spent is not the script's. The least any worker
+		// was credited is credited to the caller, so its entry still counts the longest any worker ran script
+		uint64_t host_ticks = contexts.empty() ? 0 : UINT64_MAX;
+		for (const auto& ctx : contexts) { host_ticks = std::min(host_ticks, ctx->limits.host_ticks_credited); }
+		if (host_ticks) {
+			if (execution_backend* caller = engine_access::get_execution_backend(eng)) { detail::credit_host_ticks(*caller, engine_access::execution_limits(eng), host_ticks); }
 		}
 		for (const auto& ctx : contexts) {
 			if (ctx->error && (!winner || ctx->error->iteration < winner->iteration)) {

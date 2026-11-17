@@ -3,6 +3,9 @@
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/core/script_run.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/core/execution_backend.hpp>
+#include <jaiscript/detail/host_time.hpp>
 #include "../case_table.hpp"
 #include <chrono>
 #include <thread>
@@ -11,6 +14,55 @@ using namespace jai;
 using namespace jai::foundry;
 
 namespace jai::foundry::tests {
+
+namespace {
+	// Time passing on the calling thread without a wait: the running entry's deadline nears by a_seconds, and the coarse
+	// clock that times host calls runs ahead by the same
+	void pass_time(engine& a_engine, double a_seconds) {
+		const auto span = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(a_seconds));
+		if (execution_backend* backend = detail::engine_access::calling_backend(a_engine)) { backend->extend_execution_deadline(-span); }
+		detail::engine_access::execution_limits(a_engine).host_tick_skew += static_cast<uint64_t>(span.count() / detail::k_host_tick_nanoseconds);
+	}
+
+	struct slow_loader {
+		engine* eng = nullptr;
+		script_int loaded = 0;
+		slow_loader() = default;
+		explicit slow_loader(engine* a_engine) : eng(a_engine) {}
+		slow_loader(double a_seconds, const slow_loader& a_like) : eng(a_like.eng) { pass_time(*eng, a_seconds); }
+		void load(double a_seconds) { pass_time(*eng, a_seconds); ++loaded; }
+		script_int size() const { pass_time(*eng, 5000.0); return loaded; }
+		void resize(script_int a_size) { pass_time(*eng, 5000.0); loaded = a_size; }
+	};
+
+	// Host code in every bound shape, each call passing the seconds it is given (5000 where it takes none), and
+	// engine_work: the same passing of time registered as the engine's own, the way a builtin's work counts
+	void bind_slow_host(engine& a_engine) {
+		engine* eng = &a_engine;
+		a_engine.add_function("host_work", [eng](double a_seconds) { pass_time(*eng, a_seconds); });
+		a_engine.add_function("host_work_long", [eng]() { pass_time(*eng, 5000.0); });
+		a_engine.add_variadic_function("host_work_any", [eng](const std::vector<script_value>& a_args) -> checked_result<script_value> {
+			pass_time(*eng, a_args.empty() ? 5000.0 : a_args[0].deref().as_float());
+			return script_value(std::monostate{}, eng);
+		});
+		a_engine.add_function("host_calls", [eng](double a_before, const std::string& a_callback, double a_after) {
+			pass_time(*eng, a_before);
+			auto called = eng->get_variable(a_callback).as_function()({});
+			pass_time(*eng, a_after);
+			return called.has_value();
+		});
+		dynamic_binder<slow_loader>(a_engine, "Loader")
+			.constructor<double, const slow_loader&>()
+			.method("load", &slow_loader::load)
+			.property("size", &slow_loader::size, &slow_loader::resize)
+			.static_method("warm", [eng](double a_seconds) { pass_time(*eng, a_seconds); })
+			.build();
+		a_engine.add_function("+", [](slow_loader& a_loader, const slow_loader& a_other) { pass_time(*a_loader.eng, 5000.0); return a_loader.loaded + a_other.loaded; });
+		a_engine.add_global("loader", std::make_shared<slow_loader>(eng));
+		detail::engine_access::library_registration engine_own(a_engine);
+		a_engine.add_function("engine_work", [eng](double a_seconds) { pass_time(*eng, a_seconds); });
+	}
+}
 
 class execution_budget_tests : public suite {
 public:
@@ -46,7 +98,10 @@ public:
 				const std::string be = use_vm ? " (vm)" : " (interpreter)";
 				auto e = jai::foundry::make_default_engine();
 				e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
-				e->add_function("nap", []() { std::this_thread::sleep_for(std::chrono::milliseconds(3)); });
+				{
+					detail::engine_access::library_registration engine_own(*e);   // a host's nap would not count (detail/host_time.hpp)
+					e->add_function("nap", []() { std::this_thread::sleep_for(std::chrono::milliseconds(3)); });
+				}
 				e->execution_budget(1000.0);
 				e->execute("function run(int n) -> int { nap(); int acc = 0; for (int i = 0; i < n; i++) { acc += 1; } return acc; }\n"
 				           "function idle() -> int { return 1; }");
@@ -235,16 +290,19 @@ public:
 			)").as_int());
 		});
 
-		// An entry that outran its budget in work no check sampled (a host function, with too few back-edges after it to reach a
-		// sample) hands the host the budget's error, never a success: an execute, a jaibite, a function the host calls, a
-		// coroutine the host steps and a suspendable run's slice alike
+		// An entry that outran its budget in work no check sampled (one call of the engine's own code, with too few back-edges
+		// after it to reach a sample) hands the host the budget's error, never a success: an execute, a jaibite, a function the
+		// host calls, a coroutine the host steps and a suspendable run's slice alike
 		test("an_entry_that_outran_its_budget_never_returns_success", [this]() {
 			const std::string spent = "Script execution budget exceeded - raise engine::execution_budget or break up the work";
 			for (bool use_vm : {false, true}) {
 				const std::string be = use_vm ? " (vm)" : " (interpreter)";
 				auto e = jai::foundry::make_default_engine();
 				e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
-				e->add_function("nap", []() { std::this_thread::sleep_for(std::chrono::milliseconds(3)); });
+				{
+					detail::engine_access::library_registration engine_own(*e);
+					e->add_function("nap", []() { std::this_thread::sleep_for(std::chrono::milliseconds(3)); });
+				}
 				e->execution_budget(1000.0);
 				e->execute("function quick() -> int { nap(); return 1; }\n"
 				           "coroutine int steps() { nap(); yield 1; return 2; }\n"
@@ -284,6 +342,92 @@ public:
 			try { e->execute("var out = parallel_transform(a, probe); out.size()"); } catch (const std::exception& error) { raised = error.what(); }
 			check_true(raised.find("Script execution budget exceeded - raise engine::execution_budget or break up the work") != std::string::npos, raised);
 			e->execution_budget(jai::foundry::k_test_budget_seconds);
+			check_eq((int64_t)4, e->execute("2 + 2").as_int());
+		});
+
+		// ===== host time (detail/host_time.hpp) =====
+
+		// The clock counts the script's work. Each row runs alone under a 1000 s budget: time a host's bound code takes (5000 s
+		// a call) leaves the budget whole in every bound shape, the same time in the engine's own code spends it, and what the
+		// script spends between host calls still adds up
+		test("time_in_host_code_is_not_the_scripts", [this]() {
+			struct host_time_case { const char* code; bool within; };
+			const host_time_case rows[] = {
+				{"host_work(5000.0);", true},
+				{"host_work_long();", true},
+				{"host_work_any(5000.0);", true},
+				{"var made = Loader(5000.0, loader);", true},
+				{"loader.load(5000.0);", true},
+				{"var size = loader.size;", true},
+				{"loader.size = 3;", true},
+				{"Loader::warm(5000.0);", true},
+				{"var more = loader + loader;", true},
+				{"try { host_work(5000.0); } catch (e) { }", true},
+				{"engine_work(5000.0);", false},
+				{"host_work(5000.0); engine_work(900.0);", true},
+				{"host_work(5000.0); engine_work(1100.0);", false},
+				{"for (int i = 0; i < 300; i++) { host_work(0.0); engine_work(5.0); }", false},
+				{"for (int i = 0; i < 300; i++) { host_work(50.0); loader.load(50.0); engine_work(2.0); }", true},
+				// script the host calls back is the script's; the host's time on either side of it is credited once
+				{"host_calls(5000.0, \"idle\", 5000.0);", true},
+				{"host_calls(5000.0, \"idle\", 5000.0); engine_work(900.0);", true},
+				{"host_calls(5000.0, \"idle\", 5000.0); engine_work(1100.0);", false},
+				{"host_calls(5000.0, \"hosted\", 5000.0); engine_work(900.0);", true},
+				{"host_calls(5000.0, \"working\", 5000.0); engine_work(500.0);", true},
+				{"host_calls(5000.0, \"working\", 5000.0); engine_work(700.0);", false},
+				{"host_calls(5000.0, \"runaway\", 5000.0);", false},
+			};
+			const std::string spent = "Script execution budget exceeded - raise engine::execution_budget or break up the work";
+			for (bool use_vm : {false, true}) {
+				const std::string be = use_vm ? " (vm)" : " (interpreter)";
+				auto e = jai::foundry::make_default_engine();
+				e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
+				bind_slow_host(*e);
+				e->execute("function idle() { for (int i = 0; i < 3000; i++) { } }\n"
+				           "function hosted() { host_work(5000.0); loader.load(5000.0); idle(); }\n"
+				           "function working() { engine_work(400.0); idle(); }\n"
+				           "function runaway() { engine_work(2000.0); idle(); }");
+				e->execution_budget(1000.0);
+				check_each(rows, [&](const host_time_case& row) {
+					std::string raised = "returned normally";
+					try { e->execute(row.code); } catch (const std::exception& error) { raised = error.what(); }
+					check_eq(row.within ? std::string("returned normally") : spent, raised, row.code + be);
+				});
+			}
+		});
+
+		// What a host call is credited is what it took, and nothing is credited without a wall-clock budget to move
+		test("host_time_is_credited_only_against_an_armed_budget", [this]() {
+			for (bool use_vm : {false, true}) {
+				const std::string be = use_vm ? " (vm)" : " (interpreter)";
+				auto e = jai::foundry::make_default_engine();
+				e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
+				bind_slow_host(*e);
+				const auto credited_seconds = [&](const char* a_code) {
+					e->execute(a_code);
+					return std::chrono::duration<double>(detail::host_ticks_span(detail::engine_access::execution_limits(*e).host_ticks_credited)).count();
+				};
+				e->execution_budget(1000.0);
+				check_true(std::abs(credited_seconds("host_work(5000.0);") - 5000.0) < 1.0, "a function" + be);
+				check_true(std::abs(credited_seconds("loader.load(5000.0); loader.size = 2;") - 10000.0) < 1.0, "a method and a setter" + be);
+				check_true(credited_seconds("int n = 0; for (int i = 0; i < 3000; i++) { n = i; }") < 1.0, "script alone" + be);
+				e->execution_budget(0.0);
+				check_eq(0.0, credited_seconds("host_work(5000.0); loader.load(5000.0);"), "no budget armed" + be);
+				e->execution_step_budget(100000);
+				check_eq(0.0, credited_seconds("host_work(5000.0); loader.load(5000.0);"), "a step budget alone" + be);
+			}
+		});
+
+		// A parallel region's workers each credit their own deadline, and the region's caller is credited the least any of them was
+		test("a_parallel_body_in_host_code_is_not_counted", [this]() {
+			auto e = make_engine();
+			bind_slow_host(*e);
+			e->parallel_thread_count(4);
+			e->execute("int slow(int x) { host_work(5000.0); for (int i = 0; i < 3000; i++) { } return x + 1; } int spin(int x) { engine_work(5000.0); for (int i = 0; i < 3000; i++) { } return x; } var a = array<int>(64, 1);");
+			e->execution_budget(1000.0);
+			check_eq((int64_t)64, e->execute("var out = parallel_transform(a, slow); out.size()").as_int());
+			check_true(detail::engine_access::execution_limits(*e).host_ticks_credited > 0, "the caller's entry is credited");
+			check_throws([&]() { e->execute("var out = parallel_transform(a, spin); out.size()"); });
 			check_eq((int64_t)4, e->execute("2 + 2").as_int());
 		});
 

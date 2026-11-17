@@ -249,6 +249,7 @@ namespace jai {
     // A function value's payload: the callable and the engine that made it (callbacks, signals and conversions run against it)
     struct script_function_node : script_function {
         engine* owner = nullptr;
+        bool host_code = false;   // registered by a host: a call's time is the host's, not the script's (detail/host_time.hpp)
         script_function_node(script_function&& a_function, engine* a_owner) : script_function(std::move(a_function)), owner(a_owner) {}
     };
 

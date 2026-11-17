@@ -1628,6 +1628,10 @@ namespace jai {
         script_run launch_run(std::unique_ptr<detail::run_record> run);   // start's first switch into the run (script_run.cpp)
         void cancel_suspended_runs() noexcept;   // the engine's teardown: every run still suspended is cancelled
         void register_permission_builtins();
+        // The engine's own registrations (its core, the stdlib) run inside a library registration; a callable registered
+        // outside one is host code, whose time the execution budget does not count (detail/host_time.hpp)
+        void library_registration(int a_step) noexcept;
+        bool registering_host_code() const noexcept;
         void set_permissions(const permission_set& permissions, bool enabled);
         void check_permission_mutation() const;
         bool permissions_enabled(const permission_set& permissions) const noexcept;

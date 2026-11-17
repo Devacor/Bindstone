@@ -32,7 +32,8 @@ namespace jai {
         void sleep_for(std::chrono::nanoseconds duration);
 
         // Moves the running execute's deadline later by work done for the script that is not the script's own (the engine
-        // starting its worker pool; a host's slow service call); nothing when no budget is armed
+        // starting its worker pool; a sleep provider's wait); nothing when no budget is armed. A bound host function never
+        // calls it: the time its call takes is credited already (detail/host_time.hpp)
         void extend_execution_deadline(std::chrono::nanoseconds by);
 
     private:

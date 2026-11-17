@@ -911,6 +911,7 @@ namespace web_text_detail {
 } // namespace web_text_detail
 
 	void register_web(engine& eng_ref) {
+		detail::engine_access::library_registration own_registrations(eng_ref);
 		using namespace web_text_detail;
 		using svt = script_value_type;
 		engine* eng = &eng_ref;

@@ -188,6 +188,8 @@ namespace Workbench {
 		};
 		inspectorPanel->onParallaxPreview = [this](bool a_preview) { parallaxPreview(a_preview); };
 		inspectorPanel->onSelectNode = [this](const std::shared_ptr<MV::Scene::Node>& a_node) { select(a_node); };
+		inspectorPanel->onRemoveComponent = [this](const std::shared_ptr<MV::Scene::Component>& a_component) { removeComponent(a_component); };
+		inspectorPanel->onAddComponent = [this](const MV::Point<int>& a_screenPoint) { menuBar->openContext(a_screenPoint, addComponentItems()); };
 		treePanel->onNodeDroppedOutside = [this](const std::shared_ptr<MV::Scene::Node>& a_node, const MV::Point<int>& a_screenPoint) {
 			inspectorPanel->dropNode(a_node, a_screenPoint);
 		};
@@ -412,6 +414,174 @@ namespace Workbench {
 		if (treePanel) {
 			treePanel->refresh();
 		}
+		return true;
+	}
+
+	namespace {
+		// A name no node beside it has: node, node_2, node_3.
+		std::string unusedChildId(const std::shared_ptr<MV::Scene::Node>& a_parent, const std::string& a_base) {
+			auto taken = [&a_parent](const std::string& a_id) {
+				return std::any_of(a_parent->begin(), a_parent->end(), [&a_id](const std::shared_ptr<MV::Scene::Node>& a_child) { return a_child->id() == a_id; });
+			};
+			std::string result = a_base;
+			for (int number = 2; taken(result); ++number) {
+				result = a_base + "_" + std::to_string(number);
+			}
+			return result;
+		}
+
+		struct AttachableComponent {
+			std::string typeName;
+			std::function<std::shared_ptr<MV::Scene::Component>(const std::shared_ptr<MV::Scene::Node>&, Managers&, MV::TapDevice&)> attach;
+		};
+
+		// Each is made as the scene loader makes it, with the services a loaded one would be given, and sized so
+		// that it can be seen and pressed straight away.
+		std::vector<AttachableComponent> attachableComponentTypes() {
+			return {
+				{ "Sprite", [](const std::shared_ptr<MV::Scene::Node>& a_node, Managers&, MV::TapDevice&) -> std::shared_ptr<MV::Scene::Component> {
+					return a_node->attach<MV::Scene::Sprite>()->bounds(MV::size(100.0f, 100.0f));
+				} },
+				{ "Text", [](const std::shared_ptr<MV::Scene::Node>& a_node, Managers& a_managers, MV::TapDevice&) -> std::shared_ptr<MV::Scene::Component> {
+					auto text = a_node->attach<MV::Scene::Text>(a_managers.textLibrary, std::string("default"));
+					text->bounds({ MV::Point<>(), MV::size(200.0f, 40.0f) });
+					text->text("Text");
+					return text.self();
+				} },
+				{ "Clickable", [](const std::shared_ptr<MV::Scene::Node>& a_node, Managers&, MV::TapDevice& a_mouse) -> std::shared_ptr<MV::Scene::Component> {
+					return a_node->attach<MV::Scene::Clickable>(a_mouse)->bounds(MV::size(100.0f, 50.0f));
+				} },
+				{ "Button", [](const std::shared_ptr<MV::Scene::Node>& a_node, Managers&, MV::TapDevice& a_mouse) -> std::shared_ptr<MV::Scene::Component> {
+					return a_node->attach<MV::Scene::Button>(a_mouse)->bounds(MV::size(100.0f, 50.0f));
+				} },
+				{ "FocusGroup", [](const std::shared_ptr<MV::Scene::Node>& a_node, Managers&, MV::TapDevice& a_mouse) -> std::shared_ptr<MV::Scene::Component> {
+					return a_node->attach<MV::Scene::FocusGroup>(a_mouse).self();
+				} },
+				{ "Stencil", [](const std::shared_ptr<MV::Scene::Node>& a_node, Managers&, MV::TapDevice&) -> std::shared_ptr<MV::Scene::Component> {
+					return a_node->attach<MV::Scene::Stencil>()->bounds(MV::size(100.0f, 100.0f));
+				} },
+				{ "Grid", [](const std::shared_ptr<MV::Scene::Node>& a_node, Managers&, MV::TapDevice&) -> std::shared_ptr<MV::Scene::Component> {
+					return a_node->attach<MV::Scene::Grid>().self();
+				} },
+				{ "Parallax", [](const std::shared_ptr<MV::Scene::Node>& a_node, Managers&, MV::TapDevice&) -> std::shared_ptr<MV::Scene::Component> {
+					auto parallax = a_node->attach<MV::Scene::Parallax>();
+					parallax->authoring(true);
+					return parallax.self();
+				} } };
+		}
+
+		// "class MV::Scene::Button" -> "Button"
+		std::string componentTypeName(const std::shared_ptr<MV::Scene::Component>& a_component) {
+			std::string name = typeid(*a_component).name();
+			auto lastColon = name.rfind("::");
+			if (lastColon != std::string::npos) {
+				return name.substr(lastColon + 2);
+			}
+			auto lastSpace = name.rfind(' ');
+			return lastSpace == std::string::npos ? name : name.substr(lastSpace + 1);
+		}
+
+		std::vector<std::shared_ptr<MV::Scene::Component>> componentsOf(const std::shared_ptr<MV::Scene::Node>& a_node) {
+			auto components = a_node->property_value<std::vector<std::shared_ptr<MV::Scene::Component>>>("childComponents");
+			return components ? *components : std::vector<std::shared_ptr<MV::Scene::Component>>();
+		}
+
+		// attach puts a component last: taking each off and putting it back in turn leaves them in a_order
+		void putComponentsInOrder(const std::shared_ptr<MV::Scene::Node>& a_node, const std::vector<std::shared_ptr<MV::Scene::Component>>& a_order) {
+			for (auto&& component : a_order) {
+				a_node->detach(component);
+				a_node->attach(component);
+			}
+		}
+	}
+
+	std::shared_ptr<MV::Scene::Node> App::createChildNode() {
+		auto parent = selectedNode && inScene(selectedNode) ? selectedNode : sceneRoot;
+		auto node = parent->make(unusedChildId(parent, "node"));
+		std::weak_ptr<MV::Scene::Node> weakParent = parent;
+		history.record("create " + nodeLabel(node),
+			[this, parent, node]() {
+				parent->add(node, false);
+				select(node);
+			},
+			[this, parent, node]() {
+				parent->remove(node, false);
+				select(parent == sceneRoot ? nullptr : parent);
+			});
+		if (treePanel) {
+			treePanel->refresh();
+		}
+		select(node);
+		return node;
+	}
+
+	std::vector<std::string> App::attachableComponents() const {
+		std::vector<std::string> result;
+		for (auto&& type : attachableComponentTypes()) {
+			result.push_back(type.typeName);
+		}
+		return result;
+	}
+
+	std::vector<MenuItem> App::addComponentItems() {
+		std::vector<MenuItem> result;
+		for (auto&& typeName : attachableComponents()) {
+			result.push_back({ typeName, "", [this, typeName]() { attachComponent(typeName); } });
+		}
+		return result;
+	}
+
+	std::shared_ptr<MV::Scene::Component> App::attachComponent(const std::string& a_typeName) {
+		auto node = selectedNode;
+		if (!node || !inScene(node)) {
+			return nullptr;
+		}
+		for (auto&& type : attachableComponentTypes()) {
+			if (type.typeName != a_typeName) {
+				continue;
+			}
+			try {
+				auto component = type.attach(node, managers, mouse);
+				history.record("add " + a_typeName + " to " + nodeLabel(node),
+					[node, component]() { node->attach(component); },
+					[this, node, component]() {
+						if (gizmos->editedComponent() == component) {
+							gizmos->editComponent(nullptr);
+						}
+						node->detach(component);
+					});
+				select(node);
+				return component;
+			} catch (const std::exception& a_error) {
+				reportError("adding " + a_typeName + " failed (" + nodeLabel(node) + "): " + a_error.what());
+				return nullptr;
+			}
+		}
+		return nullptr;
+	}
+
+	bool App::removeComponent(const std::shared_ptr<MV::Scene::Component>& a_component) {
+		auto node = a_component ? a_component->owner() : nullptr;
+		if (!node || !inScene(node)) {
+			return false;
+		}
+		auto order = componentsOf(node);
+		if (std::find(order.begin(), order.end(), a_component) == order.end()) {
+			return false;
+		}
+		std::string typeName = componentTypeName(a_component);
+		auto remove = [this, node, a_component]() {
+			if (gizmos->editedComponent() == a_component) {
+				gizmos->editComponent(nullptr);
+			}
+			node->detach(a_component);
+		};
+		remove();
+		history.record("remove " + typeName + " from " + nodeLabel(node), remove, [node, a_component, order]() {
+			node->attach(a_component);
+			putComponentsInOrder(node, order);
+		});
+		select(selectedNode);
 		return true;
 	}
 
@@ -747,7 +917,8 @@ namespace Workbench {
 			{ "Redo", "Ctrl+Y", [this]() { history.redo(); }, false, [this, named]() { return named("Redo", history.redoLabel()); }, [this]() { return history.canRedo(); } },
 			{ "Duplicate", "Ctrl+D", [this]() { duplicateSelected(); }, true, {}, [this]() { return selectionIsRemovable(); } },
 			{ "Delete", "Del", [this]() { deleteSelected(); }, false, {}, [this]() { return selectionIsRemovable(); } },
-			{ "History", "", [this]() { sceneToolbar->historyShown(!sceneToolbar->historyShown()); }, true, [this]() { return std::string(sceneToolbar->historyShown() ? "Hide History" : "Show History"); } } });
+			{ "History", "", [this]() { sceneToolbar->historyShown(!sceneToolbar->historyShown()); }, true, [this]() { return std::string(sceneToolbar->historyShown() ? "Hide History" : "Show History"); } },
+			{ "Create Child Node", "", [this]() { createChildNode(); }, true } });
 		menuBar->add("Settings", {
 			{ "Editor Settings", "", [this]() { showSettings(); } } });
 		std::vector<MenuItem> windowItems;
@@ -1128,7 +1299,8 @@ namespace Workbench {
 
 	std::vector<MenuItem> App::nodeContextItems() {
 		return {
-			{ "Frame", "F", [this]() { frameSelectionInViewport(); }, false, {}, [this]() { return static_cast<bool>(selectedNode); } },
+			{ "Create Child", "", [this]() { createChildNode(); } },
+			{ "Frame", "F", [this]() { frameSelectionInViewport(); }, true, {}, [this]() { return static_cast<bool>(selectedNode); } },
 			{ "Duplicate", "Ctrl+D", [this]() { duplicateSelected(); }, true, {}, [this]() { return selectionIsRemovable(); } },
 			{ "Delete", "Del", [this]() { deleteSelected(); }, false, {}, [this]() { return selectionIsRemovable(); } } };
 	}

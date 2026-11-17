@@ -1234,6 +1234,91 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		}
 	}
 
+	// Authoring: a new node, and components added to it and taken off, each one undo step
+	{
+		auto& mouse = *a_managers.services.get<MV::TapDevice>();
+		auto& inspector = a_app.inspector();
+		auto& menus = a_app.menus();
+		auto click = [&](const MV::Point<int>& a_at) {
+			for (bool down : { false, true, false }) {
+				mouse.simulate(a_at, down);
+				a_app.runFrames(2);
+			}
+			mouse.stopSimulating();
+		};
+		auto childCount = [](const std::shared_ptr<MV::Scene::Node>& a_node) {
+			return static_cast<size_t>(std::distance(a_node->begin(), a_node->end()));
+		};
+		auto componentNames = [](const std::shared_ptr<MV::Scene::Node>& a_node) {
+			std::string result;
+			if (auto components = a_node->property_value<std::vector<std::shared_ptr<MV::Scene::Component>>>("childComponents")) {
+				for (auto&& component : *components) {
+					std::string name = typeid(*component).name();
+					result += name.substr(name.rfind(':') + 1) + " ";
+				}
+			}
+			return result;
+		};
+		auto scene = a_app.scene();
+		a_app.select(nullptr);
+		a_app.runFrames(2);
+		size_t topLevel = childCount(scene);
+		auto node = a_app.createChildNode();
+		expect(node && node->parent() == scene && a_app.selected() == node && childCount(scene) == topLevel + 1, "with nothing selected a new node goes under the scene and is selected");
+		if (node) {
+			auto inner = a_app.createChildNode();
+			expect(inner && inner->parent() == node && a_app.selected() == inner, "with a node selected the new one goes under it");
+			auto beside = (a_app.select(node), a_app.createChildNode());
+			expect(beside && inner && beside->id() != inner->id(), "and is named as no node beside it is: " + (beside ? beside->id() : std::string()));
+			pressWithControl(SDLK_z);
+			pressWithControl(SDLK_z);
+			expect(childCount(node) == 0 && a_app.selected() == node, "undo takes each new node away and selects its parent");
+			a_app.runFrames(3);
+
+			auto add = inspector.addComponentScreenPoint();
+			expect(add.has_value(), "the inspector has an Add Component button under a node's components");
+			if (add) {
+				click(*add);
+				auto kinds = a_app.attachableComponents();
+				expect(menus.contextOpen() && menus.rowCount() == static_cast<int>(kinds.size()) && menus.rowLabel(0) == "Sprite", "it lists the kinds of component");
+				if (menus.contextOpen()) {
+					click(menus.rowScreenPoint(0));
+					a_app.runFrames(3);
+				}
+				expect(componentNames(node) == "Sprite ", "choosing one adds it to the node: " + componentNames(node));
+				auto remove = inspector.removeComponentScreenPoint("Sprite");
+				expect(remove.has_value(), "each component's header has a remove button");
+				if (remove) {
+					click(*remove);
+					a_app.runFrames(3);
+					expect(componentNames(node).empty(), "which takes the component off the node");
+					pressWithControl(SDLK_z);
+					expect(componentNames(node) == "Sprite ", "undo puts it back");
+					pressWithControl(SDLK_z);
+					expect(componentNames(node).empty(), "and undo again takes back the adding");
+					pressWithControl(SDLK_y);
+					expect(componentNames(node) == "Sprite ", "which redo does once more");
+				}
+				for (auto&& kind : kinds) {
+					if (kind != "Sprite") {
+						expect(static_cast<bool>(a_app.attachComponent(kind)), "a " + kind + " can be added");
+					}
+				}
+				a_app.runFrames(4);
+				std::string all = componentNames(node);
+				expect(all == "Sprite Text Clickable Button FocusGroup Stencil Grid Parallax ", "every kind is on the node in the order it was added: " + all);
+				expect(a_app.removeComponent(node->component<MV::Scene::Clickable>(true, false).self()), "one from the middle comes off");
+				expect(componentNames(node) == "Sprite Text Button FocusGroup Stencil Grid Parallax ", "leaving the rest: " + componentNames(node));
+				pressWithControl(SDLK_z);
+				a_app.runFrames(3);
+				expect(componentNames(node) == all, "and undo puts it back where it was, not last: " + componentNames(node));
+			}
+			a_app.select(node);
+			expect(a_app.deleteSelected() && childCount(scene) == topLevel, "the node deletes with everything on it");
+			a_app.runFrames(2);
+		}
+	}
+
 	// A game controller moves the focus, presses what holds it and lets it go
 	{
 		auto& mouse = *a_managers.services.get<MV::TapDevice>();
@@ -1357,10 +1442,10 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			if (row) {
 				rightClick(*row);
 				expect(menus.contextOpen() && a_app.selected() == rowNode, "a right press on a Hierarchy row selects it and opens a menu");
-				expect(menus.rowCount() == 3 && menus.rowLabel(0) == "Frame" && menus.rowLabel(1) == "Duplicate" && menus.rowLabel(2) == "Delete", "with Frame, Duplicate and Delete");
-				if (menus.contextOpen() && menus.rowCount() == 3) {
+				expect(menus.rowCount() == 4 && menus.rowLabel(0) == "Create Child" && menus.rowLabel(1) == "Frame" && menus.rowLabel(2) == "Duplicate" && menus.rowLabel(3) == "Delete", "with Create Child, Frame, Duplicate and Delete");
+				if (menus.contextOpen() && menus.rowCount() == 4) {
 					size_t before = childCount(scene);
-					click(menus.rowScreenPoint(1));
+					click(menus.rowScreenPoint(2));
 					expect(!menus.isOpen() && childCount(scene) == before + 1, "Duplicate from the menu duplicates the node");
 					pressWithControl(SDLK_z);
 					expect(childCount(scene) == before, "and undoes as one step");
@@ -1371,7 +1456,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			auto inScene = rowNode->screenBounds().centerPoint();
 			expect(a_app.gizmoLayer().pointerOverScene(inScene), "the node is in view in the Scene panel");
 			rightClick(inScene);
-			expect(menus.contextOpen() && static_cast<bool>(a_app.selected()) && menus.rowCount() == 3 && menus.rowLabel(2) == "Delete", "a right press in the scene selects what is under it and opens the same menu");
+			expect(menus.contextOpen() && static_cast<bool>(a_app.selected()) && menus.rowCount() == 4 && menus.rowLabel(3) == "Delete", "a right press in the scene selects what is under it and opens the same menu");
 			key(SDLK_ESCAPE);
 			expect(!menus.isOpen(), "Escape closes it");
 			MV::Point<int> dragged(inScene.x + 40, inScene.y);

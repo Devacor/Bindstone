@@ -834,11 +834,26 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   position, scale or rotation. That is why a group's place on screen is not read from it. `Slider` reads its
   area from it with the handle as a child, so putting the transforms in would change the slider; it is left as it is.
 
+## Increment 42: creating nodes, adding and removing components (2026-11-17)
+- `App::createChildNode`: a new empty node under the selected one, or under the scene's root with nothing
+  selected, named as no node beside it is (node, node_2), and selected. It is in the Edit menu (Create Child Node)
+  and at the top of the right-press menu of a Hierarchy row and of the scene (Create Child).
+- The inspector ends with an Add Component button that lists the kinds: Sprite, Text, Clickable, Button,
+  FocusGroup, Stencil, Grid, Parallax. `App::attachComponent(kind)` makes one on the selected node as the scene
+  loader would, sized so it can be seen and pressed at once.
+- Each component's header has a remove button. `App::removeComponent` takes it off its node; undo puts it back in
+  the place it had among the node's components, not last.
+- Each of the three is one undo step, and the inspector and Hierarchy follow.
+- A FocusGroup's `kind` is a choice row (Window, Tabs).
+- The self-test makes nodes, adds a Sprite through the button and its list, removes it from its header, undoes
+  and redoes, adds every kind, removes one from the middle and checks undo restores the order.
+- Not yet: creating a node from a prefab or a primitive with art already on it, reordering components, Scroller,
+  Spine, Emitter and the other kinds, and a shortcut key for Create Child Node.
+
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.
-- Authoring verbs still only in Source/Editor: create node, attach/detach
-  component, save selection as BindSnap, texture picker, anchor editor — old-editor deletion
-  awaits that parity (Dev sign-off).
+- Authoring verbs still only in Source/Editor: save selection as BindSnap, and the component kinds Add Component
+  does not list — old-editor deletion awaits that parity (Dev sign-off).
 - Gizmo residue (increment 13): aspect-lock not ported; inspector refreshes at gesture end;
   selection rubber band deferred.
 - Bindstone_Common.vcxitems is shared with the Android client project — Workbench compiles

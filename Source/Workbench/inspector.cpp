@@ -1,5 +1,6 @@
 #include "inspector.h"
 #include "gizmos.h"
+#include "MV/Render/Scene/focusGroup.h"
 #include <sstream>
 #include <typeindex>
 
@@ -78,6 +79,8 @@ namespace Workbench {
 		closeTexturePicker();
 		nodeDropZones.clear();
 		labelledRows.clear();
+		removeButtons.clear();
+		addComponentButton.reset();
 		rowIndent = 0.0f;
 		contentNode->clear();
 		if (!rowGrid) {
@@ -97,6 +100,17 @@ namespace Workbench {
 				for (auto&& component : *components) {
 					buildComponentSection(component);
 				}
+			}
+			if (onAddComponent) {
+				auto row = contentNode->make(MV::guid("addComponent_"));
+				std::weak_ptr<MV::Scene::Node> weakRow = row;
+				auto button = makeButton(row, *services, *theme, "add", MV::size(panelWidth, theme->fieldHeight), "Add Component", [this, weakRow]() {
+					if (auto shown = weakRow.lock()) {
+						auto box = shown->screenBounds();
+						onAddComponent(MV::Point<int>(box.minPoint.x, box.maxPoint.y));
+					}
+				});
+				addComponentButton = button->owner();
 			}
 		}
 		rowGrid->layoutCells();
@@ -121,15 +135,40 @@ namespace Workbench {
 			rebuild();
 		});
 		hoverTint(headerClick, headerBand, theme->header(), theme->headerHover());
+		float headerButtonsWidth = 0.0f;
+		if (a_gizmoComponent && onRemoveComponent) {
+			float buttonWidth = theme->rowHeight;
+			auto removeButton = makeIconButton(row, *services, *theme, "remove", MV::size(buttonWidth, theme->rowHeight - theme->px(4.0f)), Icon::Close, [this, a_gizmoComponent]() {
+				onRemoveComponent(a_gizmoComponent);
+			}, "Remove this component from the node");
+			removeButton->owner()->position(MV::point(panelWidth - buttonWidth - theme->pad, theme->px(2.0f)));
+			removeButtons.emplace_back(a_title, removeButton->owner());
+			headerButtonsWidth = buttonWidth + theme->pad;
+		}
 		if (a_gizmoComponent && onEditComponent && GizmoLayer::supports(a_gizmoComponent)) {
 			bool active = componentGizmoActive && componentGizmoActive(a_gizmoComponent);
 			float buttonWidth = theme->rowHeight * 1.5f;
 			auto gizmoButton = makeIconButton(row, *services, *theme, "gizmo", MV::size(buttonWidth, theme->rowHeight - theme->px(4.0f)), Icon::Handles, [this, a_gizmoComponent]() {
 				onEditComponent(a_gizmoComponent);
 			}, active ? "Stop editing this component in the Scene" : "Edit this component in the Scene", active ? std::optional<MV::Color>(theme->accent()) : std::nullopt);
-			gizmoButton->owner()->position(MV::point(panelWidth - buttonWidth - theme->pad, theme->px(2.0f)));
+			gizmoButton->owner()->position(MV::point(panelWidth - buttonWidth - theme->pad - headerButtonsWidth, theme->px(2.0f)));
 		}
 		return expanded;
+	}
+
+	std::optional<MV::Point<int>> InspectorPanel::addComponentScreenPoint() const {
+		auto button = addComponentButton.lock();
+		return button ? std::optional<MV::Point<int>>(button->screenBounds().centerPoint()) : std::nullopt;
+	}
+
+	std::optional<MV::Point<int>> InspectorPanel::removeComponentScreenPoint(const std::string& a_typeName) const {
+		for (auto&& [typeName, weakButton] : removeButtons) {
+			auto button = weakButton.lock();
+			if (button && typeName == a_typeName) {
+				return button->screenBounds().centerPoint();
+			}
+		}
+		return std::nullopt;
 	}
 
 	std::shared_ptr<MV::Scene::Node> InspectorPanel::makeRow(const std::string& a_label) {
@@ -543,6 +582,8 @@ namespace Workbench {
 			enumField(MV::TextJustification{}, { "Left", "Center", "Right" });
 		} else if (typeId == std::type_index(typeid(MV::Scene::Clickable::BoundsType))) {
 			enumField(MV::Scene::Clickable::BoundsType{}, { "Local", "Node", "Children", "NodeChildren", "None" });
+		} else if (typeId == std::type_index(typeid(MV::Scene::FocusGroup::Kind))) {
+			enumField(MV::Scene::FocusGroup::Kind{}, { "Window", "Tabs" });
 		} else if (typeId == std::type_index(typeid(MV::BoxAABB<>))) {
 			auto box = *a_property->value_as<MV::BoxAABB<>>();
 			std::ostringstream text;

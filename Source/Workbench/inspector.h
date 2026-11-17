@@ -30,6 +30,13 @@ namespace Workbench {
 
 		// A press on a reference field selects the node it names.
 		std::function<void(const std::shared_ptr<MV::Scene::Node>&)> onSelectNode;
+		// Asked for from a component's header, and from the button under the last component (with where on
+		// screen a list of what can be added belongs).
+		std::function<void(const std::shared_ptr<MV::Scene::Component>&)> onRemoveComponent;
+		std::function<void(const MV::Point<int>&)> onAddComponent;
+		// The middle of the Add Component button, and of the remove button on the header of a component type.
+		std::optional<MV::Point<int>> addComponentScreenPoint() const;
+		std::optional<MV::Point<int>> removeComponentScreenPoint(const std::string& a_typeName) const;
 		// A node dragged out of the Hierarchy and released over a reference field is assigned to it. True when a field took it.
 		bool dropNode(const std::shared_ptr<MV::Scene::Node>& a_node, const MV::Point<int>& a_screenPoint);
 
@@ -136,6 +143,8 @@ namespace Workbench {
 		};
 		std::vector<NodeDropZone> nodeDropZones;
 		std::vector<std::pair<std::string, std::weak_ptr<MV::Scene::Node>>> labelledRows;
+		std::vector<std::pair<std::string, std::weak_ptr<MV::Scene::Node>>> removeButtons;
+		std::weak_ptr<MV::Scene::Node> addComponentButton;
 		std::shared_ptr<MV::Scene::Grid> rowGrid;
 		float rowIndent = 0.0f;
 		std::map<std::string, bool> openGroups;

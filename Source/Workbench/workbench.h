@@ -30,6 +30,13 @@ namespace Workbench {
 
 		// Removes the selected node, or adds a copy of it beside it; false when the selection is nothing or the scene's root.
 		bool deleteSelected();
+		// A new empty node under the selected one, or under the scene's root with nothing selected; it is
+		// selected. The kinds of component Add Component offers, adding one to the selected node, and taking one
+		// off its node. Each is one undo step.
+		std::shared_ptr<MV::Scene::Node> createChildNode();
+		std::vector<std::string> attachableComponents() const;
+		std::shared_ptr<MV::Scene::Component> attachComponent(const std::string& a_typeName);
+		bool removeComponent(const std::shared_ptr<MV::Scene::Component>& a_component);
 		bool duplicateSelected();
 		CommandHistory& commands() { return history; }
 		// The scene has edits its file does not.
@@ -145,6 +152,7 @@ namespace Workbench {
 		bool handleFocusKey(const SDL_Event& a_event);
 		void openContextMenu(const MV::Point<int>& a_screenPoint);
 		std::vector<MenuItem> nodeContextItems();
+		std::vector<MenuItem> addComponentItems();
 		std::vector<MenuItem> tabContextItems(Panel* a_panel);
 		std::vector<MenuItem> textContextItems(const std::shared_ptr<MV::Scene::Clickable>& a_field);
 		void buildTitleBar();

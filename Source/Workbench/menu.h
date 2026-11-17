@@ -54,7 +54,7 @@ namespace Workbench {
 		void open(int a_index);
 		void hover(const MV::Point<int>& a_screenPoint);
 		void hoverRow(int a_row);
-		float textWidth(const std::string& a_text) const { return theme.px(7.4f) * static_cast<float>(a_text.size()); }
+		float textWidth(const std::string& a_text) const;
 		float rowHeight() const { return theme.rowHeight + theme.px(2.0f); }
 		MV::Point<> worldFromScreen(const MV::Point<int>& a_screenPoint) const;
 

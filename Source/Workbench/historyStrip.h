@@ -89,7 +89,6 @@ namespace Workbench {
 		size_t shownBars = 0;
 		size_t followedPosition = 0;
 		std::optional<size_t> pointedStep;
-		size_t stepCharacters = 0;
 	};
 
 }

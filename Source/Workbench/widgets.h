@@ -32,7 +32,15 @@ namespace Workbench {
 	// Solid expander arrow, centred in a_box: pointing right when collapsed, down when expanded.
 	std::shared_ptr<MV::Scene::Sprite> makeExpanderArrow(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const MV::Size<>& a_box, bool a_expanded);
 
+	// The width a_text takes in the label font.
+	float labelTextWidth(MV::Services& a_services, const Theme& a_theme, const std::string& a_text);
+	// a_text, or its start and an ellipsis when it is wider than a_width. Text that carries markup is left as it is.
+	std::string fitLabelText(MV::Services& a_services, const Theme& a_theme, const std::string& a_text, float a_width);
+
+	// A label never draws past the width it is made with: text too long for it ends in an ellipsis.
 	std::shared_ptr<MV::Scene::Text> makeLabel(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, const MV::Size<>& a_size, const std::string& a_text);
+	// New text for a label, fitted to the width it was made with.
+	void setLabelText(const std::shared_ptr<MV::Scene::Text>& a_label, MV::Services& a_services, const Theme& a_theme, const std::string& a_text);
 
 	std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, const MV::Size<>& a_size, const std::string& a_text, std::function<void()> a_onClick);
 

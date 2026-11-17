@@ -24,6 +24,10 @@ namespace Workbench {
 		});
 	}
 
+	float MenuBar::textWidth(const std::string& a_text) const {
+		return labelTextWidth(services, theme, a_text);
+	}
+
 	MV::Point<> MenuBar::worldFromScreen(const MV::Point<int>& a_screenPoint) const {
 		return barHost->renderer().worldFromScreen(a_screenPoint);
 	}

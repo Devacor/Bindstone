@@ -582,6 +582,18 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   over a bar turns it white and names it ("step 4: move Sky").
 - The self-test hovers toolbar buttons and a bar, and records 900 steps to check the scrolling row.
 
+## Increment 27: text that knows its width (2026-11-16)
+- Engine: `FontDefinition::measure(text)` gives the size a string takes on one line, from the font alone (no
+  renderer, no Text), and it equals what a Text lays the string out to. `FontDefinition::fit(text, width,
+  ellipsis)` gives the text, or its longest start that fits with the ellipsis after it. `Text::contentSize()` and
+  `FormattedText::contentSize()` give the laid-out size. Suite "MV Text Measure" in `Source/MV/Tests/text_tests.cpp`.
+- Workbench: `makeLabel` and `makeButton` never draw past the width they are made with; text too long ends in an
+  ellipsis (`fitLabelText`, `setLabelText` for a label whose text changes). A text field clips what is typed at its
+  edge with a `Stencil` on the text's node. Menu widths, the history row's step name and the scrub fields' digits
+  come from `measure`; the 7.4-pixels-a-character guess is gone.
+- Not yet: a text field does not scroll to keep its cursor in view, so a long entry shows its start; markup
+  (`[[c|...]]`) is measured as written, so `fitLabelText` leaves marked-up text alone.
+
 ## Known gaps (next increments)
 - Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.

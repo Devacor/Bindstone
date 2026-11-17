@@ -78,14 +78,12 @@ namespace Workbench {
 
 		const float pad = theme.px(6.0f);
 		const float rowHeight = theme.px(30.0f);
-		const float characterWidth = theme.px(7.4f);
 		const float buttonSize = IconButton::size(theme);
 		const float fieldWidth = theme.px(44.0f);
 		const float totalWidth = theme.px(52.0f);
 		const float rowWidth = std::max(widthLimit, theme.px(260.0f));
 		// the step's name gives way first: a narrow view keeps the bars, the arrows and the position
 		const float stepWidth = rowWidth >= theme.px(520.0f) ? theme.px(220.0f) : 0.0f;
-		stepCharacters = static_cast<size_t>(stepWidth / characterWidth);
 		rowSize = MV::size(rowWidth, rowHeight);
 		trackHeight = theme.px(18.0f);
 		trackInset = theme.px(8.0f);
@@ -261,7 +259,7 @@ namespace Workbench {
 			} else {
 				step = position == 0 ? std::string(steps == 0 ? "no steps yet" : "start") : history.labelAt(position - 1);
 			}
-			stepText->text(step.size() > stepCharacters && stepCharacters > 3 ? step.substr(0, stepCharacters - 3) + "..." : step);
+			setLabelText(stepText, services, theme, step);
 		}
 	}
 

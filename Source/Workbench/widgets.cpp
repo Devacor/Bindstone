@@ -22,12 +22,12 @@ namespace Workbench {
 	}
 
 	namespace {
-		// Text has no clipping: drop decimals until the number fits its field.
-		std::string formatNumberToFit(float a_value, float a_fieldWidth, const Theme& a_theme) {
-			const size_t maximumCharacters = static_cast<size_t>(std::max(3.0f, (a_fieldWidth - a_theme.px(10.0f)) / a_theme.px(7.4f)));
+		// Drops decimals until the number fits its field.
+		std::string formatNumberToFit(float a_value, float a_fieldWidth, const Theme& a_theme, MV::FontDefinition& a_font) {
+			const float room = a_fieldWidth - a_theme.px(10.0f);
 			for (int decimals = 4; decimals >= 0; --decimals) {
 				std::string result = formatNumberCompact(a_value, decimals);
-				if (result.size() <= maximumCharacters) {
+				if (a_font.measure(result).width <= room) {
 					return result;
 				}
 			}
@@ -185,12 +185,26 @@ namespace Workbench {
 		return a_owner->attach<MV::Scene::Sprite>()->bounds(a_size)->texture(roundedRectHandle(a_services, a_theme))->color(a_color);
 	}
 
+	float labelTextWidth(MV::Services& a_services, const Theme& a_theme, const std::string& a_text) {
+		auto font = a_services.get<MV::TextLibrary>()->get(a_theme.labelFont);
+		return font ? font->measure(a_text).width : 0.0f;
+	}
+
+	std::string fitLabelText(MV::Services& a_services, const Theme& a_theme, const std::string& a_text, float a_width) {
+		auto font = a_services.get<MV::TextLibrary>()->get(a_theme.labelFont);
+		return !font || a_text.find("[[") != std::string::npos ? a_text : font->fit(a_text, a_width);
+	}
+
 	std::shared_ptr<MV::Scene::Text> makeLabel(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, const MV::Size<>& a_size, const std::string& a_text) {
 		auto& library = *a_services.get<MV::TextLibrary>();
 		auto text = a_parent->make(a_id)->attach<MV::Scene::Text>(library, a_theme.labelFont);
 		text->bounds({ MV::Point<>(), a_size });
-		text->justification(MV::TextJustification::LEFT)->wrapping(MV::TextWrapMethod::NONE, a_size.width)->minimumLineHeight(a_size.height)->text(a_text);
+		text->justification(MV::TextJustification::LEFT)->wrapping(MV::TextWrapMethod::NONE, a_size.width)->minimumLineHeight(a_size.height)->text(fitLabelText(a_services, a_theme, a_text, a_size.width));
 		return text.self();
+	}
+
+	void setLabelText(const std::shared_ptr<MV::Scene::Text>& a_label, MV::Services& a_services, const Theme& a_theme, const std::string& a_text) {
+		a_label->text(fitLabelText(a_services, a_theme, a_text, a_label->bounds().width()));
 	}
 
 	std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, const MV::Size<>& a_size, const std::string& a_text, std::function<void()> a_onClick) {
@@ -215,7 +229,7 @@ namespace Workbench {
 		for (auto&& stateScene : { activeScene, idleScene }) {
 			auto stateText = stateScene->attach<MV::Scene::Text>(library, a_theme.buttonFont);
 			stateText->bounds({ MV::Point<>(), a_size });
-			stateText->justification(MV::TextJustification::CENTER)->wrapping(MV::TextWrapMethod::NONE, a_size.width)->minimumLineHeight(a_size.height)->text(a_text);
+			stateText->justification(MV::TextJustification::CENTER)->wrapping(MV::TextWrapMethod::NONE, a_size.width)->minimumLineHeight(a_size.height)->text(fitLabelText(a_services, a_theme, a_text, a_size.width - a_theme.px(8.0f)));
 		}
 		button->activeNode(activeScene);
 		button->idleNode(idleScene);
@@ -231,7 +245,10 @@ namespace Workbench {
 		auto& library = *a_services.get<MV::TextLibrary>();
 		auto& mouse = *a_services.get<MV::TapDevice>();
 		auto box = attachOutlinedRect(a_parent->make(a_id), a_services, a_theme, a_size, a_theme.fieldBg(), a_theme.fieldOutline())->owner();
-		auto text = box->attach<MV::Scene::Text>(library, a_theme.labelFont);
+		// what is typed past the field's edge is cut off there
+		auto textNode = box->make("text");
+		textNode->attach<MV::Scene::Stencil>()->bounds(outlinedFillBounds(a_theme, a_size));
+		auto text = textNode->attach<MV::Scene::Text>(library, a_theme.labelFont);
 		text->bounds({ MV::point(a_theme.px(5.0f), 0.0f), MV::size(a_size.width - a_theme.px(8.0f), a_size.height) });
 		text->justification(MV::TextJustification::LEFT)->wrapping(MV::TextWrapMethod::NONE, a_size.width - a_theme.px(8.0f))->minimumLineHeight(a_size.height)->text(a_initial);
 
@@ -294,7 +311,7 @@ namespace Workbench {
 		auto box = attachOutlinedRect(a_parent->make(a_id), a_services, a_theme, a_size, a_theme.fieldBg(), a_theme.fieldOutline())->owner();
 		auto text = box->attach<MV::Scene::Text>(library, a_theme.labelFont);
 		text->bounds({ MV::point(a_theme.px(5.0f), 0.0f), MV::size(a_size.width - a_theme.px(8.0f), a_size.height) });
-		text->justification(MV::TextJustification::LEFT)->wrapping(MV::TextWrapMethod::NONE, a_size.width - a_theme.px(8.0f))->minimumLineHeight(a_size.height)->text(formatNumberToFit(a_value, a_size.width, a_theme));
+		text->justification(MV::TextJustification::LEFT)->wrapping(MV::TextWrapMethod::NONE, a_size.width - a_theme.px(8.0f))->minimumLineHeight(a_size.height)->text(formatNumberToFit(a_value, a_size.width, a_theme, *library.get(a_theme.labelFont)));
 
 		auto clickable = box->attach<MV::Scene::Clickable>(mouse)->bounds(a_size);
 		std::weak_ptr<MV::Scene::Text> weakText = text.self();
@@ -334,7 +351,7 @@ namespace Workbench {
 			}
 		};
 
-		clickable->onDrag.connect("scrub", [weakText, state, a_onChange, fieldWidth = a_size.width, &a_theme](const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const MV::Point<int>& a_start, const MV::Point<int>&) {
+		clickable->onDrag.connect("scrub", [weakText, state, a_onChange, fieldWidth = a_size.width, &a_theme, font = library.get(a_theme.labelFont)](const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const MV::Point<int>& a_start, const MV::Point<int>&) {
 			auto locked = weakText.lock();
 			if (!locked) {
 				return;
@@ -348,7 +365,7 @@ namespace Workbench {
 			float step = std::max(0.05f, std::abs(state->committed) * 0.01f);
 			float value = state->committed + static_cast<float>(totalDelta) * step;
 			state->live = value;
-			state->shown = formatNumberToFit(value, fieldWidth, a_theme);
+			state->shown = formatNumberToFit(value, fieldWidth, a_theme, *font);
 			locked->text(state->shown);
 			if (a_onChange) {
 				a_onChange(value);
@@ -417,6 +434,9 @@ namespace Workbench {
 		auto button = makeButton(a_parent, a_services, a_theme, a_id, a_size, a_labels.empty() ? std::string("--") : a_labels[startIndex], nullptr);
 		auto index = std::make_shared<int>(startIndex);
 		std::weak_ptr<MV::Scene::Button> weakButton = button;
+		for (auto&& label : a_labels) {
+			label = fitLabelText(a_services, a_theme, label, a_size.width - a_theme.px(8.0f));
+		}
 		button->onAccept.connect("cycle", [weakButton, index, a_labels, a_onChange](const std::shared_ptr<MV::Scene::Clickable>&) {
 			if (a_labels.empty()) {
 				return;

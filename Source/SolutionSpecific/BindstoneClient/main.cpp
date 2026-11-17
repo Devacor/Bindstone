@@ -866,6 +866,32 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(false, "the scene has two nodes for the history checks");
 	}
 
+	// Text measuring against the renderer: a font's measure is what a Text lays out, and a label keeps to its width
+	{
+		auto& library = *a_managers.services.get<MV::TextLibrary>();
+		auto font = library.get("wb-small");
+		expect(static_cast<bool>(font), "the label font is loaded");
+		if (font) {
+			auto probe = MV::Scene::Node::make(a_managers.renderer, "textProbe");
+			for (std::string sample : { "Hierarchy", "maximumSpawnRate", "WWWiii 0123.5", "x" }) {
+				auto laidOut = probe->make(MV::guid("sample_"))->attach<MV::Scene::Text>(library, "wb-small");
+				laidOut->wrapping(MV::TextWrapMethod::NONE, 2000.0f)->text(sample);
+				expect(std::abs(laidOut->contentSize().width - font->measure(sample).width) < 0.01f, "measuring \"" + sample + "\" gives the width its Text lays out: " + std::to_string(font->measure(sample).width) + " against " + std::to_string(laidOut->contentSize().width));
+			}
+			Workbench::Theme probeTheme;
+			std::string longName = "aVeryLongPropertyNameThatCannotFit";
+			float narrow = font->measure(longName).width * 0.5f;
+			auto label = Workbench::makeLabel(probe, a_managers.services, probeTheme, "narrow", MV::size(narrow, 20.0f), longName);
+			std::string shown = label->text();
+			expect(shown.size() < longName.size() && shown.size() > 3 && shown.substr(shown.size() - 3) == "..." && label->contentSize().width <= narrow, "a label too narrow for its text ends in an ellipsis inside its width, showing " + shown);
+			Workbench::setLabelText(label, a_managers.services, probeTheme, "ok");
+			expect(std::string(label->text()) == "ok", "text that fits a label is shown whole");
+			auto button = Workbench::makeButton(probe, a_managers.services, probeTheme, "narrowButton", MV::size(narrow, 22.0f), longName, nullptr);
+			std::string buttonShown = button->text();
+			expect(buttonShown.size() < longName.size() && buttonShown.substr(buttonShown.size() - 3) == "...", "a button too narrow for its text ends it in an ellipsis too, showing " + buttonShown);
+		}
+	}
+
 	// The history strip: opened from the toolbar, a pip per step, its handle dragged back and forward
 	{
 		auto& history = a_app.commands();

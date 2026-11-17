@@ -73,6 +73,13 @@ namespace MV {
 
 		std::shared_ptr<CharacterDefinition> characterDefinition(const std::string &renderChar);
 
+		// The size a_text takes on one line in this font, which is what a Text lays it out to. Works without a
+		// renderer. Markup is measured as the characters it is written with.
+		Size<> measure(const UtfString &a_text);
+		// a_text when it fits a_width; otherwise its longest start that fits with a_ellipsis after it, or nothing
+		// when not even the ellipsis fits.
+		UtfString fit(const UtfString &a_text, PointPrecision a_width, const UtfString &a_ellipsis = "...");
+
 		PointPrecision height() const{
 			return lineHeight;
 		}
@@ -101,6 +108,8 @@ namespace MV {
 
 		typedef std::map<std::string, std::shared_ptr<CharacterDefinition>> CachedGlyphs;
 		CachedGlyphs cachedGlyphs;
+		std::map<std::string, PointPrecision> measuredGlyphWidths;
+		PointPrecision glyphWidth(const std::string &a_glyph);
 
 		template<class Archive>
 		void serialize(Archive & archive) const {
@@ -365,6 +374,9 @@ namespace MV {
 		void wrapping(TextWrapMethod a_newWrapping, PointPrecision a_newWidth);
 		void wrapping(TextWrapMethod a_newWrapping);
 		TextWrapMethod wrapping() const;
+
+		// The laid-out text: its widest line and the height of all its lines.
+		Size<> contentSize() const;
 
 		std::shared_ptr<Scene::Node> scene() const;
 

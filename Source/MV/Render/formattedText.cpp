@@ -57,6 +57,49 @@ namespace MV {
 
 
 
+	PointPrecision FontDefinition::glyphWidth(const std::string &a_glyph) {
+		auto found = measuredGlyphWidths.find(a_glyph);
+		if (found == measuredGlyphWidths.end()) {
+			int width = 0;
+			int height = 0;
+			if (font != nullptr) {
+				TTF_SizeUTF8(font, a_glyph.c_str(), &width, &height);
+			}
+			found = measuredGlyphWidths.emplace(a_glyph, static_cast<PointPrecision>(width)).first;
+		}
+		return found->second;
+	}
+
+	Size<> FontDefinition::measure(const UtfString &a_text) {
+		Size<> result(0.0f, lineHeight);
+		utf8_string glyphs(a_text);
+		for (auto glyph = glyphs.begin(); glyph != glyphs.end(); ++glyph) {
+			result.width += glyphWidth(glyph.str());
+		}
+		return result;
+	}
+
+	UtfString FontDefinition::fit(const UtfString &a_text, PointPrecision a_width, const UtfString &a_ellipsis) {
+		if (measure(a_text).width <= a_width) {
+			return a_text;
+		}
+		PointPrecision remaining = a_width - measure(a_ellipsis).width;
+		if (remaining < 0.0f) {
+			return {};
+		}
+		UtfString result;
+		utf8_string glyphs(a_text);
+		for (auto glyph = glyphs.begin(); glyph != glyphs.end(); ++glyph) {
+			auto piece = glyph.str();
+			remaining -= glyphWidth(piece);
+			if (remaining < 0.0f) {
+				break;
+			}
+			result += piece;
+		}
+		return result + a_ellipsis;
+	}
+
 	/*************************\
 	| --CharacterDefinition-- |
 	\*************************/
@@ -601,6 +644,15 @@ namespace MV {
 
 	void FormattedLine::minimumLineHeightChanged() {
 		fixVisuals();
+	}
+
+	Size<> FormattedText::contentSize() const {
+		Size<> result;
+		for (auto&& line : lines) {
+			result.width = std::max(result.width, line->lineWidth());
+			result.height += line->height();
+		}
+		return result;
 	}
 
 	float FormattedLine::lineWidth() const {

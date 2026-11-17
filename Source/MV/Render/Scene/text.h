@@ -107,6 +107,11 @@ namespace MV {
 			MV::TextWrapMethod wrapping() const {
 				return formattedText->wrapping();
 			}
+
+			// The laid-out text's widest line and the height of its lines, whatever the bounds are.
+			MV::Size<> contentSize() const {
+				return formattedText->contentSize();
+			}
 			MV::PointPrecision wrappingWidth() const {
 				return formattedText->width();
 			}

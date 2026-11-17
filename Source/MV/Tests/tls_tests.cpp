@@ -436,6 +436,22 @@ public:
 			check_true(contains(clientRecord->failures[0], "No TLS handshake"), "saying why: " + clientRecord->failures[0]);
 		});
 
+		test("a client destroyed the moment it reports a failure ends its network thread while that thread is still closing the connection", [this]() {
+			TestPki pki;
+			for (int i = 0; i < 50; ++i) {
+				OneShotServer hangsUp([](MV::Socket&) {});
+				auto clientRecord = std::make_shared<ClientRecord>();
+				auto client = makeClient("127.0.0.1", hangsUp.port, pki.clientConfig(), clientRecord);
+				auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+				// No sleep between updates: the client dies as close as it can to the network thread's report.
+				while (clientRecord->failures.empty() && std::chrono::steady_clock::now() < deadline) {
+					client->update();
+				}
+				check_true(!clientRecord->failures.empty(), "the handshake fails against a server that hangs up");
+				client.reset();
+			}
+		});
+
 		test("a client whose CA file is missing fails each attempt with the reason and connects once the file exists", [this]() {
 			TestPki pki;
 			auto record = std::make_shared<Record>();

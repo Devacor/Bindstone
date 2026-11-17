@@ -92,9 +92,10 @@ namespace MV {
 		ourServerMaxMessageBytes(a_limits.unauthenticatedMaxMessageBytes) {
 	}
 
-	// The network thread ends before the stream and inbox it uses go away.
+	// The network thread is joined before the stream and inbox it uses go away, and while network is still set: reset() alone clears it first.
 	Client::~Client() {
 		ourConnectionState = DISCONNECTED;
+		network->stop();
 		network.reset();
 	}
 

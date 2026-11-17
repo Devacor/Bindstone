@@ -788,6 +788,21 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Not yet: nothing can add a FocusGroup to a node except C++ and a hand-edited scene (the Workbench has no
   attach-component verb, and scripts cannot attach), no shipped screen has one, and keyboard Tab does not use them.
 
+## Increment 39: selection contexts nest (2026-11-17)
+- A FocusGroup on a parent node holds FocusGroups on nodes under it. The group in use is the innermost one the
+  focus is in, so a move from a parent's control onto a child group's control goes down a level.
+- Stepping (`focusWindowNext` / `focusWindowPrevious`, the pad's triggers) is between the groups side by side under
+  the same parent. A group with none beside it steps the level above. With nothing in use it starts at the first
+  top group.
+- Back (`focusBack`, the pad's east button) emits the group's `onBack` when something listens for it. Otherwise it
+  goes up a level, onto a control of the parent group that is in no group of its own (the one the parent
+  remembers, else its first). A parent with no such control is backed out of in turn. At the top with nothing
+  listening it does nothing and returns false, for the host to use.
+- A window remembers only what it holds itself, not what a group under it holds.
+- A modal window is the top of its own levels: groups inside it step and back as anywhere, and nothing steps or
+  backs out past it.
+- Tests: three nesting cases in `focus_group_tests.cpp`.
+
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.
 - Authoring verbs still only in Source/Editor: create node, attach/detach

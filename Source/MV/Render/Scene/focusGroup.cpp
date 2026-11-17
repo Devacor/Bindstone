@@ -47,6 +47,10 @@ namespace MV {
 			onBackSignal(std::static_pointer_cast<FocusGroup>(shared_from_this()));
 		}
 
+		bool FocusGroup::handlesBack() const {
+			return onBack.observer_count() > 0;
+		}
+
 		void FocusGroup::initialize() {
 			answerGroupQueries();
 		}
@@ -141,6 +145,10 @@ namespace MV {
 				result.remembered = [weakSelf]() -> std::shared_ptr<void> {
 					auto self = weakSelf.lock();
 					return self ? self->lastFocused.lock() : nullptr;
+				};
+				result.handlesBack = [weakSelf]() {
+					auto self = weakSelf.lock();
+					return self && self->handlesBack();
 				};
 				result.back = [weakSelf]() {
 					if (auto self = weakSelf.lock()) {

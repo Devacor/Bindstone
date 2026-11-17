@@ -10,13 +10,16 @@
 namespace MV {
 	namespace Scene {
 
-		// A selection context: the node it is on and everything under it.
-		// A WINDOW keeps focus moves inside it while it holds the focus. Stepping between windows (a controller's
-		// triggers) goes to the one each remembers, else its defaultFocus, else its first focusable. A modal window
-		// takes the focus as it shows and nothing leaves it until it hides, when the focus goes back where it was.
+		// A selection context: the node it is on and everything under it. Groups nest, and the one in use is the
+		// innermost one the focus is in.
+		// A WINDOW keeps focus moves inside it, so moving onto a control of a group under it goes down a level.
+		// Stepping (a controller's triggers) goes between the groups beside it under the same parent, onto what
+		// each remembers, else its defaultFocus, else its first focusable; a group with none beside it steps the
+		// level above. Backing out (a controller's east button) emits onBack when something listens for it, and
+		// otherwise goes up a level, onto the parent group's own controls. A modal window takes the focus as it
+		// shows and nothing leaves it until it hides, when the focus goes back where it was.
 		// TABS marks a strip of tab headers: stepping tabs (a controller's bumpers) presses the next or previous
 		// header in it, as a pointer would.
-		// Backing out (a controller's east button) emits onBack on the window in use; what that does is its script's.
 		class FocusGroup : public jai::property_owner<FocusGroup, Component> {
 			friend Node;
 			friend jai::access;
@@ -49,8 +52,9 @@ namespace MV {
 			// The Clickable under this group that last held the focus, or the tab header last chosen.
 			std::shared_ptr<Clickable> remembered() const { return lastFocused.lock(); }
 
-			// Emits onBack.
+			// Emits onBack. handlesBack is whether anything is connected to it.
 			void back();
+			bool handlesBack() const;
 
 		protected:
 			FocusGroup(const std::weak_ptr<Node>& a_owner, TapDevice& a_mouse);

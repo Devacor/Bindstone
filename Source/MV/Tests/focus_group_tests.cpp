@@ -201,6 +201,98 @@ namespace mv_tests {
 				check_true(mouse.focusBack() && rightBacks == 1 && leftBacks == 0);
 			});
 
+			test("groups nest: stepping is between the groups side by side, a move onto a child goes down a level, and back goes up one", [] {
+				SceneHost host;
+				auto& mouse = host.mouse;
+				auto root = Node::make(host.renderer, "root");
+				auto screen = addGroup(host, root, "screen");
+				auto list = addGroup(host, screen.node, "list");
+				auto detail = addGroup(host, screen.node, "detail");
+				auto itemOne = addTarget(host, list.node, "itemOne", MV::point(0.0f, 0.0f));
+				auto itemTwo = addTarget(host, list.node, "itemTwo", MV::point(0.0f, 100.0f));
+				auto fieldOne = addTarget(host, detail.node, "fieldOne", MV::point(300.0f, 0.0f));
+				auto fieldTwo = addTarget(host, detail.node, "fieldTwo", MV::point(300.0f, 100.0f));
+				auto close = addTarget(host, screen.node, "close", MV::point(0.0f, 300.0f));
+				auto apply = addTarget(host, screen.node, "apply", MV::point(300.0f, 300.0f));
+
+				itemTwo->clickable->focus();
+				const void* context = mouse.focusContext();
+				check_true(context == list.node.get(), "the group in use is the innermost one holding the focus");
+				check_false(mouse.focusMove(FocusDirection::RIGHT, context) || mouse.focusMove(FocusDirection::DOWN, context), "moves stay inside it");
+				check_true(mouse.focusWindowNext() && fieldOne->clickable->focused(), "stepping goes to the group beside it");
+				fieldTwo->clickable->focus();
+				mouse.focusContext();
+				check_true(mouse.focusWindowNext() && itemTwo->clickable->focused(), "and round again, each onto what it remembers");
+				check_true(mouse.focusWindowPrevious() && fieldTwo->clickable->focused());
+
+				check_true(mouse.focusBack() && apply->clickable->focused() == false && close->clickable->focused(), "back goes up a level, onto the parent's own controls");
+				context = mouse.focusContext();
+				check_true(context == screen.node.get(), "where the parent is the group in use");
+				check_true(mouse.focusMove(FocusDirection::RIGHT, context) && apply->clickable->focused());
+				mouse.focusContext();
+				check_true(mouse.focusMove(FocusDirection::UP, context) && fieldTwo->clickable->focused(), "from there a move onto a child's control goes down into it");
+				check_true(mouse.focusContext() == detail.node.get());
+				check_true(mouse.focusBack() && apply->clickable->focused(), "and back returns to the parent control last used, not one inside a child");
+				mouse.focusContext();
+				check_false(mouse.focusBack(), "at the top, with nothing listening, there is nowhere further back");
+				check_true(apply->clickable->focused());
+
+				int screenBacks = 0;
+				int listBacks = 0;
+				auto screenReceiver = screen.group->onBack.connect([&](const std::shared_ptr<FocusGroup>&) { ++screenBacks; });
+				itemOne->clickable->focus();
+				mouse.focusContext();
+				check_true(mouse.focusBack() && screenBacks == 0 && apply->clickable->focused(), "a group that does not listen for back still only goes up a level");
+				mouse.focusContext();
+				check_true(mouse.focusBack() && screenBacks == 1, "and the one that listens gets it");
+				auto listReceiver = list.group->onBack.connect([&](const std::shared_ptr<FocusGroup>&) { ++listBacks; });
+				itemOne->clickable->focus();
+				mouse.focusContext();
+				check_true(mouse.focusBack() && listBacks == 1 && screenBacks == 1 && itemOne->clickable->focused(), "a group that listens keeps back to itself");
+			});
+
+			test("a group with none beside it steps the level above, and back passes through a parent with no controls of its own", [] {
+				SceneHost host;
+				auto& mouse = host.mouse;
+				auto root = Node::make(host.renderer, "root");
+				auto outer = addGroup(host, root, "outer");
+				auto inner = addGroup(host, outer.node, "inner");
+				auto deep = addTarget(host, inner.node, "deep", MV::point(0.0f, 0.0f));
+				auto beside = addGroup(host, root, "beside");
+				auto other = addTarget(host, beside.node, "other", MV::point(300.0f, 0.0f));
+				int outerBacks = 0;
+				auto outerReceiver = outer.group->onBack.connect([&](const std::shared_ptr<FocusGroup>&) { ++outerBacks; });
+
+				check_true(mouse.focusWindowNext() && deep->clickable->focused(), "with nothing in use, stepping starts at the first top group");
+				mouse.focusContext();
+				check_true(mouse.focusWindowNext() && other->clickable->focused(), "the inner group has none beside it, so its parent's level steps");
+				mouse.focusContext();
+				check_true(mouse.focusWindowNext() && deep->clickable->focused(), "and stepping back into the parent lands inside its child");
+				mouse.focusContext();
+				check_true(mouse.focusBack() && outerBacks == 1 && deep->clickable->focused(), "back from the inner group reaches the parent that listens, there being no control to stop at");
+			});
+
+			test("a modal window holds its own levels: nothing steps or backs out past it", [] {
+				TwoWindows scene;
+				auto& mouse = scene.host.mouse;
+				auto popup = addGroup(scene.host, scene.root, "popup");
+				popup.group->modal(true);
+				auto confirm = addTarget(scene.host, popup.node, "confirm", MV::point(100.0f, 300.0f));
+				auto options = addGroup(scene.host, popup.node, "options");
+				auto option = addTarget(scene.host, options.node, "option", MV::point(100.0f, 400.0f));
+				scene.leftTop->clickable->focus();
+				const void* context = mouse.focusContext();
+				check_true(context == popup.node.get() && confirm->clickable->focused());
+				check_true(mouse.focusMove(FocusDirection::DOWN, context) && option->clickable->focused());
+				check_true(mouse.focusContext() == options.node.get(), "a group inside the modal window is the one in use while it holds the focus");
+				check_false(mouse.focusWindowNext(), "it has none beside it and stepping stops at the modal window");
+				check_true(option->clickable->focused());
+				check_true(mouse.focusBack() && confirm->clickable->focused(), "back goes up to the modal window's own controls");
+				mouse.focusContext();
+				check_false(mouse.focusBack(), "and no further");
+				check_true(confirm->clickable->focused());
+			});
+
 			test("a controller's triggers step windows, its shoulders step tabs and its east button backs out", [] {
 				TwoWindows scene;
 				auto& host = scene.host;

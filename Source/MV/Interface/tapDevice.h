@@ -83,6 +83,8 @@ namespace MV{
 		std::function<bool()> focusPreferred;
 		std::function<void(const std::shared_ptr<void>& a_focused)> remember;
 		std::function<std::shared_ptr<void>()> remembered;
+		// Whether backing out is something the group does itself, and doing it.
+		std::function<bool()> handlesBack;
 		std::function<void()> back;
 	};
 
@@ -149,22 +151,25 @@ namespace MV{
 		const void* focusScope() const { return focusScopeToken; }
 		void queueFocusCandidate(FocusCandidate a_candidate);
 
-		// Selection contexts. The window in use is a modal one when one is showing (the top-most), else the
-		// innermost window the focus is in, else the one last stepped to. focusContext settles that for now and
-		// returns the scope focus moves should keep to: the window's node, or a_scope with no window in use. It
-		// also puts the focus right: into a modal window as it shows, back where it was when that hides, and onto
-		// something else in the window when what held it is hidden or disabled. Call it once a frame while a
-		// keyboard or controller is driving the focus.
+		// Selection contexts. Windows nest; the one in use is the innermost window the focus is in, else the one
+		// last stepped to, and while a modal window is showing (the top-most) it is that window or one inside it.
+		// focusContext settles that for now and returns the scope focus moves should keep to: the window's node,
+		// or a_scope with no window in use. It also puts the focus right: into a modal window as it shows, back
+		// where it was when that hides, and onto something else in the window when what held it is hidden or
+		// disabled. Call it once a frame while a keyboard or controller is driving the focus.
 		const void* focusContext(const void* a_scope = nullptr);
-		// To the next or previous window, focusing what it remembers, else its default, else its first focusable
-		// that is not a tab header. False under a modal window or with nowhere else to go.
+		// To the next or previous window beside the one in use, under the same parent window, focusing what it
+		// remembers, else its default, else its first focusable that is not a tab header. A window with none
+		// beside it steps the level above. False with nowhere to go, and nothing steps out of a modal window.
 		bool focusWindowNext(const void* a_scope = nullptr);
 		bool focusWindowPrevious(const void* a_scope = nullptr);
 		// Presses the next or previous header of the tab strip in the window in use (any strip, with none in use).
 		// The focus stays where it is; focusContext moves it on if the tab took its control away.
 		bool focusTabNext(const void* a_scope = nullptr);
 		bool focusTabPrevious(const void* a_scope = nullptr);
-		// Backs out of the window in use; false with none.
+		// Backs out of the window in use: its own back when something listens for it, else up a level, onto a
+		// control of the parent window that is in no window of its own. A parent with no such control is backed
+		// out of in turn. False at the top, and nothing backs out past a modal window.
 		bool focusBack(const void* a_scope = nullptr);
 		void queueFocusGroupCandidate(FocusGroupCandidate a_candidate);
 		// Gives the focus to a_candidate; a_pressOnFocus false when a pointer press is what brought it.
@@ -173,12 +178,15 @@ namespace MV{
 		std::vector<FocusCandidate> askForFocusCandidates(const void* a_scope);
 		std::vector<FocusGroupCandidate> askForFocusGroups(const void* a_scope);
 		const FocusGroupCandidate* windowInUse(const std::vector<FocusGroupCandidate>& a_groups) const;
+		const FocusGroupCandidate* windowHoldingFocus(const std::vector<FocusGroupCandidate>& a_groups) const;
+		bool focusOwnLevel(const FocusGroupCandidate& a_window, const std::vector<FocusGroupCandidate>& a_groups);
 		void enterWindow(const FocusGroupCandidate& a_window, const std::vector<FocusGroupCandidate>& a_groups);
 		bool focusWindowStep(int a_step, const void* a_scope);
 		bool focusTabStep(int a_step, const void* a_scope);
 
 		std::vector<FocusGroupCandidate> focusGroupCandidates;
 		std::weak_ptr<void> activeWindow;
+		std::weak_ptr<void> activeModal;
 		std::weak_ptr<void> windowBeforeModal;
 		bool focusStep(int a_step, const void* a_scope);
 		bool focusFollowLink(FocusLink a_link, const void* a_scope);

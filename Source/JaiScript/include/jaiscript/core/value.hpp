@@ -1033,10 +1033,6 @@ namespace detail {
         inline const script_function& unchecked_as_function() const noexcept {
             return **storage_.get_if<TYPEID_FUNCTION>();
         }
-        // The function's node (its owner and what registered it) - caller must verify is_function() first
-        inline script_function_node& unchecked_function_node() const noexcept {
-            return **storage_.get_if<TYPEID_FUNCTION>();
-        }
 
         // Unchecked map accessor - caller must verify is_map() first
         inline const script_map& unchecked_as_map() const noexcept {
@@ -1096,7 +1092,6 @@ namespace detail {
         }
 
         const script_function& as_function() const;
-        const script_function_node& function_node() const { return static_cast<const script_function_node&>(as_function()); }   // as_function, as the node
 
         // Safe mutable reference accessors for zero-copy parameter binding
         // These encapsulate direct storage access and handle deref() properly

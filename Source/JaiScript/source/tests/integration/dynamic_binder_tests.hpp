@@ -239,6 +239,7 @@ public:
     JAI_METHOD((std::map<std::string, int64_t>), tally, () const) { return {{"count", count.get()}}; }
     JAI_METHOD(int64_t, checked, (), jai::nodiscard) { return count.get(); }
     JAI_METHOD(void, reset, (), jai::serial) { count = 0; }
+    JAI_METHOD(int64_t, waited, () const, jai::exclude_execution_time) { return count.get(); }
     JAI_METHOD(int64_t, stored, () const, jai::permissions::filesystem) { return count.get(); }
     JAI_METHOD(MethodTally, operator+, (const MethodTally& a_other) const) {
         MethodTally result;
@@ -277,7 +278,7 @@ struct MethodMeterChild : MethodMeter {
     JAI_METHOD(int64_t, twice, () const) { return level * 2; }
 };
 struct MethodMeterBare : MethodMeter {};
-static_assert(detail::method_access::slot_count<MethodTally>() == 15 &&detail::method_access::slot_count<MethodTallyPlus>() == 1);
+static_assert(detail::method_access::slot_count<MethodTally>() == 16 &&detail::method_access::slot_count<MethodTallyPlus>() == 1);
 static_assert(detail::method_access::slot_count<MethodlessTally>() == 0 && detail::method_access::slot_count<MethodMeterChild>() == 3);
 static_assert(!detail::method_access::owns_slot<MethodMeterBare, 1>() && detail::method_access::owns_slot<MethodMeterChild, 2>());
 inline registrar<MethodMeter, method_registrar_context> method_meter_registrar("MethodMeter");
@@ -2799,6 +2800,7 @@ public:
             check_eq((int64_t)22 + 11 + 11 + 11 + 33 + 22 + 84, eng->execute(
                 "t.doubled() + t.peek() + t.tally()[\"count\"] + t.checked() + t * 3 + (t + t).total() + t.scaled(2);").as_int());
             check_eq((int64_t)42 + 13 + 9, eng->execute("t.secret() + t[2] + t(2);").as_int());
+            check_eq((int64_t)11, eng->execute("t.waited();").as_int(), "a method declared with jai::exclude_execution_time binds and calls");
 
             check_true(eng->is_nodiscard_function("MethodTally.checked") && !eng->is_nodiscard_function("MethodTally.total"));
             const auto dropped = eng->check("MethodTally kept = MethodTally();\nkept.checked();\nkept.total();\n");

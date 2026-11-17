@@ -1474,14 +1474,12 @@ void class_definition::add_method(const std::string& name, script_function func,
         }
         method_arities_[name_id].push_back(arity);
 
-        methods_.insert_or_assign(name_id, script_value::make_function(
-            cpp_method_dispatch{ this, name_id, &cpp_method_overloads_[name_id], detail::engine_access::registering_host_code(*eng) }, engine_));
+        methods_.insert_or_assign(name_id, script_value::make_function(cpp_method_dispatch{ this, name_id, &cpp_method_overloads_[name_id] }, engine_));
     } else {
         methods_.insert_or_assign(name_id, script_value::make_function(
-            [func, eng, host_code = detail::engine_access::registering_host_code(*eng)](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
+            [func, eng](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
                 std::vector<script_value> scratch;
                 try {
-                    detail::host_call_time timed(*eng, host_code);
                     return func(detail::deref_builtin_args(raw_args, scratch));
                 } catch (const std::exception& e) {
                     return host_exception_result(eng, e);
@@ -1515,11 +1513,10 @@ void class_definition::add_static_method(uint64_t name_id, script_function func,
     const auto* writeback = func.target<host_writeback_function>();
     const uint64_t writeback_mask = writeback ? writeback->mask : 0;
     std::string qualified = arity == SIZE_MAX ? std::string() : name_ + "::" + std::string(detail::engine_access::get_symbolizer(*engine_)->get_string(name_id));
-    script_function call = [func, eng = engine_, arity, qualified = std::move(qualified), host_code = detail::engine_access::registering_host_code(*engine_)](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
+    script_function call = [func, eng = engine_, arity, qualified = std::move(qualified)](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
         std::vector<script_value> scratch;
         try {
             if (arity != SIZE_MAX && raw_args.size() != arity) [[unlikely]] { throw_static_method_arity(qualified, arity, raw_args.size()); }
-            detail::host_call_time timed(*eng, host_code);
             return func(detail::deref_builtin_args(raw_args, scratch));
         } catch (const std::exception& e) {
             return host_exception_result(eng, e);
@@ -1711,7 +1708,6 @@ void class_definition::add_native_method(uint64_t id, native_method fn) {
     e.plain = fn;
     e.lane = nullptr;
     e.state.reset();
-    e.host_code = engine_ && detail::engine_access::registering_host_code(*engine_);
     restamp_native_methods();
 }
 
@@ -1723,7 +1719,6 @@ void class_definition::add_native_lane(uint64_t id, native_lane fn, std::shared_
     auto& overloads = native_overload_sets_[id];
     if (!overloads) { overloads = std::make_shared<native_overload_set>(); }
     overloads->push_back(native_overload{ fn, state, exact });
-    it->second.host_code = engine_ && detail::engine_access::registering_host_code(*engine_);
     if (overloads->size() == 1) {
         it->second.lane = fn;
         it->second.state = std::move(state);

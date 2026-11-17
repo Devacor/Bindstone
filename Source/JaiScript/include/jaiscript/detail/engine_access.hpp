@@ -236,15 +236,6 @@ namespace jai::detail {
         JAI_FORCEINLINE static uint64_t source_read_count(const engine& a_engine) noexcept { return a_engine.source_read_count(); }
         JAI_FORCEINLINE static uint64_t check_walk_count(const engine& a_engine) noexcept { return a_engine.check_walk_count(); }
         JAI_FORCEINLINE static uint64_t clock_sample_count(const engine& a_engine) noexcept { return a_engine.clock_sample_count(); }
-        JAI_FORCEINLINE static bool registering_host_code(const engine& a_engine) noexcept { return a_engine.registering_host_code(); }
-        // The engine's own registrations, for as long as one lives: what registers inside is the engine's code, not a host's
-        struct library_registration {
-            engine& registering;
-            explicit library_registration(engine& a_engine) noexcept : registering(a_engine) { a_engine.library_registration(1); }
-            ~library_registration() { registering.library_registration(-1); }
-            library_registration(const library_registration&) = delete;
-            library_registration& operator=(const library_registration&) = delete;
-        };
         JAI_FORCEINLINE static script_value make_caught_error(engine& a_engine, const script_value& thrown, bool by_throw, const source_location* throw_site, const std::vector<stack_frame>& trace, const char* thrown_text = nullptr, error_kind kind = error_kind::other) { return a_engine.make_caught_error(thrown, by_throw, throw_site, trace, thrown_text, kind); }
         JAI_FORCEINLINE static script_value make_caught_error(engine& a_engine, const script_value& thrown, bool by_throw, const source_location* throw_site, std::vector<stack_frame>&& trace, const char* thrown_text = nullptr, error_kind kind = error_kind::other) { return a_engine.make_caught_error(thrown, by_throw, throw_site, std::move(trace), thrown_text, kind); }
         JAI_FORCEINLINE static error_kind exception_kind(const script_exception& a_exception) noexcept { return a_exception.kind_; }

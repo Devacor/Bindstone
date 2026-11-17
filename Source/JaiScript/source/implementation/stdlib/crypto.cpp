@@ -878,7 +878,6 @@ namespace crypto_detail {
 } // namespace crypto_detail
 
 	void register_crypto_functions(engine& eng_ref) {
-		detail::engine_access::library_registration own_registrations(eng_ref);
 		using namespace crypto_detail;
 		engine* eng = &eng_ref;
 		detail::engine_access::serial_function(eng_ref, "crypto::sha256_file");

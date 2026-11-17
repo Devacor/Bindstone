@@ -94,11 +94,14 @@ private:
 };
 
 // Trailing options beside the permissions: a script statement may not drop the result (as a script declares [[nodiscard]]),
-// and the call touches state other objects share, so a parallel body may not make it
+// the call touches state other objects share, so a parallel body may not make it, and the time the call takes is the host's
+// (a load, a wait on a service), which the execution budget does not count (detail/host_time.hpp)
 struct nodiscard_option {};
 struct serial_option {};
+struct exclude_execution_time_option {};
 inline constexpr nodiscard_option nodiscard{};
 inline constexpr serial_option serial{};
+inline constexpr exclude_execution_time_option exclude_execution_time{};
 
 // What the trailing options of add_function, add_variadic_function and a binder's method, static_method and constructor add up
 // to: any number, in any order, as in add_function("save", fn, jai::nodiscard, jai::serial, GamePermission::cheats)
@@ -111,7 +114,12 @@ struct function_options {
 namespace detail {
     template<typename O>
     concept function_option = permission_enum<std::remove_cvref_t<O>> || std::is_same_v<std::remove_cvref_t<O>, nodiscard_option> ||
-                              std::is_same_v<std::remove_cvref_t<O>, serial_option>;
+                              std::is_same_v<std::remove_cvref_t<O>, serial_option> || std::is_same_v<std::remove_cvref_t<O>, exclude_execution_time_option>;
+
+    // Whether a binding's options carry jai::exclude_execution_time: read where the binding is made, so an unmarked binding
+    // compiles what it always did and a marked one stores the timed callable (engine::time_excluded_function)
+    template<typename... Options>
+    inline constexpr bool excludes_execution_time = (std::is_same_v<std::remove_cvref_t<Options>, exclude_execution_time_option> || ...);
 
     template<typename O>
     void add_function_option(function_options& a_options, const O& a_option) {
@@ -119,6 +127,7 @@ namespace detail {
             a_options.nodiscard = true;
         } else if constexpr (std::is_same_v<O, serial_option>) {
             a_options.serial = true;
+        } else if constexpr (std::is_same_v<O, exclude_execution_time_option>) {
         } else {
             a_options.required.add(permission_id(a_option));
         }

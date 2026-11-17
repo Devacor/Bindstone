@@ -6496,8 +6496,8 @@ struct region_run {
 		if (rolled_up) {
 			engine_access::execution_limits(eng).memory_charge_deferred(rolled_up);
 		}
-		// The region's wall time is the caller's; the host time every worker spent is not the script's. The least any worker
-		// was credited is credited to the caller, so its entry still counts the longest any worker ran script
+		// The region's wall time is the caller's; what every worker spent in calls the budget does not count is not. The least
+		// any worker was credited is credited to the caller, so its entry still counts the longest any worker ran the rest
 		uint64_t host_ticks = contexts.empty() ? 0 : UINT64_MAX;
 		for (const auto& ctx : contexts) { host_ticks = std::min(host_ticks, ctx->limits.host_ticks_credited); }
 		if (host_ticks) {

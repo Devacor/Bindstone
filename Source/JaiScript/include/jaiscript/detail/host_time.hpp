@@ -18,14 +18,13 @@ namespace jai {
 
 namespace jai::detail {
 
-	// The wall-clock execution budget counts the script's work, not the host's. Each call a backend makes into host code (a
-	// bound function, method, constructor, operator or property accessor: a callable registered outside the engine's own
-	// registration) reads a coarse clock as it starts and as it returns, and the ticks between move the running entry's
-	// deadline later. The clock is one the platform keeps current by itself, so a read is a load; its tick is a millisecond
-	// or more, which makes the credit exact to a tick for a long call and, over many short ones, the tick boundaries that
-	// fell inside them: host time on average, never more. Script a host call runs (a callback, a nested execute) stops the
-	// call's clock for as long as it runs. The engine's own builtins are not host code: their time counts
-	// (detail/work_budget.hpp).
+	// The wall-clock execution budget counts everything a script's entry runs, a host's bound code included, except a
+	// binding the host marked jai::exclude_execution_time (a load, a wait on a service). A marked binding stores one
+	// callable around its own (engine::time_excluded_function), which reads a coarse clock as the call starts and as it
+	// returns; the ticks between move the running entry's deadline later. The clock is one the platform keeps current by
+	// itself, so a read is a load; its tick is a millisecond or more, which makes the credit exact to a tick for a long call
+	// and, over many short ones, the tick boundaries that fell inside them: the call's time on average, never more. Script
+	// such a call runs (a callback, a run it steps) stops the call's clock for as long as it runs.
 
 #if defined(_WIN32)
 	// KUSER_SHARED_DATA.InterruptTime, mapped read-only at this address in every process: 100 ns units, advanced by the
@@ -76,22 +75,15 @@ namespace jai::detail {
 
 	// Moves a_backend's running deadline later by a_ticks of host time (engine.cpp)
 	void credit_host_ticks(execution_backend& a_backend, execution_limits& a_limits, uint64_t a_ticks) noexcept;
-	// The limits a call of host code times against where the library makes the call itself (an overload the engine picked, a
-	// class's method dispatcher): the calling thread's, with its backend, or null when that backend has no wall-clock budget armed
+	// The limits a marked call times against: the calling thread's, with its backend, or null when that backend has no
+	// wall-clock budget armed
 	execution_limits* host_call_limits(engine& a_engine, execution_backend*& a_backend) noexcept;
 
-	// One call into host code. a_limits is the calling thread's limits when the call is timed (a wall-clock budget is armed
-	// and the callee is host code), else null.
+	// One call of a binding marked jai::exclude_execution_time
 	class host_call_time {
 	public:
-		JAI_FORCEINLINE host_call_time(execution_limits* a_limits, execution_backend* a_backend) noexcept : limits_(a_limits), backend_(a_backend) {
+		explicit host_call_time(engine& a_engine) noexcept : limits_(host_call_limits(a_engine, backend_)) {
 			if (limits_) { limits_->host_since = host_ticks_now(*limits_); }
-		}
-		host_call_time(engine& a_engine, bool a_host_code) noexcept : limits_(nullptr), backend_(nullptr) {
-			if (a_host_code) {
-				limits_ = host_call_limits(a_engine, backend_);
-				if (limits_) { limits_->host_since = host_ticks_now(*limits_); }
-			}
 		}
 		JAI_FORCEINLINE ~host_call_time() {
 			if (limits_) {
@@ -102,8 +94,8 @@ namespace jai::detail {
 		host_call_time& operator=(const host_call_time&) = delete;
 
 	private:
+		execution_backend* backend_ = nullptr;
 		execution_limits* limits_;
-		execution_backend* backend_;
 	};
 
 	// Script running inside a host call (the host called back, executed, resumed a run): the call's time so far is credited

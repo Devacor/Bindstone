@@ -2157,7 +2157,7 @@ namespace jai::vm {
         void note_compiled(const chunk& compiled);
         op_status exec_namespace_variable(const declaration_ptr& member_decl, script_namespace_data& ns_data, uint64_t namespace_id);
         op_status invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site);
-        op_status invoke_native(frame& f, const script_function_node& func, std::vector<script_value>& arguments, const call_site& site);
+        op_status invoke_native(frame& f, const script_function& func, std::vector<script_value>& arguments, const call_site& site);
         // Typed bound-method mint for this-fallback identifier resolutions (bare
         // sibling calls): call paths recover the payload (kind bound_method) and enter
         // the method in-loop; every other caller gets make_bound_method's exact
@@ -2818,13 +2818,10 @@ namespace jai::vm {
         op_status exec_call_from_scratch(frame& f, const vm_instruction& ins);
         op_status exec_sleep(frame& f, const vm_instruction& ins);
         // A function value running script calls: while a run is active a script callable enters without pinning it
-        checked_result<script_value> call_value(const script_function_node& f, const std::vector<script_value>& args) {
+        checked_result<script_value> call_value(const script_function& f, const std::vector<script_value>& args) {
             JAI_CENSUS(call_function_object);
-            if (budget_active_ && f.host_code) { return call_timed_host_value(f, args); }
             return engine_->active_run_pins() ? detail::call_function_value(f, args) : f(args);
         }
-        // call_value for host code under an armed wall-clock budget (detail/host_time.hpp); out of line, so every other call keeps its frame
-        checked_result<script_value> call_timed_host_value(const script_function_node& f, const std::vector<script_value>& args);
         op_status exec_call_from_scratch_general(frame& f, const vm_instruction& ins);
         op_status call_parked_script(frame& f, const vm_instruction& ins, const script_defined_function& fn, strong_ptr<script_function_node> pin);
         // the call paths' catch: the active exception becomes the unwinding state (out of line, no texts on the caller's

@@ -546,8 +546,7 @@ namespace jai {
         checked_result<bool> language_equal(const script_value& left, const script_value& right) override;
         checked_result<script_value> invoke_method(const script_value& self, uint64_t name_id) override;
         // A function value running script calls: while a run is active a script callable enters without pinning it
-        checked_result<script_value> call_value(const script_function_node& f, const std::vector<script_value>& args) {
-            detail::host_call_time timed(budget_active_ && f.host_code ? limits_ : nullptr, this);   // detail/host_time.hpp
+        checked_result<script_value> call_value(const script_function& f, const std::vector<script_value>& args) {
             return engine_ && engine_->active_run_pins() ? detail::call_function_value(f, args) : f(args);
         }
         builtin_method_context builtin_ctx() {

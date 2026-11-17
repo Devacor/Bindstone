@@ -635,7 +635,7 @@ namespace jai {
         void add_variadic_function(const std::string& name, Func&& func, const Options&... options) {
             using call_t = detail::engine_variadic_call<std::decay_t<Func>>;
             const function_options folded = detail::fold_function_options(options...);
-            add_engine_variadic_function(name, guard_function(call_t{std::forward<Func>(func), this}, folded.required), {&call_t::invoke, &call_t::locate},
+            add_engine_variadic_function(name, bound_function<detail::excludes_execution_time<Options...>>(call_t{std::forward<Func>(func), this}, folded.required), {&call_t::invoke, &call_t::locate},
                                          host_result_kind<typename call_t::result_type>());
             apply_function_options(name, folded);
         }
@@ -643,7 +643,7 @@ namespace jai {
         template<detail::function_option... Options>
         void add_variadic_function(const std::string& name, script_function func, const Options&... options) {
             const function_options folded = detail::fold_function_options(options...);
-            add_variadic_function(name, guard_function(std::move(func), folded.required));
+            add_variadic_function(name, bound_function<detail::excludes_execution_time<Options...>>(std::move(func), folded.required));
             apply_function_options(name, folded);
         }
         void add_function_with_arity(const std::string& name, script_function func, size_t arity);
@@ -662,14 +662,14 @@ namespace jai {
             auto binder = make_function_binder(std::forward<Func>(func), this);
             script_function bound_func = binder.bind();
             stage_host_result(host_result_kind<return_type>());
-            if constexpr (detail::host_lane_params<typename traits::argument_types>()) {
+            if constexpr (!detail::excludes_execution_time<Options...> && detail::host_lane_params<typename traits::argument_types>()) {
                 if (folded.required.empty()) {
                     using call_t = typename decltype(binder)::by_value_call;
                     stage_host_direct({&call_t::invoke, &call_t::locate});
                 }
             }
             
-            script_function wrapped_func = guard_function(std::move(bound_func), folded.required);
+            script_function wrapped_func = bound_function<detail::excludes_execution_time<Options...>>(std::move(bound_func), folded.required);
             if constexpr (constexpr uint64_t writeback = detail::tuple_writeback_mask<typename traits::argument_types>::value; writeback != 0) {
                 wrapped_func = host_writeback_function{ std::move(wrapped_func), writeback };
             }
@@ -890,6 +890,18 @@ namespace jai {
         // and worker-local copies all recheck this engine's current grants. An empty
         // requirement returns the original callable with no invocation overhead.
         script_function guard_function(script_function function, const permission_set& required);
+        // The callable a binding marked jai::exclude_execution_time stores: its call's time moves the running entry's deadline
+        // later (detail/host_time.hpp)
+        script_function time_excluded_function(script_function function);
+        // guard_function, inside time_excluded_function for a marked binding; the choice is the binding's, made as it compiles
+        template<bool ExcludeTime, typename Callable>
+        JAI_FORCEINLINE script_function bound_function(Callable&& callable, const permission_set& required) {
+            if constexpr (ExcludeTime) {
+                return time_excluded_function(guard_function(std::forward<Callable>(callable), required));
+            } else {
+                return guard_function(std::forward<Callable>(callable), required);
+            }
+        }
         // include: the file runs at the include site, in the current scope and under the running unit, so
         // its declarations are the includer's (internal/global_shadowing.md). scope names the function or block the
         // include runs in (empty at program scope): an enum the file declares there stays local to it.
@@ -1628,10 +1640,6 @@ namespace jai {
         script_run launch_run(std::unique_ptr<detail::run_record> run);   // start's first switch into the run (script_run.cpp)
         void cancel_suspended_runs() noexcept;   // the engine's teardown: every run still suspended is cancelled
         void register_permission_builtins();
-        // The engine's own registrations (its core, the stdlib) run inside a library registration; a callable registered
-        // outside one is host code, whose time the execution budget does not count (detail/host_time.hpp)
-        void library_registration(int a_step) noexcept;
-        bool registering_host_code() const noexcept;
         void set_permissions(const permission_set& permissions, bool enabled);
         void check_permission_mutation() const;
         bool permissions_enabled(const permission_set& permissions) const noexcept;

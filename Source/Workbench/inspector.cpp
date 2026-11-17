@@ -80,29 +80,33 @@ namespace Workbench {
 		labelledRows.clear();
 		rowIndent = 0.0f;
 		contentNode->clear();
-		float y = 0.0f;
+		if (!rowGrid) {
+			// every row is a child of the content node: the Grid stacks them and its bounds are the panel's height
+			rowGrid = contentNode->attach<MV::Scene::Grid>()->columns(1)->layoutPolicy(MV::Scene::Grid::AutoLayoutPolicy::Child);
+			rowGrid->hide();
+		}
+		rowGrid->cellSize(MV::size(panelWidth, std::max(theme->rowHeight, theme->fieldHeight)))->padding(MV::Point<>(), MV::point(0.0f, theme->px(4.0f)));
 		auto node = inspectedNode.lock();
 		if (!node) {
 			makeLabel(contentNode, *services, *theme, "empty", MV::size(theme->px(200.0f), theme->rowHeight), "Nothing selected");
-			builtHeight = theme->rowHeight;
-			return;
-		}
-		if (addSectionHeader("Node: " + (node->id().empty() ? std::string("(unnamed)") : node->id()), "node", y)) {
-			buildNodeSection(y);
-		}
-		if (auto components = node->property_value<std::vector<std::shared_ptr<MV::Scene::Component>>>("childComponents")) {
-			for (auto&& component : *components) {
-				buildComponentSection(component, y);
+		} else {
+			if (addSectionHeader("Node: " + (node->id().empty() ? std::string("(unnamed)") : node->id()), "node")) {
+				buildNodeSection();
+			}
+			if (auto components = node->property_value<std::vector<std::shared_ptr<MV::Scene::Component>>>("childComponents")) {
+				for (auto&& component : *components) {
+					buildComponentSection(component);
+				}
 			}
 		}
-		builtHeight = y;
+		rowGrid->layoutCells();
+		builtHeight = rowGrid->bounds().height();
 	}
 
 	// Returns true when the section is expanded; draws the Unity-style foldout header.
-	bool InspectorPanel::addSectionHeader(const std::string& a_title, const std::string& a_key, float& a_y, const std::shared_ptr<MV::Scene::Component>& a_gizmoComponent) {
+	bool InspectorPanel::addSectionHeader(const std::string& a_title, const std::string& a_key, const std::shared_ptr<MV::Scene::Component>& a_gizmoComponent) {
 		bool expanded = collapsedSections.count(a_key) ? !collapsedSections[a_key] : true;
 		auto row = contentNode->make(MV::guid("header_"));
-		row->position(MV::point(0.0f, a_y));
 		row->attach<MV::Scene::Sprite>()->bounds(MV::size(panelWidth, theme->rowHeight))->texture(shadeHandle(*services))->color(theme->header());
 		auto arrowHost = row->make("fold");
 		arrowHost->position(MV::point(theme->px(2.0f), 0.0f));
@@ -123,17 +127,14 @@ namespace Workbench {
 			});
 			gizmoButton->owner()->position(MV::point(panelWidth - buttonWidth - theme->pad, theme->px(2.0f)));
 		}
-		a_y += theme->rowHeight + theme->px(4.0f);
 		return expanded;
 	}
 
-	std::shared_ptr<MV::Scene::Node> InspectorPanel::makeRow(const std::string& a_label, float& a_y) {
+	std::shared_ptr<MV::Scene::Node> InspectorPanel::makeRow(const std::string& a_label) {
 		auto row = contentNode->make(MV::guid("row_"));
-		row->position(MV::point(0.0f, a_y));
 		auto label = makeLabel(row, *services, *theme, "label", MV::size(labelWidth() - rowIndent, theme->fieldHeight), a_label);
 		label->owner()->position(MV::point(rowIndent, 0.0f));
 		labelledRows.emplace_back(a_label, row);
-		a_y += theme->fieldHeight + theme->px(4.0f);
 		return row;
 	}
 
@@ -151,13 +152,13 @@ namespace Workbench {
 		}
 	}
 
-	void InspectorPanel::buildNodeSection(float& a_y) {
+	void InspectorPanel::buildNodeSection() {
 		auto node = inspectedNode.lock();
 		std::weak_ptr<MV::Scene::Node> weakNode = node;
 		MV::Size<> fieldSize(fieldWidth(), theme->fieldHeight);
 
 		auto fieldAt = [&](const std::string& a_label, const std::string& a_value, std::function<void(const std::string&)> a_commit) {
-			auto row = makeRow(a_label, a_y);
+			auto row = makeRow(a_label);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			makeTextField(fieldHost, *services, *theme, *focus, "value", fieldSize, a_value, std::move(a_commit));
@@ -177,7 +178,7 @@ namespace Workbench {
 		});
 
 		auto vectorAt = [&](const std::string& a_label, std::initializer_list<std::pair<std::string, float>> a_axes, std::function<void(size_t, float)> a_commit) {
-			auto row = makeRow(a_label, a_y);
+			auto row = makeRow(a_label);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			makeVectorRow(fieldHost, *services, *theme, *focus, fieldWidth(), a_axes, a_commit,
@@ -214,7 +215,7 @@ namespace Workbench {
 		});
 
 		auto scrubAt = [&](const std::string& a_label, float a_value, std::function<void(float)> a_commit) {
-			auto row = makeRow(a_label, a_y);
+			auto row = makeRow(a_label);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			makeScrubField(fieldHost, *services, *theme, *focus, "value", MV::size(fieldWidth(), theme->fieldHeight), a_value, a_commit,
@@ -232,7 +233,7 @@ namespace Workbench {
 		});
 
 		if (onParallaxPreview && hasEnabledParallax(node)) {
-			auto row = makeRow("parallax", a_y);
+			auto row = makeRow("parallax");
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			bool previewing = parallaxPreviewActive && parallaxPreviewActive();
@@ -242,10 +243,10 @@ namespace Workbench {
 		}
 	}
 
-	void InspectorPanel::buildComponentSection(const std::shared_ptr<MV::Scene::Component>& a_component, float& a_y) {
+	void InspectorPanel::buildComponentSection(const std::shared_ptr<MV::Scene::Component>& a_component) {
 		std::string typeName = friendlyTypeName(typeid(*a_component).name());
 		std::string sectionKey = typeName + (a_component->id().empty() ? "" : "#" + a_component->id());
-		if (!addSectionHeader(typeName, sectionKey, a_y, a_component)) {
+		if (!addSectionHeader(typeName, sectionKey, a_component)) {
 			return;
 		}
 		std::vector<std::pair<std::string, jai::property_base*>> properties;
@@ -253,7 +254,7 @@ namespace Workbench {
 			properties.emplace_back(a_name, a_property);
 		});
 		for (auto&& [name, property] : properties) {
-			addPropertyRow(a_component, name, property, a_y);
+			addPropertyRow(a_component, name, property);
 		}
 	}
 
@@ -346,17 +347,17 @@ namespace Workbench {
 		}
 	}
 
-	void InspectorPanel::addReadOnlyRow(const std::string& a_name, const std::string& a_value, float& a_y) {
-		auto row = makeRow(a_name, a_y);
+	void InspectorPanel::addReadOnlyRow(const std::string& a_name, const std::string& a_value) {
+		auto row = makeRow(a_name);
 		auto valueHost = row->make("field");
 		valueHost->position(MV::point(labelWidth() + theme->pad + theme->px(5.0f), 0.0f));
 		makeLabel(valueHost, *services, *theme, "value", MV::size(fieldWidth() - theme->px(5.0f), theme->fieldHeight), a_value);
 	}
 
-	void InspectorPanel::addPropertyRow(const std::shared_ptr<MV::Scene::Component>& a_component, const std::string& a_name, jai::property_base* a_property, float& a_y) {
+	void InspectorPanel::addPropertyRow(const std::shared_ptr<MV::Scene::Component>& a_component, const std::string& a_name, jai::property_base* a_property) {
 		auto typeId = a_property->value_type_id();
 		// a retired key has no value
-		if (typeId == std::type_index(typeid(void)) || addCustomEditor(a_component, a_name, a_property, a_y)) {
+		if (typeId == std::type_index(typeid(void)) || addCustomEditor(a_component, a_name, a_property)) {
 			return;
 		}
 		const std::string label = leafName(a_name);
@@ -375,7 +376,7 @@ namespace Workbench {
 
 		auto numericField = [&](auto a_sample) {
 			using ValueType = decltype(a_sample);
-			auto row = makeRow(label, a_y);
+			auto row = makeRow(label);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			ValueType current = *a_property->value_as<ValueType>();
@@ -391,7 +392,7 @@ namespace Workbench {
 
 		auto enumField = [&](auto a_sample, std::vector<std::string> a_labels) {
 			using EnumType = decltype(a_sample);
-			auto row = makeRow(label, a_y);
+			auto row = makeRow(label);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			int current = static_cast<int>(*a_property->value_as<EnumType>());
@@ -405,7 +406,7 @@ namespace Workbench {
 		};
 
 		if (typeId == std::type_index(typeid(bool))) {
-			auto row = makeRow(label, a_y);
+			auto row = makeRow(label);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			auto apply = propertyApplier<bool>(weakComponent, a_name);
@@ -432,7 +433,7 @@ namespace Workbench {
 		} else if (typeId == std::type_index(typeid(uint64_t))) {
 			numericField(uint64_t{});
 		} else if (typeId == std::type_index(typeid(std::string))) {
-			auto row = makeRow(label, a_y);
+			auto row = makeRow(label);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			auto apply = propertyApplier<std::string>(weakComponent, a_name);
@@ -448,7 +449,7 @@ namespace Workbench {
 					}
 				});
 		} else if (typeId == std::type_index(typeid(MV::Color))) {
-			auto row = makeRow(label, a_y);
+			auto row = makeRow(label);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			const MV::Color current = *a_property->value_as<MV::Color>();
@@ -487,7 +488,7 @@ namespace Workbench {
 					}
 				});
 		} else if (typeId == std::type_index(typeid(MV::Point<>))) {
-			auto row = makeRow(label, a_y);
+			auto row = makeRow(label);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			const MV::Point<> current = *a_property->value_as<MV::Point<>>();
@@ -510,7 +511,7 @@ namespace Workbench {
 					}
 				});
 		} else if (typeId == std::type_index(typeid(MV::Scale))) {
-			auto row = makeRow(label, a_y);
+			auto row = makeRow(label);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			const MV::Scale current = *a_property->value_as<MV::Scale>();
@@ -544,9 +545,9 @@ namespace Workbench {
 			auto box = *a_property->value_as<MV::BoxAABB<>>();
 			std::ostringstream text;
 			text << formatNumberCompact(box.minPoint.x, 2) << ", " << formatNumberCompact(box.minPoint.y, 2) << "   " << formatNumberCompact(box.size().width, 2) << " x " << formatNumberCompact(box.size().height, 2);
-			addReadOnlyRow(label, text.str(), a_y);
+			addReadOnlyRow(label, text.str());
 		} else {
-			addReadOnlyRow(label, friendlyTypeName(typeId.name()), a_y);
+			addReadOnlyRow(label, friendlyTypeName(typeId.name()));
 		}
 	}
 

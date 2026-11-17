@@ -178,10 +178,9 @@ namespace Workbench {
 		return result;
 	}
 
-	bool InspectorPanel::addGroupHeader(const std::string& a_title, const std::string& a_key, const std::string& a_summary, float& a_y) {
+	bool InspectorPanel::addGroupHeader(const std::string& a_title, const std::string& a_key, const std::string& a_summary) {
 		bool open = openGroups.count(a_key) && openGroups[a_key];
 		auto row = contentNode->make(MV::guid("group_"));
-		row->position(MV::point(0.0f, a_y));
 		labelledRows.emplace_back(a_title, row);
 		auto arrowHost = row->make("fold");
 		arrowHost->position(MV::point(rowIndent - theme->px(2.0f), 0.0f));
@@ -195,12 +194,11 @@ namespace Workbench {
 			openGroups[a_key] = !open;
 			rebuild();
 		});
-		a_y += theme->fieldHeight + theme->px(4.0f);
 		return open;
 	}
 
-	void InspectorPanel::addNodeReferenceRow(const std::string& a_label, const std::shared_ptr<MV::Scene::Node>& a_node, std::function<void(const std::shared_ptr<MV::Scene::Node>&)> a_assign, float& a_y) {
-		auto row = makeRow(a_label, a_y);
+	void InspectorPanel::addNodeReferenceRow(const std::string& a_label, const std::shared_ptr<MV::Scene::Node>& a_node, std::function<void(const std::shared_ptr<MV::Scene::Node>&)> a_assign) {
+		auto row = makeRow(a_label);
 		auto fieldHost = row->make("field");
 		fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 		const float clearWidth = a_assign && a_node ? theme->fieldHeight + theme->px(2.0f) : 0.0f;
@@ -254,12 +252,12 @@ namespace Workbench {
 		return false;
 	}
 
-	size_t InspectorPanel::addPager(const std::string& a_key, size_t a_count, size_t a_perPage, float& a_y) {
+	size_t InspectorPanel::addPager(const std::string& a_key, size_t a_count, size_t a_perPage) {
 		const size_t pageCount = std::max<size_t>(1, (a_count + a_perPage - 1) / a_perPage);
 		size_t& page = listPages[a_key];
 		page = std::min(page, pageCount - 1);
 		if (pageCount > 1) {
-			auto row = makeRow("", a_y);
+			auto row = makeRow("");
 			auto host = row->make("pager");
 			host->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			MV::Size<> stepSize(theme->fieldHeight * 1.4f, theme->fieldHeight);
@@ -283,11 +281,11 @@ namespace Workbench {
 		return page * a_perPage;
 	}
 
-	void InspectorPanel::addAnchorsGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable, float& a_y) {
+	void InspectorPanel::addAnchorsGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable) {
 		auto& anchors = a_drawable->anchors();
 		auto anchoredTo = anchors.hasParent() ? anchors.parent() : nullptr;
 		std::string summary = !anchoredTo ? std::string("None") : "to " + nodeName(anchoredTo->owner()) + (anchoredTo->id().empty() ? "" : " : " + anchoredTo->id());
-		if (!addGroupHeader("anchors", "anchors#" + a_drawable->id(), summary, a_y)) {
+		if (!addGroupHeader("anchors", "anchors#" + a_drawable->id(), summary)) {
 			return;
 		}
 		rowIndent += theme->px(12.0f);
@@ -320,14 +318,14 @@ namespace Workbench {
 			apply(newParent);
 			history->record("anchor parent", [apply, newParent]() { apply(newParent); }, [apply, oldParent]() { apply(oldParent); });
 			rebuild();
-		}, a_y);
+		});
 
 		using BoxGetter = MV::BoxAABB<>(*)(MV::Scene::Anchors&);
 		using BoxSetter = void(*)(MV::Scene::Anchors&, const MV::BoxAABB<>&);
 		auto boxRows = [&](const std::string& a_label, BoxGetter a_get, BoxSetter a_set) {
 			for (bool isMaximum : { false, true }) {
 				std::string label = a_label + (isMaximum ? " max" : " min");
-				auto row = makeRow(label, a_y);
+				auto row = makeRow(label);
 				auto fieldHost = row->make("field");
 				fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 				auto box = a_get(anchors);
@@ -350,7 +348,7 @@ namespace Workbench {
 		boxRows("offset", [](MV::Scene::Anchors& a_anchors) { return a_anchors.offset(); }, [](MV::Scene::Anchors& a_anchors, const MV::BoxAABB<>& a_box) { a_anchors.offset(a_box); });
 
 		{
-			auto row = makeRow("pivot", a_y);
+			auto row = makeRow("pivot");
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			auto pivot = anchors.pivot();
@@ -367,7 +365,7 @@ namespace Workbench {
 				});
 		}
 		{
-			auto row = makeRow("use position", a_y);
+			auto row = makeRow("use position");
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			auto write = [weakDrawable](bool a_on) {
@@ -384,7 +382,7 @@ namespace Workbench {
 	}
 
 	// One row per texture slot: a thumbnail and name that open the picker, and x to clear the slot.
-	void InspectorPanel::addTextureRows(const std::shared_ptr<MV::Scene::Drawable>& a_drawable, float& a_y) {
+	void InspectorPanel::addTextureRows(const std::shared_ptr<MV::Scene::Drawable>& a_drawable) {
 		auto* property = a_drawable->find_reflected_property("textures");
 		auto* textures = property ? property->value_as<std::map<size_t, std::shared_ptr<MV::TextureHandle>>>() : nullptr;
 		std::vector<size_t> slots;
@@ -400,7 +398,7 @@ namespace Workbench {
 		auto& mouse = *services->get<MV::TapDevice>();
 		for (size_t slot : slots) {
 			auto handle = textures && textures->count(slot) ? textures->at(slot) : nullptr;
-			auto row = makeRow(slots.size() == 1 ? std::string("texture") : "texture " + std::to_string(slot), a_y);
+			auto row = makeRow(slots.size() == 1 ? std::string("texture") : "texture " + std::to_string(slot));
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			const float clearWidth = handle ? theme->fieldHeight + theme->px(2.0f) : 0.0f;
@@ -571,18 +569,18 @@ namespace Workbench {
 		}
 	}
 
-	void InspectorPanel::addPointsGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable, float& a_y) {
+	void InspectorPanel::addPointsGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable) {
 		auto points = a_drawable->getPoints();
 		const std::string key = "points#" + a_drawable->id();
-		if (!addGroupHeader("points", key, countText(points.size(), "point", "points"), a_y)) {
+		if (!addGroupHeader("points", key, countText(points.size(), "point", "points"))) {
 			return;
 		}
 		rowIndent += theme->px(12.0f);
 		std::weak_ptr<MV::Scene::Drawable> weakDrawable = a_drawable;
-		const size_t first = addPager(key, points.size(), rowsPerListPage, a_y);
+		const size_t first = addPager(key, points.size(), rowsPerListPage);
 		for (size_t index = first; index < std::min(points.size(), first + rowsPerListPage); ++index) {
 			std::string label = "[" + std::to_string(index) + "]";
-			auto row = makeRow(label, a_y);
+			auto row = makeRow(label);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			auto write = [weakDrawable, index](size_t a_axis, float a_value) {
@@ -601,19 +599,19 @@ namespace Workbench {
 	}
 
 	// Indices show a triangle to a row.
-	void InspectorPanel::addIndicesGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable, float& a_y) {
+	void InspectorPanel::addIndicesGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable) {
 		std::vector<GLuint> indices = a_drawable->pointIndices();
 		const std::string key = "indices#" + a_drawable->id();
-		if (!addGroupHeader("vertexIndices", key, countText(indices.size(), "index", "indices"), a_y)) {
+		if (!addGroupHeader("vertexIndices", key, countText(indices.size(), "index", "indices"))) {
 			return;
 		}
 		rowIndent += theme->px(12.0f);
 		std::weak_ptr<MV::Scene::Drawable> weakDrawable = a_drawable;
 		const size_t triangleCount = (indices.size() + 2) / 3;
-		const size_t first = addPager(key, triangleCount, rowsPerListPage, a_y);
+		const size_t first = addPager(key, triangleCount, rowsPerListPage);
 		for (size_t triangle = first; triangle < std::min(triangleCount, first + rowsPerListPage); ++triangle) {
 			std::string label = "[" + std::to_string(triangle) + "]";
-			auto row = makeRow(label, a_y);
+			auto row = makeRow(label);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			std::vector<std::pair<std::string, float>> corners;
@@ -638,7 +636,7 @@ namespace Workbench {
 		rowIndent -= theme->px(12.0f);
 	}
 
-	bool InspectorPanel::addCustomEditor(const std::shared_ptr<MV::Scene::Component>& a_component, const std::string& a_path, jai::property_base* a_property, float& a_y) {
+	bool InspectorPanel::addCustomEditor(const std::shared_ptr<MV::Scene::Component>& a_component, const std::string& a_path, jai::property_base* a_property) {
 		const auto typeId = a_property->value_type_id();
 		const std::string label = leafName(a_path);
 		std::weak_ptr<MV::Scene::Component> weakComponent = a_component;
@@ -646,27 +644,27 @@ namespace Workbench {
 		const bool topLevel = label == a_path;
 
 		if (topLevel && label == "componentOwner") {
-			addNodeReferenceRow("owner", a_component->owner(), nullptr, a_y);
+			addNodeReferenceRow("owner", a_component->owner(), nullptr);
 			return true;
 		}
 		if (drawable && typeId == std::type_index(typeid(MV::Scene::Anchors))) {
-			addAnchorsGroup(drawable, a_y);
+			addAnchorsGroup(drawable);
 			return true;
 		}
 		if (drawable && topLevel && typeId == std::type_index(typeid(std::map<size_t, std::shared_ptr<MV::TextureHandle>>))) {
-			addTextureRows(drawable, a_y);
+			addTextureRows(drawable);
 			return true;
 		}
 		if (drawable && topLevel && typeId == std::type_index(typeid(std::vector<MV::DrawPoint>))) {
-			addPointsGroup(drawable, a_y);
+			addPointsGroup(drawable);
 			return true;
 		}
 		if (drawable && topLevel && typeId == std::type_index(typeid(std::vector<GLuint>))) {
-			addIndicesGroup(drawable, a_y);
+			addIndicesGroup(drawable);
 			return true;
 		}
 		if (auto sprite = std::dynamic_pointer_cast<MV::Scene::Sprite>(a_component); sprite && topLevel && label == "subdivisions") {
-			auto row = makeRow(label, a_y);
+			auto row = makeRow(label);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			std::weak_ptr<MV::Scene::Sprite> weakSprite = sprite;
@@ -685,10 +683,10 @@ namespace Workbench {
 		if (drawable && topLevel && label == "drawType") {
 			GLenum current = *a_property->value_as<GLenum>();
 			if (current > 6) {
-				addReadOnlyRow(label, drawTypeLabel(current), a_y);
+				addReadOnlyRow(label, drawTypeLabel(current));
 				return true;
 			}
-			auto row = makeRow(label, a_y);
+			auto row = makeRow(label);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			std::vector<std::string> labels;
@@ -711,7 +709,7 @@ namespace Workbench {
 				apply(a_node);
 				recordPropertyEdit<std::shared_ptr<MV::Scene::Node>>(weakComponent, a_path, current, a_node);
 				rebuild();
-			}, a_y);
+			});
 			return true;
 		}
 		if (typeId == std::type_index(typeid(std::weak_ptr<MV::Scene::Node>))) {
@@ -721,11 +719,11 @@ namespace Workbench {
 				apply(a_node);
 				recordPropertyEdit<std::weak_ptr<MV::Scene::Node>>(weakComponent, a_path, current, std::weak_ptr<MV::Scene::Node>(a_node));
 				rebuild();
-			}, a_y);
+			});
 			return true;
 		}
 		if (typeId == std::type_index(typeid(MV::Size<>))) {
-			auto row = makeRow(label, a_y);
+			auto row = makeRow(label);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			const MV::Size<> current = *a_property->value_as<MV::Size<>>();
@@ -751,10 +749,10 @@ namespace Workbench {
 			nested->second.visit(a_property, [&](const std::string& a_name, jai::property_base* a_child) {
 				children.emplace_back(a_name, a_child);
 			});
-			if (addGroupHeader(label, "group#" + a_component->id() + "/" + a_path, countText(children.size(), "property", "properties"), a_y)) {
+			if (addGroupHeader(label, "group#" + a_component->id() + "/" + a_path, countText(children.size(), "property", "properties"))) {
 				rowIndent += theme->px(12.0f);
 				for (auto&& [name, child] : children) {
-					addPropertyRow(a_component, a_path + "/" + name, child, a_y);
+					addPropertyRow(a_component, a_path + "/" + name, child);
 				}
 				rowIndent -= theme->px(12.0f);
 			}

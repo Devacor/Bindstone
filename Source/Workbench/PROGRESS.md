@@ -594,6 +594,19 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Not yet: a text field does not scroll to keep its cursor in view, so a long entry shows its start; markup
   (`[[c|...]]`) is measured as written, so `fitLabelText` leaves marked-up text alone.
 
+## Increment 28: inspector and Settings rows on Grid (2026-11-16)
+- The inspector's content node carries an `MV::Scene::Grid` (one column, a cell the panel's width and a row high,
+  a gap beneath each). Every row, section header and group header is a child of that node and the Grid places it;
+  the running `a_y` that every `add...` function carried is gone, and the panel's scroll height is the Grid's
+  bounds. The Settings tab stacks its rows the same way.
+- What Grid does not do yet, found while moving onto it:
+  - No fill or stretch: a cell is one fixed size or its child's size, so "fixed label, field takes the rest" is
+    still computed when a row is built, and a width change rebuilds the rows.
+  - `Grid::positionChildNode` steps down a line by `cellPadding.first.x + cellPadding.second.y`, which reads like a
+    slip for `first.y`. The rows here pad only on the second point, so they do not depend on it. Changing it would
+    move any shipped grid whose padding differs in x and y, so it is left for Dev.
+- Next for Grid: the toolbar groups, the Project tiles (a wrapping Grid by `gridWidth`), tree rows.
+
 ## Known gaps (next increments)
 - Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.

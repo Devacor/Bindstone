@@ -5,21 +5,22 @@ namespace Workbench {
 
 	void SettingsPanel::build() {
 		const float labelWidth = theme->px(120.0f);
-		const float rowStep = theme->fieldHeight + theme->px(4.0f);
-		float y = 0.0f;
+		const float fieldWidth = theme->px(80.0f);
+		auto rowGrid = contentNode->attach<MV::Scene::Grid>()->columns(1)->layoutPolicy(MV::Scene::Grid::AutoLayoutPolicy::Child);
+		rowGrid->hide();
+		rowGrid->cellSize(MV::size(labelWidth + theme->pad + fieldWidth, theme->fieldHeight))->padding(MV::Point<>(), MV::point(0.0f, theme->px(4.0f)));
 		for (size_t index = 0; index < rows.size(); ++index) {
 			auto row = contentNode->make(MV::guid("setting_"));
-			row->position(MV::point(0.0f, y));
 			makeLabel(row, *services, *theme, "label", MV::size(labelWidth, theme->fieldHeight), rows[index].label);
 			auto fieldHost = row->make("field");
 			fieldHost->position(MV::point(labelWidth + theme->pad, 0.0f));
-			fields.push_back(makeTextField(fieldHost, *services, *theme, *focus, "value", MV::size(theme->px(80.0f), theme->fieldHeight), rows[index].value(), [this, index](const std::string& a_text) {
+			fields.push_back(makeTextField(fieldHost, *services, *theme, *focus, "value", MV::size(fieldWidth, theme->fieldHeight), rows[index].value(), [this, index](const std::string& a_text) {
 				rows[index].apply(a_text);
 				fields[index]->text(rows[index].value());
 			}, true));
-			y += rowStep;
 		}
-		builtHeight = y;
+		rowGrid->layoutCells();
+		builtHeight = rowGrid->bounds().height();
 	}
 
 	void SettingsPanel::refresh() {

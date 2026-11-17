@@ -272,10 +272,26 @@ namespace MV{
 		auto centre = [](const FocusCandidate& a_candidate) {
 			return MV::Point<float>((a_candidate.screenMin.x + a_candidate.screenMax.x) * 0.5f, (a_candidate.screenMin.y + a_candidate.screenMax.y) * 0.5f);
 		};
+		// each rectangle as left, top, right, bottom, whichever way round its corners came
+		struct Edges {
+			float low[2];
+			float high[2];
+		};
+		auto edges = [](const FocusCandidate& a_candidate) {
+			return Edges {
+				{ static_cast<float>(std::min(a_candidate.screenMin.x, a_candidate.screenMax.x)), static_cast<float>(std::min(a_candidate.screenMin.y, a_candidate.screenMax.y)) },
+				{ static_cast<float>(std::max(a_candidate.screenMin.x, a_candidate.screenMax.x)), static_cast<float>(std::max(a_candidate.screenMin.y, a_candidate.screenMax.y)) } };
+		};
 		const auto start = centre(*from);
+		const auto startEdges = edges(*from);
 		const bool diagonal = way.x != 0.0f && way.y != 0.0f;
+		// the axis a straight move runs along, and the one across it
+		const int axis = way.x != 0.0f ? 0 : 1;
+		const int crossAxis = 1 - axis;
+		const bool forward = (axis == 0 ? way.x : way.y) > 0.0f;
 		const FocusCandidate* best = nullptr;
 		float bestScore = 0.0f;
+		float bestTie = 0.0f;
 		for (auto&& candidate : candidates) {
 			if (&candidate == from) {
 				continue;
@@ -283,15 +299,31 @@ namespace MV{
 			const auto at = centre(candidate);
 			const float along = (at.x - start.x) * way.x + (at.y - start.y) * way.y;
 			const float across = std::abs((at.x - start.x) * way.y - (at.y - start.y) * way.x);
-			// that way, and more that way than sideways: a diagonal keeps to a narrower cone so it never takes what
-			// lies straight along a row or a column. Sideways distance counts double, so a row or column is followed.
-			if (along <= 0.5f || across > along * (diagonal ? 0.8f : 2.0f)) {
+			if (along <= 0.5f) {
 				continue;
 			}
-			const float score = along + across * 2.0f;
-			if (!best || score < bestScore) {
+			// A straight move measures the gap between the facing edges and how far the two miss each other
+			// sideways, so the nearest thing wins whatever its size, and something squarely ahead (wholly past
+			// the edge and overlapping sideways) counts however far off its middle is. A diagonal goes by middles.
+			float score = along + across * 2.0f;
+			bool squarelyAhead = false;
+			if (!diagonal) {
+				const auto candidateEdges = edges(candidate);
+				const float gap = forward ? candidateEdges.low[axis] - startEdges.high[axis] : startEdges.low[axis] - candidateEdges.high[axis];
+				const float miss = std::max({ candidateEdges.low[crossAxis] - startEdges.high[crossAxis], startEdges.low[crossAxis] - candidateEdges.high[crossAxis], 0.0f });
+				squarelyAhead = gap >= 0.0f && miss <= 0.0f;
+				score = std::max(gap, 0.0f) + miss * 2.0f;
+			}
+			// that way, and more that way than sideways: a diagonal keeps to a narrower cone so it never takes what
+			// lies straight along a row or a column. Sideways distance counts double, so a row or column is followed.
+			if (!squarelyAhead && across > along * (diagonal ? 0.8f : 2.0f)) {
+				continue;
+			}
+			const float tie = along + across * 2.0f;
+			if (!best || score < bestScore - 0.01f || (score <= bestScore + 0.01f && tie < bestTie)) {
 				best = &candidate;
 				bestScore = score;
+				bestTie = tie;
 			}
 		}
 		if (!best) {

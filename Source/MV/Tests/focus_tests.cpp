@@ -230,6 +230,58 @@ namespace mv_tests {
 				check_true(idle->visible() && !active->visible() && !disabled->visible() && button->highlighted(), "a button without a highlight view keeps its idle view");
 			});
 
+			test("a move into a row or a column lands on the end nearest where it came from", [] {
+				SceneHost host;
+				auto& mouse = host.mouse;
+				auto root = Node::make(host.renderer, "root");
+				// [before] [0 1 2 3] [after], all in a line
+				auto before = addTarget(host, root, "before", MV::point(0.0f, 0.0f));
+				std::vector<std::shared_ptr<Target>> row;
+				for (int index = 0; index < 4; ++index) {
+					row.push_back(addTarget(host, root, "row" + std::to_string(index), MV::point(150.0f + index * 150.0f, 0.0f)));
+				}
+				auto after = addTarget(host, root, "after", MV::point(750.0f, 0.0f));
+				before->clickable->focus();
+				check_true(mouse.focusMove(MV::FocusDirection::RIGHT) && row[0]->clickable->focused(), "from before, the first");
+				after->clickable->focus();
+				check_true(mouse.focusMove(MV::FocusDirection::LEFT) && row[3]->clickable->focused(), "from after, the last");
+
+				// [left] then a column of four beside it, then [right], tops in a line
+				SceneHost columnHost;
+				auto columnRoot = Node::make(columnHost.renderer, "root");
+				auto left = addTarget(columnHost, columnRoot, "left", MV::point(0.0f, 0.0f));
+				std::vector<std::shared_ptr<Target>> column;
+				for (int index = 0; index < 4; ++index) {
+					column.push_back(addTarget(columnHost, columnRoot, "column" + std::to_string(index), MV::point(150.0f, index * 60.0f)));
+				}
+				auto right = addTarget(columnHost, columnRoot, "right", MV::point(300.0f, 0.0f));
+				auto below = addTarget(columnHost, columnRoot, "below", MV::point(150.0f, 300.0f));
+				right->clickable->focus();
+				check_true(columnHost.mouse.focusMove(MV::FocusDirection::LEFT) && column[0]->clickable->focused(), "into a column from the side, the one level with where it came from");
+				left->clickable->focus();
+				check_true(columnHost.mouse.focusMove(MV::FocusDirection::RIGHT) && column[0]->clickable->focused());
+				below->clickable->focus();
+				check_true(columnHost.mouse.focusMove(MV::FocusDirection::UP) && column[3]->clickable->focused(), "into a column from its foot, the last");
+			});
+
+			test("a wide control is as near as its edge, not its middle", [] {
+				SceneHost host;
+				auto& mouse = host.mouse;
+				auto root = Node::make(host.renderer, "root");
+				auto corner = addTarget(host, root, "corner", MV::point(0.0f, 0.0f));
+				auto bar = addTarget(host, root, "bar", MV::point(0.0f, 100.0f));
+				bar->clickable->bounds(MV::size(800.0f, 50.0f));
+				auto lowest = addTarget(host, root, "lowest", MV::point(0.0f, 400.0f));
+				auto beside = addTarget(host, root, "beside", MV::point(900.0f, 100.0f));
+				corner->clickable->focus();
+				check_true(mouse.focusMove(MV::FocusDirection::DOWN) && bar->clickable->focused(), "a bar squarely below is reached though its middle is far to one side");
+				check_true(mouse.focusMove(MV::FocusDirection::UP) && corner->clickable->focused(), "and the way back from it finds what sits over its end");
+				bar->clickable->focus();
+				check_true(mouse.focusMove(MV::FocusDirection::RIGHT) && beside->clickable->focused(), "from the bar, what is past its end is next, measured from that end");
+				check_true(mouse.focusMove(MV::FocusDirection::LEFT) && bar->clickable->focused());
+				check_true(mouse.focusMove(MV::FocusDirection::DOWN) && lowest->clickable->focused());
+			});
+
 			test("focusNearest takes the focusable at a point, or the closest one to it", [] {
 				SceneHost host;
 				auto root = Node::make(host.renderer, "root");

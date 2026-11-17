@@ -822,6 +822,18 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Tests: contiguous moves, the explicit group's whole life, the pad going in and out, and the save and load of
   both new keys. `MV Network`'s unread-timeout test failed once in a full run and passed alone: a timing test.
 
+## Increment 41: the nearest control, by its edges (2026-11-17)
+- A straight focus move measures the gap between the facing edges of where it starts and each candidate, and how
+  far the two miss each other sideways (counted double), with the distance between middles only to break a tie. A
+  move into a row lands on the end it came from, a move into a column from the side lands on the one level with
+  where it came from, and a wide control is as near as its edge is.
+- Something squarely ahead (wholly past the edge and overlapping sideways) is a candidate however far off its
+  middle is, so a small button over the end of a wide bar reaches the bar and comes back.
+- Diagonal moves still go by middles. A named `focusLink` still comes first, for the layout this gets wrong.
+- `Node::bounds` with children joins each child's box as it is in the child's own space, without the child's
+  position, scale or rotation. That is why a group's place on screen is not read from it. `Slider` reads its
+  area from it with the handle as a child, so putting the transforms in would change the slider; it is left as it is.
+
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.
 - Authoring verbs still only in Source/Editor: create node, attach/detach

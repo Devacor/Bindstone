@@ -137,8 +137,9 @@ namespace MV{
 		// Keyboard and controller focus. One focusable Clickable holds it at a time. A move first follows the
 		// neighbour the focused Clickable names for it (Clickable::focusLink). Without one, focusNext and
 		// focusPrevious walk by focus order and then by place in the scene, and focusMove goes to the nearest
-		// focusable that way on screen; a diagonal with nothing that way tries its sideways part, then its
-		// up-or-down part, so four directions serve a layout as well as eight. a_scope, a Node's address, keeps a
+		// focusable that way on screen, measured between the facing edges so a wide control is as near as its
+		// edge is; a diagonal with nothing that way tries its sideways part, then its up-or-down part, so four
+		// directions serve a layout as well as eight. a_scope, a Node's address, keeps a
 		// move to Clickables under that node. Each returns false when there is nowhere to go.
 		bool focusNext(const void* a_scope = nullptr);
 		bool focusPrevious(const void* a_scope = nullptr);

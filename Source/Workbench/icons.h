@@ -14,7 +14,8 @@ namespace Workbench {
 	// A white icon drawn at the theme's scale; tint it through the Sprite's colour.
 	std::shared_ptr<MV::TextureHandle> iconHandle(MV::Services& a_services, const Theme& a_theme, Icon a_icon);
 
-	// A square toolbar button showing an icon. An active button fills with the accent: a tool that is on, a toggle that is set.
+	// A square toolbar button showing an icon. An active button fills with the accent: a tool that is on, a toggle
+	// that is set. The pointer over one that is not active lights it.
 	class IconButton {
 	public:
 		IconButton(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, Icon a_icon, std::function<void()> a_onClick);
@@ -22,15 +23,15 @@ namespace Workbench {
 		static float size(const Theme& a_theme) { return a_theme.px(26.0f); }
 
 		std::shared_ptr<MV::Scene::Node> node() const { return buttonNode; }
-		bool active() const { return isActive; }
+		bool active() const;
 		void active(bool a_active);
+		bool hovered() const;
 
 	private:
-		const Theme& theme;
+		struct Look;
+
 		std::shared_ptr<MV::Scene::Node> buttonNode;
-		std::shared_ptr<MV::Scene::Sprite> fill;
-		std::shared_ptr<MV::Scene::Sprite> glyph;
-		bool isActive = false;
+		std::shared_ptr<Look> look;
 	};
 
 }

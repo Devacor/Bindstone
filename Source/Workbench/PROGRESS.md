@@ -567,6 +567,21 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - The self-test types into fields with pushed text and key events, steps with the arrows, checks each setting, the
   Okay and Cancel answers, the settings file, a Shift-snapped drag and the upward handles.
 
+## Increment 26: hover, and the history row across the view (2026-11-16)
+- Engine: `TapDevice::trackHover(true)` turns hover on for a pointer. While on, each move emits `onHoverQuery`,
+  every `Clickable` under the pointer answers with its click priority, and the device keeps the top-most one (with
+  any above it that let touches through), so what covers a control also takes its hover. `Clickable::onHoverEnter`,
+  `onHoverLeave` and `hovered()`. Hover holds through a press and settles on release; `refreshHover()` asks again
+  when the scene moved under a still pointer. The signals are not serialized. Off by default, so the game pays
+  nothing; with `map.scene` open in the Workbench a pointer move costs about 73 microseconds
+  (`Source/MV/Tests/input_tests.cpp`, suite "MV Hover").
+- The Workbench tracks hover: `makeButton` buttons and `IconButton`s light under the pointer.
+- History row: the step-back arrow sits left of the bars and the step-forward arrow right of them. The row is as
+  wide as the Scene view. Bars are never thinner than a logical pixel with one between: a longer history keeps
+  that width and a thin scroller appears under the bars, which follows the handle and can be dragged. The pointer
+  over a bar turns it white and names it ("step 4: move Sky").
+- The self-test hovers toolbar buttons and a bar, and records 900 steps to check the scrolling row.
+
 ## Known gaps (next increments)
 - Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.

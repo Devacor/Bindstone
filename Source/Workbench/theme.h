@@ -23,6 +23,7 @@ namespace Workbench {
 			GLYPH = 0xb4b4b4,
 			SCROLL_THUMB = 0x4c4c4c,
 			BUTTON_IDLE = 0x3c3c3c,
+			BUTTON_HOVER = 0x4d4d4d,
 			BUTTON_ACTIVE = 0x0070e0,
 			ROW_HOVER = 0x333333,
 			DROP_HINT = 0x0070e0
@@ -74,6 +75,7 @@ namespace Workbench {
 		MV::Color glyph() const { return MV::Color(uint32_t(ThemeColor::GLYPH)); }
 		MV::Color scrollThumb() const { return MV::Color(uint32_t(ThemeColor::SCROLL_THUMB)); }
 		MV::Color buttonIdle() const { return MV::Color(uint32_t(ThemeColor::BUTTON_IDLE)); }
+		MV::Color buttonHover() const { return MV::Color(uint32_t(ThemeColor::BUTTON_HOVER)); }
 		MV::Color buttonActive() const { return MV::Color(uint32_t(ThemeColor::BUTTON_ACTIVE)); }
 		MV::Color rowHover() const { return MV::Color(uint32_t(ThemeColor::ROW_HOVER)); }
 		MV::Color dropHint() const {

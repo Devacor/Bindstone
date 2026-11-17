@@ -130,35 +130,74 @@ namespace Workbench {
 		})->makeHandle();
 	}
 
+	// Shared with the hover receivers, which can outlive the IconButton that made them.
+	struct IconButton::Look {
+		std::shared_ptr<MV::Scene::Sprite> fill;
+		std::shared_ptr<MV::Scene::Sprite> glyph;
+		MV::Color accent;
+		MV::Color hover;
+		MV::Color glyphIdle;
+		bool active = false;
+		bool hovered = false;
+
+		void show() {
+			if (active || hovered) {
+				fill->color(active ? accent : hover);
+				fill->show();
+			} else {
+				fill->hide();
+			}
+			glyph->color(active || hovered ? MV::Color(1.0f, 1.0f, 1.0f, 1.0f) : glyphIdle);
+		}
+	};
+
 	IconButton::IconButton(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, Icon a_icon, std::function<void()> a_onClick) :
-		theme(a_theme) {
+		look(std::make_shared<Look>()) {
 
 		MV::Size<> buttonSize(size(a_theme), size(a_theme));
 		buttonNode = a_parent->make(a_id);
-		fill = attachRoundedRect(buttonNode, a_services, a_theme, buttonSize, a_theme.accent());
-		fill->hide();
+		look->accent = a_theme.accent();
+		look->hover = a_theme.buttonHover();
+		look->glyphIdle = a_theme.glyph();
+		look->fill = attachRoundedRect(buttonNode, a_services, a_theme, buttonSize, a_theme.accent());
 
 		const float glyphSize = a_theme.px(16.0f);
 		auto glyphNode = buttonNode->make("glyph");
 		glyphNode->position(MV::point(std::round((buttonSize.width - glyphSize) * 0.5f), std::round((buttonSize.height - glyphSize) * 0.5f)));
-		glyph = glyphNode->attach<MV::Scene::Sprite>()->bounds(MV::size(glyphSize, glyphSize))->texture(iconHandle(a_services, a_theme, a_icon))->color(a_theme.glyph());
+		look->glyph = glyphNode->attach<MV::Scene::Sprite>()->bounds(MV::size(glyphSize, glyphSize))->texture(iconHandle(a_services, a_theme, a_icon));
+		look->show();
 
 		auto& mouse = *a_services.get<MV::TapDevice>();
-		buttonNode->attach<MV::Scene::Clickable>(mouse)->bounds(buttonSize)->onAccept.connect("click", [a_onClick](const std::shared_ptr<MV::Scene::Clickable>&) {
+		auto clickable = buttonNode->attach<MV::Scene::Clickable>(mouse)->bounds(buttonSize);
+		clickable->onAccept.connect("click", [a_onClick](const std::shared_ptr<MV::Scene::Clickable>&) {
 			if (a_onClick) {
 				a_onClick();
 			}
 		});
+		std::weak_ptr<Look> weakLook = look;
+		auto hoverTo = [weakLook](bool a_hovered) {
+			return [weakLook, a_hovered](const std::shared_ptr<MV::Scene::Clickable>&) {
+				if (auto shown = weakLook.lock()) {
+					shown->hovered = a_hovered;
+					shown->show();
+				}
+			};
+		};
+		clickable->onHoverEnter.connect("hover", hoverTo(true));
+		clickable->onHoverLeave.connect("hover", hoverTo(false));
+	}
+
+	bool IconButton::active() const {
+		return look->active;
 	}
 
 	void IconButton::active(bool a_active) {
-		isActive = a_active;
-		if (isActive) {
-			fill->show();
-		} else {
-			fill->hide();
-		}
-		glyph->color(isActive ? MV::Color(1.0f, 1.0f, 1.0f, 1.0f) : theme.glyph());
+		look->active = a_active;
+		look->show();
+	}
+
+	bool IconButton::hovered() const {
+		return look->hovered;
 	}
 
 }

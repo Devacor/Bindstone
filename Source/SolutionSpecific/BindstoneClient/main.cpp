@@ -941,6 +941,17 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.runFrames(2);
 		expect(strip.pipCount() == 4 && captionStarts("4 / 4   move " + subject->id()), "each step adds a bar and the row names the last one, got " + strip.caption());
 
+		hold(toolbar.buttonScreenPoint(0), false);
+		expect(toolbar.buttonHovered(0) && !toolbar.buttonHovered(2), "the pointer over a toolbar button lights it alone");
+		hold(toolbar.buttonScreenPoint(2), false);
+		expect(!toolbar.buttonHovered(0) && toolbar.buttonHovered(2), "the light follows the pointer to the next button");
+		hold(strip.barScreenPoint(1), false);
+		hold(strip.barScreenPoint(1) + MV::Point<int>(1, 0), false);
+		expect(!toolbar.buttonHovered(2) && strip.caption().find("step 2: move " + subject->id()) != std::string::npos, "the pointer over a bar names that step, got " + strip.caption());
+		hold(strip.stepButtonScreenPoint(false), false);
+		expect(captionStarts("4 / 4   move " + subject->id()), "the row names the step the scene is at once the pointer leaves the bars, got " + strip.caption());
+		mouse.stopSimulating();
+
 		hold(strip.positionScreenPoint(4), false);
 		hold(strip.positionScreenPoint(4), true);
 		hold(strip.positionScreenPoint(3), true, 1);
@@ -1053,7 +1064,27 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.rotationSnap(5.0f);
 		a_app.useSettingsFile("");
 		std::filesystem::remove(settingsFile, stripIgnored);
+		// more steps than bars fit: the bars keep their width and the row scrolls to where the handle is
 		a_app.askToConfirm = [](const std::string&) { return true; };
+		click(toolbar.buttonScreenPoint(7));
+		expect(a_app.requestUndoSteps(2000), "the limit rises for a long history");
+		a_app.select(subject);
+		a_app.runFrames(1);
+		for (int step = 0; step < 900; ++step) {
+			gizmoLayer.moveSelected(Workbench::GizmoAxis::BOTH, MV::point(step % 2 == 0 ? 1.0f : -1.0f, 0.0f));
+		}
+		a_app.runFrames(2);
+		expect(history.length() > 900 && strip.scrolling() && strip.pipCount() < history.length() && strip.pipCount() > 50, "a long history keeps its bars drawable and scrolls, showing " + std::to_string(strip.pipCount()));
+		history.moveTo(5);
+		a_app.runFrames(2);
+		click(strip.positionScreenPoint(9));
+		expect(history.position() == 9, "the row scrolled to the handle, and a press there still lands on a step, at " + std::to_string(history.position()));
+		history.moveTo(history.length());
+		a_app.runFrames(2);
+		click(strip.positionScreenPoint(history.length() - 3));
+		expect(history.position() == history.length() - 3, "the far end of a long history is reachable the same way");
+		expect(a_app.requestUndoSteps(200) && history.length() == 200, "the limit goes back and the oldest steps go with it");
+		click(toolbar.buttonScreenPoint(7));
 		a_app.showInspector();
 		a_app.select(nullptr);
 		a_app.runFrames(3);

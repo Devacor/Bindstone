@@ -34,6 +34,7 @@ namespace MV {
 			a_builder.method("appendPriority", static_cast<std::shared_ptr<Clickable>(Clickable::*)(int64_t)>(&Clickable::appendPriority));
 
 			a_builder.method("mouseInBounds", static_cast<bool(Clickable::*)()>(&Clickable::mouseInBounds), jai::serial);
+			a_builder.method("hovered", &Clickable::hovered);
 		}
 
 
@@ -122,7 +123,9 @@ namespace MV {
 			jai::property_owner<Clickable, Sprite>(a_owner),
 			ourMouse(a_mouse),
 			onEnabled(onEnabledSignal),
-			onDisabled(onDisabledSignal) {
+			onDisabled(onDisabledSignal),
+			onHoverEnter(onHoverEnterSignal),
+			onHoverLeave(onHoverLeaveSignal) {
 
 			shouldDraw = false;
 		}
@@ -148,6 +151,27 @@ namespace MV {
 			onLeftMouseUpHandle = ourMouse.onLeftMouseUp.connect([&](TapDevice& a_mouse) {
 				acceptUpClick();
 			});
+
+			onHoverQueryHandle = ourMouse.onHoverQuery.connect([&](TapDevice& a_mouse) {
+				if (mouseInBounds(a_mouse)) {
+					std::weak_ptr<Clickable> weakSelf = std::static_pointer_cast<Clickable>(shared_from_this());
+					a_mouse.queueHoverCandidate({ clickPriority(), eatTouches, weakSelf,
+						[weakSelf]() { if (auto self = weakSelf.lock()) { self->hover(true); } },
+						[weakSelf]() { if (auto self = weakSelf.lock()) { self->hover(false); } } });
+				}
+			});
+		}
+
+		void Clickable::hover(bool a_hovered) {
+			if (isHovered != a_hovered) {
+				isHovered = a_hovered;
+				auto self = std::static_pointer_cast<Clickable>(shared_from_this());
+				if (isHovered) {
+					onHoverEnterSignal(self);
+				} else {
+					onHoverLeaveSignal(self);
+				}
+			}
 		}
 
 		std::vector<int64_t> Clickable::clickPriority() const {

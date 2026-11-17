@@ -199,7 +199,19 @@ namespace Workbench {
 		auto button = a_parent->make(a_id)->attach<MV::Scene::Button>(mouse)->bounds(a_size);
 
 		auto activeScene = attachOutlinedRect(button->owner()->make("active"), a_services, a_theme, a_size, a_theme.buttonActive(), a_theme.buttonOutline(), true)->owner();
-		auto idleScene = attachOutlinedRect(button->owner()->make("idle"), a_services, a_theme, a_size, a_theme.buttonIdle(), a_theme.buttonOutline(), true)->owner();
+		auto idleFill = attachOutlinedRect(button->owner()->make("idle"), a_services, a_theme, a_size, a_theme.buttonIdle(), a_theme.buttonOutline(), true);
+		auto idleScene = idleFill->owner();
+		std::weak_ptr<MV::Scene::Sprite> weakIdleFill = idleFill;
+		button->onHoverEnter.connect("hover", [weakIdleFill, hover = a_theme.buttonHover()](const std::shared_ptr<MV::Scene::Clickable>&) {
+			if (auto fill = weakIdleFill.lock()) {
+				fill->color(hover);
+			}
+		});
+		button->onHoverLeave.connect("hover", [weakIdleFill, idle = a_theme.buttonIdle()](const std::shared_ptr<MV::Scene::Clickable>&) {
+			if (auto fill = weakIdleFill.lock()) {
+				fill->color(idle);
+			}
+		});
 		for (auto&& stateScene : { activeScene, idleScene }) {
 			auto stateText = stateScene->attach<MV::Scene::Text>(library, a_theme.buttonFont);
 			stateText->bounds({ MV::Point<>(), a_size });

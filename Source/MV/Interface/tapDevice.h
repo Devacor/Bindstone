@@ -34,6 +34,16 @@ namespace MV{
 		std::function<void()> enabled;
 	};
 
+	// A Clickable under the pointer offering itself as hovered. The device keeps the top-most one, with any above it
+	// that let touches through.
+	struct HoverCandidate {
+		std::vector<int64_t> fitness;
+		bool exclusive = true;
+		std::weak_ptr<void> subject;
+		std::function<void()> enter;
+		std::function<void()> leave;
+	};
+
 	class TapDevice {
 	public:
 		TapDevice();
@@ -63,7 +73,22 @@ namespace MV{
 		void queueExclusiveAction(const ExclusiveTapAction &a_node);
 
 		void runExclusiveActions();
+
+		// Off until asked for: while on, every Clickable tests the pointer each time it moves. Hover holds through a
+		// press and is settled again on release.
+		void trackHover(bool a_track);
+		bool trackingHover() const { return hoverTracked; }
+		// Asks again who is under the pointer, for when the scene moved and the pointer did not.
+		void refreshHover() { hoverStale = true; }
+		void queueHoverCandidate(HoverCandidate a_candidate);
 	private:
+		void resolveHover();
+
+		bool hoverTracked = false;
+		bool hoverStale = false;
+		std::vector<HoverCandidate> hoverCandidates;
+		std::vector<HoverCandidate> hovered;
+
 		std::vector<ExclusiveTapAction> nodesToExecute;
 		bool left = false;
 		bool middle = false;
@@ -98,6 +123,7 @@ namespace MV{
 		jai::signal_emitter<CallbackSignature> onMiddleMouseUpEndSignal;
 
 		jai::signal_emitter<CallbackSignature> onMoveSignal;
+		jai::signal_emitter<CallbackSignature> onHoverQuerySignal;
 
 		jai::signal_emitter<TouchCallbackSignature> onPinchZoomSignal;
 	public:
@@ -120,6 +146,8 @@ namespace MV{
 		jai::signal<CallbackSignature> onMiddleMouseUpEnd;
 
 		jai::signal<CallbackSignature> onMove;
+		// Emitted while hover is tracked: whoever is under the pointer answers with queueHoverCandidate.
+		jai::signal<CallbackSignature> onHoverQuery;
 
 		jai::signal<TouchCallbackSignature> onPinchZoom;
 	};

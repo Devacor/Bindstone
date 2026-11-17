@@ -40,9 +40,11 @@ namespace Workbench {
 		bool contains(const MV::Point<>& a_point) const;
 		// Centre of a button on screen: 0 to 3 the tools, then snap, grid, frame, history.
 		MV::Point<int> buttonScreenPoint(int a_index) const;
+		bool buttonHovered(int a_index) const;
 
 	private:
 		std::shared_ptr<MV::Scene::Node> addGroup(float& a_x, size_t a_buttonCount);
+		const IconButton* button(int a_index) const;
 
 		std::shared_ptr<MV::Scene::Node> host;
 		MV::Services& services;

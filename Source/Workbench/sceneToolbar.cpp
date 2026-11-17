@@ -103,9 +103,16 @@ namespace Workbench {
 		host->position(a_topLeft);
 	}
 
+	const IconButton* SceneToolbar::button(int a_index) const {
+		return a_index < 4 ? toolButtons[static_cast<size_t>(a_index)].get() : a_index == 4 ? snapButton.get() : a_index == 5 ? gridButton.get() : a_index == 6 ? frameButton.get() : historyButton.get();
+	}
+
 	MV::Point<int> SceneToolbar::buttonScreenPoint(int a_index) const {
-		const IconButton* button = a_index < 4 ? toolButtons[static_cast<size_t>(a_index)].get() : a_index == 4 ? snapButton.get() : a_index == 5 ? gridButton.get() : a_index == 6 ? frameButton.get() : historyButton.get();
-		return button->node()->screenBounds().centerPoint();
+		return button(a_index)->node()->screenBounds().centerPoint();
+	}
+
+	bool SceneToolbar::buttonHovered(int a_index) const {
+		return button(a_index)->hovered();
 	}
 
 	bool SceneToolbar::contains(const MV::Point<>& a_point) const {

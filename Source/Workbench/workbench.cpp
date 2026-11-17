@@ -83,6 +83,7 @@ namespace Workbench {
 			panLast = current;
 		}));
 
+		mouse.trackHover(true);
 		history.onAfterChange = [this]() {
 			if (treePanel) {
 				treePanel->refresh();

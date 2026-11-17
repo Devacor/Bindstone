@@ -1,4 +1,5 @@
 #include "tapDevice.h"
+#include <algorithm>
 #include <jaiscript/signals/signal_impl.hpp>
 
 namespace MV{
@@ -17,6 +18,7 @@ namespace MV{
 		onRightMouseDownEnd(onRightMouseDownEndSignal),
 		onRightMouseUpEnd(onRightMouseUpEndSignal),
 		onMove(onMoveSignal),
+		onHoverQuery(onHoverQuerySignal),
 		onPinchZoom(onPinchZoomSignal){
 		update();
 	}
@@ -51,14 +53,75 @@ namespace MV{
 		if(newPosition != mousePosition){
 			oldMousePosition = mousePosition;
 			mousePosition = newPosition;
+			hoverStale = true;
 			onMoveSignal(*this);
 		}
 
+		hoverStale = hoverStale || newLeft != left;
 		updateButtonState(left, newLeft, onLeftMouseDownSignal, onLeftMouseUpSignal, onLeftMouseDownEndSignal, onLeftMouseUpEndSignal);
 		updateButtonState(middle, newMiddle, onMiddleMouseDownSignal, onMiddleMouseUpSignal, onMiddleMouseDownEndSignal, onMiddleMouseUpEndSignal);
 		updateButtonState(right, newRight, onRightMouseDownSignal, onRightMouseUpSignal, onRightMouseDownEndSignal, onRightMouseUpEndSignal);
 
 		runExclusiveActions();
+
+		if (hoverTracked && hoverStale && !left) {
+			resolveHover();
+		}
+	}
+
+	void TapDevice::trackHover(bool a_track) {
+		hoverTracked = a_track;
+		hoverStale = a_track;
+		if (!a_track) {
+			auto left = std::move(hovered);
+			hovered.clear();
+			for (auto&& was : left) {
+				if (!was.subject.expired()) {
+					was.leave();
+				}
+			}
+		}
+	}
+
+	void TapDevice::queueHoverCandidate(HoverCandidate a_candidate) {
+		hoverCandidates.push_back(std::move(a_candidate));
+	}
+
+	void TapDevice::resolveHover() {
+		hoverStale = false;
+		hoverCandidates.clear();
+		onHoverQuerySignal(*this);
+		std::sort(hoverCandidates.begin(), hoverCandidates.end(), [](const HoverCandidate& a_left, const HoverCandidate& a_right) {
+			return std::lexicographical_compare(a_right.fitness.begin(), a_right.fitness.end(), a_left.fitness.begin(), a_left.fitness.end());
+		});
+		std::vector<HoverCandidate> now;
+		for (auto&& candidate : hoverCandidates) {
+			now.push_back(std::move(candidate));
+			if (now.back().exclusive) {
+				break;
+			}
+		}
+		hoverCandidates.clear();
+
+		auto sameSubject = [](const HoverCandidate& a_left, const HoverCandidate& a_right) {
+			return !a_left.subject.owner_before(a_right.subject) && !a_right.subject.owner_before(a_left.subject);
+		};
+		auto among = [&](const std::vector<HoverCandidate>& a_list, const HoverCandidate& a_one) {
+			return std::any_of(a_list.begin(), a_list.end(), [&](const HoverCandidate& a_other) { return sameSubject(a_other, a_one); });
+		};
+		// the callbacks may rebuild the scene and ask again, so the new list is in place before any runs
+		auto before = std::move(hovered);
+		hovered = now;
+		for (auto&& was : before) {
+			if (!was.subject.expired() && !among(now, was)) {
+				was.leave();
+			}
+		}
+		for (auto&& is : now) {
+			if (!is.subject.expired() && !among(before, is)) {
+				is.enter();
+			}
+		}
 	}
 
 	void TapDevice::updateTouch(SDL_Event a_event, MV::Size<int> a_screenSize) {

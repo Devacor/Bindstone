@@ -53,12 +53,20 @@ namespace MV {
 
 			jai::signal_emitter<ButtonSignalSignature> onDisabledSignal;
 			jai::signal_emitter<ButtonSignalSignature> onEnabledSignal;
+			jai::signal_emitter<ButtonSignalSignature> onHoverEnterSignal;
+			jai::signal_emitter<ButtonSignalSignature> onHoverLeaveSignal;
 
 		public:
 			SpriteDerivedAccessors(Clickable)
 
 				jai::signal<ButtonSignalSignature> onEnabled;
 			jai::signal<ButtonSignalSignature> onDisabled;
+
+			// The pointer came over this Clickable as the top-most one, or left it. Only while its TapDevice tracks
+			// hover (TapDevice::trackHover); not serialized.
+			jai::signal<ButtonSignalSignature> onHoverEnter;
+			jai::signal<ButtonSignalSignature> onHoverLeave;
+			bool hovered() const { return isHovered; }
 
 			// Serialized through property_mgr (script receivers persist across save/load);
 			// emit through the generated onXSignal(args) emitter as before.
@@ -160,6 +168,7 @@ namespace MV {
 				onLeftMouseDownHandle.reset();
 				onLeftMouseUpHandle.reset();
 				onMouseMoveHandle.reset();
+				onHoverQueryHandle.reset();
 			}
 
 			JAI_PROPERTY((int64_t), globalClickPriority, 100, [](auto&, auto&) {});
@@ -168,6 +177,10 @@ namespace MV {
 			TapDevice::SignalType onLeftMouseDownHandle;
 			TapDevice::SignalType onLeftMouseUpHandle;
 			TapDevice::SignalType onMouseMoveHandle;
+			TapDevice::SignalType onHoverQueryHandle;
+
+			void hover(bool a_hovered);
+			bool isHovered = false;
 
 			Point<int> dragStartPosition;
 			Point<int> priorMousePosition;

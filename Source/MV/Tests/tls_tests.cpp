@@ -436,6 +436,69 @@ public:
 			check_true(contains(clientRecord->failures[0], "No TLS handshake"), "saying why: " + clientRecord->failures[0]);
 		});
 
+		test("a client reports its connection when the server's ACCEPTED frame arrives, not when its own handshake ends", [this]() {
+			TestPki pki;
+			auto context = MV::makeTlsServerContext(pki.serverConfig(pki.localServer()));
+			std::atomic<bool> accept {false};
+			std::atomic<bool> finished {false};
+			OneShotServer acceptsLate([context, &accept, &finished](MV::Socket& a_socket) {
+				BlockingTls stream(std::move(a_socket), context);
+				if (!stream.handshake()) {
+					return;
+				}
+				while (!accept && !finished) {
+					std::this_thread::sleep_for(std::chrono::milliseconds(2));
+				}
+				if (accept) {
+					stream.write(MV::NetworkMessage::make(MV::ProtocolFrame {MV::ProtocolCode::ACCEPTED, 4096, {}})->wire());
+					stream.write(MV::NetworkMessage::make(std::string("hello"))->wire());
+				}
+				while (!finished) {
+					std::this_thread::sleep_for(std::chrono::milliseconds(2));
+				}
+			});
+			struct Finish {
+				std::atomic<bool>& flag;
+				~Finish() { flag = true; }
+			} finish {finished};
+			auto clientRecord = std::make_shared<ClientRecord>();
+			auto client = makeClient("127.0.0.1", acceptsLate.port, pki.clientConfig(), clientRecord);
+			auto pump = [&] { client->update(); };
+			check_true(pumpUntil(pump, [&] { return !client->tlsSession().empty(); }), "the client's own handshake finishes");
+			pumpUntil(pump, [] { return false; }, 0.2);
+			check_false(clientRecord->initialized, "a finished handshake alone is not reported as a connection");
+			check_false(client->connected());
+			check_true(clientRecord->failures.empty(), "nor as a failure");
+			accept = true;
+			check_true(pumpUntil(pump, [&] { return clientRecord->initialized && clientRecord->received.size() == 1; }), "the frame makes it a connection, and what the server sends after it arrives");
+			check_eq(static_cast<uint32_t>(4096), client->serverMaxMessageBytes(), "the frame carries the limit the client starts under");
+		});
+
+		test("a client gives up at its deadline on a server that handshakes and never accepts it, without reporting a connection", [this]() {
+			TestPki pki;
+			auto context = MV::makeTlsServerContext(pki.serverConfig(pki.localServer()));
+			std::atomic<bool> finished {false};
+			OneShotServer neverAccepts([context, &finished](MV::Socket& a_socket) {
+				BlockingTls stream(std::move(a_socket), context);
+				if (stream.handshake()) {
+					while (!finished) {
+						std::this_thread::sleep_for(std::chrono::milliseconds(2));
+					}
+				}
+			});
+			struct Finish {
+				std::atomic<bool>& flag;
+				~Finish() { flag = true; }
+			} finish {finished};
+			MV::MessageLimits limits;
+			limits.handshakeTimeout = std::chrono::milliseconds(300);
+			auto clientRecord = std::make_shared<ClientRecord>();
+			auto client = makeClient("127.0.0.1", neverAccepts.port, pki.clientConfig(), clientRecord, limits);
+			check_true(pumpUntil([&] { client->update(); }, [&] { return !clientRecord->failures.empty(); }, 3.0), "the client fails");
+			check_false(clientRecord->initialized, "having never reported a connection");
+			check_true(contains(clientRecord->failures[0], "did not accept the connection"), "saying why: " + clientRecord->failures[0]);
+		});
+
 		test("a client destroyed the moment it reports a failure ends its network thread while that thread is still closing the connection", [this]() {
 			TestPki pki;
 			for (int i = 0; i < 50; ++i) {

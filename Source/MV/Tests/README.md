@@ -47,7 +47,8 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
   (512 KiB / 8 MiB) and resumes on drain without telling the peer, a trickling message and an
   undrained paused inbox are rejected at the unread timeout, each rejection reaching the peer as a
   `ProtocolFrame` reason code before the close; the client learns the server's limit from the
-  announcement and `send` throws `MessageTooLargeException` past it.
+  announcement and `send` throws `MessageTooLargeException` past it; an accepted peer's first frame is
+  `ACCEPTED` with the limit it starts under.
 - **MV TLS** — certificates made at test time by a throwaway CA (`tls_test_pki.hpp`, temp folder): a link
   negotiates TLS 1.3 (1.2 on an OpenSSL without it) with an AEAD cipher and carries messages both ways; a client
   refuses a server certificate from another CA (also one with the CA's exact name), one naming another host (DNS
@@ -55,7 +56,8 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
   certificates refuses none, another CA's and a server certificate, never building a connection state or reading
   what they send, and exposes a valid one's identity (`PeerCertificate`); a plaintext peer of the old protocol and
   silent peers are closed (the latter at the handshake deadline) and a client gives up on a server that never
-  handshakes; a client destroyed the moment it reports a failure joins its network thread mid-close; a missing CA
+  handshakes; a client reports its connection at the server's `ACCEPTED` frame, not at the end of its own
+  handshake, and gives up at its deadline on a server that never sends one; a client destroyed the moment it reports a failure joins its network thread mid-close; a missing CA
   file fails each attempt with the reason until it exists; the HTTPS download client
   sends SNI and refuses wrong-host certificates without sending its request; the SMTP client verifies after
   STARTTLS and sends no credentials to a wrong-host or wrong-CA server.

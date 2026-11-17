@@ -205,10 +205,12 @@ namespace MV {
 			closeConnection(e.what());
 			return;
 		}
+		awaitingAcceptance = false;
 		handshakeDeadline = network->reactor().scheduleAfter(ourLimits.handshakeTimeout, [this, a_attempt] {
 			handshakeDeadline = 0;
 			if (a_attempt == stream && ourConnectionState == CONNECTING) {
-				auto reason = "No TLS handshake from " + url.host() + " within " + std::to_string(ourLimits.handshakeTimeout.count()) + " ms.";
+				auto within = " within " + std::to_string(ourLimits.handshakeTimeout.count()) + " ms.";
+				auto reason = awaitingAcceptance ? url.host() + " did not accept the connection" + within : "No TLS handshake from " + url.host() + within;
 				error("[handshake] -> ", reason);
 				closeConnection(reason);
 			}
@@ -217,9 +219,9 @@ namespace MV {
 			if (a_attempt != stream) {
 				return;
 			}
-			network->reactor().cancel(handshakeDeadline);
-			handshakeDeadline = 0;
 			if (a_err) {
+				network->reactor().cancel(handshakeDeadline);
+				handshakeDeadline = 0;
 				auto reason = "TLS handshake with " + url.host() + " failed: " + describeTlsFailure(a_err, ssl);
 				error("[handshake] -> ", reason);
 				closeConnection(reason);
@@ -229,8 +231,10 @@ namespace MV {
 				std::lock_guard<std::mutex> guard(errorLock);
 				ourTlsSession = tlsSessionDescription(ssl);
 			}
-			auto expected = CONNECTING;
-			if (ourConnectionState.compare_exchange_strong(expected, CONNECTING_SUCCESS)) {
+			// Under TLS 1.3 the client's handshake ends before the server has judged the client's certificate, so
+			// the connection counts only once the server's ACCEPTED frame is read. The deadline keeps running until then.
+			if (ourConnectionState == CONNECTING) {
+				awaitingAcceptance = true;
 				a_attempt->onInput([this, a_attempt] { readMessages(a_attempt); });
 				a_attempt->onClosed([this, a_attempt](const std::error_code& a_closeErr) {
 					if (a_attempt == stream) {
@@ -240,6 +244,14 @@ namespace MV {
 				a_attempt->reading(true);
 			}
 		});
+	}
+
+	void Client::acceptedByServer() {
+		network->reactor().cancel(handshakeDeadline);
+		handshakeDeadline = 0;
+		awaitingAcceptance = false;
+		auto expected = CONNECTING;
+		ourConnectionState.compare_exchange_strong(expected, CONNECTING_SUCCESS);
 	}
 
 	void Client::readMessages(const std::shared_ptr<NetworkStream>& a_attempt) {
@@ -264,6 +276,11 @@ namespace MV {
 			}
 			if (!takeContent(*a_attempt, *incoming, incoming->headerValue() & ~PROTOCOL_FRAME_BIT)) {
 				return;
+			}
+			if (incoming->protocol && awaitingAcceptance) {
+				if (auto frame = ProtocolFrame::decode(incoming->content); frame && frame->code == ProtocolCode::ACCEPTED) {
+					acceptedByServer();
+				}
 			}
 			std::lock_guard<std::mutex> guard(inboxLock);
 			inbox.push_back(std::move(incoming));
@@ -320,7 +337,7 @@ namespace MV {
 		if (!frame) {
 			error("Ignored a malformed protocol frame.");
 		} else if (!frame->rejection()) {
-			info("Server message limit: ", frame->value, " bytes");
+			info(frame->code == ProtocolCode::ACCEPTED ? "Server accepted the connection, message limit: " : "Server message limit: ", frame->value, " bytes");
 			ourServerMaxMessageBytes = frame->value;
 		} else {
 			error("Server rejected the connection: ", frame->reason);
@@ -517,6 +534,8 @@ namespace MV {
 		stream->onInput([self] { self->readMessages(); });
 		stream->onClosed([self](const std::error_code& a_closeErr) { self->handleError(a_closeErr, self->incoming ? "content" : "header"); });
 		stream->reading(true);
+		// the first thing an accepted peer reads: a Client reports its connection only after this
+		push(NetworkMessage::make(ProtocolFrame {ProtocolCode::ACCEPTED, ourLimits.unauthenticatedMaxMessageBytes, {}}));
 		auto ready = std::move(onReady);
 		ready(self);
 	}
@@ -710,7 +729,7 @@ namespace MV {
 			return std::nullopt;
 		}
 		auto code = static_cast<uint8_t>(a_payload[0]);
-		if (code < static_cast<uint8_t>(ProtocolCode::MESSAGE_LIMIT) || code > static_cast<uint8_t>(ProtocolCode::INBOX_TIMEOUT)) {
+		if (code < static_cast<uint8_t>(ProtocolCode::MESSAGE_LIMIT) || code > static_cast<uint8_t>(ProtocolCode::ACCEPTED)) {
 			return std::nullopt;
 		}
 		ProtocolFrame result;

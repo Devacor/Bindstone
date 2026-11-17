@@ -31,6 +31,12 @@ inbox that is not drained, within `unreadTimeout` (30 s) is rejected. A rejectio
 `ProtocolFrame` (reason code, limit, text) and closes after the flush; `authenticate()` sends the peer its
 new limit the same way. Protocol frames set `PROTOCOL_FRAME_BIT` in the header and never reach game code.
 
+A connection counts for a `Client` once the server says so: after its side of the handshake the server sends an
+`ACCEPTED` frame (carrying the unauthenticated limit), and the client calls `onInitialized` only after reading
+it. Under TLS 1.3 a client's handshake ends before the server has judged its certificate, so the end of the
+handshake alone proves nothing. The client's handshake deadline runs until the frame arrives. Client and server
+must both speak this: a server without it leaves a client waiting until that deadline.
+
 ## TLS
 
 Every `MV::Server` / `MV::Client` link is TLS (`tls.h`); there is no plaintext mode. TLS gives each link three things:

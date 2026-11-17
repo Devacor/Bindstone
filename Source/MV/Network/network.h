@@ -59,17 +59,18 @@ namespace MV {
 	inline constexpr uint32_t PROTOCOL_FRAME_BIT = 0x80000000;
 	inline constexpr uint32_t MAX_PROTOCOL_FRAME_BYTES = 1024;
 
-	enum class ProtocolCode : uint8_t { MESSAGE_LIMIT = 1, MESSAGE_TOO_LARGE, MESSAGE_TIMEOUT, INBOX_TIMEOUT };
+	enum class ProtocolCode : uint8_t { MESSAGE_LIMIT = 1, MESSAGE_TOO_LARGE, MESSAGE_TIMEOUT, INBOX_TIMEOUT, ACCEPTED };
 
-	// What the network layer itself tells a peer: its message limit once authenticated, or why it is being closed.
+	// What the network layer itself tells a peer: that its connection is accepted, its message limit once
+	// authenticated, or why it is being closed.
 	struct ProtocolFrame {
 		ProtocolCode code {ProtocolCode::MESSAGE_LIMIT};
-		// The limit in bytes for MESSAGE_LIMIT and MESSAGE_TOO_LARGE, the timeout in ms for the timeouts.
+		// The limit in bytes for ACCEPTED, MESSAGE_LIMIT and MESSAGE_TOO_LARGE, the timeout in ms for the timeouts.
 		uint32_t value {0};
 		std::string reason;
 
 		bool rejection() const {
-			return code != ProtocolCode::MESSAGE_LIMIT;
+			return code == ProtocolCode::MESSAGE_TOO_LARGE || code == ProtocolCode::MESSAGE_TIMEOUT || code == ProtocolCode::INBOX_TIMEOUT;
 		}
 
 		std::string encode() const;
@@ -211,6 +212,7 @@ namespace MV {
 		void initiateConnection();
 		void connectTo(const std::shared_ptr<NetworkStream> &a_attempt, std::vector<SocketAddress> a_addresses);
 		void handshake(const std::shared_ptr<NetworkStream> &a_attempt);
+		void acceptedByServer();
 		void readMessages(const std::shared_ptr<NetworkStream> &a_attempt);
 
 		void handleError(const std::error_code &a_err, const std::string &a_section);
@@ -235,6 +237,8 @@ namespace MV {
 		std::shared_ptr<TlsContext> tlsContext;
 		std::shared_ptr<NetworkStream> stream;
 		uint64_t handshakeDeadline = 0;
+		// Network thread: the TLS handshake is done and the server's ACCEPTED frame is what the deadline now waits for.
+		bool awaitingAcceptance = false;
 		std::shared_ptr<NetworkMessage> incoming;
 		std::string ourTlsSession;
 

@@ -128,6 +128,14 @@ struct RawPeer {
 
 		MV::verifyTlsPeerAs(tls.ssl(), "127.0.0.1");
 		handshaken = tls.handshake();
+		if (handshaken) {
+			// what a server sends first: every test below starts from an accepted connection
+			PeerRead read;
+			auto content = receive(read);
+			auto frame = read == PeerRead::OK && protocolFrame ? MV::ProtocolFrame::decode(content) : std::nullopt;
+			accepted = frame && frame->code == MV::ProtocolCode::ACCEPTED;
+			acceptedLimit = frame ? frame->value : 0;
+		}
 	}
 
 	bool send(const std::string& a_content) {
@@ -166,6 +174,8 @@ struct RawPeer {
 
 	BlockingTls tls;
 	bool handshaken = false;
+	bool accepted = false;
+	uint32_t acceptedLimit = 0;
 	bool protocolFrame = false;
 };
 
@@ -444,6 +454,17 @@ public:
 				check_eq(1, record->disconnects);
 			}
 			expectRejection(peer, MV::ProtocolCode::MESSAGE_TOO_LARGE, static_cast<uint32_t>(32 * KIB));
+		});
+
+		test("the first thing a server tells a peer it has handshaken with is ACCEPTED, with the limit the peer starts under", [this]() {
+			auto record = std::make_shared<StateRecord>();
+			auto server = makeServer(record);
+			auto pump = [&] { server->update(0.01); };
+			RawPeer peer(server->port());
+			check_true(peer.handshaken, "the peer handshakes");
+			check_true(peer.accepted, "and reads an ACCEPTED frame before anything else");
+			check_eq(static_cast<uint32_t>(32 * KIB), peer.acceptedLimit, "carrying the unauthenticated limit");
+			check_true(pumpUntil(pump, [&] { return server->connections().size() == 1; }), "the connection is adopted");
 		});
 
 		test("before authentication a message at 32 KiB arrives and one over it is told MESSAGE_TOO_LARGE and dropped", [this]() {

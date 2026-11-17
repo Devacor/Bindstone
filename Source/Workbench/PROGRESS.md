@@ -615,6 +615,21 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   colours, the back with its tab, the front leaning forward, a soft shadow beneath. Tiles and list rows both use
   it, and the `[=]` text over the old brown square is gone.
 
+## Increment 30: dock layouts kept, saved, loaded and reset (2026-11-16)
+- `DockSpace::describeLayout` writes the arrangement as one line: each split with its ratio, each leaf with its
+  tabs by title and the one in front. `H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (...) (L 0 [Inspector,Settings]))`.
+  `applyLayout` rebuilds from such a line: an unknown title is skipped, a panel the line does not name joins the
+  first leaf (so no panel is ever lost), and text that does not read as a layout changes nothing.
+- The arrangement in use is the `layout` line of the settings file, written when a tab is dropped somewhere new, a
+  splitter is let go or another tab comes to the front (`DockSpace::onLayoutChanged`), and read at start.
+- Window menu: Save Layout... and Load Layout... (`.bindlayout`, native pickers) and Reset Layout, which returns
+  to the arrangement the editor starts with.
+- The self-test drags a tab onto another panel's edge and back, drags the outer splitter, saves, resets, loads,
+  feeds it broken and partial text, and reads the layout back from a settings file. These are the first checks of
+  tab and splitter dragging.
+- Not yet: floating windows (a tab dropped on empty space still does nothing), closing a panel and bringing it
+  back, more than one named layout in a menu.
+
 ## Known gaps (next increments)
 - Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.

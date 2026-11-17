@@ -10,6 +10,9 @@ namespace Workbench {
 	// (or the platform has no picker wired up yet).
 	std::string openSceneFileDialog(const std::string& a_startFolder);
 	std::string saveSceneFileDialog(const std::string& a_startFolder, const std::string& a_suggestedName);
+	// The same for a dock layout (.bindlayout).
+	std::string openLayoutFileDialog(const std::string& a_startFolder);
+	std::string saveLayoutFileDialog(const std::string& a_startFolder, const std::string& a_suggestedName);
 
 }
 

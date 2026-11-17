@@ -1,7 +1,9 @@
 #include "dock.h"
 #include "widgets.h"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <sstream>
 
 namespace Workbench {
 
@@ -180,6 +182,7 @@ namespace Workbench {
 			panel->content()->parent(panelPool);
 		}
 		leafChrome.clear();
+		tabNodes.clear();
 		chromeRoot->clear();
 
 		std::function<void(DockNode*)> walk = [&](DockNode* a_node) {
@@ -248,6 +251,7 @@ namespace Workbench {
 		for (size_t i = 0; i < a_leaf->panels.size(); ++i) {
 			Panel* panel = a_leaf->panels[i];
 			auto tab = tabBar->make(MV::guid("tab_"));
+			tabNodes[panel] = tab;
 			tab->position(MV::Point<>(static_cast<float>(i) * (theme.tabWidth + theme.px(2.0f)), 0.0f));
 			MV::Size<> tabSize(theme.tabWidth, theme.tabHeight);
 			// rounded top, square foot: the active tab reads as one shape with the panel below it
@@ -297,6 +301,9 @@ namespace Workbench {
 			float deltaAlongAxis = static_cast<float>(a_split->vertical ? a_delta.y : a_delta.x);
 			a_split->ratio = std::clamp(a_split->ratio + deltaAlongAxis / extent, 0.1f, 0.9f);
 			layout(lastArea);
+		});
+		grip->onRelease.connect("resized", [this](const std::shared_ptr<MV::Scene::Clickable>&, const MV::Point<MV::PointPrecision>&) {
+			layoutChanged();
 		});
 	}
 
@@ -351,9 +358,205 @@ namespace Workbench {
 	}
 
 	void DockSpace::activatePanel(DockNode* a_leaf, int a_index) {
+		bool changed = a_leaf->active != a_index;
 		a_leaf->active = a_index;
 		refreshLeafVisuals(a_leaf);
 		layout(lastArea);
+		if (changed) {
+			layoutChanged();
+		}
+	}
+
+	void DockSpace::layoutChanged() {
+		if (onLayoutChanged) {
+			onLayoutChanged();
+		}
+	}
+
+	Panel* DockSpace::panelTitled(const std::string& a_title) const {
+		for (auto&& panel : ownedPanels) {
+			if (panel->title() == a_title) {
+				return panel.get();
+			}
+		}
+		return nullptr;
+	}
+
+	std::string DockSpace::describeLayout() const {
+		std::ostringstream out;
+		std::function<void(const DockNode*)> write = [&](const DockNode* a_node) {
+			if (a_node->isLeaf()) {
+				out << "L " << a_node->active << " [";
+				for (size_t index = 0; index < a_node->panels.size(); ++index) {
+					out << (index > 0 ? "," : "") << a_node->panels[index]->title();
+				}
+				out << "]";
+			} else {
+				out << (a_node->vertical ? "V " : "H ") << a_node->ratio << " (";
+				write(a_node->a.get());
+				out << ") (";
+				write(a_node->b.get());
+				out << ")";
+			}
+		};
+		if (rootNode) {
+			write(rootNode.get());
+		}
+		return out.str();
+	}
+
+	namespace {
+		// Reads the text describeLayout writes. A leaf none of whose titles is known reads as no node at all, and a
+		// split left with one side becomes that side.
+		struct LayoutReader {
+			const std::string& text;
+			std::function<Panel*(const std::string&)> panelTitled;
+			size_t at = 0;
+			bool failed = false;
+			std::vector<Panel*> placed;
+
+			void skipSpaces() {
+				while (at < text.size() && text[at] == ' ') {
+					++at;
+				}
+			}
+
+			bool take(char a_expected) {
+				skipSpaces();
+				if (at < text.size() && text[at] == a_expected) {
+					++at;
+					return true;
+				}
+				failed = true;
+				return false;
+			}
+
+			float number() {
+				skipSpaces();
+				size_t start = at;
+				while (at < text.size() && (std::isdigit(static_cast<unsigned char>(text[at])) || text[at] == '.')) {
+					++at;
+				}
+				if (start == at) {
+					failed = true;
+					return 0.0f;
+				}
+				return std::stof(text.substr(start, at - start));
+			}
+
+			std::unique_ptr<DockNode> node() {
+				skipSpaces();
+				if (at >= text.size()) {
+					failed = true;
+					return nullptr;
+				}
+				char kind = text[at++];
+				if (kind == 'L') {
+					auto result = std::make_unique<DockNode>();
+					int active = static_cast<int>(number());
+					if (!take('[')) {
+						return nullptr;
+					}
+					size_t close = text.find(']', at);
+					if (close == std::string::npos) {
+						failed = true;
+						return nullptr;
+					}
+					size_t start = at;
+					while (start <= close) {
+						size_t end = std::min(text.find(',', start), close);
+						auto* panel = panelTitled(text.substr(start, end - start));
+						if (panel && std::find(placed.begin(), placed.end(), panel) == placed.end()) {
+							result->panels.push_back(panel);
+							placed.push_back(panel);
+						}
+						start = end + 1;
+					}
+					at = close + 1;
+					if (result->panels.empty()) {
+						return nullptr;
+					}
+					result->active = std::clamp(active, 0, static_cast<int>(result->panels.size()) - 1);
+					return result;
+				}
+				if (kind == 'H' || kind == 'V') {
+					auto result = std::make_unique<DockNode>();
+					result->vertical = kind == 'V';
+					result->ratio = std::clamp(number(), 0.1f, 0.9f);
+					if (!take('(')) {
+						return nullptr;
+					}
+					auto first = node();
+					if (failed || !take(')') || !take('(')) {
+						return nullptr;
+					}
+					auto second = node();
+					if (failed || !take(')')) {
+						return nullptr;
+					}
+					if (!first || !second) {
+						return first ? std::move(first) : std::move(second);
+					}
+					result->a = std::move(first);
+					result->b = std::move(second);
+					return result;
+				}
+				failed = true;
+				return nullptr;
+			}
+		};
+	}
+
+	bool DockSpace::applyLayout(const std::string& a_description) {
+		LayoutReader reader { a_description, [this](const std::string& a_title) { return panelTitled(a_title); } };
+		auto read = reader.node();
+		reader.skipSpaces();
+		if (reader.failed || !read || reader.at != a_description.size()) {
+			return false;
+		}
+		DockNode* firstLeaf = read.get();
+		while (!firstLeaf->isLeaf()) {
+			firstLeaf = firstLeaf->a.get();
+		}
+		for (auto&& panel : ownedPanels) {
+			if (std::find(reader.placed.begin(), reader.placed.end(), panel.get()) == reader.placed.end()) {
+				firstLeaf->panels.push_back(panel.get());
+			}
+		}
+		endTabDrag(false);
+		rootNode = std::move(read);
+		leafRects.clear();
+		nodeRects.clear();
+		gripRects.clear();
+		structureDirty = true;
+		if (lastArea.size.width > 0.0f && lastArea.size.height > 0.0f) {
+			layout(lastArea);
+		}
+		return true;
+	}
+
+	MV::Point<int> DockSpace::tabScreenPoint(const std::string& a_panelTitle) const {
+		auto found = tabNodes.find(panelTitled(a_panelTitle));
+		auto tab = found == tabNodes.end() ? nullptr : found->second.lock();
+		return tab ? tab->screenBounds().centerPoint() : MV::Point<int>();
+	}
+
+	MV::Point<int> DockSpace::dropScreenPoint(const std::string& a_panelTitle, DropZone a_zone) const {
+		auto* leaf = findLeafContaining(panelTitled(a_panelTitle), rootNode.get());
+		auto found = leafRects.find(leaf);
+		if (found == leafRects.end()) {
+			return {};
+		}
+		auto zone = zoneRect(found->second, a_zone);
+		return uiRoot->renderer().screenFromWorld(MV::point(zone.position.x + zone.size.width * 0.5f, zone.position.y + zone.size.height * 0.5f));
+	}
+
+	MV::Point<int> DockSpace::rootSplitterScreenPoint() const {
+		auto found = gripRects.find(rootNode.get());
+		if (found == gripRects.end()) {
+			return {};
+		}
+		return uiRoot->renderer().screenFromWorld(MV::point(found->second.position.x + found->second.size.width * 0.5f, found->second.position.y + found->second.size.height * 0.5f));
 	}
 
 	void DockSpace::beginTabDrag(Panel* a_panel, DockNode* a_sourceLeaf) {
@@ -455,6 +658,7 @@ namespace Workbench {
 		}
 		structureDirty = true;
 		layout(lastArea);
+		layoutChanged();
 	}
 
 	bool DockSpace::viewportAt(const MV::Point<>& a_worldPoint) const {

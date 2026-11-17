@@ -210,6 +210,8 @@ namespace Workbench {
 					DockSpace::leaf({ viewportPanel }),
 					DockSpace::leaf({ projectPanel })),
 				DockSpace::leaf({ inspectorPanel, settingsPanel }))));
+		defaultDockLayout = dock->describeLayout();
+		dock->onLayoutChanged = [this]() { writeSettingsFile(); };
 
 		buildTitleBar();
 	}
@@ -458,6 +460,38 @@ namespace Workbench {
 		}
 	}
 
+	bool App::dockLayout(const std::string& a_description) {
+		if (!dock->applyLayout(a_description)) {
+			return false;
+		}
+		writeSettingsFile();
+		return true;
+	}
+
+	void App::resetDockLayout() {
+		dockLayout(defaultDockLayout);
+	}
+
+	bool App::saveDockLayout(const std::string& a_fileName) {
+		std::ofstream file(a_fileName, std::ios::trunc);
+		file << dock->describeLayout() << "\n";
+		if (!file) {
+			reportError("the layout did not save to " + a_fileName);
+			return false;
+		}
+		return true;
+	}
+
+	bool App::loadDockLayout(const std::string& a_fileName) {
+		std::ifstream file(a_fileName);
+		std::string description;
+		if (!std::getline(file, description) || !dockLayout(description)) {
+			reportError("no layout could be read from " + a_fileName);
+			return false;
+		}
+		return true;
+	}
+
 	void App::showSettings() {
 		dock->show(settingsPanel);
 	}
@@ -479,11 +513,18 @@ namespace Workbench {
 		auto grid = sceneGridSize;
 		while (std::getline(file, line)) {
 			auto equals = line.find('=');
-			auto value = equals == std::string::npos ? std::nullopt : numberFrom(trimmed(line.substr(equals + 1)));
-			if (!value || *value <= 0.0f) {
+			if (equals == std::string::npos) {
 				continue;
 			}
 			std::string name = trimmed(line.substr(0, equals));
+			if (name == "layout") {
+				dock->applyLayout(trimmed(line.substr(equals + 1)));
+				continue;
+			}
+			auto value = numberFrom(trimmed(line.substr(equals + 1)));
+			if (!value || *value <= 0.0f) {
+				continue;
+			}
 			if (name == "undoSteps") {
 				history.limit(std::clamp<size_t>(static_cast<size_t>(*value), 1, 10000));
 			} else if (name == "gridX") {
@@ -510,6 +551,7 @@ namespace Workbench {
 		file << "gridX = " << formatNumberCompact(sceneGridSize.width) << "\n";
 		file << "gridY = " << formatNumberCompact(sceneGridSize.height) << "\n";
 		file << "rotationSnap = " << formatNumberCompact(rotationSnap()) << "\n";
+		file << "layout = " << dock->describeLayout() << "\n";
 		if (!file) {
 			reportError("the settings did not save to " + settingsPath);
 		}
@@ -588,6 +630,19 @@ namespace Workbench {
 		for (auto* panel : menuPanels) {
 			windowItems.push_back({ panel->title(), "", [this, panel]() { dock->show(panel); } });
 		}
+		windowItems.push_back({ "Save Layout...", "", [this]() {
+			auto chosen = saveLayoutFileDialog(MV::playerPreferencesPath(), "workbench.bindlayout");
+			if (!chosen.empty()) {
+				saveDockLayout(chosen);
+			}
+		}, true });
+		windowItems.push_back({ "Load Layout...", "", [this]() {
+			auto chosen = openLayoutFileDialog(MV::playerPreferencesPath());
+			if (!chosen.empty()) {
+				loadDockLayout(chosen);
+			}
+		} });
+		windowItems.push_back({ "Reset Layout", "", [this]() { resetDockLayout(); } });
 		menuBar->add("Window", std::move(windowItems));
 
 		// Scene-animation transport: pause/step/speed of the viewport's drawUpdate clock

@@ -92,6 +92,22 @@ namespace Workbench {
 		// Brings a panel's tab to the front of its leaf.
 		void show(Panel* a_panel);
 
+		// The arrangement as one line of text: each split with its ratio, each leaf with its tabs by title and
+		// which one is in front. "H 0.18 (L 0 [Hierarchy,File]) (L 0 [Scene])".
+		std::string describeLayout() const;
+		// Rebuilds the arrangement from such a line. A title it does not know is skipped and a panel it does not
+		// name joins the first leaf, so every panel is always somewhere. False, changing nothing, when the text
+		// does not read as a layout.
+		bool applyLayout(const std::string& a_description);
+		// After a tab is dropped somewhere new, a splitter is let go, or another tab is brought to the front.
+		std::function<void()> onLayoutChanged;
+
+		// Where on screen a panel's tab is, the middle of a drop zone of the leaf a panel is in, and the splitter
+		// of the outermost split.
+		MV::Point<int> tabScreenPoint(const std::string& a_panelTitle) const;
+		MV::Point<int> dropScreenPoint(const std::string& a_panelTitle, DropZone a_zone) const;
+		MV::Point<int> rootSplitterScreenPoint() const;
+
 		void layout(const MV::Size<>& a_worldSize);
 		void layout(const DockRect& a_area);
 		void update(double a_dt);
@@ -130,6 +146,8 @@ namespace Workbench {
 		DockNode* findLeafContaining(Panel* a_panel, DockNode* a_node) const;
 		DockNode* findParent(DockNode* a_child, DockNode* a_node) const;
 		void collapseIfEmpty(DockNode* a_leaf);
+		Panel* panelTitled(const std::string& a_title) const;
+		void layoutChanged();
 
 		std::shared_ptr<MV::Scene::Node> uiRoot;
 		std::shared_ptr<MV::Scene::Node> chromeRoot;
@@ -147,6 +165,7 @@ namespace Workbench {
 		std::map<DockNode*, DockRect> gripRects;
 		std::map<DockNode*, std::shared_ptr<MV::Scene::Node>> leafChrome;
 		std::map<Panel*, float> scrollOffsets;
+		std::map<Panel*, std::weak_ptr<MV::Scene::Node>> tabNodes;
 		DockRect lastArea;
 		bool structureDirty = true;
 

@@ -1334,6 +1334,73 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 	expect(!sameXY(layerNode->position(), layerRest), "the preview resumes after the save");
 	a_app.select(nullptr);
 	expect(!a_app.parallaxPreviewing() && sameXY(layerNode->position(), layerRest), "deselecting ends the preview and puts the layer back at rest");
+
+	// The dock's layout: read as text, changed by dragging a tab and a splitter, saved, loaded, reset and kept in the settings file
+	{
+		using Zone = Workbench::DockSpace::DropZone;
+		auto& docking = a_app.docking();
+		auto& mouse = *a_managers.services.get<MV::TapDevice>();
+		auto drag = [&](const MV::Point<int>& a_from, const MV::Point<int>& a_to) {
+			auto hold = [&](const MV::Point<int>& a_at, bool a_down) {
+				mouse.simulate(a_at, a_down);
+				a_app.runFrames(2);
+			};
+			hold(a_from, false);
+			hold(a_from, true);
+			for (int step = 1; step <= 4; ++step) {
+				hold(MV::Point<int>(a_from.x + (a_to.x - a_from.x) * step / 4, a_from.y + (a_to.y - a_from.y) * step / 4), true);
+			}
+			hold(a_to, false);
+			mouse.stopSimulating();
+		};
+		const std::string starting = "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project])) (L 0 [Inspector,Settings]))";
+		expect(a_app.dockLayout() == starting, "the starting layout reads as text: " + a_app.dockLayout());
+
+		auto layoutSettings = (std::filesystem::temp_directory_path() / "workbench_selftest_layout_settings.txt").string();
+		std::filesystem::remove(layoutSettings, ignored);
+		a_app.useSettingsFile(layoutSettings);
+
+		drag(docking.tabScreenPoint("Settings"), docking.dropScreenPoint("Project", Zone::Right));
+		const std::string moved = "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (H 0.7 (L 0 [Project]) (L 0 [Settings]))) (L 0 [Inspector]))";
+		expect(a_app.dockLayout() == moved, "a tab dragged onto a panel's right edge docks beside it: " + a_app.dockLayout());
+		expect(MV::fileContents(layoutSettings).find("layout = " + moved) != std::string::npos, "the new layout is written to the settings file as it changes");
+
+		drag(docking.tabScreenPoint("Settings"), docking.dropScreenPoint("Inspector", Zone::Center));
+		expect(a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project])) (L 1 [Inspector,Settings]))", "dragged back onto the Inspector it is a tab there again, in front: " + a_app.dockLayout());
+
+		auto splitter = docking.rootSplitterScreenPoint();
+		drag(splitter, splitter + MV::Point<int>(160, 0));
+		auto widened = a_app.dockLayout();
+		expect(widened.rfind("H 0.18 ", 0) != 0 && widened.rfind("H 0.", 0) == 0 && widened.find("[Hierarchy,File]") != std::string::npos, "dragging the outer splitter changes its ratio: " + widened);
+		expect(MV::fileContents(layoutSettings).find("layout = " + widened) != std::string::npos, "and letting go writes it");
+
+		auto layoutFile = (std::filesystem::temp_directory_path() / "workbench_selftest.bindlayout").string();
+		expect(a_app.saveDockLayout(layoutFile), "the layout saves to a file");
+		a_app.resetDockLayout();
+		expect(a_app.dockLayout() == starting, "Reset Layout returns to the starting layout: " + a_app.dockLayout());
+		expect(a_app.loadDockLayout(layoutFile) && a_app.dockLayout() == widened, "a saved layout loads back exactly: " + a_app.dockLayout());
+		a_app.runFrames(3);
+
+		expect(!a_app.dockLayout("H 0.5 (L 0 [Scene]") && a_app.dockLayout() == widened, "text that is not a layout is refused and changes nothing");
+		expect(a_app.dockLayout("V 0.6 (L 0 [Scene,NoSuchPanel]) (L 0 [Project])"), "a layout naming only some panels applies");
+		auto partial = a_app.dockLayout();
+		for (std::string title : { "Hierarchy", "File", "Scene", "Project", "Inspector", "Settings" }) {
+			expect(partial.find(title) != std::string::npos, "every panel is still somewhere after a partial layout, missing " + title + " in " + partial);
+		}
+		expect(partial.find("NoSuchPanel") == std::string::npos, "and a title no panel has is dropped");
+		a_app.runFrames(3);
+
+		a_app.resetDockLayout();
+		a_app.useSettingsFile("");
+		expect(a_app.dockLayout(moved), "a layout applies from text");
+		a_app.useSettingsFile(layoutSettings);
+		expect(a_app.dockLayout() == starting, "the layout the settings file holds is restored when the file is read: " + a_app.dockLayout());
+		a_app.useSettingsFile("");
+		std::filesystem::remove(layoutSettings, ignored);
+		std::filesystem::remove(layoutFile, ignored);
+		a_app.runFrames(5);
+		expect(a_app.viewport().size.width > 0.0f && a_app.errors() == 0, "the editor keeps running on the restored layout");
+	}
 }
 
 static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", bool a_loadDefaultScene = false, bool a_selectForGizmo = false, bool a_selfTest = false) {

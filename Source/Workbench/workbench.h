@@ -53,6 +53,14 @@ namespace Workbench {
 		std::function<bool(const std::string& a_message)> askToConfirm;
 		// Reads the editor's settings from this file and writes them back to it when one changes.
 		void useSettingsFile(const std::string& a_path);
+		// The dock's arrangement as one line of text, and back; false when the text is not a layout. The arrangement
+		// in use is kept in the settings file. Reset returns to the one the editor starts with.
+		std::string dockLayout() const { return dock->describeLayout(); }
+		bool dockLayout(const std::string& a_description);
+		void resetDockLayout();
+		bool saveDockLayout(const std::string& a_fileName);
+		bool loadDockLayout(const std::string& a_fileName);
+		DockSpace& docking() { return *dock; }
 		void showSettings();
 		void showInspector();
 		SettingsPanel& settings() { return *settingsPanel; }
@@ -157,6 +165,7 @@ namespace Workbench {
 		InspectorPanel* inspectorPanel = nullptr;
 		SettingsPanel* settingsPanel = nullptr;
 		std::string settingsPath;
+		std::string defaultDockLayout;
 		MV::Size<> sceneGridSize { 100.0f, 100.0f };
 		void applyGridSize();
 		void settingsChanged();

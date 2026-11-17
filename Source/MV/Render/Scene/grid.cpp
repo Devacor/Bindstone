@@ -213,7 +213,7 @@ namespace MV {
 			auto nextPosition = a_cellPosition;
 			nextPosition.translate(a_cellSize.width + (cellPadding->first + cellPadding->second).x, 0.0f);
 			if (bumpToNextLine(nextPosition.x - cellPadding->first.x - margins->first.x, a_index)) {
-				a_cellPosition.locate(margins->first.x, a_cellPosition.y + a_lineHeight + cellPadding->first.x + cellPadding->second.y);
+				a_cellPosition.locate(margins->first.x, a_cellPosition.y + a_lineHeight + cellPadding->first.y + cellPadding->second.y);
 				nextPosition = a_cellPosition;
 				nextPosition.translate(a_cellSize.width + (cellPadding->first + cellPadding->second).x, 0.0f);
 				a_lineHeight = a_cellSize.height;

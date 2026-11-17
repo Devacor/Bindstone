@@ -602,9 +602,12 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - What Grid does not do yet, found while moving onto it:
   - No fill or stretch: a cell is one fixed size or its child's size, so "fixed label, field takes the rest" is
     still computed when a row is built, and a width change rebuilds the rows.
-  - `Grid::positionChildNode` steps down a line by `cellPadding.first.x + cellPadding.second.y`, which reads like a
-    slip for `first.y`. The rows here pad only on the second point, so they do not depend on it. Changing it would
-    move any shipped grid whose padding differs in x and y, so it is left for Dev.
+  - `Grid::positionChildNode` stepped down a line by `cellPadding.first.x + cellPadding.second.y`. It now uses
+    `first.y` (suite "MV Grid" in `Source/MV/Tests/grid_tests.cpp`). No shipped grid had padding that differs in x
+    and y, so nothing moved.
+  - With one column the first cell starts one padding step down: `bumpToNextLine` reads
+    `a_index > 0 && width || columns`, so the `a_index > 0` guard does not cover the column test. Left as it is:
+    correcting it moves `gameEditor.cpp`'s one-column grid up by 4.
 - Next for Grid: the toolbar groups, the Project tiles (a wrapping Grid by `gridWidth`), tree rows.
 
 ## Increment 29: folder tiles (2026-11-16)

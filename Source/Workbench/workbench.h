@@ -13,6 +13,8 @@
 #include "sceneToolbar.h"
 #include "settingsPanel.h"
 #include "tooltips.h"
+#include "consolePanel.h"
+#include "messageLog.h"
 #include "MV/Render/Scene/parallax.h"
 
 namespace Workbench {
@@ -63,6 +65,14 @@ namespace Workbench {
 		bool loadDockLayout(const std::string& a_fileName);
 		DockSpace& docking() { return *dock; }
 		Tooltips& tips() { return *tooltips; }
+		// What the editor and the engine have reported. The Console panel lists it; the bar along the bottom of the
+		// window shows the latest line and how many errors and warnings there have been, and a press on it opens the Console.
+		MessageLog& messages() { return *messageLog; }
+		ConsolePanel& console() { return *consolePanel; }
+		void showConsole();
+		const std::string& statusLine() const { return shownStatus; }
+		const std::string& statusCounts() const { return shownCounts; }
+		MV::Point<int> statusBarScreenPoint() const;
 		// The scene's own clock (emitters, Spine, shader time) is stopped; the editor keeps running.
 		bool paused() const { return scenePaused; }
 		// The title bar's pause, step and speed buttons, left to right.
@@ -122,6 +132,8 @@ namespace Workbench {
 		void updateCameraKeys(double a_dt);
 		bool handleShortcutKey(SDL_Keycode a_key);
 		void buildTitleBar();
+		void buildStatusBar(const MV::Size<>& a_worldSize);
+		void refreshStatus();
 		void refreshTitle();
 		void layoutTitleBar(const MV::Size<>& a_worldSize);
 		void captureScreenshot(const std::string& a_path);
@@ -172,6 +184,14 @@ namespace Workbench {
 		SceneTreePanel* treePanel = nullptr;
 		InspectorPanel* inspectorPanel = nullptr;
 		SettingsPanel* settingsPanel = nullptr;
+		ConsolePanel* consolePanel = nullptr;
+		std::shared_ptr<MessageLog> messageLog;
+		std::shared_ptr<MV::Scene::Node> statusBar;
+		std::shared_ptr<MV::Scene::Text> statusText;
+		std::shared_ptr<MV::Scene::Text> statusCountText;
+		std::string shownStatus;
+		std::string shownCounts;
+		bool statusStale = true;
 		std::string settingsPath;
 		std::string defaultDockLayout;
 		MV::Size<> sceneGridSize { 100.0f, 100.0f };

@@ -1178,6 +1178,47 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(!a_app.paused(), "and starts it again");
 	}
 
+	// The message log: what the editor and the engine report shows in the status bar and the Console
+	{
+		using Level = Workbench::MessageLevel;
+		auto& mouse = *a_managers.services.get<MV::TapDevice>();
+		auto& log = a_app.messages();
+		auto& console = a_app.console();
+		auto click = [&](const MV::Point<int>& a_at) {
+			for (bool down : { false, true, false }) {
+				mouse.simulate(a_at, down);
+				a_app.runFrames(2);
+			}
+			mouse.stopSimulating();
+		};
+		log.clear();
+		a_app.runFrames(2);
+		expect(console.rowCount() == 0 && a_app.statusLine().empty() && a_app.statusCounts().empty(), "a cleared log leaves the Console and the status bar empty");
+		log.add(Level::INFO, "selftest note");
+		log.add(Level::WARNING, "selftest warning");
+		log.add(Level::FAILURE, "selftest failure");
+		log.add(Level::FAILURE, "selftest failure");
+		a_app.runFrames(2);
+		expect(a_app.statusLine() == "selftest failure (x2)", "the status bar shows the latest message, counting a repeat: " + a_app.statusLine());
+		expect(a_app.statusCounts() == "2 errors   1 warning", "and how many errors and warnings there have been: " + a_app.statusCounts());
+		expect(console.rowCount() == 3 && console.rowText(0) == "selftest failure (x2)" && console.rowText(2) == "selftest note", "the Console lists them newest first, a repeat on one row");
+
+		MV::warning("selftest engine warning");
+		a_app.runFrames(2);
+		expect(console.rowCount() == 4 && console.rowText(0).find("selftest engine warning") != std::string::npos && a_app.statusCounts() == "2 errors   2 warnings", "what the engine logs reaches the Console too: " + (console.rowCount() > 0 ? console.rowText(0) : std::string("nothing")));
+
+		auto* consoleTab = a_app.docking().panelTitled("Console");
+		expect(a_app.dockLayout().find("(L 0 [Project,Console])") != std::string::npos, "the Console sits behind the Project panel to begin with");
+		click(a_app.statusBarScreenPoint());
+		expect(a_app.docking().open(consoleTab) && a_app.dockLayout().find("(L 1 [Project,Console])") != std::string::npos, "a press on the status bar brings the Console to the front: " + a_app.dockLayout());
+		a_app.runFrames(3);
+		click(console.clearButtonScreenPoint());
+		a_app.runFrames(2);
+		expect(console.rowCount() == 0 && a_app.statusLine().empty() && a_app.statusCounts().empty() && log.count(Level::FAILURE) == 0, "Clear empties the log, the Console and the status bar");
+		a_app.resetDockLayout();
+		a_app.runFrames(3);
+	}
+
 	// Scene toolbar and menu bar, pressed on the simulated mouse
 	{
 		auto& mouse = *a_managers.services.get<MV::TapDevice>();
@@ -1415,9 +1456,9 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			hold(a_to, false);
 			mouse.stopSimulating();
 		};
-		const std::string starting = "H 0.18 (L 0 [Hierarchy]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project])) (L 0 [Inspector])) X [File,Settings]";
+		const std::string starting = "H 0.18 (L 0 [Hierarchy]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 0 [Inspector])) X [File,Settings]";
 		expect(a_app.dockLayout() == starting, "the starting layout reads as text, with File and Settings closed: " + a_app.dockLayout());
-		const std::string allDocked = "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project])) (L 0 [Inspector,Settings]))";
+		const std::string allDocked = "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 0 [Inspector,Settings]))";
 		expect(a_app.dockLayout(allDocked) && a_app.dockLayout() == allDocked, "a layout with every panel docked applies from text");
 		a_app.runFrames(3);
 
@@ -1426,12 +1467,12 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.useSettingsFile(layoutSettings);
 
 		drag(docking.tabScreenPoint("Settings"), docking.dropScreenPoint("Project", Zone::Right));
-		const std::string moved = "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (H 0.7 (L 0 [Project]) (L 0 [Settings]))) (L 0 [Inspector]))";
+		const std::string moved = "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (H 0.7 (L 0 [Project,Console]) (L 0 [Settings]))) (L 0 [Inspector]))";
 		expect(a_app.dockLayout() == moved, "a tab dragged onto a panel's right edge docks beside it: " + a_app.dockLayout());
 		expect(MV::fileContents(layoutSettings).find("layout = " + moved) != std::string::npos, "the new layout is written to the settings file as it changes");
 
 		drag(docking.tabScreenPoint("Settings"), docking.dropScreenPoint("Inspector", Zone::Center));
-		expect(a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project])) (L 1 [Inspector,Settings]))", "dragged back onto the Inspector it is a tab there again, in front: " + a_app.dockLayout());
+		expect(a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 1 [Inspector,Settings]))", "dragged back onto the Inspector it is a tab there again, in front: " + a_app.dockLayout());
 
 		auto splitter = docking.rootSplitterScreenPoint();
 		drag(splitter, splitter + MV::Point<int>(160, 0));
@@ -1447,7 +1488,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.runFrames(3);
 
 		expect(!a_app.dockLayout("H 0.5 (L 0 [Scene]") && a_app.dockLayout() == widened, "text that is not a layout is refused and changes nothing");
-		expect(a_app.dockLayout("V 0.6 (L 0 [Scene,NoSuchPanel]) (L 0 [Project])"), "a layout naming only some panels applies");
+		expect(a_app.dockLayout("V 0.6 (L 0 [Scene,NoSuchPanel]) (L 0 [Project,Console])"), "a layout naming only some panels applies");
 		auto partial = a_app.dockLayout();
 		for (std::string title : { "Hierarchy", "File", "Scene", "Project", "Inspector", "Settings" }) {
 			expect(partial.find(title) != std::string::npos, "every panel is still somewhere after a partial layout, missing " + title + " in " + partial);
@@ -1498,13 +1539,13 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.showSettings();
 		a_app.runFrames(2);
 		click(docking.closeButtonScreenPoint("Settings"));
-		expect(!docking.open(settingsTab) && a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project])) (L 0 [Inspector])) X [Settings]", "the x on a tab closes its panel and the layout says so: " + a_app.dockLayout());
+		expect(!docking.open(settingsTab) && a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 0 [Inspector])) X [Settings]", "the x on a tab closes its panel and the layout says so: " + a_app.dockLayout());
 		click(a_app.menus().titleScreenPoint(3));
 		expect(a_app.menus().isOpen() && a_app.menus().rowLabel(5) == "Settings (closed)" && a_app.menus().rowLabel(4) == "Inspector", "Window marks the closed panel");
 		if (a_app.menus().isOpen()) {
 			click(a_app.menus().rowScreenPoint(5));
 		}
-		expect(docking.open(settingsTab) && !docking.floating(settingsTab) && a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project])) (L 1 [Inspector,Settings]))", "choosing it in Window brings it back beside the panel it was closed next to: " + a_app.dockLayout());
+		expect(docking.open(settingsTab) && !docking.floating(settingsTab) && a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 1 [Inspector,Settings]))", "choosing it in Window brings it back beside the panel it was closed next to: " + a_app.dockLayout());
 
 		// floating: a tab dropped on the middle of a panel floats there
 		drag(docking.tabScreenPoint("Settings"), docking.dropScreenPoint("Scene", Zone::Float));
@@ -1535,9 +1576,9 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(std::abs(restoredFloat.position.x - sizedFloat.position.x) < 2.0f && std::abs(restoredFloat.size.height - sizedFloat.size.height) < 2.0f, "and puts it back where it was, at its size");
 
 		drag(docking.tabScreenPoint("Settings"), docking.dropScreenPoint("Inspector", Zone::Center));
-		expect(!docking.floating(settingsTab) && a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project])) (L 1 [Inspector,Settings]))", "a floating panel's tab dropped on a tab bar docks there: " + a_app.dockLayout());
+		expect(!docking.floating(settingsTab) && a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 1 [Inspector,Settings]))", "a floating panel's tab dropped on a tab bar docks there: " + a_app.dockLayout());
 
-		expect(a_app.dockLayout("L 0 [Scene] X [Hierarchy,File,Project,Inspector,Settings]") && !docking.closePanel(docking.panelTitled("Scene")) && docking.open(docking.panelTitled("Scene")), "the last panel docked in the main area cannot be closed");
+		expect(a_app.dockLayout("L 0 [Scene] X [Hierarchy,File,Project,Inspector,Settings,Console]") && !docking.closePanel(docking.panelTitled("Scene")) && docking.open(docking.panelTitled("Scene")), "the last panel docked in the main area cannot be closed");
 		a_app.resetDockLayout();
 		a_app.runFrames(5);
 		expect(a_app.dockLayout() == starting && a_app.errors() == 0, "the layout ends where it started");

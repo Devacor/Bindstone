@@ -674,6 +674,21 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Not yet: tips on inspector rows and fields, cursor changes beyond splitters, hover on tree rows through the new
   signals (the tree still tracks the pointer itself), a restore icon when the window is maximized.
 
+## Increment 33: the Console and the status bar (2026-11-16)
+- `MessageLog` (`messageLog.h`) holds what has been reported, at three levels (info, warning, failure), the same
+  line twice in a row counted on one entry, the last 1000 kept. The editor adds to it (`App::reportError`, and a
+  line for each load, save and placed BindSnap). The engine's `MV::info`, `MV::warning` and `MV::error` reach it
+  through a `Logger` listener: those can come from loader threads, so they are posted and join the log on the main
+  thread each frame (`post` / `drain`).
+- Console panel (`consolePanel.h`): the log newest first, each line in its level's colour, fitted to the panel's
+  width, with a Clear button. It is a tab behind Project in the starting layout. It rebuilds once per frame at most.
+- Status bar: a strip along the bottom of the window with the latest message on the left and the count of errors
+  and warnings on the right. A press on it brings the Console to the front. The dock gives up its height.
+- The self-test adds messages at each level, logs one through the engine, checks the status line, the counts and
+  the Console's rows, opens the Console from the status bar and clears it.
+- Not yet: filters by level, a search box, the engine's direct `std::cout` lines (only `Logger` output is caught),
+  copying a line, and a jump from a script error to its file.
+
 ## Known gaps (next increments)
 - Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.

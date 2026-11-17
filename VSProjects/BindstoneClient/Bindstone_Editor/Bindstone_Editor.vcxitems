@@ -37,6 +37,7 @@
     <ClCompile Include="$(SolutionDir)Source\Workbench\historyStrip.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\settingsPanel.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\tooltips.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Workbench\consolePanel.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Game\gameEditor.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -69,5 +70,7 @@
     <ClInclude Include="$(SolutionDir)Source\Workbench\historyStrip.h" />
     <ClInclude Include="$(SolutionDir)Source\Workbench\settingsPanel.h" />
     <ClInclude Include="$(SolutionDir)Source\Workbench\tooltips.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\consolePanel.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\messageLog.h" />
   </ItemGroup>
 </Project>

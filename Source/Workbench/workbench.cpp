@@ -121,6 +121,21 @@ namespace Workbench {
 			return SDL_ShowMessageBox(&box, &pressed) == 0 && pressed == 0;
 		};
 
+		messageLog = std::make_shared<MessageLog>();
+		// the engine logs from its loader threads too: its lines are posted and join the log on the main thread
+		for (auto severity : { MV::Severity::Info, MV::Severity::Warning, MV::Severity::Error }) {
+			MV::Logger::instance()->listen(severity, [weakLog = std::weak_ptr<MessageLog>(messageLog)](MV::Severity a_severity, const MV::LogData&, const std::string& a_message) {
+				if (auto log = weakLog.lock()) {
+					log->post(a_severity == MV::Severity::Error ? MessageLevel::FAILURE : a_severity == MV::Severity::Warning ? MessageLevel::WARNING : MessageLevel::INFO, a_message);
+				}
+			});
+		}
+		messageLog->onChange = [this]() {
+			if (consolePanel) {
+				consolePanel->logChanged();
+			}
+			statusStale = true;
+		};
 		tooltips = std::make_unique<Tooltips>(managers.services, theme);
 		managers.services.connect(tooltips.get());
 		dock = std::make_unique<DockSpace>(uiRoot, managers.services, theme, focusRouter);
@@ -179,11 +194,13 @@ namespace Workbench {
 			} }
 		};
 		settingsPanel = static_cast<SettingsPanel*>(dock->registerPanel(std::make_shared<SettingsPanel>(std::move(settingRows))));
+		consolePanel = static_cast<ConsolePanel*>(dock->registerPanel(std::make_shared<ConsolePanel>(messageLog)));
+		statusBar = uiRoot->make("statusBar");
 		Panel* viewportPanel = dock->registerPanel(std::move(viewport));
 		Panel* filePanel = dock->registerPanel(std::move(file));
 		Panel* projectPanel = dock->registerPanel(std::move(project));
 
-		menuPanels = { treePanel, filePanel, viewportPanel, projectPanel, inspectorPanel, settingsPanel };
+		menuPanels = { treePanel, filePanel, viewportPanel, projectPanel, inspectorPanel, settingsPanel, consolePanel };
 
 		SceneToolbar::Actions toolbarActions;
 		toolbarActions.onTool = [this](int a_toolIndex) { gizmoTool(static_cast<Tool>(a_toolIndex)); };
@@ -215,7 +232,7 @@ namespace Workbench {
 			DockSpace::split(false, 0.72f,
 				DockSpace::split(true, 0.70f,
 					DockSpace::leaf({ viewportPanel }),
-					DockSpace::leaf({ projectPanel })),
+					DockSpace::leaf({ projectPanel, consolePanel })),
 				DockSpace::leaf({ inspectorPanel }))));
 		// File's load and save are in the File menu and Settings opens from its own: both start closed
 		defaultDockLayout = dock->describeLayout() + " X [File,Settings]";
@@ -299,6 +316,7 @@ namespace Workbench {
 
 	void App::reportError(const std::string& a_message) {
 		++errorCount;
+		messageLog->add(MessageLevel::FAILURE, a_message);
 		if (a_message != lastErrorMessage) {
 			lastErrorMessage = a_message;
 			std::cerr << "[workbench] error: " << a_message << std::endl;
@@ -331,6 +349,7 @@ namespace Workbench {
 			}
 			select(prefab);
 			std::cout << "Workbench placed BindSnap: " << a_fileName << std::endl;
+			messageLog->add(MessageLevel::INFO, "Placed " + a_fileName);
 		} catch (const std::exception& a_error) {
 			reportError("BindSnap drop failed (" + a_fileName + "): " + a_error.what());
 		}
@@ -501,6 +520,64 @@ namespace Workbench {
 			return false;
 		}
 		return true;
+	}
+
+	void App::showConsole() {
+		dock->show(consolePanel);
+	}
+
+	void App::buildStatusBar(const MV::Size<>& a_worldSize) {
+		const float height = theme.px(22.0f);
+		const float countsWidth = theme.px(190.0f);
+		statusBar->clear();
+		statusBar->position(MV::point(0.0f, a_worldSize.height - height));
+		auto band = statusBar->attach<MV::Scene::Sprite>()->bounds(MV::size(a_worldSize.width, height))->color(theme.windowBg());
+		statusBar->make("edge")->attach<MV::Scene::Sprite>()->bounds(MV::size(a_worldSize.width, theme.px(1.0f)))->color(theme.header());
+		statusText = makeLabel(statusBar, managers.services, theme, "latest", MV::size(std::max(theme.px(60.0f), a_worldSize.width - countsWidth - theme.px(24.0f)), height), "");
+		statusText->owner()->position(MV::point(theme.px(8.0f), 0.0f));
+		statusCountText = makeLabel(statusBar, managers.services, theme, "counts", MV::size(countsWidth, height), "");
+		statusCountText->owner()->position(MV::point(a_worldSize.width - countsWidth - theme.px(8.0f), 0.0f));
+		statusCountText->justification(MV::TextJustification::RIGHT);
+		auto press = statusBar->make("press")->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(a_worldSize.width, height));
+		press->onAccept.connect("console", [this](const std::shared_ptr<MV::Scene::Clickable>&) {
+			showConsole();
+		});
+		hoverTint(press, band, theme.windowBg(), theme.panelBg());
+		tooltip(managers.services, press, "Open the Console");
+		statusStale = true;
+	}
+
+	void App::refreshStatus() {
+		statusStale = false;
+		if (!statusText || !statusCountText) {
+			return;
+		}
+		auto&& all = messageLog->messages();
+		shownStatus = all.empty() ? std::string() : all.back().text + (all.back().repeats > 1 ? " (x" + std::to_string(all.back().repeats) + ")" : "");
+		std::string coloured = all.empty() ? std::string() : ConsolePanel::levelMarkup(all.back().level) + fitLabelText(managers.services, theme, shownStatus, statusText->bounds().width());
+		statusText->text(coloured);
+		auto counted = [](size_t a_count, const char* a_one, const char* a_many) {
+			return std::to_string(a_count) + " " + (a_count == 1 ? a_one : a_many);
+		};
+		const size_t failures = messageLog->count(MessageLevel::FAILURE);
+		const size_t warnings = messageLog->count(MessageLevel::WARNING);
+		shownCounts.clear();
+		std::string colouredCounts;
+		if (failures > 0) {
+			shownCounts = counted(failures, "error", "errors");
+			colouredCounts = ConsolePanel::levelMarkup(MessageLevel::FAILURE) + shownCounts;
+		}
+		if (warnings > 0) {
+			std::string text = counted(warnings, "warning", "warnings");
+			colouredCounts += (shownCounts.empty() ? "" : "   ") + ConsolePanel::levelMarkup(MessageLevel::WARNING) + text;
+			shownCounts += (shownCounts.empty() ? "" : "   ") + text;
+		}
+		statusCountText->text(colouredCounts);
+	}
+
+	MV::Point<int> App::statusBarScreenPoint() const {
+		auto box = statusBar->screenBounds();
+		return MV::Point<int>((box.minPoint.x + box.maxPoint.x) / 2, (box.minPoint.y + box.maxPoint.y) / 2);
 	}
 
 	void App::showSettings() {
@@ -833,6 +910,7 @@ namespace Workbench {
 			documentPath = a_fileName;
 			refreshTitle();
 			std::cout << "Workbench loaded: " << a_fileName << std::endl;
+			messageLog->add(MessageLevel::INFO, "Loaded " + a_fileName);
 			return true;
 		} catch (const std::exception& a_error) {
 			reportError("load failed (" + a_fileName + "): " + a_error.what());
@@ -857,6 +935,7 @@ namespace Workbench {
 			documentPath = a_fileName;
 			history.markSaved();
 			std::cout << "Workbench saved: " << assetPath << std::endl;
+			messageLog->add(MessageLevel::INFO, "Saved " + assetPath);
 		} catch (const std::exception& a_error) {
 			reportError("save failed (" + a_fileName + "): " + a_error.what());
 			result = false;
@@ -906,8 +985,14 @@ namespace Workbench {
 		auto worldSize = managers.renderer.world().size();
 		if (worldSize.width != lastWorldSize.width || worldSize.height != lastWorldSize.height) {
 			lastWorldSize = worldSize;
-			dock->layout(DockRect{ MV::point(0.0f, theme.titleBarHeight), MV::Size<>(worldSize.width, worldSize.height - theme.titleBarHeight) });
+			const float statusHeight = theme.px(22.0f);
+			dock->layout(DockRect{ MV::point(0.0f, theme.titleBarHeight), MV::Size<>(worldSize.width, worldSize.height - theme.titleBarHeight - statusHeight) });
 			layoutTitleBar(worldSize);
+			buildStatusBar(worldSize);
+		}
+		messageLog->drain();
+		if (statusStale) {
+			refreshStatus();
 		}
 		dock->update(a_dt);
 		syncViewportClip();

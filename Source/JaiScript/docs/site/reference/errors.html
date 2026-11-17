@@ -451,6 +451,7 @@ try {
 <h4 id="errors-archives">Archives<a class="hlink" href="#errors-archives" aria-label="link">&#8203;</a></h4>
 <div class="tablewrap"><table><thead><tr><th>Text</th><th>When</th><th>Fix</th></tr></thead><tbody>
 <tr id="err-invalid-shared-ptr-id"><td><code>Invalid shared_ptr ID: 4</code></td><td><code>from_json</code>, <code>from_binary</code> or <code>from_base64</code> of a handle whose object the save never wrote.</td><td>Load unedited data a matching save wrote.</td></tr>
+<tr id="err-cannot-save-coroutine"><td><code>Cannot save coroutine 'Boss::fight': a paused coroutine is not data</code></td><td><code>to_json</code>, <code>to_binary</code> or <code>to_base64</code> of a value that holds a coroutine handle, in a variable, a container or a field.</td><td>Save the state the coroutine works on and start a new coroutine after the load.</td></tr>
 </tbody></table></div>
 <h4 id="errors-exceptions">Exceptions<a class="hlink" href="#errors-exceptions" aria-label="link">&#8203;</a></h4>
 <div class="tablewrap"><table><thead><tr><th>Text</th><th>When</th><th>Fix</th></tr></thead><tbody>

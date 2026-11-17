@@ -8,6 +8,7 @@ set(JAISCRIPT_SOURCES
     implementation/construction.cpp
     implementation/conversion_registry.cpp
     implementation/coroutine.cpp
+    implementation/coroutine_snapshot.cpp
     implementation/debug/connector.cpp
     implementation/debug/controller.cpp
     implementation/engine.cpp

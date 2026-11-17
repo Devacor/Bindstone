@@ -2,6 +2,7 @@
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/math_values.hpp>
 #include <jaiscript/detail/work_budget.hpp>
+#include <jaiscript/detail/coroutine_snapshot.hpp>
 
 namespace jai::serialization {
 
@@ -226,6 +227,7 @@ bool binary_archive_writer::begin_value(const script_value& given, std::vector<v
     std::shared_ptr<class_definition> bound;
     class_definition* class_def = nullptr;
     if (tag == script_value_type::jai_object_type) {
+        if (const auto coroutine = detail::coroutine_of(value)) { detail::throw_coroutine_not_saved(*coroutine); }
         try {
             instance = value.as<strong_ptr<class_instance>>();
         } catch (...) {

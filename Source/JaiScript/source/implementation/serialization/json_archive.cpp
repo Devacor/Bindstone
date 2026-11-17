@@ -2,6 +2,7 @@
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/math_values.hpp>
+#include <jaiscript/detail/coroutine_snapshot.hpp>
 #include <jaiscript/detail/text_hash.hpp>
 #include <jaiscript/detail/work_budget.hpp>
 #include <array>
@@ -340,6 +341,7 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
         }
 
         case script_value_type::jai_object_type: {
+            if (const auto coroutine = detail::coroutine_of(value)) { detail::throw_coroutine_not_saved(*coroutine); }
             if (!engine_ref_) {
                 out_.append("null");
                 return;

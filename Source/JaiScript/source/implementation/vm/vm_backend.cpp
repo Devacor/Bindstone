@@ -15,6 +15,7 @@
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/coroutine.hpp>
+#include <jaiscript/detail/coroutine_snapshot.hpp>
 #include <jaiscript/detail/integer_ops.hpp>
 #include <jaiscript/detail/char_promotion.hpp>
 #include <jaiscript/detail/redeclaration.hpp>
@@ -979,39 +980,248 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 			}
 		}
 
-		auto body_chunk = chunk_for_body(function->name, function->parameters, function->body, function->local_count, function->unit);
-		state.body_chunk = body_chunk;
-		state.locals = call_frame{};
-		state.locals.function_name = function->name;
-
-		auto closure_env = handle.get_closure_env();
-		state.entry_env = std::make_shared<environment>(closure_env ? closure_env : environment_, symbolizer_);
-		state.current_env = state.entry_env;
-
-		// Method coroutine: the fiber frame is a method frame over the pinned receiver
-		// ('this' also resolves via the closure env; the frame copy serves the
-		// lvalue-ref path, which reads the caller frame's this)
-		if (!handle.receiver().is_null()) {
-			state.locals.set_this(handle.receiver());
-		}
-
-		// The persistent fiber frame: a window over the fiber's OWN stack (base 0);
-		// parameter binding happens inside run_fiber once the fiber stack is live
-		state.f.code = body_chunk.get();
-		state.f.pin = body_chunk;
-		state.f.ip = 0;
-		state.f.locals = &state.locals;
-		state.f.entry_env = state.entry_env;
-		state.f.window_backed = true;
-		state.f.window_base = 0;
-		state.f.window_live = 0;
-		state.f.stack_base = 0;
-		state.f.top_level = false;
-		state.f.return_type = function->return_type;
-		state.f.return_conv_class = static_cast<uint8_t>(detail::return_conv_of(*function));
+		open_fiber(handle, state, function);
 	}
 
 	return run_fiber(handle, state);
+}
+
+void vm_backend::open_fiber(coroutine_handle& handle, vm_coroutine_state& state, const std::shared_ptr<function_decl>& function) {
+	auto body_chunk = chunk_for_body(function->name, function->parameters, function->body, function->local_count, function->unit);
+	state.body_chunk = body_chunk;
+	state.locals = call_frame{};
+	state.locals.function_name = function->name;
+
+	auto closure_env = handle.get_closure_env();
+	state.entry_env = std::make_shared<environment>(closure_env ? closure_env : environment_, symbolizer_);
+	state.current_env = state.entry_env;
+
+	// Method coroutine: the fiber frame is a method frame over the pinned receiver
+	// ('this' also resolves via the closure env; the frame copy serves the
+	// lvalue-ref path, which reads the caller frame's this)
+	if (!handle.receiver().is_null()) {
+		state.locals.set_this(handle.receiver());
+	}
+
+	// The persistent fiber frame: a window over the fiber's OWN stack (base 0);
+	// parameter binding happens inside run_fiber once the fiber stack is live
+	state.f.code = body_chunk.get();
+	state.f.pin = body_chunk;
+	state.f.ip = 0;
+	state.f.locals = &state.locals;
+	state.f.entry_env = state.entry_env;
+	state.f.window_backed = true;
+	state.f.window_base = 0;
+	state.f.window_live = 0;
+	state.f.stack_base = 0;
+	state.f.top_level = false;
+	state.f.return_type = function->return_type;
+	state.f.return_conv_class = static_cast<uint8_t>(detail::return_conv_of(*function));
+}
+
+// The site and the frame of a suspended fiber: its window in place, each open range-for's range and place from its iteration
+// state, each stack-form switch's subject from the pair it keeps on the fiber's stack
+bool vm_backend::paused_coroutine_frame(coroutine_handle& a_handle, const std::vector<detail::coroutine_site>& a_sites, uint32_t& a_site,
+                                        detail::coroutine_frame_view& a_frame) {
+	auto* state = static_cast<vm_coroutine_state*>(a_handle.backend_state());
+	if (!state || !state->started || !state->f.window_backed || !state->body_chunk) { return false; }
+	a_site = a_handle.yield_site();
+	const chunk::yield_site* entry = a_site < a_sites.size() ? state->body_chunk->yield_site_of(a_site) : nullptr;
+	if (!entry || state->f.ip != static_cast<size_t>(entry->ip) + 1) { return false; }
+	const detail::coroutine_site& site = a_sites[a_site];
+	const auto function = a_handle.get_function();
+	const size_t window = std::max(function->local_count, state->body_chunk->local_count);
+	const size_t base = state->f.window_base;
+	if (state->stack_storage.size() < base + window) { return false; }
+	a_frame.slots = state->stack_storage.data() + base;
+	a_frame.slot_count = std::min<size_t>(state->f.window_live, function->local_count);
+	a_frame.loops.resize(site.loops.size());
+	a_frame.subjects.assign(site.switches.size(), make_null());
+	if (site.refusal) { return true; }   // the save names why: the frame at such a site is not read
+	size_t loops = 0;
+	size_t switches = 0;
+	size_t pairs = 0;
+	for (const chunk::resume_step& step : entry->steps) {
+		switch (step.what) {
+			case chunk::resume_step::kind::range_for: {
+				if (loops >= state->iter_storage.size() || loops >= site.loops.size()) { return false; }
+				const iter_state& iteration = state->iter_storage[loops];
+				detail::coroutine_loop_state& loop = a_frame.loops[loops++];
+				if (iteration.coroutine) {
+					loop.range = script_value::make_coroutine_handle(coroutine_handle_type_id_, std::static_pointer_cast<void>(iteration.coroutine), engine_);
+				} else if (!iteration.container) {
+					return false;
+				} else if (iteration.is_map) {
+					const script_value* key = iteration.map_started ? iteration.map_it.standing_key() : nullptr;
+					if (!key) { return false; }
+					loop.range = *iteration.container;
+					loop.key = *key;
+				} else {
+					if (iteration.index == 0) { return false; }
+					loop.range = *iteration.container;
+					loop.at = iteration.index - 1;
+				}
+				break;
+			}
+			case chunk::resume_step::kind::switch_pair: {
+				const size_t at = base + window + pairs * 2;
+				if (switches >= site.switches.size() || at >= state->stack_storage.size()) { return false; }
+				a_frame.subjects[switches++] = state->stack_storage[at];
+				++pairs;
+				break;
+			}
+			case chunk::resume_step::kind::switch_branches:
+				if (switches >= site.switches.size()) { return false; }
+				++switches;
+				break;
+			default:
+				break;
+		}
+	}
+	// above the window: the switch pairs, then the yield's own null
+	return loops == site.loops.size() && loops == state->iter_storage.size() && switches == site.switches.size() &&
+	       state->stack_storage.size() == base + window + pairs * 2 + 1 && state->pending_storage.empty();
+}
+
+// A created coroutine as its fiber stands just past a site's op_yield: the window from the frame given, then what each construct
+// around the yield keeps while its body runs, made by the op that makes it (the try record, the iteration state, the counted
+// loop's state, the switch's pair), outermost first
+bool vm_backend::pause_coroutine_at(coroutine_handle& a_handle, const std::vector<detail::coroutine_site>& a_sites, uint32_t a_site,
+                                    detail::coroutine_frame&& a_frame) {
+	const auto function = a_handle.get_function();
+	if (!function || a_site >= a_sites.size()) { return false; }
+	const detail::coroutine_site& site = a_sites[a_site];
+	auto& state = coroutine_fiber_state(a_handle);
+	open_fiber(a_handle, state, function);
+	const chunk::yield_site* entry = state.body_chunk->yield_site_of(a_site);
+	if (!entry) {
+		a_handle.set_backend_state(nullptr);
+		return false;
+	}
+	bool placed = true;
+	{
+		struct fiber_stacks {
+			vm_backend* vm;
+			vm_coroutine_state* st;
+			std::shared_ptr<environment> env;
+			std::optional<script_exception> exception;
+			std::optional<script_value> exception_value;
+			uint64_t marker;
+			bool unwinding;
+			bool traced;
+			fiber_stacks(vm_backend* v, vm_coroutine_state* c)
+				: vm(v), st(c), env(v->environment_), exception(std::move(v->current_exception_)), exception_value(std::move(v->active_exception_value_)),
+				  marker(v->current_catch_var_id_), unwinding(v->is_unwinding_), traced(v->trace_captured_) {
+				flip();
+				vm->current_exception_.reset();
+				vm->active_exception_value_.reset();
+				vm->current_catch_var_id_ = 0;
+			}
+			~fiber_stacks() {
+				flip();
+				vm->environment_ = std::move(env);
+				vm->current_exception_ = std::move(exception);
+				vm->active_exception_value_ = std::move(exception_value);
+				vm->current_catch_var_id_ = marker;
+				vm->is_unwinding_ = unwinding;
+				vm->trace_captured_ = traced;
+			}
+			void flip() {
+				vm->stack_.swap_payload(st->stack_storage);
+				std::swap(vm->try_records_, st->try_storage);
+				std::swap(vm->iter_states_, st->iter_storage);
+				std::swap(vm->cfor_states_, st->cfor_storage);
+				std::swap(vm->pending_callees_, st->pending_storage);
+			}
+		} live(this, &state);
+		environment_ = state.entry_env;
+		state.f.unit = function->unit;
+		enter_frame(state.f);
+		enter_unit(state.f.unit);
+
+		const size_t window = std::max(function->local_count, state.body_chunk->local_count);
+		stack_.fill_null_to(state.f.window_base + window, engine_);
+		for (size_t slot = 0; slot < a_frame.slots.size() && slot < window; ++slot) {
+			frame_slot_set(state.f, slot, std::move(a_frame.slots[slot]));
+		}
+		size_t loops = 0;
+		size_t switches = 0;
+		for (const chunk::resume_step& step : entry->steps) {
+			if (!placed) { break; }
+			const vm_instruction& ins = state.body_chunk->code[step.ip];
+			switch (step.what) {
+				case chunk::resume_step::kind::scope:
+					environment_ = acquire_block_env(environment_);
+					break;
+				case chunk::resume_step::kind::try_block:
+					(void)exec_try_push(state.f, ins);
+					if (step.ip + 1 < state.body_chunk->code.size() && state.body_chunk->code[step.ip + 1].op == opcode::op_try_types) {
+						try_records_.back().clause_types = &static_cast<const try_stmt*>(state.body_chunk->nodes[state.body_chunk->code[step.ip + 1].a].get())->clause_types;
+					}
+					break;
+				case chunk::resume_step::kind::range_for: {
+					if (loops >= a_frame.loops.size()) { placed = false; break; }
+					detail::coroutine_loop_state& loop = a_frame.loops[loops++];
+					stack_.push_back(loop.range);
+					if (exec_iter_init(state.f, ins) == op_status::failed) {
+						pending_error_ = {};
+						placed = false;
+						break;
+					}
+					iter_state& iteration = iter_states_.back();
+					if (iteration.is_map) {
+						iteration.map_it = iteration.container->get_map_storage()->standing_at(loop.key);
+						iteration.map_started = true;
+					} else if (!iteration.coroutine) {
+						iteration.index = loop.at + 1;
+					}
+					break;
+				}
+				case chunk::resume_step::kind::counted_for:
+					cfor_states_.push_back(counted_for_entry_state(state.f, state.body_chunk->counted_for_protos[ins.a]));
+					break;
+				case chunk::resume_step::kind::switch_pair: {
+					if (switches >= site.switches.size()) { placed = false; break; }
+					const switch_stmt& chosen = *site.switches[switches];
+					if (detail::switch_subject_held(chosen)) {
+						stack_.push_back(a_frame.subjects[switches]);
+					} else {   // a name its tests re-read: the pair's copy is read by nothing
+						const auto* name = static_cast<const identifier_expr*>(chosen.condition.get());
+						const script_value* held = resolve_local_or_env(state.f, static_cast<uint32_t>(name->slot_index), name->symbol_id);
+						stack_.push_back(held ? script_value(held->deref()) : make_null());
+					}
+					stack_.push_back(script_value(false, engine_));
+					++switches;
+					break;
+				}
+				case chunk::resume_step::kind::switch_branches:
+					++switches;
+					break;
+			}
+		}
+		if (placed) {
+			stack_.push_back(make_null());   // the yield's own value, which its statement drops
+			state.f.ip = static_cast<size_t>(entry->ip) + 1;
+			state.current_env = environment_;
+			state.started = true;
+		} else {
+			truncate_detached(try_records_, 0);
+			truncate_detached(iter_states_, 0);
+			cfor_states_.clear();
+			stack_.clear();
+		}
+		frames_.pop_back();
+		sync_unit();
+	}
+	if (!placed) {
+		a_handle.set_backend_state(nullptr);
+		return false;
+	}
+	a_handle.release_args();
+	a_handle.note_yield_site(a_site);
+	a_handle.set_status(coroutine_handle::status::suspended);
+	limits_->memory_charge_deferred(detail::k_coroutine_state_charge);
+	return true;
 }
 
 checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_coroutine_state& state) {
@@ -1040,6 +1250,8 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 			std::swap(vm->pending_callees_, st->pending_storage);
 		}
 	} stacks_guard(this, &state);
+	// a try the body entered under another resume: its handler restores the depth of the resume that reaches it
+	for (try_record& rec : try_records_) { rec.call_depth = current_call_depth_; }
 
 	// The exception trio follows the stacks: the resumer's is saved here and comes back
 	// on every exit (a throw escaping the fiber keeps its exception pair live for the
@@ -1275,6 +1487,10 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	}
 
 	if (!completed) {
+		if (is_unwinding_) {   // a throw left the body: the handle failed, as the interpreter marks it, and the throw goes on to the resumer
+			handle.set_status(coroutine_handle::status::failed);
+			return make_null();
+		}
 		// Falling off the end returns null and (like call_script_function) skips return-type
 		// conversion, so a typed coroutine driven to completion by range-for does not error.
 		handle.complete(make_null());
@@ -1289,6 +1505,7 @@ void vm_backend::exec_yield(frame& f, const vm_instruction& ins) {
 	if (ins.a) { stack_.pop_back(); }
 	if (active_coroutine_) {
 		active_coroutine_->do_yield(std::move(value));
+		active_coroutine_->note_yield_site(ins.c - 1);
 	}
 	// Yield evaluates to null in the coroutine body; the resume continues past this op.
 	stack_.push_back(make_null());
@@ -5551,8 +5768,7 @@ bool vm_backend::resolve_cfor_int_operand(frame& f, const fused_operand& operand
 	return true;
 }
 
-op_status vm_backend::exec_cfor_prep(frame& f, const vm_instruction& ins) {
-	const counted_for_proto& p = f.code->counted_for_protos[ins.a];
+vm_backend::counted_for_state vm_backend::counted_for_entry_state(frame& f, const counted_for_proto& p) {
 	counted_for_state st;
 	st.cmp = p.cmp;
 	st.subtract = p.step_subtract;
@@ -5575,6 +5791,13 @@ op_status vm_backend::exec_cfor_prep(frame& f, const vm_instruction& ins) {
 	if (fast) fast = resolve_cfor_int_operand(f, p.end, st.end_ptr, st.end_val);
 	if (fast) fast = resolve_cfor_int_operand(f, p.step, st.step_ptr, st.step_val);
 	st.fast = fast;
+	return st;
+}
+
+op_status vm_backend::exec_cfor_prep(frame& f, const vm_instruction& ins) {
+	const counted_for_proto& p = f.code->counted_for_protos[ins.a];
+	counted_for_state st = counted_for_entry_state(f, p);
+	const bool fast = st.fast;
 
 	if (!fast) {
 		cfor_states_.push_back(st);
@@ -13631,12 +13854,7 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 		}
 		func_decl_ptr->unit = decl_unit;
 		uint64_t coroutine_type_id = coroutine_handle_type_id_;
-		script_value functionValue = script_value::make_function(
-			[eng, coroutine_type_id, func_decl_ptr, closure_env](const std::vector<script_value>& args) -> checked_result<script_value> {
-				auto handle = std::make_shared<coroutine_handle>(eng);
-				handle->set_function(func_decl_ptr, args, closure_env);
-				return script_value::make_coroutine_handle(coroutine_type_id, std::static_pointer_cast<void>(handle), eng);
-			}, engine_);
+		script_value functionValue = script_value::make_function(coroutine_mint{eng, coroutine_type_id, func_decl_ptr, closure_env}, engine_);
 		environment_->define(proto.decl->name_id, functionValue);
 		return {};
 	}

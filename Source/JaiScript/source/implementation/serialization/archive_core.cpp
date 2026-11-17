@@ -1,6 +1,8 @@
 #include <jaiscript/serialization/archive_impl.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/engine_access.hpp>
+#include <jaiscript/detail/coroutine_snapshot.hpp>
+#include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/signals/receiver_save.hpp>
 
@@ -253,6 +255,59 @@ uint32_t archive_writer_core::reference_object(const script_value& a_object) {
         referenced_ahead_->insert(identity);
     }
     return id;
+}
+
+std::vector<std::pair<std::string, script_value>> archive_writer_core::coroutine_fields(coroutine_handle& a_coroutine) {
+    if (!engine_ref_) { detail::throw_coroutine_not_saved(a_coroutine, "the archive has no engine"); }
+    std::vector<std::pair<std::string, script_value>> record = detail::coroutine_record_of(*engine_ref_, a_coroutine);
+    const script_value& receiver = a_coroutine.receiver();
+    const class_instance* instance = receiver.peek_class_instance();
+    if (!instance) { return record; }
+    const auto holder = receiver.get_object_holder();
+    const bool shared = shared_ptr_ids_ && shared_ptr_ids_->find(handle_identity(holder.get(), false)) != shared_ptr_ids_->end();
+    for (size_t i = open_instances_.size(); !shared && i-- > 0;) {
+        if (open_instances_[i] == instance) {
+            record.emplace_back("owner", script_value(static_cast<script_int>(open_instances_.size() - i), engine_ref_));
+            return record;
+        }
+    }
+    if (!shared) {
+        if (written_instances_ && written_instances_->find(instance) != written_instances_->end()) {
+            detail::throw_coroutine_not_saved(a_coroutine, "its receiver is saved by value elsewhere in the same save; hold the receiver in a shared_ptr, or keep the coroutine inside the receiver");
+        }
+        if (!lone_receivers_) { lone_receivers_ = std::make_unique<std::unordered_map<const void*, const coroutine_handle*>>(); }
+        lone_receivers_->try_emplace(instance, &a_coroutine);
+    }
+    script_value handle = receiver.is_reference() ? receiver.deref() : receiver;
+    if (const auto type = handle.get_type_info(); handle.is_object() && type && type->base_type == script_value_type::jai_object_type) {
+        handle.set_type_info(detail::engine_access::get_type_info_shared_ptr(*engine_ref_, type.get()));
+    }
+    record.emplace_back("this", std::move(handle));
+    return record;
+}
+
+void archive_writer_core::open_written_instance(const class_instance* a_instance) {
+    if (lone_receivers_) {
+        if (auto taken = lone_receivers_->find(a_instance); taken != lone_receivers_->end()) {
+            detail::throw_coroutine_not_saved(*taken->second, "its receiver is saved by value elsewhere in the same save; hold the receiver in a shared_ptr, or keep the coroutine inside the receiver");
+        }
+    }
+    const class_definition* held = a_instance ? a_instance->get_class_definition() : nullptr;
+    if (held && held->declares_coroutine_method()) {
+        if (!written_instances_) { written_instances_ = std::make_unique<std::unordered_set<const void*>>(); }
+        written_instances_->insert(a_instance);
+    }
+    open_instances_.push_back(a_instance);
+}
+
+void archive_writer_core::open_coroutine_record(const coroutine_handle& a_coroutine) {
+    open_coroutines_.push_back(&a_coroutine);
+}
+
+void archive_writer_core::refuse_function_in_coroutine(const script_value& a_value) const {
+    if (!open_coroutines_.empty() && a_value.is_function()) {
+        detail::throw_coroutine_not_saved(*open_coroutines_.back(), "it holds a function value");
+    }
 }
 
 std::shared_ptr<class_definition> archive_writer_core::bound_class_of(const script_value& value) const {

@@ -103,6 +103,10 @@ namespace jai::detail {
             : symbols_(symbols), include_locations_(include_locations), own_path_(std::move(own_path)) {}
         // the subtree is a body's (the parallel body copier): its slots are written, as a function's are
         ast_writer& in_body() { frame_depth_ = 1; return *this; }
+        // the subtree as the parser made it: what a run patches in place (a slot a capture plan retires, an outer slot plan, a
+        // cached getter, a symbol interned on first use) is left out, so the key of running code equals the key of the same
+        // code freshly parsed
+        ast_writer& as_parsed() { as_parsed_ = true; return *this; }
 
         // Structural key for one subtree: string table + node encoding, a deterministic
         // pure function of AST structure (symbol ids persist as first-seen table indices,
@@ -191,14 +195,15 @@ namespace jai::detail {
 
         // Symbol IDs are engine-local: persist the NAME (table index), never the raw id.
         void symbol(uint64_t id, uint64_t sentinel) {
-            if (id == sentinel) { varint(0); return; }
+            if (id == sentinel || as_parsed_) { varint(0); return; }   // as parsed: the spelling beside it is the name (an id may be interned on first use)
             std::string_view name = symbols_.get_string(id);
             if (name.empty()) jaibite_fail("cannot serialize unresolvable symbol id");
             varint(1 + table_index(name));
         }
         // a program's own frame writes none: its block-scoped slots are re-derived at load (detail::program_slot_pass)
-        void slot(size_t s) { varint(s == SIZE_MAX || frame_depth_ == 0 ? 0 : uint64_t(s) + 1); }
+        void slot(size_t s) { varint(s == SIZE_MAX || frame_depth_ == 0 || as_parsed_ ? 0 : uint64_t(s) + 1); }
         int frame_depth_ = 0;   // the bodies (functions, lambdas, parallel_for) the writer is inside
+        bool as_parsed_ = false;
 
         void location(const source_location& loc) {
             if (!include_locations_) {
@@ -262,6 +267,7 @@ namespace jai::detail {
         }
 
         void outer_slot_plan(const std::vector<std::pair<uint64_t, size_t>>& plan, bool built) {
+            if (as_parsed_) { return; }
             flag(built);
             varint(plan.size());
             for (const auto& [sym, s] : plan) { symbol(sym, UINT64_MAX); slot(s); }
@@ -453,7 +459,7 @@ namespace jai::detail {
             node(e->object.get());
             str(e->member);
             symbol(e->member_id, UINT64_MAX);
-            symbol(e->getter_id, UINT64_MAX);
+            if (!as_parsed_) { symbol(e->getter_id, UINT64_MAX); }
             flag(e->is_arrow);
             flag(e->is_static);
             flag(e->null_safe);

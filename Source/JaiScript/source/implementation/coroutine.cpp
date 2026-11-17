@@ -136,6 +136,12 @@ checked_result<script_value> coroutine_handle::resume_refusal() const {
         "Coroutine is already running");
 }
 
+checked_result<script_value> coroutine_mint::operator()(const std::vector<script_value>& a_args) const {
+    auto handle = std::make_shared<coroutine_handle>(eng);
+    handle->set_function(declaration, a_args, closure);
+    return script_value::make_coroutine_handle(type_id, std::static_pointer_cast<void>(handle), eng);
+}
+
 checked_result<script_value> coroutine_handle::resume_once(engine* eng) {
     if (done() || status_ == status::running) { return resume_refusal(); }
 

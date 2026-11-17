@@ -94,6 +94,22 @@ int 7, float
 <li>Floats round-trip at full precision (<code>-0.0</code> keeps its sign). JSON cannot spell an infinity or a NaN, so <code>to_json</code> writes <code>null</code>; <code>to_base64</code> / <code>from_base64</code> keep the exact bits.</li>
 <li>A payload nests as deep as memory allows. Only a host record type&#x27;s own recursion is bounded, by the host thread&#x27;s stack or <code>JAI_MAX_HOST_RECORD_DEPTH</code> = 1024 records.</li>
 <li>Trailing garbage is rejected, an invalid unicode escape is a serialization error, and a lone surrogate becomes the replacement character.</li>
+<li>A coroutine handle saves as the paused coroutine it is, and loads paused at the same <code>yield</code>, in this engine or in another running the same code (<a href="#coroutines">below</a>). A function value does not save: <code>to_json</code> writes <code>null</code> for one, <code>to_binary</code> raises.</li>
+</ul>
+<h3 id="coroutines">Paused coroutines<a class="hlink" href="#coroutines" aria-label="link">&#8203;</a></h3>
+<p>A handle is written as a shared handle whose object is the coroutine&#x27;s record, so copies of a handle share one coroutine after a load: <code>{"$id": N, "$type": "coroutine", "$val": {...}}</code> at its first handle, <code>{"$id": N}</code> after. The interpreter and the VM write the same text and the same bytes, and each loads what the other wrote.</p>
+<div class="tablewrap"><table><thead><tr><th>Record member</th><th>Holds</th></tr></thead><tbody>
+<tr><td><code>function</code>, <code>kind</code>, <code>code</code></td><td>The function&#x27;s name (<code>Class::name</code> for a method, <code>ns::name</code> in a namespace), whether it is a <code>function</code>, a <code>method</code> or a <code>static</code> method, and a fingerprint of its code. A load fails when the loading program has no such function or its code differs.</td></tr>
+<tr><td><code>state</code></td><td><code>created</code> (with <code>args</code>), <code>suspended</code>, <code>completed</code> (with <code>result</code>) or <code>failed</code></td></tr>
+<tr><td><code>at</code>, <code>locals</code>, <code>loops</code>, <code>switches</code></td><td>A suspended coroutine&#x27;s <code>yield</code> by its number in the function, the locals in scope there in declaration order, each range-for around it (what it walks and where it is), and each enclosing switch&#x27;s subject</td></tr>
+<tr><td><code>owner</code> or <code>this</code></td><td>A method coroutine&#x27;s receiver: the count of objects being saved in place around the handle out to the receiver, else a shared handle to it</td></tr>
+</tbody></table></div>
+<ul>
+<li><strong>A save is exact or it fails.</strong> A coroutine that cannot be rebuilt exactly raises <code>Cannot save coroutine &#x27;name&#x27;: reason</code> and writes nothing; the guide lists the reasons (<a href="../guide/08-coroutines.html#saving">Saving</a>).</li>
+<li><strong>A load checks the record before it builds anything</strong>: the function and its code, the <code>yield</code>, the count and the declared type of every local, each loop&#x27;s place. A record that does not fit raises <code>Cannot load coroutine &#x27;name&#x27;: reason</code> and leaves no coroutine behind.</li>
+<li><strong>A load runs no script for a frame.</strong> The values in it are loaded as any saved value is; the body runs again at the next <code>next()</code>, under that call&#x27;s budget.</li>
+<li><strong>From C++</strong> the same holds for any archive of a script value that holds a handle, and <code>jai::coroutine_handle</code> gains nothing: a host saves a coroutine by saving the value.</li>
+<li>A run suspended at <code>sleep</code> (<code>engine::start</code>) is a native stack, not a coroutine handle, and does not save.</li>
 </ul>
 <h3 id="saving-game-state-to-a-file">Saving game state to a file<a class="hlink" href="#saving-game-state-to-a-file" aria-label="link">&#8203;</a></h3>
 <p>File access belongs to the host: the standalone runner provides <code>write_file</code>, <code>read_file</code> and <code>file_exists</code>, and an embedding host registers its own. <code>app_data_dir(name)</code> answers the platform&#x27;s per-user data folder.</p>

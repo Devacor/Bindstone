@@ -146,6 +146,7 @@ namespace jai {
             }
         }
         bool has_continuations() const { return !continuations_.empty(); }
+        const std::vector<continuation_point>& continuations() const { return continuations_; }   // innermost first
         void drop_saved_containers(uint32_t phase) {
             for (auto& point : continuations_) { if (point.phase == phase) { point.saved_container.reset(); } }
         }
@@ -295,6 +296,10 @@ namespace jai {
         // Reached via execution_backend::resume_coroutine; the handle's opaque
         // backend_state holds the interpreter_coroutine_state.
         checked_result<script_value> resume_coroutine(coroutine_handle& handle) override;
+        bool paused_coroutine_frame(coroutine_handle& a_handle, const std::vector<detail::coroutine_site>& a_sites, uint32_t& a_site,
+                                    detail::coroutine_frame_view& a_frame) override;
+        bool pause_coroutine_at(coroutine_handle& a_handle, const std::vector<detail::coroutine_site>& a_sites, uint32_t a_site,
+                                detail::coroutine_frame&& a_frame) override;
 
         std::unique_ptr<backend_run_state> make_run_state() override;
         void swap_run_state(backend_run_state& state) noexcept override;
@@ -1120,6 +1125,15 @@ namespace jai {
         // Coroutine helper - creates a script_value wrapping a coroutine_handle.
         // Static (friend access to script_value) so coroutine-factory thunks need no interpreter.
         static script_value make_coroutine_object(engine* eng, uint64_t type_id, std::shared_ptr<coroutine_handle> handle);
+        // A coroutine being paused at a site (pause_coroutine_at): call_function builds the body's activation, places the frame
+        // and suspends before any statement runs
+        struct coroutine_pause {
+            coroutine_handle* handle = nullptr;
+            const detail::coroutine_site* site = nullptr;
+            detail::coroutine_frame* frame = nullptr;
+        };
+        coroutine_pause* pending_pause_ = nullptr;
+        void place_paused_frame(const coroutine_pause& a_pause, size_t a_frameIndex, const script_defined_function& a_function);
 
         // Function call helpers
         // Returns checked_result - exceptions only thrown at execute() boundary

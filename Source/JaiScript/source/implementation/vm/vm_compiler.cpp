@@ -16,6 +16,7 @@
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
 #include <jaiscript/detail/map_entry_binding.hpp>
+#include <jaiscript/detail/coroutine_snapshot.hpp>
 #include <algorithm>
 #include <cassert>
 #include <stdexcept>
@@ -1050,6 +1051,12 @@ JAI_NOINLINE std::shared_ptr<chunk> vm_compiler::open_callable(std::string_view 
 	callable_ = {};
 	callable_.active = true;
 	callable_.coroutine_body = detail::aggregate_lowering_impl::contains_yield(body.get());
+	yield_numbers_.clear();
+	resume_steps_.clear();
+	if (callable_.coroutine_body) {
+		const std::vector<detail::coroutine_site> sites = detail::coroutine_sites(parameters, *body);
+		for (size_t i = 0; i < sites.size(); ++i) { yield_numbers_.emplace(sites[i].yield, static_cast<uint32_t>(i)); }
+	}
 	callable_body_ = body.get();
 	frame_param_kinds_.clear();
 	frame_eligible_ = parameters.size() <= 8 && frame_body_shape(body.get(), stack_);
@@ -1752,10 +1759,12 @@ JAI_NOINLINE void vm_compiler::compile_block(block_stmt* block) {
 	}
 	emit(opcode::op_scope_push);
 	++scope_depth_;
+	open_resume_step(chunk::resume_step::kind::scope);
 	for (const auto& decl : block->declarations) {
 		compile_declaration(decl, false);
 		note_kill_decl(decl.get());
 	}
+	close_resume_step();
 	close_debug_locals(locals);
 	close_kill_scope();
 	--scope_depth_;
@@ -1965,6 +1974,7 @@ JAI_NOINLINE void vm_compiler::compile_for(for_stmt* stmt) {
 	if (loop_scope) {
 		emit(opcode::op_scope_push);
 		++scope_depth_;
+		open_resume_step(chunk::resume_step::kind::scope);
 	}
 
 	kill_scopes_.emplace_back();
@@ -2010,6 +2020,7 @@ JAI_NOINLINE void vm_compiler::compile_for(for_stmt* stmt) {
 	close_kill_scope();
 
 	if (loop_scope) {
+		close_resume_step();
 		--scope_depth_;
 		emit(opcode::op_scope_pop);
 	}
@@ -2085,6 +2096,7 @@ JAI_NOINLINE bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 	if (loop_scope) {
 		emit(opcode::op_scope_push);
 		++scope_depth_;
+		open_resume_step(chunk::resume_step::kind::scope);
 	}
 
 	const size_t locals = chunk_->debug_locals.size();
@@ -2105,7 +2117,7 @@ JAI_NOINLINE bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 	chunk_->counted_for_protos.push_back(proto);
 	const uint32_t proto_idx = static_cast<uint32_t>(chunk_->counted_for_protos.size() - 1);
 
-	emit(opcode::op_cfor_prep, proto_idx);
+	open_resume_step(chunk::resume_step::kind::counted_for, emit(opcode::op_cfor_prep, proto_idx));
 
 	const size_t generic_cond = chunk_->code.size();
 	{
@@ -2136,6 +2148,7 @@ JAI_NOINLINE bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 	emit(opcode::op_loop_back, static_cast<uint32_t>(generic_cond));
 
 	close_debug_locals(locals);
+	close_resume_step();
 	const size_t exit_pop = chunk_->code.size();
 	emit(opcode::op_cfor_pop);
 	const size_t end = chunk_->code.size();
@@ -2153,6 +2166,7 @@ JAI_NOINLINE bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 	stored.generic_update_ip = static_cast<uint32_t>(generic_update);
 
 	if (loop_scope) {
+		close_resume_step();
 		--scope_depth_;
 		emit(opcode::op_scope_pop);
 	}
@@ -2269,7 +2283,7 @@ JAI_NOINLINE void vm_compiler::compile_range_for(range_for_stmt* stmt) {
 	chunk_->iter_protos.push_back(proto);
 	const uint32_t proto_idx = static_cast<uint32_t>(chunk_->iter_protos.size() - 1);
 
-	emit(opcode::op_iter_init, proto_idx);
+	open_resume_step(chunk::resume_step::kind::range_for, emit(opcode::op_iter_init, proto_idx));
 	++scope_depth_;                               // loop-variable scope pushed by op_iter_init
 
 	const size_t loop_top = chunk_->code.size();
@@ -2304,6 +2318,7 @@ JAI_NOINLINE void vm_compiler::compile_range_for(range_for_stmt* stmt) {
 	loops_.pop_back();
 
 	kill_slots(loop_variable);
+	close_resume_step();
 	emit(opcode::op_iter_pop);
 	--scope_depth_;
 }
@@ -2333,7 +2348,9 @@ JAI_NOINLINE void vm_compiler::compile_try(try_stmt* stmt, const statement_ptr& 
 	loops_.back().kind = region_kind::try_block;
 	loops_.back().scope_depth = scope_depth_;
 	try_kills_.emplace_back();
+	open_resume_step(chunk::resume_step::kind::try_block, try_push);
 	compile_statement(stmt->try_block);
+	close_resume_step();
 	std::vector<uint32_t> try_declared = std::move(try_kills_.back());
 	try_kills_.pop_back();
 	loops_.pop_back();
@@ -2385,19 +2402,7 @@ bool holds_fallthrough(const statement* s) {
 	}
 }
 
-// a case value whose evaluation runs no code and writes nothing: the tests may read the switch's own name in place of a copy
-bool inert_case_value(const expression* e) {
-	if (!e) return false;
-	switch (e->get_type()) {
-	case node_type::literal_expr: return true;
-	case node_type::identifier_expr: return true;
-	case node_type::unary_expr: {
-		auto* u = static_cast<const unary_expr*>(e);
-		return (u->op.type == token_type::minus || u->op.type == token_type::plus) && u->operand && u->operand->get_type() == node_type::literal_expr;
-	}
-	default: return false;
-	}
-}
+using detail::inert_case_value;
 }
 
 // The branch form: the tests run first as `subject == value` conditions in case order (the subject a name the case values cannot write,
@@ -2555,6 +2560,7 @@ JAI_NOINLINE void vm_compiler::compile_case_body(const std::vector<statement_ptr
 	if (case_scope) {
 		emit(opcode::op_scope_push);
 		++scope_depth_;
+		open_resume_step(chunk::resume_step::kind::scope);
 	}
 	kill_scopes_.emplace_back();
 	const size_t locals = chunk_->debug_locals.size();
@@ -2573,14 +2579,19 @@ JAI_NOINLINE void vm_compiler::compile_case_body(const std::vector<statement_ptr
 	close_debug_locals(locals);
 	close_kill_scope();
 	if (case_scope) {
+		close_resume_step();
 		--scope_depth_;
 		emit(opcode::op_scope_pop);
 	}
 }
 
 JAI_NOINLINE void vm_compiler::compile_switch(switch_stmt* stmt) {
-	if (compile_switch_branches(stmt)) { return; }
+	open_resume_step(chunk::resume_step::kind::switch_branches);
+	const bool branched = compile_switch_branches(stmt);
+	close_resume_step();
+	if (branched) { return; }
 	compile_expression(stmt->condition);
+	open_resume_step(chunk::resume_step::kind::switch_pair);
 
 	push_region(region_kind::loop);
 	loops_.back().kind = region_kind::switch_ctx;
@@ -2628,6 +2639,7 @@ JAI_NOINLINE void vm_compiler::compile_switch(switch_stmt* stmt) {
 		if (case_scope) {
 			emit(opcode::op_scope_push);
 			++scope_depth_;
+			open_resume_step(chunk::resume_step::kind::scope);
 		}
 		kill_scopes_.emplace_back();
 		const size_t locals = chunk_->debug_locals.size();
@@ -2638,6 +2650,7 @@ JAI_NOINLINE void vm_compiler::compile_switch(switch_stmt* stmt) {
 		close_debug_locals(locals);
 		close_kill_scope();
 		if (case_scope) {
+			close_resume_step();
 			--scope_depth_;
 			emit(opcode::op_scope_pop);
 		}
@@ -2661,6 +2674,7 @@ JAI_NOINLINE void vm_compiler::compile_switch(switch_stmt* stmt) {
 		if (default_scope) {
 			emit(opcode::op_scope_push);
 			++scope_depth_;
+			open_resume_step(chunk::resume_step::kind::scope);
 		}
 		kill_scopes_.emplace_back();
 		const size_t locals = chunk_->debug_locals.size();
@@ -2671,6 +2685,7 @@ JAI_NOINLINE void vm_compiler::compile_switch(switch_stmt* stmt) {
 		close_debug_locals(locals);
 		close_kill_scope();
 		if (default_scope) {
+			close_resume_step();
 			--scope_depth_;
 			emit(opcode::op_scope_pop);
 		}
@@ -2692,6 +2707,7 @@ JAI_NOINLINE void vm_compiler::compile_switch(switch_stmt* stmt) {
 		patch_jump(at, end);
 	}
 	loops_.pop_back();
+	close_resume_step();
 }
 
 // The arms of `x = c ? a : b;` onto a slot, each a store of its own: a nested ternary recurses, a value takes the move row when it is
@@ -3362,7 +3378,10 @@ JAI_NOINLINE void vm_compiler::compile_yield(const yield_expr* ye) {
 		compile_expression(ye->value);
 		has_value = 1;
 	}
-	emit(opcode::op_yield, has_value, ye->value && detail::yield_operand_is_lvalue(ye->value.get()) ? 1u : 0u);
+	const auto numbered = yield_numbers_.find(ye);
+	const uint32_t site = numbered == yield_numbers_.end() ? 0u : numbered->second + 1;
+	const size_t at = emit(opcode::op_yield, has_value, ye->value && detail::yield_operand_is_lvalue(ye->value.get()) ? 1u : 0u, site);
+	if (site != 0) { chunk_->yield_sites.push_back({site - 1, static_cast<uint32_t>(at), resume_steps_}); }
 }
 
 // slot + 1 of the plain field a bare name of a method body names in the body's declaring class, 0 when the name is a local, a global

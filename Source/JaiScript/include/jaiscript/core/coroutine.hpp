@@ -66,6 +66,13 @@ public:
 
     void set_status(status s) { status_ = s; }
 
+    // Where the body last yielded, for a save (detail/coroutine_snapshot.hpp): the VM notes the site's number, the interpreter
+    // the yield expression
+    void note_yield_site(uint32_t a_site) noexcept { yield_site_ = a_site; }
+    void note_yield_node(const void* a_node) noexcept { yield_node_ = a_node; }
+    uint32_t yield_site() const noexcept { return yield_site_; }
+    const void* yield_node() const noexcept { return yield_node_; }
+
     coroutine_backend_state* backend_state() const { return backend_state_.get(); }
     void set_backend_state(std::unique_ptr<coroutine_backend_state> state) {
         backend_state_ = std::move(state);
@@ -81,6 +88,8 @@ private:
     engine* engine_ = nullptr;
     status status_ = status::created;
     bool continues_host_entry_ = false;
+    uint32_t yield_site_ = UINT32_MAX;
+    const void* yield_node_ = nullptr;
     script_value yield_value_;
     script_value result_;
 
@@ -90,6 +99,15 @@ private:
     script_value receiver_;
 
     std::unique_ptr<coroutine_backend_state> backend_state_;
+};
+
+// The value a coroutine declaration defines: a call mints a handle over the declaration and the scope it was declared in
+struct coroutine_mint {
+    engine* eng = nullptr;
+    uint64_t type_id = 0;
+    std::shared_ptr<function_decl> declaration;
+    std::shared_ptr<environment> closure;
+    checked_result<script_value> operator()(const std::vector<script_value>& a_args) const;
 };
 
 } // namespace jai

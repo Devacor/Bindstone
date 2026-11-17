@@ -469,6 +469,8 @@ namespace jai {
             template <bool C = Const, typename = std::enable_if_t<C>>
             basic_iterator(const basic_iterator<false>& o) : m_(o.m_), node_(o.node_), index_(o.index_), gen_(o.gen_), key_(o.key_) {}
 
+            // the key an iteration stands at, whether or not its entry is still in the map
+            const script_value* standing_key() const noexcept { return key_ ? &*key_ : node_ ? &node_->first : nullptr; }
             reference operator*() const { revalidate(); return *node_; }
             pointer operator->() const { revalidate(); return node_; }
             basic_iterator& operator++() {
@@ -597,6 +599,14 @@ namespace jai {
             entry* e = find_or_insert(key, [this](uint64_t h, const script_value& k) { return pool_.make(h, k); }).first;
             memo = entry_memo{this, gen_, e};
             return &e->kv;
+        }
+
+        // An iteration standing at `k` as one that walked there, whether or not the entry is still in the map: its next step
+        // continues after `k` (a paused loop's place, detail/coroutine_snapshot.hpp)
+        iterator standing_at(const script_value& k) {
+            iterator it(this, nullptr, npos, gen_ - 1, false);
+            it.key_.emplace(k);
+            return it;
         }
 
         iterator find(const script_value& k) {

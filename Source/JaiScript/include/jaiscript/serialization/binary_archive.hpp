@@ -91,7 +91,11 @@ private:
         bool value_next = false;          // a map entry's key went out: its value is next
         script_map::const_iterator next{};
         std::vector<script_value> values; // a handle's payload, or an instance's property values in order
+        bool instance = false;            // the members of an instance written in place
+        bool coroutine = false;           // a coroutine's record
     };
+    bool payload_next_ = false;           // the next value is a handle's object, not an instance written in place
+    bool begin_coroutine(coroutine_handle& a_coroutine, std::vector<value_frame>& frames);
 
     // The frame's next child, in its container (whose storage stays put while frames move) or in scratch when it had to be
     // made; null when the frame has none left

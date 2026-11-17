@@ -657,6 +657,12 @@ public:
     // Reflection enumeration (reflect::methods / method_arguments): this class's OWN
     // tables — script overload sets (AST decls carry names/types/defaults), the typed
     // C++ overload table, and the raw method-value maps for names in neither
+    // a class whose instances can be a paused coroutine's receiver: it or a parent declares a coroutine method
+    bool declares_coroutine_method() const {
+        if (coroutine_methods_) { return true; }
+        for (const auto& parent : parent_classes_) { if (parent && parent->declares_coroutine_method()) { return true; } }
+        return false;
+    }
     const auto& script_method_overloads() const { return method_overloads_; }
     const auto& script_static_method_overloads() const { return static_method_overloads_; }
     const auto& cpp_method_overload_table() const { return cpp_method_overloads_; }
@@ -1341,6 +1347,7 @@ private:
     std::unordered_map<uint64_t, std::vector<size_t>> method_arities_;
     std::unordered_map<uint64_t, cpp_overloads_by_arity> cpp_method_overloads_;
     std::unordered_map<uint64_t, std::vector<std::shared_ptr<function_decl>>> method_overloads_;
+    bool coroutine_methods_ = false;
 
     struct overload_cache_key {
         uint64_t name_id;

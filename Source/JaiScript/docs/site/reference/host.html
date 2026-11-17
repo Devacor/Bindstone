@@ -385,6 +385,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>weak_ptr</code> as the first reference</td><td>Carries the object&#x27;s <code>"$val"</code> (and <code>"$type"</code>) inline, so a weak pointer that precedes its owner still loads.</td></tr>
 <tr><td><code>unique_ptr</code> (C++ only)</td><td><code>{"$val": {...}}</code> by the pointer&#x27;s static type, with no <code>$type</code>.</td></tr>
 <tr><td>a <code>unique_ptr&lt;Base&gt;</code> holding a derived object</td><td>Writes only the <code>Base</code> fields and loads a <code>Base</code>: a polymorphic owner is a <code>shared_ptr&lt;Base&gt;</code>.</td></tr>
+<tr><td>a coroutine handle (script archives)</td><td><code>{"$id": N, "$type": "coroutine", "$val": {...}}</code> at its first handle, <code>{"$id": N}</code> after: the paused coroutine&#x27;s record (<a href="../embedding/08-serialization.html#coroutines">Paused coroutines</a>)</td></tr>
 <tr><td>null pointer, empty handle, expired weak handle</td><td>null</td></tr>
 </tbody></table></div>
 <h3 id="archive-layers">Script archives and C++ archives<a class="hlink" href="#archive-layers" aria-label="link">&#8203;</a></h3>

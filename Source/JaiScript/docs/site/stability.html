@@ -121,6 +121,7 @@ source it was parsed from. <a href="embedding/04-jaibite.html">jaibite</a></li>
 <tr><td><a href="guide/09-containers-strings.html#strings-observers-vs-mutators">String mutators</a></td><td>whether <code>to_upper</code>, <code>trim</code> and the other mutating string methods change their receiver in place</td><td></td></tr>
 <tr><td><a href="embedding/13-script-extensible.html">Script-extensible objects</a></td><td><code>extend(obj, Class)</code> and its host side</td><td></td></tr>
 <tr><td>Coroutine lambdas</td><td>absent; they may be added</td><td></td></tr>
+<tr><td><a href="guide/08-coroutines.html#saving">Saved coroutines</a></td><td>which paused coroutines save: one refused now (paused inside an expression or a <code>catch</code> block, holding a reference to an element) may save later</td><td>a save is exact or it is refused; a coroutine loads only into a program whose function has the code that was saved</td></tr>
 </tbody></table></div>
 </article>
 </main>

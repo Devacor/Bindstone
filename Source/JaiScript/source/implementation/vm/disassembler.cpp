@@ -197,6 +197,7 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 				break;
 			case opcode::op_yield:
 				out << (ins.a ? (ins.b ? " value copy" : " value") : " void");
+				if (ins.c) { out << " site " << (ins.c - 1); }
 				break;
 			case opcode::op_import:
 				out << " site=" << ins.a << " exprs=" << ins.b << (ins.c ? " value" : "");

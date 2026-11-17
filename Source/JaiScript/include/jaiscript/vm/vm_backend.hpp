@@ -171,6 +171,10 @@ namespace jai::vm {
 
 
         checked_result<script_value> resume_coroutine(coroutine_handle& handle) override;
+        bool paused_coroutine_frame(coroutine_handle& a_handle, const std::vector<detail::coroutine_site>& a_sites, uint32_t& a_site,
+                                    detail::coroutine_frame_view& a_frame) override;
+        bool pause_coroutine_at(coroutine_handle& a_handle, const std::vector<detail::coroutine_site>& a_sites, uint32_t a_site,
+                                detail::coroutine_frame&& a_frame) override;
 
         std::unique_ptr<backend_run_state> make_run_state() override;
         void swap_run_state(backend_run_state& state) noexcept override;
@@ -2915,6 +2919,10 @@ namespace jai::vm {
         op_status exec_cast(frame& f, const vm_instruction& ins);
 
         vm_coroutine_state& coroutine_fiber_state(coroutine_handle& handle);
+        // The fiber a coroutine's first resume opens: its body's chunk, its entry scope and its frame over its own stack
+        void open_fiber(coroutine_handle& handle, vm_coroutine_state& state, const std::shared_ptr<function_decl>& function);
+        // The state a counted loop's prep makes for its variable, limit and step as they stand
+        counted_for_state counted_for_entry_state(frame& f, const counted_for_proto& p);
         // Runs (or continues) the fiber; returns the yield value, the final return value on the
         // completing resume, or an error (handle marked failed) — never a stale prior yield.
         checked_result<script_value> run_fiber(coroutine_handle& handle, vm_coroutine_state& state);

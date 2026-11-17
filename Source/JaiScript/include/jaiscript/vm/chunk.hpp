@@ -833,6 +833,25 @@ namespace jai::vm {
         std::vector<fused_operand> typed_env_operands;
         std::vector<counted_for_proto> counted_for_protos;
 
+        // A coroutine body's yields (compile_yield), by their number in detail::coroutine_sites: the op_yield and what the
+        // constructs around it keep on the frame's stacks while their bodies run, outermost first, so a coroutine can be paused
+        // at one from data (vm_backend::pause_coroutine_at). A chunk with no yield has none.
+        struct resume_step {
+            enum class kind : uint8_t { scope, try_block, range_for, counted_for, switch_pair, switch_branches };
+            kind what = kind::scope;
+            uint32_t ip = 0;   // the op_try_push / op_iter_init / op_cfor_prep that opens it
+        };
+        struct yield_site {
+            uint32_t site = 0;
+            uint32_t ip = 0;
+            std::vector<resume_step> steps;
+        };
+        std::vector<yield_site> yield_sites;
+        const yield_site* yield_site_of(uint32_t a_site) const noexcept {
+            for (const yield_site& entry : yield_sites) { if (entry.site == a_site) { return &entry; } }
+            return nullptr;
+        }
+
         // Default-argument expressions compiled per parameter (function-body chunks only)
         std::vector<std::shared_ptr<chunk>> param_default_chunks;
 

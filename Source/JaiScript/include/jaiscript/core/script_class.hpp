@@ -362,6 +362,7 @@ inline checked_result<script_value> script_method_dispatch::invoke(const script_
 inline void class_definition::add_script_method(std::string_view name, std::shared_ptr<function_decl> ast, std::shared_ptr<environment> definition_env) {
     engine* eng = get_engine();
     if (!eng) return;
+    if (ast && ast->is_coroutine) { coroutine_methods_ = true; }
 
     // Track if this is a property getter for fast-path optimization
     if (name.size() > 5 && name.substr(0, 5) == "_get_") {

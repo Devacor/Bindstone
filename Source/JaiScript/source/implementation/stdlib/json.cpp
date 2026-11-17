@@ -5,6 +5,7 @@
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/work_budget.hpp>
+#include <jaiscript/detail/coroutine_snapshot.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/convenience.hpp>
@@ -262,7 +263,7 @@ namespace stdlib {
 			}
 		}
 
-		enum class shape : uint8_t { map, array, instance, handle, pairs };
+		enum class shape : uint8_t { map, array, instance, handle, pairs, coroutine };
 		struct frame {
 			frame(shape a_kind, script_value a_source, script_value a_built, engine* a_eng) :
 				kind(a_kind), source(std::move(a_source)), built(std::move(a_built)), key(std::monostate{}, a_eng) {}
@@ -272,7 +273,8 @@ namespace stdlib {
 			script_map::const_iterator next{};
 			size_t index = 0;
 			size_t count = 0;
-			script_value key;              // the member the child rebuilds for, or a pair's rebuilt key
+			script_value key;              // the member the child rebuilds for, a pair's rebuilt key, or a coroutine frame's handle
+			script_value member{std::monostate{}, nullptr};   // a coroutine frame: the record member the child rebuilds for
 			bool have_key = false;
 			bool finished = false;         // an instance whose setter threw: the in-flight exception leaves the load
 			script_int handle_id = 0;      // a handle frame's id, or the id an instance frame's object registered under
@@ -313,6 +315,10 @@ namespace stdlib {
 						return open_handle(id, has_payload ? &payload : nullptr, weak, out);
 					}
 				} else if (keys.type && keys.val && keys.type->is_string() && keys.val->is_map() && (!keys.version || keys.version->is_int())) {
+					if (keys.type->as_string() == "coroutine") {
+						open_coroutine(*keys.val, handle_id);
+						return false;
+					}
 					const script_int version = keys.version ? keys.version->as_int() : 1;
 					if (open_instance(*keys.val, keys.type->as_string(), version, handle_id)) { return false; }
 				}
@@ -342,6 +348,38 @@ namespace stdlib {
 			f.next = map.begin();
 			frames_.push_back(std::move(f));
 			return false;
+		}
+
+		// A coroutine's record: its handle is made at once, so a handle to it inside what it holds finds it, and filled when
+		// the record's values are loaded
+		void open_coroutine(const script_value& record, script_int handle_id) {
+			script_value handle = detail::make_unloaded_coroutine(*eng_);
+			if (handle_id != 0) { handles_.loaded.try_emplace(handle_id, handle); }
+			frame f(shape::coroutine, record, script_value::make_map(detail::engine_access::get_type_info_string(*eng_), nullptr, eng_), eng_);
+			f.next = record.as_map().begin();
+			f.key = std::move(handle);
+			frames_.push_back(std::move(f));
+		}
+
+		// The receiver a loaded record names: the instance being loaded in place that many levels out, else the handle it holds
+		script_value coroutine_receiver(const script_map& record) {
+			const script_value owner_key(std::string("owner"), eng_);
+			const script_value this_key(std::string("this"), eng_);
+			if (auto owner = record.find(owner_key); owner != record.end()) {
+				script_int levels = owner->second.is_int() ? owner->second.as_int() : 0;
+				for (size_t i = frames_.size() - 1; levels > 0 && i-- > 0;) {
+					const frame& outer = frames_[i];
+					if (outer.kind == shape::instance && outer.handle_id == 0 && --levels == 0) { return outer.built; }
+				}
+				detail::throw_coroutine_not_loaded("?", "its save names a receiver that is not being loaded around it");
+			}
+			if (auto held = record.find(this_key); held != record.end() && held->second.is_object()) {
+				script_value receiver = held->second;
+				if (strong_ptr<class_instance> instance = receiver.get_class_instance()) {
+					if (class_definition* def = instance->get_class_definition()) { return script_value::make_class_object(*def, instance, eng_); }
+				}
+			}
+			return script_value(std::monostate{}, eng_);
 		}
 
 		bool pairs_well_formed(const script_value& payload) {
@@ -430,6 +468,7 @@ namespace stdlib {
 			frame f(shape::instance, std::move(fields), std::move(instance), eng_);
 			f.order = &detail::engine_access::load_field_order(*eng_, *def);
 			f.version = version;
+			f.handle_id = handle_id;
 			frames_.push_back(std::move(f));
 			return true;
 		}
@@ -455,6 +494,12 @@ namespace stdlib {
 				case shape::map:
 					if (f.next == f.source.as_map().end()) { return false; }
 					f.key = f.next->first;
+					child = &f.next->second;
+					++f.next;
+					break;
+				case shape::coroutine:
+					if (f.next == f.source.as_map().end()) { return false; }
+					f.member = f.next->first;
 					child = &f.next->second;
 					++f.next;
 					break;
@@ -500,6 +545,9 @@ namespace stdlib {
 				case shape::map:
 					const_cast<script_map&>(f.built.as_map()).emplace(f.key, std::move(child));
 					break;
+				case shape::coroutine:
+					const_cast<script_map&>(f.built.as_map()).emplace(f.member, std::move(child));
+					break;
 				case shape::pairs:
 					if (!f.have_key) {
 						f.key = std::move(child);
@@ -538,6 +586,11 @@ namespace stdlib {
 				case shape::instance:
 					if (!f.finished) { run_post_load(f); }
 					return std::move(f.built);
+				case shape::coroutine: {
+					const script_map& record = f.built.as_map();
+					detail::load_coroutine_record(*eng_, f.key, record, coroutine_receiver(record));
+					return std::move(f.key);
+				}
 				default:
 					return std::move(f.built);
 			}

@@ -341,7 +341,10 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
         }
 
         case script_value_type::jai_object_type: {
-            if (const auto coroutine = detail::coroutine_of(value)) { detail::throw_coroutine_not_saved(*coroutine); }
+            if (const auto coroutine = detail::coroutine_of(value)) {
+                begin_coroutine(*coroutine, value, frames);
+                return;
+            }
             if (!engine_ref_) {
                 out_.append("null");
                 return;
@@ -366,6 +369,26 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
             write_leaf(value);
             return;
     }
+}
+
+void json_archive_writer::begin_coroutine(coroutine_handle& a_coroutine, const script_value& a_value, std::vector<write_frame>& frames) {
+    auto [id, is_new] = track_shared_ptr(&a_coroutine);
+    open_value('{');
+    write_value_key("$id", false);
+    append_json_integer(out_, id);
+    if (!is_new) {
+        close_value('}', false);
+        return;
+    }
+    std::vector<std::pair<std::string, script_value>> record = coroutine_fields(a_coroutine);
+    write_value_key("$type", true);
+    out_ += "\"coroutine\"";
+    write_value_key("$val", true);
+    open_value('{');
+    write_frame& f = frames.emplace_back(write_shape::fields, a_value);
+    f.fields = std::move(record);
+    f.coroutine = true;
+    open_coroutine_record(a_coroutine);
 }
 
 strong_ptr<class_instance> json_archive_writer::written_instance(const script_value& value) {
@@ -409,14 +432,18 @@ void json_archive_writer::begin_instance_members(const script_value& value, stro
     out_ += '"';
     write_value_key("$val", true);
     open_value('{');
+    const class_instance* in_place = comma ? nullptr : instance.get();
+    if (in_place) { open_written_instance(in_place); }
     if (class_def) {
         write_frame& f = frames.emplace_back(write_shape::instance, value);
         f.names = class_def->get_property_names();
         f.class_def = class_def;
         f.instance = std::move(instance);
+        f.written_in_place = in_place != nullptr;
     } else {
         // slot order: deterministic, close to declaration order
         write_frame& f = frames.emplace_back(write_shape::fields, value);
+        f.written_in_place = in_place != nullptr;
         instance->for_each_field([&](uint64_t field_id, const script_value& field_val) {
             f.fields.emplace_back(std::string(detail::engine_access::get_symbolizer(*engine_ref_)->get_string(field_id)), field_val);
         });
@@ -498,6 +525,8 @@ void json_archive_writer::end_frame(write_frame& f) {
         case write_shape::fields:
             close_value('}', f.first);
             close_value('}', false);
+            if (f.written_in_place) { close_written_instance(); }
+            if (f.coroutine) { close_coroutine_record(); }
             break;
     }
 }
@@ -625,6 +654,7 @@ void json_archive_writer::write_leaf(const script_value& val) {
             break;
 
         default:
+            refuse_function_in_coroutine(val);
             out_.append("null");
             break;
     }

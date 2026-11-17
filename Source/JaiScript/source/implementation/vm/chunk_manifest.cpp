@@ -244,6 +244,14 @@ namespace {
 				out << pre << " " << i << " var=" << operand(ch, p.var) << " end=" << operand(ch, p.end) << " step=" << operand(ch, p.step) << " cmp=" << static_cast<int>(p.cmp)
 				    << " sub=" << b(p.step_subtract) << " incdec=" << b(p.step_incdec) << " body=" << u(p.body_ip) << " exit=" << u(p.exit_ip) << " cond=" << u(p.generic_cond_ip) << " update=" << u(p.generic_update_ip) << "\n";
 			}
+			if (!ch.yield_sites.empty()) {
+				out << pre << "yield_sites " << ch.yield_sites.size() << "\n";
+				for (const chunk::yield_site& s : ch.yield_sites) {
+					out << pre << " " << u(s.site) << " ip=" << u(s.ip) << " steps=";
+					for (const chunk::resume_step& step : s.steps) { out << static_cast<int>(step.what) << "@" << u(step.ip) << " "; }
+					out << "\n";
+				}
+			}
 			out << pre << "typed_sites " << ch.typed_sites.size() << "\n";
 			for (size_t i = 0; i < ch.typed_sites.size(); ++i) {
 				const chunk::typed_site& s = ch.typed_sites[i];

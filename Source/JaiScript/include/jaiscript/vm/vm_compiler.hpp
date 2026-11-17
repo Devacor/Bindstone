@@ -230,6 +230,16 @@ namespace jai::vm {
         std::vector<loop_context> loops_;
         callable_context callable_;
         size_t scope_depth_ = 0;
+        // a coroutine body: its yields' numbers, and what the constructs open around the code being compiled keep on the
+        // frame's stacks (chunk::yield_site)
+        std::unordered_map<const yield_expr*, uint32_t> yield_numbers_;
+        std::vector<chunk::resume_step> resume_steps_;
+        void open_resume_step(chunk::resume_step::kind a_kind, size_t a_ip = 0) {
+            if (!yield_numbers_.empty()) { resume_steps_.push_back({a_kind, static_cast<uint32_t>(a_ip)}); }
+        }
+        void close_resume_step() {
+            if (!yield_numbers_.empty()) { resume_steps_.pop_back(); }
+        }
         const ast_node* current_stmt_ = nullptr;
         // Register-file temps: expression temporaries are frame slots above the parser's
         // local_count (LIFO within one expression tree); compile_callable raises the

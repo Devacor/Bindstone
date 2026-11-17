@@ -88,7 +88,11 @@ private:
         strong_ptr<class_instance> instance;   // an instance frame's object: its script fields save as stored
         std::vector<std::string> names;
         std::vector<std::pair<std::string, script_value>> fields;
+        bool written_in_place = false;  // an instance's members, the instance written where it is held
+        bool coroutine = false;         // a coroutine's record
     };
+    // {"$id": N, "$type": "coroutine", "$val": record} at a coroutine's first handle, {"$id": N} at every later one
+    void begin_coroutine(coroutine_handle& a_coroutine, const script_value& a_value, std::vector<write_frame>& frames);
     bool aborted_ = false;
     bool counts_work_ = false;
 

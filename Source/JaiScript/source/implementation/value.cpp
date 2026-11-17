@@ -740,6 +740,12 @@ bool script_value::is_shared_cell(const script_value& v) noexcept {
     return holder && holder->plain_cell() && holder.use_count() > 1;
 }
 
+size_t script_value::reference_holders(const script_value& v) noexcept {
+    if (v.raw_storage_index() != TYPEID_REFERENCE) return 0;
+    const auto& holder = *v.storage_.get_if<TYPEID_REFERENCE>();
+    return holder ? holder.use_count() : 0;
+}
+
 void script_value::gather_shared_cells(const script_value* values, size_t count, std::vector<script_value>& out) {
     for (size_t i = 0; i < count; ++i) {
         if (is_shared_cell(values[i])) out.push_back(values[i]);

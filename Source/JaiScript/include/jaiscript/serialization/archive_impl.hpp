@@ -44,6 +44,9 @@ struct deferred_receivers;   // signals/receiver_save.hpp
 
 namespace jai {
 
+class coroutine_handle;
+class class_instance;
+
 class serialization_error : public runtime_error {
 public:
     explicit serialization_error(const std::string& message) : runtime_error(message) {}
@@ -258,6 +261,22 @@ protected:
     std::stack<SerializationContext, std::vector<SerializationContext>> context_stack_;
 
     uint32_t version_ = 0;
+
+    // A coroutine's record (detail/coroutine_snapshot.hpp) with its receiver: "owner", the count of instances being written
+    // in place out to the one that is the receiver, else "this", a handle the save's other handles to the receiver share
+    std::vector<std::pair<std::string, script_value>> coroutine_fields(coroutine_handle& a_coroutine);
+    // An instance written in place opens and closes around its members; a coroutine saved on its own that took it as its
+    // receiver would save it twice, which the save refuses
+    void open_written_instance(const class_instance* a_instance);
+    void close_written_instance() { open_instances_.pop_back(); }
+    void open_coroutine_record(const coroutine_handle& a_coroutine);
+    void close_coroutine_record() { open_coroutines_.pop_back(); }
+    // A function value among what an open coroutine record holds: the load would run on without it
+    void refuse_function_in_coroutine(const script_value& a_value) const;
+    std::vector<const class_instance*> open_instances_;
+    std::vector<const coroutine_handle*> open_coroutines_;
+    std::unique_ptr<std::unordered_set<const void*>> written_instances_;
+    std::unique_ptr<std::unordered_map<const void*, const coroutine_handle*>> lone_receivers_;
 
     struct record_frame {
         const void* object;

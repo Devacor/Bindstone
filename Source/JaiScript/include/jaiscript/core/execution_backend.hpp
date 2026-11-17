@@ -20,7 +20,7 @@ class class_definition;
 class class_instance;
 class coroutine_handle;
 namespace debug { class controller; }
-namespace detail { class engine_operator_table; struct execution_limits; }
+namespace detail { class engine_operator_table; struct execution_limits; struct coroutine_site; struct coroutine_frame; struct coroutine_frame_view; }
 
 struct script_callable;
 
@@ -380,6 +380,13 @@ public:
 
     // Coroutine resume
     virtual checked_result<script_value> resume_coroutine(coroutine_handle& handle) = 0;
+    // A paused coroutine as data (detail/coroutine_snapshot.hpp). The site a suspended coroutine is paused at, by its number in
+    // a_sites, and its frame there; false when the frame is not one a site describes
+    virtual bool paused_coroutine_frame(coroutine_handle& a_handle, const std::vector<detail::coroutine_site>& a_sites, uint32_t& a_site,
+                                        detail::coroutine_frame_view& a_frame) = 0;
+    // A created coroutine paused at a site with the frame given, as if it had run to that yield; false leaves it created
+    virtual bool pause_coroutine_at(coroutine_handle& a_handle, const std::vector<detail::coroutine_site>& a_sites, uint32_t a_site,
+                                    detail::coroutine_frame&& a_frame) = 0;
 
     // Suspendable runs (engine::start): a fresh state, the O(1) exchange of the live state with a run's at every switch, a
     // finished run's state made fresh again for reuse, and a failed run's stack trace taken into the live state

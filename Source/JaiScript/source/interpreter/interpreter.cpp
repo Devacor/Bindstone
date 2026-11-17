@@ -62,6 +62,7 @@
 #include <jaiscript/detail/string_methods_more.hpp>
 #include <jaiscript/detail/utf8_methods.hpp>
 #include <jaiscript/detail/binary_data.hpp>
+#include <jaiscript/detail/coroutine_snapshot.hpp>
 
 namespace jai {
 
@@ -6027,6 +6028,7 @@ checked_result<void> interpreter::visit_yield_expr_t(yield_expr* expr, const rep
     // visitor parks its operands), the owning statement consumes it, and the resume
     // substitutes null for this yield (vm exec_yield parity)
     active_coroutine_->do_yield(std::move(value));
+    active_coroutine_->note_yield_node(expr);
     hasYieldRequest_ = true;
     return checked_result<void>(make_error_code(runtime_error_code::coroutine_suspended));
 }
@@ -7647,15 +7649,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
         engine* eng = engine_;
         func_decl_ptr->unit = decl_unit;
         uint64_t coroutine_type_id = coroutine_handle_type_id_;
-        script_value functionValue = script_value::make_function(
-            [eng, coroutine_type_id, func_decl_ptr, closure_env](const std::vector<script_value>& args) -> checked_result<script_value> {
-                // Create a new coroutine handle; next() resolves the live backend itself
-                auto handle = std::make_shared<coroutine_handle>(eng);
-                handle->set_function(func_decl_ptr, args, closure_env);
-
-                // Wrap as a script object
-                return make_coroutine_object(eng, coroutine_type_id, handle);
-            }, engine_);
+        script_value functionValue = script_value::make_function(coroutine_mint{eng, coroutine_type_id, func_decl_ptr, closure_env}, engine_);
 
         environment_->define(decl->name_id, functionValue);
         return {};
@@ -8962,7 +8956,8 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     }
 
 
-    if (args.size() != function.parameters().size() && !arity_accepts(function.parameters(), args.size())) {
+    coroutine_pause* const pause = std::exchange(pending_pause_, nullptr);
+    if (!pause && args.size() != function.parameters().size() && !arity_accepts(function.parameters(), args.size())) {
         return detail::arity_error(function.name, function.parameters().size(), args.size(), arity_count_ids_, *string_symbolizer_);
     }
 
@@ -9104,6 +9099,24 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         hasReturnValue_ = previousHasReturn;
         returnValue_ = previousReturn;
     };
+
+    // A coroutine paused at a site (pause_coroutine_at): its frame is placed and it suspends here, as a yield suspends it
+    if (pause) [[unlikely]] {
+        place_paused_frame(*pause, frame_index, function);
+        auto& coro_state = coroutine_state(*pause->handle, engine_);
+        coro_state.saved_environment = environment_;
+        coro_state.saved_call_stack.clear();
+        coro_state.saved_call_stack.push_back(std::move(call_stack_[frame_index]));
+        coro_state.saved_return_value.reset();
+        coro_state.saved_has_return = false;
+        coro_state.saved_member_scope = member_scope_;
+        call_stack_.erase(call_stack_.begin() + frame_index, call_stack_.end());
+        environment_ = previousEnv;
+        member_scope_ = previousScope;
+        hasReturnValue_ = previousHasReturn;
+        returnValue_ = previousReturn;
+        return make_value();
+    }
 
     // parameters bind into the call frame; a reference parameter binds to its argument's storage
 
@@ -9598,6 +9611,175 @@ interpreter_coroutine_state::~interpreter_coroutine_state() {
     if (shared.empty()) { return; }
     saved_call_stack.clear();
     script_value::release_cell_cycles(shared, eng);
+}
+
+// The frame a site describes onto the body's fresh activation, and the continuation each construct around the yield would
+// have left: the innermost first, as the unwind of a yield pushes them
+void interpreter::place_paused_frame(const coroutine_pause& a_pause, size_t a_frameIndex, const script_defined_function& a_function) {
+    const detail::coroutine_site& site = *a_pause.site;
+    detail::coroutine_frame& image = *a_pause.frame;
+    auto& coro_state = coroutine_state(*a_pause.handle, engine_);
+    {
+        call_frame& frame = call_stack_[a_frameIndex];
+        for (size_t slot = 0; slot < image.slots.size(); ++slot) {
+            if (image.slots[slot].is_reference()) { frame.boxed_cells = true; }
+            frame.set_local(slot, std::move(image.slots[slot]));
+        }
+    }
+    using step_kind = detail::coroutine_step::kind;
+    // the scopes the constructs own, outermost first
+    std::vector<std::shared_ptr<environment>> scopes(site.path.size());
+    std::vector<size_t> loop_of(site.path.size(), SIZE_MAX);
+    std::vector<size_t> switch_of(site.path.size(), SIZE_MAX);
+    {
+        std::shared_ptr<environment> scope = environment_;
+        size_t loops = 0;
+        size_t switches = 0;
+        for (size_t i = 0; i < site.path.size(); ++i) {
+            const detail::coroutine_step& step = site.path[i];
+            if (step.what == step_kind::range_body) { loop_of[i] = loops++; }
+            if (step.what == step_kind::case_body || step.what == step_kind::default_body) { switch_of[i] = switches++; }
+            const bool owns_scope = (step.what == step_kind::block && step.node != a_function.body.get()) || step.what == step_kind::for_body ||
+                                    step.what == step_kind::case_body || step.what == step_kind::default_body;
+            if (owns_scope) {
+                scope = block_environment(scope);
+                scopes[i] = scope;
+            }
+        }
+    }
+    const auto subject_of = [&](size_t a_switch, const switch_stmt* a_statement) {
+        if (detail::switch_subject_held(*a_statement)) { return image.subjects[a_switch]; }
+        const auto* name = static_cast<const identifier_expr*>(a_statement->condition.get());
+        const script_value* held = resolve_local_or_env(name->slot_index, name->symbol_id);
+        return held ? script_value(held->deref()) : make_value();
+    };
+    bool any = false;
+    for (size_t i = site.path.size(); i-- > 0;) {
+        const detail::coroutine_step& step = site.path[i];
+        ast_node* node = const_cast<ast_node*>(step.node);
+        switch (step.what) {
+            case step_kind::block:
+                coro_state.push_continuation(node, any ? step.index : step.index + 1, scopes[i]);
+                any = true;
+                break;
+            case step_kind::case_body:
+            case step_kind::default_body: {
+                coro_state.push_continuation(node, any ? step.index : step.index + 1);
+                any = true;
+                ast_node* owner = const_cast<switch_stmt*>(step.owner);
+                coro_state.push_replay(owner, step.what == step_kind::case_body ? rp_case_body : rp_default_body,
+                                       step.what == step_kind::case_body ? step.branch : 0, {subject_of(switch_of[i], step.owner)}, scopes[i]);
+                break;
+            }
+            case step_kind::if_then:
+            case step_kind::if_else:
+                if (any) { coro_state.push_continuation(node, step.what == step_kind::if_then ? 0 : 1); }
+                break;
+            case step_kind::while_body:
+                if (any) { coro_state.push_continuation(node, 0); } else { coro_state.push_replay(node, rp_body_done, 0); }
+                any = true;
+                break;
+            case step_kind::for_body:
+                if (any) { coro_state.push_continuation(node, 0, scopes[i]); } else { coro_state.push_replay(node, rp_body_done, 0, {}, scopes[i]); }
+                any = true;
+                break;
+            case step_kind::range_body: {
+                const detail::coroutine_loop_state& loop = image.loops[loop_of[i]];
+                size_t position = loop.at;
+                bool walks_coroutine = false;
+                if (loop.range.is_map()) {   // the entry's place in key order: the walk a resume makes counts entries
+                    position = 0;
+                    const auto& entries = loop.range.as_map();
+                    for (auto it = entries.begin(); it != entries.end() && (it->first <=> loop.key) < 0; ++it) { ++position; }
+                } else if (!loop.range.is_array() && !loop.range.is_string() && !loop.range.is_utf8_string()) {
+                    walks_coroutine = true;
+                    position = 0;
+                }
+                if (any) { coro_state.push_continuation(node, position, nullptr, loop.range); }
+                else { coro_state.push_replay(node, rp_body_done, walks_coroutine ? 0 : position + 1, {}, nullptr, loop.range); }
+                any = true;
+                break;
+            }
+        }
+    }
+}
+
+bool interpreter::paused_coroutine_frame(coroutine_handle& a_handle, const std::vector<detail::coroutine_site>& a_sites, uint32_t& a_site,
+                                         detail::coroutine_frame_view& a_frame) {
+    auto* state = static_cast<interpreter_coroutine_state*>(a_handle.backend_state());
+    if (!state || state->saved_call_stack.size() != 1) { return false; }
+    a_site = UINT32_MAX;
+    for (size_t i = 0; i < a_sites.size(); ++i) {
+        if (a_sites[i].yield == a_handle.yield_node()) { a_site = static_cast<uint32_t>(i); break; }
+    }
+    if (a_site == UINT32_MAX) { return false; }
+    const detail::coroutine_site& site = a_sites[a_site];
+    const call_frame& frame = state->saved_call_stack.front();
+    a_frame.slots = frame.locals.data();
+    a_frame.slot_count = frame.locals.size();
+    a_frame.loops.resize(site.loops.size());
+    a_frame.subjects.assign(site.switches.size(), make_value());
+    if (site.refusal) { return true; }   // the save names why: the frame at such a site is not read
+    size_t loops = 0;
+    size_t switches = 0;
+    const auto& points = state->continuations();
+    for (size_t i = points.size(); i-- > 0;) {   // the outermost construct first
+        const auto& point = points[i];
+        if (!point.node) { continue; }
+        if (point.node->get_type() == node_type::range_for_stmt && point.saved_container) {
+            if (loops >= site.loops.size() || site.loops[loops] != point.node) { return false; }
+            detail::coroutine_loop_state& loop = a_frame.loops[loops++];
+            loop.range = *point.saved_container;
+            const bool body_done = point.phase == rp_body_done;
+            if (loop.range.is_array() || loop.range.is_string() || loop.range.is_utf8_string()) {
+                if (body_done && point.index == 0) { return false; }
+                loop.at = body_done ? point.index - 1 : point.index;
+            } else if (loop.range.is_map()) {
+                if (body_done && point.index == 0) { return false; }
+                size_t entry = body_done ? point.index - 1 : point.index;
+                const auto& entries = loop.range.as_map();
+                auto it = entries.begin();
+                for (; it != entries.end() && entry > 0; ++it) { --entry; }
+                if (it == entries.end()) { return false; }
+                loop.key = it->first;
+            }
+        } else if (point.node->get_type() == node_type::switch_stmt && (point.phase == rp_case_body || point.phase == rp_default_body)) {
+            if (switches >= site.switches.size() || site.switches[switches] != point.node) { return false; }
+            if (!point.partial.empty()) { a_frame.subjects[switches] = point.partial[0]; }
+            ++switches;
+        }
+    }
+    return loops == site.loops.size() && switches == site.switches.size();
+}
+
+bool interpreter::pause_coroutine_at(coroutine_handle& a_handle, const std::vector<detail::coroutine_site>& a_sites, uint32_t a_site,
+                                     detail::coroutine_frame&& a_frame) {
+    arm_native_stack();
+    const auto function = a_handle.get_function();
+    if (!function || a_site >= a_sites.size()) { return false; }
+    const unit_stamp replay_unit = function->unit;
+    unit_override_scope unitScope(this, &replay_unit);
+    auto& state = coroutine_state(a_handle, engine_);
+    // the function object a first resume makes (resume_coroutine)
+    std::vector<parameter> value_params = function->parameters;
+    for (auto& p : value_params) { p.is_reference = false; }
+    state.function.emplace(function->name, value_params, function->return_type, function->body, a_handle.get_closure_env(), function->local_count);
+    state.function->unit = function->unit;
+    coroutine_pause pause{&a_handle, &a_sites[a_site], &a_frame};
+    pending_pause_ = &pause;
+    const std::vector<script_value> none;
+    auto placed = call_function(*state.function, none);
+    const bool reached = pending_pause_ == nullptr;
+    pending_pause_ = nullptr;
+    if (!placed || !reached) {
+        a_handle.set_backend_state(nullptr);
+        return false;
+    }
+    a_handle.release_args();
+    a_handle.note_yield_node(a_sites[a_site].yield);
+    a_handle.set_status(coroutine_handle::status::suspended);
+    limits_->memory_charge_deferred(detail::k_coroutine_state_charge);
+    return true;
 }
 
 script_value interpreter::make_coroutine_object(engine* eng, uint64_t type_id, std::shared_ptr<coroutine_handle> handle) {

@@ -35,6 +35,7 @@ namespace MV {
 
 			a_builder.method("mouseInBounds", static_cast<bool(Clickable::*)()>(&Clickable::mouseInBounds), jai::serial);
 			a_builder.method("hovered", &Clickable::hovered);
+			a_builder.method("highlighted", &Clickable::highlighted);
 			a_builder.method("focusable", static_cast<bool(Clickable::*)() const>(&Clickable::focusable));
 			a_builder.method("focusable", static_cast<std::shared_ptr<Clickable>(Clickable::*)(bool)>(&Clickable::focusable), jai::serial);
 			a_builder.method("focusOrder", static_cast<int64_t(Clickable::*)() const>(&Clickable::focusOrder));
@@ -134,7 +135,9 @@ namespace MV {
 			onHoverEnter(onHoverEnterSignal),
 			onHoverLeave(onHoverLeaveSignal),
 			onFocusEnter(onFocusEnterSignal),
-			onFocusLeave(onFocusLeaveSignal) {
+			onFocusLeave(onFocusLeaveSignal),
+			onHighlightEnter(onHighlightEnterSignal),
+			onHighlightLeave(onHighlightLeaveSignal) {
 
 			shouldDraw = false;
 		}
@@ -333,6 +336,7 @@ namespace MV {
 
 		void Clickable::focusChanged(bool a_focused) {
 			if (isFocused != a_focused) {
+				const bool wasHighlighted = highlighted();
 				isFocused = a_focused;
 				auto self = std::static_pointer_cast<Clickable>(shared_from_this());
 				if (isFocused) {
@@ -340,17 +344,24 @@ namespace MV {
 				} else {
 					onFocusLeaveSignal(self);
 				}
+				if (highlighted() != wasHighlighted) {
+					(wasHighlighted ? onHighlightLeaveSignal : onHighlightEnterSignal)(self);
+				}
 			}
 		}
 
 		void Clickable::hover(bool a_hovered) {
 			if (isHovered != a_hovered) {
+				const bool wasHighlighted = highlighted();
 				isHovered = a_hovered;
 				auto self = std::static_pointer_cast<Clickable>(shared_from_this());
 				if (isHovered) {
 					onHoverEnterSignal(self);
 				} else {
 					onHoverLeaveSignal(self);
+				}
+				if (highlighted() != wasHighlighted) {
+					(wasHighlighted ? onHighlightLeaveSignal : onHighlightEnterSignal)(self);
 				}
 			}
 		}

@@ -5,6 +5,7 @@
 #include "mv_scene_host.hpp"
 #include "MV/Interface/controllerDevice.h"
 #include "MV/Render/Scene/clickable.h"
+#include "MV/Render/Scene/controllerCursor.h"
 
 using namespace jai::foundry;
 using MV::ControllerAxis;
@@ -165,6 +166,76 @@ namespace mv_tests {
 				MV::ControllerDevice pad;
 				check_true(frame(pad, host, ControllerState().press(ControllerButton::DPAD_DOWN)) && first->clickable->focused());
 				check_false(second->clickable->focused());
+			});
+
+			test("in cursor mode the left stick moves a pointer the TapDevice reads as its mouse", [] {
+				SceneHost host;
+				auto root = Node::make(host.renderer, "root");
+				auto first = addTarget(host, root, "first", MV::point(0.0f, 0.0f));
+				auto second = addTarget(host, root, "second", MV::point(0.0f, 100.0f));
+				MV::ControllerDevice pad;
+				pad.deadZone(0.2f).cursorSpeed(1000.0f).cursorBounds(MV::Size<int>(400, 300));
+				host.mouse.simulate(MV::Point<int>(50, 60), false);
+				host.mouse.update();
+				host.mouse.stopSimulating();
+				first->clickable->focus();
+
+				check_true(frame(pad, host, stickAt(0.0f, 1.0f), 0.1) && second->clickable->focused(), "with cursor mode off the stick moves the focus");
+				first->clickable->focus();
+				frame(pad, host, ControllerState());
+
+				pad.cursor(true);
+				check_false(pad.cursorShown(), "turned on, the pointer waits for the stick");
+				check_true(frame(pad, host, stickAt(1.0f, 0.0f), 0.1), "the stick moves it");
+				check_true(pad.cursorShown() && host.mouse.simulating());
+				check_eq(150, pad.cursorPosition().x, "from where the pointer was, a tenth of a second at full push");
+				check_eq(60, pad.cursorPosition().y);
+				check_true(first->clickable->focused(), "and the focus stays where it was");
+				host.mouse.update();
+				check_true(host.mouse.position() == pad.cursorPosition() && !host.mouse.leftDown(), "the TapDevice reads the controller's pointer");
+
+				frame(pad, host, stickAt(0.6f, 0.0f), 0.1);
+				check_eq(175, pad.cursorPosition().x, "half the way out of the dead zone is a quarter of the speed");
+				frame(pad, host, stickAt(1.0f, 1.0f), 10.0);
+				check_true(pad.cursorPosition().x == 399 && pad.cursorPosition().y == 299, "it stops at the edge of its area");
+				frame(pad, host, stickAt(-1.0f, -1.0f), 10.0);
+				check_true(pad.cursorPosition().x == 0 && pad.cursorPosition().y == 0);
+
+				check_false(frame(pad, host, ControllerState().press(ControllerButton::SOUTH)), "south is the pointer's press, not the focus's");
+				check_eq(0, first->accepted);
+				host.mouse.update();
+				check_true(host.mouse.leftDown() && pad.cursorShown(), "held under the pointer, with the stick at rest");
+				frame(pad, host, ControllerState());
+				host.mouse.update();
+				check_false(host.mouse.leftDown());
+
+				check_true(frame(pad, host, ControllerState().press(ControllerButton::DPAD_DOWN)) && second->clickable->focused(), "the d-pad still moves the focus");
+				frame(pad, host, ControllerState());
+
+				pad.cursor(false);
+				frame(pad, host, ControllerState());
+				check_true(!pad.cursorShown() && !host.mouse.simulating(), "turned off, the mouse has the pointer back");
+				check_true(frame(pad, host, ControllerState().press(ControllerButton::SOUTH)) && second->accepted == 1, "and south presses the focus again");
+			});
+
+			test("the drawn cursor shows where the controller's pointer is and hides with it", [] {
+				SceneHost host;
+				auto root = Node::make(host.renderer, "root");
+				MV::ControllerDevice pad;
+				pad.cursor(true).cursorSpeed(1000.0f);
+				MV::Scene::ControllerCursor drawn(root, pad, host.textures);
+				drawn.update();
+				check_false(drawn.visible(), "nothing to show until the stick moves");
+				check_eq(size_t(0), drawn.node()->size(), "and no art made for it yet");
+				frame(pad, host, stickAt(1.0f, 1.0f), 0.2);
+				drawn.update();
+				check_true(drawn.visible());
+				check_true(drawn.node()->screenFromLocal(MV::Point<>()) == pad.cursorPosition(), "its middle sits on the pointer");
+				check_false(drawn.node()->serializable(), "it is never saved with the scene");
+				pad.cursor(false);
+				frame(pad, host, ControllerState());
+				drawn.update();
+				check_false(drawn.visible());
 			});
 
 			test("the south button presses the focused Clickable once, and the shoulders step through the order", [] {

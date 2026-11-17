@@ -40,6 +40,7 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\render.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\button.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\clickable.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\controllerCursor.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\clipped.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\component.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\drawable.cpp" />
@@ -102,6 +103,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\render.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\button.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\clickable.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\controllerCursor.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\clipped.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\component.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\drawable.h" />

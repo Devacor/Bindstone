@@ -181,6 +181,55 @@ namespace mv_tests {
 				check_eq(0, close->entered, "and the one in between was never part of it");
 			});
 
+			test("a Button shows its highlight view while it is focused or under the pointer, and its idle view after", [] {
+				SceneHost host;
+				host.mouse.trackHover(true);
+				auto root = Node::make(host.renderer, "root");
+				auto buttonNode = root->make("button");
+				auto active = buttonNode->make("active");
+				auto idle = buttonNode->make("idle");
+				auto disabled = buttonNode->make("disabled");
+				auto highlight = buttonNode->make("highlight");
+				auto button = buttonNode->attach<MV::Scene::Button>(host.mouse)->bounds(MV::size(100.0f, 50.0f));
+				button->activeNode(active)->idleNode(idle)->disabledNode(disabled)->highlightNode(highlight);
+				auto other = addTarget(host, root, "other", MV::point(0.0f, 200.0f));
+				auto shows = [&](const std::shared_ptr<Node>& a_view) {
+					int shown = 0;
+					for (auto&& view : { active, idle, disabled, highlight }) {
+						shown += view->visible() ? 1 : 0;
+					}
+					return shown == 1 && a_view->visible();
+				};
+				auto pointer = [&](const MV::Point<>& a_local, bool a_pressed) {
+					host.mouse.simulate(buttonNode->screenFromLocal(a_local), a_pressed);
+					host.mouse.update();
+				};
+				pointer(MV::point(500.0f, 500.0f), false);
+				check_true(shows(idle) && !button->highlighted(), "at rest");
+
+				button->focus();
+				check_true(shows(highlight) && button->highlighted(), "focused");
+				pointer(MV::point(10.0f, 10.0f), false);
+				check_true(shows(highlight) && button->hovered(), "and with the pointer over it as well");
+				other->clickable->focus();
+				check_true(shows(highlight), "the focus going leaves it highlighted while the pointer stays");
+				pointer(MV::point(10.0f, 10.0f), true);
+				check_true(shows(active), "pressed");
+				pointer(MV::point(10.0f, 10.0f), false);
+				check_true(shows(highlight), "let go with the pointer still over it");
+				button->disable();
+				check_true(shows(disabled), "disabled");
+				button->clickDetectionType(Clickable::BoundsType::LOCAL);
+				check_true(shows(highlight), "enabled again under the pointer");
+				other->clickable->focus();
+				pointer(MV::point(500.0f, 500.0f), false);
+				check_true(shows(idle) && !button->highlighted(), "the pointer and the focus both gone");
+
+				button->highlightNode(nullptr);
+				button->focus();
+				check_true(idle->visible() && !active->visible() && !disabled->visible() && button->highlighted(), "a button without a highlight view keeps its idle view");
+			});
+
 			test("focusActivate presses the focused Clickable, and pressOnFocus presses as the focus arrives", [] {
 				SceneHost host;
 				auto root = Node::make(host.renderer, "root");

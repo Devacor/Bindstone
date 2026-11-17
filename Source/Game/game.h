@@ -13,6 +13,7 @@
 #include "Game/NetworkLayer/certificates.h"
 #include "MV/Network/package.h"
 #include "MV/Interface/controllerDevice.h"
+#include "MV/Render/Scene/controllerCursor.h"
 
 #include <string>
 #include <ctime>
@@ -48,6 +49,17 @@ public:
 
 	MV::ControllerDevice& controller() {
 		return ourController;
+	}
+
+	// Whether the controller's left stick moves a pointer of its own, drawn on screen, instead of the focus.
+	bool controllerCursor() const {
+		return ourController.cursor();
+	}
+	void controllerCursor(bool a_enabled) {
+		ourController.cursor(a_enabled);
+	}
+	MV::Scene::ControllerCursor* controllerCursorArt() {
+		return ourControllerCursor.get();
 	}
 
 	GameInstance* instance() {
@@ -162,6 +174,7 @@ private:
 	MV::Scene::SafeComponent<MV::Scene::Sprite> screenScaler;
 	MV::TapDevice ourMouse;
 	MV::ControllerDevice ourController;
+	std::unique_ptr<MV::Scene::ControllerCursor> ourControllerCursor;
 
 	std::string loginId;
 	std::string loginPassword;

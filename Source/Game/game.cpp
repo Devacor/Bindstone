@@ -28,6 +28,8 @@ static jai::registrar<Game, MV::Services> _hookGame([](jai::dynamic_binder<Game>
 	builder.method("root", &Game::root);
 	builder.method("player", &Game::player);
 	builder.method("killGame", &Game::killGame, jai::serial);
+	builder.method("controllerCursor", static_cast<bool(Game::*)() const>(&Game::controllerCursor));
+	builder.method("controllerCursor", static_cast<void(Game::*)(bool)>(&Game::controllerCursor), jai::serial);
 });
 
 void sdl_quit(void){
@@ -119,6 +121,12 @@ void Game::initializeWindow(){
 	rootScene = MV::Scene::Node::make(gameData.managers().renderer);
 
 	uiRoot = rootScene->make("UI")->cameraId(1);
+	// buttons show their highlight under the pointer as they do under the focus
+	ourMouse.trackHover(true);
+	ourControllerCursor = std::make_unique<MV::Scene::ControllerCursor>(uiRoot, ourController, gameData.managers().textures);
+	if (const char* cursorRequested = std::getenv("MV_CONTROLLER_CURSOR"); cursorRequested && std::string(cursorRequested) == "1") {
+		ourController.cursor(true);
+	}
 	screenScaler = rootScene->attach<MV::Scene::Sprite>();
 	screenScaler->hide()->id("ScreenScaler");
 	auto scaledDpi = gameData.managers().renderer.window().uiScale();
@@ -164,7 +172,11 @@ bool Game::update(double dt) {
 	if (ourGui) {
 		ourGui->update(dt);
 	}
+	ourController.cursorBounds(gameData.managers().renderer.window().windowSize());
 	ourController.navigate(ourMouse, dt);
+	if (ourControllerCursor) {
+		ourControllerCursor->update();
+	}
 	rootScene->update(dt);
 
 	if (done) {

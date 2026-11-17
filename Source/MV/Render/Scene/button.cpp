@@ -15,6 +15,8 @@ namespace MV {
 			a_builder.method("idleNode", static_cast<std::shared_ptr<Button>(Button::*)(const std::shared_ptr<Node>&)>(&Button::idleNode), jai::serial);
 			a_builder.method("disabledNode", static_cast<std::shared_ptr<Node>(Button::*)() const>(&Button::disabledNode));
 			a_builder.method("disabledNode", static_cast<std::shared_ptr<Button>(Button::*)(const std::shared_ptr<Node>&)>(&Button::disabledNode), jai::serial);
+			a_builder.method("highlightNode", static_cast<std::shared_ptr<Node>(Button::*)() const>(&Button::highlightNode));
+			a_builder.method("highlightNode", static_cast<std::shared_ptr<Button>(Button::*)(const std::shared_ptr<Node>&)>(&Button::highlightNode), jai::serial);
 
 			a_builder.method("text", static_cast<std::string(Button::*)() const>(&Button::text));
 			a_builder.method("text", static_cast<std::shared_ptr<Button>(Button::*)(const std::string&)>(&Button::text), jai::serial);
@@ -26,11 +28,18 @@ namespace MV {
 			isFocusable = true;
 			onEnabled.connect(guid(), [&](const std::shared_ptr<Clickable> &a_node) {
 				if (!inPressEvent()) {
-					setCurrentView(idleView);
+					setCurrentView(restingView());
 				} else {
 					setCurrentView(activeView);
 				}
 			});
+			auto showResting = [&](const std::shared_ptr<Clickable> &a_node) {
+				if (enabled() && !inPressEvent()) {
+					setCurrentView(restingView());
+				}
+			};
+			onHighlightEnter.connect(guid(), showResting);
+			onHighlightLeave.connect(guid(), showResting);
 
 			onDisabled.connect(guid(), [&](const std::shared_ptr<Clickable> &a_node) {
 				setCurrentView(disabledView);
@@ -86,6 +95,26 @@ namespace MV {
 			return std::static_pointer_cast<Button>(self);
 		}
 
+		std::shared_ptr<Button> Button::highlightNode(const std::shared_ptr<Node> &a_highlightView) {
+			auto self = std::static_pointer_cast<Button>(shared_from_this());
+			if (highlightView) {
+				highlightView->show();
+			}
+			highlightView = a_highlightView;
+			if (highlightView) {
+				highlightView->hide();
+			}
+			if (enabled() && !inPressEvent()) {
+				currentView = nullptr;
+				setCurrentView(restingView());
+			}
+			return self;
+		}
+
+		std::shared_ptr<Node> Button::restingView() const {
+			return highlighted() && *highlightView ? *highlightView : *idleView;
+		}
+
 		void Button::acceptDownClick() {
 			auto self = shared_from_this(); //guard self against deletion
 			Clickable::acceptDownClick(); //this may still pull the "node" rug out from under us, hence the ownerIsAlive check.
@@ -98,7 +127,7 @@ namespace MV {
 			auto self = shared_from_this();
 			Clickable::acceptUpClick(a_ignoreBounds);
 			if (clickDetectionType() != Clickable::BoundsType::NONE && ownerIsAlive()) {
-				setCurrentView(idleView);
+				setCurrentView(restingView());
 			}
 		}
 
@@ -107,7 +136,7 @@ namespace MV {
 				auto self = std::static_pointer_cast<Button>(shared_from_this());
 				Clickable::cancelPress(a_callCancelCallbacks);
 				if (clickDetectionType() != Clickable::BoundsType::NONE && ownerIsAlive()) {
-					setCurrentView(idleView);
+					setCurrentView(restingView());
 				}
 			}
 		}
@@ -119,6 +148,7 @@ namespace MV {
 				showOrHideView(activeView);
 				showOrHideView(idleView);
 				showOrHideView(disabledView);
+				showOrHideView(highlightView);
 
 				notifyParentOfComponentChange();
 			}
@@ -144,6 +174,12 @@ namespace MV {
 			if (currentViewId->empty()) {
 				return;
 			}
+			// a button saved while it was highlighted loads at rest: nothing points at it or focuses it yet
+			if (*highlightView && highlightView->id() == *currentViewId) {
+				currentView = highlightView;
+				setCurrentView(idleView);
+				return;
+			}
 			for (auto&& view : { *activeView, *idleView, *disabledView }) {
 				if (view && view->id() == *currentViewId) {
 					setCurrentView(view);
@@ -167,6 +203,10 @@ namespace MV {
 				auto foundHandle = buttonClone->owner()->get(disabledView->id());
 				buttonClone->disabledNode(foundHandle);
 			}
+			if (highlightView) {
+				auto foundHandle = buttonClone->owner()->get(highlightView->id());
+				buttonClone->highlightNode(foundHandle);
+			}
 			return a_clone;
 		}
 
@@ -175,6 +215,7 @@ namespace MV {
 			text(activeView, a_textString);
 			text(idleView, a_textString);
 			text(disabledView, a_textString);
+			text(highlightView, a_textString);
 			return self;
 		}
 

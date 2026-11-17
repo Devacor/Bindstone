@@ -80,13 +80,30 @@ namespace MV {
 		bool navigate(TapDevice& a_focus, double a_dt, const void* a_scope = nullptr);
 		// How long a held direction waits before it repeats, and between repeats after that.
 		ControllerDevice& navigationRepeat(double a_firstDelay, double a_interval);
-		// The way the d-pad or left stick is held for navigation right now.
+		// The way the d-pad, or the left stick when it is not moving a cursor, is held for navigation right now.
 		std::optional<FocusDirection> navigationDirection() const;
+
+		// Cursor mode. Off, the left stick moves the focus as the d-pad does. On, the left stick moves a pointer of
+		// the controller's own instead and SOUTH presses under it: navigate feeds that pointer to the TapDevice as
+		// a mouse would be read, so hover, presses and drags follow it. The d-pad and the shoulders still move the
+		// focus, and SOUTH presses the focused Clickable while the pointer is away. Moving the real mouse takes the
+		// pointer back until the stick moves again. MV::Scene::ControllerCursor draws it.
+		ControllerDevice& cursor(bool a_enabled);
+		bool cursor() const { return cursorEnabled; }
+		// Whether the controller's pointer is the one in use, and where it is on screen.
+		bool cursorShown() const { return cursorShowing; }
+		MV::Point<int> cursorPosition() const;
+		// The area the pointer stays inside, usually the window.
+		ControllerDevice& cursorBounds(const MV::Size<int>& a_size);
+		// How far the pointer travels in a second at full push, in pixels; 0 is most of the area's height.
+		ControllerDevice& cursorSpeed(float a_pixelsPerSecond);
 
 	private:
 		MV::Point<> stick(ControllerAxis a_x, ControllerAxis a_y) const;
 		ControllerState readHardware();
 		bool navigationPressed(ControllerButton a_button);
+		bool moveCursor(TapDevice& a_pointer, double a_dt);
+		void hideCursor(TapDevice& a_pointer);
 
 		ControllerState current;
 		size_t attachedCount = 0;
@@ -103,6 +120,14 @@ namespace MV {
 		double navigationFirstDelay = 0.4;
 		double navigationInterval = 0.12;
 		ControllerState navigationSeen;
+
+		bool cursorEnabled = false;
+		bool cursorShowing = false;
+		float cursorX = 0.0f;
+		float cursorY = 0.0f;
+		MV::Size<int> cursorArea;
+		float cursorPixelsPerSecond = 0.0f;
+		std::optional<MV::Point<int>> hardwareMouse;
 
 		jai::signal_emitter<ButtonCallbackSignature> onButtonDownSignal;
 		jai::signal_emitter<ButtonCallbackSignature> onButtonUpSignal;

@@ -212,6 +212,11 @@ namespace Workbench {
 				if (auto degrees = numberFrom(a_text); degrees && *degrees > 0.0f) {
 					rotationSnap(*degrees);
 				}
+			} },
+			{ "Controller cursor", [this]() { return std::string(controllerCursor() ? "on" : "off"); }, [this](const std::string& a_text) {
+				if (a_text == "on" || a_text == "off") {
+					controllerCursor(a_text == "on");
+				}
 			} }
 		};
 		settingsPanel = static_cast<SettingsPanel*>(dock->registerPanel(std::make_shared<SettingsPanel>(std::move(settingRows))));
@@ -499,6 +504,11 @@ namespace Workbench {
 		sceneGrid->spacing(MV::size(gizmos->snapSteps.moveX, gizmos->snapSteps.moveY));
 	}
 
+	void App::controllerCursor(bool a_enabled) {
+		controller.cursor(a_enabled);
+		settingsChanged();
+	}
+
 	void App::rotationSnap(float a_degrees) {
 		gizmos->snapSteps.rotate = std::clamp(a_degrees, 0.01f, 180.0f);
 		settingsChanged();
@@ -630,6 +640,10 @@ namespace Workbench {
 				dock->applyLayout(trimmed(line.substr(equals + 1)));
 				continue;
 			}
+			if (name == "controllerCursor") {
+				controller.cursor(trimmed(line.substr(equals + 1)) == "on");
+				continue;
+			}
 			auto value = numberFrom(trimmed(line.substr(equals + 1)));
 			if (!value || *value <= 0.0f) {
 				continue;
@@ -660,6 +674,7 @@ namespace Workbench {
 		file << "gridX = " << formatNumberCompact(sceneGridSize.width) << "\n";
 		file << "gridY = " << formatNumberCompact(sceneGridSize.height) << "\n";
 		file << "rotationSnap = " << formatNumberCompact(rotationSnap()) << "\n";
+		file << "controllerCursor = " << (controllerCursor() ? "on" : "off") << "\n";
 		file << "layout = " << dock->describeLayout() << "\n";
 		if (!file) {
 			reportError("the settings did not save to " + settingsPath);
@@ -1290,7 +1305,14 @@ namespace Workbench {
 		}
 		mouse.update();
 		controller.update();
-		controller.navigate(mouse, lastDelta);
+		// the pad walks the editor's own controls, never the buttons of the scene being edited
+		controller.cursorBounds(managers.renderer.window().windowSize());
+		controller.navigate(mouse, lastDelta, uiRoot.get());
+		if (!controllerCursorArt) {
+			controllerCursorArt = std::make_unique<MV::Scene::ControllerCursor>(uiRoot, controller, managers.textures);
+			controllerCursorArt->dot(theme.px(10.0f), theme.accent());
+		}
+		controllerCursorArt->update();
 	}
 
 	void App::render() {

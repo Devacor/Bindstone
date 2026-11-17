@@ -278,8 +278,8 @@ namespace Workbench {
 				}
 			};
 		};
-		clickable->onHoverEnter.connect("hover", hoverTo(true));
-		clickable->onHoverLeave.connect("hover", hoverTo(false));
+		clickable->onHighlightEnter.connect("hover", hoverTo(true));
+		clickable->onHighlightLeave.connect("hover", hoverTo(false));
 		if (!a_tooltip.empty()) {
 			tooltip(a_services, clickable, a_tooltip);
 		}

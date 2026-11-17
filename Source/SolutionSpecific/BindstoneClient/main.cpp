@@ -1187,7 +1187,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		key(SDLK_TAB, KMOD_SHIFT);
 		expect(editingShows("200"), "Shift+Tab moves back a field");
 		key(SDLK_TAB, KMOD_SHIFT);
-		expect(editingShows("5"), "and from the first field wraps to the last");
+		expect(editingShows("off"), "and from the first field wraps to the last");
 		key(SDLK_TAB);
 		expect(editingShows("200"), "as Tab from the last wraps to the first");
 		key(SDLK_ESCAPE);
@@ -1278,6 +1278,22 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		press(MV::ControllerButton::EAST);
 		press(MV::ControllerButton::EAST);
 		expect(!a_app.editingText() && !mouse.hasFocus(), "east once more lets the focus go");
+
+		a_app.controllerCursor(true);
+		a_app.runFrames(2);
+		expect(settings.shown("Controller cursor") == "on" && !pad.cursorShown() && !a_app.controllerCursorVisible(), "cursor mode turned on shows nothing until the stick moves");
+		pad.simulate(MV::ControllerState().axis(MV::ControllerAxis::LEFT_X, 1.0f).axis(MV::ControllerAxis::LEFT_Y, 0.4f));
+		a_app.runFrames(4);
+		auto movedTo = pad.cursorPosition();
+		a_app.runFrames(4);
+		expect(pad.cursorShown() && a_app.controllerCursorVisible() && mouse.simulating() && pad.cursorPosition().x >= movedTo.x, "the left stick moves a drawn pointer that the editor reads as its mouse");
+		expect(!mouse.hasFocus(), "and no longer moves the focus");
+		a_app.controllerCursor(false);
+		a_app.runFrames(2);
+		expect(settings.shown("Controller cursor") == "off" && !pad.cursorShown() && !a_app.controllerCursorVisible() && !mouse.simulating(), "turned off, the pointer goes and the mouse is read again");
+		pad.simulate(MV::ControllerState());
+		a_app.runFrames(2);
+		mouse.focusClear();
 		pad.stopSimulating();
 		a_app.runFrames(2);
 		expect(a_app.undoSteps() == 200 && a_app.gridSize().width == 100.0f && a_app.rotationSnap() == 5.0f, "and none of it changed a setting");

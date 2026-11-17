@@ -197,6 +197,9 @@ namespace MV {
 		if (padX != 0 || padY != 0) {
 			return directionFromParts(padX, padY);
 		}
+		if (cursorEnabled) {
+			return std::nullopt;
+		}
 		const float x = axis(ControllerAxis::LEFT_X);
 		const float y = axis(ControllerAxis::LEFT_Y);
 		const float length = std::sqrt(x * x + y * y);
@@ -218,8 +221,71 @@ namespace MV {
 		return pressed;
 	}
 
+	ControllerDevice& ControllerDevice::cursor(bool a_enabled) {
+		cursorEnabled = a_enabled;
+		return *this;
+	}
+
+	MV::Point<int> ControllerDevice::cursorPosition() const {
+		return MV::Point<int>(static_cast<int>(std::lround(cursorX)), static_cast<int>(std::lround(cursorY)));
+	}
+
+	ControllerDevice& ControllerDevice::cursorBounds(const MV::Size<int>& a_size) {
+		cursorArea = a_size;
+		return *this;
+	}
+
+	ControllerDevice& ControllerDevice::cursorSpeed(float a_pixelsPerSecond) {
+		cursorPixelsPerSecond = std::max(0.0f, a_pixelsPerSecond);
+		return *this;
+	}
+
+	void ControllerDevice::hideCursor(TapDevice& a_pointer) {
+		if (cursorShowing) {
+			cursorShowing = false;
+			a_pointer.stopSimulating();
+		}
+	}
+
+	bool ControllerDevice::moveCursor(TapDevice& a_pointer, double a_dt) {
+		if (!cursorEnabled || !connected()) {
+			hideCursor(a_pointer);
+			return false;
+		}
+		bool mouseMoved = false;
+		if (SDL_WasInit(SDL_INIT_VIDEO)) {
+			MV::Point<int> hardware;
+			SDL_GetMouseState(&hardware.x, &hardware.y);
+			mouseMoved = hardwareMouse && *hardwareMouse != hardware;
+			hardwareMouse = hardware;
+		}
+		const auto push = leftStick();
+		const float pushLength = std::sqrt(push.x * push.x + push.y * push.y);
+		if (pushLength > 0.0f) {
+			if (!cursorShowing) {
+				cursorShowing = true;
+				const auto from = a_pointer.position();
+				cursorX = static_cast<float>(from.x);
+				cursorY = static_cast<float>(from.y);
+			}
+			const float fullSpeed = cursorPixelsPerSecond > 0.0f ? cursorPixelsPerSecond : cursorArea.height > 0 ? cursorArea.height * 0.8f : 800.0f;
+			// the push counts twice over: slow near the middle for a small target, quick at the rim
+			const float step = fullSpeed * pushLength * static_cast<float>(a_dt);
+			cursorX += push.x * step;
+			cursorY += push.y * step;
+			cursorX = std::max(0.0f, cursorArea.width > 0 ? std::min(cursorX, static_cast<float>(cursorArea.width - 1)) : cursorX);
+			cursorY = std::max(0.0f, cursorArea.height > 0 ? std::min(cursorY, static_cast<float>(cursorArea.height - 1)) : cursorY);
+		} else if (mouseMoved) {
+			hideCursor(a_pointer);
+		}
+		if (cursorShowing) {
+			a_pointer.simulate(cursorPosition(), down(ControllerButton::SOUTH));
+		}
+		return cursorShowing && pushLength > 0.0f;
+	}
+
 	bool ControllerDevice::navigate(TapDevice& a_focus, double a_dt, const void* a_scope) {
-		bool result = false;
+		bool result = moveCursor(a_focus, a_dt);
 		const auto direction = navigationDirection();
 		navigationStickEngaged = direction.has_value();
 		if (!direction) {
@@ -237,7 +303,8 @@ namespace MV {
 				result = a_focus.focusMove(*direction, a_scope);
 			}
 		}
-		if (navigationPressed(ControllerButton::SOUTH)) {
+		// under the controller's pointer SOUTH is that pointer's press
+		if (navigationPressed(ControllerButton::SOUTH) && !cursorShowing) {
 			result = a_focus.focusActivate() || result;
 		}
 		if (navigationPressed(ControllerButton::RIGHT_SHOULDER)) {

@@ -50,11 +50,10 @@ namespace Workbench {
 	std::shared_ptr<MV::Scene::Button> makeIconButton(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, const MV::Size<>& a_size, Icon a_icon, std::function<void()> a_onClick, const std::string& a_tooltip = "", std::optional<MV::Color> a_idle = {}, std::optional<MV::Color> a_hover = {});
 	void setButtonIcon(const std::shared_ptr<MV::Scene::Button>& a_button, MV::Services& a_services, const Theme& a_theme, Icon a_icon);
 
-	// The sprite takes a_hover while the pointer is over the Clickable and a_idle again when it leaves.
+	// The sprite takes a_hover while the Clickable is highlighted (under the pointer or holding the focus) and a_idle
+	// again after.
 	void hoverTint(const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const std::shared_ptr<MV::Scene::Sprite>& a_sprite, const MV::Color& a_idle, const MV::Color& a_hover);
-	// The sprite takes a_focused while the Clickable holds the keyboard focus.
-	void focusTint(const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const std::shared_ptr<MV::Scene::Sprite>& a_sprite, const MV::Color& a_idle, const MV::Color& a_focused);
-	// The sprite shows only while the pointer is over the Clickable.
+	// The sprite shows only while the Clickable is highlighted.
 	void hoverShow(const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const std::shared_ptr<MV::Scene::Sprite>& a_sprite);
 	// Shows a_text beside the pointer once it has rested on the Clickable.
 	void tooltip(MV::Services& a_services, const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const std::string& a_text);

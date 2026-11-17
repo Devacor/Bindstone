@@ -111,6 +111,9 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\button.cpp">
       <Filter>MV\Render\Scene</Filter>
     </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\controllerCursor.cpp">
+      <Filter>MV\Render\Scene</Filter>
+    </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\clickable.cpp">
       <Filter>MV\Render\Scene</Filter>
     </ClCompile>
@@ -287,6 +290,9 @@
       <Filter>MV\Render</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\button.h">
+      <Filter>MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\controllerCursor.h">
       <Filter>MV\Render\Scene</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\clickable.h">

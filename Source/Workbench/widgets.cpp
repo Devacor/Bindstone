@@ -224,7 +224,6 @@ namespace Workbench {
 		}
 		button->activeNode(activeScene);
 		button->idleNode(idleScene);
-		focusTint(button, idleScene->component<MV::Scene::Sprite>(false, false).self(), a_theme.buttonOutline(), a_theme.accent());
 		if (a_onClick) {
 			button->onAccept.connect("click", [a_onClick](const std::shared_ptr<MV::Scene::Clickable>&) {
 				a_onClick();
@@ -250,7 +249,6 @@ namespace Workbench {
 		}
 		button->activeNode(activeScene);
 		button->idleNode(idleScene);
-		focusTint(button, idleScene->component<MV::Scene::Sprite>(false, false).self(), a_theme.buttonOutline(), a_theme.accent());
 		hoverTint(button, idleFill, idle, hover);
 		if (a_onClick) {
 			button->onAccept.connect("click", [a_onClick](const std::shared_ptr<MV::Scene::Clickable>&) {
@@ -282,32 +280,19 @@ namespace Workbench {
 				}
 			};
 		};
-		a_clickable->onHoverEnter.connect("hoverTint", tintTo(a_hover));
-		a_clickable->onHoverLeave.connect("hoverTint", tintTo(a_idle));
-	}
-
-	void focusTint(const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const std::shared_ptr<MV::Scene::Sprite>& a_sprite, const MV::Color& a_idle, const MV::Color& a_focused) {
-		std::weak_ptr<MV::Scene::Sprite> weakSprite = a_sprite;
-		auto tintTo = [weakSprite](const MV::Color& a_color) {
-			return [weakSprite, a_color](const std::shared_ptr<MV::Scene::Clickable>&) {
-				if (auto sprite = weakSprite.lock()) {
-					sprite->color(a_color);
-				}
-			};
-		};
-		a_clickable->onFocusEnter.connect("focusTint", tintTo(a_focused));
-		a_clickable->onFocusLeave.connect("focusTint", tintTo(a_idle));
+		a_clickable->onHighlightEnter.connect("hoverTint", tintTo(a_hover));
+		a_clickable->onHighlightLeave.connect("hoverTint", tintTo(a_idle));
 	}
 
 	void hoverShow(const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const std::shared_ptr<MV::Scene::Sprite>& a_sprite) {
 		std::weak_ptr<MV::Scene::Sprite> weakSprite = a_sprite;
 		a_sprite->hide();
-		a_clickable->onHoverEnter.connect("hoverShow", [weakSprite](const std::shared_ptr<MV::Scene::Clickable>&) {
+		a_clickable->onHighlightEnter.connect("hoverShow", [weakSprite](const std::shared_ptr<MV::Scene::Clickable>&) {
 			if (auto sprite = weakSprite.lock()) {
 				sprite->show();
 			}
 		});
-		a_clickable->onHoverLeave.connect("hoverShow", [weakSprite](const std::shared_ptr<MV::Scene::Clickable>&) {
+		a_clickable->onHighlightLeave.connect("hoverShow", [weakSprite](const std::shared_ptr<MV::Scene::Clickable>&) {
 			if (auto sprite = weakSprite.lock()) {
 				sprite->hide();
 			}

@@ -729,6 +729,28 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   per-player pads, no script binding (TapDevice has none either), and the hardware path has only been run with
   whatever was plugged in during the self-test.
 
+## Increment 36: the highlight state and the controller's cursor (2026-11-17)
+- `Clickable::highlighted()` is hovered or focused, with `onHighlightEnter` / `onHighlightLeave`: one state for
+  "this is the one", whichever device chose it.
+- `Button` saves a fourth view, `highlightView` (`highlightNode`), shown in place of the idle view while the button
+  is highlighted and neither pressed nor disabled. A button without one keeps its idle view. One saved while
+  highlighted loads at rest.
+- The Workbench's hover looks follow the highlight, so a focused control looks as it does under the pointer; the
+  separate accent outline for focus is gone.
+- `ControllerDevice::cursor(true)` is cursor mode: the left stick moves a pointer of the controller's own (slow near
+  the middle, quick at the rim, kept inside `cursorBounds`) and SOUTH presses under it. `navigate` feeds it to the
+  TapDevice as a mouse, so hover, presses and drags follow. The d-pad and shoulders still move the focus, and
+  moving the real mouse takes the pointer back.
+- `MV::Scene::ControllerCursor` draws that pointer: a dot by default, or an image with a hotspot. Its art is made
+  the first time it shows and it is never saved.
+- The game tracks hover now, owns a cursor drawn in its UI, and turns cursor mode on with `game.controllerCursor(true)`
+  from script or `MV_CONTROLLER_CURSOR=1`. The Workbench has a "Controller cursor" setting (on/off, kept in the
+  settings file) and keeps the pad's focus moves to its own UI.
+- Tests: highlight views and the saved-while-highlighted load, cursor movement, bounds, press and hand-back, the
+  drawn cursor; the self-test turns the setting on, moves the stick and checks the dot shows.
+- Not yet: no shipped button has a highlight view authored, the right stick does nothing, and a real pad has not
+  been tried.
+
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.
 - Authoring verbs still only in Source/Editor: create node, attach/detach

@@ -4,6 +4,7 @@
 #include "Game/managers.h"
 #include "MV/Interface/tapDevice.h"
 #include "MV/Interface/controllerDevice.h"
+#include "MV/Render/Scene/controllerCursor.h"
 #include "commands.h"
 #include "dock.h"
 #include "gizmos.h"
@@ -118,6 +119,10 @@ namespace Workbench {
 		SceneTreePanel& hierarchy() { return *treePanel; }
 		// The game controller: it moves the keyboard focus, presses what holds it, and its east button lets go.
 		MV::ControllerDevice& pad() { return controller; }
+		// Whether the controller's left stick moves a pointer of its own, drawn as a dot, instead of the focus.
+		bool controllerCursor() const { return controller.cursor(); }
+		void controllerCursor(bool a_enabled);
+		bool controllerCursorVisible() const { return controllerCursorArt && controllerCursorArt->visible(); }
 		const std::string& document() const { return documentPath; }
 		// The title bar's text: the document's name, starred while it is modified.
 		const std::string& title() const { return shownTitle; }
@@ -188,6 +193,7 @@ namespace Workbench {
 		std::unique_ptr<DockSpace> dock;
 		std::unique_ptr<MenuBar> menuBar;
 		std::unique_ptr<Tooltips> tooltips;
+		std::unique_ptr<MV::Scene::ControllerCursor> controllerCursorArt;
 		std::vector<std::weak_ptr<MV::Scene::Node>> transportButtons;
 		std::vector<Panel*> menuPanels;
 		std::shared_ptr<MV::Scene::Text> titleText;

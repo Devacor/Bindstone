@@ -29,9 +29,16 @@ namespace MV {
 				return disabledView;
 			}
 
+			// Shown in place of the idle view while the button is highlighted (under the pointer or holding the
+			// focus) and not pressed. A button without one keeps its idle view.
+			std::shared_ptr<Node> highlightNode() const {
+				return highlightView;
+			}
+
 			std::shared_ptr<Button> activeNode(const std::shared_ptr<Node> &a_activeView);
 			std::shared_ptr<Button> idleNode(const std::shared_ptr<Node> &a_idleView);
 			std::shared_ptr<Button> disabledNode(const std::shared_ptr<Node> &a_disabledView);
+			std::shared_ptr<Button> highlightNode(const std::shared_ptr<Node> &a_highlightView);
 
 			//sets all text components contained.
 			std::shared_ptr<Button> text(const std::string &a_newValue);
@@ -78,6 +85,8 @@ namespace MV {
 			virtual void acceptUpClick(bool a_ignoreBounds = false);
 
 			void setCurrentView(const std::shared_ptr<Node> &a_view);
+			// The view of a button that is enabled and not pressed.
+			std::shared_ptr<Node> restingView() const;
 
 			void showOrHideView(const std::shared_ptr<Node> &a_view);
 			void rememberCurrentView(const std::shared_ptr<Node> &a_view);
@@ -89,6 +98,7 @@ namespace MV {
 			JAI_PROPERTY((std::shared_ptr<Node>), activeView, nullptr, [](auto&, auto&) {});
 			JAI_PROPERTY((std::shared_ptr<Node>), idleView, nullptr, [](auto&, auto&) {});
 			JAI_PROPERTY((std::shared_ptr<Node>), disabledView, nullptr, [](auto&, auto&) {});
+			JAI_PROPERTY((std::shared_ptr<Node>), highlightView, nullptr, [](auto&, auto&) {});
 		};
 	}
 }

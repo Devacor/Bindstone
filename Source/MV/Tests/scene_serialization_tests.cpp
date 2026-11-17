@@ -122,6 +122,26 @@ namespace mv_tests {
 				check_true(button->disabledNode() == loaded->get("disabled"), "disabledView is not the child node");
 			});
 
+			test("a Button saved while it was highlighted loads showing its idle view", [] {
+				SceneHost host;
+				auto scene = Node::make(host.renderer, "root");
+				auto buttonNode = scene->make("button");
+				auto active = buttonNode->make("active");
+				auto idle = buttonNode->make("idle");
+				auto highlight = buttonNode->make("highlight");
+				auto button = buttonNode->attach<MV::Scene::Button>(host.mouse)->activeNode(active)->idleNode(idle)->highlightNode(highlight);
+				button->focus();
+				check_true(highlight->visible() && !idle->visible(), "focused, it shows the highlight view");
+
+				ScratchScene file;
+				auto loaded = saveAndLoad(host, scene, file);
+				host.mouse.focusClear();
+				auto loadedButton = loaded->get("button")->component<MV::Scene::Button>(true, false);
+				check_not_null(loadedButton.self(), "Button missing after load");
+				check_true(loadedButton->highlightNode() == loaded->get("highlight"), "the highlight view is saved with the button");
+				check_true(loaded->get("idle")->visible() && !loaded->get("highlight")->visible() && !loadedButton->highlighted(), "and the button loads at rest");
+			});
+
 			test("Stencil and Palette save and load as their own $type", [] {
 				SceneHost host;
 				auto scene = Node::make(host.renderer, "root");

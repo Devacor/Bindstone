@@ -57,6 +57,8 @@ namespace MV {
 			jai::signal_emitter<ButtonSignalSignature> onHoverLeaveSignal;
 			jai::signal_emitter<ButtonSignalSignature> onFocusEnterSignal;
 			jai::signal_emitter<ButtonSignalSignature> onFocusLeaveSignal;
+			jai::signal_emitter<ButtonSignalSignature> onHighlightEnterSignal;
+			jai::signal_emitter<ButtonSignalSignature> onHighlightLeaveSignal;
 
 		public:
 			SpriteDerivedAccessors(Clickable)
@@ -69,6 +71,12 @@ namespace MV {
 			jai::signal<ButtonSignalSignature> onHoverEnter;
 			jai::signal<ButtonSignalSignature> onHoverLeave;
 			bool hovered() const { return isHovered; }
+
+			// Highlighted is under the pointer or holding the focus, whichever came first and until both are gone:
+			// the one state a control shows for "this is the one", whether a mouse or a controller chose it.
+			jai::signal<ButtonSignalSignature> onHighlightEnter;
+			jai::signal<ButtonSignalSignature> onHighlightLeave;
+			bool highlighted() const { return isHovered || isFocused; }
 
 			// Keyboard and controller focus, driven through the TapDevice (focusNext, focusMove, focusActivate). A
 			// focusable Clickable takes part while it is enabled and visible; a Button is focusable from the start.

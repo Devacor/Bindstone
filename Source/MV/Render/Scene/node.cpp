@@ -14,6 +14,8 @@
 #include "text.h"
 #include "clickable.h"
 #include "focusGroup.h"
+#include "clipped.h"
+#include "stencil.h"
 
 #include "MV/Serialization/serialize.h"
 #include <jaiscript/properties/property_serialization.hpp>
@@ -62,6 +64,7 @@ namespace MV {
 			a_builder.method("bounds", &Node::bounds, jai::serial);
 			a_builder.method("worldBounds", &Node::worldBounds, jai::serial);
 			a_builder.method("screenBounds", &Node::screenBounds, jai::serial);
+			a_builder.method("focusInParents", &Node::focusInParents, jai::serial);
 
 			a_builder.method("clone", &Node::clone, jai::serial);
 
@@ -707,6 +710,82 @@ namespace MV {
 				recalculateChildBounds();
 			}
 			return localChildBounds;
+		}
+
+		namespace {
+			BoxAABB<int> orderedCorners(const BoxAABB<int>& a_box) {
+				return BoxAABB<int>(
+					Point<int>(std::min(a_box.minPoint.x, a_box.maxPoint.x), std::min(a_box.minPoint.y, a_box.maxPoint.y)),
+					Point<int>(std::max(a_box.minPoint.x, a_box.maxPoint.x), std::max(a_box.minPoint.y, a_box.maxPoint.y)));
+			}
+
+			BoxAABB<int> sharedArea(const BoxAABB<int>& a_first, const BoxAABB<int>& a_second) {
+				const Point<int> low(std::max(a_first.minPoint.x, a_second.minPoint.x), std::max(a_first.minPoint.y, a_second.minPoint.y));
+				const Point<int> high(std::min(a_first.maxPoint.x, a_second.maxPoint.x), std::min(a_first.maxPoint.y, a_second.maxPoint.y));
+				return (high.x > low.x && high.y > low.y) ? BoxAABB<int>(low, high) : BoxAABB<int>();
+			}
+
+			template<typename ClippingComponents>
+			BoxAABB<int> cutToEach(BoxAABB<int> a_box, const ClippingComponents& a_clippings) {
+				for (auto&& clipping : a_clippings) {
+					if (a_box.empty()) {
+						break;
+					}
+					a_box = sharedArea(a_box, std::visit([](const auto& a_component) {
+						return orderedCorners(a_component->owner()->screenFromLocal(a_component->bounds()));
+					}, clipping));
+				}
+				return a_box;
+			}
+		}
+
+		BoxAABB<int> Node::visibleScreenBounds(const BoxAABB<>& a_local) {
+			return cutToEach(orderedCorners(screenFromLocal(a_local)), componentsInParents<Clipped, Stencil>(false, false));
+		}
+
+		BoxAABB<int> Node::visibleScreenBounds(bool a_includeChildren /*= true*/) {
+			auto result = visibleScreenBounds(bounds(false));
+			if (a_includeChildren) {
+				auto children = childBounds();
+				if (!children.empty()) {
+					// a Clipped or Stencil here cuts this node's children, not its own components
+					auto showing = cutToEach(orderedCorners(screenFromLocal(children)), components<Clipped, Stencil>(false));
+					showing = cutToEach(showing, componentsInParents<Clipped, Stencil>(false, false));
+					if (!showing.empty()) {
+						result = result.empty() ? showing : result.expandWith(showing);
+					}
+				}
+			}
+			return result;
+		}
+
+		std::shared_ptr<Node> Node::clippedAwayBy(const BoxAABB<>& a_local) {
+			auto showing = orderedCorners(screenFromLocal(a_local));
+			if (showing.width() <= 0 || showing.height() <= 0) {
+				return nullptr;
+			}
+			for (auto above = parent(); above; above = above->parent()) {
+				showing = cutToEach(showing, above->components<Clipped, Stencil>(false));
+				if (showing.empty()) {
+					return above;
+				}
+			}
+			return nullptr;
+		}
+
+		void Node::focusOnChild(const std::shared_ptr<Node>& a_child) {
+			// a copy: bringing it into view may change what is attached here
+			std::vector<std::shared_ptr<Component>> present(childComponents->begin(), childComponents->end());
+			for (auto&& component : present) {
+				component->focusOnChild(a_child);
+			}
+		}
+
+		void Node::focusInParents() {
+			auto self = shared_from_this();
+			for (auto above = parent(); above; above = above->parent()) {
+				above->focusOnChild(self);
+			}
 		}
 
 		std::shared_ptr<Node> Node::parent(const std::shared_ptr<Node> &a_parent) {

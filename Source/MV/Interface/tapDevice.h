@@ -67,6 +67,11 @@ namespace MV{
 		std::function<bool(const void* a_scope)> canTake;
 		// Whether it is under a scope's node, focusable there or not.
 		std::function<bool(const void* a_scope)> under;
+		// Brings it into view where something above it scrolls. Run when a move brings the focus, not a pointer's press.
+		std::function<void()> reveal;
+		// The node whose clipping leaves none of it showing, when one does. A move by direction reaches it only
+		// from under that node, and a pick by nearness to a point never does.
+		const void* hiddenUnder = nullptr;
 		bool pressOnFocus = false;
 	};
 
@@ -188,8 +193,8 @@ namespace MV{
 		// at the top, and nothing backs out past a modal window.
 		bool focusBack(const void* a_scope = nullptr);
 		void queueFocusGroupCandidate(FocusGroupCandidate a_candidate);
-		// Gives the focus to a_candidate; a_pressOnFocus false when a pointer press is what brought it.
-		void focus(FocusCandidate a_candidate, bool a_pressOnFocus = true);
+		// Gives the focus to a_candidate. A pointer's press bringing it neither presses again nor scrolls to it.
+		void focus(FocusCandidate a_candidate, bool a_byPointerPress = false);
 	private:
 		std::vector<FocusCandidate> askForFocusCandidates(const void* a_scope);
 		std::vector<FocusGroupCandidate> askForFocusGroups(const void* a_scope);

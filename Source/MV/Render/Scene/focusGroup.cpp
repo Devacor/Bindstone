@@ -166,9 +166,21 @@ namespace MV {
 			result.group = true;
 			result.order = groupOrder;
 			result.treePath = owner()->parentIndexList(0);
-			auto box = owner()->screenBounds();
+			auto box = owner()->visibleScreenBounds();
+			if (box.empty()) {
+				auto whole = owner()->bounds();
+				box = owner()->screenFromLocal(whole);
+				if (auto hider = owner()->clippedAwayBy(whole)) {
+					result.hiddenUnder = hider.get();
+				}
+			}
 			result.screenMin = box.minPoint;
 			result.screenMax = box.maxPoint;
+			result.reveal = [weakSelf]() {
+				if (auto self = weakSelf.lock(); self && self->ownerIsAlive()) {
+					self->owner()->focusInParents();
+				}
+			};
 			result.subject = weakSelf;
 			result.enter = [weakSelf]() { if (auto self = weakSelf.lock()) { self->selectedChanged(true); } };
 			result.leave = [weakSelf]() { if (auto self = weakSelf.lock()) { self->selectedChanged(false); } };

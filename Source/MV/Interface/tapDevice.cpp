@@ -157,7 +157,7 @@ namespace MV{
 		return std::move(focusCandidates);
 	}
 
-	void TapDevice::focus(FocusCandidate a_candidate, bool a_pressOnFocus) {
+	void TapDevice::focus(FocusCandidate a_candidate, bool a_byPointerPress) {
 		if (hasFocus() && sameFocusSubject(focused, a_candidate)) {
 			return;
 		}
@@ -171,7 +171,10 @@ namespace MV{
 		if (taken.enter) {
 			taken.enter();
 		}
-		if (a_pressOnFocus && taken.pressOnFocus && taken.activate) {
+		if (!a_byPointerPress && taken.reveal) {
+			taken.reveal();
+		}
+		if (!a_byPointerPress && taken.pressOnFocus && taken.activate) {
 			taken.activate();
 		}
 	}
@@ -296,6 +299,9 @@ namespace MV{
 			if (&candidate == from) {
 				continue;
 			}
+			if (candidate.hiddenUnder && !(from->under && from->under(candidate.hiddenUnder))) {
+				continue;
+			}
 			const auto at = centre(candidate);
 			const float along = (at.x - start.x) * way.x + (at.y - start.y) * way.y;
 			const float across = std::abs((at.x - start.x) * way.y - (at.y - start.y) * way.x);
@@ -356,6 +362,9 @@ namespace MV{
 		const FocusCandidate* best = nullptr;
 		int64_t bestDistance = 0;
 		for (auto&& candidate : candidates) {
+			if (candidate.hiddenUnder) {
+				continue;
+			}
 			const int64_t dx = std::max<int64_t>({ candidate.screenMin.x - a_screenPoint.x, a_screenPoint.x - candidate.screenMax.x, 0 });
 			const int64_t dy = std::max<int64_t>({ candidate.screenMin.y - a_screenPoint.y, a_screenPoint.y - candidate.screenMax.y, 0 });
 			const int64_t distance = dx * dx + dy * dy;

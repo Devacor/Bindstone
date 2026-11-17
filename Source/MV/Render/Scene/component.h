@@ -221,6 +221,10 @@ namespace MV {
 				return allowSerialize;
 			}
 
+			// Brings a node under this component's owner into view, where the component is what keeps it out of it:
+			// a Scroller scrolls to it. Node::focusInParents asks every component above a node.
+			virtual void focusOnChild(const std::shared_ptr<Node>& a_child) {}
+
 			//owner death *can* occur before node death in cases where a button deletes itself.
 			//In known cases where callback order can cause this to occur it's best we have an explicit query.
 			bool ownerIsAlive() const;

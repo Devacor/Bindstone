@@ -2,6 +2,8 @@
 
 #include "text.h"
 
+#include <algorithm>
+
 #include <jaiscript/core/dynamic_binder.hpp>
 
 namespace MV {
@@ -9,6 +11,7 @@ namespace MV {
 		void Scroller::jai_auto_bind(jai::dynamic_binder<Scroller>& a_builder) {
 			a_builder.method("content", static_cast<std::shared_ptr<Node>(Scroller::*)() const>(&Scroller::content));
 			a_builder.method("content", static_cast<std::shared_ptr<Scroller>(Scroller::*)(const std::shared_ptr<Node>&)>(&Scroller::content), jai::serial);
+			a_builder.method("focusOnChild", &Scroller::focusOnChild, jai::serial);
 		}
 
 
@@ -39,57 +42,43 @@ namespace MV {
 			});
 		}
 
-		/*
-		template <class T>
-		std::vector <std::vector<T>> Multiply(std::vector <std::vector<T>>& a, std::vector <std::vector<T>>& b)
-		{
-			const int n = a.size();     // a rows
-			const int m = a[0].size();  // a cols
-			const int p = b[0].size();  // b cols
-
-			std::vector <std::vector<T>> c(n, std::vector<T>(p, 0));
-			for (auto j = 0; j < p; ++j)
-			{
-				for (auto k = 0; k < m; ++k)
-				{
-					for (auto i = 0; i < n; ++i)
-					{
-						c[i][j] += a[i][k] * b[k][j];
+		namespace {
+			// The box around a box of one node's space, in another's.
+			BoxAABB<> boxInSpaceOf(const std::shared_ptr<Node>& a_space, const std::shared_ptr<Node>& a_from, const BoxAABB<>& a_box) {
+				const Point<> corners[] {
+					a_box.minPoint,
+					Point<>(a_box.maxPoint.x, a_box.minPoint.y, a_box.minPoint.z),
+					a_box.maxPoint,
+					Point<>(a_box.minPoint.x, a_box.maxPoint.y, a_box.maxPoint.z) };
+				BoxAABB<> result;
+				bool first = true;
+				for (auto&& corner : corners) {
+					const Point<> placed = a_space->localFromWorld(a_from->worldFromLocal(corner));
+					if (first) {
+						result = BoxAABB<>(placed, placed);
+						first = false;
+					} else {
+						result.expandWith(placed);
 					}
 				}
+				return result;
 			}
-			return c;
-		}*/
-		/*
-		Matrix operator*(const Matrix& other) const {
 
-			assert(cols() == other.rows());
-
-			Matrix out(rows(), other.cols());
-
-			for (std::size_t i = 0; i < rows(); ++i) {
-				for (std::size_t j = 0; j < other.cols(); ++j) {
-					double sum{ 0 };
-					for (std::size_t k = 0; k < cols(); ++k) {
-						sum += (*this)(i, k) * other(k, j);
-					}
-					out(i, j) = sum;
+			// Content that fits the view stays where it was put. Content longer than the view covers it from end to end.
+			PointPrecision shiftKeptCovering(PointPrecision a_shift, PointPrecision a_contentLow, PointPrecision a_contentHigh, PointPrecision a_viewLow, PointPrecision a_viewHigh) {
+				if (a_contentHigh - a_contentLow <= a_viewHigh - a_viewLow) {
+					return 0.0f;
 				}
+				return std::clamp(a_shift, a_viewHigh - a_contentHigh, a_viewLow - a_contentLow);
 			}
-			return out;
-		}*/
 
-		template<size_t N, size_t M, size_t K>
-		Matrix<N, K> MULT(const Matrix<N, M>& a_lhs, const Matrix<M, K>& a_rhs) {
-			Matrix<N, K> result;
-			for (size_t n = 0; n != N; n++) {
-				for (size_t k = 0; k != K; k++) {
-					for (size_t m = 0; m != M; m++) {
-						result(n, k) += a_lhs(n, m) * a_rhs(m, k);
-					}
+			// Something longer than the view shows from its start.
+			PointPrecision shiftIntoView(PointPrecision a_low, PointPrecision a_high, PointPrecision a_viewLow, PointPrecision a_viewHigh) {
+				if (a_low < a_viewLow || a_high - a_low >= a_viewHigh - a_viewLow) {
+					return a_viewLow - a_low;
 				}
+				return a_high > a_viewHigh ? a_viewHigh - a_high : 0.0f;
 			}
-			return result;
 		}
 
 		void Scroller::shiftContentByDelta(const MV::Point<int> & deltaPosition) {
@@ -97,36 +86,45 @@ namespace MV {
 				return;
 			}
 			auto self = owner();
-			
-			auto worldDelta = self->renderer().worldFromScreen(deltaPosition) - self->renderer().worldFromScreen(MV::Point<int>());
-			auto contentBounds = contentView->worldBounds();
-			auto ourBounds = worldBounds();
+			shiftContent(self->localFromScreen(deltaPosition) - self->localFromScreen(MV::Point<int>()));
+		}
 
-			if (!horizontalAllowed || contentBounds.width() >= ourBounds.width()) {
-				worldDelta.x = 0;
+		void Scroller::shiftContent(Point<> a_delta) {
+			auto self = owner();
+			std::shared_ptr<Node> content = contentView;
+			auto contentBox = boxInSpaceOf(self, content, content->bounds());
+			auto view = bounds();
+			a_delta.x = horizontalAllowed ? shiftKeptCovering(a_delta.x, contentBox.minPoint.x, contentBox.maxPoint.x, view.minPoint.x, view.maxPoint.x) : 0.0f;
+			a_delta.y = verticalAllowed ? shiftKeptCovering(a_delta.y, contentBox.minPoint.y, contentBox.maxPoint.y, view.minPoint.y, view.maxPoint.y) : 0.0f;
+			a_delta.z = 0.0f;
+			if (a_delta.x == 0.0f && a_delta.y == 0.0f) {
+				return;
 			}
-			if (!verticalAllowed || contentBounds.height() >= ourBounds.height()) {
-				worldDelta.y = 0;
+			auto contentParent = content->parent();
+			if (contentParent && contentParent != self) {
+				a_delta = contentParent->localFromWorld(self->worldFromLocal(a_delta)) - contentParent->localFromWorld(self->worldFromLocal(Point<>()));
 			}
+			content->translate(a_delta);
+		}
 
-			contentBounds += worldDelta;
-
-			if (worldDelta.x != 0) {
-				if (contentBounds.minPoint.x < ourBounds.minPoint.x) {
-					worldDelta.x += ourBounds.minPoint.x - contentBounds.minPoint.x;
-				} else if (contentBounds.maxPoint.x > ourBounds.maxPoint.x) {
-					worldDelta.x -= contentBounds.maxPoint.x - ourBounds.maxPoint.x;
-				}
+		void Scroller::focusOnChild(const std::shared_ptr<Node>& a_child) {
+			std::shared_ptr<Node> content = contentView;
+			if (!content || !a_child || !ownerIsAlive()) {
+				return;
 			}
-			if (worldDelta.y != 0) {
-				if (contentBounds.minPoint.y < ourBounds.minPoint.y) {
-					worldDelta.y += ourBounds.minPoint.y - contentBounds.minPoint.y;
-				}
-				else if (contentBounds.maxPoint.y > ourBounds.maxPoint.y) {
-					worldDelta.y -= contentBounds.maxPoint.y - ourBounds.maxPoint.y;
-				}
+			bool underContent = false;
+			for (auto node = a_child; node && !underContent; node = node->parent()) {
+				underContent = node == content;
 			}
-			contentView->translate(self->localFromWorld(self->worldPosition() + worldDelta));
+			auto childBox = a_child->bounds();
+			if (!underContent || childBox.empty()) {
+				return;
+			}
+			childBox = boxInSpaceOf(owner(), a_child, childBox);
+			auto view = bounds();
+			shiftContent(Point<>(
+				shiftIntoView(childBox.minPoint.x, childBox.maxPoint.x, view.minPoint.x, view.maxPoint.x),
+				shiftIntoView(childBox.minPoint.y, childBox.maxPoint.y, view.minPoint.y, view.maxPoint.y)));
 		}
 
 		std::shared_ptr<Scroller> Scroller::content(const std::shared_ptr<Node> &a_content) {

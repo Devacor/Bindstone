@@ -860,6 +860,28 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Tests: `bounds_tests.cpp` (position, own box with children, grandparents, following a move, a scale, a turn,
   hide and show, add and remove, place on screen, the slider). The Login screenshot is the same pixel for pixel.
 
+## Increment 44: the focus scrolls to what it lands on (2026-11-17)
+- `Component::focusOnChild(node)` is a component's turn to bring a node under its owner into view; it does nothing
+  unless a component says otherwise. `Node::focusInParents()` asks every component on every node above a node,
+  nearest first. A FocusCandidate carries it as `reveal`, which `TapDevice::focus` runs when a move, a walk in
+  order or `Clickable::focus()` brings the focus. A pointer's press does not: the list stays under the pointer.
+- `Scroller::focusOnChild` scrolls its content as far as it takes to show the node and no further; something
+  longer than the view shows from its start. It is bound to script, as is `Node::focusInParents`.
+- `Scroller` keeps content longer than its view covering the view from end to end, and leaves content that fits
+  where it was put. Before, it held the content inside the view, so content that fitted slid about in it and
+  content longer than it did not scroll. Its sums are in its own node's space, so a turned scroller scrolls true.
+- `Node::visibleScreenBounds()` is what shows of a node on screen: its children cut to a Clipped or Stencil on it,
+  and all of it to those above. `bounds()` and `screenBounds()` stay the whole extent, which laying out and
+  scrolling measure. `Node::clippedAwayBy(box)` names the node whose clipping hides a box altogether.
+- A focus candidate is, for a move, where what shows of it is. One scrolled wholly out of view keeps its true
+  place and names the node hiding it (`hiddenUnder`): a move by direction reaches it only from under that node,
+  and `focusNearest` never picks it. So up from a control under a list lands on the last row showing, and down
+  from that row goes on to the hidden one and scrolls to it. A FocusGroup on a list is as big as its view.
+- Tests: `scroller_tests.cpp` (a drag to each end, content that fits, focusOnChild, a move and a walk scrolling,
+  a pointer's press not scrolling, hidden rows from outside, what shows of a node, an explicit group on a list).
+- Not yet: the scroll is at once, not eased; no margin is kept round what is scrolled to; a Scroller has no
+  wheel or stick scrolling of its own.
+
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.
 - Authoring verbs still only in Source/Editor: save selection as BindSnap, and the component kinds Add Component

@@ -314,8 +314,21 @@ namespace MV {
 			result.order = focusOrderValue;
 			result.treePath = owner()->parentIndexList(0);
 			auto box = bounds();
-			result.screenMin = owner()->screenFromLocal(box.minPoint);
-			result.screenMax = owner()->screenFromLocal(box.maxPoint);
+			// for a move it is where what shows of it is; scrolled wholly out of view it keeps its true place
+			auto showing = owner()->visibleScreenBounds(box);
+			if (showing.empty()) {
+				showing = owner()->screenFromLocal(box);
+				if (auto hider = owner()->clippedAwayBy(box)) {
+					result.hiddenUnder = hider.get();
+				}
+			}
+			result.screenMin = showing.minPoint;
+			result.screenMax = showing.maxPoint;
+			result.reveal = [weakSelf]() {
+				if (auto self = weakSelf.lock(); self && self->ownerIsAlive()) {
+					self->owner()->focusInParents();
+				}
+			};
 			result.subject = weakSelf;
 			result.enter = [weakSelf]() { if (auto self = weakSelf.lock()) { self->focusChanged(true); } };
 			result.leave = [weakSelf]() { if (auto self = weakSelf.lock()) { self->focusChanged(false); } };
@@ -416,7 +429,7 @@ namespace MV {
 			isInPressEvent = true;
 			// a pointer's press takes the focus too, without pressing again
 			if (isFocusable && !isFocused && !pressedByCall && ownerIsAlive()) {
-				ourMouse.focus(focusCandidate(), false);
+				ourMouse.focus(focusCandidate(), true);
 			}
 			onPressSignal(protectFromDismissal);
 

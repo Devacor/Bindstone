@@ -27,10 +27,14 @@ namespace MV {
 				Clickable::cancelPress(a_callCancelCallbacks);
 			}
 
+			// Scrolls the content as far as it takes to show a node under it, on the axes that scroll.
+			virtual void focusOnChild(const std::shared_ptr<Node>& a_child) override;
+
 		protected:
 			Scroller(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse);
 
 			void shiftContentByDelta(const MV::Point<int> & deltaPosition);
+			void shiftContent(Point<> a_delta);
 
 			template<class Archive>
 			void save(Archive & archive, std::uint32_t const) const {

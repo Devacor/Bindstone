@@ -666,6 +666,21 @@ namespace MV {
 				return screenFromLocal(bounds(a_includeChildren));
 			}
 
+			// On screen, what shows of this node's box: its children cut to a Clipped or Stencil on this node, and
+			// all of it to those on the nodes above. The empty box when none of it shows. bounds() stays the whole
+			// extent, which is what laying out and scrolling measure.
+			BoxAABB<int> visibleScreenBounds(bool a_includeChildren = true);
+			// The same for a box in this node's space, cut by the nodes above.
+			BoxAABB<int> visibleScreenBounds(const BoxAABB<>& a_local);
+			// The nearest node above whose clipping leaves none of a box in this node's space showing; null while
+			// some of it shows.
+			std::shared_ptr<Node> clippedAwayBy(const BoxAABB<>& a_local);
+
+			// Asks each component here to bring a node under this one into view (Component::focusOnChild).
+			void focusOnChild(const std::shared_ptr<Node>& a_child);
+			// Asks every node above this one, nearest first, to bring it into view.
+			void focusInParents();
+
 			Point<> worldFromLocal(const Point<> &a_local);
 			Point<int> screenFromLocal(const Point<> &a_local);
 			Point<> localFromScreen(const Point<int> &a_screen);

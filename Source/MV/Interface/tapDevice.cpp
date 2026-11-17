@@ -193,7 +193,7 @@ namespace MV{
 		if (focusFollowLink(a_step > 0 ? FocusLink::NEXT : FocusLink::PREVIOUS, a_scope)) {
 			return true;
 		}
-		auto candidates = askForFocusCandidates(a_scope);
+		auto candidates = askForReachable(a_scope);
 		if (candidates.empty()) {
 			return false;
 		}
@@ -255,7 +255,7 @@ namespace MV{
 		if (focusFollowLink(way.link, a_scope)) {
 			return true;
 		}
-		auto candidates = askForFocusCandidates(a_scope);
+		auto candidates = askForReachable(a_scope);
 		if (candidates.empty()) {
 			return false;
 		}
@@ -320,7 +320,7 @@ namespace MV{
 	}
 
 	bool TapDevice::focusNearest(const MV::Point<int>& a_screenPoint, const void* a_scope) {
-		auto candidates = askForFocusCandidates(a_scope);
+		auto candidates = askForReachable(a_scope);
 		const FocusCandidate* best = nullptr;
 		int64_t bestDistance = 0;
 		for (auto&& candidate : candidates) {
@@ -356,24 +356,12 @@ namespace MV{
 		bool sameSubject(const std::weak_ptr<void>& a_left, const std::weak_ptr<void>& a_right) {
 			return !a_left.expired() && !a_left.owner_before(a_right) && !a_right.owner_before(a_left);
 		}
-	}
 
-	void TapDevice::queueFocusGroupCandidate(FocusGroupCandidate a_candidate) {
-		focusGroupCandidates.push_back(std::move(a_candidate));
-	}
+		// under the group's node, and not the group itself selected as a whole
+		bool groupHolds(const FocusGroupCandidate& a_group, const FocusCandidate& a_candidate) {
+			return a_candidate.under && a_candidate.under(a_group.scope) && !sameSubject(a_candidate.subject, a_group.subject);
+		}
 
-	std::vector<FocusGroupCandidate> TapDevice::askForFocusGroups(const void* a_scope) {
-		focusGroupCandidates.clear();
-		focusScopeToken = a_scope;
-		onFocusGroupQuerySignal(*this);
-		focusScopeToken = nullptr;
-		std::stable_sort(focusGroupCandidates.begin(), focusGroupCandidates.end(), [](const FocusGroupCandidate& a_left, const FocusGroupCandidate& a_right) {
-			return a_left.order != a_right.order ? a_left.order < a_right.order : a_left.treePath < a_right.treePath;
-		});
-		return std::move(focusGroupCandidates);
-	}
-
-	namespace {
 		// the modal window drawn last is the one on top
 		const FocusGroupCandidate* topModalWindow(const std::vector<FocusGroupCandidate>& a_groups) {
 			const FocusGroupCandidate* result = nullptr;
@@ -396,14 +384,41 @@ namespace MV{
 		}
 	}
 
+	void TapDevice::queueFocusGroupCandidate(FocusGroupCandidate a_candidate) {
+		focusGroupCandidates.push_back(std::move(a_candidate));
+	}
+
+	std::vector<FocusGroupCandidate> TapDevice::askForFocusGroups(const void* a_scope) {
+		focusGroupCandidates.clear();
+		focusScopeToken = a_scope;
+		onFocusGroupQuerySignal(*this);
+		focusScopeToken = nullptr;
+		std::stable_sort(focusGroupCandidates.begin(), focusGroupCandidates.end(), [](const FocusGroupCandidate& a_left, const FocusGroupCandidate& a_right) {
+			return a_left.order != a_right.order ? a_left.order < a_right.order : a_left.treePath < a_right.treePath;
+		});
+		return std::move(focusGroupCandidates);
+	}
+
+	// What a move made at a scope can land on: everything focusable under it, less what is inside a window below
+	// that is selected as a whole and has to be gone into.
+	std::vector<FocusCandidate> TapDevice::askForReachable(const void* a_scope) {
+		auto candidates = askForFocusCandidates(a_scope);
+		auto groups = askForFocusGroups(a_scope);
+		candidates.erase(std::remove_if(candidates.begin(), candidates.end(), [&](const FocusCandidate& a_candidate) {
+			return std::any_of(groups.begin(), groups.end(), [&](const FocusGroupCandidate& a_group) {
+				return a_group.explicitSelect && a_group.scope != a_scope && groupHolds(a_group, a_candidate);
+			});
+		}), candidates.end());
+		return candidates;
+	}
+
 	const FocusGroupCandidate* TapDevice::windowHoldingFocus(const std::vector<FocusGroupCandidate>& a_groups) const {
-		auto focusedSubject = focused.subject.lock();
-		if (!focusedSubject || (focused.canTake && !focused.canTake(nullptr))) {
+		if (focused.subject.expired() || (focused.canTake && !focused.canTake(nullptr))) {
 			return nullptr;
 		}
 		const FocusGroupCandidate* result = nullptr;
 		for (auto&& group : a_groups) {
-			if (!group.tabs && group.contains(focusedSubject) && (!result || result->treePath.size() < group.treePath.size())) {
+			if (!group.tabs && groupHolds(group, focused) && (!result || result->treePath.size() < group.treePath.size())) {
 				result = &group;
 			}
 		}
@@ -411,12 +426,16 @@ namespace MV{
 	}
 
 	const FocusGroupCandidate* TapDevice::windowInUse(const std::vector<FocusGroupCandidate>& a_groups) const {
+		const bool focusStands = !focused.subject.expired() && (!focused.canTake || focused.canTake(nullptr));
 		const FocusGroupCandidate* modal = topModalWindow(a_groups);
 		const FocusGroupCandidate* holding = windowHoldingFocus(a_groups);
+		// the window last stepped to counts only while nothing holds the focus
 		const FocusGroupCandidate* last = nullptr;
-		for (auto&& group : a_groups) {
-			if (!group.tabs && sameSubject(group.subject, activeWindow)) {
-				last = &group;
+		if (!focusStands) {
+			for (auto&& group : a_groups) {
+				if (!group.tabs && sameSubject(group.subject, activeWindow)) {
+					last = &group;
+				}
 			}
 		}
 		if (!modal) {
@@ -430,39 +449,46 @@ namespace MV{
 		return modal;
 	}
 
-	void TapDevice::enterWindow(const FocusGroupCandidate& a_window, const std::vector<FocusGroupCandidate>& a_groups) {
+	void TapDevice::enterWindow(const FocusGroupCandidate& a_window, const std::vector<FocusGroupCandidate>& a_groups, bool a_inside) {
+		if (!a_inside && a_window.explicitSelect && a_window.focusSelf) {
+			// selected as a whole it is one of its parent's stops, so the parent is the window in use
+			const FocusGroupCandidate* parent = parentWindowOf(a_groups, a_window);
+			activeWindow = parent ? parent->subject : std::weak_ptr<void>();
+			auto focusSelf = a_window.focusSelf;
+			focusSelf();
+			return;
+		}
 		activeWindow = a_window.subject;
 		if (a_window.focusPreferred && a_window.focusPreferred()) {
 			return;
 		}
-		auto candidates = askForFocusCandidates(a_window.scope);
+		auto candidates = askForReachable(a_window.scope);
 		auto isTabHeader = [&](const FocusCandidate& a_candidate) {
-			auto subject = a_candidate.subject.lock();
 			return std::any_of(a_groups.begin(), a_groups.end(), [&](const FocusGroupCandidate& a_group) {
-				return a_group.tabs && a_group.contains(subject);
+				return a_group.tabs && groupHolds(a_group, a_candidate);
 			});
 		};
 		auto first = std::find_if(candidates.begin(), candidates.end(), [&](const FocusCandidate& a_candidate) { return !isTabHeader(a_candidate); });
 		if (first == candidates.end()) {
 			first = candidates.begin();
 		}
-		if (first == candidates.end()) {
-			focusClear();
-		} else {
+		if (first != candidates.end()) {
 			focus(*first);
+		} else if (!a_window.explicitSelect) {
+			// a window selected as a whole with nothing in it stays selected
+			focusClear();
 		}
 	}
 
 	// Onto a control of a_window that is in no window under it: the one it remembers, else its first.
 	bool TapDevice::focusOwnLevel(const FocusGroupCandidate& a_window, const std::vector<FocusGroupCandidate>& a_groups) {
-		auto candidates = askForFocusCandidates(a_window.scope);
+		auto candidates = askForReachable(a_window.scope);
 		auto ownLevel = [&](const FocusCandidate& a_candidate) {
-			auto subject = a_candidate.subject.lock();
 			return std::none_of(a_groups.begin(), a_groups.end(), [&](const FocusGroupCandidate& a_group) {
-				return &a_group != &a_window && a_group.within(a_window.scope) && a_group.contains(subject);
+				return &a_group != &a_window && a_group.within(a_window.scope) && groupHolds(a_group, a_candidate);
 			});
 		};
-		std::weak_ptr<void> remembered = a_window.remembered ? a_window.remembered() : nullptr;
+		std::weak_ptr<void> remembered = a_window.remembered ? a_window.remembered() : std::weak_ptr<void>();
 		const FocusCandidate* chosen = nullptr;
 		for (auto&& candidate : candidates) {
 			if (!ownLevel(candidate)) {
@@ -482,15 +508,14 @@ namespace MV{
 
 	const void* TapDevice::focusContext(const void* a_scope) {
 		auto groups = askForFocusGroups(a_scope);
-		auto focusedSubject = focused.subject.lock();
-		const bool focusStands = focusedSubject && (!focused.canTake || focused.canTake(nullptr));
+		const bool focusStands = !focused.subject.expired() && (!focused.canTake || focused.canTake(nullptr));
 		const bool focusLost = hasFocus() && !focusStands;
 		// a window remembers what it holds itself, not what a window under it holds; a tab strip its headers
 		const FocusGroupCandidate* holding = windowHoldingFocus(groups);
 		if (focusStands) {
 			for (auto&& group : groups) {
-				if (group.tabs ? group.contains(focusedSubject) : &group == holding) {
-					group.remember(focusedSubject);
+				if (group.tabs ? groupHolds(group, focused) : &group == holding) {
+					group.remember(focused);
 				}
 			}
 		}
@@ -500,7 +525,7 @@ namespace MV{
 		} else if (!sameSubject(modal->subject, activeModal)) {
 			// a modal window newly on top: where the focus was is where it goes back to, unless that was a modal too
 			if (activeModal.expired()) {
-				windowBeforeModal = activeWindow;
+				windowBeforeModal = holding ? holding->subject : activeWindow;
 			}
 			activeModal = modal->subject;
 		}
@@ -521,19 +546,54 @@ namespace MV{
 			return a_scope;
 		}
 		const void* scope = inUse->scope;
-		const bool outsideModal = modal && !(focusStands && modal->contains(focusedSubject));
+		const bool outsideModal = modal && !(focusStands && groupHolds(*modal, focused));
 		if (outsideModal || focusLost) {
-			enterWindow(*inUse, groups);
+			enterWindow(*inUse, groups, true);
 		} else {
 			activeWindow = inUse->subject;
 		}
 		return scope;
 	}
 
-	bool TapDevice::focusWindowStep(int a_step, const void* a_scope) {
+	bool TapDevice::focusMoveWithin(FocusDirection a_direction, const void* a_scope) {
 		auto groups = askForFocusGroups(a_scope);
 		const FocusGroupCandidate* modal = topModalWindow(groups);
 		const FocusGroupCandidate* level = windowInUse(groups);
+		while (true) {
+			if (focusMove(a_direction, level ? level->scope : a_scope)) {
+				return true;
+			}
+			if (!level || level->explicitSelect || level == modal) {
+				return false;
+			}
+			level = parentWindowOf(groups, *level);
+		}
+	}
+
+	bool TapDevice::focusEnter(const void* a_windowNode) {
+		auto groups = askForFocusGroups(nullptr);
+		for (auto&& group : groups) {
+			if (!group.tabs && group.scope == a_windowNode) {
+				enterWindow(group, groups, true);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool TapDevice::focusWindowStep(int a_step, const void* a_scope) {
+		auto groups = askForFocusGroups(a_scope);
+		const FocusGroupCandidate* modal = topModalWindow(groups);
+		// a window selected as a whole steps from itself, though it is its parent that is in use
+		const FocusGroupCandidate* level = nullptr;
+		for (auto&& group : groups) {
+			if (!group.tabs && hasFocus() && sameSubject(group.subject, focused.subject)) {
+				level = &group;
+			}
+		}
+		if (!level) {
+			level = windowInUse(groups);
+		}
 		auto besideUnder = [&](const FocusGroupCandidate* a_parent) {
 			std::vector<const FocusGroupCandidate*> result;
 			for (auto&& group : groups) {
@@ -548,7 +608,7 @@ namespace MV{
 			if (tops.empty()) {
 				return false;
 			}
-			enterWindow(a_step > 0 ? *tops.front() : *tops.back(), groups);
+			enterWindow(a_step > 0 ? *tops.front() : *tops.back(), groups, false);
 			return true;
 		}
 		// a window with none beside it steps the level above, as far up as the modal window when one shows
@@ -558,7 +618,7 @@ namespace MV{
 			const int count = static_cast<int>(beside.size());
 			if (count > 1) {
 				const int at = static_cast<int>(std::find(beside.begin(), beside.end(), level) - beside.begin());
-				enterWindow(*beside[static_cast<size_t>((at + a_step + count) % count)], groups);
+				enterWindow(*beside[static_cast<size_t>((at + a_step + count) % count)], groups, false);
 				return true;
 			}
 			level = parent;
@@ -600,7 +660,7 @@ namespace MV{
 			}
 		}
 		auto& header = headers[static_cast<size_t>((current + a_step + count) % count)];
-		strip->remember(header.subject.lock());
+		strip->remember(header);
 		if (header.activate) {
 			auto activate = header.activate;
 			activate();
@@ -621,6 +681,14 @@ namespace MV{
 		const FocusGroupCandidate* modal = topModalWindow(groups);
 		const FocusGroupCandidate* level = windowInUse(groups);
 		while (level) {
+			if (level->explicitSelect) {
+				auto back = level->back;
+				enterWindow(*level, groups, false);
+				if (back) {
+					back();
+				}
+				return true;
+			}
 			if (level->handlesBack && level->handlesBack()) {
 				auto back = level->back;
 				back();

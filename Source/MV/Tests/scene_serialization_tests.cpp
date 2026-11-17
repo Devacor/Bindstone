@@ -148,6 +148,9 @@ namespace mv_tests {
 				auto scene = Node::make(host.renderer, "root");
 				auto window = scene->make("window");
 				window->attach<MV::Scene::FocusGroup>(host.mouse)->order(3)->modal(true)->defaultFocus("confirm");
+				auto panel = scene->make("panel");
+				auto panelGlow = panel->make("panelGlow");
+				panel->attach<MV::Scene::FocusGroup>(host.mouse)->explicitSelect(true)->highlightNode(panelGlow);
 				auto strip = window->make("strip");
 				strip->attach<MV::Scene::FocusGroup>(host.mouse)->kind(MV::Scene::FocusGroup::Kind::TABS);
 
@@ -160,6 +163,10 @@ namespace mv_tests {
 				check_not_null(loadedStrip.self(), "tab strip group missing after load");
 				check_true(loadedWindow->kind() == MV::Scene::FocusGroup::Kind::WINDOW && loadedWindow->order() == 3 && loadedWindow->modal() && loadedWindow->defaultFocus() == "confirm");
 				check_true(loadedStrip->kind() == MV::Scene::FocusGroup::Kind::TABS && !loadedStrip->modal());
+				auto loadedPanel = loaded->get("panel")->component<MV::Scene::FocusGroup>(true, false);
+				check_not_null(loadedPanel.self(), "explicitSelect group missing after load");
+				check_true(loadedPanel->explicitSelect() && !loadedWindow->explicitSelect(), "explicitSelect is saved");
+				check_true(loadedPanel->highlightNode() == loaded->get("panelGlow") && !loaded->get("panelGlow")->visible(), "its highlight view is saved with it and loads hidden");
 				window->hide();
 				check_true(host.mouse.focusContext() == loaded->get("window").get(), "and the loaded modal window answers as the one in use");
 			});

@@ -48,9 +48,11 @@ namespace MV{
 	// The moves a Clickable can name a neighbour for; one it does not name is found for it.
 	enum class FocusLink { NEXT, PREVIOUS, LEFT, RIGHT, UP, DOWN, UP_LEFT, UP_RIGHT, DOWN_LEFT, DOWN_RIGHT };
 
-	// A focusable Clickable answering a focus query: where it comes in the order, where it is on screen, and what
-	// taking, losing and using the focus does to it.
+	// Something answering a focus query, a focusable Clickable or a group that is selected as a whole: where it
+	// comes in the order, where it is on screen, and what taking, losing and using the focus does to it.
 	struct FocusCandidate {
+		// The subject is a group (MV::Scene::FocusGroup) and not a Clickable.
+		bool group = false;
 		int64_t order = 0;
 		std::vector<int64_t> treePath;
 		MV::Point<int> screenMin;
@@ -63,26 +65,30 @@ namespace MV{
 		std::function<bool(FocusLink, const void* a_scope, FocusCandidate& a_neighbour)> linked;
 		// Whether it could still take the focus: it may have been hidden or disabled since it answered.
 		std::function<bool(const void* a_scope)> canTake;
+		// Whether it is under a scope's node, focusable there or not.
+		std::function<bool(const void* a_scope)> under;
 		bool pressOnFocus = false;
 	};
 
-	// A selection context answering a group query (MV::Scene::FocusGroup): a window the focus stays inside, or a
-	// strip of tab headers.
+	// A selection context answering a group query (MV::Scene::FocusGroup): a window, or a strip of tab headers.
 	struct FocusGroupCandidate {
 		bool tabs = false;
 		bool modal = false;
+		// Selected as a whole and gone into, not moved straight into.
+		bool explicitSelect = false;
 		int64_t order = 0;
 		std::vector<int64_t> treePath;
 		// The group's node, as focus moves take a scope.
 		const void* scope = nullptr;
 		std::weak_ptr<void> subject;
-		// Whether a focused Clickable is under the group, and whether the group is under a scope's node.
-		std::function<bool(const std::shared_ptr<void>& a_focused)> contains;
+		// Whether the group is under a scope's node.
 		std::function<bool(const void* a_scope)> within;
 		// Focuses what the group remembers, else its default; false when neither can take the focus.
 		std::function<bool()> focusPreferred;
-		std::function<void(const std::shared_ptr<void>& a_focused)> remember;
-		std::function<std::shared_ptr<void>()> remembered;
+		// Selects the group as a whole.
+		std::function<void()> focusSelf;
+		std::function<void(const FocusCandidate& a_focused)> remember;
+		std::function<std::weak_ptr<void>()> remembered;
 		// Whether backing out is something the group does itself, and doing it.
 		std::function<bool()> handlesBack;
 		std::function<void()> back;
@@ -151,15 +157,23 @@ namespace MV{
 		const void* focusScope() const { return focusScopeToken; }
 		void queueFocusCandidate(FocusCandidate a_candidate);
 
-		// Selection contexts. Windows nest; the one in use is the innermost window the focus is in, else the one
-		// last stepped to, and while a modal window is showing (the top-most) it is that window or one inside it.
-		// focusContext settles that for now and returns the scope focus moves should keep to: the window's node,
-		// or a_scope with no window in use. It also puts the focus right: into a modal window as it shows, back
-		// where it was when that hides, and onto something else in the window when what held it is hidden or
-		// disabled. Call it once a frame while a keyboard or controller is driving the focus.
+		// Selection contexts. Windows nest; the one in use is the innermost window the focus is in, else, with
+		// nothing focused, the one last stepped to, and while a modal window is showing (the top-most) it is that
+		// window or one inside it. focusContext settles that for now and returns the window's node, or a_scope with
+		// no window in use. It also puts the focus right: into a modal window as it shows, back where it was when
+		// that hides, and onto something else in the window when what held it is hidden or disabled. Call it once
+		// a frame while a keyboard or controller is driving the focus.
 		const void* focusContext(const void* a_scope = nullptr);
-		// To the next or previous window beside the one in use, under the same parent window, focusing what it
-		// remembers, else its default, else its first focusable that is not a tab header. A window with none
+		// A move as a window sees it. It looks inside the window in use first, so the window's own layout decides;
+		// with nowhere to go there it looks a level out, and so on, which is how a move leaves one window and
+		// lands in the next. It never leaves a window that is selected as a whole (explicitSelect) or a modal one,
+		// and it never lands inside a window selected as a whole: it lands on that window, as one stop.
+		bool focusMoveWithin(FocusDirection a_direction, const void* a_scope = nullptr);
+		// Goes into the window on a node, as activating one selected as a whole does: onto what it remembers,
+		// else its default, else its first focusable that is not a tab header.
+		bool focusEnter(const void* a_windowNode);
+		// To the next or previous window beside the one in use (or the one selected as a whole), under the same
+		// parent window: onto a window selected as a whole, else inside as focusEnter does. A window with none
 		// beside it steps the level above. False with nowhere to go, and nothing steps out of a modal window.
 		bool focusWindowNext(const void* a_scope = nullptr);
 		bool focusWindowPrevious(const void* a_scope = nullptr);
@@ -167,9 +181,10 @@ namespace MV{
 		// The focus stays where it is; focusContext moves it on if the tab took its control away.
 		bool focusTabNext(const void* a_scope = nullptr);
 		bool focusTabPrevious(const void* a_scope = nullptr);
-		// Backs out of the window in use: its own back when something listens for it, else up a level, onto a
-		// control of the parent window that is in no window of its own. A parent with no such control is backed
-		// out of in turn. False at the top, and nothing backs out past a modal window.
+		// Backs out of the window in use. One selected as a whole is left for itself, selected again. Any other
+		// does its own back when something listens for it, else goes up a level, onto a control of the parent
+		// window that is in no window of its own; a parent with no such control is backed out of in turn. False
+		// at the top, and nothing backs out past a modal window.
 		bool focusBack(const void* a_scope = nullptr);
 		void queueFocusGroupCandidate(FocusGroupCandidate a_candidate);
 		// Gives the focus to a_candidate; a_pressOnFocus false when a pointer press is what brought it.
@@ -177,10 +192,11 @@ namespace MV{
 	private:
 		std::vector<FocusCandidate> askForFocusCandidates(const void* a_scope);
 		std::vector<FocusGroupCandidate> askForFocusGroups(const void* a_scope);
+		std::vector<FocusCandidate> askForReachable(const void* a_scope);
 		const FocusGroupCandidate* windowInUse(const std::vector<FocusGroupCandidate>& a_groups) const;
 		const FocusGroupCandidate* windowHoldingFocus(const std::vector<FocusGroupCandidate>& a_groups) const;
 		bool focusOwnLevel(const FocusGroupCandidate& a_window, const std::vector<FocusGroupCandidate>& a_groups);
-		void enterWindow(const FocusGroupCandidate& a_window, const std::vector<FocusGroupCandidate>& a_groups);
+		void enterWindow(const FocusGroupCandidate& a_window, const std::vector<FocusGroupCandidate>& a_groups, bool a_inside);
 		bool focusWindowStep(int a_step, const void* a_scope);
 		bool focusTabStep(int a_step, const void* a_scope);
 

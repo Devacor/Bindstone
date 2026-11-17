@@ -76,10 +76,10 @@ namespace MV {
 
 		// The pad at work on a_focus, once a frame after update(). It has two modes and BACK (the button a pad
 		// labels Select, View or Share) swaps them.
-		// Snapping, the mode it starts in: the d-pad or the left stick moves the focus from one Clickable to the
-		// next (eight ways; a held direction repeats) inside the window in use (TapDevice::focusContext), SOUTH
-		// presses the focused one, the triggers step to the previous and next window, the shoulders to the
-		// previous and next tab, and EAST backs out of the window.
+		// Snapping, the mode it starts in: the d-pad or the left stick moves the focus from one stop to the next
+		// (eight ways; a held direction repeats) as the window in use allows (TapDevice::focusMoveWithin), SOUTH
+		// presses the focused Clickable or goes into the focused window, the triggers step to the previous and
+		// next window, the shoulders to the previous and next tab, and EAST backs out of the window.
 		// Cursor: see cursor() below.
 		// True when the focus or the pointer moved or something was pressed.
 		bool navigate(TapDevice& a_focus, double a_dt, const void* a_scope = nullptr);

@@ -328,6 +328,10 @@ namespace MV {
 				auto self = weakSelf.lock();
 				return self && self->canTakeFocus(a_scope);
 			};
+			result.under = [weakSelf](const void* a_scope) {
+				auto self = weakSelf.lock();
+				return self && self->ownerIsAlive() && self->underFocusScope(a_scope);
+			};
 			result.pressOnFocus = pressesOnFocus;
 			return result;
 		}

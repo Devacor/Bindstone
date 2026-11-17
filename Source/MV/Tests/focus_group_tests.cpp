@@ -79,7 +79,7 @@ namespace mv_tests {
 		}
 
 		void forge_tests() override {
-			test("focus moves keep to the window the focus is in", [] {
+			test("a move kept to the window in use goes no further than it", [] {
 				TwoWindows scene;
 				auto& mouse = scene.host.mouse;
 				check_true(mouse.focusContext() == nullptr, "with nothing focused no window is in use");
@@ -218,7 +218,7 @@ namespace mv_tests {
 				itemTwo->clickable->focus();
 				const void* context = mouse.focusContext();
 				check_true(context == list.node.get(), "the group in use is the innermost one holding the focus");
-				check_false(mouse.focusMove(FocusDirection::RIGHT, context) || mouse.focusMove(FocusDirection::DOWN, context), "moves stay inside it");
+				check_false(mouse.focusMove(FocusDirection::RIGHT, context) || mouse.focusMove(FocusDirection::DOWN, context), "a move kept to it has nowhere further to go");
 				check_true(mouse.focusWindowNext() && fieldOne->clickable->focused(), "stepping goes to the group beside it");
 				fieldTwo->clickable->focus();
 				mouse.focusContext();
@@ -293,7 +293,82 @@ namespace mv_tests {
 				check_true(confirm->clickable->focused());
 			});
 
-			test("a controller's triggers step windows, its shoulders step tabs and its east button backs out", [] {
+			test("a plain group is contiguous: a move goes into it, follows its layout inside, and carries on out", [] {
+				TwoWindows scene;
+				auto& mouse = scene.host.mouse;
+				auto stray = addTarget(scene.host, scene.root, "stray", MV::point(10.0f, 55.0f));
+				scene.leftTop->clickable->focus();
+				check_true(mouse.focusMove(FocusDirection::DOWN) && stray->clickable->focused(), "taken with no regard for groups, a move goes to whatever is nearest");
+				scene.leftTop->clickable->focus();
+				check_true(mouse.focusMoveWithin(FocusDirection::DOWN) && scene.leftBottom->clickable->focused(), "taken as the group sees it, the group's own controls come first");
+				check_true(mouse.focusMoveWithin(FocusDirection::RIGHT) && scene.rightBottom->clickable->focused(), "with nothing further inside, the move carries on into the group beside it");
+				check_true(mouse.focusContext() == scene.right.node.get(), "which is then the one in use");
+				check_true(mouse.focusMoveWithin(FocusDirection::UP) && scene.rightTop->clickable->focused());
+				check_true(mouse.focusMoveWithin(FocusDirection::LEFT) && scene.leftTop->clickable->focused(), "and back out the way it came");
+				check_false(mouse.focusMoveWithin(FocusDirection::UP), "with nothing that way anywhere, it stays");
+				check_true(scene.leftTop->clickable->focused());
+			});
+
+			test("an explicitSelect group is one stop: selected as a whole, gone into, and backed out of", [] {
+				SceneHost host;
+				auto& mouse = host.mouse;
+				auto root = Node::make(host.renderer, "root");
+				auto menu = addGroup(host, root, "menu");
+				auto play = addTarget(host, menu.node, "play", MV::point(0.0f, 0.0f));
+				auto options = addTarget(host, menu.node, "options", MV::point(0.0f, 100.0f));
+				auto list = addGroup(host, root, "list");
+				auto rowOne = addTarget(host, list.node, "rowOne", MV::point(300.0f, 0.0f));
+				auto rowTwo = addTarget(host, list.node, "rowTwo", MV::point(300.0f, 100.0f));
+				auto glow = list.node->make("glow");
+				list.group->explicitSelect(true)->highlightNode(glow);
+				auto after = addTarget(host, root, "after", MV::point(600.0f, 0.0f));
+				int backs = 0;
+				int highlights = 0;
+				auto backReceiver = list.group->onBack.connect([&](const std::shared_ptr<FocusGroup>&) { ++backs; });
+				auto highlightReceiver = list.group->onHighlightEnter.connect([&](const std::shared_ptr<FocusGroup>&) { ++highlights; });
+				auto rowsFocused = [&]() { return rowOne->clickable->focused() || rowTwo->clickable->focused(); };
+				check_false(glow->visible(), "its highlight shows only while it is selected");
+
+				play->clickable->focus();
+				check_true(mouse.focusMoveWithin(FocusDirection::RIGHT) && list.group->selected() && !rowsFocused(), "a move toward it selects the group as a whole");
+				check_true(glow->visible() && highlights == 1 && mouse.hasFocus() && !play->clickable->focused());
+				check_true(mouse.focusContext() == nullptr, "selected as a whole, it is not yet the group in use");
+				check_true(mouse.focusMoveWithin(FocusDirection::RIGHT) && after->clickable->focused() && !list.group->selected(), "another move passes over it: one stop");
+				check_false(glow->visible());
+				check_true(mouse.focusMoveWithin(FocusDirection::LEFT) && list.group->selected());
+
+				check_true(mouse.focusActivate() && rowOne->clickable->focused() && !list.group->selected(), "activating it goes in, onto its first control");
+				check_true(mouse.focusContext() == list.node.get());
+				check_true(mouse.focusMoveWithin(FocusDirection::DOWN) && rowTwo->clickable->focused(), "moves inside go between its controls");
+				check_false(mouse.focusMoveWithin(FocusDirection::RIGHT) || mouse.focusMoveWithin(FocusDirection::LEFT), "and none leaves it");
+				check_true(rowTwo->clickable->focused());
+				mouse.focusContext();
+
+				check_true(mouse.focusBack() && list.group->selected() && !rowsFocused() && backs == 1, "backing out selects it as a whole again, and its back signal says so");
+				mouse.focusContext();
+				check_false(mouse.focusBack(), "from there, at the top, there is nowhere further back");
+				check_true(mouse.focusActivate() && rowTwo->clickable->focused(), "going in again returns to the control it remembers");
+				mouse.focusContext();
+				mouse.focusBack();
+
+				mouse.focusClear();
+				for (int step = 0; step < 6; ++step) {
+					mouse.focusNext();
+					check_false(rowsFocused(), "walking the order never lands inside it");
+				}
+				rowOne->clickable->focus();
+				check_true(mouse.focusContext() == list.node.get(), "a control inside chosen directly, as a pointer would, is inside at once");
+
+				play->clickable->focus();
+				mouse.focusContext();
+				check_true(mouse.focusWindowNext() && list.group->selected() && !rowsFocused(), "stepping to it selects it as a whole");
+				check_true(mouse.focusWindowNext() && play->clickable->focused(), "and stepping on from it leaves it as any other");
+
+				list.group->explicitSelect(false);
+				check_true(mouse.focusMoveWithin(FocusDirection::RIGHT) && rowOne->clickable->focused(), "without explicitSelect the same move goes straight onto a control inside");
+			});
+
+			test("a controller's triggers step windows, its shoulders step tabs and its south and east buttons go in and out", [] {
 				TwoWindows scene;
 				auto& host = scene.host;
 				auto strip = addGroup(host, scene.right.node, "strip", FocusGroup::Kind::TABS);
@@ -304,9 +379,6 @@ namespace mv_tests {
 				MV::ControllerDevice pad;
 				scene.leftTop->clickable->focus();
 
-				check_false(frame(pad, host, ControllerState().press(ControllerButton::DPAD_RIGHT)), "the d-pad stays in the window");
-				check_true(scene.leftTop->clickable->focused());
-				frame(pad, host, ControllerState());
 				check_false(frame(pad, host, ControllerState().press(ControllerButton::RIGHT_SHOULDER)), "no tabs in this window");
 				frame(pad, host, ControllerState());
 				check_true(frame(pad, host, ControllerState().axis(MV::ControllerAxis::RIGHT_TRIGGER, 1.0f)) && scene.rightTop->clickable->focused(), "the right trigger goes to the next window");
@@ -320,6 +392,18 @@ namespace mv_tests {
 				check_true(frame(pad, host, ControllerState().press(ControllerButton::EAST)) && backs == 1, "east backs out of the window in use");
 				frame(pad, host, ControllerState());
 				check_true(frame(pad, host, ControllerState().axis(MV::ControllerAxis::LEFT_TRIGGER, 1.0f)) && scene.leftTop->clickable->focused(), "the left trigger goes back a window");
+				frame(pad, host, ControllerState());
+				check_true(frame(pad, host, ControllerState().press(ControllerButton::DPAD_RIGHT)) && scene.rightTop->clickable->focused(), "the d-pad flows from one plain window into the next");
+				frame(pad, host, ControllerState());
+
+				scene.left.group->explicitSelect(true);
+				check_true(frame(pad, host, ControllerState().press(ControllerButton::DPAD_LEFT)) && scene.left.group->selected(), "and stops on a window that is selected as a whole");
+				frame(pad, host, ControllerState());
+				check_true(frame(pad, host, ControllerState().press(ControllerButton::SOUTH)) && scene.leftTop->clickable->focused(), "south goes into it");
+				frame(pad, host, ControllerState());
+				check_false(frame(pad, host, ControllerState().press(ControllerButton::DPAD_RIGHT)), "the d-pad cannot leave it");
+				frame(pad, host, ControllerState());
+				check_true(frame(pad, host, ControllerState().press(ControllerButton::EAST)) && scene.left.group->selected(), "and east comes back out to it");
 			});
 		}
 	};

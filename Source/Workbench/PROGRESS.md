@@ -803,6 +803,25 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   backs out past it.
 - Tests: three nesting cases in `focus_group_tests.cpp`.
 
+## Increment 40: Explicit Select, and plain groups are contiguous (2026-11-17)
+- `FocusGroup` saves `explicitSelect` (off unless set) and `highlightView`.
+- Without it a group is contiguous with what is around it. `TapDevice::focusMoveWithin` looks inside the group in
+  use first, so the group's own layout decides, and with nowhere to go there looks a level out: a move flows into
+  a group, between its controls, and out the other side. A plain group no longer holds the d-pad in.
+- With it the group is one stop. A move from outside selects the group as a whole (`selected()`, `onHighlightEnter`
+  / `onHighlightLeave`, and its `highlightView` shows), activating it goes in (`focusEnter`: remembered, else
+  default, else first), no move leaves it, and backing out selects it as a whole again and emits `onBack`.
+  Stepping to it with the triggers selects it as a whole. Its controls are never a stop for a move made outside
+  it, for Tab order or for `focusNearest`; one chosen directly, as a pointer does, is inside at once.
+- A focus candidate may now be a group: `FocusCandidate::group`, and `under(scope)` beside `canTake(scope)`, so
+  nothing casts a subject to find where it is.
+- The pad's d-pad and stick use `focusMoveWithin`; SOUTH on a selected group goes in and EAST comes back out.
+- The window last stepped to counts as in use only while nothing holds the focus.
+- A group's place on screen is the box around the Clickables showing under it, not `Node::screenBounds`, whose
+  child bounds had not caught up with the children's positions in a scene that had never been drawn.
+- Tests: contiguous moves, the explicit group's whole life, the pad going in and out, and the save and load of
+  both new keys. `MV Network`'s unread-timeout test failed once in a full run and passed alone: a timing test.
+
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.
 - Authoring verbs still only in Source/Editor: create node, attach/detach

@@ -337,8 +337,10 @@ namespace MV {
 			changeMode(a_focus, a_scope);
 		}
 		bool result = moveCursor(a_focus, a_dt);
-		// with a pad attached and snapping, the focus is kept to the window in use and put right as windows come and go
-		const void* context = !cursorEnabled && connected() ? a_focus.focusContext(a_scope) : a_scope;
+		// with a pad attached and snapping, the focus is put right as windows come and go
+		if (!cursorEnabled && connected()) {
+			a_focus.focusContext(a_scope);
+		}
 		const auto direction = navigationDirection();
 		navigationStickEngaged = direction.has_value();
 		if (!direction) {
@@ -346,14 +348,14 @@ namespace MV {
 		} else if (!navigationHeld) {
 			navigationHeld = direction;
 			navigationWait = navigationFirstDelay;
-			result = a_focus.focusMove(*direction, context);
+			result = a_focus.focusMoveWithin(*direction, a_scope);
 		} else {
 			// a direction that changes while held waits its turn, so a stick wandering between two does not run
 			navigationHeld = direction;
 			navigationWait -= a_dt;
 			if (navigationWait <= 0.0) {
 				navigationWait = navigationInterval;
-				result = a_focus.focusMove(*direction, context);
+				result = a_focus.focusMoveWithin(*direction, a_scope);
 			}
 		}
 		// in cursor mode SOUTH is the pointer's press and the triggers rest; each is still watched, so one held

@@ -96,8 +96,8 @@ registered. <a href="embedding/02-dynamic-binder.html#three-doors">Three doors</
 <li><strong>The backend is chosen before an engine's first execute.</strong>
 <a href="embedding/03-backends.html#set-backend-must-happen-before-the-first-execute">Backends</a></li>
 <li><strong>A script cannot outlast its limits.</strong> Exceeding the execution budget is terminal: no
-<code>catch</code> sees it. The memory cap raises once per execute as an ordinary catchable error, so a script can free
-memory and continue; a second raise in the same execute is terminal.
+<code>catch</code> sees it, and an entry that outran it never returns a result. The memory cap raises once per execute
+as an ordinary catchable error, so a script can free memory and continue; a second raise in the same execute is terminal.
 <a href="embedding/05-safety-rails.html">Safety Rails</a></li>
 <li><strong>Each way of calling script fails one way.</strong> <code>execute</code> and <code>execute_file</code> throw
 on every failure (<code>jai::parse_error</code>, <code>jai::static_check_error</code>, or a

@@ -89,7 +89,8 @@ sequential execution.
 - **Budget/memory accounting**: each worker has its own `execution_limits`
   (`detail/execution_limits.hpp`); `engine::execution_limits()` resolves to the calling
   worker's accounting through the installed region table, so one worker's allocation bomb
-  raises on that worker (§6).
+  raises on that worker (§6). A worker's budget clock arms what is left of the calling entry's budget, and its builtins
+  count their work against it (`detail/work_budget.hpp`), so a region ends with its entry.
 
 ## 3. Scheduling: shared blocks, results keyed by element (determinism)
 

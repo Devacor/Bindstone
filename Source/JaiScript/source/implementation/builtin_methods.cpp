@@ -21,6 +21,7 @@
 #include <jaiscript/detail/string_methods_more.hpp>
 #include <jaiscript/detail/utf8_methods.hpp>
 #include <jaiscript/detail/binary_data.hpp>
+#include <jaiscript/detail/work_budget.hpp>
 #include <cmath>
 #include <functional>
 #include <unordered_set>
@@ -80,6 +81,7 @@ namespace {
             return out;
         };
         str = tiled(left) + str + tiled(total - left);
+        if (detail::work_meter work(ctx.get_engine()); work.spend_bytes(str.size())) [[unlikely]] { return work.spent(); }
         return ctx.make_value();
     }
     // The argument positions a builtin's callback binds by reference (a script T& parameter, a host T& that writes back):
@@ -131,6 +133,54 @@ namespace {
         }
         if (from != &values) { values = std::move(*from); }
     }
+
+    // A typed buffer's sort under the budget. Up to a_run elements it is std::sort alone. A longer buffer sorts run by run
+    // (each std::sort's) and the runs merge pairwise through one spare buffer, the budget's count taken between runs and
+    // between a merge's blocks: a sort that stops leaves the array holding every element it had, in some order.
+    template <typename Buffer, typename Less>
+    checked_result<void> sort_buffer(Buffer& a_buffer, Less a_less, size_t a_run, detail::work_meter& a_work) {
+        const size_t count = a_buffer.size();
+        if (count <= a_run) {
+            std::sort(a_buffer.begin(), a_buffer.end(), a_less);
+            if (a_work.spend(count * 16)) [[unlikely]] { return a_work.spent(); }
+            return {};
+        }
+        for (size_t low = 0; low < count; low += a_run) {
+            const size_t high = std::min(low + a_run, count);
+            std::sort(a_buffer.begin() + static_cast<std::ptrdiff_t>(low), a_buffer.begin() + static_cast<std::ptrdiff_t>(high), a_less);
+            if (a_work.spend((high - low) * 16)) [[unlikely]] { return a_work.spent(); }
+        }
+        Buffer spare(count);
+        Buffer* from = &a_buffer;
+        Buffer* to = &spare;
+        constexpr size_t block = static_cast<size_t>(detail::k_work_chunk);
+        for (size_t width = a_run; width < count; width *= 2) {
+            for (size_t low = 0; low < count; low += 2 * width) {
+                const size_t mid = std::min(low + width, count), high = std::min(low + 2 * width, count);
+                size_t i = low, j = mid, k = low;
+                while (k < high) {
+                    const size_t stop = std::min(k + block, high);
+                    while (k < stop && i < mid && j < high) {
+                        const bool right = a_less((*from)[j], (*from)[i]);   // the left run's element on a tie: its elements come first
+                        (*to)[k++] = (*from)[right ? j : i];
+                        j += right;
+                        i += !right;
+                    }
+                    while (k < stop && j == high) { (*to)[k++] = (*from)[i++]; }
+                    while (k < stop && i == mid) { (*to)[k++] = (*from)[j++]; }
+                    if (a_work.spend(block)) [[unlikely]] {
+                        if (from != &a_buffer) { a_buffer.swap(spare); }   // the pass's source holds every element
+                        return a_work.spent();
+                    }
+                }
+            }
+            std::swap(from, to);
+        }
+        if (from != &a_buffer) { a_buffer.swap(spare); }
+        return {};
+    }
+    constexpr size_t k_scalar_sort_run = size_t(1) << 17;
+    constexpr size_t k_string_sort_run = size_t(1) << 13;
 
     // C++'s reference return for a builtin that hands back a stored element (front, back, first, last, map get): an
     // object, array or map comes back as a reference to its slot, so binding it to var/auto/T copies, var&/T& and a
@@ -227,8 +277,9 @@ namespace {
         type_info_ptr element_type;
 
         element_callback(const script_value& callback, size_t lead, const script_value& self, engine* eng)
-            : fn(callback, eng), lvalues(0), with_index(false), leading(lead) {
+            : fn(callback, eng), lvalues(0), with_index(false), leading(lead), work(eng) {
             const auto* params = callback_parameters(callback);
+            counted = !params;
             with_index = params && params->size() >= lead + 2;
             lvalues = callback_lvalue_positions(callback, lead + (with_index ? 2 : 1)) & ((1u << (lead + 1)) - 1);   // the index is a value
             if (auto tag = self.get_type_info(); tag && tag->base_type == script_value_type::jai_array_type) {
@@ -238,9 +289,12 @@ namespace {
         }
 
         mutable std::vector<script_value> args;   // one buffer for the builtin's whole run
+        mutable detail::work_meter work{nullptr};
+        bool counted = false;   // a host callable is no call entry, so the walk counts its calls; a script callback's are the backend's
 
         checked_result<script_value> call(const strong_ptr<script_array>& array, size_t i, script_value* lead, engine* eng) const {
             struct release { std::vector<script_value>& a; ~release() { a.clear(); } } done{args};
+            if (counted && work.spend(1)) [[unlikely]] { return work.spent(); }
             if (leading) { args.push_back((lvalues & 1) ? script_value::make_cell_reference(script_value(lead->deref()), eng) : *lead); }
             args.push_back(((lvalues >> leading) & 1) ? script_value::make_element_reference(array, i, eng, element_type) : array->get(i, eng));
             if (with_index) { args.push_back(script_value(static_cast<script_int>(i), eng)); }
@@ -343,6 +397,7 @@ namespace {
             }
         }
         storage->reserve(a_size);
+        detail::work_meter work(eng);
         for (size_t i = old_size; i < a_size; ++i) {
             auto element = a_fill ? detail::convert_container_element(eng, fill, element_type) : value_initialized_element(eng, element_type);
             if (!element || a_context.unwinding()) {
@@ -351,6 +406,10 @@ namespace {
                 return a_context.make_value();
             }
             storage->push(std::move(element.value()));
+            if (work.spend(1)) [[unlikely]] {
+                storage->truncate(old_size);
+                return work.spent();
+            }
         }
         return a_context.make_value();
     }
@@ -366,6 +425,7 @@ namespace {
         if (!detail::container_element_compatible(fill, element_type, eng)) {
             return detail::element_type_error(a_context.get_string_symbolizer(), runtime_error_code::array_element_type_mismatch, "Cannot push '{0}' to array<{1}>", fill, element_type);
         }
+        detail::work_meter work(eng);
         for (size_t i = 0; i < a_count && i < storage->size(); ++i) {
             script_value current = storage->get(i, eng);
             auto in_place = element_type ? detail::user_assign_operator(current, fill, eng, element_type.get()) : detail::var_slot_assign_in_place(current, fill, eng);
@@ -377,6 +437,7 @@ namespace {
                 storage->set(i, std::move(element.value()));
             }
             if (a_context.unwinding()) { return a_context.make_value(); }
+            if (work.spend(1)) [[unlikely]] { return work.spent(); }
         }
         return a_context.make_value();
     }
@@ -622,8 +683,10 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			type_info_ptr element_type = self_type && self_type->base_type == script_value_type::jai_array_type ? self_type->element_type() : nullptr;
 			script_value result = script_value::make_array(element_type, a_context.get_engine());
 			auto& result_node = *result.unchecked_get_array_storage();
+			detail::work_meter work(a_context.get_engine());
 			for (script_int i = start; i < end; ++i) {
 				result_node.push(node->get(static_cast<size_t>(i), a_context.get_engine()).clone_element());
+				if (work.spend(1)) [[unlikely]] { return work.spent(); }
 			}
 			return result;
 		}},
@@ -661,32 +724,40 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			}
 			auto& node = *a_self.unchecked_get_array_storage();
 			auto* backend = detail::engine_access::get_execution_backend(*a_context.get_engine());
+			detail::work_meter work(a_context.get_engine());
 			if (a_args.empty() && node.is_typed() && backend && backend->native_less_available()) {
 				// Direct buffer sorting: no boxing, snapshot or script comparison calls.
+				std::optional<checked_result<void>> sorted;
 				switch (node.kind()) {
 					case script_array::kind_t::i64:
-						std::sort(node.ints().begin(), node.ints().end()); return a_context.make_value();
+						sorted.emplace(sort_buffer(node.ints(), std::less<script_int>{}, k_scalar_sort_run, work));
+						break;
 					case script_array::kind_t::f64:
 						if (std::any_of(node.floats().begin(), node.floats().end(), [](script_float a_value) { return std::isnan(a_value); })) {
-							std::sort(node.floats().begin(), node.floats().end(), [](script_float a_left, script_float a_right) { return detail::float_order(a_left,a_right) < 0; });
-						} else { std::sort(node.floats().begin(), node.floats().end()); }
-						return a_context.make_value();
+							sorted.emplace(sort_buffer(node.floats(), [](script_float a_left, script_float a_right) { return detail::float_order(a_left,a_right) < 0; }, k_scalar_sort_run, work));
+						} else { sorted.emplace(sort_buffer(node.floats(), std::less<script_float>{}, k_scalar_sort_run, work)); }
+						break;
 					case script_array::kind_t::b8:
 					case script_array::kind_t::c8:
 					case script_array::kind_t::u8:
 						// Language chars promote to unsigned bytes (0..255) before <.
-						std::sort(node.bytes().begin(), node.bytes().end()); return a_context.make_value();
+						sorted.emplace(sort_buffer(node.bytes(), std::less<uint8_t>{}, k_scalar_sort_run, work));
+						break;
 					case script_array::kind_t::i8:
-						std::sort(node.bytes().begin(), node.bytes().end(), [](uint8_t a_left, uint8_t a_right) {
+						sorted.emplace(sort_buffer(node.bytes(), [](uint8_t a_left, uint8_t a_right) {
 							return static_cast<int8_t>(a_left) < static_cast<int8_t>(a_right);
-						});
-						return a_context.make_value();
+						}, k_scalar_sort_run, work));
+						break;
 					case script_array::kind_t::str:
-						std::sort(node.strs().begin(), node.strs().end(), [](const strong_ptr<script_string>& a_left, const strong_ptr<script_string>& a_right) {
+						sorted.emplace(sort_buffer(node.strs(), [](const strong_ptr<script_string>& a_left, const strong_ptr<script_string>& a_right) {
 							return *a_left < *a_right;
-						});
-						return a_context.make_value();
+						}, k_string_sort_run, work));
+						break;
 					default: break;
+				}
+				if (sorted) {
+					if (!*sorted) { return sorted->error_value(); }
+					return a_context.make_value();
 				}
 			}
 
@@ -708,6 +779,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			detail::engine_access::run_pin pin(a_context.get_engine());   // the comparisons are the builtin's callbacks
 			try {
 				merge_sort_any_order(values, [&](const script_value& a_left, const script_value& a_right) {
+					if (work.spend(1)) [[unlikely]] { error = work.spent(); throw SortAborted{}; }
 					if (!predicate) {
 						if (!backend) {
 							error = error_propagator{make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator"};
@@ -757,6 +829,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reverse() takes no arguments");
         }
         self.unchecked_get_array_storage()->reverse();
+        if (detail::work_meter work(ctx.get_engine()); work.spend(self.unchecked_array_node()->size())) [[unlikely]] { return work.spent(); }
         return ctx.make_value();
     }},
 
@@ -775,6 +848,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
 
         node.erase_at(static_cast<size_t>(index));
+        if (detail::work_meter work(ctx.get_engine()); work.spend(node.size() - static_cast<size_t>(index))) [[unlikely]] { return work.spent(); }
         return ctx.make_value(true);
     }},
 
@@ -800,12 +874,14 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			? node.materialize_values(ctx.get_engine()) : node.values();
 		std::vector<script_value> kept;
 		kept.reserve(snapshot.size());
+		detail::work_meter work(ctx.get_engine());
 		for (auto& elem : snapshot) {
 			auto call_result = lvalues ? call_with_lvalues(predicate, lvalues, {&elem}, ctx.get_engine()) : predicate({elem});
 			if (!call_result) {
 				return call_result.error_value();
 			}
 			if (ctx.unwinding()) { return ctx.make_value(); }
+			if (work.spend(1)) [[unlikely]] { return work.spent(); }
 			if (call_result.value().is_bool() && call_result.value().unchecked_as_bool()) {
 				++removed_count;          // dropped
 			} else {
@@ -844,9 +920,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (!detail::builtin_memory_charge(eng, total)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
             std::string result;
             result.reserve(total);
+            detail::work_meter work(eng);
             for (size_t i = 0; i < strs.size(); ++i) {
                 if (i) { result += sep; }
                 result += *strs[i];
+                if (work.spend(1 + (sep.size() + strs[i]->size()) / detail::k_work_unit_bytes)) [[unlikely]] { return work.spent(); }
             }
             return ctx.make_value(std::move(result));
         }
@@ -864,8 +942,13 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
         bool first = true;
         std::optional<checked_result<script_value>> stopped;   // an element's to_string() failed or threw
+        detail::work_meter work(eng);
         auto append = [&](const script_value& elem) {
             if (stopped) { return; }
+            if (work.spend(1 + (sep.size() + (elem.is_string() ? elem.unchecked_as_string().size() : 0)) / detail::k_work_unit_bytes)) [[unlikely]] {
+                stopped.emplace(work.spent());
+                return;
+            }
             if (!first) {
                 result += sep;
             }
@@ -1098,7 +1181,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			script_value result = a_context.copy_array_result ? a_self.clone() : script_value(a_self);
 			const auto target = result.unchecked_get_array_storage();
 			const auto input = other.unchecked_get_array_storage();
-			if (target->append_same_kind(*input)) { return a_context.copy_array_result ? result : a_context.make_value(); }
+			detail::work_meter work(eng);
+			if (target->append_same_kind(*input)) {
+				if (work.spend(input->size())) [[unlikely]] { return work.spent(); }
+				return a_context.copy_array_result ? result : a_context.make_value();
+			}
 			auto tag = result.get_type_info();
 			type_info_ptr type = tag ? tag->element_type() : nullptr;
 			if (type && (type->base_type == script_value_type::jai_any_type || type->base_type == script_value_type::jai_null_type)) { type = nullptr; }
@@ -1116,6 +1203,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 					value = std::move(converted.value());
 				}
 				values.push_back(std::move(value));
+				if (work.spend(1)) [[unlikely]] { return work.spent(); }
 			}
 			target->reserve(target->size() + values.size());
 			for (auto& value : values) { target->push(std::move(value)); }
@@ -1145,6 +1233,8 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (!detail::engine_access::execution_limits(*eng).memory_charge(sizeof(script_value))) [[unlikely]] {
             return detail::raise_memory_cap(detail::engine_access::execution_limits(*eng));
         }
+        detail::work_meter work(eng);
+        if (work.spend(node.size() - static_cast<size_t>(index))) [[unlikely]] { return work.spent(); }
         if (!node.is_typed()) {
             node.values().insert(node.values().begin() + static_cast<std::ptrdiff_t>(index), std::move(converted.value()));
             return ctx.make_value();
@@ -1206,8 +1296,10 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         script_value result = script_value::make_array(nullptr, ctx.get_engine());
         auto& arrayPtr = result.unchecked_get_array_storage()->values();
         arrayPtr.reserve(map.size());
+        detail::work_meter work(ctx.get_engine());
         for (const auto& [key, value] : map) {
             arrayPtr.push_back(key.clone_element());
+            if (work.spend(1)) [[unlikely]] { return work.spent(); }
         }
         return result;
     }},
@@ -1220,8 +1312,10 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         script_value result = script_value::make_array(nullptr, ctx.get_engine());
         auto& arrayPtr = result.unchecked_get_array_storage()->values();
         arrayPtr.reserve(map.size());
+        detail::work_meter work(ctx.get_engine());
         for (const auto& [key, value] : map) {
             arrayPtr.push_back(value.clone_element());
+            if (work.spend(1)) [[unlikely]] { return work.spent(); }
         }
         return result;
     }},
@@ -1287,8 +1381,13 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         const auto storage = mapPtr;
         std::vector<script_value> keys;
         keys.reserve(storage->size());
-        for (const auto& [key, value] : *storage) { keys.push_back(key); }
+        detail::work_meter work(ctx.get_engine());
+        for (const auto& [key, value] : *storage) {
+            keys.push_back(key);
+            if (work.spend(1)) [[unlikely]] { return work.spent(); }
+        }
         for (const auto& key : keys) {
+            if (work.spend(2)) [[unlikely]] { return work.spent(); }
             auto found = storage->find(key);
             if (found == storage->end()) { continue; }
             auto call_result = lvalues ? call_map_entry(predicate, lvalues, self, key, ctx.get_engine()) : predicate({key, found->second});
@@ -1326,9 +1425,14 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
         std::vector<script_value> keys;
         keys.reserve(map.size());
-        for (const auto& [key, value] : map) { keys.push_back(key); }
+        detail::work_meter work(ctx.get_engine());
+        for (const auto& [key, value] : map) {
+            keys.push_back(key);
+            if (work.spend(1)) [[unlikely]] { return work.spent(); }
+        }
         std::vector<script_value> rejected;
         for (const auto& key : keys) {
+            if (work.spend(2)) [[unlikely]] { return work.spent(); }
             auto found = map.find(key);
             if (found == map.end()) { continue; }
             auto call_result = lvalues ? call_map_entry(predicate, lvalues, receiver, key, ctx.get_engine()) : predicate({key, found->second});
@@ -1349,6 +1453,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         for (const auto& key : rejected) {
             auto it = source->find(key);
             if (it != source->end()) { source->erase(it); }
+            if (work.spend(2)) [[unlikely]] { return work.spent(); }
         }
         return ctx.make_value();
     }},
@@ -1361,6 +1466,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         script_value result = script_value::make_array(nullptr, ctx.get_engine());
         auto& arrayPtr = result.unchecked_get_array_storage()->values();
         arrayPtr.reserve(map.size());
+        detail::work_meter work(ctx.get_engine());
 
         // Return array of [key, value] pairs
         for (const auto& [key, value] : map) {
@@ -1369,6 +1475,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             pairPtr.push_back(key.clone_element());
             pairPtr.push_back(value.clone_element());
             arrayPtr.push_back(std::move(pair));
+            if (work.spend(4)) [[unlikely]] { return work.spent(); }
         }
         return result;
     }}
@@ -1391,6 +1498,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			auto& text = a_self.unchecked_text_ref(a_context.get_engine());
 			text.reserve(text.size() + extra);
 			for (const auto& argument : a_args) { text.append(argument.unchecked_text()); }
+			if (detail::work_meter work(a_context.get_engine()); work.spend_bytes(text.size())) [[unlikely]] { return work.spent(); }
 			return a_context.make_value();
 		}},
         // ============================================================
@@ -1734,8 +1842,10 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
             script_int count = 0;
             size_t pos = 0;
-            while ((pos = str.find(search, pos)) != std::string::npos) {
+            detail::work_meter work(ctx.get_engine());
+            for (size_t last = 0; (pos = str.find(search, pos)) != std::string::npos; last = pos) {
                 ++count;
+                if (work.spend(1 + (pos - last) / detail::k_work_unit_bytes)) [[unlikely]] { return work.spent(); }
                 pos += search.size();  // Non-overlapping
             }
             return ctx.make_value(count);
@@ -1812,6 +1922,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                     c = c + ('a' - 'A');
                 }
             }
+            if (detail::work_meter work(ctx.get_engine()); work.spend_bytes(str.size())) [[unlikely]] { return work.spent(); }
             return ctx.make_value();
         }},
 
@@ -1825,6 +1936,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                     c = c - ('a' - 'A');
                 }
             }
+            if (detail::work_meter work(ctx.get_engine()); work.spend_bytes(str.size())) [[unlikely]] { return work.spent(); }
             return ctx.make_value();
         }},
 
@@ -1974,7 +2086,13 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             // One pass builds the result: replacing in place shifts the tail at every hit, quadratic in the hits
             auto& str = self.unchecked_text_ref(ctx.get_engine());
             size_t hits = 0;
-            for (size_t at = str.find(old_str); at != std::string::npos; at = str.find(old_str, at + old_str.size())) { ++hits; }
+            detail::work_meter work(ctx.get_engine());
+            for (size_t at = str.find(old_str), last = 0; at != std::string::npos; at = str.find(old_str, at + old_str.size())) {
+                ++hits;
+                if (work.spend(1 + (at - last) / detail::k_work_unit_bytes)) [[unlikely]] { return work.spent(); }
+                last = at;
+            }
+            if (work.spend_bytes(str.size())) [[unlikely]] { return work.spent(); }
             if (hits == 0) { return ctx.make_value(); }
             if (new_str.size() > old_str.size() && !detail::builtin_memory_charge(ctx.get_engine(), hits, new_str.size() - old_str.size())) [[unlikely]] {
                 return detail::builtin_memory_cap(ctx.get_engine());
@@ -1985,6 +2103,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             for (size_t hit = str.find(old_str); hit != std::string::npos; hit = str.find(old_str, at)) {
                 out.append(str, at, hit - at);
                 out += new_str;
+                if (work.spend(1 + (hit - at + new_str.size()) / detail::k_work_unit_bytes)) [[unlikely]] { return work.spent(); }
                 at = hit + old_str.size();
             }
             out.append(str, at, std::string::npos);
@@ -2100,6 +2219,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             }
             auto& str = self.unchecked_text_ref(ctx.get_engine());
             std::reverse(str.begin(), str.end());
+            if (detail::work_meter work(ctx.get_engine()); work.spend_bytes(str.size())) [[unlikely]] { return work.spent(); }
             return ctx.make_value();
         }},
 
@@ -2128,8 +2248,13 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             std::string original = str;
             str.clear();
             str.reserve(detail::saturating_text_size(original.size(), detail::saturating_count(count)));
+            detail::work_meter work(ctx.get_engine());
             for (script_int i = 0; i < count; ++i) {
                 str += original;
+                if (work.spend(1 + original.size() / detail::k_work_unit_bytes)) [[unlikely]] {
+                    str = std::move(original);
+                    return work.spent();
+                }
             }
             return ctx.make_value();
         }},
@@ -2172,8 +2297,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             script_array& result = *array_val.unchecked_get_array_storage();   // array<string> is a handle buffer: push through the node
             // each piece is the array's growth (engine::memory_cap): a denied piece is never added
             auto& limits = detail::engine_access::execution_limits(*eng);
+            detail::work_meter work(eng);
+            bool spent = false;
             auto push_piece = [&](size_t a_at, size_t a_count) {
                 const size_t length = std::min(a_count, str.size() - a_at);
+                if (work.spend(1 + length / detail::k_work_unit_bytes)) [[unlikely]] { spent = true; return false; }
                 if (!limits.memory_charge(sizeof(script_value) + length)) [[unlikely]] { return false; }
                 result.strs().push_back(make_strong<script_string>(str, a_at, length));   // the piece's handle, as push stores a string
                 return true;
@@ -2187,19 +2315,19 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                     while (at < str.size() && is_string_whitespace(str[at])) { ++at; }
                     if (at == str.size()) { break; }
                     if (max_splits >= 0 && splits == max_splits) {
-                        if (!push_piece(at, std::string::npos)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
+                        if (!push_piece(at, std::string::npos)) [[unlikely]] { return spent ? work.spent() : detail::builtin_memory_cap(eng); }
                         break;
                     }
                     size_t end = at;
                     while (end < str.size() && !is_string_whitespace(str[end])) { ++end; }
-                    if (!push_piece(at, end - at)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
+                    if (!push_piece(at, end - at)) [[unlikely]] { return spent ? work.spent() : detail::builtin_memory_cap(eng); }
                     at = end;
                     ++splits;
                 }
             } else if (delim.empty()) {
                 // Split into individual characters
                 for (size_t at = 0; at < str.size(); ++at) {
-                    if (!push_piece(at, 1)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
+                    if (!push_piece(at, 1)) [[unlikely]] { return spent ? work.spent() : detail::builtin_memory_cap(eng); }
                 }
             } else {
                 size_t pieces = 1;   // counted first: one sized buffer
@@ -2209,11 +2337,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 size_t end;
                 script_int splits = 0;
                 while ((max_splits < 0 || splits < max_splits) && (end = str.find(delim, start)) != std::string::npos) {
-                    if (!push_piece(start, end - start)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
+                    if (!push_piece(start, end - start)) [[unlikely]] { return spent ? work.spent() : detail::builtin_memory_cap(eng); }
                     start = end + delim.size();
                     ++splits;
                 }
-                if (!push_piece(start, std::string::npos)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
+                if (!push_piece(start, std::string::npos)) [[unlikely]] { return spent ? work.spent() : detail::builtin_memory_cap(eng); }
             }
 
             return array_val;

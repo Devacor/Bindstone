@@ -1,6 +1,7 @@
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/math_values.hpp>
+#include <jaiscript/detail/work_budget.hpp>
 
 namespace jai::serialization {
 
@@ -171,7 +172,9 @@ void binary_archive_writer::write_value(const script_value& root) {
     std::vector<value_frame> frames;
     if (!begin_value(root, frames)) { return; }
     script_value scratch(std::monostate{}, engine_ref_);
+    detail::work_meter work(counts_work_ ? engine_ref_ : nullptr);
     while (!frames.empty()) {
+        if (work.spend(2)) [[unlikely]] { work.throw_spent(); }
         const script_value* child = next_child(frames.back(), scratch);
         if (!child) {
             frames.pop_back();
@@ -737,7 +740,11 @@ script_value binary_archive_reader::read_value_internal() {
         throw serialization_error("Engine reference expired during deserialization");
     }
     std::vector<value_frame> frames;
+    detail::work_meter work(counts_work_ ? eng : nullptr);
+    size_t counted = pos_;
     for (;;) {
+        if (work.spend(1 + (pos_ - counted) / detail::k_work_unit_bytes)) [[unlikely]] { work.throw_spent(); }
+        counted = pos_;
         script_value value(std::monostate{}, eng);
         if (!read_or_open(eng, frames, value)) { continue; }
         for (;;) {

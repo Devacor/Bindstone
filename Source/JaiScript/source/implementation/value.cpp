@@ -6,6 +6,7 @@
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
+#include <jaiscript/detail/work_budget.hpp>
 #include <jaiscript/detail/member_scope.hpp>
 #include <jaiscript/detail/string_element.hpp>
 #include <jaiscript/detail/math_values.hpp>
@@ -590,6 +591,49 @@ engine* owner_of(const Handle& a_handle) noexcept {
 // engine::memory_cap: a copy's fresh storage counts toward its engine's allowance (raised at the next loop back-edge)
 void charge_deferred(engine* a_engine, size_t a_bytes) {
     if (a_engine) { detail::engine_access::execution_limits(*a_engine).memory_charge_deferred(a_bytes); }
+}
+JAI_NOINLINE void copy_budget_check(engine* a_engine, size_t a_units) {
+    if (detail::charge_work(*a_engine, a_units)) { detail::throw_work_budget(*a_engine); }
+}
+// A copied container: its storage counts toward the memory allowance, its elements toward the budget's work count
+// (detail/work_budget.hpp). A copy that finds the budget spent leaves as the terminal budget error.
+void charge_copy(engine* a_engine, size_t a_bytes, size_t a_units) {
+    if (!a_engine) { return; }
+    detail::execution_limits& limits = detail::engine_access::execution_limits(*a_engine);
+    limits.memory_charge_deferred(a_bytes);
+    if (a_units >= detail::k_work_chunk - limits.work_units) [[unlikely]] { copy_budget_check(a_engine, a_units); return; }
+    limits.work_units += static_cast<uint32_t>(a_units);
+}
+// A container of a chunk's elements or more counts them as its loop copies them, a chunk at a time
+constexpr size_t k_copy_chunk = static_cast<size_t>(detail::k_work_chunk);
+constexpr size_t copy_units_ahead(size_t a_count) noexcept { return a_count < k_copy_chunk ? a_count + 1 : 0; }
+JAI_FORCEINLINE void copy_step(engine* a_engine, size_t a_count, size_t a_index) {
+    if (a_count >= k_copy_chunk && (a_index & (k_copy_chunk - 1)) == k_copy_chunk - 1) [[unlikely]] { charge_copy(a_engine, 0, k_copy_chunk); }
+}
+// A typed buffer's copy: one assignment below a chunk of bytes, else run by run with the count between them
+template <typename Buffer>
+void copy_buffer(Buffer& a_to, const Buffer& a_from, engine* a_engine, size_t a_unit_bytes) {
+    const size_t count = a_from.size();
+    if (count * a_unit_bytes < k_copy_chunk * detail::k_work_unit_bytes) {
+        a_to = a_from;
+        return;
+    }
+    a_to.reserve(count);
+    for (size_t at = 0; at < count;) {
+        const size_t run = detail::work_meter::run_of(count - at, a_unit_bytes);
+        a_to.insert(a_to.end(), a_from.begin() + static_cast<std::ptrdiff_t>(at), a_from.begin() + static_cast<std::ptrdiff_t>(at + run));
+        at += run;
+        charge_copy(a_engine, 0, run * a_unit_bytes / detail::k_work_unit_bytes);
+    }
+}
+// script_array::assign_buffer with the budget's count
+void copy_typed_buffer(script_array& a_to, const script_array& a_from) {
+    switch (a_from.kind()) {
+        case script_array::kind_t::i64: copy_buffer(a_to.ints(), a_from.ints(), a_from.owner, sizeof(script_int)); break;
+        case script_array::kind_t::f64: copy_buffer(a_to.floats(), a_from.floats(), a_from.owner, sizeof(script_float)); break;
+        case script_array::kind_t::str: copy_buffer(a_to.strs(), a_from.strs(), a_from.owner, detail::k_work_unit_bytes); break;
+        default: copy_buffer(a_to.bytes(), a_from.bytes(), a_from.owner, 1); break;
+    }
 }
 }
 
@@ -1544,9 +1588,12 @@ void script_value::clone_subtree_into(script_value& dest) const {
     constexpr unsigned stepped = detail::k_inline_copy_depth + 1;
     detail::deep_copy_work work;
     dest = clone_level(work, stepped);
+    engine* const eng = payload_engine();
+    size_t steps = 0;
     while (!work.empty()) {
         const detail::deep_copy_item item = work.back();
         work.pop_back();
+        if ((++steps & (detail::k_work_grain - 1)) == 0) { charge_copy(eng, 0, detail::k_work_grain); }
         switch (item.what) {
             case step::value:
                 *static_cast<script_value*>(item.dest) = static_cast<const script_value*>(item.source)->clone_level(work, stepped);
@@ -1630,7 +1677,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                 // object slots keep value semantics: every element deep-clones (shared_ptr
                 // elements share, as clone_element already decides), the tag rides along
                 const size_t n = other_node.size();
-                charge_deferred(other_node.owner, sizeof(obj_slot) * (n + 1));
+                charge_copy(other_node.owner, sizeof(obj_slot) * (n + 1), copy_units_ahead(n));
                 auto new_node = make_strong<script_array>(script_array::kind_t::obj);
                 new_node->owner = other_node.owner;
                 new_node->reserve(n);
@@ -1649,6 +1696,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                             element.clone_subtree_into(copied);
                             new_node->push(std::move(copied));
                         }
+                        copy_step(other_node.owner, n, i);
                     }
                 }
                 result.storage_ = new_node;
@@ -1656,28 +1704,32 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             }
             if (other_node.is_typed()) {
                 // kind-preserving deep copy = one buffer copy (8B/element)
-                charge_deferred(other_node.owner, sizeof(script_int) * (other_node.size() + 1));
+                const size_t bytes = sizeof(script_int) * (other_node.size() + 1);
+                charge_copy(other_node.owner, bytes, copy_units_ahead(bytes / detail::k_work_unit_bytes));
                 auto new_node = make_strong<script_array>(other_node.kind());
                 new_node->owner = other_node.owner;
-                new_node->assign_buffer(other_node);
+                copy_typed_buffer(*new_node, other_node);
                 result.storage_ = new_node;
                 break;
             }
             const auto& other_array = other_node.values();
             // element clones charge themselves recursively
-            charge_deferred(other_node.owner, sizeof(script_value) * (other_array.size() + 1));
+            const size_t n = other_array.size();
+            charge_copy(other_node.owner, sizeof(script_value) * (n + 1), copy_units_ahead(n));
             auto new_node = make_strong<script_array>();
             new_node->owner = other_node.owner;
             auto& copied = new_node->values();
-            copied.reserve(other_array.size());   // no reallocation: a deferred element's placeholder stays where it is
+            copied.reserve(n);   // no reallocation: a deferred element's placeholder stays where it is
             const size_t first_step = work.size();
-            for (const auto& elem : other_array) {
+            for (size_t i = 0; i < n; ++i) {
+                const script_value& elem = other_array[i];
                 if (elem.element_copies_shallow()) {
                     copied.push_back(elem);
                 } else {
                     copied.push_back(script_value(std::monostate{}, other_node.owner));
                     elem.clone_element_into(copied.back(), work, depth);
                 }
+                copy_step(other_node.owner, n, i);
             }
             std::reverse(work.begin() + static_cast<ptrdiff_t>(first_step), work.end());
             result.storage_ = new_node;
@@ -1686,7 +1738,8 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
         case script_value_type::jai_map_type: {
             auto& other_map = *storage_.get<strong_ptr<script_map>>();
             // key/value clones charge themselves recursively
-            charge_deferred(other_map.owner, 2 * sizeof(script_value) * (other_map.size() + 1));
+            const size_t n = other_map.size();
+            charge_copy(other_map.owner, 2 * sizeof(script_value) * (n + 1), copy_units_ahead(n));
             auto new_map = make_strong<script_map>(other_map.owner);
             if (depth > detail::k_inline_copy_depth) {
                 // an entry is one step (its key, then its value's whole copy) so keys and values interleave as below
@@ -1696,6 +1749,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                 result.storage_ = new_map;
                 break;
             }
+            size_t i = 0;
             for (const auto& [key, value] : other_map) {
                 if (value.element_copies_shallow()) {
                     new_map->emplace(key.clone_element(), value);
@@ -1703,6 +1757,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                     auto placed = new_map->emplace(key.clone_element(), script_value(std::monostate{}, other_map.owner));
                     value.clone_element_into(placed.first->second, work, depth);   // map entries never move
                 }
+                copy_step(other_map.owner, n, i++);
             }
             result.storage_ = new_map;
             break;

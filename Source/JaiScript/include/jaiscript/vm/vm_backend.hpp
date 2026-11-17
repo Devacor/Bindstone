@@ -124,6 +124,8 @@ namespace jai::vm {
         void set_execution_budget(std::chrono::nanoseconds budget) override;
         void extend_execution_deadline(std::chrono::nanoseconds by) override { if (budget_active_) { execution_deadline_ += by; } }
         std::chrono::steady_clock::time_point execution_deadline() const override { return budget_active_ ? execution_deadline_ : std::chrono::steady_clock::time_point{}; }
+        bool budget_spent_now() override;
+        bool budget_overrun_at_return() override;
         void set_has_custom_numeric_ops(bool value) override { has_custom_numeric_ops_ = value; }
         void set_has_custom_binary_ops(bool value) override { has_custom_binary_ops_ = value; }
         void set_operator_table(const detail::engine_operator_table* table) override { operator_table_ = table; }

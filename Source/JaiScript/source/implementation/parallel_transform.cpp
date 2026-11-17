@@ -5988,6 +5988,12 @@ struct region_run {
 		if (worker_count > n) { worker_count = n; }
 		if (n < k_parallel_small_n) { worker_count = 1; }
 		budget = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(eng.execution_budget()));
+		// The region runs inside the caller's entry: its workers arm what is left of that entry's budget, so the region ends with it
+		if (const execution_backend* caller = engine_access::get_execution_backend(eng)) {
+			const auto deadline = caller->execution_deadline();
+			const auto now = std::chrono::steady_clock::now();
+			if (deadline > now) { budget = std::min(budget, std::chrono::duration_cast<std::chrono::nanoseconds>(deadline - now)); }
+		}
 		use_vm = eng.get_backend_type() == backend_type::vm;
 		state.faults.checkpoint("region.pool_storage");
 		pool = &acquire_region_pool(state, static_cast<const void*>(plan.root_fn->body.get()), use_vm);

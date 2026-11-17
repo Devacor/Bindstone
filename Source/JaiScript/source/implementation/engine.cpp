@@ -19,6 +19,7 @@
 #include <jaiscript/detail/aggregate_lowering.hpp>
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
+#include <jaiscript/detail/work_budget.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
 #include <jaiscript/thread_pool.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>   // jaibite save/load
@@ -3656,6 +3657,7 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
             if (be->is_executing()) { be->park_nested_failure(); }
             throw without_category_suffix(be->get_current_exception());
         }
+        if (!nested && be->budget_overrun_at_return()) [[unlikely]] { throw script_exception(std::string(detail::raise_execution_budget(impl->limits_).static_msg)); }
 
         // No need to sync globals - they're already in the shared environment!
 
@@ -5699,6 +5701,25 @@ detail::execution_limits& engine::execution_limits() noexcept {
     return impl->limits_;
 }
 
+bool detail::charge_work(engine& a_engine, size_t a_units) {
+    detail::execution_limits& limits = engine_access::execution_limits(a_engine);
+    if (a_units < k_work_chunk - limits.work_units) [[likely]] {
+        limits.work_units += static_cast<uint32_t>(a_units);
+        return false;
+    }
+    limits.work_units = 0;
+    execution_backend* backend = engine_access::calling_backend(a_engine);
+    return backend && backend->is_executing() && backend->budget_spent_now();
+}
+
+error_propagator detail::work_budget_error(engine& a_engine) noexcept {
+    return raise_execution_budget(engine_access::execution_limits(a_engine));
+}
+
+void detail::throw_work_budget(engine& a_engine) {
+    throw script_exception(std::string(work_budget_error(a_engine).static_msg));
+}
+
 detail::parallel_engine_state& engine::parallel_state() {
     if (!impl->parallel_) {
         impl->parallel_ = std::make_unique<detail::parallel_engine_state>();
@@ -6047,6 +6068,7 @@ checked_result<script_value> engine::checked_host_entry(host_entry_body run, voi
         if (result.has_value() && backend->is_unwinding()) [[unlikely]] {   // an uncaught script throw: its text, as execute() throws it
             return failure(without_category_suffix(backend->get_current_exception()).what());
         }
+        if (result.has_value() && backend->budget_overrun_at_return()) [[unlikely]] { return detail::raise_execution_budget(impl->limits_); }
         return result;
     } catch (const std::exception& e) {   // a nested run's failure (an import that is missing or fails its check) leaves as an exception
         return failure(e.what());

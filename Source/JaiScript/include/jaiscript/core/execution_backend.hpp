@@ -311,6 +311,11 @@ public:
     virtual void extend_execution_deadline(std::chrono::nanoseconds) = 0;
     // The running execute's deadline (a default time point when no budget is armed): what the extension moved, read as is
     virtual std::chrono::steady_clock::time_point execution_deadline() const = 0;
+    // One read of the clock for the running entry, between the backend's own samples (detail::budget_clock_spent): a builtin's
+    // work poll asks it (detail/work_budget.hpp). True once the budget is spent, the terminal latch set.
+    virtual bool budget_spent_now() = 0;
+    // A host entry about to hand the host a success: true when it outran its budget (detail::budget_overrun_at_return)
+    virtual bool budget_overrun_at_return() = 0;
     virtual void set_has_custom_numeric_ops(bool value) = 0;
     // ANY user binary-operator / "[]" override registered: transient subscript reads fall
     // back to the reference mint (see detail/transient_read.hpp).

@@ -3,6 +3,7 @@
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/math_values.hpp>
 #include <jaiscript/detail/text_hash.hpp>
+#include <jaiscript/detail/work_budget.hpp>
 #include <array>
 #include <charconv>     // std::to_chars for shortest round-trippable float output
 #include <cmath>
@@ -266,6 +267,8 @@ void json_archive_writer::write_value(const script_value& root) {
     const int depth_at_entry = json_depth_;
     begin_value(root, frames);
     script_value scratch(std::monostate{}, engine_ref_);
+    detail::work_meter work(counts_work_ ? engine_ref_ : nullptr);
+    size_t counted = out_.size();
     while (!frames.empty()) {
         const script_value* child = next_child(frames.back(), scratch);
         if (aborted_) [[unlikely]] {
@@ -273,6 +276,8 @@ void json_archive_writer::write_value(const script_value& root) {
             aborted_ = false;
             return;
         }
+        if (work.spend(1 + (out_.size() - counted) / detail::k_work_unit_bytes)) [[unlikely]] { work.throw_spent(); }
+        counted = out_.size();
         if (child) {
             begin_value(*child, frames);
         } else {
@@ -636,7 +641,8 @@ void json_archive_writer::write_newline() {
         out_ += '\n';
     }
 }
-json_archive_reader::json_archive_reader(std::string_view json_string, engine* eng) : archive_reader_impl<json_archive_reader>(eng) {
+json_archive_reader::json_archive_reader(std::string_view json_string, engine* eng, bool count_work) :
+    archive_reader_impl<json_archive_reader>(eng), counts_work_(count_work) {
     if (!eng) {
         throw serialization_error("json_archive_reader requires a valid engine reference");
     }
@@ -1070,7 +1076,9 @@ script_value json_archive_reader::materialize(uint32_t idx) {
     };
     script_value leaf(std::monostate{}, eng);
     if (open(idx, leaf)) { return leaf; }
+    detail::work_meter work(counts_work_ ? eng : nullptr);
     for (;;) {
+        if (work.spend(1)) [[unlikely]] { work.throw_spent(); }
         frame& top = frames.back();
         const JNode& node = nodes_[top.node];
         if (top.next < node.u.agg.count) {
@@ -1123,7 +1131,11 @@ void json_archive_reader::push_container(JTag tag, size_t mark) {
 void json_archive_reader::parse_value_flat() {
     struct open_container { JTag tag; size_t mark; };
     std::vector<open_container> open;
+    detail::work_meter work(counts_work_ ? engine_ref_ : nullptr);
+    size_t counted = pos_;
     for (;;) {
+        if (work.spend(1 + (pos_ - counted) / detail::k_work_unit_bytes)) [[unlikely]] { work.throw_spent(); }
+        counted = pos_;
         skip_whitespace();
         if (pos_ >= json_.length()) {
             throw serialization_error("Unexpected end of JSON");

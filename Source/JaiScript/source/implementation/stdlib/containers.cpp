@@ -5,6 +5,7 @@
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/container_enforce.hpp>
 #include <jaiscript/detail/map_entry_binding.hpp>
+#include <jaiscript/detail/work_budget.hpp>
 
 namespace jai {
 namespace stdlib {
@@ -52,12 +53,18 @@ namespace stdlib {
 		using Entry = std::pair<script_value, script_value>;
 		std::vector<Entry> entries;
 		entries.reserve(a_left.unchecked_as_map().size() + a_right.unchecked_as_map().size());
+		detail::work_meter work(engine);
 		// Decide the output before copying: an overwritten input value is only read.
 		for (const auto& [key,value] : a_left.unchecked_as_map()) {
 			if (a_right.unchecked_as_map().find(key) == a_right.unchecked_as_map().end()) { entries.emplace_back(key,value); }
+			if (work.spend(2)) [[unlikely]] { return work.spent(); }
 		}
-		for (const auto& [key,value] : a_right.unchecked_as_map()) { entries.emplace_back(key,value); }
+		for (const auto& [key,value] : a_right.unchecked_as_map()) {
+			entries.emplace_back(key,value);
+			if (work.spend(1)) [[unlikely]] { return work.spent(); }
+		}
 		for (const auto& [key,value] : entries) {
+			if (work.spend(4)) [[unlikely]] { return work.spent(); }
 			if (keyType && keyType->base_type != script_value_type::jai_any_type && keyType->base_type != script_value_type::jai_null_type &&
 			    !detail::map_key_kind_admits(key.type(), detail::map_key_kind(*keyType))) {
 				return checked_result<script_value>(make_error_code(runtime_error_code::map_key_type_mismatch), "Cannot use '{0}' as a key of type '{1}'", detail::engine_access::symbolize(*engine, detail::container_value_type_name(key)), detail::engine_access::symbolize(*engine, detail::type_info_display_name(keyType)));

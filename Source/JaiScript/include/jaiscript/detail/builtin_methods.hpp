@@ -5,6 +5,7 @@
 
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
+#include <jaiscript/detail/work_budget.hpp>
 #include <functional>
 #include <unordered_map>
 #include <unordered_set>
@@ -155,7 +156,9 @@ namespace jai {
         inline checked_result<std::optional<script_int>> array_index_of_equal(const builtin_method_context& ctx, const script_value& self, const script_value& probe_in) {
             const script_array* node = self.unchecked_array_node();
             const script_value& probe = probe_in.deref();
+            work_meter work(ctx.get_engine());
             for (size_t i = 0; i < node->size(); ++i) {
+                if (work.spend(1)) [[unlikely]] { return work.spent(); }
                 const script_value elem = node->get(i, ctx.get_engine());
                 const script_value& e = elem.deref();
                 bool equal = false;

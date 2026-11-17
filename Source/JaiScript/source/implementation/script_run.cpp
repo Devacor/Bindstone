@@ -314,6 +314,9 @@ checked_result<script_value> engine::sleep_builtin(const script_value& a_seconds
         execution_limits().terminal_error = true;
         return checked_result<script_value>(make_error_code(runtime_error_code::run_cancelled), detail::k_run_cancelled);
     }
+    if (execution_backend* backend = get_execution_backend(); backend && backend->budget_overrun_at_return()) [[unlikely]] {   // a slice that outran its budget does not suspend
+        return detail::raise_execution_budget(execution_limits());
+    }
     const std::chrono::nanoseconds now = time().monotonic_now();
     run->sleep_started = now;
     run->wake = now + duration;

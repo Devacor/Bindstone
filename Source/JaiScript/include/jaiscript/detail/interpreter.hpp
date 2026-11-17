@@ -182,7 +182,7 @@ namespace jai {
 
         // ===== Execution budget (engine::execution_budget) =====
         // A top-level execute()/next() that runs past the armed deadline raises a
-        // catchable runtime error. Ticked at loop back-edges and call entry; the clock
+        // terminal runtime error. Ticked at loop back-edges and call entry; the clock
         // is only sampled every 1024 ticks so the hot path pays one increment+branch.
         void set_execution_budget(std::chrono::nanoseconds budget) override {
             execution_budget_ = budget;
@@ -191,6 +191,10 @@ namespace jai {
         std::chrono::nanoseconds execution_budget() const { return execution_budget_; }
         void extend_execution_deadline(std::chrono::nanoseconds by) override { if (budget_active_) { execution_deadline_ += by; } }
         std::chrono::steady_clock::time_point execution_deadline() const override { return budget_active_ ? execution_deadline_ : std::chrono::steady_clock::time_point{}; }
+        // An armed debug session suspends the wall-clock deadline (a paused script must not be killed by the act of
+        // debugging); sync_debug_hook re-arms a fresh deadline when the session ends.
+        bool budget_spent_now() override { return detail::budget_clock_spent(*limits_, budget_active_ && !debug_hook_, execution_deadline_); }
+        bool budget_overrun_at_return() override { return detail::budget_overrun_at_return(*limits_, budget_active_ && !debug_hook_, execution_deadline_); }
 
         void arm_execution_deadline() {
             budget_tick_ = 0;
@@ -995,17 +999,7 @@ namespace jai {
             if (debugger_.load(std::memory_order_relaxed) || debug_hook_) [[unlikely]] {
                 sync_debug_hook();
             }
-            // An armed debug session suspends the wall-clock deadline (a paused script
-            // must not be killed by the act of debugging); sync_debug_hook re-arms a
-            // fresh deadline when the session ends.
-            const auto now = std::chrono::steady_clock::now();
-            limits_->note_clock_sample(now);
-            if (limits_->step_budget_spent()) [[unlikely]] { limits_->terminal_error = true; return true; }   // the clock-free bound (vm twin)
-            if (!budget_active_ || debug_hook_) { return false; }
-            if (now < execution_deadline_) { return false; }
-            // Budget overruns are TERMINAL: no script catch may swallow a timeout
-            limits_->terminal_error = true;
-            return true;
+            return detail::budget_clock_spent(*limits_, budget_active_ && !debug_hook_, execution_deadline_);
         }
 
         // Combined limit check at loop back-edges / call entry: the budget tick plus a

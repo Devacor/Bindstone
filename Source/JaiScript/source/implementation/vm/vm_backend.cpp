@@ -366,19 +366,21 @@ bool vm_backend::execution_budget_exhausted() {
 	if (debug_controller_.load(std::memory_order_relaxed) || debug_hook_) [[unlikely]] {
 		sync_debug_hook();
 	}
-	// An armed debug session suspends the wall-clock deadline (a parked script must not
-	// be killed by the act of debugging); sync_debug_hook re-arms fresh on session end.
-	const auto now = std::chrono::steady_clock::now();
-	limits_->note_clock_sample(now);
+	return budget_spent_now();
+}
+
+// An armed debug session suspends the wall-clock deadline (a parked script must not be killed by the act of debugging);
+// sync_debug_hook re-arms fresh on session end.
+bool vm_backend::budget_spent_now() {
+	if (!detail::budget_clock_spent(*limits_, budget_active_ && !debug_hook_, execution_deadline_)) [[likely]] { return false; }
 	// a spent budget stays spent and the next poll checks again (budget_tick_ re-armed): a block's inner back edge that finds it misses onto
 	// the general form, whose poll raises (the interpreter, which has no blocks, takes no re-arm)
-	if (limits_->step_budget_spent()) [[unlikely]] { limits_->terminal_error = true; budget_tick_ = 1023; return true; }   // the clock-free bound (interpreter twin)
-	if (!budget_active_ || debug_hook_) { return false; }
-	if (now < execution_deadline_) { return false; }
-	// Budget overruns are TERMINAL: no script catch may swallow a timeout
-	limits_->terminal_error = true;
 	budget_tick_ = 1023;
 	return true;
+}
+
+bool vm_backend::budget_overrun_at_return() {
+	return detail::budget_overrun_at_return(*limits_, budget_active_ && !debug_hook_, execution_deadline_);
 }
 
 void vm_backend::sync_debug_hook() {

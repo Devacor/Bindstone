@@ -4,6 +4,7 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
+#include <jaiscript/detail/work_budget.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/convenience.hpp>
@@ -200,7 +201,9 @@ namespace stdlib {
 
 	inline void index_archive_handles(engine* eng, const script_value& root, archive_handles& handles) {
 		std::vector<script_value> pending{root};
+		detail::work_meter work(eng);
 		while (!pending.empty()) {
+			if (work.spend(1)) [[unlikely]] { work.throw_spent(); }
 			script_value value = std::move(pending.back());
 			pending.pop_back();
 			if (value.is_map()) {
@@ -248,7 +251,9 @@ namespace stdlib {
 		script_value rebuild_walk(const script_value& value, script_int handle_id) {
 			script_value result(std::monostate{}, eng_);
 			if (open(value, handle_id, result)) { return result; }
+			detail::work_meter work(eng_);
 			for (;;) {
+				if (work.spend(2)) [[unlikely]] { work.throw_spent(); }
 				if (!frames_.back().finished && advance()) { continue; }
 				script_value done = finish(frames_.back());
 				frames_.pop_back();
@@ -564,12 +569,14 @@ namespace stdlib {
         eng_ref.add_variadic_function("to_json", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() == 1) {
                 serialization::json_archive_writer writer(-1, eng); // No indentation, with engine ref
+                writer.count_work();
                 writer.write_value(args[0]);
                 return script_value(writer.take(), eng);
             } else if (args.size() == 2) {
                 int indent = static_cast<int>(args[1].as_int());
                 serialization::json_archive_writer writer(indent, eng);
                 writer.charge_indentation();
+                writer.count_work();
                 writer.write_value(args[0]);
                 return script_value(writer.take(), eng);
             } else {
@@ -579,7 +586,7 @@ namespace stdlib {
         
 		eng_ref.add_function("from_json", [eng](const std::string& json) -> script_value {
 			detail::engine_access::load_session session(eng);
-			serialization::json_archive_reader reader(json, eng);
+			serialization::json_archive_reader reader(json, eng, true);
 			script_value parsed = reader.read_value();
 			// a text with no '$' key holds no archive record: the parse is the value the rebuild would copy out
 			script_value result = reader.has_archive_keys() ? load_archive_value(eng, parsed, true) : std::move(parsed);
@@ -593,6 +600,7 @@ namespace stdlib {
             }
 
             serialization::binary_archive_writer writer(eng);
+            writer.count_work();
             writer.write_value(args[0]);
 
             const auto& data = writer.data();
@@ -614,6 +622,7 @@ namespace stdlib {
 
             detail::engine_access::load_session session(eng);
             serialization::binary_archive_reader reader(data, eng);
+            reader.count_work();
 			script_value result = load_archive_value(eng, reader.read_value(), false);
 			session.complete();
 			return result;
@@ -625,6 +634,7 @@ namespace stdlib {
             }
 
             serialization::binary_archive_writer writer(eng);
+            writer.count_work();
             writer.write_value(args[0]);
 
             const auto& data = writer.data();
@@ -638,6 +648,7 @@ namespace stdlib {
 
             detail::engine_access::load_session session(eng);
             serialization::binary_archive_reader reader(data, eng);
+            reader.count_work();
 			script_value result = load_archive_value(eng, reader.read_value(), false);
 			session.complete();
 			return result;

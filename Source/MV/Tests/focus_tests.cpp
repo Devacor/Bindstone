@@ -230,6 +230,23 @@ namespace mv_tests {
 				check_true(idle->visible() && !active->visible() && !disabled->visible() && button->highlighted(), "a button without a highlight view keeps its idle view");
 			});
 
+			test("focusNearest takes the focusable at a point, or the closest one to it", [] {
+				SceneHost host;
+				auto root = Node::make(host.renderer, "root");
+				auto left = addTarget(host, root, "left", MV::point(0.0f, 0.0f));
+				auto right = addTarget(host, root, "right", MV::point(400.0f, 0.0f));
+				auto unfocusable = addTarget(host, root, "unfocusable", MV::point(200.0f, 0.0f), false);
+				MV::Point<int> centre;
+				check_false(host.mouse.focusedScreenCentre(centre), "nothing is focused yet");
+				right->clickable->focus();
+				check_true(host.mouse.focusedScreenCentre(centre));
+				host.mouse.focusClear();
+				check_true(host.mouse.focusNearest(centre) && right->clickable->focused(), "the one the point is on");
+				auto between = unfocusable->clickable->owner()->screenFromLocal(MV::point(10.0f, 25.0f));
+				check_true(host.mouse.focusNearest(between) && left->clickable->focused(), "off every focusable, the nearest by its edge");
+				check_eq(0, unfocusable->entered);
+			});
+
 			test("focusActivate presses the focused Clickable, and pressOnFocus presses as the focus arrives", [] {
 				SceneHost host;
 				auto root = Node::make(host.renderer, "root");

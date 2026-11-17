@@ -58,6 +58,7 @@ namespace MV {
 		std::shared_ptr<MV::Scene::Node> node;
 
 		std::weak_ptr<MV::Scene::Text> activeText;
+		jai::signal<MV::Scene::Clickable::ButtonSignalSignature>::shared_receiver_type activeTextFocusLeft;
 
 		std::function<void(Interface&)> scriptInitialize;
 		std::function<void(Interface&, double)> scriptUpdate;

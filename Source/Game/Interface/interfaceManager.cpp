@@ -79,9 +79,17 @@ namespace MV {
 		manager.setActiveText(this);
 		a_textbox->enableCursor();
 		activeText = a_textbox;
+		// a text box that can hold the focus is typed in only while it does
+		activeTextFocusLeft.reset();
+		if (auto clickable = a_textbox->owner()->component<MV::Scene::Clickable>(false, false)) {
+			activeTextFocusLeft = clickable->onFocusLeave.connect([this](const std::shared_ptr<MV::Scene::Clickable>&) {
+				removeFocus();
+			});
+		}
 	}
 
 	void Interface::removeFocus() {
+		activeTextFocusLeft.reset();
 		manager.removeActiveText(this);
 		if (auto lockedText = activeText.lock()) {
 			lockedText->disableCursor();

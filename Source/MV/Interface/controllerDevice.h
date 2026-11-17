@@ -74,22 +74,36 @@ namespace MV {
 		float deadZone() const { return stickDeadZone; }
 		ControllerDevice& deadZone(float a_deadZone);
 
-		// The pad as focus moves on a_focus, once a frame after update(): the d-pad or the left stick moves the
-		// focus (eight ways; a held direction repeats), SOUTH presses the focused Clickable, and the shoulders step
-		// to the previous and next. True when the focus moved or something was pressed.
+		// The pad at work on a_focus, once a frame after update(). It has two modes and BACK (the button a pad
+		// labels Select, View or Share) swaps them.
+		// Snapping, the mode it starts in: the d-pad or the left stick moves the focus from one Clickable to the
+		// next (eight ways; a held direction repeats), SOUTH presses the focused one, and the shoulders step to
+		// the previous and next.
+		// Cursor: see cursor() below.
+		// True when the focus or the pointer moved or something was pressed.
 		bool navigate(TapDevice& a_focus, double a_dt, const void* a_scope = nullptr);
+		// Off while the pad is the game's own input, as in play away from any menu: navigate then moves no focus
+		// and shows no pointer, and the buttons, sticks and signals above are all there is. Turned on again, a
+		// button still held from play is not taken for a press.
+		ControllerDevice& navigation(bool a_enabled);
+		bool navigation() const { return navigationEnabled; }
 		// How long a held direction waits before it repeats, and between repeats after that.
 		ControllerDevice& navigationRepeat(double a_firstDelay, double a_interval);
-		// The way the d-pad, or the left stick when it is not moving a cursor, is held for navigation right now.
+		// The way the d-pad or the left stick is held for a focus move right now; none in cursor mode.
 		std::optional<FocusDirection> navigationDirection() const;
 
-		// Cursor mode. Off, the left stick moves the focus as the d-pad does. On, the left stick moves a pointer of
-		// the controller's own instead and SOUTH presses under it: navigate feeds that pointer to the TapDevice as
-		// a mouse would be read, so hover, presses and drags follow it. The d-pad and the shoulders still move the
-		// focus, and SOUTH presses the focused Clickable while the pointer is away. Moving the real mouse takes the
-		// pointer back until the stick moves again. MV::Scene::ControllerCursor draws it.
+		// Cursor mode: the pad moves a pointer of its own in place of the focus. The left stick moves it freely
+		// (slow near the middle, quick at the rim), the d-pad nudges it, and SOUTH presses under it. navigate feeds
+		// the pointer to the TapDevice as a mouse would be read, so hover, presses and drags follow it.
+		// Going in, the pointer starts on whatever held the focus and the focus is let go, so the one thing
+		// highlighted is what the pointer is over. Coming out, the focus snaps to the Clickable under the pointer
+		// or nearest it. Moving the real mouse takes the pointer back until the pad is used again.
+		// MV::Scene::ControllerCursor draws it.
 		ControllerDevice& cursor(bool a_enabled);
 		bool cursor() const { return cursorEnabled; }
+		// The button that swaps the modes; none to leave the swap to cursor().
+		ControllerDevice& cursorToggle(std::optional<ControllerButton> a_button);
+		std::optional<ControllerButton> cursorToggle() const { return cursorToggleButton; }
 		// Whether the controller's pointer is the one in use, and where it is on screen.
 		bool cursorShown() const { return cursorShowing; }
 		MV::Point<int> cursorPosition() const;
@@ -103,7 +117,9 @@ namespace MV {
 		ControllerState readHardware();
 		bool navigationPressed(ControllerButton a_button);
 		bool moveCursor(TapDevice& a_pointer, double a_dt);
+		void showCursorAt(const MV::Point<int>& a_position);
 		void hideCursor(TapDevice& a_pointer);
+		void changeMode(TapDevice& a_focus, const void* a_scope);
 
 		ControllerState current;
 		size_t attachedCount = 0;
@@ -114,6 +130,7 @@ namespace MV {
 
 		std::vector<SDL_GameController*> opened;
 
+		bool navigationEnabled = true;
 		std::optional<FocusDirection> navigationHeld;
 		bool navigationStickEngaged = false;
 		double navigationWait = 0.0;
@@ -122,6 +139,9 @@ namespace MV {
 		ControllerState navigationSeen;
 
 		bool cursorEnabled = false;
+		// the mode navigate last worked in: a change is acted on there, where the TapDevice is at hand
+		bool cursorModeEntered = false;
+		std::optional<ControllerButton> cursorToggleButton = ControllerButton::BACK;
 		bool cursorShowing = false;
 		float cursorX = 0.0f;
 		float cursorY = 0.0f;

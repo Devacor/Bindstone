@@ -58,6 +58,13 @@ public:
 	void controllerCursor(bool a_enabled) {
 		ourController.cursor(a_enabled);
 	}
+	// Off while the controller is the game's own input rather than the menus': no focus moves and no pointer.
+	bool controllerNavigation() const {
+		return ourController.navigation();
+	}
+	void controllerNavigation(bool a_enabled) {
+		ourController.navigation(a_enabled);
+	}
 	MV::Scene::ControllerCursor* controllerCursorArt() {
 		return ourControllerCursor.get();
 	}

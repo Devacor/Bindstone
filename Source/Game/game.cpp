@@ -28,6 +28,8 @@ static jai::registrar<Game, MV::Services> _hookGame([](jai::dynamic_binder<Game>
 	builder.method("root", &Game::root);
 	builder.method("player", &Game::player);
 	builder.method("killGame", &Game::killGame, jai::serial);
+	builder.method("controllerNavigation", static_cast<bool(Game::*)() const>(&Game::controllerNavigation));
+	builder.method("controllerNavigation", static_cast<void(Game::*)(bool)>(&Game::controllerNavigation), jai::serial);
 	builder.method("controllerCursor", static_cast<bool(Game::*)() const>(&Game::controllerCursor));
 	builder.method("controllerCursor", static_cast<void(Game::*)(bool)>(&Game::controllerCursor), jai::serial);
 });

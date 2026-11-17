@@ -751,6 +751,23 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Not yet: no shipped button has a highlight view authored, the right stick does nothing, and a real pad has not
   been tried.
 
+## Increment 37: the pad's two modes, and play (2026-11-17)
+- Snapping and cursor are two modes of `ControllerDevice::navigate`, and BACK (Select, View or Share on the pad)
+  swaps them; `cursorToggle(button or none)` chooses the button.
+- Snapping: the d-pad or left stick moves the focus between elements; a button shows its highlight view, a text box
+  starts taking keys and shows its blinking cursor.
+- Cursor: the left stick moves the pointer, the d-pad nudges it, SOUTH presses under it, and nothing moves the
+  focus. Going in, the pointer starts on what held the focus and the focus is let go. Coming out, the focus snaps
+  to the element under the pointer or nearest it (`TapDevice::focusNearest`, `focusedScreenCentre`).
+- `navigation(false)` is for play away from the menus: no focus moves, no pointer, only the buttons, sticks and
+  signals. Coming back, nothing still held counts as a press. The game has `game.controllerNavigation(bool)`.
+- Game text boxes: a page's text box that can hold the focus is typed in only while it does (`Interface::focus`
+  listens for the focus leaving). The Login page's two text boxes are focusable and press on focus.
+- The Workbench's "Controller cursor" setting follows the pad's own toggle, and its field menu is for its own
+  fields only, never a text box in the scene being edited.
+- Not yet: selection contexts (windows a trigger would step between), a default and a remembered focus per screen,
+  a virtual keyboard, and the game's Login page driven by a real pad.
+
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.
 - Authoring verbs still only in Source/Editor: create node, attach/detach

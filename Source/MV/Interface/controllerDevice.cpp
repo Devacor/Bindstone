@@ -7,6 +7,8 @@ namespace MV {
 
 	namespace {
 		const float TRIGGER_AS_BUTTON = 0.5f;
+		// how fast the d-pad carries the pointer, as a share of the stick's full speed
+		const float CURSOR_NUDGE = 0.35f;
 		// the left stick starts a navigation move past the first and lets go under the second, so a stick resting
 		// near the edge of one does not flicker
 		const float NAVIGATION_ENGAGE = 0.6f;
@@ -93,6 +95,11 @@ namespace MV {
 
 	ControllerDevice& ControllerDevice::deadZone(float a_deadZone) {
 		stickDeadZone = std::clamp(a_deadZone, 0.0f, 0.95f);
+		return *this;
+	}
+
+	ControllerDevice& ControllerDevice::navigation(bool a_enabled) {
+		navigationEnabled = a_enabled;
 		return *this;
 	}
 
@@ -192,13 +199,13 @@ namespace MV {
 	}
 
 	std::optional<FocusDirection> ControllerDevice::navigationDirection() const {
+		if (cursorEnabled) {
+			return std::nullopt;
+		}
 		const int padX = (down(ControllerButton::DPAD_RIGHT) ? 1 : 0) - (down(ControllerButton::DPAD_LEFT) ? 1 : 0);
 		const int padY = (down(ControllerButton::DPAD_DOWN) ? 1 : 0) - (down(ControllerButton::DPAD_UP) ? 1 : 0);
 		if (padX != 0 || padY != 0) {
 			return directionFromParts(padX, padY);
-		}
-		if (cursorEnabled) {
-			return std::nullopt;
 		}
 		const float x = axis(ControllerAxis::LEFT_X);
 		const float y = axis(ControllerAxis::LEFT_Y);
@@ -224,6 +231,33 @@ namespace MV {
 	ControllerDevice& ControllerDevice::cursor(bool a_enabled) {
 		cursorEnabled = a_enabled;
 		return *this;
+	}
+
+	ControllerDevice& ControllerDevice::cursorToggle(std::optional<ControllerButton> a_button) {
+		cursorToggleButton = a_button;
+		return *this;
+	}
+
+	void ControllerDevice::showCursorAt(const MV::Point<int>& a_position) {
+		cursorShowing = true;
+		cursorX = static_cast<float>(a_position.x);
+		cursorY = static_cast<float>(a_position.y);
+	}
+
+	void ControllerDevice::changeMode(TapDevice& a_focus, const void* a_scope) {
+		cursorModeEntered = cursorEnabled;
+		if (cursorEnabled) {
+			MV::Point<int> start = a_focus.position();
+			a_focus.focusedScreenCentre(start);
+			a_focus.focusClear();
+			if (connected()) {
+				showCursorAt(start);
+			}
+		} else if (cursorShowing) {
+			const auto last = cursorPosition();
+			hideCursor(a_focus);
+			a_focus.focusNearest(last, a_scope);
+		}
 	}
 
 	MV::Point<int> ControllerDevice::cursorPosition() const {
@@ -261,18 +295,19 @@ namespace MV {
 		}
 		const auto push = leftStick();
 		const float pushLength = std::sqrt(push.x * push.x + push.y * push.y);
-		if (pushLength > 0.0f) {
+		const float nudgeX = static_cast<float>((down(ControllerButton::DPAD_RIGHT) ? 1 : 0) - (down(ControllerButton::DPAD_LEFT) ? 1 : 0));
+		const float nudgeY = static_cast<float>((down(ControllerButton::DPAD_DOWN) ? 1 : 0) - (down(ControllerButton::DPAD_UP) ? 1 : 0));
+		const bool moving = pushLength > 0.0f || nudgeX != 0.0f || nudgeY != 0.0f;
+		if (moving || down(ControllerButton::SOUTH)) {
 			if (!cursorShowing) {
-				cursorShowing = true;
-				const auto from = a_pointer.position();
-				cursorX = static_cast<float>(from.x);
-				cursorY = static_cast<float>(from.y);
+				showCursorAt(a_pointer.position());
 			}
 			const float fullSpeed = cursorPixelsPerSecond > 0.0f ? cursorPixelsPerSecond : cursorArea.height > 0 ? cursorArea.height * 0.8f : 800.0f;
 			// the push counts twice over: slow near the middle for a small target, quick at the rim
-			const float step = fullSpeed * pushLength * static_cast<float>(a_dt);
-			cursorX += push.x * step;
-			cursorY += push.y * step;
+			const float stickStep = fullSpeed * pushLength * static_cast<float>(a_dt);
+			const float nudgeStep = fullSpeed * CURSOR_NUDGE * static_cast<float>(a_dt);
+			cursorX += push.x * stickStep + nudgeX * nudgeStep;
+			cursorY += push.y * stickStep + nudgeY * nudgeStep;
 			cursorX = std::max(0.0f, cursorArea.width > 0 ? std::min(cursorX, static_cast<float>(cursorArea.width - 1)) : cursorX);
 			cursorY = std::max(0.0f, cursorArea.height > 0 ? std::min(cursorY, static_cast<float>(cursorArea.height - 1)) : cursorY);
 		} else if (mouseMoved) {
@@ -281,10 +316,26 @@ namespace MV {
 		if (cursorShowing) {
 			a_pointer.simulate(cursorPosition(), down(ControllerButton::SOUTH));
 		}
-		return cursorShowing && pushLength > 0.0f;
+		return cursorShowing && moving;
 	}
 
 	bool ControllerDevice::navigate(TapDevice& a_focus, double a_dt, const void* a_scope) {
+		if (!navigationEnabled) {
+			hideCursor(a_focus);
+			// the pointer comes back when navigation does, if cursor mode is still the mode
+			cursorModeEntered = false;
+			// a direction held when navigation returns waits out a repeat instead of moving at once
+			navigationHeld = navigationDirection();
+			navigationWait = navigationFirstDelay;
+			navigationSeen = current;
+			return false;
+		}
+		if (cursorToggleButton && navigationPressed(*cursorToggleButton)) {
+			cursorEnabled = !cursorEnabled;
+		}
+		if (cursorEnabled != cursorModeEntered) {
+			changeMode(a_focus, a_scope);
+		}
 		bool result = moveCursor(a_focus, a_dt);
 		const auto direction = navigationDirection();
 		navigationStickEngaged = direction.has_value();
@@ -303,15 +354,21 @@ namespace MV {
 				result = a_focus.focusMove(*direction, a_scope);
 			}
 		}
-		// under the controller's pointer SOUTH is that pointer's press
-		if (navigationPressed(ControllerButton::SOUTH) && !cursorShowing) {
-			result = a_focus.focusActivate() || result;
-		}
-		if (navigationPressed(ControllerButton::RIGHT_SHOULDER)) {
-			result = a_focus.focusNext(a_scope) || result;
-		}
-		if (navigationPressed(ControllerButton::LEFT_SHOULDER)) {
-			result = a_focus.focusPrevious(a_scope) || result;
+		// in cursor mode SOUTH is the pointer's press and the shoulders rest; each is still watched, so one held
+		// through a change of mode is not taken for a new press
+		const bool south = navigationPressed(ControllerButton::SOUTH);
+		const bool next = navigationPressed(ControllerButton::RIGHT_SHOULDER);
+		const bool previous = navigationPressed(ControllerButton::LEFT_SHOULDER);
+		if (!cursorEnabled) {
+			if (south) {
+				result = a_focus.focusActivate() || result;
+			}
+			if (next) {
+				result = a_focus.focusNext(a_scope) || result;
+			}
+			if (previous) {
+				result = a_focus.focusPrevious(a_scope) || result;
+			}
 		}
 		return result;
 	}

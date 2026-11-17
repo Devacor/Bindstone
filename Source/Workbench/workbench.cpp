@@ -1106,7 +1106,8 @@ namespace Workbench {
 			auto node = clickable->owner();
 			if (auto* panel = dock->tabPanelOf(node)) {
 				items = tabContextItems(panel);
-			} else if (clickable->focusable() && clickable->pressOnFocus()) {
+			} else if (clickable->focusable() && clickable->pressOnFocus() && !inScene(node)) {
+				// one of the editor's own fields: a text box in the scene being edited is left alone
 				items = textContextItems(clickable);
 			} else if (treePanel && dock->panelContentContaining(node) == treePanel->content()) {
 				if (auto rowNode = treePanel->nodeAt(a_screenPoint)) {
@@ -1307,7 +1308,11 @@ namespace Workbench {
 		controller.update();
 		// the pad walks the editor's own controls, never the buttons of the scene being edited
 		controller.cursorBounds(managers.renderer.window().windowSize());
+		const bool cursorMode = controller.cursor();
 		controller.navigate(mouse, lastDelta, uiRoot.get());
+		if (controller.cursor() != cursorMode) {
+			settingsChanged();
+		}
 		if (!controllerCursorArt) {
 			controllerCursorArt = std::make_unique<MV::Scene::ControllerCursor>(uiRoot, controller, managers.textures);
 			controllerCursorArt->dot(theme.px(10.0f), theme.accent());

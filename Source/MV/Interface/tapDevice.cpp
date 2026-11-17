@@ -318,6 +318,39 @@ namespace MV{
 		}
 	}
 
+	bool TapDevice::focusNearest(const MV::Point<int>& a_screenPoint, const void* a_scope) {
+		auto candidates = askForFocusCandidates(a_scope);
+		const FocusCandidate* best = nullptr;
+		int64_t bestDistance = 0;
+		for (auto&& candidate : candidates) {
+			const int64_t dx = std::max<int64_t>({ candidate.screenMin.x - a_screenPoint.x, a_screenPoint.x - candidate.screenMax.x, 0 });
+			const int64_t dy = std::max<int64_t>({ candidate.screenMin.y - a_screenPoint.y, a_screenPoint.y - candidate.screenMax.y, 0 });
+			const int64_t distance = dx * dx + dy * dy;
+			if (!best || distance < bestDistance) {
+				best = &candidate;
+				bestDistance = distance;
+			}
+		}
+		if (!best) {
+			return false;
+		}
+		focus(*best);
+		return true;
+	}
+
+	bool TapDevice::focusedScreenCentre(MV::Point<int>& a_centre) {
+		if (!hasFocus()) {
+			return false;
+		}
+		for (auto&& candidate : askForFocusCandidates(nullptr)) {
+			if (sameFocusSubject(candidate, focused)) {
+				a_centre = MV::Point<int>((candidate.screenMin.x + candidate.screenMax.x) / 2, (candidate.screenMin.y + candidate.screenMax.y) / 2);
+				return true;
+			}
+		}
+		return false;
+	}
+
 	bool TapDevice::focusActivate() {
 		if (!hasFocus() || !focused.activate) {
 			return false;

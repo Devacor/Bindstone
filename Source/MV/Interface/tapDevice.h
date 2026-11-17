@@ -113,6 +113,10 @@ namespace MV{
 		bool focusNext(const void* a_scope = nullptr);
 		bool focusPrevious(const void* a_scope = nullptr);
 		bool focusMove(FocusDirection a_direction, const void* a_scope = nullptr);
+		// Gives the focus to the focusable Clickable at a point on screen, or failing that the one nearest it.
+		bool focusNearest(const MV::Point<int>& a_screenPoint, const void* a_scope = nullptr);
+		// The middle on screen of what holds the focus, as it is now; false when nothing does.
+		bool focusedScreenCentre(MV::Point<int>& a_centre);
 		// Presses the focused Clickable, as Enter or a controller's accept button would.
 		bool focusActivate();
 		void focusClear();

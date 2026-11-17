@@ -168,54 +168,115 @@ namespace mv_tests {
 				check_false(second->clickable->focused());
 			});
 
-			test("in cursor mode the left stick moves a pointer the TapDevice reads as its mouse", [] {
+			test("in cursor mode the pad moves a pointer the TapDevice reads as its mouse", [] {
 				SceneHost host;
 				auto root = Node::make(host.renderer, "root");
 				auto first = addTarget(host, root, "first", MV::point(0.0f, 0.0f));
 				auto second = addTarget(host, root, "second", MV::point(0.0f, 100.0f));
 				MV::ControllerDevice pad;
-				pad.deadZone(0.2f).cursorSpeed(1000.0f).cursorBounds(MV::Size<int>(400, 300));
-				host.mouse.simulate(MV::Point<int>(50, 60), false);
-				host.mouse.update();
-				host.mouse.stopSimulating();
+				pad.deadZone(0.2f).cursorSpeed(1000.0f).cursorBounds(MV::Size<int>(2000, 2000)).cursorToggle(std::nullopt);
 				first->clickable->focus();
-
-				check_true(frame(pad, host, stickAt(0.0f, 1.0f), 0.1) && second->clickable->focused(), "with cursor mode off the stick moves the focus");
-				first->clickable->focus();
-				frame(pad, host, ControllerState());
+				MV::Point<int> firstCentre;
+				check_true(host.mouse.focusedScreenCentre(firstCentre));
 
 				pad.cursor(true);
-				check_false(pad.cursorShown(), "turned on, the pointer waits for the stick");
+				frame(pad, host, ControllerState());
+				check_true(pad.cursorShown() && host.mouse.simulating(), "going in, the pointer shows at once");
+				check_true(pad.cursorPosition() == firstCentre, "on what held the focus");
+				check_false(host.mouse.hasFocus(), "and the focus is let go");
+
 				check_true(frame(pad, host, stickAt(1.0f, 0.0f), 0.1), "the stick moves it");
-				check_true(pad.cursorShown() && host.mouse.simulating());
-				check_eq(150, pad.cursorPosition().x, "from where the pointer was, a tenth of a second at full push");
-				check_eq(60, pad.cursorPosition().y);
-				check_true(first->clickable->focused(), "and the focus stays where it was");
+				check_eq(firstCentre.x + 100, pad.cursorPosition().x, "a tenth of a second at full push");
+				check_eq(firstCentre.y, pad.cursorPosition().y);
 				host.mouse.update();
 				check_true(host.mouse.position() == pad.cursorPosition() && !host.mouse.leftDown(), "the TapDevice reads the controller's pointer");
-
 				frame(pad, host, stickAt(0.6f, 0.0f), 0.1);
-				check_eq(175, pad.cursorPosition().x, "half the way out of the dead zone is a quarter of the speed");
+				check_eq(firstCentre.x + 125, pad.cursorPosition().x, "half the way out of the dead zone is a quarter of the speed");
+				check_true(frame(pad, host, ControllerState().press(ControllerButton::DPAD_DOWN), 0.1), "the d-pad nudges it");
+				check_eq(firstCentre.y + 35, pad.cursorPosition().y);
+				check_false(host.mouse.hasFocus(), "and moves no focus");
+				check_false(frame(pad, host, ControllerState().press(ControllerButton::RIGHT_SHOULDER)) || host.mouse.hasFocus(), "nor do the shoulders");
+
 				frame(pad, host, stickAt(1.0f, 1.0f), 10.0);
-				check_true(pad.cursorPosition().x == 399 && pad.cursorPosition().y == 299, "it stops at the edge of its area");
+				check_true(pad.cursorPosition().x == 1999 && pad.cursorPosition().y == 1999, "it stops at the edge of its area");
 				frame(pad, host, stickAt(-1.0f, -1.0f), 10.0);
 				check_true(pad.cursorPosition().x == 0 && pad.cursorPosition().y == 0);
 
-				check_false(frame(pad, host, ControllerState().press(ControllerButton::SOUTH)), "south is the pointer's press, not the focus's");
-				check_eq(0, first->accepted);
+				check_false(frame(pad, host, ControllerState().press(ControllerButton::SOUTH)), "south is the pointer's press");
 				host.mouse.update();
-				check_true(host.mouse.leftDown() && pad.cursorShown(), "held under the pointer, with the stick at rest");
+				check_true(host.mouse.leftDown() && pad.cursorShown());
 				frame(pad, host, ControllerState());
 				host.mouse.update();
 				check_false(host.mouse.leftDown());
 
-				check_true(frame(pad, host, ControllerState().press(ControllerButton::DPAD_DOWN)) && second->clickable->focused(), "the d-pad still moves the focus");
-				frame(pad, host, ControllerState());
-
 				pad.cursor(false);
 				frame(pad, host, ControllerState());
-				check_true(!pad.cursorShown() && !host.mouse.simulating(), "turned off, the mouse has the pointer back");
+				check_true(!pad.cursorShown() && !host.mouse.simulating(), "coming out, the mouse has the pointer back");
+				check_true(host.mouse.hasFocus(), "and the focus snaps to what is nearest where the pointer was");
+
+				second->clickable->focus();
+				pad.cursor(true);
+				frame(pad, host, ControllerState());
+				check_false(second->clickable->focused());
+				pad.cursor(false);
+				frame(pad, host, ControllerState());
+				check_true(second->clickable->focused(), "over a Clickable, it is that one");
 				check_true(frame(pad, host, ControllerState().press(ControllerButton::SOUTH)) && second->accepted == 1, "and south presses the focus again");
+				check_eq(1, first->accepted, "the pointer's one press went to what it was over");
+			});
+
+			test("with navigation off the pad is only input: no focus moves, no pointer, and nothing held carries over", [] {
+				SceneHost host;
+				auto root = Node::make(host.renderer, "root");
+				auto first = addTarget(host, root, "first", MV::point(0.0f, 0.0f));
+				auto second = addTarget(host, root, "second", MV::point(0.0f, 100.0f));
+				MV::ControllerDevice pad;
+				first->clickable->focus();
+				pad.navigation(false);
+				auto busy = ControllerState().press(ControllerButton::DPAD_DOWN).press(ControllerButton::SOUTH).press(ControllerButton::BACK).axis(ControllerAxis::LEFT_X, 1.0f);
+				check_false(frame(pad, host, busy));
+				check_true(first->clickable->focused() && first->accepted == 0 && !pad.cursor() && !pad.cursorShown(), "everything pressed in play leaves the menus alone");
+				check_true(pad.down(ControllerButton::SOUTH) && pad.leftStick().x == 1.0f, "while the game reads it all");
+
+				pad.navigation(true);
+				check_false(frame(pad, host, busy, 0.1), "back in the menus, what was already held is not a new press");
+				check_true(first->clickable->focused() && first->accepted == 0 && !pad.cursor());
+				frame(pad, host, ControllerState());
+				check_true(frame(pad, host, ControllerState().press(ControllerButton::DPAD_DOWN)) && second->clickable->focused(), "and a fresh press works as before");
+
+				frame(pad, host, ControllerState());
+				pad.cursor(true);
+				frame(pad, host, ControllerState());
+				check_true(pad.cursorShown() && host.mouse.simulating());
+				pad.navigation(false);
+				frame(pad, host, ControllerState());
+				check_true(!pad.cursorShown() && !host.mouse.simulating() && pad.cursor(), "play hides the pointer without forgetting the mode");
+				pad.navigation(true);
+				frame(pad, host, ControllerState());
+				check_true(pad.cursorShown(), "and the menus bring it back");
+			});
+
+			test("the select button swaps snapping for the cursor and back", [] {
+				SceneHost host;
+				auto root = Node::make(host.renderer, "root");
+				auto first = addTarget(host, root, "first", MV::point(0.0f, 0.0f));
+				auto second = addTarget(host, root, "second", MV::point(0.0f, 100.0f));
+				MV::ControllerDevice pad;
+				auto select = ControllerState().press(ControllerButton::BACK);
+				second->clickable->focus();
+				frame(pad, host, select);
+				check_true(pad.cursor() && pad.cursorShown() && !host.mouse.hasFocus(), "select goes to the free pointer");
+				frame(pad, host, select);
+				check_true(pad.cursor(), "held, it does not swap again");
+				frame(pad, host, ControllerState());
+				frame(pad, host, select);
+				check_true(!pad.cursor() && !pad.cursorShown() && second->clickable->focused(), "select again snaps back to the element the pointer was on");
+				frame(pad, host, ControllerState());
+				check_true(frame(pad, host, ControllerState().press(ControllerButton::DPAD_UP)) && first->clickable->focused(), "and the d-pad moves between elements again");
+				frame(pad, host, ControllerState());
+				pad.cursorToggle(std::nullopt);
+				frame(pad, host, select);
+				check_false(pad.cursor(), "with no toggle button set, select does nothing");
 			});
 
 			test("the drawn cursor shows where the controller's pointer is and hides with it", [] {
@@ -225,7 +286,7 @@ namespace mv_tests {
 				pad.cursor(true).cursorSpeed(1000.0f);
 				MV::Scene::ControllerCursor drawn(root, pad, host.textures);
 				drawn.update();
-				check_false(drawn.visible(), "nothing to show until the stick moves");
+				check_false(drawn.visible(), "nothing to show before the pad has worked in that mode");
 				check_eq(size_t(0), drawn.node()->size(), "and no art made for it yet");
 				frame(pad, host, stickAt(1.0f, 1.0f), 0.2);
 				drawn.update();

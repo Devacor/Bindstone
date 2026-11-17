@@ -689,8 +689,31 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Not yet: filters by level, a search box, the engine's direct `std::cout` lines (only `Logger` output is caught),
   copying a line, and a jump from a script error to its file.
 
+## Increment 34: keyboard focus, text selection and right-press menus
+- Focus lives in the engine, so authored UI carries it. `TapDevice` holds one focused Clickable and moves it:
+  `focusNext` / `focusPrevious` (by `focusOrder`, then place in the scene), `focusMove` in eight directions (the
+  nearest focusable that way on screen; a diagonal with nothing that way tries its sideways part, then its
+  up-or-down part), `focusActivate`, `focusClear`, each optionally kept under one node.
+- `Clickable` saves four properties: `focusable` (a Button starts focusable), `focusOrder`, `pressOnFocus` and
+  `focusLinks` (a neighbour by node id for next, previous or a direction). A link is followed back from the other
+  end unless that end names its own; a move with no link is worked out from the other focusable controls.
+- `Text` has a selection: Shift with the arrows, Home and End, Ctrl+A, and typing, paste, backspace and delete
+  replace it. `copyToClipboard`, `cutToClipboard` and `pasteFromClipboard` are calls as well as keys.
+- Workbench: fields and buttons are focusable. Tab and Shift+Tab walk the controls of the panel the focus is in and
+  wrap; a field that starts taking keys has its text selected; Enter or Space presses a focused button; Escape lets
+  go. A focused button's outline takes the accent colour.
+- Inspector: a Clickable's `focusLinks` is a group with a node-reference row per link; a drop on a row is one undo step.
+- A right press and release in one place opens a menu at the pointer (`MenuBar::openContext`): Frame, Duplicate and
+  Delete on a Hierarchy row or in the scene (which selects what is under the pointer first), Close and Float on a
+  dock tab, Cut, Copy, Paste and Select All on a text field. A right drag in the scene still pans.
+- Tests: `focus_tests.cpp` (order, scope, directions, diagonals falling back, links and their way back, activation)
+  and the selection cases in `text_tests.cpp`; the self-test drives Tab, the selection, a focus link and its undo,
+  and each of the four menus.
+- Not yet: controller input (nothing maps a stick or pad onto `focusMove`), arrow keys moving the focus between
+  buttons, a visible focus ring on authored UI, dragging to select text with the pointer, and Rename or Create rows
+  in the Hierarchy menu.
+
 ## Known gaps (next increments)
-- Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.
 - Authoring verbs still only in Source/Editor: create node, attach/detach
   component, save selection as BindSnap, texture picker, anchor editor — old-editor deletion

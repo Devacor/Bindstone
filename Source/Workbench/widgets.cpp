@@ -224,6 +224,7 @@ namespace Workbench {
 		}
 		button->activeNode(activeScene);
 		button->idleNode(idleScene);
+		focusTint(button, idleScene->component<MV::Scene::Sprite>(false, false).self(), a_theme.buttonOutline(), a_theme.accent());
 		if (a_onClick) {
 			button->onAccept.connect("click", [a_onClick](const std::shared_ptr<MV::Scene::Clickable>&) {
 				a_onClick();
@@ -249,6 +250,7 @@ namespace Workbench {
 		}
 		button->activeNode(activeScene);
 		button->idleNode(idleScene);
+		focusTint(button, idleScene->component<MV::Scene::Sprite>(false, false).self(), a_theme.buttonOutline(), a_theme.accent());
 		hoverTint(button, idleFill, idle, hover);
 		if (a_onClick) {
 			button->onAccept.connect("click", [a_onClick](const std::shared_ptr<MV::Scene::Clickable>&) {
@@ -282,6 +284,19 @@ namespace Workbench {
 		};
 		a_clickable->onHoverEnter.connect("hoverTint", tintTo(a_hover));
 		a_clickable->onHoverLeave.connect("hoverTint", tintTo(a_idle));
+	}
+
+	void focusTint(const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const std::shared_ptr<MV::Scene::Sprite>& a_sprite, const MV::Color& a_idle, const MV::Color& a_focused) {
+		std::weak_ptr<MV::Scene::Sprite> weakSprite = a_sprite;
+		auto tintTo = [weakSprite](const MV::Color& a_color) {
+			return [weakSprite, a_color](const std::shared_ptr<MV::Scene::Clickable>&) {
+				if (auto sprite = weakSprite.lock()) {
+					sprite->color(a_color);
+				}
+			};
+		};
+		a_clickable->onFocusEnter.connect("focusTint", tintTo(a_focused));
+		a_clickable->onFocusLeave.connect("focusTint", tintTo(a_idle));
 	}
 
 	void hoverShow(const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const std::shared_ptr<MV::Scene::Sprite>& a_sprite) {
@@ -318,6 +333,8 @@ namespace Workbench {
 
 		auto clickable = box->attach<MV::Scene::Clickable>(mouse)->bounds(a_size);
 		hoverTint(clickable, box->component<MV::Scene::Sprite>(false, false).self(), a_theme.fieldOutline(), a_theme.fieldOutlineHover());
+		// Tab reaches a field, and reaching it starts the typing
+		clickable->focusable(true)->pressOnFocus(true);
 		std::weak_ptr<MV::Scene::Text> weakText = text.self();
 		FocusRouter* focus = &a_focus;
 		auto commit = [weakText, a_onCommit]() {
@@ -381,6 +398,8 @@ namespace Workbench {
 
 		auto clickable = box->attach<MV::Scene::Clickable>(mouse)->bounds(a_size);
 		hoverTint(clickable, box->component<MV::Scene::Sprite>(false, false).self(), a_theme.fieldOutline(), a_theme.fieldOutlineHover());
+		// Tab reaches a field, and reaching it starts the typing
+		clickable->focusable(true)->pressOnFocus(true);
 		std::weak_ptr<MV::Scene::Text> weakText = text.self();
 		FocusRouter* focus = &a_focus;
 

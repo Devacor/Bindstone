@@ -183,9 +183,45 @@ namespace Workbench {
 		structureDirty = true;
 	}
 
+	bool DockSpace::canClose(Panel* a_panel) const {
+		DockNode* leaf = leafContaining(a_panel);
+		return leaf && !(leaf == rootNode.get() && leaf->panels.size() == 1);
+	}
+
+	bool DockSpace::canFloat(Panel* a_panel) const {
+		DockNode* leaf = leafContaining(a_panel);
+		return canClose(a_panel) && !(floatOf(leaf) && leaf->panels.size() == 1);
+	}
+
+	bool DockSpace::floatPanel(Panel* a_panel) {
+		if (!canFloat(a_panel)) {
+			return false;
+		}
+		auto found = leafRects.find(leafContaining(a_panel));
+		auto over = found == leafRects.end() ? lastArea : found->second;
+		auto fraction = fractionAround(MV::point(over.position.x + over.size.width * 0.5f, over.position.y + over.size.height * 0.5f));
+		detach(a_panel);
+		floats.push_back({ leaf({ a_panel }), fraction });
+		structureDirty = true;
+		layout(lastArea);
+		layoutChanged();
+		return true;
+	}
+
+	Panel* DockSpace::tabPanelOf(const std::shared_ptr<MV::Scene::Node>& a_node) const {
+		for (auto node = a_node; node; node = node->parent()) {
+			for (auto&& [panel, tab] : tabNodes) {
+				if (tab.lock() == node) {
+					return panel;
+				}
+			}
+		}
+		return nullptr;
+	}
+
 	bool DockSpace::closePanel(Panel* a_panel) {
 		DockNode* leaf = leafContaining(a_panel);
-		if (!leaf || (leaf == rootNode.get() && leaf->panels.size() == 1)) {
+		if (!canClose(a_panel)) {
 			return false;
 		}
 		closedBeside.erase(a_panel);
@@ -656,6 +692,17 @@ namespace Workbench {
 		if (onLayoutChanged) {
 			onLayoutChanged();
 		}
+	}
+
+	std::shared_ptr<MV::Scene::Node> DockSpace::panelContentContaining(const std::shared_ptr<MV::Scene::Node>& a_node) const {
+		for (auto node = a_node; node; node = node->parent()) {
+			for (auto&& panel : ownedPanels) {
+				if (panel->content() == node) {
+					return node;
+				}
+			}
+		}
+		return nullptr;
 	}
 
 	Panel* DockSpace::panelTitled(const std::string& a_title) const {

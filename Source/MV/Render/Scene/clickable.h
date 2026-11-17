@@ -55,6 +55,8 @@ namespace MV {
 			jai::signal_emitter<ButtonSignalSignature> onEnabledSignal;
 			jai::signal_emitter<ButtonSignalSignature> onHoverEnterSignal;
 			jai::signal_emitter<ButtonSignalSignature> onHoverLeaveSignal;
+			jai::signal_emitter<ButtonSignalSignature> onFocusEnterSignal;
+			jai::signal_emitter<ButtonSignalSignature> onFocusLeaveSignal;
 
 		public:
 			SpriteDerivedAccessors(Clickable)
@@ -67,6 +69,30 @@ namespace MV {
 			jai::signal<ButtonSignalSignature> onHoverEnter;
 			jai::signal<ButtonSignalSignature> onHoverLeave;
 			bool hovered() const { return isHovered; }
+
+			// Keyboard and controller focus, driven through the TapDevice (focusNext, focusMove, focusActivate). A
+			// focusable Clickable takes part while it is enabled and visible; a Button is focusable from the start.
+			// focusOrder comes before place in the scene when walking; pressOnFocus presses the Clickable as it takes
+			// the focus, for a text field that should start taking keys at once.
+			std::shared_ptr<Clickable> focusable(bool a_focusable);
+			bool focusable() const { return isFocusable; }
+			std::shared_ptr<Clickable> focusOrder(int64_t a_order);
+			int64_t focusOrder() const { return focusOrderValue; }
+			std::shared_ptr<Clickable> pressOnFocus(bool a_press);
+			bool pressOnFocus() const { return pressesOnFocus; }
+			void focus();
+			bool focused() const { return isFocused; }
+			// The neighbour a move goes to from here, named by its node's id and looked for in this Clickable's scene
+			// when the move is made. A link is followed back as well: if A names B as its right, B's left is A unless
+			// B names its own, so one end is enough. An empty id, or one that finds nothing able to take the focus,
+			// leaves the move to be worked out.
+			// Link names: next, previous, left, right, up, down, upLeft, upRight, downLeft, downRight.
+			std::shared_ptr<Clickable> focusLink(FocusLink a_link, const std::string& a_nodeId);
+			std::string focusLink(FocusLink a_link) const;
+			std::shared_ptr<Clickable> focusLink(const std::string& a_linkName, const std::string& a_nodeId);
+			static const std::string& focusLinkName(FocusLink a_link);
+			jai::signal<ButtonSignalSignature> onFocusEnter;
+			jai::signal<ButtonSignalSignature> onFocusLeave;
 
 			// Serialized through property_mgr (script receivers persist across save/load);
 			// emit through the generated onXSignal(args) emitter as before.
@@ -169,10 +195,15 @@ namespace MV {
 				onLeftMouseUpHandle.reset();
 				onMouseMoveHandle.reset();
 				onHoverQueryHandle.reset();
+				onFocusQueryHandle.reset();
 			}
 
 			JAI_PROPERTY((int64_t), globalClickPriority, 100, [](auto&, auto&) {});
 			JAI_PROPERTY((int64_t), appendClickPriority, 0, [](auto&, auto&) {});
+			JAI_NAMED_PROPERTY((bool), "focusable", isFocusable, false);
+			JAI_NAMED_PROPERTY((int64_t), "focusOrder", focusOrderValue, 0);
+			JAI_NAMED_PROPERTY((bool), "pressOnFocus", pressesOnFocus, false);
+			JAI_NAMED_PROPERTY((std::map<std::string, std::string>), "focusLinks", focusLinkIds);
 		private:
 			TapDevice::SignalType onLeftMouseDownHandle;
 			TapDevice::SignalType onLeftMouseUpHandle;
@@ -181,6 +212,14 @@ namespace MV {
 
 			void hover(bool a_hovered);
 			bool isHovered = false;
+
+			TapDevice::SignalType onFocusQueryHandle;
+			FocusCandidate focusCandidate();
+			bool focusNeighbour(FocusLink a_link, const void* a_scope, FocusCandidate& a_neighbour);
+			bool canTakeFocus(const void* a_scope) const;
+			bool underFocusScope(const void* a_scope) const;
+			void focusChanged(bool a_focused);
+			bool isFocused = false;
 
 			Point<int> dragStartPosition;
 			Point<int> priorMousePosition;

@@ -18,7 +18,18 @@ namespace Workbench {
 			activeCommit = std::move(a_commit);
 			activeAbandon = std::move(a_abandon);
 			a_text->enableCursor();
+			// what is there is selected, so typing replaces it and an arrow key keeps it
+			a_text->selectAll();
 			SDL_StartTextInput();
+		}
+
+		// Leaves the field as a press elsewhere would: committing it, or putting an Enter-only field back.
+		void leave() {
+			leaveActive();
+		}
+
+		std::shared_ptr<MV::Scene::Text> active() const {
+			return activeText.lock();
 		}
 
 		void deactivate() {
@@ -53,7 +64,10 @@ namespace Workbench {
 				return false;
 			}
 			if (a_event.type == SDL_MOUSEBUTTONDOWN) {
-				leaveActive();
+				// a right press is for the field's menu, which works on what is being typed
+				if (a_event.button.button == SDL_BUTTON_LEFT) {
+					leaveActive();
+				}
 				return false;
 			}
 			if (a_event.type != SDL_KEYDOWN && a_event.type != SDL_KEYUP && a_event.type != SDL_TEXTINPUT && a_event.type != SDL_TEXTEDITING) {

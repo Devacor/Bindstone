@@ -29,8 +29,15 @@ namespace Workbench {
 
 		void add(const std::string& a_title, std::vector<MenuItem> a_items);
 
+		// A menu of its own at the pointer, for a right press: kept inside the window, closed the same ways.
+		void openContext(const MV::Point<int>& a_screenPoint, const std::vector<MenuItem>& a_items);
+		bool contextOpen() const { return contextShown; }
+		// Whether the point is on the open menu's rows.
+		bool popupContains(const MV::Point<int>& a_screenPoint) const;
+		int rowCount() const { return static_cast<int>(rowLabels.size()); }
+
 		float width() const { return nextTitleX; }
-		bool isOpen() const { return openIndex >= 0; }
+		bool isOpen() const { return openIndex >= 0 || contextShown; }
 		void close();
 		void handleInput(SDL_Event& a_event);
 
@@ -52,6 +59,7 @@ namespace Workbench {
 		};
 
 		void open(int a_index);
+		void buildPopup(const std::vector<MenuItem>& a_items, const MV::Point<>& a_worldPosition);
 		void hover(const MV::Point<int>& a_screenPoint);
 		void hoverRow(int a_row);
 		float textWidth(const std::string& a_text) const;
@@ -66,6 +74,7 @@ namespace Workbench {
 		std::vector<Menu> menus;
 		float nextTitleX = 0.0f;
 		int openIndex = -1;
+		bool contextShown = false;
 
 		std::shared_ptr<MV::Scene::Node> popup;
 		MV::Size<> popupSize;

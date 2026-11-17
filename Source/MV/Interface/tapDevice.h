@@ -44,6 +44,26 @@ namespace MV{
 		std::function<void()> leave;
 	};
 
+	enum class FocusDirection { LEFT, RIGHT, UP, DOWN, UP_LEFT, UP_RIGHT, DOWN_LEFT, DOWN_RIGHT };
+	// The moves a Clickable can name a neighbour for; one it does not name is found for it.
+	enum class FocusLink { NEXT, PREVIOUS, LEFT, RIGHT, UP, DOWN, UP_LEFT, UP_RIGHT, DOWN_LEFT, DOWN_RIGHT };
+
+	// A focusable Clickable answering a focus query: where it comes in the order, where it is on screen, and what
+	// taking, losing and using the focus does to it.
+	struct FocusCandidate {
+		int64_t order = 0;
+		std::vector<int64_t> treePath;
+		MV::Point<int> screenMin;
+		MV::Point<int> screenMax;
+		std::weak_ptr<void> subject;
+		std::function<void()> enter;
+		std::function<void()> leave;
+		std::function<void()> activate;
+		// The neighbour this one names for a link, when it names one that can take the focus within the scope.
+		std::function<bool(FocusLink, const void* a_scope, FocusCandidate& a_neighbour)> linked;
+		bool pressOnFocus = false;
+	};
+
 	class TapDevice {
 	public:
 		TapDevice();
@@ -81,7 +101,39 @@ namespace MV{
 		// Asks again who is under the pointer, for when the scene moved and the pointer did not.
 		void refreshHover() { hoverStale = true; }
 		void queueHoverCandidate(HoverCandidate a_candidate);
+		// The Clickables under the pointer as hover last settled them, top-most first.
+		std::vector<std::shared_ptr<void>> hoveredSubjects() const;
+
+		// Keyboard and controller focus. One focusable Clickable holds it at a time. A move first follows the
+		// neighbour the focused Clickable names for it (Clickable::focusLink). Without one, focusNext and
+		// focusPrevious walk by focus order and then by place in the scene, and focusMove goes to the nearest
+		// focusable that way on screen; a diagonal with nothing that way tries its sideways part, then its
+		// up-or-down part, so four directions serve a layout as well as eight. a_scope, a Node's address, keeps a
+		// move to Clickables under that node. Each returns false when there is nowhere to go.
+		bool focusNext(const void* a_scope = nullptr);
+		bool focusPrevious(const void* a_scope = nullptr);
+		bool focusMove(FocusDirection a_direction, const void* a_scope = nullptr);
+		// Presses the focused Clickable, as Enter or a controller's accept button would.
+		bool focusActivate();
+		void focusClear();
+		bool hasFocus() const { return !focused.subject.expired(); }
+		// What holds the focus: the Clickable that answered the query, for a caller that knows the type.
+		std::shared_ptr<void> focusedSubject() const { return focused.subject.lock(); }
+		// What a focus query is limited to; null while there is no query or no limit.
+		const void* focusScope() const { return focusScopeToken; }
+		void queueFocusCandidate(FocusCandidate a_candidate);
+		// Gives the focus to a_candidate; a_pressOnFocus false when a pointer press is what brought it.
+		void focus(FocusCandidate a_candidate, bool a_pressOnFocus = true);
 	private:
+		std::vector<FocusCandidate> askForFocusCandidates(const void* a_scope);
+		bool focusStep(int a_step, const void* a_scope);
+		bool focusFollowLink(FocusLink a_link, const void* a_scope);
+		bool focusMoveOneWay(FocusDirection a_direction, const void* a_scope);
+
+		std::vector<FocusCandidate> focusCandidates;
+		FocusCandidate focused;
+		const void* focusScopeToken = nullptr;
+
 		void resolveHover();
 
 		bool hoverTracked = false;
@@ -124,6 +176,7 @@ namespace MV{
 
 		jai::signal_emitter<CallbackSignature> onMoveSignal;
 		jai::signal_emitter<CallbackSignature> onHoverQuerySignal;
+		jai::signal_emitter<CallbackSignature> onFocusQuerySignal;
 
 		jai::signal_emitter<TouchCallbackSignature> onPinchZoomSignal;
 	public:
@@ -148,6 +201,8 @@ namespace MV{
 		jai::signal<CallbackSignature> onMove;
 		// Emitted while hover is tracked: whoever is under the pointer answers with queueHoverCandidate.
 		jai::signal<CallbackSignature> onHoverQuery;
+		// Emitted to find who can take the focus: every focusable Clickable in scope answers with queueFocusCandidate.
+		jai::signal<CallbackSignature> onFocusQuery;
 
 		jai::signal<TouchCallbackSignature> onPinchZoom;
 	};

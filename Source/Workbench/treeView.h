@@ -8,6 +8,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include "widgets.h"
@@ -62,6 +63,21 @@ namespace Workbench {
 			filterQuery = a_query;
 			std::transform(filterQuery.begin(), filterQuery.end(), filterQuery.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 			rebuild();
+		}
+
+		// The item whose row is at a point on screen, and the middle of an item's row.
+		const TItem* itemAt(const MV::Point<int>& a_screenPoint) const {
+			int index = rowAt(a_screenPoint);
+			return index < 0 ? nullptr : &rowItems[static_cast<size_t>(index)];
+		}
+
+		std::optional<MV::Point<int>> rowScreenPoint(const TItem& a_item) const {
+			for (size_t index = 0; index < rowItems.size(); ++index) {
+				if (rowItems[index] == a_item) {
+					return host->screenFromLocal(MV::point(rowWidth * 0.5f, (static_cast<float>(index) + 0.5f) * theme.rowHeight));
+				}
+			}
+			return std::nullopt;
 		}
 
 		void select(const TItem& a_item) {

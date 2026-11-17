@@ -69,6 +69,7 @@ namespace Workbench {
 		void addTextureRows(const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
 		void addPointsGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
 		void addIndicesGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
+		void addFocusLinksGroup(const std::shared_ptr<MV::Scene::Clickable>& a_clickable);
 		// Rows of a list a page at a time, with the pager; returns the first index to show.
 		size_t addPager(const std::string& a_key, size_t a_count, size_t a_perPage);
 		void openTexturePicker(const std::weak_ptr<MV::Scene::Drawable>& a_drawable, size_t a_slot, const MV::Point<int>& a_screenPoint);

@@ -23,6 +23,7 @@ namespace MV {
 
 		Button::Button(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse) :
 			jai::property_owner<Button, Clickable>(a_owner, a_mouse) {
+			isFocusable = true;
 			onEnabled.connect(guid(), [&](const std::shared_ptr<Clickable> &a_node) {
 				if (!inPressEvent()) {
 					setCurrentView(idleView);

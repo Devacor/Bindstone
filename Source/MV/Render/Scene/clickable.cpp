@@ -35,6 +35,13 @@ namespace MV {
 
 			a_builder.method("mouseInBounds", static_cast<bool(Clickable::*)()>(&Clickable::mouseInBounds), jai::serial);
 			a_builder.method("hovered", &Clickable::hovered);
+			a_builder.method("focusable", static_cast<bool(Clickable::*)() const>(&Clickable::focusable));
+			a_builder.method("focusable", static_cast<std::shared_ptr<Clickable>(Clickable::*)(bool)>(&Clickable::focusable), jai::serial);
+			a_builder.method("focusOrder", static_cast<int64_t(Clickable::*)() const>(&Clickable::focusOrder));
+			a_builder.method("focusOrder", static_cast<std::shared_ptr<Clickable>(Clickable::*)(int64_t)>(&Clickable::focusOrder), jai::serial);
+			a_builder.method("focus", &Clickable::focus, jai::serial);
+			a_builder.method("focusLink", static_cast<std::shared_ptr<Clickable>(Clickable::*)(const std::string&, const std::string&)>(&Clickable::focusLink), jai::serial);
+			a_builder.method("focused", &Clickable::focused);
 		}
 
 
@@ -125,7 +132,9 @@ namespace MV {
 			onEnabled(onEnabledSignal),
 			onDisabled(onDisabledSignal),
 			onHoverEnter(onHoverEnterSignal),
-			onHoverLeave(onHoverLeaveSignal) {
+			onHoverLeave(onHoverLeaveSignal),
+			onFocusEnter(onFocusEnterSignal),
+			onFocusLeave(onFocusLeaveSignal) {
 
 			shouldDraw = false;
 		}
@@ -152,6 +161,12 @@ namespace MV {
 				acceptUpClick();
 			});
 
+			onFocusQueryHandle = ourMouse.onFocusQuery.connect([&](TapDevice& a_mouse) {
+				if (canTakeFocus(a_mouse.focusScope())) {
+					a_mouse.queueFocusCandidate(focusCandidate());
+				}
+			});
+
 			onHoverQueryHandle = ourMouse.onHoverQuery.connect([&](TapDevice& a_mouse) {
 				if (mouseInBounds(a_mouse)) {
 					std::weak_ptr<Clickable> weakSelf = std::static_pointer_cast<Clickable>(shared_from_this());
@@ -160,6 +175,172 @@ namespace MV {
 						[weakSelf]() { if (auto self = weakSelf.lock()) { self->hover(false); } } });
 				}
 			});
+		}
+
+		std::shared_ptr<Clickable> Clickable::focusable(bool a_focusable) {
+			isFocusable = a_focusable;
+			return std::static_pointer_cast<Clickable>(shared_from_this());
+		}
+
+		std::shared_ptr<Clickable> Clickable::focusOrder(int64_t a_order) {
+			focusOrderValue = a_order;
+			return std::static_pointer_cast<Clickable>(shared_from_this());
+		}
+
+		std::shared_ptr<Clickable> Clickable::pressOnFocus(bool a_press) {
+			pressesOnFocus = a_press;
+			return std::static_pointer_cast<Clickable>(shared_from_this());
+		}
+
+		const std::string& Clickable::focusLinkName(FocusLink a_link) {
+			static const std::string names[] { "next", "previous", "left", "right", "up", "down", "upLeft", "upRight", "downLeft", "downRight" };
+			return names[static_cast<size_t>(a_link)];
+		}
+
+		std::shared_ptr<Clickable> Clickable::focusLink(FocusLink a_link, const std::string& a_nodeId) {
+			if (a_nodeId.empty()) {
+				focusLinkIds->erase(focusLinkName(a_link));
+			} else {
+				(*focusLinkIds)[focusLinkName(a_link)] = a_nodeId;
+			}
+			return std::static_pointer_cast<Clickable>(shared_from_this());
+		}
+
+		std::string Clickable::focusLink(FocusLink a_link) const {
+			auto found = focusLinkIds->find(focusLinkName(a_link));
+			return found == focusLinkIds->end() ? std::string() : found->second;
+		}
+
+		std::shared_ptr<Clickable> Clickable::focusLink(const std::string& a_linkName, const std::string& a_nodeId) {
+			for (int link = 0; link <= static_cast<int>(FocusLink::DOWN_RIGHT); ++link) {
+				if (focusLinkName(static_cast<FocusLink>(link)) == a_linkName) {
+					return focusLink(static_cast<FocusLink>(link), a_nodeId);
+				}
+			}
+			require<RangeException>(false, "No focus link is named [", a_linkName, "]");
+			return std::static_pointer_cast<Clickable>(shared_from_this());
+		}
+
+		bool Clickable::canTakeFocus(const void* a_scope) const {
+			return isFocusable && ownerIsAlive() && owner()->visible() && enabled() && underFocusScope(a_scope);
+		}
+
+		namespace {
+			FocusLink oppositeFocusLink(FocusLink a_link) {
+				switch (a_link) {
+					case FocusLink::NEXT:
+						return FocusLink::PREVIOUS;
+					case FocusLink::PREVIOUS:
+						return FocusLink::NEXT;
+					case FocusLink::LEFT:
+						return FocusLink::RIGHT;
+					case FocusLink::RIGHT:
+						return FocusLink::LEFT;
+					case FocusLink::UP:
+						return FocusLink::DOWN;
+					case FocusLink::DOWN:
+						return FocusLink::UP;
+					case FocusLink::UP_LEFT:
+						return FocusLink::DOWN_RIGHT;
+					case FocusLink::UP_RIGHT:
+						return FocusLink::DOWN_LEFT;
+					case FocusLink::DOWN_LEFT:
+						return FocusLink::UP_RIGHT;
+					default:
+						return FocusLink::UP_LEFT;
+				}
+			}
+		}
+
+		bool Clickable::focusNeighbour(FocusLink a_link, const void* a_scope, FocusCandidate& a_neighbour) {
+			if (!ownerIsAlive()) {
+				return false;
+			}
+			auto named = focusLink(a_link);
+			auto ourId = owner()->id();
+			auto opposite = oppositeFocusLink(a_link);
+			auto top = owner();
+			while (top->parent()) {
+				top = top->parent();
+			}
+			// the one this Clickable names, or failing that one that names this Clickable for the way back
+			std::shared_ptr<Clickable> found;
+			std::shared_ptr<Clickable> namesUs;
+			std::function<void(const std::shared_ptr<Node>&)> search = [&](const std::shared_ptr<Node>& a_node) {
+				if (found) {
+					return;
+				}
+				auto clickable = a_node->component<Clickable>(false, false);
+				if (clickable && clickable.self().get() != this && clickable->canTakeFocus(a_scope)) {
+					if (!named.empty() && a_node->id() == named) {
+						found = clickable.self();
+						return;
+					}
+					if (!namesUs && !ourId.empty() && clickable->focusLink(opposite) == ourId) {
+						namesUs = clickable.self();
+					}
+				}
+				for (auto&& child : *a_node) {
+					search(child);
+				}
+			};
+			search(top);
+			auto neighbour = found ? found : named.empty() ? namesUs : nullptr;
+			if (!neighbour) {
+				return false;
+			}
+			a_neighbour = neighbour->focusCandidate();
+			return true;
+		}
+
+		bool Clickable::underFocusScope(const void* a_scope) const {
+			if (!a_scope) {
+				return true;
+			}
+			for (auto node = owner(); node; node = node->parent()) {
+				if (node.get() == a_scope) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		FocusCandidate Clickable::focusCandidate() {
+			std::weak_ptr<Clickable> weakSelf = std::static_pointer_cast<Clickable>(shared_from_this());
+			FocusCandidate result;
+			result.order = focusOrderValue;
+			result.treePath = owner()->parentIndexList(0);
+			auto box = bounds();
+			result.screenMin = owner()->screenFromLocal(box.minPoint);
+			result.screenMax = owner()->screenFromLocal(box.maxPoint);
+			result.subject = weakSelf;
+			result.enter = [weakSelf]() { if (auto self = weakSelf.lock()) { self->focusChanged(true); } };
+			result.leave = [weakSelf]() { if (auto self = weakSelf.lock()) { self->focusChanged(false); } };
+			result.activate = [weakSelf]() { if (auto self = weakSelf.lock()) { self->press(); } };
+			result.linked = [weakSelf](FocusLink a_link, const void* a_scope, FocusCandidate& a_neighbour) {
+				auto self = weakSelf.lock();
+				return self && self->focusNeighbour(a_link, a_scope, a_neighbour);
+			};
+			result.pressOnFocus = pressesOnFocus;
+			return result;
+		}
+
+		void Clickable::focus() {
+			if (ownerIsAlive()) {
+				ourMouse.focus(focusCandidate());
+			}
+		}
+
+		void Clickable::focusChanged(bool a_focused) {
+			if (isFocused != a_focused) {
+				isFocused = a_focused;
+				auto self = std::static_pointer_cast<Clickable>(shared_from_this());
+				if (isFocused) {
+					onFocusEnterSignal(self);
+				} else {
+					onFocusLeaveSignal(self);
+				}
+			}
 		}
 
 		void Clickable::hover(bool a_hovered) {
@@ -214,6 +395,10 @@ namespace MV {
 			auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
 			if (clickDiag()) { std::cerr << "[click] pressed " << (ownerIsAlive() ? owner()->id() : std::string("?")) << std::endl; }
 			isInPressEvent = true;
+			// a press takes the focus too, without pressing again
+			if (isFocusable && !isFocused && ownerIsAlive()) {
+				ourMouse.focus(focusCandidate(), false);
+			}
 			onPressSignal(protectFromDismissal);
 
 			objectLocationBeforeDrag = owner()->position();

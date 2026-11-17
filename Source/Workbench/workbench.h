@@ -65,6 +65,8 @@ namespace Workbench {
 		bool loadDockLayout(const std::string& a_fileName);
 		DockSpace& docking() { return *dock; }
 		Tooltips& tips() { return *tooltips; }
+		// The text field being typed into, if any.
+		std::shared_ptr<MV::Scene::Text> editingText() const { return focusRouter.active(); }
 		// What the editor and the engine have reported. The Console panel lists it; the bar along the bottom of the
 		// window shows the latest line and how many errors and warnings there have been, and a press on it opens the Console.
 		MessageLog& messages() { return *messageLog; }
@@ -112,6 +114,7 @@ namespace Workbench {
 		SceneGrid& grid() { return *sceneGrid; }
 		MenuBar& menus() { return *menuBar; }
 		InspectorPanel& inspector() { return *inspectorPanel; }
+		SceneTreePanel& hierarchy() { return *treePanel; }
 		const std::string& document() const { return documentPath; }
 		// The title bar's text: the document's name, starred while it is modified.
 		const std::string& title() const { return shownTitle; }
@@ -131,6 +134,11 @@ namespace Workbench {
 		void render();
 		void updateCameraKeys(double a_dt);
 		bool handleShortcutKey(SDL_Keycode a_key);
+		bool handleFocusKey(const SDL_Event& a_event);
+		void openContextMenu(const MV::Point<int>& a_screenPoint);
+		std::vector<MenuItem> nodeContextItems();
+		std::vector<MenuItem> tabContextItems(Panel* a_panel);
+		std::vector<MenuItem> textContextItems(const std::shared_ptr<MV::Scene::Clickable>& a_field);
 		void buildTitleBar();
 		void buildStatusBar(const MV::Size<>& a_worldSize);
 		void refreshStatus();
@@ -228,6 +236,7 @@ namespace Workbench {
 		MV::Point<int> panStart;
 		MV::Point<int> panLast;
 		std::vector<MV::TapDevice::SignalType> panReceivers;
+		MV::Point<int> contextPress;
 
 		SDL_Cursor* cursorArrow = nullptr;
 		SDL_Cursor* cursorResizeH = nullptr;

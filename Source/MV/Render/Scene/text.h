@@ -1,6 +1,7 @@
 #ifndef _MV_SCENE_TEXT_H_
 #define _MV_SCENE_TEXT_H_
 
+#include <optional>
 #include "MV/Render/formattedText.h"
 #include "sprite.h"
 #include <jaiscript/properties.hpp>
@@ -135,19 +136,36 @@ namespace MV {
 				return self;
 			}
 
+			// What is selected is replaced by what is inserted.
 			std::shared_ptr<Text> insertAtCursor(const UtfString& a_text) {
+				eraseSelection();
 				incrementCursor(formattedText->insert(cursor, a_text));
 				auto self = std::static_pointer_cast<Text>(shared_from_this());
 				onChangeSignal(self);
 				return self;
 			}
 			std::shared_ptr<Text> insertAtCursor(UtfChar a_char) {
+				eraseSelection();
 				formattedText->insert(cursor, UtfString(1, a_char));
 				incrementCursor(1);
 				auto self = std::static_pointer_cast<Text>(shared_from_this());
 				onChangeSignal(self);
 				return self;
 			}
+
+			// A run of characters between where the selection began and the cursor. Typing, pasting, backspace and
+			// delete replace it; Shift with the arrows, Home or End grows it and Ctrl+A takes everything.
+			std::shared_ptr<Text> selectAll();
+			std::shared_ptr<Text> clearSelection();
+			bool hasSelection() const {
+				return selectionAnchor.has_value() && *selectionAnchor != cursor;
+			}
+			UtfString selectedText() const;
+			// Copy and cut take the selection, or all of the text when nothing is selected (cut then removes
+			// nothing); paste replaces the selection.
+			std::shared_ptr<Text> copyToClipboard();
+			std::shared_ptr<Text> cutToClipboard();
+			std::shared_ptr<Text> pasteFromClipboard();
 
 			void enableCursor();
 			void disableCursor();
@@ -280,6 +298,13 @@ namespace MV {
 				setCursor(cursor + a_change);
 			}
 
+			// Moves the cursor; a_extend keeps where the selection began, anything else drops the selection.
+			void moveCursor(int64_t a_to, bool a_extend);
+			bool eraseSelection();
+			void refreshSelection();
+			size_t selectionStart() const { return std::min(selectionAnchor.value_or(cursor), cursor); }
+			size_t selectionEnd() const { return std::max(selectionAnchor.value_or(cursor), cursor); }
+
 			TextLibrary& textLibrary;
 
 			jai::property<std::shared_ptr<FormattedText>> formattedText;
@@ -289,6 +314,8 @@ namespace MV {
 			bool displayCursor = false;
 			size_t cursor = 0;
 			std::shared_ptr<MV::Scene::Sprite> cursorSprite;
+			std::optional<size_t> selectionAnchor;
+			std::shared_ptr<MV::Scene::Sprite> selectionSprite;
 
 			JAI_PROPERTY((std::string), fontIdentifier, "");
 			double accumulatedTime = 0.0;

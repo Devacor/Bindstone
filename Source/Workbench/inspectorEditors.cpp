@@ -281,6 +281,54 @@ namespace Workbench {
 		return page * a_perPage;
 	}
 
+	// The neighbours a Clickable names for keyboard and controller moves: a row a link, each a node dropped on it.
+	// A link left empty is worked out from the other focusable controls.
+	void InspectorPanel::addFocusLinksGroup(const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
+		size_t named = 0;
+		for (int link = 0; link <= static_cast<int>(MV::FocusLink::DOWN_RIGHT); ++link) {
+			named += a_clickable->focusLink(static_cast<MV::FocusLink>(link)).empty() ? 0 : 1;
+		}
+		if (!addGroupHeader("focus links", "focusLinks#" + a_clickable->id(), named == 0 ? std::string("automatic") : countText(named, "named", "named"))) {
+			return;
+		}
+		rowIndent += theme->px(12.0f);
+		std::weak_ptr<MV::Scene::Clickable> weakClickable = a_clickable;
+		auto top = a_clickable->owner();
+		while (top && top->parent()) {
+			top = top->parent();
+		}
+		for (int index = 0; index <= static_cast<int>(MV::FocusLink::DOWN_RIGHT); ++index) {
+			auto link = static_cast<MV::FocusLink>(index);
+			std::string id = a_clickable->focusLink(link);
+			std::shared_ptr<MV::Scene::Node> target;
+			std::function<void(const std::shared_ptr<MV::Scene::Node>&)> search = [&](const std::shared_ptr<MV::Scene::Node>& a_node) {
+				if (!target && a_node->id() == id && a_node->component<MV::Scene::Clickable>(false, false)) {
+					target = a_node;
+				}
+				for (auto&& child : *a_node) {
+					if (!target) {
+						search(child);
+					}
+				}
+			};
+			if (!id.empty() && top) {
+				search(top);
+			}
+			addNodeReferenceRow(MV::Scene::Clickable::focusLinkName(link), target, [this, weakClickable, link, id](const std::shared_ptr<MV::Scene::Node>& a_node) {
+				std::string newId = a_node ? a_node->id() : std::string();
+				auto apply = [weakClickable, link](const std::string& a_id) {
+					if (auto locked = weakClickable.lock()) {
+						locked->focusLink(link, a_id);
+					}
+				};
+				apply(newId);
+				history->record("focus link " + MV::Scene::Clickable::focusLinkName(link), [apply, newId]() { apply(newId); }, [apply, id]() { apply(id); });
+				rebuild();
+			});
+		}
+		rowIndent -= theme->px(12.0f);
+	}
+
 	void InspectorPanel::addAnchorsGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable) {
 		auto& anchors = a_drawable->anchors();
 		auto anchoredTo = anchors.hasParent() ? anchors.parent() : nullptr;
@@ -649,6 +697,10 @@ namespace Workbench {
 		}
 		if (drawable && typeId == std::type_index(typeid(MV::Scene::Anchors))) {
 			addAnchorsGroup(drawable);
+			return true;
+		}
+		if (auto clickable = std::dynamic_pointer_cast<MV::Scene::Clickable>(a_component); clickable && topLevel && label == "focusLinks") {
+			addFocusLinksGroup(clickable);
 			return true;
 		}
 		if (drawable && topLevel && typeId == std::type_index(typeid(std::map<size_t, std::shared_ptr<MV::TextureHandle>>))) {

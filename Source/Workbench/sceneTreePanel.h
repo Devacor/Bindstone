@@ -36,6 +36,15 @@ namespace Workbench {
 		// Highlights and reveals the app's selection; never calls back into the app.
 		void showSelection(const std::shared_ptr<MV::Scene::Node>& a_node);
 
+		// The node whose row is at a point on screen, and the middle of a node's row when it has one showing.
+		std::shared_ptr<MV::Scene::Node> nodeAt(const MV::Point<int>& a_screenPoint) const {
+			auto* item = tree ? tree->itemAt(a_screenPoint) : nullptr;
+			return item ? item->node.lock() : nullptr;
+		}
+		std::optional<MV::Point<int>> rowScreenPoint(const std::shared_ptr<MV::Scene::Node>& a_node) const {
+			return tree ? tree->rowScreenPoint(SceneTreeItem(a_node)) : std::nullopt;
+		}
+
 		void resized(const MV::Size<>& a_size) override {
 			if (searchSizer) {
 				searchSizer->bounds(MV::size(std::max(theme->px(60.0f), a_size.width - theme->pad), theme->fieldHeight));

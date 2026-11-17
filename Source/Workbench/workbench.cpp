@@ -71,6 +71,14 @@ namespace Workbench {
 		panWith(PanButton::LEFT, mouse.onLeftMouseDown, mouse.onLeftMouseUp);
 		panWith(PanButton::MIDDLE, mouse.onMiddleMouseDown, mouse.onMiddleMouseUp);
 		panWith(PanButton::RIGHT, mouse.onRightMouseDown, mouse.onRightMouseUp);
+		// after the pan's own receivers, so a right drag across the scene has ended as a pan by the time this looks
+		panReceivers.push_back(mouse.onRightMouseDown.connect([this](MV::TapDevice& a_mouse) { contextPress = a_mouse.position(); }));
+		panReceivers.push_back(mouse.onRightMouseUp.connect([this](MV::TapDevice& a_mouse) {
+			auto released = a_mouse.position();
+			if (std::abs(released.x - contextPress.x) + std::abs(released.y - contextPress.y) <= 4) {
+				openContextMenu(released);
+			}
+		}));
 		panReceivers.push_back(mouse.onMove.connect([this](MV::TapDevice& a_mouse) {
 			if (panButton == PanButton::NONE) {
 				return;
@@ -1059,6 +1067,117 @@ namespace Workbench {
 		}
 	}
 
+	// What a right press offers depends on what is under it: a dock tab, a text field, a Hierarchy row, or the scene.
+	void App::openContextMenu(const MV::Point<int>& a_screenPoint) {
+		std::vector<MenuItem> items;
+		for (auto&& subject : mouse.hoveredSubjects()) {
+			auto clickable = std::static_pointer_cast<MV::Scene::Clickable>(subject);
+			if (!clickable->ownerIsAlive()) {
+				continue;
+			}
+			auto node = clickable->owner();
+			if (auto* panel = dock->tabPanelOf(node)) {
+				items = tabContextItems(panel);
+			} else if (clickable->focusable() && clickable->pressOnFocus()) {
+				items = textContextItems(clickable);
+			} else if (treePanel && dock->panelContentContaining(node) == treePanel->content()) {
+				if (auto rowNode = treePanel->nodeAt(a_screenPoint)) {
+					select(rowNode);
+					items = nodeContextItems();
+				}
+			}
+			if (!items.empty()) {
+				break;
+			}
+		}
+		if (items.empty() && gizmos->pointerOverScene(a_screenPoint)) {
+			pickSceneNode(a_screenPoint);
+			items = nodeContextItems();
+		}
+		menuBar->openContext(a_screenPoint, items);
+	}
+
+	std::vector<MenuItem> App::nodeContextItems() {
+		return {
+			{ "Frame", "F", [this]() { frameSelectionInViewport(); }, false, {}, [this]() { return static_cast<bool>(selectedNode); } },
+			{ "Duplicate", "Ctrl+D", [this]() { duplicateSelected(); }, true, {}, [this]() { return selectionIsRemovable(); } },
+			{ "Delete", "Del", [this]() { deleteSelected(); }, false, {}, [this]() { return selectionIsRemovable(); } } };
+	}
+
+	std::vector<MenuItem> App::tabContextItems(Panel* a_panel) {
+		return {
+			{ "Close", "", [this, a_panel]() { dock->closePanel(a_panel); }, false, {}, [this, a_panel]() { return dock->canClose(a_panel); } },
+			{ "Float", "", [this, a_panel]() { dock->floatPanel(a_panel); }, false, {}, [this, a_panel]() { return dock->canFloat(a_panel); } } };
+	}
+
+	std::vector<MenuItem> App::textContextItems(const std::shared_ptr<MV::Scene::Clickable>& a_field) {
+		// the field is typed in first, unless it already is: then what is selected in it stays selected
+		bool holdsFocus = mouse.focusedSubject() == a_field;
+		if (!focusRouter.active() || !holdsFocus) {
+			if (holdsFocus) {
+				mouse.focusActivate();
+			} else {
+				a_field->focus();
+			}
+		}
+		auto text = focusRouter.active();
+		if (!text) {
+			return {};
+		}
+		std::weak_ptr<MV::Scene::Text> weakText = text;
+		auto onText = [weakText](std::shared_ptr<MV::Scene::Text> (MV::Scene::Text::*a_method)()) {
+			return [weakText, a_method]() {
+				if (auto locked = weakText.lock()) {
+					((*locked).*a_method)();
+				}
+			};
+		};
+		auto selected = [weakText]() {
+			auto locked = weakText.lock();
+			return locked && locked->hasSelection();
+		};
+		return {
+			{ "Cut", "Ctrl+X", onText(&MV::Scene::Text::cutToClipboard), false, {}, selected },
+			{ "Copy", "Ctrl+C", onText(&MV::Scene::Text::copyToClipboard) },
+			{ "Paste", "Ctrl+V", onText(&MV::Scene::Text::pasteFromClipboard), false, {}, []() { return SDL_HasClipboardText() == SDL_TRUE; } },
+			{ "Select All", "Ctrl+A", onText(&MV::Scene::Text::selectAll), true } };
+	}
+
+	// Tab and Shift+Tab walk the focusable controls of the panel the focus is in; Enter and Space press a focused
+	// control that is not a text field; Escape lets the focus go.
+	bool App::handleFocusKey(const SDL_Event& a_event) {
+		if (a_event.type != SDL_KEYDOWN || (SDL_GetModState() & (KMOD_CTRL | KMOD_ALT | KMOD_GUI))) {
+			return false;
+		}
+		auto key = a_event.key.keysym.sym;
+		if (key == SDLK_TAB) {
+			auto focusedClickable = std::static_pointer_cast<MV::Scene::Clickable>(mouse.focusedSubject());
+			auto from = focusRouter.active() ? focusRouter.active()->owner() : focusedClickable ? focusedClickable->owner() : nullptr;
+			auto scope = from ? dock->panelContentContaining(from) : nullptr;
+			if (!from) {
+				return false;
+			}
+			focusRouter.leave();
+			if (SDL_GetModState() & KMOD_SHIFT) {
+				mouse.focusPrevious(scope.get());
+			} else {
+				mouse.focusNext(scope.get());
+			}
+			return true;
+		}
+		if (focusRouter.hasActive()) {
+			return false;
+		}
+		if ((key == SDLK_RETURN || key == SDLK_SPACE) && mouse.hasFocus()) {
+			return mouse.focusActivate();
+		}
+		if (key == SDLK_ESCAPE && mouse.hasFocus()) {
+			mouse.focusClear();
+			return true;
+		}
+		return false;
+	}
+
 	bool App::handleShortcutKey(SDL_Keycode a_key) {
 		switch (a_key) {
 			case SDLK_q:
@@ -1095,8 +1214,13 @@ namespace Workbench {
 				requestExit();
 				continue;
 			}
+			// a press on a field's own menu is not a press away from the field
+			bool onContextMenu = event.type == SDL_MOUSEBUTTONDOWN && menuBar->contextOpen() && menuBar->popupContains(MV::Point<int>(event.button.x, event.button.y));
 			menuBar->handleInput(event);
-			if (focusRouter.handleEvent(event)) {
+			if (handleFocusKey(event)) {
+				continue;
+			}
+			if (!onContextMenu && focusRouter.handleEvent(event)) {
 				continue;
 			}
 			if (event.type == SDL_KEYDOWN && (SDL_GetModState() & KMOD_CTRL)) {

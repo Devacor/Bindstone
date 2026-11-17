@@ -1,4 +1,5 @@
 #include "text.h"
+#include "MV/Utility/tinyutf8.h"
 
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/signals/signal.hpp>
@@ -107,6 +108,15 @@ namespace MV{
 			} else if (!cursorAttached) {
 				owner()->add(cursorSprite->owner());
 			}
+			if (!selectionSprite || !selectionSprite->ownerIsAlive()) {
+				auto selectionNode = owner()->make(guid("SELECTION_"))->serializable(false);
+				// behind the glyphs it marks
+				selectionNode->depth(glyphs->depth() - 0.5f);
+				selectionSprite = selectionNode->attach<Sprite>()->color(Color(0.16f, 0.42f, 0.86f, 0.75f));
+				selectionSprite->hide();
+			} else if (!ownerHasChild(selectionSprite->owner())) {
+				owner()->add(selectionSprite->owner(), false);
+			}
 		}
 
 		void Text::positionCursorWithoutCharacter() {
@@ -164,8 +174,119 @@ namespace MV{
 			}
 		}
 
+		std::shared_ptr<Text> Text::selectAll() {
+			selectionAnchor = 0;
+			setCursor(formattedText->size());
+			refreshSelection();
+			return std::static_pointer_cast<Text>(shared_from_this());
+		}
+
+		std::shared_ptr<Text> Text::clearSelection() {
+			selectionAnchor.reset();
+			refreshSelection();
+			return std::static_pointer_cast<Text>(shared_from_this());
+		}
+
+		UtfString Text::selectedText() const {
+			if (!hasSelection()) {
+				return {};
+			}
+			utf8_string all(text());
+			return all.substr(selectionStart(), selectionEnd() - selectionStart()).cpp_str();
+		}
+
+		std::shared_ptr<Text> Text::copyToClipboard() {
+			SDL_SetClipboardText(hasSelection() ? selectedText().c_str() : text().c_str());
+			return std::static_pointer_cast<Text>(shared_from_this());
+		}
+
+		std::shared_ptr<Text> Text::cutToClipboard() {
+			auto self = copyToClipboard();
+			if (eraseSelection()) {
+				onChangeSignal(self);
+			}
+			return self;
+		}
+
+		std::shared_ptr<Text> Text::pasteFromClipboard() {
+			char* clipboard = SDL_GetClipboardText();
+			UtfString pasted = clipboard ? clipboard : "";
+			SDL_free(clipboard);
+			insertAtCursor(pasted);
+			refreshSelection();
+			return std::static_pointer_cast<Text>(shared_from_this());
+		}
+
+		bool Text::eraseSelection() {
+			if (!hasSelection()) {
+				selectionAnchor.reset();
+				return false;
+			}
+			const size_t start = selectionStart();
+			const size_t count = selectionEnd() - start;
+			selectionAnchor.reset();
+			formattedText->erase(start, count);
+			cursor = std::min(cursor, formattedText->size()) + 1;   // setCursor places only on a change
+			setCursor(static_cast<int64_t>(start));
+			refreshSelection();
+			return true;
+		}
+
+		void Text::moveCursor(int64_t a_to, bool a_extend) {
+			if (a_extend) {
+				if (!selectionAnchor) {
+					selectionAnchor = cursor;
+				}
+			} else {
+				selectionAnchor.reset();
+			}
+			setCursor(a_to);
+			refreshSelection();
+		}
+
+		void Text::refreshSelection() {
+			if (!selectionSprite || !selectionSprite->ownerIsAlive()) {
+				return;
+			}
+			if (!hasSelection() || formattedText->size() == 0) {
+				selectionSprite->hide();
+				return;
+			}
+			const size_t maxCursor = formattedText->size();
+			// the left edge of the character at an index, or the right edge of the last one
+			auto edge = [&](size_t a_index, PointPrecision& a_height) {
+				auto character = a_index < maxCursor ? formattedText->characterForIndex(a_index) : formattedText->characterForIndex(maxCursor - 1);
+				if (!character) {
+					return Point<>();
+				}
+				auto result = (character->position() + character->offset()) * character->scale();
+				if (a_index >= maxCursor) {
+					result.x += character->characterSize().width * character->scale().x;
+				}
+				a_height = character->characterSize().height * character->scale().y;
+				return result;
+			};
+			PointPrecision height = 0.0f;
+			PointPrecision endHeight = 0.0f;
+			auto from = edge(selectionStart(), height);
+			auto to = edge(selectionEnd(), endHeight);
+			// one line's worth is drawn: a selection that runs over lines is still selected, only not marked
+			if (std::abs(from.y - to.y) > 0.5f || to.x <= from.x) {
+				selectionSprite->hide();
+				return;
+			}
+			auto selectionSilence = selectionSprite->owner()->silence();
+			selectionSprite->owner()->position(formattedText->scene()->position() + from);
+			selectionSprite->bounds(MV::size(to.x - from.x, std::max(height, endHeight)));
+			selectionSprite->show();
+		}
+
 		std::shared_ptr<Text> Text::backspace() {
 			auto self = std::static_pointer_cast<Text>(shared_from_this());
+			if (eraseSelection()) {
+				onChangeSignal(self);
+				return self;
+			}
 			if (cursor > 0) {
 				formattedText->erase(cursor - 1, 1);
 				incrementCursor(-1);
@@ -179,35 +300,51 @@ namespace MV{
 
 			if (event.type == SDL_TEXTINPUT) {
 				insertAtCursor(event.text.text);
+				refreshSelection();
 				return true;
 			} else if (event.type == SDL_TEXTEDITING) {
 				//setTemporaryText(stringToWide(event.edit.text), event.edit.start, event.edit.length);
 			} else if (event.type == SDL_KEYDOWN) {
+				const bool shift = (SDL_GetModState() & KMOD_SHIFT) != 0;
+				const bool control = (SDL_GetModState() & KMOD_CTRL) != 0;
+				auto self = std::static_pointer_cast<Text>(shared_from_this());
 				if (event.key.keysym.sym == SDLK_BACKSPACE && !formattedText->empty()) {
 					backspace();
+					return true;
+				} else if (event.key.keysym.sym == SDLK_DELETE && hasSelection()) {
+					eraseSelection();
+					onChangeSignal(self);
 					return true;
 				} else if (event.key.keysym.sym == SDLK_DELETE && !formattedText->empty() && cursor < formattedText->size()) {
 					++cursor; //this is okay because backspace will reposition the cursor.
 					backspace();
 					return true;
-				} else if (event.key.keysym.sym == SDLK_v && SDL_GetModState() & KMOD_CTRL) {
-					insertAtCursor(SDL_GetClipboardText());
+				} else if (event.key.keysym.sym == SDLK_a && control) {
+					selectAll();
 					return true;
-				} else if (event.key.keysym.sym == SDLK_c && SDL_GetModState() & KMOD_CTRL) {
-					SDL_SetClipboardText(text().c_str());
+				} else if (event.key.keysym.sym == SDLK_v && control) {
+					pasteFromClipboard();
+					return true;
+				} else if (event.key.keysym.sym == SDLK_c && control) {
+					copyToClipboard();
+					return true;
+				} else if (event.key.keysym.sym == SDLK_x && control) {
+					cutToClipboard();
 					return true;
 				} else if (event.key.keysym.sym == SDLK_LEFT) {
-					if (cursor > 0) {
-						incrementCursor(-1);
-					}
+					// without Shift a selection collapses to the end the arrow points at
+					moveCursor(!shift && hasSelection() ? static_cast<int64_t>(selectionStart()) : static_cast<int64_t>(cursor) - 1, shift);
 					return true;
 				} else if (event.key.keysym.sym == SDLK_RIGHT) {
-					if (cursor < formattedText->size()) {
-						incrementCursor(1);
-					}
+					moveCursor(!shift && hasSelection() ? static_cast<int64_t>(selectionEnd()) : static_cast<int64_t>(cursor) + 1, shift);
+					return true;
+				} else if (event.key.keysym.sym == SDLK_HOME) {
+					moveCursor(0, shift);
+					return true;
+				} else if (event.key.keysym.sym == SDLK_END) {
+					moveCursor(static_cast<int64_t>(formattedText->size()), shift);
 					return true;
 				} else if (event.key.keysym.sym == SDLK_RETURN) {
-					auto self = std::static_pointer_cast<Text>(shared_from_this());
 					onEnterSignal(self);
 					return true;
 				}
@@ -216,8 +353,10 @@ namespace MV{
 		}
 
 		std::shared_ptr<Text> Text::text(const UtfString &a_text) {
+			selectionAnchor.reset();
 			formattedText->string(a_text);
 			this->setCursor(formattedText->size());
+			refreshSelection();
 			auto self = std::static_pointer_cast<Text>(shared_from_this());
 			onChangeSignal(self);
 			return self;
@@ -237,6 +376,7 @@ namespace MV{
 				displayCursor = false;
 				setCursor(cursor);
 				cursorSprite->hide();
+				clearSelection();
 				if (self) {
 					onEnterSignal(self);
 				}

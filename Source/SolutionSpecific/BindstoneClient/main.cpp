@@ -1133,6 +1133,222 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.runFrames(3);
 	}
 
+	// Keyboard: Tab between a panel's fields, a focused field's text selected, and named focus neighbours in the inspector
+	{
+		auto& mouse = *a_managers.services.get<MV::TapDevice>();
+		auto& settings = a_app.settings();
+		auto& docking = a_app.docking();
+		auto click = [&](const MV::Point<int>& a_at) {
+			for (bool down : { false, true, false }) {
+				mouse.simulate(a_at, down);
+				a_app.runFrames(2);
+			}
+			mouse.stopSimulating();
+		};
+		auto key = [&a_app](SDL_Keycode a_key, int a_modifiers = KMOD_NONE) {
+			SDL_SetModState(static_cast<SDL_Keymod>(a_modifiers));
+			SDL_Event press{};
+			press.type = SDL_KEYDOWN;
+			press.key.keysym.sym = a_key;
+			SDL_PushEvent(&press);
+			a_app.runFrames(2);
+			SDL_SetModState(KMOD_NONE);
+		};
+		auto type = [&a_app](const std::string& a_text) {
+			for (char character : a_text) {
+				SDL_Event typed{};
+				typed.type = SDL_TEXTINPUT;
+				typed.text.text[0] = character;
+				SDL_PushEvent(&typed);
+			}
+			a_app.runFrames(2);
+		};
+		auto editingShows = [&a_app](const std::string& a_text) {
+			auto editing = a_app.editingText();
+			return editing && std::string(editing->text()) == a_text;
+		};
+
+		a_app.showSettings();
+		a_app.runFrames(3);
+		click(settings.fieldScreenPoint("Undo steps"));
+		expect(editingShows("200") && a_app.editingText()->hasSelection() && std::string(a_app.editingText()->selectedText()) == "200", "a field that starts taking keys has its text selected");
+		key(SDLK_TAB);
+		expect(editingShows("100") && a_app.editingText()->hasSelection() && settings.shown("Undo steps") == "200", "Tab moves to the next field of the panel, and its text is selected");
+		type("40");
+		key(SDLK_RETURN);
+		expect(a_app.gridSize().width == 40.0f && !a_app.editingText(), "typing over the selection replaces it, got " + std::to_string(a_app.gridSize().width));
+		click(settings.fieldScreenPoint("Grid X"));
+		key(SDLK_END);
+		key(SDLK_LEFT, KMOD_SHIFT);
+		type("5");
+		key(SDLK_RETURN);
+		expect(a_app.gridSize().width == 45.0f, "Shift with an arrow selects from the cursor, and typing replaces that much: got " + std::to_string(a_app.gridSize().width));
+		click(settings.fieldScreenPoint("Grid X"));
+		key(SDLK_TAB, KMOD_SHIFT);
+		expect(editingShows("200"), "Shift+Tab moves back a field");
+		key(SDLK_TAB, KMOD_SHIFT);
+		expect(editingShows("5"), "and from the first field wraps to the last");
+		key(SDLK_TAB);
+		expect(editingShows("200"), "as Tab from the last wraps to the first");
+		key(SDLK_ESCAPE);
+		expect(!a_app.editingText() && a_app.undoSteps() == 200 && a_app.rotationSnap() == 5.0f, "Escape leaves the field and nothing Tab passed through was changed");
+		a_app.gridSize(MV::size(100.0f, 100.0f));
+		docking.closePanel(docking.panelTitled("Settings"));
+		a_app.showInspector();
+
+		std::function<std::shared_ptr<MV::Scene::Node>(const std::shared_ptr<MV::Scene::Node>&, const std::string&)> findNode = [&](const std::shared_ptr<MV::Scene::Node>& a_node, const std::string& a_id) -> std::shared_ptr<MV::Scene::Node> {
+			if (a_node->id() == a_id) {
+				return a_node;
+			}
+			for (auto&& child : *a_node) {
+				if (auto found = findNode(child, a_id)) {
+					return found;
+				}
+			}
+			return nullptr;
+		};
+		auto loginButton = findNode(a_app.scene(), "LoginButton");
+		auto emailField = findNode(a_app.scene(), "EmailBackground");
+		expect(loginButton && emailField, "the Login scene has its button and its email field");
+		if (loginButton && emailField) {
+			auto button = loginButton->component<MV::Scene::Clickable>(false, false);
+			expect(static_cast<bool>(button) && button->focusable(), "a Button in a loaded scene is focusable");
+			a_app.select(loginButton);
+			a_app.runFrames(3);
+			auto& inspector = a_app.inspector();
+			auto header = inspector.rowScreenPoint("focus links", false);
+			expect(header.has_value(), "the inspector shows a Clickable's focus links as a group");
+			if (header && button) {
+				click(*header);
+				auto down = inspector.rowScreenPoint("down");
+				expect(down.has_value(), "opened, it has a row for each link");
+				if (down) {
+					expect(inspector.dropNode(emailField, *down), "a node dropped on a link is taken");
+					a_app.runFrames(2);
+					expect(button->focusLink(MV::FocusLink::DOWN) == "EmailBackground", "and named as that neighbour: " + button->focusLink(MV::FocusLink::DOWN));
+					pressWithControl(SDLK_z);
+					expect(button->focusLink(MV::FocusLink::DOWN).empty(), "undo clears the link");
+				}
+			}
+			a_app.select(nullptr);
+		}
+	}
+
+	// A right press opens the menu of what is under it: a Hierarchy row, the scene, a dock tab, a text field
+	{
+		auto& mouse = *a_managers.services.get<MV::TapDevice>();
+		auto& menus = a_app.menus();
+		auto& docking = a_app.docking();
+		auto& settings = a_app.settings();
+		auto hold = [&](const MV::Point<int>& a_at, bool a_left, bool a_right) {
+			mouse.simulate(a_at, a_left, a_right);
+			a_app.runFrames(2);
+		};
+		auto click = [&](const MV::Point<int>& a_at) {
+			hold(a_at, false, false);
+			hold(a_at, true, false);
+			hold(a_at, false, false);
+			mouse.stopSimulating();
+		};
+		auto rightClick = [&](const MV::Point<int>& a_at) {
+			hold(a_at, false, false);
+			hold(a_at, false, true);
+			hold(a_at, false, false);
+			mouse.stopSimulating();
+		};
+		auto key = [&a_app](SDL_Keycode a_key) {
+			SDL_Event press{};
+			press.type = SDL_KEYDOWN;
+			press.key.keysym.sym = a_key;
+			SDL_PushEvent(&press);
+			a_app.runFrames(2);
+		};
+		auto childCount = [](const std::shared_ptr<MV::Scene::Node>& a_node) {
+			return static_cast<size_t>(std::distance(a_node->begin(), a_node->end()));
+		};
+
+		auto scene = a_app.scene();
+		auto rowNode = scene && scene->begin() != scene->end() ? *scene->begin() : nullptr;
+		expect(static_cast<bool>(rowNode), "the scene has a node for the menus to work on");
+		if (rowNode) {
+			a_app.select(rowNode);
+			a_app.runFrames(3);
+			auto row = a_app.hierarchy().rowScreenPoint(rowNode);
+			a_app.select(nullptr);
+			a_app.runFrames(2);
+			expect(row.has_value(), "the node has a Hierarchy row");
+			if (row) {
+				rightClick(*row);
+				expect(menus.contextOpen() && a_app.selected() == rowNode, "a right press on a Hierarchy row selects it and opens a menu");
+				expect(menus.rowCount() == 3 && menus.rowLabel(0) == "Frame" && menus.rowLabel(1) == "Duplicate" && menus.rowLabel(2) == "Delete", "with Frame, Duplicate and Delete");
+				if (menus.contextOpen() && menus.rowCount() == 3) {
+					size_t before = childCount(scene);
+					click(menus.rowScreenPoint(1));
+					expect(!menus.isOpen() && childCount(scene) == before + 1, "Duplicate from the menu duplicates the node");
+					pressWithControl(SDLK_z);
+					expect(childCount(scene) == before, "and undoes as one step");
+				}
+			}
+
+			a_app.select(nullptr);
+			auto inScene = rowNode->screenBounds().centerPoint();
+			expect(a_app.gizmoLayer().pointerOverScene(inScene), "the node is in view in the Scene panel");
+			rightClick(inScene);
+			expect(menus.contextOpen() && static_cast<bool>(a_app.selected()) && menus.rowCount() == 3 && menus.rowLabel(2) == "Delete", "a right press in the scene selects what is under it and opens the same menu");
+			key(SDLK_ESCAPE);
+			expect(!menus.isOpen(), "Escape closes it");
+			MV::Point<int> dragged(inScene.x + 40, inScene.y);
+			hold(inScene, false, false);
+			hold(inScene, false, true);
+			hold(dragged, false, true);
+			hold(dragged, false, false);
+			expect(!menus.isOpen(), "a right drag pans the scene and opens no menu");
+			hold(dragged, false, true);
+			hold(inScene, false, true);
+			hold(inScene, false, false);
+			mouse.stopSimulating();
+			a_app.select(nullptr);
+		}
+
+		auto layoutBefore = docking.describeLayout();
+		rightClick(docking.tabScreenPoint("Console"));
+		expect(menus.contextOpen() && menus.rowCount() == 2 && menus.rowLabel(0) == "Close" && menus.rowLabel(1) == "Float", "a right press on a dock tab offers Close and Float");
+		if (menus.contextOpen() && menus.rowCount() == 2) {
+			click(menus.rowScreenPoint(1));
+			expect(docking.floating(docking.panelTitled("Console")), "Float lifts the panel out of the dock");
+			rightClick(docking.tabScreenPoint("Console"));
+			expect(menus.contextOpen() && !menus.rowEnabled(1) && menus.rowEnabled(0), "a panel floating by itself cannot float again, and can close");
+			if (menus.contextOpen()) {
+				click(menus.rowScreenPoint(0));
+				expect(!docking.open(docking.panelTitled("Console")), "Close from the menu closes the panel");
+			}
+		}
+		expect(docking.applyLayout(layoutBefore) && docking.describeLayout() == layoutBefore, "the layout from before goes back");
+		a_app.runFrames(3);
+
+		a_app.showSettings();
+		a_app.runFrames(3);
+		click(settings.fieldScreenPoint("Undo steps"));
+		key(SDLK_END);
+		auto editing = a_app.editingText();
+		expect(editing && !editing->hasSelection(), "End drops the selection a field starts with");
+		rightClick(settings.fieldScreenPoint("Undo steps"));
+		expect(menus.contextOpen() && menus.rowCount() == 4 && menus.rowLabel(0) == "Cut" && menus.rowLabel(3) == "Select All", "a right press on a field offers Cut, Copy, Paste and Select All");
+		expect(a_app.editingText() == editing && editing && !editing->hasSelection() && menus.contextOpen() && !menus.rowEnabled(0), "the field being typed in keeps its cursor, and Cut waits for a selection");
+		if (menus.contextOpen() && menus.rowCount() == 4) {
+			click(menus.rowScreenPoint(3));
+			expect(a_app.editingText() == editing && editing && std::string(editing->selectedText()) == "200", "Select All from the menu selects the field's text and the field stays open");
+		}
+		rightClick(settings.fieldScreenPoint("Grid X"));
+		auto other = a_app.editingText();
+		expect(menus.contextOpen() && other && other != editing && std::string(other->selectedText()) == "100" && menus.rowEnabled(0), "a right press on another field moves the typing there, with its text selected");
+		key(SDLK_ESCAPE);
+		expect(!menus.isOpen() && !a_app.editingText() && a_app.undoSteps() == 200, "Escape closes the menu and leaves the field unchanged");
+		docking.closePanel(docking.panelTitled("Settings"));
+		a_app.showInspector();
+		a_app.runFrames(2);
+	}
+
 	// Tooltips on resting controls, and the title bar's transport as icon buttons
 	{
 		auto& mouse = *a_managers.services.get<MV::TapDevice>();

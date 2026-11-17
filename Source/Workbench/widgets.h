@@ -52,6 +52,8 @@ namespace Workbench {
 
 	// The sprite takes a_hover while the pointer is over the Clickable and a_idle again when it leaves.
 	void hoverTint(const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const std::shared_ptr<MV::Scene::Sprite>& a_sprite, const MV::Color& a_idle, const MV::Color& a_hover);
+	// The sprite takes a_focused while the Clickable holds the keyboard focus.
+	void focusTint(const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const std::shared_ptr<MV::Scene::Sprite>& a_sprite, const MV::Color& a_idle, const MV::Color& a_focused);
 	// The sprite shows only while the pointer is over the Clickable.
 	void hoverShow(const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const std::shared_ptr<MV::Scene::Sprite>& a_sprite);
 	// Shows a_text beside the pointer once it has rested on the Clickable.

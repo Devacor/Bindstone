@@ -98,7 +98,16 @@ namespace Workbench {
 		bool closePanel(Panel* a_panel);
 		bool open(Panel* a_panel) const;
 		bool floating(Panel* a_panel) const;
+		// Lifts a panel out of its leaf to float over where it was. False for the last panel docked in the main
+		// area and for one already floating by itself.
+		bool floatPanel(Panel* a_panel);
+		bool canFloat(Panel* a_panel) const;
+		bool canClose(Panel* a_panel) const;
+		// The panel whose tab a node is part of; null for a node of anything else.
+		Panel* tabPanelOf(const std::shared_ptr<MV::Scene::Node>& a_node) const;
 		Panel* panelTitled(const std::string& a_title) const;
+		// The content node of the panel a node is in, for keeping Tab inside one panel; null outside every panel.
+		std::shared_ptr<MV::Scene::Node> panelContentContaining(const std::shared_ptr<MV::Scene::Node>& a_node) const;
 		// Floating panels are drawn in this node, so they sit above whatever joined the UI before it.
 		void floatingHost(const std::shared_ptr<MV::Scene::Node>& a_host);
 

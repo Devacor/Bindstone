@@ -90,6 +90,8 @@ namespace MV {
 			bool pressOnFocus() const { return pressesOnFocus; }
 			void focus();
 			bool focused() const { return isFocused; }
+			// Focusable, enabled, visible, and under a_scope's node when one is given.
+			bool canTakeFocus(const void* a_scope = nullptr) const;
 			// The neighbour a move goes to from here, named by its node's id and looked for in this Clickable's scene
 			// when the move is made. A link is followed back as well: if A names B as its right, B's left is A unless
 			// B names its own, so one end is enough. An empty id, or one that finds nothing able to take the focus,
@@ -224,10 +226,11 @@ namespace MV {
 			TapDevice::SignalType onFocusQueryHandle;
 			FocusCandidate focusCandidate();
 			bool focusNeighbour(FocusLink a_link, const void* a_scope, FocusCandidate& a_neighbour);
-			bool canTakeFocus(const void* a_scope) const;
 			bool underFocusScope(const void* a_scope) const;
 			void focusChanged(bool a_focused);
 			bool isFocused = false;
+			// press() is not the pointer: it leaves the focus where it is
+			bool pressedByCall = false;
 
 			Point<int> dragStartPosition;
 			Point<int> priorMousePosition;

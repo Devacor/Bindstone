@@ -299,7 +299,7 @@ namespace mv_tests {
 				check_false(drawn.visible());
 			});
 
-			test("the south button presses the focused Clickable once, and the shoulders step through the order", [] {
+			test("the south button presses the focused Clickable once", [] {
 				SceneHost host;
 				auto root = Node::make(host.renderer, "root");
 				auto first = addTarget(host, root, "first", MV::point(0.0f, 0.0f));
@@ -311,9 +311,7 @@ namespace mv_tests {
 				check_false(frame(pad, host, south), "held, it does not press again");
 				check_eq(1, first->accepted);
 				frame(pad, host, ControllerState());
-				check_true(frame(pad, host, ControllerState().press(ControllerButton::RIGHT_SHOULDER)) && second->clickable->focused(), "the right shoulder is next");
-				frame(pad, host, ControllerState());
-				check_true(frame(pad, host, ControllerState().press(ControllerButton::LEFT_SHOULDER)) && first->clickable->focused(), "the left shoulder is previous");
+				check_false(frame(pad, host, ControllerState().press(ControllerButton::RIGHT_SHOULDER)) || !first->clickable->focused(), "with no tab strip the shoulders do nothing");
 				frame(pad, host, ControllerState());
 				host.mouse.focusClear();
 				check_false(frame(pad, host, south), "with nothing focused there is nothing to press");

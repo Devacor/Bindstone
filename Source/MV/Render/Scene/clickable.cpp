@@ -324,6 +324,10 @@ namespace MV {
 				auto self = weakSelf.lock();
 				return self && self->focusNeighbour(a_link, a_scope, a_neighbour);
 			};
+			result.canTake = [weakSelf](const void* a_scope) {
+				auto self = weakSelf.lock();
+				return self && self->canTakeFocus(a_scope);
+			};
 			result.pressOnFocus = pressesOnFocus;
 			return result;
 		}
@@ -406,8 +410,8 @@ namespace MV {
 			auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
 			if (clickDiag()) { std::cerr << "[click] pressed " << (ownerIsAlive() ? owner()->id() : std::string("?")) << std::endl; }
 			isInPressEvent = true;
-			// a press takes the focus too, without pressing again
-			if (isFocusable && !isFocused && ownerIsAlive()) {
+			// a pointer's press takes the focus too, without pressing again
+			if (isFocusable && !isFocused && !pressedByCall && ownerIsAlive()) {
 				ourMouse.focus(focusCandidate(), false);
 			}
 			onPressSignal(protectFromDismissal);
@@ -469,7 +473,9 @@ namespace MV {
 
 		void Clickable::press() {
 			auto self = shared_from_this();
+			pressedByCall = true;
 			acceptDownClick();
+			pressedByCall = false;
 			acceptUpClick(true);
 		}
 

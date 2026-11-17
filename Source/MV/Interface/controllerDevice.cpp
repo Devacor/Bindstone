@@ -337,6 +337,8 @@ namespace MV {
 			changeMode(a_focus, a_scope);
 		}
 		bool result = moveCursor(a_focus, a_dt);
+		// with a pad attached and snapping, the focus is kept to the window in use and put right as windows come and go
+		const void* context = !cursorEnabled && connected() ? a_focus.focusContext(a_scope) : a_scope;
 		const auto direction = navigationDirection();
 		navigationStickEngaged = direction.has_value();
 		if (!direction) {
@@ -344,30 +346,42 @@ namespace MV {
 		} else if (!navigationHeld) {
 			navigationHeld = direction;
 			navigationWait = navigationFirstDelay;
-			result = a_focus.focusMove(*direction, a_scope);
+			result = a_focus.focusMove(*direction, context);
 		} else {
 			// a direction that changes while held waits its turn, so a stick wandering between two does not run
 			navigationHeld = direction;
 			navigationWait -= a_dt;
 			if (navigationWait <= 0.0) {
 				navigationWait = navigationInterval;
-				result = a_focus.focusMove(*direction, a_scope);
+				result = a_focus.focusMove(*direction, context);
 			}
 		}
-		// in cursor mode SOUTH is the pointer's press and the shoulders rest; each is still watched, so one held
+		// in cursor mode SOUTH is the pointer's press and the triggers rest; each is still watched, so one held
 		// through a change of mode is not taken for a new press
 		const bool south = navigationPressed(ControllerButton::SOUTH);
-		const bool next = navigationPressed(ControllerButton::RIGHT_SHOULDER);
-		const bool previous = navigationPressed(ControllerButton::LEFT_SHOULDER);
+		const bool back = navigationPressed(ControllerButton::EAST);
+		const bool nextTab = navigationPressed(ControllerButton::RIGHT_SHOULDER);
+		const bool previousTab = navigationPressed(ControllerButton::LEFT_SHOULDER);
+		const bool nextWindow = navigationPressed(ControllerButton::RIGHT_TRIGGER);
+		const bool previousWindow = navigationPressed(ControllerButton::LEFT_TRIGGER);
+		if (back) {
+			result = a_focus.focusBack(a_scope) || result;
+		}
+		if (nextTab) {
+			result = a_focus.focusTabNext(a_scope) || result;
+		}
+		if (previousTab) {
+			result = a_focus.focusTabPrevious(a_scope) || result;
+		}
 		if (!cursorEnabled) {
 			if (south) {
 				result = a_focus.focusActivate() || result;
 			}
-			if (next) {
-				result = a_focus.focusNext(a_scope) || result;
+			if (nextWindow) {
+				result = a_focus.focusWindowNext(a_scope) || result;
 			}
-			if (previous) {
-				result = a_focus.focusPrevious(a_scope) || result;
+			if (previousWindow) {
+				result = a_focus.focusWindowPrevious(a_scope) || result;
 			}
 		}
 		return result;

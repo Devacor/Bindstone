@@ -61,7 +61,29 @@ namespace MV{
 		std::function<void()> activate;
 		// The neighbour this one names for a link, when it names one that can take the focus within the scope.
 		std::function<bool(FocusLink, const void* a_scope, FocusCandidate& a_neighbour)> linked;
+		// Whether it could still take the focus: it may have been hidden or disabled since it answered.
+		std::function<bool(const void* a_scope)> canTake;
 		bool pressOnFocus = false;
+	};
+
+	// A selection context answering a group query (MV::Scene::FocusGroup): a window the focus stays inside, or a
+	// strip of tab headers.
+	struct FocusGroupCandidate {
+		bool tabs = false;
+		bool modal = false;
+		int64_t order = 0;
+		std::vector<int64_t> treePath;
+		// The group's node, as focus moves take a scope.
+		const void* scope = nullptr;
+		std::weak_ptr<void> subject;
+		// Whether a focused Clickable is under the group, and whether the group is under a scope's node.
+		std::function<bool(const std::shared_ptr<void>& a_focused)> contains;
+		std::function<bool(const void* a_scope)> within;
+		// Focuses what the group remembers, else its default; false when neither can take the focus.
+		std::function<bool()> focusPreferred;
+		std::function<void(const std::shared_ptr<void>& a_focused)> remember;
+		std::function<std::shared_ptr<void>()> remembered;
+		std::function<void()> back;
 	};
 
 	class TapDevice {
@@ -126,10 +148,38 @@ namespace MV{
 		// What a focus query is limited to; null while there is no query or no limit.
 		const void* focusScope() const { return focusScopeToken; }
 		void queueFocusCandidate(FocusCandidate a_candidate);
+
+		// Selection contexts. The window in use is a modal one when one is showing (the top-most), else the
+		// innermost window the focus is in, else the one last stepped to. focusContext settles that for now and
+		// returns the scope focus moves should keep to: the window's node, or a_scope with no window in use. It
+		// also puts the focus right: into a modal window as it shows, back where it was when that hides, and onto
+		// something else in the window when what held it is hidden or disabled. Call it once a frame while a
+		// keyboard or controller is driving the focus.
+		const void* focusContext(const void* a_scope = nullptr);
+		// To the next or previous window, focusing what it remembers, else its default, else its first focusable
+		// that is not a tab header. False under a modal window or with nowhere else to go.
+		bool focusWindowNext(const void* a_scope = nullptr);
+		bool focusWindowPrevious(const void* a_scope = nullptr);
+		// Presses the next or previous header of the tab strip in the window in use (any strip, with none in use).
+		// The focus stays where it is; focusContext moves it on if the tab took its control away.
+		bool focusTabNext(const void* a_scope = nullptr);
+		bool focusTabPrevious(const void* a_scope = nullptr);
+		// Backs out of the window in use; false with none.
+		bool focusBack(const void* a_scope = nullptr);
+		void queueFocusGroupCandidate(FocusGroupCandidate a_candidate);
 		// Gives the focus to a_candidate; a_pressOnFocus false when a pointer press is what brought it.
 		void focus(FocusCandidate a_candidate, bool a_pressOnFocus = true);
 	private:
 		std::vector<FocusCandidate> askForFocusCandidates(const void* a_scope);
+		std::vector<FocusGroupCandidate> askForFocusGroups(const void* a_scope);
+		const FocusGroupCandidate* windowInUse(const std::vector<FocusGroupCandidate>& a_groups) const;
+		void enterWindow(const FocusGroupCandidate& a_window, const std::vector<FocusGroupCandidate>& a_groups);
+		bool focusWindowStep(int a_step, const void* a_scope);
+		bool focusTabStep(int a_step, const void* a_scope);
+
+		std::vector<FocusGroupCandidate> focusGroupCandidates;
+		std::weak_ptr<void> activeWindow;
+		std::weak_ptr<void> windowBeforeModal;
 		bool focusStep(int a_step, const void* a_scope);
 		bool focusFollowLink(FocusLink a_link, const void* a_scope);
 		bool focusMoveOneWay(FocusDirection a_direction, const void* a_scope);
@@ -181,6 +231,7 @@ namespace MV{
 		jai::signal_emitter<CallbackSignature> onMoveSignal;
 		jai::signal_emitter<CallbackSignature> onHoverQuerySignal;
 		jai::signal_emitter<CallbackSignature> onFocusQuerySignal;
+		jai::signal_emitter<CallbackSignature> onFocusGroupQuerySignal;
 
 		jai::signal_emitter<TouchCallbackSignature> onPinchZoomSignal;
 	public:
@@ -207,6 +258,8 @@ namespace MV{
 		jai::signal<CallbackSignature> onHoverQuery;
 		// Emitted to find who can take the focus: every focusable Clickable in scope answers with queueFocusCandidate.
 		jai::signal<CallbackSignature> onFocusQuery;
+		// Emitted to find the selection contexts: every visible FocusGroup in scope answers with queueFocusGroupCandidate.
+		jai::signal<CallbackSignature> onFocusGroupQuery;
 
 		jai::signal<TouchCallbackSignature> onPinchZoom;
 	};

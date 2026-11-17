@@ -1273,8 +1273,8 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(!a_app.editingText() && mouse.hasFocus() && a_app.undoSteps() == 200, "the east button leaves the field without changing it, the focus still on it");
 		press(MV::ControllerButton::SOUTH);
 		expect(editingShows("200"), "the south button presses what holds the focus: the field is typed in again");
-		press(MV::ControllerButton::RIGHT_SHOULDER);
-		expect(mouse.hasFocus() && !editingShows("200"), "the right shoulder steps to the next control");
+		press(MV::ControllerButton::DPAD_DOWN);
+		expect(mouse.hasFocus() && !editingShows("200"), "the d-pad moves on from a field being typed in");
 		press(MV::ControllerButton::EAST);
 		press(MV::ControllerButton::EAST);
 		expect(!a_app.editingText() && !mouse.hasFocus(), "east once more lets the focus go");

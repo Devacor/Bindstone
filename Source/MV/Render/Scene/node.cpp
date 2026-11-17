@@ -13,6 +13,7 @@
 #include "MV/Render/sharedTextures.h"
 #include "text.h"
 #include "clickable.h"
+#include "focusGroup.h"
 
 #include "MV/Serialization/serialize.h"
 #include <jaiscript/properties/property_serialization.hpp>
@@ -39,6 +40,9 @@ namespace MV {
 			});
 			a_builder.method("componentButton", [](Node& a_self) {
 				return a_self.componentInChildren<Clickable>(false, true, true).self();
+			});
+			a_builder.method("componentFocusGroup", [](Node& a_self) {
+				return a_self.componentInChildren<FocusGroup>(false, true, true).self();
 			});
 
 			a_builder.method("id", static_cast<std::string(Node::*)() const>(&Node::id));

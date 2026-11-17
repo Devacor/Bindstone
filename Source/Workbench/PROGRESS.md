@@ -768,6 +768,26 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Not yet: selection contexts (windows a trigger would step between), a default and a remembered focus per screen,
   a virtual keyboard, and the game's Login page driven by a real pad.
 
+## Increment 38: selection contexts (2026-11-17)
+- `MV::Scene::FocusGroup` is a component that makes its node a selection context. It saves `kind` (WINDOW or TABS),
+  `order`, `modal`, `defaultFocus` (a node id) and the script receivers of its `onBack` signal.
+- `TapDevice::focusContext(scope)` settles the window in use and returns the scope moves keep to: a modal window
+  when one shows (the top-most), else the innermost window the focus is in, else the one last stepped to. Called
+  once a frame, it also puts the focus into a modal window as it shows, back where it was when that hides, and onto
+  something else in the window when what held the focus is hidden or disabled. Each group remembers its last focus.
+- `focusWindowNext` / `focusWindowPrevious` step windows (remembered, else default, else the first focusable that
+  is not a tab header). `focusTabNext` / `focusTabPrevious` press the next or previous header of the tab strip in
+  the window in use, as a pointer would, leaving the focus where it is. `focusBack` emits the window's `onBack`.
+- The pad: triggers step windows, shoulders step tabs, EAST backs out, and the d-pad and stick stay inside the
+  window in use. The shoulders no longer step to the next and previous control. Contexts are only settled while a
+  pad is attached and snapping, so a mouse-only player never has the focus moved for them.
+- `Clickable::press()` no longer takes the focus: only a pointer's press does. `canTakeFocus` is public.
+- Scripts reach a node's group with `componentFocusGroup()`.
+- Tests: `focus_group_tests.cpp` (scoped moves, stepping, modal take and return, focus lost, tabs, back, the pad's
+  mapping) and a save and load of both kinds.
+- Not yet: nothing can add a FocusGroup to a node except C++ and a hand-edited scene (the Workbench has no
+  attach-component verb, and scripts cannot attach), no shipped screen has one, and keyboard Tab does not use them.
+
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.
 - Authoring verbs still only in Source/Editor: create node, attach/detach

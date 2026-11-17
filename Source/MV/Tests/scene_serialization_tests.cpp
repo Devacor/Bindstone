@@ -13,6 +13,7 @@
 #include "MV/Render/Scene/palette.h"
 #include "MV/Render/Scene/path.h"
 #include "MV/Render/Scene/grid.h"
+#include "MV/Render/Scene/focusGroup.h"
 #include <cstdlib>
 
 #include <string>
@@ -140,6 +141,27 @@ namespace mv_tests {
 				check_not_null(loadedButton.self(), "Button missing after load");
 				check_true(loadedButton->highlightNode() == loaded->get("highlight"), "the highlight view is saved with the button");
 				check_true(loaded->get("idle")->visible() && !loaded->get("highlight")->visible() && !loadedButton->highlighted(), "and the button loads at rest");
+			});
+
+			test("a FocusGroup saves and loads as its own $type with what it was given", [] {
+				SceneHost host;
+				auto scene = Node::make(host.renderer, "root");
+				auto window = scene->make("window");
+				window->attach<MV::Scene::FocusGroup>(host.mouse)->order(3)->modal(true)->defaultFocus("confirm");
+				auto strip = window->make("strip");
+				strip->attach<MV::Scene::FocusGroup>(host.mouse)->kind(MV::Scene::FocusGroup::Kind::TABS);
+
+				ScratchScene file;
+				auto loaded = saveAndLoad(host, scene, file);
+				check_true(file.contents().find("\"$type\": \"FocusGroup\"") != std::string::npos, "saved under its own name");
+				auto loadedWindow = loaded->get("window")->component<MV::Scene::FocusGroup>(true, false);
+				auto loadedStrip = loaded->get("strip")->component<MV::Scene::FocusGroup>(true, false);
+				check_not_null(loadedWindow.self(), "window group missing after load");
+				check_not_null(loadedStrip.self(), "tab strip group missing after load");
+				check_true(loadedWindow->kind() == MV::Scene::FocusGroup::Kind::WINDOW && loadedWindow->order() == 3 && loadedWindow->modal() && loadedWindow->defaultFocus() == "confirm");
+				check_true(loadedStrip->kind() == MV::Scene::FocusGroup::Kind::TABS && !loadedStrip->modal());
+				window->hide();
+				check_true(host.mouse.focusContext() == loaded->get("window").get(), "and the loaded modal window answers as the one in use");
 			});
 
 			test("Stencil and Palette save and load as their own $type", [] {

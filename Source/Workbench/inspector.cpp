@@ -107,24 +107,26 @@ namespace Workbench {
 	bool InspectorPanel::addSectionHeader(const std::string& a_title, const std::string& a_key, const std::shared_ptr<MV::Scene::Component>& a_gizmoComponent) {
 		bool expanded = collapsedSections.count(a_key) ? !collapsedSections[a_key] : true;
 		auto row = contentNode->make(MV::guid("header_"));
-		row->attach<MV::Scene::Sprite>()->bounds(MV::size(panelWidth, theme->rowHeight))->texture(shadeHandle(*services))->color(theme->header());
+		auto headerBand = row->attach<MV::Scene::Sprite>()->bounds(MV::size(panelWidth, theme->rowHeight))->texture(shadeHandle(*services))->color(theme->header());
 		auto arrowHost = row->make("fold");
 		arrowHost->position(MV::point(theme->px(2.0f), 0.0f));
 		makeExpanderArrow(arrowHost, *services, *theme, MV::size(theme->px(16.0f), theme->rowHeight), expanded);
 		auto title = makeLabel(row, *services, *theme, "text", MV::size(panelWidth - theme->px(24.0f), theme->rowHeight), a_title);
 		title->owner()->position(MV::point(theme->px(22.0f), 0.0f));
 		auto& mouse = *services->get<MV::TapDevice>();
-		row->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(panelWidth, theme->rowHeight))->onAccept.connect("toggle", [this, a_key](const std::shared_ptr<MV::Scene::Clickable>&) {
+		auto headerClick = row->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(panelWidth, theme->rowHeight));
+		headerClick->onAccept.connect("toggle", [this, a_key](const std::shared_ptr<MV::Scene::Clickable>&) {
 			bool nowCollapsed = collapsedSections.count(a_key) ? !collapsedSections[a_key] : true;
 			collapsedSections[a_key] = nowCollapsed;
 			rebuild();
 		});
+		hoverTint(headerClick, headerBand, theme->header(), theme->headerHover());
 		if (a_gizmoComponent && onEditComponent && GizmoLayer::supports(a_gizmoComponent)) {
 			bool active = componentGizmoActive && componentGizmoActive(a_gizmoComponent);
 			float buttonWidth = theme->rowHeight * 1.5f;
-			auto gizmoButton = makeButton(row, *services, *theme, "gizmo", MV::size(buttonWidth, theme->rowHeight - theme->px(4.0f)), active ? "[G]" : "G", [this, a_gizmoComponent]() {
+			auto gizmoButton = makeIconButton(row, *services, *theme, "gizmo", MV::size(buttonWidth, theme->rowHeight - theme->px(4.0f)), Icon::Handles, [this, a_gizmoComponent]() {
 				onEditComponent(a_gizmoComponent);
-			});
+			}, active ? "Stop editing this component in the Scene" : "Edit this component in the Scene", active ? std::optional<MV::Color>(theme->accent()) : std::nullopt);
 			gizmoButton->owner()->position(MV::point(panelWidth - buttonWidth - theme->pad, theme->px(2.0f)));
 		}
 		return expanded;

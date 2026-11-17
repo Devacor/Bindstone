@@ -93,7 +93,7 @@ namespace Workbench {
 
 		float x = theme.px(2.0f);
 		const float buttonY = std::round((rowHeight - buttonSize) * 0.5f);
-		backButton = std::make_unique<IconButton>(row, services, theme, "back", Icon::StepBack, [this]() { history.undo(); });
+		backButton = std::make_unique<IconButton>(row, services, theme, "back", Icon::StepBack, [this]() { history.undo(); }, "Undo one step (Ctrl+Z)");
 		backButton->node()->position(MV::point(x, buttonY));
 		x += buttonSize + theme.px(2.0f);
 
@@ -106,7 +106,7 @@ namespace Workbench {
 		barHost = track->make("bars");
 		x += trackWidth + theme.px(2.0f);
 
-		forwardButton = std::make_unique<IconButton>(row, services, theme, "forward", Icon::StepForward, [this]() { history.redo(); });
+		forwardButton = std::make_unique<IconButton>(row, services, theme, "forward", Icon::StepForward, [this]() { history.redo(); }, "Redo one step (Ctrl+Y)");
 		forwardButton->node()->position(MV::point(x, buttonY));
 		x += buttonSize + pad;
 

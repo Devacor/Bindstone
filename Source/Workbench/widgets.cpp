@@ -1,4 +1,5 @@
 #include "widgets.h"
+#include "tooltips.h"
 #include "MV/Utility/generalUtility.h"
 #include <algorithm>
 #include <cmath>
@@ -215,17 +216,7 @@ namespace Workbench {
 		auto activeScene = attachOutlinedRect(button->owner()->make("active"), a_services, a_theme, a_size, a_theme.buttonActive(), a_theme.buttonOutline(), true)->owner();
 		auto idleFill = attachOutlinedRect(button->owner()->make("idle"), a_services, a_theme, a_size, a_theme.buttonIdle(), a_theme.buttonOutline(), true);
 		auto idleScene = idleFill->owner();
-		std::weak_ptr<MV::Scene::Sprite> weakIdleFill = idleFill;
-		button->onHoverEnter.connect("hover", [weakIdleFill, hover = a_theme.buttonHover()](const std::shared_ptr<MV::Scene::Clickable>&) {
-			if (auto fill = weakIdleFill.lock()) {
-				fill->color(hover);
-			}
-		});
-		button->onHoverLeave.connect("hover", [weakIdleFill, idle = a_theme.buttonIdle()](const std::shared_ptr<MV::Scene::Clickable>&) {
-			if (auto fill = weakIdleFill.lock()) {
-				fill->color(idle);
-			}
-		});
+		hoverTint(button, idleFill, a_theme.buttonIdle(), a_theme.buttonHover());
 		for (auto&& stateScene : { activeScene, idleScene }) {
 			auto stateText = stateScene->attach<MV::Scene::Text>(library, a_theme.buttonFont);
 			stateText->bounds({ MV::Point<>(), a_size });
@@ -241,6 +232,79 @@ namespace Workbench {
 		return button;
 	}
 
+	std::shared_ptr<MV::Scene::Button> makeIconButton(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, const MV::Size<>& a_size, Icon a_icon, std::function<void()> a_onClick, const std::string& a_tooltip, std::optional<MV::Color> a_idle, std::optional<MV::Color> a_hover) {
+		auto& mouse = *a_services.get<MV::TapDevice>();
+		auto button = a_parent->make(a_id)->attach<MV::Scene::Button>(mouse)->bounds(a_size);
+		const MV::Color idle = a_idle.value_or(a_theme.buttonIdle());
+		const MV::Color hover = a_hover.value_or(a_theme.buttonHover());
+
+		auto activeScene = attachOutlinedRect(button->owner()->make("active"), a_services, a_theme, a_size, a_theme.buttonActive(), a_theme.buttonOutline(), true)->owner();
+		auto idleFill = attachOutlinedRect(button->owner()->make("idle"), a_services, a_theme, a_size, idle, a_theme.buttonOutline(), true);
+		auto idleScene = idleFill->owner();
+		const float glyphSize = std::min(a_theme.px(16.0f), std::min(a_size.width, a_size.height) - a_theme.px(4.0f));
+		for (auto&& stateScene : { activeScene, idleScene }) {
+			auto glyph = stateScene->make("glyph");
+			glyph->position(MV::point(std::round((a_size.width - glyphSize) * 0.5f), std::round((a_size.height - glyphSize) * 0.5f)));
+			glyph->attach<MV::Scene::Sprite>()->bounds(MV::size(glyphSize, glyphSize))->texture(iconHandle(a_services, a_theme, a_icon))->color(MV::Color(0.88f, 0.88f, 0.88f, 1.0f));
+		}
+		button->activeNode(activeScene);
+		button->idleNode(idleScene);
+		hoverTint(button, idleFill, idle, hover);
+		if (a_onClick) {
+			button->onAccept.connect("click", [a_onClick](const std::shared_ptr<MV::Scene::Clickable>&) {
+				a_onClick();
+			});
+		}
+		if (!a_tooltip.empty()) {
+			tooltip(a_services, button, a_tooltip);
+		}
+		return button;
+	}
+
+	void setButtonIcon(const std::shared_ptr<MV::Scene::Button>& a_button, MV::Services& a_services, const Theme& a_theme, Icon a_icon) {
+		for (auto&& state : { "active", "idle" }) {
+			auto stateScene = a_button->owner()->get(state, false);
+			auto glyph = stateScene ? stateScene->get("glyph", false) : nullptr;
+			if (glyph) {
+				glyph->component<MV::Scene::Sprite>(true, false)->texture(iconHandle(a_services, a_theme, a_icon));
+			}
+		}
+	}
+
+	void hoverTint(const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const std::shared_ptr<MV::Scene::Sprite>& a_sprite, const MV::Color& a_idle, const MV::Color& a_hover) {
+		std::weak_ptr<MV::Scene::Sprite> weakSprite = a_sprite;
+		auto tintTo = [weakSprite](const MV::Color& a_color) {
+			return [weakSprite, a_color](const std::shared_ptr<MV::Scene::Clickable>&) {
+				if (auto sprite = weakSprite.lock()) {
+					sprite->color(a_color);
+				}
+			};
+		};
+		a_clickable->onHoverEnter.connect("hoverTint", tintTo(a_hover));
+		a_clickable->onHoverLeave.connect("hoverTint", tintTo(a_idle));
+	}
+
+	void hoverShow(const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const std::shared_ptr<MV::Scene::Sprite>& a_sprite) {
+		std::weak_ptr<MV::Scene::Sprite> weakSprite = a_sprite;
+		a_sprite->hide();
+		a_clickable->onHoverEnter.connect("hoverShow", [weakSprite](const std::shared_ptr<MV::Scene::Clickable>&) {
+			if (auto sprite = weakSprite.lock()) {
+				sprite->show();
+			}
+		});
+		a_clickable->onHoverLeave.connect("hoverShow", [weakSprite](const std::shared_ptr<MV::Scene::Clickable>&) {
+			if (auto sprite = weakSprite.lock()) {
+				sprite->hide();
+			}
+		});
+	}
+
+	void tooltip(MV::Services& a_services, const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const std::string& a_text) {
+		if (auto* tips = a_services.get<Tooltips>(false)) {
+			tips->attach(a_clickable, a_text);
+		}
+	}
+
 	std::shared_ptr<MV::Scene::Text> makeTextField(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, FocusRouter& a_focus, const std::string& a_id, const MV::Size<>& a_size, const std::string& a_initial, std::function<void(const std::string&)> a_onCommit, bool a_enterOnly) {
 		auto& library = *a_services.get<MV::TextLibrary>();
 		auto& mouse = *a_services.get<MV::TapDevice>();
@@ -253,6 +317,7 @@ namespace Workbench {
 		text->justification(MV::TextJustification::LEFT)->wrapping(MV::TextWrapMethod::NONE, a_size.width - a_theme.px(8.0f))->minimumLineHeight(a_size.height)->text(a_initial);
 
 		auto clickable = box->attach<MV::Scene::Clickable>(mouse)->bounds(a_size);
+		hoverTint(clickable, box->component<MV::Scene::Sprite>(false, false).self(), a_theme.fieldOutline(), a_theme.fieldOutlineHover());
 		std::weak_ptr<MV::Scene::Text> weakText = text.self();
 		FocusRouter* focus = &a_focus;
 		auto commit = [weakText, a_onCommit]() {
@@ -295,6 +360,7 @@ namespace Workbench {
 		toggleClick->texture(roundedRectHandle(a_services, a_theme));
 		toggleClick->color(a_theme.fieldBg());
 		toggleClick->show();
+		hoverTint(toggleClick.self(), toggleClick.self(), a_theme.fieldBg(), a_theme.fieldOutline());
 		toggleClick->onAccept.connect("toggle", [mark, a_onChange](const std::shared_ptr<MV::Scene::Clickable>&) {
 			bool nowOn = !mark->visible();
 			mark->visible(nowOn);
@@ -314,6 +380,7 @@ namespace Workbench {
 		text->justification(MV::TextJustification::LEFT)->wrapping(MV::TextWrapMethod::NONE, a_size.width - a_theme.px(8.0f))->minimumLineHeight(a_size.height)->text(formatNumberToFit(a_value, a_size.width, a_theme, *library.get(a_theme.labelFont)));
 
 		auto clickable = box->attach<MV::Scene::Clickable>(mouse)->bounds(a_size);
+		hoverTint(clickable, box->component<MV::Scene::Sprite>(false, false).self(), a_theme.fieldOutline(), a_theme.fieldOutlineHover());
 		std::weak_ptr<MV::Scene::Text> weakText = text.self();
 		FocusRouter* focus = &a_focus;
 

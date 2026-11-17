@@ -6,8 +6,10 @@
 #include <string>
 #include <vector>
 #include "MV/Render/package.h"
+#include <optional>
 #include "theme.h"
 #include "focus.h"
+#include "icons.h"
 
 namespace Workbench {
 
@@ -43,6 +45,17 @@ namespace Workbench {
 	void setLabelText(const std::shared_ptr<MV::Scene::Text>& a_label, MV::Services& a_services, const Theme& a_theme, const std::string& a_text);
 
 	std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, const MV::Size<>& a_size, const std::string& a_text, std::function<void()> a_onClick);
+	// The same button showing an icon in place of text. a_idle and a_hover replace the theme's fills: an accent idle
+	// for a button that is switched on, a red hover for one that closes.
+	std::shared_ptr<MV::Scene::Button> makeIconButton(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, const MV::Size<>& a_size, Icon a_icon, std::function<void()> a_onClick, const std::string& a_tooltip = "", std::optional<MV::Color> a_idle = {}, std::optional<MV::Color> a_hover = {});
+	void setButtonIcon(const std::shared_ptr<MV::Scene::Button>& a_button, MV::Services& a_services, const Theme& a_theme, Icon a_icon);
+
+	// The sprite takes a_hover while the pointer is over the Clickable and a_idle again when it leaves.
+	void hoverTint(const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const std::shared_ptr<MV::Scene::Sprite>& a_sprite, const MV::Color& a_idle, const MV::Color& a_hover);
+	// The sprite shows only while the pointer is over the Clickable.
+	void hoverShow(const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const std::shared_ptr<MV::Scene::Sprite>& a_sprite);
+	// Shows a_text beside the pointer once it has rested on the Clickable.
+	void tooltip(MV::Services& a_services, const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const std::string& a_text);
 
 	// a_enterOnly: the field commits on Enter alone; left any other way it shows again what it showed when focused.
 	std::shared_ptr<MV::Scene::Text> makeTextField(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, FocusRouter& a_focus, const std::string& a_id, const MV::Size<>& a_size, const std::string& a_initial, std::function<void(const std::string&)> a_onCommit, bool a_enterOnly = false);

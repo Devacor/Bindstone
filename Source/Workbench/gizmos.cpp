@@ -371,12 +371,18 @@ namespace Workbench {
 		}
 
 		// The pie the drag has swept and its angle, as applied (so a snapped drag steps).
+		float shownSweep = 0.0f;
+
 		void showSweep(float a_degrees) {
 			if (!sweepWedge || !sweepLabel) {
 				return;
 			}
-			float handedness = std::sin(MV::toRadians(builtAngles.second - builtAngles.first)) < 0.0f ? -1.0f : 1.0f;
+			// a mirrored parent turns the other way on screen; read from the parent's own axes, not from where the handles point
+			float xAngle = overlayAngleOfParentDirection(MV::point(1.0f, 0.0f), 0.0f);
+			float yAngle = overlayAngleOfParentDirection(MV::point(0.0f, 1.0f), 90.0f);
+			float handedness = std::sin(MV::toRadians(yAngle - xAngle)) < 0.0f ? -1.0f : 1.0f;
 			float shown = std::clamp(a_degrees * handedness, -360.0f, 360.0f);
+			shownSweep = shown;
 			float radius = layer.theme.px(ringRadius);
 			int steps = std::max(1, static_cast<int>(std::ceil(std::abs(shown) / 4.0f)));
 			std::vector<MV::DrawPoint> points{ MV::DrawPoint(MV::Point<>(), sweepFill) };
@@ -396,6 +402,7 @@ namespace Workbench {
 		}
 
 		void hideSweep() {
+			shownSweep = 0.0f;
 			if (sweepWedge) {
 				sweepWedge->setPoints({}, {});
 			}
@@ -1133,6 +1140,10 @@ namespace Workbench {
 			}
 		}
 		gateInput();
+	}
+
+	float GizmoLayer::sweepShown() const {
+		return nodeGizmo ? nodeGizmo->shownSweep : 0.0f;
 	}
 
 	void GizmoLayer::gateInput() {

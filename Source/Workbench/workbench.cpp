@@ -121,6 +121,8 @@ namespace Workbench {
 			return SDL_ShowMessageBox(&box, &pressed) == 0 && pressed == 0;
 		};
 
+		tooltips = std::make_unique<Tooltips>(managers.services, theme);
+		managers.services.connect(tooltips.get());
 		dock = std::make_unique<DockSpace>(uiRoot, managers.services, theme, focusRouter);
 		auto tree = std::make_shared<SceneTreePanel>(history,
 			[this]() { return sceneRoot; },
@@ -221,9 +223,11 @@ namespace Workbench {
 		dock->onLayoutChanged = [this]() { writeSettingsFile(); };
 
 		buildTitleBar();
+		tooltips->host(uiRoot->make("tooltips"));
 	}
 
 	App::~App() {
+		managers.services.disconnect<Tooltips>();
 		SDL_SetCursor(SDL_GetDefaultCursor());
 		for (auto&& cursor : { cursorArrow, cursorResizeH, cursorResizeV }) {
 			if (cursor) {
@@ -660,19 +664,19 @@ namespace Workbench {
 		const float transportStart = theme.px(6.0f) + menuBar->width() + theme.px(20.0f);
 		transport->position(MV::point(transportStart, theme.pad));
 		MV::Size<> transportSize(theme.titleButtonWidth, theme.titleBarHeight - theme.pad * 2.0f);
-		auto pauseButton = makeButton(transport, managers.services, theme, "pause", transportSize, "||", nullptr);
+		auto pauseButton = makeIconButton(transport, managers.services, theme, "pause", transportSize, Icon::Pause, nullptr, "Pause or resume the scene's animation");
 		std::weak_ptr<MV::Scene::Button> weakPause = pauseButton;
 		pauseButton->onAccept.connect("toggle", [this, weakPause](const std::shared_ptr<MV::Scene::Clickable>&) {
 			scenePaused = !scenePaused;
 			if (auto locked = weakPause.lock()) {
-				locked->text(scenePaused ? ">" : "||");
+				setButtonIcon(locked, managers.services, theme, scenePaused ? Icon::Play : Icon::Pause);
 			}
 		});
-		auto stepButton = makeButton(transport, managers.services, theme, "step", transportSize, ">|", [this]() {
+		auto stepButton = makeIconButton(transport, managers.services, theme, "step", transportSize, Icon::Step, [this]() {
 			if (scenePaused) {
 				sceneStepQueued = true;
 			}
-		});
+		}, "Advance one frame while paused");
 		stepButton->owner()->position(MV::point(transportSize.width + theme.px(2.0f), 0.0f));
 		auto speedButton = makeCycleButton(transport, managers.services, theme, "speed", transportSize,
 			{ "1x", "2x", "4x", ".25x", ".5x" }, 0, [this](int a_index) {
@@ -680,6 +684,8 @@ namespace Workbench {
 				sceneSpeed = speeds[a_index];
 			});
 		speedButton->owner()->position(MV::point((transportSize.width + theme.px(2.0f)) * 2.0f, 0.0f));
+		tooltip(managers.services, speedButton, "Animation speed");
+		transportButtons = { pauseButton->owner(), stepButton->owner(), speedButton->owner() };
 		titleInteractiveWidth = transportStart + (transportSize.width + theme.px(2.0f)) * 3.0f;
 
 		auto titleHost = bar->make("title");
@@ -689,20 +695,20 @@ namespace Workbench {
 
 		auto buttons = bar->make("buttons");
 		MV::Size<> buttonSize(theme.titleButtonWidth, theme.titleBarHeight);
-		auto minimizeButton = makeButton(buttons, managers.services, theme, "minimize", buttonSize, "_", [this]() {
+		auto minimizeButton = makeIconButton(buttons, managers.services, theme, "minimize", buttonSize, Icon::Minimize, [this]() {
 			managers.renderer.window().minimize();
-		});
-		auto maximizeButton = makeButton(buttons, managers.services, theme, "maximize", buttonSize, "[]", [this]() {
+		}, "Minimize");
+		auto maximizeButton = makeIconButton(buttons, managers.services, theme, "maximize", buttonSize, Icon::Maximize, [this]() {
 			auto& window = managers.renderer.window();
 			if (window.maximized()) {
 				window.restore();
 			} else {
 				window.maximize();
 			}
-		});
-		auto closeButton = makeButton(buttons, managers.services, theme, "close", buttonSize, "x", [this]() {
+		}, "Maximize or restore");
+		auto closeButton = makeIconButton(buttons, managers.services, theme, "close", buttonSize, Icon::Close, [this]() {
 			requestExit();
-		});
+		}, "Close", std::nullopt, MV::Color(0xc42b1c));
 		minimizeButton->owner()->position(MV::point(0.0f, 0.0f));
 		maximizeButton->owner()->position(MV::point(theme.titleButtonWidth, 0.0f));
 		closeButton->owner()->position(MV::point(theme.titleButtonWidth * 2.0f, 0.0f));
@@ -881,8 +887,14 @@ namespace Workbench {
 			a_view.position.y + a_view.size.height * 0.5f - center.y * zoom));
 	}
 
+	MV::Point<int> App::transportScreenPoint(int a_index) const {
+		auto button = transportButtons[static_cast<size_t>(a_index)].lock();
+		return button ? button->screenBounds().centerPoint() : MV::Point<int>();
+	}
+
 	bool App::update(double a_dt) {
 		lastDelta = a_dt;
+		tooltips->update(a_dt);
 		lastSceneDelta = scenePaused ? 0.0 : a_dt * sceneSpeed;
 		if (scenePaused && sceneStepQueued) {
 			lastSceneDelta = 1.0 / 60.0;

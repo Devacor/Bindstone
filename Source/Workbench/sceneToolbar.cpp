@@ -23,12 +23,13 @@ namespace Workbench {
 
 		auto tools = addGroup(x, 4);
 		const Icon toolIcons[] = { Icon::Select, Icon::Move, Icon::Rotate, Icon::Scale };
+		const char* const toolTips[] = { "Select (Q)", "Move (W)", "Rotate (E)", "Scale (R)" };
 		for (int index = 0; index < 4; ++index) {
 			toolButtons.push_back(std::make_unique<IconButton>(tools, services, theme, "tool" + std::to_string(index), toolIcons[index], [this, index]() {
 				if (actions.onTool) {
 					actions.onTool(index);
 				}
-			}));
+			}, toolTips[index]));
 			place(tools, *toolButtons.back(), static_cast<size_t>(index));
 		}
 
@@ -37,13 +38,13 @@ namespace Workbench {
 			if (actions.onSnapToggle) {
 				actions.onSnapToggle();
 			}
-		});
+		}, "Snap while dragging (Shift or Ctrl turns it the other way)");
 		place(aids, *snapButton, 0);
 		gridButton = std::make_unique<IconButton>(aids, services, theme, "grid", Icon::Grid, [this]() {
 			if (actions.onGridToggle) {
 				actions.onGridToggle();
 			}
-		});
+		}, "Show the grid");
 		place(aids, *gridButton, 1);
 
 		auto view = addGroup(x, 1);
@@ -51,13 +52,13 @@ namespace Workbench {
 			if (actions.onFrame) {
 				actions.onFrame();
 			}
-		});
+		}, "Frame the selection (F)");
 		place(view, *frameButton, 0);
 
 		auto past = addGroup(x, 1);
 		historyButton = std::make_unique<IconButton>(past, services, theme, "history", Icon::History, [this]() {
 			historyShown(!historyShown());
-		});
+		}, "History");
 		place(past, *historyButton, 0);
 
 		barSize = MV::size(x - theme.px(6.0f), buttonSize + inset * 2.0f);

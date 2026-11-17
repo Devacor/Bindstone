@@ -12,6 +12,7 @@
 #include "sceneGrid.h"
 #include "sceneToolbar.h"
 #include "settingsPanel.h"
+#include "tooltips.h"
 #include "MV/Render/Scene/parallax.h"
 
 namespace Workbench {
@@ -61,6 +62,11 @@ namespace Workbench {
 		bool saveDockLayout(const std::string& a_fileName);
 		bool loadDockLayout(const std::string& a_fileName);
 		DockSpace& docking() { return *dock; }
+		Tooltips& tips() { return *tooltips; }
+		// The scene's own clock (emitters, Spine, shader time) is stopped; the editor keeps running.
+		bool paused() const { return scenePaused; }
+		// The title bar's pause, step and speed buttons, left to right.
+		MV::Point<int> transportScreenPoint(int a_index) const;
 		void showSettings();
 		void showInspector();
 		SettingsPanel& settings() { return *settingsPanel; }
@@ -156,6 +162,8 @@ namespace Workbench {
 
 		std::unique_ptr<DockSpace> dock;
 		std::unique_ptr<MenuBar> menuBar;
+		std::unique_ptr<Tooltips> tooltips;
+		std::vector<std::weak_ptr<MV::Scene::Node>> transportButtons;
 		std::vector<Panel*> menuPanels;
 		std::shared_ptr<MV::Scene::Text> titleText;
 		std::string documentPath;

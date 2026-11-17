@@ -655,6 +655,22 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		pressWithControl(SDLK_z);
 		expect(subject->rotationRad().z == restRotation.z, "undo restores the rotation after a ring drag");
 
+		// the sweep is drawn the way the pointer went: checked while the button is still down
+		mouse.simulate(ringGrab, false);
+		a_app.runFrames(2);
+		mouse.simulate(ringGrab, true);
+		a_app.runFrames(2);
+		for (int point = 0; point < 4; ++point) {
+			mouse.simulate(arc[static_cast<size_t>(point)], true);
+			a_app.runFrames(1);
+		}
+		expect(gizmoLayer.sweepShown() > 25.0f && gizmoLayer.sweepShown() < 55.0f, "the rotate sweep fans out the way the pointer turned, showing " + std::to_string(gizmoLayer.sweepShown()));
+		mouse.simulate(arc[3], false);
+		a_app.runFrames(2);
+		mouse.stopSimulating();
+		expect(gizmoLayer.sweepShown() == 0.0f, "and is gone at release");
+		pressWithControl(SDLK_z);
+
 		pressKey(SDLK_r);
 		auto scaleGrab = grab("scaleX");
 		auto alongAxis = MV::cast<float>(scaleGrab) - pivot;
@@ -1115,6 +1131,51 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.showInspector();
 		a_app.select(nullptr);
 		a_app.runFrames(3);
+	}
+
+	// Tooltips on resting controls, and the title bar's transport as icon buttons
+	{
+		auto& mouse = *a_managers.services.get<MV::TapDevice>();
+		auto& toolbar = a_app.sceneTools();
+		auto& tips = a_app.tips();
+		auto hold = [&](const MV::Point<int>& a_at, bool a_down, int a_frames = 2) {
+			mouse.simulate(a_at, a_down);
+			a_app.runFrames(a_frames);
+		};
+		auto restUntil = [&](const std::string& a_tip) {
+			// each call restarts the frame clock, so a wait is several frames long
+			for (int wait = 0; wait < 100 && tips.shown() != a_tip; ++wait) {
+				a_app.runFrames(6);
+			}
+			return tips.shown() == a_tip;
+		};
+		tips.restSeconds = 0.05;
+		hold(toolbar.buttonScreenPoint(1), false);
+		expect(restUntil("Move (W)"), "the pointer resting on the Move tool shows its tip, got \"" + tips.shown() + "\"");
+		hold(toolbar.buttonScreenPoint(2), false);
+		expect(tips.shown() != "Move (W)", "moving on to another control drops the tip");
+		expect(restUntil("Rotate (E)"), "and resting there shows that control's tip, got \"" + tips.shown() + "\"");
+		hold(toolbar.buttonScreenPoint(2), true);
+		expect(tips.shown().empty(), "a press hides the tip");
+		hold(toolbar.buttonScreenPoint(2), false);
+		auto view = a_app.viewport();
+		hold(a_managers.renderer.screenFromWorld(MV::point(view.position.x + view.size.width * 0.5f, view.position.y + view.size.height * 0.6f)), false, 12);
+		expect(tips.shown().empty(), "no tip shows over the open scene");
+		mouse.stopSimulating();
+		a_app.gizmoTool(Workbench::Tool::MOVE);
+		tips.restSeconds = 0.45;
+
+		auto click = [&](const MV::Point<int>& a_at) {
+			hold(a_at, false);
+			hold(a_at, true);
+			hold(a_at, false);
+			mouse.stopSimulating();
+		};
+		expect(!a_app.paused(), "the scene's clock starts running");
+		click(a_app.transportScreenPoint(0));
+		expect(a_app.paused(), "the pause button stops it");
+		click(a_app.transportScreenPoint(0));
+		expect(!a_app.paused(), "and starts it again");
 	}
 
 	// Scene toolbar and menu bar, pressed on the simulated mouse

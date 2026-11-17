@@ -212,9 +212,9 @@ namespace Workbench {
 		if (a_assign) {
 			nodeDropZones.push_back({ chip->owner(), a_assign });
 			if (a_node) {
-				auto clear = makeButton(fieldHost, *services, *theme, "clear", MV::size(theme->fieldHeight, theme->fieldHeight), "x", [a_assign]() {
+				auto clear = makeIconButton(fieldHost, *services, *theme, "clear", MV::size(theme->fieldHeight, theme->fieldHeight), Icon::Close, [a_assign]() {
 					a_assign(nullptr);
-				});
+				}, "Clear");
 				clear->owner()->position(MV::point(chipSize.width + theme->px(2.0f), 0.0f));
 			}
 		}
@@ -261,20 +261,20 @@ namespace Workbench {
 			auto host = row->make("pager");
 			host->position(MV::point(labelWidth() + theme->pad, 0.0f));
 			MV::Size<> stepSize(theme->fieldHeight * 1.4f, theme->fieldHeight);
-			auto previous = makeButton(host, *services, *theme, "previous", stepSize, "<", [this, a_key]() {
+			auto previous = makeIconButton(host, *services, *theme, "previous", stepSize, Icon::StepBack, [this, a_key]() {
 				if (listPages[a_key] > 0) {
 					--listPages[a_key];
 					rebuild();
 				}
-			});
+			}, "Previous page");
 			auto label = makeLabel(host, *services, *theme, "page", MV::size(theme->px(90.0f), theme->fieldHeight), std::to_string(page * a_perPage) + " - " + std::to_string(std::min(a_count, (page + 1) * a_perPage) - 1) + " of " + std::to_string(a_count));
 			label->owner()->position(MV::point(stepSize.width + theme->px(6.0f), 0.0f));
-			auto next = makeButton(host, *services, *theme, "next", stepSize, ">", [this, a_key, pageCount]() {
+			auto next = makeIconButton(host, *services, *theme, "next", stepSize, Icon::StepForward, [this, a_key, pageCount]() {
 				if (listPages[a_key] + 1 < pageCount) {
 					++listPages[a_key];
 					rebuild();
 				}
-			});
+			}, "Next page");
 			next->owner()->position(MV::point(stepSize.width + theme->px(100.0f), 0.0f));
 			(void)previous;
 		}
@@ -419,7 +419,7 @@ namespace Workbench {
 				openTexturePicker(weakDrawable, slot, a_clickable->mouse().position());
 			});
 			if (handle) {
-				auto clear = makeButton(fieldHost, *services, *theme, "clear", MV::size(theme->fieldHeight, theme->fieldHeight), "x", [this, weakDrawable, slot, handle]() {
+				auto clear = makeIconButton(fieldHost, *services, *theme, "clear", MV::size(theme->fieldHeight, theme->fieldHeight), Icon::Close, [this, weakDrawable, slot, handle]() {
 					auto apply = [weakDrawable, slot](const std::shared_ptr<MV::TextureHandle>& a_handle) {
 						if (auto locked = weakDrawable.lock()) {
 							if (a_handle) {
@@ -505,23 +505,23 @@ namespace Workbench {
 			buildTexturePicker();
 		}));
 		float x = sourceWidth + gap;
-		raise(makeButton(header, *services, *theme, "previous", MV::size(stepWidth, headerHeight), "<", [this]() {
+		raise(makeIconButton(header, *services, *theme, "previous", MV::size(stepWidth, headerHeight), Icon::StepBack, [this]() {
 			if (texturePicker.page > 0) {
 				--texturePicker.page;
 				buildTexturePicker();
 			}
-		}))->owner()->position(MV::point(x, 0.0f));
+		}, "Previous page"))->owner()->position(MV::point(x, 0.0f));
 		x += stepWidth + gap;
 		auto pageLabel = makeLabel(header, *services, *theme, "page", MV::size(theme->px(90.0f), headerHeight), std::to_string(texturePicker.page + 1) + " / " + std::to_string(pageCount));
 		pageLabel->justification(MV::TextJustification::CENTER);
 		pageLabel->owner()->position(MV::point(x, 0.0f));
 		x += theme->px(90.0f) + gap;
-		raise(makeButton(header, *services, *theme, "next", MV::size(stepWidth, headerHeight), ">", [this, pageCount]() {
+		raise(makeIconButton(header, *services, *theme, "next", MV::size(stepWidth, headerHeight), Icon::StepForward, [this, pageCount]() {
 			if (texturePicker.page + 1 < pageCount) {
 				++texturePicker.page;
 				buildTexturePicker();
 			}
-		}))->owner()->position(MV::point(x, 0.0f));
+		}, "Next page"))->owner()->position(MV::point(x, 0.0f));
 
 		auto grid = popup->make("tiles");
 		grid->position(MV::point(inset, inset * 2.0f + headerHeight));

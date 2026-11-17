@@ -271,6 +271,7 @@ namespace Workbench {
 				label->owner()->position(MV::point(iconSize + theme->pad, 0.0f));
 
 				auto rowClick = row->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(rowWidth, theme->rowHeight));
+				hoverTint(rowClick, row->component<MV::Scene::Sprite>(false, false).self(), index % 2 == 0 ? theme->panelAlt() : theme->panelBg(), theme->rowHover());
 				wireEntryInteractions(rowClick, entry, isFolder, isPrefab);
 				++index;
 			}
@@ -294,6 +295,9 @@ namespace Workbench {
 
 			auto tile = tileHost->make(MV::guid("tile_"));
 			tile->position(MV::point(column * cellWidth + tileInset, row * cellHeight));
+			auto underPointer = tile->make("hover");
+			underPointer->position(MV::point(-theme->px(4.0f), -theme->px(4.0f)));
+			auto hoverBack = attachRoundedRect(underPointer, *services, *theme, MV::size(tileSize + theme->px(8.0f), tileSize + captionHeight + theme->px(8.0f)), theme->rowHover());
 
 			std::string extension = entry.extension().string();
 			bool isImage = extension == ".png" || extension == ".jpg";
@@ -309,10 +313,12 @@ namespace Workbench {
 			} else if (isFolder) {
 				tile->attach<MV::Scene::Sprite>()->bounds(MV::size(tileSize, tileSize))->texture(folderHandle(*services));
 			} else {
-				attachRoundedRect(tile, *services, *theme, MV::size(tileSize, tileSize), tileColorForExtension(extension, *theme));
+				// a page in the file type's colour, with its short name on it
+				auto pageColor = tileColorForExtension(extension, *theme);
+				tile->make("page")->attach<MV::Scene::Sprite>()->bounds(MV::size(tileSize, tileSize))->texture(iconHandle(*services, *theme, Icon::Document, 128))->color(MV::Color(std::min(1.0f, pageColor.R + 0.18f), std::min(1.0f, pageColor.G + 0.18f), std::min(1.0f, pageColor.B + 0.18f), 1.0f));
 				auto glyphLabel = makeLabel(tile, *services, *theme, "glyph", MV::size(tileSize, theme->rowHeight), tileGlyphForExtension(extension));
 				glyphLabel->justification(MV::TextJustification::CENTER);
-				glyphLabel->owner()->position(MV::point(0.0f, (tileSize - theme->rowHeight) * 0.5f));
+				glyphLabel->owner()->position(MV::point(0.0f, (tileSize - theme->rowHeight) * 0.58f));
 			}
 
 			auto caption = makeLabel(tile, *services, *theme, "caption", MV::size(cellWidth - theme->pad, captionHeight), entry.filename().string());
@@ -320,6 +326,7 @@ namespace Workbench {
 			caption->justification(MV::TextJustification::CENTER);
 
 			auto tileClick = tile->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(tileSize, tileSize + captionHeight));
+			hoverShow(tileClick, hoverBack);
 			wireEntryInteractions(tileClick, entry, isFolder, isPrefab);
 		}
 		builtHeight = theme->rowHeight + theme->pad + ((index + columns - 1) / std::max(1, columns)) * cellHeight + footerHeight();

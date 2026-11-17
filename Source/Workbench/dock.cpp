@@ -249,6 +249,7 @@ namespace Workbench {
 		resize->color(theme.scrollThumb());
 		resize->texture(roundedRectHandle(services, theme));
 		resize->show();
+		hoverTint(resize, resize, theme.scrollThumb(), theme.accent());
 		resize->onDrag.connect("resize", [this, leaf](const std::shared_ptr<MV::Scene::Clickable>&, const MV::Point<int>&, const MV::Point<int>& a_delta) {
 			if (auto* sizing = floatOf(leaf); sizing && lastArea.size.width > 0.0f && lastArea.size.height > 0.0f) {
 				auto current = worldRectOf(sizing->fraction);
@@ -443,6 +444,7 @@ namespace Workbench {
 		scrollThumb->id("thumb");
 		scrollThumb->texture(roundedRectHandle(services, theme))->color(theme.scrollThumb());
 		scrollThumb->hide();
+		hoverTint(scrollThumb.self(), scrollThumb.self(), theme.scrollThumb(), theme.fieldOutlineHover());
 		scrollThumb->onDrag.connect("scroll", [this, a_leaf](const std::shared_ptr<MV::Scene::Clickable>&, const MV::Point<int>&, const MV::Point<int>& a_delta) {
 			auto rectIt = leafRects.find(a_leaf);
 			if (rectIt == leafRects.end() || a_leaf->panels.empty()) {
@@ -479,6 +481,32 @@ namespace Workbench {
 			clickable->onAccept.connect("activate", [this, a_leaf, index](const std::shared_ptr<MV::Scene::Clickable>&) {
 				activatePanel(a_leaf, index);
 			});
+			// a tab behind the front one shows its shape under the pointer
+			std::weak_ptr<MV::Scene::Node> weakTab = tab;
+			clickable->onHoverEnter.connect("hover", [this, a_leaf, index, weakTab](const std::shared_ptr<MV::Scene::Clickable>&) {
+				auto hoveredTab = weakTab.lock();
+				if (hoveredTab && index != a_leaf->active) {
+					for (auto&& part : { "tabBg", "tabFoot" }) {
+						if (auto sprite = hoveredTab->component<MV::Scene::Sprite>(part, false)) {
+							sprite->color(theme.header());
+							sprite->show();
+						}
+					}
+				}
+			});
+			clickable->onHoverLeave.connect("hover", [this, a_leaf, index, weakTab](const std::shared_ptr<MV::Scene::Clickable>&) {
+				auto hoveredTab = weakTab.lock();
+				if (hoveredTab) {
+					for (auto&& part : { "tabBg", "tabFoot" }) {
+						if (auto sprite = hoveredTab->component<MV::Scene::Sprite>(part, false)) {
+							sprite->color(theme.panelBg());
+							if (index != a_leaf->active) {
+								sprite->hide();
+							}
+						}
+					}
+				}
+			});
 			clickable->onDrag.connect("tabDrag", [this, a_leaf, panel](const std::shared_ptr<MV::Scene::Clickable>&, const MV::Point<int>& a_start, const MV::Point<int>&) {
 				if (!drag.active) {
 					beginTabDrag(panel, a_leaf);
@@ -495,10 +523,13 @@ namespace Workbench {
 			// shown on the tab in front; a child of the tab, so it takes the press before the tab does
 			auto close = tab->make("close");
 			const float closeSize = theme.px(14.0f);
-			close->attach<MV::Scene::Sprite>()->bounds(MV::size(closeSize, closeSize))->texture(iconHandle(services, theme, Icon::Close))->color(theme.glyph());
-			close->attach<MV::Scene::Clickable>(mouse)->onAccept.connect("close", [this, panel](const std::shared_ptr<MV::Scene::Clickable>&) {
+			auto closeGlyph = close->attach<MV::Scene::Sprite>()->bounds(MV::size(closeSize, closeSize))->texture(iconHandle(services, theme, Icon::Close))->color(theme.glyph());
+			auto closeClick = close->attach<MV::Scene::Clickable>(mouse);
+			closeClick->onAccept.connect("close", [this, panel](const std::shared_ptr<MV::Scene::Clickable>&) {
 				closePanel(panel);
 			});
+			hoverTint(closeClick.self(), closeGlyph, theme.glyph(), MV::Color(1.0f, 1.0f, 1.0f, 1.0f));
+			tooltip(services, closeClick.self(), "Close " + panel->title());
 		}
 	}
 
@@ -510,6 +541,7 @@ namespace Workbench {
 		grip->id("grip");
 		grip->color(theme.splitter());
 		grip->show();
+		hoverTint(grip.self(), grip.self(), theme.splitter(), theme.accent());
 		grip->onDrag.connect("resize", [this, a_split](const std::shared_ptr<MV::Scene::Clickable>&, const MV::Point<int>&, const MV::Point<int>& a_delta) {
 			auto rectIt = nodeRects.find(a_split);
 			if (rectIt == nodeRects.end()) {
@@ -543,6 +575,7 @@ namespace Workbench {
 			for (auto&& tab : *tabBar) {
 				for (auto&& part : { "tabBg", "tabFoot" }) {
 					if (auto sprite = tab->component<MV::Scene::Sprite>(part, false)) {
+						sprite->color(theme.panelBg());
 						if (static_cast<int>(index) == a_leaf->active) {
 							sprite->show();
 						} else {

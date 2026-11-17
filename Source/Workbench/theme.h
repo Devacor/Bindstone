@@ -19,6 +19,8 @@ namespace Workbench {
 			SELECTION = 0x0f5fb5,
 			FIELD_BG = 0x0f0f0f,
 			FIELD_OUTLINE = 0x383838,
+			FIELD_OUTLINE_HOVER = 0x646464,
+			HEADER_HOVER = 0x3b3b3b,
 			BUTTON_OUTLINE = 0x161616,
 			GLYPH = 0xb4b4b4,
 			SCROLL_THUMB = 0x4c4c4c,
@@ -71,6 +73,8 @@ namespace Workbench {
 		MV::Color selection() const { return MV::Color(uint32_t(ThemeColor::SELECTION)); }
 		MV::Color fieldBg() const { return MV::Color(uint32_t(ThemeColor::FIELD_BG)); }
 		MV::Color fieldOutline() const { return MV::Color(uint32_t(ThemeColor::FIELD_OUTLINE)); }
+		MV::Color fieldOutlineHover() const { return MV::Color(uint32_t(ThemeColor::FIELD_OUTLINE_HOVER)); }
+		MV::Color headerHover() const { return MV::Color(uint32_t(ThemeColor::HEADER_HOVER)); }
 		MV::Color buttonOutline() const { return MV::Color(uint32_t(ThemeColor::BUTTON_OUTLINE)); }
 		MV::Color glyph() const { return MV::Color(uint32_t(ThemeColor::GLYPH)); }
 		MV::Color scrollThumb() const { return MV::Color(uint32_t(ThemeColor::SCROLL_THUMB)); }

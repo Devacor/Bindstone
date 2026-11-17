@@ -55,6 +55,9 @@ namespace Workbench {
 
 		// Where a transform handle can be grabbed: moveX, moveY, moveFree, rotate, scaleX, scaleY or scaleUniform.
 		std::optional<MV::Point<int>> handleScreenPoint(const std::string& a_handle) const;
+		// The rotate sweep on screen while its ring is dragged, in degrees turning the way screen angles grow
+		// (clockwise, as y runs down); zero when no sweep shows.
+		float sweepShown() const;
 
 		void update();
 

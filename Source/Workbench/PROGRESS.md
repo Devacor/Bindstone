@@ -652,6 +652,28 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   press on it does not pick in the scene, round-trips a layout with a floating panel, and docks it again.
 - Not yet: separate OS windows, splitting inside a floating panel, a floating panel snapping to others.
 
+## Increment 32: hover, tooltips and the last text buttons (2026-11-16)
+- `hoverTint(clickable, sprite, idle, hover)` and `hoverShow` (`widgets.h`) are how a control answers the pointer.
+  In use on: every `makeButton` and `makeIconButton`, text and scrub field outlines, toggles, tabs behind the front
+  one, tab close buttons, dock splitters (accent), scroll thumbs, a floating panel's corner, inspector section
+  headers, and Project tiles and list rows.
+- Tooltips: `Tooltips` (`tooltips.h`) shows one label beside the pointer once it has rested 0.45 s on a control
+  that has a tip, and drops it on a press or when the pointer leaves. A control asks for one with
+  `tooltip(services, clickable, text)`; `IconButton` and `makeIconButton` take it as an argument. Toolbar tools,
+  history arrows, the transport, the window buttons, tab close and the inspector's small buttons have tips.
+- `makeIconButton` is `makeButton` with a drawn icon. It replaces the text on the window buttons (`_ [] x`, the
+  close one red under the pointer), the transport (`||` and `>|`; pause swaps to play), the inspector's `G` (now a
+  handles icon, accent while its gizmo is on), the `x` clear buttons and the `<` `>` pagers. New icons: Minimize,
+  Maximize, Pause, Play, Step, Handles, Document.
+- Project file tiles are a page in the file type's colour with its short name on it.
+- Rotate sweep: the wedge fanned the wrong way after the vertical handles were turned to point up, because its
+  mirrored-parent check read the handle's angle. It reads the parent's own axes now, and the self-test checks the
+  sweep's direction while the ring is still held.
+- The self-test waits on tips (shown after resting, dropped on moving on, on a press and over open scene) and
+  presses the icon pause button.
+- Not yet: tips on inspector rows and fields, cursor changes beyond splitters, hover on tree rows through the new
+  signals (the tree still tracks the pointer itself), a restore icon when the window is maximized.
+
 ## Known gaps (next increments)
 - Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.

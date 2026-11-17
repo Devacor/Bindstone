@@ -101,6 +101,33 @@ namespace Workbench {
 				case Icon::Close:
 					result = nearSegment(a_x, a_y, 0.26f, 0.26f, 0.74f, 0.74f, 0.07f) || nearSegment(a_x, a_y, 0.74f, 0.26f, 0.26f, 0.74f, 0.07f);
 				break;
+				case Icon::Minimize:
+					result = nearSegment(a_x, a_y, 0.24f, 0.70f, 0.76f, 0.70f, 0.05f);
+				break;
+				case Icon::Maximize:
+					result = inBox(a_x, a_y, 0.22f, 0.22f, 0.78f, 0.78f) && !inBox(a_x, a_y, 0.31f, 0.34f, 0.69f, 0.69f);
+				break;
+				case Icon::Pause:
+					result = inBox(a_x, a_y, 0.27f, 0.22f, 0.43f, 0.78f) || inBox(a_x, a_y, 0.57f, 0.22f, 0.73f, 0.78f);
+				break;
+				case Icon::Play:
+					result = inPolygon(a_x, a_y, { {0.30f, 0.18f}, {0.78f, 0.50f}, {0.30f, 0.82f} });
+				break;
+				case Icon::Step:
+					result = inPolygon(a_x, a_y, { {0.22f, 0.20f}, {0.62f, 0.50f}, {0.22f, 0.80f} }) || inBox(a_x, a_y, 0.66f, 0.20f, 0.78f, 0.80f);
+				break;
+				case Icon::Handles:
+					result = inBox(a_x, a_y, 0.22f, 0.22f, 0.78f, 0.78f) && !inBox(a_x, a_y, 0.28f, 0.28f, 0.72f, 0.72f);
+					for (float cornerX : { 0.22f, 0.78f }) {
+						for (float cornerY : { 0.22f, 0.78f }) {
+							result = result || inBox(a_x, a_y, cornerX - 0.10f, cornerY - 0.10f, cornerX + 0.10f, cornerY + 0.10f);
+						}
+					}
+				break;
+				case Icon::Document:
+					result = inPolygon(a_x, a_y, { {0.20f, 0.06f}, {0.60f, 0.06f}, {0.80f, 0.26f}, {0.80f, 0.94f}, {0.20f, 0.94f} }) &&
+						!nearSegment(a_x, a_y, 0.60f, 0.06f, 0.60f, 0.26f, 0.018f) && !nearSegment(a_x, a_y, 0.60f, 0.26f, 0.80f, 0.26f, 0.018f);
+				break;
 			}
 			return result;
 		}
@@ -191,8 +218,8 @@ namespace Workbench {
 		})->makeHandle();
 	}
 
-	std::shared_ptr<MV::TextureHandle> iconHandle(MV::Services& a_services, const Theme& a_theme, Icon a_icon) {
-		const int surfaceSize = MV::roundUpPowerOfTwo(std::max(16, static_cast<int>(a_theme.px(16.0f))));
+	std::shared_ptr<MV::TextureHandle> iconHandle(MV::Services& a_services, const Theme& a_theme, Icon a_icon, int a_pixels) {
+		const int surfaceSize = MV::roundUpPowerOfTwo(std::max(16, a_pixels > 0 ? a_pixels : static_cast<int>(a_theme.px(16.0f))));
 		return a_services.get<MV::SharedTextures>()->surface("workbenchIcon_" + std::to_string(static_cast<int>(a_icon)) + "_" + std::to_string(surfaceSize), [a_icon, surfaceSize] {
 			return makeIconSurface(a_icon, surfaceSize);
 		})->makeHandle();
@@ -219,7 +246,7 @@ namespace Workbench {
 		}
 	};
 
-	IconButton::IconButton(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, Icon a_icon, std::function<void()> a_onClick) :
+	IconButton::IconButton(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, Icon a_icon, std::function<void()> a_onClick, const std::string& a_tooltip) :
 		look(std::make_shared<Look>()) {
 
 		MV::Size<> buttonSize(size(a_theme), size(a_theme));
@@ -253,6 +280,9 @@ namespace Workbench {
 		};
 		clickable->onHoverEnter.connect("hover", hoverTo(true));
 		clickable->onHoverLeave.connect("hover", hoverTo(false));
+		if (!a_tooltip.empty()) {
+			tooltip(a_services, clickable, a_tooltip);
+		}
 	}
 
 	bool IconButton::active() const {

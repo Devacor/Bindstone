@@ -865,8 +865,8 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   unless a component says otherwise. `Node::focusInParents()` asks every component on every node above a node,
   nearest first. A FocusCandidate carries it as `reveal`, which `TapDevice::focus` runs when a move, a walk in
   order or `Clickable::focus()` brings the focus. A pointer's press does not: the list stays under the pointer.
-- `Scroller::focusOnChild` scrolls its content as far as it takes to show the node and no further; something
-  longer than the view shows from its start. It is bound to script, as is `Node::focusInParents`.
+- `Scroller::focusOnChild` scrolls its content to put the node in the middle of the view, as near as the
+  content's ends allow. It is bound to script, as is `Node::focusInParents`.
 - `Scroller` keeps content longer than its view covering the view from end to end, and leaves content that fits
   where it was put. Before, it held the content inside the view, so content that fitted slid about in it and
   content longer than it did not scroll. Its sums are in its own node's space, so a turned scroller scrolls true.
@@ -879,8 +879,7 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   from that row goes on to the hidden one and scrolls to it. A FocusGroup on a list is as big as its view.
 - Tests: `scroller_tests.cpp` (a drag to each end, content that fits, focusOnChild, a move and a walk scrolling,
   a pointer's press not scrolling, hidden rows from outside, what shows of a node, an explicit group on a list).
-- Not yet: the scroll is at once, not eased; no margin is kept round what is scrolled to; a Scroller has no
-  wheel or stick scrolling of its own.
+- Not yet: the scroll is at once, not eased; a Scroller has no wheel or stick scrolling of its own.
 
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.

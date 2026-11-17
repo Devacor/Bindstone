@@ -72,12 +72,8 @@ namespace MV {
 				return std::clamp(a_shift, a_viewHigh - a_contentHigh, a_viewLow - a_contentLow);
 			}
 
-			// Something longer than the view shows from its start.
-			PointPrecision shiftIntoView(PointPrecision a_low, PointPrecision a_high, PointPrecision a_viewLow, PointPrecision a_viewHigh) {
-				if (a_low < a_viewLow || a_high - a_low >= a_viewHigh - a_viewLow) {
-					return a_viewLow - a_low;
-				}
-				return a_high > a_viewHigh ? a_viewHigh - a_high : 0.0f;
+			PointPrecision shiftToMiddle(PointPrecision a_low, PointPrecision a_high, PointPrecision a_viewLow, PointPrecision a_viewHigh) {
+				return (a_viewLow + a_viewHigh - a_low - a_high) * 0.5f;
 			}
 		}
 
@@ -123,8 +119,8 @@ namespace MV {
 			childBox = boxInSpaceOf(owner(), a_child, childBox);
 			auto view = bounds();
 			shiftContent(Point<>(
-				shiftIntoView(childBox.minPoint.x, childBox.maxPoint.x, view.minPoint.x, view.maxPoint.x),
-				shiftIntoView(childBox.minPoint.y, childBox.maxPoint.y, view.minPoint.y, view.maxPoint.y)));
+				shiftToMiddle(childBox.minPoint.x, childBox.maxPoint.x, view.minPoint.x, view.maxPoint.x),
+				shiftToMiddle(childBox.minPoint.y, childBox.maxPoint.y, view.minPoint.y, view.maxPoint.y)));
 		}
 
 		std::shared_ptr<Scroller> Scroller::content(const std::shared_ptr<Node> &a_content) {

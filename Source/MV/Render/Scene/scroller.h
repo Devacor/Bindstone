@@ -27,7 +27,7 @@ namespace MV {
 				Clickable::cancelPress(a_callCancelCallbacks);
 			}
 
-			// Scrolls the content as far as it takes to show a node under it, on the axes that scroll.
+			// Scrolls the content to put a node under it in the middle of the view, as near as the content's ends allow.
 			virtual void focusOnChild(const std::shared_ptr<Node>& a_child) override;
 
 		protected:

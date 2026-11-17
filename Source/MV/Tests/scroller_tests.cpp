@@ -107,18 +107,18 @@ namespace mv_tests {
 				check_true(scene.scrolledTo(20.0f), std::to_string(scene.scrolled()));
 			});
 
-			test("focusOnChild scrolls as far as it takes to show a row, and no further", [] {
+			test("focusOnChild puts a row in the middle of the view, as near as the content's ends allow", [] {
 				List scene;
-				scene.scroller->focusOnChild(scene.rows[1]->owner());
-				check_true(scene.scrolledTo(0.0f), "a row already showing moves nothing");
 				scene.scroller->focusOnChild(scene.rows[3]->owner());
-				check_true(scene.scrolledTo(-100.0f), "a row below comes up to the foot of the view: " + std::to_string(scene.scrolled()));
+				check_true(scene.scrolledTo(-125.0f), "a row below comes up to the middle: " + std::to_string(scene.scrolled()));
 				scene.scroller->focusOnChild(scene.rows[2]->owner());
-				check_true(scene.scrolledTo(-100.0f), "the row above it is showing too");
+				check_true(scene.scrolledTo(-75.0f), "a row already showing is put there too: " + std::to_string(scene.scrolled()));
+				scene.scroller->focusOnChild(scene.rows[1]->owner());
+				check_true(scene.scrolledTo(-25.0f));
 				scene.scroller->focusOnChild(scene.rows[0]->owner());
-				check_true(scene.scrolledTo(0.0f), "a row above comes down to the head: " + std::to_string(scene.scrolled()));
+				check_true(scene.scrolledTo(0.0f), "the first row stops with the content's head at the view's: " + std::to_string(scene.scrolled()));
 				scene.scroller->focusOnChild(scene.rows[5]->owner());
-				check_true(scene.scrolledTo(-200.0f));
+				check_true(scene.scrolledTo(-200.0f), "and the last with its foot at the view's: " + std::to_string(scene.scrolled()));
 				scene.scroller->focusOnChild(scene.under->owner());
 				check_true(scene.scrolledTo(-200.0f), "a node that is not in the content is not its business");
 				scene.rows[0]->owner()->focusInParents();
@@ -127,14 +127,16 @@ namespace mv_tests {
 
 			test("the focus moving onto a row out of view scrolls to it, and a pointer's press does not", [] {
 				List scene;
-				scene.rows[1]->focus();
+				scene.rows[0]->focus();
 				check_true(scene.scrolledTo(0.0f));
+				check_true(scene.host.mouse.focusMove(FocusDirection::DOWN) && scene.rows[1]->focused() && scene.scrolledTo(-25.0f), "the row the focus moves to goes to the middle: " + std::to_string(scene.scrolled()));
+				scene.content->position(MV::point(0.0f, 0.0f));
 				check_true(scene.host.mouse.focusMove(FocusDirection::DOWN) && scene.rows[2]->focused(), "the row below, though it is clipped away, is next");
-				check_true(scene.scrolledTo(-50.0f), "and is brought in: " + std::to_string(scene.scrolled()));
+				check_true(scene.scrolledTo(-75.0f), "and is brought in: " + std::to_string(scene.scrolled()));
 				check_true(scene.host.mouse.focusMove(FocusDirection::DOWN) && scene.rows[3]->focused());
-				check_true(scene.scrolledTo(-100.0f));
-				check_true(scene.host.mouse.focusNext() && scene.rows[4]->focused() && scene.scrolledTo(-150.0f), "walking in order scrolls the same way");
-				check_true(scene.host.mouse.focusMove(FocusDirection::UP) && scene.rows[3]->focused() && scene.scrolledTo(-150.0f), "a row still showing moves nothing");
+				check_true(scene.scrolledTo(-125.0f));
+				check_true(scene.host.mouse.focusNext() && scene.rows[4]->focused() && scene.scrolledTo(-175.0f), "walking in order scrolls the same way");
+				check_true(scene.host.mouse.focusMove(FocusDirection::UP) && scene.rows[3]->focused() && scene.scrolledTo(-125.0f));
 
 				scene.content->position(MV::point(0.0f, -75.0f));
 				auto at = scene.onScreen(100.0f, 10.0f);
@@ -150,7 +152,7 @@ namespace mv_tests {
 				scene.under->focus();
 				check_true(scene.host.mouse.focusMove(FocusDirection::UP), "up from under the list");
 				check_true(scene.rows[1]->focused(), "lands on the last row showing, not on the hidden one whose true place is behind where it started");
-				check_true(scene.scrolledTo(0.0f));
+				check_true(scene.scrolledTo(-25.0f));
 
 				scene.rows[0]->focus();
 				auto behind = scene.root->screenFromLocal(MV::point(200.0f, 215.0f));
@@ -182,7 +184,7 @@ namespace mv_tests {
 				check_true(scene.host.mouse.focusMove(FocusDirection::UP) && group->selected(), "up from under it reaches it, though its content runs on down behind where the move started");
 				check_true(scene.host.mouse.focusActivate() && scene.rows[0]->focused(), "and going in starts on its first row");
 				check_true(scene.host.mouse.focusMove(FocusDirection::DOWN, scene.list.get()) && scene.host.mouse.focusMove(FocusDirection::DOWN, scene.list.get()) && scene.rows[2]->focused());
-				check_true(scene.scrolledTo(-50.0f), "moves inside it scroll: " + std::to_string(scene.scrolled()));
+				check_true(scene.scrolledTo(-75.0f), "moves inside it scroll: " + std::to_string(scene.scrolled()));
 			});
 		}
 	};

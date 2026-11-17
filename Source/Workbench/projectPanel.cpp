@@ -1,5 +1,6 @@
 #include "projectPanel.h"
 #include "widgets.h"
+#include "icons.h"
 #include <algorithm>
 #include <iostream>
 
@@ -260,9 +261,10 @@ namespace Workbench {
 						icon->attach<MV::Scene::Sprite>()->bounds(MV::fitAspect(MV::cast<MV::PointPrecision>(handle->bounds().size()), MV::size(iconSize, iconSize)))->texture(handle);
 					} catch (...) {
 					}
+				} else if (isFolder) {
+					icon->attach<MV::Scene::Sprite>()->bounds(MV::size(iconSize, iconSize))->texture(folderHandle(*services));
 				} else {
-					MV::Color iconColor = isFolder ? MV::Color(0x8a6d3a) : tileColorForExtension(extension, *theme);
-					icon->attach<MV::Scene::Sprite>()->bounds(MV::size(iconSize, iconSize))->color(iconColor);
+					icon->attach<MV::Scene::Sprite>()->bounds(MV::size(iconSize, iconSize))->color(tileColorForExtension(extension, *theme));
 				}
 
 				auto label = makeLabel(row, *services, *theme, "caption", MV::size(rowWidth - iconSize - theme->pad * 2.0f, theme->rowHeight), entry.filename().string());
@@ -304,11 +306,11 @@ namespace Workbench {
 					tile->make("thumb")->attach<MV::Scene::Sprite>()->bounds(MV::fitAspect(MV::cast<MV::PointPrecision>(handle->bounds().size()), MV::size(tileSize, tileSize)))->texture(handle);
 				} catch (...) {
 				}
+			} else if (isFolder) {
+				tile->attach<MV::Scene::Sprite>()->bounds(MV::size(tileSize, tileSize))->texture(folderHandle(*services));
 			} else {
-				MV::Color tileColor = isFolder ? MV::Color(0x8a6d3a) : tileColorForExtension(extension, *theme);
-				attachRoundedRect(tile, *services, *theme, MV::size(tileSize, tileSize), tileColor);
-				std::string glyph = isFolder ? "[=]" : tileGlyphForExtension(extension);
-				auto glyphLabel = makeLabel(tile, *services, *theme, "glyph", MV::size(tileSize, theme->rowHeight), glyph);
+				attachRoundedRect(tile, *services, *theme, MV::size(tileSize, tileSize), tileColorForExtension(extension, *theme));
+				auto glyphLabel = makeLabel(tile, *services, *theme, "glyph", MV::size(tileSize, theme->rowHeight), tileGlyphForExtension(extension));
 				glyphLabel->justification(MV::TextJustification::CENTER);
 				glyphLabel->owner()->position(MV::point(0.0f, (tileSize - theme->rowHeight) * 0.5f));
 			}

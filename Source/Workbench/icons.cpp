@@ -123,6 +123,71 @@ namespace Workbench {
 		}
 	}
 
+	namespace {
+		struct Paint {
+			float red = 0.0f;
+			float green = 0.0f;
+			float blue = 0.0f;
+			float alpha = 0.0f;
+		};
+
+		// The folder over the unit square, y down: a soft shadow, the back with its tab, and the front leaning right.
+		Paint folderPaintAt(float a_x, float a_y) {
+			if (inPolygon(a_x, a_y, { {0.15f, 0.43f}, {0.98f, 0.43f}, {0.90f, 0.85f}, {0.07f, 0.85f} })) {
+				const float down = std::clamp((a_y - 0.43f) / 0.42f, 0.0f, 1.0f);
+				if (a_y < 0.455f) {
+					return { 1.0f, 0.91f, 0.60f, 1.0f };
+				}
+				return { 1.0f - 0.06f * down, 0.80f - 0.14f * down, 0.36f - 0.16f * down, 1.0f };
+			}
+			if (inPolygon(a_x, a_y, { {0.07f, 0.20f}, {0.36f, 0.20f}, {0.44f, 0.29f}, {0.90f, 0.29f}, {0.90f, 0.85f}, {0.07f, 0.85f} })) {
+				// darker where the front's lip shades it
+				const float shade = a_y > 0.37f ? 0.80f : 1.0f;
+				return { 0.78f * shade, 0.54f * shade, 0.15f * shade, 1.0f };
+			}
+			const float shadowX = (a_x - 0.50f) / 0.46f;
+			const float shadowY = (a_y - 0.87f) / 0.07f;
+			const float fromCenter = shadowX * shadowX + shadowY * shadowY;
+			if (fromCenter < 1.0f) {
+				return { 0.0f, 0.0f, 0.0f, 0.32f * (1.0f - fromCenter) };
+			}
+			return {};
+		}
+
+		std::shared_ptr<MV::OwnedSurface> makeFolderSurface(int a_size) {
+			int bitsPerPixel = 0;
+			Uint32 redMask = 0, greenMask = 0, blueMask = 0, alphaMask = 0;
+			SDL_PixelFormatEnumToMasks(SDL_PIXELFORMAT_ABGR8888, &bitsPerPixel, &redMask, &greenMask, &blueMask, &alphaMask);
+			SDL_Surface* surface = SDL_CreateRGBSurface(0, a_size, a_size, bitsPerPixel, redMask, greenMask, blueMask, alphaMask);
+			SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_NONE);
+			auto* pixels = static_cast<uint32_t*>(surface->pixels);
+			const int pitch = surface->pitch / 4;
+			for (int y = 0; y < a_size; ++y) {
+				for (int x = 0; x < a_size; ++x) {
+					Paint sum;
+					for (int sample = 0; sample < 16; ++sample) {
+						Paint paint = folderPaintAt((x + (sample % 4 + 0.5f) / 4.0f) / a_size, (y + (sample / 4 + 0.5f) / 4.0f) / a_size);
+						sum.red += paint.red * paint.alpha;
+						sum.green += paint.green * paint.alpha;
+						sum.blue += paint.blue * paint.alpha;
+						sum.alpha += paint.alpha;
+					}
+					auto channel = [](float a_value) { return static_cast<uint32_t>(std::clamp(a_value, 0.0f, 1.0f) * 255.0f + 0.5f); };
+					// straight alpha: the colour is the average of what covered the pixel
+					const float covered = std::max(sum.alpha, 0.0001f);
+					pixels[y * pitch + x] = (channel(sum.alpha / 16.0f) << 24) | (channel(sum.blue / covered) << 16) | (channel(sum.green / covered) << 8) | channel(sum.red / covered);
+				}
+			}
+			return MV::OwnedSurface::make(surface);
+		}
+	}
+
+	std::shared_ptr<MV::TextureHandle> folderHandle(MV::Services& a_services) {
+		return a_services.get<MV::SharedTextures>()->surface("workbenchFolder_128", [] {
+			return makeFolderSurface(128);
+		})->makeHandle();
+	}
+
 	std::shared_ptr<MV::TextureHandle> iconHandle(MV::Services& a_services, const Theme& a_theme, Icon a_icon) {
 		const int surfaceSize = MV::roundUpPowerOfTwo(std::max(16, static_cast<int>(a_theme.px(16.0f))));
 		return a_services.get<MV::SharedTextures>()->surface("workbenchIcon_" + std::to_string(static_cast<int>(a_icon)) + "_" + std::to_string(surfaceSize), [a_icon, surfaceSize] {

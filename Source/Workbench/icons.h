@@ -14,6 +14,9 @@ namespace Workbench {
 	// A white icon drawn at the theme's scale; tint it through the Sprite's colour.
 	std::shared_ptr<MV::TextureHandle> iconHandle(MV::Services& a_services, const Theme& a_theme, Icon a_icon);
 
+	// A folder in its own colours, drawn open with its front leaning forward: for a Sprite of any square size.
+	std::shared_ptr<MV::TextureHandle> folderHandle(MV::Services& a_services);
+
 	// A square toolbar button showing an icon. An active button fills with the accent: a tool that is on, a toggle
 	// that is set. The pointer over one that is not active lights it.
 	class IconButton {

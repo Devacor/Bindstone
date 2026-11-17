@@ -607,6 +607,11 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
     move any shipped grid whose padding differs in x and y, so it is left for Dev.
 - Next for Grid: the toolbar groups, the Project tiles (a wrapping Grid by `gridWidth`), tree rows.
 
+## Increment 29: folder tiles (2026-11-16)
+- The Project panel draws a folder as a folder: `folderHandle` (`icons.cpp`) is a generated texture in its own
+  colours, the back with its tab, the front leaning forward, a soft shadow beneath. Tiles and list rows both use
+  it, and the `[=]` text over the old brown square is gone.
+
 ## Known gaps (next increments)
 - Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.

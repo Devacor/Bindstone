@@ -413,6 +413,7 @@ namespace MV {
 				a_child->onAddSignal(a_child);
 				onChildAddSignal(a_child);
 				a_child->markMatrixDirty(true);
+				a_child->markParentBoundsDirty();
 			}
 			return shared_from_this();
 		}
@@ -435,6 +436,7 @@ namespace MV {
 				childNodes->erase(foundNode);
 				child->onRemoveSignal(child);
 				onChildRemoveSignal(self, child);
+				markChildBoundsDirty();
 				return child;
 			}
 			require<ResourceException>(!a_throw, "Failed to remove: [", a_id, "] from parent node: [", nodeId.get(), "]");
@@ -451,6 +453,7 @@ namespace MV {
 				childNodes->erase(foundNode);
 				child->onRemoveSignal(child);
 				onChildRemoveSignal(self, child);
+				markChildBoundsDirty();
 				return child;
 			}
 			require<ResourceException>(!a_throw, "Failed to remove: [", a_child->id(), "] from parent node: [", nodeId.get(), "]");
@@ -464,6 +467,7 @@ namespace MV {
 				childNodes->erase(childNodes->begin());
 				childToRemove->onRemoveSignal(childToRemove);
 				onChildRemoveSignal(self, childToRemove);
+				markChildBoundsDirty();
 			}
 			return self;
 		}
@@ -741,16 +745,29 @@ namespace MV {
 			{
 				dirtyChildBounds = false;
 				localChildBounds = BoxAABB<>();
+				bool anyChild = false;
 				for (auto&& child : childNodes) {
 					if (child->selfVisible()) {
 						auto nodeBounds = child->bounds();
 						if (nodeBounds.empty()) {
 							continue;
 						}
-						if (localChildBounds->empty()) {
-							localChildBounds = nodeBounds;
-						} else {
-							localChildBounds->expandWith(nodeBounds);
+						// the child's box is in the child's space: its corners, carried through the child's position,
+						// rotation and scale, are where it sits in this node's
+						const auto placement = child->localTransform();
+						const Point<> corners[] {
+							nodeBounds.minPoint,
+							Point<>(nodeBounds.maxPoint.x, nodeBounds.minPoint.y, nodeBounds.minPoint.z),
+							nodeBounds.maxPoint,
+							Point<>(nodeBounds.minPoint.x, nodeBounds.maxPoint.y, nodeBounds.maxPoint.z) };
+						for (auto&& corner : corners) {
+							const Point<> placed = placement * corner;
+							if (!anyChild) {
+								localChildBounds = BoxAABB<>(placed, placed);
+								anyChild = true;
+							} else {
+								localChildBounds->expandWith(placed);
+							}
 						}
 					}
 				}
@@ -853,6 +870,7 @@ namespace MV {
 			});
 			onTransformChange.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
 				markMatrixDirty();
+				markParentBoundsDirty();
 				safeOnChange();
 			});
 			
@@ -1349,6 +1367,12 @@ namespace MV {
 				add(toAdd);
 				return toAdd;
 			}
+		}
+
+		void Node::markChildBoundsDirty() {
+			dirtyChildBounds = true;
+			onChildBoundsChangeSignal(shared_from_this());
+			markParentBoundsDirty();
 		}
 
 		void Node::markParentBoundsDirty() {

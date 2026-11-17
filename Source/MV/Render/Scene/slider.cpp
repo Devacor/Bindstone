@@ -70,7 +70,8 @@ namespace MV {
 		}
 
 		MV::PointPrecision Slider::calculatePercentFromPosition(const Point<> &a_localPoint) {
-			auto bounds = owner()->bounds();
+			// the track is the node's own box: the handle is a child that travels along it
+			auto bounds = owner()->bounds(false);
 			if (bounds.width() >= bounds.height()) {
 				return std::min(std::max((a_localPoint.x - bounds.minPoint.x) / bounds.width(), 0.0f), 1.0f);
 			} else {
@@ -80,7 +81,7 @@ namespace MV {
 
 		void Slider::updateHandlePosition() {
 			if (dragHandle) {
-				auto areaBounds = owner()->bounds();
+				auto areaBounds = owner()->bounds(false);
 				auto handleBounds = dragHandle->bounds();
 
 				PointPrecision firstX = areaBounds.minPoint.x + (areaBounds.width() - handleBounds.width());

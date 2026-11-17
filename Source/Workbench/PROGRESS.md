@@ -817,8 +817,6 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   nothing casts a subject to find where it is.
 - The pad's d-pad and stick use `focusMoveWithin`; SOUTH on a selected group goes in and EAST comes back out.
 - The window last stepped to counts as in use only while nothing holds the focus.
-- A group's place on screen is the box around the Clickables showing under it, not `Node::screenBounds`, whose
-  child bounds had not caught up with the children's positions in a scene that had never been drawn.
 - Tests: contiguous moves, the explicit group's whole life, the pad going in and out, and the save and load of
   both new keys. `MV Network`'s unread-timeout test failed once in a full run and passed alone: a timing test.
 
@@ -830,9 +828,6 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Something squarely ahead (wholly past the edge and overlapping sideways) is a candidate however far off its
   middle is, so a small button over the end of a wide bar reaches the bar and comes back.
 - Diagonal moves still go by middles. A named `focusLink` still comes first, for the layout this gets wrong.
-- `Node::bounds` with children joins each child's box as it is in the child's own space, without the child's
-  position, scale or rotation. That is why a group's place on screen is not read from it. `Slider` reads its
-  area from it with the handle as a child, so putting the transforms in would change the slider; it is left as it is.
 
 ## Increment 42: creating nodes, adding and removing components (2026-11-17)
 - `App::createChildNode`: a new empty node under the selected one, or under the scene's root with nothing
@@ -849,6 +844,21 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   and redoes, adds every kind, removes one from the middle and checks undo restores the order.
 - Not yet: creating a node from a prefab or a primitive with art already on it, reordering components, Scroller,
   Spine, Emitter and the other kinds, and a shortcut key for Create Child Node.
+
+## Increment 43: a node's bounds take in its children where they are (2026-11-17)
+- `Node::bounds(true)` and `childBounds()` carry each child's box through the child's position, rotation and
+  scale. Before, each child's box was joined as it stood in the child's own space, so a parent of two children
+  set apart reported one box at its origin.
+- A child moving, scaling or turning, and a child added or removed, mark the child bounds of every node above it
+  stale, as showing and hiding already did.
+- `Slider` measures its track from its node's own box (`bounds(false)`): its handle is a child, and with the
+  children counted the track would stretch as the handle travelled. A handle taller than its track is now centred
+  on it, which is the one thing that looks different (the Project panel's tile-size slider).
+- A FocusGroup's place on screen is its node's `screenBounds()` again.
+- The inspector's `rowScreenPoint` aims at the first control in a field, where it used to rely on the old bounds
+  putting a field's middle on its first part.
+- Tests: `bounds_tests.cpp` (position, own box with children, grandparents, following a move, a scale, a turn,
+  hide and show, add and remove, place on screen, the slider). The Login screenshot is the same pixel for pixel.
 
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.

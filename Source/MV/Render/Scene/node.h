@@ -652,8 +652,11 @@ namespace MV {
 			std::vector<int64_t> parentIndexList(int64_t a_globalPriority = 0);
 			std::vector<std::shared_ptr<MV::Scene::Node>> parents();
 
-			BoxAABB<> bounds(bool a_includeChildren = true); //our node's local bounds + optionally included childBounds;
-			BoxAABB<> childBounds(); //only child bounds
+			// In this node's own space: the box around its components, and with a_includeChildren around its
+			// showing children too, each where its position, rotation and scale put it.
+			BoxAABB<> bounds(bool a_includeChildren = true);
+			// Only the children's.
+			BoxAABB<> childBounds();
 
 			BoxAABB<> worldBounds(bool a_includeChildren = true){
 				return worldFromLocal(bounds(a_includeChildren));
@@ -782,6 +785,7 @@ namespace MV {
 			}
 
 			void markParentBoundsDirty();
+			void markChildBoundsDirty();
 
 			void silenceInternal() {
 				onChildAddSignal.block();

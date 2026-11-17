@@ -132,7 +132,6 @@ namespace MV {
 			bool selectable(const void* a_scope) const;
 			bool focusPreferred();
 			FocusCandidate selfCandidate();
-			bool screenExtent(Point<int>& a_min, Point<int>& a_max);
 			void selectedChanged(bool a_selected);
 
 			JAI_NAMED_PROPERTY((Kind), "kind", groupKind, Kind::WINDOW);

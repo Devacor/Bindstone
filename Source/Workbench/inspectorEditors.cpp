@@ -220,12 +220,31 @@ namespace Workbench {
 		}
 	}
 
+	namespace {
+		// The middle of the first thing under a node that takes a press: a field of several parts is aimed at its
+		// first part, not at the gap in the middle of the whole.
+		std::optional<MV::Point<int>> firstControlScreenPoint(const std::shared_ptr<MV::Scene::Node>& a_node) {
+			if (auto clickable = a_node->component<MV::Scene::Clickable>(false, false)) {
+				auto box = clickable->bounds();
+				return a_node->screenFromLocal(MV::point((box.minPoint.x + box.maxPoint.x) * 0.5f, (box.minPoint.y + box.maxPoint.y) * 0.5f));
+			}
+			for (auto&& child : *a_node) {
+				if (auto found = firstControlScreenPoint(child)) {
+					return found;
+				}
+			}
+			return std::nullopt;
+		}
+	}
+
 	std::optional<MV::Point<int>> InspectorPanel::rowScreenPoint(const std::string& a_label, bool a_field) const {
 		for (auto&& [label, weakRow] : labelledRows) {
 			auto row = weakRow.lock();
 			if (label == a_label && row) {
 				auto field = a_field ? row->get("field", false) : nullptr;
-				return (field ? field : row)->screenBounds().centerPoint();
+				auto aimed = field ? field : row;
+				auto control = firstControlScreenPoint(aimed);
+				return control ? *control : aimed->screenBounds().centerPoint();
 			}
 		}
 		return std::nullopt;

@@ -160,41 +160,15 @@ namespace MV {
 			}
 		}
 
-		// Where the group is on screen for a move to aim at: the box around the Clickables showing under it, read
-		// from each as a focus query reads it. A group with none is where its node's own bounds are.
-		bool FocusGroup::screenExtent(Point<int>& a_min, Point<int>& a_max) {
-			bool found = false;
-			std::function<void(const std::shared_ptr<Node>&)> visit = [&](const std::shared_ptr<Node>& a_node) {
-				if (!a_node->selfVisible()) {
-					return;
-				}
-				if (auto clickable = a_node->component<Clickable>(false, false)) {
-					auto box = clickable->bounds();
-					for (auto&& corner : { a_node->screenFromLocal(box.minPoint), a_node->screenFromLocal(box.maxPoint) }) {
-						a_min = found ? Point<int>(std::min(a_min.x, corner.x), std::min(a_min.y, corner.y)) : corner;
-						a_max = found ? Point<int>(std::max(a_max.x, corner.x), std::max(a_max.y, corner.y)) : corner;
-						found = true;
-					}
-				}
-				for (auto&& child : *a_node) {
-					visit(child);
-				}
-			};
-			visit(owner());
-			return found;
-		}
-
 		FocusCandidate FocusGroup::selfCandidate() {
 			std::weak_ptr<FocusGroup> weakSelf = std::static_pointer_cast<FocusGroup>(shared_from_this());
 			FocusCandidate result;
 			result.group = true;
 			result.order = groupOrder;
 			result.treePath = owner()->parentIndexList(0);
-			if (!screenExtent(result.screenMin, result.screenMax)) {
-				auto box = owner()->screenBounds();
-				result.screenMin = box.minPoint;
-				result.screenMax = box.maxPoint;
-			}
+			auto box = owner()->screenBounds();
+			result.screenMin = box.minPoint;
+			result.screenMax = box.maxPoint;
 			result.subject = weakSelf;
 			result.enter = [weakSelf]() { if (auto self = weakSelf.lock()) { self->selectedChanged(true); } };
 			result.leave = [weakSelf]() { if (auto self = weakSelf.lock()) { self->selectedChanged(false); } };

@@ -1,7 +1,7 @@
 # Creature Assets
 
 Each subfolder is one creature:
-- `Default/` – `unit.bindsnap` (the node snapshot) plus its art: `unit.atlas`/`unit.json`, the Spine
+- `Default/` – `unit.bindsnap` (the node snapshot) plus its art: `unit.spineatlas`/`unit.json`, the Spine
   skeleton and texture named after the creature (`whisper.spine`/`whisper.png`).
 - `main.script` and `mainClient.script` – server and client logic (JaiScript; spawn/update/death hooks).
   Each server script is a class deriving `CreatureKind` from `Shared/creatureKind.script`.

@@ -46,7 +46,8 @@ def export(project):
         jsons, atlases = glob.glob(os.path.join(out, "*.json")), glob.glob(os.path.join(out, "*.atlas"))
         if result.returncode != 0 or not jsons or not atlases:
             return False, (result.stdout + result.stderr).strip()[-400:]
-        old_atlas = os.path.join(folder, base + ".atlas")
+        # Spine writes <name>.atlas; the repo keeps it as <name>.spineatlas
+        old_atlas = os.path.join(folder, base + ".spineatlas")
         for page in atlas_pages(old_atlas):
             try: os.remove(os.path.join(folder, page))
             except OSError: pass

@@ -1111,6 +1111,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(history.position() == history.length() - 3, "the far end of a long history is reachable the same way");
 		expect(a_app.requestUndoSteps(200) && history.length() == 200, "the limit goes back and the oldest steps go with it");
 		click(toolbar.buttonScreenPoint(7));
+		a_app.docking().closePanel(a_app.docking().panelTitled("Settings"));
 		a_app.showInspector();
 		a_app.select(nullptr);
 		a_app.runFrames(3);
@@ -1353,8 +1354,11 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			hold(a_to, false);
 			mouse.stopSimulating();
 		};
-		const std::string starting = "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project])) (L 0 [Inspector,Settings]))";
-		expect(a_app.dockLayout() == starting, "the starting layout reads as text: " + a_app.dockLayout());
+		const std::string starting = "H 0.18 (L 0 [Hierarchy]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project])) (L 0 [Inspector])) X [File,Settings]";
+		expect(a_app.dockLayout() == starting, "the starting layout reads as text, with File and Settings closed: " + a_app.dockLayout());
+		const std::string allDocked = "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project])) (L 0 [Inspector,Settings]))";
+		expect(a_app.dockLayout(allDocked) && a_app.dockLayout() == allDocked, "a layout with every panel docked applies from text");
+		a_app.runFrames(3);
 
 		auto layoutSettings = (std::filesystem::temp_directory_path() / "workbench_selftest_layout_settings.txt").string();
 		std::filesystem::remove(layoutSettings, ignored);
@@ -1400,6 +1404,82 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		std::filesystem::remove(layoutFile, ignored);
 		a_app.runFrames(5);
 		expect(a_app.viewport().size.width > 0.0f && a_app.errors() == 0, "the editor keeps running on the restored layout");
+
+		// Settings starts closed and opens floating from its menu
+		auto* settingsTab = docking.panelTitled("Settings");
+		auto clickAt = [&](const MV::Point<int>& a_at) {
+			for (bool down : { false, true, false }) {
+				mouse.simulate(a_at, down);
+				a_app.runFrames(2);
+			}
+			mouse.stopSimulating();
+		};
+		expect(!docking.open(settingsTab) && !docking.open(docking.panelTitled("File")), "File and Settings start closed");
+		clickAt(a_app.menus().titleScreenPoint(2));
+		if (a_app.menus().isOpen()) {
+			clickAt(a_app.menus().rowScreenPoint(0));
+		}
+		expect(docking.open(settingsTab) && docking.floating(settingsTab), "Settings > Editor Settings opens the Settings panel floating");
+		clickAt(docking.closeButtonScreenPoint("Settings"));
+		expect(!docking.open(settingsTab) && a_app.dockLayout() == starting, "its x closes it again");
+
+		// closing a panel and bringing it back
+		expect(a_app.dockLayout(allDocked), "every panel docks again");
+		a_app.runFrames(3);
+		auto* inspectorTab = docking.panelTitled("Inspector");
+		auto click = [&](const MV::Point<int>& a_at) {
+			for (bool down : { false, true, false }) {
+				mouse.simulate(a_at, down);
+				a_app.runFrames(2);
+			}
+			mouse.stopSimulating();
+		};
+		a_app.showSettings();
+		a_app.runFrames(2);
+		click(docking.closeButtonScreenPoint("Settings"));
+		expect(!docking.open(settingsTab) && a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project])) (L 0 [Inspector])) X [Settings]", "the x on a tab closes its panel and the layout says so: " + a_app.dockLayout());
+		click(a_app.menus().titleScreenPoint(3));
+		expect(a_app.menus().isOpen() && a_app.menus().rowLabel(5) == "Settings (closed)" && a_app.menus().rowLabel(4) == "Inspector", "Window marks the closed panel");
+		if (a_app.menus().isOpen()) {
+			click(a_app.menus().rowScreenPoint(5));
+		}
+		expect(docking.open(settingsTab) && !docking.floating(settingsTab) && a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project])) (L 1 [Inspector,Settings]))", "choosing it in Window brings it back beside the panel it was closed next to: " + a_app.dockLayout());
+
+		// floating: a tab dropped on the middle of a panel floats there
+		drag(docking.tabScreenPoint("Settings"), docking.dropScreenPoint("Scene", Zone::Float));
+		expect(docking.floating(settingsTab) && !docking.floating(inspectorTab) && a_app.dockLayout().find(" F ") != std::string::npos, "a tab dropped on the middle of a panel floats: " + a_app.dockLayout());
+		auto floated = docking.floatRect("Settings");
+		expect(floated.size.width > 100.0f && floated.size.height > 100.0f, "the floating panel has a size");
+		auto insideFloat = a_managers.renderer.screenFromWorld(MV::point(floated.position.x + floated.size.width * 0.5f, floated.position.y + floated.size.height * 0.7f));
+		expect(!docking.viewportAt(a_managers.renderer.worldFromScreen(insideFloat)), "the scene beneath a floating panel does not take its presses");
+		auto selectedBeforeFloatPress = a_app.selected();
+		click(insideFloat);
+		expect(a_app.selected() == selectedBeforeFloatPress, "a press on the floating panel does not pick in the scene");
+
+		auto bar = docking.floatBarScreenPoint("Settings");
+		drag(bar, bar + MV::Point<int>(-140, 90));
+		auto movedFloat = docking.floatRect("Settings");
+		expect(std::abs((movedFloat.position.x - floated.position.x) - a_managers.renderer.worldFromScreen(MV::Point<int>(-140, 0)).x) < 3.0f && movedFloat.position.y > floated.position.y + 20.0f && std::abs(movedFloat.size.width - floated.size.width) < 1.0f, "dragging its tab bar moves it and keeps its size");
+		auto corner = docking.floatCornerScreenPoint("Settings");
+		drag(corner, corner + MV::Point<int>(120, 80));
+		auto sizedFloat = docking.floatRect("Settings");
+		expect(sizedFloat.size.width > movedFloat.size.width + 40.0f && sizedFloat.size.height > movedFloat.size.height + 30.0f && std::abs(sizedFloat.position.x - movedFloat.position.x) < 1.0f, "dragging its corner resizes it and keeps its place");
+
+		auto withFloat = a_app.dockLayout();
+		a_app.resetDockLayout();
+		expect(!docking.open(settingsTab) && a_app.dockLayout() == starting, "Reset Layout returns a floating panel to where the editor starts it");
+		expect(a_app.dockLayout(withFloat) && docking.floating(settingsTab), "a layout with a floating panel applies from text");
+		a_app.runFrames(3);
+		auto restoredFloat = docking.floatRect("Settings");
+		expect(std::abs(restoredFloat.position.x - sizedFloat.position.x) < 2.0f && std::abs(restoredFloat.size.height - sizedFloat.size.height) < 2.0f, "and puts it back where it was, at its size");
+
+		drag(docking.tabScreenPoint("Settings"), docking.dropScreenPoint("Inspector", Zone::Center));
+		expect(!docking.floating(settingsTab) && a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project])) (L 1 [Inspector,Settings]))", "a floating panel's tab dropped on a tab bar docks there: " + a_app.dockLayout());
+
+		expect(a_app.dockLayout("L 0 [Scene] X [Hierarchy,File,Project,Inspector,Settings]") && !docking.closePanel(docking.panelTitled("Scene")) && docking.open(docking.panelTitled("Scene")), "the last panel docked in the main area cannot be closed");
+		a_app.resetDockLayout();
+		a_app.runFrames(5);
+		expect(a_app.dockLayout() == starting && a_app.errors() == 0, "the layout ends where it started");
 	}
 }
 

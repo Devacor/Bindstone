@@ -195,6 +195,11 @@ namespace Workbench {
 		};
 		toolbarActions.onFrame = [this]() { frameSelectionInViewport(); };
 		sceneToolbar = std::make_unique<SceneToolbar>(uiRoot->make("sceneToolbar"), managers.services, theme, focusRouter, history, toolbarActions);
+		dock->floatingHost(uiRoot->make("dockFloating"));
+		gizmos->pointerOverScene = [this](const MV::Point<int>& a_screenPoint) {
+			auto worldPoint = managers.renderer.worldFromScreen(a_screenPoint);
+			return dock->viewportAt(worldPoint) && !sceneToolbar->contains(worldPoint);
+		};
 		sceneToolbar->tool(static_cast<int>(gizmos->tool()));
 		sceneToolbar->grid(sceneGrid->visible());
 		applyGridSize();
@@ -204,13 +209,15 @@ namespace Workbench {
 			}
 		};
 		dock->root(DockSpace::split(false, 0.18f,
-			DockSpace::leaf({ treePanel, filePanel }),
+			DockSpace::leaf({ treePanel }),
 			DockSpace::split(false, 0.72f,
 				DockSpace::split(true, 0.70f,
 					DockSpace::leaf({ viewportPanel }),
 					DockSpace::leaf({ projectPanel })),
-				DockSpace::leaf({ inspectorPanel, settingsPanel }))));
-		defaultDockLayout = dock->describeLayout();
+				DockSpace::leaf({ inspectorPanel }))));
+		// File's load and save are in the File menu and Settings opens from its own: both start closed
+		defaultDockLayout = dock->describeLayout() + " X [File,Settings]";
+		dock->applyLayout(defaultDockLayout);
 		dock->onLayoutChanged = [this]() { writeSettingsFile(); };
 
 		buildTitleBar();
@@ -628,7 +635,9 @@ namespace Workbench {
 			{ "Editor Settings", "", [this]() { showSettings(); } } });
 		std::vector<MenuItem> windowItems;
 		for (auto* panel : menuPanels) {
-			windowItems.push_back({ panel->title(), "", [this, panel]() { dock->show(panel); } });
+			windowItems.push_back({ panel->title(), "", [this, panel]() { dock->show(panel); }, false, [this, panel]() {
+				return panel->title() + (dock->open(panel) ? "" : " (closed)");
+			} });
 		}
 		windowItems.push_back({ "Save Layout...", "", [this]() {
 			auto chosen = saveLayoutFileDialog(MV::playerPreferencesPath(), "workbench.bindlayout");

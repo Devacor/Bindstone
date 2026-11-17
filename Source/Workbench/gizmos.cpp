@@ -1132,6 +1132,37 @@ namespace Workbench {
 				gizmo->update();
 			}
 		}
+		gateInput();
+	}
+
+	void GizmoLayer::gateInput() {
+		bool dragging = (nodeGizmo && nodeGizmo->dragging) || (componentGizmo && componentGizmo->dragging);
+		bool covered = pointerOverScene && !dragging && !pointerOverScene(mouse.position());
+		if (!covered) {
+			for (auto&& [weakHitArea, boundsType] : gatedHitAreas) {
+				if (auto hitArea = weakHitArea.lock()) {
+					hitArea->clickDetectionType(boundsType);
+				}
+			}
+			gatedHitAreas.clear();
+			return;
+		}
+		// each frame while covered: a gizmo rebuilt in the meantime has new hit areas
+		std::function<void(const std::shared_ptr<MV::Scene::Node>&)> gate = [&](const std::shared_ptr<MV::Scene::Node>& a_node) {
+			if (auto components = a_node->property_value<std::vector<std::shared_ptr<MV::Scene::Component>>>("childComponents")) {
+				for (auto&& component : *components) {
+					auto hitArea = std::dynamic_pointer_cast<MV::Scene::Clickable>(component);
+					if (hitArea && hitArea->enabled()) {
+						gatedHitAreas.emplace_back(hitArea, hitArea->clickDetectionType());
+						hitArea->disable();
+					}
+				}
+			}
+			for (auto&& child : *a_node) {
+				gate(child);
+			}
+		};
+		gate(overlay);
 	}
 
 }

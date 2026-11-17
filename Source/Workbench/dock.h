@@ -81,7 +81,9 @@ namespace Workbench {
 
 	class DockSpace {
 	public:
-		enum class DropZone { None, Center, Left, Right, Top, Bottom };
+		// Where a dragged tab lands on a panel: its tab bar (Center) joins it as a tab, an edge splits it, and the
+		// middle (Float) leaves the tab floating there.
+		enum class DropZone { None, Center, Left, Right, Top, Bottom, Float };
 
 		DockSpace(const std::shared_ptr<MV::Scene::Node>& a_uiRoot, MV::Services& a_services, const Theme& a_theme, FocusRouter& a_focus);
 
@@ -89,8 +91,16 @@ namespace Workbench {
 		static std::unique_ptr<DockNode> leaf(std::vector<Panel*> a_panels);
 		static std::unique_ptr<DockNode> split(bool a_vertical, float a_ratio, std::unique_ptr<DockNode> a_a, std::unique_ptr<DockNode> a_b);
 		void root(std::unique_ptr<DockNode> a_root);
-		// Brings a panel's tab to the front of its leaf.
+		// Brings a panel's tab to the front of its leaf, and brings a closed panel back: beside the panel it was
+		// closed next to, or floating when that one is gone.
 		void show(Panel* a_panel);
+		// Takes a panel out of the layout until it is shown again. False for the last panel docked in the main area.
+		bool closePanel(Panel* a_panel);
+		bool open(Panel* a_panel) const;
+		bool floating(Panel* a_panel) const;
+		Panel* panelTitled(const std::string& a_title) const;
+		// Floating panels are drawn in this node, so they sit above whatever joined the UI before it.
+		void floatingHost(const std::shared_ptr<MV::Scene::Node>& a_host);
 
 		// The arrangement as one line of text: each split with its ratio, each leaf with its tabs by title and
 		// which one is in front. "H 0.18 (L 0 [Hierarchy,File]) (L 0 [Scene])".
@@ -107,6 +117,12 @@ namespace Workbench {
 		MV::Point<int> tabScreenPoint(const std::string& a_panelTitle) const;
 		MV::Point<int> dropScreenPoint(const std::string& a_panelTitle, DropZone a_zone) const;
 		MV::Point<int> rootSplitterScreenPoint() const;
+		// A panel's tab close button, and for a floating panel the bare part of its tab bar (which moves it), its
+		// resize corner and its rectangle in world units.
+		MV::Point<int> closeButtonScreenPoint(const std::string& a_panelTitle) const;
+		MV::Point<int> floatBarScreenPoint(const std::string& a_panelTitle) const;
+		MV::Point<int> floatCornerScreenPoint(const std::string& a_panelTitle) const;
+		DockRect floatRect(const std::string& a_panelTitle) const;
 
 		void layout(const MV::Size<>& a_worldSize);
 		void layout(const DockRect& a_area);
@@ -127,7 +143,7 @@ namespace Workbench {
 	private:
 		void rebuildChrome();
 		void layoutNode(DockNode* a_node, const DockRect& a_rect);
-		void buildLeafChrome(DockNode* a_leaf);
+		void buildLeafChrome(DockNode* a_leaf, const std::shared_ptr<MV::Scene::Node>& a_parent);
 		void buildSplitterChrome(DockNode* a_split);
 		void refreshLeafVisuals(DockNode* a_leaf);
 		// Clamps the active panel's scroll offset to its content and sizes the leaf's scroll thumb to match.
@@ -146,8 +162,23 @@ namespace Workbench {
 		DockNode* findLeafContaining(Panel* a_panel, DockNode* a_node) const;
 		DockNode* findParent(DockNode* a_child, DockNode* a_node) const;
 		void collapseIfEmpty(DockNode* a_leaf);
-		Panel* panelTitled(const std::string& a_title) const;
 		void layoutChanged();
+
+		// A leaf held over the dock at a rectangle given in fractions of the dock's area.
+		struct FloatingLeaf {
+			std::unique_ptr<DockNode> leaf;
+			DockRect fraction;
+		};
+		FloatingLeaf* floatOf(const DockNode* a_leaf);
+		const FloatingLeaf* floatOf(const DockNode* a_leaf) const;
+		DockNode* leafContaining(Panel* a_panel) const;
+		void buildFloatChrome(FloatingLeaf& a_float);
+		void layoutFloat(FloatingLeaf& a_float);
+		DockRect fractionAround(const MV::Point<>& a_worldPoint) const;
+		DockRect worldRectOf(const DockRect& a_fraction) const;
+		void raise(DockNode* a_leaf);
+		// Takes the panel out of its leaf and tidies what that leaves behind; the panel's content waits in the pool.
+		void detach(Panel* a_panel);
 
 		std::shared_ptr<MV::Scene::Node> uiRoot;
 		std::shared_ptr<MV::Scene::Node> chromeRoot;
@@ -160,6 +191,11 @@ namespace Workbench {
 
 		std::vector<std::shared_ptr<Panel>> ownedPanels;
 		std::unique_ptr<DockNode> rootNode;
+		std::vector<FloatingLeaf> floats;
+		std::vector<Panel*> closedPanels;
+		std::map<Panel*, Panel*> closedBeside;
+		std::shared_ptr<MV::Scene::Node> floatRoot;
+		float raisedDepth = 0.0f;
 		std::map<DockNode*, DockRect> leafRects;
 		std::map<DockNode*, DockRect> nodeRects;
 		std::map<DockNode*, DockRect> gripRects;

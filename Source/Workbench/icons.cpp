@@ -98,6 +98,9 @@ namespace Workbench {
 				case Icon::StepForward:
 					result = inPolygon(a_x, a_y, { {0.32f, 0.20f}, {0.72f, 0.50f}, {0.32f, 0.80f} });
 				break;
+				case Icon::Close:
+					result = nearSegment(a_x, a_y, 0.26f, 0.26f, 0.74f, 0.74f, 0.07f) || nearSegment(a_x, a_y, 0.74f, 0.26f, 0.26f, 0.74f, 0.07f);
+				break;
 			}
 			return result;
 		}

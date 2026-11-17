@@ -1,5 +1,6 @@
 #include "dock.h"
 #include "widgets.h"
+#include "icons.h"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -84,6 +85,208 @@ namespace Workbench {
 		nodeRects.clear();
 		gripRects.clear();
 		layoutNode(rootNode.get(), a_area);
+		for (auto&& floatingLeaf : floats) {
+			layoutFloat(floatingLeaf);
+		}
+	}
+
+	void DockSpace::floatingHost(const std::shared_ptr<MV::Scene::Node>& a_host) {
+		floatRoot = a_host;
+		// the drag ghost, the drop hint and the panels' popups stay above a floating panel
+		overlayRoot->depth(a_host->depth() + 0.5f);
+		structureDirty = true;
+	}
+
+	DockSpace::FloatingLeaf* DockSpace::floatOf(const DockNode* a_leaf) {
+		for (auto&& floatingLeaf : floats) {
+			if (floatingLeaf.leaf.get() == a_leaf) {
+				return &floatingLeaf;
+			}
+		}
+		return nullptr;
+	}
+
+	const DockSpace::FloatingLeaf* DockSpace::floatOf(const DockNode* a_leaf) const {
+		return const_cast<DockSpace*>(this)->floatOf(a_leaf);
+	}
+
+	DockNode* DockSpace::leafContaining(Panel* a_panel) const {
+		if (auto* docked = findLeafContaining(a_panel, rootNode.get())) {
+			return docked;
+		}
+		for (auto&& floatingLeaf : floats) {
+			if (findLeafContaining(a_panel, floatingLeaf.leaf.get())) {
+				return floatingLeaf.leaf.get();
+			}
+		}
+		return nullptr;
+	}
+
+	bool DockSpace::open(Panel* a_panel) const {
+		return leafContaining(a_panel) != nullptr;
+	}
+
+	bool DockSpace::floating(Panel* a_panel) const {
+		return floatOf(leafContaining(a_panel)) != nullptr;
+	}
+
+	DockRect DockSpace::worldRectOf(const DockRect& a_fraction) const {
+		// a floating panel keeps a usable size and never leaves its tab bar outside the dock
+		MV::Size<> size(std::clamp(a_fraction.size.width * lastArea.size.width, theme.px(180.0f), std::max(theme.px(180.0f), lastArea.size.width)),
+			std::clamp(a_fraction.size.height * lastArea.size.height, theme.px(120.0f), std::max(theme.px(120.0f), lastArea.size.height)));
+		MV::Point<> position(lastArea.position.x + a_fraction.position.x * lastArea.size.width, lastArea.position.y + a_fraction.position.y * lastArea.size.height);
+		position.x = std::clamp(position.x, lastArea.position.x - size.width + theme.px(60.0f), lastArea.position.x + lastArea.size.width - theme.px(60.0f));
+		position.y = std::clamp(position.y, lastArea.position.y, lastArea.position.y + std::max(0.0f, lastArea.size.height - theme.tabHeight));
+		return DockRect { MV::point(std::round(position.x), std::round(position.y)), MV::size(std::round(size.width), std::round(size.height)) };
+	}
+
+	DockRect DockSpace::fractionAround(const MV::Point<>& a_worldPoint) const {
+		const float width = std::max(1.0f, lastArea.size.width);
+		const float height = std::max(1.0f, lastArea.size.height);
+		DockRect result;
+		result.size = MV::size(std::min(0.9f, theme.px(380.0f) / width), std::min(0.9f, theme.px(420.0f) / height));
+		// the pointer ends up on the new panel's tab
+		result.position = MV::point((a_worldPoint.x - lastArea.position.x - theme.tabWidth * 0.5f) / width, (a_worldPoint.y - lastArea.position.y - theme.tabHeight * 0.5f) / height);
+		return result;
+	}
+
+	void DockSpace::raise(DockNode* a_leaf) {
+		auto found = std::find_if(floats.begin(), floats.end(), [&](const FloatingLeaf& a_float) { return a_float.leaf.get() == a_leaf; });
+		if (found == floats.end()) {
+			return;
+		}
+		std::rotate(found, found + 1, floats.end());
+		if (auto chrome = leafChrome.find(a_leaf); chrome != leafChrome.end()) {
+			chrome->second->depth(++raisedDepth);
+		}
+	}
+
+	void DockSpace::detach(Panel* a_panel) {
+		DockNode* leaf = leafContaining(a_panel);
+		if (!leaf) {
+			return;
+		}
+		leaf->panels.erase(std::remove(leaf->panels.begin(), leaf->panels.end(), a_panel), leaf->panels.end());
+		if (!leaf->panels.empty()) {
+			leaf->active = std::clamp(leaf->active, 0, static_cast<int>(leaf->panels.size()) - 1);
+		}
+		a_panel->content()->parent(panelPool);
+		if (leaf->panels.empty()) {
+			if (floatOf(leaf)) {
+				leafRects.erase(leaf);
+				leafChrome.erase(leaf);
+				floats.erase(std::find_if(floats.begin(), floats.end(), [&](const FloatingLeaf& a_float) { return a_float.leaf.get() == leaf; }));
+			} else {
+				collapseIfEmpty(leaf);
+			}
+		}
+		structureDirty = true;
+	}
+
+	bool DockSpace::closePanel(Panel* a_panel) {
+		DockNode* leaf = leafContaining(a_panel);
+		if (!leaf || (leaf == rootNode.get() && leaf->panels.size() == 1)) {
+			return false;
+		}
+		closedBeside.erase(a_panel);
+		for (auto&& neighbour : leaf->panels) {
+			if (neighbour != a_panel) {
+				closedBeside[a_panel] = neighbour;
+				break;
+			}
+		}
+		detach(a_panel);
+		closedPanels.push_back(a_panel);
+		layout(lastArea);
+		layoutChanged();
+		return true;
+	}
+
+	void DockSpace::buildFloatChrome(FloatingLeaf& a_float) {
+		auto& mouse = *services.get<MV::TapDevice>();
+		DockNode* leaf = a_float.leaf.get();
+		buildLeafChrome(leaf, floatRoot ? floatRoot : chromeRoot);
+		auto leafNode = leafChrome[leaf];
+		leafNode->depth(++raisedDepth);
+
+		// beneath the leaf's own pieces: a shadow, an outline, and a Clickable that keeps a press on the panel from
+		// reaching whatever it covers
+		auto shadow = leafNode->make("floatShadow");
+		shadow->depth(-3.0f);
+		shadow->position(MV::point(theme.px(3.0f), theme.px(4.0f)));
+		attachRoundedRect(shadow, services, theme, MV::size(theme.tabWidth, theme.tabHeight), MV::Color(0.0f, 0.0f, 0.0f, 0.45f));
+		auto outline = leafNode->make("floatOutline");
+		outline->depth(-2.0f);
+		outline->position(MV::point(-theme.px(1.0f), -theme.px(1.0f)));
+		outline->attach<MV::Scene::Sprite>()->color(theme.fieldOutline());
+		auto blocker = leafNode->make("floatBlocker");
+		blocker->depth(-1.0f);
+		blocker->attach<MV::Scene::Clickable>(mouse)->onPress.connect("raise", [this, leaf](const std::shared_ptr<MV::Scene::Clickable>&) {
+			raise(leaf);
+		});
+
+		// the bare part of the tab bar moves the panel
+		if (auto strip = leafNode->get("tabStrip", false)) {
+			auto mover = strip->attach<MV::Scene::Clickable>(mouse);
+			mover->id("mover");
+			mover->onPress.connect("raise", [this, leaf](const std::shared_ptr<MV::Scene::Clickable>&) {
+				raise(leaf);
+			});
+			mover->onDrag.connect("move", [this, leaf](const std::shared_ptr<MV::Scene::Clickable>&, const MV::Point<int>&, const MV::Point<int>& a_delta) {
+				if (auto* moving = floatOf(leaf); moving && lastArea.size.width > 0.0f && lastArea.size.height > 0.0f) {
+					moving->fraction.position.x += static_cast<float>(a_delta.x) / lastArea.size.width;
+					moving->fraction.position.y += static_cast<float>(a_delta.y) / lastArea.size.height;
+					layoutFloat(*moving);
+				}
+			});
+			mover->onRelease.connect("moved", [this](const std::shared_ptr<MV::Scene::Clickable>&, const MV::Point<MV::PointPrecision>&) {
+				layoutChanged();
+			});
+		}
+
+		auto corner = leafNode->make("floatCorner");
+		auto resize = corner->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(theme.px(14.0f), theme.px(14.0f)));
+		resize->color(theme.scrollThumb());
+		resize->texture(roundedRectHandle(services, theme));
+		resize->show();
+		resize->onDrag.connect("resize", [this, leaf](const std::shared_ptr<MV::Scene::Clickable>&, const MV::Point<int>&, const MV::Point<int>& a_delta) {
+			if (auto* sizing = floatOf(leaf); sizing && lastArea.size.width > 0.0f && lastArea.size.height > 0.0f) {
+				auto current = worldRectOf(sizing->fraction);
+				sizing->fraction.size.width = (current.size.width + static_cast<float>(a_delta.x)) / lastArea.size.width;
+				sizing->fraction.size.height = (current.size.height + static_cast<float>(a_delta.y)) / lastArea.size.height;
+				layoutFloat(*sizing);
+			}
+		});
+		resize->onRelease.connect("resized", [this](const std::shared_ptr<MV::Scene::Clickable>&, const MV::Point<MV::PointPrecision>&) {
+			layoutChanged();
+		});
+	}
+
+	void DockSpace::layoutFloat(FloatingLeaf& a_float) {
+		auto rect = worldRectOf(a_float.fraction);
+		layoutNode(a_float.leaf.get(), rect);
+		auto chrome = leafChrome.find(a_float.leaf.get());
+		if (chrome == leafChrome.end()) {
+			return;
+		}
+		auto leafNode = chrome->second;
+		if (auto shadow = leafNode->get("floatShadow", false)) {
+			shadow->component<MV::Scene::Sprite>(true, false)->bounds(rect.size);
+		}
+		if (auto outline = leafNode->get("floatOutline", false)) {
+			outline->component<MV::Scene::Sprite>(true, false)->bounds(MV::size(rect.size.width + theme.px(2.0f), rect.size.height + theme.px(2.0f)));
+		}
+		if (auto blocker = leafNode->get("floatBlocker", false)) {
+			blocker->component<MV::Scene::Clickable>(true, false)->bounds(rect.size);
+		}
+		if (auto strip = leafNode->get("tabStrip", false)) {
+			if (auto mover = strip->component<MV::Scene::Clickable>("mover", false)) {
+				mover->bounds(MV::size(rect.size.width, theme.tabHeight));
+			}
+		}
+		if (auto corner = leafNode->get("floatCorner", false)) {
+			corner->position(MV::point(rect.size.width - theme.px(14.0f), rect.size.height - theme.px(14.0f)));
+		}
 	}
 
 	DockSpace::CursorHint DockSpace::cursorHintAt(const MV::Point<>& a_worldPoint) const {
@@ -129,6 +332,9 @@ namespace Workbench {
 					}
 					if (auto clickable = tab->component<MV::Scene::Clickable>(true, false)) {
 						clickable->bounds(tabSize);
+					}
+					if (auto close = tab->get("close", false)) {
+						close->position(MV::point(tabSize.width - theme.px(18.0f), std::round((tabSize.height - theme.px(14.0f)) * 0.5f)));
 					}
 					++tabIndex;
 				}
@@ -184,10 +390,14 @@ namespace Workbench {
 		leafChrome.clear();
 		tabNodes.clear();
 		chromeRoot->clear();
+		if (floatRoot) {
+			floatRoot->clear();
+		}
+		raisedDepth = 0.0f;
 
 		std::function<void(DockNode*)> walk = [&](DockNode* a_node) {
 			if (a_node->isLeaf()) {
-				buildLeafChrome(a_node);
+				buildLeafChrome(a_node, chromeRoot);
 				return;
 			}
 			buildSplitterChrome(a_node);
@@ -195,13 +405,16 @@ namespace Workbench {
 			walk(a_node->b.get());
 		};
 		walk(rootNode.get());
+		for (auto&& floatingLeaf : floats) {
+			buildFloatChrome(floatingLeaf);
+		}
 	}
 
-	void DockSpace::buildLeafChrome(DockNode* a_leaf) {
+	void DockSpace::buildLeafChrome(DockNode* a_leaf, const std::shared_ptr<MV::Scene::Node>& a_parent) {
 		auto& mouse = *services.get<MV::TapDevice>();
 		auto& library = *services.get<MV::TextLibrary>();
 
-		auto leafNode = chromeRoot->make(MV::guid("dockLeaf_"));
+		auto leafNode = a_parent->make(MV::guid("dockLeaf_"));
 		leafChrome[a_leaf] = leafNode;
 
 		// Hidden sizer spans the leaf rect; chrome pieces hang off it with anchors so a single
@@ -278,6 +491,14 @@ namespace Workbench {
 					endTabDrag(true);
 				}
 			});
+
+			// shown on the tab in front; a child of the tab, so it takes the press before the tab does
+			auto close = tab->make("close");
+			const float closeSize = theme.px(14.0f);
+			close->attach<MV::Scene::Sprite>()->bounds(MV::size(closeSize, closeSize))->texture(iconHandle(services, theme, Icon::Close))->color(theme.glyph());
+			close->attach<MV::Scene::Clickable>(mouse)->onAccept.connect("close", [this, panel](const std::shared_ptr<MV::Scene::Clickable>&) {
+				closePanel(panel);
+			});
 		}
 	}
 
@@ -329,6 +550,12 @@ namespace Workbench {
 						}
 					}
 				}
+				if (auto close = tab->get("close", false)) {
+					bool front = static_cast<int>(index) == a_leaf->active;
+					close->visible(front);
+					// a hidden Clickable still takes presses
+					close->component<MV::Scene::Clickable>(true, false)->bounds(front ? MV::size(theme.px(14.0f), theme.px(14.0f)) : MV::Size<>());
+				}
 				++index;
 			}
 		}
@@ -351,10 +578,35 @@ namespace Workbench {
 	}
 
 	void DockSpace::show(Panel* a_panel) {
-		if (auto* leaf = findLeafContaining(a_panel, rootNode.get())) {
+		if (auto* leaf = leafContaining(a_panel)) {
 			auto found = std::find(leaf->panels.begin(), leaf->panels.end(), a_panel);
+			raise(leaf);
 			activatePanel(leaf, static_cast<int>(found - leaf->panels.begin()));
+			return;
 		}
+		auto closed = std::find(closedPanels.begin(), closedPanels.end(), a_panel);
+		if (closed == closedPanels.end()) {
+			return;
+		}
+		closedPanels.erase(closed);
+		auto beside = closedBeside.find(a_panel);
+		DockNode* home = beside == closedBeside.end() ? nullptr : leafContaining(beside->second);
+		closedBeside.erase(a_panel);
+		if (home) {
+			home->panels.push_back(a_panel);
+			home->active = static_cast<int>(home->panels.size()) - 1;
+		} else {
+			// a window's worth in the middle of the dock
+			DockRect fraction { MV::point(0.3f, 0.2f), MV::size(0.4f, 0.5f) };
+			if (lastArea.size.width > 0.0f && lastArea.size.height > 0.0f) {
+				fraction.size = MV::size(std::min(0.9f, theme.px(380.0f) / lastArea.size.width), std::min(0.9f, theme.px(320.0f) / lastArea.size.height));
+				fraction.position = MV::point((1.0f - fraction.size.width) * 0.5f, (1.0f - fraction.size.height) * 0.4f);
+			}
+			floats.push_back({ leaf({ a_panel }), fraction });
+		}
+		structureDirty = true;
+		layout(lastArea);
+		layoutChanged();
 	}
 
 	void DockSpace::activatePanel(DockNode* a_leaf, int a_index) {
@@ -402,6 +654,18 @@ namespace Workbench {
 		if (rootNode) {
 			write(rootNode.get());
 		}
+		for (auto&& floatingLeaf : floats) {
+			out << " F " << floatingLeaf.fraction.position.x << " " << floatingLeaf.fraction.position.y << " " << floatingLeaf.fraction.size.width << " " << floatingLeaf.fraction.size.height << " (";
+			write(floatingLeaf.leaf.get());
+			out << ")";
+		}
+		if (!closedPanels.empty()) {
+			out << " X [";
+			for (size_t index = 0; index < closedPanels.size(); ++index) {
+				out << (index > 0 ? "," : "") << closedPanels[index]->title();
+			}
+			out << "]";
+		}
 		return out.str();
 	}
 
@@ -434,14 +698,44 @@ namespace Workbench {
 			float number() {
 				skipSpaces();
 				size_t start = at;
-				while (at < text.size() && (std::isdigit(static_cast<unsigned char>(text[at])) || text[at] == '.')) {
+				while (at < text.size() && (std::isdigit(static_cast<unsigned char>(text[at])) || text[at] == '.' || text[at] == '-' || text[at] == 'e')) {
 					++at;
 				}
 				if (start == at) {
 					failed = true;
 					return 0.0f;
 				}
-				return std::stof(text.substr(start, at - start));
+				try {
+					return std::stof(text.substr(start, at - start));
+				} catch (const std::exception&) {
+					failed = true;
+					return 0.0f;
+				}
+			}
+
+			// The titles between the brackets that name panels not placed yet.
+			std::vector<Panel*> titles() {
+				std::vector<Panel*> result;
+				if (!take('[')) {
+					return result;
+				}
+				size_t close = text.find(']', at);
+				if (close == std::string::npos) {
+					failed = true;
+					return result;
+				}
+				size_t start = at;
+				while (start <= close) {
+					size_t end = std::min(text.find(',', start), close);
+					auto* panel = panelTitled(text.substr(start, end - start));
+					if (panel && std::find(placed.begin(), placed.end(), panel) == placed.end()) {
+						result.push_back(panel);
+						placed.push_back(panel);
+					}
+					start = end + 1;
+				}
+				at = close + 1;
+				return result;
 			}
 
 			std::unique_ptr<DockNode> node() {
@@ -454,26 +748,8 @@ namespace Workbench {
 				if (kind == 'L') {
 					auto result = std::make_unique<DockNode>();
 					int active = static_cast<int>(number());
-					if (!take('[')) {
-						return nullptr;
-					}
-					size_t close = text.find(']', at);
-					if (close == std::string::npos) {
-						failed = true;
-						return nullptr;
-					}
-					size_t start = at;
-					while (start <= close) {
-						size_t end = std::min(text.find(',', start), close);
-						auto* panel = panelTitled(text.substr(start, end - start));
-						if (panel && std::find(placed.begin(), placed.end(), panel) == placed.end()) {
-							result->panels.push_back(panel);
-							placed.push_back(panel);
-						}
-						start = end + 1;
-					}
-					at = close + 1;
-					if (result->panels.empty()) {
+					result->panels = titles();
+					if (failed || result->panels.empty()) {
 						return nullptr;
 					}
 					result->active = std::clamp(active, 0, static_cast<int>(result->panels.size()) - 1);
@@ -510,7 +786,35 @@ namespace Workbench {
 	bool DockSpace::applyLayout(const std::string& a_description) {
 		LayoutReader reader { a_description, [this](const std::string& a_title) { return panelTitled(a_title); } };
 		auto read = reader.node();
+		std::vector<FloatingLeaf> readFloats;
+		std::vector<Panel*> readClosed;
 		reader.skipSpaces();
+		while (!reader.failed && read && reader.at < a_description.size()) {
+			char kind = a_description[reader.at++];
+			if (kind == 'F') {
+				DockRect fraction;
+				fraction.position.x = reader.number();
+				fraction.position.y = reader.number();
+				fraction.size.width = reader.number();
+				fraction.size.height = reader.number();
+				if (!reader.take('(')) {
+					break;
+				}
+				auto floated = reader.node();
+				if (reader.failed || !reader.take(')') || (floated && !floated->isLeaf())) {
+					reader.failed = true;
+					break;
+				}
+				if (floated) {
+					readFloats.push_back({ std::move(floated), fraction });
+				}
+			} else if (kind == 'X') {
+				readClosed = reader.titles();
+			} else {
+				reader.failed = true;
+			}
+			reader.skipSpaces();
+		}
 		if (reader.failed || !read || reader.at != a_description.size()) {
 			return false;
 		}
@@ -525,6 +829,10 @@ namespace Workbench {
 		}
 		endTabDrag(false);
 		rootNode = std::move(read);
+		floats = std::move(readFloats);
+		closedPanels = std::move(readClosed);
+		closedBeside.clear();
+		leafChrome.clear();
 		leafRects.clear();
 		nodeRects.clear();
 		gripRects.clear();
@@ -538,17 +846,50 @@ namespace Workbench {
 	MV::Point<int> DockSpace::tabScreenPoint(const std::string& a_panelTitle) const {
 		auto found = tabNodes.find(panelTitled(a_panelTitle));
 		auto tab = found == tabNodes.end() ? nullptr : found->second.lock();
-		return tab ? tab->screenBounds().centerPoint() : MV::Point<int>();
+		if (!tab) {
+			return {};
+		}
+		// left of centre: clear of the close button at the tab's right end
+		auto box = tab->screenBounds();
+		return MV::Point<int>(box.minPoint.x + (box.maxPoint.x - box.minPoint.x) / 3, (box.minPoint.y + box.maxPoint.y) / 2);
 	}
 
 	MV::Point<int> DockSpace::dropScreenPoint(const std::string& a_panelTitle, DropZone a_zone) const {
-		auto* leaf = findLeafContaining(panelTitled(a_panelTitle), rootNode.get());
-		auto found = leafRects.find(leaf);
+		auto found = leafRects.find(leafContaining(panelTitled(a_panelTitle)));
 		if (found == leafRects.end()) {
 			return {};
 		}
-		auto zone = zoneRect(found->second, a_zone);
+		auto& rect = found->second;
+		if (a_zone == DropZone::Center) {
+			return uiRoot->renderer().screenFromWorld(MV::point(rect.position.x + rect.size.width * 0.5f, rect.position.y + theme.tabHeight * 0.5f));
+		}
+		if (a_zone == DropZone::Float) {
+			return uiRoot->renderer().screenFromWorld(MV::point(rect.position.x + rect.size.width * 0.5f, rect.position.y + rect.size.height * 0.5f));
+		}
+		auto zone = zoneRect(rect, a_zone);
 		return uiRoot->renderer().screenFromWorld(MV::point(zone.position.x + zone.size.width * 0.5f, zone.position.y + zone.size.height * 0.5f));
+	}
+
+	MV::Point<int> DockSpace::closeButtonScreenPoint(const std::string& a_panelTitle) const {
+		auto found = tabNodes.find(panelTitled(a_panelTitle));
+		auto tab = found == tabNodes.end() ? nullptr : found->second.lock();
+		auto close = tab ? tab->get("close", false) : nullptr;
+		return close ? close->screenBounds().centerPoint() : MV::Point<int>();
+	}
+
+	DockRect DockSpace::floatRect(const std::string& a_panelTitle) const {
+		auto found = leafRects.find(leafContaining(panelTitled(a_panelTitle)));
+		return found == leafRects.end() || !floatOf(found->first) ? DockRect {} : found->second;
+	}
+
+	MV::Point<int> DockSpace::floatBarScreenPoint(const std::string& a_panelTitle) const {
+		auto rect = floatRect(a_panelTitle);
+		return uiRoot->renderer().screenFromWorld(MV::point(rect.position.x + rect.size.width - theme.px(40.0f), rect.position.y + theme.tabHeight * 0.5f));
+	}
+
+	MV::Point<int> DockSpace::floatCornerScreenPoint(const std::string& a_panelTitle) const {
+		auto rect = floatRect(a_panelTitle);
+		return uiRoot->renderer().screenFromWorld(MV::point(rect.position.x + rect.size.width - theme.px(7.0f), rect.position.y + rect.size.height - theme.px(7.0f)));
 	}
 
 	MV::Point<int> DockSpace::rootSplitterScreenPoint() const {
@@ -585,7 +926,7 @@ namespace Workbench {
 		DockNode* target = leafUnder(worldPoint, zone);
 		auto hintNode = overlayRoot->get("dropHint", false);
 		if (target && zone != DropZone::None && hintNode) {
-			auto rect = zoneRect(leafRects[target], zone);
+			auto rect = zone == DropZone::Float ? worldRectOf(fractionAround(worldPoint)) : zoneRect(leafRects[target], zone);
 			hintNode->position(rect.position);
 			dropHintSprite->bounds(MV::BoxAABB<>(rect.size));
 			hintNode->show();
@@ -618,7 +959,29 @@ namespace Workbench {
 		if (!target || zone == DropZone::None) {
 			return;
 		}
+		// the main area always keeps a panel
+		bool lastDocked = source == rootNode.get() && source->panels.size() == 1;
+		if (zone == DropZone::Float) {
+			if (lastDocked) {
+				return;
+			}
+			auto fraction = fractionAround(worldPoint);
+			if (auto* alreadyFloating = floatOf(source); alreadyFloating && source->panels.size() == 1) {
+				alreadyFloating->fraction.position = fraction.position;
+				raise(source);
+			} else {
+				detach(panel);
+				floats.push_back({ leaf({ panel }), fraction });
+				structureDirty = true;
+			}
+			layout(lastArea);
+			layoutChanged();
+			return;
+		}
 		if (target == source && (zone == DropZone::Center || source->panels.size() == 1)) {
+			return;
+		}
+		if (lastDocked && floatOf(target)) {
 			return;
 		}
 
@@ -654,7 +1017,13 @@ namespace Workbench {
 			}
 		}
 		if (source && source != target && source->panels.empty() && source->isLeaf()) {
-			collapseIfEmpty(source);
+			if (floatOf(source)) {
+				leafRects.erase(source);
+				leafChrome.erase(source);
+				floats.erase(std::find_if(floats.begin(), floats.end(), [&](const FloatingLeaf& a_float) { return a_float.leaf.get() == source; }));
+			} else {
+				collapseIfEmpty(source);
+			}
 		}
 		structureDirty = true;
 		layout(lastArea);
@@ -672,7 +1041,7 @@ namespace Workbench {
 
 	DockRect DockSpace::viewportRect() const {
 		for (auto&& [leaf, rect] : leafRects) {
-			if (!leaf->panels.empty() && leaf->panels[static_cast<size_t>(leaf->active)]->transparentWhenActive()) {
+			if (!floatOf(leaf) && !leaf->panels.empty() && leaf->panels[static_cast<size_t>(leaf->active)]->transparentWhenActive()) {
 				return DockRect{ MV::point(rect.position.x, rect.position.y + theme.tabHeight),
 					MV::Size<>(rect.size.width, rect.size.height - theme.tabHeight) };
 			}
@@ -730,13 +1099,23 @@ namespace Workbench {
 	}
 
 	DockNode* DockSpace::leafUnder(const MV::Point<>& a_worldPoint, DropZone& a_zone) const {
+		// floating panels cover the dock: the one in front first. A tab joins one on its tab bar and floats anywhere else on it.
+		for (auto floatingLeaf = floats.rbegin(); floatingLeaf != floats.rend(); ++floatingLeaf) {
+			auto found = leafRects.find(floatingLeaf->leaf.get());
+			if (found != leafRects.end() && found->second.contains(a_worldPoint)) {
+				a_zone = a_worldPoint.y < found->second.position.y + theme.tabHeight ? DropZone::Center : DropZone::Float;
+				return found->first;
+			}
+		}
 		for (auto&& [node, rect] : leafRects) {
-			if (!rect.contains(a_worldPoint)) {
+			if (floatOf(node) || !rect.contains(a_worldPoint)) {
 				continue;
 			}
 			float relativeX = (a_worldPoint.x - rect.position.x) / std::max(1.0f, rect.size.width);
 			float relativeY = (a_worldPoint.y - rect.position.y) / std::max(1.0f, rect.size.height);
-			if (relativeX < 0.25f) {
+			if (a_worldPoint.y < rect.position.y + theme.tabHeight) {
+				a_zone = DropZone::Center;
+			} else if (relativeX < 0.25f) {
 				a_zone = DropZone::Left;
 			} else if (relativeX > 0.75f) {
 				a_zone = DropZone::Right;
@@ -745,7 +1124,7 @@ namespace Workbench {
 			} else if (relativeY > 0.75f) {
 				a_zone = DropZone::Bottom;
 			} else {
-				a_zone = DropZone::Center;
+				a_zone = DropZone::Float;
 			}
 			return node;
 		}

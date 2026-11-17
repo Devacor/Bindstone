@@ -58,6 +58,10 @@ namespace Workbench {
 
 		void update();
 
+		// Whether a screen point is over open scene. Handles outrank ordinary controls, so while the pointer is over
+		// a toolbar, a floating panel or anything else that covers the scene they take no presses at all.
+		std::function<bool(const MV::Point<int>&)> pointerOverScene;
+
 		std::function<void()> onEdited;
 		// Fires for each change a drag applies, before the gesture's onEdited.
 		std::function<void()> onEditing;
@@ -90,6 +94,9 @@ namespace Workbench {
 		std::weak_ptr<MV::Scene::Node> componentOwner;
 		std::unique_ptr<NodeGizmo> nodeGizmo;
 		std::unique_ptr<Gizmo> componentGizmo;
+
+		void gateInput();
+		std::vector<std::pair<std::weak_ptr<MV::Scene::Clickable>, MV::Scene::Clickable::BoundsType>> gatedHitAreas;
 	};
 
 }

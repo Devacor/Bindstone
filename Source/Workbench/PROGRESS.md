@@ -630,6 +630,28 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Not yet: floating windows (a tab dropped on empty space still does nothing), closing a panel and bringing it
   back, more than one named layout in a menu.
 
+## Increment 31: closing panels and floating them (2026-11-16)
+- Every tab in front carries an x that closes its panel (`DockSpace::closePanel`). The Window menu marks a closed
+  panel "(closed)" and choosing it brings it back (`show`): beside the panel it was closed next to, or floating
+  when that one is gone. The last panel docked in the main area cannot be closed or dragged out.
+- Where a dragged tab lands follows Unity: on a panel's tab bar it joins as a tab, on an edge it splits, and in the
+  middle it floats there. (Before, the middle joined as a tab.)
+- A floating panel is a leaf drawn over the dock, inside the editor's window: the engine draws one OS window, so
+  these are not separate windows. The bare part of its tab bar moves it, its corner resizes it, a press brings it
+  to the front, and a press on it never reaches what it covers. Its tab drags back onto any tab bar or edge.
+  It lives in its own layer (`DockSpace::floatingHost`), above the Scene toolbar and below the menus.
+- The layout text carries both: ` F x y w h (L 0 [Settings])` for a floating leaf, in fractions of the dock's
+  area, and ` X [File,Settings]` for closed panels. Save, load, reset and the settings file follow.
+- The editor starts with File and Settings closed. File's load and save are the File menu's Open, Save and Save
+  As; it stays available from Window as the example of a hot-reloaded `.jai` panel. Settings > Editor Settings
+  opens Settings floating.
+- Gizmo handles take no presses unless the pointer is over open scene (`GizmoLayer::pointerOverScene`). They
+  outrank ordinary controls, so a handle under the toolbar or a floating panel used to take the press meant for
+  the control above it.
+- The self-test closes a tab by its x, reopens it from Window, floats a tab, moves and resizes it, checks that a
+  press on it does not pick in the scene, round-trips a layout with a floating panel, and docks it again.
+- Not yet: separate OS windows, splitting inside a floating panel, a floating panel snapping to others.
+
 ## Known gaps (next increments)
 - Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.

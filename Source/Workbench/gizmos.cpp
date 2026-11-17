@@ -131,15 +131,16 @@ namespace Workbench {
 		}
 
 		// Move and rotate work in the parent's axes; scale works in the target's own, so its handles turn with it.
+		// The vertical handle is drawn towards -y, which is up on screen.
 		std::pair<float, float> handleAxisAngles() const {
 			if (layer.shownTool() == Tool::SCALE) {
 				float turned = target->rotationRad().z;
 				return {
 					overlayAngleOfParentDirection(MV::point(std::cos(turned), std::sin(turned)), 0.0f),
-					overlayAngleOfParentDirection(MV::point(-std::sin(turned), std::cos(turned)), 90.0f)
+					overlayAngleOfParentDirection(MV::point(std::sin(turned), -std::cos(turned)), -90.0f)
 				};
 			}
-			return { overlayAngleOfParentDirection(MV::point(1.0f, 0.0f), 0.0f), overlayAngleOfParentDirection(MV::point(0.0f, 1.0f), 90.0f) };
+			return { overlayAngleOfParentDirection(MV::point(1.0f, 0.0f), 0.0f), overlayAngleOfParentDirection(MV::point(0.0f, -1.0f), -90.0f) };
 		}
 
 		bool outlineDirty() const {
@@ -469,7 +470,7 @@ namespace Workbench {
 			if (!dragging || !parent) {
 				return;
 			}
-			bool snap = ((SDL_GetModState() & KMOD_CTRL) != 0) != layer.snapAlways;
+			bool snap = ((SDL_GetModState() & (KMOD_SHIFT | KMOD_CTRL)) != 0) != layer.snapAlways;
 			switch (activeGesture) {
 				case Gesture::MOVE:
 					applyMove(parent->localFromScreen(a_cursor) - pressCursorParent, snap);
@@ -499,11 +500,11 @@ namespace Workbench {
 			auto result = pressPosition;
 			if (activeAxis != GizmoAxis::Y) {
 				result.x += a_parentDelta.x;
-				result.x = a_snap ? snapped(result.x, layer.snapSteps.move) : result.x;
+				result.x = a_snap ? snapped(result.x, layer.snapSteps.moveX) : result.x;
 			}
 			if (activeAxis != GizmoAxis::X) {
 				result.y += a_parentDelta.y;
-				result.y = a_snap ? snapped(result.y, layer.snapSteps.move) : result.y;
+				result.y = a_snap ? snapped(result.y, layer.snapSteps.moveY) : result.y;
 			}
 			target->position(result);
 			applied();

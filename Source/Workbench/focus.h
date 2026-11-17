@@ -9,12 +9,14 @@ namespace Workbench {
 
 	// Single-focus keyboard router: one active text field at a time; the field's commit
 	// callback runs on Enter AND on focus loss (click-away or focusing another field).
+	// A field given an abandon callback commits on Enter only: losing focus runs the abandon instead.
 	class FocusRouter {
 	public:
-		void activate(const std::shared_ptr<MV::Scene::Text>& a_text, std::function<void()> a_commit = nullptr) {
-			commitActive();
+		void activate(const std::shared_ptr<MV::Scene::Text>& a_text, std::function<void()> a_commit = nullptr, std::function<void()> a_abandon = nullptr) {
+			leaveActive();
 			activeText = a_text;
 			activeCommit = std::move(a_commit);
+			activeAbandon = std::move(a_abandon);
 			a_text->enableCursor();
 			SDL_StartTextInput();
 		}
@@ -25,12 +27,8 @@ namespace Workbench {
 
 		// Drops focus without running the commit (Escape).
 		void cancel() {
-			if (auto locked = activeText.lock()) {
-				locked->disableCursor();
-			}
-			activeText.reset();
 			activeCommit = nullptr;
-			SDL_StopTextInput();
+			leaveActive();
 		}
 
 		bool hasActive() const {
@@ -55,7 +53,7 @@ namespace Workbench {
 				return false;
 			}
 			if (a_event.type == SDL_MOUSEBUTTONDOWN) {
-				deactivate();
+				leaveActive();
 				return false;
 			}
 			if (a_event.type != SDL_KEYDOWN && a_event.type != SDL_KEYUP && a_event.type != SDL_TEXTINPUT && a_event.type != SDL_TEXTEDITING) {
@@ -71,21 +69,29 @@ namespace Workbench {
 
 	private:
 		void commitActive() {
-			if (auto locked = activeText.lock()) {
-				locked->disableCursor();
-				if (activeCommit) {
-					auto commit = std::move(activeCommit);
-					activeCommit = nullptr;
-					commit();
-				}
-			}
+			activeAbandon = nullptr;
+			leaveActive();
+		}
+
+		void leaveActive() {
+			auto locked = activeText.lock();
+			auto leave = std::move(activeAbandon ? activeAbandon : activeCommit);
 			activeText.reset();
 			activeCommit = nullptr;
+			activeAbandon = nullptr;
 			SDL_StopTextInput();
+			if (locked) {
+				// Text::disableCursor emits onEnter, which the fields route back here: nothing is active by now
+				locked->disableCursor();
+				if (leave) {
+					leave();
+				}
+			}
 		}
 
 		std::weak_ptr<MV::Scene::Text> activeText;
 		std::function<void()> activeCommit;
+		std::function<void()> activeAbandon;
 	};
 
 }

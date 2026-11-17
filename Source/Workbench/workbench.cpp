@@ -3,15 +3,24 @@
 #include "scriptPanel.h"
 #include "fileDialog.h"
 #include <algorithm>
+#include <charconv>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <optional>
 #include <thread>
 #include <vector>
 
 namespace Workbench {
 
 	namespace {
+		std::optional<float> numberFrom(const std::string& a_text) {
+			float result = 0.0f;
+			auto parsed = std::from_chars(a_text.data(), a_text.data() + a_text.size(), result);
+			return parsed.ec == std::errc() && parsed.ptr == a_text.data() + a_text.size() ? std::optional<float>(result) : std::nullopt;
+		}
+
 		class ViewportPanel : public Panel {
 		public:
 			ViewportPanel() : Panel("Scene", true) {}
@@ -101,6 +110,16 @@ namespace Workbench {
 			return pressed == 0 ? UnsavedChoice::SAVE : pressed == 1 ? UnsavedChoice::DISCARD : UnsavedChoice::CANCEL;
 		};
 
+		askToConfirm = [](const std::string& a_message) {
+			const SDL_MessageBoxButtonData buttons[] {
+				{ SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 0, "Okay" },
+				{ SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 1, "Cancel" }
+			};
+			SDL_MessageBoxData box { SDL_MESSAGEBOX_WARNING, SDL_GetKeyboardFocus(), "Bindstone Workbench", a_message.c_str(), 2, buttons, nullptr };
+			int pressed = 1;
+			return SDL_ShowMessageBox(&box, &pressed) == 0 && pressed == 0;
+		};
+
 		dock = std::make_unique<DockSpace>(uiRoot, managers.services, theme, focusRouter);
 		auto tree = std::make_shared<SceneTreePanel>(history,
 			[this]() { return sceneRoot; },
@@ -134,11 +153,34 @@ namespace Workbench {
 			inspectorPanel->dropNode(a_node, a_screenPoint);
 		};
 		inspectorPanel->parallaxPreviewActive = [this]() { return parallaxPreviewing(); };
+		std::vector<SettingsPanel::Row> settingRows {
+			{ "Undo steps", [this]() { return std::to_string(undoSteps()); }, [this](const std::string& a_text) {
+				if (auto steps = numberFrom(a_text); steps && *steps >= 1.0f) {
+					requestUndoSteps(static_cast<size_t>(*steps));
+				}
+			} },
+			{ "Grid X", [this]() { return formatNumberCompact(sceneGridSize.width); }, [this](const std::string& a_text) {
+				if (auto width = numberFrom(a_text); width && *width > 0.0f) {
+					gridSize(MV::size(*width, sceneGridSize.height));
+				}
+			} },
+			{ "Grid Y", [this]() { return formatNumberCompact(sceneGridSize.height); }, [this](const std::string& a_text) {
+				if (auto height = numberFrom(a_text); height && *height > 0.0f) {
+					gridSize(MV::size(sceneGridSize.width, *height));
+				}
+			} },
+			{ "Rotation snap", [this]() { return formatNumberCompact(rotationSnap()); }, [this](const std::string& a_text) {
+				if (auto degrees = numberFrom(a_text); degrees && *degrees > 0.0f) {
+					rotationSnap(*degrees);
+				}
+			} }
+		};
+		settingsPanel = static_cast<SettingsPanel*>(dock->registerPanel(std::make_shared<SettingsPanel>(std::move(settingRows))));
 		Panel* viewportPanel = dock->registerPanel(std::move(viewport));
 		Panel* filePanel = dock->registerPanel(std::move(file));
 		Panel* projectPanel = dock->registerPanel(std::move(project));
 
-		menuPanels = { treePanel, filePanel, viewportPanel, projectPanel, inspectorPanel };
+		menuPanels = { treePanel, filePanel, viewportPanel, projectPanel, inspectorPanel, settingsPanel };
 
 		SceneToolbar::Actions toolbarActions;
 		toolbarActions.onTool = [this](int a_toolIndex) { gizmoTool(static_cast<Tool>(a_toolIndex)); };
@@ -151,10 +193,10 @@ namespace Workbench {
 			sceneToolbar->grid(sceneGrid->visible());
 		};
 		toolbarActions.onFrame = [this]() { frameSelectionInViewport(); };
-		sceneToolbar = std::make_unique<SceneToolbar>(uiRoot->make("sceneToolbar"), managers.services, theme, history, toolbarActions);
+		sceneToolbar = std::make_unique<SceneToolbar>(uiRoot->make("sceneToolbar"), managers.services, theme, focusRouter, history, toolbarActions);
 		sceneToolbar->tool(static_cast<int>(gizmos->tool()));
 		sceneToolbar->grid(sceneGrid->visible());
-		sceneGrid->spacing(gizmos->snapSteps.move);
+		applyGridSize();
 		gizmos->onEditing = [this]() {
 			if (inspectorPanel) {
 				inspectorPanel->inspect(selectedNode);
@@ -166,7 +208,7 @@ namespace Workbench {
 				DockSpace::split(true, 0.70f,
 					DockSpace::leaf({ viewportPanel }),
 					DockSpace::leaf({ projectPanel })),
-				DockSpace::leaf({ inspectorPanel }))));
+				DockSpace::leaf({ inspectorPanel, settingsPanel }))));
 
 		buildTitleBar();
 	}
@@ -377,6 +419,101 @@ namespace Workbench {
 		}
 	}
 
+	bool App::requestUndoSteps(size_t a_steps) {
+		const size_t steps = std::clamp<size_t>(a_steps, 1, 10000);
+		if (steps < history.length()) {
+			const size_t dropped = history.length() - steps;
+			std::string message = "The history holds " + std::to_string(history.length()) + " steps. Keeping " + std::to_string(steps) + " drops " + std::to_string(dropped) + " of them, and they cannot be brought back.";
+			if (!askToConfirm || !askToConfirm(message)) {
+				return false;
+			}
+		}
+		history.limit(steps);
+		settingsChanged();
+		return true;
+	}
+
+	void App::gridSize(const MV::Size<>& a_size) {
+		sceneGridSize = MV::size(std::max(0.01f, a_size.width), std::max(0.01f, a_size.height));
+		applyGridSize();
+		settingsChanged();
+	}
+
+	void App::applyGridSize() {
+		gizmos->snapSteps.moveX = sceneGridSize.width / 10.0f;
+		gizmos->snapSteps.moveY = sceneGridSize.height / 10.0f;
+		sceneGrid->spacing(MV::size(gizmos->snapSteps.moveX, gizmos->snapSteps.moveY));
+	}
+
+	void App::rotationSnap(float a_degrees) {
+		gizmos->snapSteps.rotate = std::clamp(a_degrees, 0.01f, 180.0f);
+		settingsChanged();
+	}
+
+	void App::settingsChanged() {
+		writeSettingsFile();
+		if (settingsPanel) {
+			settingsPanel->refresh();
+		}
+	}
+
+	void App::showSettings() {
+		dock->show(settingsPanel);
+	}
+
+	void App::showInspector() {
+		dock->show(inspectorPanel);
+	}
+
+	// One "name = value" line per setting: read by hand so the file never depends on the scene archives.
+	void App::useSettingsFile(const std::string& a_path) {
+		settingsPath = a_path;
+		std::ifstream file(settingsPath);
+		std::string line;
+		auto trimmed = [](std::string a_text) {
+			a_text.erase(0, a_text.find_first_not_of(" \t\r"));
+			a_text.erase(a_text.find_last_not_of(" \t\r") + 1);
+			return a_text;
+		};
+		auto grid = sceneGridSize;
+		while (std::getline(file, line)) {
+			auto equals = line.find('=');
+			auto value = equals == std::string::npos ? std::nullopt : numberFrom(trimmed(line.substr(equals + 1)));
+			if (!value || *value <= 0.0f) {
+				continue;
+			}
+			std::string name = trimmed(line.substr(0, equals));
+			if (name == "undoSteps") {
+				history.limit(std::clamp<size_t>(static_cast<size_t>(*value), 1, 10000));
+			} else if (name == "gridX") {
+				grid.width = *value;
+			} else if (name == "gridY") {
+				grid.height = *value;
+			} else if (name == "rotationSnap") {
+				gizmos->snapSteps.rotate = std::clamp(*value, 0.01f, 180.0f);
+			}
+		}
+		sceneGridSize = grid;
+		applyGridSize();
+		if (settingsPanel) {
+			settingsPanel->refresh();
+		}
+	}
+
+	void App::writeSettingsFile() {
+		if (settingsPath.empty()) {
+			return;
+		}
+		std::ofstream file(settingsPath, std::ios::trunc);
+		file << "undoSteps = " << history.limit() << "\n";
+		file << "gridX = " << formatNumberCompact(sceneGridSize.width) << "\n";
+		file << "gridY = " << formatNumberCompact(sceneGridSize.height) << "\n";
+		file << "rotationSnap = " << formatNumberCompact(rotationSnap()) << "\n";
+		if (!file) {
+			reportError("the settings did not save to " + settingsPath);
+		}
+	}
+
 	std::string App::documentName() const {
 		return documentPath.empty() ? std::string("Untitled") : std::filesystem::path(documentPath).filename().string();
 	}
@@ -444,6 +581,8 @@ namespace Workbench {
 			{ "Duplicate", "Ctrl+D", [this]() { duplicateSelected(); }, true, {}, [this]() { return selectionIsRemovable(); } },
 			{ "Delete", "Del", [this]() { deleteSelected(); }, false, {}, [this]() { return selectionIsRemovable(); } },
 			{ "History", "", [this]() { sceneToolbar->historyShown(!sceneToolbar->historyShown()); }, true, [this]() { return std::string(sceneToolbar->historyShown() ? "Hide History" : "Show History"); } } });
+		menuBar->add("Settings", {
+			{ "Editor Settings", "", [this]() { showSettings(); } } });
 		std::vector<MenuItem> windowItems;
 		for (auto* panel : menuPanels) {
 			windowItems.push_back({ panel->title(), "", [this, panel]() { dock->show(panel); } });

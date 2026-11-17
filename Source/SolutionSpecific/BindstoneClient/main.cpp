@@ -559,7 +559,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		pressWithControl(SDLK_z);
 		gizmoLayer.moveSelected(Workbench::GizmoAxis::BOTH, MV::point(3.3f, 16.2f), true);
 		auto snappedPosition = subject->position();
-		expect(std::abs(std::remainder(snappedPosition.x, gizmoLayer.snapSteps.move)) < 0.001f && std::abs(std::remainder(snappedPosition.y, gizmoLayer.snapSteps.move)) < 0.001f, "a snapped move lands on the grid");
+		expect(std::abs(std::remainder(snappedPosition.x, gizmoLayer.snapSteps.moveX)) < 0.001f && std::abs(std::remainder(snappedPosition.y, gizmoLayer.snapSteps.moveY)) < 0.001f, "a snapped move lands on the grid");
 		pressWithControl(SDLK_z);
 		expect(exactXY(subject->position(), restPosition), "undo restores the position after a snapped move");
 
@@ -569,7 +569,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		pressWithControl(SDLK_z);
 		expect(subject->rotationRad().z == restRotation.z, "undo restores the rotation exactly");
 		gizmoLayer.rotateSelected(40.0f, true);
-		expect(std::abs(std::remainder(subject->rotation().z, gizmoLayer.snapSteps.rotate)) < 0.001f, "a snapped rotation lands on a 15 degree step");
+		expect(std::abs(std::remainder(subject->rotation().z, gizmoLayer.snapSteps.rotate)) < 0.001f, "a snapped rotation lands on the rotation step");
 		pressWithControl(SDLK_z);
 		expect(subject->rotationRad().z == restRotation.z, "undo restores the rotation after a snapped turn");
 
@@ -593,6 +593,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(a_app.gizmoTool() == Workbench::Tool::SCALE && gizmoLayer.handleScreenPoint("scaleX") && gizmoLayer.handleScreenPoint("scaleUniform"), "R shows the scale handles");
 		pressKey(SDLK_w);
 		expect(a_app.gizmoTool() == Workbench::Tool::MOVE && gizmoLayer.handleScreenPoint("moveX") && gizmoLayer.handleScreenPoint("moveY") && gizmoLayer.handleScreenPoint("moveFree"), "W shows the move handles");
+		expect(gizmoLayer.handleScreenPoint("moveY").value_or(MV::Point<int>()).y < gizmoLayer.handleScreenPoint("moveFree").value_or(MV::Point<int>()).y, "the vertical move arrow points up");
 		if (auto editable = subject->component<MV::Scene::Clickable>(false, false)) {
 			gizmoLayer.editComponent(editable.self());
 			a_app.runFrames(2);
@@ -622,7 +623,14 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		SDL_SetModState(static_cast<SDL_Keymod>(KMOD_CTRL));
 		drag(moveGrab, { moveGrab + MV::Point<int>(31, 47) });
 		SDL_SetModState(KMOD_NONE);
-		expect(subject->position().x == restPosition.x && subject->position().y != restPosition.y && std::abs(std::remainder(subject->position().y, gizmoLayer.snapSteps.move)) < 0.001f, "Ctrl snaps an arrow drag to the grid");
+		expect(subject->position().x == restPosition.x && subject->position().y != restPosition.y && std::abs(std::remainder(subject->position().y, gizmoLayer.snapSteps.moveY)) < 0.001f, "Ctrl snaps an arrow drag to the grid");
+		pressWithControl(SDLK_z);
+
+		moveGrab = grab("moveX");
+		SDL_SetModState(static_cast<SDL_Keymod>(KMOD_SHIFT));
+		drag(moveGrab, { moveGrab + MV::Point<int>(47, 9) });
+		SDL_SetModState(KMOD_NONE);
+		expect(subject->position().x != restPosition.x && subject->position().y == restPosition.y && std::abs(std::remainder(subject->position().x, gizmoLayer.snapSteps.moveX)) < 0.001f, "Shift snaps an arrow drag to the grid too");
 		pressWithControl(SDLK_z);
 
 		moveGrab = grab("moveFree");
@@ -654,6 +662,12 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(std::abs(subject->scale().x - restScale.x * 1.5f) < 0.03f && subject->scale().y == restScale.y, "dragging the X scale handle half its length scales X by 1.5, got " + std::to_string(subject->scale().x));
 		pressWithControl(SDLK_z);
 		expect(exactXY(subject->scale(), restScale), "undo restores the scale after a handle drag");
+		scaleGrab = grab("scaleY");
+		expect(scaleGrab.y < MV::round<int>(pivot).y, "the vertical scale handle points up");
+		alongAxis = MV::cast<float>(scaleGrab) - pivot;
+		drag(scaleGrab, { MV::round<int>(MV::cast<float>(scaleGrab) + alongAxis * (0.5f / 0.6f)) });
+		expect(std::abs(subject->scale().y - restScale.y * 1.5f) < 0.03f && subject->scale().x == restScale.x, "dragging the Y scale handle up half its length scales Y by 1.5, got " + std::to_string(subject->scale().y));
+		pressWithControl(SDLK_z);
 		pressKey(SDLK_w);
 
 		auto viewCenter = renderer.screenFromWorld(MV::point(view.position.x + view.size.width * 0.5f, view.position.y + view.size.height * 0.25f));
@@ -880,6 +894,36 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			mouse.stopSimulating();
 		};
 		auto captionStarts = [&strip](const std::string& a_text) { return strip.caption().rfind(a_text, 0) == 0; };
+		auto pushKey = [](SDL_Keycode a_key) {
+			SDL_Event press{};
+			press.type = SDL_KEYDOWN;
+			press.key.keysym.sym = a_key;
+			SDL_PushEvent(&press);
+		};
+		auto typeInto = [&](const MV::Point<int>& a_field, const std::string& a_text, bool a_enter) {
+			click(a_field);
+			for (int erased = 0; erased < 8; ++erased) {
+				pushKey(SDLK_BACKSPACE);
+			}
+			for (char character : a_text) {
+				SDL_Event typed{};
+				typed.type = SDL_TEXTINPUT;
+				typed.text.text[0] = character;
+				SDL_PushEvent(&typed);
+			}
+			if (a_enter) {
+				pushKey(SDLK_RETURN);
+			}
+			a_app.runFrames(2);
+		};
+		// the simulated mouse makes no SDL event, and a field is left on a button-down event
+		auto pressElsewhere = [&a_app]() {
+			SDL_Event press{};
+			press.type = SDL_MOUSEBUTTONDOWN;
+			press.button.button = SDL_BUTTON_LEFT;
+			SDL_PushEvent(&press);
+			a_app.runFrames(2);
+		};
 
 		expect(a_app.loadScene("Interface/Login/view.scene") && !a_app.scene()->empty(), "the Login scene loads for the history strip");
 		a_app.runFrames(10);
@@ -895,7 +939,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			gizmoLayer.moveSelected(Workbench::GizmoAxis::BOTH, MV::point(10.0f, 0.0f));
 		}
 		a_app.runFrames(2);
-		expect(strip.pipCount() == 4 && captionStarts("4 / 4   move " + subject->id()), "each step adds a pip and the caption names the last one, got " + strip.caption());
+		expect(strip.pipCount() == 4 && captionStarts("4 / 4   move " + subject->id()), "each step adds a bar and the row names the last one, got " + strip.caption());
 
 		hold(strip.positionScreenPoint(4), false);
 		hold(strip.positionScreenPoint(4), true);
@@ -913,6 +957,19 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(history.position() == 0 && sameXY(subject->position(), rest) && captionStarts("0 / 4   start"), "a press at the start of the row unwinds everything");
 		click(strip.positionScreenPoint(4));
 		expect(history.position() == 4 && sameXY(subject->position(), rest + MV::point(40.0f, 0.0f)), "a press at the end redoes everything");
+
+		click(strip.stepButtonScreenPoint(false));
+		expect(history.position() == 3 && captionStarts("3 / 4"), "the left arrow steps back once, got " + strip.caption());
+		click(strip.stepButtonScreenPoint(true));
+		expect(history.position() == 4 && captionStarts("4 / 4"), "the right arrow steps forward once, got " + strip.caption());
+		typeInto(strip.fieldScreenPoint(), "1", true);
+		expect(history.position() == 1 && captionStarts("1 / 4") && sameXY(subject->position(), rest + MV::point(10.0f, 0.0f)), "a position typed and entered moves the history there, got " + strip.caption());
+		typeInto(strip.fieldScreenPoint(), "99", true);
+		expect(history.position() == 4 && captionStarts("4 / 4"), "a typed position past the end stops at the end, got " + strip.caption());
+		typeInto(strip.fieldScreenPoint(), "2", false);
+		expect(captionStarts("2 / 4") && history.position() == 4, "typing alone moves nothing");
+		pressElsewhere();
+		expect(history.position() == 4 && captionStarts("4 / 4"), "a position typed but not entered is dropped when the field is left, got " + strip.caption());
 
 		expect(history.savedPosition() == std::optional<size_t>(0), "the saved mark sits where the scene was loaded");
 		auto stripFile = (std::filesystem::temp_directory_path() / "workbench_selftest_strip.scene").string();
@@ -935,7 +992,71 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(toolbar.historyShown(), "the button opens it again");
 		click(toolbar.buttonScreenPoint(7));
 		expect(!toolbar.historyShown(), "and closes it");
+
+		// Settings: the undo-step limit applies on Enter, asks before it drops history, and is kept in the settings file
+		auto& settings = a_app.settings();
+		a_app.showSettings();
+		a_app.runFrames(3);
+		int confirms = 0;
+		bool agree = false;
+		a_app.askToConfirm = [&](const std::string&) {
+			++confirms;
+			return agree;
+		};
+		expect(a_app.undoSteps() == 200 && settings.shown("Undo steps") == "200" && history.length() == 3, "the Settings tab shows the undo steps in use");
+		typeInto(settings.fieldScreenPoint("Undo steps"), "50", false);
+		pressElsewhere();
+		expect(a_app.undoSteps() == 200 && settings.shown("Undo steps") == "200" && confirms == 0, "a number typed but not entered changes nothing");
+		typeInto(settings.fieldScreenPoint("Undo steps"), "50", true);
+		expect(a_app.undoSteps() == 50 && settings.shown("Undo steps") == "50" && confirms == 0 && history.length() == 3, "a limit the history fits under applies on Enter without a question");
+		typeInto(settings.fieldScreenPoint("Undo steps"), "2", true);
+		expect(confirms == 1 && a_app.undoSteps() == 50 && settings.shown("Undo steps") == "50" && history.length() == 3, "Cancel keeps the limit and the history");
+		agree = true;
+		auto beforeTrim = subject->position();
+		typeInto(settings.fieldScreenPoint("Undo steps"), "2", true);
+		expect(confirms == 2 && a_app.undoSteps() == 2 && settings.shown("Undo steps") == "2" && history.length() == 2 && history.position() == 2, "Okay drops the oldest step");
+		expect(sameXY(subject->position(), beforeTrim), "dropping steps leaves the scene as it is");
+		a_app.select(subject);
+		a_app.runFrames(1);
+		gizmoLayer.moveSelected(Workbench::GizmoAxis::BOTH, MV::point(3.0f, 0.0f));
+		expect(history.length() == 2 && history.position() == 2, "a new step past the limit pushes the oldest out");
+		typeInto(settings.fieldScreenPoint("Undo steps"), "lots", true);
+		expect(a_app.undoSteps() == 2 && settings.shown("Undo steps") == "2", "text that is not a number is refused");
+
+		expect(a_app.gridSize().width == 100.0f && gizmoLayer.snapSteps.moveX == 10.0f && settings.shown("Grid X") == "100" && settings.shown("Rotation snap") == "5", "the grid cell is 100 with a snap a tenth of it, and rotation snaps by 5 degrees");
+		typeInto(settings.fieldScreenPoint("Grid X"), "50", true);
+		expect(a_app.gridSize().width == 50.0f && a_app.gridSize().height == 100.0f && gizmoLayer.snapSteps.moveX == 5.0f && gizmoLayer.snapSteps.moveY == 10.0f && a_app.grid().spacing().width == 5.0f, "Grid X sets the cell's width: lines and snapping follow at a tenth of it");
+		typeInto(settings.fieldScreenPoint("Grid Y"), "20", true);
+		expect(a_app.gridSize().height == 20.0f && gizmoLayer.snapSteps.moveY == 2.0f && a_app.grid().spacing().height == 2.0f, "Grid Y sets the cell's height on its own");
+		gizmoLayer.moveSelected(Workbench::GizmoAxis::BOTH, MV::point(3.3f, 16.3f), true);
+		expect(std::abs(std::remainder(subject->position().x, 5.0f)) < 0.001f && std::abs(std::remainder(subject->position().y, 2.0f)) < 0.001f, "a snapped move lands on each axis's own step");
+		typeInto(settings.fieldScreenPoint("Grid X"), "0", true);
+		expect(a_app.gridSize().width == 50.0f && settings.shown("Grid X") == "50", "a grid of zero is refused");
+		typeInto(settings.fieldScreenPoint("Rotation snap"), "30", true);
+		gizmoLayer.rotateSelected(40.0f, true);
+		expect(a_app.rotationSnap() == 30.0f && std::abs(std::remainder(subject->rotation().z, 30.0f)) < 0.001f, "Rotation snap sets the degrees a snapped turn lands on");
+
+		auto settingsFile = (std::filesystem::temp_directory_path() / "workbench_selftest_settings.txt").string();
+		std::filesystem::remove(settingsFile, stripIgnored);
+		a_app.useSettingsFile(settingsFile);
+		expect(a_app.undoSteps() == 2 && a_app.gridSize().width == 50.0f, "a missing settings file changes nothing");
+		typeInto(settings.fieldScreenPoint("Undo steps"), "75", true);
+		a_app.useSettingsFile("");
+		a_app.commands().limit(200);
+		a_app.gridSize(MV::size(100.0f, 100.0f));
+		a_app.rotationSnap(5.0f);
+		a_app.useSettingsFile(settingsFile);
+		expect(a_app.undoSteps() == 75 && settings.shown("Undo steps") == "75", "a changed setting is written to the file and read back");
+		expect(a_app.gridSize().width == 50.0f && a_app.gridSize().height == 20.0f && a_app.rotationSnap() == 30.0f && gizmoLayer.snapSteps.moveX == 5.0f && settings.shown("Grid Y") == "20", "the grid and the rotation snap come back from the file too");
+		expect(a_app.requestUndoSteps(200) && a_app.undoSteps() == 200, "the limit goes back to its default");
+		a_app.gridSize(MV::size(100.0f, 100.0f));
+		a_app.rotationSnap(5.0f);
+		a_app.useSettingsFile("");
+		std::filesystem::remove(settingsFile, stripIgnored);
+		a_app.askToConfirm = [](const std::string&) { return true; };
+		a_app.showInspector();
 		a_app.select(nullptr);
+		a_app.runFrames(3);
 	}
 
 	// Scene toolbar and menu bar, pressed on the simulated mouse
@@ -1283,10 +1404,12 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 		}
 	}
 	if (!a_smoke) {
+		app.useSettingsFile(MV::playerPreferencesPath() + "workbench_settings.txt");
 		return app.run();
 	}
 	// no run without a person at it may stop on a message box
 	app.askAboutUnsavedChanges = [](const std::string&) { return Workbench::App::UnsavedChoice::DISCARD; };
+	app.askToConfirm = [](const std::string&) { return true; };
 	if (a_selfTest) {
 		RunWorkbenchSelfTest(app, managers);
 	}

@@ -11,6 +11,7 @@
 #include "menu.h"
 #include "sceneGrid.h"
 #include "sceneToolbar.h"
+#include "settingsPanel.h"
 #include "MV/Render/Scene/parallax.h"
 
 namespace Workbench {
@@ -38,6 +39,23 @@ namespace Workbench {
 		bool requestLoadScene(const std::string& a_fileName);
 		void requestExit();
 		bool exiting() const { return done; }
+
+		// The most undo steps kept. Fewer than the history holds asks first, since the steps past it are dropped.
+		size_t undoSteps() const { return history.limit(); }
+		bool requestUndoSteps(size_t a_steps);
+		// The scene grid's cell. Its lines sit a tenth of the cell apart, and a snapped move lands on those.
+		MV::Size<> gridSize() const { return sceneGridSize; }
+		void gridSize(const MV::Size<>& a_size);
+		// The degrees a snapped rotation lands on.
+		float rotationSnap() const { return gizmos->snapSteps.rotate; }
+		void rotationSnap(float a_degrees);
+		// Asked before something that cannot be taken back; a native Okay / Cancel box unless replaced.
+		std::function<bool(const std::string& a_message)> askToConfirm;
+		// Reads the editor's settings from this file and writes them back to it when one changes.
+		void useSettingsFile(const std::string& a_path);
+		void showSettings();
+		void showInspector();
+		SettingsPanel& settings() { return *settingsPanel; }
 
 		int run();
 		int runFrames(int a_frameCount, const std::string& a_screenshotPath = "");
@@ -137,6 +155,12 @@ namespace Workbench {
 		float titleInteractiveWidth = 0.0f;
 		SceneTreePanel* treePanel = nullptr;
 		InspectorPanel* inspectorPanel = nullptr;
+		SettingsPanel* settingsPanel = nullptr;
+		std::string settingsPath;
+		MV::Size<> sceneGridSize { 100.0f, 100.0f };
+		void applyGridSize();
+		void settingsChanged();
+		void writeSettingsFile();
 
 		MV::Size<> lastWorldSize;
 		double lastDelta = 0.0;

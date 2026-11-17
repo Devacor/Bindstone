@@ -215,7 +215,7 @@ namespace Workbench {
 		return button;
 	}
 
-	std::shared_ptr<MV::Scene::Text> makeTextField(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, FocusRouter& a_focus, const std::string& a_id, const MV::Size<>& a_size, const std::string& a_initial, std::function<void(const std::string&)> a_onCommit) {
+	std::shared_ptr<MV::Scene::Text> makeTextField(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, FocusRouter& a_focus, const std::string& a_id, const MV::Size<>& a_size, const std::string& a_initial, std::function<void(const std::string&)> a_onCommit, bool a_enterOnly) {
 		auto& library = *a_services.get<MV::TextLibrary>();
 		auto& mouse = *a_services.get<MV::TapDevice>();
 		auto box = attachOutlinedRect(a_parent->make(a_id), a_services, a_theme, a_size, a_theme.fieldBg(), a_theme.fieldOutline())->owner();
@@ -233,9 +233,17 @@ namespace Workbench {
 				}
 			}
 		};
-		clickable->onAccept.connect("focus", [weakText, focus, commit](const std::shared_ptr<MV::Scene::Clickable>&) {
+		clickable->onAccept.connect("focus", [weakText, focus, commit, a_enterOnly](const std::shared_ptr<MV::Scene::Clickable>&) {
 			if (auto locked = weakText.lock()) {
-				focus->activate(locked, commit);
+				std::function<void()> abandon;
+				if (a_enterOnly) {
+					abandon = [weakText, shown = std::string(locked->text())]() {
+						if (auto text = weakText.lock()) {
+							text->text(shown);
+						}
+					};
+				}
+				focus->activate(locked, commit, abandon);
 			}
 		});
 		text->onEnter.connect("commit", [focus](std::shared_ptr<MV::Scene::Text>) {

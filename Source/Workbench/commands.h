@@ -100,11 +100,8 @@ namespace Workbench {
 				return;
 			}
 			undoStack.push_back({ std::move(a_command), ++lastSerial });
-			if (undoStack.size() > maximumDepth) {
-				baseSerial = undoStack.front().serial;
-				undoStack.pop_front();
-			}
 			redoStack.clear();
+			dropPastLimit();
 			notifyMoved();
 		}
 
@@ -114,6 +111,15 @@ namespace Workbench {
 
 		bool undo() { return position() > 0 && moveTo(position() - 1); }
 		bool redo() { return moveTo(position() + 1); }
+
+		// The most steps kept, applied and undone together. Steps past a smaller limit are dropped: the oldest applied
+		// ones first, then the undone ones furthest from being redone.
+		size_t limit() const { return stepLimit; }
+		void limit(size_t a_steps) {
+			stepLimit = std::max<size_t>(1, a_steps);
+			dropPastLimit();
+			notifyMoved();
+		}
 
 		// Steps applied, and steps in all: the applied ones and the undone ones a redo would bring back.
 		size_t position() const { return undoStack.size(); }
@@ -204,6 +210,17 @@ namespace Workbench {
 			}
 		}
 
+		void dropPastLimit() {
+			while (length() > stepLimit) {
+				if (!undoStack.empty()) {
+					baseSerial = undoStack.front().serial;
+					undoStack.pop_front();
+				} else {
+					redoStack.pop_front();
+				}
+			}
+		}
+
 		// Names the state the document is in: the last step applied, or the base no step can undo past.
 		std::uint64_t currentSerial() const { return undoStack.empty() ? baseSerial : undoStack.back().serial; }
 
@@ -220,7 +237,7 @@ namespace Workbench {
 			notifyMoved();
 		}
 
-		static constexpr size_t maximumDepth = 200;
+		size_t stepLimit = 200;
 		static inline const std::string noLabel;
 		struct Step {
 			std::unique_ptr<Command> command;

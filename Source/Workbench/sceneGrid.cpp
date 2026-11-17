@@ -26,8 +26,8 @@ namespace Workbench {
 		laidOutZoom = 0.0f;
 	}
 
-	void SceneGrid::spacing(float a_worldUnits) {
-		worldSpacing = std::max(0.001f, a_worldUnits);
+	void SceneGrid::spacing(const MV::Size<>& a_worldUnits) {
+		worldSpacing = MV::size(std::max(0.001f, a_worldUnits.width), std::max(0.001f, a_worldUnits.height));
 	}
 
 	std::shared_ptr<MV::Scene::Sprite> SceneGrid::line(size_t a_index) {
@@ -41,7 +41,7 @@ namespace Workbench {
 		if (!isVisible || a_zoom <= 0.0f) {
 			return;
 		}
-		if (a_cameraPosition == laidOutPosition && a_zoom == laidOutZoom && a_view == laidOutView && worldSpacing == laidOutSpacing) {
+		if (a_cameraPosition == laidOutPosition && a_zoom == laidOutZoom && a_view == laidOutView && worldSpacing.width == laidOutSpacing.width && worldSpacing.height == laidOutSpacing.height) {
 			return;
 		}
 		laidOutPosition = a_cameraPosition;
@@ -49,16 +49,21 @@ namespace Workbench {
 		laidOutView = a_view;
 		laidOutSpacing = worldSpacing;
 
-		float step = worldSpacing;
-		while (step * a_zoom < theme.px(12.0f)) {
-			step *= 10.0f;
-		}
+		auto widened = [&](float a_step) {
+			while (a_step * a_zoom < theme.px(12.0f)) {
+				a_step *= 10.0f;
+			}
+			return a_step;
+		};
+		const float stepAcross = widened(worldSpacing.width);
+		const float stepDown = widened(worldSpacing.height);
 		const float thickness = std::max(1.0f, theme.px(0.5f));
 		size_t used = 0;
 		auto layOut = [&](bool a_vertical) {
 			const float viewStart = a_vertical ? a_view.minPoint.x : a_view.minPoint.y;
 			const float viewEnd = a_vertical ? a_view.maxPoint.x : a_view.maxPoint.y;
 			const float cameraOffset = a_vertical ? a_cameraPosition.x : a_cameraPosition.y;
+			const float step = a_vertical ? stepAcross : stepDown;
 			const auto firstIndex = static_cast<long long>(std::ceil((viewStart - cameraOffset) / (step * a_zoom)));
 			for (long long index = firstIndex; ; ++index) {
 				const float screen = std::round(cameraOffset + static_cast<float>(index) * step * a_zoom);

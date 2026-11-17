@@ -35,6 +35,7 @@
     <ClCompile Include="$(SolutionDir)Source\Workbench\sceneToolbar.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\inspectorEditors.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\historyStrip.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Workbench\settingsPanel.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Game\gameEditor.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -65,5 +66,6 @@
     <ClInclude Include="$(SolutionDir)Source\Workbench\sceneGrid.h" />
     <ClInclude Include="$(SolutionDir)Source\Workbench\sceneToolbar.h" />
     <ClInclude Include="$(SolutionDir)Source\Workbench\historyStrip.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\settingsPanel.h" />
   </ItemGroup>
 </Project>

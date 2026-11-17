@@ -6,16 +6,18 @@
 #include <vector>
 #include "MV/Render/package.h"
 #include "commands.h"
+#include "focus.h"
+#include "icons.h"
 #include "theme.h"
 
 namespace Workbench {
 
-	// The history as a row of pips, one per step, with a handle where the scene is: steps left of it are applied,
+	// The history as a row of bars, one per step, with a handle where the scene is: steps left of it are applied,
 	// steps right of it are undone. A press on the row moves the handle there and a drag carries it, undoing and
-	// redoing as it passes each step.
+	// redoing as it passes each step. Beside it: a step back, a step forward, and the position as a field over the total.
 	class HistoryStrip {
 	public:
-		HistoryStrip(const std::shared_ptr<MV::Scene::Node>& a_host, MV::Services& a_services, const Theme& a_theme, CommandHistory& a_history);
+		HistoryStrip(const std::shared_ptr<MV::Scene::Node>& a_host, MV::Services& a_services, const Theme& a_theme, FocusRouter& a_focus, CommandHistory& a_history);
 
 		bool expanded() const { return isExpanded; }
 		void expanded(bool a_expanded);
@@ -26,19 +28,24 @@ namespace Workbench {
 
 		MV::Size<> size() const { return isExpanded ? rowSize : MV::Size<>(); }
 		size_t pipCount() const { return pips.size(); }
-		const std::string& caption() const { return shownCaption; }
+		// The row's text as shown: the position field, the total, then the step the scene is at ("2 / 4   move Sky").
+		std::string caption() const;
 		// Where on screen the handle sits when a_position steps are applied; meaningful while expanded.
 		MV::Point<int> positionScreenPoint(size_t a_position) const;
+		MV::Point<int> stepButtonScreenPoint(bool a_forward) const;
+		MV::Point<int> fieldScreenPoint() const;
 
 	private:
 		void rebuild();
 		void showPosition();
 		void moveToScreenPoint(const MV::Point<int>& a_screenPoint);
+		void moveToTyped(const std::string& a_text);
 		float positionX(size_t a_position) const { return trackInset + pipSpacing * static_cast<float>(a_position); }
 
 		std::shared_ptr<MV::Scene::Node> host;
 		MV::Services& services;
 		const Theme& theme;
+		FocusRouter& focus;
 		CommandHistory& history;
 
 		bool isExpanded = false;
@@ -50,12 +57,16 @@ namespace Workbench {
 		std::vector<std::shared_ptr<MV::Scene::Sprite>> pips;
 		std::shared_ptr<MV::Scene::Node> handle;
 		std::shared_ptr<MV::Scene::Node> savedMark;
-		std::shared_ptr<MV::Scene::Text> captionText;
-		std::string shownCaption;
+		std::unique_ptr<IconButton> backButton;
+		std::unique_ptr<IconButton> forwardButton;
+		std::shared_ptr<MV::Scene::Text> positionField;
+		std::shared_ptr<MV::Scene::Text> totalText;
+		std::shared_ptr<MV::Scene::Text> stepText;
 		float trackInset = 0.0f;
-		float trackWidth = 0.0f;
+		float trackHeight = 0.0f;
 		float pipSpacing = 0.0f;
-		size_t captionCharacters = 0;
+		float pipWidth = 0.0f;
+		size_t stepCharacters = 0;
 	};
 
 }

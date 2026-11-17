@@ -24,7 +24,7 @@ namespace Workbench {
 			std::function<void()> onFrame;
 		};
 
-		SceneToolbar(const std::shared_ptr<MV::Scene::Node>& a_host, MV::Services& a_services, const Theme& a_theme, CommandHistory& a_history, Actions a_actions);
+		SceneToolbar(const std::shared_ptr<MV::Scene::Node>& a_host, MV::Services& a_services, const Theme& a_theme, FocusRouter& a_focus, CommandHistory& a_history, Actions a_actions);
 
 		void tool(int a_toolIndex);
 		void snap(bool a_on);

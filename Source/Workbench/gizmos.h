@@ -15,10 +15,11 @@ namespace Workbench {
 	enum class Tool { SELECT, MOVE, ROTATE, SCALE };
 	enum class GizmoAxis { X, Y, BOTH };
 
-	// What a gesture snaps its result to while Ctrl is held: parent-space units, degrees, scale units.
+	// What a gesture snaps its result to while Shift or Ctrl is held: parent-space units on each axis, degrees, scale units.
 	struct GizmoSnapSteps {
-		float move = 10.0f;
-		float rotate = 15.0f;
+		float moveX = 10.0f;
+		float moveY = 10.0f;
+		float rotate = 5.0f;
 		float scale = 0.1f;
 	};
 

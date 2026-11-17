@@ -544,6 +544,29 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   checks the saved mark, the pips a new step drops, and the Edit row.
 - Not yet: a pip's label on hover (Clickable has no hover signal), a list view of the steps.
 
+## Increment 25: Settings, snap units and the history row's controls (2026-11-16)
+- History row: the pips are bars, orange when applied, grey when undone, and the step the scene is at is green and
+  taller. A step-back and a step-forward arrow sit left of the bars; right of them the position is a field over the
+  total ("[2] / 4"), which moves the history to a typed position on Enter. The handle is white and the saved mark blue.
+- Settings: a tab beside the Inspector (`SettingsPanel`, rows of label and field given by the app), opened from the
+  Settings menu or Window. Fields apply on Enter only; left any other way they show the value in use again.
+  - Undo steps (`CommandHistory::limit`, default 200, 1 to 10000). A number below the steps the history holds asks
+    Okay / Cancel first (`App::askToConfirm`, a native box unless replaced); Okay drops the oldest applied steps,
+    then the undone ones furthest from a redo.
+  - Grid X and Grid Y (default 100): the scene grid's cell. Lines sit a tenth of the cell apart and a snapped move
+    lands on those, each axis on its own step (`GizmoSnapSteps::moveX` / `moveY`, `SceneGrid::spacing(Size)`).
+  - Rotation snap in degrees (default 5).
+  - Kept in `workbench_settings.txt` in the player-preferences folder as `name = value` lines
+    (`App::useSettingsFile`); only the interactive run reads or writes it.
+- Snapping: Shift or Ctrl held during a move, rotate or scale drag snaps it; the toolbar magnet inverts that.
+- The move and scale gizmos draw their vertical handle up the screen (towards -y); a drag up on the scale handle
+  grows the scale.
+- `FocusRouter`: a field may pass an abandon callback, which makes it Enter-only (`makeTextField(..., a_enterOnly)`).
+  `Text::disableCursor` emits `onEnter`, so the router clears its state before it calls it. Before this, Escape and a
+  press elsewhere both ran the commit through that signal.
+- The self-test types into fields with pushed text and key events, steps with the arrows, checks each setting, the
+  Okay and Cancel answers, the settings file, a Shift-snapped drag and the upward handles.
+
 ## Known gaps (next increments)
 - Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.

@@ -18,8 +18,9 @@ namespace Workbench {
 		bool visible() const { return isVisible; }
 		void visible(bool a_visible);
 
-		float spacing() const { return worldSpacing; }
-		void spacing(float a_worldUnits);
+		// World units between lines across and down, before the step widens for the zoom.
+		MV::Size<> spacing() const { return worldSpacing; }
+		void spacing(const MV::Size<>& a_worldUnits);
 
 		void update(const MV::Point<>& a_cameraPosition, float a_zoom, const MV::BoxAABB<>& a_view);
 
@@ -30,12 +31,12 @@ namespace Workbench {
 		const Theme& theme;
 		std::vector<std::shared_ptr<MV::Scene::Sprite>> lines;
 		bool isVisible = true;
-		float worldSpacing = 10.0f;
+		MV::Size<> worldSpacing { 10.0f, 10.0f };
 
 		MV::Point<> laidOutPosition;
 		float laidOutZoom = 0.0f;
 		MV::BoxAABB<> laidOutView;
-		float laidOutSpacing = 0.0f;
+		MV::Size<> laidOutSpacing;
 	};
 
 }

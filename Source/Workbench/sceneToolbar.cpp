@@ -7,7 +7,7 @@ namespace Workbench {
 		const MV::Color groupFill(0.11f, 0.11f, 0.11f, 0.92f);
 	}
 
-	SceneToolbar::SceneToolbar(const std::shared_ptr<MV::Scene::Node>& a_host, MV::Services& a_services, const Theme& a_theme, CommandHistory& a_history, Actions a_actions) :
+	SceneToolbar::SceneToolbar(const std::shared_ptr<MV::Scene::Node>& a_host, MV::Services& a_services, const Theme& a_theme, FocusRouter& a_focus, CommandHistory& a_history, Actions a_actions) :
 		host(a_host),
 		services(a_services),
 		theme(a_theme),
@@ -63,7 +63,7 @@ namespace Workbench {
 		barSize = MV::size(x - theme.px(6.0f), buttonSize + inset * 2.0f);
 		historyHost = host->make("history");
 		historyHost->position(MV::point(0.0f, barSize.height + theme.px(4.0f)));
-		historyStrip = std::make_unique<HistoryStrip>(historyHost, services, theme, a_history);
+		historyStrip = std::make_unique<HistoryStrip>(historyHost, services, theme, a_focus, a_history);
 	}
 
 	void SceneToolbar::historyShown(bool a_shown) {

@@ -92,6 +92,12 @@ namespace Workbench {
 						nearSegment(a_x, a_y, 0.50f, 0.56f, 0.50f, 0.38f, 0.04f) || nearSegment(a_x, a_y, 0.50f, 0.56f, 0.63f, 0.62f, 0.04f);
 				}
 				break;
+				case Icon::StepBack:
+					result = inPolygon(a_x, a_y, { {0.68f, 0.20f}, {0.28f, 0.50f}, {0.68f, 0.80f} });
+				break;
+				case Icon::StepForward:
+					result = inPolygon(a_x, a_y, { {0.32f, 0.20f}, {0.72f, 0.50f}, {0.32f, 0.80f} });
+				break;
 			}
 			return result;
 		}

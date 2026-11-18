@@ -2024,7 +2024,7 @@ private:
 		});
 		test("family_b_no_member_and_not_a_function_texts", [this]() {
 			expect_texts({
-				{"coroutine handle", "coroutine int g() { yield 1; } var h = g();", "var z = h.nosuch;", "coroutine_handle has no member 'nosuch'", warn_region},
+				{"coroutine handle", "coroutine int g() { yield 1; } var h = g();", "var z = h.nosuch;", "coroutine<int> has no member 'nosuch'", warn_region},
 				{"string", "var s = \"s\";", "s.foo();", "string has no member 'foo'", warn_region},
 				{"array", "var a = [1];", "a.foo();", "array has no member 'foo'", warn_region},
 				{"map", "var m = {\"a\": 1};", "m.foo();", "map has no member 'foo'; read the key as [\"foo\"]", warn_region},
@@ -3718,6 +3718,26 @@ private:
 					`${apply(x => x * 3, 4)} ${apply([](int x) { return x * 3; }, 4)} ${apply(triple, 4)} ${ran} ${twice(x => x * 2, 2)}`;
 				)"));
 			});
+		});
+		// the binder records a std::function<R(A...)> parameter's signature: the lambda handed to it is typed and checked at load
+		test("a_std_function_parameter_is_its_signature_at_load", [this]() {
+			auto e = make_engine();
+			stdlib::register_all(*e);
+			e->add_function("apply", [](std::function<int64_t(int64_t)> f, int64_t v) { return f(v); });
+			e->add_function("each_name", [](const std::function<void(std::string, double)>& f) { f("a", 1.5); });
+			const std::pair<const char*, const char*> refused[] = {
+				{"apply((string s) => 1, 2);", "argument 1 of 'apply': cannot pass 'function' where it takes 'function<int(int)>': the lambda declares parameter 's' as 'string', which does not take the signature's 'int'"},
+				{"apply((a, b) => a, 2);", "the lambda takes 2 arguments, the signature passes 1"},
+				{"apply(x => x + \"s\", 2);", "cannot return 'string' from 'lambda' declared to return 'int'"},
+				{"each_name((n, w) => n + w);", "cannot apply '+' to 'string' and 'float'"},
+			};
+			for (const auto& [source, text] : refused) {
+				const std::string report = e->check(source).format();
+				check_true(report.find(text) != std::string::npos, std::string(source) + " -> " + report);
+			}
+			check_eq(int64_t(42), e->execute("apply(x => x * 2, 21);").as_int(), "an untyped parameter takes int");
+			check_eq(std::string("int"), e->execute("string t = \"\"; apply(x => { t = type_of(x); return x; }, 1); t;").to_string(), "and holds an int");
+			check_eq(std::string("a/float"), e->execute("string seen = \"\"; each_name((n, w) => { seen = n + \"/\" + type_of(w); }); seen;").to_string(), "a void(string, double) callback");
 		});
 		test("an_enum_parameter_of_a_host_function_takes_an_int", [this]() {
 			enum class mood { calm = 0, angry = 1 };

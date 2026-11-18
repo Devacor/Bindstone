@@ -125,6 +125,10 @@ namespace jai {
         bool declared_ref_escapes = false;
         // A converted closure's captured name (never parsed): its slot binds the closure's cell when the frame enters
         bool binds_capture = false;
+        // written as a bare name (`x`, where `var x` spells the dynamic parameter out): a lambda's takes the type the signature
+        // it is checked against declares for it (contextual, the checker's stamp; the serializer writes the name as parsed)
+        bool untyped = false;
+        bool contextual = false;
         mutable uint64_t symbol_id = UINT64_MAX;  // Cached symbol ID for optimization
         mutable size_t slot_index = SIZE_MAX;     // Slot index for fast local access (SIZE_MAX = not assigned)
         // A reference parameter the body never writes through takes a temporary
@@ -434,6 +438,8 @@ namespace jai {
         std::vector<capture> captures;
         std::vector<parameter> parameters;
         type_info_ptr return_type;
+        // return_type is the signature's the lambda is checked against, not one it spells (the checker's stamp, as parameter::contextual)
+        bool contextual_return = false;
         statement_ptr body;
         size_t local_count = 0;  // Total slots needed (params + locals) for stack allocation
 

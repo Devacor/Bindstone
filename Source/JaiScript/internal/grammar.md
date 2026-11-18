@@ -303,6 +303,8 @@ type = primitiveType
      | "weak_ptr" "<" type ">"
      | "shared_ptr" "<" type ">"                // Explicit reference semantics (no clone on assign)
      | "function"                               // Callable
+     | "function" "<" type "(" (type "&"? IDENTIFIER? ("," type "&"? IDENTIFIER?)*)? ")" ">"   // A callable with a signature; the names mean nothing
+     | "coroutine" "<" type ">"                 // A coroutine handle whose yields and return are that type
      | "auto"                                   // Type inference with locking
      | "var"                                    // Dynamic typing (any type allowed)
 

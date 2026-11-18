@@ -1133,7 +1133,7 @@ script_value script_value::make_class_object(const class_definition& cd, strong_
 script_value script_value::make_coroutine_handle(uint64_t type_id, std::shared_ptr<void> handle, engine* eng) {
     script_value v(std::monostate{}, eng);
     auto obj = acquire_object_holder(eng);
-    obj->set_type(interned_type_text(eng, "coroutine_handle", type_id), type_id);
+    obj->set_type(interned_type_text(eng, "coroutine", type_id), type_id);
     obj->hold(std::move(handle));
     obj->mark_coroutine_handle();
     v.storage_ = obj;

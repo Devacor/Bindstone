@@ -1998,6 +1998,17 @@ inline bool member_reads_back(const script_value& v, uint64_t member_id, uint64_
     return false;
 }
 
+// A callable stored into a function<R(A...)> slot: the identity, or what its own declaration rules out (its parameter count, a
+// parameter no argument of the signature's type converts to, a declared result that is not the signature's). A host function, an
+// overload set and an undeclared result declare nothing the store can judge, and pass. Out of line: the table's callers pay one
+// call for a signature slot and nothing for any other (environment.cpp)
+checked_result<slot_conversion> signature_slot_conversion(const script_value& value, const type_info_ptr& signature, engine* eng);
+// A coroutine<Y> slot takes null and the handle of a coroutine declared to yield Y (any handle when Y is var) (environment.cpp)
+checked_result<slot_conversion> coroutine_slot_conversion(const script_value& value, const type_info_ptr& target, engine* eng);
+bool coroutine_slot_admits(const script_value& value, const type_info& target);
+// coroutine<Y> as type_of and the slot texts name a handle: Y is its coroutine's declared type, var when it declares none
+std::string coroutine_type_name(const script_value& value);
+
 // weak_ptr<T> slot taking a shared_ptr handle (C++: weak = shared): the pointee class must be
 // T or derive from it, then the handle downgrades to a weak one. false = not this row.
 inline bool weak_slot_takes_shared(const script_value& value, const type_info_ptr& target_type, engine* eng) {
@@ -2139,12 +2150,14 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
                 if (tag && !tag->type_name.empty() && !target_type->type_name.empty() && tag->type_name == target_type->type_name) {
                     return slot_conversion::of(verdict::identity_exact);
                 }
+                if (target_type->is_coroutine) [[unlikely]] { return coroutine_slot_conversion(v, target_type, eng); }
                 auto view = resolve_slot_class(v, eng);
                 if (class_slot_admits(view, v, *target_type, eng)) {
                     return slot_conversion::of(verdict::identity);
                 }
                 return slot_conversion::of(v.get_object_holder() ? verdict::needs_ctor : verdict::reject_class);
             }
+            if (target_type->is_coroutine) [[unlikely]] { return coroutine_slot_conversion(v, target_type, eng); }
             if (primitive_src && !target_type->type_name.empty()) return slot_conversion::of(verdict::needs_ctor);
             return slot_conversion::of(verdict::reject);
         }
@@ -2155,6 +2168,7 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
         case script_value_type::jai_function_type:
             // a callable slot resets to null and takes a callable again (a std::function's rule)
             if (ri == script_value::TYPEID_NULL) return typed_null();
+            if (!target_type->type_params.empty()) [[unlikely]] { return signature_slot_conversion(v, target_type, eng); }
             return slot_conversion::of(v.type() == target ? verdict::identity : verdict::reject);
         case script_value_type::jai_vec2_type:
         case script_value_type::jai_vec3_type:
@@ -2381,6 +2395,7 @@ inline std::string slot_source_type_name(const script_value& value_in, engine* e
             if (named_tag) return tag->type_name;
             auto view = resolve_slot_class(v, eng);
             if (view.def) return view.def->get_name();
+            if (auto holder = v.get_object_holder(); holder && holder->is_coroutine_handle()) return coroutine_type_name(v);
             if (auto holder = v.get_object_holder(); holder && !holder->type_name().empty()) return std::string(holder->type_name());
             return "object";
         }

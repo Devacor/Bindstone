@@ -296,8 +296,8 @@ bool class_definition::type_can_hold_string(const type_info_ptr& t, std::vector<
 }
 
 bool class_definition::type_tree_runs_destructor(const type_info_ptr& t, std::vector<const class_definition*>& in_progress, uint8_t mode) const {
-    if (!t || t->base_type == script_value_type::jai_any_type) {
-        // an untyped slot holds any value: it runs what some script class runs
+    if (!t || t->base_type == script_value_type::jai_any_type || t->is_coroutine) {
+        // an untyped slot holds any value: it runs what some script class runs (a coroutine<Y> slot's handle owns a frame of any locals)
         if (mode == 0 || mode == 3 || !engine_) { return true; }
         for (const auto& entry : detail::engine_access::get_class_registry(*engine_).script_classes_) {
             const class_definition* cls = entry.second.get();

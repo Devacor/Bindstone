@@ -36,7 +36,7 @@ namespace jai::detail {
     // BUMP THIS on any change to what a parse produces: the serialized bytes and the parse-time semantics baked into the
     // AST (slot assignment, node and token numbers, capture plans). A stale sidecar is reparsed and rewritten (the version
     // check feeds the corrupt-file fallback), so a bump is always safe and a missed one leaves stale caches.
-    inline constexpr uint32_t k_jaibite_version = 60;
+    inline constexpr uint32_t k_jaibite_version = 61;
     // Header flags (u32):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -253,13 +253,25 @@ namespace jai::detail {
             }
         }
 
+        // `var`, as a bare parameter name is parsed
+        void dynamic_type() {
+            u8(1);
+            u8(uint8_t(script_value_type::jai_any_type));
+            str("any");
+            varint(0);
+            flag(true);
+            varint(0);
+        }
+
         void parameters(const std::vector<parameter>& params) {
             varint(params.size());
             for (const auto& p : params) {
-                type(p.type);
+                // a contextual type is the checker's: the parameter is written as parsed, and a load types it again
+                if (!p.contextual) { type(p.type); } else if (p.untyped) { dynamic_type(); } else { type(type_info_ptr{}); }
                 str(p.name);
                 flag(p.is_reference);
                 flag(p.is_const);
+                flag(p.untyped);
                 symbol(p.symbol_id, UINT64_MAX);
                 slot(p.slot_index);
                 node(p.default_value.get());
@@ -479,7 +491,7 @@ namespace jai::detail {
                 node(c.initializer.get());
             }
             parameters(e->parameters);
-            type(e->return_type);
+            type(e->contextual_return ? type_info_ptr{} : e->return_type);
             node(e->body.get());
             varint(e->local_count);
             outer_slot_plan(e->outer_slot_plan, e->outer_slot_plan_built);
@@ -1043,6 +1055,7 @@ namespace jai::detail {
             temp.native_size = native_size;
             temp.is_signed = is_signed;
             temp.type_params = std::move(params);
+            temp.is_coroutine = base == script_value_type::jai_object_type && n == 1 && name.rfind("coroutine<", 0) == 0;
             // Check the encoded shape before interning: primitive/container keys
             // deliberately ignore surplus parameters, which would hide corruption.
             bool valid_arity = true;
@@ -1113,6 +1126,7 @@ namespace jai::detail {
                 bool is_ref = flag();
                 bool is_const = flag();
                 parameter p(t, name, is_ref, is_const);
+                p.untyped = flag();
                 p.symbol_id = symbol(UINT64_MAX);
                 p.slot_index = slot_val();
                 p.default_value = expr_opt();

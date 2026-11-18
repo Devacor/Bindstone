@@ -812,7 +812,7 @@ coroutine_record coroutine_record_of(engine& a_engine, coroutine_handle& a_handl
 script_value make_unloaded_coroutine(engine& a_engine) {
 	auto handle = std::make_shared<coroutine_handle>(&a_engine);
 	handle->set_status(coroutine_handle::status::failed);
-	return script_value::make_coroutine_handle(engine_access::symbolize(a_engine, "coroutine_handle"), std::static_pointer_cast<void>(handle), &a_engine);
+	return script_value::make_coroutine_handle(engine_access::symbolize(a_engine, "coroutine"), std::static_pointer_cast<void>(handle), &a_engine);
 }
 
 script_value coroutine_record_map(engine& a_engine, coroutine_record a_record) {

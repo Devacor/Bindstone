@@ -260,7 +260,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		to_bool_id_ = symbolizer_->intern("to_bool");
 		eq_method_id_ = symbolizer_->intern("==");
 		same_as_id_ = symbolizer_->intern("same_as");
-		coroutine_handle_type_id_ = symbolizer_->intern("coroutine_handle");
+		coroutine_handle_type_id_ = symbolizer_->intern("coroutine");
 		next_id_ = symbolizer_->intern("next");
 		handle_reset_id_ = symbolizer_->intern("reset");
 		done_id_ = symbolizer_->intern("done");
@@ -12737,7 +12737,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 		if (holder && holder->type_id() == coroutine_handle_type_id_) {
 			if (member_id == next_id_ || member_id == done_id_ || member_id == advance_id_ || member_id == result_id_) { return {}; }
 			return raise_(make_error_code(runtime_error_code::member_not_found),
-				"coroutine_handle has no member '{0}'", member_id);
+				"{0} has no member '{1}'", detail::coroutine_type_symbol(objectValue, engine_), member_id);
 		}
 		if (holder && holder->is_instance() && member_id != same_as_id_) {
 			auto* inst = holder->unchecked_instance();
@@ -14872,7 +14872,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 				return {};
 			}
 			return raise_(make_error_code(runtime_error_code::member_not_found),
-				"coroutine_handle has no member '{0}'", expr->member_id);
+				"{0} has no member '{1}'", detail::coroutine_type_symbol(objectValue, engine_), expr->member_id);
 		}
 	}
 

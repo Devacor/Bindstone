@@ -9,6 +9,7 @@
 #include <jaiscript/detail/member_scope.hpp>
 #include <jaiscript/detail/typed_slot.hpp>
 #include <jaiscript/core/overload_resolution.hpp>
+#include <jaiscript/core/coroutine.hpp>
 #include <algorithm>
 #include <cstdint>
 
@@ -140,6 +141,146 @@ void native_stack_mark::arm() noexcept {
 
 void throw_nesting_exhausted(const source_location& at) {
     throw nesting_exhausted(at);
+}
+
+namespace {
+// What a script callable declares: its parameters, its result (a coroutine's is the handle its call makes) and its name
+struct declared_callable {
+    const std::vector<parameter>* parameters = nullptr;
+    const type_info* result = nullptr;
+    bool coroutine = false;
+    std::string_view name;
+};
+
+std::optional<declared_callable> declared_callable_of(const script_value& callable, engine* eng) {
+    if (callable.raw_storage_index() != script_value::TYPEID_FUNCTION) { return std::nullopt; }
+    const script_function& fn = callable.unchecked_as_function();
+    if (const auto* mint = fn.target<coroutine_mint>(); mint && mint->declaration) {
+        return declared_callable{&mint->declaration->parameters, mint->declaration->return_type.get(), true, mint->declaration->name};
+    }
+    const auto* thunk = fn.target<script_callable_thunk>();
+    if (!thunk || thunk->eng != eng) { return std::nullopt; }
+    const script_callable& payload = thunk->payload;
+    switch (payload.kind) {
+        case script_callable::kind_type::function:
+            if (!payload.fn) { return std::nullopt; }
+            return declared_callable{&payload.fn->parameters(), payload.fn->return_type.get(), false, payload.fn->name};
+        case script_callable::kind_type::method:
+        case script_callable::kind_type::static_method:
+            if (!payload.ast() || payload.ast()->is_coroutine) { return std::nullopt; }
+            return declared_callable{&payload.ast()->parameters, payload.ast()->return_type.get(), false, payload.ast()->name};
+        default:
+            return std::nullopt;
+    }
+}
+
+bool dynamic_type(const type_info* t) { return !t || t->base_type == script_value_type::jai_any_type; }
+
+// A by-value slot of type `to` never takes a value of type `from` (the typed-slot table's rows by kind; a class may convert
+// through a constructor or a to_X(), so an object on either side stays open)
+bool kind_never_converts(const type_info& from, const type_info& to) {
+    using k = script_value_type;
+    const k f = from.base_type, t = to.base_type;
+    const bool object_from = f == k::jai_object_type || f == k::jai_shared_ptr_type || f == k::jai_weak_ptr_type;
+    switch (t) {
+        case k::jai_int_type:
+            return !(f == k::jai_int_type || f == k::jai_bool_type || object_from);
+        case k::jai_float_type: return !(f == k::jai_float_type || f == k::jai_int_type || f == k::jai_bool_type || object_from);
+        case k::jai_char_type: return !(f == k::jai_char_type || f == k::jai_string_type || object_from);
+        case k::jai_string_type:
+        case k::jai_utf8_string_type: return !(f == k::jai_string_type || f == k::jai_utf8_string_type || f == k::jai_char_type || object_from);
+        case k::jai_bool_type: return false;
+        case k::jai_array_type:
+        case k::jai_map_type:
+        case k::jai_function_type: return f != t;
+        case k::jai_object_type:
+            if (to.is_coroutine) { return !from.is_coroutine; }
+            return f == k::jai_array_type || f == k::jai_map_type || f == k::jai_function_type;
+        case k::jai_shared_ptr_type:
+        case k::jai_weak_ptr_type: return !(object_from || f == k::jai_null_type);
+        default: return is_math_type(t) && !is_math_type(f);
+    }
+}
+
+std::string callable_spelling(std::string_view name) {
+    return name.empty() || name.front() == '<' ? std::string("a lambda") : "'" + std::string(name) + "'";
+}
+
+JAI_NOINLINE error_propagator signature_refused(const declared_callable& held, const type_info& signature, const std::string& reason, engine* eng) {
+    return error_propagator{make_error_code(runtime_error_code::type_mismatch), "{0}",
+        engine_access::symbolize(*eng, "Cannot use " + callable_spelling(held.name) + " as " + signature.canonical_name() + ": " + reason)};
+}
+}
+
+// a handle slot resets to null, as a callable slot does
+checked_result<slot_conversion> coroutine_slot_conversion(const script_value& value, const type_info_ptr& target, engine* eng) {
+    if (value.raw_storage_index() == script_value::TYPEID_NULL) {
+        script_value null_value(std::monostate{}, eng);
+        null_value.set_type_info(target);
+        return slot_conversion::converted_to(std::move(null_value));
+    }
+    return slot_conversion::of(coroutine_slot_admits(value, *target) ? slot_conversion::verdict::identity : slot_conversion::verdict::reject);
+}
+
+namespace {
+std::optional<error_propagator> signature_slot_refusal(const script_value& callable, const type_info& signature, engine* eng);
+}
+
+checked_result<slot_conversion> signature_slot_conversion(const script_value& value, const type_info_ptr& signature, engine* eng) {
+    if (value.type() != script_value_type::jai_function_type) { return slot_conversion::of(slot_conversion::verdict::reject); }
+    if (auto refusal = signature_slot_refusal(value, *signature, eng)) { return std::move(*refusal); }
+    return slot_conversion::of(slot_conversion::verdict::identity);
+}
+
+namespace {
+std::optional<error_propagator> signature_slot_refusal(const script_value& callable, const type_info& signature, engine* eng) {
+    if (!eng) { return std::nullopt; }
+    const std::optional<declared_callable> held = declared_callable_of(callable, eng);
+    if (!held) { return std::nullopt; }
+    const std::vector<parameter>& params = *held->parameters;
+    const size_t passed = signature.type_params.size() - 1;
+    size_t required = 0;
+    while (required < params.size() && !params[required].default_value) { ++required; }
+    if (passed < required || passed > params.size()) {
+        const std::string takes = required == params.size() ? std::to_string(required) : std::to_string(required) + " to " + std::to_string(params.size());
+        return signature_refused(*held, signature, "it takes " + takes + (params.size() == 1 ? " argument" : " arguments") + ", the signature passes " +
+                                 std::to_string(passed), eng);
+    }
+    for (size_t i = 0; i < passed; ++i) {
+        const parameter& p = params[i];
+        const type_info* argument = signature.type_params[i + 1].get();
+        const bool by_reference = argument && argument->base_type == script_value_type::jai_reference_type;
+        if (by_reference) { argument = argument->element_type().get(); }
+        if (p.is_reference && !p.is_const && !by_reference) {
+            return signature_refused(*held, signature, "parameter '" + p.name + "' is a reference (" + (p.type ? p.type->canonical_name() : std::string("auto")) +
+                                     "&), the signature passes " + (dynamic_type(argument) ? std::string("var") : argument->canonical_name()) + " by value", eng);
+        }
+        if (dynamic_type(argument) || dynamic_type(p.type.get())) { continue; }
+        const bool refused = p.is_reference && !p.is_const ? argument->base_type != p.type->base_type : kind_never_converts(*argument, *p.type);
+        if (refused) {
+            return signature_refused(*held, signature, "parameter '" + p.name + "' (declared " + p.type->canonical_name() + (p.is_reference ? "&" : "") +
+                                     ") does not take " + argument->canonical_name(), eng);
+        }
+    }
+    const type_info* wanted = signature.type_params[0].get();
+    if (dynamic_type(wanted) || wanted->base_type == script_value_type::jai_null_type) { return std::nullopt; }
+    if (held->coroutine) {
+        const type_info* yields = wanted->is_coroutine && !wanted->type_params.empty() ? wanted->type_params[0].get() : nullptr;
+        const bool fits = wanted->is_coroutine && (dynamic_type(yields) || (!dynamic_type(held->result) && held->result->id == yields->id));
+        if (fits) { return std::nullopt; }
+        return signature_refused(*held, signature, "it returns coroutine<" + (dynamic_type(held->result) ? std::string("var") : held->result->canonical_name()) +
+                                 ">, the signature returns " + wanted->canonical_name(), eng);
+    }
+    const type_info* declared = held->result;
+    if (declared && declared->base_type == script_value_type::jai_reference_type) { declared = declared->element_type().get(); }
+    if (dynamic_type(declared) || declared->id == wanted->id) { return std::nullopt; }
+    const auto class_like = [](const type_info& t) {
+        return (t.base_type == script_value_type::jai_object_type && !t.is_coroutine) || t.base_type == script_value_type::jai_shared_ptr_type;
+    };
+    if (class_like(*declared) && class_like(*wanted)) { return std::nullopt; }   // the value keeps its class; the store that takes the result judges it
+    return signature_refused(*held, signature, "it returns " + (declared->base_type == script_value_type::jai_null_type ? std::string("void") : declared->canonical_name()) +
+                             ", the signature returns " + wanted->canonical_name(), eng);
+}
 }
 
 // Out-of-line door for class_definition.hpp's field kernel (typed_slot.hpp holds the body)

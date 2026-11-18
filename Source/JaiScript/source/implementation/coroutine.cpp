@@ -3,8 +3,38 @@
 #include "../../include/jaiscript/core/execution_backend.hpp"
 #include "../../include/jaiscript/detail/arg_capture.hpp"
 #include "../../include/jaiscript/core/function_binder.hpp"
+#include "../../include/jaiscript/detail/class_runtime.hpp"
+#include "../../include/jaiscript/detail/coroutine_snapshot.hpp"
 
 namespace jai {
+
+namespace {
+// The type a coroutine declares for its yields and return; null when it declares none (var)
+const type_info* declared_yield_type(const script_value& a_value) {
+    const std::shared_ptr<coroutine_handle> handle = detail::coroutine_of(a_value);
+    const std::shared_ptr<function_decl> function = handle ? handle->get_function() : nullptr;
+    const type_info* declared = function ? function->return_type.get() : nullptr;
+    return declared && declared->base_type != script_value_type::jai_any_type ? declared : nullptr;
+}
+}
+
+bool detail::coroutine_slot_admits(const script_value& a_value, const type_info& a_target) {
+    const auto* holder = a_value.peek_object_holder();
+    if (!holder || !holder->is_coroutine_handle()) { return false; }
+    const type_info* wanted = a_target.type_params.empty() ? nullptr : a_target.type_params[0].get();
+    if (!wanted || wanted->base_type == script_value_type::jai_any_type) { return true; }
+    const type_info* declared = declared_yield_type(a_value);
+    return declared && (declared == wanted || declared->id == wanted->id);
+}
+
+uint64_t detail::coroutine_type_symbol(const script_value& a_value, engine* a_engine) {
+    return engine_access::symbolize(*a_engine, coroutine_type_name(a_value));
+}
+
+std::string detail::coroutine_type_name(const script_value& a_value) {
+    const type_info* declared = declared_yield_type(a_value);
+    return "coroutine<" + (declared ? declared->canonical_name() : std::string("var")) + ">";
+}
 
 coroutine_handle::coroutine_handle(engine* eng)
     : engine_(eng)

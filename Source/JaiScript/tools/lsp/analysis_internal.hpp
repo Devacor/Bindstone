@@ -90,7 +90,7 @@ inline std::string type_text(const jai::type_info* ti) {
 		case vt::jai_shared_ptr_type:
 			return "shared_ptr<" + (ti->element_type() ? type_text(ti->element_type().get()) : ti->type_name == "shared_ptr" ? std::string("auto") : ti->type_name) + ">";
 		case vt::jai_weak_ptr_type: return "weak_ptr<" + (ti->element_type() ? type_text(ti->element_type().get()) : std::string("auto")) + ">";
-		case vt::jai_function_type: return "function";
+		case vt::jai_function_type: return ti->is_signature() ? ti->canonical_name() : std::string("function");
 		default: return ti->canonical_name();
 	}
 }

@@ -168,6 +168,17 @@ public:
 
         test("programs_of_every_construct_run_alike_fresh_and_after_save_and_load", [check_roundtrip]() {
             const std::pair<std::string, std::string> programs[] = {
+                {"typed_callables", R"(
+                class Hero { int hp = 3; }
+                function<string(int)> name = x => type_of(x);
+                array<function<int(int)>> steps = [x => x + 1, x => x * 2];
+                int apply(function<int(Hero)> key, Hero h) { return key(h); }
+                coroutine int gen() { yield 4; }
+                coroutine<int> h = gen();
+                class Button { function<string(float)> label; Button() : label(v => type_of(v)) {} }
+                Button b;
+                name(1) + "|" + to_string(steps[1](steps[0](1))) + "|" + to_string(apply(e => e.hp, Hero())) + "|" + type_of(h) + "|" + to_string(h.next()) + "|" + b.label(1);
+            )"},
                 {"arithmetic_strings", R"(
                 int a = 7; int b = 3;
                 float f = 2.5 * 4.0 + a;
@@ -422,7 +433,7 @@ public:
             // the format version sits right after the 4-byte magic
             using namespace jaibite_test_detail;
             auto bytes = fresh_engine(false, {})->jaibite("[[warn_mode]];\nextern int q;\nvar v = 1;").save_bytes();
-            check_eq((int)60, (int)bytes[4], "jaibite format version");
+            check_eq((int)61, (int)bytes[4], "jaibite format version");
             {   // import(...) round-trips: literal paths, a group, computed arguments and jai::force
                 const auto dir = jai::foundry::test_temp_directory();
                 { std::ofstream(dir / "jb_imp_a.jai") << "int JB_A = 3;\n"; }

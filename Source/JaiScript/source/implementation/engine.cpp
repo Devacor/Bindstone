@@ -5273,11 +5273,16 @@ type_info* engine::get_type_info_function(type_info* return_type, const std::vec
     return get_type_info(temp);
 }
 
+// A function value's stamp: the `function` spelling, which names no signature (function<void()> is a signature of its own)
 type_info* engine::get_type_info_untyped_function() {
     if (impl->type_info_untyped_function_) { return impl->type_info_untyped_function_; }
-    type_info* ptr = get_type_info_function(get_type_info_void(), {});
+    type_info* ptr = get_type_info(type_info::make_callable(impl->string_symbolizer_));
     if (!parallel_region_active()) { impl->type_info_untyped_function_ = ptr; }
     return ptr;
+}
+
+type_info* engine::get_type_info_coroutine(type_info* yield_type) {
+    return get_type_info(type_info::make_coroutine(impl->string_symbolizer_, type_info_ptr(yield_type)));
 }
 
 type_info* engine::get_type_info(const type_info& temp) {

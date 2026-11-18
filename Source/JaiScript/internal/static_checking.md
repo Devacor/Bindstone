@@ -58,7 +58,9 @@ read around its errors.
 | `shared_ptr<T>` | null; an object of `T` or a subclass; a handle whose STATIC pointee is `T` or a subclass (an upcast); `cast<shared_ptr<T>>(h)`; a `var`/unknown source (judged at run time by its object's class) | a handle statically typed `shared_ptr<Base>` (a downcast needs the cast) or an unrelated class = error, at a declaration, `=`, a field, a `shared_ptr<T>` namespace variable, a parameter, a return and a container element |
 | `weak_ptr<T>` | null or a compatible shared/weak handle | same pointee or derived-to-base; unknown sources stay lenient |
 | `T&` declaration | T, or a derived class for a base-class reference | conversions do not make a mismatched reference binding valid; unknown sources stay lenient |
-| `function` variable or field | callable or null | calls through callable variables and function-typed parameters remain unchecked |
+| `function` variable or field | callable or null | calls through a bare `function` stay unchecked |
+| `function<R(A...)>` | null; a callable whose visible declaration fits (count with defaults, each parameter takes the signature's type, a declared result that is R or derives from it; void/var take any); a host function, an overload set or a callable of unknown declaration (judged at the store by `detail::signature_slot_refusal`) | a call through the slot checks count and arguments and has R's type (tentative); a lambda checked against it takes untyped parameters and an undeclared result from it (`open_lambda_context`, kept by the semantic walk, written as parsed by the serializer) |
+| `coroutine<Y>` | null; a handle of a coroutine declared exactly Y (any handle for Y var) | next()/result()/range-for/advance typed by Y; a value of known type a yield or return gives is checked against Y |
 | `var` | anything, forever | the dynamic escape: downstream types are unknown; a typed container copied into var retains its element constraint; explicitly use array<var> for a dynamic-element copy, and crossing back into a typed container validates its contents |
 | `auto` + initializer | the initializer's static type, then enforced as that type | a `var` or unknown static type (a `var` local, an `array<var>` element, a `var`-returning call, a mixed-branch ternary other than int with float, whose static type is float) makes the slot a `var`: the unit's first proof pass writes that into the declaration in every mode (proofs on or off, any check mode, a `.jaibite` load), once, so the runtime never locks to a value's run-time type; a `null` initializer leaves it dynamic — null carries no type; the runtime locks at the first non-null store |
 | `auto` without initializer | dynamic (unchecked) | runtime locks at first assignment; the checker can't see branch order, so it opts out — documented leniency |
@@ -140,15 +142,17 @@ methods, inherited fields) all check against the declared type.
   `float`, `bool`, `char`, `string` - `to_char(n)` is a `char`, `engine::host_function_result`);
   anything else (a `script_value`, an object, registrations that disagree) is unknown. The
   type is a diagnostics fact, never a proof source.
-- callables in variables (lambdas, cross-execute function values): unchecked.
+- callables in a `function<R(A...)>` slot: count, arguments and result by the signature; in a bare `function` or a `var`: unchecked.
+- host `std::function<R(A...)>` parameters: the binder records R and A... (`param_type_info::signature`), the checker reads them as `function<R(A...)>`.
+- contextual lambda types come from declarations only (`peek_type`, a field, a parameter, a return type): a flow narrowing never types a lambda, since it changes no run-time path. A call through a signature slot is an unresolved callee to narrowing (the slot may hold a host function that writes back), so a name passed to it ends its narrowing.
 
 **Returns** — a returned value must be assignable to the declared return type; a value from a `void` fn is
 an error. A primitive, string or reference result holds no null, so a bare `return;` and a path that
 reaches the end of the body are errors there (`detail/return_flow.hpp`, a load-time walk: no call or
 return pays for it); an end reached only through a `catch` of an exception the walk cannot prove is
 raised is a warning. A class, handle or container result returns null on those paths: warning
-severity. Lambdas with a declared return type follow the same rule. Coroutines are exempt: calling one
-yields a handle, and yield/return types aren't checked.
+severity. Lambdas with a declared return type follow the same rule. Coroutines owe no return: calling one
+yields a `coroutine<Y>`, and each yield and return of a known type is checked against Y.
 
 **Identifiers** — undeclared = error, checked against: scopes, the current class's members
 (incl. inherited) and, in a body that sees `this`, the members of a class derived from it,

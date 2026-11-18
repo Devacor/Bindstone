@@ -227,6 +227,11 @@
     "storage": {
       "patterns": [
         {
+          "comment": "function<R(A...)> and coroutine<Y> are types",
+          "name": "storage.type.jaiscript",
+          "match": "\\b(function|coroutine)\\b(?=\\s*<)"
+        },
+        {
           "name": "storage.type.class.jaiscript",
           "match": "\\b(class|coroutine|enum|namespace|function)\\b"
         },

@@ -2189,6 +2189,63 @@ public:
             }
         });
 
+        test("signature_slots_check_stores_and_calls_at_load", [this]() {
+            const std::pair<const char*, const char*> cases[] = {
+                {"function<int(int)> f = x => x;\nstring s = f(1);", "cannot initialize 's' declared 'string' with 'int'"},
+                {"function<int(int)> f = x => x;\nint n = f(\"a\");", "argument 1 of 'f': cannot pass 'string' where the signature takes 'int'"},
+                {"function<int(int)> f = x => x;\nint n = f(1, 2);", "'f' expects 1 argument(s), got 2 (it is a 'function<int(int)>')"},
+                {"function<int(int)> g = (a, b) => a + b;", "the lambda takes 2 arguments, the signature passes 1"},
+                {"function<int(int)> h = (string t) => 1;", "the lambda declares parameter 't' as 'string', which does not take the signature's 'int'"},
+                {"float half(int x) { return x / 2.0; }\nfunction<int(int)> k = half;", "'half' returns 'float', the signature returns 'int': a result is not converted on the way out"},
+                {"int add(int a, int b) { return a + b; }\nfunction<int(int)> one = add;", "'add' takes 2 arguments, the signature passes 1"},
+                {"function<int(int)> w = x => \"text\";", "cannot return 'string' from 'lambda' declared to return 'int'"},
+                {"class Hero { int hp; }\nfunction<int(Hero)> key = e => e.hpp;", "no member 'hpp' in class 'Hero'"},
+                {"function<int(int&)> byref = (int& r) => r;\nbyref(5);", "argument 1 of 'byref': the signature takes 'int&'; pass a variable"},
+                {"function<void(int)> writes = (int& r) => { r = 1; };", "the lambda takes parameter 'r' by reference ('int&'), the signature passes 'int' by value"},
+                {"function<int(int)> f = x => x;\nfunction<string(int)> cross = f;", "a 'function<int(int)>' returns 'int', the signature returns 'string'"},
+                {"array<function<int(int)>> fs = [x => x, (string z) => 1];", "array element 1: expected 'function<int(int)>', got 'function'"},
+                {"int apply(function<int(int)> g) { return g(1); }\napply(s => { string t = s; return 1; });", "cannot initialize 't' declared 'string' with 'int'"},
+                {"coroutine int count() { yield 1; }\ncoroutine<string> cs = count();", "cannot initialize 'cs' declared 'coroutine<string>' with 'coroutine<int>'"},
+                {"coroutine int count() { yield 1; }\nfunction<int()> notco = count;", "'count' returns 'coroutine<int>', the signature returns 'int'"},
+                {"coroutine int count() { yield 1; }\ncoroutine<int> c = count();\nstring st = c.next();", "cannot initialize 'st' declared 'string' with 'int'"},
+                {"coroutine int count() { yield 1; }\nfor (string each : count()) { }", "cannot initialize 'each' declared 'string' with 'int'"},
+                {"coroutine int bad() { yield \"x\"; }", "cannot yield 'string' from 'bad' declared to return 'int'"},
+                // member initializer lists: the lambda is typed by the field and stored as into it
+                {"class Button { function<void(string)> on_click; Button() : on_click(s => s.nope()) {} }", "no member 'nope' on 'string'"},
+                {"class Pad { function<void(string)> on_click; Pad() : on_click((int n) => n) {} }",
+                 "cannot assign 'function' to field 'on_click' declared 'function<void(string)>': the lambda declares parameter 'n' as 'int'"},
+                // flow narrowing: an argument is judged by its narrowed type; a lambda that reaches the name by reference reads it as
+                // declared, and one that stores to it ends the narrowing where it is made
+                {"class Unit { } class Hero : Unit { int hp; }\nfunction<int(Hero)> slot = h => h.hp;\nint run(Unit u) { return slot(u); }",
+                 "argument 1 of 'slot': cannot pass 'Unit' where the signature takes 'Hero'"},
+                {"class Unit { } class Hero : Unit { int hp; }\nint run(Unit u) { if (u instanceof Hero) { function<int(int)> by_ref = x => u.hp + x; } return 0; }",
+                 "no member 'hp' in class 'Unit'"},
+                {"class Unit { } class Hero : Unit { int hp; }\nint run(Unit u) { if (u instanceof Hero) { function<int(int)> writer = x => { u = Unit(); return x; };\nreturn u.hp; } return 0; }",
+                 "no member 'hp' in class 'Unit'"},
+            };
+            for (bool proofs : {true, false}) {
+                for (const auto& [source, text] : cases) {
+                    auto e = make_engine();
+                    e->type_proofs(proofs);
+                    auto r = e->check(source);
+                    check_true(has_diag(r, dlevel::error, text), std::string(source) + "\n" + r.format());
+                }
+                auto e = make_engine();
+                e->type_proofs(proofs);
+                auto clean = e->check("function<int(int)> f = x => x * 2;\nint a = f(3);\nint twice(function<int(int)> g, int v) { return g(g(v)); }\nint b = twice(x => x + 1, 1);\n"
+                                      "function<float(int)> h = x => x / 2.0;\nfloat c = h(1);\nfunction<var(var)> any = x => x;\nstring d = any(1);\n"
+                                      "class Base { } class Derived : Base { }\nDerived make() { return Derived(); }\nfunction<Base()> maker = make;\n"
+                                      "coroutine int g() { yield 1; }\ncoroutine<int> k = g();\nauto j = g();\nk = j;\nint n = k.next();\nvar v = k.next();");
+                check_eq((size_t)0, error_count(clean), clean.format());
+                auto composed = e->check("class Unit { string name; } class Hero : Unit { int hp; }\nint measure(function<int(Hero)> key, Hero h) { return key(h); }\n"
+                                         "function<int(Hero)> slot = h => h.hp;\nfunction<int(Unit)> probe = u => { if (u instanceof Hero) { return u.hp; } return 0; };\n"
+                                         "int run(Unit u) { int total = 0; if (u instanceof Hero) { total += measure(h => h.hp, u);\n"
+                                         "function<int(int)> add = [u](x) { return u.hp + x; }; total += add(1); total += slot(u); } return total; }\n"
+                                         "class Button { function<int(string)> on_click; Button() : on_click(s => s.size()) {} }");
+                check_eq((size_t)0, error_count(composed), composed.format());
+            }
+        });
+
         test("a_coroutine_handle_answers_next_and_done_only", [this]() {
             for (bool proofs : {true, false}) {
                 auto e = make_engine();
@@ -2196,12 +2253,12 @@ public:
                 const std::string gen = "coroutine int g() { yield 1; yield 2; }\n";
                 auto r = e->check(gen + "auto h = g();\nh.resume();");
                 check_eq((size_t)1, error_count(r), r.format());
-                check_true(has_diag(r, dlevel::error, "no member 'resume' on 'coroutine_handle' (did you mean 'next'?)"), r.format());
-                check_true(has_diag(e->check(gen + "g().resume();"), dlevel::error, "no member 'resume' on 'coroutine_handle' (did you mean 'next'?)"));
+                check_true(has_diag(r, dlevel::error, "no member 'resume' on 'coroutine<int>' (did you mean 'next'?)"), r.format());
+                check_true(has_diag(e->check(gen + "g().resume();"), dlevel::error, "no member 'resume' on 'coroutine<int>' (did you mean 'next'?)"));
                 check_true(has_diag(e->check(gen + "class C { coroutine int m() { yield 1; } }\nauto c = C();\nauto h = c.m();\nh.resume();"), dlevel::error,
-                                    "no member 'resume' on 'coroutine_handle' (did you mean 'next'?)"));
-                check_true(has_diag(e->check(gen + "auto h = g();\nh.nxt();"), dlevel::error, "no member 'nxt' on 'coroutine_handle' (did you mean 'next'?)"));
-                check_true(has_diag(e->check(gen + "auto h = g();\nvar f = h.resume;"), dlevel::error, "no member 'resume' on 'coroutine_handle'"));
+                                    "no member 'resume' on 'coroutine<int>' (did you mean 'next'?)"));
+                check_true(has_diag(e->check(gen + "auto h = g();\nh.nxt();"), dlevel::error, "no member 'nxt' on 'coroutine<int>' (did you mean 'next'?)"));
+                check_true(has_diag(e->check(gen + "auto h = g();\nvar f = h.resume;"), dlevel::error, "no member 'resume' on 'coroutine<int>'"));
                 check_true(has_diag(e->check(gen + "auto h = g();\nh.next(1, 2);"), dlevel::error, "next() takes 0 or 1 arguments ([count])"));
                 check_true(has_diag(e->check(gen + "auto h = g();\nh.next(\"2\");"), dlevel::error, "next() count must be an integer"));
                 check_true(has_diag(e->check(gen + "auto h = g();\nh.done(1);"), dlevel::error, "done() takes no arguments"));

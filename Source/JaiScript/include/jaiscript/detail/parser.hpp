@@ -251,6 +251,10 @@ namespace jai {
         checked_result<type_info_ptr> map_type();
         checked_result<type_info_ptr> weak_ptr_type();
         checked_result<type_info_ptr> shared_ptr_type();
+        bool callable_type_ahead() const;   // function '<' / coroutine '<': a type, never a declaration's keyword
+        checked_result<type_info_ptr> signature_type();
+        checked_result<type_info_ptr> coroutine_type();
+        checked_result<declaration_ptr> callable_typed_declaration();
         checked_result<type_info_ptr> named_type();
         type_info_ptr byte_element_type();
         type_info_ptr array_type_of(const type_info_ptr& element);

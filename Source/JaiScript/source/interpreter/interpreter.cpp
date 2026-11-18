@@ -391,7 +391,7 @@ void interpreter::initialize() {
     shared_ptr_holder_type_id_ = string_symbolizer_->intern("shared_ptr_holder");
     weak_from_this_id_ = string_symbolizer_->intern("weak_from_this");
     shared_from_this_id_ = string_symbolizer_->intern("shared_from_this");
-    coroutine_handle_type_id_ = string_symbolizer_->intern("coroutine_handle");
+    coroutine_handle_type_id_ = string_symbolizer_->intern("coroutine");
     next_id_ = string_symbolizer_->intern("next");
     handle_reset_id_ = string_symbolizer_->intern("reset");
     done_id_ = string_symbolizer_->intern("done");
@@ -4665,7 +4665,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
                 return {};
             }
             return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
-                "coroutine_handle has no member '{0}'", expr->member_id);
+                "{0} has no member '{1}'", detail::coroutine_type_symbol(objectValue, engine_), expr->member_id);
         }
     }
 

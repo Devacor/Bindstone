@@ -75,18 +75,30 @@ namespace jai {
         auto_select     // The engine's default: set_backend stores vm
     };
 
+    struct host_signature;
+
     // Extended type info for overload resolution - stores base type + optional C++ type for objects
     struct param_type_info {
         script_value_type base_type;
         std::type_index cpp_type{typeid(void)};  // For object types, used to lookup class def
+        // a std::function<R(A...)> parameter's R and A..., which the checker reads as function<R(A...)>
+        const host_signature* signature = nullptr;
 
         param_type_info() : base_type(script_value_type::jai_null_type) {}
         param_type_info(script_value_type t) : base_type(t), cpp_type(typeid(void)) {}
         param_type_info(script_value_type t, std::type_index idx) : base_type(t), cpp_type(idx) {}
+        param_type_info(script_value_type t, const host_signature* s) : base_type(t), cpp_type(typeid(void)), signature(s) {}
 
         bool operator==(const param_type_info& other) const {
-            return base_type == other.base_type && cpp_type == other.cpp_type;
+            return base_type == other.base_type && cpp_type == other.cpp_type && signature == other.signature;
         }
+    };
+
+    // The parts of a C++ std::function<R(A...)> a script callable stands behind; references marks each A that is a non-const T&
+    struct host_signature {
+        param_type_info result;
+        std::vector<param_type_info> parameters;
+        std::vector<uint8_t> references;
     };
 
     // Compile-time-tagged script source for engine::execute's literal fast lane.
@@ -1314,6 +1326,8 @@ namespace jai {
         type_info* get_type_info_function(type_info* return_type, const std::vector<type_info*>& arg_types);
         // the type every function value carries (void(), interned once per engine)
         type_info* get_type_info_untyped_function();
+        // coroutine<Y>: the type of a handle whose yields and return convert to Y (null: var)
+        type_info* get_type_info_coroutine(type_info* yield_type);
 
         // Get or create type_info for object types (uses class_definition's type_info)
         type_info* get_type_info_object(const std::string& class_name);
@@ -1561,7 +1575,7 @@ namespace jai {
                           std::is_same_v<decay_t, script_int> || std::is_enum_v<decay_t>) {
                 return param_type_info(script_value_type::jai_int_type);
             } else if constexpr (is_specialization_v<decay_t, std::function>) {
-                return param_type_info(script_value_type::jai_function_type);
+                return param_type_info(script_value_type::jai_function_type, &host_signature_of(static_cast<decay_t*>(nullptr)));
             } else if constexpr (std::is_same_v<decay_t, float> || std::is_same_v<decay_t, double> ||
                                  std::is_same_v<decay_t, script_float>) {
                 return param_type_info(script_value_type::jai_float_type);
@@ -1590,6 +1604,15 @@ namespace jai {
             } else {
                 return param_type_info(script_value_type::jai_object_type, std::type_index(typeid(decay_t)));
             }
+        }
+        // One descriptor per C++ signature, made on first use: engine-independent and never written again (a void R is jai_invalid_type)
+        template <typename R, typename... A>
+        static const host_signature& host_signature_of(std::function<R(A...)>*) {
+            static const host_signature result{
+                std::is_void_v<R> ? param_type_info(script_value_type::jai_invalid_type) : map_cpp_type_to_param_info<R>(),
+                {map_cpp_type_to_param_info<A>()...},
+                {uint8_t(std::is_lvalue_reference_v<A> && !std::is_const_v<std::remove_reference_t<A>>)...}};
+            return result;
         }
         template <typename R>
         static constexpr script_value_type host_result_kind() {

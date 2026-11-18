@@ -113,6 +113,13 @@ private:
     std::unique_ptr<uncopied_state> uncopied_;
 };
 
+namespace detail {
+// coroutine<Y> as type_of names a handle: Y is its coroutine's declared type, var when it declares none
+std::string coroutine_type_name(const script_value& value);
+// that name interned, for an error text's argument (out of line: the member paths that raise with it stay small)
+uint64_t coroutine_type_symbol(const script_value& value, engine* eng);
+}
+
 // The value a coroutine declaration defines: a call mints a handle over the declaration and the scope it was declared in
 struct coroutine_mint {
     engine* eng = nullptr;

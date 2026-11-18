@@ -474,9 +474,15 @@ public:
             };
             const char* heads[] = { "coroutine gen() -> int", "coroutine function gen() -> int", "coroutine int gen()", "coroutine int gen() -> int" };
             const char* bodies[] = {
-                " { yield 1; return \"x\"; }\nauto h = gen();\nvar first = h.next();\nh.next();",
                 " { yield 1; var s = \"x\"; return s; }\nauto h = gen();\nvar first = h.next();\nh.next();",
+                " { var one = 1; yield one; var s = \"x\"; return s; }\nauto h = gen();\nvar first = h.next();\nh.next();",
             };
+            for (const char* head : heads) {   // a return of a known type the declared one never takes fails the load
+                for (bool use_vm : {false, true}) {
+                    const std::string out = run(use_vm, std::string(head) + " { yield 1; return \"x\"; }");
+                    check_true(out.find("cannot return 'string' from 'gen' declared to return 'int'") != std::string::npos, std::string(head) + ": " + out);
+                }
+            }
             for (const char* body : bodies) {
                 std::string reference;
                 for (const char* head : heads) {
@@ -882,19 +888,21 @@ public:
                 "Cannot return array from 'g' (declared -> int)", "method coroutine completion mismatch text");
         });
 
-        test("yields_take_the_declared_type", [this, both_drained]() {
+        test("yields_take_the_declared_type", [this, both_drained, check_parity]() {
             // a yield hands out the declared type like a return: the slot table converts, a mismatch raises the yield's text
             both_drained("coroutine int g() { yield true; var f = 2.9; yield f; return 0; }\nauto h = g(); var a = h.next(); string t = \"\"; try { h.next(); } catch (e) { t = to_string(e); } type_of(a) + \":\" + to_string(a) + \"|\" + t",
                 "int:1|Cannot yield float from 'g' (declared -> int)", "a bool converts into int, a float never does");
-            both_drained("coroutine string g() { yield 1; return \"x\"; }\nauto h = g(); string t = \"\"; try { h.next(); } catch (e) { t = to_string(e); } t",
+            both_drained("coroutine string g() { var n = 1; yield n; return \"x\"; }\nauto h = g(); string t = \"\"; try { h.next(); } catch (e) { t = to_string(e); } t",
                 "Cannot yield int from 'g' (declared -> string)", "an int never converts into string");
+            check_true(check_parity("coroutine string g() { yield 1; return \"x\"; }", "a known yield").find("cannot yield 'int' from 'g' declared to return 'string'") != std::string::npos,
+                "a yield of a known type the declared one never takes fails the load");
             both_drained("coroutine float g() { yield 1; yield 2; return 0.0; }\nstring s = \"\"; for (auto v : g()) { s += type_of(v); } s",
                 "floatfloat", "a range-for drive sees the converted values");
-            both_drained("coroutine int g() { yield \"s\"; yield 2; return 0; }\nauto h = g(); string t = \"\"; try { h.next(); } catch (e) { t = to_string(e); } t + \"|\" + to_string(h.done())",
+            both_drained("coroutine int g() { var s = \"s\"; yield s; yield 2; return 0; }\nauto h = g(); string t = \"\"; try { h.next(); } catch (e) { t = to_string(e); } t + \"|\" + to_string(h.done())",
                 "Cannot yield string from 'g' (declared -> int)|true", "a mismatch raises at the resume; the handle is done");
             both_drained("coroutine int g() { var s = \"s\"; try { yield s; } catch (e) { yield 7; } return 0; }\nauto h = g(); drain(h)",
                 "7|0", "a catch around the yield sees its failure");
-            both_drained("class C { coroutine int g() { yield [1]; return 0; } }\nauto h = C().g(); string t = \"\"; try { h.next(); } catch (e) { t = to_string(e); } t",
+            both_drained("class C { coroutine int g() { var a = [1]; yield a; return 0; } }\nauto h = C().g(); string t = \"\"; try { h.next(); } catch (e) { t = to_string(e); } t",
                 "Cannot yield array from 'g' (declared -> int)", "a method coroutine's mismatch text");
             both_drained("coroutine var g() { yield \"s\"; yield 2.9; return 0; }\nauto h = g(); drain(h)",
                 "s|2.9|0", "a var coroutine yields as is");
@@ -1181,7 +1189,8 @@ public:
         test("handle_type_of_and_to_string_parity", [this, check_parity]() {
             std::string r = check_parity("coroutine int g() { yield 1; }\nauto h = g(); auto h2 = h;\ntype_of(h) + \"|\" + to_string(to_string(h) != \"\") + \"|\" + to_string(h == null) + \"|\" + to_string(h == h2)",
                 "type_of / to_string / equality of a coroutine handle");
-            check_eq(std::string("coroutine_handle|true|false|true"), r, "a handle's type_of is the name its error texts use");
+            check_eq(std::string("coroutine<int>|true|false|true"), r, "a handle's type_of is its coroutine<Y>, the name its error texts use");
+            check_eq(std::string("coroutine<var>"), check_parity("coroutine g() { yield 1; }\ntype_of(g())", "an undeclared coroutine"), "an undeclared yield is var");
         });
 
         // A brace-less body that completes AT the yield leaves no inner frame: the enclosing
@@ -1496,7 +1505,7 @@ public:
             load_error("coroutine int g() { yield 1; }\nauto h = g(); h.advance(5);", "2:25: error: advance() writes the yielded value through its argument; pass a variable", "a literal fails the load");
             load_error("coroutine string g() { yield \"a\"; }\nauto h = g(); int v = 0; h.advance(v);", "advance() cannot store the yielded 'string' into 'int'", "the yielded type against v's");
             load_error("coroutine int g() { yield 1; }\nconst int c = 0; auto h = g(); h.advance(c);", "cannot pass const 'c' to parameter 'v' of 'advance': 'advance' writes through it", "a const fails the load");
-            load_error("coroutine int g() { yield 1; }\nauto h = g(); h.advanse(c);", "no member 'advanse' on 'coroutine_handle' (did you mean 'advance'?)", "the suggestion knows advance");
+            load_error("coroutine int g() { yield 1; }\nauto h = g(); h.advanse(c);", "no member 'advanse' on 'coroutine<int>' (did you mean 'advance'?)", "the suggestion knows advance");
         });
 
         test("result_reads_the_return_value_once_done", [this, check_both, check_executes, both_backends]() {
@@ -1531,7 +1540,7 @@ public:
             };
             load_error("coroutine int g() { return 1; }\nauto h = g(); h.result(1);", "error: result() takes no arguments", "the checker knows the arity");
             load_error("coroutine string g() { return \"a\"; }\nauto h = g(); h.next(); array<int> a = h.result();", "cannot initialize 'a'", "the checker knows the declared return type");
-            load_error("coroutine int g() { return 1; }\nauto h = g(); h.resul();", "no member 'resul' on 'coroutine_handle' (did you mean 'result'?)", "the suggestion knows result");
+            load_error("coroutine int g() { return 1; }\nauto h = g(); h.resul();", "no member 'resul' on 'coroutine<int>' (did you mean 'result'?)", "the suggestion knows result");
         });
 
         test("next_and_next_count", [this, check_both, check_executes]() {

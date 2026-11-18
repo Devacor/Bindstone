@@ -307,7 +307,7 @@ int main() {
 <div class="tab-panel" id="port-d-jai" role="tabpanel" aria-labelledby="port-d-tab-jai" tabindex="0">
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Button {
     string label;
-    function on_click;
+    function&lt;void(string)&gt; on_click;
     void click() { if (on_click != nullptr) { on_click(label); } }
 }
 
@@ -331,7 +331,7 @@ print(clicks, " ", log.size(), " ", add_base(1), " ", counter(), " ", copy());</
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2 2 11 3 4</code></pre></div>
 </div>
 </div>
-<ul><li>Capture lists mean what they mean in C++, and a by-value capture is writable without <code>mutable</code>. A <code>function</code> slot holds any callable or null and declares no signature.</li><li>The last number differs. C++ copies a lambda together with its <code>n</code>; in JaiScript <code>copy</code> and <code>counter</code> are two names for one lambda and count on one <code>n</code>.</li></ul>
+<ul><li>Capture lists mean what they mean in C++, and a by-value capture is writable without <code>mutable</code>. <code>function&lt;void(string)&gt;</code> is the <code>std::function</code>: a handler that does not fit it, or a call that passes something else, fails the load. A bare <code>function</code> slot holds any callable or null and declares no signature.</li><li>The last number differs. C++ copies a lambda together with its <code>n</code>; in JaiScript <code>copy</code> and <code>counter</code> are two names for one lambda and count on one <code>n</code>.</li></ul>
 <h3 id="port-e">A thrown class, a destructor and a map<a class="hlink" href="#port-e" aria-label="link">&#8203;</a></h3>
 <div class="tabs" id="port-e-tabs">
 <div class="tab-list" role="tablist" aria-label="C++ and its JaiScript port" hidden>
@@ -437,7 +437,8 @@ rope=2</code></pre></div>
 <tr><td>reference</td><td><code>void heal(int&amp; hp)</code>, <code>auto&amp; r = x;</code></td><td>the same; a field or an element binds too (<code>heal(h.hp)</code>, <code>heal(arr[i])</code>); a reference cannot be a field or an element</td></tr>
 <tr><td>template</td><td><code>template&lt;class T&gt; T biggest(T a, T b)</code></td><td><code>auto biggest(auto a, auto b)</code>; no templates, no variadics in script</td></tr>
 <tr><td>lambda</td><td><code>[x, &amp;y](int v) { ... }</code></td><td>the same captures: <code>[]</code>, <code>[x]</code>, <code>[&amp;x]</code>, <code>[=]</code>, <code>[&amp;]</code>, <code>[this]</code>, <code>[n = expr]</code>; a by-value capture is writable without <code>mutable</code></td></tr>
-<tr><td>callable slot</td><td><code>std::function&lt;int(int)&gt; f;</code></td><td><code>function f;</code>: any callable or null, with no signature</td></tr>
+<tr><td>callable slot</td><td><code>std::function&lt;int(int)&gt; f;</code></td><td><code>function&lt;int(int)&gt; f;</code>: the same, checked at load (<code>f = x =&gt; x * 2;</code> types <code>x</code> as an <code>int</code>); <code>function f;</code> holds any callable or null, with no signature</td></tr>
+<tr><td>coroutine</td><td><code>std::generator&lt;int&gt;</code>, a <code>std::coroutine_handle</code></td><td><code>coroutine int f()</code>; a call makes a <code>coroutine&lt;int&gt;</code> (<a href="12-from-coroutines.html">From coroutines</a>)</td></tr>
 </tbody></table></div>
 <h3 id="classes">Classes<a class="hlink" href="#classes" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th></th><th>C++</th><th>JaiScript</th></tr></thead><tbody>

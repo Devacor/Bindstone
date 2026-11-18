@@ -193,6 +193,7 @@ namespace jai::detail {
         JAI_FORCEINLINE static type_info* get_type_info_declared_reference(engine& a_engine, type_info* referenced_type) { return a_engine.get_type_info_declared_reference(referenced_type); }
         JAI_FORCEINLINE static type_info* get_type_info_function(engine& a_engine, type_info* return_type, const std::vector<type_info*>& arg_types) { return a_engine.get_type_info_function(return_type, arg_types); }
         JAI_FORCEINLINE static type_info* get_type_info_untyped_function(engine& a_engine) { return a_engine.get_type_info_untyped_function(); }
+        JAI_FORCEINLINE static type_info* get_type_info_coroutine(engine& a_engine, type_info* yield_type) { return a_engine.get_type_info_coroutine(yield_type); }
         JAI_FORCEINLINE static type_info* get_type_info_object(engine& a_engine, const std::string& class_name) { return a_engine.get_type_info_object(class_name); }
         JAI_FORCEINLINE static type_info* get_type_info_object(engine& a_engine, uint64_t type_id) { return a_engine.get_type_info_object(type_id); }
         JAI_FORCEINLINE static type_info* get_type_info(engine& a_engine, const type_info& temp) { return a_engine.get_type_info(temp); }

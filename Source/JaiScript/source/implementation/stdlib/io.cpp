@@ -2,6 +2,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/detail/format_spec.hpp>
 #include <jaiscript/detail/format_text.hpp>
 #include <jaiscript/detail/value_text.hpp>
@@ -275,7 +276,7 @@ namespace stdlib {
     // the instance's own class first, then the value tag, then the bare kind - a value
     // tagged with a base class still answers the class it actually holds.
     std::string object_type_name(const script_value& d) {
-        if (const auto* holder = d.peek_object_holder(); holder && holder->is_coroutine_handle()) { return "coroutine_handle"; }
+        if (const auto* holder = d.peek_object_holder(); holder && holder->is_coroutine_handle()) { return detail::coroutine_type_name(d); }
         try {
             auto instance = d.as<strong_ptr<class_instance>>();
             if (instance) {

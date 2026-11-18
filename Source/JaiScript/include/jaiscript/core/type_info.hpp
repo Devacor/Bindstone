@@ -109,6 +109,9 @@ namespace jai {
         // An enum's types, set when its declaration runs (engine::note_enum): the interned object spelling of its name, which a
         // slot declares, and the int type its values are stamped with (a stamp of the first lands as the second: set_type_info)
         bool is_enum = false;
+        // coroutine<Y>, a coroutine handle's type: an object type named by its spelling whose one parameter is the type each yield
+        // and the return convert to (engine::get_type_info_coroutine)
+        bool is_coroutine = false;
         std::string type_name;  // For Object<T>, this would be the class name
         uint64_t id = 0;        // Interned canonical name for O(1) type comparison
 
@@ -163,6 +166,8 @@ namespace jai {
         bool is_map() const { return base_type == script_value_type::jai_map_type; }
         bool is_object() const { return base_type == script_value_type::jai_object_type; }
         bool is_function() const { return base_type == script_value_type::jai_function_type; }
+        // function<R(A...)>: a callable slot with a signature (the bare `function` spelling has none)
+        bool is_signature() const { return base_type == script_value_type::jai_function_type && !type_params.empty(); }
         bool is_reference() const { return base_type == script_value_type::jai_reference_type; }
         bool is_weak_ptr() const { return base_type == script_value_type::jai_weak_ptr_type; }
         // a value of this type can own an instance (its end observable through a destructor, a weak_ptr or a use count): anything
@@ -280,6 +285,9 @@ namespace jai {
         static type_info make_callable(string_symbolizer& symbolizer);
 
         static type_info make_function(string_symbolizer& symbolizer, type_info_ptr return_type, std::vector<type_info_ptr> arg_types);
+
+        // coroutine<Y>
+        static type_info make_coroutine(string_symbolizer& symbolizer, type_info_ptr yield_type);
 
         // An integral or floating C++ type of that size, as make<T> reaches it
         static type_info make_native_int(string_symbolizer& symbolizer, size_t native_size, bool is_signed);

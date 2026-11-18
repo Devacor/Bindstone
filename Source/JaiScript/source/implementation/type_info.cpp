@@ -108,14 +108,20 @@ std::string type_info::canonical_name() const {
                     result += "function";
                     break;
                 }
+                // a signature names var as written and a T& parameter by its T
                 text(">");
                 text(")");
                 for (size_t i = t.type_params.size(); i-- > 1;) {
-                    part(t.type_params[i], "");
+                    const type_info* arg = t.type_params[i].get();
+                    if (arg && arg->base_type == script_value_type::jai_reference_type) {
+                        text("&");
+                        arg = arg->element_type().get();
+                    }
+                    if (!arg || arg->base_type == script_value_type::jai_any_type) { text("var"); } else { pending.push_back({arg, nullptr}); }
                     if (i > 1) { text(","); }
                 }
                 text("(");
-                part(t.return_type(), "void");
+                if (t.return_type() && t.return_type()->base_type == script_value_type::jai_any_type) { text("var"); } else { part(t.return_type(), "void"); }
                 text("function<");
                 break;
             default:
@@ -300,6 +306,16 @@ type_info type_info::make_function(string_symbolizer& symbolizer, type_info_ptr 
     type_info info(script_value_type::jai_function_type);
     info.type_params.push_back(return_type);
     info.type_params.insert(info.type_params.end(), arg_types.begin(), arg_types.end());
+    info.id = type_name_id(symbolizer, info.canonical_name());
+    return info;
+}
+
+type_info type_info::make_coroutine(string_symbolizer& symbolizer, type_info_ptr yield_type) {
+    type_info info(script_value_type::jai_object_type);
+    info.is_coroutine = true;
+    const bool dynamic = !yield_type || yield_type->base_type == script_value_type::jai_any_type;
+    info.type_name = "coroutine<" + (dynamic ? std::string("var") : yield_type->canonical_name()) + ">";
+    info.type_params.push_back(yield_type);
     info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }

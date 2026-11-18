@@ -2042,7 +2042,7 @@ JAI_NOINLINE checked_result<expression_ptr> parser::cast_expression() {
     const token& castToken = previous();
     JAISCRIPT_TRY(expect(token_type::less, "expected '<' after 'cast'"));
     if (check(token_type::auto_keyword) || check(token_type::var_keyword) ||
-        check(token_type::void_keyword) || check(token_type::function_keyword)) {
+        check(token_type::void_keyword) || (check(token_type::function_keyword) && !callable_type_ahead())) {
         report_error("cast needs a concrete type: cast<T>(e), cast<T&>(e) or cast<shared_ptr<T>>(e)", peek());
         return make_error_code(parse_error_code::syntax_error);
     }
@@ -2077,9 +2077,69 @@ checked_result<type_info_ptr> parser::parse_type() {
         case token_type::shared_ptr_keyword:
             advance();
             return shared_ptr_type();
+        case token_type::function_keyword:
+        case token_type::coroutine_keyword:
+            if (callable_type_ahead()) {
+                return advance().type == token_type::coroutine_keyword ? coroutine_type() : signature_type();
+            }
+            return named_type();
         default:
             return named_type();
     }
+}
+
+// function<R(A...)> or coroutine<Y> starts here: the keyword with '<' after it (`function name`, `function (` and the coroutine
+// prefix never have one)
+bool parser::callable_type_ahead() const {
+    return (check(token_type::function_keyword) || check(token_type::coroutine_keyword)) && !pushed_back_token_ &&
+           current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::less;
+}
+
+// function<R(A, B&, ...)>: the result, then each parameter's type, by reference with '&'; a name after a type is read and dropped
+JAI_NOINLINE checked_result<type_info_ptr> parser::signature_type() {
+    advance();   // '<'
+    if (check(token_type::auto_keyword)) {
+        report_error("a function signature declares its result: function<R(A...)>, with void for none and var for any", peek());
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    JAISCRIPT_TRY_ASSIGN(type_info_ptr result, parse_type());
+    if (check(token_type::ampersand)) {
+        report_error("a function signature returns by value: function<R(A...)>", peek());
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after the result type of a function signature: function<R(A...)>"));
+    std::vector<type_info_ptr> arguments;
+    if (!check(token_type::right_paren)) {
+        do {
+            if (check(token_type::auto_keyword)) {
+                report_error("a function signature declares each parameter's type: function<R(A...)>, with var for any", peek());
+                return make_error_code(parse_error_code::syntax_error);
+            }
+            JAISCRIPT_TRY_ASSIGN(type_info_ptr argument, parse_type());
+            if (argument && argument->base_type == script_value_type::jai_null_type) {
+                report_error("a function signature's parameter cannot be void: function<R()> takes none", previous());
+                return make_error_code(parse_error_code::syntax_error);
+            }
+            if (match(token_type::ampersand)) { argument = type_info_ptr(detail::engine_access::get_type_info_reference(*engine_, argument.get())); }
+            if (check(token_type::identifier)) { advance(); }
+            arguments.push_back(argument);
+        } while (match(token_type::comma));
+    }
+    JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after the parameters of a function signature"));
+    consume_greater_in_generic("expected '>' after a function signature");
+    return store_type_info(type_info::make_function(*symbolizer_, result, std::move(arguments)));
+}
+
+// coroutine<Y>: a handle whose yields and return are Y
+JAI_NOINLINE checked_result<type_info_ptr> parser::coroutine_type() {
+    advance();   // '<'
+    if (check(token_type::auto_keyword) || check(token_type::void_keyword)) {
+        report_error("a coroutine type declares what its coroutine yields: coroutine<T>, with var for any", peek());
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    JAISCRIPT_TRY_ASSIGN(type_info_ptr yields, parse_type());
+    consume_greater_in_generic("expected '>' after a coroutine's yield type");
+    return store_type_info(type_info::make_coroutine(*symbolizer_, yields));
 }
 
 JAI_NOINLINE checked_result<type_info_ptr> parser::named_type() {
@@ -3279,6 +3339,8 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::declaration_rest() {
         return decl;
     }
 
+    if (callable_type_ahead()) { return callable_typed_declaration(); }
+
     if (match(token_type::coroutine_keyword)) {
         const bool was_in_coroutine = in_coroutine_;
         in_coroutine_ = true;
@@ -3553,6 +3615,7 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
             type_info_ptr type = nullptr;
             std::string name;
             bool is_reference = false;
+            bool untyped = false;
 
             // Check for :name syntax (shorthand for auto: name)
             if (match(token_type::colon)) {
@@ -3566,7 +3629,7 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
                      check(token_type::function_keyword) || check(token_type::int_keyword) || check(token_type::float_keyword) ||
                      check(token_type::string_keyword) || check(token_type::bool_keyword) || check(token_type::char_keyword) ||
                      check(token_type::void_keyword) || check(token_type::array_keyword) || check(token_type::map_keyword) ||
-                     check(token_type::weak_ptr_keyword) || check(token_type::shared_ptr_keyword)) {
+                     check(token_type::weak_ptr_keyword) || check(token_type::shared_ptr_keyword) || callable_type_ahead()) {
 
                 JAISCRIPT_TRY_ASSIGN(type, parse_type());
 
@@ -3587,6 +3650,7 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
                         type->type_name.find("::") == std::string::npos) {
                         name = type->type_name;
                         type = store_type_info(type_info::make_any(*symbolizer_));
+                        untyped = true;
                     } else {
                         report_expected_name("expected parameter name", "parameter");
     return make_error_code(parse_error_code::syntax_error);
@@ -3604,6 +3668,7 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
 
             parameter param(type, name, is_reference, is_const);
             param.symbol_id = symbolizer_->intern(name);
+            param.untyped = untyped;
 
             if (match(token_type::equal)) {
                 JAISCRIPT_TRY_ASSIGN(param.default_value, expression());
@@ -3755,6 +3820,7 @@ checked_result<expression_ptr> parser::arrow_function_expression() {
         token name = advance();
         parameter param(store_type_info(type_info::make_any(*symbolizer_)), std::string(name.lexeme));
         param.symbol_id = get_symbol_id(name);
+        param.untyped = true;
         lambda->parameters.push_back(std::move(param));
     } else {
         JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' for arrow function parameters"));
@@ -4962,7 +5028,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
             in_coroutine_ = true;
             coroutine_body_pending_ = true;
             for (;;) {
-                if (match(token_type::coroutine_keyword)) { member_is_coroutine = true; }
+                if (!callable_type_ahead() && match(token_type::coroutine_keyword)) { member_is_coroutine = true; }
                 else if (match(token_type::static_keyword)) { leading_static = true; }
                 else if (match(token_type::override_keyword)) { leading_override = true; }
                 else { break; }
@@ -5023,7 +5089,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
             auto var_decl = std::make_shared<variable_decl>(name.location, store_type_info(type_info::make_callable(*symbolizer_)), name.lexeme, get_symbol_id(name), init);
             var_decl->function_spelling = true;
             member = var_decl;
-        } else if (match(token_type::function_keyword) || (member_is_coroutine && bare_coroutine_head())) {
+        } else if ((!callable_type_ahead() && match(token_type::function_keyword)) || (member_is_coroutine && bare_coroutine_head())) {
             // Method declaration with 'function' keyword: function name(...) or function operator=(...);
             // the bare coroutine head (coroutine name(...) / coroutine operator+(...)) lands here too
             bool is_static = leading_static;
@@ -5074,7 +5140,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
             // Regular member (variable or function)
             bool is_static = leading_static || match(token_type::static_keyword);
             bool is_override = leading_override || match(token_type::override_keyword);
-            const bool function_spelling = check(token_type::function_keyword);
+            const bool function_spelling = check(token_type::function_keyword) && !callable_type_ahead();
 
             auto type_result = parse_type();
             if (!type_result) {
@@ -5460,7 +5526,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
             }
             member_decl = std::move(class_result.value());
             match(token_type::semicolon);  // Consume optional semicolon after class
-        } else if (!inline_member && !const_member && match(token_type::coroutine_keyword)) {
+        } else if (!inline_member && !const_member && !callable_type_ahead() && match(token_type::coroutine_keyword)) {
             // a coroutine member: the program-scope spellings (internal/grammar.md: a namespace body is declaration*)
             const bool was_in_coroutine = in_coroutine_;
             in_coroutine_ = true;
@@ -5498,7 +5564,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
             member_decl = std::move(extern_result.value());
         } else {
             // Function or variable declaration
-            const bool function_spelling = check(token_type::function_keyword);
+            const bool function_spelling = check(token_type::function_keyword) && !callable_type_ahead();
             type_info_ptr type;
             if (!((inline_member || const_member) && untyped_member_declaration_ahead())) {
                 auto type_result = parse_type();
@@ -5852,7 +5918,7 @@ checked_result<declaration_ptr> parser::extern_declaration() {
         }
         return false;
     };
-    if (!is_const && match(token_type::function_keyword)) {
+    if (!is_const && !callable_type_ahead() && match(token_type::function_keyword)) {
         is_function = true;
     } else if (!untyped_name_ahead()) {
         JAISCRIPT_TRY_ASSIGN(type, parse_type());
@@ -6086,7 +6152,7 @@ bool parser::bare_coroutine_head() const {
 
 bool parser::coroutine_modifier_run() const {
     for (size_t i = current_; i < stream_->size(); ++i) {
-        if ((*stream_)[i].type == token_type::coroutine_keyword) return true;
+        if ((*stream_)[i].type == token_type::coroutine_keyword) return i + 1 >= stream_->size() || (*stream_)[i + 1].type != token_type::less;
         if ((*stream_)[i].type != token_type::static_keyword && (*stream_)[i].type != token_type::override_keyword) return false;
     }
     return false;
@@ -6098,9 +6164,24 @@ checked_result<declaration_ptr> parser::bare_coroutine_declaration() {
     return parse_function_body(name_view, name_id, nullptr);
 }
 
+// function<R(A...)> name ... / coroutine<Y> name ...: a function when '(' follows the name, else a variable
+checked_result<declaration_ptr> parser::callable_typed_declaration() {
+    const size_t start = current_;
+    JAISCRIPT_TRY(parse_type());
+    match(token_type::ampersand);
+    const bool is_function = check(token_type::identifier) && current_ + 1 < stream_->size() &&
+                             (*stream_)[current_ + 1].type == token_type::left_paren && !paren_group_ends_statement(current_ + 1);
+    current_ = start;
+    pushed_back_token_.reset();
+    if (!is_function) { return variable_declaration(); }
+    JAISCRIPT_TRY_ASSIGN(auto result, function_declaration());
+    match(token_type::semicolon);
+    return result;
+}
+
 checked_result<declaration_ptr> parser::function_declaration() {
     type_info_ptr return_type;
-    if (!match(token_type::function_keyword)) { JAISCRIPT_TRY_ASSIGN(return_type, parse_type()); }   // `function f(...)` declares no return type
+    if (callable_type_ahead() || !match(token_type::function_keyword)) { JAISCRIPT_TRY_ASSIGN(return_type, parse_type()); }   // `function f(...)` declares no return type
     return_type = wrap_reference_return_type(return_type);
 
     if (check(token_type::identifier) && reject_using_name(peek(), "function")) { return make_error_code(parse_error_code::syntax_error); }
@@ -6246,6 +6327,7 @@ expression_ptr parser::default_initializer(const type_info_ptr& type, const sour
     case script_value_type::jai_array_type: return std::make_shared<array_literal_expr>(loc, std::vector<expression_ptr>());
     case script_value_type::jai_map_type: return std::make_shared<map_literal_expr>(loc, std::vector<std::pair<expression_ptr, expression_ptr>>());
     case script_value_type::jai_object_type:
+        if (type->is_coroutine) return nullptr;   // a handle starts null
         if (!type->type_name.empty()) return std::make_shared<new_expr>(loc, type, std::vector<expression_ptr>());
         return nullptr;
     case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_vec4_type: case script_value_type::jai_color_type:
@@ -6321,7 +6403,7 @@ bool parser::paren_group_ends_statement(size_t lparen) const {
 }
 
 checked_result<declaration_ptr> parser::variable_declaration() {
-    const bool function_spelling = check(token_type::function_keyword);
+    const bool function_spelling = check(token_type::function_keyword) && !callable_type_ahead();
     JAISCRIPT_TRY_ASSIGN(type_info_ptr type, parse_type());
 
     // Check for reference after type (e.g., int& x or auto& x)

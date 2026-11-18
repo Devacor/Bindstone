@@ -143,6 +143,10 @@ struct ctype {
     bool open = false;
     const expression* origin = nullptr; // this use's expression, for literal-only checks
     const type_info* yields = nullptr;  // coroutine_k: the declared type each yield converts to (null: undeclared)
+    // function_k read off a program function's name: the declarations the name holds (a signature slot checks them)
+    const std::vector<const function_decl*>* fns = nullptr;
+    // a result that is null where its coroutine hands out nothing (next()): typed for diagnostics, and an auto declared with it is a var
+    bool nullable_result = false;
 
     bool is_unknown() const { return kind == unknown; }
     static ctype make(kind_t k) { return ctype{k, {}}; }
@@ -160,7 +164,7 @@ std::string ctype_name(const ctype& t) {
         case ctype::bool_k: return "bool";
         case ctype::array_k: return t.ti ? t.ti->canonical_name() : "array";
         case ctype::map_k: return t.ti ? t.ti->canonical_name() : "map";
-        case ctype::function_k: return "function";
+        case ctype::function_k: return t.ti && t.ti->is_signature() ? t.ti->canonical_name() : "function";
         case ctype::weak_k: return t.ti ? t.ti->canonical_name() : "weak_ptr";
         case ctype::object_k:
             if (t.ti && t.ti->base_type == script_value_type::jai_shared_ptr_type) { return t.ti->canonical_name(); }
@@ -168,7 +172,7 @@ std::string ctype_name(const ctype& t) {
         case ctype::class_ref_k: return "class " + std::string(t.cls);
         case ctype::enum_ref_k: return "enum " + std::string(t.cls);
         case ctype::math_k: return std::string(t.cls);
-        case ctype::coroutine_k: return "coroutine_handle";
+        case ctype::coroutine_k: return "coroutine<" + (t.yields ? t.yields->canonical_name() : std::string("var")) + ">";
         default: return "unknown";
     }
 }
@@ -200,6 +204,12 @@ ctype spelled_ctype_from_type_info(const type_info* ti) {
             // shared_ptr<T> carries T's name; member access resolves identically (ti keeps
             // the base_type, so the proof pass still tells value object from handle)
             if (ti->type_name.empty()) { return {}; }
+            if (ti->is_coroutine) {
+                t = ctype::make(ctype::coroutine_k);
+                const type_info* yields = ti->type_params.empty() ? nullptr : ti->type_params[0].get();
+                t.yields = yields && yields->base_type != script_value_type::jai_any_type ? yields : nullptr;
+                break;
+            }
             t = ctype::object(ti->type_name);
             break;
         case script_value_type::jai_reference_type:
@@ -375,6 +385,14 @@ public:
     type_info* get_type_info_array(type_info* element) const { return engine_access::get_type_info_array(engine_, element); }
     type_info* get_type_info_string() const { return engine_access::get_type_info_string(engine_); }
     type_info* get_type_info_map(type_info* key, type_info* value) const { return engine_access::get_type_info_map(engine_, key, value); }
+    type_info* get_type_info_coroutine(type_info* yields) const { return engine_access::get_type_info_coroutine(engine_, yields); }
+    type_info* get_type_info_void() const { return engine_access::get_type_info_void(engine_); }
+    type_info* get_type_info_math(script_value_type kind) const { return engine_access::get_type_info_math(engine_, kind); }
+    type_info* get_type_info_reference(type_info* referent) const { return engine_access::get_type_info_reference(engine_, referent); }
+    type_info* get_type_info_untyped_function() const { return engine_access::get_type_info_untyped_function(engine_); }
+    type_info* get_type_info_function(type_info* result, const std::vector<type_info*>& arguments) const {
+        return engine_access::get_type_info_function(engine_, result, arguments);
+    }
 
 private:
     engine& engine_;
@@ -917,6 +935,7 @@ private:
     // placeholder: a later '_' that names a local variable or a structured binding (name_independent) redeclares freely, and
     // the name then names none of them
     void declare_local(std::string_view name, var_entry entry, const source_location& at, bool name_independent = false) {
+        entry.type.fns = nullptr;
         auto [held, fresh] = scopes_.back().emplace(name, entry);
         if (fresh) { return; }
         if (name == "_" && (name_independent || scopes_.size() == 1)) {
@@ -2928,6 +2947,12 @@ private:
                 (src.kind == ctype::object_k && (!src.ti || src.ti->base_type == script_value_type::jai_shared_ptr_type) &&
                  weak_initializer_compatible(src, dst));
         }
+        if (accepted && dst.kind == ctype::function_k) {
+            if (const std::string issue = signature_issue(src, dst); !issue.empty()) {
+                return "expected '" + target->canonical_name() + "', got '" + ctype_name(src) + "': " + issue;
+            }
+        }
+        if (accepted && dst.kind == ctype::coroutine_k) { accepted = assignable(src, dst); }
         if (accepted) { return {}; }
         std::string result = "expected '" + target->canonical_name() + "', got '" + ctype_name(src) + "'";
         if (dst.kind == ctype::int_k && src.kind == ctype::float_k) { result += std::string(": ") + float_to_int_fix; }
@@ -3052,7 +3077,188 @@ private:
             auto issue = container_issue(src, dst);
             if (!issue.empty()) { return ": " + issue; }
         }
+        if (dst.kind == ctype::function_k && src.kind == ctype::function_k) {
+            auto issue = signature_issue(src, dst);
+            if (!issue.empty()) { return ": " + issue; }
+        }
+        if (dst.kind == ctype::coroutine_k && src.kind == ctype::coroutine_k && dst.yields) {
+            return ": a coroutine<" + dst.yields->canonical_name() + "> holds a coroutine declared to yield '" + dst.yields->canonical_name() + "'";
+        }
         return {};
+    }
+
+    // ---------------------------------------------------------------- signatures
+
+    // What a callable expression declares, as a signature slot judges it: one or more declarations (a function's name), a
+    // lambda literal, or another slot's signature
+    struct callable_view {
+        const std::vector<parameter>* parameters = nullptr;
+        const type_info* result = nullptr;      // the declared result; null when none is declared
+        ctype inferred{};                       // an undeclared lambda's result where every return agrees
+        bool coroutine = false;
+        std::string spelled;
+    };
+
+    static std::string argument_count_text(size_t required, size_t total) {
+        return (required == total ? std::to_string(total) : std::to_string(required) + " to " + std::to_string(total)) +
+               (total == 1 ? " argument" : " arguments");
+    }
+    static bool dynamic_type(const type_info* t) { return !t || t->base_type == script_value_type::jai_any_type; }
+    static std::string signature_argument_spelling(const type_info* argument) {
+        if (argument && argument->base_type == script_value_type::jai_reference_type) {
+            return signature_argument_spelling(argument->element_type().get()) + "&";
+        }
+        return dynamic_type(argument) ? std::string("var") : argument->canonical_name();
+    }
+
+    // A result as a call through a signature delivers it: no conversion runs, so it is the signature's own type, a class the
+    // signature's class takes as it stands, or anything where the signature returns void or var
+    bool result_fits(const ctype& made, const ctype& wanted) {
+        if (wanted.is_unknown() || wanted.kind == ctype::null_k || made.is_unknown()) { return true; }
+        if (made.kind != wanted.kind) { return false; }
+        switch (wanted.kind) {
+            case ctype::object_k: return class_relation(made.cls, wanted.cls) != 0;
+            case ctype::int_k: return made.cls == wanted.cls;
+            case ctype::math_k: return made.cls == wanted.cls;
+            case ctype::array_k: case ctype::map_k: case ctype::weak_k:
+                return !made.ti || !wanted.ti || made.ti->id == wanted.ti->id;
+            case ctype::function_k:
+                return !wanted.ti || !wanted.ti->is_signature() || (made.ti && made.ti->id == wanted.ti->id);
+            case ctype::coroutine_k: return !wanted.yields || (made.yields && made.yields->id == wanted.yields->id);
+            default: return true;
+        }
+    }
+
+    // Why `held` cannot stand behind `signature`; empty when it can
+    std::string callable_issue(const callable_view& held, const type_info* signature) {
+        const std::vector<parameter>& params = *held.parameters;
+        const size_t passed = signature->type_params.size() - 1;
+        size_t required = 0;
+        while (required < params.size() && !params[required].default_value) { ++required; }
+        if (passed < required || passed > params.size()) {
+            return held.spelled + " takes " + argument_count_text(required, params.size()) + ", the signature passes " + std::to_string(passed);
+        }
+        for (size_t i = 0; i < passed; ++i) {
+            const parameter& p = params[i];
+            const type_info* argument = signature->type_params[i + 1].get();
+            const bool by_reference = argument && argument->base_type == script_value_type::jai_reference_type;
+            const ctype given = ctype_from_type_info(argument);
+            const std::string declared = (p.is_const ? "const " : "") + (p.type ? p.type->canonical_name() : std::string("auto")) + (p.is_reference ? "&" : "");
+            if (p.is_reference && !p.is_const) {
+                if (!by_reference) {
+                    return held.spelled + " takes parameter '" + p.name + "' by reference ('" + declared + "'), the signature passes '" +
+                           signature_argument_spelling(argument) + "' by value";
+                }
+                if (!reference_parameter_binds(p, given)) {
+                    return held.spelled + " declares parameter '" + p.name + "' as '" + declared + "', which does not bind the signature's '" +
+                           signature_argument_spelling(argument) + "'";
+                }
+                continue;
+            }
+            const ctype slot = ctype_from_type_info(p.type.get());
+            if (!assignable(given, slot)) {
+                return held.spelled + " declares parameter '" + p.name + "' as '" + declared + "', which does not take the signature's '" +
+                       signature_argument_spelling(argument) + "'";
+            }
+        }
+        const ctype wanted = ctype_from_type_info(signature->type_params[0].get());
+        ctype made = held.result ? ctype_from_type_info(held.result->base_type == script_value_type::jai_reference_type ? held.result->element_type().get() : held.result)
+                                 : held.inferred;
+        if (held.coroutine) {
+            made = ctype::make(ctype::coroutine_k);
+            made.yields = dynamic_type(held.result) ? nullptr : held.result;
+        }
+        if (!result_fits(made, wanted)) {
+            return held.spelled + " returns '" + (made.kind == ctype::null_k ? std::string("void") : ctype_name(made)) + "', the signature returns '" +
+                   ctype_name(wanted) + "': a result is not converted on the way out; wrap the call in a lambda that converts it";
+        }
+        return {};
+    }
+
+    // Why a callable of static type `src` cannot be stored in the signature slot `dst`; empty when it can, or when the load
+    // cannot see what the callable declares (a var, a host function, a bare `function`: the store judges it when it runs)
+    std::string signature_issue(const ctype& src, const ctype& dst) {
+        const type_info* signature = dst.ti;
+        if (!signature || !signature->is_signature() || src.kind != ctype::function_k) { return {}; }
+        const expression* origin = src.origin;
+        if (origin && origin->get_type() == node_type::lambda_expr) {
+            const auto* l = static_cast<const lambda_expr*>(origin);
+            callable_view held{&l->parameters, l->return_type.get(), {}, false, "the lambda"};
+            if (auto it = lambda_results_.find(l); it != lambda_results_.end() && !l->return_type) { held.inferred = it->second; }
+            return callable_issue(held, signature);
+        }
+        const bool named = origin && (origin->get_type() == node_type::identifier_expr || origin->get_type() == node_type::member_expr);
+        if (named && src.fns && !src.fns->empty()) {
+            std::string first;
+            for (const function_decl* fn : *src.fns) {
+                const callable_view held{&fn->parameters, fn->return_type.get(), {}, fn->is_coroutine, "'" + std::string(fn->name) + "'"};
+                std::string issue = callable_issue(held, signature);
+                if (issue.empty()) { return {}; }
+                if (first.empty()) { first = std::move(issue); }
+            }
+            return src.fns->size() == 1 ? first : "no overload of '" + std::string(src.fns->front()->name) + "' fits the signature";
+        }
+        if (src.ti && src.ti->is_signature() && src.ti->id != signature->id) {
+            const type_info* from = src.ti;
+            const size_t passed = signature->type_params.size() - 1, taken = from->type_params.size() - 1;
+            if (passed != taken) {
+                return "a '" + from->canonical_name() + "' takes " + argument_count_text(taken, taken) + ", the signature passes " + std::to_string(passed);
+            }
+            for (size_t i = 1; i <= passed; ++i) {
+                const type_info* given = signature->type_params[i].get();
+                const type_info* taken_type = from->type_params[i].get();
+                const bool given_ref = given && given->base_type == script_value_type::jai_reference_type;
+                const bool taken_ref = taken_type && taken_type->base_type == script_value_type::jai_reference_type;
+                const bool fits = taken_ref ? given_ref && reference_type_compatible(ctype_from_type_info(given), ctype_from_type_info(taken_type))
+                                            : assignable(ctype_from_type_info(given), ctype_from_type_info(taken_type));
+                if (!fits) {
+                    return "parameter " + std::to_string(i) + " of a '" + from->canonical_name() + "' is '" + signature_argument_spelling(taken_type) +
+                           "', which does not take the signature's '" + signature_argument_spelling(given) + "'";
+                }
+            }
+            const ctype made = ctype_from_type_info(from->type_params[0].get());
+            const ctype wanted = ctype_from_type_info(signature->type_params[0].get());
+            const bool nothing = made.kind == ctype::null_k && !wanted.is_unknown() && wanted.kind != ctype::null_k;
+            if (nothing || !result_fits(made, wanted)) {
+                return "a '" + from->canonical_name() + "' returns '" + (made.kind == ctype::null_k ? std::string("void") : made.is_unknown() ? std::string("var") : ctype_name(made)) +
+                       "', the signature returns '" + ctype_name(wanted) + "': a result is not converted on the way out; wrap the call in a lambda that converts it";
+            }
+        }
+        return {};
+    }
+
+    // A call through a signature slot: the count, each argument as a parameter of that type takes it, and the signature's result
+    // (for diagnostics: the slot's callable is whatever was stored, so no proof rests on it)
+    ctype check_signature_call(const std::string& shown, const type_info* signature, const call_expr* c, const std::vector<ctype>& args) {
+        const size_t taken = signature->type_params.size() - 1;
+        const ctype result_type = ctype_from_type_info(signature->type_params[0].get());
+        ctype result = result_type;
+        result.tentative = !result.is_unknown();
+        if (args.size() != taken) {
+            diag(diag_level::error, c->location, shown + " expects " + std::to_string(taken) + " argument(s), got " + std::to_string(args.size()) +
+                 " (it is a '" + signature->canonical_name() + "')");
+            return result;
+        }
+        for (size_t i = 0; i < taken; ++i) {
+            const type_info* declared = signature->type_params[i + 1].get();
+            const bool by_reference = declared && declared->base_type == script_value_type::jai_reference_type;
+            const ctype slot = ctype_from_type_info(declared);
+            const std::string position = "argument " + std::to_string(i + 1) + " of " + shown;
+            if (by_reference) {
+                const node_type k = c->arguments[i]->get_type();
+                if (k == node_type::literal_expr || k == node_type::array_literal_expr || k == node_type::map_literal_expr || k == node_type::lambda_expr) {
+                    diag(diag_level::error, c->arguments[i]->location, position + ": the signature takes '" + signature_argument_spelling(declared) + "'; pass a variable");
+                } else if (!args[i].is_unknown() && !slot.is_unknown() && !reference_type_compatible(args[i], slot)) {
+                    diag(diag_level::error, c->arguments[i]->location, position + ": cannot bind '" + ctype_name(args[i]) + "' to '" + signature_argument_spelling(declared) + "'");
+                }
+                continue;
+            }
+            if (!slot.is_unknown() && !assignable(args[i], slot)) {
+                diag(diag_level::error, c->arguments[i]->location, position + ": cannot pass '" + ctype_name(args[i]) + "' where the signature takes '" +
+                     signature_argument_spelling(declared) + "'" + assignment_detail(args[i], slot));
+            }
+        }
+        return result;
     }
 
     // a class held by value (never null); a handle, a var and an unknown wrapper are not
@@ -3093,7 +3299,12 @@ private:
             case ctype::char_k: return src.kind == ctype::char_k || src.kind == ctype::string_k || may_convert_via_method(src, "to_char");
             case ctype::array_k:
             case ctype::map_k: return container_issue(src, dst).empty();
-            case ctype::function_k: return src.kind == ctype::function_k || src.kind == ctype::null_k;
+            case ctype::function_k:
+                if (src.kind == ctype::null_k) { return true; }
+                return src.kind == ctype::function_k && signature_issue(src, dst).empty();
+            case ctype::coroutine_k:
+                if (src.kind == ctype::null_k) { return true; }
+                return src.kind == ctype::coroutine_k && (!dst.yields || (src.yields && src.yields->id == dst.yields->id));
             case ctype::weak_k: return weak_initializer_compatible(src, dst);
             case ctype::null_k: return src.kind == ctype::null_k;   // void returns
             case ctype::math_k: {
@@ -3597,7 +3808,7 @@ private:
     }
     // A coroutine handle answers next(), done(), advance() and result() only (the runtime's texts); resume is the retired spelling
     // of next
-    void coroutine_member_missing(const member_expr* a_member) {
+    void coroutine_member_missing(const ctype& a_receiver, const member_expr* a_member) {
         std::string best;
         if (a_member->member == "resume") {
             best = "next";
@@ -3608,7 +3819,7 @@ private:
                 if (distance < bestDistance) { bestDistance = distance; best = std::string(name); }
             }
         }
-        diag(diag_level::error, a_member->location, "no member '" + std::string(a_member->member) + "' on 'coroutine_handle'" +
+        diag(diag_level::error, a_member->location, "no member '" + std::string(a_member->member) + "' on '" + ctype_name(a_receiver) + "'" +
             (best.empty() ? std::string() : " (did you mean '" + best + "'?)"));
     }
     ctype coroutine_method_call(const ctype& a_receiver, const member_expr* a_member, const call_expr* a_call, const std::vector<ctype>& a_args) {
@@ -3623,7 +3834,11 @@ private:
             } else if (a_args.size() == 1 && !a_args[0].is_unknown() && !a_args[0].tentative && a_args[0].kind != ctype::int_k) {
                 diag(diag_level::error, a_call->arguments[0]->location, "next() count must be an integer");
             }
-            return {};
+            // the declared type, for diagnostics: the step that ends a body which returns nothing hands out null
+            ctype stepped = a_receiver.yields ? ctype_from_type_info(a_receiver.yields) : ctype{};
+            stepped.tentative = !stepped.is_unknown();
+            stepped.nullable_result = true;
+            return stepped;
         }
         if (a_member->member == "result") {
             if (!a_args.empty()) { diag(diag_level::error, a_call->location, "result() takes no arguments"); }
@@ -3657,7 +3872,7 @@ private:
             }
             return ctype::make(ctype::bool_k);
         }
-        coroutine_member_missing(a_member);
+        coroutine_member_missing(a_receiver, a_member);
         return {};
     }
     // An argument's shape where the load is sure of it: a number, text, an array, a map, a function or a math value (the api
@@ -4081,7 +4296,8 @@ private:
 
     // a method call on a host class that opted into strict signatures: the arity and argument kinds its overloads accept, and
     // the result they agree on; other host classes stay lenient
-    ctype check_strict_host_method(std::string_view cls, std::string_view member, const std::vector<ctype>& args, const source_location& loc) {
+    ctype check_strict_host_method(std::string_view cls, std::string_view member, const std::vector<ctype>& args, const source_location& loc,
+                                   const call_expr* c = nullptr) {
         auto def = engine_class(cls);
         if (!def || !def->is_cpp_class() || def->extended_ever()) { return {}; }
         const auto& table = def->cpp_method_overload_table();
@@ -4108,13 +4324,18 @@ private:
             diag(diag_level::error, loc, "'" + fname + "' expects " + text + " argument(s), got " + std::to_string(args.size()));
             return {};
         }
+        {
+            std::vector<std::vector<param_type_info>> overloads;
+            for (const auto& entry : bucket->second) { overloads.push_back(entry.param_types); }
+            if (report_host_callback(fname, overloads, args, c)) { return {}; }
+        }
         std::optional<ctype> result;
         bool agree = true;
         bool viable = false;
         for (const auto& entry : bucket->second) {
             bool ok = true;
             for (size_t i = 0; i < args.size() && i < entry.param_types.size(); ++i) {
-                if (!host_param_accepts(args[i], entry.param_types[i])) { ok = false; break; }
+                if (!host_param_accepts(args[i], entry.param_types[i]) || !host_callback_issue(args[i], entry.param_types[i]).empty()) { ok = false; break; }
             }
             if (!ok) { continue; }
             viable = true;
@@ -4498,10 +4719,15 @@ private:
 
     // Host (C++) function surface: reject only certainties — arity misses across every
     // overload, or a known-primitive argument no builtin conversion reaches.
-    void check_host_call(const std::string& fname, const std::vector<ctype>& args, const source_location& loc) {
+    void check_host_call(const std::string& fname, const std::vector<ctype>& args, const source_location& loc, const call_expr* c = nullptr) {
         std::vector<engine::host_overload_signature> sigs;
         if (!eng_.host_function_signatures(fname, sigs) || sigs.empty()) {
             return;
+        }
+        {
+            std::vector<std::vector<param_type_info>> overloads;
+            for (const auto& sig : sigs) { overloads.push_back(sig.param_types); }
+            if (report_host_callback(fname, overloads, args, c)) { return; }
         }
         bool arity_ok = false;
         bool viable = false;
@@ -4549,7 +4775,7 @@ private:
         if (sig.param_types.empty()) { return true; }   // untyped legacy binding
         if (sig.param_types.size() != args.size()) { return true; }   // defensive: don't guess
         for (size_t i = 0; i < args.size(); ++i) {
-            if (!host_param_accepts(args[i], sig.param_types[i])) {
+            if (!host_param_accepts(args[i], sig.param_types[i]) || !host_callback_issue(args[i], sig.param_types[i]).empty()) {
                 return false;
             }
         }
@@ -4740,7 +4966,7 @@ private:
             initializing_field initializing{field->name, {}};
             initializing.unready = fields_from(c->decl, field);
             initializing_field_ = &initializing;
-            const ctype value = infer(init.value.get());
+            const ctype value = infer_expecting(init.value.get(), field->auto_spelled ? nullptr : field->type.get());
             initializing_field_ = nullptr;
             if (field->type && !field->auto_spelled && field->type->base_type != script_value_type::jai_any_type) {
                 check_store(value, false, token_type::equal, declared_variable_type(field), declared_variable_type_name(field),
@@ -5273,10 +5499,19 @@ private:
 
     // -------------------------------------------------------------- expressions
 
+    // The declared type the next expression inferred initializes (a declaration's, a parameter's, a slot's): a lambda literal
+    // takes its untyped parameters and its result from a signature there, and an array or map literal hands its element type on
+    const type_info* expected_ = nullptr;
+    ctype infer_expecting(expression* e, const type_info* expected) {
+        expected_ = expected;
+        return infer(e);
+    }
+
     JAI_NOINLINE ctype infer(expression* e) {
         if (e) { stack_.guard(e->location); }
         narrow_observed_ = nullptr;
-        ctype result = infer_impl(e);
+        const type_info* expected = std::exchange(expected_, nullptr);
+        ctype result = infer_impl(e, expected);
         result.origin = e;
         if (observer_ && e) { observe(e, narrow_observed_ && e->get_type() == node_type::identifier_expr ? *narrow_observed_ : result); }
         narrow_observed_ = nullptr;
@@ -5296,7 +5531,7 @@ private:
         observer_->expression_type(e, view);
     }
 
-    JAI_NOINLINE ctype infer_impl(expression* e) {
+    JAI_NOINLINE ctype infer_impl(expression* e, const type_info* expected) {
         if (!e) { return {}; }
         switch (e->get_type()) {
             case node_type::literal_expr: {
@@ -5323,9 +5558,13 @@ private:
                 return infer_call(static_cast<call_expr*>(e));
             case node_type::member_expr:
                 return infer_member_expression(static_cast<member_expr*>(e));
-            case node_type::lambda_expr:
-                walk_lambda(static_cast<lambda_expr*>(e));
+            case node_type::lambda_expr: {
+                auto* l = static_cast<lambda_expr*>(e);
+                const lambda_context context = open_lambda_context(l, expected);
+                walk_lambda(l);
+                close_lambda_context(l, context);
                 return ctype::make(ctype::function_k);
+            }
             case node_type::new_expr:
                 return infer_new(static_cast<new_expr*>(e));
             case node_type::include_expr: {
@@ -5336,11 +5575,11 @@ private:
             case node_type::import_expr:
                 return infer_import(static_cast<import_expr*>(e));
             case node_type::ternary_expr:
-                return infer_ternary(static_cast<ternary_expr*>(e));
+                return infer_ternary(static_cast<ternary_expr*>(e), expected);
             case node_type::array_literal_expr:
-                return infer_array_literal(static_cast<array_literal_expr*>(e));
+                return infer_array_literal(static_cast<array_literal_expr*>(e), expected);
             case node_type::map_literal_expr:
-                return infer_map_literal(static_cast<map_literal_expr*>(e));
+                return infer_map_literal(static_cast<map_literal_expr*>(e), expected);
             case node_type::this_expr:
                 return infer_this(e);
             case node_type::super_expr:
@@ -5643,17 +5882,17 @@ private:
         return ctype::make(ctype::bool_k);   // true when a module (re)ran
     }
 
-    JAI_NOINLINE ctype infer_ternary(ternary_expr* t) {
+    JAI_NOINLINE ctype infer_ternary(ternary_expr* t, const type_info* expected) {
         const size_t mark = narrow_ended_.size();
         infer(t->condition.get());
         std::vector<narrow_fact> when_true, when_false;
         narrow_conclude(t->condition.get(), mark, when_true, when_false);
         const size_t held = narrow_facts_.size();
         narrow_push(when_true);
-        ctype a = infer(t->then_expression.get());
+        ctype a = infer_expecting(t->then_expression.get(), expected);
         narrow_pop(held);
         narrow_push(when_false);
-        ctype b = infer(t->else_expression.get());
+        ctype b = infer_expecting(t->else_expression.get(), expected);
         narrow_pop(held);
         if (a.kind == b.kind && a.cls == b.cls) {
             if (!mixed_ternaries_.empty()) { mixed_ternaries_.erase(t); }   // a walk ahead judged the arms by their declared types
@@ -5679,17 +5918,301 @@ private:
         return mixed;
     }
 
-    JAI_NOINLINE ctype infer_array_literal(array_literal_expr* a) {
-        for (auto& el : a->elements) { literal_element_types_[el.get()] = infer(el.get()); }
+    JAI_NOINLINE ctype infer_array_literal(array_literal_expr* a, const type_info* expected) {
+        const type_info* element = expected && expected->base_type == script_value_type::jai_array_type ? expected->element_type().get() : nullptr;
+        for (auto& el : a->elements) { literal_element_types_[el.get()] = infer_expecting(el.get(), element); }
         return ctype::make(ctype::array_k);
     }
 
-    JAI_NOINLINE ctype infer_map_literal(map_literal_expr* m) {
+    JAI_NOINLINE ctype infer_map_literal(map_literal_expr* m, const type_info* expected) {
+        const type_info* value = expected && expected->base_type == script_value_type::jai_map_type ? expected->value_type().get() : nullptr;
         for (auto& [k, v] : m->entries) {
             literal_element_types_[k.get()] = infer(k.get());
-            literal_element_types_[v.get()] = infer(v.get());
+            literal_element_types_[v.get()] = infer_expecting(v.get(), value);
         }
         return ctype::make(ctype::map_k);
+    }
+
+    // an expression whose checking takes the slot's declared type (infer_expecting)
+    static bool contextual_literal(const expression* e) {
+        if (!e) { return false; }
+        const node_type k = e->get_type();
+        return k == node_type::lambda_expr || k == node_type::array_literal_expr || k == node_type::map_literal_expr || k == node_type::ternary_expr;
+    }
+
+    // The static type of a name, `this` or a field of either, read without walking it (no diagnostic, no stamp)
+    ctype peek_type(const expression* e) {
+        if (!e) { return {}; }
+        if (e->get_type() == node_type::this_expr) { return class_ctx_ ? ctype::object(class_ctx_name_) : ctype{}; }
+        if (e->get_type() == node_type::identifier_expr) {
+            const auto* id = static_cast<const identifier_expr*>(e);
+            if (const var_entry* local = find_local(id->name)) { return local->dynamic ? ctype{} : local->type; }
+            if (class_ctx_ && !id->global_qualified) {
+                const member_hit hit = lookup_member(class_ctx_name_, id->name, false);
+                if (hit.found) { return hit.field && !hit.methods && hit.field->type ? member_type(hit) : ctype{}; }
+            }
+            if (find_sclass(id->name)) { return ctype{ctype::class_ref_k, id->name}; }
+            return {};
+        }
+        if (e->get_type() == node_type::member_expr) {
+            const auto* m = static_cast<const member_expr*>(e);
+            if (m->is_static) { return {}; }
+            const ctype recv = peek_type(m->object.get());
+            if (recv.kind != ctype::object_k || recv.cls.empty()) { return {}; }
+            const member_hit hit = lookup_member(recv.cls, m->member, false);
+            return hit.found && hit.field && !hit.methods && hit.field->type ? member_type(hit) : ctype{};
+        }
+        return {};
+    }
+
+    // The declared type of the storage an assignment's target names, where the load sees it: a variable, a field, an element
+    const type_info* peek_declared_type(const expression* e) {
+        if (!e) { return nullptr; }
+        if (e->get_type() == node_type::binary_expr) {
+            const auto* b = static_cast<const binary_expr*>(e);
+            if (b->op.type != token_type::left_bracket) { return nullptr; }
+            const type_info* container = peek_declared_type(b->left.get());
+            if (container && container->base_type == script_value_type::jai_array_type) { return container->element_type().get(); }
+            if (container && container->base_type == script_value_type::jai_map_type) { return container->value_type().get(); }
+            return nullptr;
+        }
+        const type_info* declared = peek_type(e).ti;
+        return declared && declared->base_type == script_value_type::jai_reference_type ? declared->element_type().get() : declared;
+    }
+
+    // A C++ parameter as a script type: the scalars, a registered class (by value or shared_ptr), a math kind, a std::function's
+    // signature; null (var) for a script_value and for what the binding does not name
+    type_info* host_parameter_type(const param_type_info& p) {
+        using k = script_value_type;
+        switch (p.base_type) {
+            case k::jai_int_type: return eng_.get_type_info_int();
+            case k::jai_float_type: return eng_.get_type_info_float();
+            case k::jai_bool_type: return eng_.get_type_info_bool();
+            case k::jai_char_type: return eng_.get_type_info_char();
+            case k::jai_string_type: return eng_.get_type_info_string();
+            case k::jai_invalid_type: return eng_.get_type_info_void();
+            case k::jai_object_type:
+            case k::jai_shared_ptr_type: {
+                auto def = eng_.get_class_definition_by_type(p.cpp_type);
+                if (!def) { return nullptr; }
+                type_info* object = eng_.get_type_info_object(def->get_name());
+                return p.base_type == k::jai_object_type ? object : eng_.get_type_info_shared_ptr(object);
+            }
+            case k::jai_function_type: {
+                if (!p.signature) { return eng_.get_type_info_untyped_function(); }
+                std::vector<type_info*> arguments;
+                for (size_t i = 0; i < p.signature->parameters.size(); ++i) {
+                    type_info* argument = host_parameter_type(p.signature->parameters[i]);
+                    if (p.signature->references[i] && argument) { argument = eng_.get_type_info_reference(argument); }
+                    arguments.push_back(argument ? argument : eng_.get_type_info_any());
+                }
+                type_info* result = host_parameter_type(p.signature->result);
+                return eng_.get_type_info_function(result ? result : eng_.get_type_info_any(), arguments);
+            }
+            default:
+                return is_math_type(p.base_type) ? eng_.get_type_info_math(p.base_type) : nullptr;
+        }
+    }
+
+    // The type each argument of a host call initializes where every registration the count admits agrees on it
+    void host_arguments_agreed(const std::vector<std::vector<param_type_info>>& overloads, size_t argc, std::vector<const type_info*>& out) {
+        std::vector<const type_info*> agreed(argc, nullptr);
+        bool any = false;
+        for (const auto& params : overloads) {
+            if (params.size() != argc) { continue; }
+            for (size_t i = 0; i < argc; ++i) {
+                const type_info* declared = params[i].base_type == script_value_type::jai_function_type ? host_parameter_type(params[i]) : nullptr;
+                if (!any) { agreed[i] = declared; } else if (agreed[i] != declared) { agreed[i] = nullptr; }
+            }
+            any = true;
+        }
+        if (any) { out = std::move(agreed); }
+    }
+    void host_argument_types(const std::string& name, size_t argc, std::vector<const type_info*>& out) {
+        std::vector<engine::host_overload_signature> sigs;
+        if (!eng_.host_function_signatures(name, sigs)) { return; }
+        std::vector<std::vector<param_type_info>> overloads;
+        for (auto& sig : sigs) { overloads.push_back(std::move(sig.param_types)); }
+        host_arguments_agreed(overloads, argc, out);
+    }
+    void host_method_argument_types(std::string_view cls, std::string_view member, size_t argc, std::vector<const type_info*>& out) {
+        auto def = engine_class(cls);
+        if (!def || !def->is_cpp_class()) { return; }
+        const auto& table = def->cpp_method_overload_table();
+        auto it = table.find(eng_.symbolize(member));
+        if (it == table.end()) { return; }
+        auto bucket = it->second.find(argc);
+        if (bucket == it->second.end()) { return; }
+        std::vector<std::vector<param_type_info>> overloads;
+        for (const auto& entry : bucket->second) { overloads.push_back(entry.param_types); }
+        host_arguments_agreed(overloads, argc, out);
+    }
+
+    // A script callable handed to a std::function parameter: what keeps it from standing behind the signature (empty: nothing)
+    std::string host_callback_issue(const ctype& arg, const param_type_info& p) {
+        if (p.base_type != script_value_type::jai_function_type || !p.signature || arg.kind != ctype::function_k) { return {}; }
+        ctype slot = ctype::make(ctype::function_k);
+        slot.ti = host_parameter_type(p);
+        return signature_issue(arg, slot);
+    }
+    // the first argument of a host call whose callable the one registration of that count refuses, reported with its reason
+    bool report_host_callback(const std::string& fname, const std::vector<std::vector<param_type_info>>& overloads, const std::vector<ctype>& args,
+                              const call_expr* c) {
+        const std::vector<param_type_info>* only = nullptr;
+        for (const auto& params : overloads) {
+            if (params.size() != args.size()) { continue; }
+            if (only) { return false; }
+            only = &params;
+        }
+        if (!only || !c) { return false; }
+        for (size_t i = 0; i < args.size(); ++i) {
+            if (const std::string issue = host_callback_issue(args[i], (*only)[i]); !issue.empty()) {
+                diag(diag_level::error, c->arguments[i]->location, "argument " + std::to_string(i + 1) + " of '" + fname + "': cannot pass '" +
+                     ctype_name(args[i]) + "' where it takes '" + host_parameter_type((*only)[i])->canonical_name() + "': " + issue);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // What each argument of a call initializes, where one declaration answers the call: the parameter types every overload the
+    // count admits agrees on, a signature slot's, a typed array's element for push. Asked only for a call that passes a literal
+    // whose checking takes it.
+    void expected_argument_types(const call_expr* c, std::vector<const type_info*>& out) {
+        const size_t argc = c->arguments.size();
+        if (!std::any_of(c->arguments.begin(), c->arguments.end(), [](const expression_ptr& a) { return contextual_literal(a.get()); })) { return; }
+        const auto from_signature = [&](const type_info* signature) {
+            if (!signature || !signature->is_signature() || signature->type_params.size() - 1 != argc) { return; }
+            for (size_t i = 1; i <= argc; ++i) { out.push_back(signature->type_params[i].get()); }
+        };
+        const auto from_overloads = [&](const std::vector<const function_decl*>& fns) {
+            std::vector<const type_info*> agreed(argc, nullptr);
+            bool any = false;
+            for (const function_decl* fn : fns) {
+                auto [min_a, max_a] = arity_range(fn);
+                if (argc < min_a || argc > max_a) { continue; }
+                for (size_t i = 0; i < argc; ++i) {
+                    const type_info* declared = fn->parameters[i].is_reference ? nullptr : fn->parameters[i].type.get();
+                    if (!any) { agreed[i] = declared; } else if (agreed[i] != declared) { agreed[i] = nullptr; }
+                }
+                any = true;
+            }
+            if (any) { out = std::move(agreed); }
+        };
+        const auto from_member = [&](const member_hit& hit) {
+            if (!hit.found) { return; }
+            if (hit.methods) { from_overloads(*hit.methods); } else if (hit.field) { from_signature(hit.field->type.get()); }
+        };
+        const expression* callee = c->callee.get();
+        if (callee && callee->get_type() == node_type::identifier_expr) {
+            const auto* id = static_cast<const identifier_expr*>(callee);
+            size_t scope_index = 0;
+            if (const var_entry* local = find_local(id->name, &scope_index); local && (id->global_qualified ||
+                (!member_hides_program_name(id->name, scope_index) && !namespace_hides_program_name(id->name, scope_index)))) {
+                if (!local->dynamic) { from_signature(local->type.ti); }
+                return;
+            }
+            if (class_ctx_ && !id->global_qualified) {
+                const member_hit hit = lookup_member(class_ctx_name_, id->name, false);
+                if (hit.found || hit.unresolved) { from_member(hit); return; }
+            }
+            if (auto it = functions_.find(id->name); it != functions_.end()) { from_overloads(it->second); return; }
+            if (const sclass* sc = find_sclass(id->name)) { from_overloads(sc->ctors); return; }
+            if (const function_decl* declared = program_function(id->name)) { from_overloads({declared}); return; }
+            host_argument_types(std::string(id->name), argc, out);
+            return;
+        }
+        if (callee && callee->get_type() == node_type::member_expr) {
+            const auto* m = static_cast<const member_expr*>(callee);
+            if (m->is_static) {
+                if (auto it = namespace_fns_.find(qualified_spelling(m)); it != namespace_fns_.end()) { from_overloads(it->second); return; }
+                const ctype recv = peek_type(m->object.get());
+                if (recv.kind == ctype::class_ref_k) { from_member(lookup_member(recv.cls, m->member, true)); }
+                return;
+            }
+            const ctype recv = peek_type(m->object.get());
+            if (recv.kind == ctype::object_k && !recv.cls.empty()) {
+                const member_hit hit = lookup_member(recv.cls, m->member, false);
+                if (!hit.methods && !hit.field) { host_method_argument_types(recv.cls, m->member, argc, out); } else { from_member(hit); }
+            } else if (recv.kind == ctype::array_k && recv.ti && ((m->member == "push" && argc == 1) || (m->member == "insert" && argc == 2))) {
+                out.assign(argc, nullptr);
+                out.back() = recv.ti->element_type().get();
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- contextual lambda types
+
+    // What a lambda's parameters and result were before a walk typed them from the signature it is checked against: a walk that
+    // only reports puts them back, the walk that stamps the program keeps them (the backends bind and convert by them)
+    struct lambda_context {
+        std::vector<std::pair<type_info_ptr, bool>> parameters;
+        type_info_ptr result;
+        bool contextual_result = false;
+    };
+
+    lambda_context open_lambda_context(lambda_expr* l, const type_info* signature) {
+        lambda_context was;
+        was.parameters.reserve(l->parameters.size());
+        for (parameter& p : l->parameters) {
+            was.parameters.emplace_back(p.type, p.contextual);
+            if (p.contextual) {   // as parsed: a bare name is a var, an auto has no type
+                p.type = p.untyped ? type_info_ptr{eng_.get_type_info_any()} : type_info_ptr{};
+                p.contextual = false;
+            }
+        }
+        was.result = l->return_type;
+        was.contextual_result = l->contextual_return;
+        if (l->contextual_return) {
+            l->return_type = type_info_ptr{};
+            l->contextual_return = false;
+        }
+        if (!signature || !signature->is_signature() || signature->type_params.size() - 1 != l->parameters.size()) { return was; }
+        for (size_t i = 0; i < l->parameters.size(); ++i) {
+            parameter& p = l->parameters[i];
+            const type_info* declared = signature->type_params[i + 1].get();
+            if (declared && declared->base_type == script_value_type::jai_reference_type) { declared = declared->element_type().get(); }
+            if (p.is_reference || !(p.untyped || !p.type) || dynamic_type(declared)) { continue; }
+            p.type = type_info_ptr{const_cast<type_info*>(declared)};
+            p.contextual = true;
+        }
+        const type_info* result = signature->type_params[0].get();
+        if (!l->return_type && !dynamic_type(result) && result->base_type != script_value_type::jai_null_type) {
+            l->return_type = type_info_ptr{const_cast<type_info*>(result)};
+            l->contextual_return = true;
+        }
+        return was;
+    }
+
+    void close_lambda_context(lambda_expr* l, const lambda_context& was) {
+        if (!semantic_walk()) {
+            for (size_t i = 0; i < l->parameters.size(); ++i) {
+                l->parameters[i].type = was.parameters[i].first;
+                l->parameters[i].contextual = was.parameters[i].second;
+            }
+            l->return_type = was.result;
+            l->contextual_return = was.contextual_result;
+            return;
+        }
+        bool moved = l->return_type.get() != was.result.get();
+        for (size_t i = 0; i < l->parameters.size(); ++i) {
+            const parameter& p = l->parameters[i];
+            if (p.type.get() == was.parameters[i].first.get()) { continue; }
+            moved = true;
+            // a store to the name rebinds a handle only while the parameter is a var (identifier_expr::names_var_decl, the parser's)
+            detail::body_walker names;
+            names.symbolizer = nullptr;
+            names.on_identifier = [&p](identifier_expr* id) {
+                if (id->symbol_id == p.symbol_id && id->slot_index == p.slot_index && id->slot_index != SIZE_MAX) { id->names_var_decl = !p.contextual; }
+            };
+            names.stmt(l->body);
+        }
+        if (moved) {   // the functions made from here on bind by the new declaration
+            l->shared_params_cache.reset();
+            l->mint_cache.reset();
+            l->graft_decl.reset();
+            l->graft_overloads.clear();
+        }
     }
 
     JAI_NOINLINE ctype infer_this(expression* e) {
@@ -5824,10 +6347,12 @@ private:
                 return namespace_fns_.count(space + "::" + std::string(id->name)) ? ctype::make(ctype::function_k) : ctype{};
             }
         }
-        if (functions_.count(id->name)) {
+        if (auto declared = functions_.find(id->name); declared != functions_.end()) {
             note_global_use(id->name);
             report_function_before_declaration(id->name, id->location, false);
-            return ctype::make(ctype::function_k);
+            ctype named = ctype::make(ctype::function_k);
+            if (foreign_overloads(id->name, declared->second).empty()) { named.fns = &declared->second; }   // another unit's overloads answer the name too
+            return named;
         }
         if (find_sclass(id->name)) {
             report_class_before_declaration(id->name, id->location);
@@ -5960,7 +6485,7 @@ private:
             return c;
         }
         if (recv.kind == ctype::coroutine_k) {
-            if (!recv.tentative && m->member != "next" && m->member != "done" && m->member != "advance" && m->member != "result") { coroutine_member_missing(m); }
+            if (!recv.tentative && m->member != "next" && m->member != "done" && m->member != "advance" && m->member != "result") { coroutine_member_missing(recv, m); }
             return {};
         }
         if (recv.is_unknown() && !m->is_static) {
@@ -6035,7 +6560,9 @@ private:
                 if (!writing && !want_static) {   // a method is called or bound, never read bare
                     diag(diag_level::error, m->location, detail::method_value_text(m->member, cls, detail::method_value_receiver(m), false));
                 }
-                return ctype::make(ctype::function_k);
+                ctype named = ctype::make(ctype::function_k);
+                if (want_static && hit.provable) { named.fns = hit.methods; }
+                return named;
             }
             if (hit.field && (hit.field->type || hit.field->function_spelling)) { return member_type(hit); }
             return {};
@@ -6083,12 +6610,14 @@ private:
         }
         template_files_ += template_body;
         struct template_scope { int& depth; bool on; ~template_scope() { depth -= on; } } in_template{template_files_, template_body};
+        std::vector<const type_info*> expected;
+        expected_argument_types(c, expected);
         for (size_t k = 0; k < c->arguments.size(); ++k) {
             auto& a = c->arguments[k];
             const bool combine = callee_name == "parallel_reduce" && k == 3;   // runs serially after the join
             const bool body = parallel_callee && !combine && a->get_type() == node_type::lambda_expr;
             parallel_body_depth_ += body;
-            args.push_back(infer(a.get()));
+            args.push_back(infer_expecting(a.get(), k < expected.size() ? expected[k] : nullptr));
             parallel_body_depth_ -= body;
         }
         const std::vector<const function_decl*>* ov = nullptr;   // the statically resolved same-script overload set
@@ -6329,10 +6858,11 @@ private:
             if (id->name == "weak_from_this" || id->name == "shared_from_this") { return {}; }   // call-shape builtins, resolved before any lookup
             stamp(id->program_name, semantic_walk() && bare_program_name(id), false);
             size_t scope_index = 0;
-            if (find_local(id->name, &scope_index) && (id->global_qualified ||
+            if (const var_entry* local = find_local(id->name, &scope_index); local && (id->global_qualified ||
                 (!member_hides_program_name(id->name, scope_index) && !namespace_hides_program_name(id->name, scope_index)))) {
                 if (scope_index == 0) { note_global_use(id->name); }
-                return {};   // callable local: signature unknown
+                if (!local->dynamic && signature_slot(local->type)) { return check_signature_call("'" + std::string(id->name) + "'", local->type.ti, c, args); }
+                return {};   // a callable local without a signature
             }
             if (class_ctx_ && !id->global_qualified) {
                 member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
@@ -6346,6 +6876,9 @@ private:
                         if (!nodiscard_hit_.name.empty()) { nodiscard_hit_.name = std::string(class_ctx_name_) + "." + nodiscard_hit_.name; }
                         if (!hit.provable) { r.tentative = true; }
                         return r;
+                    }
+                    if (hit.field && hit.field->type) {
+                        if (const ctype held = member_type(hit); signature_slot(held)) { return check_signature_call("'" + std::string(id->name) + "'", held.ti, c, args); }
                     }
                     return {};
                 }
@@ -6402,7 +6935,7 @@ private:
                     check_sleep_call(args, c->location);
                     return ctype::make(ctype::null_k);
                 }
-                check_host_call(name, args, c->location);
+                check_host_call(name, args, c->location, c);
                 check_held_script_call(id->name, args, c->location);
                 if (name == "parallel_reduce") { check_reduce_callbacks(c); }
                 if (name == "format") { check_format_text(c, args); }
@@ -6532,9 +7065,11 @@ private:
             }
             return !recv.tentative && !m->is_static ? builtin_result(recv, m, args) : ctype{};   // builtin container/string methods etc.
         }
-        infer(callee);
+        if (const ctype held = infer(callee); signature_slot(held)) { return check_signature_call("the callee", held.ti, c, args); }
         return {};
     }
+
+    static bool signature_slot(const ctype& t) { return t.kind == ctype::function_k && t.ti && t.ti->is_signature(); }
 
     // p.reset(h) as the run time judges it, where the load can see it: one argument, a handle (a value or a primitive is not), of a
     // class a typed shared_ptr<T> receiver admits
@@ -6588,8 +7123,11 @@ private:
                 if (!hit.provable) { result.tentative = true; }
                 return result;
             }
+            if (hit.field && hit.field->type) {
+                if (const ctype held = member_type(hit); signature_slot(held)) { return check_signature_call("'" + std::string(m->member) + "'", held.ti, c, args); }
+            }
             note_host_nodiscard(std::string(recv.cls) + "." + std::string(m->member));
-            if (!want_static) { return check_strict_host_method(recv.cls, m->member, args, c->location); }
+            if (!want_static) { return check_strict_host_method(recv.cls, m->member, args, c->location, c); }
             check_host_static_arity(recv.cls, m->member, args.size(), c->location);
             return {};
         }
@@ -6634,7 +7172,8 @@ private:
         if (a->bare_condition) {
             diag(diag_level::warning, a->location, "assignment used as a condition: write '==' to compare, or '((a = b))' with parentheses of its own to assign");
         }
-        ctype rhs = infer(a->value.get());
+        const type_info* slot = a->op.type == token_type::equal && contextual_literal(a->value.get()) ? peek_declared_type(a->target.get()) : nullptr;
+        ctype rhs = infer_expecting(a->value.get(), slot);
         // a plain store of a string-valued right side: the compiler's text-builder store (`s = s + ...`) takes it, behind its run-time guards
         if (a->op.type == token_type::equal) {
             stamp(a->static_operand_class, rhs.kind == ctype::string_k ? operand_class_string_string : operand_class_unknown, operand_class_unknown);
@@ -8367,12 +8906,15 @@ private:
             elem = ctype_from_type_info(container.ti->element_type());
         } else if (container.kind == ctype::string_k) {
             elem = ctype::make(ctype::char_k);
+        } else if (container.kind == ctype::coroutine_k && container.yields) {
+            elem = ctype_from_type_info(container.yields);   // each yield converted to it; a bare yield hands out null
+            elem.tentative = true;
         }
         if (!f->element_type) { f->auto_spelled = true; }
         check_spelled_type(f->element_type.get(), f->location);
         if (f->auto_spelled && !f->auto_typed && semantic_walk() && container.kind != ctype::map_k) {
             f->auto_typed = true;   // an auto over elements without a static type is a var, decided once
-            if (elem.is_unknown()) { f->element_type = eng_.get_type_info_any(); }
+            if (elem.is_unknown() || container.kind == ctype::coroutine_k) { f->element_type = eng_.get_type_info_any(); }
         }
         const bool declared = f->element_type && f->element_type->base_type != script_value_type::jai_any_type && !f->auto_spelled;
         stamp(f->element_conversion_free, !declared || (!narrowed_container && !elem.is_unknown() && same_type(ctype_from_type_info(f->element_type.get()), elem)), false);
@@ -8549,7 +9091,8 @@ private:
 
     JAI_NOINLINE void check_return_impl(return_stmt* r, uint8_t& proof) {
         const size_t reads = narrow_reads_;
-        const ctype value = r->value ? infer(r->value.get()) : ctype::make(ctype::null_k);
+        const type_info* declared = fn_stack_.empty() || fn_stack_.back().is_coroutine ? nullptr : fn_stack_.back().ret;
+        const ctype value = r->value ? infer_expecting(r->value.get(), declared) : ctype::make(ctype::null_k);
         // the return proof has a reader with no run-time guard (parallel_transform's rewrite): a narrowed read stays out of it
         narrow_derived_ = narrow_reads_ != reads;
         check_return_value(r, value, proof);
@@ -8561,9 +9104,11 @@ private:
     void check_coroutine_value(const ctype& value, const source_location& loc, const char* verb) {
         if (fn_stack_.empty()) { return; }
         const fn_ctx& fn = fn_stack_.back();
-        if (!fn.is_coroutine || !fn.ret || fn.ret->base_type != script_value_type::jai_int_type || value.kind != ctype::float_k) { return; }
-        diag(diag_level::error, loc, std::string("cannot ") + verb + " 'float' from '" + std::string(fn.name) + "' declared to return 'int': " + float_to_int_fix,
-             fn.line, fn.column);
+        if (!fn.is_coroutine || !fn.ret) { return; }
+        const ctype declared = ctype_from_type_info(fn.ret);
+        if (declared.is_unknown() || declared.kind == ctype::null_k || value.is_unknown() || assignable(value, declared)) { return; }
+        diag(diag_level::error, loc, std::string("cannot ") + verb + " '" + ctype_name(value) + "' from '" + std::string(fn.name) + "' declared to return '" +
+             fn.ret->canonical_name() + "'" + assignment_detail(value, declared), fn.line, fn.column);
     }
 
     JAI_NOINLINE void check_return_value(return_stmt* r, ctype value, uint8_t& proof) {
@@ -8580,7 +9125,7 @@ private:
             if (k == 0 || (open.inferred_return != 0 && open.inferred_return != k)) { open.inferred_mixed = true; }
             else { open.inferred_return = k; }
         }
-        if (fn.is_coroutine) { check_coroutine_value(value, r->location, "return"); }
+        if (fn.is_coroutine && r->value) { check_coroutine_value(value, r->location, "return"); }
         if (fn.is_coroutine || !fn.ret) { return; }   // coroutine returns/yields + auto: lenient
         if (!r->value && requires_return_value(fn.ret)) {
             diag(diag_level::error, r->location, "'" + std::string(fn.name) + "' declared to return '" +
@@ -8767,8 +9312,11 @@ private:
     void type_auto_slot(variable_decl* decl, const ctype& init) {
         if (!decl->auto_spelled || decl->auto_typed || !semantic_walk()) { return; }
         decl->auto_typed = true;
-        if (init.is_unknown() || init.kind == ctype::coroutine_k) {
+        if (init.is_unknown() || init.nullable_result) {
             decl->type = eng_.get_type_info_any();
+            decl->decl_fast_flags = variable_decl::classify_decl_fast(decl->type);
+        } else if (init.kind == ctype::coroutine_k) {
+            decl->type = eng_.get_type_info_coroutine(const_cast<type_info*>(init.yields));   // a handle carries no stamp for the run to lock to
             decl->decl_fast_flags = variable_decl::classify_decl_fast(decl->type);
         } else if (init.kind == ctype::float_k && decl->initializer && decl->initializer->get_type() == node_type::ternary_expr &&
                    last_mixed_ternary_.node == decl->initializer.get()) {
@@ -8822,7 +9370,7 @@ private:
         check_spelled_type(decl->type.get(), decl->location);
         check_inline_redefinition(decl);
         const size_t reads = narrow_reads_;
-        ctype init = decl->initializer ? infer(decl->initializer.get()) : ctype{};
+        ctype init = decl->initializer ? infer_expecting(decl->initializer.get(), decl->auto_spelled ? nullptr : decl->type.get()) : ctype{};
         const ctype read = init;
         narrow_derived_ = narrow_reads_ != reads;
         // a narrowing changes no declaration: an auto takes the type its initializer has by declaration
@@ -8955,7 +9503,7 @@ private:
             // store, so a null init stays dynamic.
             init = numeric_ternary_type(decl->initializer.get(), init);
             entry.type = init;
-            entry.dynamic = init.is_unknown() || init.kind == ctype::null_k;
+            entry.dynamic = init.is_unknown() || init.kind == ctype::null_k || init.nullable_result;
             entry.display = ctype_name(init);
             type_auto_slot(decl, init);
             // A mixed-branch ternary has no single static type, so the auto is a var: say so where it reads like a typed slot
@@ -9107,7 +9655,7 @@ private:
             ctype pt = ctype_from_type_info(p.type.get());
             if (p.default_value) {
                 report_default_naming_parameter(params, p, p.default_value.get());
-                ctype dv = infer(p.default_value.get());
+                ctype dv = infer_expecting(p.default_value.get(), p.is_reference ? nullptr : p.type.get());
                 if (!p.is_reference && !pt.is_unknown() && !assignable(dv, pt)) {
                     diag(diag_level::error, p.default_value->location,
                          "default value of '" + p.name + "' declared '" +
@@ -9292,7 +9840,7 @@ private:
                     initializing_field initializing{f->name, {}};
                     if (!f->is_static) { initializing.unready = fields_from(cd, f); }
                     initializing_field_ = f->is_static ? nullptr : &initializing;
-                    ctype init = infer(f->initializer.get());
+                    ctype init = infer_expecting(f->initializer.get(), f->auto_spelled ? nullptr : f->type.get());
                     initializing_field_ = nullptr;
                     cdtor_ctx_ = enclosing_cdtor;
                     if (f->auto_spelled) { type_auto_slot(f, numeric_ternary_type(f->initializer.get(), init)); }   // an auto field: its initializer's static type
@@ -9319,6 +9867,8 @@ private:
         class_ctx_ = prev_class;
         class_ctx_name_ = prev_name;
     }
+
+    std::unordered_map<const lambda_expr*, ctype> lambda_results_;   // an undeclared lambda whose returns are one certain scalar kind
 
     // An init-capture, or an explicit by-value capture of a program-scope name, holds a copy taken at creation:
     // the call reads that copy, never the name, so the body is not grafted at the call site
@@ -9414,6 +9964,8 @@ private:
             const fn_ctx& done = fn_stack_.back();
             const uint8_t kind = !l->return_type && !done.inferred_mixed && !has_includes_ ? done.inferred_return : uint8_t(0);
             stamp(l->inferred_return_kind, kind, uint8_t(0));
+            if (kind) { lambda_results_[l] = ctype::make(kind == 1 ? ctype::int_k : kind == 2 ? ctype::float_k : ctype::bool_k); }
+            else { lambda_results_.erase(l); }
         }
         fn_stack_.pop_back();
         scopes_.pop_back();

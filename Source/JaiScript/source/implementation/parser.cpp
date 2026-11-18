@@ -2299,9 +2299,12 @@ checked_result<type_info_ptr> parser::parse_type_head() {
 
 // function<R(A...)> or coroutine<Y> starts here: the keyword with '<' after it (`function name`, `function (` and the coroutine
 // prefix never have one)
-bool parser::callable_type_ahead() const {
-    return (check(token_type::function_keyword) || check(token_type::coroutine_keyword)) && !pushed_back_token_ &&
-           current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::less;
+bool parser::callable_type_ahead() const { return !pushed_back_token_ && callable_type_at(current_); }
+
+bool parser::callable_type_at(size_t at) const {
+    const std::vector<token>& tokens = *stream_;
+    return at + 1 < tokens.size() && (tokens[at].type == token_type::function_keyword || tokens[at].type == token_type::coroutine_keyword) &&
+           tokens[at + 1].type == token_type::less;
 }
 
 // function<R(A, B&, ...)>: the result, then each parameter's type, by reference with '&'; a name after a type is read and dropped
@@ -3209,7 +3212,7 @@ size_t parser::type_arguments_end(size_t open, bool& split, bool placeholders) c
             case token_type::less:
                 ++depth;
                 if (depth < 64) {
-                    const bool callable = i > open && tokens[i - 1].type == token_type::function_keyword;
+                    const bool callable = i > open && tokens[i - 1].type == token_type::function_keyword && callable_type_at(i - 1);
                     signatures = callable ? signatures | (1ull << depth) : signatures & ~(1ull << depth);
                 }
                 break;
@@ -3229,7 +3232,7 @@ size_t parser::type_arguments_end(size_t open, bool& split, bool placeholders) c
                 break;
             }
             case token_type::coroutine_keyword:   // coroutine<Y>: a type only before '<'
-                if (depth == 0 || i + 1 >= tokens.size() || tokens[i + 1].type != token_type::less) { return SIZE_MAX; }
+                if (depth == 0 || !callable_type_at(i)) { return SIZE_MAX; }
                 break;
             case token_type::greater:
                 if (--depth == 0) { return i + 1; }
@@ -3245,7 +3248,10 @@ size_t parser::type_arguments_end(size_t open, bool& split, bool placeholders) c
             case token_type::weak_ptr_keyword: case token_type::var_keyword: case token_type::function_keyword:
                 if (depth == 0) { return SIZE_MAX; }
                 break;
-            case token_type::auto_keyword: case token_type::void_keyword:
+            case token_type::void_keyword:   // function<void(A...)>: a signature's result is a type's spelling wherever it stands
+                if (depth < 64 && ((signatures >> depth) & 1) && tokens[i - 1].type == token_type::less) { break; }
+                [[fallthrough]];
+            case token_type::auto_keyword:
                 if (depth == 0 || !placeholders) { return SIZE_MAX; }
                 break;
             default:

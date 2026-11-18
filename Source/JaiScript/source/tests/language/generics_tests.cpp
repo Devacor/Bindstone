@@ -1642,7 +1642,7 @@ public:
 			)").as_string());
 		});
 
-		test("a_signature_is_a_type_inside_a_generic_and_no_type_argument_yet", [this]() {
+		test("a_signature_is_a_type_inside_a_generic", [this]() {
 			auto e = stdlib_engine();
 			// function<R(A...)> in a generic's parameters and fields is ordinary code once the instance is made
 			check_eq(std::string("4|8|3|7"), e->execute(R"(
@@ -1656,19 +1656,72 @@ public:
 				Box<function> any; any.v = () => 7;
 				`${apply<int>((int a) => a + 1, 3)}|${s.run(4)}|${total}|${any.v()}`;
 			)").as_string());
-			// as a type argument a signature and a coroutine type are refused by name, in a type and in a call
-			const std::string box = "class Box<T> { T v; } T pick<T>(T a) { return a; } ";
-			check_true(contains(failure(*e, box + "Box<function<int(int)>> b;"), "'function<int(int)>' is not a type an instance is made with: 'Box<function<int(int)>>'"));
-			check_true(contains(failure(*e, box + "array<Box<function<void()>>> bs;"), "'function<void()>' is not a type an instance is made with: 'Box<function<void()>>'"));
-			check_true(contains(failure(*e, box + "Box<coroutine<int>> c;"), "'coroutine<int>' is not a type an instance is made with: 'Box<coroutine<int>>'"));
-			check_true(contains(failure(*e, box + "function<int(int)> inc = (int a) => a + 1; auto g = pick<function<int(int)>>(inc);"),
-				"'function<int(int)>' is not a type an instance is made with: 'pick<function<int(int)>>'"));
 			// a signature deduces nothing: the call writes the type argument
 			check_true(contains(failure(*e, "T run<T>(function<T()> f) { return f(); } function<int()> one = () => 1; run(one);"),
 				"cannot deduce T for 'run': argument 1 is a function, which says nothing of a type; write run<T>(...)"));
 			check_eq((int64_t)1, e->execute("T run<T>(function<T()> f) { return f(); } function<int()> one = () => 1; run<int>(one);").as_int());
 			// a typed callable's own '<' is no type-argument list of a call, and a comparison beside one stays a comparison
 			check_eq(std::string("3|true|false"), e->execute("function<int(int)> f = (int a) => a + 1; int g = 1; int h = 2; `${f(2)}|${g < h}|${f(1) < h}`;").as_string());
+		});
+
+		// function<R(A...)> and coroutine<Y> are type arguments like any other type: the instance's text spells them where the
+		// parameter stood, and its name spells them as their own names do
+		test("a_signature_and_a_coroutine_type_are_type_arguments", [this]() {
+			auto e = stdlib_engine();
+			const std::string box = "class Box<T> { T v; } T pick<T>(T a) { return a; } ";
+			check_eq(std::string("3|Box<function<int(int)>>"), e->execute(box + "Box<function<int(int)>> b; b.v = (int a) => a + 1; `${b.v(2)}|${reflect::type_of(b)}`;").as_string());
+			check_eq(std::string("1|Box<function<void()>>"), e->execute(box + "int hits = 0; array<Box<function<void()>>> bs; Box<function<void()>> one; one.v = () => { hits += 1; };"
+				" bs.push(one); bs[0].v(); `${hits}|${reflect::type_of(bs[0])}`;").as_string());
+			check_eq(std::string("42|Box<coroutine<int>>"), e->execute(box + "coroutine int gen() { yield 20; yield 22; } Box<coroutine<int>> c; c.v = gen();"
+				" `${c.v.next() + c.v.next()}|${reflect::type_of(c)}`;").as_string());
+			// in a call, written: a signature that returns void is one too
+			check_eq(std::string("5|1"), e->execute(box + "function<int(int)> inc = (int a) => a + 1; auto g = pick<function<int(int)>>(inc);"
+				" int n = 0; function<void()> bump = () => { n += 1; }; pick<function<void()>>(bump)(); `${g(4)}|${n}`;").as_string());
+			// a reference parameter, a class and a second parameter are spelled as the signature's own name spells them
+			check_eq(std::string("5|Box<function<void(Item&,int)>>"), e->execute(box + "class Item { int n = 1; } void grow(Item& it, int by) { it.n += by; }"
+				" Box<function<void(Item&, int)>> g; g.v = grow; Item it; g.v(it, 4); `${it.n}|${reflect::type_of(g)}`;").as_string());
+			// a parameter inside a signature or a coroutine type takes a callable argument the same way
+			check_eq(std::string("7|Pipe<function<int()>>|coroutine<int>"), e->execute(
+				"class Pipe<T> { function<T(T)> step; }\nclass Wrap<Y> { coroutine<Y> held; }\ncoroutine int gen() { yield 1; }\n"
+				"Pipe<function<int()>> p; p.step = (function<int()> f) => f;\nWrap<int> w; w.held = gen();\n"
+				"function<int()> seven = () => 7;\n`${p.step(seven)()}|${reflect::type_of(p)}|${reflect::type_of(w.held)}`;").as_string());
+			// a field that is the parameter can hold a callable: a copy rebinds a lambda bound to the instance it was copied from
+			check_eq(std::string("1|6"), e->execute(
+				"class Counter<F> { int n; F bump; void arm() { bump = [this](int by) { n += by; return n; }; } }\n"
+				"Counter<function<int(int)>> c; c.arm(); c.bump(1);\nCounter<function<int(int)>> d = c; d.bump(5);\n`${c.n}|${d.n}`;").as_string());
+			e->execute(box + "class Stepper { coroutine<int> v; } Box<function<int(int)>> held; Box<coroutine<int>> stepping; Box<int> plain; Stepper by_hand;");
+			check_true(detail::engine_access::get_class_definition(*e, "Box<function<int(int)>>")->value_tree_holds_callable());
+			check_true((detail::engine_access::get_class_definition(*e, "Counter<function<int(int)>>")->copy_care() & class_definition::copy_care_watch) != 0);
+			check_eq(detail::engine_access::get_class_definition(*e, "Stepper")->value_tree_holds_callable(),
+			         detail::engine_access::get_class_definition(*e, "Box<coroutine<int>>")->value_tree_holds_callable(), "an instance answers as the class written by hand");
+			check_false(detail::engine_access::get_class_definition(*e, "Box<int>")->value_tree_holds_callable());
+		});
+
+		test("an_instance_made_with_a_callable_type_keeps_its_name_where_names_travel", [this]() {
+			auto e = stdlib_engine();
+			e->execute("class Tagged<T> { int n = 0; }\nTagged<function<int(int)>> t; t.n = 5;\nTagged<function<int(int, string)>> two;\nTagged<coroutine<int>> stepping;");
+			check_eq(std::string("Tagged<function<int(int)>>|Tagged<function<int(int,string)>>|Tagged<coroutine<int>>"),
+				e->execute("reflect::type_of(t) + \"|\" + reflect::type_name(two) + \"|\" + reflect::type_of(stepping);").as_string());
+			check_eq(std::string("{\"$type\":\"Tagged<function<int(int)>>\",\"$val\":{\"n\":5}}"), e->execute("to_json(t);").as_string());
+			check_eq(std::string("Tagged<function<int(int)>>|5"), e->execute("auto back = from_json(to_json(t)); reflect::type_of(back) + \"|\" + to_string(back.n);").as_string());
+			check_eq(std::string("Tagged<function<int(int)>>|5"), e->execute("auto again = from_binary(to_binary(t)); reflect::type_of(again) + \"|\" + to_string(again.n);").as_string());
+			check_true(contains(e->execute("to_binary(t);").as_string(), "Tagged<function<int(int)>>"));
+			check_true(e->execute("reflect::classes().contains(\"Tagged<function<int(int)>>\") && reflect::classes().contains(\"Tagged<coroutine<int>>\");").as_bool());
+			// a name that arrives as text is read without its spacing
+			for (const auto& [spelled, name] : std::vector<std::pair<const char*, const char*>>{{"Tagged< function<int( int )> >", "Tagged<function<int(int)>>"},
+					{"Tagged<function<int(int, string)>>", "Tagged<function<int(int,string)>>"}, {"Tagged < coroutine < int > >", "Tagged<coroutine<int>>"}}) {
+				const std::string quoted = "\"" + std::string(spelled) + "\"";
+				check_eq(std::string(name), e->execute("reflect::type_of(reflect::construct(" + quoted + "));").as_string(), "reflect::construct " + std::string(spelled));
+				check_true(e->execute("reflect::is_instance_of(reflect::construct(" + quoted + "), " + quoted + ");").as_bool(), "reflect::is_instance_of " + std::string(spelled));
+				check_eq(std::string(name), e->execute("reflect::type_of(from_json(\"{\\\"$type\\\":\\\"" + std::string(spelled) + "\\\",\\\"$val\\\":{}}\"));").as_string(), "from_json " + std::string(spelled));
+				check_eq(std::string(name), detail::registered_type_spelling(e.get(), spelled), "the registered spelling of " + std::string(spelled));
+			}
+			// a saved bite carries the instance and a fresh engine declares it
+			const std::string unit = "class Box<T> { T v; }\nBox<function<int(int)>> b; b.v = (int a) => a + 1;\ncoroutine int gen() { yield 4; }\nBox<coroutine<int>> c; c.v = gen();\n"
+				"`${b.v(2)}|${c.v.next()}|${reflect::type_of(b)}|${reflect::type_of(c)}`;";
+			auto bite = e->jaibite(unit);
+			auto fresh = stdlib_engine();
+			check_eq(std::string("3|4|Box<function<int(int)>>|Box<coroutine<int>>"), fresh->jaibite_load_bytes(bite.save_bytes()).execute().as_string());
 		});
 
 		// A generic class is a class of its namespace to another file's block of that namespace, as a plain class is: its bare

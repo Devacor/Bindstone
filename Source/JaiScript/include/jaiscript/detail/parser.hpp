@@ -321,6 +321,7 @@ namespace jai {
         checked_result<type_info_ptr> weak_ptr_type();
         checked_result<type_info_ptr> shared_ptr_type();
         bool callable_type_ahead() const;   // function '<' / coroutine '<': a type, never a declaration's keyword
+        bool callable_type_at(size_t at) const;   // the same asked of the stream at an index (type_arguments_end)
         checked_result<type_info_ptr> signature_type();
         checked_result<type_info_ptr> coroutine_type();
         checked_result<declaration_ptr> callable_typed_declaration();

@@ -1443,10 +1443,11 @@ struct engine::implementation {
 
     // What an instance is built on (class_decl::instance_needs): the classes its type arguments name, through containers
     // and handles, an instance among them by its own name; its bases; for a method's instance, the class it joins. An enum
-    // or a builtin type needs no declaration. The request keeps the same names for the checker's order rule.
+    // or a builtin type needs no declaration, and a signature or a coroutine type only what it names. The request keeps the
+    // same names for the checker's order rule.
     void argument_classes(engine& self, const std::vector<declaration_ptr>& decls, const type_info* type, std::vector<std::string_view>& out) {
         if (!type) { return; }
-        if (type->base_type == script_value_type::jai_object_type && !type->type_name.empty()) {
+        if (type->base_type == script_value_type::jai_object_type && !type->type_name.empty() && !type->is_coroutine) {
             const std::string name(type->type_name);
             const bool is_class = generic_instances_.count(name) != 0 || name.find('<') != std::string::npos || unit_declares_class(decls, name) ||
                                   program_classes_.count(name) != 0 || self.get_class_registry().find_script_class(name) != nullptr || self.get_class_definition(name) != nullptr;

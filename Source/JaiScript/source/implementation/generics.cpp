@@ -181,10 +181,27 @@ bool generic_argument_tokens(const type_info& type, const source_location& at, s
 		case script_value_type::jai_color_type: case script_value_type::jai_ivec2_type: case script_value_type::jai_ivec3_type:
 			out.push_back(make_name(type.canonical_name(), at, symbols));   // a math type is one token (lexer.cpp)
 			return true;
-		case script_value_type::jai_function_type:
-			if (!type.type_params.empty()) { return false; }
+		case script_value_type::jai_function_type: {   // function, or function<R(A, B&)> as its own name spells it
 			word(token_type::function_keyword, "function");
+			if (type.type_params.empty()) { return true; }
+			word(token_type::less, "<");
+			const type_info_ptr& result = type.type_params[0];
+			if (!result || result->base_type == script_value_type::jai_null_type) { word(token_type::void_keyword, "void"); }
+			else if (!generic_argument_tokens(*result, at, symbols, out)) { return false; }
+			word(token_type::left_paren, "(");
+			for (size_t i = 1; i < type.type_params.size(); ++i) {
+				if (i > 1) { word(token_type::comma, ","); }
+				const type_info* taken = type.type_params[i].get();
+				const bool by_reference = taken && taken->base_type == script_value_type::jai_reference_type;
+				if (by_reference) { taken = taken->element_type().get(); }
+				if (!taken) { word(token_type::var_keyword, "var"); }
+				else if (!generic_argument_tokens(*taken, at, symbols, out)) { return false; }
+				if (by_reference) { word(token_type::ampersand, "&"); }
+			}
+			word(token_type::right_paren, ")");
+			word(token_type::greater, ">");
 			return true;
+		}
 		case script_value_type::jai_array_type:
 			word(token_type::array_keyword, "array");
 			word(token_type::less, "<");
@@ -214,7 +231,16 @@ bool generic_argument_tokens(const type_info& type, const source_location& at, s
 			return true;
 		}
 		case script_value_type::jai_object_type:
-			if (type.type_name.empty() || type.is_coroutine) { return false; }   // coroutine<Y> is spelled by its keyword: none is made with one yet
+			if (type.is_coroutine) {   // coroutine<Y> is spelled by its keyword, its name being no class's
+				const type_info* yields = type.type_params.empty() ? nullptr : type.type_params[0].get();
+				word(token_type::coroutine_keyword, "coroutine");
+				word(token_type::less, "<");
+				if (!yields) { word(token_type::var_keyword, "var"); }
+				else if (!generic_argument_tokens(*yields, at, symbols, out)) { return false; }
+				word(token_type::greater, ">");
+				return true;
+			}
+			if (type.type_name.empty()) { return false; }
 			qualified_name_tokens(type.type_name, at, symbols, out);
 			return true;
 		default:

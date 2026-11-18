@@ -117,7 +117,7 @@ risky.execute();                                  // throws &quot;Undefined vari
 <p id="the-stamp-holds-its-context">A load trusts the stamp, and skips the check, only when all three hold. Otherwise the bite is checked again against the loading engine, and an error throws at load:</p>
 <ul>
 <li>the registration fingerprint matches the saving engine&#x27;s;</li>
-<li>the stamp names this library&#x27;s checker revision, a value derived from the checker&#x27;s source: every build of one library source trusts the others&#x27; stamps, and a library whose checker changed checks again;</li>
+<li>the stamp names this library&#x27;s checker revision, a value derived from the library&#x27;s source code: every build of one library source trusts the others&#x27; stamps, and a library whose code changed checks again;</li>
 <li>every name the check resolved outside the file resolves the same here. The stamp records each one: the unit that declared it, a global&#x27;s type, and a host function&#x27;s overloads or a bound class&#x27;s methods, fields and bases by their C++ signatures.</li>
 </ul>
 <p>So a file that checked clean inside one program, with <a href="06-static-checking.html#programs">its names declared by a sibling unit</a>, is checked again when a different program reaches it or the sibling&#x27;s declaration changes, and gets the verdict a fresh parse would. A clean re-check rewrites the disk cache under the new context.</p>

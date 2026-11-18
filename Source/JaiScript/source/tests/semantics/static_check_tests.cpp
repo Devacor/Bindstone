@@ -884,7 +884,7 @@ public:
                 for (int i = 0; i < 4; ++i) { stamped[8 + i] = static_cast<uint8_t>(flags >> (8 * i)); }
                 return stamped;
             };
-            const uint32_t revision = jai::detail::k_jaibite_checker_revision;
+            const uint32_t revision = jai::detail::jaibite_checker_revision();
             const auto stamped_by = [](uint32_t a_revision) { return jai::detail::k_jaibite_flag_checked_clean | (a_revision << 8); };
             check_eq(revision, jai::detail::jaibite_checked_clean_flags() >> 8, "the stamp holds the whole revision");
             for (const uint32_t other : {revision ^ 1u, revision ^ 0x800000u, revision ^ 0xFFFFFFu, revision == 12u ? 11u : 12u}) {

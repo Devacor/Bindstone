@@ -24,6 +24,7 @@
 #include "implementation/class_registry.cpp"
 #include "implementation/construction.cpp"
 #include "implementation/parse_errors.cpp"
+#include "implementation/jaibite_checker_revision.cpp"
 #include "implementation/type_checker.cpp"
 #include "implementation/aggregate_lowering.cpp"
 #include "implementation/schema_binding.cpp"

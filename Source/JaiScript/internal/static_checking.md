@@ -739,9 +739,10 @@ checked-clean bit in the header's flags u32 beside the bite's context section (`
 name the clean check asked the engine or the program pools about (`check_options::outside`, recorded by the checker's
 `outside_engine`) and a key over what each resolves to (`outside_signature`: the program's declaring units by
 `unit_key`, the cell's kind and type, registrations, the script class, namespace and namespace member by the unit that
-ran them). The stamp also names the checker's revision (flag bits 8..31): `k_jaibite_checker_revision`, a hash of the
-checker's translation unit that `tools/ci/checker_revision.py` generates into `detail/jaibite_checker_revision.hpp` and the
-`checker-revision` gate holds to the tree. On load the stamp is trusted ONLY when the revision is this library's, the
+ran them). The stamp also names the checker's revision (flag bits 8..31): `detail::jaibite_checker_revision()`, a hash of
+the code of every C++ file under `include/` and `source/` but the tests (a rule that refuses a program can live in any of
+them) that `tools/ci/checker_revision.py` generates into `detail/jaibite_checker_revision.hpp`, the `checker-revision` gate
+holds to the tree and `jaibite_checker_revision.cpp` alone includes. On load the stamp is trusted ONLY when the revision is this library's, the
 registration fingerprint matches the saving engine's AND those names key alike here; otherwise the bite is re-checked at load against THIS engine's surface (an error throws). The
 disk cache holds a stamp the same way, judged at the check it stands in for (check_entry, after the program's names
 are gathered), and rewrites the cache when a re-check replaced it. The same section carries the parse's namespace-class

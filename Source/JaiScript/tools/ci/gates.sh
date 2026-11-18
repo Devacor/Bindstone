@@ -40,7 +40,7 @@
 # PATH, else Visual Studio's), CLANG_BUILD_DIR the tree (default build-clang); it skips with a message when no clang++ is found.
 #
 # The checker-revision gate runs no binary: the committed include/jaiscript/detail/jaibite_checker_revision.hpp is the value
-# tools/ci/checker_revision.py computes from the checker's sources in this checkout, after the generator's own checks.
+# tools/ci/checker_revision.py computes from the library's code in this checkout, after the generator's own checks.
 #
 # HASH_BACKENDS names the backends the runner's hash gates (gatorquest, timedemo) run (default "vm interp"; the per-change
 # tier passes "vm" unless its interpreter tier is picked, tools/ci/targeted.sh). GLOOM, the demoreel, the crawler and the
@@ -610,7 +610,7 @@ gate_site() {
 }
 
 # A .jaibite's checked-clean stamp is trusted under the checker revision that gave it; the revision is generated from the
-# checker's sources, and a stale one is fixed by the command the failure names
+# library's code, and a stale one is fixed by the command the failure names
 gate_checker_revision() {
 	local py
 	py="$(jai_python)"

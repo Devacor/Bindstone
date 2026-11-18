@@ -14,6 +14,7 @@ set(JAISCRIPT_SOURCES
     implementation/debug/controller.cpp
     implementation/engine.cpp
     implementation/environment.cpp
+    implementation/jaibite_checker_revision.cpp
     implementation/lexer.cpp
     implementation/no_interpreter.cpp
     implementation/parallel_transform.cpp

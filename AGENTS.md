@@ -87,7 +87,8 @@ and `Tools/Landing/client_gate.sh`; run on a committed tree, both write a stamp 
 skips every gate stamped for the tree it lands with the same configuration and toolchain. A branch cut from main's tip
 therefore lands without rerunning its gates; `targeted.sh --build --landing <base>..HEAD` in the worktree also stamps the
 Release suites. `LAND_NO_STAMPS=1` runs everything. The Android gate (`gates.sh android`) runs by hand only. After its picks a landing
-regenerates JaiScript's checker revision (`Source/JaiScript/tools/ci/checker_revision.py`) and commits it when it moved.
+regenerates JaiScript's checker revision (`Source/JaiScript/tools/ci/checker_revision.py`: a hash of the code of every C++
+file under the package's `include/` and `source/` but the tests) and commits it when it moved.
 
 ### JaiScript work
 

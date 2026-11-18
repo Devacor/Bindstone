@@ -93,7 +93,8 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
   manifests (every chunk field, exact constant bits) change only where the change intends.
 - A change to what the AST serializer writes bumps `k_jaibite_version` (`include/jaiscript/detail/ast_serializer.hpp`).
 - The checker's revision (`include/jaiscript/detail/jaibite_checker_revision.hpp`, what a `.jaibite`'s checked-clean stamp
-  names) is generated from `type_checker.cpp` and the headers it reaches: `python tools/ci/checker_revision.py` writes it,
+  names) is generated from the code of every C++ file under `include/` and `source/` but the tests, comments and layout
+  aside, since a rule that refuses a program can live in any of them: `python tools/ci/checker_revision.py` writes it,
   and the `checker-revision` gate fails, before targeted.sh builds anything, when the committed value is not the tree's. A
   rebase that conflicts on it runs the same command; a landing regenerates it.
 - `tools/ci/targeted.sh --build <base>..HEAD` on a committed tree writes a stamp for each gate it passes, keyed by the

@@ -33,8 +33,8 @@
 # A library change also takes the wasm gate: the WebAssembly build is the one 32-bit libc++ target the gates run, so it catches
 # layout assumptions the 64-bit builds hide (a field placed in tail padding, a tag in a 4-aligned pointer's low bits).
 #
-# A change to the library (the checker's translation unit is source/implementation/type_checker.cpp and the headers it reaches) or to
-# the generator takes the checker-revision gate: the committed revision is the one tools/ci/checker_revision.py computes. It is
+# A change to the library's code (include/ and source/, the tests excepted: all of it is hashed) or to the generator takes the
+# checker-revision gate: the committed revision is the one tools/ci/checker_revision.py computes. It is
 # checked before anything is built, since the command that fixes it changes the tree every other check ran on.
 #
 # Whatever takes the suites takes the clang gate too: the suites built with Clang (gates.sh clang), whose names differ from MSVC's.
@@ -105,8 +105,9 @@ classify() {
 		docs/site/install.*) pick ci-scripts "the installers ($p)" ;;
 	esac
 	case "$p" in
-		include/* | source/implementation/* | tools/ci/checker_revision.py)
-			pick checker-revision "the committed checker revision is the one the checker's sources give ($p)" ;;
+		source/tests/*) ;;
+		include/* | source/* | tools/ci/checker_revision.py)
+			pick checker-revision "the committed checker revision is the one the library's code gives ($p)" ;;
 	esac
 	case "$p" in
 		docs/site/* | docs/site_tools/*) pick site "the documentation site ($p)" ;;

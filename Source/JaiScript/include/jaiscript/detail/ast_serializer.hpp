@@ -21,7 +21,6 @@
 
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/environment.hpp>
-#include <jaiscript/detail/jaibite_checker_revision.hpp>
 #include <jaiscript/detail/map_entry_binding.hpp>
 #include <jaiscript/detail/native_stack.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
@@ -45,14 +44,15 @@ namespace jai::detail {
     // bit 1 = a context section follows the string table (the writer sets it whenever the context is not empty)
     inline constexpr uint32_t k_jaibite_flag_context = 0x2;
     // A checked-clean stamp records the checker revision that gave it (flag bits 8..31), and a bite stamped under another
-    // revision is checked again on load instead of trusted. k_jaibite_checker_revision is a hash of the checker's sources,
-    // generated into jaibite_checker_revision.hpp (tools/ci/checker_revision.py): nobody bumps it, and builds of one source
-    // agree. A parse change bumps k_jaibite_version instead, which re-parses as well.
-    static_assert(k_jaibite_checker_revision <= 0xFFFFFFu);
-    inline constexpr uint32_t jaibite_checked_clean_flags() { return k_jaibite_flag_checked_clean | (k_jaibite_checker_revision << 8); }
+    // revision is checked again on load instead of trusted. The revision is a hash of the library's code that
+    // tools/ci/checker_revision.py generates: nobody bumps it, builds of one source agree, and it is read through a
+    // function one file defines (jaibite_checker_revision.cpp), so a new value recompiles that file alone. A parse change
+    // bumps k_jaibite_version instead, which re-parses as well.
+    uint32_t jaibite_checker_revision() noexcept;
+    inline uint32_t jaibite_checked_clean_flags() { return k_jaibite_flag_checked_clean | (jaibite_checker_revision() << 8); }
     // The stamp is trusted only from this checker revision
-    inline constexpr bool jaibite_stamped_clean(uint32_t flags) {
-        return (flags & k_jaibite_flag_checked_clean) && (flags >> 8) == k_jaibite_checker_revision;
+    inline bool jaibite_stamped_clean(uint32_t flags) {
+        return (flags & k_jaibite_flag_checked_clean) && (flags >> 8) == jaibite_checker_revision();
     }
     // The source a bite was parsed from: its byte count and a 64-bit hash of its bytes. A disk sibling is valid only for
     // the source whose identity equals the one it records (never by an mtime ordering); a bite saved without a source

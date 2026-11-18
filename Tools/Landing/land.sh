@@ -183,7 +183,7 @@ if [ "$TIER" != battery-only ]; then
 			done
 			if [ "$regen_search" = 1 ]; then "$(jai_python)" "$REPO/Source/JaiScript/docs/site_tools/build_search_index.py" > /dev/null || ok=0; fi
 			if [ "$regen_api" = 1 ]; then "$(jai_python)" "$REPO/Source/JaiScript/docs/site_tools/build_api_reference.py" > /dev/null || ok=0; fi
-			# after the API reference: its generated arities header is one of the checker's sources
+			# after the API reference: its generated arities header is library code, which the revision hashes
 			if [ "$regen_revision" = 1 ]; then "$(jai_python)" "$REPO/Source/JaiScript/tools/ci/checker_revision.py" > /dev/null || ok=0; fi
 			for f in $conflicted; do git add "$f" || ok=0; done
 			if [ "$ok" = 1 ] && GIT_EDITOR=true git cherry-pick --continue > /dev/null 2>&1; then
@@ -200,9 +200,9 @@ if [ "$TIER" != battery-only ]; then
 		echo "checking the picks that applied ($PARTIAL)"
 		break
 	done
-	# Picks whose checker changes met main's leave the revision of neither: it is the landed sources' or the stamps lie
+	# Picks whose library changes met main's leave the revision of neither: it is the landed sources' or the stamps lie
 	"$(jai_python)" "$REPO/Source/JaiScript/tools/ci/checker_revision.py" > "$LOG_DIR/land_${L}_checker_revision.log" 2>&1 || { cat "$LOG_DIR/land_${L}_checker_revision.log"; echo "$L NOT GREEN: the checker revision did not regenerate (main holds the picks; fix forward)"; exit 1; }
-	if [ -n "$(git status --porcelain -- "$CHECKER_REVISION")" ]; then
+	if ! git diff --quiet -- "$CHECKER_REVISION"; then
 		git add -- "$CHECKER_REVISION" && git commit -q -m "Generated for $L: the checker revision" -- "$CHECKER_REVISION" || { echo "$L NOT GREEN: the regenerated checker revision did not commit (main holds the picks; fix forward)"; exit 1; }
 		echo "regenerated the checker revision: $(tail -n 1 "$LOG_DIR/land_${L}_checker_revision.log" | tr -d '\r') -> $(git rev-parse --short HEAD)"
 	fi

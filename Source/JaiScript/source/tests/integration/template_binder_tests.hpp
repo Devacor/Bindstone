@@ -968,6 +968,44 @@ public:
             check_true(error.find("cannot deduce T for 'of': argument 1 is TplBinderKVPair<string, float>, which 'TplBox<T>' does not match; write of<T>(...)") != std::string::npos, error);
         });
 
+        // A sized number is a type only as a host template's argument: a parameter keeps it there and reads as the int or float a
+        // value of it is everywhere else in the instance
+        test("a_sized_number_a_host_template_is_bound_with_reads_as_its_script_type", [this]() {
+            auto eng = make_engine();
+            stdlib::register_all(*eng);
+            eng->bind_static_types<TplBox<int64_t>, TplBox<int32_t>, TplBox<float>, TplBox<uint8_t>, TplBox<std::vector<int32_t>>, TplBox<TplNamedLeaf>>();
+            eng->execute("class Of<T> {} string name<T>() { string n = reflect::type_of(Of<T>()); return n.substr(3, n.size() - 4); }"
+                         " int kind_of<T>(TplBox<T> b) { return b.kind(); }"
+                         " T zero<T>(TplBox<T> b) { T made = T(); return made; }"
+                         " string read_as<T>(TplBox<T> b) { array<T> held; T one = T(); held.push(one);"
+                         "   return name<T>() + \"/\" + reflect::type_of(one) + \"/\" + reflect::type_name(held) + \"/\" + to_string(b.kind()); }"
+                         " TplBox<int32> narrow; TplBox<float32> single; TplBox<uint8> small; TplBox<int> wide; TplBox<array<int32>> list; TplBox<NamedLeaf> leaf;");
+            check_eq(std::string("int/int/array<int>/8"), eng->execute("read_as(narrow);").as_string(), "int32 reads as int");
+            check_eq(std::string("float/float/array<float>/4"), eng->execute("read_as(single);").as_string(), "float32 reads as float");
+            check_eq(std::string("int/int/array<uint8>/7"), eng->execute("read_as(small);").as_string(), "uint8 reads as int, and is an array's element");
+            check_eq(std::string("int/int/array<int>/2"), eng->execute("read_as(wide);").as_string(), "int is itself");
+            check_eq(std::string("array<int>/array/array<array<int>>/0"), eng->execute("read_as(list);").as_string(), "at any depth");
+            check_eq(std::string("0|0.0|8|2"), eng->execute("`${zero(narrow)}|${zero(single)}|${kind_of(narrow)}|${kind_of(wide)}`;").as_string(), "each binding keeps its instance");
+            // the spelling is deduced, never written: on its own it names no type
+            std::string error;
+            try { eng->execute("zero<int32>(narrow);"); } catch (const std::exception& ex) { error = ex.what(); }
+            check_true(error.find("unknown type 'int32'") != std::string::npos, error);
+            error.clear();
+            // no promotion: the binding's own spelling and a script type are two types for one parameter
+            try { eng->execute("bool same<T>(TplBox<T> b, T x) { return true; } same(narrow, 5);"); } catch (const std::exception& ex) { error = ex.what(); }
+            check_true(error.find("cannot deduce T for 'same': it is int32 from argument 1 and int from argument 2") != std::string::npos, error);
+            // a name the host gave its argument that no script type reads as: fine where it stays the template's argument, an error
+            // at the call where the instance would read it
+            check_eq((int64_t)10, eng->execute("kind_of(leaf);").as_int());
+            error.clear();
+            try { eng->execute("zero(leaf);"); } catch (const std::exception& ex) { error = ex.what(); }
+            check_true(error.find("cannot deduce T for 'zero': argument 1 names 'NamedLeaf', a type the host binds that no script type reads as") != std::string::npos, error);
+            check_true(error.find("unknown type") == std::string::npos, error);
+            // a byte array's element is the same rule: array<T> keeps array<uint8>, T alone is an int
+            check_eq(std::string("1|3|int"), eng->execute("T first<T>(array<T> xs) { T head = xs[0]; return head; } int count<T>(array<T> xs) { return xs.size(); }"
+                " array<uint8> bytes = [1, 2, 3]; `${first(bytes)}|${count(bytes)}|${reflect::type_of(first(bytes))}`;").as_string());
+        });
+
         test("a_host_templates_name_arriving_as_text_is_read_without_its_spacing", [this]() {
             auto eng = make_engine();
             stdlib::register_all(*eng);

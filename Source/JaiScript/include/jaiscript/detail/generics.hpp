@@ -14,6 +14,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace jai {
@@ -135,7 +136,22 @@ namespace jai::detail {
 
 	// A type as the tokens that spell it where a type parameter stood (each at `at`): `shop::Stack<int>` is `shop` `::` and the one
 	// name `Stack<int>`, the class an instance declares. False for a type no argument may be (auto, void, a reference).
-	bool generic_argument_tokens(const type_info& type, const source_location& at, string_symbolizer& symbols, std::vector<token>& out);
+	// With `read`, the type as an instance reads it where the parameter stands on its own: a sized number (a name in `read`, the
+	// uint8 or int8 of an array's element) is the int or float a value of it is; array<uint8> itself keeps its element (`element`:
+	// the type stands as one).
+	bool generic_argument_tokens(const type_info& type, const source_location& at, string_symbolizer& symbols, std::vector<token>& out,
+	                             const std::vector<std::string_view>* read = nullptr, bool element = false);
+
+	// What an instance's text takes from the host to spell a sized number a host template is bound with (Box<int32>, Box<float32>:
+	// jai::type_name_helper's spellings, sized_number_kind). Such a name is a type only as a host template's argument, so a
+	// parameter keeps it there (Box<T> is Box<int32>) and reads as int or float anywhere else (T x; array<T>; a result).
+	struct generic_spelling {
+		const std::unordered_set<std::string>* templates = nullptr;   // the host's templates, by name
+		std::vector<std::string_view> sized;                          // the arguments' names that are sized numbers, no class having taken one
+	};
+	// Whether the parameter stands anywhere in the definition but as a host template's argument: an instance then reads its
+	// argument as a script type
+	bool generic_parameter_read(const generic_definition& definition, size_t parameter, const std::unordered_set<std::string>& templates);
 
 	// The instance's name: template_instance_name over the generic's qualified name and each argument's canonical spelling
 	std::string generic_instance_name(std::string_view generic, const std::vector<type_info_ptr>& arguments);
@@ -143,14 +159,14 @@ namespace jai::detail {
 	// An instance's text: the definition's tokens with each parameter replaced by its argument and the declared name by
 	// `instance` (the name without its namespace), wrapped in the definition's namespace or, for a method, its class; eof ends it
 	std::vector<token> generic_instance_tokens(const generic_definition& definition, const std::vector<type_info_ptr>& arguments,
-	                                           std::string_view instance, string_symbolizer& symbols);
+	                                           std::string_view instance, string_symbolizer& symbols, const generic_spelling* host = nullptr);
 
 	// What a generic's declaration runs (generic_decl::marker): made once, null for a method's generic
 	std::shared_ptr<class_decl> generic_marker(const generic_decl& declared, string_symbolizer& symbols);
 
 	// `T : Base` with the arguments in place: the bound's tokens (empty when the parameter has none)
 	std::vector<token> generic_bound_tokens(const generic_definition& definition, size_t parameter, const std::vector<type_info_ptr>& arguments,
-	                                        string_symbolizer& symbols);
+	                                        string_symbolizer& symbols, const generic_spelling* host = nullptr);
 
 } // namespace jai::detail
 

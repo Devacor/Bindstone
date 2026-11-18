@@ -1459,6 +1459,17 @@ struct engine::implementation {
         }
         for (const auto& parameter : type->type_params) { argument_classes(self, decls, parameter.get(), out); }
     }
+    // The sized numbers among an instance's arguments (detail::generic_spelling::sized): a host's spelling of one that no
+    // class or enum of the program has taken for its own name
+    void sized_arguments(engine& self, const std::vector<declaration_ptr>& decls, const type_info* type, std::vector<std::string_view>& out, int depth = 0) {
+        if (!type || depth > 64) { return; }
+        if (type->base_type == script_value_type::jai_object_type && !type->is_coroutine) {
+            if (sized_number_kind(type->type_name) != script_value_type::jai_null_type && std::find(out.begin(), out.end(), type->type_name) == out.end() &&
+                plain_type_named(self, decls, type->type_name) == detail::plain_type_kind::none) { out.push_back(type->type_name); }
+            return;
+        }
+        for (const auto& parameter : type->type_params) { sized_arguments(self, decls, parameter.get(), out, depth + 1); }
+    }
     void note_instance_needs(engine& self, const std::vector<declaration_ptr>& decls, declaration& made, const detail::generic_definition& definition,
                              generic_instance_decl& request) {
         if (made.get_type() == node_type::namespace_decl) {
@@ -1612,9 +1623,11 @@ struct engine::implementation {
             }
         }
         const std::string& file = definition->location.filename;
+        detail::generic_spelling host{&registeredTemplateTypes, {}};
+        for (const auto& argument : request.arguments) { sized_arguments(self, decls, argument.get(), host.sized); }
         for (size_t p = 0; p < definition->parameters.size(); ++p) {
             if (definition->parameters[p].bound.empty()) { continue; }
-            std::vector<token> bound = detail::generic_bound_tokens(*definition, p, request.arguments, string_symbolizer_);
+            std::vector<token> bound = detail::generic_bound_tokens(*definition, p, request.arguments, string_symbolizer_, &host);
             bound.emplace_back(token_type::eof, "", definition->parameters[p].location);
             parser reader(bound, &string_symbolizer_, &self, registeredTemplateTypes, file);
             auto type = reader.parse_type_text(made);
@@ -1633,7 +1646,7 @@ struct engine::implementation {
         if (definition->kind != detail::generic_kind::method && !prefix.empty() && simple.size() > prefix.size() + 2 && simple.substr(0, prefix.size()) == prefix) {
             simple.remove_prefix(prefix.size() + 2);
         }
-        const std::vector<token> text = detail::generic_instance_tokens(*definition, request.arguments, simple, string_symbolizer_);
+        const std::vector<token> text = detail::generic_instance_tokens(*definition, request.arguments, simple, string_symbolizer_, &host);
         parser reader(text, &string_symbolizer_, &self, registeredTemplateTypes, file);
         auto parsed = reader.parse();
         refuse_unsettled(reader);

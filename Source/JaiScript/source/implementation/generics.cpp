@@ -65,15 +65,85 @@ namespace {
 		return qualifier == definition.space;
 	}
 
+	// tokens[i] stands as a whole argument of a type-argument list (Name<..., T, ...>); `head` is the token before the list's '<'
+	bool list_argument(const std::vector<token>& tokens, size_t i, size_t& head) {
+		if (i == 0 || i + 1 >= tokens.size()) { return false; }
+		const token_type before = tokens[i - 1].type, after = tokens[i + 1].type;
+		if ((before != token_type::less && before != token_type::comma) ||
+		    (after != token_type::greater && after != token_type::comma && after != token_type::right_shift)) { return false; }
+		int depth = 0;
+		for (size_t k = i; k-- > 0;) {
+			switch (tokens[k].type) {
+				case token_type::greater: ++depth; break;
+				case token_type::right_shift: depth += 2; break;
+				case token_type::less:
+					if (depth == 0) { head = k - 1; return k > 0; }
+					--depth;
+					break;
+				case token_type::identifier: case token_type::colon_colon: case token_type::comma: case token_type::ampersand:
+				case token_type::int_keyword: case token_type::float_keyword: case token_type::string_keyword: case token_type::bool_keyword:
+				case token_type::char_keyword: case token_type::var_keyword: case token_type::array_keyword: case token_type::map_keyword:
+				case token_type::shared_ptr_keyword: case token_type::weak_ptr_keyword: case token_type::function_keyword:
+				case token_type::coroutine_keyword:
+					break;
+				default:
+					return false;   // a signature's or a call's '(' , a statement: no type list opens before it
+			}
+		}
+		return false;
+	}
+
+	// the name at `head`, with the qualifier before it, is a host template's
+	bool host_template_at(const std::vector<token>& tokens, size_t head, const std::unordered_set<std::string>* templates) {
+		if (!templates || templates->empty() || tokens[head].type != token_type::identifier) { return false; }
+		std::string name(tokens[head].lexeme);
+		for (size_t k = head; k >= 2 && tokens[k - 1].type == token_type::colon_colon && tokens[k - 2].type == token_type::identifier; k -= 2) {
+			name.insert(0, std::string(tokens[k - 2].lexeme) + "::");
+		}
+		return templates->count(name) != 0;
+	}
+
+	// Where a parameter's argument is spelled as it is bound and not as it is read (generic_spelling): as a host template's
+	// argument, and a byte as an array's element
+	bool bound_position(const std::vector<token>& tokens, size_t i, const type_info* argument, const generic_spelling* host) {
+		size_t head = 0;
+		if (!list_argument(tokens, i, head)) { return false; }
+		if (tokens[head].type == token_type::array_keyword) { return argument && argument->is_byte_element(); }
+		return host && host_template_at(tokens, head, host->templates);
+	}
+
+	// the arguments as tokens: as they are bound, and as an instance reads them where a parameter stands on its own
+	struct spelled_arguments {
+		const std::vector<type_info_ptr>& arguments;
+		const generic_spelling* host;
+		std::vector<std::vector<token>> bound, read;
+
+		spelled_arguments(const std::vector<type_info_ptr>& a_arguments, string_symbolizer& symbols, const generic_spelling* a_host) : arguments(a_arguments), host(a_host) {
+			const std::vector<std::string_view> none;
+			for (const auto& argument : arguments) {
+				bound.emplace_back();
+				read.emplace_back();
+				if (!argument) { continue; }
+				generic_argument_tokens(*argument, {}, symbols, bound.back());
+				generic_argument_tokens(*argument, {}, symbols, read.back(), host ? &host->sized : &none);
+			}
+		}
+		bool empty() const { return bound.empty(); }
+		// the parameter's argument where tokens[i] names it
+		const std::vector<token>& at(const std::vector<token>& tokens, size_t i, size_t parameter) const {
+			return bound_position(tokens, i, arguments[parameter].get(), host) ? bound[parameter] : read[parameter];
+		}
+	};
+
 	void replace_parameters(const generic_definition& definition, const std::vector<token>& tokens, size_t begin, size_t end,
-	                        const std::vector<std::vector<token>>& spelled, std::vector<token>& out) {
+	                        const spelled_arguments& spelled, std::vector<token>& out) {
 		for (size_t i = begin; i < end; ++i) {
 			const token& t = tokens[i];
 			if (t.type == token_type::identifier && !spelled.empty() && !member_position(tokens, i)) {
 				const auto parameter = std::find_if(definition.parameters.begin(), definition.parameters.end(),
 					[&](const generic_parameter& p) { return p.name == t.lexeme; });
 				if (parameter != definition.parameters.end()) {
-					for (token piece : spelled[static_cast<size_t>(parameter - definition.parameters.begin())]) {
+					for (token piece : spelled.at(tokens, i, static_cast<size_t>(parameter - definition.parameters.begin()))) {
 						piece.location = t.location;
 						out.push_back(std::move(piece));
 					}
@@ -82,15 +152,6 @@ namespace {
 			}
 			out.push_back(t);
 		}
-	}
-
-	std::vector<std::vector<token>> spell_arguments(const std::vector<type_info_ptr>& arguments, string_symbolizer& symbols) {
-		std::vector<std::vector<token>> spelled;
-		for (const auto& argument : arguments) {
-			spelled.emplace_back();
-			if (argument) { generic_argument_tokens(*argument, {}, symbols, spelled.back()); }
-		}
-		return spelled;
 	}
 
 	size_t parameter_index(const generic_definition& g, const type_info& t) {
@@ -161,15 +222,17 @@ uint64_t generic_stamp(const std::vector<token>& tokens) {
 	return hash == 0 ? 1 : hash;   // 0 marks a declaration written by hand
 }
 
-bool generic_argument_tokens(const type_info& type, const source_location& at, string_symbolizer& symbols, std::vector<token>& out) {
+bool generic_argument_tokens(const type_info& type, const source_location& at, string_symbolizer& symbols, std::vector<token>& out,
+                             const std::vector<std::string_view>* read, bool element) {
 	const auto word = [&](token_type kind, std::string_view text) { out.emplace_back(kind, text, at); };
 	const auto parameter = [&](const type_info_ptr& p) {
 		if (!p) { word(token_type::auto_keyword, "auto"); return true; }
-		return generic_argument_tokens(*p, at, symbols, out);
+		return generic_argument_tokens(*p, at, symbols, out, read);
 	};
 	switch (type.base_type) {
 		case script_value_type::jai_int_type:
-			if (type.is_byte_element() || type.is_enum) { qualified_name_tokens(type.type_name, at, symbols, out); } else { word(token_type::int_keyword, "int"); }
+			// a byte is a type as an array's element; read on its own it is an int
+			if (type.is_enum || (type.is_byte_element() && (!read || element))) { qualified_name_tokens(type.type_name, at, symbols, out); } else { word(token_type::int_keyword, "int"); }
 			return true;
 		case script_value_type::jai_float_type: word(token_type::float_keyword, "float"); return true;
 		case script_value_type::jai_string_type: word(token_type::string_keyword, "string"); return true;
@@ -187,7 +250,7 @@ bool generic_argument_tokens(const type_info& type, const source_location& at, s
 			word(token_type::less, "<");
 			const type_info_ptr& result = type.type_params[0];
 			if (!result || result->base_type == script_value_type::jai_null_type) { word(token_type::void_keyword, "void"); }
-			else if (!generic_argument_tokens(*result, at, symbols, out)) { return false; }
+			else if (!generic_argument_tokens(*result, at, symbols, out, read)) { return false; }
 			word(token_type::left_paren, "(");
 			for (size_t i = 1; i < type.type_params.size(); ++i) {
 				if (i > 1) { word(token_type::comma, ","); }
@@ -195,7 +258,7 @@ bool generic_argument_tokens(const type_info& type, const source_location& at, s
 				const bool by_reference = taken && taken->base_type == script_value_type::jai_reference_type;
 				if (by_reference) { taken = taken->element_type().get(); }
 				if (!taken) { word(token_type::var_keyword, "var"); }
-				else if (!generic_argument_tokens(*taken, at, symbols, out)) { return false; }
+				else if (!generic_argument_tokens(*taken, at, symbols, out, read)) { return false; }
 				if (by_reference) { word(token_type::ampersand, "&"); }
 			}
 			word(token_type::right_paren, ")");
@@ -205,7 +268,8 @@ bool generic_argument_tokens(const type_info& type, const source_location& at, s
 		case script_value_type::jai_array_type:
 			word(token_type::array_keyword, "array");
 			word(token_type::less, "<");
-			if (!parameter(type.element_type())) { return false; }
+			if (!type.element_type()) { word(token_type::auto_keyword, "auto"); }
+			else if (!generic_argument_tokens(*type.element_type(), at, symbols, out, read, true)) { return false; }
 			word(token_type::greater, ">");
 			return true;
 		case script_value_type::jai_map_type:
@@ -221,7 +285,7 @@ bool generic_argument_tokens(const type_info& type, const source_location& at, s
 			word(shared ? token_type::shared_ptr_keyword : token_type::weak_ptr_keyword, shared ? "shared_ptr" : "weak_ptr");
 			word(token_type::less, "<");
 			if (type.element_type()) {
-				if (!generic_argument_tokens(*type.element_type(), at, symbols, out)) { return false; }
+				if (!generic_argument_tokens(*type.element_type(), at, symbols, out, read)) { return false; }
 			} else if (shared && !type.type_name.empty() && type.type_name != "shared_ptr") {
 				qualified_name_tokens(type.type_name, at, symbols, out);
 			} else {
@@ -231,12 +295,17 @@ bool generic_argument_tokens(const type_info& type, const source_location& at, s
 			return true;
 		}
 		case script_value_type::jai_object_type:
+			if (read && std::find(read->begin(), read->end(), std::string_view(type.type_name)) != read->end()) {   // int32, float32: read as what a value is
+				const bool floating = sized_number_kind(type.type_name) == script_value_type::jai_float_type;
+				word(floating ? token_type::float_keyword : token_type::int_keyword, floating ? "float" : "int");
+				return true;
+			}
 			if (type.is_coroutine) {   // coroutine<Y> is spelled by its keyword, its name being no class's
 				const type_info* yields = type.type_params.empty() ? nullptr : type.type_params[0].get();
 				word(token_type::coroutine_keyword, "coroutine");
 				word(token_type::less, "<");
 				if (!yields) { word(token_type::var_keyword, "var"); }
-				else if (!generic_argument_tokens(*yields, at, symbols, out)) { return false; }
+				else if (!generic_argument_tokens(*yields, at, symbols, out, read)) { return false; }
 				word(token_type::greater, ">");
 				return true;
 			}
@@ -252,11 +321,23 @@ std::string generic_instance_name(std::string_view generic, const std::vector<ty
 	return type_info::instance_name(generic, arguments);
 }
 
+bool generic_parameter_read(const generic_definition& definition, size_t parameter, const std::unordered_set<std::string>& templates) {
+	if (parameter >= definition.parameters.size()) { return false; }
+	const std::vector<token>& tokens = definition.tokens;
+	for (size_t i = 0; i < tokens.size(); ++i) {
+		if (i > definition.name_token && i < definition.list_end) { continue; }   // the type parameters
+		if (tokens[i].type != token_type::identifier || tokens[i].lexeme != definition.parameters[parameter].name || member_position(tokens, i)) { continue; }
+		size_t head = 0;
+		if (!list_argument(tokens, i, head) || !host_template_at(tokens, head, &templates)) { return true; }
+	}
+	return false;
+}
+
 std::vector<token> generic_instance_tokens(const generic_definition& definition, const std::vector<type_info_ptr>& arguments,
-                                           std::string_view instance, string_symbolizer& symbols) {
+                                           std::string_view instance, string_symbolizer& symbols, const generic_spelling* host) {
 	const std::vector<token>& tokens = definition.tokens;
 	const source_location at = tokens.empty() ? definition.location : tokens.front().location;
-	const std::vector<std::vector<token>> spelled = spell_arguments(arguments, symbols);
+	const spelled_arguments spelled(arguments, symbols, host);
 	std::vector<token> out;
 	out.reserve(tokens.size() + 16);
 	size_t closes = 0;
@@ -294,7 +375,7 @@ std::vector<token> generic_instance_tokens(const generic_definition& definition,
 				const auto parameter = std::find_if(definition.parameters.begin(), definition.parameters.end(),
 					[&](const generic_parameter& p) { return p.name == t.lexeme; });
 				if (parameter != definition.parameters.end()) {
-					for (token piece : spelled[static_cast<size_t>(parameter - definition.parameters.begin())]) {
+					for (token piece : spelled.at(tokens, i, static_cast<size_t>(parameter - definition.parameters.begin()))) {
 						piece.location = t.location;
 						out.push_back(std::move(piece));
 					}
@@ -316,11 +397,11 @@ std::vector<token> generic_instance_tokens(const generic_definition& definition,
 }
 
 std::vector<token> generic_bound_tokens(const generic_definition& definition, size_t parameter, const std::vector<type_info_ptr>& arguments,
-                                        string_symbolizer& symbols) {
+                                        string_symbolizer& symbols, const generic_spelling* host) {
 	std::vector<token> out;
 	if (parameter >= definition.parameters.size()) { return out; }
 	const std::vector<token>& bound = definition.parameters[parameter].bound;
-	replace_parameters(definition, bound, 0, bound.size(), spell_arguments(arguments, symbols), out);
+	replace_parameters(definition, bound, 0, bound.size(), spelled_arguments(arguments, symbols, host), out);
 	return out;
 }
 

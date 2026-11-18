@@ -82,6 +82,11 @@ namespace jai {
     // name that spells no argument list
     bool template_name_arguments(std::string_view name, std::string_view& base, std::vector<std::string_view>& arguments);
 
+    // The sized numbers a host template's argument is spelled by (jai::type_name_helper, core/template_binder.hpp: int8 int16
+    // int32, uint8 uint16 uint32 uint, float32) are no script types: the kind a value of one reads as, jai_int_type or
+    // jai_float_type, and jai_null_type for any other name
+    script_value_type sized_number_kind(std::string_view spelling);
+
     // Where a class's qualified name parts from its namespace: its last "::" outside the brackets of an instance's arguments
     // (shop::Shelf<shop::Item> is Shelf<shop::Item> of shop), npos for a name no namespace qualifies
     size_t class_qualifier_cut(std::string_view name);

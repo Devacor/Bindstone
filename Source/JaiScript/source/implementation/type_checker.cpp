@@ -1688,6 +1688,18 @@ private:
             default: return nullptr;
         }
     }
+    // A name in a deduced type that a host template's argument spelled and no script type reads as: no class, no enum and no
+    // sized number (sized_number_kind, which an instance reads as int or float)
+    std::string host_only_name(const type_info* type, int depth = 0) {
+        if (!type || depth > 64) { return {}; }
+        if (type->base_type == script_value_type::jai_object_type && !type->is_coroutine) {
+            return unknown_bare_type(type) && sized_number_kind(type->type_name) == script_value_type::jai_null_type ? type->type_name : std::string();
+        }
+        for (const auto& parameter : type->type_params) {
+            if (std::string found = host_only_name(parameter.get(), depth + 1); !found.empty()) { return found; }
+        }
+        return {};
+    }
     // The type arguments a call leaves to its value arguments: `types` holds the written ones and takes the rest. False with
     // `error` saying what to write.
     bool deduce_type_arguments(const call_expr* c, const generic_definition& g, const std::vector<ctype>& args, std::vector<type_info_ptr>& types, std::string& error) {
@@ -1759,6 +1771,11 @@ private:
                 std::vector<token> probe;
                 if (!generic_argument_tokens(*d.found[p].type, c->location, eng_.symbols(), probe)) {
                     error = lead + "argument " + std::to_string(d.found[p].argument) + " is " + d.found[p].type->canonical_name() + ", which no instance is made with; " + spelled(name);
+                    return false;
+                }
+                // a name the host spelled for its template's argument is a type only there: the instance must not read it
+                if (const std::string host = host_only_name(d.found[p].type); !host.empty() && generic_parameter_read(g, p, eng_.get_registered_template_types())) {
+                    error = lead + "argument " + std::to_string(d.found[p].argument) + " names '" + host + "', a type the host binds that no script type reads as";
                     return false;
                 }
                 types.push_back(type_info_ptr(const_cast<type_info*>(d.found[p].type)));

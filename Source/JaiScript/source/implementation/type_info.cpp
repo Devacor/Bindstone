@@ -84,6 +84,15 @@ bool template_name_arguments(std::string_view name, std::string_view& base, std:
     return depth == 0;
 }
 
+script_value_type sized_number_kind(std::string_view spelling) {
+    if (spelling == "float32") { return script_value_type::jai_float_type; }
+    std::string_view width = spelling;
+    if (width.substr(0, 4) == "uint") { width.remove_prefix(4); }
+    else if (width.substr(0, 3) == "int" && width.size() > 3) { width.remove_prefix(3); }   // int itself is the script's own
+    else { return script_value_type::jai_null_type; }
+    return width.empty() || width == "8" || width == "16" || width == "32" ? script_value_type::jai_int_type : script_value_type::jai_null_type;
+}
+
 size_t class_qualifier_cut(std::string_view name) {
     int depth = 0;
     for (size_t i = name.size(); i-- > 1;) {

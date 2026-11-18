@@ -5049,6 +5049,10 @@ private:
             path += parts[k];
             if (namespace_known(path)) { space = path; next = k + 1; }
         }
+        // a namespace's generic class by its bare name (shop::Box, shop::Box::made): no class answers to it
+        for (std::string named = path + "::" + std::string(parts.back()); named.size() > parts.front().size(); named.resize(named.rfind("::"))) {
+            if (refuse_bare_generic_class(named, m->location)) { return; }
+        }
         if (space.empty() || namespace_declares(space, parts[next])) { return; }
         diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, m->location,
              "no member '" + std::string(parts[next]) + "' in namespace '" + space + "'");
@@ -7646,6 +7650,7 @@ private:
             return named;
         }
         if (find_sclass(id->name)) {
+            if (refuse_bare_generic_class(id->name, id->location)) { return {}; }
             report_class_before_declaration(id->name, id->location);
             report_instance_before_declaration(id->name, id->location, false);
             return ctype{ctype::class_ref_k, id->name};
@@ -7660,6 +7665,7 @@ private:
         if (const variable_decl* g = program_global(name)) { note_global_use(id->name); return program_global_type(g); }   // the proof pass alone types a global another unit declares
         if (extra_global(name)) { note_global_use(id->name); return program_scope_read_type(name); }
         if (eng_.is_type_name(name) || eng_.find_script_class(name)) {
+            if (refuse_bare_generic_class(id->name, id->location)) { return {}; }
             return ctype{ctype::class_ref_k, id->name};
         }
         if (eng_.has_function(name)) { note_global_use(id->name); return ctype::make(ctype::function_k); }
@@ -7671,6 +7677,7 @@ private:
         if (engine_knows_name(name)) { return {}; }
         if (program_or_derived_name(id->name)) { return {}; }
         if (stale_field_context()) { return {}; }   // bare old-shape field in a redefined class's method
+        if (refuse_bare_generic_class(id->name, id->location)) { return {}; }   // a generic class's name and nothing else's
         undeclared(id->location, id->name);
         return {};
     }

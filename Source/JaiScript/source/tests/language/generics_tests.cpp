@@ -305,6 +305,40 @@ public:
 			)").as_string());
 		});
 
+		test("a_generic_classs_bare_name_reaches_it_from_its_namespace_reopened_as_a_classs_does", [this]() {
+			// a later unit reopens the namespace: the class and the generic class the earlier unit declared answer by their bare names
+			auto e = stdlib_engine();
+			e->execute("namespace shop {\n\tclass Item { int n = 1; }\n\tclass Shelf<T> { T item; int size() { return 2; } }\n}\n");
+			check_eq((int64_t)1, e->execute("namespace shop { int plain() { Item i; return i.n; } }\nshop::plain();").as_int());
+			check_eq(std::string("2|2|2|shop::Shelf<shop::Item>"), e->execute(
+				"namespace shop {\n\tclass Rack : Shelf<int> { }\n"
+				"\tstring probe() { Shelf<int> typed; auto made = Shelf<string>(); Rack rack; Shelf<Item> items;\n"
+				"\t\treturn to_string(typed.size()) + \"|\" + to_string(made.size()) + \"|\" + to_string(rack.size()) + \"|\" + reflect::type_of(items); }\n}\nshop::probe();").as_string());
+			// nested namespaces: the inner one's own and the enclosing one's
+			auto nested = stdlib_engine();
+			nested->execute("namespace a {\n\tclass Outer { int n = 1; }\n\tclass Gen<T> { int size() { return 2; } }\n"
+				"\tnamespace b {\n\t\tclass Deep { int n = 3; }\n\t\tclass Wrap<T> { int size() { return 4; } }\n\t}\n}\n");
+			check_eq((int64_t)4, nested->execute("namespace a { namespace b { int plain() { Outer o; Deep d; return o.n + d.n; } } }\na::b::plain();").as_int());
+			check_eq((int64_t)6, nested->execute("namespace a { namespace b { int probe() { Gen<int> g; Wrap<int> w; return g.size() + w.size(); } } }\na::b::probe();").as_int());
+			check_eq(std::string("a::Gen<a::b::Deep>"), nested->execute("namespace a::b { string spelled() { Gen<Deep> g; return reflect::type_of(g); } }\na::b::spelled();").as_string());
+			// a using declaration names either
+			check_eq((int64_t)3, e->execute("using shop::Item;\nusing shop::Shelf;\nItem i;\nShelf<int> s;\ni.n + s.size();").as_int());
+			// from another file, once the file that declares them ran
+			const auto directory = unit_directory("reopened_namespace");
+			const std::string lib = write_unit(directory, "lib.jai", "namespace shop {\n\tclass Item { int n = 1; }\n\tclass Shelf<T> { T item; int size() { return 2; } }\n}\n");
+			const std::string user = write_unit(directory, "user.jai", "namespace shop {\n\tint both() { Item i; Shelf<Item> s; return i.n + s.size(); }\n}\nshop::both();\n");
+			auto files = stdlib_engine();
+			files->execute_file(lib);
+			check_eq((int64_t)3, files->execute_file(user).as_int());
+			// a bite parsed where the namespace declared the generic class does not load where it does not, as with a class
+			auto bite = e->jaibite("namespace shop { int held() { Shelf<int> s; return s.size(); } }\nshop::held();\n");
+			check_eq((int64_t)2, bite.execute().as_int());
+			auto bare = stdlib_engine();
+			std::string refused = "(loaded)";
+			try { bare->jaibite_load_bytes(bite.save_bytes()); } catch (const std::exception& error) { refused = error.what(); }
+			check_true(contains(refused, "the bite was parsed where 'shop::Shelf' was a class or an enum (a bare 'Shelf' inside namespace 'shop' names it); here it is not: save it again from source"), refused);
+		});
+
 		test("a_generic_function_is_a_function_per_argument_list", [this]() {
 			auto e = stdlib_engine();
 			e->execute(declarations());
@@ -757,6 +791,31 @@ public:
 			check_true(contains(failure(*e, "auto same = cast<Box>(p);"), bare));
 			check_true(contains(failure(*e, "class Sub : Box { }"), bare));
 			check_true(contains(failure(*e, "auto made = Box();"), "'Box' is a generic class: its type arguments are written, never deduced from a constructor's (Box<T>(...))"));
+			// every other place a class's bare name stands says the same: a braced construction, a static member read, stored
+			// and called, the name as a value, a handle's and a container's argument, a result, a field, a lambda's parameter, a
+			// range-for's and a catch's variable, a type argument of a host function, a generic class and a generic function
+			e->execute("class Tally { static int made = 7; static int count() { return 3; } }\nclass Cell<T> { T v; }\nT same<T>(T x) { return x; }");
+			e->execute("class Tally<T> { T v; }");
+			const std::string tally = "'Tally' is a generic class: name its type arguments (Tally<T>)";
+			for (const char* use : {"auto made = Box{};", "Box made{};", "int n = Tally::made;", "Tally::made = 3;", "int n = Tally::count();", "auto f = Tally::count;",
+			                        "auto c = Tally;", "string s = reflect::type_of(Tally);", "int n = Tally.made;",
+			                        "shared_ptr<Tally> h;", "weak_ptr<Tally> w;", "map<string, Tally> m;", "Tally give() { return null; }", "function give() -> Tally { return null; }",
+			                        "class Holder { Tally held; }", "auto f = (Tally t) => 1;", "array<int> xs; for (Tally t : xs) { }", "try { throw 1; } catch (Tally t) { }",
+			                        "auto h = make_shared<Tally>();", "auto t = from_json<Tally>(\"{}\");", "Cell<Tally> c;", "same<Tally>(p);", "Tally& r = p;"}) {
+				const std::string text = failure(*e, use);
+				check_true(contains(text, std::string(use).find("Tally") != std::string::npos ? tally : bare), std::string(use) + ": " + text);
+			}
+			// a namespace's generic class, by its qualified name and by its bare name inside the namespace, and a generic class
+			// no class stands behind
+			e->execute("namespace shop { class Tally { static int made = 7; } }\nclass Lone<T> { static int made = 1; }\nnamespace shop { class Solo<T> { static int made = 2; } }");
+			e->execute("namespace shop { class Tally<T> { T v; } }");
+			for (const auto& [use, name] : std::vector<std::pair<const char*, const char*>>{{"int n = shop::Tally::made;", "shop::Tally"}, {"auto c = shop::Tally;", "shop::Tally"},
+					{"namespace shop { int f() { return Tally::made; } }", "shop::Tally"}, {"using shop::Tally;\nint n = Tally::made;", "shop::Tally"},
+					{"int n = Lone::made;", "Lone"}, {"auto c = Lone;", "Lone"}, {"int n = shop::Solo::made;", "shop::Solo"}}) {
+				const std::string text = failure(*e, use);
+				check_true(contains(text, std::string("'") + name + "' is a generic class: name its type arguments (" + name + "<T>)"), std::string(use) + ": " + text);
+			}
+			check_eq((int64_t)3, e->execute("Lone<int>::made + shop::Solo<int>::made;").as_int());
 			check_eq(std::string("2|1|1"), e->execute("to_string(q.n()) + \"|\" + to_string(p.plain) + \"|\" + to_string(old_plain());").as_string());
 			// a bare generic name with no class behind it says the same
 			check_true(contains(failure(*e, "class Lone<T> { T v; }\nLone l;"), "'Lone' is a generic class: name its type arguments (Lone<T>)"));

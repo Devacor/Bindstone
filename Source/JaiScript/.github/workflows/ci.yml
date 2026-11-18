@@ -257,3 +257,5 @@ jobs:
         run: find source/implementation -name '*.cpp' | sort | xargs -P 4 -n 1 g++-14 -std=c++20 -fsyntax-only -Iinclude -Isource
       - name: Public headers alone and warning-free
         run: HEADER_CXX=g++-14 bash tools/ci/gates.sh headers && HEADER_CXX=clang++ bash tools/ci/gates.sh headers
+      - name: The committed checker revision is the one the checker's sources give
+        run: bash tools/ci/gates.sh checker-revision

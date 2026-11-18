@@ -2,7 +2,7 @@
 # The CI gates, one per argument, so the workflow can give each its own step and a
 # local run can reproduce any of them:
 #
-#   BIN=build/bin tools/ci/gates.sh tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference fuzz-order gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider selftest site
+#   BIN=build/bin tools/ci/gates.sh tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference fuzz-order gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider selftest site checker-revision
 #   tools/ci/gates.sh all
 #
 # BIN is the directory holding the built executables (default: build/bin under the
@@ -38,6 +38,9 @@
 # The clang gate builds the suites with Clang and runs them on the VM and the interpreter: Clang spells some names unlike MSVC
 # (a function-local class is its bare name), so a suite green on MSVC can fail there. CLANG_CXX names clang++ (else clang++ on
 # PATH, else Visual Studio's), CLANG_BUILD_DIR the tree (default build-clang); it skips with a message when no clang++ is found.
+#
+# The checker-revision gate runs no binary: the committed include/jaiscript/detail/jaibite_checker_revision.hpp is the value
+# tools/ci/checker_revision.py computes from the checker's sources in this checkout, after the generator's own checks.
 #
 # HASH_BACKENDS names the backends the runner's hash gates (gatorquest, timedemo) run (default "vm interp"; the per-change
 # tier passes "vm" unless its interpreter tier is picked, tools/ci/targeted.sh). GLOOM, the demoreel, the crawler and the
@@ -606,6 +609,15 @@ gate_site() {
 	run "$(jai_python)" docs/site_tools/verify_site.py --runner "$BIN/jaiscript"
 }
 
+# A .jaibite's checked-clean stamp is trusted under the checker revision that gave it; the revision is generated from the
+# checker's sources, and a stale one is fixed by the command the failure names
+gate_checker_revision() {
+	local py
+	py="$(jai_python)"
+	run "$py" "$ROOT/tools/ci/checker_revision.py" --selftest
+	run "$py" "$ROOT/tools/ci/checker_revision.py" --check
+}
+
 gate_asan() {
 	local build msvc=0 dll
 	build="${ASAN_BUILD_DIR:-build-asan}"
@@ -668,7 +680,7 @@ toolchain_of() {
 }
 if [ "${1:-}" = --toolchain ]; then toolchain_of "${2:?usage: gates.sh --toolchain <gate>}"; exit 0; fi
 
-ALL=(tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference fuzz-order gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider selftest site)
+ALL=(tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference fuzz-order gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider selftest site checker-revision)
 MILESTONE=(gloom-workers gloom-long timedemo amalgamation)
 CROSS=(android clang headers wasm)
 SANITIZER=(asan)
@@ -678,7 +690,7 @@ SANITIZER=(asan)
 
 for gate in "$@"; do
 	case "$gate" in
-		tests-interp | tests-vm | tests-vm-reference | fuzz | fuzz-vm-reference | fuzz-order | gloom | demoreel | crawler | gatorquest | embed-quickstart | lsp | lsp-latency | spider | selftest | site) ;;
+		tests-interp | tests-vm | tests-vm-reference | fuzz | fuzz-vm-reference | fuzz-order | gloom | demoreel | crawler | gatorquest | embed-quickstart | lsp | lsp-latency | spider | selftest | site | checker-revision) ;;
 		gloom-workers | gloom-long | timedemo | amalgamation | android | asan | clang | headers | wasm) ;;
 		*) echo "unknown gate: $gate (${ALL[*]} all; milestone: ${MILESTONE[*]}; cross: ${CROSS[*]}; sanitizer: ${SANITIZER[*]})" >&2; exit 2 ;;
 	esac

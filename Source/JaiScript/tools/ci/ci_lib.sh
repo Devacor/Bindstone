@@ -304,7 +304,7 @@ jai_stamp_python() {
 }
 
 # jai_stamp_build <gate> <debug|release>: the build a gate's stamp is keyed on, "-" for a gate that runs none of its binaries
-jai_stamp_build() { case "$1" in clang | headers | wasm | android | amalgamation | ci-scripts) echo - ;; *) echo "$2" ;; esac; }
+jai_stamp_build() { case "$1" in clang | headers | wasm | android | amalgamation | ci-scripts | checker-revision) echo - ;; *) echo "$2" ;; esac; }
 
 # jai_gate_key <gate> <debug|release|->: the key of a gate's stamp, two lines. The build's part comes from its CMakeCache.txt
 # (type, benchmarks, a digest of the compiler, flags and JAISCRIPT_ options; the CMake and compiler versions); a build that

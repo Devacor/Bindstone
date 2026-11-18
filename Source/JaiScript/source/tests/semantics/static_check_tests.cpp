@@ -874,8 +874,9 @@ public:
         });
 
         test("jaibite_stamp_from_another_checker_revision_rechecks", [this]() {
-            // a checked-clean stamp vouches for the checker that gave it: one from an older revision (rules that have since
-            // grown) is checked again on load, one from this revision is trusted
+            // a checked-clean stamp vouches for the checker that gave it: one from another revision (rules that have since
+            // grown) is checked again on load, one from this revision is trusted. The revision is a hash of the checker's
+            // sources in all 24 of its bits, so any other value there is another checker, the hand-numbered ones included
             auto e = make_engine();
             auto bytes = unstamped_bite_bytes(*e, "int bad = \"s\";");
             auto stamp = [&bytes](uint32_t flags) {
@@ -883,10 +884,42 @@ public:
                 for (int i = 0; i < 4; ++i) { stamped[8 + i] = static_cast<uint8_t>(flags >> (8 * i)); }
                 return stamped;
             };
-            const auto older = stamp(jai::detail::k_jaibite_flag_checked_clean | ((jai::detail::k_jaibite_checker_revision - 1) << 8));
-            check_throws<static_check_error>([&]() { e->jaibite_load_bytes(older); }, "an older revision's stamp re-checks and finds the error");
+            const uint32_t revision = jai::detail::k_jaibite_checker_revision;
+            const auto stamped_by = [](uint32_t a_revision) { return jai::detail::k_jaibite_flag_checked_clean | (a_revision << 8); };
+            check_eq(revision, jai::detail::jaibite_checked_clean_flags() >> 8, "the stamp holds the whole revision");
+            for (const uint32_t other : {revision ^ 1u, revision ^ 0x800000u, revision ^ 0xFFFFFFu, revision == 12u ? 11u : 12u}) {
+                check_false(jai::detail::jaibite_stamped_clean(stamped_by(other)), std::to_string(other));
+                check_throws<static_check_error>([&]() { e->jaibite_load_bytes(stamp(stamped_by(other))); },
+                    "another revision's stamp re-checks and finds the error: " + std::to_string(other));
+            }
             auto current = e->jaibite_load_bytes(stamp(jai::detail::jaibite_checked_clean_flags()));
             check_true(current.checked_clean(), "this revision's stamp is trusted");
+
+            // the disk cache holds its stamp the same way, and a clean check of a cache another revision stamped writes
+            // it again under this one: the next load trusts it
+            const auto dir = closure_dir("revision_stamp");
+            std::filesystem::remove_all(dir / ".cache");
+            write_unit(dir, "revision_stamp.jai", "int revision_stamp_value = 4; revision_stamp_value + 1;");
+            const auto walks_of_a_load = [&dir]() {
+                auto eng = make_engine();
+                check_eq((int64_t)5, eng->execute_file((dir / "revision_stamp.jai").string()).as_int());
+                return detail::engine_access::check_walk_count(*eng);
+            };
+            check_eq((uint64_t)1, walks_of_a_load(), "the first load checks the file and caches it");
+            check_eq((uint64_t)0, walks_of_a_load(), "a cache this revision stamped is trusted");
+            {
+                std::fstream cache(dir / ".cache" / "revision_stamp.jai.jaibite", std::ios::in | std::ios::out | std::ios::binary);
+                check_true(cache.is_open(), "the cache sits beside the file");
+                cache.seekg(8);
+                const uint32_t written = static_cast<uint8_t>(cache.get());   // the low byte: the stamp bit beside the bite's other flags
+                check_true((written & jai::detail::k_jaibite_flag_checked_clean) != 0, "the cache was stamped");
+                const uint32_t flags = written | ((revision ^ 1u) << 8);
+                cache.seekp(8);
+                for (int i = 0; i < 4; ++i) { cache.put(static_cast<char>(flags >> (8 * i))); }
+            }
+            check_eq((uint64_t)1, walks_of_a_load(), "a cache another revision stamped is checked again");
+            check_eq((uint64_t)0, walks_of_a_load(), "and that clean check stamped it under this revision");
+            std::filesystem::remove_all(dir);
         });
 
         test("jaibite_checks_at_creation_and_at_load", [this]() {

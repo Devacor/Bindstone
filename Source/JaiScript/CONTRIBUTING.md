@@ -171,7 +171,10 @@ Two catalogues move with the code:
   output blocks that quote it.
 - **The AST format.** A change to what the serializer writes bumps `k_jaibite_version` in
   `include/jaiscript/detail/ast_serializer.hpp`, so stale `.jaibite` caches are
-  rejected instead of misread.
+  rejected instead of misread. The checker's revision beside it is generated: after a change to
+  `source/implementation/type_checker.cpp` or a header it includes, run
+  `python tools/ci/checker_revision.py` and commit `include/jaiscript/detail/jaibite_checker_revision.hpp`
+  (the `checker-revision` gate says so when it is stale).
 
 <!-- internal-only -->
 Before you touch value layout, `strong_ptr`, raw-index dispatch or the VM run loop, read

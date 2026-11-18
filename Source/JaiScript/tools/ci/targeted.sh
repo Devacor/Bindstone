@@ -33,6 +33,10 @@
 # A library change also takes the wasm gate: the WebAssembly build is the one 32-bit libc++ target the gates run, so it catches
 # layout assumptions the 64-bit builds hide (a field placed in tail padding, a tag in a 4-aligned pointer's low bits).
 #
+# A change to the library (the checker's translation unit is source/implementation/type_checker.cpp and the headers it reaches) or to
+# the generator takes the checker-revision gate: the committed revision is the one tools/ci/checker_revision.py computes. It is
+# checked before anything is built, since the command that fixes it changes the tree every other check ran on.
+#
 # Whatever takes the suites takes the clang gate too: the suites built with Clang (gates.sh clang), whose names differ from MSVC's.
 #
 # --lanes declares a change confined to the VM's optimized lanes (fused, typed, cell, graft and cache code) inside the
@@ -88,12 +92,21 @@ vm_tier() {
 
 classify() {
 	local p="$1"
+	# a number generated from sources that take their own checks
+	if [ "$p" = include/jaiscript/detail/jaibite_checker_revision.hpp ]; then
+		pick checker-revision "the generated checker revision ($p)"
+		return
+	fi
 	case "$p" in
 		include/jaiscript/* | tools/ci/host_warnings.cpp | tools/ci/must_not_compile.cpp | docs/site_tools/check_sample_includes.py | source/tests/integration/doc_samples_tests.cpp | docs/site/embedding/01-embedding-quickstart.html | docs/site/embedding/02-dynamic-binder.html | docs/site/embedding/21-visual-studio.html)
 			pick headers "the public headers compile alone and warning-free, and the whole-program samples show their includes ($p)" ;;
 	esac
 	case "$p" in
 		docs/site/install.*) pick ci-scripts "the installers ($p)" ;;
+	esac
+	case "$p" in
+		include/* | source/implementation/* | tools/ci/checker_revision.py)
+			pick checker-revision "the committed checker revision is the one the checker's sources give ($p)" ;;
 	esac
 	case "$p" in
 		docs/site/* | docs/site_tools/*) pick site "the documentation site ($p)" ;;
@@ -208,6 +221,9 @@ if [ "$LANDING" = 1 ]; then
 	fi
 fi
 [ "$PLAN" = 1 ] && exit 0
+case " $CHECKS " in
+	*" checker-revision "*) "$(jai_python)" "$JAI_ROOT/tools/ci/checker_revision.py" --check || { echo "TARGETED RED: checker-revision"; exit 1; } ;;
+esac
 [ "$LANDING" = 1 ] && lockq_wait
 # binaries a run did not build may predate the tree, so only a --build run stamps what it passes
 [ "$BUILD" = 1 ] && jai_stamp_begin .

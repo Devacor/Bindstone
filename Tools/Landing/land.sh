@@ -8,7 +8,9 @@
 #
 # Picks: a commit whose subject main already carries is skipped (a mirrored commit) unless main reverted that twin; an
 # empty pick is skipped; a conflict confined to the union files (LAND_UNION_FILES, default the perf ledger) resolves as the
-# union; any other conflict aborts with main untouched by that pick.
+# union, and one in a generated file (the search index, the API reference, the checker revision) by generating it again; any
+# other conflict aborts with main untouched by that pick. After the picks the checker revision is generated from the landed
+# sources (Source/JaiScript/tools/ci/checker_revision.py) and committed when it moved, so main never carries a stale one.
 #
 # The targeted tier runs what the picked paths need: Source/JaiScript/tools/ci/targeted.sh --landing for the package (its
 # suites on the Release build), and beside it the client build when MutedVision compiles a changed file, with -verifyassets
@@ -59,6 +61,7 @@ UNION_FILES="${LAND_UNION_FILES:-Source/JaiScript/docs/PERF_PASS_2026-09-02.md}"
 # Generated from the site's own sources: a conflict in them is settled by regenerating once the sources merged
 SEARCH_INDEX="Source/JaiScript/docs/site/assets/search-index.js Source/JaiScript/docs/site/assets/search-text.js"
 API_OUTPUTS="Source/JaiScript/docs/site/reference/api.html Source/JaiScript/include/jaiscript/detail/builtin_api_arities.hpp"
+CHECKER_REVISION="Source/JaiScript/include/jaiscript/detail/jaibite_checker_revision.hpp"
 
 # client_choice <rev-range>: sets CLIENT_BUILD_WHY and CLIENT_VERIFY_WHY from the paths the range touches
 client_choice() {
@@ -161,22 +164,27 @@ if [ "$TIER" != battery-only ]; then
 			continue
 		fi
 		resolvable=1
-		for f in $conflicted; do case " $UNION_FILES $SEARCH_INDEX $API_OUTPUTS " in *" $f "*) ;; *) resolvable=0 ;; esac; done
+		for f in $conflicted; do case " $UNION_FILES $SEARCH_INDEX $API_OUTPUTS $CHECKER_REVISION " in *" $f "*) ;; *) resolvable=0 ;; esac; done
 		if [ "$resolvable" = 1 ] && [ -n "$conflicted" ]; then
 			ok=1
 			regen_search=0
 			regen_api=0
+			regen_revision=0
 			for f in $conflicted; do
 				case " $UNION_FILES " in
 					*" $f "*) "$(jai_python)" "$REPO/Tools/Landing/resolve_union.py" "$f" > /dev/null || ok=0 ;;
 					*)
 						git checkout --theirs -- "$f" > /dev/null 2>&1 || ok=0
-						case " $SEARCH_INDEX " in *" $f "*) regen_search=1 ;; *) regen_api=1 ;; esac
+						case " $SEARCH_INDEX " in *" $f "*) regen_search=1 ;; esac
+						case " $API_OUTPUTS " in *" $f "*) regen_api=1 ;; esac
+						[ "$f" != "$CHECKER_REVISION" ] || regen_revision=1
 						;;
 				esac
 			done
 			if [ "$regen_search" = 1 ]; then "$(jai_python)" "$REPO/Source/JaiScript/docs/site_tools/build_search_index.py" > /dev/null || ok=0; fi
 			if [ "$regen_api" = 1 ]; then "$(jai_python)" "$REPO/Source/JaiScript/docs/site_tools/build_api_reference.py" > /dev/null || ok=0; fi
+			# after the API reference: its generated arities header is one of the checker's sources
+			if [ "$regen_revision" = 1 ]; then "$(jai_python)" "$REPO/Source/JaiScript/tools/ci/checker_revision.py" > /dev/null || ok=0; fi
 			for f in $conflicted; do git add "$f" || ok=0; done
 			if [ "$ok" = 1 ] && GIT_EDITOR=true git cherry-pick --continue > /dev/null 2>&1; then
 				echo "picked $(git log --oneline -1 "$c" | cut -c1-70) -> $(git rev-parse --short HEAD) (resolved $(echo $conflicted))"
@@ -192,6 +200,12 @@ if [ "$TIER" != battery-only ]; then
 		echo "checking the picks that applied ($PARTIAL)"
 		break
 	done
+	# Picks whose checker changes met main's leave the revision of neither: it is the landed sources' or the stamps lie
+	"$(jai_python)" "$REPO/Source/JaiScript/tools/ci/checker_revision.py" > "$LOG_DIR/land_${L}_checker_revision.log" 2>&1 || { cat "$LOG_DIR/land_${L}_checker_revision.log"; echo "$L NOT GREEN: the checker revision did not regenerate (main holds the picks; fix forward)"; exit 1; }
+	if [ -n "$(git status --porcelain -- "$CHECKER_REVISION")" ]; then
+		git add -- "$CHECKER_REVISION" && git commit -q -m "Generated for $L: the checker revision" -- "$CHECKER_REVISION" || { echo "$L NOT GREEN: the regenerated checker revision did not commit (main holds the picks; fix forward)"; exit 1; }
+		echo "regenerated the checker revision: $(tail -n 1 "$LOG_DIR/land_${L}_checker_revision.log" | tr -d '\r') -> $(git rev-parse --short HEAD)"
+	fi
 	echo "landed tip: $(git rev-parse --short HEAD)"
 fi
 HEADSHA=$(git rev-parse --short HEAD)

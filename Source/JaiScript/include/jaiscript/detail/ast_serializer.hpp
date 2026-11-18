@@ -21,6 +21,7 @@
 
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/environment.hpp>
+#include <jaiscript/detail/jaibite_checker_revision.hpp>
 #include <jaiscript/detail/map_entry_binding.hpp>
 #include <jaiscript/detail/native_stack.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
@@ -43,10 +44,11 @@ namespace jai::detail {
     inline constexpr uint32_t k_jaibite_flag_checked_clean = 0x1;
     // bit 1 = a context section follows the string table (the writer sets it whenever the context is not empty)
     inline constexpr uint32_t k_jaibite_flag_context = 0x2;
-    // BUMP THIS whenever the static checker's rules change (a new diagnostic, a rule that rejects more): a checked-clean
-    // stamp records the revision that checked it (flag bits 8..31), and a bite stamped under another revision is checked
-    // again on load instead of trusted. A parse change bumps k_jaibite_version instead, which re-parses as well.
-    inline constexpr uint32_t k_jaibite_checker_revision = 12;
+    // A checked-clean stamp records the checker revision that gave it (flag bits 8..31), and a bite stamped under another
+    // revision is checked again on load instead of trusted. k_jaibite_checker_revision is a hash of the checker's sources,
+    // generated into jaibite_checker_revision.hpp (tools/ci/checker_revision.py): nobody bumps it, and builds of one source
+    // agree. A parse change bumps k_jaibite_version instead, which re-parses as well.
+    static_assert(k_jaibite_checker_revision <= 0xFFFFFFu);
     inline constexpr uint32_t jaibite_checked_clean_flags() { return k_jaibite_flag_checked_clean | (k_jaibite_checker_revision << 8); }
     // The stamp is trusted only from this checker revision
     inline constexpr bool jaibite_stamped_clean(uint32_t flags) {

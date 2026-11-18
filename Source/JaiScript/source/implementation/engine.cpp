@@ -1076,7 +1076,8 @@ struct engine::implementation {
         bool outside_keyed = false;
         bool context_recorded = false;   // the first check ran: its context is the one the cache keeps
         bool stamp_loaded = false;   // the loaded cache's stamp, held against the context at the check it stands in for
-        bool restamp = false;        // that stamp did not hold: the cache is written again under this context
+        bool cache_unstamped = false;   // the loaded cache held no stamp this checker's revision trusts
+        bool restamp = false;        // the stamp did not hold, or a clean check found none to trust: the cache is written again under this context
         std::string closure_listing;                   // erroring units' listings, each against its own source + path
         std::vector<check_diagnostic> closure_diags;   // every unit diagnostic, path-qualified in the message
         std::string closure_parse_failures;            // units that failed to parse: the program stops there, before any check
@@ -1440,7 +1441,7 @@ struct engine::implementation {
             ++check_walks_;
             entry.check_result = detail::run_static_check(self, checked_declarations(entry), nullptr, o);
             if (first) {
-                entry.restamp = entry.stamp_loaded;
+                entry.restamp = entry.stamp_loaded || (entry.cache_unstamped && !entry.check_result.has_errors());
                 entry.outside_keyed = !entry.check_result.has_errors();
                 entry.context.outside = entry.outside_keyed ? std::move(outside) : std::vector<std::string>{};
                 entry.context.outside_key = entry.outside_keyed ? outside_key(self, entry.context.outside) : 0;
@@ -2369,6 +2370,7 @@ struct engine::implementation {
             entry->context = std::move(context);
             entry->namespace_classes = namespace_class_count();
             entry->stamp_loaded = detail::jaibite_stamped_clean(flags);   // it stands in for the first check while its names resolve alike
+            entry->cache_unstamped = !entry->stamp_loaded;
             return entry;
         } catch (...) {
             return nullptr;

@@ -213,9 +213,15 @@ namespace construction_kernel {
 			if (!constructed || host.unwinding) { return constructed; }
 			cx.instance.constructed_levels(cx.cls->constructed_through(parents[i].get()));
 		}
-		if (level->chain_initializers_all_literal()) {
-			if (cx.code_ran || !cx.instance.seeded_from_plan()) { stamp_literal_field_initializers(cx.instance, *level, true, host.eng); }
-		} else if (!level->get_field_initializer_asts().empty()) {
+		const bool literal_chain = level->chain_initializers_all_literal();
+		if (literal_chain && (cx.code_ran || !cx.instance.seeded_from_plan())) { stamp_literal_field_initializers(cx.instance, *level, true, host.eng); }
+		if (initializes_fields(*ctor)) {
+			// C++ [class.base.init]: the fields in declaration order, each from the list's initializer when it names one
+			cx.code_ran = true;
+			auto initialized = host.initialize_fields(cx.instance.strong_from_this(), level, constructor_field_plan(*level, *ctor, *host.symbols, !literal_chain), scope);
+			if (host.unwinding) { return {}; }
+			if (!initialized) { return initialized; }
+		} else if (!literal_chain && !level->get_field_initializer_asts().empty()) {
 			auto initialized = host.evaluate_field_initializers(cx.instance.strong_from_this(), level, scope, true, nullptr);
 			if (host.unwinding) { return {}; }
 			if (!initialized) { return initialized; }

@@ -87,7 +87,7 @@ namespace jai::detail {
 				case node_type::variable_decl: expr(static_cast<const variable_decl*>(node)->initializer.get()); break;
 				case node_type::function_decl: {
 					auto* f = static_cast<const function_decl*>(node);
-					for (const auto& init : f->initializers) { for (const auto& a : init.arguments) { expr(a.get()); } }
+					for (const auto& init : f->initializers) { for (const auto& a : init.arguments) { expr(a.get()); } expr(init.value.get()); }
 					stmt(f->body.get());
 					break;
 				}

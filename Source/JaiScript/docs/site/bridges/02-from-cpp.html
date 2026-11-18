@@ -88,6 +88,7 @@ int main() {
     float y = 0.0;
     Vec2 operator+(const Vec2&amp; o) { return Vec2{x + o.x, y + o.y}; }
     Vec2 operator*(float s) { return Vec2{x * s, y * s}; }
+    Vec2&amp; operator+=(const Vec2&amp; o) { x += o.x; y += o.y; return this; }
 }
 
 array&lt;Vec2&gt; points = [Vec2{1.0, 2.0}, Vec2{3.0, 4.0}, Vec2{-2.0, 0.5}];
@@ -103,7 +104,7 @@ print("{:.1f} {:.1f} {}", sum.x, sum.y, points[0] == Vec2{2.0, 0.0});</code></pr
 </div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2.0 100.0
 5.0 0.5 true</code></pre></div>
-<ul><li>The rest is C++ as written: a class is a value, <code>auto&amp;</code> names the element, and <code>Vec2 first = points[0];</code> copies.</li><li><code>+=</code> runs <code>operator+</code> and stores the result; a compound operator is not declared on its own. <code>==</code> compares fields without a declaration. Braces name their class (<code>Vec2{1.0, 2.0}</code>), and there are no const methods.</li></ul>
+<ul><li>The rest is C++ as written: a class is a value, <code>auto&amp;</code> names the element, and <code>Vec2 first = points[0];</code> copies.</li><li><code>operator+=</code> is declared as in C++ and runs on the element in place; <code>return this;</code> is C++&#x27;s <code>return *this;</code>, and a class without one runs <code>a = a + b</code>. <code>==</code> compares fields without a declaration. Braces name their class (<code>Vec2{1.0, 2.0}</code>), and there are no const methods.</li></ul>
 <h3 id="port-b">Shared ownership<a class="hlink" href="#port-b" aria-label="link">&#8203;</a></h3>
 <div class="tabs" id="port-b-tabs">
 <div class="tab-list" role="tablist" aria-label="C++ and its JaiScript port" hidden>
@@ -148,7 +149,7 @@ int main() {
     string name;
     array&lt;shared_ptr&lt;Node&gt;&gt; children;
     weak_ptr&lt;Node&gt; parent;
-    Node(string n) { name = n; }
+    Node(string n) : name(n) {}
     ~Node() { print("~", name); }
 }
 
@@ -175,7 +176,7 @@ print("expired: ", watch.expired());</code></pre></div>
 ~branch
 ~leaf
 expired: true</code></pre></div>
-<ul><li><code>new Node("root")</code> is <code>make_shared&lt;Node&gt;("root")</code>: it returns a <code>shared_ptr&lt;Node&gt;</code>, and nothing is ever deleted by hand. The last handle frees the object, so the destructors run in C++'s order.</li><li><code>weak_ptr</code>, <code>lock()</code>, <code>expired()</code> and <code>use_count()</code> keep their meaning. There is no member initializer list: a constructor assigns its fields in its body.</li></ul>
+<ul><li><code>new Node("root")</code> is <code>make_shared&lt;Node&gt;("root")</code>: it returns a <code>shared_ptr&lt;Node&gt;</code>, and nothing is ever deleted by hand. The last handle frees the object, so the destructors run in C++'s order.</li><li><code>weak_ptr</code>, <code>lock()</code>, <code>expired()</code> and <code>use_count()</code> keep their meaning. The member initializer list is C++&#x27;s: the fields initialize in declaration order, each named one from its initializer.</li></ul>
 <h3 id="port-c">A class hierarchy<a class="hlink" href="#port-c" aria-label="link">&#8203;</a></h3>
 <div class="tabs" id="port-c-tabs">
 <div class="tab-list" role="tablist" aria-label="C++ and its JaiScript port" hidden>
@@ -441,13 +442,15 @@ rope=2</code></pre></div>
 <h3 id="classes">Classes<a class="hlink" href="#classes" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th></th><th>C++</th><th>JaiScript</th></tr></thead><tbody>
 <tr><td>class</td><td><code>class Hero { public: int hp = 10; };</code>, <code>struct</code></td><td><code>class Hero { int hp = 10; }</code>: members start public; no <code>struct</code> keyword</td></tr>
+<tr><td>initializer list</td><td><code>Ship(std::string n) : name(std::move(n)), engine(900) {}</code>, <code>Ship() : Ship("dinghy") {}</code></td><td><code>Ship(string n) : name(n), engine(900) {}</code>, <code>Ship() : Ship("dinghy") {}</code>: bases, then fields in declaration order (a list out of order warns)</td></tr>
+<tr><td>copy construction</td><td><code>Hero b(a);</code>, <code>std::make_shared&lt;Hero&gt;(*h)</code></td><td><code>Hero b(a);</code>, <code>new Hero(h)</code>: one argument of the class, a value or a handle, copies (the declared <code>Hero(const Hero&amp;)</code>, else member by member)</td></tr>
 <tr><td>inheritance</td><td><code>class Mage : public Hero</code>, <code>Mage() : Hero(5) {}</code>, <code>Hero::describe()</code></td><td><code>class Mage : Hero</code>, <code>Mage() : super(5) {}</code> (<code>: this(...)</code> delegates), <code>super::describe()</code></td></tr>
 <tr><td>virtual</td><td><code>virtual</code> in the base, <code>override</code> optional</td><td>every method is virtual; a redefinition requires <code>override</code></td></tr>
 <tr><td>destructor</td><td><code>~Hero()</code></td><td><code>~Hero()</code>, run when the value's scope ends, a throw included</td></tr>
 <tr><td>heap object</td><td><code>std::make_shared&lt;Hero&gt;()</code>, <code>Hero*</code>, <code>delete</code></td><td><code>make_shared&lt;Hero&gt;()</code> or <code>new Hero()</code>: a <code>shared_ptr&lt;Hero&gt;</code>. <code>weak_ptr&lt;T&gt;</code> with <code>lock()</code> and <code>expired()</code>. No raw pointers; the last handle frees the object</td></tr>
 <tr><td>statics</td><td><code>Hero::count</code></td><td><code>Hero::count</code></td></tr>
 <tr><td>no copies</td><td><code>Hero(const Hero&amp;) = delete;</code></td><td><code>nocopy class Hero { ... }</code></td></tr>
-<tr><td>operators</td><td><code>Vec operator+(const Vec&amp; o) const</code></td><td><code>Vec operator+(Vec o)</code>; C++'s set less <code>&amp;&amp;</code>, <code>||</code>, <code>,</code>, <code>-&gt;</code>, <code>new</code>, <code>delete</code> and <code>!</code>; <code>operator&lt;=&gt;</code> supplies the comparisons as in C++20</td></tr>
+<tr><td>operators</td><td><code>Vec operator+(const Vec&amp; o) const</code></td><td><code>Vec operator+(Vec o)</code>, <code>Vec&amp; operator+=(Vec o)</code>, <code>operator++()</code> / <code>operator++(int)</code>; C++'s set less <code>&amp;&amp;</code>, <code>||</code>, <code>,</code>, <code>-&gt;</code>, <code>-&gt;*</code>, unary <code>&amp;</code> and <code>*</code>, <code>new</code>, <code>delete</code> and <code>!</code>; <code>operator&lt;=&gt;</code> supplies the comparisons as in C++20</td></tr>
 <tr><td>bool conversion</td><td><code>explicit operator bool() const</code></td><td><code>bool to_bool()</code></td></tr>
 </tbody></table></div>
 <h3 id="control-flow-and-errors">Control flow and the rest<a class="hlink" href="#control-flow-and-errors" aria-label="link">&#8203;</a></h3>

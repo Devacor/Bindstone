@@ -73,6 +73,7 @@ namespace jai {
         expression_ptr lvalue_target(const expression_ptr& target);
         expression_ptr bound_reference(const expression_ptr& piece);
         expression_ptr bound_conditional(expression_ptr value);
+        expression_ptr reference_binding(expression_ptr value);
 
         // token buffer for handling >> splitting in generic contexts
         std::optional<token> pushed_back_token_;
@@ -148,6 +149,8 @@ namespace jai {
         expression_ptr default_initializer(const type_info_ptr& type, const source_location& loc);   // a typed declaration without an initializer
         expression_ptr math_constructor_call(script_value_type kind, std::vector<expression_ptr> arguments, const source_location& loc);
         checked_result<expression_ptr> initializer_from_arguments(const type_info_ptr& type, std::vector<expression_ptr> arguments, bool brace, const source_location& loc);
+        void resolve_constructor_initializers(class_decl& cls);
+        expression_ptr field_initializer_value(const variable_decl& field, std::vector<expression_ptr> arguments, bool brace, const source_location& at);
         checked_result<expression_ptr> construction(const type_info_ptr& type, std::vector<expression_ptr> arguments, bool brace, const source_location& loc);
         bool paren_group_ends_statement(size_t lparen) const;   // `name(...)` followed by ';': an object declaration, never a function
         checked_result<declaration_ptr> include_declaration();
@@ -315,6 +318,8 @@ namespace jai {
         bool in_switch_case_ = false;  // Track if we're inside a switch case
         bool in_coroutine_ = false;
         bool in_constructor_ = false;   // the body being parsed is a constructor's own (a value return is an error)
+        bool postfix_marker_ahead_ = false;
+        std::string_view enclosing_class_;   // the class whose body is being parsed (empty: none): what `this` names   // the next parameter list is operator++'s or operator--'s: a lone (int) is C++'s postfix marker
         bool returns_reference_ = false;   // the body being parsed returns T&: its return operand binds as a reference
         // Armed by a coroutine head; parse_function_body consumes it for exactly the next
         // body, so nested functions and lambdas never inherit yield permission

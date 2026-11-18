@@ -420,6 +420,46 @@ public:
 
         // A user copy constructor builds every copy C++ copy-constructs; a prvalue initializing a slot and a returned own local are
         // elided; a base's copy constructor builds the base of a class that declares none; a throwing one leaves no object
+        // C++ overload resolution: one argument of the class, a value or what a shared_ptr<T> holds, picks the copy constructor (the
+        // declared one, else the implicit one) in every construction spelling; a prvalue of the class is the object itself (C++17)
+        test("a_single_argument_of_the_class_is_a_copy_or_the_prvalue_itself", [this]() {
+            expect_log(R"(
+                class P { string n = ""; P(string s) { n = s; } ~P() { LOG = LOG + "~" + n; } }
+                class Q { string n = ""; Q(string s) { n = s; } Q(const Q& o) { n = o.n + "'"; LOG = LOG + "c" + n; } ~Q() { LOG = LOG + "~" + n; } }
+                class R { var held = null; R(var v) { held = v; } }
+                class S { shared_ptr<S> parent; S() {} S(shared_ptr<S> p) { parent = p; } }
+                function f() -> void {
+                    P a = P("a"); shared_ptr<P> h = new P("h");
+                    P b = P(a); P c = P(h); auto d = new P(h); auto e = make_shared<P>(a); P g{h}; P t = P(P("t"));
+                    LOG = LOG + "|" + b.n + c.n + d.n + e.n + g.n + t.n + to_string(same_object(d, h)) + "|";
+                    Q q = Q("q"); shared_ptr<Q> qh = new Q("r"); Q q1 = Q(q); auto q2 = new Q(qh); Q q3 = Q(Q("t"));
+                    R r0 = R(1); R r1 = R(r0); auto root = new S(); auto child = new S(root);
+                    LOG = LOG + "|" + type_of(r1.held) + to_string(same_object(child.parent, root)) + "|";
+                }
+                f(); LOG;
+            )", "|ahhahtfalse|cq'cr'|inttrue|~t~r'~q'~r~q~t~h~a~h~h~a~h~a");
+        });
+
+        // this names the object, an lvalue (C++'s *this): a declaration and an assignment copy it; a T& return and a T& declaration
+        // bind it
+        test("this_is_copied_where_a_value_is_made_and_bound_where_a_reference_is", [this]() {
+            expect_log(R"(
+                class T {
+                    int n = 6;
+                    T bump() { T old = this; n += 1; return old; }
+                    T& self() { return this; }
+                    void through() { T& r = this; r.n += 10; }
+                    void into(T& out) { out = this; }
+                    ~T() { LOG = LOG + to_string(n) + ";"; }
+                }
+                function f() -> void {
+                    T t; T b = t.bump(); t.self().n += 1; t.through(); T o; t.into(o); o.n = 50;
+                    LOG = LOG + `${b.n} ${t.n}|`;
+                }
+                f(); LOG;
+            )", "6 18|50;6;18;");
+        });
+
         test("a_copy_constructor_builds_every_copy", [this]() {
             const std::string c = R"(class C { string n = ""; C(string s) { n = s; } C(const C& o) { if (o.n == "bad") { throw "x"; } n = o.n + "'"; LOG = LOG + "c" + n; } ~C() { LOG = LOG + "~" + n; } } )";
             expect_log(c + R"(
@@ -898,6 +938,31 @@ public:
                 function f() -> string { Acc x = Acc(1); shared_ptr<Acc> h = x; Acc two = Acc(2); x += two; LOG = LOG + "|"; return to_string(h.n) + to_string(same_object(h, x)); }
                 string out = f(); out + ":" + LOG;
             )", "3true:23|23");
+            // a declared operator+= (and ++, --) is what the compound calls, on the object in place: no temporary, nothing stored
+            // back, the expression its result; one that does not take the operand leaves a op= b as a = a op b
+            expect_log(R"(
+                class Acc {
+                    int n = 0;
+                    Acc(int v) { n = v; }
+                    ~Acc() { LOG = LOG + to_string(n) + ";"; }
+                    Acc operator+(Acc o) { LOG = LOG + "+"; return Acc(n + o.n); }
+                    Acc& operator+=(int k) { n += k; LOG = LOG + "i"; return this; }
+                    Acc& operator-=(int k) { n -= k; LOG = LOG + "d"; return this; }
+                    Acc& operator++() { n += 100; LOG = LOG + "p"; return this; }
+                    Acc operator++(int) { Acc old = Acc(n); n += 1000; LOG = LOG + "P"; return old; }
+                }
+                class Box { Acc a = Acc(7); void bump() { a += 1; } }
+                function twice(Acc& r) -> void { r += 2; r += 2; }
+                function f() -> string {
+                    Acc x = Acc(1); shared_ptr<Acc> h = x;
+                    x += 2; ++x; auto& back = (x -= 1); back += 10; twice(x);
+                    auto old = x++; LOG = LOG + "|";
+                    array<Acc> xs = [Acc(5)]; xs[0] += 1; Box b; b.bump(); b.a += 1; var v = Acc(3); v += 1; h += 1;
+                    Acc two = Acc(2); x += two; LOG = LOG + "|";
+                    return `${h.n} ${same_object(h, x)} ${old.n} ${xs[0].n} ${b.a.n} ${v.n}`;
+                }
+                string out = f(); out + ":" + LOG;
+            )", "1119 true 116 6 9 4:ipdiiiP|iiiii+2;1119;|2;4;9;6;116;1119;");
         });
 
         test("a_var_slot_replaces_its_value", [this]() {
@@ -1180,7 +1245,7 @@ public:
             const std::vector<std::pair<std::string, std::string>> cases = {
                 {"class H : C, N { H() {} } H h;", "Class 'H' must construct base 'N': it has no default constructor"},
                 {"class H : C, N { } H h;", "Class 'H' must construct base 'N': it has no default constructor"},
-                {"class K : A { K() : C() {} }", "Class 'K' has no base 'C' to construct"},
+                {"class K : A { K() : C() {} }", "Class 'K' has no base or field 'C' to initialize"},
                 {"class L : A { L() : super(1), A(2) {} }", "Class 'L' constructs base 'A' twice"},
                 {"class M : A, C { M() : C(), C() {} }", "Class 'M' constructs base 'C' twice"},
             };

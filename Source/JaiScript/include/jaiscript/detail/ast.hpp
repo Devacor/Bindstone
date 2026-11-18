@@ -971,14 +971,24 @@ namespace jai {
             : declaration(loc, node_type::variable_decl), type(t), name(n), name_id(nid), initializer(init), is_static(false), slot_index(SIZE_MAX), decl_fast_flags(classify_decl_fast(t)) {}
     };
     
-    // Constructor initialization entry (for : super(args), : this(args))
+    // One entry of a constructor's initializer list (C++ [class.base.init]): a base, a delegation or one of the class's own fields
     struct constructor_initializer {
-        std::string target; // "super", "this" or the name of the base it constructs
-        std::vector<expression_ptr> arguments;
+        // unresolved: a name the list wrote that is neither (the load reports it)
+        enum class kind_t : uint8_t { base, delegation, field, unresolved };
+
+        std::string target; // "super", "this" (a delegation, the class's own name included), a base's name or a field's
+        std::vector<expression_ptr> arguments;   // a base's or a delegation target's; a field's ride in `value`
         std::vector<uint8_t> arg_captures;
+        kind_t kind = kind_t::base;
+        // a field's initializer: what the declaration `T name(arguments);` would initialize it with (the parser builds it once the
+        // class's fields are known)
+        expression_ptr value;
+        source_location location;   // the name as written
 
         constructor_initializer(const std::string& t, std::vector<expression_ptr> args)
             : target(t), arguments(std::move(args)) {}
+        constructor_initializer(const std::string& t, std::vector<expression_ptr> args, kind_t k, const source_location& at)
+            : target(t), arguments(std::move(args)), kind(k), location(at) {}
     };
 
     // Function declaration

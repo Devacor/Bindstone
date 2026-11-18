@@ -50,7 +50,8 @@ namespace jai::vm {
             const constructor_initializer* delegation = nullptr;
             std::vector<chunk::ctor_step> steps;                        // one per base in declaration order (or the delegation's level)
             std::vector<const constructor_initializer*> initializers;   // each step's initializer (null: default-constructed)
-            std::vector<std::pair<uint64_t, expression_ptr>> fields;    // the level's own field initializers, evaluated
+            struct field_step { uint64_t field_id; expression_ptr value; bool listed; };   // listed: a member initializer, which reads the parameters
+            std::vector<field_step> fields;                             // the level's own fields the prologue evaluates, in declaration order
             bool literal_fields = false;                                // the level's chain is literal: op_ctor_literals stamps them instead
             std::unordered_map<uint64_t, uint32_t> name_slots;
             std::shared_ptr<ast_node> origin;                           // the constructor: where a step without arguments stands

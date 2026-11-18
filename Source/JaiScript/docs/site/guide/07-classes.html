@@ -122,7 +122,7 @@ print(Move{a, b, 5}.cost);</code></pre></div>
 5</code></pre></div>
 <ul>
 <li>Each initializer converts as a store to its field does, and fields past the last one run their own initializers.</li>
-<li>One argument of the class itself (or a subclass) copies it instead. Too many raise <code>Too many initializers for 'Cell': it has 2 fields, got 3</code>.</li>
+<li>One argument of the class itself (or a subclass), or a <code>shared_ptr</code> to one, copies it instead (<a href="#copy-constructors">copies</a>). Too many raise <code>Too many initializers for 'Cell': it has 2 fields, got 3</code>.</li>
 <li>A class is no aggregate when a class in its chain declares a constructor or is a C++ class, or when an instance field is private or a reference: it answers <code>No constructor of 'T' takes (int)</code>.</li>
 <li>Nested braces are not supported: write <code>Move m{Cell{1, 2}, Cell{3, 4}}</code>, not <code>Move m{{1, 2}, {3, 4}}</code>.</li>
 </ul>
@@ -171,6 +171,28 @@ done</code></pre></div>
 <li>Field initializers read the fields above them, base fields, statics and the enclosing scope, never a constructor's parameters: with a global <code>int n = 40;</code>, <code>class C { int x = n; C(int n = 5) {} }</code> gives <code>C(7).x == 40</code>. Reading its own field or a later one is the load error <code>field initializer of 'spd' reads 'slices' before its initialization: fields initialize in declaration order; declare 'slices' above 'spd'</code>. A lambda the initializer creates may name any field, since it runs later.</li>
 <li>A constructor that throws leaves the assignment target with its old value. The half-built object destroys only what finished: its members die, then each completed base runs its destructor, last constructed first; the throwing class's own destructor body does not run. After a delegated-to constructor finishes the object counts as constructed, so a throw in the delegating body runs the destructor too.</li>
 </ul>
+<h3 id="member-initializer-lists">Member initializer lists<a class="hlink" href="#member-initializer-lists" aria-label="link">&#8203;</a></h3>
+<p>A constructor's initializer list names its bases and its own fields, as C++'s does:</p>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Engine { int rpm; Engine(int r) : rpm(r) {} }
+class Ship {
+    string name;
+    Engine engine;                       // no default constructor: every constructor names it
+    int crew = 4;
+    array&lt;int&gt; decks;
+    Ship(string n, int r) : name(n), engine(r), decks{1, 2, 3} {}
+    Ship() : Ship("dinghy", 300) {}      // a delegation, as : this("dinghy", 300)
+}
+Ship s("Gull", 900);
+print(s.name, " ", s.engine.rpm, " ", s.crew, " ", s.decks, " / ", Ship().name);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Gull 900 4 [1, 2, 3] / dinghy</code></pre></div>
+<ul>
+<li><strong>Order is the class's.</strong> The bases construct first, then every field in declaration order, whatever order the list is written in. A field the list names takes that initializer and skips its own; the rest run their own. A list out of declaration order warns, as C++ compilers do: <code>member initializer of 'n' follows 'f', but fields initialize in declaration order: 'n' first; write the list in that order</code>.</li>
+<li><strong>A member initializer reads the constructor's parameters</strong>, which a field's own initializer never does, and the fields above it. Reading a field initialized after it is the load error <code>field initializer of 'x' reads 'y' before its initialization: fields initialize in declaration order; declare 'y' above 'x'</code>.</li>
+<li><strong>The value.</strong> <code>name(args)</code> and <code>name{args}</code> construct a class or math field from the arguments, as the declaration <code>T name(args);</code> would. Any other field takes its one value as <code>=</code> stores it, converting where <code>=</code> does; an array also takes <code>xs{a, b}</code> as its elements and <code>xs(n, v)</code> as <code>n</code> copies of <code>v</code>. A class field with no default constructor needs none when every constructor initializes it, directly or through the constructor it delegates to.</li>
+<li><strong>Delegation is the whole list.</strong> <code>Ship() : Ship(...)</code> and <code>Ship() : this(...)</code> delegate; naming anything beside them is the load error <code>A constructor of 'E' that delegates names nothing else in its initializer list: remove 'x'</code>.</li>
+<li>The load also reports a field named twice (<code>Class 'E' initializes field 'x' twice</code>), a static (<code>Class 'E' cannot initialize static member 's' in a constructor's initializer list</code>) and a name that is neither a base nor a field (<code>Class 'E' has no base or field 'nope' to initialize</code>).</li>
+<li>A class has no <code>const</code> or reference instance fields to initialize there: <code>const T NAME = e;</code> in a class body is a class-level constant, and a field is never a reference.</li>
+</ul>
 <h3 id="copy-constructors">Copy constructors and assignment<a class="hlink" href="#copy-constructors" aria-label="link">&#8203;</a></h3>
 <p>A constructor whose one parameter is the class itself (<code>Token(const Token&amp; o)</code> or <code>Token(Token&amp; o)</code>) is the copy constructor. It builds every copy C++ copy-constructs: a declaration from an existing object, a by-value argument or range-for variable, a returned global, member or parameter, a copy capture, a container literal that names an object, <code>push</code>, and each element of a copied container.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Token {
@@ -201,6 +223,7 @@ drop a
 drop a</code></pre></div>
 <ul>
 <li><strong>Elision is C++17's.</strong> A temporary that initializes a slot or a parameter is that object, and a function's own local it returns is the caller's object: neither copies.</li>
+<li><strong>One argument of the class is a copy.</strong> <code>T(x)</code>, <code>new T(x)</code>, <code>make_shared&lt;T&gt;(x)</code>, <code>T y(x);</code> and <code>T y{x};</code> with <code>x</code> a <code>T</code> (or a class derived from it), held by value or through a <code>shared_ptr&lt;T&gt;</code>, copy-construct it, as C++'s overload resolution picks the copy constructor: the declared one, else the implicit one, which copies member by member. A declared constructor ranks against it as an overload does, so <code>T(shared_ptr&lt;T&gt; p)</code> takes a handle as it is, and a <code>var</code> parameter loses to it. A temporary of the class itself is the object (C++17): <code>T(T(1))</code> constructs once and copies nothing.</li>
 <li><strong>A class with a copy constructor has no move</strong>, so a returned parameter of it and a member read off a temporary are copied. A class that declares none copies member by member. A copy constructor that throws leaves no object, so no destructor runs for it.</li>
 <li><strong>Assignment is not copy construction.</strong> <code>x = y;</code> into a slot declared a class runs the class's <code>operator=</code> when an overload takes the value, self-assignment included. Otherwise it is the implicit copy assignment: <code>x</code> keeps its object (references and handles to it see the new members) and every member takes the source's.</li>
 <li><strong>Assignment never slices.</strong> After <code>Cat c = Cat(); c = Tiger();</code>, <code>c</code> is the same object and a complete <code>Tiger</code>. An object assigned a sibling class first destroys the levels the source lacks (destructor body, then members), then takes the source's class and members; a reference to a field it lost raises <code>Reference to a removed field</code>.</li>
@@ -361,7 +384,7 @@ print("field = {}, t.target = {}", t.backing(), t.target);</code></pre></div>
 field = 6, t.target = 60</code></pre></div>
 <p>The checker types <code>obj.x</code> from one parameterless getter with a declared return type and one by-value single-parameter setter: <code>t.target = "warm";</code> is the load error <code>cannot assign 'string' to property 'target' declared 'int'</code>. Overloaded, <code>var</code>, reference or host-registered accessors are checked when they run.</p>
 <h2 id="reference-returns-and-keyword-names">Reference returns and keyword member names<a class="hlink" href="#reference-returns-and-keyword-names" aria-label="link">&#8203;</a></h2>
-<p>A method or function declared to return <code>T&amp;</code> returns the storage itself, so its call is an assignment target for <code>=</code>, compound assignment and <code>++</code>/<code>--</code>. Returning something with no storage (a temporary, a missing map key) raises <code>Function with reference return type must return an lvalue reference</code>, and assigning to a by-value call raises <code>Cannot assign to a call result: 's.get' returns by value</code>.</p>
+<p>A method or function declared to return <code>T&amp;</code> returns the storage itself, so its call is an assignment target for <code>=</code>, compound assignment and <code>++</code>/<code>--</code>. In a method, <code>this</code> is the object, as C++'s <code>*this</code> is: <code>return this;</code> from a <code>T&amp;</code> method returns the object itself and <code>T&amp; self = this;</code> binds it, while <code>T copy = this;</code> copies it. Returning something with no storage (a temporary, a missing map key) raises <code>Function with reference return type must return an lvalue reference</code>, and assigning to a by-value call raises <code>Cannot assign to a call result: 's.get' returns by value</code>.</p>
 <p>A reserved word is a name after <code>.</code>, <code>?.</code>, <code>-&gt;</code> or <code>::</code>, and as the declared name of a field, method, namespace member or enum value. Bare, it stays the keyword: inside the class write <code>this.default</code>. <code>this</code> and <code>super</code> are never member names, and <code>delete</code> is not reserved.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Slots {
     array&lt;int&gt; items = [0, 0, 0];
@@ -431,6 +454,21 @@ try { var f = anyone.heal; } catch (e) { print("{}", e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">6
 'heal' is a method of Player; call it with anyone.heal() or bind it with reflect::bind(anyone, "heal")</code></pre></div>
 <h2 id="callable-objects">Operators and callable objects<a class="hlink" href="#callable-objects" aria-label="link">&#8203;</a></h2>
+<p>A compound assignment, <code>++</code> and <code>--</code> are declarable in place, as in C++. <code>return this;</code> from a method returning <code>T&amp;</code> is C++'s <code>return *this;</code>:</p>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Tally {
+    int n = 0;
+    Tally&amp; operator+=(int k) { n += k; return this; }
+    Tally&amp; operator++() { n += 1; return this; }                       // ++t
+    Tally operator++(int) { Tally old = this; n += 1; return old; }    // t++: the int marks the postfix form
+}
+Tally t;
+t += 5;
+++t;
+Tally before = t++;
+array&lt;Tally&gt; all = [t];
+all[0] += 10;                                // in place, on the element
+print(t.n, " ", before.n, " ", all[0].n, " ", (t += 1).n);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">7 6 17 8</code></pre></div>
 <p>Operators are methods named <code>operator</code> plus the symbol (<a href="04-operators.html#operator-overloading">Operators</a>). <code>operator()</code> makes an instance callable; it overloads and inherits like any method. A <code>function</code> slot takes a function or null, so wrap an instance in a lambda to pass it to one:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Counter {
     int n = 0;

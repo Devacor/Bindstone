@@ -18,6 +18,7 @@ OLD_TEXTS = [
     r"is marked serial_static_method\(\)",
     r"is marked serial_method\(\)",
     r"Member '[^']*' accessed on null",
+    r"Class '[^']*' has no base '[^']*' to construct",
     r"String has no method",
     r"Array has no method",
     r"Map has no method or key",

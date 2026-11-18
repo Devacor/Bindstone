@@ -1901,6 +1901,12 @@ namespace {
 					note_converting_construction(p.type, p.default_value, p.default_value.get());
 				}
 				for (const auto& init : cls->effective_initializers(*ctor)) {
+					if (init.value) {   // a field's member initializer
+						if (!walk_expr(init.value)) { return false; }
+						admitted_expressions.push_back(init.value);
+						if (const auto field_id = sym->find(init.target)) { note_converting_construction(cls->get_field_declared_type(*field_id), init.value, init.value.get()); }
+						continue;
+					}
 					for (const auto& arg : init.arguments) {
 						if (!walk_expr(arg)) { return false; }
 						admitted_expressions.push_back(arg);

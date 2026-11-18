@@ -469,7 +469,7 @@ namespace jai {
     inline bool is_lvalue_shaped_expr(const expression* e) noexcept {
         if (!e) return false;
         const node_type t = e->get_type();
-        if (t == node_type::identifier_expr || t == node_type::member_expr) return true;
+        if (t == node_type::identifier_expr || t == node_type::member_expr || t == node_type::this_expr) return true;   // this: C++'s *this
         if (t == node_type::ternary_expr) {
             const auto* n = static_cast<const ternary_expr*>(e);
             return is_lvalue_shaped_expr(n->then_expression.get()) || is_lvalue_shaped_expr(n->else_expression.get());

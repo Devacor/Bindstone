@@ -16,6 +16,7 @@
     { "include": "#keywords" },
     { "include": "#storage" },
     { "include": "#class-declaration" },
+    { "include": "#operator-declaration" },
     { "include": "#function-declaration" },
     { "include": "#support-functions" },
     { "include": "#function-call" },
@@ -251,6 +252,14 @@
       "captures": {
         "1": { "name": "storage.type.class.jaiscript" },
         "2": { "name": "entity.name.type.class.jaiscript" }
+      }
+    },
+    "operator-declaration": {
+      "comment": "a declared operator: operator+, operator+=, operator++, operator<=>, operator[], operator() and the rest of the set",
+      "match": "\\b(operator)\\s*(\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|<<=|>>=|\\+\\+|--|<=>|\\(\\)|\\[\\]|==|!=|<=|>=|<<|>>|[-+*/%&|^~<>=])(?=\\s*\\()",
+      "captures": {
+        "1": { "name": "storage.type.operator.jaiscript" },
+        "2": { "name": "entity.name.function.operator.jaiscript" }
       }
     },
     "function-declaration": {

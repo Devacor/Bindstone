@@ -1316,14 +1316,35 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
     reflect_field_order_instance.insert(reflect_field_order_instance.end(), reflect_field_order_static.begin(), reflect_field_order_static.end());
     class_def->set_field_order(std::move(reflect_field_order_instance));
 
-    // Every name an initializer list gives is a base, named once (super(...) is the first)
+    // Every name an initializer list gives is a base or one of the class's instance fields, named once (super(...) is the first
+    // base); a delegation stands alone
     for (const auto& member : decl->members) {
         const auto* ctor = member.declaration && member.declaration->get_type() == node_type::function_decl
             ? static_cast<const function_decl*>(member.declaration.get()) : nullptr;
         if (!ctor || ctor->name != decl->name) { continue; }
         std::vector<int> named(decl->base_classes.size(), 0);
+        std::vector<std::string_view> fields_named;
         for (const auto& init : ctor->initializers) {
-            if (init.target == "this") { continue; }
+            using kind_t = constructor_initializer::kind_t;
+            if (init.kind == kind_t::delegation) {
+                if (ctor->initializers.size() > 1) {
+                    const constructor_initializer& other = &init == &ctor->initializers.front() ? ctor->initializers[1] : ctor->initializers.front();
+                    return checked_result<void>(make_error_code(runtime_error_code::no_constructor_found), k_delegation_alone, decl->name_id, symbols->intern(other.target));
+                }
+                continue;
+            }
+            if (init.kind == kind_t::field) {
+                if (std::find(fields_named.begin(), fields_named.end(), init.target) != fields_named.end()) {
+                    return checked_result<void>(make_error_code(runtime_error_code::no_constructor_found), k_field_named_twice, decl->name_id, symbols->intern(init.target));
+                }
+                fields_named.push_back(init.target);
+                continue;
+            }
+            if (init.kind == kind_t::unresolved) {
+                const uint64_t named_id = symbols->intern(init.target);
+                return checked_result<void>(make_error_code(runtime_error_code::no_constructor_found),
+                                            class_def->has_static_field(named_id) ? k_static_in_initializer_list : k_not_a_base, decl->name_id, named_id);
+            }
             size_t index = init.target == "super" && !decl->base_classes.empty() ? 0 : SIZE_MAX;
             for (size_t i = 0; index == SIZE_MAX && i < decl->base_classes.size(); ++i) {
                 if (initializer_names(init.target, decl->base_classes[i])) { index = i; }

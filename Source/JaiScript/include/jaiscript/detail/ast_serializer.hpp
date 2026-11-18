@@ -36,7 +36,7 @@ namespace jai::detail {
     // BUMP THIS on any change to what a parse produces: the serialized bytes and the parse-time semantics baked into the
     // AST (slot assignment, node and token numbers, capture plans). A stale sidecar is reparsed and rewritten (the version
     // check feeds the corrupt-file fallback), so a bump is always safe and a missed one leaves stale caches.
-    inline constexpr uint32_t k_jaibite_version = 59;
+    inline constexpr uint32_t k_jaibite_version = 60;
     // Header flags (u32):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -662,6 +662,9 @@ namespace jai::detail {
                 str(init.target);
                 varint(init.arguments.size());
                 for (const auto& a : init.arguments) node(a.get());
+                varint(static_cast<uint64_t>(init.kind));
+                node(init.value.get());
+                location(init.location);
             }
             flag(d->is_override);
             flag(d->is_static);
@@ -1638,6 +1641,12 @@ namespace jai::detail {
             for (uint64_t i = 0; i < ni; ++i) {
                 std::string target = str();
                 d->initializers.emplace_back(target, expr_list());
+                constructor_initializer& init = d->initializers.back();
+                const uint64_t kind = varint();
+                if (kind > static_cast<uint64_t>(constructor_initializer::kind_t::unresolved)) { jaibite_fail("corrupt initializer kind"); }
+                init.kind = static_cast<constructor_initializer::kind_t>(kind);
+                init.value = expr_opt();
+                init.location = location();
             }
             d->is_override = flag();
             d->is_static = flag();

@@ -841,6 +841,11 @@ void semantic_walker::walk_function_body(const jai::function_decl* fn) {
 	declare_params(fn->parameters, after_open_paren(start));
 	for (const auto& init : fn->initializers) {
 		for (const auto& arg : init.arguments) { walk_expr(arg.get()); }
+		if (init.kind != jai::constructor_initializer::kind_t::field || class_stack_.empty()) { continue; }
+		if (init.value) { walk_expr(init.value.get()); }
+		if (auto r = view_.find_member(class_stack_.back(), init.target, false); r.found) {   // a member initializer names its field
+			occur(name_span(init.location, init.target), view_.member_symbol(m_, r, init.target), false);
+		}
 	}
 	if (fn->body) { walk_decls(fn->body->declarations); }
 	fn_stack_.pop_back();

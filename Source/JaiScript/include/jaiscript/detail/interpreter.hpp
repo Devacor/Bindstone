@@ -45,7 +45,7 @@ namespace jai {
     class script_class_definition;
     class class_definition;
     class class_instance;
-    namespace detail { struct namespace_store_target; struct aggregate_plan; struct construction_scope; }
+    namespace detail { struct namespace_store_target; struct aggregate_plan; struct construction_scope; struct field_initialization; }
     namespace debug { class controller; }
 
     // Forward declare interpreter for scoped_method_environment
@@ -509,11 +509,15 @@ namespace jai {
         // Evaluate field initializers for a script class instance at construction time
         // This should be called BEFORE the constructor body executes
         // If skip_parent_recursion is true, only evaluate THIS class's field initializers (parents already handled)
+        // `plan`: a constructor's own fields instead (detail::constructor_field_plan), a listed one evaluated in list_env, the
+        // constructor's activation scope
         checked_result<void> evaluate_field_initializers(strong_ptr<class_instance> instance,
                                         std::shared_ptr<script_class_definition> class_def,
                                         std::shared_ptr<environment> init_env,
                                         bool skip_parent_recursion = false,
-                                        const detail::aggregate_plan* aggregate = nullptr);
+                                        const detail::aggregate_plan* aggregate = nullptr,
+                                        const std::vector<detail::field_initialization>* plan = nullptr,
+                                        std::shared_ptr<environment> list_env = nullptr);
         // execution_backend::apply_field_initializers
         void apply_field_initializers(const strong_ptr<class_instance>& instance,
                                       const std::shared_ptr<class_definition>& class_def) override;

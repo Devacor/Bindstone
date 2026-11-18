@@ -2581,7 +2581,7 @@ checked_result<script_value> vm_backend::handle_add(const script_value& left, co
 // a template string's `+`: binary_general's, a scalar beside the string becoming text. KEEP BYTE-PARALLEL with interpreter::join_text
 checked_result<script_value> vm_backend::join_text(const script_value& left, const script_value& right) {
 	if (operator_table_ && operator_table_->any()) {
-		if (operator_table_->entry(detail::binary_op_slot(token_type::plus))) { return binary_general(token_type::plus, left, right); }
+		if (operator_table_->overload(detail::op_slot::plus, left, right).is_function()) { return binary_general(token_type::plus, left, right); }
 	}
 	binary_host h{*this, true};
 	return detail::binary_arithmetic<detail::arith_op::add>(h, ops_.plus, left, right);
@@ -2705,10 +2705,9 @@ checked_result<script_value> vm_backend::binary_general(token_type op, const scr
 	// reads the engine's flat operator table (detail/operator_table.hpp) - one mask
 	// test + array read, no environment probe.
 	if (operator_table_ && operator_table_->any()) {
-		if (const script_value* opFunc = operator_table_->entry(detail::binary_op_slot(op))) {
-			const script_function& func = opFunc->as_function();
+		if (const script_value taker = operator_table_->overload(detail::binary_op_slot(op), left, right); taker.is_function()) {
 			std::vector<script_value> args = {left, right};
-			auto result = call_value(func, args);
+			auto result = call_value(taker.as_function(), args);
 			if (!result) {
 				return result.error_value();
 			}
@@ -3724,10 +3723,9 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 				default: if (compound_kind_bitwise(kind)) { op_slot = detail::binary_op_slot(compound_kind_token(kind)); } break;
 			}
 			if (operator_table_) {
-				if (const script_value* opFunc = operator_table_->entry(op_slot)) {
-					const script_function& func = opFunc->as_function();
+				if (const script_value taker = operator_table_->overload(op_slot, target, rightValue); taker.is_function()) {
 					std::vector<script_value> args = {target.clone(), rightValue};
-					auto result = call_value(func, args);
+					auto result = call_value(taker.as_function(), args);
 					if (!result) {
 						return raise_from(result);
 					}
@@ -6104,11 +6102,10 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 			}
 		}
 		// Fall back to the global [] operator (flat table - no env probe)
-		if (operator_table_) {
-			if (const script_value* getMethod = operator_table_->entry(detail::op_slot::subscript)) {
-				const script_function& func = getMethod->as_function();
+		if (operator_table_ && operator_table_->entry(detail::op_slot::subscript)) {
+			if (const script_value taker = operator_table_->overload(detail::op_slot::subscript, left, right); taker.is_function()) {
 				std::vector<script_value> args = {left, right};
-				auto result = call_value(func, args);
+				auto result = call_value(taker.as_function(), args);
 				if (!result) {
 					return raise_from(result);
 				}
@@ -6202,14 +6199,18 @@ op_status vm_backend::exec_index_compound(frame& f, const uint32_t compound) {
 	script_value resultValue = make_null();
 	// a global operator answers first (the flat table; KEEP BYTE-PARALLEL with the interpreter's element compound); ++ and --
 	// step numbers only
-	const script_value* opFunc = operator_table_ && !incdec ? operator_table_->entry(detail::binary_op_slot(op)) : nullptr;
-	if (opFunc) {
-		auto result = call_value(opFunc->as_function(), {currentValue, rightValue});
-		if (!result) {
-			return raise_from(result);
+	bool by_global_operator = false;
+	if (operator_table_ && !incdec && operator_table_->entry(detail::binary_op_slot(op))) [[unlikely]] {
+		if (const script_value taker = operator_table_->overload(detail::binary_op_slot(op), currentValue, rightValue); taker.is_function()) {
+			auto result = call_value(taker.as_function(), {currentValue, rightValue});
+			if (!result) {
+				return raise_from(result);
+			}
+			resultValue = std::move(result.value());
+			by_global_operator = true;
 		}
-		resultValue = std::move(result.value());
-	} else {
+	}
+	if (!by_global_operator) {
 		// a bound rhs decodes before the zero divisor's check, which comes ahead of the operands' kinds
 		if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 			rightValue = rightValue.bound_decoded_temp();
@@ -19151,9 +19152,13 @@ chunk* vm_backend::constructor_chunk(const std::shared_ptr<script_class_definiti
 			prologue.initializers.push_back(init);
 		}
 		prologue.literal_fields = level->chain_initializers_all_literal();
-		if (!prologue.literal_fields) {
+		if (detail::initializes_fields(*ctor)) {
+			for (auto& step : detail::constructor_field_plan(*level, *ctor, *symbolizer_, !prologue.literal_fields)) {
+				prologue.fields.push_back({step.field_id, std::move(step.value), step.listed});
+			}
+		} else if (!prologue.literal_fields) {
 			for (const auto& [field_id, initializer] : level->get_field_initializer_asts()) {
-				if (initializer) { prologue.fields.emplace_back(field_id, initializer); }
+				if (initializer) { prologue.fields.push_back({field_id, initializer, false}); }
 			}
 		}
 	}
@@ -19384,7 +19389,7 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 	std::shared_ptr<function_decl> matching_ctor;
 	std::vector<script_value> captured;
 	auto pre = construct_instance_pre_body(class_def, args, matching_ctor, captured, nullptr, check_access);
-	if (!pre || is_unwinding_) {
+	if (!pre || is_unwinding_ || !matching_ctor) {
 		return pre;
 	}
 	script_value this_value = std::move(pre.value());
@@ -19414,6 +19419,11 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 	script_value this_value = std::move(pre.value());
 	if (is_unwinding_) [[unlikely]] {
 		stack_.push_back(std::move(this_value));   // a throw ahead of the body ends the construction; dispatch unwinds
+		return {};
+	}
+	if (!matching_ctor) [[unlikely]] {   // the implicit copy constructor's pick: the value is the finished copy
+		if (result_stamp && this_value.type() == script_value_type::jai_object_type) { this_value.set_type_info(result_stamp); }
+		stack_.push_back(std::move(this_value));
 		return {};
 	}
 	ctor_contexts_.push_back(ctor_context{class_def.get(), this_value.peek_class_instance(), definition_env, false});

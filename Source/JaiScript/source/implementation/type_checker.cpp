@@ -4636,14 +4636,34 @@ private:
         const auto& bases = c->decl->base_classes;
         std::vector<int> named(bases.size(), 0);
         bool delegates = false;
+        using kind_t = constructor_initializer::kind_t;
+        std::vector<const constructor_initializer*> fields_named;
         for (const auto& init : fn->initializers) {
-            if (init.target == "this") { delegates = true; continue; }
+            if (init.kind == kind_t::delegation) {
+                delegates = true;
+                if (fn->initializers.size() > 1) {
+                    const constructor_initializer& other = &init == &fn->initializers.front() ? fn->initializers[1] : fn->initializers.front();
+                    diag(diag_level::error, fn->location, format_error_message(detail::k_delegation_alone, class_ctx_name_, other.target));
+                }
+                continue;
+            }
+            if (init.kind == kind_t::field) {
+                const bool twice = std::any_of(fields_named.begin(), fields_named.end(), [&](const constructor_initializer* f) { return f->target == init.target; });
+                if (twice) { diag(diag_level::error, init.location, format_error_message(detail::k_field_named_twice, class_ctx_name_, init.target)); }
+                else { fields_named.push_back(&init); }
+                continue;
+            }
+            if (init.kind == kind_t::unresolved) {
+                const bool is_static = c->static_fields.count(init.target) != 0;
+                diag(diag_level::error, init.location, format_error_message(is_static ? detail::k_static_in_initializer_list : detail::k_not_a_base, class_ctx_name_, init.target));
+                continue;
+            }
             size_t index = init.target == "super" && !bases.empty() ? 0 : SIZE_MAX;
             for (size_t i = 0; index == SIZE_MAX && i < bases.size(); ++i) {
                 if (detail::initializer_names(init.target, bases[i])) { index = i; }
             }
             if (index == SIZE_MAX) {
-                if (init.target != "super") { diag(diag_level::error, fn->location, format_error_message(detail::k_not_a_base, class_ctx_name_, init.target)); }
+                if (init.target != "super") { diag(diag_level::error, init.location, format_error_message(detail::k_not_a_base, class_ctx_name_, init.target)); }
                 continue;
             }
             if (++named[index] == 2) { diag(diag_level::error, fn->location, format_error_message(detail::k_base_named_twice, class_ctx_name_, bases[index])); }
@@ -4657,8 +4677,85 @@ private:
         }
     }
 
-    void check_ctor_call(std::string_view cls_name, const sclass& c, const std::vector<ctype>& args,
+    // The implicit copy constructor may take a one-argument construction (detail::implicit_copy_construction): the argument is an
+    // object of the class or of a class derived from it, a value or a handle, and no declared constructor is from the class itself
+    bool implicit_copy_may_take(std::string_view cls_name, const sclass& c, const std::vector<ctype>& args) {
+        if (c.ctors.empty() || args.size() != 1 || args[0].kind != ctype::object_k || class_relation(args[0].cls, cls_name) == 0) { return false; }
+        for (const auto* ctor : c.ctors) {
+            auto [lo, hi] = arity_range(ctor);
+            if (ctor->parameters.empty() || lo > 1 || hi < 1) { continue; }
+            const type_info* first = ctor->parameters[0].type.get();
+            if (first && first->base_type == script_value_type::jai_reference_type) { first = first->type_params.empty() ? nullptr : first->type_params[0].get(); }
+            if (first && first->base_type == script_value_type::jai_object_type && first->type_name == cls_name) { return false; }
+        }
+        return true;
+    }
+
+    // true: the implicit copy constructor may be the one that runs (which constructor does is the run's pick)
+    // A constructor's member initializers (C++ [class.base.init]): each value stores into its field as `=` would; the fields
+    // initialize in declaration order, so a list written in another order warns (as C++'s -Wreorder) and a value that reads a field
+    // initialized after it is the field initializer's error
+    void check_member_initializers(const function_decl* fn) {
+        const sclass* c = class_ctx_;
+        if (!c || !c->decl) { return; }
+        std::vector<const variable_decl*> order;
+        for (const auto& m : c->decl->members) {
+            if (m.declaration && m.declaration->get_type() == node_type::variable_decl) {
+                const auto* f = static_cast<const variable_decl*>(m.declaration.get());
+                if (!f->is_static) { order.push_back(f); }
+            }
+        }
+        const auto position = [&](std::string_view name) {
+            for (size_t i = 0; i < order.size(); ++i) { if (order[i]->name == name) { return i; } }
+            return order.size();
+        };
+        const constructor_initializer* previous = nullptr;
+        bool warned = false;
+        for (const auto& init : fn->initializers) {
+            if (init.kind != constructor_initializer::kind_t::field || !init.value) { continue; }
+            const size_t at = position(init.target);
+            if (at == order.size()) { continue; }
+            const variable_decl* field = order[at];
+            initializing_field initializing{field->name, {}};
+            initializing.unready = fields_from(c->decl, field);
+            initializing_field_ = &initializing;
+            const ctype value = infer(init.value.get());
+            initializing_field_ = nullptr;
+            if (field->type && !field->auto_spelled && field->type->base_type != script_value_type::jai_any_type) {
+                check_store(value, false, token_type::equal, declared_variable_type(field), declared_variable_type_name(field),
+                            "field '" + std::string(field->name) + "'", init.location, field->location.line, field->location.column);
+            }
+            if (previous && !warned && position(previous->target) > at) {
+                diag(diag_level::warning, init.location, "member initializer of '" + std::string(field->name) + "' follows '" + previous->target +
+                     "', but fields initialize in declaration order: '" + std::string(field->name) + "' first; write the list in that order");
+                warned = true;
+            }
+            previous = &init;
+        }
+    }
+
+    // a class value field with no initializer of its own that every constructor names in its list (or delegates to one that
+    // does): its default construction never runs, so the class need not have a default constructor
+    bool every_constructor_initializes(const sclass& c, std::string_view field) {
+        if (c.ctors.empty()) { return false; }
+        for (const auto* ctor : c.ctors) {
+            const bool names = std::any_of(ctor->initializers.begin(), ctor->initializers.end(), [&](const constructor_initializer& init) {
+                return init.kind == constructor_initializer::kind_t::delegation || (init.kind == constructor_initializer::kind_t::field && init.target == field);
+            });
+            if (!names) { return false; }
+        }
+        return true;
+    }
+
+    bool check_ctor_call(std::string_view cls_name, const sclass& c, const std::vector<ctype>& args,
                          const source_location& loc) {
+        if (implicit_copy_may_take(cls_name, c, args)) { return true; }
+        check_declared_ctor_call(cls_name, c, args, loc);
+        return false;
+    }
+
+    void check_declared_ctor_call(std::string_view cls_name, const sclass& c, const std::vector<ctype>& args,
+                                  const source_location& loc) {
         if (c.ctors.empty() && args.empty()) {
             report_base_without_default(cls_name, loc);
             for (size_t i = 1; c.decl && i < c.decl->base_classes.size(); ++i) {
@@ -5413,15 +5510,37 @@ private:
         }
     }
 
-    // ++ and -- take numbers and chars; no class operator answers them
-    bool incdec_refused(const ctype& t) {
+    // The class of an object target declares an in-place operator (op: "+=", "++", ...) that may take the operation, as
+    // detail::object_operator_in_place asks: a compound one taking rhs, ++/-- in the form written (prefix none, postfix the int
+    // marker); an uncertain member answers yes, a script class's overloads none of which takes it no
+    bool in_place_operator_may_take(const ctype& t, std::string_view op, const ctype* rhs, bool postfix) {
+        if (t.kind != ctype::object_k || t.cls.empty()) { return false; }
+        const member_hit hit = lookup_member(t.cls, op, /*want_static=*/false);
+        if (!hit.certain || extended_members_.count(std::string(op))) { return true; }
+        if (!hit.found) { return false; }
+        if (!hit.methods) { return true; }
+        for (const auto* fn : *hit.methods) {
+            auto [lo, hi] = arity_range(fn);
+            if (rhs) {
+                if (lo <= 1 && hi >= 1 && script_fn_viable(fn, std::vector<ctype>{*rhs})) { return true; }
+            } else if (postfix ? (lo <= 1 && hi >= 1) : lo == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // ++ and -- take numbers and chars, and an object whose class declares the operator in the form written
+    bool incdec_refused(const ctype& t, const char* op = nullptr, bool postfix = false) {
+        if (op && in_place_operator_may_take(t, op, nullptr, postfix)) { return false; }
         return settled_operand(t) && t.kind != ctype::int_k && t.kind != ctype::float_k && t.kind != ctype::char_k;
     }
 
-    // x op= rhs runs x op rhs: the binary rows above, then the store; the diagnostic names the compound spelling
+    // x op= rhs runs the class's operator op= when it declares one taking rhs, else x op rhs: the binary rows above, then the store;
+    // the diagnostic names the compound spelling
     bool check_compound_operands(const ctype& target, token_type base_op, const ctype& rhs, const source_location& loc, size_t decl_line, size_t decl_col) {
         if (incdec_op_) {
-            if (!incdec_refused(target)) { return false; }
+            if (!incdec_refused(target, incdec_op_, incdec_postfix_)) { return false; }
             diag(diag_level::error, loc, std::string("cannot apply '") + incdec_op_ + "' to '" + ctype_name(target) + "'", decl_line, decl_col);
             return true;
         }
@@ -5447,6 +5566,7 @@ private:
             case token_type::minus_minus:
                 narrow_end_roots(u->operand.get(), /*escape=*/false);
                 check_incdec_target(u);
+                if (in_place_operator_may_take(operand, u->op.type == token_type::plus_plus ? "++" : "--", nullptr, u->is_postfix)) { return {}; }
                 if (incdec_refused(operand) || (enum_value(operand) && !operand.tentative)) {
                     diag(diag_level::error, u->location, std::string("cannot apply '") + (u->op.type == token_type::plus_plus ? "++" : "--") + "' to '" + ctype_name(operand) + "'");
                 } else if (operand.kind == ctype::char_k && !operand.tentative && !operand.diagnostic_only && u->operand->get_type() == node_type::identifier_expr) {
@@ -6229,8 +6349,8 @@ private:
             }
             if (const sclass* sc = find_sclass(id->name)) {
                 report_class_before_declaration(id->name, c->location);
-                check_ctor_call(id->name, *sc, args, c->location);
-                if (sc->provable) { ov = &sc->ctors; }
+                const bool may_copy = check_ctor_call(id->name, *sc, args, c->location);
+                if (sc->provable && !may_copy) { ov = &sc->ctors; }
                 return object_of(id->name);
             }
             if (enums_.count(id->name)) { return {}; }
@@ -6497,6 +6617,8 @@ private:
         }
         struct incdec_scope { const char*& slot; const char* prev; ~incdec_scope() { slot = prev; } } incdec_guard{incdec_op_, incdec_op_};
         incdec_op_ = !a->incdec_desugar ? nullptr : a->op.type == token_type::plus_equal ? "++" : "--";
+        const bool enclosing_postfix = std::exchange(incdec_postfix_, a->incdec_desugar && a->postfix_old_result);
+        struct postfix_scope { bool& slot; bool prev; ~postfix_scope() { slot = prev; } } postfix_guard{incdec_postfix_, enclosing_postfix};
         bool compound = (a->op.type != token_type::equal);
         token_type base_op = compound_base(a->op.type);
 
@@ -6790,6 +6912,7 @@ private:
     // `x op= rhs` is `x = T(x op rhs)` — so it checks exactly like plain assignment
     // of the operation's result. var targets keep the dynamic behavior (unchecked).
     const char* incdec_op_ = nullptr;   // the ++/-- spelling while checking its += 1 / -= 1 desugar
+    bool incdec_postfix_ = false;       // that desugar's form
     void check_store(const ctype& rhs, bool compound, token_type base_op, const ctype& target,
                      const std::string& target_display, const std::string& what,
                      const source_location& loc, size_t decl_line, size_t decl_col) {
@@ -6813,6 +6936,11 @@ private:
                      decl_line, decl_col);
                 return;
             }
+        }
+        if (compound && target.kind == ctype::object_k &&
+            (incdec_op_ ? in_place_operator_may_take(target, incdec_op_, nullptr, incdec_postfix_)
+                        : in_place_operator_may_take(target, std::string(detail::binary_op_name(base_op)) + "=", &rhs, false))) {
+            return;   // the class's in-place operator runs on the object: nothing is stored
         }
         if (compound && check_compound_operands(target, base_op, rhs, loc, decl_line, decl_col)) { return; }
         ctype stored = compound ? binary_result(target, base_op, rhs) : rhs;
@@ -8885,6 +9013,7 @@ private:
             for (const auto& arg : init.arguments) { infer(arg.get()); }
             if (is_ctor && init.target == "super" && init.arguments.empty()) { report_base_without_default(class_ctx_name_, fn->location); }
         }
+        if (is_ctor) { check_member_initializers(fn); }
         if (is_ctor) { check_base_initializers(fn); }
         fn_stack_.back().in_ctor_initializers = false;
         if (fn->body) {
@@ -9119,7 +9248,9 @@ private:
                                            f->name, cd->name, f->location);
                 if (!f->type && !f->function_spelling) { f->auto_spelled = true; }
                 check_spelled_type(f->type.get(), f->location);
-                if (f->initializer) {
+                const bool listed_value = !f->is_static && f->default_initialized && f->type && f->type->base_type == script_value_type::jai_object_type &&
+                                          every_constructor_initializes(it->second, f->name);
+                if (f->initializer && !listed_value) {
                     const cdtor_ctx enclosing_cdtor = std::exchange(cdtor_ctx_, f->is_static ? cdtor_ctx::none : cdtor_ctx::construction);
                     initializing_field initializing{f->name, {}};
                     if (!f->is_static) { initializing.unready = fields_from(cd, f); }

@@ -87,6 +87,8 @@ inline registrar<binder_listed_plane, binder_registrar_context> binder_listed_pl
 struct binder_chain_root { int64_t depth = 0; };
 struct binder_chain_middle : binder_chain_root {};
 struct binder_chain_leaf : binder_chain_middle {};
+struct binder_chain_other : binder_chain_root {};
+struct binder_chain_join : binder_chain_middle, binder_chain_other {};
 
 // Test classes for binding
 class DynamicBinderPoint {
@@ -2993,6 +2995,15 @@ public:
             try { eng->execute("1;"); } catch (const jai::runtime_error& e) { failure = e.what(); }
             check_eq(std::string("Bindings are incomplete:\n  class 'Root' failed to register: Diamond inheritance detected while resolving a deferred base-class link"), failure);
             check_eq((int64_t)2, eng->execute("1 + 1;").as_int());
+            // two deferred links that each look sound complete a diamond in a class derived from both
+            auto joined = make_engine();
+            dynamic_binder<binder_chain_middle>(*joined, "Middle").base_class<binder_chain_root>();
+            dynamic_binder<binder_chain_other>(*joined, "Other").base_class<binder_chain_root>();
+            dynamic_binder<binder_chain_join>(*joined, "Join").base_class<binder_chain_middle>().base_class<binder_chain_other>();
+            dynamic_binder<binder_chain_root>(*joined, "Root").property("depth", &binder_chain_root::depth);
+            failure.clear();
+            try { joined->execute("1;"); } catch (const jai::runtime_error& e) { failure = e.what(); }
+            check_eq(std::string("Bindings are incomplete:\n  class 'Root' failed to register: Diamond inheritance detected while resolving a deferred base-class link: class 'Join'"), failure);
         });
 
         test("live_binder_commits_at_first_load_and_keeps_binding", [this]() {

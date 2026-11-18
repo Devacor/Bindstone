@@ -99,7 +99,7 @@ void collect_stop_lines(const statement* s, stop_line_map& out) {
     case node_type::function_decl: {
         auto* fd = static_cast<const function_decl*>(s);
         for (const auto& p : fd->parameters) { expr(p.default_value); }
-        for (const auto& init : fd->initializers) { for (const auto& a : init.arguments) { expr(a); } }
+        for (const auto& init : fd->initializers) { for (const auto& a : init.arguments) { expr(a); } expr(init.value); }
         collect_stop_lines(fd->body.get(), out);
         break;
     }

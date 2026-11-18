@@ -1369,16 +1369,16 @@ JAI_NOINLINE void vm_compiler::compile_constructor_prologue(const constructor_pr
 			own.target = prologue.level;
 			chunk_->ctor_steps.push_back(std::move(own));
 			emit(opcode::op_ctor_literals, static_cast<uint32_t>(chunk_->ctor_steps.size() - 1));
-		} else {
-			static const std::unordered_map<uint64_t, uint32_t> no_parameters;
-			name_slots_ = &no_parameters;   // C++ [class.mem]: a field initializer resolves in the class, never the constructor's parameters
-			for (const auto& [field_id, initializer] : prologue.fields) {
-				current_stmt_ = initializer.get();
-				chunk_->nodes.push_back(initializer);
-				compile_expression(initializer);
-				chunk_->field_inits.emplace_back(field_id, initializer.get());
-				emit(opcode::op_field_init, static_cast<uint32_t>(chunk_->field_inits.size() - 1));
-			}
+		}
+		static const std::unordered_map<uint64_t, uint32_t> no_parameters;
+		for (const auto& field : prologue.fields) {
+			// C++ [class.mem]: a field's own initializer resolves in the class, never the constructor's parameters; a member initializer reads them
+			name_slots_ = field.listed ? &prologue.name_slots : &no_parameters;
+			current_stmt_ = field.value.get();
+			chunk_->nodes.push_back(field.value);
+			compile_expression(field.value);
+			chunk_->field_inits.emplace_back(field.field_id, field.value.get());
+			emit(opcode::op_field_init, static_cast<uint32_t>(chunk_->field_inits.size() - 1));
 		}
 	}
 	current_stmt_ = nullptr;

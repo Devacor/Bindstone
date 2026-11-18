@@ -326,8 +326,8 @@ checked_result<bool> interpreter::language_less(const script_value& a_left, cons
 	const auto& left = a_left.deref();
 	const auto& right = a_right.deref();
 	if (operator_table_) {
-		if (const script_value* function = operator_table_->entry(detail::op_slot::less)) {
-			auto result = function->as_function()({left, right});
+		if (const script_value taker = operator_table_->overload(detail::op_slot::less, left, right); taker.is_function()) {
+			auto result = taker.as_function()({left, right});
 			if (!result) { return result.error_value(); }
 			return is_truthy(result.value());
 		}
@@ -342,8 +342,8 @@ checked_result<bool> interpreter::language_equal(const script_value& left, const
     const script_value& l = left.deref();
     const script_value& r = right.deref();
     if (operator_table_ && operator_table_->any()) {
-        if (const script_value* opFunc = operator_table_->entry(detail::binary_op_slot(token_type::equal_equal))) {
-            auto result = opFunc->as_function()({l, r});
+        if (const script_value taker = operator_table_->overload(detail::op_slot::equal_equal, l, r); taker.is_function()) {
+            auto result = taker.as_function()({l, r});
             if (!result) { return result.error_value(); }
             return is_truthy(result.value());
         }
@@ -1035,10 +1035,9 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
     // flat operator table (detail/operator_table.hpp): one mask test + array read,
     // no environment probe on any operator path.
     if (op_symbol_id != 0 && operator_table_ && operator_table_->any()) {
-        if (const script_value* opFunc = operator_table_->entry(detail::binary_op_slot(expr->op.type))) {
-            const script_function& func = opFunc->as_function();
+        if (const script_value taker = operator_table_->overload(detail::binary_op_slot(expr->op.type), left, right); taker.is_function()) {
             std::vector<script_value> args = {left, right};
-            auto result = call_value(func, args);
+            auto result = call_value(taker.as_function(), args);
             if (!result) {
                 // Function returned error - propagate it up
                 return result.error_value();
@@ -1238,10 +1237,9 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
 
                 // Fall back to the global [] operator (flat table - no env probe)
                 if (operator_table_) {
-                    if (const script_value* getMethod = operator_table_->entry(detail::op_slot::subscript)) {
-                        const script_function& func = getMethod->as_function();
+                    if (const script_value taker = operator_table_->overload(detail::op_slot::subscript, left, right); taker.is_function()) {
                         std::vector<script_value> args = {left, right};
-                        auto result = call_value(func, args);
+                        auto result = call_value(taker.as_function(), args);
                         if (!result) {
                             // Function returned error - propagate it up
                             return result.error_value();
@@ -1633,10 +1631,9 @@ checked_result<void> interpreter::assign_compound_identifier(assignment_expr* ex
                 default: if (detail::compound_is_bitwise(expr->op.type)) { op_slot = detail::binary_op_slot(detail::compound_base(expr->op.type)); } break;
             }
             if (operator_table_) {
-                if (const script_value* opFunc = operator_table_->entry(op_slot)) {
-                    const script_function& func = opFunc->as_function();
+                if (const script_value taker = operator_table_->overload(op_slot, target, rightValue); taker.is_function()) {
                     std::vector<script_value> args = {target.clone(), rightValue};
-                    auto result = call_value(func, args);
+                    auto result = call_value(taker.as_function(), args);
                     if (!result) {
                         return result.error_value();
                     }
@@ -2058,15 +2055,19 @@ checked_result<void> interpreter::assign_compound_element(assignment_expr* expr,
     script_value resultValue = make_value();
     // a global operator answers first (the flat table; KEEP BYTE-PARALLEL with vm_backend::exec_index_compound); ++ and --
     // step numbers only
-    const script_value* compound_op_fn = operator_table_ && !expr->incdec_desugar
-        ? operator_table_->entry(detail::binary_op_slot(detail::compound_base(expr->op.type))) : nullptr;
-    if (compound_op_fn) {
-        auto result = call_value(compound_op_fn->as_function(), {currentValue, rightValue});
-        if (!result) {
-            return result.error_value();
+    bool by_global_operator = false;
+    const detail::op_slot compound_slot = detail::binary_op_slot(detail::compound_base(expr->op.type));
+    if (operator_table_ && !expr->incdec_desugar && operator_table_->entry(compound_slot)) {
+        if (const script_value taker = operator_table_->overload(compound_slot, currentValue, rightValue); taker.is_function()) {
+            auto result = call_value(taker.as_function(), {currentValue, rightValue});
+            if (!result) {
+                return result.error_value();
+            }
+            resultValue = std::move(result.value());
+            by_global_operator = true;
         }
-        resultValue = std::move(result.value());
-    } else {
+    }
+    if (!by_global_operator) {
         // a bound rhs decodes before the zero divisor's check, which comes ahead of the operands' kinds
         if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
             rightValue = rightValue.bound_decoded_temp();
@@ -8064,7 +8065,9 @@ checked_result<void> interpreter::evaluate_field_initializers(strong_ptr<class_i
                                              std::shared_ptr<script_class_definition> class_def,
                                              std::shared_ptr<environment> init_env,
                                              bool skip_parent_recursion,
-                                             const detail::aggregate_plan* aggregate) {
+                                             const detail::aggregate_plan* aggregate,
+                                             const std::vector<detail::field_initialization>* plan,
+                                             std::shared_ptr<environment> list_env) {
     const unit_stamp class_unit = class_def->unit();   // the initializers are the class's code (no frame of their own)
     unit_override_scope unitScope(this, &class_unit);
     // First, evaluate parent class field initializers (if any)
@@ -8131,6 +8134,18 @@ checked_result<void> interpreter::evaluate_field_initializers(strong_ptr<class_i
 
     if (aggregate) [[unlikely]] {
         return detail::aggregate_fill_own_fields(*instance, *class_def, *aggregate, engine_, initialize_field);
+    }
+    if (plan) {
+        const std::shared_ptr<environment> member_env = environment_;
+        const detail::member_scope_ctx member_scope = member_scope_;
+        for (const auto& step : *plan) {
+            // a listed initializer is the constructor's code: its parameters, then the members, as its body resolves names
+            environment_ = step.listed ? list_env : member_env;
+            member_scope_ = step.listed ? scope_restore.previous_scope : member_scope;
+            auto initialized = initialize_field(step.field_id, step.value);
+            if (!initialized) { return initialized; }
+        }
+        return {};
     }
     for (const auto& [field_id, initializer_ast] : field_initializers) {
         if (initializer_ast) {
@@ -8239,6 +8254,10 @@ struct interpreter::construction_lender final : detail::construction_host {
                                                      detail::construction_scope& scope, bool skip_parent_recursion,
                                                      const detail::aggregate_plan* aggregate) override {
         return self.evaluate_field_initializers(instance, cls, scope.members ? scope.members : scope.env, skip_parent_recursion, aggregate);
+    }
+    checked_result<void> initialize_fields(const strong_ptr<class_instance>& instance, const std::shared_ptr<script_class_definition>& cls,
+                                           const std::vector<detail::field_initialization>& plan, detail::construction_scope& scope) {
+        return self.evaluate_field_initializers(instance, cls, scope.members ? scope.members : scope.env, true, nullptr, &plan, scope.env);
     }
 
     bool owns_arguments(const std::vector<script_value>&) const { return call_ctx != nullptr; }
@@ -8378,7 +8397,7 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
     std::shared_ptr<function_decl> matching_ctor;
     std::vector<script_value> captured;
     auto pre = detail::prepare_construction(host, class_def, args, initializer_depth, matching_ctor, captured, check_access);
-    if (!pre || is_unwinding_) { return pre; }
+    if (!pre || is_unwinding_ || !matching_ctor) { return pre; }
     script_value this_value = std::move(pre.value());
     initializer_depth.reset();
     auto constructed = detail::construct_instance_members(host, class_def, definition_env, this_value, matching_ctor, captured.empty() ? args : captured);

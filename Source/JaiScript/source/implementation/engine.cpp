@@ -657,6 +657,11 @@ struct engine::implementation {
             }
             return best->function;
         }
+
+        // engine_operator_table's picker: the overload taking a binary operator's operands, null when none does
+        static script_value operator_overload(const void* set, const script_value& left, const script_value& right) {
+            return static_cast<const OverloadSet*>(set)->findBestMatch({left, right});
+        }
     };
     
     // Track which globals should NOT be serialized (most are serializable by default)
@@ -840,7 +845,10 @@ struct engine::implementation {
         }
         auto val = global_environment_->get(string_symbolizer_.intern(name));
         if (val && val.value().is_function()) {
-            operator_table_.set(slot, std::move(val.value()));
+            // a typed registration dispatches over its set, whose pick the table asks; a lone untyped function takes any operands
+            const auto set = overloadedFunctions.find(std::string(name));
+            const bool dispatches = set != overloadedFunctions.end() && val.value().as_function().target<engine::overload_dispatch>();
+            operator_table_.set(slot, std::move(val.value()), dispatches ? &OverloadSet::operator_overload : nullptr, dispatches ? &set->second : nullptr);
             latch_custom_binary_ops();
         } else {
             // Operator name rebound to a non-function: dispatch falls back to builtins
@@ -4793,6 +4801,18 @@ void engine::register_class_by_type(std::type_index type, std::shared_ptr<class_
         for (auto&& derived : derivedDefs) {
             if (!derived->add_parent(classDef)) {
                 throw std::runtime_error("Diamond inheritance detected while resolving a deferred base-class link");
+            }
+            // the link may complete a diamond below it, in a class already derived from the one it linked
+            std::vector<std::shared_ptr<class_definition>> below{derived};
+            for (size_t i = 0; i < below.size(); ++i) {
+                for (const auto& weak : below[i]->derived_classes()) {
+                    auto descendant = weak.lock();
+                    if (!descendant || std::find(below.begin(), below.end(), descendant) != below.end()) { continue; }
+                    if (descendant->has_diamond_inheritance()) {
+                        throw std::runtime_error("Diamond inheritance detected while resolving a deferred base-class link: class '" + descendant->get_name() + "'");
+                    }
+                    below.push_back(std::move(descendant));
+                }
             }
         }
     }

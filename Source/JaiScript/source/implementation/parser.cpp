@@ -6,6 +6,7 @@
 #include "../../include/jaiscript/detail/transient_read.hpp"
 #include "../../include/jaiscript/detail/lexer.hpp"  // a spliced include is lexed here
 #include "../../include/jaiscript/detail/map_entry_binding.hpp"
+#include "../../include/jaiscript/detail/operator_ids.hpp"
 #include "../../include/jaiscript/detail/expr_children.hpp"
 #include "../../include/jaiscript/detail/program_slots.hpp"
 #include "../../include/jaiscript/detail/template_library.hpp"
@@ -325,6 +326,7 @@ namespace {
             if (inits) {
                 for (const auto& ci : *inits) {
                     walk_args(ci.arguments);
+                    if (ci.value) { walk_expr(ci.value.get()); }
                 }
             }
             walk_stmt(body);
@@ -3138,6 +3140,15 @@ expression_ptr parser::bound_conditional(expression_ptr value) {
     return value;
 }
 
+// What a reference binds where one surely binds (a T& declaration, a reference return): a conditional's arms as places, and `this`
+// as the object it names (C++ *this), a reference to it
+expression_ptr parser::reference_binding(expression_ptr value) {
+    if (value && value->get_type() == node_type::this_expr && !enclosing_class_.empty()) {
+        return std::make_shared<cast_expr>(value->location, store_type_info(type_info::make_object(*symbolizer_, enclosing_class_)), true, std::move(value));
+    }
+    return bound_conditional(std::move(value));
+}
+
 checked_result<declaration_ptr> parser::declaration() {
     if (!check_mode_attribute_ahead()) { return declaration_body(); }
     return attributed_declaration();
@@ -3522,6 +3533,15 @@ JAI_NOINLINE checked_result<expression_ptr> parser::finish_member_access(express
 checked_result<std::vector<parameter>> parser::parse_parameter_list() {
     std::vector<parameter> params;
 
+    if (std::exchange(postfix_marker_ahead_, false) && check(token_type::int_keyword) && current_ + 1 < stream_->size() &&
+        (*stream_)[current_ + 1].type == token_type::right_paren) {
+        advance();
+        parameter marker(store_type_info(type_info::make_int(*symbolizer_)), std::string(detail::k_postfix_marker_name));
+        marker.symbol_id = symbolizer_->intern(marker.name);
+        params.push_back(std::move(marker));
+        return params;
+    }
+
     if (!check(token_type::right_paren)) {
         do {
             const bool is_const = match(token_type::const_keyword);
@@ -3804,7 +3824,7 @@ JAI_NOINLINE checked_result<expression_ptr> parser::lambda_expression_body(std::
         return value.error_value();
     }
     std::vector<declaration_ptr> body;
-    auto ret = std::make_shared<return_stmt>(at, returns_reference_ ? bound_conditional(value.value()) : value.value());
+    auto ret = std::make_shared<return_stmt>(at, returns_reference_ ? reference_binding(value.value()) : value.value());
     body.push_back(std::make_shared<statement_decl>(at, ret));
     lambda->body = std::make_shared<block_stmt>(at, std::move(body));
     lambda->local_count = exit_function_scope();
@@ -4588,7 +4608,7 @@ checked_result<statement_ptr> parser::return_statement() {
             return make_error_code(parse_error_code::syntax_error);
         }
         JAISCRIPT_TRY_ASSIGN(value, expression());
-        if (returns_reference_ && !in_coroutine_) { value = bound_conditional(std::move(value)); }
+        if (returns_reference_ && !in_coroutine_) { value = reference_binding(std::move(value)); }
     }
 
     JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after return value"));
@@ -4827,6 +4847,8 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
     auto [class_name_id, class_name_view] = space.empty() ? symbolizer_->intern_with_view(className.lexeme)
                                                           : symbolizer_->intern_with_view(std::string(space) + "::" + std::string(className.lexeme));
     auto classDecl = std::make_shared<class_decl>(className.location, class_name_view, class_name_id);
+    struct enclosing_class_restore { std::string_view& slot; std::string_view saved; ~enclosing_class_restore() { slot = saved; } } enclosing_scope{enclosing_class_, enclosing_class_};
+    enclosing_class_ = class_name_view;
     classDecl->base_classes = std::move(base_classes);
     classDecl->nocopy = nocopy;
 
@@ -5169,6 +5191,9 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                         continue;
                     }
 
+                    struct ref_return_restore { bool& flag; bool saved; ~ref_return_restore() { flag = saved; } } ref_return_scope{returns_reference_, returns_reference_};
+                    returns_reference_ = func->return_type && func->return_type->base_type == script_value_type::jai_reference_type;
+
                     // Enter function scope for slot-based local variable tracking
                     enter_function_scope();
 
@@ -5212,7 +5237,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                     if (!init) { init = default_initializer(type, name.location); }
                     auto var_decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), init);
                     var_decl->is_static = is_static;
-                    var_decl->default_initialized = member_const && !spelled_init;   // a class constant needs its initializer (finish_const)
+                    var_decl->default_initialized = !spelled_init;   // a class constant needs its initializer (finish_const)
                     var_decl->function_spelling = function_spelling;
                     member = var_decl;
                 }
@@ -5265,8 +5290,77 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
 
     in_coroutine_ = class_entry_in_coroutine;
     JAISCRIPT_TRY(expect(token_type::right_brace, "expected '}' after class body"));
+    resolve_constructor_initializers(*classDecl);
 
     return classDecl;
+}
+
+// C++ [class.base.init]: a name in a constructor's initializer list is the class itself (a delegation, as `this`), one of its bases,
+// or an instance field the class declares; a name that is none of them stays unresolved for the load to report
+void parser::resolve_constructor_initializers(class_decl& cls) {
+    using kind_t = constructor_initializer::kind_t;
+    for (auto& member : cls.members) {
+        if (!member.declaration || member.declaration->get_type() != node_type::function_decl) { continue; }
+        auto& ctor = static_cast<function_decl&>(*member.declaration);
+        if (ctor.name != cls.name) { continue; }
+        for (auto& init : ctor.initializers) {
+            if (init.kind != kind_t::unresolved) { continue; }
+            const bool brace = !init.arg_captures.empty() && init.arg_captures[0] != 0;
+            init.arg_captures.clear();
+            if (init.target == cls.name || detail::initializer_names(init.target, cls.name)) {   // a namespace's class is ns::Name: its bare name delegates too
+                init.target = "this";
+                init.kind = kind_t::delegation;
+                continue;
+            }
+            if (std::any_of(cls.base_classes.begin(), cls.base_classes.end(), [&](std::string_view base) { return detail::initializer_names(init.target, base); })) {
+                init.kind = kind_t::base;
+                continue;
+            }
+            for (const auto& other : cls.members) {
+                if (!other.declaration || other.declaration->get_type() != node_type::variable_decl) { continue; }
+                const auto& field = static_cast<const variable_decl&>(*other.declaration);
+                if (field.is_static || field.name != init.target) { continue; }
+                init.kind = kind_t::field;
+                init.value = field_initializer_value(field, std::move(init.arguments), brace, init.location);
+                init.arguments.clear();
+                break;
+            }
+        }
+    }
+}
+
+// A field's member initializer, name(arguments) or name{arguments}: a class or math value is constructed from them, as the declaration
+// `T name(arguments);` constructs it; any other field takes its one value as `=` would store it (no argument: the type's default);
+// an array also takes a braced list of two or more elements and a (size, value) pair
+expression_ptr parser::field_initializer_value(const variable_decl& field, std::vector<expression_ptr> arguments, bool brace, const source_location& at) {
+    const type_info_ptr& type = field.type;
+    const script_value_type base = type ? type->base_type : script_value_type::jai_any_type;
+    const auto null_value = [&] { return expression_ptr(std::make_shared<literal_expr>(at, script_value(script_value::ast_literal_tag{}, std::monostate{}))); };
+    switch (base) {
+    case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_vec4_type: case script_value_type::jai_color_type:
+    case script_value_type::jai_ivec2_type: case script_value_type::jai_ivec3_type:
+        return math_constructor_call(base, std::move(arguments), at);
+    case script_value_type::jai_object_type:
+        if (!type->type_name.empty()) { return std::make_shared<new_expr>(at, type, std::move(arguments)); }
+        break;
+    case script_value_type::jai_array_type:
+        if (brace && arguments.size() >= 2) { return std::make_shared<array_literal_expr>(at, std::move(arguments)); }
+        if (!brace && arguments.size() == 2) {
+            auto sized = construction(type, std::move(arguments), false, at);
+            return sized ? sized.value() : null_value();
+        }
+        break;
+    default:
+        break;
+    }
+    if (arguments.size() == 1) { return std::move(arguments[0]); }
+    if (arguments.empty()) {
+        expression_ptr zero = default_initializer(type, at);
+        return zero ? zero : null_value();
+    }
+    report_error_at("field '" + std::string(field.name) + "' declared '" + (type ? type->canonical_name() : std::string("auto")) +
+                    "' is initialized by one value, not " + std::to_string(arguments.size()), at);
+    return null_value();
 }
 
 checked_result<declaration_ptr> parser::namespace_declaration() {
@@ -5598,6 +5692,17 @@ std::optional<std::string> parser::parse_operator_method_symbol() {
     if (check(token_type::right_shift)) { advance(); return std::string(">>"); }
     if (check(token_type::spaceship)) { advance(); return std::string("<=>"); }
     if (check(token_type::tilde)) { advance(); return std::string("~"); }
+    // the in-place forms, as C++ declares them: a op= b calls operator op=, ++a operator++() and a++ operator++(int)
+    switch (peek().type) {
+        case token_type::plus_equal: case token_type::minus_equal: case token_type::star_equal: case token_type::slash_equal:
+        case token_type::percent_equal: case token_type::ampersand_equal: case token_type::pipe_equal: case token_type::caret_equal:
+        case token_type::left_shift_equal: case token_type::right_shift_equal:
+            return std::string(advance().lexeme);
+        case token_type::plus_plus: case token_type::minus_minus:
+            postfix_marker_ahead_ = true;
+            return std::string(advance().lexeme);
+        default: break;
+    }
     if (check(token_type::left_paren) && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::right_paren) {
         advance(); advance();
         return std::string("()");
@@ -6061,7 +6166,7 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
                     } while (match(token_type::comma));
                 }
                 JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after super arguments"));
-                func->initializers.emplace_back("super", std::move(args));
+                func->initializers.emplace_back("super", std::move(args), constructor_initializer::kind_t::base, previous().location);
             } else if (match(token_type::this_keyword)) {
                 // Parse this(args)
                 JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after 'this'"));
@@ -6073,22 +6178,24 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
                     } while (match(token_type::comma));
                 }
                 JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after this arguments"));
-                func->initializers.emplace_back("this", std::move(args));
+                func->initializers.emplace_back("this", std::move(args), constructor_initializer::kind_t::delegation, previous().location);
             } else if (check(token_type::identifier)) {
-                // Parse Base(args): the base it names constructs with them (C++ [class.base.init])
-                std::string base_name(advance().lexeme);
-                JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after base class name"));
-                std::vector<expression_ptr> args;
-                if (!check(token_type::right_paren)) {
-                    do {
-                        JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                        args.push_back(bound_conditional(std::move(arg)));
-                    } while (match(token_type::comma));
+                // name(args) or name{args}: a base, the class itself (a delegation) or a field (C++ [class.base.init]); which one is
+                // settled when the class body closes (resolve_constructor_initializers)
+                const token name = advance();
+                std::string written(name.lexeme);
+                while (check(token_type::colon_colon) && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::identifier) {
+                    advance();
+                    written += "::" + std::string(advance().lexeme);   // a qualified base, or a namespace's class by its full name
                 }
-                JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after base constructor arguments"));
-                func->initializers.emplace_back(std::move(base_name), std::move(args));
+                const bool brace = check(token_type::left_brace);
+                if (!brace) { JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' or '{' after a name in a constructor initializer list")); }
+                else { advance(); }
+                JAISCRIPT_TRY_ASSIGN(auto args, construction_arguments(brace, brace ? "expected '}' after initializer arguments" : "expected ')' after initializer arguments"));
+                func->initializers.emplace_back(std::move(written), std::move(args), constructor_initializer::kind_t::unresolved, name.location);
+                func->initializers.back().arg_captures.assign(1, brace ? 1 : 0);   // the bracket, until the name is resolved
             } else {
-                report_error("expected 'super', 'this' or a base class name in constructor initializer list", peek());
+                report_error("expected 'super', 'this', a base class or a field in constructor initializer list", peek());
     return make_error_code(parse_error_code::syntax_error);
             }
         } while (match(token_type::comma));
@@ -6234,7 +6341,7 @@ checked_result<declaration_ptr> parser::variable_declaration() {
     expression_ptr initializer = nullptr;
     if (match(token_type::equal)) {
         JAISCRIPT_TRY_ASSIGN(initializer, expression());
-        if (is_reference) { initializer = bound_conditional(std::move(initializer)); }
+        if (is_reference) { initializer = reference_binding(std::move(initializer)); }
     } else if ((check(token_type::left_brace) || check(token_type::left_paren)) && type && !is_reference) {
         // Type name{args...} / Type name(args...): construction with the declared type (a primitive takes its one value)
         const bool brace = check(token_type::left_brace);

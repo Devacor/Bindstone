@@ -1170,19 +1170,22 @@ namespace jai::detail {
 		const script_value rightNorm = rightBound ? rightDeref.bound_decoded_temp() : script_value(std::monostate{}, eng);
 		const script_value& rightValue = rightBound ? rightNorm : rightDeref;
 		script_value resultValue(std::monostate{}, eng);
-		const script_value* opFunc = op_table ? op_table->entry(binary_op_slot(op)) : nullptr;
-		if (!opFunc && op == token_type::plus) {
+		bool by_global_operator = false;
+		if (op_table && op_table->entry(binary_op_slot(op))) [[unlikely]] {
+			if (const script_value taker = op_table->overload(binary_op_slot(op), currentValue, rightValue); taker.is_function()) {
+				std::vector<script_value> args = {currentValue, rightValue};
+				auto result = taker.as_function()(args);
+				if (!result) {
+					return result;
+				}
+				resultValue = std::move(result.value());
+				by_global_operator = true;
+			}
+		}
+		if (!by_global_operator && op == token_type::plus) {
 			if (auto appended = ref_text_append_in_place(refLocal, currentValue, rightValue, declared_static, eng)) { return std::move(*appended); }
 		}
-		if (opFunc) {
-			const script_function& func = opFunc->as_function();
-			std::vector<script_value> args = {currentValue, rightValue};
-			auto result = func(args);
-			if (!result) {
-				return result;
-			}
-			resultValue = std::move(result.value());
-		} else {
+		if (!by_global_operator) {
 			switch (op) {
 				case token_type::plus: {
 					// one '+=' table for every destination: a text target appends text, a text operand never stringifies

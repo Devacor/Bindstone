@@ -223,7 +223,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <div class="tablewrap"><table><thead><tr><th>Binding</th><th>Rule</th></tr></thead><tbody>
 <tr><td>Tokens</td><td><code>+ - * / % &amp; | ^ &lt;&lt; &gt;&gt; == != &lt; &lt;= &gt; &gt;= &lt;=&gt;</code>, unary <code>- + ~</code> (a lambda taking only the object), <code>[]</code>, <code>()</code>, <code>=</code>, and <code>to_bool</code> for <code>!v</code> and <code>if (v)</code>.</td></tr>
 <tr><td>Supplied</td><td><code>&lt;=&gt;</code> supplies <code>&lt; &lt;= &gt; &gt;=</code> and <code>==</code>; <code>==</code> supplies <code>!=</code>; <code>5 == m</code> asks <code>m</code>&#x27;s <code>==</code> taking an int.</td></tr>
-<tr><td><code>++</code>, <code>--</code></td><td>C++&#x27;s two forms, which a script class cannot declare: a lambda taking only the object answers <code>++v</code>; one taking the object and an ignored <code>int64_t</code> answers <code>v++</code>.</td></tr>
+<tr><td><code>++</code>, <code>--</code></td><td>C++&#x27;s two forms, as a script class declares them: a lambda taking only the object answers <code>++v</code>; one taking the object and an ignored <code>int64_t</code> answers <code>v++</code>.</td></tr>
 <tr><td>A missing <code>++</code> or <code>--</code> form</td><td><code>Cannot apply &#x27;++&#x27; to T</code></td></tr>
 <tr><td>Compound (<code>"+="</code> ...)</td><td>Runs once on the object in place, for a variable, field, element, map value or reference. Nothing is stored back; the expression is what the operator returns.</td></tr>
 <tr><td>Compound, none bound</td><td><code>m += o</code> is <code>m = m + o</code>.</td></tr>
@@ -233,6 +233,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>operator&lt;(const Money&amp;)</code> and <code>operator&lt;=&gt;(int64_t)</code> bound</td><td><code>m &lt; 5</code> runs the <code>&lt;=&gt;</code>.</td></tr>
 <tr><td>Only <code>operator+(const Money&amp;)</code> bound</td><td><code>m + "!"</code> is the builtin concatenation of <code>m</code>&#x27;s text.</td></tr>
 <tr><td>No match</td><td><code>No bound 'Money * int': bind operator "*" taking int on Money, or convert the operand</code></td></tr>
+<tr><td>A global operator (<code>eng-&gt;add_function("+", [](Money&amp;, const Money&amp;) { ... })</code>)</td><td>Answers the operands one of its overloads takes, in every form (binary, compound, an element&#x27;s, a <code>var</code>&#x27;s). Every other pair keeps its own meaning: <code>1 + 2</code> stays the builtin addition and a class&#x27;s operator still answers for it. An overload taking <code>(int, int)</code> replaces the builtin for those operands.</td></tr>
 </tbody></table></div>
 <h3 id="binder-template-names">Template instantiation names<a class="hlink" href="#binder-template-names" aria-label="link">&#8203;</a></h3>
 <p>A bound template instantiation is named the way a script spells its argument (<a href="../embedding/02-dynamic-binder.html#plain-structs-and-templates-static-binders">static binders</a>).</p>

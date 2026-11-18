@@ -461,6 +461,45 @@ public:
                      "a reference parameter");
         });
 
+        test("an_instantiation_the_host_did_not_bind_is_a_load_error_listing_the_bound_ones", [this]() {
+            const auto message = [this](const std::string& source) {
+                auto eng = make_engine();
+                jai::stdlib::register_all(*eng);
+                eng->bind_static_types<TplBox<int64_t>, TplBox<std::string>, TplTagged<std::string, int64_t>>();
+                try { return eng->execute(source).to_string(); } catch (const std::exception& err) { return std::string(err.what()); }
+            };
+            const std::string unbound = "'TplBox<bool>' is not bound: the host binds TplBox<int>, TplBox<int32>, TplBox<string>";
+            for (const char* source : {"TplBox<bool> b;", "TplBox< bool > spaced;", "class C { TplBox<bool> f; }", "void f(TplBox<bool> b) { }",
+                                       "TplBox<bool> g() { return TplBox<bool>(); }", "array<TplBox<bool>> xs;", "map<string, TplBox<bool>> m;", "shared_ptr<TplBox<bool>> h;",
+                                       "weak_ptr<TplBox<bool>> w;", "for (TplBox<bool> x : [1]) { }", "auto l = [](TplBox<bool> b) { return 1; };",
+                                       "void f() { try { } catch (TplBox<bool> e) { } }", "extern TplBox<bool> held;", "var v = 1; cast<TplBox<bool>>(v);",
+                                       "var v = 1; v instanceof TplBox<bool>;", "void f() { auto p = new TplBox<bool>(); }",
+                                       "void f() { auto p = make_shared<TplBox<bool>>(); }", "void f() { auto b = TplBox<bool>(); }",
+                                       "void f() { auto b = TplBox<bool>{}; }", "void f() { auto xs = array<TplBox<bool>>(); }"}) {
+                check_true(message(source).find("error: " + unbound) != std::string::npos, std::string(source) + " -> " + message(source));
+            }
+            check_true(message("TplBox<TplBox<bool>> nested;").find("error: 'TplBox<TplBox<bool>>' is not bound: the host binds TplBox<int>, TplBox<int32>, TplBox<string>") != std::string::npos,
+                       message("TplBox<TplBox<bool>> nested;"));
+            check_true(message("TplTagged<int, string> swapped;").find("error: 'TplTagged<int, string>' is not bound: the host binds TplTagged<string, int>") != std::string::npos,
+                       message("TplTagged<int, string> swapped;"));
+            check_eq(std::string("2 8 2"), message("TplBox< int > spaced; TplBox<int32> sibling; array<TplBox<int>> xs = [spaced]; `${spaced.kind()} ${sibling.kind()} ${xs[0].kind()}`"));
+            // a warn region leaves it to the run time, which says the same
+            for (const char* construction : {"TplBox<bool> b;", "auto p = new TplBox<bool>();", "auto p = make_shared<TplBox<bool>>();", "auto b = TplBox<bool>();",
+                                             "array<TplBox<bool>> xs; xs.resize(1);"}) {
+                check_eq(unbound, message("[[warn_mode]]; var c = \"\"; try { " + std::string(construction) + " } catch (e) { c = e; } c"), construction);
+            }
+            check_eq("reflect::construct: " + unbound, message("var c = \"\"; try { reflect::construct(\"TplBox<\" + \"bool>\"); } catch (e) { c = e; } c"));
+            check_eq(std::string("No constructor found for class 'Nope'"), message("[[warn_mode]]; var c = \"\"; try { auto p = new Nope(); } catch (e) { c = e; } c"));
+
+            auto many = make_engine();
+            many->bind_static_types<TplBox<std::vector<int64_t>>, TplBox<int64_t>, TplBox<double>, TplBox<std::shared_ptr<TplLeaf>>, TplBox<TplLeaf>,
+                                    TplBox<uint8_t>, TplBox<std::map<std::string, double>>, TplBox<TplNamedLeaf>>();
+            std::string listed;
+            try { many->execute("TplBox<bool> b;"); } catch (const std::exception& err) { listed = err.what(); }
+            check_true(listed.find("error: 'TplBox<bool>' is not bound: the host binds TplBox<int>, TplBox<float>, TplBox<int32>, TplBox<uint8>, TplBox<TplLeaf>, "
+                                   "TplBox<float32>, TplBox<NamedLeaf>, TplBox<array<int>> and 2 more\n") != std::string::npos, listed);
+        });
+
         test("a_template_base_name_is_not_a_reserved_word", [this]() {
             auto eng = make_engine();
             eng->bind_static_type<TplBox<int64_t>>();
@@ -479,6 +518,12 @@ public:
             eng->bind_static_type<TplBox<tpl_same_width_a>>();
             check_throws([&]() { eng->bind_static_type<TplBox<tpl_same_width_b>>(); });
             eng->bind_static_type<TplBox<tpl_same_width_a>>();   // the same type again stays idempotent
+            auto scripted = make_engine();
+            scripted->execute("class TplLeaf { int mine = 4; }");
+            std::string refusal;
+            try { scripted->bind_static_type<TplLeaf>(); } catch (const std::exception& e) { refusal = e.what(); }
+            check_eq(std::string("the script name 'TplLeaf' already names a script class, so a C++ type cannot bind under it"), refusal);
+            check_eq((int64_t)4, scripted->execute("TplLeaf().mine").as_int(), "the script class stands");
         });
 
         test("static_type_registry_engine_state", [this]() {

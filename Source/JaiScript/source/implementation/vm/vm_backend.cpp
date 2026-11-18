@@ -18300,8 +18300,8 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 			const bool memo = cached_global_env_ && !parallel_worker_;
 			script_value* ctor_cell = memo ? new_class_cell(f, ins, *inner_type) : environment_->get_value_ptr(symbolizer_->intern(inner_type->type_name));
 			if (!ctor_cell || !ctor_cell->is_function()) {
-				return raise_(make_error_code(runtime_error_code::undefined_variable),
-					"No constructor found for class '{0}'", inner_type->id);
+				const detail::error_text text = detail::no_constructor_text(engine_, *inner_type);
+				return raise_(make_error_code(runtime_error_code::undefined_variable), text.format, text.id);
 			}
 			if (memo) {
 				const call_site& site = f.code->call_sites[ins.c - 1];
@@ -18343,8 +18343,8 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		const bool memo = cached_global_env_ && !parallel_worker_;
 		script_value* ctor_cell = memo ? new_class_cell(f, ins, *inner_type) : environment_->get_value_ptr(symbolizer_->intern(inner_type->type_name));
 		if (!ctor_cell || !ctor_cell->is_function()) {
-			return raise_(make_error_code(runtime_error_code::undefined_variable),
-				"No constructor found for class '{0}'", inner_type->id);
+			const detail::error_text text = detail::no_constructor_text(engine_, *inner_type);
+			return raise_(make_error_code(runtime_error_code::undefined_variable), text.format, text.id);
 		}
 		if (memo) {
 			const call_site& site = f.code->call_sites[ins.c - 1];
@@ -18505,8 +18505,8 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		return {};
 	}
 
-	return raise_(make_error_code(runtime_error_code::undefined_variable),
-		"No constructor found for class '{0}'", expr->type->id);
+	const detail::error_text text = detail::no_constructor_text(engine_, *expr->type);
+	return raise_(make_error_code(runtime_error_code::undefined_variable), text.format, text.id);
 }
 
 // extern declares nothing: the name resolves to whatever defines it, and a use while nothing does raises the

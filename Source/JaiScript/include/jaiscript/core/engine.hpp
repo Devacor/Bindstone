@@ -1678,6 +1678,7 @@ namespace jai {
         void initialize_engine_reference();
         void wire_backend();
         void add_class_impl(const std::string& name, std::shared_ptr<class_definition> classDef);
+        void refuse_script_class_name(const std::string& name) const;
         void register_class_by_type(std::type_index type, std::shared_ptr<class_definition> classDef);
 
         // Records a base link whose base class has not registered yet (registrar order is

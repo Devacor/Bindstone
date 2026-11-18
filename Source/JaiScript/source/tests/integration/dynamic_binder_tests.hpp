@@ -2924,6 +2924,27 @@ public:
             scripted->execute("class DeclaredBeacon { int seats = 2; }");
             check_eq(std::string("bind_registrar: the script name 'DeclaredBeacon' already names a script class, so the C++ type 'jai::foundry::tests::DeclaredBeacon' cannot bind under it"),
                 failure_of([&] { bind_registrar(*scripted, declared_binding_context{}); }));
+            check_eq(std::string("the script name 'DeclaredBeacon' already names a script class, so a C++ type cannot bind under it"),
+                failure_of([&] { dynamic_binder<declared_name_rival>(*scripted, "DeclaredBeacon").property("seats", &declared_name_rival::seats).build(); }));
+            check_eq((int64_t)2, scripted->execute("DeclaredBeacon().seats;").as_int(), "the script class stands");
+        });
+        test("a_script_class_cannot_take_a_host_class_name", [this]() {
+            const auto failure_of = [](auto&& a_run) {
+                try { a_run(); } catch (const std::exception& e) { return std::string(e.what()); }
+                return std::string("no error");
+            };
+            const std::string refusal = "cannot declare class 'NamedThing': the host binds a C++ class of that name; give the script class another name, or derive from it (class Other : NamedThing)";
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            dynamic_binder<NamedThing>(*eng, "NamedThing").constructor<>().property("name", &NamedThing::name).build();
+            const std::string at_load = failure_of([&] { eng->execute("class NamedThing { int mine = 1; }"); });
+            check_true(at_load.find("1:7: error: " + refusal) != std::string::npos, at_load);
+            // a warn region leaves it to the declaration
+            const std::string at_run = failure_of([&] { eng->execute("[[warn_mode]]; class NamedThing { int mine = 1; } NamedThing().mine;"); });
+            check_true(at_run.find(refusal) != std::string::npos && at_run.find("error: ") == std::string::npos, at_run);
+            check_eq(std::string("named"), eng->execute("NamedThing().name;").as_string(), "the host class stands");
+            check_eq(std::string("named 1 NamedHeir"), eng->execute("class NamedHeir : NamedThing { int mine = 1; } NamedHeir h; h.name + \" \" + to_string(h.mine) + \" \" + type_of(h);").as_string());
+            check_eq((int64_t)3, eng->execute("namespace kept { class NamedThing { int mine = 3; } } kept::NamedThing().mine;").as_int(), "a namespace's class is its own name");
         });
         test("mutual_references_register_in_either_order", [this]() {
             const char* script = "var h = Hangar(); var p = Plane(); p.home = h; h.plane = p; p.home.bays + h.plane.seats;";

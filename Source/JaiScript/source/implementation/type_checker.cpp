@@ -343,6 +343,7 @@ public:
     bool host_function_result(const std::string& name, script_value_type& out) const { note(name); return engine_access::host_function_result(engine_, name, out); }
     bool host_nodiscard(const std::string& callable) const { note(callable); return engine_.is_nodiscard_function(callable); }
     std::vector<std::string> registered_class_names() const { return engine_.registered_class_names(); }
+    std::string unbound_instantiation_text(std::string_view name) const { note(name); return detail::unbound_instantiation_text(engine_, name); }
     std::vector<std::pair<size_t, const std::string*>> constant_argument_indexes(const std::string& callable) const { note(callable); return engine_access::constant_argument_indexes(engine_, callable); }
     const std::unordered_map<std::string, std::vector<std::string>>& constant_texts_by_name() const { note(k_outside_constants); return engine_access::constant_texts_by_name(engine_); }
     script_namespace_data* find_namespace(const std::string& path) const {
@@ -2442,11 +2443,30 @@ private:
         return eng_.is_type_name(n) || (n.find("::") != std::string::npos && extra_global(n));   // a class another unit's namespace declares
     }
 
-    // C++ [basic.lookup]: every type a declaration spells names a type; a template instance's own name is the host's, its
-    // arguments are checked. A dynamic-path include can declare anything, as for an undeclared identifier.
+    // C++ [temp.inst] has the compiler make any instantiation a program names; a host binds the ones it compiled, so a
+    // spelling of its template it did not bind names no class, wherever a type is written
+    bool unbound_instantiation(const type_info* ti, const source_location& loc) {
+        if (ti->base_type != script_value_type::jai_object_type || ti->type_params.empty() || known_class(ti->type_name)) { return false; }
+        const std::string text = eng_.unbound_instantiation_text(ti->type_name);
+        if (text.empty()) { return false; }
+        diag(diag_level::error, loc, text);
+        return true;
+    }
+    // The same through a type an expression spells (new, make_shared, a construction, a cast): its arguments, pointee and elements
+    bool report_unbound_instantiation(const type_info* ti, const source_location& loc) {
+        if (!ti) { return false; }
+        if (unbound_instantiation(ti, loc)) { return true; }
+        bool reported = false;
+        for (const auto& param : ti->type_params) { reported = report_unbound_instantiation(param.get(), loc) || reported; }
+        return reported;
+    }
+
+    // C++ [basic.lookup]: every type a declaration spells names a type; a template instance's own name is the host's (one
+    // the host bound), its arguments are checked. A dynamic-path include can declare anything, as for an undeclared identifier.
     void check_spelled_type(const type_info* ti, const source_location& loc) {
         if (!ti) { return; }
         const bool object = ti->base_type == script_value_type::jai_object_type;
+        if (object && unbound_instantiation(ti, loc)) { return; }
         if (object && ti->type_params.empty() && !ti->type_name.empty() && !known_type_name(ti->type_name)) {
             const std::string name(ti->type_name);
             const std::string math = "math::" + name;
@@ -5592,6 +5612,7 @@ private:
         std::vector<ctype> args;
         for (auto& a : n->arguments) { args.push_back(infer(a.get())); }
         ctype t = ctype_from_type_info(n->type.get());
+        report_unbound_instantiation(n->type.get(), n->location);
         const sclass* made = t.kind == ctype::object_k ? find_sclass(t.cls) : nullptr;
         narrow_end_references();   // a constructor runs code
         for (size_t i = 0; i < n->arguments.size(); ++i) {   // a constructor's reference parameter, or a host constructor's
@@ -5689,6 +5710,7 @@ private:
             diag(diag_level::error, c->location, "'instanceof' tests a class, and '" + name + "' is an enum: compare the value with one of its values (x == " + name + "::value)");
             return result;
         }
+        if (report_unbound_instantiation(c->target.get(), c->location)) { return result; }
         if (!known_class(name) && !extra_global(name)) {
             diag(diag_level::error, c->location, "unknown type '" + name + "'");
             return result;
@@ -5721,6 +5743,7 @@ private:
         if (c->by_reference) { report_mixed_reference_conditional(c->operand.get()); }
         check_const_cast(c);
         ctype t = ctype_from_type_info(c->target.get());
+        if (report_unbound_instantiation(c->target.get(), c->location)) { return {}; }
         if (t.kind == ctype::object_k && !known_class(t.cls) && !extra_global(std::string(t.cls))) {
             diag(diag_level::error, c->location, "unknown type in cast: '" + std::string(t.cls) + "'");
             return {};
@@ -8631,6 +8654,7 @@ private:
             entry.type = ctype::make(ctype::function_k);
             entry.dynamic = true;
         } else if (x->type) {
+            report_unbound_instantiation(x->type.get(), x->location);
             entry.declared = x->type.get();
             entry.display = x->type->canonical_name();
             entry.type = ctype_from_type_info(x->type.get());
@@ -9231,6 +9255,9 @@ private:
     }
 
     void walk_class(const class_decl* cd) {
+        if (auto held = eng_.get_class_definition(std::string(cd->name)); held && !held->is_script_class()) {
+            diag(diag_level::error, cd->location, format_error_message(detail::k_host_class_name_taken, cd->name, cd->name));
+        }
         check_class_bases(cd);
         report_value_cycle(cd);
         check_member_names(cd);

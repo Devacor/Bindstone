@@ -40,6 +40,9 @@ namespace detail {
         return "Class '" + std::string(cls) + "' inherits '" + std::string(shared) + "' through both '" + std::string(first) + "' and '" +
                std::string(second) + "' (diamond inheritance is not supported)";
     }
+    // A class the host binds keeps its name: the redefinition path is a script class's alone (the declaration and the strict checker)
+    inline constexpr std::string_view k_host_class_name_taken =
+        "cannot declare class '{0}': the host binds a C++ class of that name; give the script class another name, or derive from it (class Other : {1})";
     inline std::string override_without_base_text(std::string_view name) {
         return "Method '" + std::string(name) + "' marked as override but no base class method found";
     }

@@ -1061,7 +1061,12 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
         if (!existing.is_null() && existing.is_object()) {
             auto objHolder = existing.get_object_holder();
             if (objHolder && objHolder->type_id() == host.class_definition_type_id) {
-                class_def = std::static_pointer_cast<script_class_definition>(objHolder->host_object());
+                auto held = std::static_pointer_cast<class_definition>(objHolder->host_object());
+                if (!held->is_script_class()) {
+                    const uint64_t name_id = (decl->name_id != UINT64_MAX) ? decl->name_id : symbols->intern(decl->name);
+                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), k_host_class_name_taken, name_id, name_id);
+                }
+                class_def = std::static_pointer_cast<script_class_definition>(held);
                 is_redefinition = true;
             }
         }

@@ -364,7 +364,8 @@ namespace {
                     auto global = detail::engine_access::get_global_environment(a_engine);
                     auto constructor = global ? global->get(std::string(a_element_type->type_name)) : checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable));
                     if (!constructor || !constructor.value().is_function()) {
-                        return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable), "No constructor found for class '{0}'", a_element_type->id);
+                        const detail::error_text text = detail::no_constructor_text(a_engine, *a_element_type);
+                        return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable), text.format, text.id);
                     }
                     auto constructed = constructor.value().as_function()({});
                     if (!constructed) { return constructed.error_value(); }

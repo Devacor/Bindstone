@@ -4502,7 +4502,15 @@ uint64_t engine::park_error_text(std::string_view text) const {
     return symbols.park(text);
 }
 
+// A script class keeps its name: its objects and the units that declared it hold that class
+void engine::refuse_script_class_name(const std::string& name) const {
+    if (impl->class_registry_.find_script_class(name)) {
+        throw runtime_error("the script name '" + name + "' already names a script class, so a C++ type cannot bind under it");
+    }
+}
+
 void engine::add_class_impl(const std::string& name, std::shared_ptr<class_definition> classDef) {
+    refuse_script_class_name(name);
     ++impl->script_cache_epoch;   // class registration can change how source parses
     ++impl->check_surface_epoch_;
     impl->classes[name] = classDef;
@@ -4840,6 +4848,39 @@ std::string readable_cpp_type_name(const std::type_index& type) {
     return result;
 }
 
+std::string unbound_instantiation_text(const engine& eng, std::string_view type_name) {
+    const size_t arguments = type_name.find('<');
+    if (arguments == std::string_view::npos || eng.is_type_registered(std::string(type_name))) { return {}; }
+    const std::string_view base = type_name.substr(0, arguments);
+    if (!engine_access::get_registered_template_types(eng).contains(std::string(base))) { return {}; }
+    std::vector<std::string> bound;
+    for (std::string& name : eng.registered_class_names()) {
+        if (name.size() > arguments && name[arguments] == '<' && std::string_view(name).substr(0, arguments) == base) { bound.push_back(std::move(name)); }
+    }
+    // the plainest spellings lead, so a long list keeps the ones a script most likely meant
+    std::sort(bound.begin(), bound.end(), [](const std::string& a_left, const std::string& a_right) {
+        return a_left.size() != a_right.size() ? a_left.size() < a_right.size() : a_left < a_right;
+    });
+    constexpr size_t k_listed_instantiations = 8;
+    std::string result = "'" + std::string(type_name) + "' is not bound: the host binds ";
+    if (bound.empty()) { return result + "no instantiation of " + std::string(base); }
+    for (size_t i = 0; i < bound.size() && i < k_listed_instantiations; ++i) {
+        if (i) { result += ", "; }
+        result += bound[i];
+    }
+    if (bound.size() > k_listed_instantiations) { result += " and " + std::to_string(bound.size() - k_listed_instantiations) + " more"; }
+    return result;
+}
+
+error_text no_constructor_text(const engine* eng, const type_info& type) {
+    if (eng && !type.type_params.empty()) {
+        if (const std::string unbound = unbound_instantiation_text(*eng, type.type_name); !unbound.empty()) {
+            if (const uint64_t id = engine_access::park_error_text(*eng, unbound)) { return {"{0}", id}; }
+        }
+    }
+    return {"No constructor found for class '{0}'", type.id};
+}
+
 }
 
 namespace {
@@ -4896,6 +4937,7 @@ pending_binder::pending_binder(engine& owner, const std::string& class_name, com
     previous_(owner.impl->last_pending_binder_),
     commit_(commit) {
 
+    owner.refuse_script_class_name(class_name);   // before the binder registers a constructor under the name
     (previous_ ? previous_->next_ : owner.impl->first_pending_binder_) = this;
     owner.impl->last_pending_binder_ = this;
     owner.impl->bindings_unsettled_ = true;

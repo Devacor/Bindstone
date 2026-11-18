@@ -5496,8 +5496,8 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
             // Look up T's constructor
             auto ctor_result = environment_->get(innerTypeName, *string_symbolizer_);
             if (!ctor_result || !ctor_result.value().is_function()) {
-                return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                    "No constructor found for class '{0}'", inner_type->id);
+                const detail::error_text text = detail::no_constructor_text(engine_, *inner_type);
+                return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), text.format, text.id);
             }
 
             script_value constructorFunc = std::move(ctor_result.value());
@@ -5541,8 +5541,8 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
         // Look up T's constructor
         auto ctor_result = environment_->get(innerTypeName, *string_symbolizer_);
         if (!ctor_result || !ctor_result.value().is_function()) {
-            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                "No constructor found for class '{0}'", inner_type->id);
+            const detail::error_text text = detail::no_constructor_text(engine_, *inner_type);
+            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), text.format, text.id);
         }
 
         script_value constructorFunc = std::move(ctor_result.value());
@@ -5592,9 +5592,8 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
         return {};
     }
 
-    // No constructor found for class
-    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-        "No constructor found for class '{0}'", expr->type->id);
+    const detail::error_text text = detail::no_constructor_text(engine_, *expr->type);
+    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), text.format, text.id);
 }
 
 template<bool Replaying>

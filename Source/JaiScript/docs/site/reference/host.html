@@ -236,7 +236,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td>A global operator (<code>eng-&gt;add_function("+", [](Money&amp;, const Money&amp;) { ... })</code>)</td><td>Answers the operands one of its overloads takes, in every form (binary, compound, an element&#x27;s, a <code>var</code>&#x27;s). Every other pair keeps its own meaning: <code>1 + 2</code> stays the builtin addition and a class&#x27;s operator still answers for it. An overload taking <code>(int, int)</code> replaces the builtin for those operands.</td></tr>
 </tbody></table></div>
 <h3 id="binder-template-names">Template instantiation names<a class="hlink" href="#binder-template-names" aria-label="link">&#8203;</a></h3>
-<p>A bound template instantiation is named the way a script spells its argument (<a href="../embedding/02-dynamic-binder.html#plain-structs-and-templates-static-binders">static binders</a>).</p>
+<p>A bound template instantiation is named the way a script spells its argument (<a href="../embedding/02-dynamic-binder.html#plain-structs-and-templates-static-binders">static binders</a>). A spelling the host did not bind is a load error listing the ones it did (<a href="errors.html#err-instantiation-not-bound-load"><code>'Box&lt;bool&gt;' is not bound: the host binds ...</code></a>).</p>
 <div class="tablewrap"><table><thead><tr><th>C++ argument</th><th>Script spelling</th></tr></thead><tbody>
 <tr><td><code>int64_t</code>, <code>double</code></td><td><code>int</code>, <code>float</code> (a script <code>double</code> is the same type)</td></tr>
 <tr><td><code>int32_t</code>, <code>uint8_t</code>, C++ <code>float</code></td><td><code>int32</code>, <code>uint8</code>, <code>float32</code></td></tr>

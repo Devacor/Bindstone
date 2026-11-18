@@ -269,6 +269,16 @@ namespace jai::detail {
 
     std::string readable_cpp_type_name(const std::type_index& type);
 
+    // A host binds a class template one instantiation at a time. For a spelling of a host template it did not bind:
+    // "'Box<bool>' is not bound: the host binds Box<int>, Box<float>" (the checker's text and the run time's); empty for any other name
+    std::string unbound_instantiation_text(const engine& eng, std::string_view type_name);
+    struct error_text {
+        std::string_view format;
+        uint64_t id;
+    };
+    // The error of a construction no class answers: the text above for an unbound instantiation, else "No constructor found for class 'X'"
+    error_text no_constructor_text(const engine* eng, const type_info& type);
+
 } // namespace jai::detail
 
 #endif

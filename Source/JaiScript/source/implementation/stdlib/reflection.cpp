@@ -48,6 +48,12 @@ inline std::string semantic_type_name(const script_value& val, engine* eng) {
     return "unknown";
 }
 
+// The family's refusal of a class name; a spelling of a host template the host did not bind says what it binds
+[[noreturn]] inline void throw_unknown_class(engine* eng, const char* who, const std::string& name) {
+    const std::string unbound = detail::unbound_instantiation_text(*eng, name);
+    throw runtime_error(std::string("reflect::") + who + ": " + (unbound.empty() ? "unknown class '" + name + "'" : unbound));
+}
+
 // object | "Class" -> class_definition. Unknown class NAME throws the family error;
 // a non-class VALUE returns nullptr (callers decide whether that is an error).
 inline class_definition* resolve_class(engine* eng, const script_value& v,
@@ -58,9 +64,7 @@ inline class_definition* resolve_class(engine* eng, const script_value& v,
     if (d.is_string()) {
         const std::string name = d.as_string();
         auto def = detail::engine_access::get_class_definition(*eng, name);
-        if (!def) {
-            throw runtime_error(std::string("reflect::") + who + ": unknown class '" + name + "'");
-        }
+        if (!def) { throw_unknown_class(eng, who, name); }
         return def.get();
     }
     if (d.is_object()) {
@@ -711,7 +715,7 @@ void register_reflection_functions(engine& eng_ref) {
         // The same global the direct spelling Class(...) resolves
         auto ctor = detail::engine_access::get_global_environment(*eng)->get(name);
         if (!ctor || !ctor.value().is_function()) {
-            throw runtime_error(std::string("reflect::construct: unknown class '") + name + "'");
+            reflect_detail::throw_unknown_class(eng, "construct", name);
         }
         return reflect_detail::construct_through_reflection(eng, name, ctor.value(), call_args);
     });
@@ -722,7 +726,7 @@ void register_reflection_functions(engine& eng_ref) {
         std::vector<script_value> call_args(args.begin() + 1, args.end());
         auto ctor = detail::engine_access::get_global_environment(*eng)->get(name);
         if (!ctor || !ctor.value().is_function()) {
-            throw runtime_error(std::string("reflect::construct_shared: unknown class '") + name + "'");
+            reflect_detail::throw_unknown_class(eng, "construct_shared", name);
         }
         auto result = reflect_detail::construct_through_reflection(eng, name, ctor.value(), call_args);
         if (!result) { return result; }

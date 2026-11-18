@@ -218,9 +218,9 @@
           "match": "\\b(if|else|do|while|for|parallel_for|break|continue|return|try|catch|throw|switch|case|default|fallthrough|yield)\\b"
         },
         {
-          "comment": "x instanceof T: an operator after an operand (a member named instanceof follows a dot)",
-          "name": "keyword.operator.expression.instanceof.jaiscript",
-          "match": "(?<![.:>])\\binstanceof\\b(?=\\s+[A-Za-z_])"
+          "comment": "dynamic_cast<T&>(e), dynamic_cast<shared_ptr<T>>(e), dynamic_pointer_cast<T>(e): each word is a cast only before '<'",
+          "name": "keyword.operator.cast.jaiscript",
+          "match": "(?<![.:>])\\b(dynamic_cast|dynamic_pointer_cast)\\b(?=\\s*<)"
         }
       ]
     },

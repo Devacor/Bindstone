@@ -1502,6 +1502,9 @@ JAI_NOINLINE checked_result<expression_ptr> parser::primary_rest() {
     const bool make_shared_spelling = check(token_type::identifier) && peek().lexeme == "make_shared" &&
         current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::less;
     if (make_shared_spelling || match(token_type::new_keyword)) { return new_expression(make_shared_spelling); }
+    // dynamic_cast<T&>(e), dynamic_cast<shared_ptr<T>>(e) and dynamic_pointer_cast<T>(e); either word alone stays an ordinary name
+    if (check(token_type::identifier) && (peek().lexeme == "dynamic_cast" || peek().lexeme == "dynamic_pointer_cast") &&
+        current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::less) { return dynamic_cast_expression(); }
 
     // A math type (one fused token, lexer.cpp) in expression position is the static member math::K the math::
     // intrinsics resolve, so math::vec3(1, 2, 3) calls the constructor intrinsic
@@ -2061,6 +2064,38 @@ JAI_NOINLINE checked_result<expression_ptr> parser::cast_expression() {
     return std::make_shared<cast_expr>(castToken.location, target, by_reference, std::move(operand));
 }
 
+// dynamic_cast<T&>(e) is cast<T&>(e) for a class T: the reference, or the cast's error. dynamic_cast<shared_ptr<T>>(e), which
+// dynamic_pointer_cast<T>(e) spells too, is the handle typed shared_ptr<T> when e's object is a T and null when it is not
+JAI_NOINLINE checked_result<expression_ptr> parser::dynamic_cast_expression() {
+    const token word = advance();
+    const bool pointer_spelling = word.lexeme == "dynamic_pointer_cast";
+    const char* const forms = pointer_spelling ? "dynamic_pointer_cast names a class: dynamic_pointer_cast<T>(e)"
+                                               : "dynamic_cast takes a class by reference or by handle: dynamic_cast<T&>(e) or dynamic_cast<shared_ptr<T>>(e)";
+    advance();   // '<'
+    if (!check(token_type::identifier) && !(check(token_type::shared_ptr_keyword) && !pointer_spelling)) {
+        report_error(forms, peek());
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    JAISCRIPT_TRY_ASSIGN(type_info_ptr target, parse_type());
+    const bool by_reference = !pointer_spelling && match(token_type::ampersand);
+    const bool handle = target && target->base_type == script_value_type::jai_shared_ptr_type;
+    const type_info* named = handle ? target->element_type().get() : target.get();
+    const bool class_named = named && named->base_type == script_value_type::jai_object_type && !named->type_name.empty();
+    if (!class_named || (pointer_spelling ? handle : handle == by_reference)) {
+        report_error(forms, word);
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    if (pointer_spelling) { target = shared_ptr_type_of(target); }
+    consume_greater_in_generic(pointer_spelling ? "expected '>' after dynamic_pointer_cast type" : "expected '>' after dynamic_cast type");
+    JAISCRIPT_TRY(expect(token_type::left_paren, pointer_spelling ? "expected '(' after dynamic_pointer_cast<T>" : "expected '(' after dynamic_cast type"));
+    JAISCRIPT_TRY_ASSIGN(auto operand, expression());
+    JAISCRIPT_TRY(expect(token_type::right_paren, pointer_spelling ? "expected ')' after dynamic_pointer_cast operand" : "expected ')' after dynamic_cast operand"));
+    if (by_reference) { operand = bound_conditional(std::move(operand)); }
+    auto made = std::make_shared<cast_expr>(word.location, target, by_reference, std::move(operand));
+    made->dynamic = true;
+    return expression_ptr(made);
+}
+
 // Type parsing
 checked_result<type_info_ptr> parser::parse_type() {
     stack_.guard(peek().location);
@@ -2410,11 +2445,8 @@ checked_result<expression_ptr> parser::expression() {
 }
 
 // One frame per operand on the way down: what follows the operand climbs in operator_rest
-// The operator after an operand: a token's, or the word instanceof, an operator only there (a relational one, as in JavaScript)
 int parser::infix_precedence() const {
-    const token& next = peek();
-    if (next.type == token_type::identifier && next.lexeme == "instanceof") { return k_relational_precedence; }
-    return operator_precedence(next.type);
+    return operator_precedence(peek().type);
 }
 
 checked_result<expression_ptr> parser::operator_expression(int min_precedence) {
@@ -2425,31 +2457,8 @@ checked_result<expression_ptr> parser::operator_expression(int min_precedence) {
     return operator_rest(std::move(left.value()), min_precedence, operand_start);
 }
 
-// e instanceof T: T a class by name (ns::T too); the node is a cast that answers instead of converting
-JAI_NOINLINE checked_result<expression_ptr> parser::instance_test_rest(expression_ptr left) {
-    const token word = advance();
-    if (!check(token_type::identifier)) {
-        report_error(is_type_keyword_token(peek().type)
-            ? "'instanceof' tests a class, and '" + std::string(peek().lexeme) + "' is a builtin type: compare type_of(x) == \"" + std::string(peek().lexeme) + "\""
-            : std::string("expected a class name after 'instanceof'"), peek());
-        return make_error_code(parse_error_code::syntax_error);
-    }
-    JAISCRIPT_TRY_ASSIGN(type_info_ptr target, parse_type());
-    if (!target || target->base_type != script_value_type::jai_object_type || target->type_name.empty()) {
-        report_error("expected a class name after 'instanceof'", word);
-        return make_error_code(parse_error_code::syntax_error);
-    }
-    auto test = std::make_shared<cast_expr>(word.location, target, false, std::move(left));
-    test->instance_test = true;
-    return expression_ptr(test);
-}
-
 JAI_NOINLINE checked_result<expression_ptr> parser::operator_rest(expression_ptr left, int min_precedence, size_t operand_start) {
     for (int precedence = infix_precedence(); precedence >= min_precedence; precedence = infix_precedence()) {
-        if (precedence == k_relational_precedence && peek().type == token_type::identifier) {
-            JAISCRIPT_TRY_ASSIGN(left, instance_test_rest(std::move(left)));
-            continue;
-        }
         if (precedence == k_assignment_precedence) { return assignment_rest(std::move(left), operand_start); }
         if (precedence == k_ternary_precedence) {
             JAISCRIPT_TRY_ASSIGN(left, ternary_rest(std::move(left)));
@@ -3492,8 +3501,7 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::declaration_rest() {
             current_ = savedPos;
             errors_.resize(errors_before);
             pushed_back_token_ = pushed_before;
-        } else if (check(token_type::identifier) && !(peek().lexeme == "instanceof" && current_ + 1 < stream_->size() &&
-                                                      (*stream_)[current_ + 1].type == token_type::identifier)) {   // x instanceof T ... is an expression
+        } else if (check(token_type::identifier)) {
             // Pattern: identifier identifier - a declaration. A '(' after the second
             // identifier makes it a class-typed free function (C++ return-type-first,
             // same as the namespace path); otherwise a variable: Point p; / Point mk() {...}
@@ -4193,13 +4201,131 @@ void parser::mark_bare_condition(const expression_ptr& condition, size_t first_t
     assign->bare_condition = true;
 }
 
+// A ';' before the ')' that closes an if's parentheses: C++17's `if (init; condition)`
+bool parser::init_statement_ahead() const {
+    size_t depth = 0;
+    for (size_t at = current_; at < stream_->size(); ++at) {
+        switch ((*stream_)[at].type) {
+            case token_type::left_paren: case token_type::left_bracket: case token_type::left_brace: ++depth; break;
+            case token_type::right_paren: case token_type::right_bracket: case token_type::right_brace:
+                if (depth == 0) { return false; }
+                --depth;
+                break;
+            case token_type::semicolon:
+                if (depth == 0) { return true; }
+                break;
+            default: break;
+        }
+    }
+    return false;
+}
+
+// One declarator and no ';' (a for's init, a condition's declaration); null when an expression is ahead. In a condition a type
+// declares only where a name follows it (`int(x)` is an expression there), and after a class name's '&' only where '=' follows
+// the name (`a & b` is an expression); the initializer is the condition
+JAI_NOINLINE checked_result<declaration_ptr> parser::unterminated_declaration(bool condition) {
+    const token const_at = peek();
+    const bool is_const = match(token_type::const_keyword);
+    const bool keyword_type = check(token_type::auto_keyword) || check(token_type::var_keyword) ||
+                              check(token_type::int_keyword) || check(token_type::float_keyword) ||
+                              check(token_type::string_keyword) || check(token_type::bool_keyword) ||
+                              check(token_type::char_keyword) || check(token_type::array_keyword) ||
+                              check(token_type::map_keyword) || check(token_type::shared_ptr_keyword) ||
+                              check(token_type::weak_ptr_keyword) || callable_type_ahead();
+    bool declares = keyword_type && !condition;
+    if (!declares && (keyword_type || check(token_type::identifier))) {
+        const size_t type_start = current_;
+        const size_t errors_before = errors_.size();
+        const std::optional<token> pushed_before = pushed_back_token_;
+        auto type_probe = parse_type();
+        if (type_probe && errors_.size() == errors_before) {
+            const bool binary_and = match(token_type::ampersand) && condition && !keyword_type;
+            declares = check(token_type::identifier) &&
+                       (!binary_and || (current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::equal));
+        }
+        current_ = type_start;
+        errors_.resize(errors_before);
+        pushed_back_token_ = pushed_before;
+    }
+    // const i = 0: const alone is const auto
+    const bool bare_const = is_const && check(token_type::identifier) && current_ + 1 < stream_->size() &&
+                            (*stream_)[current_ + 1].type == token_type::equal;
+    if (!declares && !bare_const) {
+        if (is_const) {
+            report_foreign(detail::foreign_word::const_misplaced, const_at);
+            return make_error_code(parse_error_code::syntax_error);
+        }
+        return declaration_ptr();
+    }
+    type_info_ptr type;
+    if (!bare_const) {
+        JAISCRIPT_TRY_ASSIGN(type_info_ptr spelled_type, parse_type());
+        type = std::move(spelled_type);
+    }
+    if (match(token_type::ampersand)) {
+        type_info refType(script_value_type::jai_reference_type);
+        refType.type_name = type ? (type->type_name + "&") : "auto&";
+        refType.type_params.push_back(type);
+        refType.id = symbolizer_->intern(refType.canonical_name());
+        type = store_type_info(std::move(refType));
+    }
+    JAISCRIPT_TRY_ASSIGN(token name, consume_name("expected variable name", "variable"));
+
+    expression_ptr initializer = nullptr;
+    const bool spelled_initializer = match(token_type::equal);
+    if (spelled_initializer) {
+        JAISCRIPT_TRY_ASSIGN(initializer, expression());
+    } else if (condition) {
+        report_error("a condition's declaration needs an initializer: if (auto " + std::string(name.lexeme) + " = e)", name);
+        return make_error_code(parse_error_code::syntax_error);
+    } else {
+        initializer = default_initializer(type, name.location);
+    }
+
+    auto declared = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), initializer);
+    declared->default_initialized = is_const && !spelled_initializer;
+    if (in_function_scope() && declared->name_id != UINT64_MAX) {
+        declared->slot_index = allocate_slot(declared->name_id);
+    }
+    if (is_const && !finish_const(declared, const_at, false)) { return make_error_code(parse_error_code::syntax_error); }
+    return declaration_ptr(declared);
+}
+
+// What stands between an if's or a while's parentheses: an expression, or one declaration whose variable is the condition
+// (C++17 `if (auto d = e)`); an if may lead with an init statement (`if (init; condition)`). The declarations are returned in
+// order, and the statement that owns them wraps itself in their block
+checked_result<expression_ptr> parser::condition_clause(std::vector<declaration_ptr>& declarations, bool init_allowed) {
+    if (init_allowed && init_statement_ahead()) {
+        if (!check(token_type::semicolon)) {
+            JAISCRIPT_TRY_ASSIGN(declaration_ptr init, unterminated_declaration(false));
+            if (!init) {
+                JAISCRIPT_TRY_ASSIGN(expression_ptr expr, expression());
+                init = std::make_shared<statement_decl>(expr->location, std::make_shared<expression_stmt>(expr->location, expr));
+            }
+            declarations.push_back(std::move(init));
+        }
+        JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after the init statement of an if"));
+    }
+    const size_t condition_start = current_;
+    JAISCRIPT_TRY_ASSIGN(declaration_ptr declared, unterminated_declaration(true));
+    if (declared) {
+        const auto* variable = static_cast<const variable_decl*>(declared.get());
+        expression_ptr value = hidden_identifier(variable->name_id, variable->name, variable->location);
+        declarations.push_back(std::move(declared));
+        return value;
+    }
+    JAISCRIPT_TRY_ASSIGN(expression_ptr condition, expression());
+    mark_bare_condition(condition, condition_start);
+    return condition;
+}
+
 checked_result<statement_ptr> parser::if_statement() {
     const token& ifToken = previous();
 
     JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after 'if'"));
-    const size_t condition_start = current_;
-    JAISCRIPT_TRY_ASSIGN(expression_ptr condition, expression());
-    mark_bare_condition(condition, condition_start);
+    block_scope_guard condition_scope(*this);   // a name the condition declares lives to the end of the else
+    std::vector<declaration_ptr> declarations;
+    JAISCRIPT_TRY_ASSIGN(expression_ptr condition, condition_clause(declarations, /*init_allowed=*/true));
     JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after if condition"));
 
     JAISCRIPT_TRY_ASSIGN(statement_ptr then_statement, statement());
@@ -4209,7 +4335,10 @@ checked_result<statement_ptr> parser::if_statement() {
         JAISCRIPT_TRY_ASSIGN(else_statement, statement());
     }
 
-    return std::make_shared<if_stmt>(ifToken.location, condition, then_statement, else_statement);
+    statement_ptr test = std::make_shared<if_stmt>(ifToken.location, condition, then_statement, else_statement);
+    if (declarations.empty()) { return test; }
+    declarations.push_back(std::make_shared<statement_decl>(ifToken.location, std::move(test)));
+    return std::make_shared<block_stmt>(ifToken.location, std::move(declarations));
 }
 
 checked_result<statement_ptr> parser::while_statement() {
@@ -4217,14 +4346,21 @@ checked_result<statement_ptr> parser::while_statement() {
     jump_scope loop(jumps_, {jumps_.breakable + 1, jumps_.continuable + 1, jumps_.parallel_body});
 
     JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after 'while'"));
-    const size_t condition_start = current_;
-    JAISCRIPT_TRY_ASSIGN(expression_ptr condition, expression());
-    mark_bare_condition(condition, condition_start);
+    block_scope_guard turn_scope(*this);   // a name the condition declares is made again for each turn
+    std::vector<declaration_ptr> declarations;
+    JAISCRIPT_TRY_ASSIGN(expression_ptr condition, condition_clause(declarations, /*init_allowed=*/false));
     JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after while condition"));
 
     JAISCRIPT_TRY_ASSIGN(statement_ptr body, statement());
 
-    return std::make_shared<while_stmt>(whileToken.location, condition, body);
+    if (declarations.empty()) { return std::make_shared<while_stmt>(whileToken.location, condition, body); }
+    // while (T x = e) body: for (;;) { T x = e; if (!x) break; body }
+    const source_location& at = whileToken.location;
+    token bang(token_type::bang, "!", at);
+    statement_ptr leave = std::make_shared<if_stmt>(at, std::make_shared<unary_expr>(at, bang, condition), std::make_shared<break_stmt>(at));
+    declarations.push_back(std::make_shared<statement_decl>(at, std::move(leave)));
+    declarations.push_back(std::make_shared<statement_decl>(body->location, body));
+    return std::make_shared<for_stmt>(at, nullptr, nullptr, nullptr, std::make_shared<block_stmt>(at, std::move(declarations)));
 }
 
 // parallel_for (auto& x : arr) { body } — range-for SYNTAX, but the body is parsed as a
@@ -4566,76 +4702,12 @@ traditional_for:
     // Init — the loop variable's slot stops resolving after the loop closes
     block_scope_guard loop_var_scope(*this);
     declaration_ptr init = nullptr;
-    const token init_const_at = peek();
-    const bool init_const = match(token_type::const_keyword);
-    // An identifier starts a declaration only when a type spelling is followed by a name (C++: whatever can be a
-    // declaration is one); `i = 0`, `o[0] = 1`, `j += 1` are expression initializers
-    bool identifier_declares = false;
-    if (check(token_type::identifier)) {
-        const size_t type_start = current_;
-        const size_t errors_before = errors_.size();
-        const std::optional<token> pushed_before = pushed_back_token_;
-        auto type_probe = parse_type();
-        if (type_probe && errors_.size() == errors_before) {
-            match(token_type::ampersand);
-            identifier_declares = check(token_type::identifier);
+    if (!match(token_type::semicolon)) {
+        JAISCRIPT_TRY_ASSIGN(init, unterminated_declaration(false));
+        if (!init) {
+            JAISCRIPT_TRY_ASSIGN(expression_ptr expr, expression());
+            init = std::make_shared<expression_decl>(expr->location, std::move(expr));
         }
-        current_ = type_start;
-        errors_.resize(errors_before);
-        pushed_back_token_ = pushed_before;
-    }
-    // for (const i = 0; ...): const alone is const auto
-    const bool bare_const_init = init_const && check(token_type::identifier) && current_ + 1 < stream_->size() &&
-                                 (*stream_)[current_ + 1].type == token_type::equal;
-    if (match(token_type::semicolon)) {
-        // No init
-    } else if (check(token_type::auto_keyword) || check(token_type::var_keyword) ||
-               check(token_type::int_keyword) || check(token_type::float_keyword) ||
-               check(token_type::string_keyword) || check(token_type::bool_keyword) ||
-               check(token_type::char_keyword) || check(token_type::array_keyword) ||
-               check(token_type::map_keyword) || identifier_declares || bare_const_init) {
-        // Parse variable declaration without consuming the semicolon
-        // (the for loop will handle it)
-        type_info_ptr type;
-        if (!bare_const_init) {
-            JAISCRIPT_TRY_ASSIGN(type_info_ptr spelled_type, parse_type());
-            type = std::move(spelled_type);
-        }
-
-        // Check for reference after type
-        if (match(token_type::ampersand)) {
-            type_info refType(script_value_type::jai_reference_type);
-            refType.type_name = type ? (type->type_name + "&") : "auto&";
-            refType.type_params.push_back(type);
-            refType.id = symbolizer_->intern(refType.canonical_name());
-            type = store_type_info(std::move(refType));
-        }
-
-        JAISCRIPT_TRY_ASSIGN(token name, consume_name("expected variable name", "variable"));
-
-        expression_ptr initializer = nullptr;
-        const bool spelled_initializer = match(token_type::equal);
-        if (spelled_initializer) {
-            JAISCRIPT_TRY_ASSIGN(initializer, expression());
-        } else {
-            initializer = default_initializer(type, name.location);
-        }
-
-        auto var_init = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), initializer);
-        var_init->default_initialized = init_const && !spelled_initializer;
-        if (in_function_scope() && var_init->name_id != UINT64_MAX) {
-            var_init->slot_index = allocate_slot(var_init->name_id);
-        }
-        if (init_const && !finish_const(var_init, init_const_at, false)) { return make_error_code(parse_error_code::syntax_error); }
-        init = var_init;
-        // Note: NOT consuming semicolon here - the for loop will handle it
-    } else {
-        if (init_const) {
-            report_foreign(detail::foreign_word::const_misplaced, init_const_at);
-            return make_error_code(parse_error_code::syntax_error);
-        }
-        JAISCRIPT_TRY_ASSIGN(expression_ptr expr, expression());
-        init = std::make_shared<expression_decl>(expr->location, std::move(expr));
     }
 
     // Consume semicolon after init

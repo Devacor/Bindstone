@@ -199,6 +199,9 @@ namespace jai {
         // spell, so continue reaches the condition as C++'s does
         bool do_while_ahead() const;
         checked_result<statement_ptr> do_while_statement();
+        bool init_statement_ahead() const;
+        checked_result<declaration_ptr> unterminated_declaration(bool condition);
+        checked_result<expression_ptr> condition_clause(std::vector<declaration_ptr>& declarations, bool init_allowed);
         // A name only the parser can spell (it holds a character no identifier may): a desugaring's own variable
         std::pair<uint64_t, std::string_view> hidden_name(std::string_view stem);
         expression_ptr hidden_identifier(uint64_t id, std::string_view name, const source_location& loc);
@@ -234,8 +237,8 @@ namespace jai {
         checked_result<expression_ptr> parenthesized();
         checked_result<expression_ptr> bracket_expression();
         checked_result<expression_ptr> cast_expression();
+        checked_result<expression_ptr> dynamic_cast_expression();
         int infix_precedence() const;
-        checked_result<expression_ptr> instance_test_rest(expression_ptr left);
         
         // Helper parsers
         checked_result<expression_ptr> finish_call(expression_ptr callee);

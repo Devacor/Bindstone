@@ -606,8 +606,9 @@ namespace jai {
         bool binding_ref = false;
         // a parallel body's rewritten `return e;` (parallel_transform.cpp): e converts as that function's return does, with its text
         std::string_view return_of;
-        // `e instanceof T`: no conversion, the bool answer to whether e holds an object of class T or of a class derived from it
-        bool instance_test = false;
+        // dynamic_cast: the handle form (dynamic_cast<shared_ptr<T>>(e), dynamic_pointer_cast<T>(e)) answers null where
+        // cast<shared_ptr<T>>(e) raises for an operand that holds no T; the reference form is cast<T&>(e) with a checked operand
+        bool dynamic = false;
         expression_ptr operand;
         mutable const_site const_check;   // cast<T&>(c) / cast<shared_ptr<T>>(c) of a const
 

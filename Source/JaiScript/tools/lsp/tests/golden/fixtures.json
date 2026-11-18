@@ -34,6 +34,7 @@
   "auto",
   "blue",
   "class",
+  "dynamic_pointer_cast",
   "enum",
   "for",
   "green",
@@ -42,7 +43,6 @@
   "if",
   "import",
   "inspect",
-  "instanceof",
   "int",
   "jai",
   "make_party",
@@ -526,11 +526,11 @@
   {
    "range": {
     "end": {
-     "character": 24,
+     "character": 30,
      "line": 27
     },
     "start": {
-     "character": 20,
+     "character": 26,
      "line": 27
     }
    },

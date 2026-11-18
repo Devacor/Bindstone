@@ -536,12 +536,12 @@ void register_reflection_functions(engine& eng_ref) {
         return arr;
     });
 
-    // is_a(x, "Class"): instanceof for a class named at run time
-    add("is_a", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
-        reflect_detail::expect_args(args, 2, "is_a");
+    // is_instance_of(x, "Class"): whether x holds an object of the class or of one derived from it
+    add("is_instance_of", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        reflect_detail::expect_args(args, 2, "is_instance_of");
         const script_value& named = args[1].is_reference() ? args[1].deref() : args[1];
-        if (!named.is_string()) { throw runtime_error("reflect::is_a expects a value and a class name"); }
-        const class_definition* cls = reflect_detail::resolve_class(eng, named, "is_a");
+        if (!named.is_string()) { throw runtime_error("reflect::is_instance_of expects a value and a class name"); }
+        const class_definition* cls = reflect_detail::resolve_class(eng, named, "is_instance_of");
         return script_value(cls && detail::instance_of_class(args[0], cls->get_name(), eng), eng);
     });
 

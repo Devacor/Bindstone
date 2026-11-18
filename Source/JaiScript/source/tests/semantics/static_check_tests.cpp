@@ -2251,9 +2251,9 @@ public:
                 // declared, and one that stores to it ends the narrowing where it is made
                 {"class Unit { } class Hero : Unit { int hp; }\nfunction<int(Hero)> slot = h => h.hp;\nint run(Unit u) { return slot(u); }",
                  "argument 1 of 'slot': cannot pass 'Unit' where the signature takes 'Hero'"},
-                {"class Unit { } class Hero : Unit { int hp; }\nint run(Unit u) { if (u instanceof Hero) { function<int(int)> by_ref = x => u.hp + x; } return 0; }",
+                {"class Unit { } class Hero : Unit { int hp; }\nint run(Unit u) { if (dynamic_pointer_cast<Hero>(u)) { function<int(int)> by_ref = x => u.hp + x; } return 0; }",
                  "no member 'hp' in class 'Unit'"},
-                {"class Unit { } class Hero : Unit { int hp; }\nint run(Unit u) { if (u instanceof Hero) { function<int(int)> writer = x => { u = Unit(); return x; };\nreturn u.hp; } return 0; }",
+                {"class Unit { } class Hero : Unit { int hp; }\nint run(Unit u) { if (dynamic_pointer_cast<Hero>(u)) { function<int(int)> writer = x => { u = Unit(); return x; };\nreturn u.hp; } return 0; }",
                  "no member 'hp' in class 'Unit'"},
             };
             for (bool proofs : {true, false}) {
@@ -2271,8 +2271,8 @@ public:
                                       "coroutine int g() { yield 1; }\ncoroutine<int> k = g();\nauto j = g();\nk = j;\nint n = k.next();\nvar v = k.next();");
                 check_eq((size_t)0, error_count(clean), clean.format());
                 auto composed = e->check("class Unit { string name; } class Hero : Unit { int hp; }\nint measure(function<int(Hero)> key, Hero h) { return key(h); }\n"
-                                         "function<int(Hero)> slot = h => h.hp;\nfunction<int(Unit)> probe = u => { if (u instanceof Hero) { return u.hp; } return 0; };\n"
-                                         "int run(Unit u) { int total = 0; if (u instanceof Hero) { total += measure(h => h.hp, u);\n"
+                                         "function<int(Hero)> slot = h => h.hp;\nfunction<int(Unit)> probe = u => { if (dynamic_pointer_cast<Hero>(u)) { return u.hp; } return 0; };\n"
+                                         "int run(Unit u) { int total = 0; if (dynamic_pointer_cast<Hero>(u)) { total += measure(h => h.hp, u);\n"
                                          "function<int(int)> add = [u](x) { return u.hp + x; }; total += add(1); total += slot(u); } return total; }\n"
                                          "class Button { function<int(string)> on_click; Button() : on_click(s => s.size()) {} }");
                 check_eq((size_t)0, error_count(composed), composed.format());

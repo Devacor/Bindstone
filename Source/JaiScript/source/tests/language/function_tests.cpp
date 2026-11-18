@@ -858,9 +858,9 @@ public:
                 // flow narrowing: a narrowed name is an argument beside a typed lambda and through a slot, a by-value capture stays
                 // narrowed in a typed lambda's body, and a signature's parameter narrows like any other
                 {"class Unit { } class Hero : Unit { int hp = 5; }\nint measure(function<int(Hero)> key, Hero h) { return key(h); }\nfunction<int(Hero)> slot = h => h.hp * 2;\n"
-                 "int run(Unit u) { int total = 0; if (u instanceof Hero) { total += measure(h => h.hp, u); function<int(int)> add = [u](x) { return u.hp + x; }; "
+                 "int run(Unit u) { int total = 0; if (dynamic_pointer_cast<Hero>(u)) { total += measure(h => h.hp, u); function<int(int)> add = [u](x) { return u.hp + x; }; "
                  "total += add(1); total += slot(u); } return total; }\nrun(Hero()) * 2 + run(Unit());", 42},
-                {"class Unit { } class Hero : Unit { int hp = 21; }\nfunction<int(Unit)> f = u => { if (u instanceof Hero) { return u.hp * 2; } return 0; };\nf(Hero()) + f(Unit());", 42},
+                {"class Unit { } class Hero : Unit { int hp = 21; }\nfunction<int(Unit)> f = u => { if (dynamic_pointer_cast<Hero>(u)) { return u.hp * 2; } return 0; };\nf(Hero()) + f(Unit());", 42},
             };
             check_each(cases, [&](const auto& c) {
                 auto engine = make_engine();

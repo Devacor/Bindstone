@@ -474,7 +474,7 @@ public:
                                        "TplBox<bool> g() { return TplBox<bool>(); }", "array<TplBox<bool>> xs;", "map<string, TplBox<bool>> m;", "shared_ptr<TplBox<bool>> h;",
                                        "weak_ptr<TplBox<bool>> w;", "for (TplBox<bool> x : [1]) { }", "auto l = [](TplBox<bool> b) { return 1; };",
                                        "void f() { try { } catch (TplBox<bool> e) { } }", "extern TplBox<bool> held;", "var v = 1; cast<TplBox<bool>>(v);",
-                                       "var v = 1; v instanceof TplBox<bool>;", "void f() { auto p = new TplBox<bool>(); }",
+                                       "var v = 1; dynamic_pointer_cast<TplBox<bool>>(v);", "void f() { auto p = new TplBox<bool>(); }",
                                        "void f() { auto p = make_shared<TplBox<bool>>(); }", "void f() { auto b = TplBox<bool>(); }",
                                        "void f() { auto b = TplBox<bool>{}; }", "void f() { auto xs = array<TplBox<bool>>(); }"}) {
                 check_true(message(source).find("error: " + unbound) != std::string::npos, std::string(source) + " -> " + message(source));
@@ -533,7 +533,7 @@ public:
             check_eq(std::string("TplBox<int> TplTagged<string, int> TplTagged<string, int>"),
                      run("`${type_of(reflect::construct(\"TplBox< int >\"))} ${type_of(reflect::construct(\"TplTagged<string,int>\"))} "
                          "${reflect::type_name(reflect::construct_shared(\"TplTagged< string , int >\"))}`"));
-            check_eq(std::string("true true"), run("TplBox<int> b; `${reflect::has_method(\"TplBox< int >\", \"kind\")} ${reflect::is_a(b, \" TplBox<int> \")}`"));
+            check_eq(std::string("true true"), run("TplBox<int> b; `${reflect::has_method(\"TplBox< int >\", \"kind\")} ${reflect::is_instance_of(b, \" TplBox<int> \")}`"));
             check_eq(std::string("reflect::construct: unknown class 'No Such'"), run("var c = \"\"; try { reflect::construct(\"No Such\"); } catch (e) { c = e; } c"));
             // an archive names its class as registered and reads the name whatever its spacing
             check_eq(std::string("ns::K 5 {\"$type\":\"ns::K\",\"$val\":{\"v\":5}}"),

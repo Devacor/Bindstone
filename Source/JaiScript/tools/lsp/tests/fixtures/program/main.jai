@@ -25,7 +25,7 @@ void run() {
 run();
 
 void inspect(var who) {
-	if (who instanceof Hero) {
+	if (dynamic_pointer_cast<Hero>(who)) {
 		who.heal(1);
 	}
 }

@@ -333,7 +333,13 @@ operator function of that name are left to the run time.
 
 **Casts** — `cast<T>(e)` types as certain `T` (a typed local initialized from it proves
 `same_type`), `cast<T&>(e)` as `T` for member lookup only (a reference: never a store proof),
-`cast<shared_ptr<T>>(e)` as the handle spelling; primitives type as the primitive. A store through
+`cast<shared_ptr<T>>(e)` as the handle spelling; primitives type as the primitive. `dynamic_cast` is the same node with
+`cast_expr::dynamic` set (`dynamic_cast<T&>(e)` the reference form, `dynamic_cast<shared_ptr<T>>(e)` and
+`dynamic_pointer_cast<T>(e)` the handle form, which `detail::cast_dynamic_handle` answers with null where the cast raises), typed
+as its cast is; `check_dynamic_cast` alone judges its operand (a declared non-class kind is the load's error, two unrelated
+classes a warning). A condition's declaration (`if (auto d = e)`, `while (T x = e)`, `if (init; condition)`) is the parser's
+lowering to a block (`{ T x = e; if (x) ... }`, `for (;;) { T x = e; if (!x) break; body }`): the checker and both backends see
+ordinary declarations. A store through
 `cast<T&>(e)` (`=`, `op=`, `++`/`--`) checks the stored value against `T` with the assignment table
 (`cannot assign 'string' to a cast<int&> target declared 'int'`); a call returning `T&`, a conditional of lvalues and an
 assignment in target position check against the referent's type (`... to the reference declared 'int'`). A target that
@@ -695,7 +701,8 @@ frame, a `[=]` lambda copies it, `[&]` and a bare `[]` alias it), and `narrow_al
 aliasing boundary.
 
 **Producing.** `narrow_collect(e, sense)` reads a condition: `!` flips the sense, `&&`/`||` take both sides where both had the
-value and the facts both sides give otherwise, `instanceof` / `reflect::is_a(x, "T")` give a class, `type_of(x) == "k"` a
+value and the facts both sides give otherwise, a condition that is a dynamic handle cast of the name (`dynamic_cast<shared_ptr<T>>(x)`, `dynamic_pointer_cast<T>(x)`: true where
+the handle is not null) and `reflect::is_instance_of(x, "T")` give a class, `type_of(x) == "k"` a
 kind (the engine's own `type_of` only: a local, a script function, a member or a held script declaration of that name
 disqualifies it). `narrow_class_fact` judges against the declared type and the narrowing in force: an ancestor or the
 same class adds nothing, an unrelated class marks the fact `open` (diagnostics leave a miss to the run time, both for a `var`

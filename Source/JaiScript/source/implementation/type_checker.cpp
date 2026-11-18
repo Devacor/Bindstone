@@ -5094,7 +5094,7 @@ private:
 
     // -------------------------------------------------------------- flow narrowing
     //
-    // A test of what a local holds (x instanceof T, reflect::is_a(x, "T"), type_of(x) == "int") gives the name that type where
+    // A test of what a local holds (reflect::is_instance_of(x, "T"), a dynamic handle cast of x, type_of(x) == "int") gives the name that type where
     // the test is known to have held: a fact on narrow_facts_, read by infer_identifier (a reference's by referent_receiver).
     // narrow_end is everything that can give the variable another value. A fact changes no declaration and no run-time path:
     // the proofs a narrowed read feeds select lanes that keep their run-time guards (internal/static_checking.md "Flow narrowing").
@@ -5164,8 +5164,7 @@ private:
                 return;
             }
             case node_type::cast_expr: {
-                auto* c = static_cast<const cast_expr*>(e);
-                if (!c->instance_test) { narrow_each_root(c->operand.get(), f); }
+                narrow_each_root(static_cast<const cast_expr*>(e)->operand.get(), f);
                 return;
             }
             case node_type::ternary_expr:
@@ -5348,7 +5347,10 @@ private:
             }
             case node_type::cast_expr: {
                 auto* c = static_cast<const cast_expr*>(e);
-                if (c->instance_test && sense && c->target) { narrow_named_test(c->operand.get(), c->target->type_name, /*kinds=*/false, out); }
+                // dynamic_cast<shared_ptr<T>>(x) / dynamic_pointer_cast<T>(x) as the condition: x is a T where the handle was not null
+                if (c->dynamic && !c->by_reference && sense && c->target && c->target->element_type()) {
+                    narrow_named_test(c->operand.get(), c->target->element_type()->type_name, /*kinds=*/false, out);
+                }
                 return;
             }
             case node_type::call_expr: {
@@ -5356,7 +5358,7 @@ private:
                 std::string name;
                 if (!sense || c->arguments.size() != 2 || !c->callee || c->callee->get_type() != node_type::member_expr) { return; }
                 auto* m = static_cast<const member_expr*>(c->callee.get());
-                if (static_path(m, "reflect") && m->member == "is_a" && narrow_text_literal(c->arguments[1].get(), name)) {
+                if (static_path(m, "reflect") && m->member == "is_instance_of" && narrow_text_literal(c->arguments[1].get(), name)) {
                     narrow_named_test(c->arguments[0].get(), name, /*kinds=*/false, out);
                 }
                 return;
@@ -5418,11 +5420,11 @@ private:
         bool found = false;
         if (t < node_type::expression_stmt) {
             auto* e = static_cast<const expression*>(n);
-            if (t == node_type::cast_expr && static_cast<const cast_expr*>(e)->instance_test) { return true; }
+            if (t == node_type::cast_expr && static_cast<const cast_expr*>(e)->dynamic) { return true; }
             if (t == node_type::call_expr) {
                 const expression* callee = static_cast<const call_expr*>(e)->callee.get();
                 if (callee && callee->get_type() == node_type::identifier_expr && static_cast<const identifier_expr*>(callee)->name == "type_of") { return true; }
-                if (callee && callee->get_type() == node_type::member_expr && static_cast<const member_expr*>(callee)->member == "is_a") { return true; }
+                if (callee && callee->get_type() == node_type::member_expr && static_cast<const member_expr*>(callee)->member == "is_instance_of") { return true; }
             }
             if (t == node_type::lambda_expr && narrow_has_test(static_cast<const lambda_expr*>(e)->body.get())) { return true; }
             for_each_child_expression(e, [&](const expression* k) { found = found || narrow_has_test(k); });
@@ -6252,35 +6254,35 @@ private:
 
     // cast<T>(e): certain T (proofs flow); cast<T&>(e): T for member lookup, never a store proof (tentative, like every reference);
     // cast<shared_ptr<T>>(e): the handle spelling. The operand is the explicit typed boundary - never checked against T.
-    // e instanceof T: T names a class; an operand whose declared type can hold no object of a class is never one
-    ctype infer_instance_test(cast_expr* c, const ctype& operand) {
-        stamp_const(c->const_check, const_none, {});
-        const std::string name(c->target->type_name);
-        const ctype result = ctype::make(ctype::bool_k);
-        if (enum_type_name(*c->target) || find_enum(name)) {
-            diag(diag_level::error, c->location, "'instanceof' tests a class, and '" + name + "' is an enum: compare the value with one of its values (x == " + name + "::value)");
-            return result;
-        }
-        if (report_unbound_instantiation(c->target.get(), c->location)) { return result; }
-        if (!known_class(name) && !extra_global(name)) {
-            diag(diag_level::error, c->location, "unknown type '" + name + "'");
-            return result;
-        }
-        if (operand.tentative || operand.is_unknown() || operand.narrowed) { return result; }
+    // dynamic_cast names a class and takes an operand that can hold an object: an operand whose declared type holds none is the
+    // load's error, and two classes neither of which derives from the other meet only in a class derived from both
+    bool dynamic_cast_of_enum(const cast_expr* c) {
+        const type_info* named = c->by_reference ? c->target.get() : c->target->element_type().get();
+        if (!named || (!enum_type_name(*named) && !find_enum(named->type_name))) { return false; }
+        const std::string name(named->type_name);
+        diag(diag_level::error, c->location, (c->by_reference ? "dynamic_cast<" + name + "&>" : "dynamic_cast<shared_ptr<" + name + ">>") +
+             " names a class, and '" + name + "' is an enum: cast<" + name + ">(n) converts an int that is one of its values");
+        return true;
+    }
+    void check_dynamic_cast(const cast_expr* c, const ctype& operand) {
+        const type_info* named = c->by_reference ? c->target.get() : c->target->element_type().get();
+        if (!named) { return; }
+        const std::string name(named->type_name);
+        const std::string form = c->by_reference ? "dynamic_cast<" + name + "&>" : "dynamic_cast<shared_ptr<" + name + ">>";
+        if (operand.tentative || operand.is_unknown() || operand.narrowed) { return; }
         switch (operand.kind) {
             case ctype::int_k: case ctype::float_k: case ctype::bool_k: case ctype::char_k: case ctype::string_k: case ctype::utf8_k:
             case ctype::array_k: case ctype::map_k: case ctype::math_k: case ctype::function_k:
-                diag(diag_level::error, c->location, "'instanceof " + name + "' is always false: the operand is '" + ctype_name(operand) + "', never an object of a class");
+                diag(diag_level::error, c->location, form + (c->by_reference ? " always raises" : " is always null") + ": the operand is '" + ctype_name(operand) + "', never an object of a class");
                 break;
             case ctype::object_k:
-                // two classes neither of which derives from the other: true only of an object whose class derives from both
                 if (!operand.cls.empty() && class_relation(operand.cls, name) == 0 && class_relation(name, operand.cls) == 0) {
-                    diag(diag_level::warning, c->location, "'instanceof " + name + "' is false for every '" + std::string(operand.cls) + "' but one whose class derives from '" + name + "' too");
+                    diag(diag_level::warning, c->location, form + (c->by_reference ? " raises" : " is null") + " for every '" + std::string(operand.cls) +
+                         "' but one whose class derives from '" + name + "' too");
                 }
                 break;
             default: break;
         }
-        return result;
     }
 
     JAI_NOINLINE ctype infer_cast(cast_expr* c) {
@@ -6290,15 +6292,16 @@ private:
             return operand_t;
         }
         ctype operand_t = infer(c->operand.get());
-        if (c->instance_test) { return infer_instance_test(c, operand_t); }
         if (c->by_reference) { report_mixed_reference_conditional(c->operand.get()); }
         check_const_cast(c);
         ctype t = ctype_from_type_info(c->target.get());
         if (report_unbound_instantiation(c->target.get(), c->location)) { return {}; }
+        if (c->dynamic && dynamic_cast_of_enum(c)) { return {}; }
         if (t.kind == ctype::object_k && !known_class(t.cls) && !extra_global(std::string(t.cls))) {
             diag(diag_level::error, c->location, "unknown type in cast: '" + std::string(t.cls) + "'");
             return {};
         }
+        if (c->dynamic) { check_dynamic_cast(c, operand_t); }
         if (collect_diagnostics_ && !c->by_reference && c->target->base_type == script_value_type::jai_object_type) {
             warn_cast_copy(c, operand_t);
         }

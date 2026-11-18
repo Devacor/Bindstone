@@ -333,9 +333,13 @@ expressionStatement = expression ";"     // includes throw/yield — both are ex
 
 blockStatement = "{" declaration* "}"
 
-ifStatement = "if" "(" expression ")" statement ("else" statement)?
+ifStatement = "if" "(" (initStatement? ";")? condition ")" statement ("else" statement)?
 
-whileStatement = "while" "(" expression ")" statement
+whileStatement = "while" "(" condition ")" statement
+
+// a declared condition is its variable's value, in scope to the end of the statement (the else too); a while makes it again each turn
+condition = expression | "const"? (type "&"?)? identifier "=" expression
+initStatement = expression | "const"? (type "&"?)? identifier ("=" expression)?
 
 // the body runs once before the first test; `do` is contextual (an identifier followed by "{")
 doWhileStatement = "do" blockStatement "while" "(" expression ")" ";"
@@ -399,8 +403,7 @@ bitwiseAndExpression = equalityExpression ("&" equalityExpression)*
 
 equalityExpression = relationalExpression (("==" | "!=") relationalExpression)*
 
-relationalExpression = shiftExpression (("<" | ">" | "<=" | ">=" | "<=>") shiftExpression | "instanceof" className)*
-                       (* instanceof is a word only here, after an operand: e instanceof T is whether e holds an object of class T or of one derived from it *)
+relationalExpression = shiftExpression (("<" | ">" | "<=" | ">=" | "<=>") shiftExpression)*
 
 shiftExpression = additiveExpression (("<<" | ">>") additiveExpression)*
 
@@ -463,6 +466,9 @@ includeExpression = "include" (STRING_LITERAL | "<" path ">" | "(" expression ")
 // 0..255 or a one-character string and raises "Cannot cast 'int' to 'char'" /
 // "Cannot cast 'string' to 'char'" otherwise.
 castExpression = "cast" "<" type "&"? ">" "(" expression ")"
+               | "dynamic_cast" "<" (className "&" | "shared_ptr" "<" className ">") ">" "(" expression ")"
+               | "dynamic_pointer_cast" "<" className ">" "(" expression ")"
+                 (* each word is a cast only before "<"; alone it is a name *)
 
 literal = INTEGER_LITERAL
         | FLOAT_LITERAL

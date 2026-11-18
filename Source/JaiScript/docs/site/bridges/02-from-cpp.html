@@ -202,6 +202,7 @@ public:
     explicit Circle(double r) : radius(r) {}
     std::string name() const override { return "circle"; }
     double area() const override { return 3.14159 * radius * radius; }
+    double diameter() const { return radius * 2.0; }
 private:
     double radius;
 };
@@ -221,6 +222,7 @@ int main() {
     double total = 0.0;
     for (const auto&amp; s : shapes) {
         std::cout &lt;&lt; s-&gt;describe() &lt;&lt; "\n";
+        if (auto round = dynamic_cast&lt;const Circle*&gt;(s.get())) { std::cout &lt;&lt; std::format("diameter {:.2f}\n", round-&gt;diameter()); }
         total += s-&gt;area();
     }
     std::cout &lt;&lt; std::format("total {:.2f}\n", total);
@@ -238,6 +240,7 @@ public:
     Circle(float r) { radius = r; }
     string name() override { return "circle"; }
     float area() override { return 3.14159 * radius * radius; }
+    float diameter() { return radius * 2.0; }
 private:
     float radius;
 }
@@ -256,15 +259,17 @@ shapes.push(make_shared&lt;Rect&gt;(2.0, 3.5));
 float total = 0.0;
 for (const auto&amp; s : shapes) {
     print(s-&gt;describe());
+    if (auto round = dynamic_pointer_cast&lt;Circle&gt;(s)) { print("diameter {:.2f}", round-&gt;diameter()); }
     total += s-&gt;area();
 }
 print("total {:.2f}", total);</code></pre></div>
 </div>
 </div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">circle 3.14
+diameter 2.00
 shape 7.00
 total 10.14</code></pre></div>
-<ul><li>No <code>virtual</code>: every method is virtual, and a redefinition must say <code>override</code>. <code>private:</code> admits subclasses.</li><li>No <code>unique_ptr</code>: the container holds <code>shared_ptr&lt;Shape&gt;</code>. An <code>array&lt;Shape&gt;</code> of values works too, because a base-typed element is <a href="#no-slicing">never sliced</a>.</li></ul>
+<ul><li><code>dynamic_cast</code> ports as written. The pointer form takes the handle: <code>dynamic_cast&lt;const Circle*&gt;(s.get())</code> is <code>dynamic_pointer_cast&lt;Circle&gt;(s)</code>, or <code>dynamic_cast&lt;shared_ptr&lt;Circle&gt;&gt;(s)</code>, null when the shape is no circle, and the condition declares its result as C++17&#x27;s does. <code>dynamic_cast&lt;Circle&amp;&gt;(*s)</code> is <code>dynamic_cast&lt;Circle&amp;&gt;(s)</code> and raises <code>Cannot cast 'Rect' to 'Circle&amp;'</code> where C++ throws <code>std::bad_cast</code>.</li><li>No <code>virtual</code>: every method is virtual, and a redefinition must say <code>override</code>. <code>private:</code> admits subclasses.</li><li>No <code>unique_ptr</code>: the container holds <code>shared_ptr&lt;Shape&gt;</code>. An <code>array&lt;Shape&gt;</code> of values works too, because a base-typed element is <a href="#no-slicing">never sliced</a>.</li></ul>
 <h3 id="port-d">Lambdas and a callback<a class="hlink" href="#port-d" aria-label="link">&#8203;</a></h3>
 <div class="tabs" id="port-d-tabs">
 <div class="tab-list" role="tablist" aria-label="C++ and its JaiScript port" hidden>
@@ -428,7 +433,8 @@ rope=2</code></pre></div>
 <tr><td>initialization</td><td><code>int i{5};</code>, <code>T x;</code>, <code>T x(a, b);</code></td><td>the same three; <code>T x;</code> default-constructs a class and zeroes a number</td></tr>
 <tr><td>containers</td><td><code>std::vector&lt;int&gt;</code>, <code>std::map&lt;std::string, int&gt;</code>, <code>{1, 2, 3}</code></td><td><code>array&lt;int&gt;</code>, <code>map&lt;string, int&gt;</code> (iterates in key order), <code>[1, 2, 3]</code>, <code>{"key": 1}</code></td></tr>
 <tr><td>casts</td><td><code>static_cast&lt;int&gt;(2.7)</code>, <code>dynamic_cast&lt;Square&amp;&gt;(s)</code>, <code>std::static_pointer_cast&lt;Square&gt;(p)</code></td><td><code>cast&lt;int&gt;(2.7)</code>, <code>cast&lt;Square&amp;&gt;(s)</code>, <code>cast&lt;shared_ptr&lt;Square&gt;&gt;(p)</code>; a wrong class raises the catchable <code>Cannot cast 'X' to 'T'</code> (<a href="../guide/02-type-ladder.html#cast-the-explicit-boundary">cast</a>)</td></tr>
-<tr><td>is it a Square?</td><td><code>if (dynamic_cast&lt;Square*&gt;(p))</code></td><td><code>if (s instanceof Square)</code>; inside the branch <code>s</code> is a <code>Square</code>, with no cast, until something stores to it (<a href="../guide/07-classes.html#instanceof">instanceof</a>, <a href="../reference/rules.html#flow-narrowing">flow narrowing</a>)</td></tr>
+<tr><td>is it a Square?</td><td><code>if (auto sq = dynamic_cast&lt;Square*&gt;(p))</code>, <code>std::dynamic_pointer_cast&lt;Square&gt;(p)</code>, <code>dynamic_cast&lt;Square&amp;&gt;(s)</code></td><td><code>if (auto sq = dynamic_cast&lt;shared_ptr&lt;Square&gt;&gt;(p))</code>, <code>dynamic_pointer_cast&lt;Square&gt;(p)</code>, <code>dynamic_cast&lt;Square&amp;&gt;(s)</code>: a handle or null, and a reference or an error. A bare cast as the condition, <code>if (dynamic_pointer_cast&lt;Square&gt;(p))</code>, makes <code>p</code> itself a <code>Square</code> in the branch until something stores to it (<a href="../guide/07-classes.html#dynamic-cast">dynamic_cast</a>, <a href="../reference/rules.html#flow-narrowing">flow narrowing</a>)</td></tr>
+<tr><td>a declaration in a condition</td><td><code>if (auto it = find(k); it != end)</code>, <code>while (auto line = next())</code></td><td>the same: <code>if (init; condition)</code>, <code>if (auto x = e)</code>, <code>while (auto x = e)</code> (<a href="../reference/rules.html#rule-condition-declaration">condition declarations</a>)</td></tr>
 <tr><td>identity</td><td><code>&amp;a == &amp;b</code></td><td><code>same_object(a, b)</code></td></tr>
 </tbody></table></div>
 <h3 id="functions-references-lambdas">Functions, references and lambdas<a class="hlink" href="#functions-references-lambdas" aria-label="link">&#8203;</a></h3>

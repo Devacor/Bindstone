@@ -14,6 +14,7 @@
 #include <jaiscript/detail/value_text.hpp>
 #include <jaiscript/detail/object_borrow.hpp>
 #include <jaiscript/detail/container_enforce.hpp>
+#include <jaiscript/detail/copy_rebind.hpp>
 #include <jaiscript/detail/arity_diagnostic.hpp>
 #include <array>
 #include <atomic>
@@ -1582,17 +1583,19 @@ void script_value::clone_element_into(script_value& dest, detail::deep_copy_work
     } else if (depth < detail::k_inline_copy_depth) {
         dest = clone_level(work, depth + 1);
     } else if (depth == detail::k_inline_copy_depth) {
-        clone_subtree_into(dest);
+        clone_subtree_into(dest, work);
     } else {
         work.push_back({detail::deep_copy_item::step::value, this, &dest});
     }
 }
 
 // Each level pushes its steps reversed, so the back of the list is always the next step the native walk would take
-void script_value::clone_subtree_into(script_value& dest) const {
+void script_value::clone_subtree_into(script_value& dest, detail::deep_copy_work& outer) const {
     using step = detail::deep_copy_item::step;
     constexpr unsigned stepped = detail::k_inline_copy_depth + 1;
     detail::deep_copy_work work;
+    work.watched = outer.watched;
+    work.met_bound_callable = outer.met_bound_callable;
     dest = clone_level(work, stepped);
     engine* const eng = payload_engine();
     size_t steps = 0;
@@ -1625,8 +1628,14 @@ void script_value::clone_subtree_into(script_value& dest) const {
             case step::finish_overflow:
                 static_cast<const class_instance*>(item.source)->finish_deep_copy_level(*static_cast<class_instance*>(item.dest), item.what == step::finish_overflow);
                 break;
+            case step::watched_end:
+                if (--work.watched == 0 && work.met_bound_callable != 0) {
+                    static_cast<const class_instance*>(item.source)->end_watched_copy(*static_cast<class_instance*>(item.dest), work);
+                }
+                break;
         }
     }
+    outer.met_bound_callable = work.met_bound_callable;
 }
 
 script_value script_value::clone_level(detail::deep_copy_work& work, unsigned depth) const {
@@ -1699,7 +1708,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                             new_node->push(element.clone_level(work, depth + 1));
                         } else {
                             script_value copied(std::monostate{}, other_node.owner);
-                            element.clone_subtree_into(copied);
+                            element.clone_subtree_into(copied, work);
                             new_node->push(std::move(copied));
                         }
                         copy_step(other_node.owner, n, i);
@@ -1778,6 +1787,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             // the same resume/done state). Deep-copying a suspended coroutine is
             // meaningless - this is the ruled reference-semantics-on-copy design.
             if (obj_holder->is_coroutine_handle()) {
+                if (work.watched != 0 && work.met_bound_callable == 0) { work.met_bound_callable = detail::binds_class_instance(*this); }
                 return *this;
             }
 
@@ -1849,6 +1859,9 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                 }
             } else {
                 // For primitive types and functions, shallow copy is fine
+                if (work.watched != 0 && work.met_bound_callable == 0 && raw_storage_index() == TYPEID_FUNCTION && unchecked_function_node().binds_instance != 1) {
+                    work.met_bound_callable = detail::binds_class_instance(*this);
+                }
                 result.storage_ = storage_;
             }
             break;

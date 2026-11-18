@@ -86,7 +86,7 @@ checked_result<script_value> coroutine_handle::resume_steps(execution_backend& a
     } scope{continues_host_entry_, continues_host_entry_};
     continues_host_entry_ = true;
     for (script_int step = 1;; ++step) {
-        if (done() || status_ == status::running) { return resume_refusal(); }
+        if (done() || status_ == status::running || uncopied_) { return resume_refusal(); }
         checked_result<script_value> result = a_backend.resume_coroutine(*this);
         if (step == a_count || !result || a_backend.is_unwinding()) { return result; }
     }
@@ -101,7 +101,7 @@ checked_result<script_value> coroutine_handle::next_from_script(engine* eng, con
 
 checked_result<script_value> coroutine_handle::advance_from_script(engine* eng, const std::vector<script_value>& a_args) {
     if (a_args.size() != 1) { return advance_argument_count_error(); }
-    if (status_ == status::running) { return resume_refusal(); }
+    if (status_ == status::running || uncopied_) { return resume_refusal(); }
     detail::host_reference out = detail::host_reference_argument(eng, a_args, 0, 0);
     if (!out.target.is_reference() && !out.slot.frame) { return advance_non_lvalue_error(); }
     if (done()) { return script_value(false, eng); }
@@ -125,7 +125,18 @@ checked_result<script_value> coroutine_handle::result_from_script(size_t a_argCo
     return result_.clone_element();
 }
 
+void coroutine_handle::mark_uncopied(std::string a_name, std::string a_reason) {
+    uncopied_ = std::make_unique<uncopied_state>();
+    if (engine_) { uncopied_->resume_text = detail::engine_access::park_error_text(*engine_, "Cannot resume coroutine '" + a_name + "': it was not copied with its object: " + a_reason); }
+    uncopied_->name = std::move(a_name);
+    uncopied_->reason = std::move(a_reason);
+    status_ = status::suspended;
+}
+
 checked_result<script_value> coroutine_handle::resume_refusal() const {
+    if (uncopied_) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed), "{0}", uncopied_->resume_text);
+    }
     if (done()) {
         return checked_result<script_value>(
             make_error_code(runtime_error_code::evaluation_failed),
@@ -143,7 +154,7 @@ checked_result<script_value> coroutine_mint::operator()(const std::vector<script
 }
 
 checked_result<script_value> coroutine_handle::resume_once(engine* eng) {
-    if (done() || status_ == status::running) { return resume_refusal(); }
+    if (done() || status_ == status::running || uncopied_) { return resume_refusal(); }
 
     execution_backend* backend = detail::engine_access::get_execution_backend(*eng);
     if (backend->is_executing() || backend->is_unwinding()) { return backend->resume_coroutine(*this); }

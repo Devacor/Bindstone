@@ -7,6 +7,7 @@ set(JAISCRIPT_SOURCES
     implementation/class_registry.cpp
     implementation/construction.cpp
     implementation/conversion_registry.cpp
+    implementation/copy_rebind.cpp
     implementation/coroutine.cpp
     implementation/coroutine_snapshot.cpp
     implementation/debug/connector.cpp

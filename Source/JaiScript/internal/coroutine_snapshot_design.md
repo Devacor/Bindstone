@@ -98,7 +98,8 @@ forms compute the same thing.
 A save is untrusted input. A load checks everything before it changes the handle: the function exists and its code
 matches; the site number is one of the function's yields and one a coroutine is saved at; the locals, loops and switch
 subjects match the site's counts; each typed local converts to its declared type through the no-script table a field
-load uses (`field_store_convert_no_script`), else the load fails naming the local; a loop's range is something a loop
+load uses (`field_store_convert_no_script`), and an `auto` local whose initializer the checker typed int, float, bool,
+char or string (`variable_decl::inferred_type`) converts to that type, else the load fails naming the local; a loop's range is something a loop
 walks and its place is inside it; an alias names an earlier local. Proofs are not saved: the code that runs after a load
 is the engine's own compiled or checked code, whose typed instructions test their operands' tags and fall back to the
 general form on a miss, and a fiber frame never runs a cell block. A value of the wrong kind in an `auto` slot therefore
@@ -135,23 +136,70 @@ object would split one object into two, so the save refuses, whichever of the tw
 the receiver in a `shared_ptr`, or keeping the handle inside the receiver, saves. Lifting the refusal needs an identity
 for value instances in the archive format.
 
-### Copy and restore differ
+### Copy and restore agree
 
-A copy of a handle is the same coroutine, and that rule is unchanged: a copy of an object that holds a handle holds the
-same handle. A save and a load is the one way to an independent coroutine, and it does not give what a copy gives:
+Dev's ruling (2026-11-17): a lambda or coroutine held by its own object rebinds to the copy when the object is copied. For
+everything an object holds by value, a copy behaves as an archive round trip of the object; handles to objects outside
+the copy stay shared.
 
 - **The handle is held by its own receiver** (`class Brain { int ticks = 0; auto run = think(); coroutine int think()
-  {...} }`). `Brain b = a;` copies the fields and shares the coroutine: `b.run` is `a.run`, still bound to `a`, so
-  `b.run.next()` advances `a`'s coroutine and changes `a.ticks`. `Brain b = from_binary(to_binary(a));` writes the record
-  with `"owner": 1` and loads a second coroutine paused at the same yield whose `this` is the loaded `Brain`:
-  `b.run.next()` changes `b.ticks` and leaves `a` and `a.run` alone.
-- **The receiver is outside the saved value** (`auto h = a.think(); from_binary(to_binary(h))`). The record carries the
-  receiver as the coroutine's own object (`"this": {"$id": M, "$type": "Brain", "$val": ...}`): the loaded coroutine acts
-  on a loaded copy of `a` that only it holds, not on `a`. Saved together with a `shared_ptr` to the receiver, the loaded
-  coroutine and the loaded `shared_ptr` share one loaded object.
+  {...} }`). `Brain b = a;` and `Brain b = from_binary(to_binary(a));` give the same `b`: a second coroutine paused at the
+  same yield whose `this` is `b`. `b.run.next()` changes `b.ticks` and leaves `a` and `a.run` alone.
+- **The receiver is outside the copied value** (`auto h = a.think(); auto g = h;`). A copy shares: `g` is `h`. A save and a
+  load of `h` alone carries the receiver as the coroutine's own object (`"this": {"$id": M, "$type": "Brain", "$val":
+  ...}`), so the loaded coroutine acts on a loaded copy of `a` that only it holds. This is the one shape where the two
+  differ, and it is the handle's own copy, not an object's.
 
-In both shapes the loaded coroutine is bound to loaded state; nothing a load makes points back at the objects that were
-saved.
+The kernel is `detail/copy_rebind.hpp` + `source/implementation/copy_rebind.cpp`, and the copy of an instance decides
+whether it runs. A copy asks its class one memoized fact, `class_definition::copy_care()` (the copy facts' epoch, so a
+definition settles it and a reload renews it):
+
+- **0**: no field anywhere in the class's value tree (its own, a subclass's, a by-value field's class's) can hold a
+  function or a coroutine, and no level declares a copy constructor. The copy is `class_instance::copy_members_level`,
+  the members' copies, and nothing else: no flag is set, read or tested for it.
+- **`copy_care_watch`**: a `var` or `auto` field, a function, a container of either. The members' copies run under a
+  watch: `deep_copy_work::watched` counts the watched instances open around the value being copied, and where the copy
+  meets a function or a coroutine handle while one is open (`clone_level`'s two cases) it asks once whether that callable is
+  bound to an instance (`binds_class_instance`; a function value's node keeps the answer, `script_function_node::
+  binds_instance`, so a lambda bound to nothing is one byte compare from then on). The outermost watched instance, when
+  its members are done and one was met, runs the kernel over itself and its copy (`class_instance::end_watched_copy`).
+  Below `k_inline_copy_depth`, where members are steps on the work list, the end of the watch is a step after them.
+- **`copy_care_constructor`**: the user copy constructor builds the copy (`deep_copy_with_care`), and a class that can
+  also hold a callable is rebound after it.
+
+Every route that copies a class instance reaches `class_instance::deep_copy_level` through `script_value::clone()`: a
+declaration or a store into a value slot, by-value arguments and non-elided returns, by-value captures, element and entry
+copies of containers, container copies (each element is its own outermost instance), `cast<T>`, `new T(v)`, a value made
+from a handle. `=` into an existing object keeps the object and assigns its members (`implicit_copy_assign`), which
+watches the members' copies the same way and rebinds onto the assigned object. The parallel detach refuses a function
+value and an object holding one (`value is not value-semantic (function)`), so no worker copy holds a closure to rebind.
+
+The kernel walks the source instance and its copy side by side on an explicit work list (fields slot by slot, array
+elements by index, map entries in order while their keys match), pairs each instance the source holds by value with its
+copy, and notes every function and coroutine the copy holds. Then, per noted site:
+
+- a **lambda** whose scopes up to the first instance scope (its capture scope, the carrier of other captures, the method
+  scope of a captured `this`) name a paired instance (`this`, or the object a `[weak_this]` points at) is rebuilt over copies
+  of those scopes: the instance's copy for `this` and `weak_this`, a clone for each by-value capture (walked in turn), the
+  same cell for each by-reference capture. The function keeps its body and compiled chunk. One source closure gives one
+  copy (`made`), so two fields holding one lambda hold one lambda in the copy;
+- a **bound method** (`script_callable` with a receiver, `bound_method_fn`) takes the paired receiver;
+- a **method coroutine** whose receiver is paired gets a new handle at once (a handle inside its own frame finds it), then
+  `coroutine_record_into(..., coroutine_capture::copy)` reads its state exactly as a save does, the record's values are
+  cloned and walked (a lambda local bound to the object rebinds), and `copy_coroutine_record` rebuilds the frame through
+  `load_coroutine_record` with the receiver's copy: the same checks, the same backend `pause_coroutine_at`. Capture and
+  load are one kernel for both purposes; `coroutine_capture` only changes the words of a reason and admits function
+  values, which a copy holds and an archive cannot.
+
+A coroutine whose state a save refuses (paused inside an expression or a catch block, running, a local that is a reference
+the save cannot name, a local a live lambda shares, a range over unnamed storage, a function redefined after it started)
+has no copy. The object's copy is still made, because copies happen in places a script cannot guard (an element store,
+a by-value argument), and the copy's handle is `coroutine_handle::mark_uncopied`: never done, raising `Cannot resume
+coroutine 'f': it was not copied with its object: <reason>` at `next`, `next(n)` and `advance`, and refusing a save with
+the same reason.
+
+A user copy constructor runs as it always does; the pass runs after it, so what it took from its source that is bound to
+the source (`f = other.f;`) is bound to the copy once the copy is complete.
 
 ## The function
 
@@ -186,6 +234,8 @@ A save that cannot be exact fails with `Cannot save coroutine 'f': <reason>`; it
 | its range-for over 'x' walks storage the save cannot name | the range is shared with something that is not a local, a field of the receiver or a named program variable |
 | its receiver is saved by value elsewhere in the same save | above |
 | its function was redefined after it started / its class no longer declares the function it runs / its function is declared inside another function | above |
+
+A copy reads the same table (the words say `was` and `copy`); only the function-value rows do not apply to it.
 
 Each of the first eight is a scope decision, not a limit of the approach: a place encoding (root and path) for
 references, operand contracts per expression kind, and a saved caught-error entry would lift them.

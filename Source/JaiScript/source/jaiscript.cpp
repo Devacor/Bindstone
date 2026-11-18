@@ -41,6 +41,7 @@
 #include "implementation/vm/vm_coverage.cpp"
 #include "implementation/coroutine.cpp"
 #include "implementation/coroutine_snapshot.cpp"
+#include "implementation/copy_rebind.cpp"
 #include "implementation/script_run.cpp"
 #include "implementation/parallel_transform.cpp"
 #include "implementation/thread_pool.cpp"

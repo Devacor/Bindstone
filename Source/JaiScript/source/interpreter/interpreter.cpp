@@ -8020,22 +8020,16 @@ checked_result<void> interpreter::visit_import_expr(import_expr* expr) {
 checked_result<script_value> interpreter::execute_method_ast(std::shared_ptr<function_decl> ast,
                                            std::shared_ptr<environment> method_env,
                                            const std::vector<script_value>& args) {
-    // Coroutine methods mint a handle instead of executing (free-coroutine parity).
-    // The handle pins its own method env carrying 'this' (the caller ends method_env when this returns) plus the receiver, so
-    // the instance stays alive while suspended and 'this' resolves identically across resumes (KEEP BYTE-PARALLEL with
-    // vm_backend::execute_method_ast)
+    // Coroutine methods mint a handle instead of executing (free-coroutine parity): its own method scope (the caller ends
+    // method_env when this returns) and the receiver, which the handle keeps alive while suspended
     if (ast->is_coroutine) {
         const uint64_t this_id = string_symbolizer_->get_this_id();
         script_value this_obj(std::monostate{}, engine_);
         if (auto this_result = method_env->get(this_id)) {
             this_obj = std::move(this_result.value());
         }
-        auto static_class = method_env->get_class_definition();
-        auto coro_env = static_class
-            ? std::make_shared<environment>(method_env->get_parent(), string_symbolizer_, static_class)
-            : std::make_shared<environment>(method_env->get_parent(), string_symbolizer_, this_obj);
-        coro_env->set_access_context(method_env->get_access_context());
-        coro_env->define(this_id, this_obj);
+        auto coro_env = detail::method_coroutine_scope(method_env->get_parent(), string_symbolizer_, this_id, this_obj, method_env->get_class_definition(),
+                                                       method_env->get_access_context());
         auto handle = std::make_shared<coroutine_handle>(engine_);
         handle->set_function(ast, args, coro_env);
         handle->set_receiver(std::move(this_obj));
@@ -9739,7 +9733,7 @@ bool interpreter::paused_coroutine_frame(coroutine_handle& a_handle, const std::
     a_frame.slot_count = frame.locals.size();
     a_frame.loops.resize(site.loops.size());
     a_frame.subjects.assign(site.switches.size(), make_value());
-    if (site.refusal) { return true; }   // the save names why: the frame at such a site is not read
+    if (site.refusal != detail::coroutine_refusal::none) { return true; }   // the save names why: the frame at such a site is not read
     size_t loops = 0;
     size_t switches = 0;
     const auto& points = state->continuations();

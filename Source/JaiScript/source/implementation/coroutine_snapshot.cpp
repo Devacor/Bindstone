@@ -15,9 +15,22 @@ namespace jai::detail {
 
 namespace coroutine_snapshot_impl {
 
-constexpr const char* k_paused_in_expression = "it is paused inside an expression, and only a yield that is its own statement is saved";
-constexpr const char* k_paused_in_catch = "it is paused inside a catch block";
-constexpr const char* k_paused_after_declaration = "its body declares a function, a class, an enum or a namespace ahead of the yield it is paused at";
+// The words a reason spells its asker with: a save's or a copy's
+std::string_view capture_noun(coroutine_capture a_why) { return a_why == coroutine_capture::copy ? "copy" : "save"; }
+std::string_view capture_done(coroutine_capture a_why) { return a_why == coroutine_capture::copy ? "copied" : "saved"; }
+
+// A copy's reasons speak of the moment of the copy: they are read when the copy's coroutine is resumed
+std::string refusal_text(coroutine_refusal a_refusal, coroutine_capture a_why) {
+	const std::string is(a_why == coroutine_capture::copy ? "was" : "is");
+	switch (a_refusal) {
+		case coroutine_refusal::in_expression: return "it " + is + " paused inside an expression, and only a yield that is its own statement is " + std::string(capture_done(a_why));
+		case coroutine_refusal::in_catch: return "it " + is + " paused inside a catch block";
+		default: return "its body declares a function, a class, an enum or a namespace ahead of the yield it " + is + " paused at";
+	}
+}
+
+// A copy's record that does not fit its function: the copy's coroutine stays without a frame
+struct copy_not_rebuilt {};
 
 constexpr std::string_view k_kind_function = "function";
 constexpr std::string_view k_kind_method = "method";
@@ -37,10 +50,10 @@ bool declares_into_scope(const jai::statement* a_statement) {
 struct site_walker {
 	std::vector<coroutine_site>& out;
 	coroutine_site live;
-	const char* refusal = nullptr;
+	coroutine_refusal refusal = coroutine_refusal::none;
 	native_stack_mark stack;
 
-	void emit(const yield_expr* a_yield, const char* a_refusal) {
+	void emit(const yield_expr* a_yield, coroutine_refusal a_refusal) {
 		coroutine_site site = live;
 		site.yield = a_yield;
 		site.refusal = a_refusal;
@@ -50,7 +63,7 @@ struct site_walker {
 	void expression_yields(const expression* a_expression) {
 		if (!a_expression) { return; }
 		stack.guard(a_expression->location);
-		if (a_expression->get_type() == node_type::yield_expr) { emit(static_cast<const yield_expr*>(a_expression), k_paused_in_expression); }
+		if (a_expression->get_type() == node_type::yield_expr) { emit(static_cast<const yield_expr*>(a_expression), coroutine_refusal::in_expression); }
 		for_each_child_expression(a_expression, [&](const expression* a_child) { expression_yields(a_child); });
 	}
 
@@ -72,6 +85,7 @@ struct site_walker {
 			local.slot = decl->slot_index;
 			local.name = decl->name;
 			local.type = decl->type;
+			local.inferred = decl->inferred_type;
 			local.held = decl->type && decl->type->base_type == script_value_type::jai_reference_type ? coroutine_local::kind::reference : coroutine_local::kind::value;
 			local.boxed = decl->ref_escaping;
 			live.locals.push_back(std::move(local));
@@ -100,12 +114,12 @@ struct site_walker {
 
 	void statements(const std::vector<statement_ptr>& a_body) {
 		const size_t mark = live.locals.size();
-		const char* outer = refusal;
+		const coroutine_refusal outer = refusal;
 		for (size_t i = 0; i < a_body.size(); ++i) {
 			live.path.back().index = i;
 			walk(a_body[i].get());
 			declare(a_body[i].get());
-			if (declares_into_scope(a_body[i].get()) && !refusal) { refusal = k_paused_after_declaration; }
+			if (declares_into_scope(a_body[i].get()) && refusal == coroutine_refusal::none) { refusal = coroutine_refusal::after_declaration; }
 		}
 		live.locals.resize(mark);
 		refusal = outer;
@@ -114,13 +128,13 @@ struct site_walker {
 	void block(const block_stmt* a_block) {
 		step(coroutine_step::kind::block, a_block, [&]() {
 			const size_t mark = live.locals.size();
-			const char* outer = refusal;
+			const coroutine_refusal outer = refusal;
 			for (size_t i = 0; i < a_block->declarations.size(); ++i) {
 				const jai::statement* decl = a_block->declarations[i].get();
 				live.path.back().index = i;
 				walk(decl);
 				declare(decl);
-				if (declares_into_scope(decl) && !refusal) { refusal = k_paused_after_declaration; }
+				if (declares_into_scope(decl) && refusal == coroutine_refusal::none) { refusal = coroutine_refusal::after_declaration; }
 			}
 			live.locals.resize(mark);
 			refusal = outer;
@@ -209,8 +223,8 @@ struct site_walker {
 			case node_type::try_stmt: {
 				const auto* guarded = static_cast<const try_stmt*>(a_statement);
 				walk(guarded->try_block.get());
-				const char* outer = refusal;
-				refusal = k_paused_in_catch;
+				const coroutine_refusal outer = refusal;
+				refusal = coroutine_refusal::in_catch;
 				walk(guarded->catch_block.get());
 				refusal = outer;
 				break;
@@ -355,8 +369,9 @@ struct coroutine_identity {
 	std::string code;
 };
 
-// The names a paused coroutine's function is saved under; throws when the program no longer defines that function
-coroutine_identity identify(engine& a_engine, const coroutine_handle& a_handle) {
+// The names a paused coroutine's function is saved under, into a_out; the reason (empty: none) when the program no longer
+// defines that function
+std::string identify(engine& a_engine, const coroutine_handle& a_handle, coroutine_identity& a_out) {
 	const std::shared_ptr<function_decl> function = a_handle.get_function();
 	coroutine_identity result;
 	result.code = function_code(a_engine, *function);
@@ -368,9 +383,10 @@ coroutine_identity identify(engine& a_engine, const coroutine_handle& a_handle) 
 		if (auto owner = declaring_class(a_engine, start, name_id, result.code)) {
 			result.kind = k_kind_method;
 			result.name = owner->get_name() + "::" + leaf;
-			return result;
+			a_out = std::move(result);
+			return {};
 		}
-		throw_coroutine_not_saved(a_handle, "its class no longer declares the function it runs");
+		return "its class no longer declares the function it runs";
 	}
 	const std::shared_ptr<environment> closure = a_handle.get_closure_env();
 	if (closure && closure->is_static_method_env()) {
@@ -378,25 +394,28 @@ coroutine_identity identify(engine& a_engine, const coroutine_handle& a_handle) 
 		if (owner && overload_with_code(a_engine, owner->script_static_method_overloads(), name_id, result.code)) {
 			result.kind = k_kind_static;
 			result.name = owner->get_name() + "::" + leaf;
-			return result;
+			a_out = std::move(result);
+			return {};
 		}
-		throw_coroutine_not_saved(a_handle, "its class no longer declares the function it runs");
+		return "its class no longer declares the function it runs";
 	}
 	result.kind = k_kind_function;
 	string_symbolizer* symbols = engine_access::get_symbolizer(a_engine);
 	for (const auto& [namespace_id, data] : engine_access::script_namespaces(a_engine)) {
 		if (data && overload_with_code(a_engine, data->functions, name_id, result.code)) {
 			result.name = std::string(symbols->get_string(namespace_id)) + "::" + leaf;
-			return result;
+			a_out = std::move(result);
+			return {};
 		}
 	}
 	coroutine_origin origin;
 	bool named = false;
 	if (find_origin(a_engine, k_kind_function, leaf, result.code, script_value(std::monostate{}, &a_engine), origin, named)) {
 		result.name = leaf;
-		return result;
+		a_out = std::move(result);
+			return {};
 	}
-	throw_coroutine_not_saved(a_handle, named ? "its function was redefined after it started" : "its function is declared inside another function");
+	return named ? "its function was redefined after it started" : "its function is declared inside another function";
 }
 
 script_value text_value(engine& a_engine, std::string_view a_text) { return script_value(std::string(a_text), &a_engine); }
@@ -449,8 +468,12 @@ const script_value* record_member(const script_map& a_record, engine& a_engine, 
 struct record_reader {
 	engine& eng;
 	std::string function;
+	coroutine_capture why = coroutine_capture::save;
 
-	[[noreturn]] void fail(std::string_view a_reason) const { throw_coroutine_not_loaded(function, a_reason); }
+	[[noreturn]] void fail(std::string_view a_reason) const {
+		if (why == coroutine_capture::copy) { throw copy_not_rebuilt{}; }
+		throw_coroutine_not_loaded(function, a_reason);
+	}
 
 	script_value unpacked(const script_value& a_position) const {
 		if (!a_position.is_map()) { return a_position; }
@@ -466,11 +489,14 @@ struct record_reader {
 		return std::move(*converted);
 	}
 
-	// A saved value into the slot of a declared type, as a load stores a field
-	script_value typed(const script_value& a_position, const type_info_ptr& a_declared, std::string_view a_name) const {
-		if (!declares_type(a_declared)) { return unpacked(a_position); }
-		auto converted = field_store_convert_no_script(a_position, a_declared, &eng);
-		if (!converted) { fail("its save holds a value its local '" + std::string(a_name) + "' cannot take"); }
+	// A saved value into its local's slot, as a load stores a field: converted to the declared type, or to the type an
+	// auto declaration inferred
+	script_value typed(const script_value& a_position, const coroutine_local& a_local) const {
+		const bool declared = declares_type(a_local.type);
+		if (!declared && !a_local.inferred) { return unpacked(a_position); }
+		auto converted = declared ? field_store_convert_no_script(a_position, a_local.type, &eng)
+		                          : field_store_convert_no_script(unpacked(a_position), a_local.inferred, &eng);
+		if (!converted) { fail("its save holds a value its local '" + std::string(a_local.name) + "' cannot take"); }
 		return std::move(*converted);
 	}
 
@@ -519,7 +545,7 @@ size_t container_holders(const script_value& a_container) {
 std::vector<coroutine_site> coroutine_sites(const std::vector<parameter>& a_parameters, const block_stmt& a_body) {
 	using namespace coroutine_snapshot_impl;
 	std::vector<coroutine_site> result;
-	site_walker walker{result, {}, nullptr, {}};
+	site_walker walker{result, {}, coroutine_refusal::none, {}};
 	for (const parameter& bound : a_parameters) {
 		if (bound.slot_index == SIZE_MAX) { continue; }
 		coroutine_local local;
@@ -564,6 +590,7 @@ std::shared_ptr<coroutine_handle> coroutine_of(const script_value& a_value) {
 }
 
 std::string coroutine_display_name(const coroutine_handle& a_handle) {
+	if (const coroutine_handle::uncopied_state* uncopied = a_handle.uncopied()) { return uncopied->name; }
 	std::string result;
 	if (const class_instance* receiver = a_handle.receiver().peek_class_instance()) {
 		if (const class_definition* owner = receiver->get_class_definition()) { result = owner->get_name() + "::"; }
@@ -580,50 +607,58 @@ JAI_NOINLINE void throw_coroutine_not_loaded(std::string_view a_function, std::s
 	throw serialization_error("Cannot load coroutine '" + std::string(a_function) + "': " + std::string(a_reason));
 }
 
-coroutine_record coroutine_record_of(engine& a_engine, coroutine_handle& a_handle) {
+std::string coroutine_record_into(engine& a_engine, coroutine_handle& a_handle, coroutine_capture a_why, coroutine_record& record,
+                                  std::vector<coroutine_site>* a_sites) {
 	using namespace coroutine_snapshot_impl;
+	if (const coroutine_handle::uncopied_state* uncopied = a_handle.uncopied()) { return "it was not copied with its object: " + uncopied->reason; }
+	const std::string_view is = a_why == coroutine_capture::copy ? "was" : "is";
 	const std::shared_ptr<function_decl> function = a_handle.get_function();
-	if (!function || !function->body) { throw_coroutine_not_saved(a_handle, "it has no function"); }
+	if (!function || !function->body) { return "it has no function"; }
 	const coroutine_handle::status status = a_handle.get_status();
-	if (status == coroutine_handle::status::running) { throw_coroutine_not_saved(a_handle, "it is running"); }
-	const coroutine_identity identity = identify(a_engine, a_handle);
-	coroutine_record record;
-	record.emplace_back("function", text_value(a_engine, identity.name));
-	record.emplace_back("kind", text_value(a_engine, identity.kind));
-	record.emplace_back("code", text_value(a_engine, identity.code));
+	if (status == coroutine_handle::status::running) { return "it " + std::string(is) + " running"; }
+	if (a_why == coroutine_capture::save) {
+		coroutine_identity identity;
+		if (std::string unknown = identify(a_engine, a_handle, identity); !unknown.empty()) { return unknown; }
+		record.emplace_back("function", text_value(a_engine, identity.name));
+		record.emplace_back("kind", text_value(a_engine, identity.kind));
+		record.emplace_back("code", text_value(a_engine, identity.code));
+	}
 	if (status == coroutine_handle::status::created) {
 		record.emplace_back("state", text_value(a_engine, "created"));
 		script_value arguments = make_list(a_engine);
 		for (const script_value& argument : a_handle.get_args()) { list_push(arguments, packed(a_engine, argument)); }
 		record.emplace_back("args", std::move(arguments));
-		return record;
+		return {};
 	}
 	if (status == coroutine_handle::status::failed) {
 		record.emplace_back("state", text_value(a_engine, "failed"));
-		return record;
+		return {};
 	}
 	if (status == coroutine_handle::status::completed) {
 		record.emplace_back("state", text_value(a_engine, "completed"));
 		auto result = a_handle.result_from_script(0);
 		record.emplace_back("result", packed(a_engine, result ? result.value() : script_value(std::monostate{}, &a_engine)));
-		return record;
+		return {};
 	}
 
-	const std::vector<coroutine_site> sites = coroutine_sites(function->parameters, *function->body);
+	std::vector<coroutine_site> owned;
+	std::vector<coroutine_site>& sites = a_sites ? *a_sites : owned;
+	sites = coroutine_sites(function->parameters, *function->body);
 	execution_backend* backend = engine_access::get_execution_backend(a_engine);
 	uint32_t at = UINT32_MAX;
 	coroutine_frame_view frame;
 	if (!backend || !backend->paused_coroutine_frame(a_handle, sites, at, frame) || at >= sites.size()) {
-		throw_coroutine_not_saved(a_handle, "its paused frame cannot be read");
+		return "its paused frame cannot be read";
 	}
 	const coroutine_site& site = sites[at];
-	if (site.refusal) { throw_coroutine_not_saved(a_handle, site.refusal); }
+	if (site.refusal != coroutine_refusal::none) { return refusal_text(site.refusal, a_why); }
 	if (frame.loops.size() != site.loops.size() || frame.subjects.size() != site.switches.size()) {
-		throw_coroutine_not_saved(a_handle, "its paused frame cannot be read");
+		return "its paused frame cannot be read";
 	}
+	const auto unnamed = [&]() { return std::string(is) + " a reference the " + std::string(capture_noun(a_why)) + " cannot name"; };
 	const auto slot_value = [&](size_t a_slot) -> const script_value* { return a_slot < frame.slot_count ? frame.slots + a_slot : nullptr; };
-	const auto local_refused = [&](const coroutine_local& a_local, std::string_view a_why) {
-		throw_coroutine_not_saved(a_handle, "its local '" + std::string(a_local.name) + "' " + std::string(a_why));
+	const auto local_reason = [&](const coroutine_local& a_local, std::string_view a_reason) {
+		return "its local '" + std::string(a_local.name) + "' " + std::string(a_reason);
 	};
 
 	// a cell every holder of which is a slot of this frame is the frame's own
@@ -653,13 +688,13 @@ coroutine_record coroutine_record_of(engine& a_engine, coroutine_handle& a_handl
 			const script_map* entries = map_node(loop.range);
 			const bool element_cursor = elements && holder->container.get() == elements && !holder->has_map_key && holder->container_index == loop.at;
 			const bool entry_cursor = entries && local.binds_entry && holder->has_map_key && holder->container_map.get() == entries;
-			if (!element_cursor && !entry_cursor) { local_refused(local, "is a reference the save cannot name"); }
+			if (!element_cursor && !entry_cursor) { return local_reason(local, unnamed()); }
 			list_push(locals, null);
 			continue;
 		}
 		if (local.held == coroutine_local::kind::reference) {
-			if (!holder || !holder->plain_cell()) { local_refused(local, "is a reference the save cannot name"); }
-			if (script_value::reference_holders(*held) > frame_holders(*held)) { local_refused(local, "is a reference the save cannot name"); }
+			if (!holder || !holder->plain_cell()) { return local_reason(local, unnamed()); }
+			if (script_value::reference_holders(*held) > frame_holders(*held)) { return local_reason(local, unnamed()); }
 			size_t target = SIZE_MAX;
 			for (size_t j = 0; j < site.locals.size(); ++j) {
 				const script_value* other = slot_value(site.locals[j].slot);
@@ -675,13 +710,13 @@ coroutine_record coroutine_record_of(engine& a_engine, coroutine_handle& a_handl
 			continue;
 		}
 		if (holder) {
-			if (!holder->plain_cell()) { local_refused(local, "is a reference the save cannot name"); }
-			if (script_value::reference_holders(*held) > frame_holders(*held)) { local_refused(local, "is shared with a function value"); }
+			if (!holder->plain_cell()) { return local_reason(local, unnamed()); }
+			if (script_value::reference_holders(*held) > frame_holders(*held)) { return local_reason(local, std::string(is) + " shared with a function value"); }
 		}
 		const script_value& value = plain(*held);
-		if (value.is_function()) { local_refused(local, "holds a function value"); }
+		if (value.is_function() && a_why == coroutine_capture::save) { return local_reason(local, "holds a function value"); }
 		if (local.held == coroutine_local::kind::loop_variable && local.by_reference && map_node(frame.loops[local.loop].range)) {
-			local_refused(local, "is a by-reference loop variable over a map");
+			return local_reason(local, std::string(is) + " a by-reference loop variable over a map");
 		}
 		list_push(locals, declares_type(local.type) ? value : packed(a_engine, value));
 	}
@@ -742,7 +777,7 @@ coroutine_record coroutine_record_of(engine& a_engine, coroutine_handle& a_handl
 					if (local.held == coroutine_local::kind::loop_variable && local.loop == k && held && held->get_reference_holder()) { ++expected; }
 				}
 				if (container_holders(range) > expected) {
-					throw_coroutine_not_saved(a_handle, "its range-for over '" + std::string(loop.variable_name) + "' walks storage the save cannot name");
+					return "its range-for over '" + std::string(loop.variable_name) + "' walks storage the " + std::string(capture_noun(a_why)) + " cannot name";
 				}
 				record_set(a_engine, entry, "range", packed(a_engine, range));
 			}
@@ -752,7 +787,7 @@ coroutine_record coroutine_record_of(engine& a_engine, coroutine_handle& a_handl
 				record_set(a_engine, entry, "key", packed(a_engine, state.key));
 			}
 		} else {
-			throw_coroutine_not_saved(a_handle, "its paused frame cannot be read");
+			return "its paused frame cannot be read";
 		}
 		list_push(loops, std::move(entry));
 	}
@@ -763,6 +798,14 @@ coroutine_record coroutine_record_of(engine& a_engine, coroutine_handle& a_handl
 		if (switch_subject_held(*site.switches[k])) { list_push(subjects, packed(a_engine, frame.subjects[k])); }
 	}
 	record.emplace_back("switches", std::move(subjects));
+	return {};
+}
+
+coroutine_record coroutine_record_of(engine& a_engine, coroutine_handle& a_handle) {
+	coroutine_record record;
+	if (const std::string refused = coroutine_record_into(a_engine, a_handle, coroutine_capture::save, record, nullptr); !refused.empty()) {
+		throw_coroutine_not_saved(a_handle, refused);
+	}
 	return record;
 }
 
@@ -770,6 +813,39 @@ script_value make_unloaded_coroutine(engine& a_engine) {
 	auto handle = std::make_shared<coroutine_handle>(&a_engine);
 	handle->set_status(coroutine_handle::status::failed);
 	return script_value::make_coroutine_handle(engine_access::symbolize(a_engine, "coroutine_handle"), std::static_pointer_cast<void>(handle), &a_engine);
+}
+
+script_value coroutine_record_map(engine& a_engine, coroutine_record a_record) {
+	using namespace coroutine_snapshot_impl;
+	script_value result = make_record(a_engine);
+	for (auto& [key, value] : a_record) { record_set(a_engine, result, key, std::move(value)); }
+	return result;
+}
+
+namespace coroutine_snapshot_impl {
+
+// The frame a record describes, once its function is known: read and checked whole before the handle changes
+void rebuild_from_record(engine& a_engine, coroutine_handle& a_handle, const script_map& a_record, record_reader& reader,
+                         std::shared_ptr<function_decl> declaration, std::shared_ptr<environment> closure, script_value receiver,
+                         std::vector<coroutine_site> sites);
+
+} // namespace coroutine_snapshot_impl
+
+bool copy_coroutine_record(engine& a_engine, const script_value& a_copy, const script_map& a_record, const coroutine_handle& a_source,
+                           const script_value& a_receiver, std::vector<coroutine_site> a_sites) {
+	using namespace coroutine_snapshot_impl;
+	const std::shared_ptr<coroutine_handle> handle = coroutine_of(a_copy);
+	const std::shared_ptr<environment>& scope = a_source.get_closure_env();
+	if (!handle || !scope || !scope->is_method_env()) { return false; }
+	string_symbolizer* symbols = engine_access::get_symbolizer(a_engine);
+	auto closure = method_coroutine_scope(scope->get_parent(), symbols, symbols->get_this_id(), a_receiver, nullptr, scope->get_access_context());
+	record_reader reader{a_engine, coroutine_display_name(a_source), coroutine_capture::copy};
+	try {
+		rebuild_from_record(a_engine, *handle, a_record, reader, a_source.get_function(), std::move(closure), a_receiver, std::move(a_sites));
+	} catch (const copy_not_rebuilt&) {
+		return false;
+	}
+	return true;
 }
 
 void load_coroutine_record(engine& a_engine, const script_value& a_handle, const script_map& a_record, const script_value& a_receiver) {
@@ -781,8 +857,7 @@ void load_coroutine_record(engine& a_engine, const script_value& a_handle, const
 	if (function && function->is_string()) { reader.function = function->as_string(); }
 	const script_value& kind = reader.member(a_record, "kind");
 	const script_value& code = reader.member(a_record, "code");
-	const script_value& state = reader.member(a_record, "state");
-	if (!function || !function->is_string() || !kind.is_string() || !code.is_string() || !state.is_string()) { reader.fail("its save is malformed"); }
+	if (!function || !function->is_string() || !kind.is_string() || !code.is_string()) { reader.fail("its save is malformed"); }
 
 	coroutine_origin origin;
 	bool named = false;
@@ -798,6 +873,20 @@ void load_coroutine_record(engine& a_engine, const script_value& a_handle, const
 		receiver = minted->receiver();
 	}
 	if (!declaration || !declaration->body) { reader.fail("the program has no such coroutine function"); }
+	std::vector<coroutine_site> sites;
+	if (const script_value* state = record_member(a_record, a_engine, "state"); state && state->is_string() && state->as_string() == "suspended") {
+		sites = coroutine_sites(declaration->parameters, *declaration->body);
+	}
+	rebuild_from_record(a_engine, *handle, a_record, reader, std::move(declaration), std::move(closure), std::move(receiver), std::move(sites));
+}
+
+void coroutine_snapshot_impl::rebuild_from_record(engine& a_engine, coroutine_handle& a_handle, const script_map& a_record, record_reader& reader,
+                                                  std::shared_ptr<function_decl> declaration, std::shared_ptr<environment> closure, script_value receiver,
+                                                  std::vector<coroutine_site> sites) {
+	coroutine_handle* const handle = &a_handle;
+	const bool functions_refused = reader.why == coroutine_capture::save;
+	const script_value& state = reader.member(a_record, "state");
+	if (!state.is_string()) { reader.fail("its save is malformed"); }
 
 	const std::string& phase = state.as_string();
 	std::vector<script_value> arguments;
@@ -809,16 +898,14 @@ void load_coroutine_record(engine& a_engine, const script_value& a_handle, const
 	// everything the record holds is read and checked before the handle changes: a refused load leaves it as it was made
 	script_value result(std::monostate{}, &a_engine);
 	if (phase == "completed") { result = reader.unpacked(reader.member(a_record, "result")); }
-	std::vector<coroutine_site> sites;
 	coroutine_frame frame;
 	script_int at = 0;
 	if (phase == "suspended") {
-		sites = coroutine_sites(declaration->parameters, *declaration->body);
 		const script_value& saved_at = reader.member(a_record, "at");
 		if (!saved_at.is_int() || saved_at.as_int() < 0 || static_cast<size_t>(saved_at.as_int()) >= sites.size()) { reader.fail("its save names no yield of the function"); }
 		at = saved_at.as_int();
 		const coroutine_site& site = sites[static_cast<size_t>(at)];
-		if (site.refusal) { reader.fail("its save names a yield no coroutine is saved at"); }
+		if (site.refusal != coroutine_refusal::none) { reader.fail("its save names a yield no coroutine is saved at"); }
 		const std::vector<script_value> locals = reader.list(a_record, "locals");
 		const std::vector<script_value> loops = reader.list(a_record, "loops");
 		const std::vector<script_value> subjects = reader.list(a_record, "switches");
@@ -835,8 +922,8 @@ void load_coroutine_record(engine& a_engine, const script_value& a_handle, const
 		for (size_t i = 0; i < site.locals.size(); ++i) {
 			const coroutine_local& local = site.locals[i];
 			if (local.held != coroutine_local::kind::value) { continue; }
-			script_value value = reader.typed(locals[i], local.type, local.name);
-			if (value.is_function() || coroutine_of(value) == handle) { reader.fail("its save holds a value its local '" + std::string(local.name) + "' cannot take"); }
+			script_value value = reader.typed(locals[i], local);
+			if ((functions_refused && value.is_function()) || coroutine_of(value).get() == handle) { reader.fail("its save holds a value its local '" + std::string(local.name) + "' cannot take"); }
 			slot_of(local) = local.boxed ? script_value::make_cell_reference(std::move(value), &a_engine) : std::move(value);
 		}
 		for (size_t i = 0; i < site.locals.size(); ++i) {
@@ -888,8 +975,8 @@ void load_coroutine_record(engine& a_engine, const script_value& a_handle, const
 				continue;
 			}
 			if (local.by_reference && !coroutine_of(range)) { reader.fail("its save does not fit the function's locals"); }
-			script_value value = reader.typed(saved, local.type, local.name);
-			if (value.is_function() || coroutine_of(value) == handle) { reader.fail("its save holds a value its local '" + std::string(local.name) + "' cannot take"); }
+			script_value value = reader.typed(saved, local);
+			if ((functions_refused && value.is_function()) || coroutine_of(value).get() == handle) { reader.fail("its save holds a value its local '" + std::string(local.name) + "' cannot take"); }
 			slot_of(local) = local.boxed ? script_value::make_cell_reference(std::move(value), &a_engine) : std::move(value);
 		}
 		};
@@ -919,7 +1006,7 @@ void load_coroutine_record(engine& a_engine, const script_value& a_handle, const
 				reader.fail("its save is malformed");
 			}
 			const bool walks_coroutine = coroutine_of(range) != nullptr;
-			if (walks_coroutine && coroutine_of(range) == handle) { reader.fail("its save is malformed"); }
+			if (walks_coroutine && coroutine_of(range).get() == handle) { reader.fail("its save is malformed"); }
 			if (!walks_coroutine && !range.is_array() && !range.is_map() && !range.is_string() && !range.is_utf8_string()) { reader.fail("its save holds a loop over a value no loop walks"); }
 			if (range.is_array() || range.is_string() || range.is_utf8_string()) {
 				const script_value* position = record_member(entry, a_engine, "at");

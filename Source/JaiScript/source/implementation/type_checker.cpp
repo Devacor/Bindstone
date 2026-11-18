@@ -369,6 +369,7 @@ public:
     type_info* get_type_info_int() const { return engine_access::get_type_info_int(engine_); }
     type_info* get_type_info_float() const { return engine_access::get_type_info_float(engine_); }
     type_info* get_type_info_bool() const { return engine_access::get_type_info_bool(engine_); }
+    type_info* get_type_info_char() const { return engine_access::get_type_info_char(engine_); }
     type_info* get_type_info_any() const { return engine_access::get_type_info_any(engine_); }
     type_info* get_type_info_uint8() const { return engine_access::get_type_info_uint8(engine_); }
     type_info* get_type_info_array(type_info* element) const { return engine_access::get_type_info_array(engine_, element); }
@@ -8773,6 +8774,15 @@ private:
                    last_mixed_ternary_.node == decl->initializer.get()) {
             decl->type = eng_.get_type_info_float();   // an int/float ternary is float (C++ common type): the chosen arm converts
             decl->decl_fast_flags = variable_decl::classify_decl_fast(decl->type);
+        } else if (!init.tentative && !init.diagnostic_only) {
+            switch (init.kind) {
+                case ctype::int_k: if (init.cls.empty()) { decl->inferred_type = eng_.get_type_info_int(); } break;
+                case ctype::float_k: decl->inferred_type = eng_.get_type_info_float(); break;
+                case ctype::bool_k: decl->inferred_type = eng_.get_type_info_bool(); break;
+                case ctype::char_k: decl->inferred_type = eng_.get_type_info_char(); break;
+                case ctype::string_k: decl->inferred_type = eng_.get_type_info_string(); break;
+                default: break;
+            }
         }
     }
 

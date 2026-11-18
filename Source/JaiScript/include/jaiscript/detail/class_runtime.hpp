@@ -8,6 +8,7 @@
 #include <jaiscript/detail/numeric_conversion.hpp>
 #include <jaiscript/detail/math_values.hpp>
 #include <jaiscript/detail/container_enforce.hpp>
+#include <jaiscript/detail/copy_rebind.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/slot_site.hpp>
 #include <jaiscript/detail/arity_diagnostic.hpp>
@@ -1847,13 +1848,6 @@ inline void class_instance::relayout_fields(const class_definition& from, const 
     for (size_t slot = 0; slot < result.size(); ++slot) { flat_fields_[slot] = std::move(result[slot]); }
 }
 
-inline void class_instance::copy_fields_from(const class_instance& other) {
-    other.for_each_field([&](uint64_t id, const script_value& value) {
-        materialize_field(id, value.clone_element());
-    });
-    if (const script_value* held = other.native()) { extras().native = held->clone_element(); }
-}
-
 namespace detail {
 
 // class_instance::dispatch_as for a scope: the object answers as `level` until the scope ends. Code compiled against the level reads
@@ -2799,10 +2793,16 @@ inline std::optional<checked_result<void>> var_slot_assign_in_place(const script
 // A field lane writing slot directly steps aside when the field holds an object a store asks first (var_slot_assign_in_place)
 inline bool field_slot_holds_object(class_instance* inst, uint32_t slot);
 
-// The members `layout` declares (its whole chain, base first) copied from source into dest
+// The members `layout` declares (its whole chain, base first) copied from source into dest; the members' copies are one copy
+// of the object, so what they hold bound to source or a part of it is bound to dest (detail/copy_rebind.hpp)
 inline checked_result<void> implicit_copy_assign(class_instance* dest, const class_definition* layout, class_instance* source, engine* eng) {
     const uint32_t n = layout->field_slot_count();
     const class_definition* dest_layout = dest->get_class_definition();
+    // the members of a class that can hold a callable are copied under one watch (class_instance::deep_copy_with_care)
+    detail::deep_copy_work work;
+    const bool watched = layout->value_tree_holds_callable();
+    bool assigned_member = false;
+    work.watched = watched;
     for (uint32_t slot = 0; slot < n; ++slot) {
         if (layout->slot_is_cpp_property(slot)) { continue; }
         const uint64_t id = layout->slot_field(slot);
@@ -2814,13 +2814,15 @@ inline checked_result<void> implicit_copy_assign(class_instance* dest, const cla
         if (to && declared && declared->base_type == script_value_type::jai_object_type && !declared->type_name.empty()) {
             if (auto nested = user_assign_operator(*to, member, eng, declared.get())) {
                 if (!*nested) { return *nested; }
+                assigned_member = true;
                 continue;
             }
         }
         const uint32_t dest_slot = dest_layout ? dest_layout->field_slot(id) : class_definition::k_no_field_slot;
         if (dest_slot == class_definition::k_no_field_slot) { continue; }
-        dest->field_slot_write(dest_slot, member.clone_element());
+        dest->field_slot_write(dest_slot, watched && !member.element_copies_shallow() ? member.clone_level(work, 1) : member.clone_element());
     }
+    if (watched && (work.met_bound_callable != 0 || assigned_member)) [[unlikely]] { rebind_copied_callables(*source, *dest); }
     return {};
 }
 
@@ -3392,11 +3394,6 @@ inline const script_value& class_instance::native_or_throw() const {
     return *held;
 }
 
-inline strong_ptr<class_instance> class_instance::deep_copy() const {
-    detail::deep_copy_work work;
-    return deep_copy_level(work, 0);
-}
-
 inline void class_instance::finish_deep_copy_level(class_instance& copy, bool overflow) const {
     if (overflow) {
         // the copies landed in overflow (no definition yet, matching the old no-enforcement order); adopt it, then slot them
@@ -3427,12 +3424,59 @@ inline void class_instance::finish_deep_copy_level(class_instance& copy, bool ov
     }
 }
 
-inline strong_ptr<class_instance> class_instance::deep_copy_level(detail::deep_copy_work& work, unsigned depth) const {
+JAI_FORCEINLINE strong_ptr<class_instance> class_instance::deep_copy_level(detail::deep_copy_work& work, unsigned depth) const {
+    if (class_def_) {
+        if (const uint8_t care = class_def_->copy_care()) [[unlikely]] {
+            if (care != class_definition::copy_care_watch || depth > detail::k_inline_copy_depth) { return deep_copy_with_care(work, depth, care); }
+            // a class that can hold a callable: its members' copies, watched for a closure or a coroutine bound to an instance
+            ++work.watched;
+            strong_ptr<class_instance> copy = copy_members_level(work, depth);
+            if (--work.watched == 0 && work.met_bound_callable != 0) [[unlikely]] { end_watched_copy(*copy, work); }
+            return copy;
+        }
+    }
+    return copy_members_level(work, depth);
+}
+
+// The outermost watched copy met a closure or a coroutine bound to an instance: the copy's own are bound to the copy
+JAI_NOINLINE inline void class_instance::end_watched_copy(class_instance& copy, detail::deep_copy_work& work) const {
+    work.met_bound_callable = 0;
+    detail::rebind_copied_callables(*this, copy);
+}
+
+JAI_NOINLINE inline strong_ptr<class_instance> class_instance::deep_copy_with_care(detail::deep_copy_work& work, unsigned depth, uint8_t care) const {
+    const bool watch = (care & class_definition::copy_care_watch) != 0;
+    if ((care & class_definition::copy_care_constructor) != 0 && dispatch_phase_ == cdtor_phase::none && !class_def_->nocopy()) {
+        if (const class_definition* level = class_def_->copy_constructor_level()) {
+            strong_ptr<class_instance> built = detail::copy_construct_instance(*this, level);
+            if (watch) {   // the constructor may have stored what its source holds
+                if (work.watched != 0) {
+                    work.met_bound_callable = 1;
+                } else {
+                    detail::rebind_copied_callables(*this, *built);
+                }
+            }
+            return built;
+        }
+    }
+    if (!watch) { return copy_members_level(work, depth); }
+    ++work.watched;
+    if (depth > detail::k_inline_copy_depth) {
+        // the members are steps on the list: the end of the watch is the step after them
+        const size_t end = work.size();
+        work.push_back({detail::deep_copy_item::step::watched_end, this, nullptr});
+        strong_ptr<class_instance> copy = copy_members_level(work, depth);
+        work[end].dest = copy.get();
+        return copy;
+    }
+    strong_ptr<class_instance> copy = copy_members_level(work, depth);
+    if (--work.watched == 0 && work.met_bound_callable != 0) { end_watched_copy(*copy, work); }
+    return copy;
+}
+
+JAI_NOINLINE inline strong_ptr<class_instance> class_instance::copy_members_level(detail::deep_copy_work& work, unsigned depth) const {
     if (class_def_ && class_def_->nocopy()) {
         throw runtime_error("Cannot copy an instance of nocopy class '" + std::string(get_class_name()) + "': hold it by reference (auto&/var&) or share it (shared_ptr)");
-    }
-    if (class_def_ && dispatch_phase_ == cdtor_phase::none) {
-        if (const class_definition* level = class_def_->copy_constructor_level()) { return detail::copy_construct_instance(*this, level); }
     }
     auto new_instance = class_def_ ? class_def_->allocate_instance() : class_instance::make(type_id_, owner_);
 #ifdef JAISCRIPT_VM_COVERAGE

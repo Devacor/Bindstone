@@ -285,14 +285,19 @@ public:
     // The C++ object's address (owning or not); null without one. A raw read - no handle copies - for member resolution.
     inline void* cpp_object_pointer() const;
 
-    inline strong_ptr<class_instance> deep_copy() const;
     // One level of a deep copy (script_value::clone_level); past detail::k_inline_copy_depth its fields and then its end
     // (finish_deep_copy_level) are steps on the work list
     inline strong_ptr<class_instance> deep_copy_level(detail::deep_copy_work& work, unsigned depth) const;
     // The end of an instance's copy, after its fields: its C++ object, then the copy joins its class's live instances
     inline void finish_deep_copy_level(class_instance& copy, bool overflow) const;
+    // The copy every class takes: its members' copies and nothing else
+    inline strong_ptr<class_instance> copy_members_level(detail::deep_copy_work& work, unsigned depth) const;
+    // deep_copy_level for a class whose copy takes care (class_definition::copy_care): a user copy constructor builds it, or
+    // its value tree can hold a callable and the copy is watched. The outermost watched copy that met a closure or a
+    // coroutine bound to an instance binds the copy's own to the copy (detail/copy_rebind.hpp)
+    inline strong_ptr<class_instance> deep_copy_with_care(detail::deep_copy_work& work, unsigned depth, uint8_t care) const;
+    inline void end_watched_copy(class_instance& copy, detail::deep_copy_work& work) const;
 
-    inline void copy_fields_from(const class_instance& other);
 
     // The C++ object behind the instance (a bound class's instance, a script class over a bound base, an extended
     // object): never a field, so no script name reaches it; the bound members reach it through the class
@@ -459,7 +464,7 @@ private:
     // A null, int, float, char or bool cell is its bytes: the copy constructor writes exactly the tag, the engine and the payload
     inline field_cell make_trivial_cell(const script_value& v);
     // Store WITHOUT reference write-through (the old map's raw insert_or_assign shape:
-    // copy_fields_from and lazy-default materialization replace a held reference value
+    // lazy-default materialization replace a held reference value
     // itself); returns the stored cell. set_field_unchecked keeps write-through.
     inline script_value& materialize_field(uint64_t id, script_value&& v);
     inline void rehome_overflow_fields();
@@ -728,6 +733,14 @@ public:
     // A move of a value of this class runs a user copy constructor (the chain's, or a by-value field's through its own
     // fields); a container field moves its storage
     bool value_tree_runs_copy_constructor() const;
+    // A value of this class can hold a function or a coroutine by value: a field of it, of a subclass or of a by-value field's
+    // class is untyped, a function or a container of either (a copy of a class that cannot never looks for one to rebind)
+    bool value_tree_holds_callable() const;
+    // What a copy of an instance of this class takes beyond its members' copies: copy_care_constructor, a user copy
+    // constructor builds it; copy_care_watch, its value tree can hold a callable. The one fact a copy asks: 0 is the
+    // memberwise copy and nothing else
+    static constexpr uint8_t copy_care_watch = 1, copy_care_constructor = 2;
+    uint8_t copy_care() const;
     // C++ destruction of a dying instance from `level` down: the level's destructor body, its own fields in reverse
     // declaration order, then its bases in reverse order
     inline void destroy_chain(class_instance* instance, const class_definition* level) const;
@@ -1401,7 +1414,8 @@ private:
     mutable std::atomic<bool> field_slots_current_{false};   // re-walk the chain on next query
     mutable std::atomic_flag field_slots_building_;
     mutable bool destructor_tree_cached_ = false;
-    mutable uint8_t copy_facts_ = 0;   // in the destructor fact's padding: the class keeps its layout
+    mutable uint16_t copy_facts_ = 0;   // in the destructor fact's padding: the class keeps its layout
+    mutable uint8_t copy_care_ = 0;     // copy_care's answer while copy_facts_ holds copy_fact_care
     mutable uint64_t destructor_tree_epoch_ = UINT64_MAX;
     mutable script_value null_field_value_;
     mutable uint64_t to_bool_memo_epoch_ = UINT64_MAX;
@@ -1484,12 +1498,13 @@ private:
     mutable uint64_t handle_slots_epoch_ = 0;
     type_info* handle_type_ = nullptr;
     bool flat_field_type(const type_info_ptr& t, std::vector<const class_definition*>& in_progress, bool host_values = false) const;
-    // mode 0: a destructor runs; 1: a destructor or a user copy constructor; 2: a user copy constructor
+    // mode 0: a destructor runs; 1: a destructor or a user copy constructor; 2: a user copy constructor; 3: the tree can
+    // hold a function or a coroutine (copy_fact's mode 4 is the chain's copy constructor or mode 3)
     bool value_tree_runs_destructor_impl(std::vector<const class_definition*>& in_progress, uint8_t mode = 0) const;
     const class_definition* find_copy_constructor_level() const;
     // the copy facts known under destructor_tree_epoch_ (copy_fact_* bits): a known bit, then its answer
-    static constexpr uint8_t copy_fact_tree = 1, copy_fact_ctor_tree = 4, copy_fact_level = 16;
-    bool copy_fact(uint8_t fact, uint8_t mode) const;
+    static constexpr uint16_t copy_fact_tree = 1, copy_fact_ctor_tree = 4, copy_fact_level = 16, copy_fact_callable = 64, copy_fact_care = 256;
+    bool copy_fact(uint16_t fact, uint8_t mode) const;
 
     inline void recompute_property_getters(const std::unordered_map<uint64_t, script_value>& new_methods, engine* engine_ref);
 

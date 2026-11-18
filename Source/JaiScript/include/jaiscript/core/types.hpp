@@ -249,6 +249,9 @@ namespace jai {
     // A function value's payload: the callable and the engine that made it (callbacks, signals and conversions run against it)
     struct script_function_node : script_function {
         engine* owner = nullptr;
+        // Whether the callable is bound to a class instance, once a watched copy has asked (detail/copy_rebind.hpp): 0 not
+        // asked, 1 bound to none, 2 bound. A closure's scopes are fixed when it is made, so the answer holds for its life
+        mutable uint8_t binds_instance = 0;
         script_function_node(script_function&& a_function, engine* a_owner) : script_function(std::move(a_function)), owner(a_owner) {}
     };
 

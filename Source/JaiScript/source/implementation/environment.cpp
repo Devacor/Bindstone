@@ -1155,6 +1155,19 @@ std::unordered_map<std::string_view, script_value> environment::get_local_variab
     return result;
 }
 
+std::vector<std::pair<uint64_t, const script_value*>> environment::own_definitions() const {
+    std::vector<std::pair<uint64_t, const script_value*>> result(local_storage_.size(), {UINT64_MAX, nullptr});
+    local_ids_.for_each([&](uint64_t id, bool) {
+        auto* cell = flat_lookup_.find(id);
+        if (!cell) { return; }
+        for (size_t i = 0; i < local_storage_.size(); ++i) {
+            if (&local_storage_[i] == *cell) { result[i] = {id, *cell}; break; }
+        }
+    });
+    std::erase_if(result, [](const auto& entry) { return !entry.second; });
+    return result;
+}
+
 void environment::clear_values() {
     if (local_ids_.empty() && local_storage_.empty()) {
         return;   // nothing to destroy, nothing for vm lookup caches to go stale on

@@ -256,13 +256,19 @@ namespace detail {
         // One step of that list: a value into its placeholder, a map entry into its copied map, an object slot onto its
         // copied array, or the end of an instance's copy (its C++ object, after its fields)
         struct deep_copy_item {
-            enum class step : uint8_t { value, entry, slot, finish, finish_overflow };
+            enum class step : uint8_t { value, entry, slot, finish, finish_overflow, watched_end };
             step what;
             const void* source;
             void* dest;
             size_t index = 0;
         };
-        using deep_copy_work = std::vector<deep_copy_item>;
+        // The list, and what the copies of instances whose class can hold a callable keep (class_instance::deep_copy_with_care):
+        // how many of them are open around the value being copied, and whether a closure or a coroutine bound to a class
+        // instance was met under one. A copy that holds no such instance never reads or writes either
+        struct deep_copy_work : std::vector<deep_copy_item> {
+            uint32_t watched = 0;
+            uint32_t met_bound_callable = 0;   // a flag, sized so the two are one word a copy clears beside its list
+        };
     }
 
     class script_value {
@@ -399,7 +405,7 @@ namespace detail {
         // clone_element's rule into dest, which must not move until the work list is done
         void clone_element_into(script_value& dest, detail::deep_copy_work& work, unsigned depth) const;
         // The copy of a subtree below detail::k_inline_copy_depth, on a work list
-        void clone_subtree_into(script_value& dest) const;
+        void clone_subtree_into(script_value& dest, detail::deep_copy_work& outer) const;
 
         // Parallel-region detach (parallel_transform v0): deep copy where EVERY heavy
         // node gets a fresh strong_ptr - including strings, which clone() and plain
@@ -1030,6 +1036,9 @@ namespace detail {
 
 
         // Unchecked function accessor - caller must verify is_function() first
+        inline const script_function_node& unchecked_function_node() const noexcept {
+            return **storage_.get_if<TYPEID_FUNCTION>();
+        }
         inline const script_function& unchecked_as_function() const noexcept {
             return **storage_.get_if<TYPEID_FUNCTION>();
         }

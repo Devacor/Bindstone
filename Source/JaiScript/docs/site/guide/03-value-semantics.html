@@ -52,7 +52,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <li><strong>Parameters and returns copy.</strong> A by-value parameter is the callee's own copy, and a by-value return hands back a value that aliases nothing.</li>
 <li><strong>Methods act on their receiver.</strong> <code>p.set(42)</code> changes <code>p</code>.</li>
 <li><strong>Sharing is spelled.</strong> Two names reach one object only through a <code>&amp;</code> parameter, a reference declaration (<code>auto&amp; r = x;</code>), a range-for <code>auto&amp;</code>, a <code>shared_ptr&lt;T&gt;</code> or <code>cast&lt;T&amp;&gt;</code>.</li>
-<li><strong>A copy is deep, except through a handle.</strong> Copying an object copies its value fields and elements; a <code>shared_ptr</code>, a coroutine handle and a lambda inside it keep pointing at what they pointed at.</li>
+<li><strong>A copy is deep, except through a handle.</strong> Copying an object copies its value fields and elements; a <code>shared_ptr</code> inside it keeps pointing at what it pointed at. A lambda or a coroutine the object holds that is bound to the object itself is bound to the copy (<a href="#copies-share-a-coroutine">below</a>).</li>
 </ol>
 <p>A write to a copy never reaches the original. The checker refuses the plainest cases at load (<a href="#lost-writes">lost writes</a>); the rest is the habit of asking &quot;is this a copy?&quot; wherever a change does not stick.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Hero {
@@ -213,30 +213,35 @@ enemies[0].hp is still 10</code></pre></div>
 </ul>
 <p>So the check is a net under the common slip, not a guarantee. Writing <code>auto&amp;</code> in every loop that changes its elements is what makes the question moot.</p>
 <p>A container or string a function returns by value is a copy too: <code>a.list().push(4);</code> is <code>push changes a call result in place and nothing reads it: 'a.list' returns by value</code> and <code>a.list()[0] = 7;</code> is <code>cannot assign to a call result: 'a.list' returns by value</code>. Return <code>array&lt;int&gt;&amp;</code> to change the original.</p>
-<h2 id="copies-share-a-coroutine">What a copy still shares<a class="hlink" href="#copies-share-a-coroutine" aria-label="link">&#8203;</a></h2>
-<p>Three kinds of value are handles, so a copy of one (or of an object holding one) reaches the same state:</p>
+<h2 id="copies-share-a-coroutine">Behaviour a copy takes along<a class="hlink" href="#copies-share-a-coroutine" aria-label="link">&#8203;</a></h2>
+<p>A copy of an object is what saving the object and loading it back would give (<a href="08-coroutines.html#saving">Saving</a>): everything the object holds by value is the copy's own, behaviour included. A lambda or a coroutine the object holds by value (a field, an element of a container field, a field of a value field, at any depth) that is bound to the object, or to a part of it the object holds by value, is bound to the corresponding part of the copy:</p>
 <ul>
-<li>A <strong><code>shared_ptr</code></strong> or <code>weak_ptr</code>, as above.</li>
-<li>A <strong>coroutine handle</strong>: a copy is the same running coroutine. A method coroutine keeps the object it started on, so advancing a copied object's handle changes the original's fields. A copy that needs its own assigns a new call: <code>copy.legs = copy.walk();</code> (<a href="08-coroutines.html#a-behaviour-in-a-field">Coroutines</a>).</li>
-<li>A <strong>lambda</strong>: its by-value captures are the lambda's own variables, kept between calls, and a copy of the lambda shares them (<a href="06-functions.html#lambdas-and-captures">Functions</a>).</li>
+<li>A <strong>lambda</strong> that captured <code>this</code> (<code>[this]</code>, <code>[=]</code>, <code>[&amp;]</code>, <code>=&gt;</code>, <code>function(...)</code>), a <code>[weak_this]</code> lambda and a bound method (<code>reflect::bind(this, "m")</code>) act on the copy. The lambda's by-value captures are copied with it; its by-reference captures stay shared with the variables they name. Two fields holding one lambda hold one lambda in the copy.</li>
+<li>A <strong>method coroutine</strong> gets its own frame, paused at the same <code>yield</code> with copies of its locals, acting on the copy. A range-for over a field of the object walks the copy's field. A coroutine not yet started is a new call with copies of its arguments; a finished one keeps its <code>result()</code>.</li>
 </ul>
+<p>Anything bound elsewhere is untouched: a lambda or coroutine bound to another object, or to none, is shared by the copy, as a <code>shared_ptr</code> is. A copy of the handle or the lambda alone (<code>auto g = h;</code>) is the same coroutine or the same closure, with the same captures.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Walker {
     int steps = 0;
     coroutine int walk() { while (true) { steps += 1; yield steps; } }
     auto legs = walk();
+    var tally = [this]() { return steps * 10; };
 }
 Walker a;
+a.legs.next();
 Walker copy = a;
-copy.legs.next();                       // a's coroutine, running on a
-print("copy {}, original {}", copy.steps, a.steps);
+copy.legs.next();                       // copy's own coroutine, running on copy
+print("copy {}, original {}, tally {} {}", copy.steps, a.steps, copy.tally(), a.tally());
 
-int n = 0;
-auto count = [n]() { n += 1; return n; };
-auto again = count;                     // shares count's n
-count(); count();
-print(again());</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">copy 0, original 1
-3</code></pre></div>
+auto same = a.legs;                     // the handle alone: one coroutine
+same.next();
+print("original {}", a.steps);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">copy 2, original 1, tally 20 10
+original 2</code></pre></div>
+<ul>
+<li><strong>A coroutine with no copy.</strong> A coroutine paused where it cannot be saved (inside an expression such as <code>var v = yield x;</code>, inside a <code>catch</code> block, or with a local that is a reference into an element or a field) has no frame a copy can take. The copy still succeeds, and its handle raises when it is resumed: <code>Cannot resume coroutine 'Walker::walk': it was not copied with its object: it was paused inside a catch block</code>. <code>done()</code> is false for it, and assigning a new call replaces it. A copy of a running coroutine (an object copying itself from inside its own coroutine) is the same.</li>
+<li><strong>A copy constructor</strong> runs as on any copy; when it finishes, what it took from its source that is bound to the source is bound to the copy: <code>T(const T&amp; o) { f = o.f; }</code> leaves the copy's <code>f</code> acting on the copy. Called inside the constructor, before it returns, <code>f</code> still acts on <code>o</code>.</li>
+<li><strong>What pays.</strong> A class whose fields cannot hold a lambda or a coroutine (no <code>var</code>, <code>auto</code>, function or container of them anywhere in its value tree) is copied member by member and nothing else; the class settles that when it is defined. A class that can hold one is copied the same way and looks only at the functions and coroutines it meets, and only a copy that meets one bound to an object does more.</li>
+</ul>
 <h2 id="const-set-once-then-only-read"><code>const</code>: set once, then only read<a class="hlink" href="#const-set-once-then-only-read" aria-label="link">&#8203;</a></h2>
 <p><code>const</code> marks a variable (<code>const int LIMIT = 10;</code>), a parameter, a loop variable, a structured binding or a class constant that its initializer sets and nothing writes afterwards. <code>const</code> alone is <code>const auto</code>: <code>const limit = 10;</code>, <code>for (const m : pack)</code>, <code>const [a, b] = pair;</code>, <code>for (const [k, v] : m)</code>. The rules are C++'s, less const methods:</p>
 <ul>

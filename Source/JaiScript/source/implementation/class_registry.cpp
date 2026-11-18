@@ -298,7 +298,7 @@ bool class_definition::type_can_hold_string(const type_info_ptr& t, std::vector<
 bool class_definition::type_tree_runs_destructor(const type_info_ptr& t, std::vector<const class_definition*>& in_progress, uint8_t mode) const {
     if (!t || t->base_type == script_value_type::jai_any_type) {
         // an untyped slot holds any value: it runs what some script class runs
-        if (mode == 0 || !engine_) { return true; }
+        if (mode == 0 || mode == 3 || !engine_) { return true; }
         for (const auto& entry : detail::engine_access::get_class_registry(*engine_).script_classes_) {
             const class_definition* cls = entry.second.get();
             if (cls && ((mode == 1 && cls->chain_declares_destructor(*engine_)) || cls->find_copy_constructor_level())) { return true; }
@@ -309,10 +309,11 @@ bool class_definition::type_tree_runs_destructor(const type_info_ptr& t, std::ve
     case script_value_type::jai_null_type:
     case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:
     case script_value_type::jai_char_type: case script_value_type::jai_string_type: case script_value_type::jai_utf8_string_type:
-    case script_value_type::jai_shared_ptr_type: case script_value_type::jai_weak_ptr_type: case script_value_type::jai_function_type:
+    case script_value_type::jai_shared_ptr_type: case script_value_type::jai_weak_ptr_type:
     case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_ivec2_type:
     case script_value_type::jai_ivec3_type: case script_value_type::jai_vec4_type: case script_value_type::jai_color_type:
         return false;
+    case script_value_type::jai_function_type: return mode == 3;
     case script_value_type::jai_array_type: return mode != 2 && type_tree_runs_destructor(t->element_type(), in_progress, mode);
     case script_value_type::jai_map_type:
         return mode != 2 && (type_tree_runs_destructor(t->key_type(), in_progress, mode) || type_tree_runs_destructor(t->value_type(), in_progress, mode));
@@ -328,7 +329,7 @@ bool class_definition::type_tree_runs_destructor(const type_info_ptr& t, std::ve
 bool class_definition::value_tree_runs_destructor_impl(std::vector<const class_definition*>& in_progress, uint8_t mode) const {
     for (const class_definition* visiting : in_progress) { if (visiting == this) { return false; } }
     in_progress.push_back(this);
-    bool runs = engine_ && ((mode != 2 && chain_declares_destructor(*engine_)) || (mode != 0 && find_copy_constructor_level()));
+    bool runs = engine_ && ((mode < 2 && chain_declares_destructor(*engine_)) || ((mode == 1 || mode == 2) && find_copy_constructor_level()));
     const uint32_t n = field_slot_count();
     for (uint32_t slot = 0; slot < n && !runs; ++slot) {
         runs = type_tree_runs_destructor(get_field_declared_type(slot_field(slot)), in_progress, mode);
@@ -658,19 +659,22 @@ release_sync::~release_sync() {
 } // namespace detail
 
 // A copy fact under the destructor fact's epoch (value_tree_runs_destructor refreshes it and forgets the copy facts): mode 1 and 2
-// walk the value tree, mode 0 asks the chain for a copy constructor
-bool class_definition::copy_fact(uint8_t fact, uint8_t mode) const {
+// walk the value tree, mode 0 asks the chain for a copy constructor, mode 4 for one or a tree that can hold a callable
+bool class_definition::copy_fact(uint16_t fact, uint8_t mode) const {
     const uint64_t epoch = engine_ ? detail::engine_access::definition_epoch(*engine_) : 0;
     if (destructor_tree_epoch_ != epoch || !engine_) { value_tree_runs_destructor(); }
     if (!(copy_facts_ & fact)) {
         bool answer;
         if (mode == 0) {
             answer = find_copy_constructor_level() != nullptr;
+        } else if (mode == 4) {
+            const bool constructed = copy_fact(copy_fact_level, 0);
+            answer = copy_fact(copy_fact_callable, 3) || constructed;
         } else {
             std::vector<const class_definition*> in_progress;
             answer = value_tree_runs_destructor_impl(in_progress, mode);
         }
-        copy_facts_ = static_cast<uint8_t>(copy_facts_ | fact | (answer ? fact << 1 : 0));
+        copy_facts_ = static_cast<uint16_t>(copy_facts_ | fact | (answer ? fact << 1 : 0));
     }
     return (copy_facts_ & (fact << 1)) != 0;
 }
@@ -678,6 +682,17 @@ bool class_definition::copy_fact(uint8_t fact, uint8_t mode) const {
 bool class_definition::value_tree_copies_observably() const { return copy_fact(copy_fact_tree, 1); }
 
 bool class_definition::value_tree_runs_copy_constructor() const { return copy_fact(copy_fact_ctor_tree, 2); }
+
+bool class_definition::value_tree_holds_callable() const { return copy_fact(copy_fact_callable, 3); }
+
+uint8_t class_definition::copy_care() const {
+    if (engine_ && destructor_tree_epoch_ == detail::engine_access::definition_epoch(*engine_) && (copy_facts_ & copy_fact_care)) [[likely]] { return copy_care_; }
+    copy_care_ = 0;
+    if (copy_fact(copy_fact_care, 4)) {
+        copy_care_ = static_cast<uint8_t>(((copy_facts_ & (copy_fact_callable << 1)) ? copy_care_watch : 0) | ((copy_facts_ & (copy_fact_level << 1)) ? copy_care_constructor : 0));
+    }
+    return copy_care_;
+}
 
 namespace {
 // A constructor's one parameter names the class: T(const T&) or T(T&)

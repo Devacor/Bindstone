@@ -479,6 +479,28 @@ public:
 				// cut short, the archive fails in its reader
 				check_eq(std::string("Binary archive read past end of data"),
 				         run(*saver, "why([&]() { string bytes = to_binary(h); return from_binary(bytes.substr(0, bytes.size() - 9)); })"), "a truncated save");
+
+				// an auto local holds to the type its initializer gave it
+				const std::string tally = "coroutine int tally() { auto seen = 0; auto label = \"n\"; while (true) { ++seen; yield seen; } }\n"
+				                          "function why(f) { try { return `${f()}`; } catch (e) { return `${e}`; } }";
+				auto inferred = backend_engine(use_vm);
+				run(*inferred, tally);
+				const std::string kept = run(*inferred, "var t = tally(); t.next(); to_json(t)");
+				const auto doctored = [&](const std::string& a_from, const std::string& a_to) {
+					std::string text = kept;
+					const size_t at = text.find(a_from);
+					check(at != std::string::npos, "the save holds " + a_from);
+					if (at != std::string::npos) { text.replace(at, a_from.size(), a_to); }
+					auto loader = backend_engine(use_vm);
+					run(*loader, tally);
+					loader->add_global("text", text);
+					return run(*loader, "why([&]() { return to_string(from_json(text).next()); })");
+				};
+				check_eq(std::string("2"), doctored("\"locals\":[1,\"n\"]", "\"locals\":[1,\"n\"]"), "an auto local loads");
+				check_eq(std::string("Cannot load coroutine 'tally': its save holds a value its local 'seen' cannot take"),
+				         doctored("\"locals\":[1,\"n\"]", "\"locals\":[\"one\",\"n\"]"), "an auto int local refuses a string");
+				check_eq(std::string("Cannot load coroutine 'tally': its save holds a value its local 'label' cannot take"),
+				         doctored("\"locals\":[1,\"n\"]", "\"locals\":[1,[1]]"), "an auto string local refuses an array");
 			}
 		});
 
@@ -515,6 +537,85 @@ public:
 				auto handle = std::static_pointer_cast<jai::coroutine_handle>(holder->host_object());
 				check(handle->get_status() == jai::coroutine_handle::status::failed, use_vm == 0 ? "interp: failed" : "vm: failed");
 			}
+		});
+
+		test("a_copy_gives_the_coroutines_its_object_holds_their_own_frames", [this]() {
+			// After k steps, the copy's coroutine runs on from the same yield over the copy's state, and the original's is untouched
+			const std::pair<const char*, const char*> shapes[] = {
+				{"locals and a while loop", R"(
+					class H { int ticks = 0; auto co = body(3); coroutine int body(int a_step) { int local = 100; auto inferred = 1; while (local < 112) { local += a_step; inferred += 1; ticks += 1; yield local + inferred; } return ticks; } }
+				)"},
+				{"range-for over a field and a local", R"(
+					class H { int ticks = 0; array<int> plan = [3, 5, 8]; auto co = body();
+						coroutine int body() { array<int> mine = [1, 2]; for (auto p : plan) { for (auto& m : mine) { m += p; ticks += 1; yield m; } } return ticks; } }
+				)"},
+				{"a map loop, a switch and a reference local", R"(
+					class H { int ticks = 0; map<string, int> bag = {"a": 1, "b": 2}; auto co = body();
+						coroutine int body() { int base = 10; int& alias = base; for (auto [k, v] : bag) { switch (v) { case 1: alias += 1; yield alias; break; default: ticks += v; yield ticks; } } return base; } }
+				)"},
+				{"a lambda local bound to the object", R"(
+					class H { int ticks = 0; auto co = body(); coroutine int body() { auto bump = [this]() { ticks += 1; return ticks; }; while (ticks < 4) { yield bump(); } return -ticks; } }
+				)"},
+				{"a nested coroutine of the object", R"(
+					class H { int ticks = 0; auto co = body(); coroutine int inner() { for (int i = 0; i < 3; ++i) { ticks += 1; yield i; } }
+						coroutine int body() { for (auto v : inner()) { yield v * 10 + ticks; } return ticks; } }
+				)"},
+			};
+			const std::string driver = R"(
+				function drain(var h) { string out = ""; while (!h.done()) { var v = h.next(); out += `${h.done() ? "=" : ""}${v},`; } return out; }
+				function copied(int k) { H a; for (int i = 0; i < k; ++i) { a.co.next(); } H b = a; string rb = drain(b.co); string after_b = `${a.ticks}`; string ra = drain(a.co); return `${rb}|${ra}|${after_b}|${a.ticks}|${b.ticks}`; }
+				function whole() { H a; return drain(a.co); }
+			)";
+			for (const auto& [name, program] : shapes) {
+				std::shared_ptr<engine> engines[3] = {backend_engine(0), backend_engine(1), backend_engine(2)};
+				std::string full[3];
+				for (int b = 0; b < 3; ++b) {
+					check_eq(std::string("0"), run(*engines[b], std::string(program) + driver + "\n0"), std::string(name) + ": loads");
+					full[b] = run(*engines[b], "whole()");
+				}
+				check_eq(full[0], full[1], std::string(name) + ": the backends agree");
+				check_eq(full[0], full[2], std::string(name) + ": the reference VM agrees");
+				const std::vector<std::string> all = steps(full[1]);
+				for (size_t k = 0; k < all.size(); ++k) {
+					const std::string result[3] = {run(*engines[0], "copied(" + std::to_string(k) + ")"), run(*engines[1], "copied(" + std::to_string(k) + ")"),
+					                               run(*engines[2], "copied(" + std::to_string(k) + ")")};
+					std::string rest;
+					for (size_t i = k; i < all.size(); ++i) { rest += all[i] + ","; }
+					const std::string at = std::string(name) + " after " + std::to_string(k) + " steps";
+					check_eq(rest, result[1].substr(0, result[1].find('|')), at + ": the copy runs on from the same yield");
+					check_eq(rest, result[1].substr(result[1].find('|') + 1, rest.size()), at + ": the original runs on from it too");
+					check_eq(result[0], result[1], at + ": the backends agree");
+					check_eq(result[1], result[2], at + ": the reference VM agrees");
+				}
+			}
+			check_both(R"(
+				class H { int ticks = 0; auto co = body(); coroutine int body() { while (true) { ticks += 1; yield ticks; } } }
+				H a; a.co.next(); H b = a; a.co.next(); auto bare = b.co; bare.next(); b.co.next();
+				`${a.ticks}|${b.ticks}`
+			)", "2|3", "a handle copied by itself shares its coroutine; the object's copy has its own");
+			check_both(R"(
+				coroutine int free_body() { yield 1; yield 2; }
+				class H { int ticks = 0; var co; }
+				H a; a.co = free_body(); H b = a; a.co.next(); b.co.next(); `${b.co.done()}`
+			)", "false", "a coroutine bound to no object is shared by the copy");
+			check_both(R"(
+				class H { int got = 0; auto co = body(); coroutine int body() { while (true) { var v = yield got; got += 1; } } }
+				H a; a.co.next(); H b = a; a.co.next();
+				string r = `${b.co.done()}`;
+				try { b.co.next(); } catch (e) { r += "|" + e; }
+				try { to_json(b); } catch (e) { r += "|" + e; }
+				r + "|" + to_string(a.got)
+			)", "false|Cannot resume coroutine 'H::body': it was not copied with its object: it was paused inside an expression, and only a yield that is its own statement is copied"
+			    "|Cannot save coroutine 'H::body': it was not copied with its object: it was paused inside an expression, and only a yield that is its own statement is copied|1",
+			    "a coroutine whose state has no copy leaves a handle that raises when it is resumed");
+			check_both(R"(
+				class H { int n = 0; auto co = body(); coroutine int body() { try { throw "x"; } catch (e) { yield 1; } yield 2; } }
+				H a; a.co.next(); H b = a; string r = ""; try { b.co.next(); } catch (e) { r = e; } r + "|" + to_string(a.co.next())
+			)", "Cannot resume coroutine 'H::body': it was not copied with its object: it was paused inside a catch block|2", "a pause in a catch block");
+			check_both(R"(
+				class H { int n = 0; auto co = body(); coroutine int body() { while (true) { n += 1; H snap = this; yield n; } } }
+				H a; string r = to_string(a.co.next()); r
+			)", "1", "a copy taken while the coroutine runs leaves the copy's handle unresumable, and the original runs on");
 		});
 
 		test("a_dropped_loaded_coroutine_destroys_what_the_original_would", [this]() {

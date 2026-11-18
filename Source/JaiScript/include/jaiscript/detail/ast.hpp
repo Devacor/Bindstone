@@ -885,6 +885,10 @@ namespace jai {
         // or unknown static type makes `type` the var marker; the spelling stays auto for re-checks and .jaibite
         bool auto_spelled = false;
         bool auto_typed = false;
+        // Declared `auto` over an initializer whose static type is certainly int, float, bool, char or string: that type, set with
+        // auto_typed and never serialized. The runtime locks the slot to its value; a paused coroutine's load holds the slot
+        // to this (detail/coroutine_snapshot.hpp)
+        type_info_ptr inferred_type;
         // Parser escape analysis: the variable may be bound by reference, so its
         // declaration boxes the value into a cell (storage IS the cell from birth)
         bool ref_escaping = false;

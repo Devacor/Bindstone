@@ -2,8 +2,9 @@
 
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/checked_result.hpp>
-#include <vector>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace jai {
 
@@ -73,6 +74,16 @@ public:
     uint32_t yield_site() const noexcept { return yield_site_; }
     const void* yield_node() const noexcept { return yield_node_; }
 
+    // A copy of an object stands this handle where a coroutine of the object had no copy (detail/copy_rebind.hpp): it is
+    // never done, and a resume raises the reason
+    struct uncopied_state {
+        std::string name;
+        std::string reason;
+        uint64_t resume_text = 0;   // the resume refusal, parked in the engine's symbols (an error names it, past this handle)
+    };
+    void mark_uncopied(std::string a_name, std::string a_reason);
+    const uncopied_state* uncopied() const noexcept { return uncopied_.get(); }
+
     coroutine_backend_state* backend_state() const { return backend_state_.get(); }
     void set_backend_state(std::unique_ptr<coroutine_backend_state> state) {
         backend_state_ = std::move(state);
@@ -99,6 +110,7 @@ private:
     script_value receiver_;
 
     std::unique_ptr<coroutine_backend_state> backend_state_;
+    std::unique_ptr<uncopied_state> uncopied_;
 };
 
 // The value a coroutine declaration defines: a call mints a handle over the declaration and the scope it was declared in

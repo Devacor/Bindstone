@@ -323,6 +323,8 @@ namespace jai {
         // exhausted; the caller runs its original full lookup for the fallback tails.
         script_value* vm_storage_lookup(uint64_t id, bool& cacheable);
         const detail::env_value_store& own_values() const noexcept { return local_storage_; }
+        // This scope's own names with their cells, in declaration order
+        std::vector<std::pair<uint64_t, const script_value*>> own_definitions() const;
 
     protected:
         // Invalidate the vm's env-lookup inline caches (defined in environment.cpp:
@@ -412,6 +414,18 @@ namespace jai {
     };
 
     namespace detail {
+        // The scope a method coroutine's handle pins: its own method scope over `a_parent` carrying `this` (a static method's
+        // carries its class), so 'this' resolves identically across resumes. Both backends mint it, and a copy of the object
+        // makes one for the copy's coroutine
+        inline std::shared_ptr<environment> method_coroutine_scope(std::shared_ptr<environment> a_parent, string_symbolizer* a_symbols, uint64_t a_this_id,
+                                                                   const script_value& a_this, std::shared_ptr<class_definition> a_static, class_definition* a_access) {
+            auto result = a_static ? std::make_shared<environment>(std::move(a_parent), a_symbols, std::move(a_static))
+                                   : std::make_shared<environment>(std::move(a_parent), a_symbols, a_this);
+            result->set_access_context(a_access);
+            result->define(a_this_id, a_this);
+            return result;
+        }
+
         // A bound method's non-owning reference into its receiver (the chaining idiom's `return *this`) keeps the receiver's
         // object alive, so a temporary receiver outlives the call
         void anchor_bound_method_result(const script_value& this_obj, checked_result<script_value>& result);

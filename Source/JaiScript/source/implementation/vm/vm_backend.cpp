@@ -1037,7 +1037,7 @@ bool vm_backend::paused_coroutine_frame(coroutine_handle& a_handle, const std::v
 	a_frame.slot_count = std::min<size_t>(state->f.window_live, function->local_count);
 	a_frame.loops.resize(site.loops.size());
 	a_frame.subjects.assign(site.switches.size(), make_null());
-	if (site.refusal) { return true; }   // the save names why: the frame at such a site is not read
+	if (site.refusal != detail::coroutine_refusal::none) { return true; }   // the save names why: the frame at such a site is not read
 	size_t loops = 0;
 	size_t switches = 0;
 	size_t pairs = 0;
@@ -18765,22 +18765,15 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 checked_result<script_value> vm_backend::execute_method_ast(const std::shared_ptr<function_decl>& ast,
                                                             std::shared_ptr<environment> method_env,
                                                             const std::vector<script_value>& args) {
-	// Coroutine methods mint a handle instead of executing (free-coroutine parity).
-	// The handle pins its OWN method env carrying 'this' — the caller recycles
-	// method_env back to the pool right after this returns — plus the receiver, so
-	// the instance stays alive while suspended and 'this' resolves identically
-	// across resumes. KEEP BYTE-PARALLEL with interpreter::execute_method_ast.
+	// Coroutine methods mint a handle instead of executing (free-coroutine parity): its own method scope (the caller recycles
+	// method_env right after this returns) and the receiver, which the handle keeps alive while suspended
 	if (ast->is_coroutine) {
 		script_value this_obj = make_null();
 		if (auto this_result = method_env->get(this_id_)) {
 			this_obj = std::move(this_result.value());
 		}
-		auto static_class = method_env->get_class_definition();
-		auto coro_env = static_class
-			? std::make_shared<environment>(method_env->get_parent(), symbolizer_, static_class)
-			: std::make_shared<environment>(method_env->get_parent(), symbolizer_, this_obj);
-		coro_env->set_access_context(method_env->get_access_context());
-		coro_env->define(this_id_, this_obj);
+		auto coro_env = detail::method_coroutine_scope(method_env->get_parent(), symbolizer_, this_id_, this_obj, method_env->get_class_definition(),
+		                                               method_env->get_access_context());
 		auto handle = std::make_shared<coroutine_handle>(engine_);
 		handle->set_function(ast, args, coro_env);
 		handle->set_receiver(std::move(this_obj));

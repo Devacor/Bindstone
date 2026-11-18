@@ -976,6 +976,18 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Not yet: moving a file between folders by dragging, a preview on a BindSnap's tile, undo of these verbs, and
   paths the game builds in code (`Creatures/<id>/<skin>/unit.bindsnap`), which no rename can follow.
 
+## Increment 49: scenes are placed like BindSnaps, and no file holds itself (2026-11-18)
+- Dev: a scene and a BindSnap are one kind of file, and which a file is called is convention. A `.scene` tile
+  drags into the scene or onto a Hierarchy row as a `.bindsnap` does, making a linked node; its tile reads
+  `scene` as a BindSnap's reads `snap`. A Hierarchy row let go on a folder still writes a `.bindsnap`.
+- `BindSnapInstance` does not build a file under a node already linked to that file, however far above: a file
+  that links to itself, straight or through others, builds once round and stops with an error naming it.
+  `BindSnapInstance::sourceName` is the form two file names are compared in.
+- The editor refuses, with a Console warning: placing the file being edited in itself, placing a file that holds
+  the file being edited, and saving a node over a file that something in the node is linked to.
+- Tests: the engine suite builds a file linked to itself and two linked to each other; the self-test places the
+  open document in itself, a scene in a new scene, and saves a node over a file its child is linked to.
+
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.
 - Authoring verbs still only in Source/Editor: the component kinds Add Component does not list — old-editor

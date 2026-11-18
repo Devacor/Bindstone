@@ -30,7 +30,7 @@ namespace Workbench {
 		}
 
 		std::string tileGlyphForExtension(const std::string& a_extension) {
-			if (a_extension == ".scene") { return "S"; }
+			if (a_extension == ".scene") { return "scene"; }
 			if (a_extension == ".bindsnap") { return "snap"; }
 			if (a_extension == ".png" || a_extension == ".jpg") { return "img"; }
 			if (a_extension == ".script" || a_extension == ".jai") { return "{}"; }
@@ -392,7 +392,8 @@ namespace Workbench {
 				bool isFolder = fs::is_directory(entry);
 				std::string extension = entry.extension().string();
 				bool isImage = extension == ".png" || extension == ".jpg";
-				bool isPrefab = extension == ".bindsnap";
+				// a scene is placed in another as a BindSnap is: which a file is called is convention
+				bool isPrefab = extension == ".bindsnap" || extension == ".scene";
 
 				auto row = tileHost->make(MV::guid("listRow_"));
 				row->position(MV::point(0.0f, index * theme->rowHeight));
@@ -464,7 +465,7 @@ namespace Workbench {
 
 			std::string extension = entry.extension().string();
 			bool isImage = extension == ".png" || extension == ".jpg";
-			bool isPrefab = extension == ".bindsnap";
+			bool isPrefab = extension == ".bindsnap" || extension == ".scene";
 
 			if (isImage) {
 				attachOutlinedRect(tile, *services, *theme, MV::size(tileSize, tileSize), theme->fieldBg(), theme->fieldOutline());

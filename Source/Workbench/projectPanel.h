@@ -11,7 +11,8 @@ namespace Workbench {
 	// Unity-style Project window over Assets/: folder tree left, tile grid right, breadcrumb
 	// top; double-click navigates folders and loads .scene/.bindsnap files into the editor.
 	// A footer slider scales the tiles; at its minimum the grid becomes a list. A BindSnap's tile drags out into
-	// the scene, and a Hierarchy row let go on the panel is saved into the folder it is over (App::saveAsBindSnap).
+	// the scene, as a scene's does, and a Hierarchy row let go on the panel is saved into the folder it is over
+	// (App::saveAsBindSnap).
 	class ProjectPanel : public Panel {
 	public:
 		ProjectPanel(std::function<void(const std::string&)> a_openScene, std::function<void(const std::string&, const MV::Point<int>&)> a_dropPrefab) :

@@ -397,13 +397,23 @@ namespace Workbench {
 
 		// A BindSnap's file as a linked node names it: what Node::make takes, with no "./" or "Assets/" before it.
 		std::string bindSnapSourceName(const std::filesystem::path& a_file) {
-			std::string name = a_file.generic_string();
-			for (const std::string lead : { "./", "Assets/" }) {
-				if (name.starts_with(lead)) {
-					name = name.substr(lead.size());
+			return MV::Scene::BindSnapInstance::sourceName(a_file.generic_string());
+		}
+
+		// Whether a node, or one under it, is linked to a file, its content built or not.
+		bool namesFile(const std::shared_ptr<MV::Scene::Node>& a_node, const std::string& a_sourceName, bool a_itself = true) {
+			if (a_itself) {
+				auto link = a_node->component<MV::Scene::BindSnapInstance>(false, false);
+				if (link && bindSnapSourceName(link->source()) == a_sourceName) {
+					return true;
 				}
 			}
-			return name;
+			for (auto&& child : *a_node) {
+				if (namesFile(child, a_sourceName)) {
+					return true;
+				}
+			}
+			return false;
 		}
 
 		// The link on a node whose file's content is on it.
@@ -450,13 +460,23 @@ namespace Workbench {
 		if (!parent || (linkOn(parent) == nullptr && contentLocked(parent, "place a BindSnap under"))) {
 			return;
 		}
+		const auto sourceName = bindSnapSourceName(a_fileName);
+		const auto documentName = documentPath.empty() ? std::string() : bindSnapSourceName(documentPath);
+		if (sourceName == documentName) {
+			messageLog->add(MessageLevel::WARNING, "Not placed: " + a_fileName + " is the file being edited, and would hold itself");
+			return;
+		}
 		try {
-			const auto sourceName = bindSnapSourceName(a_fileName);
 			auto placed = parent->make(unusedChildId(parent, "placing"));
 			auto link = placed->attach<MV::Scene::BindSnapInstance>(managers.services)->placeSource(sourceName);
 			if (!link->built()) {
 				parent->remove(placed);
 				throw std::runtime_error("the file could not be read");
+			}
+			if (!documentName.empty() && namesFile(placed, documentName, false)) {
+				parent->remove(placed);
+				messageLog->add(MessageLevel::WARNING, "Not placed: " + a_fileName + " holds the file being edited, which would then hold itself");
+				return;
 			}
 			placed->id(unusedChildId(parent, link->sourceRootId().empty() ? std::string("node") : link->sourceRootId()));
 			if (atPoint) {
@@ -1628,6 +1648,10 @@ namespace Workbench {
 		auto file = bindSnapFileFor(a_node, a_folder);
 		std::error_code ignored;
 		const auto kind = bindSnapDropKind(a_node, file);
+		if (!(kind == BindSnapDrop::ASK && a_onClash == BindSnapClash::NEW_ASSET) && namesFile(a_node, bindSnapSourceName(file), false)) {
+			messageLog->add(MessageLevel::WARNING, "Not saved: something in " + nodeLabel(a_node) + " is linked to " + file.generic_string() + ", which would then hold itself");
+			return {};
+		}
 		std::optional<CommandHistory::Group> steps;
 		if (!linkOn(a_node) || (kind == BindSnapDrop::ASK && a_onClash == BindSnapClash::NEW_ASSET)) {
 			steps.emplace(history, "save " + nodeLabel(a_node) + " as a BindSnap");

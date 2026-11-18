@@ -223,6 +223,39 @@ namespace mv_tests {
 				auto changedCopy = scene.node->clone();
 				check_true(at(changedCopy->get("Label", false), 50.0f, 60.0f), "and a clone carries what the instance had changed");
 			});
+
+			test("a file that links to itself, straight or through another, stops at that link", [] {
+				SceneHost host;
+				ScratchScene file;
+				auto crate = Node::make(host.renderer, "Crate");
+				crate->attach<Sprite>()->bounds(MV::size(40.0f, 40.0f));
+				// the file is not there yet, so this link is written unbuilt
+				crate->make("inner")->attach<BindSnapInstance>(host.services)->source(file.path);
+				crate->saveJai(file.path, host.services, false);
+
+				auto root = Node::make(host.renderer, "root");
+				auto placed = root->make("placed");
+				auto instance = placed->attach<BindSnapInstance>(host.services)->source(file.path);
+				auto inner = placed->get("inner", false);
+				check_true(instance->built() && inner && wide(placed->component<Sprite>(false, false).self(), 40.0f), "the file builds once");
+				auto innerLink = inner ? inner->component<BindSnapInstance>(false, false) : MV::Scene::SafeComponent<BindSnapInstance>();
+				check_true(innerLink && !innerLink->built() && inner->empty(), "and the link in it to the same file is left unbuilt");
+
+				ScratchScene first;
+				ScratchScene second;
+				auto one = Node::make(host.renderer, "One");
+				one->make("toSecond")->attach<BindSnapInstance>(host.services)->source(second.path);
+				one->saveJai(first.path, host.services, false);
+				auto two = Node::make(host.renderer, "Two");
+				two->make("toFirst")->attach<BindSnapInstance>(host.services)->source(first.path);
+				two->saveJai(second.path, host.services, false);
+				auto around = root->make("around");
+				check_true(around->attach<BindSnapInstance>(host.services)->source(first.path)->built(), "a file that comes back to itself through another builds");
+				auto toSecond = around->get("toSecond", false);
+				auto toFirst = toSecond ? toSecond->get("toFirst", false) : nullptr;
+				check_true(toSecond && toSecond->component<BindSnapInstance>(false, false)->built() && toFirst, "as far as the other file");
+				check_true(toFirst && !toFirst->component<BindSnapInstance>(false, false)->built() && toFirst->empty(), "and stops where it would start again");
+			});
 		}
 	};
 

@@ -395,6 +395,17 @@ namespace MV {
 			return result;
 		}
 
+		std::string BindSnapInstance::sourceName(const std::string& a_fileName) {
+			std::string result = a_fileName;
+			std::replace(result.begin(), result.end(), '\\', '/');
+			for (const std::string lead : { "./", "Assets/" }) {
+				if (result.starts_with(lead)) {
+					result = result.substr(lead.size());
+				}
+			}
+			return result;
+		}
+
 		std::shared_ptr<BindSnapInstance> BindSnapInstance::holding(const std::shared_ptr<Node>& a_node) {
 			if (!a_node) {
 				return nullptr;
@@ -414,6 +425,14 @@ namespace MV {
 		bool BindSnapInstance::build(bool a_takeRootTransform) {
 			if (isBuilt || sourceFile->empty() || !ownerIsAlive()) {
 				return isBuilt;
+			}
+			// a file that links to itself, straight or through others, would build without end: it stops here
+			for (auto above = owner()->parent(); above; above = above->parent()) {
+				auto outer = above->component<BindSnapInstance>(false, false);
+				if (outer && sourceName(outer->source()) == sourceName(sourceFile)) {
+					MV::error("BindSnapInstance [", owner()->id(), "] is left unbuilt: ", *sourceFile, " links to itself");
+					return false;
+				}
 			}
 			std::shared_ptr<Node> loaded;
 			try {

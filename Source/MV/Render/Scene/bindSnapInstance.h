@@ -38,7 +38,7 @@ namespace MV {
 		// an instance's overrides stay as they were loaded.
 		struct BindSnapTracking {};
 
-		// Links its node to a .bindsnap file. The file's root gives the node its components and children, which are
+		// Links its node to a file holding a node: a .bindsnap by convention, a .scene as well. The file's root gives the node its components and children, which are
 		// the node's own from then on but are not saved with it: the scene keeps the file's name and the overrides,
 		// the properties this instance holds its own value of. The node's id and transform are the instance's.
 		// Whatever else is put on the node (a component, a child of the node itself) is saved with the node as usual;
@@ -96,6 +96,8 @@ namespace MV {
 			// The file's components and children as they are on the node.
 			std::vector<std::shared_ptr<Component>> contentComponents() const;
 			std::vector<std::shared_ptr<Node>> contentChildren() const;
+			// A file's name as links compare it: forward slashes, and no "./" or "Assets/" before it.
+			static std::string sourceName(const std::string& a_fileName);
 			// The nearest instance whose content a node is, or is under; null for a node that is saved as it is.
 			static std::shared_ptr<BindSnapInstance> holding(const std::shared_ptr<Node>& a_node);
 

@@ -2252,6 +2252,39 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			}
 			expect(project.entryScreenPoint("note.txt").has_value(), "a file that appears in the folder shown gets a tile without being asked for");
 			expect(a_app.errors() == errorsBeforeVerbs, "none of which reports an error");
+
+			// a scene is placed as a BindSnap is, and no file comes to hold itself
+			auto rowOfRoot = [&]() {
+				a_app.hierarchy().refresh();
+				a_app.runFrames(3);
+				return a_app.hierarchy().rowScreenPoint(a_app.scene());
+			};
+			auto countBefore = childCount(a_app.scene());
+			if (auto rootRow = rowOfRoot()) {
+				a_app.dropPrefab(sceneInFolder.generic_string(), *rootRow);
+			}
+			expect(a_app.document() == sceneInFolder.string() && childCount(a_app.scene()) == countBefore, "the file being edited is not placed inside itself");
+			a_app.newScene();
+			if (auto rootRow = rowOfRoot()) {
+				a_app.dropPrefab(sceneInFolder.generic_string(), *rootRow);
+				a_app.runFrames(3);
+			}
+			auto placedScene = a_app.selected();
+			expect(placedScene && linkOf(placedScene) && linkOf(placedScene)->built() && childCount(placedScene) > 0 && linkOf(placedScene)->source() == sceneInFolder.generic_string(), "a scene is placed in another as a linked node, as a BindSnap is");
+
+			a_app.select(nullptr);
+			auto chestHolder = a_app.createChildNode();
+			chestHolder->id("Chest");
+			a_app.hierarchy().refresh();
+			a_app.select(chestHolder);
+			a_app.runFrames(3);
+			if (auto holderRow = a_app.hierarchy().rowScreenPoint(chestHolder)) {
+				a_app.dropPrefab((folder / "Chest.bindsnap").generic_string(), *holderRow);
+				a_app.runFrames(3);
+			}
+			auto chestBefore = MV::fileContents((folder / "Chest.bindsnap").generic_string(), true);
+			expect(childCount(chestHolder) == 1 && a_app.saveAsBindSnap(chestHolder, folder.generic_string()).empty() && MV::fileContents((folder / "Chest.bindsnap").generic_string(), true) == chestBefore && !linkOf(chestHolder), "a node is not saved over a file that something in it is linked to");
+			expect(a_app.errors() == errorsBeforeVerbs, "and each refusal is a warning, not an error");
 		}
 
 		project.showFolder("Assets");

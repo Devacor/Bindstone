@@ -261,6 +261,7 @@ def run_fixtures(exe, update, checks):
         ask("hover.doc_comment", "textDocument/hover", main_uri, main_text, "twice", 1, 0)
         ask("hover.enum_value", "textDocument/hover", main_uri, main_text, "green", 1, 0)
         ask("hover.host_fn", "textDocument/hover", main_uri, main_text, "to_string", 1, 0)
+        ask("hover.narrowed", "textDocument/hover", main_uri, main_text, "who.heal", 1, 0)
         ask("hover.param", "textDocument/hover", main_uri, main_text, "xs)", 2, 0)
         ask("hover.base_ref_method", "textDocument/hover", main_uri, main_text, "a.power", 1, 2)
         ask("definition.global", "textDocument/definition", main_uri, main_text, "LIMIT", 1, 0)

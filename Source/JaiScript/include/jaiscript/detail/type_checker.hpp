@@ -97,6 +97,7 @@ namespace jai {
         std::string_view cls{};            // object_k / class_ref_k / enum_ref_k
         const type_info* ti = nullptr;     // the declared type it came from, when there is one
         bool tentative = false;
+        bool narrowed = false;             // a flow test narrowed the name read here (its declaration says less)
         std::string name;
     };
 

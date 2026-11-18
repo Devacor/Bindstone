@@ -137,6 +137,10 @@ struct ctype {
     // The class a reference names (T&, auto& of a known class, a range-for variable over class elements): member diagnostics
     // read it, while the receiver keeps the proof pass's view (internal/static_checking.md "References")
     bool diagnostic_only = false;
+    // What a flow test proved of a variable declared wider (internal/static_checking.md "Flow narrowing"); open: the variable
+    // may hold a class the test did not name, so a member the narrowed class lacks is the run time's to answer
+    bool narrowed = false;
+    bool open = false;
     const expression* origin = nullptr; // this use's expression, for literal-only checks
     const type_info* yields = nullptr;  // coroutine_k: the declared type each yield converts to (null: undeclared)
 
@@ -318,6 +322,7 @@ public:
         return result;
     }
     bool host_function_signatures(const std::string& name, std::vector<engine::host_overload_signature>& out) const { note(name); return engine_.host_function_signatures(name, out); }
+    uint64_t host_function_writeback(const std::string& name) const { note(name); return engine_access::host_function_writeback(engine_, name); }
     // the script function declarations the engine holds at program scope under a name (an earlier unit's, one or an overload set)
     std::vector<std::shared_ptr<script_defined_function>> held_function_declarations(std::string_view name) const {
         note(name);
@@ -359,6 +364,7 @@ public:
     uint8_t math_alias_fn(uint64_t symbol) const { return engine_access::math_alias_fn(engine_, symbol); }
     const std::unordered_set<uint64_t>& builtin_method_ids(int kind) const { return engine_access::builtin_method_ids(engine_, kind); }
     type_info* get_type_info_object(const std::string& cls) const { return engine_access::get_type_info_object(engine_, cls); }
+    type_info* get_type_info_shared_ptr(type_info* pointee) const { return engine_access::get_type_info_shared_ptr(engine_, pointee); }
     type_info* get_type_info_int() const { return engine_access::get_type_info_int(engine_); }
     type_info* get_type_info_float() const { return engine_access::get_type_info_float(engine_); }
     type_info* get_type_info_bool() const { return engine_access::get_type_info_bool(engine_); }
@@ -437,7 +443,7 @@ public:
             warn_duplicate_top_level_functions();   // under the unit's [[warn_mode]] / [[strict_mode]]
             lw_open_region();
             for (const auto& d : decls_) {
-                walk_decl(d.get());
+                walk_listed(d.get());
             }
             lw_close_region(nullptr, &decls_, nullptr);
             scopes_.pop_back();
@@ -639,6 +645,18 @@ private:
         const type_info* pair_value = nullptr;      // a range-for map entry: the map's declared value type
         bool shared_name = false;         // an extern's or an inline declaration's name: the unit's top level may declare it again
         ctype::kind_t literal_elem = ctype::unknown;   // an auto declared with a uniform scalar array literal: the element kind the run types the array by
+        const void* narrow_key = nullptr;   // a local's, parameter's or loop variable's own declaration: the variable a flow test may narrow
+        bool capture_copy = false;          // a lambda's named by-value capture: its own snapshot of the variable
+        bool capture_alias = false;         // a lambda's named by-reference capture: the enclosing frame's storage
+    };
+
+    // What a call's arguments may bind to, for flow narrowing: a reference parameter may let the callee write the variable
+    struct narrow_callee {
+        bool copies = false;         // a library builtin: every argument is taken as a value
+        std::string_view host;       // a free function the engine holds under this name
+        bool resolved = false;       // a namespace entry: its declarations and its host write-back mask say it all
+        uint64_t writeback = 0;
+        std::vector<const function_decl*> declarations;
     };
 
     // A reference's (or an auto loop variable's) known class or typed container, for member diagnostics alone
@@ -3305,7 +3323,7 @@ private:
     // A host namespace entry with a declared signature (script_namespace_data::signatures): arity and argument kinds are
     // certainties the entry's own run-time check would raise; a unit that declares the namespace, or a script function of
     // the name, keeps the call lenient
-    ctype check_namespace_entry(const member_expr* m, const std::vector<ctype>& args, const source_location& loc) {
+    ctype check_namespace_entry(const member_expr* m, const std::vector<ctype>& args, const source_location& loc, narrow_callee& seen) {
         std::vector<std::string_view> segments;
         const expression* e = m->object.get();
         while (e && e->get_type() == node_type::member_expr) {
@@ -3319,6 +3337,8 @@ private:
         if (namespaces_.count(std::string_view(path))) {
             auto fit = namespace_fns_.find(qualified);
             if (fit == namespace_fns_.end()) { return {}; }
+            seen.resolved = !find_sclass(path) && !known_class(path);
+            seen.declarations = fit->second;
             if (find_sclass(path) || known_class(path)) {   // a class of the namespace's name answers with its statics too
                 check_namespace_function_nodiscard(qualified, fit->second);
                 return {};
@@ -3344,6 +3364,7 @@ private:
                     }
                 }
             }
+            seen.declarations.insert(seen.declarations.end(), foreign.begin(), foreign.end());
             ctype r = foreign.empty() ? check_script_overloads(qualified, own, args, loc).result
                                       : check_program_overloads(qualified, own, foreign, args, loc);
             check_namespace_function_nodiscard(qualified, fit->second);
@@ -3357,6 +3378,8 @@ private:
         if (auto fit = space->functions.find(member_id); fit != space->functions.end()) {
             std::vector<const function_decl*> decls;
             for (const auto& d : fit->second) { if (d) { decls.push_back(d.get()); } }
+            seen.resolved = !find_sclass(path) && !known_class(path);
+            seen.declarations = decls;
             // another unit's namespace functions, held from its run: an error only when none of them takes the call
             // (a unit of the program that declares the name may be reloading: the engine's declarations are then the old text's)
             if (!decls.empty() && collect_diagnostics_ && !has_dynamic_includes_ && !extra_global(qualified) && !find_sclass(path) && !known_class(path)) {
@@ -3364,6 +3387,11 @@ private:
             }
             check_namespace_function_nodiscard(qualified, decls);
             return {};
+        }
+        if (auto vit = space->variables.find(member_id); vit != space->variables.end() && vit->second.is_function()) {
+            const auto* w = vit->second.as_function().target<host_writeback_function>();
+            seen.resolved = true;
+            seen.writeback = w ? w->mask : 0;
         }
         auto sit = space->signatures.find(member_id);
         if (sit == space->signatures.end()) { return {}; }
@@ -4319,7 +4347,8 @@ private:
 
     // A T& parameter's argument: a primitive of exactly that kind, a class T or a subclass; unknown and var& / auto& pass; a const T&
     // binds a temporary T made from whatever a T parameter takes (C++)
-    bool reference_parameter_binds(const parameter& p, const ctype& arg) {
+    bool reference_parameter_binds(const parameter& p, const ctype& narrowed_arg) {
+        const ctype arg = narrow_declared_view(narrowed_arg);
         if (!p.type || arg.is_unknown()) { return true; }
         if (p.is_const && assignable(arg, ctype_from_type_info(p.type.get()))) { return true; }
         switch (p.type->base_type) {
@@ -4692,13 +4721,447 @@ private:
         report_no_overload(cls_name, c.ctors, args, loc, c.foreign);
     }
 
+    // -------------------------------------------------------------- flow narrowing
+    //
+    // A test of what a local holds (x instanceof T, reflect::is_a(x, "T"), type_of(x) == "int") gives the name that type where
+    // the test is known to have held: a fact on narrow_facts_, read by infer_identifier (a reference's by referent_receiver).
+    // narrow_end is everything that can give the variable another value. A fact changes no declaration and no run-time path:
+    // the proofs a narrowed read feeds select lanes that keep their run-time guards (internal/static_checking.md "Flow narrowing").
+
+    struct narrow_fact {
+        const void* key = nullptr;   // var_entry::narrow_key
+        ctype type;
+        bool referent = false;       // a reference's: member diagnostics read it and the proof view stays unknown
+        bool proof_only = false;     // a var's: the proof walk reads it, diagnostics keep the var (no load-time text changes)
+        bool dead = false;
+    };
+    struct narrow_event { const void* key; bool escape; };
+    enum class narrow_bound : uint8_t { alias, copy };
+    struct narrow_frame { size_t base; narrow_bound kind; };   // a body whose names at a lower scope index belong to an enclosing frame
+    std::vector<narrow_fact> narrow_facts_;
+    std::vector<narrow_event> narrow_ended_;               // every end, in walk order: a region reads what ended since its mark
+    std::unordered_set<const void*> narrow_escaped_;       // variables a reference may still reach
+    std::vector<narrow_frame> narrow_frames_;
+    std::unordered_set<const void*>* narrow_declared_ = nullptr;   // the declarations of a body being walked ahead
+    bool narrow_dry_ = false;                              // a loop or lambda body walked ahead for what it ends: nothing narrows, nothing is reported
+    bool narrow_in_list_ = false;                          // the statement about to be walked stands in a statement list
+    bool narrow_derived_ = false;                          // the initializer or return value just inferred read a narrowed name
+    size_t narrow_reads_ = 0;
+    const ctype* narrow_observed_ = nullptr;               // a var's narrowing the diagnostics walk does not read: the observer still sees it
+
+    // Program-scope and namespace variables are any function's to write
+    void narrow_declare(var_entry& entry, const void* key) {
+        if (scopes_.size() <= 1 || (!namespace_scopes_.empty() && namespace_scopes_.back() == scopes_.size() - 1)) { return; }
+        entry.narrow_key = key;
+        if (narrow_declared_) { narrow_declared_->insert(key); }
+    }
+
+    // Through a by-reference capture or a parallel body a name is the enclosing frame's storage, which that frame may write
+    // between two of this body's steps; through by-value captures alone it is a snapshot taken where the lambda was made
+    bool narrow_aliased(const var_entry& e, size_t scope_index) const {
+        if (e.capture_alias) { return true; }
+        return std::any_of(narrow_frames_.begin(), narrow_frames_.end(), [&](const narrow_frame& f) { return f.base > scope_index && f.kind == narrow_bound::alias; });
+    }
+    bool narrow_crosses(const var_entry& e, size_t scope_index) const {
+        if (e.capture_alias || e.capture_copy) { return true; }
+        for (const narrow_frame& f : narrow_frames_) { if (f.base > scope_index) { return true; } }
+        return false;
+    }
+
+    void narrow_apply(const narrow_event& ev) {
+        for (narrow_fact& f : narrow_facts_) { if (f.key == ev.key) { f.dead = true; } }
+        if (ev.escape) { narrow_escaped_.insert(ev.key); }
+    }
+    // The variable may hold another value from here on. escape: something that can write it may outlive this point (a reference
+    // a callee kept, a lambda that runs again), so it does not narrow again
+    void narrow_end(const var_entry& e, size_t scope_index, bool escape) {
+        if (!e.narrow_key) { return; }
+        const narrow_event ev{e.narrow_key, escape || narrow_crosses(e, scope_index)};
+        narrow_ended_.push_back(ev);
+        if (!narrow_dry_) { narrow_apply(ev); }
+    }
+    // The variables an expression names as storage: a name, a cast of one, an arm of a conditional, an assignment's target
+    template <class F>
+    void narrow_each_root(const expression* e, F&& f) {
+        if (!e) { return; }
+        switch (e->get_type()) {
+            case node_type::identifier_expr: {
+                auto* id = static_cast<const identifier_expr*>(e);
+                if (id->global_qualified) { return; }
+                size_t scope = 0;
+                if (const var_entry* v = find_local(id->name, &scope); v && v->narrow_key) { f(*v, scope); }
+                return;
+            }
+            case node_type::cast_expr: {
+                auto* c = static_cast<const cast_expr*>(e);
+                if (!c->instance_test) { narrow_each_root(c->operand.get(), f); }
+                return;
+            }
+            case node_type::ternary_expr:
+                narrow_each_root(static_cast<const ternary_expr*>(e)->then_expression.get(), f);
+                narrow_each_root(static_cast<const ternary_expr*>(e)->else_expression.get(), f);
+                return;
+            case node_type::assignment_expr:
+                narrow_each_root(static_cast<const assignment_expr*>(e)->target.get(), f);
+                return;
+            default:
+                return;
+        }
+    }
+    void narrow_end_roots(const expression* e, bool escape) {
+        narrow_each_root(e, [&](const var_entry& v, size_t scope) { narrow_end(v, scope, escape); });
+    }
+
+    const narrow_fact* narrow_live_fact(const var_entry& e, size_t scope_index) const {
+        if (narrow_facts_.empty() || !e.narrow_key) { return nullptr; }
+        for (auto it = narrow_facts_.rbegin(); it != narrow_facts_.rend(); ++it) {
+            if (it->key != e.narrow_key || it->dead) { continue; }
+            return narrow_aliased(e, scope_index) ? nullptr : &*it;
+        }
+        return nullptr;
+    }
+    const ctype* narrow_read(const var_entry& e, size_t scope_index, bool referent) {
+        const narrow_fact* fact = narrow_live_fact(e, scope_index);
+        if (!fact || fact->referent != referent) { return nullptr; }
+        if (fact->proof_only && !semantic_walk()) {
+            narrow_observed_ = &fact->type;
+            return nullptr;
+        }
+        ++narrow_reads_;
+        return &fact->type;
+    }
+
+    // A reference binds the variable, not the value it holds: a narrowed name binds as it is declared
+    ctype narrow_declared_view(const ctype& t) {
+        if (!t.narrowed || !t.origin || t.origin->get_type() != node_type::identifier_expr) { return t; }
+        const var_entry* e = find_local(static_cast<const identifier_expr*>(t.origin)->name);
+        if (!e) { return t; }
+        ctype result = e->dynamic ? ctype{} : e->type;
+        result.origin = t.origin;
+        return result;
+    }
+
+    // A local, parameter or loop variable this body may narrow: its own, with no reference left that could write it
+    const var_entry* narrow_target(const expression* operand, size_t& scope) {
+        if (!operand || operand->get_type() != node_type::identifier_expr) { return nullptr; }
+        auto* id = static_cast<const identifier_expr*>(operand);
+        if (id->global_qualified || extended_names_.count(id->name)) { return nullptr; }
+        const var_entry* e = find_local(id->name, &scope);
+        if (!e || !e->narrow_key || narrow_escaped_.count(e->narrow_key) || narrow_aliased(*e, scope)) { return nullptr; }
+        return e;
+    }
+
+    // What a passed class test tells of a variable, given what it is declared and already narrowed to. A declared class or handle
+    // narrows to the tested class as if declared so; a var or a reference to one may hold more than the test named (open)
+    bool narrow_class_fact(const var_entry& e, size_t scope, std::string_view cls, const std::vector<narrow_fact>& pending, narrow_fact& out) {
+        if (!find_sclass(cls) && !engine_class(cls)) { return false; }
+        // a reference, or an auto loop variable over class elements: its class is the referent member diagnostics read
+        const bool reference = e.is_reference || (e.dynamic && e.referent.kind == ctype::object_k);
+        if (!e.dynamic && e.type.kind != ctype::object_k) { return false; }
+        const ctype* held = nullptr;   // the narrowing in force: one this condition already gathered, else the live one
+        for (auto it = pending.rbegin(); it != pending.rend() && !held; ++it) { if (it->key == e.narrow_key) { held = &it->type; } }
+        if (!held) { if (const narrow_fact* live = narrow_live_fact(e, scope)) { held = &live->type; } }
+        if (held && held->kind != ctype::object_k) { return false; }
+        const ctype& declared = reference ? e.referent : e.type;
+        const bool declared_class = declared.kind == ctype::object_k && !declared.cls.empty() && (reference || !e.dynamic);
+        bool open = held ? held->open : !declared_class;
+        const std::string_view from = held ? held->cls : declared_class ? declared.cls : std::string_view{};
+        if (!from.empty()) {
+            if (from == cls) { return false; }
+            if (class_relation(cls, from) != 1) {
+                if (class_relation(from, cls) == 1) { return false; }   // tested for an ancestor: nothing new
+                open = true;   // an object of both: the first class's members stay possible
+            }
+        }
+        const type_info* object_type = eng_.get_type_info_object(std::string(cls));
+        if (!object_type) { return false; }
+        ctype t = ctype::object(object_type->type_name);
+        t.narrowed = true;
+        t.open = open;
+        out = narrow_fact{};
+        out.key = e.narrow_key;
+        if (reference) {
+            t.tentative = true;
+            t.diagnostic_only = true;
+            out.referent = true;
+        } else if (e.dynamic) {
+            t.tentative = true;   // a value or a handle, of this class or one derived from it
+            out.proof_only = true;
+        } else if (e.is_handle || (e.type.ti && e.type.ti->base_type == script_value_type::jai_shared_ptr_type)) {
+            t.ti = eng_.get_type_info_shared_ptr(const_cast<type_info*>(object_type));
+            t.tentative = e.type.tentative || open;
+        } else {
+            t.ti = object_type;
+            t.tentative = e.type.tentative || open;
+        }
+        out.type = t;
+        return true;
+    }
+    // type_of(x) == "int": a var holds exactly that kind
+    bool narrow_kind_fact(const var_entry& e, ctype::kind_t kind, narrow_fact& out) {
+        if (!e.dynamic || e.is_reference || e.alias.kind != ctype::unknown) { return false; }
+        out = narrow_fact{};
+        out.key = e.narrow_key;
+        out.type = ctype::make(kind);
+        out.type.narrowed = true;
+        out.proof_only = true;
+        return true;
+    }
+    bool narrow_builtin_type_of(const identifier_expr* id) {
+        const std::string name(id->name);
+        if (find_local(id->name) || functions_.count(id->name) || program_function(id->name)) { return false; }
+        if (class_ctx_ && lookup_member(class_ctx_name_, id->name, /*want_static=*/false).found) { return false; }
+        if (!id->global_qualified && !enclosing_namespace_member(id->name).empty()) { return false; }
+        return eng_.has_function(name) && eng_.held_function_declarations(id->name).empty();
+    }
+    static ctype::kind_t narrow_kind_name(std::string_view name) {
+        return name == "int" ? ctype::int_k : name == "float" ? ctype::float_k : name == "bool" ? ctype::bool_k
+             : name == "string" ? ctype::string_k : name == "char" ? ctype::char_k : ctype::unknown;
+    }
+    static bool narrow_text_literal(const expression* e, std::string& out) {
+        if (!e || e->get_type() != node_type::literal_expr) { return false; }
+        const script_value& v = static_cast<const literal_expr*>(e)->value;
+        if (v.type() != script_value_type::jai_string_type) { return false; }
+        out = std::string(v.unchecked_as_string());
+        return true;
+    }
+    void narrow_named_test(const expression* operand, const std::string& name, bool kinds, std::vector<narrow_fact>& out) {
+        size_t scope = 0;
+        const var_entry* e = narrow_target(operand, scope);
+        if (!e) { return; }
+        narrow_fact f;
+        const ctype::kind_t kind = kinds ? narrow_kind_name(name) : ctype::unknown;
+        if (kind != ctype::unknown ? narrow_kind_fact(*e, kind, f) : narrow_class_fact(*e, scope, name, out, f)) { out.push_back(f); }
+    }
+    static bool narrow_same(const narrow_fact& a, const narrow_fact& b) {
+        return a.key == b.key && a.referent == b.referent && a.type.kind == b.type.kind && a.type.cls == b.type.cls && a.type.ti == b.type.ti && a.type.open == b.type.open;
+    }
+    // The facts an expression's value implies when it is `sense`
+    void narrow_collect(const expression* e, bool sense, std::vector<narrow_fact>& out) {
+        if (!e) { return; }
+        stack_.guard(e->location);
+        switch (e->get_type()) {
+            case node_type::unary_expr: {
+                auto* u = static_cast<const unary_expr*>(e);
+                if (u->op.type == token_type::bang) { narrow_collect(u->operand.get(), !sense, out); }
+                return;
+            }
+            case node_type::binary_expr: {
+                auto* b = static_cast<const binary_expr*>(e);
+                const token_type op = b->op.type;
+                if (op == token_type::ampersand_ampersand || op == token_type::pipe_pipe) {
+                    if ((op == token_type::ampersand_ampersand) == sense) {   // both operands had that value
+                        narrow_collect(b->left.get(), sense, out);
+                        narrow_collect(b->right.get(), sense, out);
+                        return;
+                    }
+                    std::vector<narrow_fact> l, r;   // either may have: what both tell
+                    narrow_collect(b->left.get(), sense, l);
+                    if (!l.empty()) { narrow_collect(b->right.get(), sense, r); }
+                    for (const narrow_fact& a : l) {
+                        if (std::any_of(r.begin(), r.end(), [&](const narrow_fact& c) { return narrow_same(a, c); })) { out.push_back(a); }
+                    }
+                    return;
+                }
+                if ((op != token_type::equal_equal && op != token_type::bang_equal) || (op == token_type::equal_equal) != sense) { return; }
+                const expression* call = b->left.get();
+                const expression* text = b->right.get();
+                if (call && call->get_type() != node_type::call_expr) { std::swap(call, text); }
+                std::string name;
+                if (!call || call->get_type() != node_type::call_expr || !narrow_text_literal(text, name)) { return; }
+                auto* c = static_cast<const call_expr*>(call);
+                if (c->arguments.size() != 1 || !c->callee || c->callee->get_type() != node_type::identifier_expr) { return; }
+                auto* callee = static_cast<const identifier_expr*>(c->callee.get());
+                if (callee->name == "type_of" && narrow_builtin_type_of(callee)) { narrow_named_test(c->arguments[0].get(), name, /*kinds=*/true, out); }
+                return;
+            }
+            case node_type::cast_expr: {
+                auto* c = static_cast<const cast_expr*>(e);
+                if (c->instance_test && sense && c->target) { narrow_named_test(c->operand.get(), c->target->type_name, /*kinds=*/false, out); }
+                return;
+            }
+            case node_type::call_expr: {
+                auto* c = static_cast<const call_expr*>(e);
+                std::string name;
+                if (!sense || c->arguments.size() != 2 || !c->callee || c->callee->get_type() != node_type::member_expr) { return; }
+                auto* m = static_cast<const member_expr*>(c->callee.get());
+                if (static_path(m, "reflect") && m->member == "is_a" && narrow_text_literal(c->arguments[1].get(), name)) {
+                    narrow_named_test(c->arguments[0].get(), name, /*kinds=*/false, out);
+                }
+                return;
+            }
+            default:
+                return;
+        }
+    }
+    bool narrow_ended_since(size_t mark, const void* key) const {
+        for (size_t i = mark; i < narrow_ended_.size(); ++i) { if (narrow_ended_[i].key == key) { return true; } }
+        return false;
+    }
+    void narrow_drop_ended(std::vector<narrow_fact>& facts, size_t mark) {
+        std::erase_if(facts, [&](const narrow_fact& f) { return narrow_escaped_.count(f.key) != 0 || narrow_ended_since(mark, f.key); });
+    }
+    // What a condition evaluated since `mark` tells where it was true and where it was false; a variable the condition itself
+    // ended tells nothing
+    void narrow_conclude(const expression* condition, size_t mark, std::vector<narrow_fact>& when_true, std::vector<narrow_fact>& when_false) {
+        if (narrow_dry_ || !condition) { return; }
+        narrow_collect(condition, true, when_true);
+        narrow_collect(condition, false, when_false);
+        narrow_drop_ended(when_true, mark);
+        narrow_drop_ended(when_false, mark);
+    }
+    void narrow_push(const std::vector<narrow_fact>& facts) {
+        if (narrow_dry_) { return; }
+        for (const narrow_fact& f : facts) { if (!narrow_escaped_.count(f.key)) { narrow_facts_.push_back(f); } }
+    }
+    void narrow_pop(size_t held) {
+        if (narrow_facts_.size() > held) { narrow_facts_.erase(narrow_facts_.begin() + static_cast<std::ptrdiff_t>(held), narrow_facts_.end()); }
+    }
+    bool narrow_live() const {
+        return std::any_of(narrow_facts_.begin(), narrow_facts_.end(), [](const narrow_fact& f) { return !f.dead; });
+    }
+    static bool narrow_completes(const statement* s) {
+        return !s || (return_flow().analyze(s).paths & (return_flow::normal | return_flow::maybe_normal)) != 0;
+    }
+    // a break that leaves this loop: its condition was not false on the way out
+    bool narrow_breaks(const ast_node* n) {
+        if (!n) { return false; }
+        stack_.guard(n->location);
+        switch (n->get_type()) {
+            case node_type::break_stmt: return true;
+            case node_type::while_stmt: case node_type::for_stmt: case node_type::range_for_stmt: case node_type::parallel_for_stmt:
+            case node_type::function_decl: case node_type::class_decl: case node_type::namespace_decl:
+                return false;
+            default: break;
+        }
+        if (n->get_type() < node_type::expression_stmt) { return false; }
+        bool found = false;
+        lw_each_child(n, [&](const ast_node* k) { found = found || narrow_breaks(k); });
+        return found;
+    }
+    // whether a body tests what a variable holds
+    bool narrow_has_test(const ast_node* n) {
+        if (!n) { return false; }
+        stack_.guard(n->location);
+        const node_type t = n->get_type();
+        bool found = false;
+        if (t < node_type::expression_stmt) {
+            auto* e = static_cast<const expression*>(n);
+            if (t == node_type::cast_expr && static_cast<const cast_expr*>(e)->instance_test) { return true; }
+            if (t == node_type::call_expr) {
+                const expression* callee = static_cast<const call_expr*>(e)->callee.get();
+                if (callee && callee->get_type() == node_type::identifier_expr && static_cast<const identifier_expr*>(callee)->name == "type_of") { return true; }
+                if (callee && callee->get_type() == node_type::member_expr && static_cast<const member_expr*>(callee)->member == "is_a") { return true; }
+            }
+            if (t == node_type::lambda_expr && narrow_has_test(static_cast<const lambda_expr*>(e)->body.get())) { return true; }
+            for_each_child_expression(e, [&](const expression* k) { found = found || narrow_has_test(k); });
+            return found;
+        }
+        if (t == node_type::class_decl || t == node_type::namespace_decl) { return false; }
+        if (t == node_type::try_stmt && !static_cast<const try_stmt*>(n)->clause_types.empty()) { return true; }
+        lw_each_child(n, [&](const ast_node* k) { found = found || narrow_has_test(k); });
+        return found;
+    }
+    bool narrow_wants_ahead(const ast_node* body) { return !narrow_dry_ && (narrow_live() || narrow_has_test(body)); }
+
+    // A loop's body runs again after anything in it, and a lambda's body runs later and more than once: what the body ends for a
+    // variable declared outside it is ended before the body is walked. The body is walked ahead with nothing narrowed, so every
+    // call resolves by declared types alone, and nothing reported or stamped.
+    template <class F>
+    std::vector<narrow_event> narrow_walk_ahead(const void* own_variable, F&& walk) {
+        std::vector<narrow_event> ended;
+        std::unordered_set<const void*> declared;
+        {
+            const proof_mode proofs = std::exchange(proofs_, proof_mode::leave);
+            const bool collecting = std::exchange(collect_diagnostics_, false);
+            check_observer* const observer = std::exchange(observer_, nullptr);
+            std::vector<narrow_fact> facts = std::exchange(narrow_facts_, {});
+            std::vector<narrow_event> log = std::exchange(narrow_ended_, {});
+            std::unordered_set<const void*>* const outer_declared = std::exchange(narrow_declared_, &declared);
+            const mixed_ternary_note mixed = last_mixed_ternary_;
+            std::optional<fn_ctx> function;
+            if (!fn_stack_.empty()) { function = fn_stack_.back(); }
+            const bool in_list = std::exchange(narrow_in_list_, false);
+            const bool derived = narrow_derived_;
+            const size_t reads = narrow_reads_;
+            narrow_dry_ = true;
+            scopes_.emplace_back();
+            walk();
+            scopes_.pop_back();
+            narrow_dry_ = false;
+            narrow_reads_ = reads;
+            narrow_derived_ = derived;
+            narrow_in_list_ = in_list;
+            if (function) { fn_stack_.back() = std::move(*function); }
+            last_mixed_ternary_ = mixed;
+            narrow_declared_ = outer_declared;
+            ended = std::exchange(narrow_ended_, std::move(log));
+            narrow_facts_ = std::move(facts);
+            observer_ = observer;
+            collect_diagnostics_ = collecting;
+            proofs_ = proofs;
+        }
+        std::erase_if(ended, [&](const narrow_event& ev) { return ev.key == own_variable || declared.count(ev.key) != 0; });
+        for (const narrow_event& ev : ended) { narrow_apply(ev); }
+        return ended;
+    }
+
+    // An argument that names a variable outright may bind to a reference the callee, or something the callee keeps, writes
+    // through. A parameter declared by value or const&, a host parameter that writes nothing back and a library builtin take
+    // the value; a callee the checker cannot see may take anything.
+    bool narrow_binds_reference(const call_expr* c, size_t i, const std::vector<const function_decl*>* ov, const narrow_callee& seen) {
+        if (seen.copies) { return false; }
+        const auto by_reference = [i](const function_decl* fn) {
+            return fn && !fn->is_coroutine && i < fn->parameters.size() && fn->parameters[i].is_reference && !fn->parameters[i].is_const;
+        };
+        if (ov) {
+            if (std::any_of(ov->begin(), ov->end(), by_reference)) { return true; }
+            if (ov_class_.empty() || !c->callee) { return false; }
+            const std::string_view name = c->callee->get_type() == node_type::member_expr ? std::string_view(static_cast<const member_expr*>(c->callee.get())->member)
+                                        : c->callee->get_type() == node_type::identifier_expr ? std::string_view(static_cast<const identifier_expr*>(c->callee.get())->name)
+                                        : std::string_view{};
+            const auto overrides = overrides_of(ov_class_, name);
+            return std::any_of(overrides.begin(), overrides.end(), by_reference);
+        }
+        if (seen.resolved) {
+            return std::any_of(seen.declarations.begin(), seen.declarations.end(), by_reference) || i >= 64 || ((seen.writeback >> i) & 1) != 0;
+        }
+        if (seen.host.empty()) { return true; }
+        for (const auto& held : eng_.held_function_declarations(seen.host)) {
+            if (!held) { return true; }
+            const auto& parameters = held->parameters();
+            if (i < parameters.size() && parameters[i].is_reference && !parameters[i].is_const) { return true; }
+        }
+        return i >= 64 || ((eng_.host_function_writeback(std::string(seen.host)) >> i) & 1) != 0;
+    }
+    // A call may write the variable a reference aliases (a global, a field, a container element): a reference's narrowing ends
+    void narrow_end_references() {
+        for (narrow_fact& f : narrow_facts_) {
+            if (!f.referent || f.dead) { continue; }
+            narrow_ended_.push_back({f.key, false});
+            if (!narrow_dry_) { f.dead = true; }
+        }
+    }
+    void narrow_call_arguments(const call_expr* c, const std::vector<const function_decl*>* ov, const narrow_callee& seen) {
+        if (!seen.copies) { narrow_end_references(); }
+        for (size_t i = 0; i < c->arguments.size(); ++i) {
+            int binds = -1;
+            narrow_each_root(c->arguments[i].get(), [&](const var_entry& v, size_t scope) {
+                if (binds < 0) { binds = narrow_binds_reference(c, i, ov, seen) ? 1 : 0; }
+                if (binds == 1) { narrow_end(v, scope, /*escape=*/true); }
+            });
+        }
+    }
+
     // -------------------------------------------------------------- expressions
 
     JAI_NOINLINE ctype infer(expression* e) {
         if (e) { stack_.guard(e->location); }
+        narrow_observed_ = nullptr;
         ctype result = infer_impl(e);
         result.origin = e;
-        if (observer_ && e) { observe(e, result); }
+        if (observer_ && e) { observe(e, narrow_observed_ && e->get_type() == node_type::identifier_expr ? *narrow_observed_ : result); }
+        narrow_observed_ = nullptr;
         if (e && lw_on()) { lw_types_[e] = result; }
         return result;
     }
@@ -4710,6 +5173,7 @@ private:
         view.cls = t.cls;
         view.ti = t.ti;
         view.tentative = t.tentative;
+        view.narrowed = t.narrowed;
         view.name = ctype_name(t);
         observer_->expression_type(e, view);
     }
@@ -4784,8 +5248,17 @@ private:
     }
 
     JAI_NOINLINE ctype infer_binary(binary_expr* b) {
+        const size_t mark = narrow_ended_.size();
         ctype l = infer(b->left.get());
+        const size_t held = narrow_facts_.size();
+        if ((b->op.type == token_type::ampersand_ampersand || b->op.type == token_type::pipe_pipe) && !narrow_dry_) {
+            std::vector<narrow_fact> decided;   // the right operand runs only where the left was true (&&) or false (||)
+            narrow_collect(b->left.get(), b->op.type == token_type::ampersand_ampersand, decided);
+            narrow_drop_ended(decided, mark);
+            narrow_push(decided);
+        }
         ctype r = infer(b->right.get());
+        narrow_pop(held);
         return binary_type(b, l, r);
     }
 
@@ -4972,6 +5445,7 @@ private:
                 return is_numeric(operand.kind) || (operand.kind == ctype::math_k && u->op.type == token_type::plus) ? plain_int(operand) : ctype{};
             case token_type::plus_plus:
             case token_type::minus_minus:
+                narrow_end_roots(u->operand.get(), /*escape=*/false);
                 check_incdec_target(u);
                 if (incdec_refused(operand) || (enum_value(operand) && !operand.tentative)) {
                     diag(diag_level::error, u->location, std::string("cannot apply '") + (u->op.type == token_type::plus_plus ? "++" : "--") + "' to '" + ctype_name(operand) + "'");
@@ -4998,10 +5472,18 @@ private:
         std::vector<ctype> args;
         for (auto& a : n->arguments) { args.push_back(infer(a.get())); }
         ctype t = ctype_from_type_info(n->type.get());
+        const sclass* made = t.kind == ctype::object_k ? find_sclass(t.cls) : nullptr;
+        narrow_end_references();   // a constructor runs code
+        for (size_t i = 0; i < n->arguments.size(); ++i) {   // a constructor's reference parameter, or a host constructor's
+            const bool binds = !made || std::any_of(made->ctors.begin(), made->ctors.end(), [i](const function_decl* fn) {
+                return i < fn->parameters.size() && fn->parameters[i].is_reference && !fn->parameters[i].is_const;
+            });
+            if (binds) { narrow_end_roots(n->arguments[i].get(), /*escape=*/true); }
+        }
         if (t.kind == ctype::object_k) {
             if (n->type && n->type->base_type == script_value_type::jai_shared_ptr_type) { note_handle_held(t.cls, n->location); }
-            if (const sclass* c = find_sclass(t.cls)) {
-                check_ctor_call(t.cls, *c, args, n->location);
+            if (made) {
+                check_ctor_call(t.cls, *made, args, n->location);
             } else {
                 check_strict_host_constructor(std::string(t.cls), args, n->location);
             }
@@ -5020,13 +5502,24 @@ private:
     }
 
     JAI_NOINLINE ctype infer_ternary(ternary_expr* t) {
+        const size_t mark = narrow_ended_.size();
         infer(t->condition.get());
+        std::vector<narrow_fact> when_true, when_false;
+        narrow_conclude(t->condition.get(), mark, when_true, when_false);
+        const size_t held = narrow_facts_.size();
+        narrow_push(when_true);
         ctype a = infer(t->then_expression.get());
+        narrow_pop(held);
+        narrow_push(when_false);
         ctype b = infer(t->else_expression.get());
+        narrow_pop(held);
         if (a.kind == b.kind && a.cls == b.cls) {
+            if (!mixed_ternaries_.empty()) { mixed_ternaries_.erase(t); }   // a walk ahead judged the arms by their declared types
             if (a.ti != b.ti) { a.ti = nullptr; }   // two spellings (value vs handle) are not one certain type
             a.tentative = a.tentative || b.tentative;
             a.const_key = a.const_key || b.const_key;
+            a.narrowed = a.narrowed && b.narrowed;
+            a.open = a.open || b.open;
             return a;
         }
         if (!a.is_unknown() && !b.is_unknown() && a.kind != ctype::null_k && b.kind != ctype::null_k) {   // a T-or-null arm pair is a nullable value, never a type mix
@@ -5080,7 +5573,7 @@ private:
             diag(diag_level::error, c->location, "unknown type '" + name + "'");
             return result;
         }
-        if (operand.tentative || operand.is_unknown()) { return result; }
+        if (operand.tentative || operand.is_unknown() || operand.narrowed) { return result; }
         switch (operand.kind) {
             case ctype::int_k: case ctype::float_k: case ctype::bool_k: case ctype::char_k: case ctype::string_k: case ctype::utf8_k:
             case ctype::array_k: case ctype::map_k: case ctype::math_k: case ctype::function_k:
@@ -5155,6 +5648,7 @@ private:
                         std::string(id->name) + "'; name it or use [=] or [&]", local->line, local->column);
                 }
             }
+            if (const ctype* narrowed = narrow_read(*local, scope_index, /*referent=*/false)) { return *narrowed; }
             return local->dynamic ? (local->alias.kind != ctype::unknown ? local->alias : ctype{}) : local->type;
         }
         if (class_ctx_ && !id->global_qualified) {
@@ -5262,8 +5756,11 @@ private:
             case node_type::identifier_expr: {
                 const auto* id = static_cast<const identifier_expr*>(e);
                 if (extended_names_.count(id->name)) { return {}; }
-                const var_entry* local = find_named(id);
-                return local ? local->referent : ctype{};
+                size_t scope_index = 0;
+                const var_entry* local = find_named(id, &scope_index);
+                if (!local) { return {}; }
+                if (const ctype* narrowed = narrow_read(*local, scope_index, /*referent=*/true)) { return *narrowed; }
+                return local->referent;
             }
             case node_type::member_expr: {
                 const auto* m = static_cast<const member_expr*>(e);
@@ -5399,7 +5896,7 @@ private:
             if (hit.field && (hit.field->type || hit.field->function_spelling)) { return member_type(hit); }
             return {};
         }
-        if (!hit.certain) { return {}; }
+        if (!hit.certain || recv.open) { return {}; }
         if (stale_shape_receiver(recv, m->object.get())) { return {}; }
         if (!want_static) {
             if (ctype t; handle_builtin_result(m->member, t)) { return {}; }   // builtin as a value: lenient
@@ -5453,7 +5950,9 @@ private:
         const std::vector<const function_decl*>* ov = nullptr;   // the statically resolved same-script overload set
         ov_class_ = {};
         nodiscard_hit_ = {};
-        ctype t = infer_call_impl(c, args, ov);
+        narrow_callee seen;
+        ctype t = infer_call_impl(c, args, ov, seen);
+        narrow_call_arguments(c, ov, seen);
         t = check_call(c, args, ov, std::move(t));
         if (!nodiscard_hit_.name.empty() && collect_diagnostics_) { nodiscard_calls_[c] = std::move(nodiscard_hit_); }
         nodiscard_hit_ = {};
@@ -5679,7 +6178,7 @@ private:
         return true;
     }
 
-    ctype infer_call_impl(call_expr* c, const std::vector<ctype>& args, const std::vector<const function_decl*>*& ov) {
+    ctype infer_call_impl(call_expr* c, const std::vector<ctype>& args, const std::vector<const function_decl*>*& ov, narrow_callee& seen) {
         expression* callee = c->callee.get();
         if (callee->get_type() == node_type::identifier_expr) {
             auto* id = static_cast<identifier_expr*>(callee);
@@ -5751,6 +6250,7 @@ private:
                 return object_of(id->name);   // registered class ctor: args lenient unless the host class is strict
             }
             if (eng_.has_function(name)) {
+                seen.host = id->name;
                 note_global_use(id->name);
                 note_host_nodiscard(name);
                 check_constant_arguments(name, name, c);
@@ -5794,13 +6294,14 @@ private:
                 }
                 if (fn != math_fn::none && !detail::math_arity_accepts(fn, args.size())) { return {}; }   // the kernel raises the table's text
                 if (fn != math_fn::none && args.size() <= 8) {
+                    seen.copies = true;
                     checkMathShapes(m, c, args);
                     return math_intrinsic_result(fn, args);
                 }
                 if (ctype t; library_namespace_call(c, m, args, t)) { return t; }
                 if (namespace_path_receiver(m)) {
                     check_namespace_member(m);
-                    return check_namespace_entry(m, args, c->location);
+                    return check_namespace_entry(m, args, c->location, seen);
                 }
             }
             ctype recv = declared_container_receiver(m->object.get(), infer(m->object.get()));
@@ -5857,6 +6358,7 @@ private:
                     proven = v->builtin_alias == ctype::string_k ? 1 : v->builtin_alias == ctype::array_k ? 2 : v->builtin_alias == ctype::map_k ? 3 : 0;
                 }
             }
+            seen.copies = proven != 0;   // the library's string, array and map methods
             if (!recv.tentative && !m->is_static) {
                 scalar_member_missing(recv, m, true);
                 check_builtin_member(recv, m);
@@ -5949,6 +6451,7 @@ private:
         }
         if (!want_static) {
             if (ctype t; handle_builtin_result(m->member, t)) {
+                if (m->member == "reset") { narrow_end_roots(m->object.get(), /*escape=*/false); }   // the handle names another object, or none
                 if (m->member == "reset" && !c->arguments.empty()) { check_handle_reset(c, m, recv, args); }
                 if (recv.ti && recv.ti->base_type == script_value_type::jai_shared_ptr_type && !recv.tentative) { in_place_result_used(recv, m, c); }
                 return t;
@@ -5959,7 +6462,7 @@ private:
             report_cdtor_call(m->member, m->location)) {
             return {};
         }
-        if (hit.certain) {
+        if (hit.certain && !recv.open) {
             size_t rl = 0, rc = 0;
             if (auto it = classes_.find(recv.cls); it != classes_.end()) {
                 rl = it->second.decl->location.line;
@@ -6006,6 +6509,7 @@ private:
             size_t scope_index = 0;
             if (var_entry* local = find_named(id, &scope_index)) {
                 if (scope_index == 0) { note_global_use(id->name); }   // top-level var write
+                narrow_end(*local, scope_index, /*escape=*/false);
                 if (rhs.const_key && local->is_handle && !compound) { map_key_alias(a->location, a->value.get()); return done(rhs); }
                 if (const type_info* referent = !local->is_reference || !local->declared ? nullptr
                                                 : local->declared->is_reference() ? local->declared->element_type().get() : local->declared) {
@@ -6162,6 +6666,7 @@ private:
             }
         }
         if (detail::reference_target(target)) {
+            narrow_end_roots(target, /*escape=*/true);
             // cast<T&>(e) (its operand already is a T), f() returning T&, a conditional of lvalues, an assignment: the store
             // checks against the referent's type; a call the checker resolves to by-value overloads only names no storage
             if (target->get_type() == node_type::call_expr && call_returns_by_value(static_cast<call_expr*>(target))) {
@@ -7549,9 +8054,61 @@ private:
 
     // -------------------------------------------------------------- statements
 
+    // A statement of a list: an if or a loop that leaves the list on one outcome narrows the statements after it
+    void walk_listed(declaration* d) {
+        narrow_in_list_ = true;
+        walk_decl(d);
+        narrow_in_list_ = false;
+    }
+
+    JAI_NOINLINE void walk_while(while_stmt* w, bool in_list) {
+        const size_t mark = narrow_ended_.size();
+        infer(w->condition.get());
+        const size_t tested = narrow_ended_.size();
+        std::vector<narrow_fact> when_true, when_false;
+        narrow_conclude(w->condition.get(), mark, when_true, when_false);
+        const size_t held = narrow_facts_.size();
+        narrow_push(when_true);
+        walk_stmt(w->body.get());
+        narrow_pop(held);
+        narrow_after_loop(w->body.get(), in_list, mark, tested, when_false);
+    }
+    // After a loop its condition was false, unless a break left it; the body's own ends came before the last test
+    void narrow_after_loop(const statement* body, bool in_list, size_t mark, size_t tested, std::vector<narrow_fact>& when_false) {
+        if (!in_list || when_false.empty() || narrow_dry_ || narrow_breaks(body)) { return; }
+        std::erase_if(when_false, [&](const narrow_fact& f) {
+            for (size_t i = mark; i < tested && i < narrow_ended_.size(); ++i) { if (narrow_ended_[i].key == f.key) { return true; } }
+            return false;
+        });
+        narrow_push(when_false);
+    }
+
+    JAI_NOINLINE void walk_if(if_stmt* i, bool in_list) {
+        const size_t mark = narrow_ended_.size();
+        infer(i->condition.get());
+        std::vector<narrow_fact> when_true, when_false;
+        narrow_conclude(i->condition.get(), mark, when_true, when_false);
+        const size_t held = narrow_facts_.size();
+        narrow_push(when_true);
+        walk_stmt(i->then_statement.get());
+        narrow_pop(held);
+        narrow_push(when_false);
+        walk_stmt(i->else_statement.get());
+        narrow_pop(held);
+        if (!in_list || (when_true.empty() && when_false.empty())) { return; }
+        // one branch leaves (return, throw, break, continue): the statements after the if run only on the other outcome
+        const bool then_leaves = !narrow_completes(i->then_statement.get());
+        const bool else_leaves = i->else_statement && !narrow_completes(i->else_statement.get());
+        if (then_leaves == else_leaves) { return; }
+        std::vector<narrow_fact>& after = then_leaves ? when_false : when_true;
+        narrow_drop_ended(after, mark);
+        narrow_push(after);
+    }
+
     JAI_NOINLINE void walk_stmt(statement* s) {
         if (!s) { return; }
         stack_.guard(s->location);
+        const bool in_list = std::exchange(narrow_in_list_, false);
         mode_guard region(mode_stack_, s->check_mode_attr, /*scoped=*/false);
         switch (s->get_type()) {
             case node_type::expression_stmt:
@@ -7562,26 +8119,24 @@ private:
             case node_type::block_stmt: {
                 auto* b = static_cast<block_stmt*>(s);
                 mode_guard block(mode_stack_, leading_mode(b->declarations), /*scoped=*/true);
+                const size_t held = narrow_facts_.size();
                 scopes_.emplace_back();
-                for (auto& d : b->declarations) { walk_decl(d.get()); }
+                for (auto& d : b->declarations) { walk_listed(d.get()); }
                 scopes_.pop_back();
+                narrow_pop(held);
                 break;
             }
-            case node_type::if_stmt: {
-                auto* i = static_cast<if_stmt*>(s);
-                infer(i->condition.get());
-                walk_stmt(i->then_statement.get());
-                walk_stmt(i->else_statement.get());
+            case node_type::if_stmt:
+                walk_if(static_cast<if_stmt*>(s), in_list);
                 break;
-            }
             case node_type::while_stmt: {
                 auto* w = static_cast<while_stmt*>(s);
-                infer(w->condition.get());
-                walk_stmt(w->body.get());
+                if (narrow_wants_ahead(w)) { narrow_walk_ahead(nullptr, [&] { walk_while(w, false); }); }
+                walk_while(w, in_list);
                 break;
             }
             case node_type::for_stmt:
-                walk_for(static_cast<for_stmt*>(s));
+                walk_for(static_cast<for_stmt*>(s), in_list);
                 break;
             case node_type::range_for_stmt:
                 walk_range_for(static_cast<range_for_stmt*>(s));
@@ -7610,13 +8165,33 @@ private:
         }
     }
 
-    JAI_NOINLINE void walk_for(for_stmt* f) {
+    JAI_NOINLINE void walk_for(for_stmt* f, bool in_list) {
         scopes_.emplace_back();
         if (lw_on()) { lw_modes_[f] = region_mode(); }
         if (f->initializer) { walk_decl(f->initializer.get()); }
-        if (f->condition) { infer(f->condition.get()); }
-        if (f->update) { infer(f->update.get()); }
-        walk_stmt(f->body.get());
+        std::vector<narrow_event> ended;   // what the loop ends anywhere: the update runs after the body
+        const auto turns = [&](bool listed) {
+            const size_t mark = narrow_ended_.size();
+            if (f->condition) { infer(f->condition.get()); }
+            const size_t tested = narrow_ended_.size();
+            std::vector<narrow_fact> when_true, when_false;
+            narrow_conclude(f->condition.get(), mark, when_true, when_false);
+            const size_t held = narrow_facts_.size();
+            if (f->update) {
+                for (const narrow_fact& fact : when_true) {
+                    const bool kept = std::none_of(ended.begin(), ended.end(), [&](const narrow_event& ev) { return ev.key == fact.key; });
+                    if (kept) { narrow_push({fact}); }
+                }
+                infer(f->update.get());
+                narrow_pop(held);
+            }
+            narrow_push(when_true);
+            walk_stmt(f->body.get());
+            narrow_pop(held);
+            narrow_after_loop(f->body.get(), listed, mark, tested, when_false);
+        };
+        if (narrow_wants_ahead(f)) { ended = narrow_walk_ahead(nullptr, [&] { turns(false); }); }
+        turns(in_list);
         scopes_.pop_back();
     }
 
@@ -7625,7 +8200,9 @@ private:
         return t && t->base_type == script_value_type::jai_object_type && !t->type_name.empty() ? t : nullptr;
     }
     JAI_NOINLINE void walk_range_for(range_for_stmt* f) {
+        const size_t reads = narrow_reads_;
         const ctype container = enum_table(infer(f->container.get()));
+        const bool narrowed_container = narrow_reads_ != reads;
         if (f->binds_map_entry && !container.tentative && !container.is_unknown() && container.kind != ctype::map_k && container.kind != ctype::coroutine_k) {   // for (auto [k, v] : x)
             diag(diag_level::error, f->container->location, "a structured binding takes a map's entries, its key and value: cannot bind '" +
                  ctype_name(container) + "' to " + detail::map_entry_binding_spelling(*f));
@@ -7646,7 +8223,7 @@ private:
             if (elem.is_unknown()) { f->element_type = eng_.get_type_info_any(); }
         }
         const bool declared = f->element_type && f->element_type->base_type != script_value_type::jai_any_type && !f->auto_spelled;
-        stamp(f->element_conversion_free, !declared || (!elem.is_unknown() && same_type(ctype_from_type_info(f->element_type.get()), elem)), false);
+        stamp(f->element_conversion_free, !declared || (!narrowed_container && !elem.is_unknown() && same_type(ctype_from_type_info(f->element_type.get()), elem)), false);
         if (declared && !f->is_reference && !elem.is_unknown() && !assignable(elem, ctype_from_type_info(f->element_type.get()))) {
             const ctype slot = ctype_from_type_info(f->element_type.get());   // each element initializes the variable as a declaration would
             diag(diag_level::error, f->location, "cannot initialize '" + std::string(f->variable_name) + "' declared '" + f->element_type->canonical_name() +
@@ -7715,7 +8292,9 @@ private:
         if (loop_const && !entry.map_pair && !container.tentative) { entry.const_element = value_class_type(elem.ti); }
         if (entry.map_pair && container.ti && !container.tentative) { entry.pair_value = container.ti->value_type().get(); }
         warn_shadow("range-for variable", f->variable_name, f->location);
+        if (!entry.map_pair) { narrow_declare(entry, f); }
         scopes_.back().emplace(f->variable_name, std::move(entry));
+        if (narrow_wants_ahead(f->body.get())) { narrow_walk_ahead(f, [&] { walk_stmt(f->body.get()); }); }
         walk_stmt(f->body.get());
         scopes_.pop_back();
     }
@@ -7759,7 +8338,9 @@ private:
         }
         for (const auto& c : f->extra_containers) { infer(c.get()); }
         ++parallel_body_depth_;
+        narrow_frames_.push_back({scopes_.size() - 1, narrow_bound::alias});   // every worker shares the enclosing frame's variables
         walk_stmt(f->body.get());
+        narrow_frames_.pop_back();
         --parallel_body_depth_;
         scopes_.pop_back();
     }
@@ -7767,13 +8348,22 @@ private:
     JAI_NOINLINE void walk_try(try_stmt* t) {
         walk_stmt(t->try_block.get());
         scopes_.emplace_back();
+        const size_t held = narrow_facts_.size();
         if (!t->catch_var.empty()) {
             var_entry entry;
             entry.dynamic = true;
             warn_shadow("catch variable", t->catch_var, t->location);
-            scopes_.back().emplace(std::string_view(t->catch_var), std::move(entry));
+            narrow_declare(entry, t);
+            const auto caught = scopes_.back().emplace(std::string_view(t->catch_var), std::move(entry)).first;
+            if (t->clause_types.size() == 1 && !narrow_dry_) {   // catch (T e): the handler runs for a T alone
+                narrow_fact fact;
+                const ctype::kind_t kind = narrow_kind_name(t->clause_types[0]);
+                if (kind != ctype::unknown ? narrow_kind_fact(caught->second, kind, fact)
+                                           : narrow_class_fact(caught->second, scopes_.size() - 1, t->clause_types[0], {}, fact)) { narrow_push({fact}); }
+            }
         }
         walk_stmt(t->catch_block.get());
+        narrow_pop(held);
         scopes_.pop_back();
     }
 
@@ -7782,14 +8372,18 @@ private:
         for (auto& cs : sw->cases) {
             const ctype value = infer(cs->value.get());
             stamp(cs->static_operand_class, operand_class_of(condition, value), operand_class_unknown);
+            const size_t held = narrow_facts_.size();
             scopes_.emplace_back();
-            for (auto& st : cs->body) { walk_stmt(st.get()); }
+            for (auto& st : cs->body) { narrow_in_list_ = true; walk_stmt(st.get()); narrow_in_list_ = false; }
             scopes_.pop_back();
+            narrow_pop(held);
         }
         if (sw->default_case) {
+            const size_t held = narrow_facts_.size();
             scopes_.emplace_back();
-            for (auto& st : sw->default_case->body) { walk_stmt(st.get()); }
+            for (auto& st : sw->default_case->body) { narrow_in_list_ = true; walk_stmt(st.get()); narrow_in_list_ = false; }
             scopes_.pop_back();
+            narrow_pop(held);
         }
     }
 
@@ -7802,8 +8396,13 @@ private:
     }
 
     JAI_NOINLINE void check_return_impl(return_stmt* r, uint8_t& proof) {
+        const size_t reads = narrow_reads_;
         const ctype value = r->value ? infer(r->value.get()) : ctype::make(ctype::null_k);
+        // the return proof has a reader with no run-time guard (parallel_transform's rewrite): a narrowed read stays out of it
+        narrow_derived_ = narrow_reads_ != reads;
         check_return_value(r, value, proof);
+        if (narrow_derived_) { proof = proof_none; }
+        narrow_derived_ = false;
     }
 
     // An int coroutine's yield or return of a float the checker sees: the one store a coroutine's values are checked for at load
@@ -7824,7 +8423,7 @@ private:
         }
         if (!fn.is_coroutine && !fn.ret) {
             fn_ctx& open = fn_stack_.back();
-            const uint8_t k = !r->value || r->binds_reference || value.tentative ? 0
+            const uint8_t k = !r->value || r->binds_reference || value.tentative || narrow_derived_ ? 0
                             : value.kind == ctype::int_k ? (enum_value(value) ? 0 : 1) : value.kind == ctype::float_k ? 2 : value.kind == ctype::bool_k ? 3 : 0;
             if (k == 0 || (open.inferred_return != 0 && open.inferred_return != k)) { open.inferred_mixed = true; }
             else { open.inferred_return = k; }
@@ -7838,7 +8437,7 @@ private:
         }
         if (fn.ret->base_type == script_value_type::jai_reference_type && r->value) {
             const type_info* referent = fn.ret->element_type().get();
-            if (referent && !reference_type_compatible(value, ctype_from_type_info(referent))) {
+            if (referent && !reference_type_compatible(narrow_declared_view(value), ctype_from_type_info(referent))) {
                 diag(diag_level::error, r->location, "cannot return reference to '" + ctype_name(value) +
                     "' from '" + std::string(fn.name) + "' declared to return '" + fn.ret->canonical_name() + "'");
             }
@@ -8060,8 +8659,36 @@ private:
         if (!decl->type && !decl->function_spelling) { decl->auto_spelled = true; }
         check_spelled_type(decl->type.get(), decl->location);
         check_inline_redefinition(decl);
-        const ctype init = decl->initializer ? infer(decl->initializer.get()) : ctype{};
+        const size_t reads = narrow_reads_;
+        ctype init = decl->initializer ? infer(decl->initializer.get()) : ctype{};
+        const ctype read = init;
+        narrow_derived_ = narrow_reads_ != reads;
+        // a narrowing changes no declaration: an auto takes the type its initializer has by declaration
+        const bool inferred = !decl->function_spelling && (decl->auto_spelled || !decl->type ||
+            (decl->type->base_type == script_value_type::jai_shared_ptr_type && !decl->type->element_type()));
+        if (narrow_derived_ && inferred) { init = narrow_declared_type(decl->initializer.get()); }
         declare_variable(decl, init);
+        narrow_derived_ = false;
+        narrow_copy(decl, read);
+    }
+
+    ctype narrow_declared_type(expression* e) {
+        ctype result;
+        narrow_walk_ahead(nullptr, [&] { result = infer(e); });
+        return result;
+    }
+    // `auto y = x;` where x is narrowed: the copy holds what x holds
+    void narrow_copy(const variable_decl* decl, const ctype& read) {
+        if (narrow_dry_ || !read.narrowed || !decl->initializer || decl->initializer->get_type() != node_type::identifier_expr) { return; }
+        if (decl->type && decl->type->base_type == script_value_type::jai_reference_type) { return; }
+        size_t scope = 0;
+        const var_entry* made = find_local(decl->name, &scope);
+        if (!made || made->narrow_key != decl) { return; }
+        narrow_fact fact;
+        if (read.kind == ctype::object_k ? !narrow_class_fact(*made, scope, read.cls, {}, fact) : !narrow_kind_fact(*made, read.kind, fact)) { return; }
+        if (read.open) { fact.type.open = true; fact.type.tentative = true; }
+        if (made->dynamic && !made->is_reference) { fact.proof_only = true; }
+        narrow_push({fact});
     }
 
     JAI_NOINLINE void declare_variable(variable_decl* decl, ctype init) {
@@ -8108,6 +8735,7 @@ private:
             warn_shadow("local", decl->name, decl->location);
             if (lw_on()) { lw_opaque_locals_.insert(decl); }
             entry.shared_name = decl->is_inline;
+            if (!decl->is_static) { narrow_declare(entry, decl); }
             declare_local(decl->name, std::move(entry), decl->location, !decl->is_static);
             return;
         }
@@ -8147,10 +8775,11 @@ private:
                     binding_source = ctype_from_type_info(source->declared);
                 }
             }
+            binding_source = narrow_declared_view(binding_source);
             const bool reference_ok = is_reference_decl && reference_type_compatible(binding_source, entry.type);
             // a const T& binds a temporary T made from what a T declaration takes (C++ lifetime extension)
             const bool init_ok = is_reference_decl ? reference_ok || (decl->is_const && assignable(init, entry.type)) : assignable(init, entry.type);
-            stamp(decl->reference_admission_proven, is_reference_decl && has_init && reference_ok && !binding_source.is_unknown() &&
+            stamp(decl->reference_admission_proven, is_reference_decl && has_init && reference_ok && !narrow_derived_ && !binding_source.is_unknown() &&
                   !binding_source.tentative && binding_source.kind != ctype::null_k &&
                   binding_source.kind != ctype::object_k, false);   // a class binding checks at run time (a reload may change the chain)
             if (has_init && (!entry.dynamic || is_reference_decl) && !init_ok) {
@@ -8201,6 +8830,8 @@ private:
         }
         entry.shared_name = decl->is_inline;
         if (has_init && decl->auto_spelled && !entry.dynamic && !is_reference_decl) { entry.literal_elem = uniform_literal_element(decl->initializer.get()); }
+        if (!decl->is_static) { narrow_declare(entry, decl); }   // a static local is every call's
+        if (is_reference_decl && has_init && !decl->is_const) { narrow_end_roots(decl->initializer.get(), /*escape=*/true); }
         declare_local(decl->name, std::move(entry), decl->location, !decl->is_static);
     }
 
@@ -8246,6 +8877,8 @@ private:
         mode_guard enclosing(mode_stack_, scoped_region_mode(), /*scoped=*/true, /*always=*/true);
         check_spelled_type(fn->return_type.get(), fn->location);
         lw_open_region();
+        narrow_frames_.push_back({scopes_.size() - 1, narrow_bound::alias});   // a named function captures nothing
+        const size_t narrowed = narrow_facts_.size();
         define_params(fn->parameters, fn->location, /*warn_field_shadows=*/!is_ctor);
         fn_stack_.back().in_ctor_initializers = true;
         for (const auto& init : fn->initializers) {
@@ -8256,8 +8889,10 @@ private:
         fn_stack_.back().in_ctor_initializers = false;
         if (fn->body) {
             mode_guard body(mode_stack_, leading_mode(fn->body->declarations), /*scoped=*/true);
-            for (auto& d : fn->body->declarations) { walk_decl(d.get()); }
+            for (auto& d : fn->body->declarations) { walk_listed(d.get()); }
         }
+        narrow_pop(narrowed);
+        narrow_frames_.pop_back();
         check_falls_off_end(fn);
         lw_close_region(&fn->parameters, nullptr, fn->body.get());
         fn_stack_.pop_back();
@@ -8342,6 +8977,7 @@ private:
                 entry.lw_handle = pt.kind == ctype::object_k;   // a by-value class parameter shares a handle argument's object
                 lw_register(entry, entry.dynamic ? ctype{} : pt, &p, p.name, lw_origin::parameter, entry.display, !p.is_const && !entry.lw_handle);
             }
+            narrow_declare(entry, &p);
             declare_local(p.name, std::move(entry), fn_loc);
         }
     }
@@ -8528,7 +9164,15 @@ private:
 
     JAI_NOINLINE void walk_lambda(lambda_expr* l) {
         check_lambda_captures(l);
+        // the body runs later and again: what it ends for a variable it captured is ended where the lambda is made
+        if (narrow_wants_ahead(l->body.get())) { narrow_walk_ahead(nullptr, [&] { walk_lambda_body(l); }); }
+        walk_lambda_body(l);
+    }
+
+    JAI_NOINLINE void walk_lambda_body(lambda_expr* l) {
         capture_stack_.push_back(capture_ctx{scopes_.size(), l});
+        narrow_frames_.push_back({scopes_.size(), l->default_capture == lambda_expr::capture_default::by_value ? narrow_bound::copy : narrow_bound::alias});
+        const size_t narrowed = narrow_facts_.size();
         // the body may run after the constructor or destructor that creates the lambda has returned
         const cdtor_ctx enclosing_cdtor = std::exchange(cdtor_ctx_, cdtor_ctx::none);
         struct restore_cdtor { cdtor_ctx& slot; cdtor_ctx was; ~restore_cdtor() { slot = was; } } restore{cdtor_ctx_, enclosing_cdtor};
@@ -8540,6 +9184,8 @@ private:
         lw_open_region();
         define_lambda_names(l);
         walk_stmt(l->body.get());
+        narrow_pop(narrowed);
+        narrow_frames_.pop_back();
         lw_close_region(&l->parameters, nullptr, l->body.get());
         close_lambda_scope(l);
     }
@@ -8578,7 +9224,13 @@ private:
         define_params(l->parameters, l->location);
         for (const auto& cap : l->captures) {
             if (!cap.initializer) {   // a named capture is the lambda's own copy of the variable, typed as it
-                if (var_entry* original = find_local(cap.name)) { scopes_.back().emplace(cap.name, *original); continue; }
+                if (var_entry* original = find_local(cap.name)) {
+                    var_entry own = *original;
+                    own.capture_alias = cap.by_reference;
+                    own.capture_copy = !cap.by_reference;
+                    scopes_.back().emplace(cap.name, std::move(own));
+                    continue;
+                }
                 if (!class_ctx_ || !detail::is_weak_this_capture(cap)) { continue; }
             }
             var_entry entry;

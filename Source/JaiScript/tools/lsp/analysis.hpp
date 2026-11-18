@@ -44,6 +44,7 @@ struct occurrence {
 	text_span span;
 	uint32_t symbol = 0;
 	bool declaration = false;
+	std::string narrowed;   // the type a flow test gave the name here
 };
 
 struct scope_local {

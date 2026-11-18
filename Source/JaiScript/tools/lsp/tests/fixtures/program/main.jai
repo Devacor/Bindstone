@@ -23,3 +23,9 @@ void run() {
 }
 
 run();
+
+void inspect(var who) {
+	if (who instanceof Hero) {
+		who.heal(1);
+	}
+}

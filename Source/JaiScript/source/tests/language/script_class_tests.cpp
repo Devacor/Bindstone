@@ -1091,6 +1091,90 @@ public:
             check_true(!warned.has_errors() && warned.diagnostics[0].message == "'instanceof Healer' is false for every 'Hero' but one whose class derives from 'Healer' too", warned.format(""));
         });
 
+        test("a_passed_test_narrows_the_variable_until_something_can_change_it", [this]() {
+            const std::string classes = R"(
+                class Unit { int hp = 1; string tag() { return "unit"; } }
+                class Hero : Unit { int mana = 5; string tag() override { return "hero"; } }
+                class Paladin : Hero { int faith = 7; }
+                class Rogue : Unit { int stealth = 2; }
+                string who(Hero h) { return h.tag() + to_string(h.mana); }
+                void touch() { }
+            )";
+            const std::string narrowed = classes + R"(
+                int direct(Unit u) { if (u instanceof Hero) { Hero h = u; return u.mana + h.mana; } return 0; }
+                int handle(shared_ptr<Unit> u) { if (!(u instanceof Paladin)) { return -1; } return u.faith; }
+                int chained(var v) { return v instanceof Hero && v.mana > 1 ? v.mana : 0; }
+                int either(Unit u) { if (!(u instanceof Hero) || u.mana < 0) { return 0; } return u.mana; }
+                int otherwise(Unit u) { if (!(u instanceof Hero)) { return 0; } else { return u.mana; } }
+                int looped(array<shared_ptr<Unit>> xs) { int t = 0; for (auto x : xs) { if (!(x instanceof Hero)) { continue; } t += x.mana; } return t; }
+                int walked(shared_ptr<Unit> u) { int n = 0; while (u instanceof Paladin) { n += u.faith; u = new Unit(); } return n; }
+                int stepped(shared_ptr<Unit> u) { int n = 0; for (; u instanceof Hero; u = new Unit()) { n += u.mana; } return n; }
+                int kinds(var x) { if (type_of(x) == "int") { return x + 1; } if (type_of(x) != "string") { return 0; } return x.size(); }
+                int typed(var v) { try { throw v; } catch (Hero e) { return e.mana; } return 0; }
+                int caught(var v) { try { return typed(v); } catch (err) { return 0; } }
+                int reflected(Unit u) { if (reflect::is_a(u, "Paladin")) { return u.faith; } return 0; }
+                int referred(Unit& u) { if (u instanceof Hero) { return u.mana; } return 0; }
+                int snapshot(shared_ptr<Unit> u) { if (u instanceof Hero) { auto f = [u]() { return u.mana; }; u = new Unit(); return f(); } return 0; }
+                string passed(Unit u) { if (u instanceof Hero) { return who(u); } return "-"; }
+                int both(var v) { if (v instanceof Hero && v instanceof Rogue) { return v.mana + v.stealth; } return 3; }
+                int copied(shared_ptr<Unit> u) { if (u instanceof Hero) { auto c = u; return c.mana; } return 0; }
+                void keep(shared_ptr<Unit>& r, Unit& v) { }
+                int bound(shared_ptr<Unit> u, Unit w) { if (u instanceof Hero && w instanceof Hero) { int m = u.mana + w.mana; keep(u, w); shared_ptr<Unit>& a = u; return m; } return 0; }   // a reference binds the variable as declared
+                int compared(var x) { if (type_of(x) == "int") { return x == "5" || x == null ? 1 : 0; } return 2; }   // a var keeps its run-time comparisons
+                Paladin p;
+                `${direct(Hero())} ${direct(Unit())} ${handle(new Paladin())} ${handle(new Hero())} ${chained(Hero())} ${chained(5)} ${either(Hero())} ${either(Rogue())} ` +
+                `${otherwise(Paladin())} ${looped([new Hero(), new Unit(), new Paladin()])} ${walked(new Paladin())} ${stepped(new Hero())} ${kinds(41)} ${kinds("four")} ${kinds(2.5)} ` +
+                `${caught(Paladin())} ${caught(3)} ${reflected(Paladin())} ${referred(p)} ${snapshot(new Hero())} ${passed(Paladin())} ${passed(Unit())} ${both(Hero())} ${copied(new Paladin())} ${compared(5)} ${bound(new Hero(), Paladin())}`;
+            )";
+            const std::string expected = "10 0 7 -1 5 0 5 0 5 10 7 5 42 4 0 5 0 7 5 5 hero5 - 3 5 0 10";
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            auto rep = e->check(narrowed);
+            check_eq((size_t)0, rep.diagnostics.size(), rep.format(narrowed));
+            check_eq(expected, e->execute(narrowed).as_string());
+            auto unproven = make_engine();
+            jai::stdlib::register_all(*unproven);
+            unproven->type_proofs(false);
+            check_eq(expected, unproven->execute(narrowed).as_string());
+            // every way the variable may change ends the narrowing: the member is the declared class's again, a load error
+            const std::vector<std::string> ended = {
+                "int f(Unit u) { if (u instanceof Hero) { u = Unit(); return u.mana; } return 0; }",
+                "void poke(shared_ptr<Unit>& r) { r = new Unit(); } int f(shared_ptr<Unit> u) { if (u instanceof Hero) { poke(u); return u.mana; } return 0; }",
+                "int f(shared_ptr<Unit> u) { if (u instanceof Hero) { auto g = [&]() { u = new Unit(); }; g(); return u.mana; } return 0; }",
+                "int f(shared_ptr<Unit> u) { auto g = [&]() { u = new Unit(); }; if (u instanceof Hero) { g(); return u.mana; } return 0; }",
+                "int f(shared_ptr<Unit> u) { if (u instanceof Hero) { auto g = [&]() { return u.mana; }; return g(); } return 0; }",
+                "int f(shared_ptr<Unit> u) { if (u instanceof Hero) { auto g = [&]() { auto h = [=]() { return u.mana; }; return h(); }; return g(); } return 0; }",
+                "int f(shared_ptr<Unit> u) { int t = 0; if (u instanceof Hero) { for (int i = 0; i < 2; i++) { t += u.mana; u = new Unit(); } } return t; }",
+                "int f(shared_ptr<Unit> u) { int t = 0; while (t < 2) { if (u instanceof Hero) { t += 1; } t += u.mana; } return t; }",
+                "int f(shared_ptr<Unit> u) { if (u instanceof Hero) { shared_ptr<Unit>& a = u; a = new Unit(); return u.mana; } return 0; }",
+                "int f(shared_ptr<Unit> u) { if (u instanceof Hero) { u.reset(); return u.mana; } return 0; }",
+                "int f(Unit& u) { if (u instanceof Hero) { touch(); return u.mana; } return 0; }",
+                "int f(Unit u) { if (u instanceof Hero) { } return u.mana; }",
+                "int f(Unit u) { return u instanceof Hero ? 0 : u.mana; }",
+                "int f(Unit u, bool ok) { if (u instanceof Hero || ok) { return u.mana; } return 0; }",
+                "int f(Unit u) { if (!(u instanceof Hero)) { return u.mana; } return 0; }",
+                "class Holder { Unit slot = Hero(); int f() { if (slot instanceof Hero) { return slot.mana; } return 0; } }",
+                "shared_ptr<Unit> G = new Hero(); int f() { if (G instanceof Hero) { return G.mana; } return 0; }",
+                "int f(array<Unit> xs) { if (xs[0] instanceof Hero) { return xs[0].mana; } return 0; }",
+            };
+            for (const auto& body : ended) {
+                auto fresh = make_engine();
+                jai::stdlib::register_all(*fresh);
+                const std::string program = classes + body;
+                auto found = fresh->check(program);
+                check_true(found.has_errors() && found.diagnostics.size() == 1 && found.diagnostics[0].message.find("no member '") == 0, found.format(program));
+            }
+            // under [[warn_mode]] the same programs run: the run time's own member read decides, on both backends alike
+            auto warned = make_engine();
+            jai::stdlib::register_all(*warned);
+            check_eq(std::string("5|Unit has no member 'mana'|5"), warned->execute("[[warn_mode]];\n" + classes + R"(
+                string t(function f) { string r = ""; try { r = `${f()}`; } catch (err) { r = err; } return r; }
+                int f(shared_ptr<Unit> u) { auto g = [&]() { u = new Unit(); }; if (u instanceof Hero) { int before = u.mana; g(); return u.mana; } return 0; }
+                int k(var v) { if (v instanceof Hero) { return v.mana; } return 0; }
+                t([]() { return k(Hero()); }) + "|" + t([]() { return f(new Hero()); }) + "|" + t([]() { return k(Paladin()); });
+            )").as_string());
+        });
+
         test("diamond_inheritance_should_fail", [this]() {
             auto js_engine = make_engine();
 

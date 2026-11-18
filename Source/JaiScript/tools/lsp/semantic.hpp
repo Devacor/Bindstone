@@ -91,7 +91,7 @@ private:
 	std::unordered_map<uint32_t, nav_type> symbol_type_;
 	std::unordered_map<const jai::expression*, nav_type> nav_memo_;
 
-	void occur(text_span span, uint32_t sym, bool declaration);
+	void occur(text_span span, uint32_t sym, bool declaration, std::string narrowed = {});
 	void push_scope(text_pos start, text_pos end);
 	void pop_scope();
 	uint32_t declare_local(std::string_view name, text_span span, symbol_kind kind, const std::string& type_shown, nav_type type, bool with_occurrence = true, const std::string& inferred = {});

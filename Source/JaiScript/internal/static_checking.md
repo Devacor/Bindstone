@@ -677,6 +677,56 @@ hide, re-parent, hybridize or `extend` the class against a `type_proofs(false)` 
 `jaiscript_fuzz --no-proofs` (plus the fuzz smoke suite's no-proofs band) keeps the
 interpreter-vs-vm differential green in both proof states.
 
+## Flow narrowing
+
+The language rule is `docs/site/reference/rules.html#flow-narrowing`; this is how the walk keeps it. Code: the "flow
+narrowing" block of `type_checker.cpp` (`narrow_*`).
+
+**Facts.** A `narrow_fact` names a variable by `var_entry::narrow_key` (its own declaration: a `variable_decl`, a
+`parameter`, a `range_for_stmt`, a `try_stmt`) and the ctype it holds. `narrow_declare` gives a key to locals, parameters,
+range-for and catch variables only: program-scope and namespace variables (any function writes them), statics, fields, `this`,
+elements and member paths never get one. A lambda's named capture copies the outer entry with `capture_copy` /
+`capture_alias`; `narrow_frames_` records each body's boundary (a function and a `parallel_for` body alias their enclosing
+frame, a `[=]` lambda copies it, `[&]` and a bare `[]` alias it), and `narrow_aliased` refuses a fact to a name read through an
+aliasing boundary.
+
+**Producing.** `narrow_collect(e, sense)` reads a condition: `!` flips the sense, `&&`/`||` take both sides where both had the
+value and the facts both sides give otherwise, `instanceof` / `reflect::is_a(x, "T")` give a class, `type_of(x) == "k"` a
+kind (the engine's own `type_of` only: a local, a script function, a member or a held script declaration of that name
+disqualifies it). `narrow_class_fact` judges against the declared type and the narrowing in force: an ancestor or the
+same class adds nothing, an unrelated class marks the fact `open` (diagnostics leave a miss to the run time, both for a `var`
+and after two unrelated tests), a value class keeps a value type_info, a handle the tested class's `shared_ptr` type_info, a
+reference's fact is `referent` (read only by `referent_receiver`, as its declared referent is). A `var`'s fact, class or kind,
+is `proof_only`: the diagnostics walk reads the var as before (the false-positive contract: a `var` narrowed to `int` would
+make `x == "5"` and `x == null`, false at run time, typed-side load errors) and hands the fact to the observer alone
+(`narrow_observed_`); the proof walk (`semantic_walk()`) reads it.
+
+**Consumers.** `walk_if`, `walk_while`, `walk_for`, the ternary and `&&`/`||` push facts around the parts they govern;
+`walk_listed` marks a statement of a list so an `if` whose one branch cannot complete (`return_flow`) or a loop with no
+`break` pushes the other outcome for the statements after it, popped at the list's end. `infer_identifier` and
+`referent_receiver` return the fact's type.
+
+**Ends.** `narrow_end` marks every fact of the variable dead and logs the event in `narrow_ended_` (a condition drops the
+facts its own evaluation ended: `narrow_drop_ended`). It runs at a store to the name (`=`, compound, `++`/`--`, a
+`cast<T&>` or conditional target), `reset()`, a non-const reference declaration over it, and an argument a reference may bind:
+`narrow_binds_reference` says no only for a by-value or `const&` parameter of every overload and override the checker
+resolved, a library builtin, or a host function whose writeback mask (`engine::host_function_writeback`) and held
+declarations leave the position by value; anything unresolved binds. An end through a frame boundary, and every reference
+binding, is an escape (`narrow_escaped_`): the variable never narrows again in that walk, because the writer may run at any
+later point. A call or a construction ends every reference's fact (`narrow_end_references`).
+
+**Loops and lambdas run their bodies again.** Before a loop body (and a `for`'s update) or a lambda body is walked for real,
+`narrow_walk_ahead` walks it with no facts, no diagnostics, no proofs and no observer, collects what it ends for variables
+declared outside it, and applies those ends first: the back edge and every later call of the lambda see them. It runs only
+when a fact is live or the body holds a test (`narrow_has_test`), so a program without tests pays nothing.
+
+**What never reads a fact.** An `auto` (and `shared_ptr<auto>`) declaration types from its initializer's declared type
+(`narrow_declared_type` re-infers it ahead), so the run time's declared types never change; a copy `auto c = x;` starts with
+`x`'s fact instead. Two proofs have a reader with no run-time guard, and a value read through a narrowing stays out of them:
+the return proof (`parallel_transform`'s rewrite; the lambda's inferred return kind too) and a range-for's
+`element_conversion_free`. `reference_admission_proven` likewise. Every other proof a narrowed read reaches (operand classes,
+store and argument proofs, method grafts) selects a lane whose guard is total (`internal/type_proofs_design.md` section 0).
+
 ## jaibite
 
 A bite is checked at creation (an error throws there);

@@ -528,10 +528,10 @@ void semantic_walker::run() {
 	}), m_.occurrences.end());
 }
 
-void semantic_walker::occur(text_span span, uint32_t sym, bool declaration) {
+void semantic_walker::occur(text_span span, uint32_t sym, bool declaration, std::string narrowed) {
 	if (sym >= m_.symbols.size()) { return; }
 	if (!span_spells(u_, span, m_.symbols[sym].name)) { return; }
-	m_.occurrences.push_back({span, sym, declaration});
+	m_.occurrences.push_back({span, sym, declaration, std::move(narrowed)});
 }
 
 void semantic_walker::push_scope(text_pos start, text_pos end) {
@@ -1041,7 +1041,8 @@ void semantic_walker::walk_expr(const jai::expression* e) {
 					span.start.col += 2;
 					span.end.col += 2;
 				}
-				occur(span, s, false);
+				const auto checked = m_.types.find(e);
+				occur(span, s, false, checked != m_.types.end() && checked->second.narrowed ? checked->second.name : std::string());
 			}
 			break;
 		}

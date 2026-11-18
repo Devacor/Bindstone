@@ -69,7 +69,7 @@ F2 renames.</li>
 <h3 id="limits">What it does not see<a class="hlink" href="#limits" aria-label="link">&#8203;</a></h3>
 <ul>
 <li><strong>Dynamic values.</strong> A member used on a <code>var</code> has no definition and no hover, and a
-<code>var</code> hovers as <code>var</code>. Declared types, <code>auto</code> and references to them navigate.</li>
+<code>var</code> hovers as <code>var</code>; where a test <a href="../reference/rules.html#flow-narrowing">narrowed</a> a name, its hover adds the type it holds there, and completion after it offers that type&#x27;s members. Declared types, <code>auto</code> and references to them navigate.</li>
 <li><strong>Run-time structure.</strong> Members a script adds with <code>extend</code>, names a host registers after
 load and files reached by a computed <code>import(expr)</code>. <code>extern</code> declares such names.</li>
 <li><strong>Inside a declaration that does not parse.</strong> The editor shows the parser's error for it. Findings stay

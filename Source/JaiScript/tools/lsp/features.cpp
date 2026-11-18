@@ -372,8 +372,9 @@ std::optional<std::string> workspace::hover(unit& u, text_pos pos, text_span& ra
 	const symbol* s = symbol_at(u, pos, &index);
 	if (!s) { return std::nullopt; }
 	const unit_model& m = model(u);
+	std::string narrowed;
 	for (const auto& o : m.occurrences) {
-		if (o.symbol == index && o.span.contains(pos)) { range = o.span; break; }
+		if (o.symbol == index && o.span.contains(pos)) { range = o.span; narrowed = o.narrowed; break; }
 	}
 	std::string code;
 	if (!s->signatures.empty()) {
@@ -413,6 +414,7 @@ std::optional<std::string> workspace::hover(unit& u, text_pos pos, text_span& ra
 	if (!s->path.empty() && s->path != u.path) {
 		about += " - declared in `" + file_name(s->path) + ":" + std::to_string(s->span.start.line + 1) + "`";
 	}
+	if (!narrowed.empty()) { about += "; narrowed here to `" + narrowed + "`"; }
 	md += "\n\n" + about;
 	if (!s->path.empty() && s->kind != symbol_kind::local && s->kind != symbol_kind::parameter) {
 		const std::string path = s->path;

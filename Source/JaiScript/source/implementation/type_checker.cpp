@@ -3331,12 +3331,39 @@ private:
         }
     }
 
-    // Constructor-conversion fallback Target(src): checkable only for in-script classes;
-    // engine-registered targets stay lenient.
+    // A bound constructor's or operator's parameter against the one value a conversion hands it (engine.cpp
+    // object_param_cost): a parameter of a bound class takes that class or one derived from it, as a script constructor's does
+    bool host_constructor_param_takes(const ctype& src, const param_type_info& p) {
+        const bool object_param = p.base_type == script_value_type::jai_object_type || p.base_type == script_value_type::jai_shared_ptr_type ||
+                                  p.base_type == script_value_type::jai_weak_ptr_type;
+        auto bound = object_param && p.cpp_type != std::type_index(typeid(void)) ? eng_.get_class_definition_by_type(p.cpp_type) : nullptr;
+        if (!bound) { return host_param_accepts(src, p); }
+        if (src.is_unknown() || src.kind == ctype::null_k) { return true; }
+        return src.kind == ctype::object_k && (src.cls.empty() || class_relation(src.cls, bound->get_name()) != 0);
+    }
+
+    // Target(src) through a C++ class's bound constructors, as the run time's conversion calls them: one of exactly one
+    // parameter that may take the source (a variadic or untyped binding may take anything)
+    bool host_class_constructs_from(const class_definition& target, const ctype& src) {
+        const std::string& name = target.get_name();
+        if (src.kind == ctype::object_k && src.cls.empty()) { return true; }
+        std::vector<engine::host_overload_signature> signatures;
+        if (!eng_.host_function_signatures(name, signatures)) { return eng_.has_function(name); }
+        for (const auto& signature : signatures) {
+            if (signature.arity == SIZE_MAX) { return true; }
+            if (signature.arity != 1) { continue; }
+            if (signature.param_types.size() != 1 || host_constructor_param_takes(src, signature.param_types[0])) { return true; }
+        }
+        return false;
+    }
+
+    // Constructor-conversion fallback Target(src): a script class's declared constructors, a C++ class's bound ones; a script
+    // class only the engine holds stays lenient.
     bool may_construct_from(std::string_view target_cls, const ctype& src) {
         const sclass* c = find_sclass(target_cls);
         if (!c) {
-            return engine_class(target_cls) != nullptr;   // registered: lenient
+            auto def = engine_class(target_cls);
+            return def && (!def->is_cpp_class() || host_class_constructs_from(*def, src));
         }
         for (const auto* ctor : c->ctors) {
             // A defaulted-param ctor is NOT a converting ctor -
@@ -7514,13 +7541,26 @@ private:
     }
 
     // `target = rhs` on a class-typed target runs a user operator=(rhs) ahead of the
-    // conversion ladder (both backends); a registered ancestor's operator= stays lenient.
+    // conversion ladder (both backends); a C++ class's bound "=" takes what its recorded signatures may take, any other
+    // registered operator= stays lenient.
     bool assign_operator_accepts(std::string_view cls, const ctype& src, int depth = 0) {
         if (depth > 32) { return true; }
         const sclass* c = find_sclass(cls);
         if (!c) {
             auto def = engine_class(cls);
-            return !def || !def->get_method(eng_.symbolize("="), false).is_invalid();
+            if (!def) { return true; }
+            const uint64_t assign_id = eng_.symbolize("=");
+            if (def->get_method(assign_id, false).is_invalid()) { return false; }
+            if (!def->is_cpp_class() || def->extended_ever()) { return true; }
+            const auto& table = def->cpp_method_overload_table();
+            const auto bound = table.find(assign_id);
+            if (bound == table.end()) { return true; }
+            const auto unary = bound->second.find(1);
+            if (unary == bound->second.end()) { return true; }
+            for (const auto& entry : unary->second) {
+                if (entry.param_types.size() != 1 || host_constructor_param_takes(src, entry.param_types[0])) { return true; }
+            }
+            return false;
         }
         if (auto m = c->methods.find("="); m != c->methods.end()) {
             const std::vector<ctype> one{src};
@@ -9295,6 +9335,13 @@ private:
     }
 
     JAI_NOINLINE void walk_enum(enum_decl* e) {
+        // E::value reads the class of that name first, so no value of the enum could be named
+        if (scopes_.size() == 1) {
+            if (auto held = eng_.get_class_definition(std::string(e->name)); held && !held->is_script_class()) {
+                diag(diag_level::error, e->location, "cannot declare enum '" + std::string(e->name) +
+                     "': the host binds a C++ class of that name; give the enum another name", 0, 0, /*always_error=*/true);
+            }
+        }
         if (scopes_.size() > 1 && (namespace_scopes_.empty() || namespace_scopes_.back() != scopes_.size() - 1)) {
             warn_scoped_enum(e);
             var_entry entry;

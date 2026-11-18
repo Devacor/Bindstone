@@ -10,6 +10,7 @@
 #include <jaiscript/properties/macros.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <jaiscript/detail/type_name_key.hpp>
 #include <cmath>
 
 namespace jai::foundry::tests {
@@ -498,6 +499,46 @@ public:
             try { many->execute("TplBox<bool> b;"); } catch (const std::exception& err) { listed = err.what(); }
             check_true(listed.find("error: 'TplBox<bool>' is not bound: the host binds TplBox<int>, TplBox<float>, TplBox<int32>, TplBox<uint8>, TplBox<TplLeaf>, "
                                    "TplBox<float32>, TplBox<NamedLeaf>, TplBox<array<int>> and 2 more\n") != std::string::npos, listed);
+        });
+
+        test("each_bound_instantiation_is_its_own_class_to_a_typed_slot", [this]() {
+            const auto message = [this](const std::string& source) {
+                auto eng = make_engine();
+                jai::stdlib::register_all(*eng);
+                eng->bind_static_types<TplBox<int64_t>, TplBox<double>>();
+                try { return eng->execute(source).to_string(); } catch (const std::exception& err) { return std::string(err.what()); }
+            };
+            for (const auto& [source, text] : std::vector<std::pair<std::string, std::string>>{
+                     {"function k(TplBox<float> b) -> int { return b.kind(); } TplBox<int> i; k(i);", "argument 1 of 'k': cannot pass 'TplBox<int>' to 'b' declared 'TplBox<float>'"},
+                     {"TplBox<int> i; TplBox<float> f = i;", "cannot initialize 'f' declared 'TplBox<float>' with 'TplBox<int>'"},
+                     {"TplBox<int> i; TplBox<float> f; f = i;", "cannot assign 'TplBox<int>' to 'f' declared 'TplBox<float>'"},
+                     {"TplBox<float> g() { TplBox<int> i; return i; }", "cannot return 'TplBox<int>' from 'g' declared to return 'TplBox<float>'"},
+                     {"array<TplBox<float>> xs; TplBox<int> i; xs.push(i);", "cannot push into 'array<TplBox<float>>': expected 'TplBox<float>', got 'TplBox<int>'"},
+                     {"TplBox<int32> narrow; TplBox<int> wide = narrow;", "cannot initialize 'wide' declared 'TplBox<int>' with 'TplBox<int32>'"}}) {
+                check_true(message(source).find("error: " + text) != std::string::npos, source + " -> " + message(source));
+            }
+            check_eq(std::string("3 3"), message("TplBox<float> f; TplBox<float> g = f; var v = f; TplBox<float> h = v; `${g.kind()} ${h.kind()}`"));
+        });
+
+        test("a_type_name_arriving_as_text_matches_whatever_its_spacing", [this]() {
+            check_eq(std::string("Duo<int,string>"), detail::type_name_key("Duo< int , string >"));
+            check_eq(detail::type_name_key("Duo<int, string>"), detail::type_name_key(" Duo\t<int ,string>\n"));
+            check_eq(std::string("ns::K"), detail::type_name_key("ns :: K"));
+            const auto run = [this](const std::string& source) {
+                auto eng = make_engine();
+                jai::stdlib::register_all(*eng);
+                eng->bind_static_types<TplBox<int64_t>, TplTagged<std::string, int64_t>>();
+                try { return eng->execute(source).to_string(); } catch (const std::exception& err) { return std::string(err.what()); }
+            };
+            check_eq(std::string("TplBox<int> TplTagged<string, int> TplTagged<string, int>"),
+                     run("`${type_of(reflect::construct(\"TplBox< int >\"))} ${type_of(reflect::construct(\"TplTagged<string,int>\"))} "
+                         "${reflect::type_name(reflect::construct_shared(\"TplTagged< string , int >\"))}`"));
+            check_eq(std::string("true true"), run("TplBox<int> b; `${reflect::has_method(\"TplBox< int >\", \"kind\")} ${reflect::is_a(b, \" TplBox<int> \")}`"));
+            check_eq(std::string("reflect::construct: unknown class 'No Such'"), run("var c = \"\"; try { reflect::construct(\"No Such\"); } catch (e) { c = e; } c"));
+            // an archive names its class as registered and reads the name whatever its spacing
+            check_eq(std::string("ns::K 5 {\"$type\":\"ns::K\",\"$val\":{\"v\":5}}"),
+                     run("namespace ns { class K { int v = 1; } } auto k = from_json(\"{\\\"$type\\\": \\\"ns :: K\\\", \\\"$val\\\": {\\\"v\\\": 5}}\"); `${type_of(k)} ${k.v} ${to_json(k)}`"));
+            check_eq(std::string("Wide 2"), run("class Thin { int t = 0; } class Wide : Thin { int v = 1; } auto w = extend(Thin(), \" Wide \"); `${type_of(w)} ${w.v + 1}`"));
         });
 
         test("a_template_base_name_is_not_a_reserved_word", [this]() {

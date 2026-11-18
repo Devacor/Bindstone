@@ -2,6 +2,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>
+#include <jaiscript/detail/type_name_key.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/environment.hpp>
@@ -64,6 +65,7 @@ inline class_definition* resolve_class(engine* eng, const script_value& v,
     if (d.is_string()) {
         const std::string name = d.as_string();
         auto def = detail::engine_access::get_class_definition(*eng, name);
+        if (!def) { def = detail::engine_access::get_class_definition(*eng, detail::registered_type_spelling(eng, name)); }
         if (!def) { throw_unknown_class(eng, who, name); }
         return def.get();
     }
@@ -145,6 +147,21 @@ template <typename T>
     throw runtime_error(format_error_message(r.message(),
         detail::engine_access::get_symbolizer(*eng)->get_string(r.symbol_id()),
         detail::engine_access::get_symbolizer(*eng)->get_string(r.symbol_id2())));
+}
+
+// The constructor a class name that arrived as text reaches (the global the direct spelling Class(...) resolves); a_name
+// becomes the spelling the class is registered under
+inline script_value constructor_named(engine* eng, std::string& a_name, const char* who) {
+    const auto global = detail::engine_access::get_global_environment(*eng);
+    if (auto ctor = global->get(a_name); ctor && ctor.value().is_function()) { return std::move(ctor.value()); }
+    const std::string spelled = detail::registered_type_spelling(eng, a_name);
+    if (!spelled.empty() && spelled != a_name) {
+        if (auto ctor = global->get(spelled); ctor && ctor.value().is_function()) {
+            a_name = spelled;
+            return std::move(ctor.value());
+        }
+    }
+    throw_unknown_class(eng, who, a_name);
 }
 
 // Reflection reaches a script class's private constructors as it reaches its other private members
@@ -710,25 +727,18 @@ void register_reflection_functions(engine& eng_ref) {
 
     add("construct", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_min_args(args, 1, "construct");
-        const std::string& name = reflect_detail::expect_name(args, 0, "construct");
+        std::string name = reflect_detail::expect_name(args, 0, "construct");
         std::vector<script_value> call_args(args.begin() + 1, args.end());
-        // The same global the direct spelling Class(...) resolves
-        auto ctor = detail::engine_access::get_global_environment(*eng)->get(name);
-        if (!ctor || !ctor.value().is_function()) {
-            reflect_detail::throw_unknown_class(eng, "construct", name);
-        }
-        return reflect_detail::construct_through_reflection(eng, name, ctor.value(), call_args);
+        const script_value ctor = reflect_detail::constructor_named(eng, name, "construct");
+        return reflect_detail::construct_through_reflection(eng, name, ctor, call_args);
     });
 
     add("construct_shared", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_min_args(args, 1, "construct_shared");
-        const std::string& name = reflect_detail::expect_name(args, 0, "construct_shared");
+        std::string name = reflect_detail::expect_name(args, 0, "construct_shared");
         std::vector<script_value> call_args(args.begin() + 1, args.end());
-        auto ctor = detail::engine_access::get_global_environment(*eng)->get(name);
-        if (!ctor || !ctor.value().is_function()) {
-            reflect_detail::throw_unknown_class(eng, "construct_shared", name);
-        }
-        auto result = reflect_detail::construct_through_reflection(eng, name, ctor.value(), call_args);
+        const script_value ctor = reflect_detail::constructor_named(eng, name, "construct_shared");
+        auto result = reflect_detail::construct_through_reflection(eng, name, ctor, call_args);
         if (!result) { return result; }
         script_value value = std::move(result.value());
         // `new Class(...)` semantics: shared_ptr is a TYPE MARKER, not storage — mark

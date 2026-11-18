@@ -303,7 +303,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>is_directory</code></td><td>Whether it is a folder.</td></tr>
 </tbody></table></div>
 <h2 id="reflection-calls">Reflection calls<a class="hlink" href="#reflection-calls" aria-label="link">&#8203;</a></h2>
-<p>Every <code>reflect::</code> call, from <a href="../guide/12-reflection.html">Reflection</a>. A call that takes an instance <code>v</code> also takes a class name as a string.</p>
+<p>Every <code>reflect::</code> call, from <a href="../guide/12-reflection.html">Reflection</a>. A call that takes an instance <code>v</code> also takes a class name as a string. A class name given as text is matched whatever its spacing: <code>"Box&lt; int &gt;"</code> and <code>"Duo&lt;int,string&gt;"</code> name <code>Box&lt;int&gt;</code> and <code>Duo&lt;int, string&gt;</code>.</p>
 <h3 id="reflection-shape">Shape<a class="hlink" href="#reflection-shape" aria-label="link">&#8203;</a></h3>
 <p>Taught in <a href="../guide/12-reflection.html#ask-what-shape-is-this">Ask: what shape is this?</a></p>
 <div class="tablewrap"><table><thead><tr><th>Call</th><th>Answers</th></tr></thead><tbody>

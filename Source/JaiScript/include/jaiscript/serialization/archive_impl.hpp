@@ -103,6 +103,9 @@ void read_binding_record(any_archive_reader& ar, engine* eng, std::type_index ty
 std::string bound_type_name(engine* eng, std::type_index type);
 // The registry entry of the binding record eng binds under name, or null
 const polymorphic_registry::type_entry* binding_entry_named(engine* eng, const std::string& name);
+// The entry a polymorphic "$type" loads through: the registry's, eng's binding record's, or (hybrid_class and hybrid_base
+// set) the bound C++ base's of the script class it names. A name that is no registered spelling answers by its type_name_key
+const polymorphic_registry::type_entry* polymorphic_load_entry(engine* eng, const std::string& name, std::string& hybrid_class, std::string& hybrid_base);
 
 #define JAI_DETAIL_SERIALIZATION_ROUTES \
     "give the type a member serialize(Archive&), or save(Archive&) and load(Archive&) (non-public ones with 'friend jai::access;'), " \
@@ -1588,27 +1591,9 @@ private:
                 self()->serialize("$type", poly_type);
             }
             if (!poly_type.empty()) {
-                auto* entry = polymorphic_registry::instance().find(poly_type);
-                if (!entry) {
-                    entry = binding_entry_named(engine_ref_, poly_type);
-                }
                 std::string hybrid_class;
                 std::string hybrid_base;
-                if (!entry && engine_ref_) {
-                    // A $type naming a script class deriving a bound C++ base: load through
-                    // the base's registry entry, then re-attach the script layer below.
-                    std::string base_name = detail::engine_access::script_layer_base_name(*engine_ref_, poly_type);
-                    if (!base_name.empty()) {
-                        entry = polymorphic_registry::instance().find(base_name);
-                        if (!entry) {
-                            entry = binding_entry_named(engine_ref_, base_name);
-                        }
-                        if (entry) {
-                            hybrid_class = poly_type;
-                            hybrid_base = base_name;
-                        }
-                    }
-                }
+                const polymorphic_registry::type_entry* entry = polymorphic_load_entry(engine_ref_, poly_type, hybrid_class, hybrid_base);
                 // Reject a tampered $type that names a registered type unrelated to the
                 // requested base BEFORE constructing it — otherwise the void->elem_type cast
                 // below would reinterpret an unrelated object as elem_type (type confusion

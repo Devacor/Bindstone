@@ -2,6 +2,7 @@
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/engine_access.hpp>
 #include <jaiscript/detail/coroutine_snapshot.hpp>
+#include <jaiscript/detail/type_name_key.hpp>
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/signals/receiver_save.hpp>
@@ -9,6 +10,21 @@
 #include <charconv>
 #include <cmath>
 #include <string>
+
+namespace jai::detail {
+
+std::string registered_type_spelling(const engine* a_engine, std::string_view a_text) {
+    if (a_engine && a_engine->is_type_registered(std::string(a_text))) { return std::string(a_text); }
+    const std::string key = type_name_key(a_text);
+    if (a_engine) {
+        for (std::string& name : a_engine->registered_class_names()) {
+            if (type_name_key(name) == key) { return std::move(name); }
+        }
+    }
+    return serialization::polymorphic_registry::instance().name_of_key(key);
+}
+
+}
 
 namespace jai::serialization {
 
@@ -156,6 +172,38 @@ const polymorphic_registry::type_entry* binding_entry_named(engine* eng, const s
     }
     const polymorphic_registry::type_entry* entry = polymorphic_registry::instance().find(std::type_index(*binding->cpp_type()));
     return entry && entry->named_by_binding ? entry : nullptr;
+}
+
+namespace {
+
+    const polymorphic_registry::type_entry* load_entry_spelled(engine* eng, const std::string& name, std::string& hybrid_class, std::string& hybrid_base) {
+        const polymorphic_registry::type_entry* entry = polymorphic_registry::instance().find(name);
+        if (!entry) {
+            entry = binding_entry_named(eng, name);
+        }
+        if (!entry && eng) {
+            // a script class deriving a bound C++ base loads through the base's entry; the caller re-attaches the script layer
+            std::string base_name = detail::engine_access::script_layer_base_name(*eng, name);
+            if (!base_name.empty()) {
+                entry = polymorphic_registry::instance().find(base_name);
+                if (!entry) {
+                    entry = binding_entry_named(eng, base_name);
+                }
+                if (entry) {
+                    hybrid_class = name;
+                    hybrid_base = std::move(base_name);
+                }
+            }
+        }
+        return entry;
+    }
+
+}
+
+const polymorphic_registry::type_entry* polymorphic_load_entry(engine* eng, const std::string& name, std::string& hybrid_class, std::string& hybrid_base) {
+    if (const auto* entry = load_entry_spelled(eng, name, hybrid_class, hybrid_base)) { return entry; }
+    const std::string spelled = detail::registered_type_spelling(eng, name);
+    return spelled.empty() || spelled == name ? nullptr : load_entry_spelled(eng, spelled, hybrid_class, hybrid_base);
 }
 
 void throw_archive_value_range(std::string_view value_text, const char* field) {

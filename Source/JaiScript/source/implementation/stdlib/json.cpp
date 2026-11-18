@@ -6,6 +6,7 @@
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/work_budget.hpp>
 #include <jaiscript/detail/coroutine_snapshot.hpp>
+#include <jaiscript/detail/type_name_key.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/convenience.hpp>
@@ -434,8 +435,12 @@ namespace stdlib {
 		// A load constructs: a class with a zero-argument constructor runs it as Name() would whatever its access, its initializer
 		// list included (a hybrid's builds its C++ base), and its error or throw is the load's; a class without one is created
 		// without one, its C++ base through load_hybrid's ladder, then its field initializers. False leaves the map a map
-		bool open_instance(script_value fields, const std::string type_name, script_int version, script_int handle_id) {
-			const std::shared_ptr<class_definition> class_def = detail::engine_access::get_class_definition(*eng_, type_name);
+		bool open_instance(script_value fields, std::string type_name, script_int version, script_int handle_id) {
+			std::shared_ptr<class_definition> class_def = detail::engine_access::get_class_definition(*eng_, type_name);
+			if (!class_def) {
+				type_name = detail::registered_type_spelling(eng_, type_name);
+				class_def = detail::engine_access::get_class_definition(*eng_, type_name);
+			}
 			if (!class_def) { return false; }
 			script_value ctor = eng_->get_variable(type_name);
 			if (!ctor.is_function()) { return false; }

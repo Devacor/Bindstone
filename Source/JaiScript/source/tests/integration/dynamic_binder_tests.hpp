@@ -57,6 +57,24 @@ struct PlainCopy {
 
 namespace jai::foundry::tests {
 
+// Classes a typed slot tells apart: Metres converts from a Feet and from a number, Square derives Shape, Label is alone,
+// Crate takes any value
+struct slot_feet { double value = 0; };
+struct slot_metres {
+    double value = 0;
+    slot_metres() = default;
+    slot_metres(const slot_feet& a_feet) : value(a_feet.value * 0.5) {}
+    slot_metres(double a_value) : value(a_value) {}
+};
+struct slot_shape { virtual ~slot_shape() = default; int64_t sides = 0; };
+struct slot_square : slot_shape { slot_square() { sides = 4; } };
+struct slot_label { std::string text = "label"; };
+struct slot_crate {
+    std::string held = "empty";
+    slot_crate() = default;
+    slot_crate(const script_value& a_value) : held(a_value.is_object() ? "object" : "value") {}
+};
+
 struct binder_plane;
 struct binder_hangar {
     std::shared_ptr<binder_plane> plane;
@@ -2945,6 +2963,58 @@ public:
             check_eq(std::string("named"), eng->execute("NamedThing().name;").as_string(), "the host class stands");
             check_eq(std::string("named 1 NamedHeir"), eng->execute("class NamedHeir : NamedThing { int mine = 1; } NamedHeir h; h.name + \" \" + to_string(h.mine) + \" \" + type_of(h);").as_string());
             check_eq((int64_t)3, eng->execute("namespace kept { class NamedThing { int mine = 3; } } kept::NamedThing().mine;").as_int(), "a namespace's class is its own name");
+            // an enum of the name could name none of its values (E::value reads the class): refused in a warn region too
+            for (const char* source : {"enum NamedThing { first, second }", "[[warn_mode]]; enum NamedThing { first, second }"}) {
+                const std::string failure = failure_of([&] { eng->execute(source); });
+                check_true(failure.find("error: cannot declare enum 'NamedThing': the host binds a C++ class of that name; give the enum another name") != std::string::npos,
+                           std::string(source) + " -> " + failure);
+            }
+            check_eq((int64_t)2, eng->execute("enum Named { NamedThing = 2 } Named::NamedThing;").as_int(), "an enum's value is another name");
+        });
+        test("a_typed_slot_tells_bound_classes_apart", [this]() {
+            const auto bound = [this]() {
+                auto eng = make_engine();
+                jai::stdlib::register_all(*eng);
+                dynamic_binder<slot_feet>(*eng, "Feet").constructor<>().property("value", &slot_feet::value).build();
+                dynamic_binder<slot_metres>(*eng, "Metres").constructor<>().constructor<const slot_feet&>().constructor<double>().property("value", &slot_metres::value).build();
+                dynamic_binder<slot_shape>(*eng, "Shape").constructor<>().property("sides", &slot_shape::sides).build();
+                dynamic_binder<slot_square>(*eng, "Square").constructor<>().base_class<slot_shape>().build();
+                dynamic_binder<slot_label>(*eng, "Label").constructor<>().property("text", &slot_label::text).build();
+                dynamic_binder<slot_crate>(*eng, "Crate").constructor<>().constructor<const script_value&>().property("held", &slot_crate::held).build();
+                return eng;
+            };
+            const auto message = [&](const std::string& source) {
+                auto eng = bound();
+                try { return eng->execute(source).to_string(); } catch (const std::exception& e) { return std::string(e.what()); }
+            };
+            const auto refused = [&](const std::string& source, const std::string& text) {
+                const std::string got = message(source);
+                check_true(got.find("error: " + text) != std::string::npos, source + " -> " + got);
+            };
+            // unrelated classes, at each typed site
+            refused("void take(Shape s) { } Label l; take(l);", "argument 1 of 'take': cannot pass 'Label' to 's' declared 'Shape'");
+            refused("Label l; Shape s = l;", "cannot initialize 's' declared 'Shape' with 'Label'");
+            refused("Label l; Shape s; s = l;", "cannot assign 'Label' to 's' declared 'Shape'");
+            refused("Shape make() { Label l; return l; }", "cannot return 'Label' from 'make' declared to return 'Shape'");
+            refused("array<Shape> shapes; Label l; shapes.push(l);", "cannot push into 'array<Shape>': expected 'Shape', got 'Label'");
+            refused("class Holder { Shape s; } Holder h; Label l; h.s = l;", "cannot assign 'Label' to field 's' declared 'Shape'");
+            refused("Metres m; Feet f = m;", "cannot initialize 'f' declared 'Feet' with 'Metres'");
+            refused("Label l = 3;", "cannot initialize 'l' declared 'Label' with 'int'");
+            refused("class Plain { int n = 1; } Plain p; Shape s = p;", "cannot initialize 's' declared 'Shape' with 'Plain'");
+            // a converting constructor converts
+            check_eq(std::string("5.0 2.5 5.0"), message("Feet f; f.value = 10.0; Metres m = f; Metres n = 2.5; float taken(Metres x) { return x.value; } `${m.value} ${n.value} ${taken(f)}`"));
+            check_eq(std::string("object value"), message("Label l; Crate c = l; Crate d = 3; `${c.held} ${d.held}`"));
+            // a derived class is its base, and the base's declared type is not the derived class (cast<Square&> or instanceof narrows)
+            check_eq(std::string("4 4 Square Square"), message("Square q; Shape s = q; int sides(Shape x) { return x.sides; } Square back = cast<Square&>(s); "
+                                                               "string narrowed(Shape x) { if (x instanceof Square) { Square y = x; return type_of(y); } return \"\"; } "
+                                                               "`${s.sides} ${sides(q)} ${type_of(back)} ${narrowed(s)}`"));
+            refused("Shape s = Square(); Square back = s;", "cannot initialize 'back' declared 'Square' with 'Shape'");
+            // a script class deriving a bound class, and one deriving two
+            check_eq(std::string("3 Tri"), message("class Tri : Shape { Tri() { sides = 3; } } Tri t; Shape s = t; `${s.sides} ${type_of(s)}`"));
+            check_eq(std::string("Both 0"), message("class Both : Shape, Label { } Both b; string named(Label l) { return type_of(l); } int sides(Shape s) { return s.sides; } `${named(b)} ${sides(b)}`"));
+            // what the checker does not know stays the run time's
+            check_eq(std::string("4"), message("var v = Square(); Shape s = v; auto a = Square(); Shape t = a; `${t.sides}`"));
+            check_eq(std::string("No overload of 'Shape' takes (Label)"), message("var v = Label(); var c = \"\"; try { Shape s = v; } catch (e) { c = e; } c"));
         });
         test("mutual_references_register_in_either_order", [this]() {
             const char* script = "var h = Hangar(); var p = Plane(); p.home = h; h.plane = p; p.home.bays + h.plane.seats;";

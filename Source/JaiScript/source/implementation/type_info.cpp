@@ -1,7 +1,17 @@
 #include "../../include/jaiscript/core/type_info.hpp"
+#include "../../include/jaiscript/detail/type_name_key.hpp"
 #include <sstream>
 
 namespace jai {
+
+std::string detail::type_name_key(std::string_view a_text) {
+    std::string result;
+    result.reserve(a_text.size());
+    for (const char c : a_text) {
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f' && c != '\v') { result += c; }
+    }
+    return result;
+}
 
 namespace {
 [[noreturn]] JAI_NOINLINE void throw_type_shape_not_prewarmed() {

@@ -9,6 +9,7 @@
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/float_text.hpp>
+#include <jaiscript/detail/type_name_key.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/stdlib/json.hpp>   // reconstruct_archive_value (hybrid field hydration)
 #include <jaiscript/core/script_namespace.hpp>
@@ -7654,6 +7655,7 @@ checked_result<std::shared_ptr<class_definition>> engine::resolve_script_class(c
             "extend: the second argument must name a script class (a class name or a string)");
     }
     auto script_def = get_class_registry().find_script_class(name);
+    if (!script_def && script_class.is_string()) { script_def = get_class_registry().find_script_class(detail::registered_type_spelling(this, name)); }
     if (!script_def) {
         return result(make_error_code(runtime_error_code::extend_rejected),
             "extend: '{0}' is not a script class defined in this engine", symbolize(name));

@@ -925,6 +925,11 @@ private:
         bool inferred_mixed = false;      // auto: a return of another kind, of an uncertain kind, or without a value
         bool returns_seen = false;        // auto: a return with a value was walked
         bool returns_values = true;       // auto: every return yields a value the checker knows (no handle, no reference, no function)
+        // auto, where the program declares a generic: the one type every return so far yields, for a deduction through a lambda's
+        // result (lambda_return_types_); mixed for two types or one the load cannot name
+        const type_info* returned = nullptr;
+        bool returned_mixed = false;
+        bool returns_nothing = false;
         const std::string* file = nullptr;   // the file the body is written in (a declaration from another one was spliced by an include)
     };
     std::vector<fn_ctx> fn_stack_;
@@ -1494,6 +1499,7 @@ private:
             case ctype::char_k: return eng_.get_type_info_char();
             case ctype::utf8_k: return eng_.get_type_info_utf8_string();
             case ctype::math_k: return eng_.get_type_info_math(math_type_from_name(arg.cls));   // a math constructor's result, a math-typed value
+            case ctype::coroutine_k: return arg.yields ? eng_.get_type_info_coroutine(const_cast<type_info*>(arg.yields)) : nullptr;
             case ctype::object_k: return arg.cls.empty() ? nullptr : eng_.get_type_info_object(std::string(arg.cls));
             case ctype::array_k: {   // a literal of one element type: [1, 2] is an array<int>
                 if (!arg.origin || arg.origin->get_type() != node_type::array_literal_expr) { return nullptr; }
@@ -1595,7 +1601,21 @@ private:
                 if (!actual->type_params.empty() && actual->type_params[0]) { unify(d, pattern->type_params[0].get(), actual->type_params[0].get(), depth + 1); }
                 else if (!actual->type_name.empty() && actual->type_name != "shared_ptr") { unify(d, pattern->type_params[0].get(), eng_.get_type_info_object(actual->type_name), depth + 1); }
                 return;
+            case script_value_type::jai_function_type:   // function<U(T)> against a signature: the result, then each parameter
+                if (!pattern->is_signature() || !actual->is_signature() || pattern->type_params.size() != actual->type_params.size()) { return; }
+                for (size_t i = 0; i < pattern->type_params.size(); ++i) {
+                    const type_info* named = actual->type_params[i].get();
+                    if (i == 0 && (!named || named->base_type == script_value_type::jai_null_type)) { continue; }   // no result names no type
+                    unify(d, pattern->type_params[i].get(), named, depth + 1);
+                }
+                return;
             case script_value_type::jai_object_type: {
+                if (pattern->is_coroutine) {   // coroutine<T> against a coroutine's handle
+                    if (actual->is_coroutine && !pattern->type_params.empty() && !actual->type_params.empty()) {
+                        unify(d, pattern->type_params[0].get(), actual->type_params[0].get(), depth + 1);
+                    }
+                    return;
+                }
                 if (pattern->type_params.empty() || actual->base_type != script_value_type::jai_object_type) { return; }
                 const std::string_view generic = std::string_view(pattern->type_name).substr(0, pattern->type_name.find('<'));
                 std::vector<type_info_ptr> arguments;
@@ -1609,20 +1629,118 @@ private:
                 return;
         }
     }
+    // A lambda's parameter that declares no type of its own: a bare name or auto, typed by the signature it is checked against
+    static bool arrow_parameter(const parameter& p) { return !p.is_reference && (p.untyped || !p.type || p.contextual); }
+    static bool untyped_arrow(const expression* e) {
+        if (!e || e->get_type() != node_type::lambda_expr) { return false; }
+        const auto& parameters = static_cast<const lambda_expr*>(e)->parameters;
+        return std::any_of(parameters.begin(), parameters.end(), arrow_parameter);
+    }
+    // The signature a function value declares, which a deduction reads function<R(A...)> against: a slot's own, or a lambda's
+    // or a function's whose every parameter declares its type, with the result it declares (a lambda's: the one type its
+    // returns yield). Null for a callable that declares no one signature: an overloaded name, a `function` slot, an arrow.
+    const type_info* declared_signature(const ctype& arg) {
+        if (arg.ti && arg.ti->is_signature()) { return arg.ti; }
+        const std::vector<parameter>* parameters = nullptr;
+        const type_info* result = nullptr;
+        if (arg.origin && arg.origin->get_type() == node_type::lambda_expr) {
+            const auto* l = static_cast<const lambda_expr*>(arg.origin);
+            parameters = &l->parameters;
+            result = l->return_type.get();
+            if (auto yields = lambda_return_types_.find(l); !result && yields != lambda_return_types_.end()) { result = yields->second; }
+        } else if (arg.fns && arg.fns->size() == 1) {
+            const function_decl* fn = arg.fns->front();
+            parameters = &fn->parameters;
+            result = fn->is_coroutine && fn->return_type ? eng_.get_type_info_coroutine(fn->return_type.get()) : fn->return_type.get();
+        }
+        if (!parameters || !result) { return nullptr; }
+        std::vector<type_info*> taken;
+        for (const parameter& p : *parameters) {
+            if (!p.type || p.untyped || p.contextual) { return nullptr; }
+            taken.push_back(p.is_reference ? eng_.get_type_info_reference(p.type.get()) : p.type.get());
+        }
+        return eng_.get_type_info_function(const_cast<type_info*>(result), taken);
+    }
+    // `pattern` with each type parameter the deduction has found in its place; null while it names one not found yet, or an
+    // instance the unit does not declare
+    const type_info* substituted(const deduction& d, const type_info* pattern, int depth = 0) {
+        if (!pattern || depth > 64) { return nullptr; }
+        if (const size_t p = type_parameter_index(d.g, *pattern); p != SIZE_MAX) { return d.found[p].type; }
+        if (pattern->type_params.empty()) { return pattern; }
+        std::vector<type_info*> inner;
+        for (const auto& parameter : pattern->type_params) {
+            const type_info* made = substituted(d, parameter.get(), depth + 1);
+            if (!made) { return nullptr; }
+            inner.push_back(const_cast<type_info*>(made));
+        }
+        switch (pattern->base_type) {
+            case script_value_type::jai_array_type: return eng_.get_type_info_array(inner[0]);
+            case script_value_type::jai_map_type: return inner.size() == 2 ? eng_.get_type_info_map(inner[0], inner[1]) : nullptr;
+            case script_value_type::jai_shared_ptr_type: return eng_.get_type_info_shared_ptr(inner[0]);
+            case script_value_type::jai_reference_type: return eng_.get_type_info_reference(inner[0]);
+            case script_value_type::jai_function_type: return eng_.get_type_info_function(inner[0], std::vector<type_info*>(inner.begin() + 1, inner.end()));
+            case script_value_type::jai_object_type: {
+                if (pattern->is_coroutine) { return eng_.get_type_info_coroutine(inner[0]); }   // its name holds what it yields: made, never edited
+                const std::string instance = generic_instance_name(std::string_view(pattern->type_name).substr(0, pattern->type_name.find('<')),
+                                                                   std::vector<type_info_ptr>(inner.begin(), inner.end()));
+                return known_class(instance) ? eng_.get_type_info_object(instance) : nullptr;
+            }
+            default: return nullptr;
+        }
+    }
     // The type arguments a call leaves to its value arguments: `types` holds the written ones and takes the rest. False with
     // `error` saying what to write.
     bool deduce_type_arguments(const call_expr* c, const generic_definition& g, const std::vector<ctype>& args, std::vector<type_info_ptr>& types, std::string& error) {
         deduction d{g, std::vector<deduced_type>(g.parameters.size()), {}, 0};
         for (size_t i = 0; i < types.size(); ++i) { d.found[i] = {types[i].get(), 0}; }
         std::vector<const type_info*> actual(args.size(), nullptr);
+        std::vector<size_t> arrows;   // the lambdas that take their parameters' types from what the other arguments find
+        const auto bare = [](const type_info* t) {
+            while (t && t->base_type == script_value_type::jai_reference_type && !t->type_params.empty()) { t = t->type_params[0].get(); }
+            return t;
+        };
         for (size_t i = 0; i < args.size() && i < g.values.size(); ++i) {
-            if (args[i].kind == ctype::null_k || args[i].kind == ctype::function_k) { continue; }   // a null and a function value say nothing of a type
-            actual[i] = deduction_type(args[i]);
-            if (!actual[i] && args[i].is_unknown()) {   // a reference names what it was declared to name
-                actual[i] = deduction_type(referent_receiver(c->arguments[c->type_argument_count + i].get()));
+            if (args[i].kind == ctype::null_k) { continue; }   // a null says nothing of a type
+            if (args[i].kind == ctype::function_k) {   // nor does a function value, but through the signature it declares
+                const type_info* pattern = bare(g.values[i].type.get());
+                const bool through = pattern && pattern->is_signature();
+                if (!through && !(args[i].ti && args[i].ti->is_signature())) { continue; }
+                actual[i] = declared_signature(args[i]);
+                if (!actual[i]) {
+                    if (through && untyped_arrow(args[i].origin)) { arrows.push_back(i); }
+                    continue;
+                }
+            } else {
+                actual[i] = deduction_type(args[i]);
+                if (!actual[i] && args[i].is_unknown()) {   // a reference names what it was declared to name
+                    actual[i] = deduction_type(referent_receiver(c->arguments[c->type_argument_count + i].get()));
+                }
             }
             d.argument = i + 1;
             unify(d, g.values[i].type.get(), actual[i]);
+            if (!d.error.empty()) { error = std::move(d.error); return false; }
+        }
+        // An arrow is read last: each parameter it leaves untyped takes the type the signature gives it with what is found so
+        // far, the arrow is checked so, and its result then names what the signature's result does
+        for (const size_t i : arrows) {
+            expression* written = c->arguments[c->type_argument_count + i].get();
+            auto* l = static_cast<lambda_expr*>(written);
+            const type_info* pattern = bare(g.values[i].type.get());
+            if (pattern->type_params.size() - 1 != l->parameters.size()) { continue; }
+            d.argument = i + 1;
+            std::vector<type_info*> taken;
+            for (size_t k = 0; k < l->parameters.size(); ++k) {
+                const parameter& p = l->parameters[k];
+                const type_info* wanted = pattern->type_params[k + 1].get();
+                const type_info* found = nullptr;
+                if (arrow_parameter(p)) { found = substituted(d, bare(wanted)); } else { unify(d, wanted, p.type.get()); }
+                taken.push_back(found ? const_cast<type_info*>(found) : eng_.get_type_info_any());
+            }
+            if (!d.error.empty()) { error = std::move(d.error); return false; }
+            infer_expecting(written, eng_.get_type_info_function(eng_.get_type_info_any(), taken));
+            const type_info* result = l->return_type.get();
+            if (auto yields = lambda_return_types_.find(l); !result && yields != lambda_return_types_.end()) { result = yields->second; }
+            if (result && result->base_type != script_value_type::jai_null_type) { unify(d, pattern->type_params[0].get(), result); }
             if (!d.error.empty()) { error = std::move(d.error); return false; }
         }
         const size_t given = c->type_argument_count;
@@ -1652,7 +1770,7 @@ private:
                 error = lead + "no parameter names it; " + spelled(name);
             } else if (named_by > args.size()) {
                 error = lead + "argument " + std::to_string(named_by) + " is left to its default; " + spelled(name);
-            } else if (args[named_by - 1].kind == ctype::null_k || args[named_by - 1].kind == ctype::function_k) {
+            } else if (args[named_by - 1].kind == ctype::null_k || (args[named_by - 1].kind == ctype::function_k && !actual[named_by - 1])) {
                 error = lead + "argument " + std::to_string(named_by) + " is " + (args[named_by - 1].kind == ctype::null_k ? "null" : "a function") + ", which says nothing of a type; " + spelled(name);
             } else if (!actual[named_by - 1]) {
                 error = lead + "argument " + std::to_string(named_by) + "'s type is not known at load; " + spelled(name);
@@ -7931,8 +8049,23 @@ private:
         struct template_scope { int& depth; bool on; ~template_scope() { depth -= on; } } in_template{template_files_, template_body};
         std::vector<const type_info*> expected;
         expected_argument_types(c, expected);
+        // An arrow that declares no parameter types, passed to a generic, takes them from the call's other arguments: it is
+        // walked once the callee is known (deduce_type_arguments types it on the way), by the instance's own signature
+        std::vector<expression*> arrows;
+        bool generic_named = false;
+        if (generics_live_ && c->callee && std::any_of(c->arguments.begin(), c->arguments.end(), [](const expression_ptr& a) { return untyped_arrow(a.get()); })) {
+            bool receiver_unknown = false;
+            generic_named = !generic_callee(c, receiver_unknown).empty();
+        }
         for (size_t k = 0; k < c->arguments.size(); ++k) {
             auto& a = c->arguments[k];
+            if (generic_named && untyped_arrow(a.get())) {
+                ctype held = ctype::make(ctype::function_k);
+                held.origin = a.get();
+                args.push_back(held);
+                arrows.push_back(a.get());
+                continue;
+            }
             const bool combine = callee_name == "parallel_reduce" && k == 3;   // runs serially after the join
             const bool body = parallel_callee && !combine && a->get_type() == node_type::lambda_expr;
             parallel_body_depth_ += body;
@@ -7944,6 +8077,16 @@ private:
         }
         const std::string spelled_callee = unknown_types.empty() ? std::string() : type_argument_callee(c);
         const generic_call generic = resolve_generic_call(c, args);
+        if (!arrows.empty()) {
+            if (generic == generic_call::rewritten) {
+                expected.clear();
+                expected_argument_types(c, expected);
+            }
+            for (size_t k = 0; k < c->arguments.size(); ++k) {
+                expression* a = c->arguments[k].get();
+                if (std::find(arrows.begin(), arrows.end(), a) != arrows.end()) { args[k] = infer_expecting(a, k < expected.size() ? expected[k] : nullptr); }
+            }
+        }
         if (generic != generic_call::none || spelled_callee.empty()) {   // a generic's own type arguments: the declaration's error
             for (const auto& [type, at] : unknown_types) { check_spelled_type(type.get(), at); }
             unknown_types.clear();
@@ -10573,6 +10716,12 @@ private:
             else { open.inferred_return = k; }
             open.returns_seen = true;
             if (!r->value || r->binds_reference || !names_a_value(value)) { open.returns_values = false; }
+            if (generics_live_) {
+                const type_info* yields = r->value && !r->binds_reference && !narrow_derived_ ? deduction_type(value) : nullptr;
+                if (!r->value) { open.returns_nothing = true; }
+                else if (!yields || (open.returned && open.returned->canonical_name() != yields->canonical_name())) { open.returned_mixed = true; }
+                else { open.returned = yields; }
+            }
         }
         if (fn.is_coroutine && r->value) { check_coroutine_value(value, r->location, "return"); }
         if (fn.is_coroutine || !fn.ret) { return; }   // coroutine returns/yields + auto: lenient
@@ -11369,6 +11518,7 @@ private:
     }
 
     std::unordered_map<const lambda_expr*, ctype> lambda_results_;   // an undeclared lambda whose returns are one certain scalar kind
+    std::unordered_map<const lambda_expr*, const type_info*> lambda_return_types_;   // and the one type they yield, void for none (fn_ctx::returned)
 
     // An init-capture, or an explicit by-value capture of a program-scope name, holds a copy taken at creation:
     // the call reads that copy, never the name, so the body is not grafted at the call site
@@ -11466,6 +11616,11 @@ private:
             stamp(l->inferred_return_kind, kind, uint8_t(0));
             if (kind) { lambda_results_[l] = ctype::make(kind == 1 ? ctype::int_k : kind == 2 ? ctype::float_k : ctype::bool_k); }
             else { lambda_results_.erase(l); }
+            if (generics_live_) {   // no return of a value at all is a lambda that returns nothing
+                const bool unknown = l->return_type || done.returned_mixed || has_includes_ || (done.returned && done.returns_nothing);
+                if (unknown) { lambda_return_types_.erase(l); }
+                else { lambda_return_types_[l] = done.returned ? done.returned : eng_.get_type_info_void(); }
+            }
         }
         fn_stack_.pop_back();
         scopes_.pop_back();

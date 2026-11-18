@@ -1656,9 +1656,6 @@ public:
 				Box<function> any; any.v = () => 7;
 				`${apply<int>((int a) => a + 1, 3)}|${s.run(4)}|${total}|${any.v()}`;
 			)").as_string());
-			// a signature deduces nothing: the call writes the type argument
-			check_true(contains(failure(*e, "T run<T>(function<T()> f) { return f(); } function<int()> one = () => 1; run(one);"),
-				"cannot deduce T for 'run': argument 1 is a function, which says nothing of a type; write run<T>(...)"));
 			check_eq((int64_t)1, e->execute("T run<T>(function<T()> f) { return f(); } function<int()> one = () => 1; run<int>(one);").as_int());
 			// a typed callable's own '<' is no type-argument list of a call, and a comparison beside one stays a comparison
 			check_eq(std::string("3|true|false"), e->execute("function<int(int)> f = (int a) => a + 1; int g = 1; int h = 2; `${f(2)}|${g < h}|${f(1) < h}`;").as_string());
@@ -1695,6 +1692,52 @@ public:
 			check_eq(detail::engine_access::get_class_definition(*e, "Stepper")->value_tree_holds_callable(),
 			         detail::engine_access::get_class_definition(*e, "Box<coroutine<int>>")->value_tree_holds_callable(), "an instance answers as the class written by hand");
 			check_false(detail::engine_access::get_class_definition(*e, "Box<int>")->value_tree_holds_callable());
+		});
+
+		// function<U(T)> against a function value is a walk over the signature: the result, then each parameter
+		test("a_type_argument_is_deduced_through_a_signature", [this]() {
+			auto e = stdlib_engine();
+			const std::string run = "T run<T>(function<T()> f) { return f(); }\nU apply<T, U>(function<U(T)> f, T x) { return f(x); }\nT pick<T>(T a) { return a; }\n";
+			// from a function's name, a lambda that declares its types, and a variable declared with a signature
+			check_eq(std::string("1|2|ab|3"), e->execute(run + "int one() { return 1; }\nfunction<int()> three = () => 3;\n"
+				"`${run(one)}|${run(() => 2)}|${run([]() -> string { return \"ab\"; })}|${run(three)}`;").as_string());
+			check_eq(std::string("5.0|n4|true"), e->execute(run + "string label(int n) { return \"n\" + to_string(n); }\nfunction<bool(string)> filled = (string s) => s.size() > 0;\n"
+				"`${apply((int a) => a * 2.5, 2)}|${apply(label, 4)}|${apply(filled, \"x\")}`;").as_string());
+			// a parameter that is the type parameter takes a slot's own signature
+			check_eq((int64_t)5, e->execute(run + "function<int(int)> inc = (int a) => a + 1;\nauto same = pick(inc);\nsame(4);").as_int());
+			// through a coroutine type too
+			check_eq((int64_t)9, e->execute("T first<T>(coroutine<T> c) { return c.next(); }\ncoroutine int gen() { yield 9; }\nfirst(gen());").as_int());
+			// a signature's parameter and another argument must agree, and a signature of another count matches nothing
+			check_true(contains(failure(*e, run + "apply((string s) => 1, 2);"), "cannot deduce T for 'apply': it is string from argument 1 and int from argument 2"));
+			check_true(contains(failure(*e, run + "run((int a) => a);"), "cannot deduce T for 'run': argument 1 is function<int(int)>, which 'function<T()>' does not match; write run<T>(...)"));
+			// what declares no one signature still says nothing: an overloaded name, a bare function slot, a lambda where the
+			// parameter is the type parameter itself
+			const std::string nothing = "cannot deduce T for 'run': argument 1 is a function, which says nothing of a type; write run<T>(...)";
+			check_true(contains(failure(*e, run + "int two() { return 2; }\nint two(int x) { return x; }\nrun(two);"), nothing));
+			check_true(contains(failure(*e, run + "function any = () => 1;\nrun(any);"), nothing));
+			check_true(contains(failure(*e, run + "pick((int a) => a);"), "cannot deduce T for 'pick': argument 1 is a function, which says nothing of a type; write pick<T>(...)"));
+			check_true(contains(failure(*e, run + "run(() => { });"), "cannot deduce T for 'run': argument 1 is function<void()>, which 'function<T()>' does not match; write run<T>(...)"));
+		});
+
+		// The other arguments are read first; an arrow whose parameters declare no type takes them from what those found, and its
+		// result then gives what is left
+		test("an_untyped_arrow_is_typed_from_the_arguments_beside_it_and_its_result_deduces", [this]() {
+			auto e = stdlib_engine();
+			const std::string map_all = "array<U> map_all<T, U>(array<T> xs, function<U(T)> f) { array<U> out; for (auto x : xs) { out.push(f(x)); } return out; }\n";
+			check_eq(std::string("[2, 4, 6]|array<int>"), e->execute(map_all + "auto doubled = map_all([1, 2, 3], x => x * 2);\n`${doubled}|${reflect::type_name(doubled)}`;").as_string());
+			check_eq(std::string("[\"1!\", \"2!\"]|[1, 2]|[0.5]"), e->execute(map_all + "class Item { int n; Item(int a) : n(a) {} }\narray<Item> items = [Item(1), Item(2)];\n"
+				"`${map_all([1, 2], x => to_string(x) + \"!\")}|${map_all(items, (it) => it.n)}|${map_all([1], x => { return x / 2.0; })}`;").as_string());
+			// whichever side of the call the arrow stands on, and beside a parameter it declares
+			check_eq(std::string("7|ab3"), e->execute("U feed<T, U>(function<U(T)> f, T x) { return f(x); }\nV join<T, U, V>(function<V(T, U)> f, T a, U b) { return f(a, b); }\n"
+				"`${feed(x => x + 1, 6)}|${join((string s, n) => s + to_string(n), \"ab\", 3)}`;").as_string());
+			// the arrow's body is checked with the type its parameter took
+			check_true(contains(failure(*e, map_all + "map_all([1, 2], x => x.nope);"), "int has no member 'nope'"));
+			// with nothing beside it to read its parameter from, the arrow says nothing
+			check_true(contains(failure(*e, "U conv<T, U>(function<U(T)> f) { return f(); }\nconv(x => x);"),
+				"cannot deduce T for 'conv': argument 1 is a function, which says nothing of a type; write conv<T, U>(...)"));
+			// a result the load cannot name leaves its parameter to be written
+			check_true(contains(failure(*e, map_all + "var loose = 1;\nmap_all([1, 2], x => loose);"),
+				"cannot deduce U for 'map_all': argument 2 is a function, which says nothing of a type; write map_all<int, U>(...)"));
 		});
 
 		test("an_instance_made_with_a_callable_type_keeps_its_name_where_names_travel", [this]() {

@@ -1567,7 +1567,7 @@ void vm_backend::capture_stack_trace() {
 		const ast_node* node = frame_statement(*fr);
 		if (fr->top_level) {
 			graft_frames_at(*fr->code, fr->ip, &node, captured_trace_);
-			top_node = node;
+			top_node = namespace_member_ && node && node->get_type() == node_type::namespace_decl ? namespace_member_ : node;
 			break;
 		}
 		if (captured_trace_.size() >= k_stack_trace_frames) {   // the frames above the innermost top-level one, counted, not walked
@@ -18579,20 +18579,23 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 
 op_status vm_backend::exec_namespace_decl(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<namespace_decl*>(f.code->nodes[ins.a].get());
+	// a failure's trace is taken while the block still names its member: the block's frame stands at the member's line
+	struct member_statement { vm_backend* vm; const ast_node* outer; ~member_statement() { vm->namespace_member_ = outer; } } statement{this, std::exchange(namespace_member_, nullptr)};
+	op_status result = op_status::ok;
 	try {
 		struct revalidate_after { vm_backend* vm; ~revalidate_after() { vm->revalidate_folds(); } } after{this};
-		return exec_namespace_decl_node(decl);
+		result = exec_namespace_decl_node(decl);
 	} catch (const script_exception& e) {
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
 		current_exception_ = e;
 		is_unwinding_ = true;
-		return {};
 	} catch (const std::runtime_error& e) {
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
 		current_exception_ = script_exception(e.what());
 		is_unwinding_ = true;
-		return {};
 	}
+	if ((result == op_status::failed || is_unwinding_) && !trace_captured_) { capture_stack_trace(); }
+	return result;
 }
 
 // A namespace's variable declaration runs as a program of one declaration in the namespace's scope (exec_decl_var's
@@ -18664,6 +18667,7 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 	detail::namespace_scope(*engine_, *ns_data, decl->name_id);
 
 	for (const auto& member_decl : decl->declarations) {
+		namespace_member_ = member_decl.get();
 		if (member_decl->get_type() == node_type::function_decl) {
 			auto* func_decl = static_cast<function_decl*>(member_decl.get());
 			if (func_decl->name_id == UINT64_MAX) {

@@ -1015,6 +1015,7 @@ namespace jai::vm {
         bool is_unwinding_ = false;
         bool trace_captured_ = false;
         std::vector<stack_frame> captured_trace_;
+        const ast_node* namespace_member_ = nullptr;   // the member the running namespace block declares: its frame's statement in a trace
         std::optional<error_propagator> run_error_;   // the runtime error that ended this run's top level
         detail::nested_failure nested_failure_;
         // "Inside a catch block" marker of the rethrow protocol (the catch symbol, or the

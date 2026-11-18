@@ -435,6 +435,38 @@ public:
             }
         });
 
+        test("a_declaration_that_fails_at_load_traces_its_own_statement", [this]() {
+            // each member of a namespace block is a statement of its own: a failing class, variable or function stands at its line,
+            // whatever ran before it in the block, and a static's initializer at its own line, as a field's does
+            const std::string prelude = "int boom() { throw \"boom\"; } var text() { return \"s\"; }\n";   // line 1
+            const std::filesystem::path dir = jai::foundry::test_temp_directory();
+            { std::ofstream(dir / "trace_declaring.jai") << "namespace shop { int tax(int p) { return p + 1; } }\n"; }
+            { std::ofstream(dir / "trace_again.jai") << "int q = 1;\nnamespace shop {\n    class K { int k = 1; }\n    int a = 1;\n    int tax(int p) { return 0; }\n}\n"; }
+            { std::ofstream(dir / "trace_nested.jai") << "namespace shop {\n    namespace inner { int a = 1; }\n    int tax(int p) { return 0; }\n}\n"; }
+            check_each(std::vector<std::pair<std::string, std::string>>{
+                {"namespace shop {\n    int a = 1;\n    class Crate : Item { int both() { return 1; } }\n}\n", "<script>:4"},
+                {"namespace shop {\n    int a = 1;\n    int b = boom();\n}\n", "boom:1|<script>:4"},
+                {"namespace shop {\n    class K { int k = 1; }\n    int b =\n        boom();\n}\n", "boom:1|<script>:4"},
+                {"namespace shop {\n    int a = 1;\n    namespace inner {\n        int c = 2;\n        int b = boom();\n    }\n}\n", "boom:1|<script>:6"},
+                {"namespace shop {\n    int a = 1;\n    namespace inner {\n        int c = 2;\n        class Crate : Item { }\n    }\n}\n", "<script>:6"},
+                {"namespace shop {\n    int a = 1;\n    class K {\n        static int s =\n            boom();\n    }\n}\n", "boom:1|<script>:6"},
+                {"int a = 1;\nclass K {\n    static int s =\n        boom();\n}\n", "boom:1|<script>:5"},
+                // what the class's declaration raises after an initializer ran stands at the class
+                {"namespace shop {\n    int a = 1;\n    class K {\n        static int ok = a + 1;\n        static int s =\n            text();\n    }\n}\n", "<script>:4"},
+                {"int z = 0; namespace shop { int a = 1; class Crate : Item { } }\n", "<script>:2"},
+                {"int z = 0; namespace shop { int a = 1; int b = boom(); }\n", "boom:1|<script>:2"},
+                // a function another file's block declared: the redefinition stands at the function, in the importing frame's file
+                {"import \"trace_declaring.jai\";\nimport \"trace_again.jai\";\n", "<script>:5|<script>:3"},
+                {"import \"trace_declaring.jai\";\nvoid load() {\n    import \"trace_nested.jai\";\n}\nload();\n", "<script>:3|load:4|<script>:6"},
+            }, [&](const auto& c) {
+                auto engine = make_engine();
+                engine->add_include_path(dir.string());
+                check_true(!failure_text(*engine, (prelude + c.first).c_str()).empty(), "the load fails");
+                check_eq(c.second, trace_shape(*engine));
+            });
+            for (const char* file : {"trace_declaring.jai", "trace_again.jai", "trace_nested.jai"}) { std::filesystem::remove(dir / file); }
+        });
+
         test("top_level_throw_captures_script_frame", [this]() {
             auto engine = make_engine();
             try { engine->execute("throw \"x\";"); } catch (...) {}

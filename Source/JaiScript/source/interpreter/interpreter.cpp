@@ -7697,20 +7697,23 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
 checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     return detail::declare_script_class(decl, detail::class_declaration_host{
         engine_, string_symbolizer_, environment_, class_definition_type_id_, class_lookup_callback_, current_unit(),
-        [this](const expression_ptr& e, const std::shared_ptr<environment>& env) -> checked_result<script_value> {
+        [this, decl](const expression_ptr& e, const std::shared_ptr<environment>& env) -> checked_result<script_value> {
             struct env_restore {
                 interpreter& self;
                 std::shared_ptr<environment> previous;
                 ~env_restore() { self.environment_ = std::move(previous); }
             } restore{*this, environment_};
             if (env) { environment_ = env; }
+            note_running_statement(e.get());   // an initializer's failure stands at its own line, as the vm's frame for it does
             auto evaluated = dispatch_expr(e.get());
             if (!evaluated) {
                 return evaluated.error_value();
             }
+            note_running_statement(decl);
             return pop_value();
         },
-        [this] {
+        [this, decl] {
+            note_running_statement(decl);
             if (is_unwinding_) {
                 is_unwinding_ = false;
                 trace_captured_ = false;
@@ -7747,7 +7750,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
     // Process all declarations within the namespace
     // Functions, variables, and classes are stored in the namespace_data registry
     for (const auto& member_decl : decl->declarations) {
-        // Check what kind of declaration this is
+        note_running_statement(member_decl.get());   // a member's failure stands at the member, as the vm's namespace_member_ has it
         if (member_decl->get_type() == node_type::function_decl) {
             auto* func_decl = static_cast<function_decl*>(member_decl.get());
             // Intern the function name if not already done
@@ -8903,7 +8906,7 @@ bool scope_slots_at(const statement* s, const ast_node* at, bool mid_statement, 
 }
 }
 
-void interpreter::note_running_statement(statement* stmt) {
+void interpreter::note_running_statement(const ast_node* stmt) {
     if (!call_stack_.empty()) call_stack_.back().current_node = stmt;
     else top_level_node_ = stmt;
 }

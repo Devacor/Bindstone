@@ -550,6 +550,8 @@ public:
             files.write("naming_subclass.jai", "namespace shop { class Crate : Item { int both() { return price + tax(1); } } int crate() { return Crate().both(); } }");
             files.write("naming_early.jai", "namespace shop { int early = tax(1); }");
             files.write("declaring_again.jai", "namespace shop { int tax(int p) { return 0; } }");
+            files.write("base_again.jai", "namespace shop { int base = 77; int peek() { return base; } }");
+            files.write("item_again.jai", "namespace shop { class Item { int price = 99; } int peek() { Item i; return i.price; } }");
             files.write("naming_hidden.jai", "string base = \"global\"; namespace shop { int hidden() { return tax(1) + base; } }");
             files.write("naming_using.jai", "using shop::Item, shop::tax, shop::base;\nint outside() { Item i; return tax(i.price) + base; }\nnamespace other { int inside() { Item i; return tax(i.price, 1); } }");
             check_each(std::vector<std::pair<std::string, std::string>>{
@@ -566,6 +568,10 @@ public:
                 {"import \"naming_early.jai\"; import \"declaring.jai\"; shop::early", "Undefined variable 'tax'"},
                 // one name declared by two files of the namespace is the redefinition it is in one file's two blocks
                 {"import \"declaring.jai\"; import \"declaring_again.jai\"; shop::tax(1)", "Function 'tax' already exists in namespace 'shop'. Use 'override' keyword to replace it."},
+                // a variable two files declare is the one variable, initialized again by the file that runs later; a class is replaced
+                {"import \"declaring.jai\"; import \"base_again.jai\"; `${shop::base} ${shop::peek()}`", "77 77"},
+                {"import \"base_again.jai\"; import \"declaring.jai\"; `${shop::base} ${shop::peek()}`", "10 10"},
+                {"import \"declaring.jai\"; import \"item_again.jai\"; `${shop::peek()} ${shop::Item().price}`", "99 99"},
             }, [&](const auto& c) {
                 auto eng = files.engine();
                 const std::string got = outcome(*eng, c.first);

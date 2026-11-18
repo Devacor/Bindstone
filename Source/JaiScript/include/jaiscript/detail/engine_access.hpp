@@ -122,6 +122,8 @@ namespace jai::detail {
         JAI_FORCEINLINE static bool backend_unwinding(const engine& a_engine) { return a_engine.backend_unwinding(); }
         JAI_FORCEINLINE static std::string backend_exception_text(const engine& a_engine) { return a_engine.backend_exception_text(); }
         JAI_FORCEINLINE static std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& script_namespaces(engine& a_engine) { return a_engine.script_namespaces(); }
+        JAI_FORCEINLINE static bool namespace_class_known(const engine& a_engine, std::string_view a_query) { return a_engine.namespace_class_known(a_query); }
+        JAI_FORCEINLINE static void pool_program_classes(engine& a_engine, const program_class_map& a_classes) { a_engine.pool_program_classes(a_classes); }
         JAI_FORCEINLINE static type_info* note_enum(engine& a_engine, uint64_t name_id, std::string_view name, const std::vector<int64_t>& numbers) { return a_engine.note_enum(name_id, name, numbers); }
         JAI_FORCEINLINE static bool is_enum_name(const engine& a_engine, uint64_t name_id) { return a_engine.is_enum_name(name_id); }
         JAI_FORCEINLINE static string_symbolizer* get_symbolizer(engine& a_engine) { return a_engine.get_symbolizer(); }

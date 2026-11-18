@@ -110,6 +110,8 @@ struct unit {
 	std::vector<std::string> salvaged;            // failing parse: top-level names read off the tokens (no cascade of undeclared names)
 	std::vector<file_diagnostic> parse_errors;
 	std::vector<std::string> imports;             // resolved literal top-level import/include targets
+	std::vector<std::string> namespace_queries;   // the namespace classes the parse asked about (parser::namespace_queries)
+	std::string namespace_answers;                // and how the program pooled then answered each
 	uint64_t surface = 0;                         // hash of what other units' checks read from this one
 	uint64_t disk_stamp = 0;
 	double disk_checked_at = -1.0e9;              // seconds (steady clock) of the last stat
@@ -227,6 +229,9 @@ private:
 	uint64_t epoch_clock_ = 0;
 
 	void parse(unit& u, bool publish = true);
+	uint64_t pooled_program_ = 0;                 // the signature of the program whose classes the engine's parser reads
+	void pool_classes(const program& prog);
+	std::string namespace_answers(const unit& u) const;
 	void set_imports(const std::string& path, const std::vector<std::string>& imports);
 	std::vector<std::string> roots_of(const std::string& path);
 	void analyze(unit& u, bool want_model);

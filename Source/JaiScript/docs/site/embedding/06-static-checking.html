@@ -136,7 +136,7 @@ clean load: 4</code></pre></div>
 <ul>
 <li>in scope, or a member of the current class (inherited ones included; inside a method or a <code>[this]</code> lambda, also a member of a derived class);</li>
 <li>a program-scope declaration of the unit, top level or in a namespace body (two-pass, so a function reads a global declared below it);</li>
-<li>a top-level name of any unit in the program (<a href="#programs">Programs</a>);</li>
+<li>a top-level name of any unit in the program, or, in a namespace's code, a member any unit declares in that namespace or one that encloses it (<a href="#programs">Programs</a>);</li>
 <li>an <code>extern</code> declaration (<a href="#extern">extern</a>);</li>
 <li>one of the host&#x27;s per-call instance variables;</li>
 <li>anything on the engine&#x27;s registration surface when the script loads: globals, functions, classes, template types, namespaces.</li>

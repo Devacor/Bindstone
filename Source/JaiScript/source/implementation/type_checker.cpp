@@ -3738,8 +3738,9 @@ private:
     // program, an earlier run, the host's registrations), never a class's statics or a nested namespace
     bool namespace_member_declared(const std::string& space, std::string_view member) {
         const std::string qualified = space + "::" + std::string(member);
-        if (known_type_name(qualified) || find_sclass(qualified)) { return false; }   // the parser reads a namespace's bare class name qualified
-        if (namespace_members_.count(qualified) || extra_global(qualified) || eng_.has_variable(qualified) || eng_.has_function(qualified)) { return true; }
+        if (known_class(qualified) || find_sclass(qualified) || eng_.is_type_name(qualified)) { return false; }   // the parser reads a namespace's bare class name qualified
+        if (namespace_members_.count(qualified) || eng_.has_variable(qualified) || eng_.has_function(qualified)) { return true; }
+        if (extra_global(qualified) && !extra_global(qualified + "::")) { return true; }   // another unit's member; a nested namespace is named by its path
         eng_.note(qualified);
         const script_namespace_data* ns = eng_.find_namespace(space);
         if (!ns) { return false; }

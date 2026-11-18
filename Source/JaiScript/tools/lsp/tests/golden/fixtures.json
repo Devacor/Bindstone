@@ -161,6 +161,19 @@
   },
   "uri": "program/lib.jai"
  },
+ "definition.namespace_fn_other_file": {
+  "range": {
+   "end": {
+    "character": 8,
+    "line": 4
+   },
+   "start": {
+    "character": 5,
+    "line": 4
+   }
+  },
+  "uri": "namespace/shop.jai"
+ },
  "diagnostics.edit_breaks": [
   {
    "message": "expected expression",
@@ -279,6 +292,7 @@
   }
  ],
  "diagnostics.main": [],
+ "diagnostics.namespace.shelf": [],
  "highlight.local_sum": [
   {
    "kind": 3,
@@ -445,6 +459,22 @@
    "start": {
     "character": 3,
     "line": 12
+   }
+  }
+ },
+ "hover.namespace_field_other_file": {
+  "contents": {
+   "kind": "markdown",
+   "value": "```jaiscript\nint shop::Item.price\n```\n\nfield of `shop::Item` - declared in `shop.jai:4`"
+  },
+  "range": {
+   "end": {
+    "character": 26,
+    "line": 5
+   },
+   "start": {
+    "character": 21,
+    "line": 5
    }
   }
  },

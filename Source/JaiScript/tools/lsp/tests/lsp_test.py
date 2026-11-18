@@ -323,6 +323,15 @@ def run_fixtures(exe, update, checks):
             leaf_uri = uri_of(FIXTURES / "errors" / leaf)
             results["diagnostics.errors." + leaf] = client.diagnostics.get(leaf_uri, {}).get("diagnostics")
 
+        # a namespace two files declare: the bare names one file reads are the members the other declares
+        shelf = FIXTURES / "namespace" / "shelf.jai"
+        shelf_uri = client.open(shelf)
+        shelf_text = client.texts[shelf_uri]
+        client.settle()
+        results["diagnostics.namespace.shelf"] = client.wait_diagnostics(shelf_uri)["diagnostics"]
+        ask("hover.namespace_field_other_file", "textDocument/hover", shelf_uri, shelf_text, "stocked.price", 1, 8)
+        ask("definition.namespace_fn_other_file", "textDocument/definition", shelf_uri, shelf_text, "tax(", 1, 0)
+
         # an edit that breaks and then fixes the syntax: the error appears at the edited line and goes away
         pos = at(main_text, "int hp = h.hp;", 1, 0)
         version = client.change(main_uri, pos, pos, "int broken = ;\n\t")

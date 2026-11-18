@@ -1170,6 +1170,17 @@ struct engine::implementation {
         }
         return next == pooled.size();
     }
+    // The pooled classes a namespace declares, by bare name, and a count that moves whenever the pooled classes do: a parse reads a
+    // bare name in a namespace's code as that namespace's class (parser::qualify_namespace_classes), whichever unit declares it
+    std::unordered_set<std::string> pooled_namespace_classes_;
+    size_t pooled_class_moves_ = 0;
+    void index_pooled_namespace_classes() {
+        ++pooled_class_moves_;
+        pooled_namespace_classes_.clear();
+        for (const auto& [name, declaration] : program_classes_) {
+            if (const size_t cut = name.rfind("::"); cut != std::string::npos) { pooled_namespace_classes_.insert(name.substr(cut + 2)); }
+        }
+    }
     // A unit's declarations into the program pools, each name under the unit that declares it; a unit pooled again under the
     // key it was pooled with brings the names it brought before, and again with the same declarations changes nothing but the
     // class models, where the unit pooled last wins
@@ -1184,7 +1195,9 @@ struct engine::implementation {
                 moved = program_names_.insert(n).second || moved;
             }
         }
+        const size_t classes_before = program_classes_.size();
         moved = detail::collect_unit_classes(decls, program_classes_) || moved;
+        if (program_classes_.size() != classes_before) { index_pooled_namespace_classes(); }
         if (std::vector<declaration_ptr>& pooled = pooled_unit_declarations_[path]; !pools_as(pooled, decls)) {
             pooled.clear();
             for (const auto& d : decls) { if (pooled_by_path(d)) { pooled.push_back(d); } }
@@ -1312,6 +1325,27 @@ struct engine::implementation {
         return cached;
     }
 
+    static void note_parse_failure(const parse_error& e, std::string& parse_failures) {
+        std::string_view listing = e.what();
+        constexpr std::string_view k_header = "parse failed:\n";
+        if (listing.substr(0, k_header.size()) == k_header) { listing.remove_prefix(k_header.size()); }   // the program's own header leads them all
+        parse_failures += listing;
+        if (parse_failures.empty() || parse_failures.back() != '\n') { parse_failures += '\n'; }
+    }
+
+    // A unit parsed before the pools held a namespace class it names bare read that name unqualified: it parses again once its
+    // program is pooled, and pools what the new parse declares (the classes a unit declares do not depend on the answer, so one
+    // pass over a program settles it). True when the entry was replaced; throws parse_error.
+    bool reparse_if_moved(engine& self, std::shared_ptr<script_cache_entry>& held, const std::string& source) {
+        if (!parse_moved(*held)) { return false; }
+        const std::string path = held->source_path;
+        std::filesystem::path cacheFile;
+        bool cacheFresh = false;
+        held = acquire_entry(self, source, path, cacheFile, cacheFresh);
+        pool_unit(held->declarations, path, unit_key(*held, source));
+        return true;
+    }
+
     // Depth-first in source order; a unit the runtime cannot resolve or read is skipped here
     // and reported by the runtime exactly as before, when it executes. A unit that fails to
     // parse is collected in parse_failures (its text, path and position included). Every
@@ -1334,11 +1368,7 @@ struct engine::implementation {
                 bool cacheFresh = false;
                 unit.entry = acquire_entry(self, unit.source, unit.path, cacheFile, cacheFresh);
             } catch (const parse_error& e) {
-                std::string_view listing = e.what();
-                constexpr std::string_view k_header = "parse failed:\n";
-                if (listing.substr(0, k_header.size()) == k_header) { listing.remove_prefix(k_header.size()); }   // the program's own header leads them all
-                parse_failures += listing;
-                if (parse_failures.empty() || parse_failures.back() != '\n') { parse_failures += '\n'; }
+                note_parse_failure(e, parse_failures);
                 continue;
             } catch (...) {
                 continue;
@@ -1471,20 +1501,33 @@ struct engine::implementation {
     // parse error is the whole report (the names it would have declared are unknown, so
     // any check would only cascade). The findings live on the root entry and are
     // republished on every call, gathered or not.
-    const check_report& checked_report(engine& self, script_cache_entry& entry, std::string_view source) {
-        if (closure_due(entry)) {
+    const check_report& checked_report(engine& self, std::shared_ptr<script_cache_entry>& held, std::string_view source) {
+        if (closure_due(*held)) {
             std::vector<std::string> roots;
-            literal_unit_paths(entry.declarations, roots);
+            literal_unit_paths(held->declarations, roots);
+            std::vector<closure_unit> closure;
+            std::vector<closure_stamp> stamps;
+            std::string parse_failures;
+            if (!roots.empty()) {
+                pool_unit(held->declarations, held->source_path, unit_key(*held, source));
+                std::unordered_set<std::string> visited;
+                collect_closure_units(self, roots, visited, closure, stamps, held->source_path, parse_failures);
+                for (auto& unit : closure) {
+                    try {
+                        reparse_if_moved(self, unit.entry, unit.source);
+                    } catch (const parse_error& e) {
+                        note_parse_failure(e, parse_failures);
+                    }
+                }
+                reparse_if_moved(self, held, std::string(source));
+            }
+            script_cache_entry& entry = *held;
             entry.closure_root = !roots.empty();
-            entry.closure_stamps.clear();
+            entry.closure_stamps = std::move(stamps);
             entry.closure_listing.clear();
             entry.closure_diags.clear();
-            entry.closure_parse_failures.clear();
-            std::vector<closure_unit> closure;
+            entry.closure_parse_failures = std::move(parse_failures);
             if (entry.closure_root) {
-                pool_unit(entry.declarations, entry.source_path, unit_key(entry, source));
-                std::unordered_set<std::string> visited;
-                collect_closure_units(self, roots, visited, closure, entry.closure_stamps, entry.source_path, entry.closure_parse_failures);
                 if (entry.checked_union != program_union_epoch_) { entry.checked = false; }
                 // every unit's consts before any unit's check: a constant argument may name a const a later unit declares
                 detail::gather_constants(entry.declarations, program_constants_, constant_rule_index_);
@@ -1523,12 +1566,12 @@ struct engine::implementation {
                 }
             }
         } else {
-            check_entry(self, entry, true);
+            check_entry(self, *held, true);
         }
-        program_check_listing_ = entry.closure_listing;
-        program_check_diags_ = entry.closure_diags;
-        program_parse_failures_ = entry.closure_parse_failures;
-        return entry.check_result;
+        program_check_listing_ = held->closure_listing;
+        program_check_diags_ = held->closure_diags;
+        program_parse_failures_ = held->closure_parse_failures;
+        return held->check_result;
     }
 
     // What a caller sees: the root's diagnostics followed by the closure's (line/column 0,
@@ -1593,21 +1636,20 @@ struct engine::implementation {
 
     // The one cache-hit execution tail (execute_file fast lane + the literal lane):
     // mirrors execute_source's hit path — prepare, static-check hook, execute_parsed.
-    script_value execute_cache_hit(engine& self, const std::shared_ptr<script_cache_entry>& held,
+    script_value execute_cache_hit(engine& self, std::shared_ptr<script_cache_entry> held,
                                    const instance_variables& instanceVars, std::string_view source) {
-        script_cache_entry& entry = *held;
         binding_gate(self);
         has_executed_ = true;
         load_scope loading(*this);
         self.backend()->prepare_for_execution();
-        entry.last_used = ++script_cache_clock;
-        const check_report& rep = checked_report(self, entry, source);
+        held->last_used = ++script_cache_clock;
+        const check_report& rep = checked_report(self, held, source);
         if (instanceVars.empty()) {
             gate_checked(rep, source);
         } else {
-            gate_checked(check_with_instance_vars(self, entry, instanceVars), source);
+            gate_checked(check_with_instance_vars(self, *held, instanceVars), source);
         }
-        return run_unit(self, held, entry.compiled, instanceVars.empty() ? nullptr : &instanceVars, source, false);
+        return run_unit(self, held, held->compiled, instanceVars.empty() ? nullptr : &instanceVars, source, false);
     }
 
     // Every unit that ran, at the entry it last ran: a module's reload re-checks them against the declarations it brings before
@@ -1700,6 +1742,7 @@ struct engine::implementation {
         pooled_unit_keys_ = std::move(saved.unit_keys);
         pooled_unit_declarations_ = std::move(saved.unit_declarations);
         program_classes_ = std::move(saved.classes);
+        index_pooled_namespace_classes();
         program_enums_ = std::move(saved.enums);
         program_functions_ = std::move(saved.functions);
         program_globals_ = std::move(saved.globals);
@@ -1827,6 +1870,7 @@ struct engine::implementation {
         return false;
     }
     // A parse's namespace-class questions (parser::namespace_queries) as the engine answers them now, '1' where the class exists
+    // (an earlier run defined it, or a unit of the program declares it)
     std::string namespace_answers(const std::vector<std::string>& queries) const {
         std::string result;
         result.reserve(queries.size());
@@ -1835,6 +1879,7 @@ struct engine::implementation {
     }
     bool namespace_class_known(std::string_view query) const {
         const size_t cut = query.rfind("::");
+        if (cut == std::string_view::npos ? pooled_namespace_classes_.count(std::string(query)) != 0 : program_classes_.count(std::string(query)) != 0) { return true; }
         const auto name = string_symbolizer_.find(cut == std::string_view::npos ? query : query.substr(cut + 2));
         if (!name) { return false; }
         const auto declares = [&](const std::shared_ptr<script_namespace_data>& space) { return space && space->classes.count(*name) != 0; };
@@ -1846,9 +1891,9 @@ struct engine::implementation {
         const auto it = script_namespaces_.find(*space);
         return it != script_namespaces_.end() && declares(it->second);
     }
-    // classes are only ever added to a namespace, so an unchanged count answers every question as before
+    // classes are only ever added to a namespace and the pools count their own moves, so an unchanged count answers every question as before
     size_t namespace_class_count() const {
-        size_t result = 0;
+        size_t result = pooled_class_moves_;
         for (const auto& [id, space] : script_namespaces_) { if (space) { result += space->classes.size(); } }
         return result;
     }
@@ -3561,7 +3606,7 @@ script_value engine::execute_unheld(script_source source) {
         if (it != impl->literal_script_cache.end()) {
             if (it->second->epoch == impl->script_cache_epoch && !impl->parse_moved(*it->second)) {   // a spliced include's change re-parses on this tier too
                 auto entry = it->second;
-                return impl->execute_cache_hit(*this, entry, instance_variables{},
+                return impl->execute_cache_hit(*this, std::move(entry), instance_variables{},
                                                std::string_view(source.data(), source.size()));
             }
             impl->literal_script_cache.erase(it);
@@ -3605,7 +3650,9 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
 
         // Static-check hook: one place, at the parse-cache entry — covers execute(),
         // hot-reload re-parses (new source = new entry) and registration-epoch changes.
-        const check_report& rep = impl->checked_report(*this, *cached, scriptContent);
+        const auto parsed = cached;
+        const check_report& rep = impl->checked_report(*this, cached, scriptContent);
+        if (cached != parsed && !cacheFile.empty()) { cacheFresh = impl->cache_holds(*cached, cacheFile, scriptContent); }   // the gather parsed the root again
         // a unit from a file (the root file, an include, an import) lists under its path
         const std::string_view listing_name = sourcePath.empty() ? std::string_view("<script>") : std::string_view(sourcePath);
         if (instanceVars.empty()) {
@@ -4039,7 +4086,7 @@ check_report engine::check(const std::string& scriptContent) {
         impl->stamp_spliced(*cached, parser.spliced_files());
         impl->note_parse_context(*cached, parser);
     }
-    return impl->program_report(impl->checked_report(*this, *cached, scriptContent));
+    return impl->program_report(impl->checked_report(*this, cached, scriptContent));
 }
 
 bool engine::host_function_signatures(const std::string& name, std::vector<host_overload_signature>& out) const {
@@ -4778,6 +4825,16 @@ checked_result<std::string> engine::text_of(const script_value& v) const {
 
 std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& engine::script_namespaces() {
     return impl->script_namespaces_;
+}
+
+bool engine::namespace_class_known(std::string_view query) const {
+    return impl->namespace_class_known(query);
+}
+
+void engine::pool_program_classes(const detail::program_class_map& classes) {
+    impl->program_classes_ = classes;
+    impl->index_pooled_namespace_classes();
+    ++impl->program_union_epoch_;
 }
 
 type_info* engine::note_enum(uint64_t name_id, std::string_view name, const std::vector<int64_t>& numbers) {
@@ -7008,12 +7065,20 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             if (entries[k]) { I.pool_unit(entries[k]->declarations, group[k].resolved, I.unit_key(*entries[k], contents[k])); }
         }
         for (size_t k = 0; k < group.size(); ++k) {
+            try {
+                if (entries[k]) { I.reparse_if_moved(*this, entries[k], contents[k]); }
+            } catch (const std::exception& e) {
+                entries[k] = nullptr;
+                fail(k, e);
+            }
+        }
+        for (size_t k = 0; k < group.size(); ++k) {
             if (!entries[k]) { continue; }
             const std::string& path = group[k].resolved;
             I.importing_.insert(path);
             if (originals < group.size()) { entries[k]->checked = false; }   // a cached verdict never knew the pending modules' text
             try {
-                I.gate_checked(I.checked_report(*this, *entries[k], contents[k]), contents[k], path);
+                I.gate_checked(I.checked_report(*this, entries[k], contents[k]), contents[k], path);
             } catch (const std::exception& e) {
                 fail(k, e);
             }

@@ -23,6 +23,38 @@ void check_stdlib_ints(const std::vector<std::pair<std::string, int64_t>>& a_cas
     });
 }
 
+// A program's files in a directory of their own, and engines that find them there
+struct program_files {
+    std::filesystem::path dir;
+    explicit program_files(const std::string& a_name) : dir(jai::foundry::test_temp_directory() / ("namespace_program_" + a_name)) {
+        std::filesystem::remove_all(dir);
+        std::filesystem::create_directories(dir);
+    }
+    ~program_files() {
+        std::error_code ignored;
+        std::filesystem::remove_all(dir, ignored);
+    }
+    void write(const std::string& a_file, const std::string& a_text) const {
+        std::ofstream(dir / a_file, std::ios::binary | std::ios::trunc) << a_text;
+    }
+    std::shared_ptr<jai::engine> engine(bool a_cache = false) const {
+        auto result = make_engine();
+        jai::stdlib::register_all(*result);
+        result->jaibite_cache(a_cache);
+        result->add_include_path(dir.string());
+        return result;
+    }
+};
+
+// the source's last value as text, or what its load or run raised
+std::string outcome(jai::engine& a_engine, const std::string& a_source) {
+    try {
+        return a_engine.execute(a_source).to_string();
+    } catch (const std::exception& e) {
+        return std::string(e.what());
+    }
+}
+
 }
 
 class namespace_tests : public suite {
@@ -471,6 +503,112 @@ public:
             eng->execute("namespace mod { int v() override { return 5; } int v(int x) { return x; } int both() { return v() + v(30); } }");
             check_eq(std::string("5 35"), eng->execute("`${mod::get()} ${mod::both()}`;").as<std::string>());
             std::filesystem::remove(module);
+        });
+
+        // Every namespace block of a program adds to the one namespace, so a bare name in a namespace's code is the member any
+        // file of the program declares, as a type and as a value, whichever file is imported first
+        test("a_namespaces_code_finds_bare_the_members_another_file_declares", [&]() {
+            const std::string declaring = R"(
+                int base = 1000;
+                class Item { int price = 500; }
+                namespace shop {
+                    class Item { int price = 3; static int count = 2; Item() {} Item(int p) { price = p; } static int made() { return 7; } }
+                    class Special : Item { int extra = 1; }
+                    const int LIMIT = 4;
+                    int tax(int p) { return p + 1; }
+                    int tax(int p, int q) { return p + q; }
+                    int base = 10;
+                    namespace inner { int k() { return 5; } class Deep { int d = 9; } }
+                }
+            )";
+            const std::string naming = R"(
+                namespace shop {
+                    int total() { Item i; return tax(i.price) + base; }
+                    int consts() { return LIMIT + tax(1, 2); }
+                    int statics() { return Item::count + Item::made(); }
+                    int built() { return Item(8).price; }
+                    int listed() { array<Item> a = [Item(1), Item(2)]; return a.size(); }
+                    int handles() { auto h = make_shared<Item>(4); shared_ptr<Item> g = new Item(5); return h.price + g.price; }
+                    int casts() { Special s; Item& i = cast<Item&>(s); return i.price; }
+                    int param(Item it) { return it.price; }
+                    class Crate { Item held; int both() { return held.price + tax(1); } }
+                    void restock() { base = 20; }
+                    namespace inner { int deep() { Deep d; Item i; return d.d + i.price; } }
+                }
+                namespace shop::inner { int up() { return tax(1) + base + k(); } }
+                string report() {
+                    string before = `${shop::total()} ${shop::consts()} ${shop::statics()} ${shop::built()} ${shop::listed()} ${shop::handles()} ${shop::casts()} ${shop::param(shop::Item(6))} ${shop::Crate().both()} ${shop::inner::deep()}`;
+                    shop::restock();
+                    return before + ` ${shop::base} ${shop::inner::up()} ${base} ${Item().price}`;
+                }
+            )";
+            const std::string expected = "14 7 9 8 2 9 3 6 5 12 20 27 1000 500";
+            program_files files("members");
+            files.write("declaring.jai", declaring);
+            files.write("naming.jai", naming);
+            files.write("naming_imports.jai", "import \"declaring.jai\";\n" + naming);
+            files.write("naming_subclass.jai", "namespace shop { class Crate : Item { int both() { return price + tax(1); } } int crate() { return Crate().both(); } }");
+            files.write("naming_early.jai", "namespace shop { int early = tax(1); }");
+            files.write("declaring_again.jai", "namespace shop { int tax(int p) { return 0; } }");
+            files.write("naming_hidden.jai", "string base = \"global\"; namespace shop { int hidden() { return tax(1) + base; } }");
+            files.write("naming_using.jai", "using shop::Item, shop::tax, shop::base;\nint outside() { Item i; return tax(i.price) + base; }\nnamespace other { int inside() { Item i; return tax(i.price, 1); } }");
+            check_each(std::vector<std::pair<std::string, std::string>>{
+                {"include \"declaring.jai\"; include \"naming.jai\"; report()", expected},   // one unit: what every program below must match
+                {"import \"declaring.jai\"; import \"naming.jai\"; report()", expected},
+                {"import \"naming.jai\"; import \"declaring.jai\"; report()", expected},
+                {"import \"naming_imports.jai\"; report()", expected},
+                {"void load() { import \"declaring.jai\"; }\n" + naming + "\nload(); report()", expected},
+                {"import \"declaring.jai\"; import \"naming_subclass.jai\"; shop::crate()", "5"},
+                {"import \"naming_using.jai\"; import \"declaring.jai\"; `${outside()} ${other::inside()}`", "14 4"},
+                {"import \"naming_hidden.jai\"; import \"declaring.jai\"; shop::hidden()", "12"},   // the namespace's int hides the unit's own global string
+                // top-level code still runs in import order: the name resolves at load, its declaration has not run
+                {"import \"naming_subclass.jai\"; import \"declaring.jai\"; shop::crate()", "Base class 'shop::Item' not found"},
+                {"import \"naming_early.jai\"; import \"declaring.jai\"; shop::early", "Undefined variable 'tax'"},
+                // one name declared by two files of the namespace is the redefinition it is in one file's two blocks
+                {"import \"declaring.jai\"; import \"declaring_again.jai\"; shop::tax(1)", "Function 'tax' already exists in namespace 'shop'. Use 'override' keyword to replace it."},
+            }, [&](const auto& c) {
+                auto eng = files.engine();
+                const std::string got = outcome(*eng, c.first);
+                check_eq(c.second, got.substr(0, got.find('\n')), c.first);
+            });
+        });
+
+        // A reload pools what its files declare now, each parsed knowing the others: a member the namespace gains is found
+        // bare by the namespace's other files, and a program that still names a dropped member no longer loads
+        test("a_reload_brings_a_namespaces_new_members_to_its_other_files", [&]() {
+            program_files files("reload");
+            files.write("declaring.jai", "namespace shop { class Item { int price = 3; } int tax(int p) { return p + 1; } int base = 10; }");
+            files.write("naming.jai", "namespace shop { int total() { Item i; return tax(i.price) + base; } }");
+            auto eng = files.engine();
+            check_eq(std::string("14"), outcome(*eng, "import \"declaring.jai\"; import \"naming.jai\"; function reload() -> bool { return import(\"declaring.jai\", \"naming.jai\"); } shop::total()"));
+            files.write("declaring.jai", "namespace shop { class Item { int price = 3; } class Box { int w = 6; } int tax(int p) { return p + 1; } int fee() { return 100; } int base = 10; }");
+            files.write("naming.jai", "namespace shop { int total() { Item i; Box b; return tax(i.price) + base + fee() + b.w; } }");
+            check_eq(std::string("true"), outcome(*eng, "reload();"), "both files re-ran");
+            check_eq(std::string("120"), outcome(*eng, "shop::total()"));
+            files.write("declaring.jai", "namespace shop { class Item { int price = 3; } class Box { int w = 6; } int fee() { return 100; } int base = 10; }");
+            const std::string refused = outcome(*files.engine(), "import \"declaring.jai\"; import \"naming.jai\"; shop::total()");
+            check_true(refused.find("naming.jai") != std::string::npos && refused.find("use of undeclared identifier 'tax'") != std::string::npos, refused);
+        });
+
+        // A cached unit's clean check stands while the files that declare the names it read stand: a later engine walks the
+        // root alone, and a member the declaring file drops fails the cached unit's load
+        test("a_cached_check_of_namespace_code_follows_the_file_that_declares_its_names", [&]() {
+            const std::string declaring = "namespace shop { class Item { int price = 3; } int tax(int p) { return p + 1; } int base = 10; }";
+            check_each(std::vector<std::string>{
+                "import \"declaring.jai\"; import \"naming.jai\"; shop::total()",
+                "import \"naming.jai\"; import \"declaring.jai\"; shop::total()",
+            }, [&](const std::string& root) {
+                program_files files("cache");
+                files.write("declaring.jai", declaring);
+                files.write("naming.jai", "namespace shop { int total() { Item i; return tax(i.price) + base; } }");
+                check_eq(std::string("14"), outcome(*files.engine(true), root), "the load that writes the caches");
+                auto cached = files.engine(true);
+                check_eq(std::string("14"), outcome(*cached, root), "the load that reads them");
+                check_eq((uint64_t)1, detail::engine_access::check_walk_count(*cached), "the root's text alone is checked again");
+                files.write("declaring.jai", "namespace shop { class Item { int price = 3; } int levy(int p) { return p + 1; } int base = 10; }");
+                const std::string refused = outcome(*files.engine(true), root);
+                check_true(refused.find("naming.jai") != std::string::npos && refused.find("use of undeclared identifier 'tax'") != std::string::npos, refused);
+            });
         });
 
         test("a_qualified_host_registration_is_a_namespace_member", [&]() {

@@ -1184,6 +1184,11 @@ namespace jai {
 
         // Engine-owned script namespace registry (namespace_id -> data); survives across backends
         std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& script_namespaces();
+        // Whether "ns::Name" is a class of that namespace, or a bare "Name" a class of any namespace: one an earlier run defined or
+        // a unit of the program declares
+        bool namespace_class_known(std::string_view query) const;
+        // A tool that keeps its own program tables (tools/lsp) hands a program's classes over before it parses one of its units
+        void pool_program_classes(const detail::program_class_map& classes);
         // Names an enum declaration defined (both backends note them): `E::v` reads the value through the enum's variable
         // marks the enum's types (type_info::is_enum) and returns the int type its values are stamped with
         type_info* note_enum(uint64_t name_id, std::string_view name, const std::vector<int64_t>& numbers);

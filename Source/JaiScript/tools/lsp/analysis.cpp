@@ -331,6 +331,8 @@ void workspace::parse(unit& u, bool publish) {
 	try {
 		jai::parser prs(tokens, jai::detail::engine_access::get_symbolizer(eng), &eng, registered, u.path);
 		auto result = prs.parse();
+		u.namespace_queries = prs.namespace_queries();
+		u.namespace_answers = namespace_answers(u);
 		if (result) {
 			u.decls = std::move(result.value());
 			u.parse_ok = true;
@@ -542,8 +544,31 @@ std::vector<std::string> workspace::program_units(const std::string& path) {
 	return program_of(path).units;
 }
 
+// A bare name in a namespace's code is that namespace's class when any unit of the program declares one: the parser asks the
+// engine, which answers from the program handed to it here
+void workspace::pool_classes(const program& prog) {
+	if (pooled_program_ == prog.signature) { return; }
+	jai::detail::engine_access::pool_program_classes(*engine_, prog.classes);
+	pooled_program_ = prog.signature;
+}
+
+std::string workspace::namespace_answers(const unit& u) const {
+	std::string result;
+	for (const auto& query : u.namespace_queries) { result.push_back(jai::detail::engine_access::namespace_class_known(*engine_, query) ? '1' : '0'); }
+	return result;
+}
+
 void workspace::analyze(unit& u, bool want_model) {
-	const program& prog = program_of(u.path);
+	const program* program_now = &program_of(u.path);
+	if (u.checked_epoch != u.epoch || u.checked_program != program_now->signature) {
+		pool_classes(*program_now);
+		if (namespace_answers(u) != u.namespace_answers) {   // parsed before its program's classes were known
+			parse(u);
+			program_now = &program_of(u.path);
+			pool_classes(*program_now);
+		}
+	}
+	const program& prog = *program_now;
 	const bool diagnostics_fresh = u.checked_epoch == u.epoch && u.checked_program == prog.signature;
 	const bool model_fresh = u.model && u.model_epoch == u.epoch && u.model_program == prog.signature;
 	if (diagnostics_fresh && (!want_model || model_fresh)) { return; }
@@ -643,6 +668,7 @@ std::shared_ptr<unit_model> workspace::analyze_text(unit& base, std::string text
 	temp.path = base.path;
 	temp.text = std::move(text);
 	temp.good_decls = base.parse_ok ? base.decls : base.good_decls;
+	pool_classes(prog);
 	parse(temp, false);
 	auto model = std::make_shared<unit_model>();
 	type_collector collector(model->types);

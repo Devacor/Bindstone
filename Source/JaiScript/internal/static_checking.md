@@ -207,6 +207,11 @@ earlier one) together with any the engine holds from another unit's run, an erro
 only another unit declared checks against the engine's held declarations the same way. `ns::x` reads and stores by the
 declared type of the unit's own namespace variable (tentative: diagnostics, never a proof; a class-typed value slot types
 nothing, since it may hold a subclass). A class of the namespace's name keeps the call lenient (its statics answer too).
+A bare name in a namespace's code is the member a declaration of that namespace makes, then of each enclosing one, in any
+unit of the program (`namespace_member_declared`: the unit's own members, the program's names, the engine's): a function or a
+variable another unit declares resolves as its qualified spelling does, lenient until that unit has run. A class is named
+by the parser, which reads the bare name as the qualified one (`parser::qualify_namespace_classes`), so the checker never
+counts a class as such a member, nor a nested namespace, which only its path names.
 
 **Members** — on a receiver whose class is fully known (in-script hierarchy resolvable, or
 engine-registered `class_definition` incl. `_get_`/`_set_` properties and statics),
@@ -405,6 +410,14 @@ class as deferred, and once an import completes with it defined the unit re-stam
 with the registered definition in view (`restamp_deferred`). The definition moves no surface
 epoch: every check that read the pools modeled that very declaration, so no verdict
 re-derives (`engine::note_class_defined`; a first definition the pools do not model moves it).
+
+**Namespace classes across units** — a parse reads a bare name in a namespace's code as that namespace's class when the
+unit's own text, an earlier run or the pooled classes declare one (`engine::namespace_class_known`, the one answer the
+parser, the cache and a bite's context ask). A unit is parsed to find its imports, so before the units that may declare
+such a class are pooled: once a closure is gathered (and once a reload's group is pooled), every unit whose answers moved
+parses again and pools that parse (`reparse_if_moved`), the root included. The classes a unit declares do not depend on
+the answers, so one pass settles a program. The language server keeps its own program tables and hands a program's classes
+to its engine before it parses or checks one of its units (`engine_access::pool_program_classes`).
 
 Under strict, an error anywhere in the program fails the root's `execute()` before any unit
 runs. `what()` lists the root's diagnostics first, then each erroring unit's own listing,
@@ -754,7 +767,7 @@ registration fingerprint matches the saving engine's AND those names key alike h
 disk cache holds a stamp the same way, judged at the check it stands in for (check_entry, after the program's names
 are gathered), and rewrites the cache when a re-check replaced it. The same section carries the parse's namespace-class
 lookups (`parser::namespace_queries`); a cache whose lookups answer otherwise reparses, and an in-memory parse asks them
-again whenever the engine's namespace class count moved (`parse_moved`). A bite is
+again whenever the engine's namespace class count or its pooled classes moved (`parse_moved`). A bite is
 checked once — registrations after that don't re-trigger; re-create the bite to re-check.
 Proofs are independent of that: they stamp at creation/load/execute and
 re-stamp whenever the surface epoch or the proof switch moved, while the diagnostics stay

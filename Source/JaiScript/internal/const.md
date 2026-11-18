@@ -471,6 +471,8 @@ JaiScript's:
   entry once per enum map and keeps it while the enum's name holds the same map: the map is const, so the same node
   holds the same entries, so a read costs no string hash.
 - An enum declared in a function or a block stays local (internal/global_shadowing.md) and is never folded.
+- An enum a namespace declares (`ns::E`) keeps its map in the namespace's scope as the const member `E`: `ns::E = 5`,
+  `ns::E["c"] = 2` and `ns::E.erase("a")` are the same errors, and `ns::E::v` folds as `E::v` does.
 - A missing value (`E::zzz`) raises `No value 'zzz' in enum 'E'`; the checker reports it.
 
 ## 12. Where it lives

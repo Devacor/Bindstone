@@ -15220,8 +15220,18 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 			return raise_(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}::{1}'", name_id, expr->member_id);
 		}
 		if (ident_expr && engine_->is_enum_name(name_id)) {   // KEEP BYTE-PARALLEL with the interpreter
-			if (auto enum_var = environment_->get(name_id); enum_var && enum_var.value().deref().is_map()) {
+			// ::E::v names the program scope's enum where a namespace declares an E of its own
+			environment& scope = ident_expr->global_qualified ? *engine_->get_global_environment() : *environment_;
+			if (auto enum_var = scope.get(name_id); enum_var && enum_var.value().deref().is_map()) {
 				auto value = detail::enum_scoped_value(enum_var.value().deref().as_map(), name_id, expr->member, expr->member_id, engine_);
+				if (!value) { return raise_from(value); }
+				out = std::move(value.value());
+				return {};
+			}
+		}
+		if (!ident_expr) {   // ns::E::v, a namespace's enum
+			if (const script_value* table = detail::namespace_enum_cell(*engine_, name, *symbolizer_)) {
+				auto value = detail::enum_scoped_value(table->deref().as_map(), name_id, expr->member, expr->member_id, engine_);
 				if (!value) { return raise_from(value); }
 				out = std::move(value.value());
 				return {};
@@ -15922,12 +15932,18 @@ std::optional<script_value> vm_backend::folded_static_value(const member_expr* e
 	}
 	auto def = engine_->get_class_definition(name);
 	if (!def) {
-		// E::v of a program-scope enum: the value its const map holds (an enum declared in a function or a block is the scope's, never folded)
-		if (expr->object->get_type() != node_type::identifier_expr || !engine_->is_enum_name(name_id)) { return std::nullopt; }
-		const script_value* cell = engine_->get_global_environment()->get_value_ptr(name_id);
-		// a barrier fold reads the program scope's enum: the worker's scope holds the region's capture of it, and a chunk that
-		// declares an enum of its own is never prefolded
-		if (!cell || !engine_->const_cell(cell) || (!prefold && environment_->get_value_ptr(name_id) != cell)) { return std::nullopt; }
+		// E::v of a program-scope enum or a namespace's (ns::E::v): the value its const map holds (an enum declared in a function or a
+		// block is the scope's, never folded)
+		const script_value* cell = nullptr;
+		if (expr->object->get_type() != node_type::identifier_expr) {
+			cell = detail::namespace_enum_cell(*engine_, name, *symbolizer_);
+		} else if (engine_->is_enum_name(name_id)) {
+			cell = engine_->get_global_environment()->get_value_ptr(name_id);
+			// a barrier fold reads the program scope's enum: the worker's scope holds the region's capture of it, and a chunk that
+			// declares an enum of its own is never prefolded
+			if (!prefold && !static_cast<const identifier_expr*>(expr->object.get())->global_qualified && environment_->get_value_ptr(name_id) != cell) { return std::nullopt; }
+		}
+		if (!cell || !engine_->const_cell(cell)) { return std::nullopt; }
 		const script_value& base = cell->deref();
 		if (base.raw_storage_index() != script_value::TYPEID_MAP) { return std::nullopt; }
 		auto it = base.as_map().find(map_string_key_probe{ expr->member });
@@ -18740,6 +18756,9 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 			if (const auto marker = detail::generic_marker(*static_cast<generic_decl*>(member_decl.get()), *symbolizer_)) { VM_TRY(exec_class_decl_node(marker.get())); }
 		} else if (member_decl->get_type() == node_type::generic_instance_decl) {
 			// an instance's request runs nothing (KEEP BYTE-PARALLEL with the interpreter)
+		} else if (member_decl->get_type() == node_type::enum_decl) {
+			detail::declare_namespace_enum(*engine_, *ns_data, decl->name_id, static_cast<const enum_decl&>(*member_decl));   // KEEP BYTE-PARALLEL with the interpreter
+
 		} else {
 			arm_listing();
 			auto compiled = compiler_.compile_standalone_declaration(member_decl);

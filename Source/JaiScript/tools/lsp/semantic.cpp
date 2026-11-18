@@ -103,6 +103,7 @@ void build_unit_index(const std::vector<jai::declaration_ptr>& decls, const std:
 			case jai::node_type::enum_decl: {
 				auto* e = static_cast<const jai::enum_decl*>(d.get());
 				out.names[prefix + std::string(e->name)].push_back({e, symbol_kind::enum_type, e->name});
+			if (!prefix.empty()) { out.names[std::string(e->name)].push_back({e, symbol_kind::enum_type, e->name}); }
 				for (const auto& [vname, _] : e->values) { out.enum_values.emplace(std::string(vname), e); }
 				break;
 			}

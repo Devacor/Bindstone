@@ -522,6 +522,7 @@ const program& workspace::program_of(const std::string& path) {
 		prog.signature = signature;
 		prog.names.clear();
 		prog.classes.clear();
+		prog.enums.clear();
 		for (const auto& p : closure) {
 			unit* u = find(p);
 			if (!u) { continue; }
@@ -529,6 +530,7 @@ const program& workspace::program_of(const std::string& path) {
 			jai::detail::collect_unit_names(decls, prog.names);
 			jai::detail::collect_unit_classes(decls, prog.classes);
 			jai::detail::engine_access::register_generics(*engine_, decls, u->path);   // every unit instantiates what the program declares
+			jai::detail::collect_unit_enums(decls, p, prog.enums);
 			prog.names.insert(u->salvaged.begin(), u->salvaged.end());
 		}
 	}
@@ -546,11 +548,11 @@ std::vector<std::string> workspace::program_units(const std::string& path) {
 	return program_of(path).units;
 }
 
-// A bare name in a namespace's code is that namespace's class when any unit of the program declares one: the parser asks the
-// engine, which answers from the program handed to it here
+// A bare name in a namespace's code is that namespace's class or enum when any unit of the program declares one: the parser
+// asks the engine, which answers from the program handed to it here
 void workspace::pool_classes(const program& prog) {
 	if (pooled_program_ == prog.signature) { return; }
-	jai::detail::engine_access::pool_program_classes(*engine_, prog.classes);
+	jai::detail::engine_access::pool_program_classes(*engine_, prog.classes, prog.enums);
 	pooled_program_ = prog.signature;
 }
 
@@ -588,6 +590,7 @@ void workspace::analyze(unit& u, bool want_model) {
 	options.proofs = jai::detail::check_options::proofs_t::leave;
 	options.program_names = &prog.names;
 	options.program_classes = &prog.classes;
+	options.program_enums = &prog.enums;
 	if (model) {
 		collector = std::make_unique<type_collector>(model->types);
 		options.observer = collector.get();
@@ -681,6 +684,7 @@ std::shared_ptr<unit_model> workspace::analyze_text(unit& base, std::string text
 	options.proofs = jai::detail::check_options::proofs_t::leave;
 	options.program_names = &prog.names;
 	options.program_classes = &prog.classes;
+	options.program_enums = &prog.enums;
 	options.observer = &collector;
 	try {
 		auto checked = temp.decls;

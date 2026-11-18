@@ -806,7 +806,12 @@ bool parser::apply_using_declarations(const std::vector<token>& in, std::vector<
 namespace {
     // The block a token sits in: a namespace's (its own path and the index of the namespace around it), a class body's (its bare
     // name) or any other. A qualified name is built only when a lookup needs it, so nesting costs no more than its depth.
-    struct name_scope { enum kind_t { other, space, klass } kind; std::string name; size_t outer = SIZE_MAX; };
+    struct name_scope {
+        enum kind_t { other, space, klass, enumeration } kind;
+        std::string name;
+        size_t outer = SIZE_MAX;
+        std::vector<std::string_view> local_enums;   // the enums a function or a block declared so far: its own, whatever the namespace declares
+    };
 
     struct name_scope_walk {
         std::vector<name_scope> scopes;
@@ -815,6 +820,12 @@ namespace {
         size_t innermost_namespace() const {
             for (size_t k = scopes.size(); k-- > 0;) { if (scopes[k].kind == name_scope::space) { return k; } }
             return SIZE_MAX;
+        }
+        bool local_enum(std::string_view name) const {
+            for (size_t k = scopes.size(); k-- > 0 && scopes[k].kind != name_scope::space;) {
+                if (std::find(scopes[k].local_enums.begin(), scopes[k].local_enums.end(), name) != scopes[k].local_enums.end()) { return true; }
+            }
+            return false;
         }
         std::string qualified(size_t k) const {
             std::vector<const std::string*> parts;
@@ -849,6 +860,9 @@ namespace {
                 case token_type::class_keyword:
                     if (i + 1 < in.size() && in[i + 1].type == token_type::identifier) { pending = {name_scope::klass, std::string(in[i + 1].lexeme)}; }
                     break;
+                case token_type::enum_keyword:
+                    if (i + 1 < in.size() && in[i + 1].type == token_type::identifier) { pending = {name_scope::enumeration, std::string(in[i + 1].lexeme)}; }
+                    break;
                 case token_type::semicolon:
                     pending = {name_scope::other, {}};
                     break;
@@ -868,12 +882,12 @@ namespace {
 
 bool parser::qualify_namespace_classes(const std::vector<token>& in, std::vector<token>& out) {
     if (std::none_of(in.begin(), in.end(), [](const token& t) { return t.type == token_type::namespace_keyword; })) return false;
-    std::unordered_map<std::string, std::unordered_set<std::string_view>> declared;   // namespace -> the classes this stream declares in it
+    std::unordered_map<std::string, std::unordered_set<std::string_view>> declared;   // namespace -> the classes and enums this stream declares in it
     std::unordered_set<std::string_view> declared_anywhere;
     {
         name_scope_walk walk;
         for (size_t i = 0; i < in.size(); ++i) {
-            if (in[i].type == token_type::class_keyword && i + 1 < in.size() && in[i + 1].type == token_type::identifier &&
+            if ((in[i].type == token_type::class_keyword || in[i].type == token_type::enum_keyword) && i + 1 < in.size() && in[i + 1].type == token_type::identifier &&
                 !walk.scopes.empty() && walk.scopes.back().kind == name_scope::space) {
                 declared[walk.qualified(walk.scopes.size() - 1)].insert(in[i + 1].lexeme);
                 declared_anywhere.insert(in[i + 1].lexeme);
@@ -881,12 +895,12 @@ bool parser::qualify_namespace_classes(const std::vector<token>& in, std::vector
             walk.step(in, i);
         }
     }
-    // beyond this stream: a class a namespace holds from an earlier run, or one another unit of the program declares in it
+    // beyond this stream: a class or an enum a namespace holds from an earlier run, or one another unit of the program declares in it
     auto names_class = [&](const std::string& space, std::string_view name) {
         if (auto d = declared.find(space); d != declared.end() && d->second.count(name)) { return true; }
         return detail::engine_access::namespace_class_known(*engine_, *namespace_queries_.insert(space + "::" + std::string(name)).first);
     };
-    // a name no namespace declares as a class needs no qualified name built
+    // a name no namespace declares as a class or an enum needs no qualified name built
     auto some_namespace_class = [&](std::string_view name) {
         if (declared_anywhere.count(name)) { return true; }
         return detail::engine_access::namespace_class_known(*engine_, *namespace_queries_.emplace(name).first);
@@ -911,11 +925,15 @@ bool parser::qualify_namespace_classes(const std::vector<token>& in, std::vector
         const token& t = in[i];
         if (t.type == token_type::identifier && !walk.scopes.empty()) {
             const token_type before = out.empty() ? token_type::eof : out.back().type;
+            if (before == token_type::enum_keyword && walk.scopes.back().kind != name_scope::space) { walk.scopes.back().local_enums.push_back(t.lexeme); }
             const token_type after = i + 1 < in.size() ? in[i + 1].type : token_type::eof;
             const bool return_type = before == token_type::arrow && (after == token_type::left_brace || after == token_type::ampersand || after == token_type::semicolon);
             const bool member_name = before == token_type::dot || before == token_type::question_dot || before == token_type::colon_colon ||
                                      (before == token_type::arrow && !return_type);
-            const bool declared_name = before == token_type::class_keyword || before == token_type::tilde || before == token_type::namespace_keyword;
+            // an enum's values are its own names, whatever the namespace declares under them
+            const bool enum_value_name = walk.scopes.back().kind == name_scope::enumeration && (before == token_type::left_brace || before == token_type::comma);
+            const bool declared_name = before == token_type::class_keyword || before == token_type::tilde || before == token_type::namespace_keyword ||
+                                       before == token_type::enum_keyword || enum_value_name;
             // ClassName( at a member's start in its own body is the constructor, named by the class's own spelling
             const bool after_visibility = before == token_type::colon && out.size() >= 2 &&
                 (out[out.size() - 2].type == token_type::public_keyword || out[out.size() - 2].type == token_type::private_keyword ||
@@ -923,7 +941,7 @@ bool parser::qualify_namespace_classes(const std::vector<token>& in, std::vector
             const bool constructor = walk.scopes.back().kind == name_scope::klass && walk.scopes.back().name == t.lexeme &&
                 after == token_type::left_paren && (before == token_type::left_brace || before == token_type::semicolon ||
                                                     before == token_type::right_brace || after_visibility);
-            if (!member_name && !declared_name && !constructor) {
+            if (!member_name && !declared_name && !constructor && !walk.local_enum(t.lexeme)) {
                 if (const std::string space = qualifier_for(walk, t.lexeme); !space.empty()) {
                     for (size_t start = 0;;) {
                         const size_t cut = space.find("::", start);
@@ -2731,6 +2749,16 @@ JAI_NOINLINE checked_result<expression_ptr> parser::coalesce_rest(expression_ptr
     return std::make_shared<binary_expr>(op.location, left, op, right);
 }
 
+// `E`, or `a::b::E` for an enum a namespace declares: the enum's own name before one of its values
+static bool spells_enum_name(const expression* e, std::string_view name) {
+    if (e->get_type() == node_type::identifier_expr) { return static_cast<const identifier_expr*>(e)->name == name; }
+    if (e->get_type() != node_type::member_expr) { return false; }
+    const auto* m = static_cast<const member_expr*>(e);
+    const size_t cut = name.rfind("::");
+    return m->is_static && m->object && cut != std::string_view::npos && m->member == name.substr(cut + 2) &&
+           spells_enum_name(m->object.get(), name.substr(0, cut));
+}
+
 // An enumerator's initializer, evaluated at parse time as C++ evaluates it: an integer or char literal, an earlier enumerator
 // (bare or through the enum's name), and the integer operators over them, under the run time's overflow and shift rules.
 // The failing case comes back as the error text's tail.
@@ -2750,8 +2778,7 @@ static bool enum_initializer_value(const expression* e, const enum_decl& d, std:
                 name = static_cast<const identifier_expr*>(e)->name;
             } else {
                 const auto* m = static_cast<const member_expr*>(e);
-                if (m->null_safe || m->is_arrow || !m->object || m->object->get_type() != node_type::identifier_expr ||
-                    static_cast<const identifier_expr*>(m->object.get())->name != d.name) {
+                if (m->null_safe || m->is_arrow || !m->object || !spells_enum_name(m->object.get(), d.name)) {
                     why = "needs a constant integer";
                     return false;
                 }
@@ -3906,43 +3933,7 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::declaration_rest() {
         return result;
     }
 
-    // Check for enum keyword
-    if (match(token_type::enum_keyword)) {
-        if (check(token_type::identifier) && reject_using_name(peek(), "enum")) { return make_error_code(parse_error_code::syntax_error); }
-        JAISCRIPT_TRY_ASSIGN(token name_tok, consume(token_type::identifier, "expected enum name"));
-        auto [name_id, name_view] = symbolizer_->intern_with_view(name_tok.lexeme);
-        JAISCRIPT_TRY(expect(token_type::left_brace, "expected '{' after enum name"));
-
-        auto decl = std::make_shared<enum_decl>(name_tok.location, name_view, name_id);
-
-        if (!check(token_type::right_brace)) {
-            do {
-                const bool keyword_value = is_declarable_keyword_name(peek().type) && current_ + 1 < stream_->size() &&
-                                           ((*stream_)[current_ + 1].type == token_type::comma || (*stream_)[current_ + 1].type == token_type::right_brace ||
-                                            (*stream_)[current_ + 1].type == token_type::equal);
-                JAISCRIPT_TRY_ASSIGN(token val_tok, keyword_value ? checked_result<token>(advance()) : consume(token_type::identifier, "expected enum value name"));
-                auto [val_id, val_view] = symbolizer_->intern_with_view(val_tok.lexeme);
-                decl->values.push_back({val_view, val_id});
-                script_int number = 0;
-                if (match(token_type::equal)) {
-                    const token& at = peek();
-                    JAISCRIPT_TRY_ASSIGN(expression_ptr init, expression());
-                    std::string why;
-                    if (!enum_initializer_value(init.get(), *decl, decl->numbers, number, why)) {
-                        report_error("enum value '" + std::string(val_tok.lexeme) + "' " + why, at);
-                        return make_error_code(parse_error_code::syntax_error);
-                    }
-                } else if (!decl->numbers.empty() && !ints::try_add(decl->numbers.back(), 1, number)) {
-                    report_error("enum value '" + std::string(val_tok.lexeme) + "' overflows the int range: the value before it is the largest int", val_tok);
-                    return make_error_code(parse_error_code::syntax_error);
-                }
-                decl->numbers.push_back(number);
-            } while (match(token_type::comma));
-        }
-
-        JAISCRIPT_TRY(expect(token_type::right_brace, "expected '}' after enum values"));
-        return decl;
-    }
+    if (match(token_type::enum_keyword)) { return enum_declaration(); }
 
     if (callable_type_ahead()) { return callable_typed_declaration(); }
 
@@ -6156,6 +6147,44 @@ expression_ptr parser::field_initializer_value(const variable_decl& field, std::
     return null_value();
 }
 
+// enum Name { a, b = 2 } after the keyword; one a namespace declares is named ns::Name, as its classes are
+checked_result<declaration_ptr> parser::enum_declaration(std::string_view space) {
+    if (check(token_type::identifier) && reject_using_name(peek(), "enum")) { return make_error_code(parse_error_code::syntax_error); }
+    JAISCRIPT_TRY_ASSIGN(token name_tok, consume(token_type::identifier, "expected enum name"));
+    auto [name_id, name_view] = symbolizer_->intern_with_view(space.empty() ? std::string(name_tok.lexeme) : std::string(space) + "::" + std::string(name_tok.lexeme));
+    JAISCRIPT_TRY(expect(token_type::left_brace, "expected '{' after enum name"));
+
+    auto decl = std::make_shared<enum_decl>(name_tok.location, name_view, name_id);
+
+    if (!check(token_type::right_brace)) {
+        do {
+            const bool keyword_value = is_declarable_keyword_name(peek().type) && current_ + 1 < stream_->size() &&
+                                       ((*stream_)[current_ + 1].type == token_type::comma || (*stream_)[current_ + 1].type == token_type::right_brace ||
+                                        (*stream_)[current_ + 1].type == token_type::equal);
+            JAISCRIPT_TRY_ASSIGN(token val_tok, keyword_value ? checked_result<token>(advance()) : consume(token_type::identifier, "expected enum value name"));
+            auto [val_id, val_view] = symbolizer_->intern_with_view(val_tok.lexeme);
+            decl->values.push_back({val_view, val_id});
+            script_int number = 0;
+            if (match(token_type::equal)) {
+                const token& at = peek();
+                JAISCRIPT_TRY_ASSIGN(expression_ptr init, expression());
+                std::string why;
+                if (!enum_initializer_value(init.get(), *decl, decl->numbers, number, why)) {
+                    report_error("enum value '" + std::string(val_tok.lexeme) + "' " + why, at);
+                    return make_error_code(parse_error_code::syntax_error);
+                }
+            } else if (!decl->numbers.empty() && !ints::try_add(decl->numbers.back(), 1, number)) {
+                report_error("enum value '" + std::string(val_tok.lexeme) + "' overflows the int range: the value before it is the largest int", val_tok);
+                return make_error_code(parse_error_code::syntax_error);
+            }
+            decl->numbers.push_back(number);
+        } while (match(token_type::comma));
+    }
+
+    JAISCRIPT_TRY(expect(token_type::right_brace, "expected '}' after enum values"));
+    return decl;
+}
+
 checked_result<declaration_ptr> parser::namespace_declaration() {
     stack_.guard(peek().location);
     // Accept identifier or any keyword as namespace name
@@ -6284,6 +6313,13 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
             if (reject_coroutine_reference_parameter(*func)) { continue; }
             member_decl = std::move(parsed.value());
             match(token_type::semicolon);
+        } else if (!inline_member && !const_member && match(token_type::enum_keyword)) {
+            auto enum_result = enum_declaration(full_namespace_name);
+            if (!enum_result) {
+                synchronize();
+                continue;
+            }
+            member_decl = std::move(enum_result.value());
         } else if (match(token_type::namespace_keyword)) {
             // Nested namespaces
             auto namespace_result = namespace_declaration();

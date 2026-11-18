@@ -1158,7 +1158,7 @@ struct engine::implementation {
     // the same units' class declarations (a subclass resolves a parent another unit declares).
     std::unordered_set<std::string> program_names_;
     detail::program_class_map program_classes_;
-    detail::program_enum_map program_enums_;   // the closure units' top-level enums (an enum value read is no user code: member_expr::enum_constant)
+    detail::program_enum_map program_enums_;   // the closure units' enums, a namespace's under its qualified name (an enum value read is no user code: member_expr::enum_constant)
     detail::program_function_map program_functions_;   // the closure units' free functions, a namespace's qualified (internal/static_checking.md "Programs"; the inliner's cross-unit leaves)
     detail::program_global_map program_globals_;   // the closure units' top-level and namespace variables: the proof pass types the top-level ones (internal/static_checking.md "Proofs")
     std::unordered_map<std::string, std::unordered_map<std::string, uint64_t>> program_name_units_;   // name -> unit path -> unit_key of the unit declaring it
@@ -1166,23 +1166,27 @@ struct engine::implementation {
     std::unordered_map<std::string, std::vector<declaration_ptr>> pooled_unit_declarations_;   // unit path -> its functions, variables and enums the tables hold
     // moves whenever what the checker reads of the pools (names, class models, enums) changes: a verdict holds while it stands
     uint64_t program_union_epoch_ = 0;
-    // the declarations the path-keyed tables hold of a unit: its functions, variables and enums, and its namespaces' functions and variables
-    static void pooled_by_path(const std::vector<declaration_ptr>& decls, bool in_namespace, std::vector<declaration_ptr>& out) {
+    // the declarations the path-keyed tables hold of a unit: its functions, variables and enums, and those of its namespaces
+    static void pooled_by_path(const std::vector<declaration_ptr>& decls, std::vector<declaration_ptr>& out) {
         for (const auto& d : decls) {
             if (!d) { continue; }
             const node_type type = d->get_type();
-            if (type == node_type::function_decl || type == node_type::variable_decl || (type == node_type::enum_decl && !in_namespace)) { out.push_back(d); }
-            else if (type == node_type::namespace_decl) { pooled_by_path(static_cast<const namespace_decl*>(d.get())->declarations, true, out); }
+            if (type == node_type::function_decl || type == node_type::variable_decl || type == node_type::enum_decl) { out.push_back(d); }
+            else if (type == node_type::namespace_decl) { pooled_by_path(static_cast<const namespace_decl*>(d.get())->declarations, out); }
         }
     }
-    // The pooled classes a namespace declares, by bare name, and a count that moves whenever the pooled classes do: a parse reads a
-    // bare name in a namespace's code as that namespace's class (parser::qualify_namespace_classes), whichever unit declares it
+    // The pooled classes and enums a namespace declares, by bare name, and a count that moves whenever they do: a parse reads a
+    // bare name in a namespace's code as that namespace's class or enum (parser::qualify_namespace_classes), whichever unit
+    // declares it
     std::unordered_set<std::string> pooled_namespace_classes_;
     size_t pooled_class_moves_ = 0;
     void index_pooled_namespace_classes() {
         ++pooled_class_moves_;
         pooled_namespace_classes_.clear();
         for (const auto& [name, declaration] : program_classes_) {
+            if (const size_t cut = name.rfind("::"); cut != std::string::npos) { pooled_namespace_classes_.insert(name.substr(cut + 2)); }
+        }
+        for (const auto& [name, units] : program_enums_) {
             if (const size_t cut = name.rfind("::"); cut != std::string::npos) { pooled_namespace_classes_.insert(name.substr(cut + 2)); }
         }
     }
@@ -1205,10 +1209,12 @@ struct engine::implementation {
         if (program_classes_.size() != classes_before) { index_pooled_namespace_classes(); }
         register_generics(decls, path);
         std::vector<declaration_ptr> held;
-        pooled_by_path(decls, false, held);
+        pooled_by_path(decls, held);
         if (std::vector<declaration_ptr>& pooled = pooled_unit_declarations_[path]; pooled != held) {
             pooled = std::move(held);
+            const size_t enums_before = program_enums_.size();
             detail::collect_unit_enums(decls, path, program_enums_);
+            if (program_enums_.size() != enums_before) { index_pooled_namespace_classes(); }
             detail::collect_unit_functions(decls, path, program_functions_);
             detail::collect_unit_globals(decls, path, program_globals_);
             moved = true;
@@ -2479,8 +2485,8 @@ struct engine::implementation {
         pooled_unit_keys_ = std::move(saved.unit_keys);
         pooled_unit_declarations_ = std::move(saved.unit_declarations);
         program_classes_ = std::move(saved.classes);
-        index_pooled_namespace_classes();
         program_enums_ = std::move(saved.enums);
+        index_pooled_namespace_classes();
         program_functions_ = std::move(saved.functions);
         program_globals_ = std::move(saved.globals);
         generics_ = std::move(saved.generics);
@@ -2598,7 +2604,7 @@ struct engine::implementation {
     void stamp_spliced(script_cache_entry& entry, const std::vector<closure_stamp>& files) {
         entry.spliced_stamps = files;
     }
-    // A cached parse no longer stands for its text: an include it spliced changed, or a namespace class it asked about is answered otherwise
+    // A cached parse no longer stands for its text: an include it spliced changed, or a namespace class or enum it asked about is answered otherwise
     bool parse_moved(script_cache_entry& entry) {
         for (const auto& s : entry.spliced_stamps) { uint64_t mtime = 0, size = 0; if (!stat_mtime_size(s.path, mtime, size) || mtime != s.mtime || size != s.size) return true; }
         if (entry.context.namespace_queries.empty()) { return false; }
@@ -2608,8 +2614,8 @@ struct engine::implementation {
         entry.namespace_classes = classes;
         return false;
     }
-    // A parse's namespace-class questions (parser::namespace_queries) as the engine answers them now, '1' where the class exists
-    // (an earlier run defined it, or a unit of the program declares it)
+    // A parse's namespace-class questions (parser::namespace_queries) as the engine answers them now, '1' where the class or enum
+    // exists (an earlier run defined it, or a unit of the program declares it)
     std::string namespace_answers(const std::vector<std::string>& queries) const {
         std::string result;
         result.reserve(queries.size());
@@ -2618,11 +2624,12 @@ struct engine::implementation {
     }
     bool namespace_class_known(std::string_view query) const {
         const size_t cut = query.rfind("::");
-        if (cut == std::string_view::npos ? pooled_namespace_classes_.count(std::string(query)) != 0 : program_classes_.count(std::string(query)) != 0) { return true; }
-        if (pooled_namespace_generics_.count(std::string(query)) != 0) { return true; }   // a generic class is a class of its namespace
+        const std::string spelled(query);
+        if (cut == std::string_view::npos ? pooled_namespace_classes_.count(spelled) != 0 : program_classes_.count(spelled) != 0 || program_enums_.count(spelled) != 0) { return true; }
+        if (pooled_namespace_generics_.count(spelled) != 0) { return true; }   // a generic class is a class of its namespace
         const auto name = string_symbolizer_.find(cut == std::string_view::npos ? query : query.substr(cut + 2));
         if (!name) { return false; }
-        const auto declares = [&](const std::shared_ptr<script_namespace_data>& space) { return space && space->classes.count(*name) != 0; };
+        const auto declares = [&](const std::shared_ptr<script_namespace_data>& space) { return space && (space->classes.count(*name) != 0 || space->enums.count(*name) != 0); };
         if (cut == std::string_view::npos) {
             return std::any_of(script_namespaces_.begin(), script_namespaces_.end(), [&](const auto& entry) { return declares(entry.second); });
         }
@@ -2631,14 +2638,14 @@ struct engine::implementation {
         const auto it = script_namespaces_.find(*space);
         return it != script_namespaces_.end() && declares(it->second);
     }
-    // classes are only ever added to a namespace and the pools count their own moves, so an unchanged count answers every question as before
+    // classes and enums are only ever added to a namespace and the pools count their own moves, so an unchanged count answers every question as before
     size_t namespace_class_count() const {
         size_t result = pooled_class_moves_;
-        for (const auto& [id, space] : script_namespaces_) { if (space) { result += space->classes.size(); } }
+        for (const auto& [id, space] : script_namespaces_) { if (space) { result += space->classes.size() + space->enums.size(); } }
         return result;
     }
-    // A bite's parse read a bare class name inside a namespace by namespace classes this engine answers otherwise: its text
-    // would parse otherwise here, and the bite carries no text to parse again
+    // A bite's parse read a bare class or enum name inside a namespace by namespace classes and enums this engine answers
+    // otherwise: its text would parse otherwise here, and the bite carries no text to parse again
     [[noreturn]] void refuse_namespace_answers(const detail::jaibite_context& context, const std::string& answers) {
         check_report report;
         for (size_t i = 0; i < context.namespace_queries.size() && i < answers.size(); ++i) {
@@ -2647,8 +2654,8 @@ struct engine::implementation {
             const bool saved = i < context.namespace_answers.size() && context.namespace_answers[i] == '1';
             const size_t cut = query.rfind("::");
             const std::string what = cut == std::string::npos
-                ? std::string(saved ? "a namespace declared class '" : "no namespace declared class '") + query + "'; here " + (saved ? "none does" : "one does")
-                : "'" + query + "' " + (saved ? "was" : "was not") + " a class (a bare '" + query.substr(cut + 2) + "' inside namespace '" + query.substr(0, cut) +
+                ? std::string(saved ? "a namespace declared class or enum '" : "no namespace declared class or enum '") + query + "'; here " + (saved ? "none does" : "one does")
+                : "'" + query + "' " + (saved ? "was" : "was not") + " a class or an enum (a bare '" + query.substr(cut + 2) + "' inside namespace '" + query.substr(0, cut) +
                   "' names it); here it " + (saved ? "is not" : "is");
             report.diagnostics.push_back({check_diagnostic::level::error, 0, 0, "the bite was parsed where " + what + ": save it again from source"});
         }
@@ -2780,6 +2787,7 @@ struct engine::implementation {
         if (const auto id = string_symbolizer_.find(name)) {
             if (const script_value* cell = global_environment_->get_value_ptr(*id)) { fold(value_signature(*cell)); }
             if (auto it = script_namespaces_.find(*id); it != script_namespaces_.end() && it->second) { fold(0x51); }
+            if (enum_names_.count(*id)) { fold(0xE1); }
         }
         if (auto c = class_registry_.find_script_class(name)) { fold(mix_key(0xC1, ran_unit_key(c->unit().id))); }
         if (const size_t cut = name.rfind("::"); cut != std::string::npos) {
@@ -5701,8 +5709,9 @@ bool engine::namespace_class_known(std::string_view query) const {
     return impl->namespace_class_known(query);
 }
 
-void engine::pool_program_classes(const detail::program_class_map& classes) {
+void engine::pool_program_classes(const detail::program_class_map& classes, const detail::program_enum_map& enums) {
     impl->program_classes_ = classes;
+    impl->program_enums_ = enums;
     impl->index_pooled_namespace_classes();
     ++impl->program_union_epoch_;
 }

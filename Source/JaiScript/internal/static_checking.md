@@ -227,7 +227,8 @@ member declared further down is left alone, as the read is, since the name still
 namespace's name keeps the call lenient (its statics answer too), as does a unit with a dynamic-path import for a member it
 does not declare, and a member only the host registers. A class is named by the parser, which reads the bare name as the
 qualified one (`parser::qualify_namespace_classes`), so the checker never counts a class as such a member, nor a nested
-namespace, which only its path names. `::f` is the program scope's, whatever a local or a namespace holds under the name,
+namespace, which only its path names. An enum is named by the parser the same way ("Enums in a namespace" below). `::f` is
+the program scope's, whatever a local or a namespace holds under the name,
 and a call whose bare name a local, a member or a namespace's member takes is never judged as another unit's program-scope
 function of that name (`reaches_program_scope`).
 
@@ -287,6 +288,18 @@ declares its enums there too; that include's report (`last_check_diagnostics()`)
 warning, path-qualified, for each enum the file declares under a program-scope name, and so does the
 host's warning channel (`engine::report_script_warning`, stderr unless the host sets a handler),
 since a run-time include has no load listing to print.
+
+**Enums in a namespace** — `namespace shop { enum Kind { a, b } }` declares the type `shop::Kind`: the declaration's name is
+the qualified spelling (`enum_decl::name`, as a namespace class's), so `enums_`, the program's enum pool and every message
+hold it under that name, and each rule of a program-scope enum applies unchanged. The parser reads a bare `Kind` in the
+namespace's code as `shop::Kind` (the class rewrite, same question to the engine), except inside a function or a block
+that declared an enum of that name before it, and except a value's own name in an enum body. A static chain that spells an
+enum this unit declares is the enum's name (`namespace_enum`: its value table, a const `map<string,int>`), and one member
+further is one of its values, checked for existence. An enum only another unit or an earlier run declares is a known type
+whose slots take its values alone; its values are found when the code runs, as a program-scope enum's are. At run time the
+value table is the namespace's const member under the bare name (`detail::declare_namespace_enum`), so `shop::Kind` reads it,
+no store reaches it, and `shop::Kind::b` reads through it (`detail::namespace_enum_cell`); `::Kind::v` in the namespace's code
+names the program scope's enum.
 
 **Functions from an include inside a function body** — a literal include there is spliced into the body, so a
 function the file declares is a nested function. When the program scope names it too (the unit's top
@@ -431,13 +444,14 @@ with the registered definition in view (`restamp_deferred`). The definition move
 epoch: every check that read the pools modeled that very declaration, so no verdict
 re-derives (`engine::note_class_defined`; a first definition the pools do not model moves it).
 
-**Namespace classes across units** — a parse reads a bare name in a namespace's code as that namespace's class when the
-unit's own text, an earlier run or the pooled classes declare one (`engine::namespace_class_known`, the one answer the
-parser, the cache and a bite's context ask). A unit is parsed to find its imports, so before the units that may declare
-such a class are pooled: once a closure is gathered (and once a reload's group is pooled), every unit whose answers moved
-parses again and pools that parse (`reparse_if_moved`), the root included. The classes a unit declares do not depend on
-the answers, so one pass settles a program. The language server keeps its own program tables and hands a program's classes
-to its engine before it parses or checks one of its units (`engine_access::pool_program_classes`).
+**Namespace classes and enums across units** — a parse reads a bare name in a namespace's code as that namespace's class
+or enum when the unit's own text, an earlier run or the pooled classes and enums declare one
+(`engine::namespace_class_known`, the one answer the parser, the cache and a bite's context ask). A unit is parsed to find
+its imports, so before the units that may declare such a class or enum are pooled: once a closure is gathered (and once a
+reload's group is pooled), every unit whose answers moved parses again and pools that parse (`reparse_if_moved`), the root
+included. The classes and enums a unit declares do not depend on the answers, so one pass settles a program. The language
+server keeps its own program tables and hands a program's classes and enums to its engine before it parses or checks one
+of its units (`engine_access::pool_program_classes`).
 
 Under strict, an error anywhere in the program fails the root's `execute()` before any unit
 runs. `what()` lists the root's diagnostics first, then each erroring unit's own listing,
@@ -789,9 +803,9 @@ them) that `tools/ci/checker_revision.py` generates into `detail/jaibite_checker
 holds to the tree and `jaibite_checker_revision.cpp` alone includes. On load the stamp is trusted ONLY when the revision is this library's, the
 registration fingerprint matches the saving engine's AND those names key alike here; otherwise the bite is re-checked at load against THIS engine's surface (an error throws). The
 disk cache holds a stamp the same way, judged at the check it stands in for (check_entry, after the program's names
-are gathered), and rewrites the cache when a re-check replaced it. The same section carries the parse's namespace-class
-lookups (`parser::namespace_queries`); a cache whose lookups answer otherwise reparses, and an in-memory parse asks them
-again whenever the engine's namespace class count or its pooled classes moved (`parse_moved`). A bite is
+are gathered), and rewrites the cache when a re-check replaced it. The same section carries the parse's namespace class
+and enum lookups (`parser::namespace_queries`); a cache whose lookups answer otherwise reparses, and an in-memory parse asks
+them again whenever the engine's count of namespace classes and enums or its pooled ones moved (`parse_moved`). A bite is
 checked once — registrations after that don't re-trigger; re-create the bite to re-check.
 Proofs are independent of that: they stamp at creation/load/execute and
 re-stamp whenever the surface epoch or the proof switch moved, while the diagnostics stay

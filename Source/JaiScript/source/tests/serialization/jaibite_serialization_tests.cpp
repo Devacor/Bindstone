@@ -398,7 +398,7 @@ public:
                 const auto bytes = saved_after_points(saved);
                 check_eq(std::string(saved ? "VALUE 1" : "VALUE 2"), load(bytes, saved), "the same namespace classes load the bite");
                 const std::string refused = load(bytes, !saved);
-                check_true(refused.find("static check failed") != std::string::npos && refused.find("class 'Point'") != std::string::npos, refused);
+                check_true(refused.find("static check failed") != std::string::npos && refused.find("class or enum 'Point'") != std::string::npos, refused);
             }
         });
 

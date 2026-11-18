@@ -136,6 +136,7 @@ struct program {
 	uint64_t signature = 0;
 	std::unordered_set<std::string> names;
 	jai::detail::program_class_map classes;
+	jai::detail::program_enum_map enums;
 };
 
 struct location {

@@ -1229,7 +1229,7 @@ namespace jai {
         // a unit of the program declares
         bool namespace_class_known(std::string_view query) const;
         // A tool that keeps its own program tables (tools/lsp) hands a program's classes over before it parses one of its units
-        void pool_program_classes(const detail::program_class_map& classes);
+        void pool_program_classes(const detail::program_class_map& classes, const detail::program_enum_map& enums);
         // Names an enum declaration defined (both backends note them): `E::v` reads the value through the enum's variable
         // marks the enum's types (type_info::is_enum) and returns the int type its values are stamped with
         type_info* note_enum(uint64_t name_id, std::string_view name, const std::vector<int64_t>& numbers);

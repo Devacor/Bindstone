@@ -4,4 +4,5 @@ namespace shop {
 	class Item { int price = 3; }
 	int tax(int p) { return p + 1; }
 	int base = 10;
+	enum Kind { plain, fancy }
 }

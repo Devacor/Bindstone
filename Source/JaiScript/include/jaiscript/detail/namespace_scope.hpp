@@ -14,6 +14,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/enum_value.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <memory>
@@ -47,6 +48,32 @@ namespace jai::detail {
 			ns.scope->mark_namespace_scope();
 		}
 		return ns.scope;
+	}
+
+	// An enum a namespace declares is the type ns::Name (C++), and its value table is the namespace's const member Name: ns::Name
+	// reads it, the namespace's code reads it bare, and nothing stores to it
+	inline void declare_namespace_enum(engine& eng, script_namespace_data& ns, uint64_t namespace_id, const enum_decl& decl) {
+		const size_t cut = decl.name.rfind("::");
+		const uint64_t member = engine_access::get_symbolizer(eng)->intern(cut == std::string_view::npos ? decl.name : decl.name.substr(cut + 2));
+		const std::shared_ptr<environment>& scope = namespace_scope(eng, ns, namespace_id);
+		scope->define(member, enum_value_table(decl, &eng));
+		engine_access::mark_const_cell(eng, scope->get_own_value_ptr(member), true);
+		ns.enums.insert(member);
+	}
+
+	// The cell of the value table of the enum `qualified` names (ns::Name); null when no namespace declares that enum. Reads only:
+	// no name is interned on this path.
+	inline const script_value* namespace_enum_cell(engine& eng, std::string_view qualified, const string_symbolizer& symbols) {
+		const size_t cut = qualified.rfind("::");
+		if (cut == std::string_view::npos) { return nullptr; }
+		const auto space = symbols.find(qualified.substr(0, cut));
+		const auto member = symbols.find(qualified.substr(cut + 2));
+		if (!space || !member) { return nullptr; }
+		auto& spaces = engine_access::script_namespaces(eng);
+		const auto ns = spaces.find(*space);
+		if (ns == spaces.end() || !ns->second || !ns->second->scope || !ns->second->enums.count(*member)) { return nullptr; }
+		const script_value* cell = ns->second->scope->get_own_value_ptr(*member);
+		return cell && cell->deref().is_map() ? cell : nullptr;
 	}
 
 	// "a::b" for the object of `a::b::x`; empty when the chain is not identifiers joined by ::

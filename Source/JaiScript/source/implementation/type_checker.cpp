@@ -338,7 +338,12 @@ public:
     }
     bool has_function(const std::string& name) const { note(name); return engine_.has_function(name); }
     bool is_type_name(const std::string& name) const { note(name); return engine_access::is_type_name(engine_, name); }
-    bool is_enum_name(const std::string& name) const { note(name); return engine_access::is_enum_name(engine_, engine_access::symbolize(engine_, name)); }
+    // an enum a declaration that ran named (engine::note_enum)
+    bool is_enum_name(const std::string& name) const {
+        note(name);
+        const auto id = engine_access::get_symbolizer(engine_)->find(name);
+        return id && engine_access::is_enum_name(engine_, *id);
+    }
     bool is_const_global(const std::string& name) const { note(name); return engine_access::is_const_global(engine_, name); }
     held_value get_variable(const std::string& name) const { note(name); return engine_.get_variable(name); }
     std::shared_ptr<class_definition> get_class_definition(const std::string& name) const { note(name); return engine_access::get_class_definition(engine_, name); }
@@ -448,7 +453,7 @@ void collect_namespace_members(const namespace_decl* n, std::unordered_set<std::
             case node_type::variable_decl: member(static_cast<const variable_decl*>(d.get())->name); break;
             case node_type::extern_decl: collect_qualified_extern(static_cast<const extern_decl*>(d.get()), out); break;
             case node_type::class_decl: member(static_cast<const class_decl*>(d.get())->name); break;
-            case node_type::enum_decl: member(static_cast<const enum_decl*>(d.get())->name); break;
+            case node_type::enum_decl: out.emplace(static_cast<const enum_decl*>(d.get())->name); break;   // already its qualified name
             case node_type::destructuring_decl:
                 for (const auto& [name, _] : static_cast<const destructuring_decl*>(d.get())->names) { member(name); }
                 break;
@@ -3001,7 +3006,14 @@ private:
         } else if (base->get_type() == node_type::member_expr) {   // C::s, ns::x
             auto* m = static_cast<const member_expr*>(base);
             hit.root = detail::const_spelled(m);
-            if (const variable_decl* nv = own_namespace_variable(m)) {
+            if (const enum_decl* en = namespace_enum(m)) {   // ns::E, the enum's name: a const map<string, int>
+                is_const = true;
+                known = true; library = true;
+                hit.line = en->location.line; hit.column = en->location.column;
+            } else if (eng_.is_enum_name(qualified_spelling(m))) {   // ns::E an earlier run declared
+                is_const = true;
+                known = true; library = true;
+            } else if (const variable_decl* nv = own_namespace_variable(m)) {
                 is_const = nv->is_const;
                 hit.line = nv->location.line; hit.column = nv->location.column;
                 from_type(nv->type.get());
@@ -3307,7 +3319,14 @@ private:
             eng_.note(n);
             if (program_enums_->count(n)) { return true; }
         }
-        return eng_.is_type_name(n) || (n.find("::") != std::string::npos && extra_global(n));   // a class another unit's namespace declares
+        return eng_.is_type_name(n) || eng_.is_enum_name(n) || (n.find("::") != std::string::npos && extra_global(n));   // a class another unit's namespace declares
+    }
+
+    // ns::E where this unit declares enum E in namespace ns: the name is the enum's value table, and ns::E::v one of its values
+    const enum_decl* namespace_enum(const member_expr* m) {
+        if (!m->is_static || enums_.empty()) { return nullptr; }
+        const auto it = enums_.find(qualified_spelling(m));
+        return it != enums_.end() ? it->second : nullptr;
     }
 
     // C++ [temp.inst] has the compiler make any instantiation a program names; a host binds the ones it compiled, so a
@@ -7472,10 +7491,14 @@ private:
                             ctype* recv_out, member_hit* hit_out) {
         if (m->is_static && binary_width_token(m)) { return object_of("binary::width"); }
         if (m->is_static && namespace_path_receiver(m)) {
-            check_namespace_member(m);
-            if (const var_entry* x = qualified_extern(m); x && !x->dynamic) { return x->type; }
-            const std::string path = member_path(m);
-            return path.empty() ? ctype{} : namespace_member_read(path, m->member);
+            if (const enum_decl* named = namespace_enum(m)) { return ctype{ctype::enum_ref_k, named->name}; }
+            const bool enum_value = m->object->get_type() == node_type::member_expr && namespace_enum(static_cast<const member_expr*>(m->object.get()));
+            if (!enum_value) {
+                check_namespace_member(m);
+                if (const var_entry* x = qualified_extern(m); x && !x->dynamic) { return x->type; }
+                const std::string path = member_path(m);
+                return path.empty() ? ctype{} : namespace_member_read(path, m->member);
+            }
         }
         ctype recv = infer(m->object.get());
         if (recv_out) { *recv_out = recv; }
@@ -10454,7 +10477,7 @@ private:
 
     JAI_NOINLINE void walk_enum(enum_decl* e) {
         // E::value reads the class of that name first, so no value of the enum could be named
-        if (scopes_.size() == 1) {
+        if (scopes_.size() == 1 || (!namespace_scopes_.empty() && namespace_scopes_.back() == scopes_.size() - 1)) {
             if (auto held = eng_.get_class_definition(std::string(e->name)); held && !held->is_script_class()) {
                 diag(diag_level::error, e->location, "cannot declare enum '" + std::string(e->name) +
                      "': the host binds a C++ class of that name; give the enum another name", 0, 0, /*always_error=*/true);
@@ -11464,9 +11487,10 @@ void collect_unit_names(const std::vector<declaration_ptr>& decls, std::unordere
                 for (size_t pos = n->name.find("::"); pos != std::string_view::npos; pos = n->name.find("::", pos + 2)) {
                     out.emplace(n->name.substr(0, pos));
                 }
-                std::vector<declaration_ptr> qualified_members;   // its classes and nested namespaces carry qualified names
+                std::vector<declaration_ptr> qualified_members;   // its classes, enums and nested namespaces carry qualified names
                 for (const auto& member : n->declarations) {
-                    if (member && (member->get_type() == node_type::class_decl || member->get_type() == node_type::namespace_decl)) { qualified_members.push_back(member); }
+                    if (member && (member->get_type() == node_type::class_decl || member->get_type() == node_type::enum_decl ||
+                                   member->get_type() == node_type::namespace_decl)) { qualified_members.push_back(member); }
                 }
                 collect_unit_names(qualified_members, out);
                 collect_namespace_members(n, out);
@@ -11514,14 +11538,21 @@ void collect_unit_globals(const std::vector<declaration_ptr>& decls, const std::
     pool_unit_globals(decls, {}, unit_path, out);
 }
 
-void collect_unit_enums(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_enum_map& out) {
-    for (auto& [name, units] : out) { units.erase(unit_path); }   // a re-gather replaces the unit's own entries
+// a namespace's enum is named by its qualified spelling (ns::Name), as its classes are
+static void collect_enums_of(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_enum_map& out) {
     for (const auto& d : decls) {
         if (d && d->get_type() == node_type::enum_decl) {
             auto ed = std::static_pointer_cast<const enum_decl>(d);
             out[std::string(ed->name)][unit_path] = std::move(ed);
+        } else if (d && d->get_type() == node_type::namespace_decl) {
+            collect_enums_of(static_cast<const namespace_decl*>(d.get())->declarations, unit_path, out);
         }
     }
+}
+
+void collect_unit_enums(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_enum_map& out) {
+    for (auto& [name, units] : out) { units.erase(unit_path); }   // a re-gather replaces the unit's own entries
+    collect_enums_of(decls, unit_path, out);
 }
 
 // a namespace's class is named by its qualified spelling (ns::Name)

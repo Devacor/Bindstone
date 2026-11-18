@@ -37,8 +37,8 @@ namespace jai {
         // with, for the parse cache's stamps; and the first one that never read whole (the parse failed on it)
         const std::vector<detail::source_stamp>& spliced_files() const { return spliced_files_; }
         const std::string& unsettled_file() const { return unsettled_file_; }
-        // the namespace classes this parse asked the engine about, sorted: "space::Name" (space declares class Name) or a bare
-        // "Name" (some namespace does); the parse holds wherever the engine answers them alike (engine.cpp namespace_answers)
+        // the namespace classes and enums this parse asked the engine about, sorted: "space::Name" (space declares a class or an
+        // enum Name) or a bare "Name" (some namespace does); the parse holds wherever the engine answers them alike (engine.cpp
         std::vector<std::string> namespace_queries() const { return {namespace_queries_.begin(), namespace_queries_.end()}; }
         // after a failed parse: the top-level declarations that parsed around the errors (a tool checks what it can)
         std::vector<declaration_ptr>& recovered_declarations() { return recovered_; }
@@ -57,11 +57,11 @@ namespace jai {
     private:
         std::vector<declaration_ptr> recovered_;
         const std::vector<token>* stream_;   // the token stream being parsed: the program's, or a spliced include's while its declarations are read
-        std::vector<token> namespace_stream_;   // the program's stream with its namespaces' bare class names qualified
+        std::vector<token> namespace_stream_;   // the program's stream with its namespaces' bare class and enum names qualified
         std::vector<token> using_stream_;    // the program's stream after its using declarations rewrote it
         std::set<std::string> namespace_queries_;
-        // Inside a namespace's blocks a class that namespace declares (here or in a unit the engine ran) reads by its bare name
-        // as ns::Name, its one name (C++); false when the stream opens no namespace that names one
+        // Inside a namespace's blocks a class or an enum that namespace declares (here or in a unit the engine ran) reads by its
+        // bare name as ns::Name, its one name (C++); false when the stream opens no namespace that names one
         bool qualify_namespace_classes(const std::vector<token>& in, std::vector<token>& out);
         // `using ns::name;` (a comma list) at a statement's start: the rest of THIS token stream reads each name as its qualified
         // spelling (file-local, not transitive, any namespace); false when the stream names no using
@@ -154,6 +154,7 @@ namespace jai {
         checked_result<declaration_ptr> declaration_rest();
         checked_result<declaration_ptr> statement_declaration();
         checked_result<declaration_ptr> class_declaration(bool nocopy = false, std::string_view space = {});
+        checked_result<declaration_ptr> enum_declaration(std::string_view space = {});
         checked_result<declaration_ptr> namespace_declaration();
         checked_result<declaration_ptr> function_declaration();
         bool bare_coroutine_head() const;   // coroutine IDENT '(' / coroutine operator<sym>: no type, no 'function'

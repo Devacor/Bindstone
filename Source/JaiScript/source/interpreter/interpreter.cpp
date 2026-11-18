@@ -4260,8 +4260,18 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}::{1}'", name_id, expr->member_id);
             }
             if (ident_expr && engine_->is_enum_name(name_id)) {   // KEEP BYTE-PARALLEL with the vm
-                if (auto enum_var = environment_->get(name_id); enum_var && enum_var.value().deref().is_map()) {
+                // ::E::v names the program scope's enum where a namespace declares an E of its own
+                environment& scope = ident_expr->global_qualified ? *engine_->get_global_environment() : *environment_;
+                if (auto enum_var = scope.get(name_id); enum_var && enum_var.value().deref().is_map()) {
                     auto value = detail::enum_scoped_value(enum_var.value().deref().as_map(), name_id, expr->member, expr->member_id, engine_);
+                    if (!value) { return value.error_value(); }
+                    push_value(std::move(value.value()));
+                    return {};
+                }
+            }
+            if (!ident_expr) {   // ns::E::v, a namespace's enum
+                if (const script_value* table = detail::namespace_enum_cell(*engine_, name, *string_symbolizer_)) {
+                    auto value = detail::enum_scoped_value(table->deref().as_map(), name_id, expr->member, expr->member_id, engine_);
                     if (!value) { return value.error_value(); }
                     push_value(std::move(value.value()));
                     return {};
@@ -7842,6 +7852,9 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             if (const auto marker = detail::generic_marker(*static_cast<generic_decl*>(member_decl.get()), *string_symbolizer_)) { JAISCRIPT_TRY(visit_class_decl(marker.get())); }
         } else if (member_decl->get_type() == node_type::generic_instance_decl) {
             // an instance's request runs nothing (KEEP BYTE-PARALLEL with the vm)
+        } else if (member_decl->get_type() == node_type::enum_decl) {
+            detail::declare_namespace_enum(*engine_, *ns_data, decl->name_id, static_cast<const enum_decl&>(*member_decl));   // KEEP BYTE-PARALLEL with the vm
+
         } else {
             // Other declaration types (expressions, includes, etc.) - execute normally
             JAISCRIPT_TRY(dispatch_decl(member_decl.get()));

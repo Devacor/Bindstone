@@ -307,6 +307,7 @@ void workspace::parse(unit& u, bool publish) {
 	u.tokens.clear();
 	u.parse_errors.clear();
 	u.imports.clear();
+	u.checked_decls.clear();
 	auto registered = jai::detail::engine_access::get_registered_template_types(eng);
 	std::vector<jai::token> tokens;
 	std::unique_ptr<jai::lexer> lex;   // literal lexemes view the lexer's own storage: it outlives the parse
@@ -527,6 +528,7 @@ const program& workspace::program_of(const std::string& path) {
 			auto decls = program_decls(*u);
 			jai::detail::collect_unit_names(decls, prog.names);
 			jai::detail::collect_unit_classes(decls, prog.classes);
+			jai::detail::engine_access::register_generics(*engine_, decls, u->path);   // every unit instantiates what the program declares
 			prog.names.insert(u->salvaged.begin(), u->salvaged.end());
 		}
 	}
@@ -594,7 +596,9 @@ void workspace::analyze(unit& u, bool want_model) {
 	jai::check_report report;
 	std::string failure;
 	try {
-		report = jai::detail::run_static_check(*engine_, u.decls, extra.empty() ? nullptr : &extra, options);
+		// the check declares the generic instances the unit uses, in a copy: the features read the unit's own declarations
+		if (u.checked_decls.empty()) { u.checked_decls = u.decls; }
+		report = jai::detail::engine_access::check_expanding(*engine_, u.checked_decls, options, extra.empty() ? nullptr : &extra);
 	} catch (const std::exception& ex) {
 		failure = ex.what();
 	}
@@ -679,7 +683,8 @@ std::shared_ptr<unit_model> workspace::analyze_text(unit& base, std::string text
 	options.program_classes = &prog.classes;
 	options.observer = &collector;
 	try {
-		jai::detail::run_static_check(*engine_, temp.decls, nullptr, options);
+		auto checked = temp.decls;
+		jai::detail::engine_access::check_expanding(*engine_, checked, options);
 	} catch (const std::exception&) {
 	}
 	semantic_walker(*this, temp, prog, *model).run();

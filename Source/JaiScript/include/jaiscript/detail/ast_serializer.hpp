@@ -20,6 +20,7 @@
 // both backends, so a faithful round trip preserves behavior.
 
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/generics.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/map_entry_binding.hpp>
 #include <jaiscript/detail/native_stack.hpp>
@@ -36,7 +37,7 @@ namespace jai::detail {
     // BUMP THIS on any change to what a parse produces: the serialized bytes and the parse-time semantics baked into the
     // AST (slot assignment, node and token numbers, capture plans). A stale sidecar is reparsed and rewritten (the version
     // check feeds the corrupt-file fallback), so a bump is always safe and a missed one leaves stale caches.
-    inline constexpr uint32_t k_jaibite_version = 63;
+    inline constexpr uint32_t k_jaibite_version = 64;
     // Header flags (u32):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -421,6 +422,12 @@ namespace jai::detail {
                 case node_type::destructuring_decl:
                     write_destructuring_decl(n);
                     break;
+                case node_type::generic_decl:
+                    write_generic_decl(n);
+                    break;
+                case node_type::generic_instance_decl:
+                    write_generic_instance_decl(n);
+                    break;
                 default:
                     jaibite_fail("unserializable AST node type " + std::to_string(int(n->get_type())));
             }
@@ -688,6 +695,12 @@ namespace jai::detail {
             flag(d->is_nodiscard);
             varint(d->local_count);
             outer_slot_plan(d->outer_slot_plan, d->outer_slot_plan_built);
+            flag(d->instance_stamp != 0);
+            if (d->instance_stamp != 0) {
+                fixed_u64(body_, d->instance_stamp);
+                str(d->instance_name);
+                flag(d->method_instance);
+            }
             --frame_depth_;
         }
 
@@ -703,6 +716,12 @@ namespace jai::detail {
                 u8(uint8_t(m.visibility));
                 node(m.declaration.get());
             }
+            flag(d->instance_stamp != 0);
+            if (d->instance_stamp != 0) { fixed_u64(body_, d->instance_stamp); }
+            flag(d->method_instances);
+            str(d->instance_generic);
+            varint(d->instance_needs.size());
+            for (const auto& need : d->instance_needs) str(need);
         }
 
         JAI_NOINLINE void write_namespace_decl(const ast_node* n) {
@@ -759,6 +778,60 @@ namespace jai::detail {
             flag(d->is_const);
             varint(d->written_at);
             type(d->type);
+        }
+
+        // a generic is its tokens (detail/generics.hpp): a loaded one instantiates as a parsed one does
+        JAI_NOINLINE void write_generic_decl(const ast_node* n) {
+            const generic_definition& g = *static_cast<const generic_decl*>(n)->definition;
+            u8(uint8_t(g.kind));
+            str(g.name);
+            str(g.space);
+            str(g.owner);
+            flag(g.is_static);
+            u8(g.visibility);
+            varint(g.parameters.size());
+            for (const auto& p : g.parameters) {
+                str(p.name);
+                location(p.location);
+                varint(p.bound.size());
+                for (const auto& t : p.bound) tok(t);
+            }
+            varint(g.tokens.size());
+            for (const auto& t : g.tokens) tok(t);
+            varint(g.name_token);
+            varint(g.list_end);
+            fixed_u64(body_, g.stamp);
+            varint(g.values.size());
+            for (const auto& v : g.values) {
+                type(v.type);
+                flag(v.is_reference);
+                flag(v.has_default);
+            }
+            location(g.location);
+        }
+
+        JAI_NOINLINE void write_generic_instance_decl(const ast_node* n) {
+            auto* d = static_cast<const generic_instance_decl*>(n);
+            str(d->name);
+            str(d->generic);
+            varint(d->arguments.size());
+            for (const auto& a : d->arguments) type(a);
+            str(d->within);
+            varint(d->needs.size());
+            for (const auto& need : d->needs) str(need);
+            flag(d->expanded);
+            varint(d->bounds.size());
+            for (const auto& b : d->bounds) {
+                str(b.parameter);
+                str(b.argument);
+                str(b.requires_);
+            }
+            varint(d->failures.size());
+            for (const auto& failure : d->failures) {
+                location(failure.at);
+                str(failure.message);
+            }
+            str(d->file);
         }
 
         JAI_NOINLINE void write_enum_decl(const ast_node* n) {
@@ -1254,6 +1327,8 @@ namespace jai::detail {
             result[size_t(node_type::extern_decl)] = &ast_reader::read_extern_decl;
             result[size_t(node_type::enum_decl)] = &ast_reader::read_enum_decl;
             result[size_t(node_type::destructuring_decl)] = &ast_reader::read_destructuring_decl;
+            result[size_t(node_type::generic_decl)] = &ast_reader::read_generic_decl;
+            result[size_t(node_type::generic_instance_decl)] = &ast_reader::read_generic_instance_decl;
             return result;
         }
 
@@ -1677,6 +1752,11 @@ namespace jai::detail {
             bool built = false;
             outer_slot_plan(d->outer_slot_plan, built);
             d->outer_slot_plan_built = built;
+            if (flag()) {
+                d->instance_stamp = fixed_u64();
+                d->instance_name = view();
+                d->method_instance = flag();
+            }
             return d;
         }
 
@@ -1695,11 +1775,15 @@ namespace jai::detail {
                 if (vis > uint8_t(class_decl::Protected)) jaibite_fail("corrupt member visibility");
                 auto member_decl = decl_req();
                 if (member_decl->get_type() != node_type::variable_decl &&
-                    member_decl->get_type() != node_type::function_decl) {
+                    member_decl->get_type() != node_type::function_decl && member_decl->get_type() != node_type::generic_decl) {
                     jaibite_fail("invalid program: class member must be a variable or function declaration");
                 }
                 d->members.push_back({ static_cast<class_decl::member_visibility>(vis), member_decl });
             }
+            if (flag()) { d->instance_stamp = fixed_u64(); }
+            d->method_instances = flag();
+            d->instance_generic = view();
+            for (uint64_t needs = varint(); needs > 0; --needs) { d->instance_needs.push_back(view()); }
             return d;
         }
 
@@ -1760,6 +1844,84 @@ namespace jai::detail {
             auto d = std::make_shared<extern_decl>(loc, t, is_function, name, nid);
             d->is_const = is_const;
             d->written_at = written_at;
+            return d;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_generic_decl(const source_location& loc) {
+            auto g = std::make_shared<generic_definition>();
+            const uint8_t kind = u8();
+            if (kind > uint8_t(generic_kind::method)) jaibite_fail("corrupt generic kind");
+            g->kind = static_cast<generic_kind>(kind);
+            g->name = view();
+            g->space = str();
+            g->owner = str();
+            g->is_static = flag();
+            g->visibility = u8();
+            if (g->visibility > uint8_t(class_decl::Protected)) jaibite_fail("corrupt member visibility");
+            uint64_t np = varint();
+            check_count(np);
+            for (uint64_t i = 0; i < np; ++i) {
+                generic_parameter p;
+                const auto [id, name] = interned(varint());
+                p.name = name;
+                p.name_id = id;
+                p.location = location();
+                uint64_t nb = varint();
+                check_count(nb);
+                for (uint64_t k = 0; k < nb; ++k) p.bound.push_back(tok());
+                g->parameters.push_back(std::move(p));
+            }
+            uint64_t nt = varint();
+            check_count(nt);
+            g->tokens.reserve(size_t(nt));
+            for (uint64_t i = 0; i < nt; ++i) g->tokens.push_back(tok());
+            g->name_token = static_cast<uint32_t>(varint());
+            g->list_end = static_cast<uint32_t>(varint());
+            if (g->name_token >= g->tokens.size() || g->list_end > g->tokens.size() || g->list_end <= g->name_token || g->parameters.empty()) {
+                jaibite_fail("invalid program: a generic's name and parameters");
+            }
+            g->stamp = fixed_u64();
+            uint64_t nv = varint();
+            check_count(nv);
+            for (uint64_t i = 0; i < nv; ++i) {
+                generic_value_parameter v;
+                v.type = type();
+                v.is_reference = flag();
+                v.has_default = flag();
+                g->values.push_back(std::move(v));
+            }
+            g->location = location();
+            return std::make_shared<generic_decl>(loc, std::move(g));
+        }
+
+        JAI_NOINLINE ast_node_ptr read_generic_instance_decl(const source_location& loc) {
+            const auto [id, name] = interned(varint());
+            auto d = std::make_shared<generic_instance_decl>(loc, name, id);
+            d->generic = view();
+            uint64_t na = varint();
+            check_count(na);
+            for (uint64_t i = 0; i < na; ++i) d->arguments.push_back(type());
+            d->within = view();
+            for (uint64_t needs = varint(); needs > 0; --needs) { d->needs.push_back(view()); }
+            d->expanded = flag();
+            uint64_t nb = varint();
+            check_count(nb);
+            for (uint64_t i = 0; i < nb; ++i) {
+                generic_instance_decl::bound b;
+                b.parameter = str();
+                b.argument = str();
+                b.requires_ = str();
+                d->bounds.push_back(std::move(b));
+            }
+            uint64_t nf = varint();
+            check_count(nf);
+            for (uint64_t i = 0; i < nf; ++i) {
+                generic_instance_decl::failure failure;
+                failure.at = location();
+                failure.message = str();
+                d->failures.push_back(std::move(failure));
+            }
+            d->file = str();
             return d;
         }
 

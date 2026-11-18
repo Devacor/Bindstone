@@ -22,6 +22,7 @@ set(JAISCRIPT_SOURCES
     implementation/parser.cpp
     implementation/properties.cpp
     implementation/records.cpp
+    implementation/generics.cpp
     implementation/regex/regex_engine.cpp
     implementation/regex/regex_library.cpp
     implementation/runtime_errors.cpp

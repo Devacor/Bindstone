@@ -3,6 +3,7 @@
 #include <jaiscript/detail/math_values.hpp>
 #include <jaiscript/detail/work_budget.hpp>
 #include <jaiscript/detail/coroutine_snapshot.hpp>
+#include <jaiscript/detail/type_name_key.hpp>
 
 namespace jai::serialization {
 
@@ -954,6 +955,10 @@ void binary_archive_reader::take_child(engine* eng, value_frame& f, script_value
 
 script_value binary_archive_reader::finish_frame(engine* eng, value_frame& f) {
     if (f.shape != frame_shape::object) { return std::move(f.built); }
+    // the name in the data is text: the class it names is known by its registered spelling from here on
+    if (f.type_name.find_first_of("<, \t\r\n") != std::string::npos && !detail::engine_access::get_class_definition(*eng, f.type_name)) {
+        if (std::string spelled = detail::registered_type_spelling(eng, f.type_name); !spelled.empty()) { f.type_name = std::move(spelled); }
+    }
     const uint32_t property_count = static_cast<uint32_t>(f.names.size());
     const auto* metadata = detail::engine_access::get_serialization_registry(*eng).get_class_metadata(f.type_name);
     if (metadata && metadata->custom_construct) {

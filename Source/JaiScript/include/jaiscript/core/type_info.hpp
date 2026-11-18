@@ -63,9 +63,10 @@ namespace jai {
         return script_value_type::jai_null_type;
     }
 
-    // A template instance's registered name: the base, then each argument's canonical spelling (type_info::canonical_name
-    // for a script type, type_name_helper for a C++ one), so the parser's Box<array<int>> and a host's
-    // Box<std::vector<int64_t>> name one class
+    // A template instance's registered name: the base, then each argument's spelling (type_info::spelling for a script
+    // type, type_name_helper for a C++ one), so the parser's Box<array<int>> and a host's Box<std::vector<int64_t>> name
+    // one class. The arguments are joined with ", " (Pair<string, int>); a builtin container's own name is not
+    // (map<string,int>, type_info::canonical_name).
     inline std::string template_instance_name(std::string_view base, const std::vector<std::string>& arguments) {
         std::string name(base);
         name += '<';
@@ -76,6 +77,10 @@ namespace jai {
         name += '>';
         return name;
     }
+
+    // Name<A, B>: the base name and the text of each argument, cut at the commas of the name's own brackets; false for a
+    // name that spells no argument list
+    bool template_name_arguments(std::string_view name, std::string_view& base, std::vector<std::string_view>& arguments);
 
     // Forward declarations
     class type_info;
@@ -222,6 +227,10 @@ namespace jai {
         // The script spelling a reader sees (reflection, reports): canonical_name with an untyped container spelled bare
         // ("array", "map") and a dynamic element as var ("map<string,var>"); "var" for any
         std::string spelling() const;
+
+        // An instance's name from its arguments' types (template_instance_name over each one's spelling: Box<var>, never
+        // Box<any>); "auto" for an argument still to be named
+        static std::string instance_name(std::string_view base, const std::vector<type_info_ptr>& arguments);
 
         // Equality comparison
         bool equals(const type_info& other) const;

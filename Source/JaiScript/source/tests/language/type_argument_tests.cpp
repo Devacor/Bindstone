@@ -42,7 +42,7 @@ public:
 			auto made = make_record(*e, t, record_field_list{{"handle", script_value(handle, e)}}, "one_record");
 			if (!made) { throw std::runtime_error(e->format_error(made)); }
 			return std::move(made.value());
-		}, returns_type_argument);
+		}, returns<T>);
 		eng.add_function("some_records", [e](const script_type& t) {
 			script_value rows = script_value::make_array(t.info(), e);
 			for (const char* handle : {"rex", "kit"}) {
@@ -51,12 +51,12 @@ public:
 				rows.unchecked_get_array_storage()->push(std::move(made.value()));
 			}
 			return rows;
-		}, returns_array_of_type_argument);
+		}, returns<array_of<T>>);
 		eng.add_function("first_record", [e](const script_type& t) {
 			auto made = make_shared_record(*e, t, record_field_list{{"handle", script_value(std::string("rex"), e)}}, "first_record");
 			if (!made) { throw std::runtime_error(e->format_error(made)); }
 			return std::move(made.value());
-		}, returns_shared_ptr_of_type_argument);
+		}, returns<shared_ptr_of<T>>);
 		dynamic_binder<type_argument_probe::store>(eng, "ProbeStore")
 			.constructor<>()
 			.method("fetch", [e](type_argument_probe::store& self, const script_type& t, const std::string& sql) {
@@ -70,7 +70,7 @@ public:
 				if (!made) { throw std::runtime_error(e->format_error(made)); }
 				rows.unchecked_get_array_storage()->push(std::move(made.value()));
 				return rows;
-			}, returns_array_of_type_argument)
+			}, returns<array_of<T>>)
 			.build();
 		eng.constant_argument("ProbeStore.fetch", 0, "a constant, please");
 	}
@@ -105,14 +105,109 @@ public:
 			check_eq(std::string("array<array<int>>"), e->execute("type_name_of<array<array<int>>>()").as_string());
 		});
 
+		test("a_locals_less_than_always_compares", [this]() {
+			// a local variable or a parameter is never generic and never a host function: '<' after one compares, whatever follows
+			auto e = make_engine();
+			e->execute("int two(bool x, bool y) { return (x ? 1 : 0) + (y ? 10 : 0); }");
+			check_eq((int64_t)11, e->execute("int f() { int a = 1; int b = 2; int c = 3; int d = 2; return two(a < b, c > (d)); } f();").as_int());
+			check_eq((int64_t)11, e->execute("int f(int a, int b, int c, int d) { return two(a < b, c > (d)); } f(1, 2, 3, 2);").as_int());
+			check_eq((int64_t)11, e->execute("int f() { int a = 1; int b = 2; int c = 3; int d = 2; auto h = () => { auto k = () => two(a < b, c > (d)); return k(); }; return h(); } f();").as_int());
+			check_true(e->execute("bool f(int a, int b) { return (a < b) == (b > (a)); } f(1, 2);").as_bool());
+		});
+
+		test("less_than_after_a_variable_the_unit_declared_above_compares", [this]() {
+			auto e = make_engine();
+			stdlib::register_all(*e);
+			check_eq(std::string("2"), e->execute("int two(bool a, bool b) { return 2; }\nint a = 1; int b = 2; int c = 3; int d = 0;\nto_string(two(a < b, c > (d)));").as_string());
+			e->execute("int pair(bool x, bool y) { return (x ? 1 : 0) + (y ? 10 : 0); }");
+			check_eq((int64_t)11, e->execute("int p = 1; int q = 2; int r = 3; int s = 2; pair(p < q, r > (s));").as_int());
+			check_eq((int64_t)11, e->execute("auto u = 1; var v = 2; float w = 3.0; int x = 2; pair(u < v, w > (x));").as_int());
+			check_true(e->execute("int m = 1; int n = 2; bool both = (m < n) == (n > (m)); both;").as_bool());
+			// inside a function of the unit, the variable declared above it is known too
+			check_eq((int64_t)11, e->execute("int g1 = 1; int g2 = 2; int g3 = 3; int g4 = 2; int f() { return pair(g1 < g2, g3 > (g4)); } f();").as_int());
+			// a run holding a type's keyword is still read as type arguments, as after a local
+			check_true(contains(failure(*e, "int l = 1; l<int>(2);"), "Cannot call 'l': it is an int, not a function"));
+			// a variable declared below the use is not known yet: the guiding error
+			check_true(contains(failure(*e, "int h() { return pair(z1 < z2, z3 > (z4)); } int z1 = 1; int z2 = 2; int z3 = 3; int z4 = 2; h();"),
+				"reads as a call with type arguments, which 'z1' does not take; if this is a comparison, write (z1 < z2)"));
+		});
+
+		test("a_comparison_read_as_type_arguments_says_what_to_write", [this]() {
+			auto e = make_engine();
+			bind_probe(*e);
+			e->execute("int two(bool x, bool y) { return (x ? 1 : 0) + (y ? 10 : 0); }");
+			// a program-scope name may be a generic or a host function, so its '<' opens type arguments (C#'s rule); a name that
+			// takes none and a type that is none is most likely a comparison, and the error says how to write one
+			// (a variable the unit declares above is known to be one; these are another unit's, which the parse does not see)
+			e->execute("int a = 1; int b = 2; int c = 3; int d = 2;");
+			const std::string read = failure(*e, "two(a < b, c > (d));");
+			check_true(contains(read, "unknown type 'b': 'a<b, c>(...)' reads as a call with type arguments, which 'a' does not take; if this is a comparison, write (a < b)"), read);
+			check_false(contains(read, "unknown type 'c'"), "the call's one error");
+			check_eq((int64_t)11, e->execute("two((a < b), c > (d));").as_int());
+			const std::string member = failure(*e, "class P { int n = 1; } P p; int b = 2; int c = 3; int d = 2; two(p.n < b, c > (d));");
+			check_true(contains(member, "unknown type 'b': 'p.n<b, c>(...)' reads as a call with type arguments, which 'p.n' does not take; if this is a comparison, write (p.n < b)"), member);
+			// a callee that takes type arguments keeps the declaration's error
+			const std::string host = failure(*e, "type_name_of<Nope>();");
+			check_true(contains(host, "unknown type 'Nope'") && !contains(host, "comparison"), host);
+			const std::string generic = failure(*e, "T same<T>(T x) { return x; } same<Nope>(1);");
+			check_true(contains(generic, "unknown type 'Nope'") && !contains(generic, "comparison"), generic);
+		});
+
 		test("a_script_callee_takes_no_type_arguments", [this]() {
 			auto e = make_engine();
 			for (const char* code : {"int f(int x) { return x; } f<int>(1);",
 			                         "class C { int m() { return 1; } } C c; c.m<int>();",
-			                         "class C { } C<int>();",
 			                         "void g() { auto l = [](int x) { return x; }; l<int>(2); }"}) {
 				check_true(contains(failure(*e, code), "takes no type arguments: a type argument goes to a host function"), code);
 			}
+		});
+
+		test("type_arguments_on_a_type_that_takes_none_are_one_error_wherever_a_type_stands", [this]() {
+			struct kind {
+				const char* declares;   // what the unit declares first
+				const char* name;
+				const char* text;
+			};
+			const kind kinds[] = {
+				{"class Hero { } ", "Hero", "'Hero' takes no type arguments: it is not a generic class"},
+				{"namespace n { class Hero { } } ", "n::Hero", "'n::Hero' takes no type arguments: it is not a generic class"},
+				{"", "time::date", "'time::date' takes no type arguments: it is a host class, not a host template"},
+				{"", "regex", "'regex' takes no type arguments: it is a host class, not a host template"},
+				{"enum Color { red, green } ", "Color", "'Color' takes no type arguments: it is an enum"},
+				{"", "int", "'int' takes no type arguments: it is a builtin type"},
+				{"", "string", "'string' takes no type arguments: it is a builtin type"},
+				{"", "math::vec2", "'math::vec2' takes no type arguments: it is a builtin type"},
+				{"", "utf8_string", "'utf8_string' takes no type arguments: it is a builtin type"},
+			};
+			const char* positions[] = {
+				"NAME<int> bad;",                                  // a declaration
+				"class Holder { NAME<int> field; }",               // a field
+				"void take(NAME<int> p) { }",                      // a parameter
+				"NAME<int> make() { NAME<int> x; return x; }",     // a return type
+				"array<NAME<int>> many;",
+				"map<string, NAME<int>> keyed;",
+				"shared_ptr<NAME<int>> held;",
+				"auto made = NAME<int>();",                        // Name<Args>(...) in an expression
+			};
+			for (const kind& k : kinds) {
+				for (const char* position : positions) {
+					auto e = make_engine();
+					bind_probe(*e);
+					std::string code = position;
+					for (size_t at = code.find("NAME"); at != std::string::npos; at = code.find("NAME", at)) { code.replace(at, 4, k.name); }
+					code = k.declares + code;
+					const std::string text = failure(*e, code);
+					const size_t first = text.find(k.text);
+					check_true(first != std::string::npos, code + " => " + text);
+					check_true(first == std::string::npos || text.find("takes no type arguments", first + std::string(k.text).size()) == std::string::npos, "once: " + code + " => " + text);
+					check_false(contains(text, "expected"), "no parse error: " + code + " => " + text);
+				}
+			}
+			// a host template the host did not bind with that spelling is its own case, and a generic's instance is none of this
+			auto e = make_engine();
+			bind_probe(*e);
+			check_eq((int64_t)3, e->execute("class Box<T> { T v; } Box<int> b; b.v = 3; b.v;").as_int());
+			check_true(contains(failure(*e, "int f(int x) { return x; } f<int>(1);"), "'f' takes no type arguments: a type argument goes to a host function"));
 		});
 
 		test("an_unknown_type_argument_is_the_declarations_error", [this]() {
@@ -217,14 +312,14 @@ public:
 			auto made = make_record(*e, t, fields, "record_from");
 			if (!made) { throw std::runtime_error(e->format_error(made)); }
 			return std::move(made.value());
-		}, returns_type_argument);
+		}, returns<T>);
 		eng.add_function("shared_record_from", [e](const script_type& t, const script_value& fields) {
 			record_field_list list;
 			for (const auto& [key, value] : fields.deref().as_map()) { list.emplace_back(key.as_string(), value); }
 			auto made = make_shared_record(*e, t, list, "shared_record_from");
 			if (!made) { throw std::runtime_error(e->format_error(made)); }
 			return std::move(made.value());
-		}, returns_shared_ptr_of_type_argument);
+		}, returns<shared_ptr_of<T>>);
 		eng.add_function("fields_text", [e](const script_value& record) {
 			auto fields = record_fields(*e, record, "fields_text");
 			if (!fields) { throw std::runtime_error(e->format_error(fields)); }

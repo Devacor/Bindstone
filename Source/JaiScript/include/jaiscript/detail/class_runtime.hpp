@@ -451,6 +451,12 @@ inline void class_definition::clear_static_method_overloads() {
     static_method_overloads_.clear();
 }
 
+inline void class_definition::drop_method_overloads(uint64_t name_id, bool is_static) {
+    (is_static ? static_method_overloads_ : method_overloads_).erase(name_id);
+    overload_resolution_cache_.clear();
+    bump_method_epoch();
+}
+
 inline void class_definition::retain_static_fields(const std::set<uint64_t>& keep) {
     for (auto it = static_fields_.begin(); it != static_fields_.end();) {
         if (keep.find(*it) == keep.end()) {
@@ -1204,6 +1210,13 @@ inline void class_definition::set_nonpublic_members(std::unordered_map<uint64_t,
     nonpublic_members_ = std::move(members);
     refresh_access_chain_flag();
     bump_method_epoch();   // inline caches stamp a needs-access-check flag at fill
+}
+
+inline void class_definition::set_nonpublic_member(uint64_t member_id, access_level level) {
+    nonpublic_members_[member_id] = level;
+    bump_field_shape_epoch();
+    refresh_access_chain_flag();
+    bump_method_epoch();
 }
 
 inline const class_definition* class_definition::find_nonpublic_declarer(uint64_t member_id, access_level& level_out) const {

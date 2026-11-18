@@ -50,8 +50,32 @@ inline std::string class_dot_member_text(std::string_view cls, std::string_view 
     return "'" + std::string(cls) + "' is a class; use " + std::string(cls) + "::" + std::string(member);
 }
 
-// `x.m` on a receiver without m: kind is the receiver's class or builtin kind (empty: object)
-inline std::string no_member_text(std::string_view kind, std::string_view member) {
+// The class among `cls` and its bases that declares a generic method `member` (docs/site/guide/21-generics.html "Generic
+// methods"); empty when none does
+template <class Engine>
+inline std::string generic_method_owner(Engine& eng, std::string_view cls, std::string_view member, int depth = 0) {
+    if (depth > 32 || cls.empty()) { return {}; }
+    const std::string name(cls);
+    if (detail::engine_access::find_generics(eng, name + "::" + std::string(member))) { return name; }
+    if (const auto def = detail::engine_access::get_class_definition(eng, name)) {
+        for (const auto& parent : def->get_parent_classes()) {
+            if (std::string found = generic_method_owner(eng, parent->get_name(), member, depth + 1); !found.empty()) { return found; }
+        }
+    }
+    return {};
+}
+
+// `x.m` on a receiver without m: kind is the receiver's class or builtin kind (empty: object). A generic method is a member
+// only as its instances, each made where a call is written with the receiver's class known: a call that reaches one at run
+// time, through a receiver the load did not know the class of, is told so and what to write.
+template <class Engine>
+inline std::string no_member_text(Engine* eng, std::string_view kind, std::string_view member) {
+    if (eng && detail::engine_access::names_generic_method(*eng, std::string(member))) {
+        if (const std::string owner = generic_method_owner(*eng, kind, member); !owner.empty()) {
+            return owner + "::" + std::string(member) + " is a generic method: its instance is picked where the call is written, from the receiver's class, which is not known "
+                   "there; give the receiver a typed name (" + std::string(kind) + " x = ...) or cast it (cast<" + std::string(kind) + "&>(x)." + std::string(member) + "(...))";
+        }
+    }
     return std::string(kind.empty() ? std::string_view("object") : kind) + " has no member '" + std::string(member) + "'";
 }
 

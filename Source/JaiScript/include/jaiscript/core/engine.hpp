@@ -369,7 +369,7 @@ namespace jai {
         // Whether a host function ("name") or a bound method ("Class.method") was registered with jai::nodiscard.
         bool is_nodiscard_function(const std::string& callable) const;
         // The typed result a host function ("name") or a bound method ("Class.method") declared for a call with type arguments
-        // (jai::returns_type_argument 1, returns_array_of_type_argument 2, returns_shared_ptr_of_type_argument 3); 0 for none.
+        // (jai::returns<jai::T> 1, jai::returns<jai::array_of<jai::T>> 2, jai::returns<jai::shared_ptr_of<jai::T>> 3); 0 for none.
         uint8_t type_argument_result(const std::string& callable) const;
 
         // Global registration
@@ -893,8 +893,18 @@ namespace jai {
         friend class caught_error_scope;
         // [[nodiscard]] for a host function ("name") or a bound method ("Class.method"): what jai::nodiscard records.
         void nodiscard_function(const std::string& callable);
-        // What jai::returns_type_argument and its siblings record
+        // What jai::returns<jai::T> and its siblings record
         void type_result_function(const std::string& callable, uint8_t shape);
+        // Generics (detail/generics.hpp): the definitions the program declares under a qualified name ("Stack", "wire::decode",
+        // "Request::json"), null when none; what an instance was made from; and a unit's check with the instances it needs
+        // declared into `declarations` (ahead of the declaration that first uses each), repeated until the check asks for no more
+        const std::vector<std::shared_ptr<const detail::generic_definition>>* find_generics(const std::string& qualified) const;
+        bool generic_instance(const std::string& name, std::string& generic, std::vector<type_info_ptr>& arguments) const;
+        bool declares_generics() const;
+        bool names_generic_method(const std::string& name) const;   // some class declares a generic method of that bare name
+        check_report check_expanding(std::vector<declaration_ptr>& declarations, detail::check_options options, const std::vector<std::string>* extra_globals = nullptr);
+        // a unit's generics, for the units checked after it (a run and a pooled closure unit declare theirs themselves)
+        void register_generics(const std::vector<declaration_ptr>& declarations, const std::string& file);
         // A host function a parallel body may not call: what jai::serial records. Every other registered host function, the
         // library's own included, is taken to be safe on any thread. A namespace entry is marked by its qualified name.
         void serial_function(const std::string& name);
@@ -1129,6 +1139,7 @@ namespace jai {
         
         // Get all registered template types for parser
         std::unordered_set<std::string> get_registered_template_types() const;
+        bool is_template_type(const std::string& baseTemplateName) const;   // a host bound an instance of this template
         
         // Get class definition by name
         std::shared_ptr<class_definition> get_class_definition(const std::string& name) const;
@@ -1228,6 +1239,9 @@ namespace jai {
         
         // Get the class registry for this engine
         class_registry& get_class_registry();
+        // The node of a running unit that holds an instance's declaration (the declaration itself, or the namespace around it):
+        // what keeps it alive while the instance waits to be defined
+        std::shared_ptr<void> instance_owner(const class_decl* a_declaration) const;
 
         // Map path for types without the slot, keyed by the native object's pointer.
         // note_script_layer is called from class_instance::set_native.
@@ -1352,6 +1366,9 @@ namespace jai {
 
         // Lookup by canonical name (interns the name first, then does ID lookup)
         type_info* get_type_info_by_name(const std::string& canonical_name);
+        // The type a canonical name spells (type_info::canonical_name's inverse: "int", "array<Item>", "map<string,int>",
+        // "shared_ptr<Item>", a class or an instance by its name); null for a name that spells no type an argument can be
+        type_info* type_named(std::string_view canonical_name);
 
         // Template method to get type_info for any C++ type
         template<typename T>

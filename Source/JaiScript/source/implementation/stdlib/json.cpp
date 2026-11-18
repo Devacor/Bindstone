@@ -7,11 +7,15 @@
 #include <jaiscript/detail/work_budget.hpp>
 #include <jaiscript/detail/coroutine_snapshot.hpp>
 #include <jaiscript/detail/type_name_key.hpp>
+#include <jaiscript/detail/engine_access.hpp>
+#include <jaiscript/detail/generics.hpp>
+#include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/detail/type_value.hpp>
 #include <jaiscript/core/script_type.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/convenience.hpp>
+#include <algorithm>
 #include <memory>
 #include <limits>
 #include <optional>
@@ -234,6 +238,20 @@ namespace stdlib {
 		throw serialization_error("Invalid shared_ptr ID: " + std::to_string(id));
 	}
 
+	// A $type that names no class is data, except an instance of a declared generic: one a unit offered that still waits for
+	// what it is built on, or one the program never made (docs/site/guide/21-generics.html "One instance, one class")
+	JAI_NOINLINE inline void refuse_unmade_instance(engine& eng, const std::string& type_name) {
+		if (const std::string waiting = detail::waiting_instance_text(eng, type_name); !waiting.empty()) { throw serialization_error(waiting); }
+		const std::string key = detail::type_name_key(type_name);   // a generic's own name is one word: its key is itself
+		const size_t open = key.find('<');
+		if (open == std::string::npos || open == 0 || key.back() != '>' || !detail::engine_access::declares_generics(eng)) { return; }
+		const std::string generic = key.substr(0, open);
+		const auto* declared = detail::engine_access::find_generics(eng, generic);
+		if (!declared || std::none_of(declared->begin(), declared->end(), [](const auto& g) { return g->kind == detail::generic_kind::class_type; })) { return; }
+		throw serialization_error("'" + type_name + "' names an instance of the generic '" + generic + "' that the program never made: name the type where it is loaded, as from_json<" +
+		                          type_name + ">(text) does");
+	}
+
 	// The archive form of one value back to a live value. A class instance (a {"$type": Name, "$val": {members}} map naming a
 	// registered class) is constructed, then its saved members are restored in the class's declaration order (each nested value built
 	// when its member is reached), without notifying, then its post_load(self, version) is queued for the end of the
@@ -440,10 +458,14 @@ namespace stdlib {
 		bool open_instance(script_value fields, std::string type_name, script_int version, script_int handle_id) {
 			std::shared_ptr<class_definition> class_def = detail::engine_access::get_class_definition(*eng_, type_name);
 			if (!class_def) {
-				type_name = detail::registered_type_spelling(eng_, type_name);
-				class_def = detail::engine_access::get_class_definition(*eng_, type_name);
+				const std::string spelled = detail::registered_type_spelling(eng_, type_name);
+				class_def = detail::engine_access::get_class_definition(*eng_, spelled);
+				if (!class_def) {
+					refuse_unmade_instance(*eng_, type_name);
+					return false;
+				}
+				type_name = spelled;
 			}
-			if (!class_def) { return false; }
 			script_value ctor = eng_->get_variable(type_name);
 			if (!ctor.is_function()) { return false; }
 			script_value instance(std::monostate{}, eng_);
@@ -662,7 +684,7 @@ namespace stdlib {
 			auto built = detail::json_to_type(*eng, parse_json_text(eng, json), type.info(), "from_json");
 			if (!built) { throw runtime_error(eng->format_error(built)); }
 			return std::move(built.value());
-		}, serial, returns_type_argument);
+		}, serial, returns<T>);
         
         eng_ref.add_variadic_function("to_binary", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {

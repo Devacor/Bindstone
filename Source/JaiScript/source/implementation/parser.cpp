@@ -963,7 +963,7 @@ bool parser::reject_using_name(const token& t, const char* what) {
                      " by a using declaration; a " + std::string(what) + " cannot be declared with that name", t);
         return true;
     }
-    if (t.lexeme.find("::") != std::string_view::npos) {
+    if (t.lexeme.find('<') == std::string_view::npos && t.lexeme.find("::") != std::string_view::npos) {   // an instance's name (Stack<shop::Item>) is no source spelling
         report_error("'" + std::string(t.lexeme) + "' is a qualified name; a " + std::string(what) + " cannot be declared with it", t);
         return true;
     }
@@ -1011,8 +1011,10 @@ checked_result<std::vector<declaration_ptr>> parser::parse() {
                 synchronize();
             } else {
                 auto decl = std::move(decl_result.value());
+                flush_generic_uses(declarations);
                 if (decl) {
                     check_reload_hook(*decl, reload_hook_seen);
+                    if (decl->get_type() == node_type::variable_decl) { unit_variables_.insert(static_cast<const variable_decl&>(*decl).name_id); }
                     declarations.push_back(std::move(decl));
                 }
             }
@@ -1085,6 +1087,13 @@ std::vector<std::string> parser::get_errors() const {
     std::vector<std::string> result;
     result.reserve(errors_.size());
     for (const auto& e : errors_) { result.push_back(e.at.to_string() + ": " + e.message); }
+    return result;
+}
+
+std::vector<parser::issue> parser::issues() const {
+    std::vector<issue> result;
+    result.reserve(errors_.size());
+    for (const auto& e : errors_) { result.push_back({e.at, e.message}); }
     return result;
 }
 
@@ -1851,6 +1860,7 @@ JAI_NOINLINE checked_result<expression_ptr> parser::identifier_expression() {
         current_--; // Back up to re-parse as type
         const size_t errors_before = errors_.size();
         const std::optional<token> pushed_before = pushed_back_token_;
+        const size_t uses_before = generic_uses_.size();
 
         auto type_result = parse_type();
         if (type_result && errors_.size() == errors_before) {
@@ -1870,6 +1880,7 @@ JAI_NOINLINE checked_result<expression_ptr> parser::identifier_expression() {
         current_ = savedPos + 1;
         errors_.resize(errors_before);
         pushed_back_token_ = pushed_before;
+        generic_uses_.resize(uses_before);
     }
 
     auto id_expr = std::make_shared<identifier_expr>(identToken.location, identToken.lexeme, get_symbol_id(identToken));
@@ -1888,6 +1899,22 @@ JAI_NOINLINE std::optional<checked_result<expression_ptr>> parser::type_construc
             current_ = savedPos;
             token typeToken = advance();
             std::string type_name(typeToken.lexeme);
+
+            // int(x), string(), bool{}: a primitive's own construction, as a declaration spells it (int n(x);): no argument is
+            // its zero, one is that value converted (cast<int>(x)). A generic's T(x) reads so when T is a primitive.
+            if ((check(token_type::left_paren) || check(token_type::left_brace)) &&
+                (typeToken.type == token_type::int_keyword || typeToken.type == token_type::float_keyword || typeToken.type == token_type::string_keyword ||
+                 typeToken.type == token_type::bool_keyword || typeToken.type == token_type::char_keyword)) {
+                const bool is_brace = check(token_type::left_brace);
+                advance();
+                JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(is_brace));
+                if (arguments.empty()) { return checked_result<expression_ptr>(default_initializer(type, typeToken.location)); }
+                if (arguments.size() == 1) {
+                    return checked_result<expression_ptr>(std::make_shared<cast_expr>(typeToken.location, type, false, std::move(arguments[0])));
+                }
+                report_error("a '" + type->canonical_name() + "' is initialized by one value, not " + std::to_string(arguments.size()), previous());
+                return checked_result<expression_ptr>(make_error_code(parse_error_code::syntax_error));
+            }
 
             // For template types, we need to parse the full type
             if (check(token_type::less)) {
@@ -1938,6 +1965,13 @@ JAI_NOINLINE checked_result<expression_ptr> parser::bracket_expression() {
                     if (t == token_type::right_bracket && i + 1 < stream_->size() && (*stream_)[i + 1].type == token_type::left_paren) {
                         current_ -= 1;
                         return lambda_expression();
+                    }
+                    if (t == token_type::right_bracket && i + 1 < stream_->size() && (*stream_)[i + 1].type == token_type::less) {
+                        const size_t close = type_parameters_end(i + 1);
+                        if (close != SIZE_MAX && close < stream_->size() && (*stream_)[close].type == token_type::left_paren) {
+                            report_error("a lambda takes no type parameters: give it auto parameters ([](auto x) { ... }), which take any type", (*stream_)[i + 1]);
+                            return make_error_code(parse_error_code::syntax_error);
+                        }
                     }
                     break;
                 }
@@ -2181,7 +2215,7 @@ JAI_NOINLINE checked_result<type_info_ptr> parser::named_type() {
 
     // Handle var - dynamic typing (any type allowed, never locks)
     if (match(token_type::var_keyword)) {
-        return store_type_info(type_info::make_any(*symbolizer_));
+        return builtin_type("var", store_type_info(type_info::make_any(*symbolizer_)));
     }
 
     // `function`: a callable-or-null slot (a std::function's rule) at every boundary
@@ -2191,19 +2225,19 @@ JAI_NOINLINE checked_result<type_info_ptr> parser::named_type() {
 
     // Primitive types
     if (match(token_type::int_keyword)) {
-        return store_type_info(type_info::make_int(*symbolizer_));
+        return builtin_type("int", store_type_info(type_info::make_int(*symbolizer_)));
     }
     if (match(token_type::float_keyword)) {
-        return store_type_info(type_info::make_float(*symbolizer_));
+        return builtin_type("float", store_type_info(type_info::make_float(*symbolizer_)));
     }
     if (match(token_type::string_keyword)) {
-        return store_type_info(type_info::make_string(*symbolizer_));
+        return builtin_type("string", store_type_info(type_info::make_string(*symbolizer_)));
     }
     if (match(token_type::bool_keyword)) {
-        return store_type_info(type_info::make_bool(*symbolizer_));
+        return builtin_type("bool", store_type_info(type_info::make_bool(*symbolizer_)));
     }
     if (match(token_type::char_keyword)) {
-        return store_type_info(type_info::make_char(*symbolizer_));
+        return builtin_type("char", store_type_info(type_info::make_char(*symbolizer_)));
     }
     if (match(token_type::void_keyword)) {
         return store_type_info(type_info::make_void(*symbolizer_));
@@ -2211,7 +2245,7 @@ JAI_NOINLINE checked_result<type_info_ptr> parser::named_type() {
 
     if (check(token_type::identifier) && peek().lexeme == "utf8_string") {
         advance();
-        return store_type_info(type_info::make_utf8_string(*symbolizer_));
+        return builtin_type("utf8_string", store_type_info(type_info::make_utf8_string(*symbolizer_)));
     }
 
     if (check(token_type::identifier) && (peek().lexeme == "uint8" || peek().lexeme == "int8")) {
@@ -2222,15 +2256,15 @@ JAI_NOINLINE checked_result<type_info_ptr> parser::named_type() {
     if (check(token_type::identifier)) {
         const script_value_type math_kind = math_type_from_name(peek().lexeme);
         if (math_kind != script_value_type::jai_null_type) {
-            advance();
-            return store_type_info(type_info::make_math(*symbolizer_, math_kind));
+            const std::string_view name = advance().lexeme;
+            return builtin_type(name, store_type_info(type_info::make_math(*symbolizer_, math_kind)));
         }
     }
 
     // Handle "double" as an alias for float (since we only have float_keyword)
     if (check(token_type::identifier) && peek().lexeme == "double") {
         advance();  // consume "double"
-        return store_type_info(type_info::make_float(*symbolizer_));
+        return builtin_type("double", store_type_info(type_info::make_float(*symbolizer_)));
     }
 
     // User-defined type (potentially templated)
@@ -2244,31 +2278,12 @@ JAI_NOINLINE checked_result<type_info_ptr> parser::named_type() {
             type_name += advance().lexeme;
         }
 
-        // A host template's base name followed by '<' is a template (Point<int>); the bare name stays an ordinary identifier
-        if (check(token_type::less) && is_registered_template_type(type_name)) {
-            advance();
-            std::vector<type_info_ptr> templateParams;
-            std::vector<std::string> spellings;
-            do {
-                type_info_ptr param;
-                if (check(token_type::identifier) && (peek().lexeme == "uint8" || peek().lexeme == "int8")) {
-                    param = store_type_info(advance().lexeme == "uint8" ? type_info::make_uint8(*symbolizer_) : type_info::make_int8(*symbolizer_));
-                } else {
-                    JAISCRIPT_TRY_ASSIGN(param, parse_type());
-                }
-                if (!param) {
-                    report_error("a template argument needs a concrete type", previous());
-                    return make_error_code(parse_error_code::syntax_error);
-                }
-                spellings.push_back(param->canonical_name());
-                templateParams.push_back(param);
-            } while (match(token_type::comma));
-
-            consume_greater_in_generic("expected '>' after template parameters");
-
-            type_info info = type_info::make_object(*symbolizer_, template_instance_name(type_name, spellings));
-            info.type_params = std::move(templateParams);
-            return store_type_info(std::move(info));
+        // A name followed by type arguments is a template's instance: a host template's (Point<int>), which keeps precedence,
+        // else a generic class's (Stack<int>), declared by the unit that names it; the bare name stays an ordinary identifier
+        const bool host_template = check(token_type::less) && is_registered_template_type(type_name);
+        bool split = false;
+        if (host_template || (check(token_type::less) && !pushed_back_token_ && type_arguments_end(current_, split, true) != SIZE_MAX)) {
+            return instance_type(type_name, host_template);
         }
 
         return store_type_info(type_info::make_object(*symbolizer_, type_name));
@@ -2276,6 +2291,38 @@ JAI_NOINLINE checked_result<type_info_ptr> parser::named_type() {
 
     report_error("expected type", peek());
     return make_error_code(parse_error_code::syntax_error);
+}
+
+JAI_NOINLINE checked_result<type_info_ptr> parser::instance_type(const std::string& type_name, bool host_template) {
+    const token open = advance();
+    std::vector<type_info_ptr> templateParams;
+    do {
+        type_info_ptr param;
+        if (check(token_type::identifier) && (peek().lexeme == "uint8" || peek().lexeme == "int8")) {
+            param = store_type_info(advance().lexeme == "uint8" ? type_info::make_uint8(*symbolizer_) : type_info::make_int8(*symbolizer_));
+        } else {
+            JAISCRIPT_TRY_ASSIGN(param, parse_type());
+        }
+        if (!param || (!host_template && param->base_type == script_value_type::jai_null_type)) {
+            report_error(host_template ? "a template argument needs a concrete type"
+                                       : "a type argument names a type: '" + std::string(param ? "void" : "auto") + "' is not one an instance can be made with", previous());
+            return make_error_code(parse_error_code::syntax_error);
+        }
+        templateParams.push_back(param);
+    } while (match(token_type::comma));
+
+    consume_greater_in_generic(host_template ? "expected '>' after template parameters" : "expected '>' after type arguments");
+
+    if (!host_template) { note_generic_use(type_name, templateParams, open.location); }
+    type_info info = type_info::make_object(*symbolizer_, type_info::instance_name(type_name, templateParams));
+    info.type_params = std::move(templateParams);
+    return store_type_info(std::move(info));
+}
+
+JAI_NOINLINE checked_result<type_info_ptr> parser::builtin_type(std::string_view name, type_info_ptr type) {
+    bool split = false;
+    if (!check(token_type::less) || pushed_back_token_ || type_arguments_end(current_, split, true) == SIZE_MAX) { return type; }
+    return instance_type(std::string(name), false);
 }
 
 JAI_NOINLINE checked_result<type_info_ptr> parser::array_type() {
@@ -2945,62 +2992,526 @@ bool parser::postfix_operator_ahead(const expression_ptr& expr) const {
         case token_type::minus_minus:
             return true;
         case token_type::less:   // f<T>(...), a.m<T>(...), ns::f<T>(...)
-            return expr && (expr->get_type() == node_type::identifier_expr || expr->get_type() == node_type::member_expr) && type_arguments_ahead();
+            return expr && (expr->get_type() == node_type::identifier_expr || expr->get_type() == node_type::member_expr) && type_arguments_ahead(names_variable(*expr));
         default:
             return false;
     }
 }
 
-// C#'s rule: '<' opens type arguments only when the type-shaped run it starts closes on a '>' that a '(' follows ('>>' closes
-// two); anything else keeps '<' a comparison, so (a < b) > (c) needs its parentheses
-bool parser::type_arguments_ahead() const {
+// C#'s rule: '<' opens type arguments only when the type-shaped run it starts closes on a '>' that a '(' , a '{' or a '::' follows
+// ('>>' closes two), or that nothing a '>' compares with follows (an instance named as a value, which type_argument_call
+// refuses); anything else keeps '<' a comparison, so (a < b) > (c) needs its parentheses. After a local variable or a parameter
+// (`local`), which is neither a generic nor a host function, '<' compares wherever it can: only a run that holds a type's
+// keyword (l<int>(2), which no comparison spells) is read as type arguments, for the checker to refuse.
+bool parser::type_arguments_ahead(bool local) const {
     if (pushed_back_token_ || peek().type != token_type::less) { return false; }
+    bool split = false;
+    const size_t end = type_arguments_end(current_, split);
+    if (end == SIZE_MAX || split || end >= stream_->size()) { return false; }
+    if (local) {
+        bool keyword = false;
+        for (size_t i = current_ + 1; i + 1 < end && !keyword; ++i) {
+            const token_type t = (*stream_)[i].type;
+            keyword = t != token_type::identifier && t != token_type::colon_colon && t != token_type::comma && t != token_type::less && t != token_type::greater &&
+                      t != token_type::right_shift;
+        }
+        if (!keyword) { return false; }
+    }
+    switch ((*stream_)[end].type) {
+        case token_type::left_paren: case token_type::left_brace: case token_type::colon_colon: case token_type::semicolon:
+        case token_type::comma: case token_type::right_paren: case token_type::right_bracket: case token_type::eof:
+            return true;
+        default:
+            return false;
+    }
+}
+
+size_t parser::type_arguments_end(size_t open, bool& split, bool placeholders) const {
+    split = false;
     const std::vector<token>& tokens = *stream_;
     int depth = 0;
-    for (size_t i = current_; i < tokens.size(); ++i) {
+    uint64_t signatures = 0;   // bit d: the '<' that opened depth d follows `function`, so one parameter list may stand there
+    for (size_t i = open; i < tokens.size(); ++i) {
         switch (tokens[i].type) {
-            case token_type::less: ++depth; break;
-            case token_type::greater: case token_type::right_shift:
-                depth -= tokens[i].type == token_type::greater ? 1 : 2;
-                if (depth < 0) { return false; }
-                if (depth == 0) { return i + 1 < tokens.size() && tokens[i + 1].type == token_type::left_paren; }
+            case token_type::less:
+                ++depth;
+                if (depth < 64) {
+                    const bool callable = i > open && tokens[i - 1].type == token_type::function_keyword;
+                    signatures = callable ? signatures | (1ull << depth) : signatures & ~(1ull << depth);
+                }
+                break;
+            case token_type::left_paren: {   // function<R(A, B&)>: a signature's parameter list, which only a type spells
+                if (depth < 1 || depth >= 64 || !((signatures >> depth) & 1)) { return SIZE_MAX; }
+                signatures &= ~(1ull << depth);
+                int parens = 0;
+                for (; i < tokens.size(); ++i) {
+                    const token_type t = tokens[i].type;
+                    if (t == token_type::left_paren) { ++parens; continue; }
+                    if (t == token_type::right_paren) { if (--parens == 0) { break; } continue; }
+                    if (t != token_type::identifier && t != token_type::colon_colon && t != token_type::comma && t != token_type::less &&
+                        t != token_type::greater && t != token_type::right_shift && t != token_type::ampersand && !is_type_keyword_token(t) &&
+                        t != token_type::function_keyword && t != token_type::coroutine_keyword && t != token_type::const_keyword) { return SIZE_MAX; }
+                }
+                if (i >= tokens.size()) { return SIZE_MAX; }
+                break;
+            }
+            case token_type::coroutine_keyword:   // coroutine<Y>: a type only before '<'
+                if (depth == 0 || i + 1 >= tokens.size() || tokens[i + 1].type != token_type::less) { return SIZE_MAX; }
+                break;
+            case token_type::greater:
+                if (--depth == 0) { return i + 1; }
+                break;
+            case token_type::right_shift:
+                if (depth == 1) { split = true; return i; }
+                depth -= 2;
+                if (depth == 0) { return i + 1; }
                 break;
             case token_type::identifier: case token_type::colon_colon: case token_type::comma: case token_type::int_keyword:
             case token_type::float_keyword: case token_type::string_keyword: case token_type::bool_keyword: case token_type::char_keyword:
             case token_type::array_keyword: case token_type::map_keyword: case token_type::shared_ptr_keyword:
-            case token_type::weak_ptr_keyword: case token_type::var_keyword:
+            case token_type::weak_ptr_keyword: case token_type::var_keyword: case token_type::function_keyword:
+                if (depth == 0) { return SIZE_MAX; }
+                break;
+            case token_type::auto_keyword: case token_type::void_keyword:
+                if (depth == 0 || !placeholders) { return SIZE_MAX; }
                 break;
             default:
-                return false;
+                return SIZE_MAX;
         }
     }
+    return SIZE_MAX;
+}
+
+size_t parser::type_run_end(size_t at) const {
+    const std::vector<token>& tokens = *stream_;
+    if (at >= tokens.size()) { return SIZE_MAX; }
+    bool split = false;
+    switch (tokens[at].type) {
+        case token_type::int_keyword: case token_type::float_keyword: case token_type::string_keyword: case token_type::bool_keyword:
+        case token_type::char_keyword: case token_type::void_keyword: case token_type::auto_keyword: case token_type::var_keyword:
+            return at + 1;
+        case token_type::array_keyword: case token_type::map_keyword: case token_type::shared_ptr_keyword: case token_type::weak_ptr_keyword: {
+            if (at + 1 >= tokens.size() || tokens[at + 1].type != token_type::less) { return SIZE_MAX; }
+            const size_t end = type_arguments_end(at + 1, split, true);
+            return split ? SIZE_MAX : end;
+        }
+        case token_type::identifier: {
+            size_t after = at + 1;
+            while (after + 1 < tokens.size() && tokens[after].type == token_type::colon_colon && tokens[after + 1].type == token_type::identifier) { after += 2; }
+            if (after < tokens.size() && tokens[after].type == token_type::less) {
+                const size_t end = type_arguments_end(after, split, true);
+                if (end != SIZE_MAX && !split) { return end; }
+            }
+            return after;
+        }
+        default:
+            return SIZE_MAX;
+    }
+}
+
+// A declaration's type parameters: names, bounds (T : Base<T>) and whatever else the declaration reports by name
+size_t parser::type_parameters_end(size_t open) const {
+    const std::vector<token>& tokens = *stream_;
+    if (open >= tokens.size() || tokens[open].type != token_type::less) { return SIZE_MAX; }
+    int depth = 0;
+    for (size_t i = open; i < tokens.size(); ++i) {
+        switch (tokens[i].type) {
+            case token_type::less: ++depth; break;
+            case token_type::greater:
+                if (--depth == 0) { return i + 1; }
+                break;
+            case token_type::right_shift:
+                depth -= 2;
+                if (depth == 0) { return i + 1; }
+                if (depth < 0) { return SIZE_MAX; }
+                break;
+            case token_type::identifier: case token_type::colon_colon: case token_type::comma: case token_type::colon: case token_type::equal:
+            case token_type::dot: case token_type::int_keyword: case token_type::float_keyword: case token_type::string_keyword:
+            case token_type::bool_keyword: case token_type::char_keyword: case token_type::array_keyword: case token_type::map_keyword:
+            case token_type::shared_ptr_keyword: case token_type::weak_ptr_keyword: case token_type::var_keyword: case token_type::function_keyword:
+            case token_type::auto_keyword: case token_type::void_keyword: case token_type::class_keyword: case token_type::integer_literal:
+                break;
+            default:
+                return SIZE_MAX;
+        }
+    }
+    return SIZE_MAX;
+}
+
+size_t parser::attributes_end(size_t at) const {
+    const std::vector<token>& tokens = *stream_;
+    while (at + 4 < tokens.size() && tokens[at].type == token_type::left_bracket && tokens[at + 1].type == token_type::left_bracket &&
+           tokens[at + 2].type == token_type::identifier && tokens[at + 3].type == token_type::right_bracket &&
+           tokens[at + 4].type == token_type::right_bracket) {
+        at += 5;
+    }
+    return at;
+}
+
+size_t parser::generic_function_head(size_t at, bool member) const {
+    if (pushed_back_token_) { return SIZE_MAX; }
+    const std::vector<token>& tokens = *stream_;
+    const auto names_list = [&](size_t name) {
+        if (name + 1 >= tokens.size() || tokens[name].type != token_type::identifier || tokens[name + 1].type != token_type::less) { return false; }
+        const size_t close = type_parameters_end(name + 1);
+        return close != SIZE_MAX && close < tokens.size() && tokens[close].type == token_type::left_paren;
+    };
+    at = attributes_end(at);
+    bool coroutine = false;
+    for (; at < tokens.size(); ++at) {
+        if (tokens[at].type == token_type::coroutine_keyword) { coroutine = true; continue; }
+        if (!member || (tokens[at].type != token_type::static_keyword && tokens[at].type != token_type::override_keyword)) { break; }
+    }
+    if (at >= tokens.size()) { return SIZE_MAX; }
+    if (tokens[at].type == token_type::function_keyword) { return names_list(at + 1) ? at + 1 : SIZE_MAX; }
+    size_t name = type_run_end(at);
+    if (name != SIZE_MAX && name < tokens.size() && tokens[name].type == token_type::ampersand) { ++name; }
+    if (name != SIZE_MAX && names_list(name)) { return name; }
+    return coroutine && names_list(at) ? at : SIZE_MAX;   // coroutine each<T>(...): the bare head
+}
+
+bool parser::generic_parameters(detail::generic_definition& definition, size_t open, size_t& list_end) {
+    const std::vector<token>& tokens = *stream_;
+    const std::string generic(definition.name);
+    const auto fail = [&](const std::string& message, const token& at) {
+        report_error(message, at);
+        return false;
+    };
+    size_t i = open + 1;
+    if (tokens[i].type == token_type::greater) {
+        return fail("generic '" + generic + "' lists no type parameter: name at least one (" + generic + "<T>)", tokens[i]);
+    }
+    for (;;) {
+        const token& t = tokens[i];
+        const token& next = tokens[i + 1 < tokens.size() ? i + 1 : i];
+        if (t.type == token_type::class_keyword || (t.type == token_type::identifier && t.lexeme == "typename" && next.type == token_type::identifier)) {
+            return fail("a type parameter is its name alone: " + generic + "<T>, not <" + std::string(t.lexeme) + " T>", t);
+        }
+        if (t.type != token_type::identifier || next.type == token_type::less || next.type == token_type::colon_colon) {
+            if (is_type_keyword_token(t.type) && next.type == token_type::identifier) {
+                return fail("'" + generic + "' declares a non-type parameter ('" + std::string(t.lexeme) + " " + std::string(next.lexeme) +
+                            "'): a generic's parameters are types (" + generic + "<T>)", t);
+            }
+            if (is_type_keyword_token(t.type) || t.type == token_type::identifier) {
+                return fail("'" + generic + "' names a type where a type parameter belongs: specialization is not supported (declare " + generic +
+                            "<T> once, for every T)", t);
+            }
+            return fail("expected a type parameter's name in the list of '" + generic + "'", t);
+        }
+        if (next.type == token_type::identifier) {
+            return fail("'" + generic + "' declares a non-type parameter ('" + std::string(t.lexeme) + " " + std::string(next.lexeme) +
+                        "'): a generic's parameters are types (" + generic + "<T>)", t);
+        }
+        if (next.type == token_type::equal) {
+            return fail("default type arguments are not supported: declare '" + std::string(t.lexeme) + "' alone and name the argument at each use", next);
+        }
+        if (next.type == token_type::dot) {
+            return fail("variadic type parameters are not supported: list each parameter of '" + generic + "'", next);
+        }
+        if (t.lexeme == definition.name) {
+            return fail("'" + generic + "' is the generic's own name: its type parameter needs another", t);
+        }
+        for (const auto& earlier : definition.parameters) {
+            if (earlier.name == t.lexeme) { return fail("duplicate type parameter '" + std::string(t.lexeme) + "' in '" + generic + "'", t); }
+        }
+        detail::generic_parameter parameter;
+        parameter.name = symbolizer_->intern_with_view(t.lexeme).second;
+        parameter.name_id = get_symbol_id(t);
+        parameter.location = t.location;
+        ++i;
+        bool closed = false;
+        if (tokens[i].type == token_type::colon) {
+            const token& colon = tokens[i];
+            int depth = 0;
+            for (++i; i < tokens.size(); ++i) {
+                const token_type k = tokens[i].type;
+                if (depth == 0 && (k == token_type::comma || k == token_type::greater)) { break; }
+                if (k == token_type::less) { ++depth; }
+                else if (k == token_type::greater) { --depth; }
+                else if (k == token_type::right_shift) {
+                    if (depth == 1) {   // the bound's own '>' and the list's
+                        parameter.bound.emplace_back(token_type::greater, ">", tokens[i].location);
+                        closed = true;
+                        ++i;
+                        break;
+                    }
+                    depth -= 2;
+                    parameter.bound.emplace_back(token_type::greater, ">", tokens[i].location);
+                    parameter.bound.emplace_back(token_type::greater, ">", tokens[i].location);
+                    continue;
+                }
+                else if (k != token_type::identifier && k != token_type::colon_colon && k != token_type::comma && !is_type_keyword_token(k)) {
+                    return fail("expected a class after ':': '" + std::string(parameter.name) + " : Base' bounds " + std::string(parameter.name) + " by a class", tokens[i]);
+                }
+                parameter.bound.push_back(tokens[i]);
+            }
+            if (parameter.bound.empty() || parameter.bound.front().type != token_type::identifier) {
+                return fail("expected a class after ':': '" + std::string(parameter.name) + " : Base' bounds " + std::string(parameter.name) + " by a class",
+                            parameter.bound.empty() ? colon : parameter.bound.front());
+            }
+        }
+        definition.parameters.push_back(std::move(parameter));
+        if (closed) { list_end = i; return true; }
+        if (i < tokens.size() && tokens[i].type == token_type::comma) { ++i; continue; }
+        if (i < tokens.size() && tokens[i].type == token_type::greater) { list_end = i + 1; return true; }
+        return fail("expected ',' or '>' after type parameter '" + std::string(definition.parameters.back().name) + "'", tokens[i < tokens.size() ? i : tokens.size() - 1]);
+    }
+}
+
+// From the end of the type parameters to past the body's closing brace
+bool parser::generic_extent(detail::generic_kind kind, size_t list_end, size_t& end) {
+    const std::vector<token>& tokens = *stream_;
+    const char* const expected = kind == detail::generic_kind::class_type ? "expected '{' before class body" : "expected '{' before function body";
+    size_t i = list_end;
+    size_t depth = 0;
+    for (; i < tokens.size(); ++i) {   // the head: a parameter list, a base list, a trailing return type
+        const token_type k = tokens[i].type;
+        if (k == token_type::left_paren || k == token_type::left_bracket) { ++depth; }
+        else if (k == token_type::right_paren || k == token_type::right_bracket) { if (depth > 0) { --depth; } }
+        else if (depth == 0 && k == token_type::left_brace) { break; }
+        else if (k == token_type::eof || (depth == 0 && (k == token_type::semicolon || k == token_type::right_brace))) {
+            report_error(expected, tokens[i]);
+            return false;
+        }
+    }
+    for (depth = 0; i < tokens.size(); ++i) {
+        const token_type k = tokens[i].type;
+        if (k == token_type::left_brace) { ++depth; }
+        else if (k == token_type::right_brace) {
+            if (--depth == 0) { end = i + 1; return true; }
+        }
+    }
+    report_error(kind == detail::generic_kind::class_type ? "expected '}' after class body" : "expected '}' after block", tokens.back());
     return false;
 }
 
+// A type parameter's name is reserved in its generic: an instance replaces every bare use of it, so a variable, a parameter, a
+// field or a method of that name would not survive (a member read, x.T, is no use of the parameter)
+bool parser::reserved_parameter_names(const detail::generic_definition& definition) {
+    const std::vector<token>& tokens = definition.tokens;
+    for (size_t i = 1; i + 1 < tokens.size(); ++i) {
+        if (tokens[i].type != token_type::identifier || (i > definition.name_token && i < definition.list_end)) { continue; }
+        const bool parameter = std::any_of(definition.parameters.begin(), definition.parameters.end(),
+            [&](const detail::generic_parameter& p) { return p.name == tokens[i].lexeme; });
+        if (!parameter) { continue; }
+        const token& before = tokens[i - 1];
+        const token_type after = tokens[i + 1].type;
+        const bool names_type = before.type == token_type::identifier || before.type == token_type::const_keyword ||
+                                (is_type_keyword_token(before.type) && before.type != token_type::array_keyword && before.type != token_type::map_keyword &&
+                                 before.type != token_type::shared_ptr_keyword && before.type != token_type::weak_ptr_keyword);
+        const bool closes_type = before.type == token_type::greater || before.type == token_type::right_shift || before.type == token_type::ampersand;
+        const bool ends_declarator = after == token_type::semicolon || after == token_type::equal || after == token_type::comma ||
+                                     after == token_type::right_paren || after == token_type::colon;
+        const bool opens_declarator = after == token_type::left_paren || after == token_type::left_brace;
+        if ((names_type && (ends_declarator || opens_declarator)) || (closes_type && ends_declarator)) {
+            report_error("'" + std::string(tokens[i].lexeme) + "' is a type parameter of '" + std::string(definition.name) + "': a declaration cannot reuse its name", tokens[i]);
+            return false;
+        }
+    }
+    return true;
+}
+
+// A generic's text (detail::generic_instance_tokens: program-scope text, in its namespace or its class) parsed here, in place of
+// the stream; null when it reports an error
+declaration_ptr parser::parse_generic_text(const std::vector<token>& text) {
+    const std::vector<token>* saved_stream = stream_;
+    const size_t saved_current = current_;
+    const std::optional<token> saved_pushed_back = pushed_back_token_;
+    std::vector<generic_use> saved_uses = std::move(generic_uses_);
+    std::vector<std::string> saved_namespace = std::move(current_namespace_path_);
+    std::vector<function_scope> saved_scopes = std::move(function_scope_stack_);
+    std::vector<template_barrier> saved_barriers = std::move(template_barriers_);
+    const jump_targets saved_jumps = jumps_;
+    const int saved_nesting = nesting_depth_;
+    const size_t saved_boundary = slot_lookup_boundary_;
+    const bool saved_flags[] = {in_switch_case_, in_coroutine_, in_constructor_, returns_reference_, coroutine_body_pending_};
+    generic_uses_.clear(); current_namespace_path_.clear(); function_scope_stack_.clear(); template_barriers_.clear();
+    jumps_ = {}; nesting_depth_ = 0; slot_lookup_boundary_ = 0;
+    in_switch_case_ = in_coroutine_ = in_constructor_ = returns_reference_ = coroutine_body_pending_ = false;
+    stream_ = &text; current_ = 0; pushed_back_token_.reset();
+    const size_t errors_before = errors_.size();
+    auto parsed = declaration();
+    if (parsed && errors_.size() == errors_before && !is_at_end()) { report_error("unexpected text after the generic's declaration", peek()); }
+    stream_ = saved_stream; current_ = saved_current; pushed_back_token_ = saved_pushed_back;
+    generic_uses_ = std::move(saved_uses);
+    current_namespace_path_ = std::move(saved_namespace);
+    function_scope_stack_ = std::move(saved_scopes);
+    template_barriers_ = std::move(saved_barriers);
+    jumps_ = saved_jumps; nesting_depth_ = saved_nesting; slot_lookup_boundary_ = saved_boundary;
+    in_switch_case_ = saved_flags[0]; in_coroutine_ = saved_flags[1]; in_constructor_ = saved_flags[2];
+    returns_reference_ = saved_flags[3]; coroutine_body_pending_ = saved_flags[4];
+    paren_close_.erase(&text);
+    if (!parsed) {
+        if (errors_.size() == errors_before) { report_error_at(format_error(parsed, *symbolizer_), text.front().location); }
+        return nullptr;
+    }
+    return errors_.size() == errors_before ? std::move(parsed.value()) : nullptr;
+}
+
+checked_result<declaration_ptr> parser::generic_declaration(const generic_site& site) {
+    const std::vector<token>& tokens = *stream_;
+    const token name = tokens[site.name_at];
+    const bool is_class = site.kind == detail::generic_kind::class_type;
+    if (reject_using_name(name, is_class ? "class" : site.kind == detail::generic_kind::method ? "member" : "function")) {
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    auto definition = std::make_shared<detail::generic_definition>();
+    definition->kind = site.kind;
+    definition->name = symbolizer_->intern_with_view(name.lexeme).second;
+    definition->space = std::string(site.space);
+    definition->owner = std::string(site.owner);
+    definition->visibility = site.visibility;
+    definition->location = name.location;
+    size_t list_end = type_parameters_end(site.name_at + 1);
+    size_t end = 0;
+    if (list_end == SIZE_MAX) {
+        report_error("expected '>' after the type parameters of '" + std::string(name.lexeme) + "'", tokens[site.name_at + 1]);
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    if (!is_class && tokens[list_end].type != token_type::left_paren) {
+        report_error("expected '(' after the type parameters of '" + std::string(name.lexeme) + "'", tokens[list_end]);
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    if (!generic_extent(site.kind, list_end, end)) { return make_error_code(parse_error_code::syntax_error); }
+    const auto refuse = [&](const std::string& message, const token& at) {
+        report_error(message, at);
+        current_ = end;
+        return make_error_code(parse_error_code::syntax_error);
+    };
+    if (in_function_scope()) {
+        return refuse("generic '" + std::string(name.lexeme) + "' is declared inside a function body: a generic is declared at program scope, in a namespace or in a class", name);
+    }
+    if (!generic_parameters(*definition, site.name_at + 1, list_end)) {
+        current_ = end;
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    if (site.kind == detail::generic_kind::method) {
+        for (size_t i = site.begin; i < end && tokens[i].type != token_type::left_brace; ++i) {
+            if (i >= site.name_at && i < list_end) { continue; }
+            if (tokens[i].type == token_type::static_keyword && i < site.name_at) { definition->is_static = true; }
+            if (tokens[i].type == token_type::override_keyword) {
+                return refuse("generic method '" + std::string(name.lexeme) + "' cannot be marked override: a generic method is not virtual (the receiver's class as the checker knows it picks the instance)", tokens[i]);
+            }
+        }
+    }
+    definition->tokens.assign(tokens.begin() + static_cast<std::ptrdiff_t>(site.begin), tokens.begin() + static_cast<std::ptrdiff_t>(end));
+    definition->name_token = static_cast<uint32_t>(site.name_at - site.begin);
+    definition->list_end = static_cast<uint32_t>(list_end - site.begin);
+    definition->stamp = detail::generic_stamp(definition->tokens);
+    if (!reserved_parameter_names(*definition)) {
+        current_ = end;
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    const declaration_ptr parsed = parse_generic_text(detail::generic_instance_tokens(*definition, {}, definition->name, *symbolizer_));
+    current_ = end;
+    if (!parsed) { return make_error_code(parse_error_code::syntax_error); }
+    if (!is_class) {
+        const jai::declaration* d = parsed.get();
+        while (d && d->get_type() == node_type::namespace_decl && !static_cast<const namespace_decl*>(d)->declarations.empty()) {
+            d = static_cast<const namespace_decl*>(d)->declarations.front().get();
+        }
+        if (d && d->get_type() == node_type::class_decl && !static_cast<const class_decl*>(d)->members.empty()) {
+            d = static_cast<const class_decl*>(d)->members.front().declaration.get();
+        }
+        if (!d || d->get_type() != node_type::function_decl) {
+            return refuse("generic '" + std::string(name.lexeme) + "' is not a function declaration", name);
+        }
+        for (const auto& p : static_cast<const function_decl*>(d)->parameters) {
+            definition->values.push_back({p.type, p.is_reference, p.default_value != nullptr});
+        }
+    }
+    return declaration_ptr(std::make_shared<generic_decl>(name.location, std::move(definition)));
+}
+
 // callee<T1, T2>(args) is callee(T1, T2, args): each type argument a type value (cast_expr::type_value), which a host takes
-// as a jai::script_type
+// as a jai::script_type and the checker folds into the name when the callee is a generic (callee<T1, T2>)
 JAI_NOINLINE checked_result<expression_ptr> parser::type_argument_call(expression_ptr callee) {
-    advance();   // '<'
-    std::vector<expression_ptr> type_values;
+    const token open = advance();   // '<'
+    std::vector<type_info_ptr> types;
+    std::vector<source_location> places;
     do {
-        const source_location at = peek().location;
+        places.push_back(peek().location);
         JAISCRIPT_TRY_ASSIGN(type_info_ptr type, parse_type());   // never auto or void: type_arguments_ahead admits neither
-        auto value = std::make_shared<cast_expr>(at, type, false,
-            std::make_shared<literal_expr>(at, script_value(script_value::ast_literal_tag{}, std::monostate{})));
-        value->type_value = true;
-        type_values.push_back(std::move(value));
+        types.push_back(std::move(type));
     } while (match(token_type::comma));
-    if (type_values.size() > UINT8_MAX) {
+    if (types.size() > UINT8_MAX) {
         report_error("a call takes at most 255 type arguments", previous());
         return make_error_code(parse_error_code::syntax_error);
     }
     consume_greater_in_generic("expected '>' after type arguments");
-    JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after type arguments"));
+    if (!check(token_type::left_paren)) { return generic_instance_reference(std::move(callee), std::move(types), open); }
+    advance();   // '('
+    std::vector<expression_ptr> type_values;
+    for (size_t i = 0; i < types.size(); ++i) {
+        auto value = std::make_shared<cast_expr>(places[i], types[i], false,
+            std::make_shared<literal_expr>(places[i], script_value(script_value::ast_literal_tag{}, std::monostate{})));
+        value->type_value = true;
+        type_values.push_back(std::move(value));
+    }
     JAISCRIPT_TRY_ASSIGN(expression_ptr call, finish_call(std::move(callee)));
     auto* c = static_cast<call_expr*>(call.get());
     c->arguments.insert(c->arguments.begin(), std::make_move_iterator(type_values.begin()), std::make_move_iterator(type_values.end()));
     c->type_argument_count = static_cast<uint8_t>(type_values.size());
     return call;
+}
+
+// Name<Args>{...} and Name<Args>::member name a generic class's instance as a class's own name would; no other token follows an
+// instance's name in an expression
+JAI_NOINLINE checked_result<expression_ptr> parser::generic_instance_reference(expression_ptr callee, std::vector<type_info_ptr> arguments, const token& at) {
+    std::string generic;
+    bool named = true;
+    for (const jai::expression* e = callee.get(); e;) {
+        if (e->get_type() == node_type::identifier_expr) {
+            generic.insert(0, static_cast<const identifier_expr*>(e)->name);
+            break;
+        }
+        if (e->get_type() != node_type::member_expr || !static_cast<const member_expr*>(e)->is_static) { named = false; break; }
+        generic.insert(0, "::" + std::string(static_cast<const member_expr*>(e)->member));
+        e = static_cast<const member_expr*>(e)->object.get();
+    }
+    if (!named || !(check(token_type::left_brace) || check(token_type::colon_colon))) {
+        const std::string spelled = named ? type_info::instance_name(generic, arguments) : std::string("f<T>");
+        report_error("'" + spelled + "' names a generic's instance, which is not a value: call it, or pass a lambda that does ((x) => " + spelled + "(x))", at);
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    const bool qualified = callee->get_type() == node_type::member_expr;
+    const std::string_view last = qualified ? static_cast<const member_expr*>(callee.get())->member : static_cast<const identifier_expr*>(callee.get())->name;
+    const auto [id, view] = symbolizer_->intern_with_view(type_info::instance_name(last, arguments));
+    note_generic_use(generic, std::move(arguments), callee->location);
+    if (qualified) {
+        return expression_ptr(std::make_shared<member_expr>(callee->location, static_cast<const member_expr*>(callee.get())->object, view, id, false, true));
+    }
+    auto name = std::make_shared<identifier_expr>(callee->location, view, id);
+    resolve_name(*name);
+    return expression_ptr(std::move(name));
+}
+
+checked_result<type_info_ptr> parser::parse_type_text(std::vector<declaration_ptr>& requests) {
+    stack_.arm();
+    auto type = parse_type();
+    if (type && !is_at_end()) {
+        report_error("expected a class", peek());
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    if (type && errors_.empty()) { flush_generic_uses(requests); }
+    return type;
+}
+
+void parser::note_generic_use(std::string_view generic, std::vector<type_info_ptr> arguments, const source_location& at) {
+    const std::string_view generic_view = symbolizer_->intern_with_view(generic).second;
+    const auto [name_id, name_view] = symbolizer_->intern_with_view(detail::generic_instance_name(generic, arguments));
+    generic_uses_.push_back({name_view, name_id, generic_view, std::move(arguments), at});
+}
+
+void parser::flush_generic_uses(std::vector<declaration_ptr>& out) {
+    for (auto& use : generic_uses_) {
+        if (!requested_instances_.insert(use.name_id).second) { continue; }
+        auto request = std::make_shared<generic_instance_decl>(use.at, use.name, use.name_id);
+        request->generic = use.generic;
+        request->arguments = std::move(use.arguments);
+        out.push_back(std::move(request));
+    }
+    generic_uses_.clear();
 }
 
 JAI_NOINLINE checked_result<expression_ptr> parser::postfix_rest(expression_ptr expr, size_t chain_start, bool chain_starts_clean) {
@@ -3271,6 +3782,22 @@ checked_result<declaration_ptr> parser::declaration() {
 }
 
 JAI_NOINLINE checked_result<declaration_ptr> parser::attributed_declaration() {
+    // a generic keeps its attributes in its tokens: each instance parses them as its own
+    if (const size_t name_at = generic_function_head(current_); name_at != SIZE_MAX) {
+        JAISCRIPT_TRY_ASSIGN(declaration_ptr generic, generic_declaration({detail::generic_kind::function, current_, name_at, {}, {}}));
+        match(token_type::semicolon);
+        return generic;
+    }
+    {
+        size_t head = attributes_end(current_);
+        if (head < stream_->size() && (*stream_)[head].type == token_type::nocopy_keyword) { ++head; }
+        if (head + 2 < stream_->size() && (*stream_)[head].type == token_type::class_keyword && (*stream_)[head + 1].type == token_type::identifier &&
+            (*stream_)[head + 2].type == token_type::less && !pushed_back_token_) {
+            JAISCRIPT_TRY_ASSIGN(declaration_ptr generic, generic_declaration({detail::generic_kind::class_type, current_, head + 1, {}, {}}));
+            match(token_type::semicolon);
+            return generic;
+        }
+    }
     if (nodiscard_attribute_ahead()) {
         const source_location at = peek().location;
         current_ += 5;
@@ -3319,6 +3846,11 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::declaration_rest() {
     }
     if (foreign_word_at_statement()) { return make_error_code(parse_error_code::syntax_error); }
     if (check(token_type::const_keyword)) { return const_declaration(); }
+    if (const size_t name_at = generic_function_head(current_); name_at != SIZE_MAX) {
+        JAISCRIPT_TRY_ASSIGN(declaration_ptr generic, generic_declaration({detail::generic_kind::function, current_, name_at, {}, {}}));
+        match(token_type::semicolon);
+        return generic;
+    }
 
     if (match(token_type::nocopy_keyword)) {
         const token at = previous();
@@ -3526,12 +4058,33 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::declaration_rest() {
             }
         }
 
+        // Stack<int> s; / shop::Stack<int>& r = s; / Stack<int> make() {...}: a generic's instance declares as a plain class
+        // name does (a < b > c; is no comparison a program can make: a bool has none with c)
+        if (after < stream_->size() && (*stream_)[after].type == token_type::less && !pushed_back_token_ &&
+            !(after == current_ && is_registered_template_type(firstIdentifier))) {
+            bool split = false;
+            const size_t end = type_arguments_end(after, split, true);
+            if (end != SIZE_MAX && !split && end + 1 < stream_->size()) {
+                const bool reference = (*stream_)[end].type == token_type::ampersand;
+                const size_t name_at = end + (reference ? 1 : 0);
+                if (name_at + 1 < stream_->size() && (*stream_)[name_at].type == token_type::identifier) {
+                    const token_type then = (*stream_)[name_at + 1].type;
+                    if (then == token_type::semicolon || then == token_type::equal || then == token_type::left_paren || (then == token_type::left_brace && !reference)) {
+                        const bool is_function = then == token_type::left_paren && !paren_group_ends_statement(name_at + 1);
+                        current_ = savedPos;
+                        return is_function ? function_declaration() : variable_declaration();
+                    }
+                }
+            }
+        }
+
         if (check(token_type::less) && is_registered_template_type(firstIdentifier)) {
             // Point<int> p; / Point<int>& r = q; / Point<int> make() {...}: the same declaration rules as a plain class name;
             // a failed type parse is an expression (Point < x)
             current_ = savedPos;
             const size_t errors_before = errors_.size();
             const std::optional<token> pushed_before = pushed_back_token_;
+            const size_t uses_before = generic_uses_.size();
             auto type_result = parse_type();
             if (type_result && type_result.value() && errors_.size() == errors_before && !pushed_back_token_) {
                 const bool reference = check(token_type::ampersand);
@@ -3548,6 +4101,7 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::declaration_rest() {
             current_ = savedPos;
             errors_.resize(errors_before);
             pushed_back_token_ = pushed_before;
+            generic_uses_.resize(uses_before);
         } else if (check(token_type::identifier)) {
             // Pattern: identifier identifier - a declaration. A '(' after the second
             // identifier makes it a class-typed free function (C++ return-type-first,
@@ -4284,6 +4838,7 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::unterminated_declaration(bo
         const size_t type_start = current_;
         const size_t errors_before = errors_.size();
         const std::optional<token> pushed_before = pushed_back_token_;
+        const size_t uses_before = generic_uses_.size();
         auto type_probe = parse_type();
         if (type_probe && errors_.size() == errors_before) {
             const bool binary_and = match(token_type::ampersand) && condition && !keyword_type;
@@ -4293,6 +4848,7 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::unterminated_declaration(bo
         current_ = type_start;
         errors_.resize(errors_before);
         pushed_back_token_ = pushed_before;
+        generic_uses_.resize(uses_before);
     }
     // const i = 0: const alone is const auto
     const bool bare_const = is_const && check(token_type::identifier) && current_ + 1 < stream_->size() &&
@@ -5001,6 +5557,9 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
     stack_.guard(peek().location);
     if (check(token_type::identifier) && reject_using_name(peek(), "class")) { return make_error_code(parse_error_code::syntax_error); }
     JAISCRIPT_TRY_ASSIGN(token className, consume(token_type::identifier, "expected class name"));
+    if (check(token_type::less) && !pushed_back_token_) {   // class Name<T, ...>: a generic class
+        return generic_declaration({detail::generic_kind::class_type, current_ - 2 - (nocopy ? 1 : 0), current_ - 1, space, {}});
+    }
     if (check(token_type::identifier) && peek().lexeme == "extends") {
         report_foreign(detail::foreign_word::extends_base, peek());
         return make_error_code(parse_error_code::syntax_error);
@@ -5009,6 +5568,16 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
     std::vector<std::string_view> base_classes;
     if (match(token_type::colon)) {
         do {
+            if (check(token_type::identifier) && !pushed_back_token_) {   // Base<Args>: a template's or a generic's instance, by its one name
+                size_t after = current_ + 1;
+                while (after + 1 < stream_->size() && (*stream_)[after].type == token_type::colon_colon && (*stream_)[after + 1].type == token_type::identifier) { after += 2; }
+                bool split = false;
+                if (after < stream_->size() && (*stream_)[after].type == token_type::less && type_arguments_end(after, split, true) != SIZE_MAX) {
+                    JAISCRIPT_TRY_ASSIGN(type_info_ptr base, named_type());
+                    base_classes.emplace_back(symbolizer_->intern_with_view(base->type_name).second);
+                    continue;
+                }
+            }
             JAISCRIPT_TRY_ASSIGN(token base_class_tok, consume(token_type::identifier, "expected base class name"));
             if (!check(token_type::colon_colon)) {
                 // Token lexeme already points to symbolizer storage (identifiers are interned during lexing)
@@ -5085,6 +5654,15 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
 
         if (foreign_word_at_statement()) {
             synchronize_class_member(class_open_index);
+            continue;
+        }
+        if (const size_t name_at = generic_function_head(current_, true); name_at != SIZE_MAX) {   // T name<T>(...): a generic method
+            auto generic = generic_declaration({detail::generic_kind::method, current_, name_at, space, class_name_view, static_cast<uint8_t>(visibility)});
+            if (!generic) {
+                synchronize_class_member(class_open_index);
+                continue;
+            }
+            classDecl->members.push_back({visibility, std::move(generic.value())});
             continue;
         }
 
@@ -5622,6 +6200,16 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
         if (check(token_type::import_keyword)) {   // an import is a statement that takes no scope: never a member
             report_error("import is a statement, not a member: it is not allowed directly in a class or a namespace body", peek());
             return make_error_code(parse_error_code::syntax_error);
+        }
+        if (const size_t name_at = generic_function_head(current_); name_at != SIZE_MAX) {
+            auto generic = generic_declaration({detail::generic_kind::function, current_, name_at, full_namespace_name, {}});
+            if (!generic) {
+                synchronize();
+                continue;
+            }
+            match(token_type::semicolon);
+            namespace_decl_node->declarations.push_back(std::move(generic.value()));
+            continue;
         }
         source_location nodiscard_at{};
         const bool nodiscard_member = nodiscard_attribute_ahead();
@@ -6215,6 +6803,10 @@ bool parser::nodiscard_attribute_ahead() const {
 
 // [[nodiscard]] marks a function or a method that returns a value; false (an error reported) for anything else
 bool parser::mark_nodiscard(const declaration_ptr& decl, const source_location& at, std::string_view class_name) {
+    if (decl && decl->get_type() == node_type::generic_decl &&
+        static_cast<const generic_decl*>(decl.get())->definition->kind != detail::generic_kind::class_type) {
+        return true;   // the attribute is among the generic's tokens: each instance is marked as it parses
+    }
     auto* fn = decl && decl->get_type() == node_type::function_decl ? static_cast<function_decl*>(decl.get()) : nullptr;
     if (!fn || (!class_name.empty() && (fn->name == class_name || (fn->name.size() > 1 && fn->name[0] == '~')))) {
         report_error_at("[[nodiscard]] applies to a function or a method", at);
@@ -6381,12 +6973,20 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
                 func->initializers.emplace_back("this", std::move(args), constructor_initializer::kind_t::delegation, previous().location);
             } else if (check(token_type::identifier)) {
                 // name(args) or name{args}: a base, the class itself (a delegation) or a field (C++ [class.base.init]); which one is
-                // settled when the class body closes (resolve_constructor_initializers)
-                const token name = advance();
-                std::string written(name.lexeme);
-                while (check(token_type::colon_colon) && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::identifier) {
-                    advance();
-                    written += "::" + std::string(advance().lexeme);   // a qualified base, or a namespace's class by its full name
+                // settled when the class body closes (resolve_constructor_initializers). Base<Args> names an instance
+                const token name = peek();
+                std::string written;
+                bool split = false;
+                if (current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::less && !pushed_back_token_ &&
+                    type_arguments_end(current_ + 1, split, true) != SIZE_MAX) {
+                    JAISCRIPT_TRY_ASSIGN(type_info_ptr base, named_type());
+                    written = base->type_name;
+                } else {
+                    written = std::string(advance().lexeme);
+                    while (check(token_type::colon_colon) && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::identifier) {
+                        advance();
+                        written += "::" + std::string(advance().lexeme);   // a qualified base, or a namespace's class by its full name
+                    }
                 }
                 const bool brace = check(token_type::left_brace);
                 if (!brace) { JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' or '{' after a name in a constructor initializer list")); }
@@ -6792,6 +7392,10 @@ bool parser::foreign_word_at_statement() {
     const token& next = (*stream_)[current_ + 1];
     const bool declaration_follows = next.type == token_type::identifier || is_type_keyword_token(next.type) || next.type == token_type::const_keyword ||
                                      next.type == token_type::static_keyword;
+    if (t.lexeme == "template" && next.type == token_type::less) {
+        report_foreign(detail::foreign_word::template_prefix, t);
+        return true;
+    }
     if (t.lexeme == "constexpr" && declaration_follows) {
         report_foreign(detail::foreign_word::constexpr_declaration, t);
         return true;

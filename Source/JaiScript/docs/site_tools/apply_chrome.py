@@ -78,6 +78,8 @@ GUIDE = [
      "template(path, names...) renders an HTML file with escaped ${...} splices, seeing the names it is given by reference and the program, checked at load and reloaded on edit; scoped_template renders untrusted templates over a copy of a map."),
     ("20-terminal-games.html", "A Terminal Game in One File",
      "A real-time game run by the standalone runner: read_key and key_down polling, frame pacing with a stopwatch and sleep, frames drawn with ANSI escape codes, the terminal's size, sound, and saves."),
+    ("21-generics.html", "Generics",
+     "Classes, functions and methods with type parameters, instantiated at load and checked as if written by hand: deduction, bounds, generic methods, where the errors of an instance are reported, and how instances travel across modules, hot reload and jaibite."),
 ]
 
 EMBEDDING = [

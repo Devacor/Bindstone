@@ -10,6 +10,7 @@
 // callable slots additionally enforce the approved static contract.
 
 #include <jaiscript/detail/type_checker.hpp>
+#include <jaiscript/detail/generics.hpp>
 #include <filesystem>
 #include <jaiscript/detail/inline_variable.hpp>
 #include <jaiscript/detail/ast.hpp>
@@ -81,6 +82,11 @@ std::string check_report::format(std::string_view source, std::string_view scrip
             out += " (declared at " + std::to_string(d.related_line) + ":" + std::to_string(d.related_column) + ")";
         }
         out += '\n';
+        for (const auto& note : d.notes) {
+            out += "    ";
+            out += note;
+            out += '\n';
+        }
         if (d.file.empty() && d.line >= 1 && d.line <= lines.size()) {
             std::string_view line = lines[d.line - 1];
             out += "    ";
@@ -320,12 +326,25 @@ public:
     }
 
     bool has_variable(const std::string& name) const { note(name); return engine_.has_variable(name); }
+    const std::vector<generic_definition_ptr>* find_generics(const std::string& qualified) const { note(qualified); return engine_access::find_generics(engine_, qualified); }
+    bool declares_generics() const { return engine_access::declares_generics(engine_); }
+    bool names_generic_method(const std::string& name) const { note(name); return engine_access::names_generic_method(engine_, name); }
+    bool generic_instance(const std::string& name, std::string& generic, std::vector<type_info_ptr>& arguments) const { return engine_access::generic_instance(engine_, name, generic, arguments); }
+    string_symbolizer& symbols() const { return *engine_access::get_symbolizer(engine_); }
+    uint64_t intern(std::string_view text, std::string_view& view) const {
+        const auto interned = engine_access::get_symbolizer(engine_)->intern_with_view(text);
+        view = interned.second;
+        return interned.first;
+    }
     bool has_function(const std::string& name) const { note(name); return engine_.has_function(name); }
     bool is_type_name(const std::string& name) const { note(name); return engine_access::is_type_name(engine_, name); }
+    bool is_enum_name(const std::string& name) const { note(name); return engine_access::is_enum_name(engine_, engine_access::symbolize(engine_, name)); }
     bool is_const_global(const std::string& name) const { note(name); return engine_access::is_const_global(engine_, name); }
     held_value get_variable(const std::string& name) const { note(name); return engine_.get_variable(name); }
     std::shared_ptr<class_definition> get_class_definition(const std::string& name) const { note(name); return engine_access::get_class_definition(engine_, name); }
     std::shared_ptr<script_class_definition> find_script_class(const std::string& name) const { note(name); return engine_access::get_class_registry(engine_).find_script_class(name); }
+    // a generic whose declaration has run in the engine (an earlier run of the unit, another unit): class_registry's linker
+    bool generic_declared(const std::string& name) const { note(name); return engine_access::get_class_registry(engine_).declared_generics_.count(name) != 0; }
     std::shared_ptr<class_definition> get_class_definition_by_type(const std::type_index& type) const {
         auto result = engine_access::get_class_definition_by_type(engine_, type);
         if (result) { note(result->get_name()); }
@@ -353,7 +372,7 @@ public:
     bool host_function_result(const std::string& name, script_value_type& out) const { note(name); return engine_access::host_function_result(engine_, name, out); }
     bool host_nodiscard(const std::string& callable) const { note(callable); return engine_.is_nodiscard_function(callable); }
     uint8_t type_argument_result(const std::string& callable) const { note(callable); return engine_.type_argument_result(callable); }
-    // array<T> and shared_ptr<T> as the engine interns them (a typed host result: jai::returns_array_of_type_argument)
+    // array<T> and shared_ptr<T> as the engine interns them (a typed host result: jai::returns<jai::array_of<jai::T>>)
     const type_info* array_type_of(const type_info* element) const { return engine_access::get_type_info_array(engine_, const_cast<type_info*>(element)); }
     const type_info* shared_type_of(const type_info* pointee) const { return engine_access::get_type_info_shared_ptr(engine_, const_cast<type_info*>(pointee)); }
     std::vector<std::string> registered_class_names() const { return engine_.registered_class_names(); }
@@ -373,6 +392,7 @@ public:
     string_symbolizer* get_symbolizer() const { return engine_access::get_symbolizer(engine_); }
     std::shared_ptr<environment> get_global_environment() const { return engine_access::get_global_environment(engine_); }
     std::unordered_set<std::string> get_registered_template_types() const { return engine_access::get_registered_template_types(engine_); }
+    bool is_template_type(const std::string& base) const { return engine_access::is_template_type(engine_, base); }
     bool has_constant_arguments() const { return engine_access::has_constant_arguments(engine_); }
     bool sleep_callee(const void* fn) const noexcept { return engine_access::sleep_callee(engine_, fn); }
     bool format_literal_callee(const void* fn) const noexcept { return engine_access::format_literal_for(engine_, fn) != nullptr; }
@@ -388,10 +408,12 @@ public:
     type_info* get_type_info_uint8() const { return engine_access::get_type_info_uint8(engine_); }
     type_info* get_type_info_array(type_info* element) const { return engine_access::get_type_info_array(engine_, element); }
     type_info* get_type_info_string() const { return engine_access::get_type_info_string(engine_); }
+    type_info* get_type_info_utf8_string() const { return engine_access::get_type_info_utf8_string(engine_); }
+    type_info* get_type_info_math(script_value_type kind) const { return engine_access::get_type_info_math(engine_, kind); }
+    type_info* type_named(std::string_view canonical_name) const { return engine_access::type_named(engine_, canonical_name); }
     type_info* get_type_info_map(type_info* key, type_info* value) const { return engine_access::get_type_info_map(engine_, key, value); }
     type_info* get_type_info_coroutine(type_info* yields) const { return engine_access::get_type_info_coroutine(engine_, yields); }
     type_info* get_type_info_void() const { return engine_access::get_type_info_void(engine_); }
-    type_info* get_type_info_math(script_value_type kind) const { return engine_access::get_type_info_math(engine_, kind); }
     type_info* get_type_info_reference(type_info* referent) const { return engine_access::get_type_info_reference(engine_, referent); }
     type_info* get_type_info_untyped_function() const { return engine_access::get_type_info_untyped_function(engine_); }
     type_info* get_type_info_function(type_info* result, const std::vector<type_info*>& arguments) const {
@@ -456,6 +478,9 @@ public:
         reload_dependent_ = opts.reload_dependent;
         observer_ = opts.observer;
         outside_out_ = opts.outside;
+        generic_requests_ = opts.generic_requests;
+        remade_failures_ = opts.remade_failures;
+        kept_instances_ = opts.kept_instances;
     }
 
     check_report run() {
@@ -465,6 +490,7 @@ public:
             scopes_.emplace_back();
             mode_guard unit(mode_stack_, leading_mode(decls_), /*scoped=*/true);
             warn_duplicate_top_level_functions();   // under the unit's [[warn_mode]] / [[strict_mode]]
+            warn_kept_instances();
             lw_open_region();
             for (const auto& d : decls_) {
                 walk_listed(d.get());
@@ -548,8 +574,25 @@ private:
         }
         return check_mode_attr_none;
     }
+    // the mode attribute of the first declaration of the text itself (a unit's instances and their requests stand ahead of it)
     static uint8_t leading_mode(const std::vector<declaration_ptr>& decls) {
-        return decls.empty() || !decls.front() ? check_mode_attr_none : decls.front()->check_mode_attr;
+        for (const auto& d : decls) {
+            if (!d) { return check_mode_attr_none; }
+            if (!instance_node(*d)) { return d->check_mode_attr; }
+        }
+        return check_mode_attr_none;
+    }
+    static bool instance_node(const declaration& d) {
+        switch (d.get_type()) {
+            case node_type::generic_instance_decl: return true;
+            case node_type::function_decl: return static_cast<const function_decl&>(d).instance_stamp != 0;
+            case node_type::class_decl: return static_cast<const class_decl&>(d).instance_stamp != 0 || static_cast<const class_decl&>(d).method_instances;
+            case node_type::namespace_decl: {
+                const auto& members = static_cast<const namespace_decl&>(d).declarations;
+                return !members.empty() && std::all_of(members.begin(), members.end(), [](const declaration_ptr& m) { return m && instance_node(*m); });
+            }
+            default: return false;
+        }
     }
 
     std::unordered_map<std::string_view, sclass> classes_;
@@ -580,6 +623,7 @@ private:
     // A call with type arguments (call_expr::type_argument_count) being resolved: the script function it resolved to (an error:
     // only a host takes a type argument), else the host callable whose registration may type its result
     bool type_argument_call_ = false;
+    std::vector<std::pair<type_info_ptr, source_location>>* unknown_type_arguments_ = nullptr;   // the call's type arguments that name no type, while they are inferred
     std::string type_argument_script_callee_;
     std::string type_argument_host_callee_;
     // Every name the program scope declares (top level and namespace bodies, any order): a function reads a global declared
@@ -927,16 +971,715 @@ private:
         if (!collect_diagnostics_) { return; }
         const uint8_t mode = region_mode();
         if (mode == check_mode_attr_warn && !always_error) { severity = diag_level::warning; }
+        if (severity == diag_level::error && remade_failures_) {   // an error in an instance the unit only makes again is that instance's
+            if (const generic_instance_decl* remade = remade_root(instance_ctx_)) { note_remade_failure(*remade, loc, message); }
+        }
         if (diags_.size() >= k_check_diagnostic_cap) {
             capped_ = true;
             return;
         }
-        std::string file = template_files_ > 0 ? loc.filename : std::string();
+        // inside a template's body and inside a generic another file declares the place is that file's
+        std::string file = template_files_ > 0 || (instance_ctx_ && loc.filename != unit_file_) ? loc.filename : std::string();
         std::string key = file + ":" + std::to_string(loc.line) + ":" + std::to_string(loc.column) + ":" + message;
+        if (instance_ctx_) { key += ":"; key += instance_ctx_->name; }   // each instance reports what its own arguments break
         if (!seen_.insert(std::move(key)).second) {
             return;
         }
-        diags_.push_back({severity, loc.line, loc.column, std::move(message), file.empty() ? related_line : 0, file.empty() ? related_column : 0, std::move(file)});
+        diags_.push_back({severity, loc.line, loc.column, std::move(message), file.empty() ? related_line : 0, file.empty() ? related_column : 0, std::move(file),
+                          instance_notes(instance_ctx_)});
+    }
+
+    // -------------------------------------------------------------- generics (detail/generics.hpp)
+
+    std::unordered_map<std::string, std::vector<generic_definition_ptr>> generics_;   // this unit's, by qualified name
+    std::unordered_set<std::string_view> generic_method_names_;                        // its generic methods' bare names
+    bool generics_live_ = false;   // the unit or the program declares a generic: calls look their callee up among them
+    std::unordered_map<std::string_view, const generic_instance_decl*> instance_requests_;   // this unit's, by instance name
+    std::unordered_set<std::string_view> unmade_instances_;   // their bounds do not hold: their declarations are not checked
+    struct method_instance {
+        std::vector<const function_decl*> fns;
+        uint8_t access = 0;
+        std::string_view owner;
+        bool is_static = false;
+    };
+    std::unordered_map<std::string_view, method_instance> method_instances_;   // "Class::name<Args>" -> the unit's declaration
+    std::vector<generic_request>* generic_requests_ = nullptr;
+    std::unordered_set<std::string> requested_now_;
+    std::vector<generic_kept_instance>* remade_failures_ = nullptr;
+    const std::vector<generic_kept_instance>* kept_instances_ = nullptr;
+    const generic_instance_decl* instance_ctx_ = nullptr;      // the instance whose declarations are being walked
+    std::string unit_file_;                                    // the file the unit's own text is in
+
+    void collect_generics(const std::vector<declaration_ptr>& decls) {
+        for (const auto& d : decls) {
+            if (!d) { continue; }
+            switch (d->get_type()) {
+                case node_type::generic_decl: {
+                    const auto& definition = static_cast<const generic_decl*>(d.get())->definition;
+                    generics_[definition->qualified_name()].push_back(definition);
+                    break;
+                }
+                case node_type::generic_instance_decl: {
+                    auto* request = static_cast<const generic_instance_decl*>(d.get());
+                    instance_requests_.emplace(request->name, request);
+                    if (request->within.empty() && unit_file_.empty()) { unit_file_ = request->location.filename; }
+                    break;
+                }
+                case node_type::namespace_decl:
+                    collect_generics(static_cast<const namespace_decl*>(d.get())->declarations);
+                    break;
+                case node_type::class_decl: {
+                    auto* cd = static_cast<const class_decl*>(d.get());
+                    for (const auto& m : cd->members) {
+                        if (!m.declaration) { continue; }
+                        if (m.declaration->get_type() == node_type::generic_decl) {
+                            const auto& definition = static_cast<const generic_decl*>(m.declaration.get())->definition;
+                            generics_[definition->qualified_name()].push_back(definition);
+                            generic_method_names_.insert(definition->name);
+                        } else if (cd->method_instances && m.declaration->get_type() == node_type::function_decl) {
+                            auto* fn = static_cast<const function_decl*>(m.declaration.get());
+                            method_instance& instance = method_instances_[fn->instance_name];
+                            instance.fns.assign(1, fn);
+                            instance.access = m.visibility == class_decl::Private ? 1 : m.visibility == class_decl::Protected ? 2 : 0;
+                            instance.owner = cd->name;
+                            instance.is_static = fn->is_static;
+                        }
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+    }
+
+    // an instance's name in a note: one longer than 80 characters keeps its two ends
+    static std::string note_name(std::string_view name) {
+        constexpr size_t k_longest = 80, k_end = 36;
+        if (name.size() <= k_longest) { return std::string(name); }
+        return std::string(name.substr(0, k_end)) + " ... " + std::string(name.substr(name.size() - k_end));
+    }
+    // "in Stack<int>, instantiated at app.jai:12:5", then the instance that asked for that one, outward
+    std::vector<std::string> instance_notes(const generic_instance_decl* instance) const {
+        std::vector<std::string> notes;
+        size_t levels = 0;
+        for (; instance && levels <= k_generic_depth_limit; ++levels) {
+            if (levels < 4) { notes.push_back("in " + note_name(instance->name) + ", instantiated at " + instance->location.to_string()); }
+            const auto outer = instance->within.empty() ? instance_requests_.end() : instance_requests_.find(instance->within);
+            instance = outer != instance_requests_.end() ? outer->second : nullptr;
+        }
+        if (levels > 4) { notes.push_back("and " + std::to_string(levels - 4) + " more instantiations around these"); }
+        return notes;
+    }
+    const generic_instance_decl* instance_request(std::string_view name) const {
+        const auto held = instance_requests_.find(name);
+        return held != instance_requests_.end() ? held->second : nullptr;
+    }
+    // The instance the unit makes again (generic_instance_decl::remade) that `instance` is, or was asked for by; null for one
+    // the unit's own text asked for
+    const generic_instance_decl* remade_root(const generic_instance_decl* instance) const {
+        for (size_t levels = 0; instance && levels <= k_generic_depth_limit; ++levels) {
+            if (instance->remade) { return instance; }
+            instance = instance->within.empty() ? nullptr : instance_request(instance->within);
+        }
+        return nullptr;
+    }
+    void note_remade_failure(const generic_instance_decl& remade, const source_location& at, const std::string& message) {
+        const bool at_declaration = at.line == remade.location.line && at.column == remade.location.column && at.filename == remade.location.filename;
+        remade_failures_->push_back({std::string(remade.name), std::string(remade.generic), at_declaration ? message : message + " (" + at.to_string() + ")", remade.location});
+    }
+    // The instances a declaration of this unit could not make again keep the declaration they have
+    void warn_kept_instances() {
+        if (!kept_instances_) { return; }
+        for (const auto& kept : *kept_instances_) {
+            diag(diag_level::warning, kept.at, "'" + kept.name + "' keeps its earlier declaration: this declaration of '" + kept.generic + "' cannot make it: " + kept.reason);
+        }
+    }
+    struct instance_scope {
+        const generic_instance_decl*& slot;
+        const generic_instance_decl* saved;
+        instance_scope(const generic_instance_decl*& s, const generic_instance_decl* entered) : slot(s), saved(s) { slot = entered; }
+        ~instance_scope() { slot = saved; }
+    };
+
+    // A generic's own declaration: its name is the unit's once per shape. A host template's name stays the template's, since
+    // Name<Args> spells the host's instantiation; a generic class cannot take a host-bound class's name, as no script class
+    // can; a generic function may, as a plain function may (a method's name is its class's own)
+    void walk_generic(const generic_definition& g) {
+        const std::string qualified = g.qualified_name();
+        if (g.kind != generic_kind::method) {
+            if (eng_.is_template_type(qualified)) {
+                diag(diag_level::error, g.location, "'" + qualified + "' is a host template: a generic cannot take its name", 0, 0, /*always_error=*/true);
+            } else if (g.kind == generic_kind::class_type) {
+                if (const auto held = eng_.get_class_definition(qualified); held && !held->is_script_class()) {
+                    diag(diag_level::error, g.location, format_error_message(detail::k_host_class_name_taken, qualified, qualified), 0, 0, /*always_error=*/true);
+                }
+            }
+        }
+        const auto declared = generics_.find(qualified);
+        if (declared == generics_.end()) { return; }
+        const auto counted = [](size_t count) { return std::to_string(count) + (count == 1 ? " type parameter" : " type parameters"); };
+        // one name, one class: a class and a generic class of a name in one unit are an error at the second of them
+        if (const class_decl* plain = g.kind == generic_kind::class_type ? unit_plain_class(qualified) : nullptr) {
+            const bool generic_second = plain->location.line < g.location.line || (plain->location.line == g.location.line && plain->location.column < g.location.column);
+            const source_location& first = generic_second ? plain->location : g.location;
+            diag(diag_level::error, generic_second ? g.location : plain->location, "class '" + qualified + "' is declared " +
+                 (generic_second ? "without type parameters" : "with " + counted(g.parameters.size())) + " on line " + std::to_string(first.line) + " and " +
+                 (generic_second ? "with " + counted(g.parameters.size()) : "without type parameters") + " here: a class and a generic class cannot share a name",
+                 first.line, first.column, /*always_error=*/true);
+        }
+        for (const auto& earlier : declared->second) {
+            if (earlier.get() == &g) { break; }
+            // a class's name is one class: functions overload by their parameters, a generic class by nothing
+            if (g.kind == generic_kind::class_type && earlier->kind == generic_kind::class_type && earlier->parameters.size() != g.parameters.size()) {
+                diag(diag_level::error, g.location, "generic class '" + qualified + "' is declared with " + counted(earlier->parameters.size()) + " on line " +
+                     std::to_string(earlier->location.line) + " and with " + counted(g.parameters.size()) + " here: a generic class cannot be overloaded by its parameter count",
+                     earlier->location.line, earlier->location.column, /*always_error=*/true);
+                break;
+            }
+            if (!same_generic_signature(*earlier, g)) { continue; }
+            diag(diag_level::error, g.location, "generic '" + generic_spelling(g) + "' is declared again: line " + std::to_string(earlier->location.line) +
+                 " declares it with the same parameters", earlier->location.line, earlier->location.column, /*always_error=*/true);
+            break;
+        }
+    }
+
+    // A generic method's instances: each a method of the class the declaration names, checked as that class's own
+    void walk_method_instances(const class_decl* cd) {
+        sclass* owner = find_sclass(cd->name);
+        sclass engine_held;   // a class an earlier run declared: member lookups reach the engine's definition by its name
+        if (!owner) {
+            if (!engine_class(cd->name)) { return; }
+            model_class(cd, engine_held);
+            owner = &engine_held;
+        }
+        sclass* const enclosing = class_ctx_;
+        const std::string_view enclosing_name = class_ctx_name_;
+        class_ctx_ = owner;
+        class_ctx_name_ = cd->name;
+        for (const auto& m : cd->members) {
+            if (!m.declaration || m.declaration->get_type() != node_type::function_decl) { continue; }
+            auto* fn = static_cast<function_decl*>(m.declaration.get());
+            if (unmade_instances_.count(fn->instance_name)) { continue; }
+            instance_scope scope(instance_ctx_, instance_request(fn->instance_name));
+            walk_function(fn);
+        }
+        class_ctx_ = enclosing;
+        class_ctx_name_ = enclosing_name;
+    }
+
+    // The request ahead of an instance's declarations: its bounds, checked where the instance was asked for, then whatever kept
+    // the instance from being made
+    void walk_instance_request(const generic_instance_decl* request) {
+        const generic_instance_decl* asker = request->within.empty() ? nullptr : instance_request(request->within);
+        bool bounded = true;
+        {
+            instance_scope scope(instance_ctx_, asker);
+            for (const auto& bound : request->bounds) {
+                if (class_is_or_derives(bound.argument, bound.requires_)) { continue; }
+                bounded = false;
+                std::string text = std::string(request->name) + ": '" + bound.argument + "' does not derive from '" + bound.requires_ + "', which " + bound.parameter + " requires";
+                if (request->remade && remade_failures_) { note_remade_failure(*request, request->location, text); }
+                diag(diag_level::error, request->location, std::move(text), 0, 0, /*always_error=*/true);
+            }
+        }
+        if (!bounded) { unmade_instances_.insert(request->name); return; }
+        for (const auto& failure : request->failures) {
+            const bool at_request = failure.at.line == request->location.line && failure.at.column == request->location.column &&
+                                    failure.at.filename == request->location.filename;
+            instance_scope scope(instance_ctx_, at_request ? asker : request);
+            if (at_request && request->remade && remade_failures_) { note_remade_failure(*request, failure.at, failure.message); }
+            diag(diag_level::error, failure.at, failure.message, 0, 0, /*always_error=*/true);
+        }
+    }
+
+    // The class this unit declares under a name that is no generic's instance; null when it declares none
+    const class_decl* unit_plain_class(std::string_view name) const {
+        const auto held = classes_.find(name);
+        return held != classes_.end() && held->second.decl && held->second.decl->instance_stamp == 0 && !held->second.decl->method_instances ? held->second.decl : nullptr;
+    }
+    // The generics a qualified name declares: this unit's, then those of the rest of the program this unit does not declare again.
+    // A class's name is one class: the unit's generic class, or its class of the name, stands for the program's generic class.
+    std::vector<generic_definition_ptr> generics_named(const std::string& qualified) {
+        std::vector<generic_definition_ptr> found;
+        if (auto own = generics_.find(qualified); own != generics_.end()) { found = own->second; }
+        const bool class_here = unit_plain_class(qualified) || std::any_of(found.begin(), found.end(), [](const generic_definition_ptr& f) { return f->kind == generic_kind::class_type; });
+        if (const auto* held = eng_.find_generics(qualified)) {
+            for (const auto& g : *held) {
+                if (class_here && g->kind == generic_kind::class_type) { continue; }
+                const bool declared_here = std::any_of(found.begin(), found.end(), [&](const generic_definition_ptr& f) {
+                    return f == g || (same_generic_signature(*f, *g) && f->location.filename == g->location.filename);
+                });
+                if (!declared_here) { found.push_back(g); }
+            }
+        }
+        return found;
+    }
+    // The generic class that holds a name: where one does, the bare name is no class's (a class the name had before stays
+    // for the code and the objects that use it already)
+    generic_definition_ptr generic_class_named(std::string_view name) {
+        for (const auto& g : generics_named(std::string(name))) { if (g->kind == generic_kind::class_type) { return g; } }
+        return nullptr;
+    }
+    // What a name is that takes no type arguments (detail/generics.hpp): a builtin type, an enum, a host class, a script class
+    plain_type_kind plain_type_named(const std::string& name) {
+        if (name.empty() || find_local(name)) { return plain_type_kind::none; }
+        if (builtin_type_name(name)) { return plain_type_kind::builtin; }
+        if (find_enum(name) || (program_enums_ && program_enums_->count(name) != 0) || eng_.is_enum_name(name)) { return plain_type_kind::enumeration; }
+        if (find_sclass(name)) { return plain_type_kind::script_class; }
+        const auto held = engine_class(name);
+        return held ? (held->is_cpp_class() ? plain_type_kind::host_class : plain_type_kind::script_class) : plain_type_kind::none;
+    }
+    // Where a class is spelled by a bare name a generic class holds: the error, and true
+    bool refuse_bare_generic_class(std::string_view name, const source_location& loc) {
+        if (!generics_live_ || name.empty()) { return false; }
+        const generic_definition_ptr g = generic_class_named(name);
+        if (!g) { return false; }
+        diag(diag_level::error, loc, "'" + std::string(name) + "' is a generic class: name its type arguments (" + generic_spelling(*g) + ")");
+        return true;
+    }
+    // A class's generic methods of a name: its own, else the nearest base's that declares one (a derived class's hides a base's)
+    std::vector<generic_definition_ptr> class_generics(std::string_view cls, std::string_view name, int depth = 0) {
+        if (depth > 32 || cls.empty()) { return {}; }
+        auto found = generics_named(std::string(cls) + "::" + std::string(name));
+        if (!found.empty()) { return found; }
+        if (const sclass* c = find_sclass(cls)) {
+            for (auto base : c->decl->base_classes) {
+                found = class_generics(base, name, depth + 1);
+                if (!found.empty()) { return found; }
+            }
+            return {};
+        }
+        if (auto def = engine_class(cls)) {
+            for (const auto& parent : def->get_parent_classes()) {
+                found = class_generics(parent->get_name(), name, depth + 1);
+                if (!found.empty()) { return found; }
+            }
+        }
+        return {};
+    }
+
+    // The class a program-scope variable of another unit is declared with (Counter c; shared_ptr<Counter> c;), when one unit
+    // declares the name once: what picks a generic method on it, as a declared type does in C++
+    std::string_view declared_global_class(const identifier_expr* id) {
+        if (!program_globals_ || find_local(id->name)) { return {}; }
+        eng_.note(id->name);
+        const auto held = program_globals_->find(std::string(id->name));
+        if (held == program_globals_->end() || held->second.size() != 1 || held->second.begin()->second.size() != 1) { return {}; }
+        const variable_decl* g = held->second.begin()->second.front().get();
+        const type_info* t = g ? g->type.get() : nullptr;
+        while (t && t->base_type == script_value_type::jai_reference_type && !t->type_params.empty()) { t = t->type_params[0].get(); }
+        if (!t || (t->base_type != script_value_type::jai_object_type && t->base_type != script_value_type::jai_shared_ptr_type)) { return {}; }
+        return t->type_name == "shared_ptr" ? std::string_view{} : std::string_view(t->type_name);
+    }
+
+    // What a call's callee names among the generics, by the lookup an ordinary call of that spelling takes: a method of the
+    // receiver's class, a member of an enclosing namespace, a program-scope name
+    std::vector<generic_definition_ptr> generic_callee(call_expr* c, bool& receiver_unknown) {
+        receiver_unknown = false;
+        expression* callee = c->callee.get();
+        if (callee->get_type() == node_type::identifier_expr) {
+            auto* id = static_cast<identifier_expr*>(callee);
+            if (!id->global_qualified) {
+                if (find_local(id->name)) { return {}; }
+                if (class_ctx_) {
+                    auto found = class_generics(class_ctx_name_, id->name);
+                    if (!found.empty()) { return found; }
+                }
+                if (!namespace_walk_names_.empty()) {
+                    for (std::string space(namespace_walk_names_.back());;) {
+                        auto found = generics_named(space + "::" + std::string(id->name));
+                        if (!found.empty()) { return found; }
+                        const size_t cut = space.rfind("::");
+                        if (cut == std::string::npos) { break; }
+                        space.resize(cut);
+                    }
+                }
+            }
+            return generics_named(std::string(id->name));
+        }
+        if (callee->get_type() != node_type::member_expr) { return {}; }
+        auto* m = static_cast<member_expr*>(callee);
+        if (m->is_static) {
+            const std::string qualified = qualified_spelling(m);
+            if (qualified.empty()) { return {}; }
+            auto found = generics_named(qualified);
+            if (!found.empty()) { return found; }
+            const std::string owner = qualified.substr(0, qualified.size() - m->member.size() - 2);
+            return find_sclass(owner) || engine_class(owner) ? class_generics(owner, m->member) : std::vector<generic_definition_ptr>{};
+        }
+        if (!generic_method_names_.count(m->member) && !eng_.names_generic_method(std::string(m->member))) { return {}; }
+        const ctype recv = infer(m->object.get());
+        if ((recv.kind == ctype::object_k || recv.kind == ctype::class_ref_k) && !recv.cls.empty()) { return class_generics(recv.cls, m->member); }
+        if (recv.is_unknown()) {   // a reference's declared class (Base& b), a global another unit declares with a class
+            if (const ctype held = referent_receiver(m->object.get()); held.kind == ctype::object_k && !held.cls.empty()) { return class_generics(held.cls, m->member); }
+            if (m->object->get_type() == node_type::identifier_expr) {
+                const std::string_view declared = declared_global_class(static_cast<const identifier_expr*>(m->object.get()));
+                if (!declared.empty()) { return class_generics(declared, m->member); }
+            }
+        }
+        receiver_unknown = recv.is_unknown();
+        return {};
+    }
+
+    static std::string generic_spelling(const generic_definition& g) {
+        std::string text = g.qualified_name() + "<";
+        for (size_t i = 0; i < g.parameters.size(); ++i) { text += (i ? ", " : "") + std::string(g.parameters[i].name); }
+        return text + ">";
+    }
+    bool instance_declared(const generic_definition& g, const std::string& instance) {
+        switch (g.kind) {
+            case generic_kind::class_type: return classes_.count(instance) != 0;
+            case generic_kind::method: return method_instances_.count(instance) != 0;
+            default: return g.space.empty() ? functions_.count(instance) != 0 : namespace_fns_.count(instance) != 0;
+        }
+    }
+
+    // ---- deduction (docs/site/guide/21-generics.html "Deduction")
+
+    // What a value argument's load-time type is, as a type an instance can be made with; null when the load does not know it
+    const type_info* deduction_type(const ctype& arg) {
+        const type_info* t = arg.ti;
+        while (t && t->base_type == script_value_type::jai_reference_type && !t->type_params.empty()) { t = t->type_params[0].get(); }
+        // a container spelled without its element (a literal's own type) is read from the literal below
+        const bool open_container = t && (t->base_type == script_value_type::jai_array_type || t->base_type == script_value_type::jai_map_type) &&
+                                    std::any_of(t->type_params.begin(), t->type_params.end(), [](const type_info_ptr& p) { return !p || p->base_type == script_value_type::jai_any_type; });
+        if (t && t->base_type != script_value_type::jai_any_type && !open_container) { return t; }
+        if (arg.tentative) { return nullptr; }
+        switch (arg.kind) {
+            case ctype::int_k: return arg.cls.empty() ? eng_.get_type_info_int() : eng_.get_type_info_object(std::string(arg.cls));
+            case ctype::float_k: return eng_.get_type_info_float();
+            case ctype::bool_k: return eng_.get_type_info_bool();
+            case ctype::string_k: return eng_.get_type_info_string();
+            case ctype::char_k: return eng_.get_type_info_char();
+            case ctype::utf8_k: return eng_.get_type_info_utf8_string();
+            case ctype::math_k: return eng_.get_type_info_math(math_type_from_name(arg.cls));   // a math constructor's result, a math-typed value
+            case ctype::object_k: return arg.cls.empty() ? nullptr : eng_.get_type_info_object(std::string(arg.cls));
+            case ctype::array_k: {   // a literal of one element type: [1, 2] is an array<int>
+                if (!arg.origin || arg.origin->get_type() != node_type::array_literal_expr) { return nullptr; }
+                const type_info* element = nullptr;
+                for (const auto& el : static_cast<const array_literal_expr*>(arg.origin)->elements) {
+                    const type_info* t = deduction_type(recorded_literal_element(el.get()));
+                    if (!t || (element && t->canonical_name() != element->canonical_name())) { return nullptr; }
+                    element = t;
+                }
+                return element ? eng_.get_type_info_array(const_cast<type_info*>(element)) : nullptr;
+            }
+            case ctype::map_k: {
+                if (!arg.origin || arg.origin->get_type() != node_type::map_literal_expr) { return nullptr; }
+                const type_info* key = nullptr;
+                const type_info* value = nullptr;
+                for (const auto& [k, v] : static_cast<const map_literal_expr*>(arg.origin)->entries) {
+                    const type_info* kt = deduction_type(recorded_literal_element(k.get()));
+                    const type_info* vt = deduction_type(recorded_literal_element(v.get()));
+                    if (!kt || !vt || (key && kt->canonical_name() != key->canonical_name()) || (value && vt->canonical_name() != value->canonical_name())) { return nullptr; }
+                    key = kt;
+                    value = vt;
+                }
+                return key ? eng_.get_type_info_map(const_cast<type_info*>(key), const_cast<type_info*>(value)) : nullptr;
+            }
+            default: return nullptr;
+        }
+    }
+    static size_t type_parameter_index(const generic_definition& g, const type_info& t) {
+        if (t.base_type != script_value_type::jai_object_type || !t.type_params.empty()) { return SIZE_MAX; }
+        for (size_t i = 0; i < g.parameters.size(); ++i) { if (g.parameters[i].name == t.type_name) { return i; } }
+        return SIZE_MAX;
+    }
+    static bool names_type_parameter(const generic_definition& g, const type_info* pattern, size_t parameter, int depth = 0) {
+        if (!pattern || depth > 64) { return false; }
+        if (type_parameter_index(g, *pattern) == parameter) { return true; }
+        for (const auto& inner : pattern->type_params) { if (names_type_parameter(g, inner.get(), parameter, depth + 1)) { return true; } }
+        return false;
+    }
+    // The generic and arguments a class is an instance of, or derives an instance of, when the generic is `generic`
+    bool instance_arguments(std::string_view cls, std::string_view generic, std::vector<type_info_ptr>& arguments, int depth = 0) {
+        if (depth > 32 || cls.empty()) { return false; }
+        if (const generic_instance_decl* request = instance_request(cls)) {
+            if (request->generic == generic) { arguments = request->arguments; return true; }
+        } else {
+            std::string made_from;
+            std::vector<type_info_ptr> made_with;
+            if (eng_.generic_instance(std::string(cls), made_from, made_with) && made_from == generic) { arguments = std::move(made_with); return true; }
+            // a host template's instance is made by the host and named by its arguments (template_instance_name)
+            std::string_view base;
+            std::vector<std::string_view> spelled;
+            if (template_name_arguments(cls, base, spelled) && base == generic && eng_.is_template_type(std::string(base))) {
+                for (const std::string_view argument : spelled) { made_with.push_back(type_info_ptr(eng_.type_named(argument))); }
+                if (std::none_of(made_with.begin(), made_with.end(), [](const type_info_ptr& t) { return !t; })) { arguments = std::move(made_with); return true; }
+            }
+        }
+        if (const sclass* c = find_sclass(cls)) {
+            for (auto base : c->decl->base_classes) { if (instance_arguments(base, generic, arguments, depth + 1)) { return true; } }
+            return false;
+        }
+        if (auto def = engine_class(cls)) {
+            for (const auto& parent : def->get_parent_classes()) { if (instance_arguments(parent->get_name(), generic, arguments, depth + 1)) { return true; } }
+        }
+        return false;
+    }
+    struct deduced_type {
+        const type_info* type = nullptr;
+        size_t argument = 0;   // the value argument it came from, counted from 1; 0: written in the call
+    };
+    struct deduction {
+        const generic_definition& g;
+        std::vector<deduced_type> found;
+        std::string error;
+        size_t argument = 0;
+    };
+    // `pattern` (a parameter's declared type, the type parameters standing in it as classes) against the type an argument has
+    void unify(deduction& d, const type_info* pattern, const type_info* actual, int depth = 0) {
+        if (!pattern || !actual || depth > 64 || !d.error.empty()) { return; }
+        while (pattern->base_type == script_value_type::jai_reference_type && !pattern->type_params.empty() && pattern->type_params[0]) { pattern = pattern->type_params[0].get(); }
+        while (actual->base_type == script_value_type::jai_reference_type && !actual->type_params.empty() && actual->type_params[0]) { actual = actual->type_params[0].get(); }
+        if (const size_t p = type_parameter_index(d.g, *pattern); p != SIZE_MAX) {
+            deduced_type& slot = d.found[p];
+            if (!slot.type) {
+                slot = {actual, d.argument};
+            } else if (slot.argument != 0 && slot.type->canonical_name() != actual->canonical_name()) {
+                d.error = "cannot deduce " + std::string(d.g.parameters[p].name) + " for '" + std::string(d.g.name) + "': it is " + slot.type->canonical_name() +
+                          " from argument " + std::to_string(slot.argument) + " and " + actual->canonical_name() + " from argument " + std::to_string(d.argument);
+            }
+            return;
+        }
+        switch (pattern->base_type) {
+            case script_value_type::jai_array_type: case script_value_type::jai_map_type: case script_value_type::jai_weak_ptr_type:
+                if (actual->base_type != pattern->base_type) { return; }
+                for (size_t i = 0; i < pattern->type_params.size() && i < actual->type_params.size(); ++i) {
+                    unify(d, pattern->type_params[i].get(), actual->type_params[i].get(), depth + 1);
+                }
+                return;
+            case script_value_type::jai_shared_ptr_type:
+                if (actual->base_type != script_value_type::jai_shared_ptr_type || pattern->type_params.empty()) { return; }
+                if (!actual->type_params.empty() && actual->type_params[0]) { unify(d, pattern->type_params[0].get(), actual->type_params[0].get(), depth + 1); }
+                else if (!actual->type_name.empty() && actual->type_name != "shared_ptr") { unify(d, pattern->type_params[0].get(), eng_.get_type_info_object(actual->type_name), depth + 1); }
+                return;
+            case script_value_type::jai_object_type: {
+                if (pattern->type_params.empty() || actual->base_type != script_value_type::jai_object_type) { return; }
+                const std::string_view generic = std::string_view(pattern->type_name).substr(0, pattern->type_name.find('<'));
+                std::vector<type_info_ptr> arguments;
+                if (!instance_arguments(actual->type_name, generic, arguments)) { return; }
+                for (size_t i = 0; i < pattern->type_params.size() && i < arguments.size(); ++i) {
+                    unify(d, pattern->type_params[i].get(), arguments[i].get(), depth + 1);
+                }
+                return;
+            }
+            default:
+                return;
+        }
+    }
+    // The type arguments a call leaves to its value arguments: `types` holds the written ones and takes the rest. False with
+    // `error` saying what to write.
+    bool deduce_type_arguments(const call_expr* c, const generic_definition& g, const std::vector<ctype>& args, std::vector<type_info_ptr>& types, std::string& error) {
+        deduction d{g, std::vector<deduced_type>(g.parameters.size()), {}, 0};
+        for (size_t i = 0; i < types.size(); ++i) { d.found[i] = {types[i].get(), 0}; }
+        std::vector<const type_info*> actual(args.size(), nullptr);
+        for (size_t i = 0; i < args.size() && i < g.values.size(); ++i) {
+            if (args[i].kind == ctype::null_k || args[i].kind == ctype::function_k) { continue; }   // a null and a function value say nothing of a type
+            actual[i] = deduction_type(args[i]);
+            if (!actual[i] && args[i].is_unknown()) {   // a reference names what it was declared to name
+                actual[i] = deduction_type(referent_receiver(c->arguments[c->type_argument_count + i].get()));
+            }
+            d.argument = i + 1;
+            unify(d, g.values[i].type.get(), actual[i]);
+            if (!d.error.empty()) { error = std::move(d.error); return false; }
+        }
+        const size_t given = c->type_argument_count;
+        const auto spelled = [&](std::string_view parameter) {   // name<string, V>(...): what to write, the found arguments filled in
+            std::string text = "write " + std::string(g.name) + "<";
+            for (size_t p = 0; p < g.parameters.size(); ++p) {
+                text += p ? ", " : "";
+                text += d.found[p].type && g.parameters[p].name != parameter ? d.found[p].type->canonical_name() : std::string(g.parameters[p].name);
+            }
+            return text + (c->arguments.size() == given ? ">()" : ">(...)");
+        };
+        for (size_t p = types.size(); p < g.parameters.size(); ++p) {
+            const std::string_view name = g.parameters[p].name;
+            const std::string lead = "cannot deduce " + std::string(name) + " for '" + std::string(g.name) + "': ";
+            if (d.found[p].type) {
+                std::vector<token> probe;
+                if (!generic_argument_tokens(*d.found[p].type, c->location, eng_.symbols(), probe)) {
+                    error = lead + "argument " + std::to_string(d.found[p].argument) + " is " + d.found[p].type->canonical_name() + ", which no instance is made with; " + spelled(name);
+                    return false;
+                }
+                types.push_back(type_info_ptr(const_cast<type_info*>(d.found[p].type)));
+                continue;
+            }
+            size_t named_by = 0;   // the first value parameter whose type names it, counted from 1
+            for (size_t i = 0; i < g.values.size() && named_by == 0; ++i) { if (names_type_parameter(g, g.values[i].type.get(), p)) { named_by = i + 1; } }
+            if (named_by == 0) {
+                error = lead + "no parameter names it; " + spelled(name);
+            } else if (named_by > args.size()) {
+                error = lead + "argument " + std::to_string(named_by) + " is left to its default; " + spelled(name);
+            } else if (args[named_by - 1].kind == ctype::null_k || args[named_by - 1].kind == ctype::function_k) {
+                error = lead + "argument " + std::to_string(named_by) + " is " + (args[named_by - 1].kind == ctype::null_k ? "null" : "a function") + ", which says nothing of a type; " + spelled(name);
+            } else if (!actual[named_by - 1]) {
+                error = lead + "argument " + std::to_string(named_by) + "'s type is not known at load; " + spelled(name);
+            } else {
+                error = lead + "argument " + std::to_string(named_by) + " is " + actual[named_by - 1]->canonical_name() + ", which '" +
+                        g.values[named_by - 1].type->canonical_name() + "' does not match; " + spelled(name);
+            }
+            return false;
+        }
+        return true;
+    }
+
+    enum class generic_call : uint8_t { none, rewritten, pending };
+    // A call whose callee names a generic is its instance's call: the callee takes the instance's name (largest<int>) and the
+    // type arguments leave the argument list, once the unit declares that instance; until then the call asks for it and types
+    // nothing (the engine declares it and checks the unit again)
+    generic_call resolve_generic_call(call_expr* c, std::vector<ctype>& args) {
+        if (!generics_live_ || !c->callee) { return generic_call::none; }
+        bool receiver_unknown = false;
+        std::vector<generic_definition_ptr> candidates = generic_callee(c, receiver_unknown);
+        const size_t given = c->type_argument_count;
+        const size_t values = c->arguments.size() - given;
+        if (candidates.empty()) {
+            if (receiver_unknown && given > 0) {
+                auto* m = static_cast<const member_expr*>(c->callee.get());
+                std::vector<type_info_ptr> spelled;
+                for (size_t i = 0; i < given; ++i) { spelled.push_back(static_cast<const cast_expr*>(c->arguments[i].get())->target); }
+                diag(diag_level::error, c->location, "cannot instantiate '" + generic_instance_name(m->member, spelled) + "': the receiver's class is not known at load");
+                return generic_call::pending;
+            }
+            return generic_call::none;
+        }
+        const bool is_class = candidates.front()->kind == generic_kind::class_type;
+        const std::string shown(candidates.front()->name);
+        if (is_class && given == 0) {
+            std::string parameters;
+            for (size_t i = 0; i < candidates.front()->parameters.size(); ++i) { parameters += (i ? ", " : "") + std::string(candidates.front()->parameters[i].name); }
+            diag(diag_level::error, c->location, "'" + shown + "' is a generic class: its type arguments are written, never deduced from a constructor's (" +
+                 shown + "<" + parameters + ">(...))");
+            return generic_call::pending;
+        }
+        // an ordinary function or method of the name that takes the call keeps it
+        if (!is_class && given == 0 && ordinary_callee_fits(c, args)) { return generic_call::none; }
+        std::vector<generic_definition_ptr> fitting;
+        std::vector<std::vector<type_info_ptr>> fitting_types;
+        std::string deduction_error;
+        bool counted = false;
+        for (const auto& g : candidates) {
+            const bool counts = is_class ? g->parameters.size() == given : g->parameters.size() >= given;
+            if (!counts || (!is_class && (values < g->required_values() || values > g->values.size()))) { continue; }
+            counted = true;
+            std::vector<type_info_ptr> types;
+            for (size_t i = 0; i < given; ++i) { types.push_back(static_cast<const cast_expr*>(c->arguments[i].get())->target); }
+            if (types.size() < g->parameters.size()) {
+                const std::vector<ctype> value_args(args.begin() + static_cast<std::ptrdiff_t>(given), args.end());
+                std::string error;
+                if (!deduce_type_arguments(c, *g, value_args, types, error)) {
+                    if (deduction_error.empty()) { deduction_error = std::move(error); }
+                    continue;
+                }
+            }
+            fitting.push_back(g);
+            fitting_types.push_back(std::move(types));
+        }
+        if (fitting.empty() && counted) {
+            diag(diag_level::error, c->location, deduction_error);
+            return generic_call::pending;
+        }
+        if (fitting.empty()) {
+            const generic_definition& g = *candidates.front();
+            if (is_class ? g.parameters.size() != given : g.parameters.size() < given) {
+                diag(diag_level::error, c->location, "'" + shown + "' takes " + std::to_string(g.parameters.size()) + (g.parameters.size() == 1 ? " type argument" : " type arguments") +
+                     ", not " + std::to_string(given));
+            } else {
+                diag(diag_level::error, c->location, "'" + generic_spelling(g) + "' takes " + arity_text(g) + ", not " + std::to_string(values));
+            }
+            return generic_call::pending;
+        }
+        if (fitting.size() > 1) {
+            diag(diag_level::error, c->location, "call to '" + shown + "' is ambiguous: the generics '" + generic_spelling(*fitting[0]) + "' (" +
+                 fitting[0]->location.to_string() + ") and '" + generic_spelling(*fitting[1]) + "' (" + fitting[1]->location.to_string() + ") both take it");
+            return generic_call::pending;
+        }
+        const generic_definition_ptr& g = fitting.front();
+        std::vector<type_info_ptr> types = std::move(fitting_types.front());
+        const std::string instance = generic_instance_name(g->qualified_name(), types);
+        if (generic_requests_ && remade_root(instance_request(instance)) && !remade_root(instance_ctx_) && requested_now_.insert(instance).second) {
+            generic_request request;   // the unit's own text names an instance it was only making again: the instance is the unit's
+            request.name = instance;
+            request.generic = g->qualified_name();
+            request.arguments = types;
+            request.definition = g;
+            request.at = c->location;
+            request.within = instance_ctx_ ? std::string(instance_ctx_->name) : std::string();
+            generic_requests_->push_back(std::move(request));
+        }
+        if (!instance_declared(*g, instance)) {
+            if (generic_requests_ && !instance_requests_.count(instance) && requested_now_.insert(instance).second) {
+                generic_request request;
+                request.name = instance;
+                request.generic = g->qualified_name();
+                request.arguments = std::move(types);
+                request.definition = g;
+                request.at = c->location;
+                request.within = instance_ctx_ ? std::string(instance_ctx_->name) : std::string();
+                generic_requests_->push_back(std::move(request));
+            }
+            return generic_call::pending;
+        }
+        // the name the instance declares: what follows its generic's namespace; a method's in full (Base::tag<int>), which is
+        // what keeps a generic method from being virtual
+        const bool bare = g->kind == generic_kind::method || g->space.empty();
+        std::string_view simple;
+        const uint64_t id = eng_.intern(bare ? std::string_view(instance) : std::string_view(instance).substr(g->space.size() + 2), simple);
+        if (c->callee->get_type() == node_type::identifier_expr) {
+            auto* was = static_cast<identifier_expr*>(c->callee.get());
+            auto named = std::make_shared<identifier_expr>(was->location, simple, id);
+            named->global_qualified = was->global_qualified;
+            c->callee = std::move(named);
+        } else {
+            auto* was = static_cast<member_expr*>(c->callee.get());
+            auto named = std::make_shared<member_expr>(was->location, was->object, simple, id, was->is_arrow, was->is_static);
+            named->null_safe = was->null_safe;
+            named->call_result_discarded = was->call_result_discarded;
+            c->callee = std::move(named);
+        }
+        c->arguments.erase(c->arguments.begin(), c->arguments.begin() + static_cast<std::ptrdiff_t>(given));
+        args.erase(args.begin(), args.begin() + static_cast<std::ptrdiff_t>(given));
+        c->type_argument_count = 0;
+        return generic_call::rewritten;
+    }
+    static std::string arity_text(const generic_definition& g) {
+        const size_t least = g.required_values(), most = g.values.size();
+        return (least == most ? std::to_string(most) : std::to_string(least) + " to " + std::to_string(most)) + (most == 1 ? " argument" : " arguments");
+    }
+    // whether the ordinary declarations a call's callee names include one that takes these arguments
+    bool ordinary_callee_fits(call_expr* c, const std::vector<ctype>& args) {
+        const std::vector<const function_decl*>* overloads = nullptr;
+        expression* callee = c->callee.get();
+        if (callee->get_type() == node_type::identifier_expr) {
+            auto* id = static_cast<identifier_expr*>(callee);
+            if (class_ctx_ && !id->global_qualified) {
+                const member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
+                if (hit.found && hit.methods) { overloads = hit.methods; }
+            }
+            if (!overloads && !id->global_qualified) {
+                if (const std::string space = enclosing_namespace_member(id->name); !space.empty()) {
+                    if (auto held = namespace_fns_.find(space + "::" + std::string(id->name)); held != namespace_fns_.end()) { overloads = &held->second; }
+                }
+            }
+            if (!overloads) {
+                if (auto held = functions_.find(id->name); held != functions_.end()) { overloads = &held->second; }
+            }
+        } else if (callee->get_type() == node_type::member_expr) {
+            auto* m = static_cast<member_expr*>(callee);
+            if (m->is_static) {
+                if (auto held = namespace_fns_.find(qualified_spelling(m)); held != namespace_fns_.end()) { overloads = &held->second; }
+            } else {
+                const ctype recv = infer(m->object.get());
+                if (recv.kind == ctype::object_k && !recv.cls.empty()) {
+                    const member_hit hit = lookup_member(recv.cls, m->member, /*want_static=*/false);
+                    if (hit.found && hit.methods) { overloads = hit.methods; }
+                }
+            }
+        }
+        if (!overloads) { return false; }
+        return std::any_of(overloads->begin(), overloads->end(), [&](const function_decl* fn) { return script_fn_viable(fn, args, overloads->size() > 1); });
     }
 
     // C++ [basic.scope]: a block, a parameter list or one unit's top level declares a name once; a later run of the program
@@ -993,6 +1736,7 @@ private:
     }
 
     void undeclared(const source_location& loc, std::string_view name) {
+        if (instance_requests_.count(name)) { return; }   // an instance that could not be made: its request says why
         // Literal imports are covered by the program closure's names; a dynamic path can
         // define anything - keep the signal, drop the teeth.
         diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, loc,
@@ -1040,8 +1784,20 @@ private:
     }
 
     void collect_class(const class_decl* cd) {
+        if (cd->method_instances) { return; }   // no class of its own: its members join the class it names
         sclass& c = classes_[cd->name];
         model_class(cd, c);
+        attach_method_instances(c);
+    }
+    // the instances of a class's generic methods this unit declares are members of its model
+    void attach_method_instances(sclass& c) {
+        for (const auto& [name, instance] : method_instances_) {
+            if (instance.owner != c.decl->name) { continue; }
+            for (const function_decl* fn : instance.fns) {
+                add_overload((instance.is_static ? c.static_methods : c.methods)[fn->name], fn);
+                if (instance.access) { c.nonpublic[fn->name] = instance.access; }
+            }
+        }
     }
 
     // The unit's own class first, then the program table (modeled once per check; a table
@@ -1056,6 +1812,7 @@ private:
         const class_decl* cd = pit->second.get();
         sclass& c = program_sclasses_[cd->name];
         model_class(cd, c);
+        attach_method_instances(c);
         c.foreign = true;
         c.provable = engine_class(cd->name) != nullptr;
         if (!c.provable) { deferred_ = true; if (deferred_out_) { deferred_out_->push_back(std::string(cd->name)); } }
@@ -1329,6 +2086,8 @@ private:
     }
 
     void collect_top_level() {
+        collect_generics(decls_);
+        generics_live_ = !generics_.empty() || eng_.declares_generics();
         collect_scope_decls(decls_);
         for (const auto& d : decls_) {
             if (d && d->get_type() == node_type::namespace_decl) {
@@ -1442,7 +2201,7 @@ private:
             if (!d) { continue; }
             if (d->get_type() == node_type::function_decl) { fns.push_back(static_cast<const function_decl*>(d.get())); }
             else if (d->get_type() == node_type::namespace_decl) { collect_namespace_functions(static_cast<const namespace_decl*>(d.get()), path, by_namespace); }
-            else if (d->get_type() == node_type::class_decl) { report_class_redefinitions(static_cast<const class_decl*>(d.get())); }
+            else if (d->get_type() == node_type::class_decl && !static_cast<const class_decl*>(d.get())->method_instances) { report_class_redefinitions(static_cast<const class_decl*>(d.get())); }
         }
     }
 
@@ -1504,7 +2263,7 @@ private:
         for (const auto& d : decls_) {
             if (!d) { continue; }
             if (d->get_type() == node_type::function_decl) { fns.push_back(static_cast<const function_decl*>(d.get())); }
-            else if (d->get_type() == node_type::class_decl) { report_class_redefinitions(static_cast<const class_decl*>(d.get())); }
+            else if (d->get_type() == node_type::class_decl && !static_cast<const class_decl*>(d.get())->method_instances) { report_class_redefinitions(static_cast<const class_decl*>(d.get())); }
             else if (d->get_type() == node_type::namespace_decl) { collect_namespace_functions(static_cast<const namespace_decl*>(d.get()), {}, namespace_fns); }
         }
         for (const auto& [path, members] : namespace_fns) { report_redefinitions(members, /*by_name=*/false); }
@@ -1512,6 +2271,7 @@ private:
         if (!program_functions_) { return; }
         std::unordered_set<std::string> warned;
         for (const function_decl* fn : fns) {
+            if (fn->instance_stamp != 0) { continue; }   // every unit that uses a generic's instance declares it
             if (!warned.insert(std::string(fn->name) + parameter_signature(fn)).second) { continue; }
             eng_.note(fn->name);
             auto pit = program_functions_->find(std::string(fn->name));
@@ -1806,6 +2566,16 @@ private:
             miss.unresolved = true;
             return miss;
         }
+        // an instance of one of its generic methods, which this unit declares and the class takes when the unit runs
+        if (const method_instance* instance = engine_method_instance(*def, member)) {
+            if (instance->is_static == want_static || (instance->is_static && !instance_only)) {
+                member_hit h{true, true, nullptr, &instance->fns};
+                h.provable = false;
+                h.access = instance->access;
+                h.declarer = instance->owner;
+                return h;
+            }
+        }
         uint64_t id = eng_.symbolize(member);
         // Script/vm classes from previous executes don't expose a uniform member surface
         // across backends: a hit is trusted, a miss is not. Only a cpp_class is closed, and
@@ -1843,6 +2613,14 @@ private:
         }
         miss.certain = closed;   // cpp classes: member definitely absent; others stay open
         return miss;
+    }
+
+    const method_instance* engine_method_instance(const class_definition& def, std::string_view member) {
+        if (method_instances_.empty() || member.find('<') == std::string_view::npos) { return nullptr; }
+        const auto held = method_instances_.find(member);
+        if (held == method_instances_.end()) { return nullptr; }
+        const auto owner = engine_class(held->second.owner);
+        return owner && (owner.get() == &def || def.derives_from(owner.get())) ? &held->second : nullptr;
     }
 
     // A user _get_/_set_ for `member` anywhere in cls's chain: modeled classes through their
@@ -2492,11 +3270,15 @@ private:
 
     // C++ [basic.lookup]: every type a declaration spells names a type; a template instance's own name is the host's (one
     // the host bound), its arguments are checked. A dynamic-path include can declare anything, as for an undeclared identifier.
+    bool unknown_bare_type(const type_info* ti) {
+        return ti && ti->base_type == script_value_type::jai_object_type && ti->type_params.empty() && !ti->type_name.empty() && !known_type_name(ti->type_name);
+    }
     void check_spelled_type(const type_info* ti, const source_location& loc) {
         if (!ti) { return; }
         const bool object = ti->base_type == script_value_type::jai_object_type;
         if (object && unbound_instantiation(ti, loc)) { return; }
-        if (object && ti->type_params.empty() && !ti->type_name.empty() && !known_type_name(ti->type_name)) {
+        if (object && ti->type_params.empty() && refuse_bare_generic_class(ti->type_name, loc)) { return; }
+        if (unknown_bare_type(ti)) {
             const std::string name(ti->type_name);
             const std::string math = "math::" + name;
             const std::string hint = math_type_from_name(math) != script_value_type::jai_null_type
@@ -3555,7 +4337,7 @@ private:
         type_argument_script_callee_ = std::string(fname);
         return true;
     }
-    // A host registration's typed result (core/permission.hpp jai::returns_type_argument and its siblings): the first type
+    // A host registration's typed result (core/permission.hpp jai::returns<jai::T> and its siblings): the first type
     // argument T, array<T> or shared_ptr<T>
     ctype type_argument_result(const call_expr* c, uint8_t shape) {
         const type_info* t = static_cast<const cast_expr*>(c->arguments[0].get())->target.get();
@@ -4119,7 +4901,7 @@ private:
         }
         if (recv.tentative || recv.diagnostic_only || m->is_static) { return; }
         if (m->member != "same_as") {
-            diag(diag_level::error, m->location, no_member_text(base_type_spelling(kind), m->member));
+            diag(diag_level::error, m->location, no_member_text(static_cast<engine*>(nullptr), base_type_spelling(kind), m->member));
         } else if (!called) {
             diag(diag_level::error, m->location, detail::method_value_text(m->member, base_type_spelling(kind), detail::method_value_receiver(m), true));
         }
@@ -5912,6 +6694,7 @@ private:
         std::vector<ctype> args;
         for (auto& a : n->arguments) { args.push_back(infer(a.get())); }
         ctype t = ctype_from_type_info(n->type.get());
+        if (t.kind == ctype::object_k && refuse_bare_generic_class(t.cls, n->location)) { return t; }
         report_unbound_instantiation(n->type.get(), n->location);
         const sclass* made = t.kind == ctype::object_k ? find_sclass(t.cls) : nullptr;
         narrow_end_references();   // a constructor runs code
@@ -6325,12 +7108,17 @@ private:
         ctype operand_t = infer(c->operand.get());
         if (c->type_value) {   // a type argument: its type names a type, as a declaration's does
             stamp_const(c->const_check, const_none, {});
+            if (unknown_type_arguments_ && unknown_bare_type(c->target.get())) {   // its call reports it, once the callee is known
+                unknown_type_arguments_->emplace_back(c->target, c->location);
+                return ctype::object("reflect::type");
+            }
             check_spelled_type(c->target.get(), c->location);
             return ctype::object("reflect::type");
         }
         if (c->by_reference) { report_mixed_reference_conditional(c->operand.get()); }
         check_const_cast(c);
         ctype t = ctype_from_type_info(c->target.get());
+        if (t.kind == ctype::object_k && refuse_bare_generic_class(t.cls, c->location)) { return {}; }
         if (report_unbound_instantiation(c->target.get(), c->location)) { return {}; }
         if (c->dynamic && dynamic_cast_of_enum(c)) { return {}; }
         if (t.kind == ctype::object_k && !known_class(t.cls) && !extra_global(std::string(t.cls))) {
@@ -6416,12 +7204,14 @@ private:
         if (auto declared = functions_.find(id->name); declared != functions_.end()) {
             note_global_use(id->name);
             report_function_before_declaration(id->name, id->location, false);
+            report_instance_before_declaration(id->name, id->location, false);
             ctype named = ctype::make(ctype::function_k);
             if (foreign_overloads(id->name, declared->second).empty()) { named.fns = &declared->second; }   // another unit's overloads answer the name too
             return named;
         }
         if (find_sclass(id->name)) {
             report_class_before_declaration(id->name, id->location);
+            report_instance_before_declaration(id->name, id->location, false);
             return ctype{ctype::class_ref_k, id->name};
         }
         if (enums_.count(id->name)) { return ctype{ctype::enum_ref_k, id->name}; }
@@ -6662,8 +7452,19 @@ private:
         }
     }
 
+    // The callee of a call with type arguments as its text spells it: a name, or a name's member; empty for any other
+    static std::string type_argument_callee(const call_expr* c) {
+        if (!c->callee) { return {}; }
+        if (c->callee->get_type() == node_type::identifier_expr) { return std::string(static_cast<const identifier_expr*>(c->callee.get())->name); }
+        if (c->callee->get_type() != node_type::member_expr) { return {}; }
+        const auto* m = static_cast<const member_expr*>(c->callee.get());
+        if (!m->object || m->object->get_type() != node_type::identifier_expr) { return {}; }
+        return std::string(static_cast<const identifier_expr*>(m->object.get())->name) + (m->is_static ? "::" : m->is_arrow ? "->" : ".") + std::string(m->member);
+    }
+
     JAI_NOINLINE ctype infer_call(call_expr* c) {
         std::vector<ctype> args;
+        std::vector<std::pair<type_info_ptr, source_location>> unknown_types;   // type arguments that name no type: one error, once the callee is known
         args.reserve(c->arguments.size());
         const std::string_view callee_name = c->callee && c->callee->get_type() == node_type::identifier_expr
             ? std::string_view(static_cast<const identifier_expr*>(c->callee.get())->name) : std::string_view{};
@@ -6684,8 +7485,31 @@ private:
             const bool combine = callee_name == "parallel_reduce" && k == 3;   // runs serially after the join
             const bool body = parallel_callee && !combine && a->get_type() == node_type::lambda_expr;
             parallel_body_depth_ += body;
+            auto* const outer_unknown = unknown_type_arguments_;
+            unknown_type_arguments_ = k < c->type_argument_count ? &unknown_types : nullptr;
             args.push_back(infer_expecting(a.get(), k < expected.size() ? expected[k] : nullptr));
+            unknown_type_arguments_ = outer_unknown;
             parallel_body_depth_ -= body;
+        }
+        const std::string spelled_callee = unknown_types.empty() ? std::string() : type_argument_callee(c);
+        const generic_call generic = resolve_generic_call(c, args);
+        if (generic != generic_call::none || spelled_callee.empty()) {   // a generic's own type arguments: the declaration's error
+            for (const auto& [type, at] : unknown_types) { check_spelled_type(type.get(), at); }
+            unknown_types.clear();
+        }
+        if (generic == generic_call::pending) { return {}; }   // a generic's call waits for its instance
+        if (generic == generic_call::none && c->type_argument_count > 0) {   // Name<Args>(...) on a type that takes none: the declaration's error
+            std::string named;   // a name alone or a qualified one: what a type's spelling is
+            if (c->callee->get_type() == node_type::identifier_expr) {
+                named = std::string(static_cast<const identifier_expr*>(c->callee.get())->name);
+            } else if (c->callee->get_type() == node_type::member_expr && static_cast<const member_expr*>(c->callee.get())->is_static) {
+                named = qualified_spelling(static_cast<const member_expr*>(c->callee.get()));
+            }
+            if (const plain_type_kind kind = plain_type_named(named); kind != plain_type_kind::none) {
+                for (const auto& [type, at] : unknown_types) { check_spelled_type(type.get(), at); }
+                diag(diag_level::error, c->location, no_type_arguments_text(named, kind), 0, 0, /*always_error=*/true);
+                return {};
+            }
         }
         const std::vector<const function_decl*>* ov = nullptr;   // the statically resolved same-script overload set
         ov_class_ = {};
@@ -6698,7 +7522,23 @@ private:
         type_argument_host_callee_.clear();
         narrow_callee seen;
         ctype t = infer_call_impl(c, args, ov, seen);
-        if (c->type_argument_count > 0) {
+        if (!unknown_types.empty() && !type_argument_host_callee_.empty()) {   // a host's type arguments: the declaration's error
+            for (const auto& [type, at] : unknown_types) { check_spelled_type(type.get(), at); }
+            unknown_types.clear();
+        }
+        if (!unknown_types.empty()) {
+            // C#'s rule read `a < b, c > (d)` as a call with type arguments; the callee takes none and a type argument names no
+            // type, so a comparison was most likely meant: the call's one error says how to write it
+            const std::string first = unknown_types.front().first->canonical_name();
+            const std::string first_given = static_cast<const cast_expr*>(c->arguments[0].get())->target->canonical_name();
+            std::string given;
+            for (size_t i = 0; i < c->type_argument_count; ++i) { given += (i ? ", " : "") + static_cast<const cast_expr*>(c->arguments[i].get())->target->canonical_name(); }
+            diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, unknown_types.front().second,
+                 "unknown type '" + first + "': '" + spelled_callee + "<" + given + ">(...)' reads as a call with type arguments, which '" + spelled_callee +
+                 "' does not take; if this is a comparison, write (" + spelled_callee + " < " + first_given + ")");
+            ov = nullptr;
+            t = {};
+        } else if (c->type_argument_count > 0) {
             if (!type_argument_script_callee_.empty()) {
                 diag(diag_level::error, c->location, "'" + type_argument_script_callee_ + "' takes no type arguments: a type argument goes to a host function");
                 ov = nullptr;
@@ -6903,6 +7743,22 @@ private:
         diag(diag_level::error, at, "'" + std::string(name) + "' is " + (call ? "called" : "used") + " before its declaration (line " + std::to_string(first->second.line) +
                                     "): top-level code runs in order, so declare it above the " + use + " or make the " + use + " after it");
     }
+    // A generic's instance is declared the moment everything it is built on is (class_registry's linker), so a use of one in
+    // top-level code stands below what this file declares of that: the generic, and the classes the instance waits for (the
+    // request's needs, the very names the linker waits on). The texts are a plain name's.
+    void report_instance_before_declaration(std::string_view instance, const source_location& at, bool call) {
+        if (!top_level_code()) { return; }
+        const auto request = instance_requests_.find(instance);
+        if (request == instance_requests_.end()) { return; }
+        const std::string generic(request->second->generic);
+        if (const auto declared = generics_.find(generic); declared != generics_.end() && !declared->second.empty() &&
+            declared->second.front()->kind != generic_kind::method && declared_after(declared->second.front()->location, at) && !eng_.generic_declared(generic)) {
+            const char* use = call ? "call" : "use";
+            diag(diag_level::error, at, "'" + generic + "' is " + (call ? "called" : "used") + " before its declaration (line " + std::to_string(declared->second.front()->location.line) +
+                                        "): top-level code runs in order, so declare it above the " + use + " or make the " + use + " after it");
+        }
+        for (const std::string_view need : request->second->needs) { report_class_before_declaration(need, at); }
+    }
     void report_function_before_declaration(std::string_view name, const source_location& at, bool call) {
         report_use_before_declaration(name, at, call, [&] { return eng_.has_function(std::string(name)); });
     }
@@ -6984,6 +7840,7 @@ private:
             if (auto it = functions_.find(id->name); it != functions_.end()) {
                 note_global_use(id->name);
                 report_function_before_declaration(id->name, c->location, true);
+                report_instance_before_declaration(id->name, c->location, true);
                 if (const auto& foreign = foreign_overloads(id->name, it->second); !foreign.empty()) {
                     return check_program_overloads(id->name, it->second, foreign, args, c->location);
                 }
@@ -6993,6 +7850,7 @@ private:
             if (const sclass* sc = find_sclass(id->name)) {
                 if (script_callee_takes_type_arguments(id->name)) { return {}; }
                 report_class_before_declaration(id->name, c->location);
+                report_instance_before_declaration(id->name, c->location, false);
                 const bool may_copy = check_ctor_call(id->name, *sc, args, c->location);
                 if (sc->provable && !may_copy) { ov = &sc->ctors; }
                 return object_of(id->name);
@@ -7214,6 +8072,7 @@ private:
                 if (const ctype held = member_type(hit); signature_slot(held)) { return check_signature_call("'" + std::string(m->member) + "'", held.ti, c, args); }
             }
             note_host_nodiscard(std::string(recv.cls) + "." + std::string(m->member));
+            if (type_argument_call_ && (find_sclass(recv.cls) || eng_.find_script_class(std::string(recv.cls)))) { type_argument_host_callee_.clear(); }   // a script class's field: no host method
             if (!want_static) { return check_strict_host_method(recv.cls, m->member, args, c->location, c); }
             check_host_static_arity(recv.cls, m->member, args.size(), c->location);
             return {};
@@ -9338,15 +10197,40 @@ private:
             case node_type::variable_decl:
                 walk_variable_decl(static_cast<variable_decl*>(d));
                 break;
-            case node_type::function_decl:
-                walk_function_declaration(static_cast<function_decl*>(d));
+            case node_type::function_decl: {
+                auto* fn = static_cast<function_decl*>(d);
+                if (fn->instance_stamp != 0) {   // a generic's instance: its diagnostics say whose
+                    if (unmade_instances_.count(fn->instance_name)) { break; }
+                    instance_scope scope(instance_ctx_, instance_request(fn->instance_name));
+                    walk_function_declaration(fn);
+                    break;
+                }
+                walk_function_declaration(fn);
                 break;
+            }
             case node_type::class_decl: {
                 auto* cd = static_cast<class_decl*>(d);
+                if (cd->method_instances) {
+                    walk_method_instances(cd);
+                    break;
+                }
+                if (cd->instance_stamp != 0) {
+                    if (unmade_instances_.count(cd->name)) { break; }
+                    instance_scope scope(instance_ctx_, instance_request(cd->name));
+                    if (!classes_.count(cd->name)) { collect_class(cd); }
+                    walk_class(cd);
+                    break;
+                }
                 if (!classes_.count(cd->name)) { collect_class(cd); }
                 walk_class(cd);
                 break;
             }
+            case node_type::generic_instance_decl:
+                walk_instance_request(static_cast<const generic_instance_decl*>(d));
+                break;
+            case node_type::generic_decl:
+                walk_generic(*static_cast<const generic_decl*>(d)->definition);
+                break;
             case node_type::namespace_decl: {
                 auto* n = static_cast<namespace_decl*>(d);
                 scopes_.emplace_back();
@@ -9923,6 +10807,7 @@ private:
         if (auto held = eng_.get_class_definition(std::string(cd->name)); held && !held->is_script_class()) {
             diag(diag_level::error, cd->location, format_error_message(detail::k_host_class_name_taken, cd->name, cd->name));
         }
+        for (const std::string_view base : cd->base_classes) { refuse_bare_generic_class(base, cd->location); }
         check_class_bases(cd);
         report_value_cycle(cd);
         check_member_names(cd);
@@ -10129,15 +11014,16 @@ void static_checker::collect_names(const statement* node) {
         case node_type::function_decl: {
             auto* f = static_cast<const function_decl*>(node);
             collect_program_name(f->name);
-            note_program_decl(f->name, f->location);
+            if (f->instance_stamp == 0) { note_program_decl(f->name, f->location); }   // an instance is declared by the linker: its order rule is report_instance_before_declaration
             nested_scope body{collect_depth_};
             collect_names(f->body.get());
             break;
         }
         case node_type::class_decl: {
             auto* c = static_cast<const class_decl*>(node);
+            if (c->method_instances) { break; }
             collect_program_name(c->name);
-            note_program_decl(c->name, c->location);
+            if (c->instance_stamp == 0) { note_program_decl(c->name, c->location); }
             nested_scope members{collect_depth_};
             for (const auto& m : c->members) { collect_names(m.declaration.get()); }
             break;
@@ -10419,6 +11305,7 @@ void collect_unit_functions(const std::vector<declaration_ptr>& decls, const std
     for (const auto& d : decls) {
         if (d && d->get_type() == node_type::function_decl) {
             auto fd = std::static_pointer_cast<const function_decl>(d);
+            if (fd->instance_stamp != 0) { continue; }   // a generic's instance is each unit's own declaration
             out[std::string(fd->name)][unit_path].push_back(std::move(fd));
         }
     }
@@ -10450,6 +11337,7 @@ bool collect_unit_classes(const std::vector<declaration_ptr>& decls, program_cla
     for (const auto& d : decls) {
         if (!d) { continue; }
         if (d->get_type() == node_type::class_decl) {
+            if (static_cast<const class_decl*>(d.get())->method_instances) { continue; }   // a generic method's instances: no class of their own
             auto& slot = out[std::string(static_cast<const class_decl*>(d.get())->name)];
             if (slot != d) {
                 slot = std::static_pointer_cast<class_decl>(d);

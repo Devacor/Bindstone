@@ -1,5 +1,6 @@
 #include <jaiscript/stdlib/reflection.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>
 #include <jaiscript/detail/type_name_key.hpp>
@@ -161,6 +162,7 @@ inline script_value constructor_named(engine* eng, std::string& a_name, const ch
             return std::move(ctor.value());
         }
     }
+    if (const std::string waiting = detail::waiting_instance_text(*eng, a_name); !waiting.empty()) { throw runtime_error(std::string("reflect::") + who + ": " + waiting); }
     throw_unknown_class(eng, who, a_name);
 }
 

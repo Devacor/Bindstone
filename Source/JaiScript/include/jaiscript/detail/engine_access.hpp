@@ -55,6 +55,12 @@ namespace jai::detail {
         JAI_FORCEINLINE static std::vector<std::pair<size_t, const std::string*>> constant_argument_indexes(const engine& a_engine, const std::string& callable) { return a_engine.constant_argument_indexes(callable); }
         JAI_FORCEINLINE static bool has_constant_arguments(const engine& a_engine) { return a_engine.has_constant_arguments(); }
         JAI_FORCEINLINE static const std::unordered_map<std::string, std::vector<std::string>>& constant_texts_by_name(const engine& a_engine) { return a_engine.constant_texts_by_name(); }
+        JAI_FORCEINLINE static const std::vector<std::shared_ptr<const generic_definition>>* find_generics(const engine& a_engine, const std::string& a_qualified) { return a_engine.find_generics(a_qualified); }
+        JAI_FORCEINLINE static bool generic_instance(const engine& a_engine, const std::string& a_name, std::string& a_generic, std::vector<type_info_ptr>& a_arguments) { return a_engine.generic_instance(a_name, a_generic, a_arguments); }
+        JAI_FORCEINLINE static bool declares_generics(const engine& a_engine) { return a_engine.declares_generics(); }
+        JAI_FORCEINLINE static bool names_generic_method(const engine& a_engine, const std::string& a_name) { return a_engine.names_generic_method(a_name); }
+        JAI_FORCEINLINE static check_report check_expanding(engine& a_engine, std::vector<declaration_ptr>& a_declarations, check_options a_options, const std::vector<std::string>* a_extra = nullptr) { return a_engine.check_expanding(a_declarations, std::move(a_options), a_extra); }
+        JAI_FORCEINLINE static void register_generics(engine& a_engine, const std::vector<declaration_ptr>& a_declarations, const std::string& a_file) { a_engine.register_generics(a_declarations, a_file); }
         JAI_FORCEINLINE static detail::execution_limits& execution_limits(engine& a_engine) noexcept { return a_engine.execution_limits(); }
         JAI_FORCEINLINE static void parallel_spin_wait_us(engine& a_engine, size_t microseconds) { return a_engine.parallel_spin_wait_us(microseconds); }
         JAI_FORCEINLINE static size_t parallel_spin_wait_us(const engine& a_engine) { return a_engine.parallel_spin_wait_us(); }
@@ -95,6 +101,7 @@ namespace jai::detail {
         template<typename F> JAI_FORCEINLINE static void add_function_with_arity_and_full_types(engine& a_engine, const std::string& name, F&& func, size_t arity, const std::vector<param_type_info>& param_types) { return a_engine.add_function_with_arity_and_full_types(name, std::forward<F>(func), arity, param_types); }
         template<typename F> JAI_FORCEINLINE static void add_function_with_arity_and_full_types(engine& a_engine, const std::string& name, F&& func, size_t arity, const std::vector<param_type_info>& param_types, script_value_type result) { return a_engine.add_function_with_arity_and_full_types(name, std::forward<F>(func), arity, param_types, result); }
         JAI_FORCEINLINE static std::unordered_set<std::string> get_registered_template_types(const engine& a_engine) { return a_engine.get_registered_template_types(); }
+        JAI_FORCEINLINE static bool is_template_type(const engine& a_engine, const std::string& a_base) { return a_engine.is_template_type(a_base); }
         JAI_FORCEINLINE static std::shared_ptr<class_definition> get_class_definition(const engine& a_engine, const std::string& name) { return a_engine.get_class_definition(name); }
         JAI_FORCEINLINE static std::shared_ptr<class_definition> get_class_definition(const engine& a_engine, uint64_t type_id) { return a_engine.get_class_definition(type_id); }
         // null for a null engine: a test of the engine in a conditional expression keeps MSVC from inlining a forwarder whose result has a destructor
@@ -137,6 +144,7 @@ namespace jai::detail {
         template<typename Registry> JAI_FORCEINLINE static void set_conversion_registry(engine& a_engine, Registry&& registry) { return a_engine.set_conversion_registry(std::forward<Registry>(registry)); }
         JAI_FORCEINLINE static serialization::serialization_registry& get_serialization_registry(engine& a_engine) { return a_engine.get_serialization_registry(); }
         JAI_FORCEINLINE static class_registry& get_class_registry(engine& a_engine) { return a_engine.get_class_registry(); }
+        JAI_FORCEINLINE static std::shared_ptr<void> instance_owner(engine& a_engine, const class_decl* a_declaration) { return a_engine.instance_owner(a_declaration); }
         JAI_FORCEINLINE static void note_script_layer(engine& a_engine, const void* cpp_object, const weaker_ptr<class_instance>& owner) { return a_engine.note_script_layer(cpp_object, owner); }
         JAI_FORCEINLINE static strong_ptr<class_instance> script_layer_of(const engine& a_engine, const void* cpp_object) { return a_engine.script_layer_of(cpp_object); }
         JAI_FORCEINLINE static strong_ptr<class_instance> object_instance_of(const engine& a_engine, const void* cpp_object) { return a_engine.object_instance_of(cpp_object); }
@@ -201,6 +209,7 @@ namespace jai::detail {
         JAI_FORCEINLINE static type_info* get_type_info(engine& a_engine, const type_info& temp) { return a_engine.get_type_info(temp); }
         JAI_FORCEINLINE static type_info* get_type_info_by_id(engine& a_engine, uint64_t type_id) { return a_engine.get_type_info_by_id(type_id); }
         JAI_FORCEINLINE static type_info* get_type_info_by_name(engine& a_engine, const std::string& canonical_name) { return a_engine.get_type_info_by_name(canonical_name); }
+        JAI_FORCEINLINE static type_info* type_named(engine& a_engine, std::string_view canonical_name) { return a_engine.type_named(canonical_name); }
         template<typename T> JAI_FORCEINLINE static type_info* get_type_info_for_cpp_type(engine& a_engine) { return a_engine.get_type_info_for_cpp_type<T>(); }
         JAI_FORCEINLINE static void*& reference_holder_pool_slot(engine& a_engine) { return a_engine.reference_holder_pool_slot(); }
         JAI_FORCEINLINE static void set_reference_holder_pool_teardown(engine& a_engine, void (*teardown)(void*)) { return a_engine.set_reference_holder_pool_teardown(teardown); }
@@ -279,7 +288,8 @@ namespace jai::detail {
         std::string_view format;
         uint64_t id;
     };
-    // The error of a construction no class answers: the text above for an unbound instantiation, else "No constructor found for class 'X'"
+    // The error of a construction no class answers: the text above for an unbound instantiation, what a generic's instance
+    // still waits for (environment::undefined_text), else "No constructor found for class 'X'"
     error_text no_constructor_text(const engine* eng, const type_info& type);
 
 } // namespace jai::detail

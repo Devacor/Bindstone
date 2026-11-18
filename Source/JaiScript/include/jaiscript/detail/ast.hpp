@@ -24,6 +24,7 @@ namespace jai {
     struct script_defined_function;   // environment.hpp; node mint caches hold it opaquely
     class class_definition;           // class_definition.hpp; node caches hold it by raw pointer
     namespace detail::regex { class compiled; }   // detail/regex.hpp; a constant pattern's compile, engine-independent
+    namespace detail { struct generic_definition; }   // detail/generics.hpp
 
     using ast_node_ptr = std::shared_ptr<ast_node>;
     using expression_ptr = std::shared_ptr<expression>;
@@ -94,6 +95,8 @@ namespace jai {
         enum_decl,
         destructuring_decl,
         extern_decl,      // extern [type | function] name; - a name defined outside the program
+        generic_decl,           // class Name<T> / T name<T>(...): a generic's declaration, kept as its tokens
+        generic_instance_decl,  // the instance a unit asks for: its declarations follow it
     };
 
     // The checker's const verdict at a write or a binding (internal/const.md), stamped by every walk: const_raises makes the node
@@ -1020,6 +1023,13 @@ namespace jai {
         bool is_coroutine = false;
         bool is_nodiscard = false;   // [[nodiscard]]: a call whose result an expression statement drops fails the load
         size_t local_count = 0;   // Total slots needed (params + locals) for stack allocation
+        // A generic's instance (detail/generics.hpp): the stamp of the definition it was made from and the instance's qualified
+        // name ("wire::decode<Cart>", "Request::json<Cart>"); 0 for a function written by hand. Defining an instance that is
+        // already defined under the same stamp does nothing.
+        uint64_t instance_stamp = 0;
+        std::string_view instance_name;
+        bool method_instance = false;   // the instance of a generic method: a member its class takes after its own declaration
+        bool instance_remade = false;   // class_decl::instance_remade
 
         // Enclosing-frame slot locals a nested COROUTINE body references, as
         // (symbol_id, outer slot). Interpreter-owned: built on the first declaration
@@ -1079,6 +1089,20 @@ namespace jai {
         std::vector<std::string_view> base_classes;  // Points to symbolizer storage (permanent)
         std::vector<member> members;
         bool nocopy = false;  // 'nocopy class': by-value copies of instances are errors (a deleted C++ copy constructor)
+        uint64_t instance_stamp = 0;   // a generic's instance (function_decl::instance_stamp); its name is the class's
+        // the instances of generic methods a unit adds to a class another declaration defines: this node declares no class, its
+        // members join the class named
+        bool method_instances = false;
+        // An instance is declared the moment everything it is built on is declared (class_registry's linker): the generic it
+        // was made from (empty for a method's instance) and the classes its type arguments name, its bases and, for a
+        // method's instance, the class it joins. The checker's order rule reads the same names from the request.
+        std::string_view instance_generic;
+        std::vector<std::string_view> instance_needs;
+        // An instance its unit makes again because the unit declares its generic again (generic_instance_decl::remade): it is
+        // declared as that declaration runs, not at an earlier declaration of the name. Never serialized.
+        bool instance_remade = false;
+        bool generic_marker = false;   // no class: a generic class's declaration ran (generic_decl::marker), `name` its qualified name
+        uint64_t marker_stamp = 0;     // a marker's: the stamp of the definition whose declaration it is
 
         class_decl(const source_location& loc, std::string_view n, uint64_t nid = UINT64_MAX)
             : declaration(loc, node_type::class_decl), name(n), name_id(nid) {}    };
@@ -1184,6 +1208,58 @@ namespace jai {
 
         extern_decl(const source_location& loc, type_info_ptr t, bool fn, std::string_view n, uint64_t nid)
             : declaration(loc, node_type::extern_decl), type(std::move(t)), is_function(fn), name(n), name_id(nid) {}
+    };
+
+    // A generic's declaration (docs/site/guide/21-generics.html): nothing runs here but the engine learning the definition, which
+    // every unit that names the generic instantiates from
+    class generic_decl : public declaration {
+    public:
+        std::shared_ptr<const detail::generic_definition> definition;
+        // What a generic class's declaration runs, in both backends, by the path a class declaration takes: a class_decl
+        // flagged generic_marker, which tells the linker the generic is declared (detail::generic_marker makes it; null for
+        // a function's or a method's)
+        mutable std::shared_ptr<class_decl> marker;
+        mutable bool marker_made = false;
+
+        generic_decl(const source_location& loc, std::shared_ptr<const detail::generic_definition> d)
+            : declaration(loc, node_type::generic_decl), definition(std::move(d)) {}
+    };
+
+    // An instance a unit asks for; `location` is where its text first names it. The unit's requests stand ahead of its own
+    // declarations, each followed by the instance's declarations once made (they carry instance_stamp), so a unit offers its
+    // instances as it starts; a request that could not be made keeps why.
+    class generic_instance_decl : public declaration {
+    public:
+        struct failure {
+            source_location at;
+            std::string message;
+        };
+        struct bound {
+            std::string parameter;   // T
+            std::string argument;    // the argument's canonical spelling
+            std::string requires_;   // the bound, with the arguments in place
+        };
+
+        std::string_view name;      // the instance's qualified name: Stack<int>, shop::Stack<shop::Product>, wire::decode<Cart>
+        uint64_t name_id = UINT64_MAX;
+        std::string_view generic;   // the generic's qualified name
+        std::vector<type_info_ptr> arguments;
+        std::string_view within;    // the instance whose text asked for this one; empty for the unit's own text
+        std::vector<std::string_view> needs;   // the classes the instance waits for (class_decl::instance_needs)
+        bool expanded = false;
+        bool unresolved = false;    // no generic of that name was declared when it was asked for: asked again at the next check
+        std::vector<bound> bounds;
+        std::vector<failure> failures;
+        std::string file;           // the generic's file (the unit's own text when empty or equal to it)
+        // the definition a checker's request resolved (a function's overload, a method): never serialized, read once
+        std::shared_ptr<const detail::generic_definition> definition;
+        // The unit did not name this instance: it lived in the engine when the unit declared its generic again, and is made
+        // again from that declaration (engine.cpp note_remade_instances). One the declaration cannot make is dropped with a
+        // warning; one the unit's own text comes to name is the unit's from then on. Never serialized.
+        bool remade = false;
+
+        generic_instance_decl(const source_location& loc, std::string_view n, uint64_t nid)
+            : declaration(loc, node_type::generic_instance_decl), name(n), name_id(nid) {}
     };
 
     inline void mark_result_discarded(expression* e) {

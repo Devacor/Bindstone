@@ -691,10 +691,10 @@ inline void register_database(jai::engine& eng, const std::filesystem::path& app
 	}, counts);
 	bind_typed_database_method(binder, "query", [](database& self, const jai::script_type& type, const std::string& sql, const std::vector<jai::script_value>& params) {
 		return self.query(type, sql, params);
-	}, jai::returns_array_of_type_argument, counts);
+	}, jai::returns<jai::array_of<jai::T>>, counts);
 	bind_typed_database_method(binder, "query_one", [](database& self, const jai::script_type& type, const std::string& sql, const std::vector<jai::script_value>& params) {
 		return self.query_one(type, sql, params);
-	}, jai::returns_shared_ptr_of_type_argument, counts);
+	}, jai::returns<jai::shared_ptr_of<jai::T>>, counts);
 	binder.method("insert", [](database& self, const std::string& table, const jai::script_value& record) { return self.insert(table, record); });
 	binder.method("update", [](database& self, const std::string& table, const jai::script_value& record) { return self.update(table, record); });
 	binder.method("transaction", [](database& self, const jai::script_value& fn) { return self.transaction(fn); });

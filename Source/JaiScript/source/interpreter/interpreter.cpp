@@ -2,6 +2,7 @@
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/generics.hpp>
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
 #include <jaiscript/detail/interpreter.hpp>
@@ -4393,7 +4394,7 @@ JAI_NOINLINE void interpreter::raise_script_text(const std::string& text, const 
 }
 
 JAI_NOINLINE void interpreter::raise_no_member(std::string_view kind, std::string_view member, const source_location& location) {
-    raise_script_text(no_member_text(kind, member), location);
+    raise_script_text(no_member_text(engine_, kind, member), location);
     detail::engine_access::set_exception_kind(*current_exception_, error_kind::no_member);
 }
 
@@ -7653,8 +7654,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
         uint64_t coroutine_type_id = coroutine_handle_type_id_;
         script_value functionValue = script_value::make_function(coroutine_mint{eng, coroutine_type_id, func_decl_ptr, closure_env}, engine_);
 
-        environment_->define(decl->name_id, functionValue);
-        return {};
+        return detail::declare_script_function(*engine_, *decl, environment_, nullptr, std::move(functionValue));
     }
 
     // Don't capture any environment in the closure - just use nullptr (which also makes
@@ -7678,6 +7678,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
     scriptFunc->declared = true;
     scriptFunc->line = decl->location.line;
     scriptFunc->context = engine_->host_entry_generation();
+    scriptFunc->generic_stamp = decl->instance_stamp;
 
     // Create wrapper function resolving the live backend at call time. Named thunk so
     // callers can recover the payload via target<script_callable_thunk>() - vm parity.
@@ -7687,14 +7688,10 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
     payload.fn = scriptFunc;
     script_value functionValue = script_value::make_function(
         script_function(script_callable_thunk{engine_, std::move(payload)}), engine_);
-    engine_->bump_definition_epoch();
 
-    // Define the function in current environment: alone, or in the overload set of its name (KEEP BYTE-PARALLEL with
-    // vm_backend::exec_func_decl)
-    auto declared = detail::declare_function_overload(*environment_, decl->name_id, scriptFunc, std::move(functionValue), engine_, decl->is_override);
-    if (!declared) { return declared.error_value(); }
-    environment_->define(decl->name_id, std::move(declared.value()));
-    return {};
+    // Define the function in current environment: alone, or in the overload set of its name; a generic's instance once its
+    // generic is declared (KEEP BYTE-PARALLEL with vm_backend::exec_func_decl)
+    return detail::declare_script_function(*engine_, *decl, environment_, scriptFunc, std::move(functionValue));
 }
 
 checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
@@ -7761,6 +7758,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             // Overloads of the name coexist; one of the same signature collides unless it overrides (KEEP BYTE-PARALLEL with the vm)
             func_decl->unit = current_unit();
             func_decl->context = engine_->host_entry_generation();
+            if (detail::namespace_function_waits(*engine_, ns_data, decl->name_id, *func_decl)) { continue; }   // a generic's instance, until its generic is declared
             auto& overloads = ns_data->functions[func_decl->name_id];
             std::string admission_error;
             const auto admission = detail::admit_namespace_function(overloads, *func_decl, engine_->unit_rerun(func_decl->unit), admission_error);
@@ -7772,6 +7770,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             if (admission == detail::namespace_admission::reference_only) {
                 return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), "{0}", string_symbolizer_->intern(admission_error));
             }
+            if (admission == detail::namespace_admission::present) { continue; }   // a generic's instance, already defined
 
             // Check if this namespace name matches a class name
             // If so, check for collision with class static methods
@@ -7835,6 +7834,11 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             }
             detail::register_namespace_class(*engine_, *ns_data, *class_decl_ptr);
 
+        } else if (member_decl->get_type() == node_type::generic_decl) {
+            // a generic class's declaration runs its marker (KEEP BYTE-PARALLEL with the vm)
+            if (const auto marker = detail::generic_marker(*static_cast<generic_decl*>(member_decl.get()), *string_symbolizer_)) { JAISCRIPT_TRY(visit_class_decl(marker.get())); }
+        } else if (member_decl->get_type() == node_type::generic_instance_decl) {
+            // an instance's request runs nothing (KEEP BYTE-PARALLEL with the vm)
         } else {
             // Other declaration types (expressions, includes, etc.) - execute normally
             JAISCRIPT_TRY(dispatch_decl(member_decl.get()));
@@ -10637,6 +10641,12 @@ checked_result<void> interpreter::dispatch_decl(declaration* decl) {
             return visit_extern_decl(static_cast<extern_decl*>(decl));
         case node_type::statement_decl:
             return dispatch_stmt(static_cast<statement_decl*>(decl)->statement.get());
+        case node_type::generic_decl:            // a generic class's declaration runs its marker: the linker's word that the generic is
+            // declared, by a class declaration's path (KEEP BYTE-PARALLEL with vm_compiler's compile_declaration_code)
+            if (const auto marker = detail::generic_marker(*static_cast<generic_decl*>(decl), *string_symbolizer_)) { return visit_class_decl(marker.get()); }
+            return {};
+        case node_type::generic_instance_decl:   // a request runs nothing: the instance's declarations follow it
+            return {};
         default:
             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
                 "Unknown declaration type in dispatch_decl");

@@ -3,6 +3,7 @@
 #include <jaiscript/detail/const_rules.hpp>   // const guards (internal/const.md)
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
+#include <jaiscript/detail/generics.hpp>
 #include <jaiscript/detail/body_walker.hpp>
 #include <jaiscript/detail/program_slots.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
@@ -1506,6 +1507,12 @@ void vm_compiler::compile_declaration_code(const declaration_ptr& decl, bool top
 		return;
 	case node_type::extern_decl:
 		emit(opcode::op_extern_decl, add_node(decl));
+		return;
+	case node_type::generic_decl:            // a generic class's declaration runs its marker: the linker's word that the generic is
+		// declared, by a class declaration's path (KEEP BYTE-PARALLEL with the interpreter's dispatch_decl)
+		if (const auto marker = detail::generic_marker(*static_cast<generic_decl*>(decl.get()), *symbolizer_)) { emit(opcode::op_class_decl, add_node(marker)); }
+		return;
+	case node_type::generic_instance_decl:   // a request runs nothing: the instance's declarations follow it
 		return;
 	case node_type::include_decl:
 		compile_include_declaration(static_cast<include_decl*>(decl.get()));

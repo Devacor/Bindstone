@@ -106,6 +106,7 @@ struct unit {
 	std::vector<lex_token> tokens;
 	std::vector<jai::declaration_ptr> decls;      // the parse, or what parsed around its errors
 	std::vector<jai::declaration_ptr> good_decls; // the last clean parse
+	std::vector<jai::declaration_ptr> checked_decls; // decls with the generic instances its check declared: what the checker walks
 	bool parse_ok = false;
 	std::vector<std::string> salvaged;            // failing parse: top-level names read off the tokens (no cascade of undeclared names)
 	std::vector<file_diagnostic> parse_errors;

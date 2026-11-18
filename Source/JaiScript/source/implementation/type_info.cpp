@@ -53,6 +53,37 @@ std::string leaf_canonical_name(const type_info& t) {
 }
 }
 
+namespace {
+bool name_space(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+}
+
+bool template_name_arguments(std::string_view name, std::string_view& base, std::vector<std::string_view>& arguments) {
+    const size_t open = name.find('<');
+    if (open == std::string_view::npos || open == 0 || name.back() != '>') { return false; }
+    base = name.substr(0, open);
+    arguments.clear();
+    int depth = 0;
+    size_t start = open + 1;
+    const auto cut = [&](size_t end) {
+        std::string_view argument = name.substr(start, end - start);
+        while (!argument.empty() && name_space(argument.front())) { argument.remove_prefix(1); }
+        while (!argument.empty() && name_space(argument.back())) { argument.remove_suffix(1); }
+        arguments.push_back(argument);
+        start = end + 1;
+    };
+    for (size_t i = open; i < name.size(); ++i) {
+        const char c = name[i];
+        if (c == '<' || c == '(') { ++depth; }
+        else if (c == '>' || c == ')') {
+            if (--depth == 0) {
+                if (i + 1 != name.size()) { return false; }
+                cut(i);
+            }
+        } else if (c == ',' && depth == 1) { cut(i); }
+    }
+    return depth == 0;
+}
+
 // A composite type names its parameters on an explicit work list: the parser names each level of a nested type while the
 // levels around it are still on the stack, so the name never recurses
 std::string type_info::canonical_name() const {
@@ -159,6 +190,13 @@ std::string type_info::spelling() const {
         default:
             return canonical_name();
     }
+}
+
+std::string type_info::instance_name(std::string_view base, const std::vector<type_info_ptr>& arguments) {
+    std::vector<std::string> spellings;
+    spellings.reserve(arguments.size());
+    for (const auto& argument : arguments) { spellings.push_back(argument ? argument->spelling() : std::string("auto")); }
+    return template_instance_name(base, spellings);
 }
 
 type_info type_info::make_int(string_symbolizer& symbolizer) {

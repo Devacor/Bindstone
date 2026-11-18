@@ -309,6 +309,9 @@ class Suite:
 		r = self.request("GET", "/members")
 		self.check("query<T> answers records: an INTEGER 0/1 column fills a bool, a REAL a float, a JSON TEXT an array",
 			r.json() == {"shown": ["rex (admin) 2.0", "mapped (admin) 0.0"], "tags": ["pup", "artist"]}, r.text())
+		r = self.request("GET", "/members/generic")
+		self.check("a generic's instance is a row type, and a generic function wraps the rows of a typed query",
+			r.json() == {"labels": ["rex", "mapped"], "total": 2, "first": "rex", "type": "Page<Member>", "one": "rex Labeled<string>"}, r.text())
 		r = self.request("GET", "/members/1")
 		self.check("query_one<T> answers a handle", r.json() == {"handle": "rex", "admin": True, "tags": ["pup", "artist"]}, r.text())
 		r = self.request("GET", "/members/9")

@@ -2,10 +2,15 @@
 #include "jaiscript/core/dynamic_binder.hpp"
 #include "jaiscript/core/engine.hpp"
 #include "jaiscript/detail/class_runtime.hpp"
+#include "jaiscript/detail/namespace_scope.hpp"
 #include "jaiscript/detail/release_machine.hpp"
 #include "jaiscript/detail/ast_serializer.hpp"
 #include "jaiscript/detail/builtin_methods.hpp"
 #include "jaiscript/detail/parallel_transform.hpp"
+#include "jaiscript/detail/type_name_key.hpp"
+#include "jaiscript/detail/function_overloads.hpp"
+#include "jaiscript/detail/namespace_function.hpp"
+#include "jaiscript/detail/generics.hpp"
 #include <stdexcept>
 #include <thread>
 #include <tuple>
@@ -1056,7 +1061,324 @@ namespace {
     }
 }
 
+namespace {
+
+    // One instance of a generic method onto its class: an earlier instance of the name gives way, a private one keeps its label
+    checked_result<void> install_method_instance(class_definition& def, uint64_t name_id, const class_definition::generic_method_instance& instance, string_symbolizer& symbols) {
+        def.drop_method_overloads(name_id, instance.ast->is_static);
+        try {
+            if (instance.ast->is_static) {
+                def.add_static_script_method(instance.ast->name, instance.ast, instance.env);
+            } else {
+                def.add_script_method(instance.ast->name, instance.ast, instance.env);
+            }
+        } catch (const runtime_error& e) {
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), "{0}", symbols.intern(e.what()));
+        }
+        if (instance.access != access_level::public_access) { def.set_nonpublic_member(name_id, instance.access); }
+        return {};
+    }
+
+    // A unit's instances of a class's generic methods (class_decl::method_instances): each joins the class the declaration
+    // names, where that class does not hold it already under the same stamp (detail/generics.hpp). The linker runs it once
+    // the class is declared.
+    checked_result<void> declare_method_instances(class_decl* decl, const class_declaration_host& host) {
+        string_symbolizer* symbols = host.symbols;
+        auto global_env = engine_access::get_global_environment(host.eng);
+        if (!global_env) { return checked_result<void>(make_error_code(runtime_error_code::engine_destroyed)); }
+        std::shared_ptr<class_definition> class_def;
+        if (auto existing = global_env->get(symbols->get_class_var_id_with_view(decl->name_id).first); existing && existing.value().is_object()) {
+            auto holder = existing.value().get_object_holder();
+            if (holder && holder->type_id() == host.class_definition_type_id) { class_def = std::static_pointer_cast<class_definition>(holder->host_object()); }
+        }
+        for (const auto& member : decl->members) {
+            if (!member.declaration || member.declaration->get_type() != node_type::function_decl) { continue; }
+            auto ast = std::static_pointer_cast<function_decl>(member.declaration);
+            if (!class_def) {   // the linker defines an instance once its class is declared: a host class holds no script method
+                return checked_result<void>(make_error_code(runtime_error_code::class_not_found), "Class '{0}' not found", decl->name_id);
+            }
+            const auto held = class_def->generic_method_instances().find(ast->name_id);
+            if (held != class_def->generic_method_instances().end() && held->second.stamp == ast->instance_stamp) { continue; }
+            class_definition::generic_method_instance instance;
+            instance.stamp = ast->instance_stamp;
+            instance.ast = ast;
+            instance.env = host.env;
+            instance.access = member.visibility == class_decl::Private ? access_level::private_access
+                            : member.visibility == class_decl::Protected ? access_level::protected_access : access_level::public_access;
+            JAISCRIPT_TRY(install_method_instance(*class_def, ast->name_id, instance, *symbols));
+            class_def->hold_generic_method_instance(ast->name_id, std::move(instance));
+        }
+        return {};
+    }
+
+} // namespace
+
+namespace {
+
+    checked_result<void> define_script_class(class_decl* decl, const class_declaration_host& host);
+
+    // The declaration an instance waits for has run: a declaration of its generic's name, and for an instance its unit makes
+    // again (class_decl::instance_remade) the declaration of the very definition it was made from, the one that unit runs
+    bool generic_declared(engine& eng, const std::string& generic, uint64_t stamp, bool remade) {
+        const auto& declared = engine_access::get_class_registry(eng).declared_generics_;
+        const auto ran = declared.find(generic);
+        return ran != declared.end() && (remade ? ran->second.count(stamp) != 0 : !ran->second.empty());
+    }
+
+    // What an instance still waits for: its generic's declaration, then the first class it is built on that is not declared;
+    // empty when everything is
+    std::string instance_waits_for(engine& eng, const class_decl& decl, std::string_view being_declared = {}) {
+        if (!decl.instance_generic.empty() && !generic_declared(eng, std::string(decl.instance_generic), decl.instance_stamp, decl.instance_remade)) {
+            return std::string(decl.instance_generic);
+        }
+        for (const std::string_view need : decl.instance_needs) {
+            if (need != being_declared && !engine_access::get_class_definition(eng, std::string(need))) { return std::string(need); }
+        }
+        if (!decl.method_instances || !decl.instance_remade) { return {}; }
+        for (const auto& member : decl.members) {   // a method's instance made again: its class as the declaration that holds the new generic leaves it
+            if (!member.declaration || member.declaration->get_type() != node_type::function_decl) { continue; }
+            const auto& fn = static_cast<const function_decl&>(*member.declaration);
+            std::string generic(instance_generic_name(fn.instance_name));
+            if (!generic_declared(eng, generic, fn.instance_stamp, true)) { return generic; }
+        }
+        return {};
+    }
+
+    std::string instance_key(const class_decl& decl) {
+        std::string key(decl.name);
+        if (!decl.method_instances) { return key; }
+        for (const auto& member : decl.members) {
+            if (member.declaration && member.declaration->get_type() == node_type::function_decl) { key += ' '; key += static_cast<const function_decl&>(*member.declaration).instance_name; }
+        }
+        return key;
+    }
+
+    // An instance with all it is built on declared: a method's joins its class, a class's is declared as a class written
+    // here would be (in a namespace, it is the namespace's class too, as the backends make a class their namespace_decl runs)
+    checked_result<void> define_instance(class_decl* decl, const class_declaration_host& host) {
+        if (decl->method_instances) { return declare_method_instances(decl, host); }
+        JAISCRIPT_TRY(define_script_class(decl, host));
+        const size_t cut = decl->instance_generic.rfind("::");
+        if (cut != std::string_view::npos) {
+            auto& spaces = engine_access::script_namespaces(*host.eng);
+            if (const auto space = spaces.find(host.symbols->intern(decl->instance_generic.substr(0, cut))); space != spaces.end() && space->second) {
+                register_namespace_class(*host.eng, *space->second, *decl);
+            }
+        }
+        return {};
+    }
+
+    // Every waiting instance that everything it is built on is declared for now, in the order offered; defining one may
+    // declare what another waited for
+    checked_result<void> link_instances(engine& eng) {
+        class_registry& registry = engine_access::get_class_registry(eng);
+        for (;;) {
+            auto& waiting = registry.waiting_instances_;
+            const auto ready = std::find_if(waiting.begin(), waiting.end(), [&](const class_registry::waiting_instance& w) { return instance_waits_for(eng, *w.decl).empty(); });
+            if (ready == waiting.end()) { return {}; }
+            const class_registry::waiting_instance held = std::move(*ready);
+            waiting.erase(ready);
+            JAISCRIPT_TRY(define_instance(held.decl, class_declaration_host{held.eng, held.symbols, held.env, held.class_definition_type_id, held.class_lookup, held.unit,
+                                                                           held.eval, held.discard_unwinding}));
+        }
+    }
+
+    // A unit offers an instance: it waits when something it is built on is not declared yet (a later offer of it replaces
+    // the earlier one), else it is defined now
+    checked_result<void> offer_instance(class_decl* decl, const class_declaration_host& host) {
+        class_registry& registry = engine_access::get_class_registry(*host.eng);
+        std::string key = instance_key(*decl);
+        auto& waiting = registry.waiting_instances_;
+        const auto earlier = std::find_if(waiting.begin(), waiting.end(), [&](const class_registry::waiting_instance& w) { return w.key == key; });
+        if (instance_waits_for(*host.eng, *decl).empty()) {
+            if (earlier != waiting.end()) { waiting.erase(earlier); }
+            return define_instance(decl, host);
+        }
+        class_registry::waiting_instance parked{std::move(key), engine_access::instance_owner(*host.eng, decl), decl, host.eng, host.symbols, host.env,
+                                                host.class_definition_type_id, host.class_lookup, host.unit, host.eval, host.discard_unwinding};
+        if (earlier != waiting.end()) { *earlier = std::move(parked); } else { waiting.push_back(std::move(parked)); }
+        return {};
+    }
+
+} // namespace
+
+std::string waiting_instance_text(engine& eng, const std::string& name) {
+    const std::string key = type_name_key(name);   // the name arrives as text
+    for (const auto& w : engine_access::get_class_registry(eng).waiting_instances_) {
+        if (w.decl->method_instances || type_name_key(w.decl->name) != key) { continue; }
+        return "'" + std::string(w.decl->name) + "' is not declared yet: it waits for '" + instance_waits_for(eng, *w.decl) + "'";
+    }
+    return {};
+}
+
+std::string_view undeclared_instance_text(engine& eng, uint64_t id) {
+    class_registry& registry = engine_access::get_class_registry(eng);
+    if (registry.waiting_instances_.empty() && registry.waiting_functions_.empty()) { return {}; }
+    string_symbolizer& symbols = *engine_access::get_symbolizer(eng);
+    if (symbols.frozen()) { return {}; }   // a parallel region interns nothing: its error keeps the plain text
+    std::string_view name = symbols.get_string(id);
+    if (name.starts_with("__class_")) { name.remove_prefix(8); }   // a class is looked up by its variable (get_class_var_id_with_view)
+    if (name.find('<') == std::string_view::npos) { return {}; }
+    std::string text = waiting_instance_text(eng, std::string(name));
+    if (text.empty()) {   // a function's instance, bound when its generic's declaration runs
+        for (const auto& w : registry.waiting_functions_) {
+            if (symbols.get_string(w.name_id) != name) { continue; }
+            text = "'" + (w.space ? std::string(symbols.get_string(w.space_id)) + "::" : std::string()) + std::string(name) + "' is not declared yet: it waits for '" + w.generic + "'";
+            break;
+        }
+    }
+    return text.empty() ? std::string_view() : symbols.intern_with_view(text).second;
+}
+
+namespace {
+
+    // the '::' that ends a qualified name's scope, outside any angle brackets; npos for a bare name
+    size_t scope_cut(std::string_view name) {
+        size_t cut = std::string_view::npos;
+        int depth = 0;
+        for (size_t i = 0; i + 1 < name.size(); ++i) {
+            if (name[i] == '<') { ++depth; }
+            else if (name[i] == '>') { --depth; }
+            else if (depth == 0 && name[i] == ':' && name[i + 1] == ':') { cut = i++; }
+        }
+        return cut;
+    }
+
+} // namespace
+
+std::string_view instance_generic_name(std::string_view instance) {
+    if (instance.empty() || instance.back() != '>') { return instance; }
+    int depth = 0;
+    for (size_t i = instance.size(); i-- > 0;) {
+        if (instance[i] == '>') { ++depth; }
+        else if (instance[i] == '<' && --depth == 0) { return instance.substr(0, i); }
+    }
+    return instance;
+}
+
+std::vector<uint64_t> declared_instance_stamps(engine& eng, const std::string& name) {
+    std::vector<uint64_t> stamps;
+    if (const auto cls = engine_access::get_class_definition(eng, name)) {
+        if (cls->generic_stamp() != 0) { stamps.push_back(cls->generic_stamp()); }
+        return stamps;
+    }
+    const std::string_view generic = instance_generic_name(name);
+    const size_t cut = scope_cut(generic);
+    if (cut == std::string_view::npos) {   // a program-scope function, alone or in its name's overload set
+        const auto global = engine_access::get_global_environment(eng);
+        const script_value* held = global ? global->get_own_value_ptr(engine_access::symbolize(eng, name)) : nullptr;
+        const script_callable* callable = held ? script_callable_of(*held, &eng) : nullptr;
+        if (!callable) { return stamps; }
+        const auto note = [&](const std::shared_ptr<script_defined_function>& fn) { if (fn && fn->generic_stamp != 0) { stamps.push_back(fn->generic_stamp); } };
+        if (callable->kind == script_callable::kind_type::function) { note(callable->fn); }
+        else if (callable->kind == script_callable::kind_type::overload_set && callable->overloads()) { for (const auto& member : callable->overloads()->members) { note(member); } }
+        return stamps;
+    }
+    const std::string scope(generic.substr(0, cut));
+    if (const auto owner = engine_access::get_class_definition(eng, scope)) {   // a generic method's, on its class
+        const auto held = owner->generic_method_instances().find(engine_access::symbolize(eng, name));
+        if (held != owner->generic_method_instances().end()) { stamps.push_back(held->second.stamp); }
+        return stamps;
+    }
+    auto& spaces = engine_access::script_namespaces(eng);   // a namespace's function
+    const auto space = spaces.find(engine_access::symbolize(eng, scope));
+    if (space == spaces.end() || !space->second) { return stamps; }
+    const auto overloads = space->second->functions.find(engine_access::symbolize(eng, std::string_view(name).substr(cut + 2)));
+    if (overloads == space->second->functions.end()) { return stamps; }
+    for (const auto& fn : overloads->second) { if (fn && fn->instance_stamp != 0) { stamps.push_back(fn->instance_stamp); } }
+    return stamps;
+}
+
+namespace {
+
+    checked_result<void> bind_function(engine& eng, environment& env, uint64_t name_id, const std::shared_ptr<script_defined_function>& fn, script_value value, bool is_override) {
+        if (!fn) { env.define(name_id, std::move(value)); return {}; }   // a coroutine's function joins no overload set
+        auto declared = declare_function_overload(env, name_id, fn, std::move(value), &eng, is_override);
+        if (!declared) { return declared.error_value(); }
+        env.define(name_id, std::move(declared.value()));
+        engine_access::bump_definition_epoch(eng);
+        return {};
+    }
+
+} // namespace
+
+bool namespace_function_waits(engine& eng, const std::shared_ptr<script_namespace_data>& space, uint64_t space_id, const function_decl& decl) {
+    if (decl.instance_stamp == 0 || decl.method_instance) { return false; }
+    class_registry& registry = engine_access::get_class_registry(eng);
+    std::string generic(instance_generic_name(decl.instance_name));
+    if (generic_declared(eng, generic, decl.instance_stamp, decl.instance_remade)) { return false; }
+    auto& waiting = registry.waiting_functions_;
+    const auto earlier = std::find_if(waiting.begin(), waiting.end(), [&](const class_registry::waiting_function& w) {
+        return w.space == space && w.name_id == decl.name_id && w.declaration && same_signature(w.declaration->parameters, decl.parameters);
+    });
+    class_registry::waiting_function parked{std::move(generic), decl.instance_stamp, decl.instance_remade, nullptr, decl.name_id, nullptr, script_value(std::monostate{}, &eng), false, space, space_id,
+                                            std::make_shared<function_decl>(decl)};
+    if (earlier != waiting.end()) { *earlier = std::move(parked); } else { waiting.push_back(std::move(parked)); }
+    return true;
+}
+
+checked_result<void> declare_script_function(engine& eng, const function_decl& decl, const std::shared_ptr<environment>& env,
+                                             const std::shared_ptr<script_defined_function>& fn, script_value value) {
+    if (decl.instance_stamp != 0 && !decl.method_instance) {
+        class_registry& registry = engine_access::get_class_registry(eng);
+        std::string generic(instance_generic_name(decl.instance_name));
+        if (!generic_declared(eng, generic, decl.instance_stamp, decl.instance_remade)) {   // a later offer of the instance replaces the earlier one
+            auto& waiting = registry.waiting_functions_;
+            const auto earlier = std::find_if(waiting.begin(), waiting.end(), [&](const class_registry::waiting_function& w) {
+                return w.env == env && w.name_id == decl.name_id && (w.fn && fn ? same_signature(w.fn->parameters(), fn->parameters()) : !w.fn && !fn);
+            });
+            class_registry::waiting_function parked{std::move(generic), decl.instance_stamp, decl.instance_remade, env, decl.name_id, fn, std::move(value), decl.is_override};
+            if (earlier != waiting.end()) { *earlier = std::move(parked); } else { waiting.push_back(std::move(parked)); }
+            return {};
+        }
+    }
+    return bind_function(eng, *env, decl.name_id, fn, std::move(value), decl.is_override);
+}
+
 checked_result<void> declare_script_class(class_decl* decl, const class_declaration_host& host) {
+    if (decl->generic_marker) {   // a generic's declaration ran: the instances that waited for it
+        class_registry& registry = engine_access::get_class_registry(*host.eng);
+        registry.declared_generics_[std::string(decl->name)].insert(decl->marker_stamp);
+        for (size_t i = 0; i < registry.waiting_functions_.size();) {
+            if (const auto& w = registry.waiting_functions_[i]; w.generic != decl->name || !generic_declared(*host.eng, w.generic, w.stamp, w.remade)) { ++i; continue; }
+            const class_registry::waiting_function held = std::move(registry.waiting_functions_[i]);
+            registry.waiting_functions_.erase(registry.waiting_functions_.begin() + static_cast<std::ptrdiff_t>(i));
+            if (held.space) {   // a namespace's: as its namespace_decl would have declared it here
+                auto& overloads = held.space->functions[held.name_id];
+                std::string refusal;
+                if (admit_namespace_function(overloads, *held.declaration, false, refusal) != namespace_admission::admitted) { continue; }
+                overloads.push_back(held.declaration);
+                publish_namespace_function(*host.eng, *held.space, held.space_id, held.name_id);
+                continue;
+            }
+            JAISCRIPT_TRY(bind_function(*host.eng, *held.env, held.name_id, held.fn, held.value, held.is_override));
+        }
+        return link_instances(*host.eng);
+    }
+    if (decl->instance_stamp != 0 || decl->method_instances) {
+        JAISCRIPT_TRY(offer_instance(decl, host));
+        return link_instances(*host.eng);
+    }
+    // class Num : Comparable<Num>: a base that is an instance waiting for this very class is declared as this declaration
+    // begins (the class is named, which is all its base needs of it; neither could be declared first otherwise)
+    for (const std::string_view base : decl->base_classes) {
+        auto& waiting = engine_access::get_class_registry(*host.eng).waiting_instances_;
+        const auto held = std::find_if(waiting.begin(), waiting.end(), [&](const class_registry::waiting_instance& w) {
+            return !w.decl->method_instances && w.decl->name == base && instance_waits_for(*host.eng, *w.decl, decl->name).empty();
+        });
+        if (held == waiting.end()) { continue; }
+        const class_registry::waiting_instance instance = std::move(*held);
+        waiting.erase(held);
+        JAISCRIPT_TRY(define_instance(instance.decl, class_declaration_host{instance.eng, instance.symbols, instance.env, instance.class_definition_type_id,
+                                                                              instance.class_lookup, instance.unit, instance.eval, instance.discard_unwinding}));
+    }
+    JAISCRIPT_TRY(define_script_class(decl, host));
+    return link_instances(*host.eng);   // the instances that waited for this class
+}
+
+namespace {
+
+checked_result<void> define_script_class(class_decl* decl, const class_declaration_host& host) {
     engine* eng = host.eng;
     string_symbolizer* symbols = host.symbols;
     const std::shared_ptr<environment>& env = host.env;
@@ -1086,6 +1408,10 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
             }
         }
     }
+
+    // A generic's instance (detail/generics.hpp): every unit that uses it declares it, and where the class is already defined
+    // from the same definition this declaration does nothing (its statics keep their values)
+    if (class_def && decl->instance_stamp != 0 && class_def->generic_stamp() == decl->instance_stamp) { return {}; }
 
     if (!class_def) {
         uint64_t type_id = (decl->name_id != UINT64_MAX) ? decl->name_id : symbols->intern(decl->name);
@@ -1481,10 +1807,23 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
         return register_result;
     }
     engine_access::bump_class_definition_epoch(*eng);
+    class_def->set_generic_stamp(decl->instance_stamp);
+    for (const auto& member : decl->members) {   // its generic methods are declared as it is: their instances wait for this
+        if (!member.declaration || member.declaration->get_type() != node_type::generic_decl) { continue; }
+        const auto& definition = static_cast<const generic_decl&>(*member.declaration).definition;
+        if (definition) { engine_access::get_class_registry(*eng).declared_generics_[definition->qualified_name()].insert(definition->stamp); }
+    }
+    if (is_redefinition) {   // the instances of its generic methods, which the units that call them declared
+        for (const auto& [name_id, instance] : class_def->generic_method_instances()) {
+            JAISCRIPT_TRY(install_method_instance(*class_def, name_id, instance, *symbols));
+        }
+    }
 
     global_env->define(class_var_id, script_value::make_object("class_definition", host.class_definition_type_id, class_def, eng));
     return {};
 }
+
+} // namespace
 
 } // namespace detail
 

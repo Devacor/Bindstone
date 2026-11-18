@@ -3,6 +3,7 @@
 #include "lexer.hpp"
 #include "ast.hpp"
 #include "foreign_keyword.hpp"
+#include "generics.hpp"
 #include "native_stack.hpp"
 #include <jaiscript/core/types.hpp>
 #include <jaiscript/core/checked_result.hpp>
@@ -38,6 +39,14 @@ namespace jai {
         std::vector<std::string> namespace_queries() const { return {namespace_queries_.begin(), namespace_queries_.end()}; }
         // after a failed parse: the top-level declarations that parsed around the errors (a tool checks what it can)
         std::vector<declaration_ptr>& recovered_declarations() { return recovered_; }
+        // each error as its place and its text (an instance's parse reports them in its generic's file)
+        struct issue {
+            source_location at;
+            std::string message;
+        };
+        std::vector<issue> issues() const;
+        // The token stream as one type (a generic's bound with its arguments in place); the instances it names are requested in `requests`
+        checked_result<type_info_ptr> parse_type_text(std::vector<declaration_ptr>& requests);
         // The token stream as one template body (lexer::tokenize_template) under a scoped_template's rules: the expression, or the
         // listing of what the text breaks (docs/site/guide/19-templates.html)
         checked_result<expression_ptr> parse_scoped_template_body();
@@ -225,8 +234,48 @@ namespace jai {
         checked_result<expression_ptr> coalesce_rest(expression_ptr left);
         checked_result<expression_ptr> unary_operator();
         bool postfix_operator_ahead(const expression_ptr& expr) const;
-        bool type_arguments_ahead() const;
+        bool type_arguments_ahead(bool local) const;
         checked_result<expression_ptr> type_argument_call(expression_ptr callee);
+        checked_result<expression_ptr> generic_instance_reference(expression_ptr callee, std::vector<type_info_ptr> arguments, const token& at);
+
+        // Generics (docs/site/guide/21-generics.html, detail/generics.hpp)
+        // the stream index after the type-argument list that opens at `open` ('<'), or SIZE_MAX when the run is not one; `split`
+        // when the list closes on the first half of a '>>' (the index is then that token's)
+        size_t type_arguments_end(size_t open, bool& split, bool placeholders = false) const;
+        size_t type_run_end(size_t at) const;            // the index after the type spelled at `at`, or SIZE_MAX
+        size_t type_parameters_end(size_t open) const;   // the index after a declaration's '<' ... '>' list, or SIZE_MAX
+        // [[attribute]]* [static | override | coroutine]* (function | Type [&]) Name '<' ... '>' '(' at `at`: the index of Name, or
+        // SIZE_MAX. The modifiers are a class member's.
+        size_t generic_function_head(size_t at, bool member = false) const;
+        // A generic's declaration as its tokens, from stream index `begin` (an attribute, a modifier or the head) with the name at
+        // `name_at`: read once here for its syntax, its parameters standing as classes; the declaration it would have been is discarded
+        struct generic_site {
+            detail::generic_kind kind;
+            size_t begin;
+            size_t name_at;
+            std::string_view space;   // the namespace around it
+            std::string_view owner;   // a method's class, by its qualified name
+            uint8_t visibility = 0;   // a method's: class_decl::member_visibility
+        };
+        checked_result<declaration_ptr> generic_declaration(const generic_site& site);
+        bool generic_parameters(detail::generic_definition& definition, size_t open, size_t& list_end);
+        bool generic_extent(detail::generic_kind kind, size_t list_end, size_t& end);
+        bool reserved_parameter_names(const detail::generic_definition& definition);
+        declaration_ptr parse_generic_text(const std::vector<token>& text);
+        size_t attributes_end(size_t at) const;   // past the [[attribute]] groups at `at`
+        // The instances this parse's text names since its last top-level declaration began: each becomes a generic_instance_decl
+        // ahead of that declaration
+        struct generic_use {
+            std::string_view name;
+            uint64_t name_id = 0;
+            std::string_view generic;
+            std::vector<type_info_ptr> arguments;
+            source_location at;
+        };
+        std::vector<generic_use> generic_uses_;
+        std::unordered_set<uint64_t> requested_instances_;
+        void note_generic_use(std::string_view generic, std::vector<type_info_ptr> arguments, const source_location& at);
+        void flush_generic_uses(std::vector<declaration_ptr>& out);
         checked_result<expression_ptr> postfix_rest(expression_ptr expr, size_t chain_start, bool chain_starts_clean);
         checked_result<expression_ptr> postfix_operator(expression_ptr expr, std::vector<size_t>& null_links);
         checked_result<expression_ptr> brace_construction(expression_ptr expr);
@@ -261,6 +310,11 @@ namespace jai {
         checked_result<type_info_ptr> coroutine_type();
         checked_result<declaration_ptr> callable_typed_declaration();
         checked_result<type_info_ptr> named_type();
+        // Name<Args> with the '<' next: the instance's type; a script generic's instance is asked for (note_generic_use)
+        checked_result<type_info_ptr> instance_type(const std::string& type_name, bool host_template);
+        // A builtin type just read: with type arguments after it (int<string>) it is read as an instance all the same, so the
+        // load refuses it once, by the kind of the name
+        checked_result<type_info_ptr> builtin_type(std::string_view name, type_info_ptr type);
         type_info_ptr byte_element_type();
         type_info_ptr array_type_of(const type_info_ptr& element);
         type_info_ptr map_type_of(const type_info_ptr& key, const type_info_ptr& value);
@@ -433,6 +487,19 @@ namespace jai {
         size_t lookup_slot(uint64_t symbol_id) {
             return resolve_outer_use(symbol_id, function_scope_stack_.size());
         }
+        // The name is a variable the parse has seen declared: a local variable or a parameter of a function being parsed (its
+        // own or one around it), or a program-scope variable the unit declares above. A variable never takes type arguments.
+        bool names_variable(const jai::expression& e) const {
+            if (e.get_type() != node_type::identifier_expr) { return false; }
+            const uint64_t symbol_id = static_cast<const identifier_expr&>(e).symbol_id;
+            if (unit_variables_.count(symbol_id)) { return true; }
+            if (static_cast<const identifier_expr&>(e).global_qualified) { return false; }
+            for (const auto& scope : function_scope_stack_) {
+                if (scope.symbol_to_slot.count(symbol_id)) { return true; }
+            }
+            return false;
+        }
+        std::unordered_set<uint64_t> unit_variables_;   // the program-scope variables declared so far, by name
         // Capture lists are parsed in the enclosing scope, before the lambda's own opens
         size_t lookup_capture_slot(uint64_t symbol_id) {
             return resolve_outer_use(symbol_id, function_scope_stack_.size() + 1);

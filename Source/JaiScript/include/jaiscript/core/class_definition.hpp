@@ -551,6 +551,21 @@ public:
     uint64_t method_epoch() const { return method_epoch_; }
     unit_stamp unit() const { return unit_; }
     void set_unit(unit_stamp unit) { unit_ = unit; }
+    // a generic's instance: the stamp of the definition it was declared from (class_decl::instance_stamp), 0 for any other class
+    uint64_t generic_stamp() const { return generic_stamp_; }
+    void set_generic_stamp(uint64_t stamp) { generic_stamp_ = stamp; }
+    // The instances of this class's generic methods (detail/generics.hpp), by name: each joins the class after its declaration,
+    // from a unit that calls it, and a redefinition of the class holds them still (detail::declare_script_class)
+    struct generic_method_instance {
+        uint64_t stamp = 0;
+        std::shared_ptr<function_decl> ast;
+        std::shared_ptr<environment> env;
+        access_level access = access_level::public_access;
+    };
+    const std::unordered_map<uint64_t, generic_method_instance>& generic_method_instances() const { return generic_method_instances_; }
+    void hold_generic_method_instance(uint64_t name_id, generic_method_instance instance) { generic_method_instances_[name_id] = std::move(instance); }
+    inline void drop_method_overloads(uint64_t name_id, bool is_static);   // a name's script overloads, ahead of its redefinition
+    inline void set_nonpublic_member(uint64_t member_id, access_level level);
     inline void bump_method_epoch();
 
     // Field-shape epoch: moves only when a field's facts can change - field set, declared types,
@@ -1447,6 +1462,8 @@ private:
     // See method_epoch(): per-call-site inline-cache validity stamp
     uint64_t method_epoch_ = 1;
     unit_stamp unit_{};   // the unit and execution of the class declaration: field initializers resolve in it
+    uint64_t generic_stamp_ = 0;
+    std::unordered_map<uint64_t, generic_method_instance> generic_method_instances_;
     uint64_t field_shape_epoch_ = 1;   // see field_shape_epoch()
 
     // Destructor probe memo (see create_instance): valid while dtor_memo_epoch_

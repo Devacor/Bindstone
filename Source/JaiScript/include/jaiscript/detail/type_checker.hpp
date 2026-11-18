@@ -38,8 +38,11 @@ namespace jai {
         // Related source point (e.g. the declaration a bad assignment violates); 0 = none.
         size_t related_line = 0;
         size_t related_column = 0;
-        // A diagnostic in a template a call expanded (template(...)): that file's path, its line and column; empty = the unit's
+        // A diagnostic in a template a call expanded (template(...)) or in a generic another file declares: that file's path,
+        // its line and column; empty = the unit's
         std::string file;
+        // A diagnostic inside a generic's instance: "in Stack<int>, instantiated at app.jai:12:5", outermost instance last
+        std::vector<std::string> notes;
     };
 
     struct check_report {
@@ -109,6 +112,10 @@ namespace jai {
 
     namespace detail {
 
+        struct generic_request;      // detail/generics.hpp
+        struct generic_kept_instance;
+        struct generic_definition;
+
         inline constexpr size_t k_check_diagnostic_cap = 100;
         // the outside name a walk records when it reads the program's constant texts (never an identifier)
         inline constexpr std::string_view k_outside_constants = "#constants";
@@ -173,6 +180,14 @@ namespace jai {
             // rests on (engine.cpp keys a checked-clean stamp by what they resolve to)
             std::vector<std::string>* outside = nullptr;
             check_observer* observer = nullptr;
+            // out: the generic instances the walk needs that the unit does not declare yet (a call's, by its given or deduced type
+            // arguments). The engine declares them and checks again; null leaves such a call untyped.
+            std::vector<generic_request>* generic_requests = nullptr;
+            // A unit that declares a generic again makes the instances the engine holds again (generic_instance_decl::remade).
+            // out: each one an error of the walk lies in, with that error. in: those the engine gave up on, which keep their
+            // earlier declaration: the walk warns of each.
+            std::vector<generic_kept_instance>* remade_failures = nullptr;
+            const std::vector<generic_kept_instance>* kept_instances = nullptr;
         };
 
         // Every top-level name `decls` declares (functions, variables, externs, destructured

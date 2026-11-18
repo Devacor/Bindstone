@@ -182,6 +182,18 @@ routes.get("/members", (spider::Request req) => {
 	for (auto& m : all) { shown.push(m.shown()); }
 	return {"shown": shown, "tags": all.size() > 0 ? all[0].tags : array<string>()};
 });
+// a generic's instance is a row type like any class, and a generic function wraps the rows a typed query answers
+class Labeled<T> { int id; T handle; }
+class Page<T> { array<T> rows; int total = 0; }
+Page<T> page_of<T>(array<T> rows) { Page<T> page; page.rows = rows; page.total = rows.size(); return page; }
+routes.get("/members/generic", (spider::Request req) => {
+	array<string> labels;
+	for (auto& row : db.query<Labeled<string>>(ALL_MEMBERS)) { labels.push(row.handle); }
+	array<Member> all = db.query<Member>(ALL_MEMBERS);
+	auto page = page_of(all);
+	shared_ptr<Labeled<string>> one = db.query_one<Labeled<string>>(FIND_MEMBER, 1);
+	return {"labels": labels, "total": page.total, "first": page.rows[0].handle, "type": type_of(page), "one": one->handle + " " + type_of(one)};
+});
 routes.get("/members/:id", (spider::Request req) => {
 	shared_ptr<Member> m = db.query_one<Member>(FIND_MEMBER, req.param("id").to_int());
 	return m == null ? spider::not_found("no member") : spider::json({"handle": m->handle, "admin": m->admin, "tags": m->tags});

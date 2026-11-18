@@ -144,6 +144,11 @@ the explicit spellings at a typed boundary.
 delegation, static members (`C::s`), operator overloading, user `_get_x` / `_set_x`
 accessors, and hot reload that migrates live instances field by field.
 
+**Generics.** `class Stack<T>`, `T largest<T>(array<T> xs)` and generic methods, instantiated at
+load like C++ templates and checked as if written by hand: `Stack<int>` is an ordinary class.
+Type arguments are written or deduced, `T : Base` bounds one, and an error inside an instance
+names the generic's line and where it was instantiated.
+
 **Coroutines.** `coroutine` functions *and* methods, `yield`, drivable from a range-`for` or
 advanced with `next()` by the host a frame at a time.
 

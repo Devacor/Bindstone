@@ -28,6 +28,7 @@ enum class foreign_word : unsigned char {
 	strict_not_equal,
 	generator_function,
 	spread,
+	template_prefix,
 };
 
 inline constexpr std::string_view foreign_word_text(foreign_word w) noexcept {
@@ -72,6 +73,8 @@ inline constexpr std::string_view foreign_word_text(foreign_word w) noexcept {
 			return "JaiScript has no 'function*': a generator is a coroutine, coroutine name(...) { yield v; }";
 		case foreign_word::spread:
 			return "JaiScript has no spread '...': join arrays with array::concat(a, b) (a.concat(b) appends in place), and pass arguments one by one";
+		case foreign_word::template_prefix:
+			return "JaiScript has no 'template<...>' prefix: a generic lists its type parameters after its name, class Stack<T> { ... } or T largest<T>(array<T> xs) { ... }";
 	}
 	return {};
 }

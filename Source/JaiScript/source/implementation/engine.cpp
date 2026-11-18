@@ -39,6 +39,7 @@
 #include <jaiscript/detail/release_machine.hpp>
 #include <jaiscript/detail/constant_arguments.hpp>
 #include <jaiscript/detail/type_value.hpp>
+#include <jaiscript/detail/generics.hpp>
 #include <jaiscript/detail/run_record.hpp>
 #include <jaiscript/core/script_run.hpp>
 #ifdef JAISCRIPT_VM_COVERAGE
@@ -1081,6 +1082,9 @@ struct engine::implementation {
         bool stamp_loaded = false;   // the loaded cache's stamp, held against the context at the check it stands in for
         bool cache_unstamped = false;   // the loaded cache held no stamp this checker's revision trusts
         bool restamp = false;        // the stamp did not hold, or a clean check found none to trust: the cache is written again under this context
+        // it made instances from generics another unit declares, or made again instances the engine held: like a spliced
+        // include, no cache holds them
+        bool outside_generics = false;
         std::string closure_listing;                   // erroring units' listings, each against its own source + path
         std::vector<check_diagnostic> closure_diags;   // every unit diagnostic, path-qualified in the message
         std::string closure_parse_failures;            // units that failed to parse: the program stops there, before any check
@@ -1200,6 +1204,7 @@ struct engine::implementation {
         const size_t classes_before = program_classes_.size();
         moved = detail::collect_unit_classes(decls, program_classes_) || moved;
         if (program_classes_.size() != classes_before) { index_pooled_namespace_classes(); }
+        register_generics(decls, path);
         if (std::vector<declaration_ptr>& pooled = pooled_unit_declarations_[path]; !pools_as(pooled, decls)) {
             pooled.clear();
             for (const auto& d : decls) { if (pooled_by_path(d)) { pooled.push_back(d); } }
@@ -1210,6 +1215,667 @@ struct engine::implementation {
         }
         if (moved) { ++program_union_epoch_; }
     }
+    // ---- Generics (detail/generics.hpp, docs/site/guide/21-generics.html)
+    // Every definition the program declares, by qualified name: the closure units' as they are pooled and those of every unit
+    // that ran. A generic class's definition replaces the earlier one of its name, a function's or a method's its file's
+    // earlier one of the same shape; a file's removed ones leave with it, and a class declared under a generic class's name
+    // takes the name.
+    std::unordered_map<std::string, std::vector<detail::generic_definition_ptr>> generics_;
+    // The generic classes the pooled units declare in a namespace, by qualified and by bare name: classes of the namespace to a
+    // parse, as program_classes_ holds the plain ones (namespace_class_known)
+    std::unordered_set<std::string> pooled_namespace_generics_;
+    void index_pooled_namespace_generics() {
+        std::unordered_set<std::string> named;
+        for (const auto& [name, held] : generics_) {
+            const size_t cut = name.rfind("::");
+            if (cut == std::string::npos || std::none_of(held.begin(), held.end(), [](const detail::generic_definition_ptr& g) { return g->kind == detail::generic_kind::class_type; })) { continue; }
+            named.insert(name);
+            named.insert(name.substr(cut + 2));
+        }
+        if (named == pooled_namespace_generics_) { return; }
+        pooled_namespace_generics_ = std::move(named);
+        ++pooled_class_moves_;
+    }
+    // each instance made, by name: what it was made from (a deduction reads Name<T> against the arguments)
+    struct generic_instance_record {
+        std::string generic;
+        std::vector<type_info_ptr> arguments;
+    };
+    std::unordered_map<std::string, generic_instance_record> generic_instances_;
+    std::unordered_map<std::string, std::vector<std::string>> instances_of_;   // the instances made of each generic, by its qualified name
+    // The shape of each function's and method's definition an instance was made from, by its stamp: a later declaration of that
+    // shape is the definition declared again (note_remade_instances), one of another shape an overload beside it
+    std::unordered_map<uint64_t, detail::generic_definition_ptr> instance_shapes_;
+    std::unordered_set<std::string> generic_method_names_;   // the bare names of the generic methods ever declared
+    void note_instance(const std::string& name, const std::string& generic, const std::vector<type_info_ptr>& arguments) {
+        const auto [held, fresh] = generic_instances_.try_emplace(name);
+        if (fresh) { instances_of_[generic].push_back(name); }
+        held->second = {generic, arguments};
+    }
+
+    static bool same_generic_shape(const detail::generic_definition& a, const detail::generic_definition& b) { return detail::same_generic_signature(a, b); }
+    static void collect_generics(const std::vector<declaration_ptr>& decls, std::vector<detail::generic_definition_ptr>& out) {
+        for (const auto& d : decls) {
+            if (!d) { continue; }
+            if (d->get_type() == node_type::generic_decl) {
+                out.push_back(static_cast<const generic_decl*>(d.get())->definition);
+            } else if (d->get_type() == node_type::namespace_decl) {
+                collect_generics(static_cast<const namespace_decl*>(d.get())->declarations, out);
+            } else if (d->get_type() == node_type::class_decl) {
+                for (const auto& m : static_cast<const class_decl*>(d.get())->members) {
+                    if (m.declaration && m.declaration->get_type() == node_type::generic_decl) {
+                        out.push_back(static_cast<const generic_decl*>(m.declaration.get())->definition);
+                    }
+                }
+            }
+        }
+    }
+    // the classes a unit declares that are no generic's instance, through its namespaces
+    static void collect_plain_classes(const std::vector<declaration_ptr>& decls, std::vector<const class_decl*>& out) {
+        for (const auto& d : decls) {
+            if (!d) { continue; }
+            if (d->get_type() == node_type::class_decl) {
+                const auto* c = static_cast<const class_decl*>(d.get());
+                if (c->instance_stamp == 0 && !c->method_instances) { out.push_back(c); }
+            } else if (d->get_type() == node_type::namespace_decl) {
+                collect_plain_classes(static_cast<const namespace_decl*>(d.get())->declarations, out);
+            }
+        }
+    }
+    void register_generics(const std::vector<declaration_ptr>& decls, const std::string& file) {
+        std::vector<detail::generic_definition_ptr> declared;
+        collect_generics(decls, declared);
+        if (declared.empty() && generics_.empty()) { return; }
+        std::vector<const class_decl*> plain;
+        collect_plain_classes(decls, plain);
+        for (const class_decl* c : plain) {   // a class declared under a generic class's name takes the name
+            const auto held = generics_.find(std::string(c->name));
+            if (held == generics_.end()) { continue; }
+            if (std::erase_if(held->second, [](const detail::generic_definition_ptr& g) { return g->kind == detail::generic_kind::class_type; }) != 0) { ++script_cache_epoch; }
+        }
+        const bool named_file = !file.empty() && file != "<script>";
+        if (named_file) {   // what the file no longer declares
+            for (auto& [name, held] : generics_) {
+                std::erase_if(held, [&](const detail::generic_definition_ptr& g) {
+                    if (g->location.filename != file) { return false; }
+                    const bool kept = std::any_of(declared.begin(), declared.end(), [&](const detail::generic_definition_ptr& d) {
+                        return d->qualified_name() == name && same_generic_shape(*d, *g);
+                    });
+                    if (!kept) { ++script_cache_epoch; }
+                    return !kept;
+                });
+            }
+        }
+        for (const auto& definition : declared) {
+            if (definition->kind == detail::generic_kind::method) { generic_method_names_.emplace(definition->name); }
+            auto& held = generics_[definition->qualified_name()];
+            // a class's name is one generic class, whatever file or parameter list declared it before; a function's or a method's
+            // is one per shape and file
+            auto earlier = std::find_if(held.begin(), held.end(), [&](const detail::generic_definition_ptr& g) {
+                if (definition->kind == detail::generic_kind::class_type) { return g->kind == detail::generic_kind::class_type; }
+                return same_generic_shape(*g, *definition) && g->location.filename == definition->location.filename;
+            });
+            if (earlier == held.end()) {
+                held.push_back(definition);
+            } else if (*earlier != definition) {
+                if ((*earlier)->stamp != definition->stamp) { ++script_cache_epoch; }   // a parse that made instances from the old text makes them again
+                *earlier = definition;
+            }
+        }
+        index_pooled_namespace_generics();
+    }
+    // The instance a declaration was made for (a class's name, a function's, a method's), through the namespaces its text
+    // stands in; empty for any other declaration
+    static std::string_view instance_of(const declaration& d) { return instance_of_impl(d); }
+    // The file a unit's own text is in: an instance's declarations, which stand first, carry their generic's
+    static std::string unit_file(const std::vector<declaration_ptr>& decls) {
+        for (const auto& d : decls) {
+            if (!d || !instance_of(*d).empty()) { continue; }
+            if (d->get_type() == node_type::generic_instance_decl && !static_cast<const generic_instance_decl&>(*d).within.empty()) { continue; }
+            return d->location.filename;
+        }
+        for (const auto& d : decls) { if (d && d->get_type() == node_type::generic_instance_decl) { return d->location.filename; } }
+        return {};
+    }
+    // the unit's declarations being run, innermost last: where a waiting instance's owner is found (engine::instance_owner)
+    std::vector<const std::vector<declaration_ptr>*> running_declarations_;
+
+    static const detail::generic_definition_ptr* unit_class_generic(const std::vector<declaration_ptr>& decls, std::string_view qualified) {
+        for (const auto& d : decls) {
+            if (!d) { continue; }
+            if (d->get_type() == node_type::generic_decl) {
+                const auto& definition = static_cast<const generic_decl*>(d.get())->definition;
+                if (definition->kind == detail::generic_kind::class_type && definition->qualified_name() == qualified) { return &definition; }
+            } else if (d->get_type() == node_type::namespace_decl) {
+                if (const auto* found = unit_class_generic(static_cast<const namespace_decl*>(d.get())->declarations, qualified)) { return found; }
+            }
+        }
+        return nullptr;
+    }
+    static bool unit_declares_enum(const std::vector<declaration_ptr>& decls, std::string_view name) {
+        for (const auto& d : decls) {
+            if (!d) { continue; }
+            if (d->get_type() == node_type::enum_decl && static_cast<const enum_decl*>(d.get())->name == name) { return true; }
+            if (d->get_type() == node_type::namespace_decl && unit_declares_enum(static_cast<const namespace_decl*>(d.get())->declarations, name)) { return true; }
+        }
+        return false;
+    }
+    // What a name that no generic class declares is, where type arguments follow it
+    detail::plain_type_kind plain_type_named(engine& self, const std::vector<declaration_ptr>& decls, const std::string& name) {
+        if (detail::builtin_type_name(name)) { return detail::plain_type_kind::builtin; }
+        if (unit_declares_enum(decls, name) || program_enums_.count(name) != 0 || self.is_enum_name(string_symbolizer_.intern(name))) { return detail::plain_type_kind::enumeration; }
+        if (unit_declares_class(decls, name) || program_classes_.count(name) != 0 || self.get_class_registry().find_script_class(name) != nullptr) { return detail::plain_type_kind::script_class; }
+        const auto held = self.get_class_definition(name);
+        return held ? (held->is_cpp_class() ? detail::plain_type_kind::host_class : detail::plain_type_kind::script_class) : detail::plain_type_kind::none;
+    }
+    static bool unit_declares_class(const std::vector<declaration_ptr>& decls, std::string_view name) {
+        for (const auto& d : decls) {
+            if (!d) { continue; }
+            if (d->get_type() == node_type::class_decl && static_cast<const class_decl*>(d.get())->name == name) { return true; }
+            if (d->get_type() == node_type::namespace_decl && unit_declares_class(static_cast<const namespace_decl*>(d.get())->declarations, name)) { return true; }
+        }
+        return false;
+    }
+    static void stamp_instance(declaration& d, const detail::generic_definition& definition, std::string_view name, std::string_view simple, bool remade) {
+        switch (d.get_type()) {
+            case node_type::namespace_decl:
+                for (const auto& member : static_cast<namespace_decl&>(d).declarations) { if (member) { stamp_instance(*member, definition, name, simple, remade); } }
+                break;
+            case node_type::class_decl: {
+                auto& c = static_cast<class_decl&>(d);
+                if (definition.kind == detail::generic_kind::method) {
+                    c.method_instances = true;
+                    c.instance_remade = remade;
+                    for (const auto& m : c.members) {
+                        if (!m.declaration || m.declaration->get_type() != node_type::function_decl) { continue; }
+                        auto& f = static_cast<function_decl&>(*m.declaration);
+                        f.instance_stamp = definition.stamp;
+                        f.instance_name = name;
+                        f.method_instance = true;
+                        f.instance_remade = remade;
+                    }
+                } else if (definition.kind == detail::generic_kind::class_type && c.name == name) {
+                    c.instance_stamp = definition.stamp;
+                    c.instance_remade = remade;
+                }
+                break;
+            }
+            case node_type::function_decl: {
+                auto& f = static_cast<function_decl&>(d);
+                if (definition.kind == detail::generic_kind::function && f.name == simple) {
+                    f.instance_stamp = definition.stamp;
+                    f.instance_name = name;
+                    f.instance_remade = remade;
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    // What an instance is built on (class_decl::instance_needs): the classes its type arguments name, through containers
+    // and handles, an instance among them by its own name; its bases; for a method's instance, the class it joins. An enum
+    // or a builtin type needs no declaration. The request keeps the same names for the checker's order rule.
+    void argument_classes(engine& self, const std::vector<declaration_ptr>& decls, const type_info* type, std::vector<std::string_view>& out) {
+        if (!type) { return; }
+        if (type->base_type == script_value_type::jai_object_type && !type->type_name.empty()) {
+            const std::string name(type->type_name);
+            const bool is_class = generic_instances_.count(name) != 0 || name.find('<') != std::string::npos || unit_declares_class(decls, name) ||
+                                  program_classes_.count(name) != 0 || self.get_class_registry().find_script_class(name) != nullptr || self.get_class_definition(name) != nullptr;
+            if (is_class) {
+                const std::string_view held = string_symbolizer_.intern_with_view(name).second;
+                if (std::find(out.begin(), out.end(), held) == out.end()) { out.push_back(held); }
+            }
+            return;   // an instance's own arguments are what that instance waits for
+        }
+        for (const auto& parameter : type->type_params) { argument_classes(self, decls, parameter.get(), out); }
+    }
+    void note_instance_needs(engine& self, const std::vector<declaration_ptr>& decls, declaration& made, const detail::generic_definition& definition,
+                             generic_instance_decl& request) {
+        if (made.get_type() == node_type::namespace_decl) {
+            for (const auto& member : static_cast<namespace_decl&>(made).declarations) { if (member) { note_instance_needs(self, decls, *member, definition, request); } }
+            return;
+        }
+        if (made.get_type() != node_type::class_decl) { return; }   // a function's instance has no declaration-time work: it is declared as the unit starts
+        auto& c = static_cast<class_decl&>(made);
+        if (c.instance_stamp == 0 && !c.method_instances) { return; }
+        std::vector<std::string_view> needs;
+        if (c.method_instances) {
+            needs.push_back(c.name);
+        } else {
+            c.instance_generic = string_symbolizer_.intern_with_view(definition.qualified_name()).second;
+        }
+        for (const auto& argument : request.arguments) { argument_classes(self, decls, argument.get(), needs); }
+        for (const std::string_view base : c.base_classes) { if (std::find(needs.begin(), needs.end(), base) == needs.end()) { needs.push_back(base); } }
+        c.instance_needs = needs;
+        request.needs = std::move(needs);
+    }
+
+    using generic_request_index = std::unordered_map<std::string_view, generic_instance_decl*>;
+    static bool type_names_class(const type_info* type, std::string_view name, int depth = 0) {
+        if (!type || depth > 64) { return false; }
+        if (type->base_type == script_value_type::jai_object_type && type->type_name == name) { return true; }
+        return std::any_of(type->type_params.begin(), type->type_params.end(), [&](const type_info_ptr& p) { return type_names_class(p.get(), name, depth + 1); });
+    }
+    // The member of a generic class's text that the token at `at` stands in, by its name (empty when none does); `method`
+    // when a parameter list follows the name
+    static std::string_view generic_member_at(const detail::generic_definition& definition, const source_location& at, bool& method) {
+        const std::vector<token>& tokens = definition.tokens;
+        size_t target = SIZE_MAX;
+        for (size_t i = 0; i < tokens.size() && target == SIZE_MAX; ++i) {
+            if (tokens[i].location.line == at.line && tokens[i].location.column == at.column) { target = i; }
+        }
+        size_t open = definition.list_end;
+        while (open < tokens.size() && tokens[open].type != token_type::left_brace) { ++open; }
+        if (target == SIZE_MAX || target <= open) { return {}; }
+        const auto named = [&](size_t begin, size_t end) {   // the last name outside angle brackets before '(' (a method), '=' or the end
+            std::string_view name;
+            int angles = 0;
+            for (size_t i = begin; i < end; ++i) {
+                const token_type kind = tokens[i].type;
+                if (kind == token_type::less) { ++angles; }
+                else if (kind == token_type::greater) { --angles; }
+                else if (kind == token_type::right_shift) { angles -= 2; }
+                else if (kind == token_type::left_paren && angles <= 0) { method = !name.empty(); return name; }
+                else if ((kind == token_type::equal || kind == token_type::left_brace) && angles <= 0) { return name; }
+                else if (kind == token_type::identifier && angles <= 0) { name = tokens[i].lexeme; }
+            }
+            return name;
+        };
+        int depth = 0;
+        size_t begin = open + 1;
+        for (size_t i = open; i < tokens.size(); ++i) {
+            const token_type kind = tokens[i].type;
+            if (kind == token_type::left_brace) { ++depth; continue; }
+            const bool closes = kind == token_type::right_brace && --depth == 1;
+            if (!closes && !(kind == token_type::semicolon && depth == 1)) { continue; }
+            if (target >= begin && target <= i) { return named(begin, i); }
+            begin = i + 1;
+        }
+        return {};
+    }
+    // "'List<int>' would need 'List<List<int>>' and so on without end: the member 'chunks' names an instance of 'List' built
+    // from the instance itself; ...": `request`, asked for in the text of `asker` (made from `asked_in`), is an instance of
+    // the generic `outer` is one of, built from `outer`
+    static std::string endless_instance_text(const detail::generic_definition& definition, const generic_instance_decl& outer, const generic_instance_decl& request,
+                                             const detail::generic_definition* asked_in) {
+        std::string text = "'" + std::string(outer.name) + "' would need '" + std::string(request.name) + "' and so on without end: ";
+        bool method = false;
+        const std::string_view member = asked_in ? generic_member_at(*asked_in, request.location, method) : std::string_view();
+        text += member.empty() ? "its text names" : "the member '" + std::string(member) + "' names";
+        text += " an instance of '" + definition.qualified_name() + "' built from the instance itself; a class's members are made with it and a generic function only where it is called, so ";
+        if (member.empty() || !method || asked_in != &definition) { return text + "let a generic function outside the class make that instance"; }
+        std::string parameters;
+        for (size_t i = 0; i < definition.parameters.size(); ++i) { parameters += (i ? ", " : "") + std::string(definition.parameters[i].name); }
+        return text + "write it as one outside the class: " + std::string(member) + "<" + parameters + ">(" + std::string(definition.name) + "<" + parameters + "> self)";
+    }
+    // One instance: the definition's text with the request's arguments, parsed as program text; its declarations, stamped, come
+    // back in `made` behind the requests that text makes itself. What keeps it from being made stays on the request, for the
+    // check to report.
+    void instantiate_generic(engine& self, const std::vector<declaration_ptr>& decls, const generic_request_index& requests,
+                             generic_instance_decl& request, std::vector<declaration_ptr>& made, std::vector<std::string>& files) {
+        const auto fail = [&](std::string message, bool unresolved = false) {
+            request.failures.push_back({request.location, std::move(message)});
+            request.unresolved = unresolved;
+        };
+        const std::string generic(request.generic);
+        detail::generic_definition_ptr definition = std::move(request.definition);
+        request.definition.reset();
+        if (!definition) {
+            if (const auto* own = unit_class_generic(decls, generic)) {
+                definition = *own;
+            } else if (auto held = generics_.find(generic); held != generics_.end() && !unit_declares_class(decls, generic)) {   // the unit's own class takes the name
+                for (const auto& g : held->second) {
+                    if (g->kind == detail::generic_kind::class_type) { definition = g; break; }
+                }
+            }
+            if (!definition) {
+                const detail::plain_type_kind plain = plain_type_named(self, decls, generic);
+                fail(plain != detail::plain_type_kind::none ? detail::no_type_arguments_text(generic, plain)
+                                                            : "unknown type '" + std::string(request.name) + "': no generic class '" + generic + "' is declared",
+                     plain == detail::plain_type_kind::none);
+                return;
+            }
+        }
+        if (definition->parameters.size() != request.arguments.size()) {
+            fail("'" + generic + "' takes " + std::to_string(definition->parameters.size()) + (definition->parameters.size() == 1 ? " type argument" : " type arguments") +
+                 ", not " + std::to_string(request.arguments.size()));
+            return;
+        }
+        std::vector<std::string_view> chain;
+        for (std::string_view outer = request.within; !outer.empty();) {
+            chain.push_back(outer);
+            const auto held = requests.find(outer);
+            if (held == requests.end() || chain.size() > detail::k_generic_depth_limit) { break; }
+            // An instance whose text asks for an instance of its own generic built from itself asks without end (List<int> for
+            // List<List<int>>, that one for List<List<List<int>>>): the first step says so, where the member stands
+            if (definition->kind == detail::generic_kind::class_type && held->second->generic == request.generic &&
+                std::any_of(request.arguments.begin(), request.arguments.end(), [&](const type_info_ptr& a) { return type_names_class(a.get(), outer); })) {
+                const auto asker = requests.find(request.within);
+                detail::generic_definition_ptr asked_in;
+                if (asker != requests.end() && asker->second->generic == request.generic) {
+                    asked_in = definition;
+                } else if (asker != requests.end()) {
+                    const std::string asking(asker->second->generic);
+                    if (const auto* own = unit_class_generic(decls, asking)) {
+                        asked_in = *own;
+                    } else if (const auto held_generics = generics_.find(asking); held_generics != generics_.end()) {
+                        for (const auto& g : held_generics->second) { if (g->kind == detail::generic_kind::class_type) { asked_in = g; break; } }
+                    }
+                }
+                fail(endless_instance_text(*definition, *held->second, request, asked_in.get()));
+                return;
+            }
+            outer = held->second->within;
+        }
+        if (chain.size() >= detail::k_generic_depth_limit) {
+            std::string text = "generic instantiation nests more than " + std::to_string(detail::k_generic_depth_limit) + " deep: '" + std::string(chain.back()) + "'";
+            for (size_t i = chain.size() - 1; i-- > 0 && chain.size() - i <= 3;) { text += " needs '" + std::string(chain[i]) + "'"; }
+            fail(text + ", and so on without end");
+            return;
+        }
+        for (const auto& argument : request.arguments) {
+            std::vector<token> spelled;
+            if (!argument || !detail::generic_argument_tokens(*argument, request.location, string_symbolizer_, spelled)) {
+                fail("'" + (argument ? argument->canonical_name() : std::string("auto")) + "' is not a type an instance is made with: '" + std::string(request.name) + "'");
+                return;
+            }
+        }
+        const std::string& file = definition->location.filename;
+        for (size_t p = 0; p < definition->parameters.size(); ++p) {
+            if (definition->parameters[p].bound.empty()) { continue; }
+            std::vector<token> bound = detail::generic_bound_tokens(*definition, p, request.arguments, string_symbolizer_);
+            bound.emplace_back(token_type::eof, "", definition->parameters[p].location);
+            parser reader(bound, &string_symbolizer_, &self, registeredTemplateTypes, file);
+            auto type = reader.parse_type_text(made);
+            if (!type || !type.value() || reader.has_errors()) {
+                for (auto& issue : reader.issues()) { request.failures.push_back({std::move(issue.at), std::move(issue.message)}); }
+                if (request.failures.empty()) { request.failures.push_back({definition->parameters[p].location, "expected a class after ':'"}); }
+                made.clear();
+                return;
+            }
+            request.bounds.push_back({std::string(definition->parameters[p].name), request.arguments[p]->canonical_name(), type.value()->canonical_name()});
+        }
+        // The name the instance declares: a class's and a function's without the namespace around it; a method's in full
+        // (Base::tag<int>), so a derived class's instance of the name is another method and none overrides the other
+        std::string_view simple = request.name;
+        const std::string& prefix = definition->space;
+        if (definition->kind != detail::generic_kind::method && !prefix.empty() && simple.size() > prefix.size() + 2 && simple.substr(0, prefix.size()) == prefix) {
+            simple.remove_prefix(prefix.size() + 2);
+        }
+        const std::vector<token> text = detail::generic_instance_tokens(*definition, request.arguments, simple, string_symbolizer_);
+        parser reader(text, &string_symbolizer_, &self, registeredTemplateTypes, file);
+        auto parsed = reader.parse();
+        for (const auto& spliced : reader.spliced_files()) { files.push_back(spliced); }
+        if (!parsed) {
+            for (auto& issue : reader.issues()) { request.failures.push_back({std::move(issue.at), std::move(issue.message)}); }
+            if (request.failures.empty()) { request.failures.push_back({definition->location, self.format_error(parsed)}); }
+            made.clear();
+            return;
+        }
+        for (auto& d : made) { static_cast<generic_instance_decl*>(d.get())->within = request.name; }   // the bounds' own instances
+        for (auto& d : parsed.value()) {
+            if (!d) { continue; }
+            if (d->get_type() == node_type::generic_instance_decl) {
+                static_cast<generic_instance_decl*>(d.get())->within = request.name;
+            } else {
+                stamp_instance(*d, *definition, request.name, simple, request.remade);
+                note_instance_needs(self, decls, *d, *definition, request);
+            }
+            made.push_back(std::move(d));
+        }
+        request.expanded = true;
+        request.file = file;
+        files.push_back(file);
+        note_instance(std::string(request.name), generic, request.arguments);
+        if (definition->kind != detail::generic_kind::class_type && !instance_shapes_.count(definition->stamp)) {
+            auto shape = std::make_shared<detail::generic_definition>(*definition);
+            shape->tokens = {};
+            for (auto& parameter : shape->parameters) { parameter.bound = {}; }
+            instance_shapes_.emplace(definition->stamp, std::move(shape));
+        }
+    }
+
+    // The request a unit only makes again (generic_instance_decl::remade) that `request` is, or was asked for by; null for one
+    // the unit's own text asked for
+    static generic_instance_decl* remade_root(const generic_request_index& requests, generic_instance_decl* request) {
+        for (size_t levels = 0; request && levels <= detail::k_generic_depth_limit; ++levels) {
+            if (request->remade) { return request; }
+            const auto outer = request->within.empty() ? requests.end() : requests.find(request->within);
+            request = outer != requests.end() ? outer->second : nullptr;
+        }
+        return nullptr;
+    }
+    static generic_request_index index_requests(const std::vector<declaration_ptr>& decls) {
+        generic_request_index requests;
+        for (const auto& d : decls) {
+            if (d && d->get_type() == node_type::generic_instance_decl) { requests.emplace(static_cast<generic_instance_decl*>(d.get())->name, static_cast<generic_instance_decl*>(d.get())); }
+        }
+        return requests;
+    }
+    // The unit's own text (at `at`, in the instance `within`) names an instance the unit was only making again: the instance
+    // is the unit's from here, asked for there. True when it was not the unit's already.
+    static bool claim_instance(const generic_request_index& requests, generic_instance_decl& standing, const source_location& at, std::string_view within) {
+        if (!remade_root(requests, &standing)) { return false; }
+        if (const auto asker = requests.find(within); !within.empty() && asker != requests.end() && remade_root(requests, asker->second)) { return false; }
+        standing.remade = false;
+        standing.location = at;
+        standing.within = within;
+        return true;
+    }
+
+    // A unit that declares a generic again makes again every instance of it the engine holds, at that declaration, whatever
+    // the unit's text names (docs/site/guide/21-generics.html "Declaring it again"): each is a request the unit did not write,
+    // flagged remade, made from the unit's definition like any other and declared as that definition's declaration runs (the
+    // linker in class_registry.cpp). An instance is held when a class, a method or a function is declared under its name from
+    // another stamp; a function's and a method's also when that stamp's definition has the shape of the unit's (another shape
+    // is another overload). `kept` are the instances the unit's declarations cannot make: none is asked for again, and a
+    // class the unit declares under a generic class's name adds that generic's instances to them. True when a request was added.
+    bool note_remade_instances(engine& self, std::vector<declaration_ptr>& decls, std::vector<detail::generic_kept_instance>& kept) {
+        if (instances_of_.empty()) { return false; }
+        const auto given_up = [&](const std::string& name) {
+            return std::any_of(kept.begin(), kept.end(), [&](const detail::generic_kept_instance& k) { return k.name == name; });
+        };
+        std::vector<const class_decl*> plain;
+        collect_plain_classes(decls, plain);
+        for (const class_decl* c : plain) {
+            const auto made = instances_of_.find(std::string(c->name));
+            if (made == instances_of_.end()) { continue; }
+            for (const std::string& name : made->second) {
+                const auto held = self.get_class_definition(name);
+                if (!held || held->generic_stamp() == 0 || given_up(name)) { continue; }
+                kept.push_back({name, std::string(c->name), detail::no_type_arguments_text(c->name, detail::plain_type_kind::script_class), c->location});
+            }
+        }
+        std::vector<detail::generic_definition_ptr> declared;
+        collect_generics(decls, declared);
+        bool added = false;
+        for (const auto& definition : declared) {
+            const std::string generic = definition->qualified_name();
+            const auto made = instances_of_.find(generic);
+            if (made == instances_of_.end()) { continue; }
+            for (const std::string& name : made->second) {
+                if (given_up(name)) { continue; }
+                if (std::any_of(decls.begin(), decls.end(), [&](const declaration_ptr& d) {
+                        return d && d->get_type() == node_type::generic_instance_decl && static_cast<const generic_instance_decl&>(*d).name == name; })) { continue; }
+                const std::vector<uint64_t> stamps = detail::declared_instance_stamps(self, name);
+                const bool held = std::any_of(stamps.begin(), stamps.end(), [&](uint64_t stamp) {
+                    if (stamp == definition->stamp) { return false; }
+                    if (definition->kind == detail::generic_kind::class_type) { return true; }
+                    const auto shape = instance_shapes_.find(stamp);
+                    return shape == instance_shapes_.end() || same_generic_shape(*shape->second, *definition);
+                });
+                if (!held) { continue; }
+                const auto [id, interned] = string_symbolizer_.intern_with_view(name);
+                auto request = std::make_shared<generic_instance_decl>(definition->location, interned, id);
+                request->generic = string_symbolizer_.intern_with_view(generic).second;
+                request->arguments = generic_instances_[name].arguments;
+                request->definition = definition;
+                request->remade = true;
+                decls.push_back(std::move(request));   // behind the unit's own requests: an instance the unit's text names is the unit's
+                added = true;
+            }
+        }
+        return added;
+    }
+    // The unit declares again a generic (or declares a class under a generic class's name) the engine holds instances of:
+    // its check has instances to make again or to warn of, whatever a loaded stamp says of its text
+    bool remakes_instances(engine& self, const std::vector<declaration_ptr>& decls) {
+        if (instances_of_.empty()) { return false; }
+        std::vector<declaration_ptr> probe = decls;
+        std::vector<detail::generic_kept_instance> kept;
+        return note_remade_instances(self, probe, kept) || !kept.empty();
+    }
+    // An instance the unit only made again and its declaration cannot make leaves the unit: its request, its declarations and
+    // the instances its text alone asked for. False when the unit's own text names it by now (its errors are the unit's).
+    static bool drop_remade_instance(std::vector<declaration_ptr>& decls, const std::string& name) {
+        const generic_request_index requests = index_requests(decls);
+        const auto held = requests.find(name);
+        if (held == requests.end() || !held->second->remade) { return false; }
+        std::erase_if(decls, [&](const declaration_ptr& d) {
+            if (!d) { return false; }
+            if (d->get_type() == node_type::generic_instance_decl) { return remade_root(requests, static_cast<generic_instance_decl*>(d.get())) == held->second; }
+            const std::string_view made = instance_of(*d);
+            const auto asked = made.empty() ? requests.end() : requests.find(made);
+            return asked != requests.end() && remade_root(requests, asked->second) == held->second;
+        });
+        return true;
+    }
+
+    // Every request of the unit that is not made yet, in order; an instance's own requests follow its request, ahead of its
+    // declarations (a base's instance before the class that derives from it). True when the declarations changed.
+    bool expand_generics(engine& self, std::vector<declaration_ptr>& decls, std::vector<std::string>& files) {
+        bool changed = false;
+        generic_request_index requests;   // every request there is, whatever its place: an instance's chain of askers reads it
+        for (const auto& d : decls) {
+            if (d && d->get_type() == node_type::generic_instance_decl) { requests.emplace(static_cast<generic_instance_decl*>(d.get())->name, static_cast<generic_instance_decl*>(d.get())); }
+        }
+        for (size_t i = 0; i < decls.size(); ++i) {
+            if (!decls[i] || decls[i]->get_type() != node_type::generic_instance_decl) { continue; }
+            auto* request = static_cast<generic_instance_decl*>(decls[i].get());
+            if (generic_instance_decl* standing = requests.emplace(request->name, request).first->second; standing != request) {   // the unit asks for an instance once: the earliest request stands
+                claim_instance(requests, *standing, request->location, request->within);
+                decls.erase(decls.begin() + static_cast<std::ptrdiff_t>(i--));
+                changed = true;
+                continue;
+            }
+            if (request->expanded || (!request->failures.empty() && !request->unresolved)) {
+                if (request->expanded && !generic_instances_.count(std::string(request->name))) {
+                    note_instance(std::string(request->name), std::string(request->generic), request->arguments);   // a loaded unit's
+                }
+                continue;
+            }
+            request->failures.clear();
+            request->bounds.clear();
+            request->unresolved = false;
+            std::vector<declaration_ptr> made;
+            instantiate_generic(self, decls, requests, *request, made, files);
+            decls.insert(decls.begin() + static_cast<std::ptrdiff_t>(i) + 1, made.begin(), made.end());
+            changed = true;
+        }
+        // the unit's requests and instances stand ahead of its own declarations, in the order asked: running them is the unit
+        // offering its instances as it starts (the linker in class_registry.cpp declares each when all it is built on is)
+        const auto instance_node = [](const declaration_ptr& d) { return d && (d->get_type() == node_type::generic_instance_decl || !instance_of(*d).empty()); };
+        if (!std::is_partitioned(decls.begin(), decls.end(), instance_node)) {
+            std::stable_partition(decls.begin(), decls.end(), instance_node);
+            changed = true;
+        }
+        return changed;
+    }
+
+    static std::string_view instance_of_impl(const declaration& d) {
+        switch (d.get_type()) {
+            case node_type::class_decl: {
+                const auto& c = static_cast<const class_decl&>(d);
+                if (c.instance_stamp != 0) { return c.name; }
+                if (!c.method_instances) { return {}; }
+                for (const auto& m : c.members) {
+                    if (m.declaration && m.declaration->get_type() == node_type::function_decl) { return static_cast<const function_decl&>(*m.declaration).instance_name; }
+                }
+                return {};
+            }
+            case node_type::function_decl: {
+                const auto& f = static_cast<const function_decl&>(d);
+                return f.instance_stamp != 0 ? f.instance_name : std::string_view();
+            }
+            case node_type::namespace_decl:
+                for (const auto& member : static_cast<const namespace_decl&>(d).declarations) {
+                    if (!member) { continue; }
+                    if (const std::string_view found = instance_of_impl(*member); !found.empty()) { return found; }
+                }
+                return {};
+            default:
+                return {};
+        }
+    }
+    // An instance a check found the unit to need: a request among the unit's others. No place is computed for it: the unit
+    // offers every instance as it starts, and the linker declares each the moment all it is built on is declared.
+    bool request_instance(std::vector<declaration_ptr>& decls, detail::generic_request& asked) {
+        for (const auto& d : decls) {
+            if (d && d->get_type() == node_type::generic_instance_decl && static_cast<const generic_instance_decl*>(d.get())->name == asked.name) {
+                const std::string_view within = asked.within.empty() ? std::string_view() : string_symbolizer_.intern_with_view(asked.within).second;
+                return claim_instance(index_requests(decls), static_cast<generic_instance_decl&>(*d), asked.at, within);
+            }
+        }
+        const auto [id, name] = string_symbolizer_.intern_with_view(asked.name);
+        auto request = std::make_shared<generic_instance_decl>(asked.at, name, id);
+        request->generic = string_symbolizer_.intern_with_view(asked.generic).second;
+        request->arguments = std::move(asked.arguments);
+        if (!asked.within.empty()) { request->within = string_symbolizer_.intern_with_view(asked.within).second; }
+        request->definition = std::move(asked.definition);
+        decls.insert(decls.begin(), std::move(request));
+        return true;
+    }
+
+    // A unit's check with its generics: the instances its text names are declared, then each check's requests (a call's given or
+    // deduced type arguments, a generic method's receiver), until a check asks for nothing new. `view` answers what to check:
+    // the declarations, with a reload hook after them.
+    template <typename View>
+    check_report check_expanding(engine& self, std::vector<declaration_ptr>& declarations, View&& view, detail::check_options o,
+                                 std::vector<std::string>& files, bool& changed, const std::vector<std::string>* extra_globals = nullptr) {
+        changed = expand_generics(self, declarations, files);
+        std::vector<detail::generic_kept_instance> kept;   // what the unit's declarations cannot make again: the check warns of each
+        const auto remake = [&] {   // a class made again declares its generic methods again: until nothing more is held
+            while (note_remade_instances(self, declarations, kept)) {
+                expand_generics(self, declarations, files);
+                changed = true;
+            }
+        };
+        remake();
+        o.kept_instances = &kept;
+        for (int round = 0;; ++round) {
+            std::vector<detail::generic_request> asked;
+            std::vector<detail::generic_kept_instance> failed;
+            o.generic_requests = &asked;
+            o.remade_failures = &failed;
+            ++check_walks_;
+            check_report report = detail::run_static_check(self, view(), extra_globals, o);
+            bool moved = false;
+            if (round < 1024) { for (auto& request : asked) { moved = request_instance(declarations, request) || moved; } }
+            for (auto& failure : failed) {   // the first error in each: the instance leaves the unit and keeps the declaration it has
+                if (!drop_remade_instance(declarations, failure.name)) { continue; }
+                kept.push_back(std::move(failure));
+                moved = true;
+            }
+            if (!moved) { return report; }
+            expand_generics(self, declarations, files);
+            remake();
+            changed = true;
+        }
+    }
+    // the files an entry's instances were made from stand beside its spliced includes: a change re-parses the entry
+    void stamp_generic_files(script_cache_entry& entry, const std::vector<std::string>& files) {
+        for (const auto& f : files) {
+            if (f != entry.source_path) { entry.outside_generics = true; }
+            if (f.empty() || f == "<script>") { continue; }
+            if (f == entry.source_path || std::any_of(entry.spliced_stamps.begin(), entry.spliced_stamps.end(), [&](const closure_stamp& s) { return s.path == f; })) { continue; }
+            closure_stamp s{f, 0, 0};
+            (void)stat_mtime_size(f, s.mtime, s.size);
+            entry.spliced_stamps.push_back(std::move(s));
+        }
+    }
+
     struct closure_unit {
         std::string path;   // resolved spelling: the key the unit later executes under
         std::string source;
@@ -1456,13 +2122,18 @@ struct engine::implementation {
         const uint64_t want_proof_epoch = type_proofs_ ? check_surface_epoch_ : UINT64_MAX;
         // a moved union re-derives a failing verdict (the names it lacked may be there now); a clean one breaking is a reload's
         // dependents check (check_group), and a gather re-derives its root
-        const bool need_check = want_diagnostics && (!entry.checked || entry.checked_epoch != check_surface_epoch_ ||
+        // a unit that declares a generic again is checked against the instances the engine holds as it starts to run, which may
+        // be more than its last check saw (a unit that ran since made one): it makes each again (note_remade_instances)
+        const bool remakes = want_diagnostics && remakes_instances(self, entry.declarations);
+        const bool need_check = want_diagnostics && (!entry.checked || entry.checked_epoch != check_surface_epoch_ || remakes ||
                                                      (entry.checked_union != program_union_epoch_ && entry.check_result.has_errors()));
         const bool need_proofs = entry.proof_epoch != want_proof_epoch || !entry.autos_typed ||
                                  (lowering_on() && !entry.lowering.built) || entry.lowering.lowered_view != lowering_on();
-        if (need_check && entry.stamp_loaded && outside_key(self, entry.context.outside) == entry.context.outside_key) {
+        if (need_check && entry.stamp_loaded && !remakes && outside_key(self, entry.context.outside) == entry.context.outside_key) {
             entry.check_result = {};   // the loaded stamp's names resolve here as where it was checked
             entry.outside_keyed = true;
+            std::vector<std::string> generic_files;
+            expand_generics(self, entry.declarations, generic_files);   // a cached unit holds its instances: the engine learns what each was made from
         } else if (need_check) {   // the diagnostics walk leaves the proofs alone: the proof pass follows, and it alone reads the program's globals
             detail::set_aggregate_view(entry.lowering, false);   // diagnostics read the parsed bodies
             detail::check_options o = program_check_options(detail::check_options::proofs_t::leave);
@@ -1471,8 +2142,25 @@ struct engine::implementation {
             const bool first = jaibite_cache_enabled && entry.source_path != "<script>" && !entry.context_recorded;
             std::vector<std::string> outside;
             if (first) { o.outside = &outside; }
-            ++check_walks_;
-            entry.check_result = detail::run_static_check(self, checked_declarations(entry), nullptr, o);
+            std::vector<std::string> generic_files;
+            bool expanded = false;
+            entry.check_result = check_expanding(self, entry.declarations, [&]() -> const std::vector<declaration_ptr>& {
+                if (entry.reload_hook) {
+                    entry.check_declarations = entry.declarations;
+                    entry.check_declarations.push_back(entry.reload_hook);
+                }
+                return checked_declarations(entry);
+            }, o, generic_files, expanded);
+            if (expanded) {   // the unit declares its instances now: what was built from its declarations is built again
+                entry.compiled.reset();
+                if (entry.lowering.built) { entry.lowering = detail::aggregate_lowering_state{}; }
+                stamp_generic_files(entry, generic_files);
+                if (std::any_of(entry.declarations.begin(), entry.declarations.end(), [](const declaration_ptr& d) {
+                        return d && d->get_type() == node_type::generic_instance_decl && static_cast<const generic_instance_decl&>(*d).remade; })) {
+                    entry.outside_generics = true;
+                }
+                if (pooled_unit_keys_.count(entry.source_path) && detail::collect_unit_classes(entry.declarations, program_classes_)) { ++program_union_epoch_; }
+            }
             if (first) {
                 entry.restamp = entry.stamp_loaded || (entry.cache_unstamped && !entry.check_result.has_errors());
                 entry.outside_keyed = !entry.check_result.has_errors();
@@ -1564,7 +2252,7 @@ struct engine::implementation {
                 for (const auto& d : r.diagnostics) {
                     entry.closure_diags.push_back({d.severity, 0, 0,
                         (d.file.empty() ? unit.path : d.file) + ":" + std::to_string(d.line) + ":" + std::to_string(d.column) + ": " + d.message,
-                        d.related_line, d.related_column});
+                        d.related_line, d.related_column, {}, d.notes});
                 }
             }
         } else {
@@ -1732,10 +2420,11 @@ struct engine::implementation {
         std::unordered_map<std::string, std::unordered_map<std::string, uint64_t>> name_units;
         std::unordered_map<std::string, uint64_t> unit_keys;
         std::unordered_map<std::string, std::vector<declaration_ptr>> unit_declarations;
+        std::unordered_map<std::string, std::vector<detail::generic_definition_ptr>> generics;
     };
     program_pools save_program_pools() const {
         return {program_names_, program_classes_, program_enums_, program_functions_, program_globals_, program_name_units_, pooled_unit_keys_,
-                pooled_unit_declarations_};
+                pooled_unit_declarations_, generics_};
     }
     void restore_program_pools(program_pools&& saved) {
         ++program_union_epoch_;
@@ -1748,6 +2437,8 @@ struct engine::implementation {
         program_enums_ = std::move(saved.enums);
         program_functions_ = std::move(saved.functions);
         program_globals_ = std::move(saved.globals);
+        generics_ = std::move(saved.generics);
+        index_pooled_namespace_generics();
     }
 
     // A unit's run. A re-run of a unit whose source declares a reload hook snapshots the unit's program-scope variables first and
@@ -1882,6 +2573,7 @@ struct engine::implementation {
     bool namespace_class_known(std::string_view query) const {
         const size_t cut = query.rfind("::");
         if (cut == std::string_view::npos ? pooled_namespace_classes_.count(std::string(query)) != 0 : program_classes_.count(std::string(query)) != 0) { return true; }
+        if (pooled_namespace_generics_.count(std::string(query)) != 0) { return true; }   // a generic class is a class of its namespace
         const auto name = string_symbolizer_.find(cut == std::string_view::npos ? query : query.substr(cut + 2));
         if (!name) { return false; }
         const auto declares = [&](const std::shared_ptr<script_namespace_data>& space) { return space && space->classes.count(*name) != 0; };
@@ -2807,6 +3499,7 @@ checked_result<void> host_reference_store(engine* eng, const host_slot& slot, sc
 engine::engine() : impl(std::make_unique<implementation>()) {
     assert(detail::object_ref::layout_holds() && "object_ref reads a shared_ptr as (stored pointer, control block)");
     impl->global_environment_->bind_engine(this);
+    impl->global_environment_->explain_undefined([this](uint64_t id) { return detail::undeclared_instance_text(*this, id); });
 }
 
 bool engine_loading(const engine* a_engine) {
@@ -3658,6 +4351,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         const auto parsed = cached;
         const check_report& rep = impl->checked_report(*this, cached, scriptContent);
         if (cached != parsed && !cacheFile.empty()) { cacheFresh = impl->cache_holds(*cached, cacheFile, scriptContent); }   // the gather parsed the root again
+        for (const auto& s : cached->spliced_stamps) { impl->note_closure_file(s.path, true, s.mtime, s.size); }   // the generics its instances were made from
         // a unit from a file (the root file, an include, an import) lists under its path
         const std::string_view listing_name = sourcePath.empty() ? std::string_view("<script>") : std::string_view(sourcePath);
         if (instanceVars.empty()) {
@@ -3672,7 +4366,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         // Rewrite a missing/stale/rejected cache AFTER the check hook so a clean check
         // stamps checked_clean, and BEFORE execution on purpose: a runtime error doesn't
         // invalidate a good parse.
-        if (!cacheFile.empty() && (!cacheFresh || cached->restamp) && cached->spliced_stamps.empty()) {   // a unit with spliced includes keeps no cache: its freshness knows only its own file
+        if (!cacheFile.empty() && (!cacheFresh || cached->restamp) && cached->spliced_stamps.empty() && !cached->outside_generics) {   // a unit with spliced includes keeps no cache: its freshness knows only its own file
             impl->write_jaibite_cache(*this, cacheFile, *cached, sourcePath, scriptContent);
         }
 
@@ -3691,6 +4385,7 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
                                     std::shared_ptr<void>& compiled_slot,
                                     const instance_variables* instanceVars, uint32_t unit, bool textual) {
     ++impl->definition_epoch_;   // a run may (re)define anything a cached cross-function proof relied on
+    impl->register_generics(declarations, impl->unit_file(declarations));   // a later unit instantiates what this one declares
     // after a nested run the ambient re-aligns with the frame that resumes (the run may have made the first shadow under it)
     struct unit_scope { string_symbolizer& s; unit_stamp prev; execution_backend* be; ~unit_scope() { s.set_current_unit(prev); if (be) { be->sync_unit(); } } } unitScope{ impl->string_symbolizer_, impl->string_symbolizer_.current_unit(), backend() };
     if (!textual) {   // an include runs under the including unit
@@ -3698,6 +4393,11 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
         impl->unit_first_run_.emplace(stamp.id, stamp.seq);
         impl->string_symbolizer_.set_current_unit(stamp);
     }
+    struct running_scope {
+        std::vector<const std::vector<declaration_ptr>*>& running;
+        ~running_scope() { running.pop_back(); }
+    } running{impl->running_declarations_};
+    impl->running_declarations_.push_back(&declarations);
     try {
         execution_backend* be = backend();
         const bool nested = be->is_executing();
@@ -3767,14 +4467,15 @@ jai::jaibite engine::jaibite(const std::string& scriptContent) {
 // whenever the switch or the surface epoch moved. Source is only available at creation time (loaded
 // bites format their listing without snippets).
 void engine::check_bite(jai::jaibite& bite, const std::string* source) {
-    if (bite.stamp_loaded_ && impl->outside_key(*this, bite.context_.outside) == bite.context_.outside_key) {
+    const bool remakes = impl->remakes_instances(*this, bite.declarations_);   // as for a unit's entry (check_entry)
+    if (bite.stamp_loaded_ && !remakes && impl->outside_key(*this, bite.context_.outside) == bite.context_.outside_key) {
         bite.check_state_ = jaibite::check_state::clean;   // the names the stamp resolved resolve here as where it was checked
     }
     bite.stamp_loaded_ = false;
     if (!bite.lowering_) { bite.lowering_ = std::make_shared<detail::aggregate_lowering_state>(); }
     auto& lowering = *std::static_pointer_cast<detail::aggregate_lowering_state>(bite.lowering_);
     const uint64_t want_proof_epoch = impl->type_proofs_ ? impl->check_surface_epoch_ : UINT64_MAX;
-    const bool need_check = bite.check_state_ == jaibite::check_state::unchecked;
+    const bool need_check = bite.check_state_ == jaibite::check_state::unchecked || remakes;
     const bool need_proofs = bite.proof_epoch_ != want_proof_epoch || !bite.autos_typed_ ||
                              (impl->lowering_on() && !lowering.built) || lowering.lowered_view != impl->lowering_on();
     if (need_check) { detail::set_aggregate_view(lowering, false); }   // diagnostics read the parsed bodies
@@ -3793,7 +4494,15 @@ void engine::check_bite(jai::jaibite& bite, const std::string* source) {
         std::vector<std::string> outside;
         const bool record = need_check && !bite.context_recorded_;
         if (record) { o.outside = &outside; }
-        check_report r = detail::run_static_check(*this, bite.declarations_, nullptr, o);
+        check_report r;
+        if (need_check) {   // the bite declares the instances its text needs (detail/generics.hpp)
+            std::vector<std::string> generic_files;
+            bool expanded = false;
+            r = impl->check_expanding(*this, bite.declarations_, [&]() -> const std::vector<declaration_ptr>& { return bite.declarations_; }, o, generic_files, expanded);
+            if (expanded) { bite.compiled_.reset(); }
+        } else {
+            r = detail::run_static_check(*this, bite.declarations_, nullptr, o);
+        }
         if (need_check) {
             bite.check_report_ = std::move(r);
             bite.check_state_ = bite.check_report_.has_errors()
@@ -4458,6 +5167,48 @@ uint8_t engine::type_argument_result(const std::string& callable) const {
     return found != impl->type_result_callables_.end() ? found->second : 0;
 }
 
+std::shared_ptr<void> engine::instance_owner(const class_decl* a_declaration) const {
+    const std::function<bool(const declaration&)> holds = [&](const declaration& d) {
+        if (&d == a_declaration) { return true; }
+        if (d.get_type() != node_type::namespace_decl) { return false; }
+        for (const auto& member : static_cast<const namespace_decl&>(d).declarations) { if (member && holds(*member)) { return true; } }
+        return false;
+    };
+    for (size_t i = impl->running_declarations_.size(); i-- > 0;) {
+        for (const auto& d : *impl->running_declarations_[i]) { if (d && holds(*d)) { return d; } }
+    }
+    return nullptr;
+}
+
+const std::vector<detail::generic_definition_ptr>* engine::find_generics(const std::string& qualified) const {
+    const auto held = impl->generics_.find(qualified);
+    return held != impl->generics_.end() && !held->second.empty() ? &held->second : nullptr;
+}
+
+bool engine::generic_instance(const std::string& name, std::string& generic, std::vector<type_info_ptr>& arguments) const {
+    auto made = impl->generic_instances_.find(name);
+    if (made == impl->generic_instances_.end() && name.find_first_of("<, \t\r\n") != std::string::npos) {   // a name that arrived as text: the instance of its key
+        const std::string key = detail::type_name_key(name);
+        made = std::find_if(impl->generic_instances_.begin(), impl->generic_instances_.end(), [&](const auto& held) { return detail::type_name_key(held.first) == key; });
+    }
+    if (made == impl->generic_instances_.end()) { return false; }
+    generic = made->second.generic;
+    arguments = made->second.arguments;
+    return true;
+}
+
+bool engine::declares_generics() const { return !impl->generics_.empty(); }
+
+bool engine::names_generic_method(const std::string& name) const { return impl->generic_method_names_.count(name) != 0; }
+
+check_report engine::check_expanding(std::vector<declaration_ptr>& declarations, detail::check_options options, const std::vector<std::string>* extra_globals) {
+    std::vector<std::string> files;
+    bool expanded = false;
+    return impl->check_expanding(*this, declarations, [&]() -> const std::vector<declaration_ptr>& { return declarations; }, std::move(options), files, expanded, extra_globals);
+}
+
+void engine::register_generics(const std::vector<declaration_ptr>& declarations, const std::string& file) { impl->register_generics(declarations, file); }
+
 void engine::serial_namespace(const std::string& space) { impl->serial_namespaces_.insert(space); }
 
 bool engine::host_function_serial(const std::string& name) const {
@@ -4751,6 +5502,8 @@ std::unordered_set<std::string> engine::get_registered_template_types() const {
     return impl->registeredTemplateTypes;
 }
 
+bool engine::is_template_type(const std::string& baseTemplateName) const { return impl->registeredTemplateTypes.count(baseTemplateName) != 0; }
+
 // Single source of backend configuration: every backend, however installed (construction,
 // set_backend by type, or injected instance), gets the full engine wiring.
 void engine::wire_backend() {
@@ -4949,6 +5702,10 @@ error_text no_constructor_text(const engine* eng, const type_info& type) {
         if (const std::string unbound = unbound_instantiation_text(*eng, type.type_name); !unbound.empty()) {
             if (const uint64_t id = engine_access::park_error_text(*eng, unbound)) { return {"{0}", id}; }
         }
+    }
+    // a generic's instance that still waits says what for (environment::undefined_text)
+    if (const auto global = engine_access::get_global_environment(eng)) {
+        if (const std::string_view reason = global->undefined_text(type.id, {}); !reason.empty()) { return {reason, type.id}; }
     }
     return {"No constructor found for class '{0}'", type.id};
 }
@@ -5412,6 +6169,30 @@ type_info* engine::get_type_info_by_name(const std::string& canonical_name) {
     // Intern the name to get the ID, then do ID-based lookup
     uint64_t type_id = impl->string_symbolizer_.intern(canonical_name);
     return get_type_info_by_id(type_id);
+}
+
+type_info* engine::type_named(std::string_view canonical_name) {
+    if (canonical_name.empty()) { return nullptr; }
+    if (canonical_name == "any" || canonical_name == "var") { return get_type_info_any(); }
+    if (canonical_name == "function") { return get_type_info_untyped_function(); }
+    if (const auto known = impl->string_symbolizer_.find(canonical_name)) {   // a type the engine already holds by this name
+        if (type_info* held = get_type_info_by_id(*known)) { return held; }
+    }
+    std::string_view base;
+    std::vector<std::string_view> arguments;
+    if (template_name_arguments(canonical_name, base, arguments)) {
+        const bool handle = base == "shared_ptr", observer = base == "weak_ptr";
+        if (base == "function") { return nullptr; }
+        if (base == "array" || base == "map" || handle || observer) {
+            if (arguments.size() != (base == "map" ? 2u : 1u)) { return nullptr; }
+            type_info* first = type_named(arguments[0]);
+            type_info* second = base == "map" ? type_named(arguments[1]) : nullptr;
+            if (!first || (base == "map" && !second)) { return nullptr; }
+            return base == "array" ? get_type_info_array(first) : base == "map" ? get_type_info_map(first, second)
+                 : handle ? get_type_info_shared_ptr(first) : get_type_info_weak_ptr(first);
+        }
+    }
+    return get_type_info_object(std::string(canonical_name));
 }
 
 void engine::set_conversion_registry(std::shared_ptr<conversions::conversion_registry> registry) {

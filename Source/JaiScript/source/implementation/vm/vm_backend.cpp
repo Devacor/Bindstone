@@ -1,5 +1,6 @@
 #include <jaiscript/detail/structural_ordering.hpp>
 #include <jaiscript/detail/float_text.hpp>
+#include <jaiscript/detail/generics.hpp>
 #include <jaiscript/detail/uniquely_held.hpp>
 #include <jaiscript/detail/release_machine.hpp>
 #include <bit>
@@ -13938,7 +13939,8 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 		func_decl_ptr->unit = decl_unit;
 		uint64_t coroutine_type_id = coroutine_handle_type_id_;
 		script_value functionValue = script_value::make_function(coroutine_mint{eng, coroutine_type_id, func_decl_ptr, closure_env}, engine_);
-		environment_->define(proto.decl->name_id, functionValue);
+		auto declared = detail::declare_script_function(*engine_, *proto.decl, environment_, nullptr, std::move(functionValue));
+		if (!declared) { return raise_from(declared); }
 		return {};
 	}
 
@@ -13949,15 +13951,15 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 	proto.fn->declared = true;
 	proto.fn->line = proto.decl->location.line;
 	proto.fn->context = engine_->host_entry_generation();
+	proto.fn->generic_stamp = proto.decl->instance_stamp;
 	payload.fn = proto.fn;
 	script_value functionValue = script_value::make_function(
 		script_function(script_callable_thunk{eng, std::move(payload)}), engine_);
 
-	// alone, or in the overload set of its name (KEEP BYTE-PARALLEL with interpreter::visit_function_decl)
-	auto declared = detail::declare_function_overload(*environment_, proto.decl->name_id, proto.fn, std::move(functionValue), engine_, proto.decl->is_override);
+	// alone, or in the overload set of its name; a generic's instance once its generic is declared (KEEP BYTE-PARALLEL with
+	// interpreter::visit_function_decl)
+	auto declared = detail::declare_script_function(*engine_, *proto.decl, environment_, proto.fn, std::move(functionValue));
 	if (!declared) { return raise_from(declared); }
-	environment_->define(proto.decl->name_id, std::move(declared.value()));
-	engine_->bump_definition_epoch();
 	return {};
 }
 
@@ -14543,7 +14545,7 @@ JAI_NOINLINE void vm_backend::raise_script_exception(const std::string& message,
 }
 
 JAI_NOINLINE void vm_backend::raise_no_member(std::string_view kind, std::string_view member, const source_location& location) {
-	raise_script_exception(no_member_text(kind, member), location);
+	raise_script_exception(no_member_text(engine_, kind, member), location);
 	detail::engine_access::set_exception_kind(*current_exception_, error_kind::no_member);
 }
 
@@ -18670,6 +18672,7 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 
 			func_decl->unit = current_unit();
 			func_decl->context = engine_->host_entry_generation();
+			if (detail::namespace_function_waits(*engine_, ns_data, decl->name_id, *func_decl)) { continue; }   // a generic's instance, until its generic is declared
 			auto& overloads = ns_data->functions[func_decl->name_id];
 			std::string admission_error;
 			const auto admission = detail::admit_namespace_function(overloads, *func_decl, engine_->unit_rerun(func_decl->unit), admission_error);
@@ -18681,6 +18684,7 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 			if (admission == detail::namespace_admission::reference_only) {
 				return raise_(make_error_code(runtime_error_code::type_mismatch), "{0}", symbolizer_->intern(admission_error));
 			}
+			if (admission == detail::namespace_admission::present) { continue; }   // a generic's instance, already defined
 
 			if (!func_decl->is_override) {
 				auto [class_var_id, class_var_name] = symbolizer_->get_class_var_id_with_view(decl->name_id);
@@ -18727,6 +18731,11 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 			}
 			detail::register_namespace_class(*engine_, *ns_data, *class_decl_ptr);
 
+		} else if (member_decl->get_type() == node_type::generic_decl) {
+			// a generic class's declaration runs its marker (KEEP BYTE-PARALLEL with the interpreter)
+			if (const auto marker = detail::generic_marker(*static_cast<generic_decl*>(member_decl.get()), *symbolizer_)) { VM_TRY(exec_class_decl_node(marker.get())); }
+		} else if (member_decl->get_type() == node_type::generic_instance_decl) {
+			// an instance's request runs nothing (KEEP BYTE-PARALLEL with the interpreter)
 		} else {
 			arm_listing();
 			auto compiled = compiler_.compile_standalone_declaration(member_decl);

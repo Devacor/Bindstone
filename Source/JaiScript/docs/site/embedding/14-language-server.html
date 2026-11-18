@@ -82,6 +82,11 @@ import order (<a href="../guide/13-strict-checking.html#across-files">Across fil
 view it has when its program runs. From the workspace's import graph it walks up from the file to the roots (files
 nothing imports) and checks the file against every unit those roots reach. A file two programs share sees both; a file
 nothing imports is its own root.</p>
+<p>A <a href="../guide/21-generics.html">generic</a> any unit of the program declares is known to all of them: a file that
+names <code>Stack&lt;int&gt;</code> or calls <code>largest(xs)</code> is checked with those instances declared, as the engine checks it, and an
+error inside an instance is listed at the generic with its <code>instantiated at</code> note. Hover, completion and navigation
+read a file&#x27;s own declarations; inside a generic&#x27;s body, which is kept as its tokens until it is instantiated, they offer
+nothing yet.</p>
 <p>Paths resolve as the engine resolves them: the importing file's folder, then the configured include paths, then the
 working directory, which the server sets to the first workspace folder. An open file is read from the editor, unsaved
 changes included; every other file from disk, re-read when it changes.</p>

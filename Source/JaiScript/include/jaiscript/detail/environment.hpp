@@ -107,6 +107,10 @@ namespace jai {
         // A plain extern names a global some unit or the host defines; a lookup that finds nothing says so
         void note_extern(uint64_t id, bool function);
         std::string_view undefined_text(uint64_t id, std::string_view otherwise = "Undefined variable '{0}'") const;
+        // Root only: what says why a name that is not defined is not defined yet, as its error's whole text in permanent storage
+        // (empty: nothing to say). undefined_text asks it after the externs: a generic's instance that still waits answers
+        // (detail::undeclared_instance_text).
+        void explain_undefined(std::function<std::string_view(uint64_t)> a_reason);
         std::pair<std::string_view, uint64_t> unknown_name_error(std::string_view name) const;
 
         // Get a variable value (searches parent scopes, then this/static fields based on kind)
@@ -354,6 +358,7 @@ namespace jai {
             std::unordered_map<uint64_t, unit_stamp> unit_of;
             std::unordered_map<uint64_t, std::vector<uint32_t>> inline_cells;   // an inline cell's declaring units
             std::unordered_map<uint64_t, bool> extern_names;   // plain externs (true = function)
+            std::function<std::string_view(uint64_t)> undefined_reason;   // explain_undefined
         };
         std::unique_ptr<root_tables> root_;
         root_tables& root_tables_mut();
@@ -705,6 +710,7 @@ struct call_frame {
         size_t line = 0;   // the declaration's line (an overload's diagnostics name it)
         uint64_t context = 0;   // the host entry that declared it (engine::host_entry_generation)
         std::string_view saved_source;   // a lambda's lambda_expr::saved_source (connect_source saves it)
+        uint64_t generic_stamp = 0;   // a generic's instance: function_decl::instance_stamp (detail::declare_function_overload)
         std::shared_ptr<const function_decl> decl;   // the vm's mint pins its declaration, so the inliner's stamps on it resolve while the function lives (the interpreter's decl already owns its mint)
         // A converted closure (internal/closure_conversion_design.md): closure_env is null, backend_body_cache is the chunk compiled
         // with a slot per captured name, and captures holds each name's cell in capture_ids' order (body stays the lambda's own)

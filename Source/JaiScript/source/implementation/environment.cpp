@@ -804,8 +804,15 @@ std::string_view environment::undefined_text(uint64_t id, std::string_view other
             return it->second ? "'{0}' is declared extern but never defined"
                               : "'{0}' is declared extern but never defined (an 'inline' declaration creates it)";
         }
+        if (root->root_->undefined_reason) {
+            if (const std::string_view reason = root->root_->undefined_reason(id); !reason.empty()) { return reason; }
+        }
     }
     return otherwise;
+}
+
+void environment::explain_undefined(std::function<std::string_view(uint64_t)> a_reason) {
+    root_tables_mut().undefined_reason = std::move(a_reason);
 }
 
 bool environment::define_variable(uint64_t id, const script_value& value) {

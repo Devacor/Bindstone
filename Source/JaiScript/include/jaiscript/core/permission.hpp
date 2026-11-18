@@ -103,15 +103,50 @@ inline constexpr nodiscard_option nodiscard{};
 inline constexpr serial_option serial{};
 inline constexpr exclude_execution_time_option exclude_execution_time{};
 
-// What a call with type arguments answers, in terms of its first type argument T (docs/site/embedding/17-host-api.html "Type
-// arguments"): T itself, array<T> or shared_ptr<T>. The checker types the call so (auto rows = db.query<User>(...) is an
-// array<User>); the host returns a value of that type.
+// What a call with type arguments answers, in terms of its type arguments (docs/site/embedding/17-host-api.html "Type
+// arguments"): jai::returns<jai::T> is the first type argument itself, jai::returns<jai::array_of<jai::T>> an array of it,
+// jai::returns<jai::shared_ptr_of<jai::T>> a shared_ptr to it. The checker types the call so (auto rows = db.query<User>(...)
+// is an array<User>); the host returns a value of that type.
+struct T {};   // the call's first type argument
+template<typename Element>
+struct array_of {};
+template<typename Pointee>
+struct shared_ptr_of {};
+
 struct type_result_option {
     std::uint8_t shape = 0;
 };
-inline constexpr type_result_option returns_type_argument{1};
-inline constexpr type_result_option returns_array_of_type_argument{2};
-inline constexpr type_result_option returns_shared_ptr_of_type_argument{3};
+
+namespace detail {
+    // A result shape the checker knows how to build: a new shape (a map_of, a second placeholder) is one more specialization
+    // and its case in the checker's type_argument_result
+    template<typename Shape>
+    struct type_result_shape {
+        static constexpr std::uint8_t value = 0;
+    };
+    template<>
+    struct type_result_shape<T> {
+        static constexpr std::uint8_t value = 1;
+    };
+    template<>
+    struct type_result_shape<array_of<T>> {
+        static constexpr std::uint8_t value = 2;
+    };
+    template<>
+    struct type_result_shape<shared_ptr_of<T>> {
+        static constexpr std::uint8_t value = 3;
+    };
+
+    template<typename Shape>
+    constexpr type_result_option make_type_result() {
+        static_assert(type_result_shape<Shape>::value != 0,
+            "jai::returns<Shape>: Shape is jai::T, jai::array_of<jai::T> or jai::shared_ptr_of<jai::T>");
+        return type_result_option{type_result_shape<Shape>::value};
+    }
+}
+
+template<typename Shape>
+inline constexpr type_result_option returns = detail::make_type_result<Shape>();
 
 // What the trailing options of add_function, add_variadic_function and a binder's method, static_method and constructor add up
 // to: any number, in any order, as in add_function("save", fn, jai::nodiscard, jai::serial, GamePermission::cheats)

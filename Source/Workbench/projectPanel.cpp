@@ -116,9 +116,30 @@ namespace Workbench {
 		}
 	}
 
-	void ProjectPanel::update(double) {
+	// The names in the folder shown, to tell when something outside the editor changes it.
+	std::string ProjectPanel::folderListing() const {
+		std::string result;
+		std::error_code failed;
+		for (auto&& entry : fs::directory_iterator(currentFolder, failed)) {
+			result += entry.path().filename().string();
+			result += '\n';
+		}
+		return result;
+	}
+
+	void ProjectPanel::update(double a_dt) {
 		if (!footerHost || !contentNode) {
 			return;
+		}
+		listingWait += a_dt;
+		if (rebuildWanted && !renaming()) {
+			rebuildWanted = false;
+			rebuildTiles();
+		} else if (listingWait >= 0.5 && !renaming()) {
+			listingWait = 0.0;
+			if (folderListing() != shownListing) {
+				refresh();
+			}
 		}
 		// The dock wheel-scrolls the whole content node; counter-scroll to pin the footer.
 		float offset = scrolled();
@@ -199,6 +220,48 @@ namespace Workbench {
 				dropAreaMark->attach<MV::Scene::Sprite>()->bounds(side)->color(theme->accent());
 			}
 		}
+	}
+
+	std::optional<fs::path> ProjectPanel::entryAt(const MV::Point<int>& a_screenPoint) const {
+		for (auto&& entry : shownEntries) {
+			auto node = entry.node.lock();
+			if (node && node->screenFromLocal(node->bounds(false)).contains(a_screenPoint)) {
+				return entry.path;
+			}
+		}
+		return std::nullopt;
+	}
+
+	bool ProjectPanel::beginRename(const fs::path& a_entry) {
+		for (auto&& entry : shownEntries) {
+			auto node = entry.node.lock();
+			auto caption = entry.caption.lock();
+			if (!node || !caption || entry.path != a_entry) {
+				continue;
+			}
+			caption->hide();
+			const fs::path target = entry.path;
+			const std::string extension = entry.folder ? std::string() : target.extension().string();
+			auto field = makeTextField(node, *services, *theme, *focus, "rename", MV::size(entry.captionSize.width, theme->fieldHeight), entry.folder ? target.filename().string() : target.stem().string(), [this, target, extension](const std::string& a_typed) {
+				rebuildWanted = true;
+				if (onRename && !a_typed.empty() && a_typed + extension != target.filename().string()) {
+					onRename(target, a_typed + extension);
+				}
+			}, true);
+			auto box = field->owner()->parent();
+			box->position(caption->position());
+			renameField = field;
+			if (auto clickable = box->component<MV::Scene::Clickable>(false, false)) {
+				// leaving the field without Enter puts the caption back
+				clickable->onFocusLeave.connect("endRename", [this](const std::shared_ptr<MV::Scene::Clickable>&) {
+					rebuildWanted = true;
+					renameField.reset();
+				});
+				clickable->focus();
+			}
+			return true;
+		}
+		return false;
 	}
 
 	MV::Point<int> ProjectPanel::tileAreaScreenPoint() const {
@@ -303,6 +366,8 @@ namespace Workbench {
 		}
 		tileHost->clear();
 		shownEntries.clear();
+		renameField.reset();
+		shownListing = folderListing();
 		if (dropAreaMark) {
 			dropAreaMark->removeFromParent();
 			dropAreaMark.reset();
@@ -356,7 +421,7 @@ namespace Workbench {
 					dropMark->attach<MV::Scene::Sprite>()->bounds(MV::size(rowWidth, theme->rowHeight))->color(theme->dropHint());
 					dropMark->hide();
 				}
-				shownEntries.push_back({ entry, isFolder, row, dropMark });
+				shownEntries.push_back({ entry, isFolder, row, dropMark, label->owner(), MV::size(rowWidth - iconSize - theme->pad * 2.0f, theme->rowHeight) });
 
 				auto rowClick = row->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(rowWidth, theme->rowHeight));
 				hoverTint(rowClick, row->component<MV::Scene::Sprite>(false, false).self(), index % 2 == 0 ? theme->panelAlt() : theme->panelBg(), theme->rowHover());
@@ -394,6 +459,7 @@ namespace Workbench {
 				attachRoundedRect(dropMark, *services, *theme, MV::size(tileSize + theme->px(8.0f), tileSize + captionHeight + theme->px(8.0f)), theme->dropHint());
 				dropMark->hide();
 			}
+			const size_t shownIndex = shownEntries.size();
 			shownEntries.push_back({ entry, isFolder, tile, dropMark });
 
 			std::string extension = entry.extension().string();
@@ -421,6 +487,8 @@ namespace Workbench {
 			auto caption = makeLabel(tile, *services, *theme, "caption", MV::size(cellWidth - theme->pad, captionHeight), entry.filename().string());
 			caption->owner()->position(MV::point(-tileInset + theme->pad * 0.5f, tileSize + theme->px(2.0f)));
 			caption->justification(MV::TextJustification::CENTER);
+			shownEntries[shownIndex].caption = caption->owner();
+			shownEntries[shownIndex].captionSize = MV::size(cellWidth - theme->pad, captionHeight);
 
 			auto tileClick = tile->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(tileSize, tileSize + captionHeight));
 			hoverShow(tileClick, hoverBack);

@@ -36,6 +36,13 @@ namespace Workbench {
 		// A place among the tiles away from the first of them, and the middle of a file's or folder's tile by name.
 		MV::Point<int> tileAreaScreenPoint() const;
 		std::optional<MV::Point<int>> entryScreenPoint(const std::string& a_name) const;
+		// The file or folder whose tile is at a point.
+		std::optional<std::filesystem::path> entryAt(const MV::Point<int>& a_screenPoint) const;
+		// Opens a file's or folder's name for typing in place of its caption. Enter gives the new name to
+		// onRename (with its extension, which is not typed); leaving the field keeps the old name.
+		bool beginRename(const std::filesystem::path& a_entry);
+		bool renaming() const { return !renameField.expired(); }
+		std::function<void(const std::filesystem::path& a_entry, const std::string& a_newName)> onRename;
 
 	protected:
 		void build() override;
@@ -57,7 +64,14 @@ namespace Workbench {
 			bool folder = false;
 			std::weak_ptr<MV::Scene::Node> node;
 			std::weak_ptr<MV::Scene::Node> dropMark;
+			std::weak_ptr<MV::Scene::Node> caption;
+			MV::Size<> captionSize;
 		};
+		std::string folderListing() const;
+		std::weak_ptr<MV::Scene::Text> renameField;
+		std::string shownListing;
+		double listingWait = 0.0;
+		bool rebuildWanted = false;
 		std::vector<ShownEntry> shownEntries;
 		std::shared_ptr<MV::Scene::Node> dropAreaMark;
 		float tileSizeFor() const { return theme->px(48.0f + 112.0f * tilePercent); }

@@ -9,10 +9,27 @@
 #endif
 #include <windows.h>
 #include <commdlg.h>
+#include <shellapi.h>
 #pragma comment(lib, "comdlg32.lib")
 #endif
 
 namespace Workbench {
+
+	bool moveToRecycleBin(const std::string& a_path) {
+		std::error_code failed;
+#ifdef _WIN32
+		// the shell wants a full path with back slashes, ended by two nulls
+		std::wstring from = std::filesystem::absolute(a_path, failed).make_preferred().wstring();
+		from.push_back(L'\0');
+		SHFILEOPSTRUCTW operation{};
+		operation.wFunc = FO_DELETE;
+		operation.pFrom = from.c_str();
+		operation.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+		return SHFileOperationW(&operation) == 0 && !operation.fAnyOperationsAborted;
+#else
+		return std::filesystem::remove_all(a_path, failed) > 0 && !failed;
+#endif
+	}
 
 	namespace {
 		std::string relativeToWorkingDirectory(const std::filesystem::path& a_chosen) {

@@ -954,6 +954,28 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   inspector or applies or reverts one property, a child added inside content or one removed is not an override,
   and the Project panel does not notice files changing by itself.
 
+## Increment 48: the Project panel's own verbs (2026-11-17)
+- A right press on a tile opens Rename, Duplicate, Delete and New Folder; on the bare panel, New Folder.
+- Rename opens the name in place of the caption, without its extension, selected for typing. Enter renames;
+  leaving the field keeps the old name. `App::renameAsset` then carries what refers to the file along: the linked
+  nodes of the open scene (`BindSnapInstance::retarget`), the open document's own path, and the quoted paths in
+  every `.scene`, `.bindsnap` and `.json` under Assets, both as an instance names them and with `Assets/` before
+  them. A folder's rename rewrites the paths that start with it. A `.script` or `.jai` that names the old path is
+  reported in the Console and left as it is. A name already there, or one a file cannot have, is refused with a
+  warning.
+- Duplicate copies a file or folder under a name nothing beside it has. Delete asks first, saying how many linked
+  nodes of the open scene would lose their file, and sends it to the recycle bin (`moveToRecycleBin`,
+  `App::discardFile` replaces how). New Folder makes one and opens its name for typing.
+- New Asset, from the Replace or New Asset menu, opens the new file's name for typing.
+- A linked node dragged to a folder is saved under its file's name, whatever the node is called, so it still
+  applies to its own file after either is renamed.
+- The panel looks at the folder shown twice a second and rebuilds its tiles when the names in it change.
+- The self-test renames through the typed field and through `renameAsset` with a scene on disk naming the file,
+  duplicates from the menu, deletes with a no and a yes, makes and names a folder, and waits for a file written
+  from outside to get a tile.
+- Not yet: moving a file between folders by dragging, a preview on a BindSnap's tile, undo of these verbs, and
+  paths the game builds in code (`Creatures/<id>/<skin>/unit.bindsnap`), which no rename can follow.
+
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.
 - Authoring verbs still only in Source/Editor: the component kinds Add Component does not list — old-editor

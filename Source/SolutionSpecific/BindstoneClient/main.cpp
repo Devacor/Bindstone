@@ -2053,6 +2053,28 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			auto row = a_app.hierarchy().rowScreenPoint(a_node);
 			return row ? drag(*row, a_to) : std::string("(no row)");
 		};
+		// types a name over what a field holds and presses Enter
+		auto typeName = [&a_app](const std::string& a_text) {
+			auto pushKey = [](SDL_Keycode a_key) {
+				SDL_Event press{};
+				press.type = SDL_KEYDOWN;
+				press.key.keysym.sym = a_key;
+				SDL_PushEvent(&press);
+			};
+			for (int erased = 0; erased < 24; ++erased) {
+				pushKey(SDLK_BACKSPACE);
+			}
+			a_app.runFrames(2);
+			for (char character : a_text) {
+				SDL_Event typed{};
+				typed.type = SDL_TEXTINPUT;
+				typed.text.text[0] = character;
+				SDL_PushEvent(&typed);
+			}
+			a_app.runFrames(2);
+			pushKey(SDLK_RETURN);
+			a_app.runFrames(3);
+		};
 		auto linkedSceneFile = (std::filesystem::temp_directory_path() / "workbench_selftest_linked.scene").string();
 		auto savedScene = [&]() {
 			return a_app.saveScene(linkedSceneFile) ? MV::fileContents(linkedSceneFile, true) : std::string();
@@ -2134,6 +2156,9 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 					click(menus.rowScreenPoint(1));
 				}
 				expect(other->id() == "Crate_2" && std::filesystem::exists(folder / "Crate_2.bindsnap") && linkOf(other) && childrenInFile(file) == 1, "New Asset gives the node a name nothing there has and saves it beside the other, which is left alone");
+				expect(project.renaming() && a_app.editingText() && std::string(a_app.editingText()->text()) == "Crate_2", "and opens the new file's name for typing");
+				typeName("Box");
+				expect(!project.renaming() && std::filesystem::exists(folder / "Box.bindsnap") && !std::filesystem::exists(folder / "Crate_2.bindsnap") && linkOf(other) && linkOf(other)->source() == (folder / "Box.bindsnap").generic_string(), "Enter renames the file, and the node's link follows it");
 
 				a_app.select(shelf);
 				auto third = a_app.createChildNode();
@@ -2160,6 +2185,73 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			}
 			std::error_code removeFailed;
 			std::filesystem::remove(linkedSceneFile, removeFailed);
+
+			// the Project panel's own verbs, in the folder shown
+			std::shared_ptr<MV::Scene::Node> boxNode;
+			std::function<void(const std::shared_ptr<MV::Scene::Node>&)> findBox = [&](const std::shared_ptr<MV::Scene::Node>& a_node) {
+				if (auto link = linkOf(a_node); link && link->source() == (folder / "Box.bindsnap").generic_string()) {
+					boxNode = a_node;
+				}
+				for (auto&& child : *a_node) {
+					findBox(child);
+				}
+			};
+			findBox(a_app.scene());
+			auto sceneInFolder = folder / "inside.scene";
+			expect(a_app.saveScene(sceneInFolder.string()) && countOf(MV::fileContents(sceneInFolder.string(), true), "Box.bindsnap") == 1, "a scene saved in the folder names the file a node is linked to");
+			expect(a_app.renameAsset(folder / "Box.bindsnap", "Chest.bindsnap") && std::filesystem::exists(folder / "Chest.bindsnap"), "a file renames");
+			{
+				auto text = MV::fileContents(sceneInFolder.string(), true);
+				expect(countOf(text, "Chest.bindsnap") == 1 && countOf(text, "Box.bindsnap") == 0, "and the scene on disk that named it names it as it now is");
+				expect(boxNode && linkOf(boxNode) && linkOf(boxNode)->source() == (folder / "Chest.bindsnap").generic_string(), "as does the node linked to it in the open scene");
+			}
+			expect(!a_app.renameAsset(folder / "Chest.bindsnap", "Crate.bindsnap") && std::filesystem::exists(folder / "Chest.bindsnap"), "a rename onto a name already there is refused");
+			const int errorsBeforeVerbs = a_app.errors();
+
+			auto chestTile = project.entryScreenPoint("Chest.bindsnap");
+			expect(chestTile.has_value(), "the renamed file has a tile");
+			if (chestTile) {
+				mouse.simulate(*chestTile, false, false);
+				a_app.runFrames(2);
+				mouse.simulate(*chestTile, false, true);
+				a_app.runFrames(2);
+				mouse.simulate(*chestTile, false, false);
+				a_app.runFrames(2);
+				mouse.stopSimulating();
+				expect(menus.contextOpen() && menus.rowCount() == 4 && menus.rowLabel(0) == "Rename" && menus.rowLabel(1) == "Duplicate" && menus.rowLabel(2) == "Delete" && menus.rowLabel(3) == "New Folder", "a right press on a tile opens a menu for the file");
+				if (menus.contextOpen()) {
+					click(menus.rowScreenPoint(1));
+				}
+				expect(std::filesystem::exists(folder / "Chest_2.bindsnap"), "Duplicate copies it under a name nothing there has");
+			}
+			auto confirmBefore = a_app.askToConfirm;
+			auto discardBefore = a_app.discardFile;
+			int confirmsAsked = 0;
+			a_app.askToConfirm = [&confirmsAsked](const std::string&) { ++confirmsAsked; return confirmsAsked > 1; };
+			a_app.discardFile = [](const std::filesystem::path& a_entry) {
+				std::error_code failed;
+				return std::filesystem::remove_all(a_entry, failed) > 0;
+			};
+			expect(!a_app.deleteAsset(folder / "Chest_2.bindsnap") && std::filesystem::exists(folder / "Chest_2.bindsnap") && confirmsAsked == 1, "Delete asks first and leaves the file when the answer is no");
+			expect(a_app.deleteAsset(folder / "Chest_2.bindsnap") && !std::filesystem::exists(folder / "Chest_2.bindsnap"), "and removes it when the answer is yes");
+			a_app.askToConfirm = confirmBefore;
+			a_app.discardFile = discardBefore;
+
+			auto made = a_app.createFolder(folder);
+			expect(std::filesystem::is_directory(made) && made.filename() == "New Folder" && project.renaming(), "New Folder makes one and opens its name for typing");
+			typeName("Props");
+			expect(std::filesystem::is_directory(folder / "Props") && !std::filesystem::exists(made), "and Enter names it");
+
+			{
+				std::ofstream outside(folder / "note.txt");
+				outside << "written outside the editor";
+			}
+			// the panel looks at its folder twice a second; a run of frames starts its clock afresh, so they go in runs
+			for (auto began = std::chrono::steady_clock::now(); std::chrono::steady_clock::now() - began < std::chrono::seconds(6) && !project.entryScreenPoint("note.txt");) {
+				a_app.runFrames(30);
+			}
+			expect(project.entryScreenPoint("note.txt").has_value(), "a file that appears in the folder shown gets a tile without being asked for");
+			expect(a_app.errors() == errorsBeforeVerbs, "none of which reports an error");
 		}
 
 		project.showFolder("Assets");

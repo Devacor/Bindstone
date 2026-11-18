@@ -58,6 +58,11 @@ namespace MV {
 			std::shared_ptr<BindSnapInstance> source(const std::string& a_fileName);
 			// As source, for a node being placed: the node also takes the position, rotation and scale of the file's root.
 			std::shared_ptr<BindSnapInstance> placeSource(const std::string& a_fileName);
+			// The file was renamed or moved: the link follows it, and nothing on the node changes.
+			std::shared_ptr<BindSnapInstance> retarget(const std::string& a_fileName) {
+				sourceFile = a_fileName;
+				return std::static_pointer_cast<BindSnapInstance>(shared_from_this());
+			}
 			// The id the file's root had when the content was last built from it.
 			const std::string& sourceRootId() const { return rootId; }
 			// Links a node that already holds the file's content, as when the file was just written from it:

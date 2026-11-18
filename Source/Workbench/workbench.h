@@ -44,6 +44,16 @@ namespace Workbench {
 		// it. Each is one undo step.
 		bool unpackBindSnap(const std::shared_ptr<MV::Scene::Node>& a_node);
 		bool revertBindSnap(const std::shared_ptr<MV::Scene::Node>& a_node);
+		// The Project panel's verbs on a file or a folder. A rename, in place, carries what refers to it along:
+		// the linked nodes of the open scene, and the paths written in the scenes, BindSnaps and catalogs on
+		// disk; a script that names it is only reported. A duplicate gets a name nothing beside it has. A delete
+		// asks first and goes to the recycle bin. Each returns what it made, or whether it did it.
+		bool renameAsset(const std::filesystem::path& a_entry, const std::string& a_newName);
+		std::filesystem::path duplicateAsset(const std::filesystem::path& a_entry);
+		bool deleteAsset(const std::filesystem::path& a_entry);
+		std::filesystem::path createFolder(const std::filesystem::path& a_in);
+		// How a deleted file leaves; the recycle bin unless replaced.
+		std::function<bool(const std::filesystem::path&)> discardFile;
 		// Reads again each file a linked node in the scene names that has changed on disk since it was last
 		// read, keeping what each node changed. update() does this twice a second.
 		void checkBindSnapFiles();
@@ -175,6 +185,7 @@ namespace Workbench {
 		bool handleFocusKey(const SDL_Event& a_event);
 		void openContextMenu(const MV::Point<int>& a_screenPoint);
 		std::vector<MenuItem> nodeContextItems();
+		std::vector<MenuItem> projectContextItems(const MV::Point<int>& a_screenPoint);
 		std::vector<MenuItem> addComponentItems();
 		std::vector<MenuItem> tabContextItems(Panel* a_panel);
 		std::vector<MenuItem> textContextItems(const std::shared_ptr<MV::Scene::Clickable>& a_field);

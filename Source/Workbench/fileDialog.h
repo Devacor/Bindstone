@@ -14,6 +14,9 @@ namespace Workbench {
 	std::string openLayoutFileDialog(const std::string& a_startFolder);
 	std::string saveLayoutFileDialog(const std::string& a_startFolder, const std::string& a_suggestedName);
 
+	// Moves a file or a folder to the platform's recycle bin, where there is one; else removes it.
+	bool moveToRecycleBin(const std::string& a_path);
+
 }
 
 #endif

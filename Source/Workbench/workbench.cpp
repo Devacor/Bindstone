@@ -264,6 +264,8 @@ namespace Workbench {
 		Panel* viewportPanel = dock->registerPanel(std::move(viewport));
 		Panel* filePanel = dock->registerPanel(std::move(file));
 		projectPanel = static_cast<ProjectPanel*>(dock->registerPanel(std::move(project)));
+		projectPanel->onRename = [this](const std::filesystem::path& a_entry, const std::string& a_newName) { renameAsset(a_entry, a_newName); };
+		discardFile = [](const std::filesystem::path& a_entry) { return moveToRecycleBin(a_entry.string()); };
 
 		menuPanels = { treePanel, filePanel, viewportPanel, projectPanel, inspectorPanel, settingsPanel, consolePanel };
 
@@ -512,9 +514,209 @@ namespace Workbench {
 				saveAsBindSnap(node, folder, a_onClash);
 			}
 		};
+		// the new file's name is opened for typing where it appears
+		auto chooseNew = [this, weakNode, folder]() {
+			if (auto node = weakNode.lock()) {
+				auto written = saveAsBindSnap(node, folder, BindSnapClash::NEW_ASSET);
+				if (!written.empty() && projectPanel) {
+					projectPanel->beginRename(std::filesystem::path(written));
+				}
+			}
+		};
 		menuBar->openContext(a_screenPoint, {
 			{ "Replace " + file.filename().string(), "", [choose]() { choose(BindSnapClash::REPLACE); } },
-			{ "New Asset", "", [choose]() { choose(BindSnapClash::NEW_ASSET); } } });
+			{ "New Asset", "", chooseNew } });
+	}
+
+	namespace {
+		// Every place a_part is in a_text swapped for a_with; how many there were.
+		size_t replaceEach(std::string& a_text, const std::string& a_part, const std::string& a_with) {
+			size_t count = 0;
+			for (auto at = a_text.find(a_part); at != std::string::npos; at = a_text.find(a_part, at + a_with.size())) {
+				a_text.replace(at, a_part.size(), a_with);
+				++count;
+			}
+			return count;
+		}
+
+		std::string unusedBeside(const std::filesystem::path& a_entry) {
+			std::error_code ignored;
+			const auto folder = a_entry.parent_path();
+			const auto stem = a_entry.stem().string();
+			const auto extension = a_entry.extension().string();
+			for (int number = 2; ; ++number) {
+				auto name = stem + "_" + std::to_string(number) + extension;
+				if (!std::filesystem::exists(folder / name, ignored)) {
+					return name;
+				}
+			}
+		}
+	}
+
+	bool App::renameAsset(const std::filesystem::path& a_entry, const std::string& a_newName) {
+		std::error_code failed;
+		const auto target = a_entry.parent_path() / a_newName;
+		const bool folder = std::filesystem::is_directory(a_entry, failed);
+		if (a_newName.empty() || a_newName.find_first_of("<>:\"/\\|?*") != std::string::npos) {
+			messageLog->add(MessageLevel::WARNING, "Not renamed: " + a_newName + " is not a name a file can have");
+			return false;
+		}
+		if (std::filesystem::exists(target, failed)) {
+			messageLog->add(MessageLevel::WARNING, "Not renamed: " + target.generic_string() + " is already there");
+			return false;
+		}
+		std::filesystem::rename(a_entry, target, failed);
+		if (failed) {
+			reportError("rename of " + a_entry.generic_string() + " failed: " + failed.message());
+			return false;
+		}
+		const auto oldName = bindSnapSourceName(a_entry);
+		const auto newName = bindSnapSourceName(target);
+		// what the open scene's linked nodes name, and the scene's own file
+		std::vector<std::shared_ptr<MV::Scene::BindSnapInstance>> links;
+		collectLinks(sceneRoot, links);
+		for (auto&& link : links) {
+			auto source = bindSnapSourceName(link->source());
+			if (source == oldName) {
+				link->retarget(newName);
+			} else if (folder && source.starts_with(oldName + "/")) {
+				link->retarget(newName + source.substr(oldName.size()));
+			}
+		}
+		for (auto&& [source, written] : std::map<std::string, std::filesystem::file_time_type>(bindSnapWriteTimes)) {
+			if (source == oldName || (folder && source.starts_with(oldName + "/"))) {
+				bindSnapWriteTimes[newName + source.substr(oldName.size())] = written;
+				bindSnapWriteTimes.erase(source);
+			}
+		}
+		if (bindSnapSourceName(documentPath) == oldName) {
+			documentPath = target.generic_string();
+			refreshTitle();
+		}
+		// the paths written in files: as an instance names them and with Assets/ before them, whole for a file and
+		// as the start of a path for a folder
+		std::vector<std::pair<std::string, std::string>> swaps;
+		const std::string ending = folder ? "/" : "\"";
+		swaps.emplace_back("\"" + oldName + ending, "\"" + newName + ending);
+		if (!a_entry.is_absolute()) {
+			swaps.emplace_back("\"Assets/" + oldName + ending, "\"Assets/" + newName + ending);
+		}
+		std::vector<std::filesystem::path> roots { "Assets" };
+		if (a_entry.is_absolute()) {
+			roots.push_back(a_entry.parent_path());
+		}
+		size_t references = 0;
+		size_t files = 0;
+		std::vector<std::string> scripts;
+		for (auto&& scanRoot : roots) {
+			for (auto walk = std::filesystem::recursive_directory_iterator(scanRoot, std::filesystem::directory_options::skip_permission_denied, failed); !failed && walk != std::filesystem::recursive_directory_iterator(); walk.increment(failed)) {
+				if (!walk->is_regular_file(failed)) {
+					continue;
+				}
+				const auto extension = walk->path().extension().string();
+				const bool rewritten = extension == ".scene" || extension == ".bindsnap" || extension == ".json";
+				if (!rewritten && extension != ".script" && extension != ".jai") {
+					continue;
+				}
+				const auto fileName = walk->path().generic_string();
+				auto text = MV::fileContents(fileName);
+				size_t found = 0;
+				for (auto&& [from, to] : swaps) {
+					found += rewritten ? replaceEach(text, from, to) : (text.find(from) != std::string::npos ? 1 : 0);
+				}
+				if (found == 0) {
+					continue;
+				}
+				if (!rewritten) {
+					scripts.push_back(fileName);
+					continue;
+				}
+				std::ofstream output(walk->path(), std::ios::binary | std::ios::trunc);
+				output << text;
+				references += found;
+				++files;
+			}
+		}
+		messageLog->add(MessageLevel::INFO, "Renamed " + a_entry.generic_string() + " to " + a_newName + (references ? "; " + std::to_string(references) + " references in " + std::to_string(files) + " files follow it" : std::string()));
+		for (auto&& script : scripts) {
+			messageLog->add(MessageLevel::WARNING, script + " still names " + oldName + ": a script's paths are not rewritten");
+		}
+		if (projectPanel) {
+			projectPanel->refresh();
+		}
+		linksChanged();
+		return true;
+	}
+
+	std::filesystem::path App::duplicateAsset(const std::filesystem::path& a_entry) {
+		std::error_code failed;
+		const auto copy = a_entry.parent_path() / unusedBeside(a_entry);
+		std::filesystem::copy(a_entry, copy, std::filesystem::copy_options::recursive, failed);
+		if (failed) {
+			reportError("duplicate of " + a_entry.generic_string() + " failed: " + failed.message());
+			return {};
+		}
+		messageLog->add(MessageLevel::INFO, "Duplicated " + a_entry.generic_string() + " as " + copy.filename().string());
+		if (projectPanel) {
+			projectPanel->refresh();
+		}
+		return copy;
+	}
+
+	bool App::deleteAsset(const std::filesystem::path& a_entry) {
+		const auto name = bindSnapSourceName(a_entry);
+		std::vector<std::shared_ptr<MV::Scene::BindSnapInstance>> links;
+		collectLinks(sceneRoot, links);
+		const auto linked = std::count_if(links.begin(), links.end(), [&](const std::shared_ptr<MV::Scene::BindSnapInstance>& a_link) {
+			auto source = bindSnapSourceName(a_link->source());
+			return source == name || source.starts_with(name + "/");
+		});
+		std::string message = "Delete " + a_entry.generic_string() + "? It goes to the recycle bin.";
+		if (linked > 0) {
+			message += " " + std::to_string(linked) + " linked node" + (linked == 1 ? "" : "s") + " in the open scene will have no file to read.";
+		}
+		if (!askToConfirm || !askToConfirm(message)) {
+			return false;
+		}
+		if (!discardFile || !discardFile(a_entry)) {
+			reportError("delete of " + a_entry.generic_string() + " failed");
+			return false;
+		}
+		messageLog->add(MessageLevel::INFO, "Deleted " + a_entry.generic_string());
+		if (projectPanel) {
+			projectPanel->refresh();
+		}
+		return true;
+	}
+
+	std::filesystem::path App::createFolder(const std::filesystem::path& a_in) {
+		std::error_code failed;
+		auto folder = a_in / "New Folder";
+		if (std::filesystem::exists(folder, failed)) {
+			folder = a_in / unusedBeside(folder);
+		}
+		if (!std::filesystem::create_directory(folder, failed) || failed) {
+			reportError("a folder could not be made in " + a_in.generic_string());
+			return {};
+		}
+		if (projectPanel) {
+			projectPanel->refresh();
+			projectPanel->beginRename(folder);
+		}
+		return folder;
+	}
+
+	std::vector<MenuItem> App::projectContextItems(const MV::Point<int>& a_screenPoint) {
+		std::vector<MenuItem> result;
+		if (auto entry = projectPanel->entryAt(a_screenPoint)) {
+			auto target = *entry;
+			result.push_back({ "Rename", "", [this, target]() { projectPanel->beginRename(target); } });
+			result.push_back({ "Duplicate", "", [this, target]() { duplicateAsset(target); } });
+			result.push_back({ "Delete", "", [this, target]() { deleteAsset(target); } });
+		}
+		auto shown = projectPanel->shownFolder();
+		result.push_back({ "New Folder", "", [this, shown]() { createFolder(shown); }, !result.empty() });
+		return result;
 	}
 
 	void App::noteBindSnapWritten(const std::string& a_sourceName) {
@@ -1406,6 +1608,10 @@ namespace Workbench {
 	}
 
 	std::filesystem::path App::bindSnapFileFor(const std::shared_ptr<MV::Scene::Node>& a_node, const std::string& a_folder) {
+		// a linked node goes by its file's name, whatever the node is called
+		if (auto link = linkOn(a_node)) {
+			return std::filesystem::path(a_folder) / std::filesystem::path(link->source()).filename();
+		}
 		std::string name = a_node->id();
 		for (auto&& character : name) {
 			if (static_cast<unsigned char>(character) < 32 || std::string_view("<>:\"/\\|?*").find(character) != std::string_view::npos) {
@@ -1672,6 +1878,9 @@ namespace Workbench {
 			if (!items.empty()) {
 				break;
 			}
+		}
+		if (items.empty() && projectPanel && dock->panelShowingAt(managers.renderer.worldFromScreen(a_screenPoint)) == projectPanel) {
+			items = projectContextItems(a_screenPoint);
 		}
 		if (items.empty() && gizmos->pointerOverScene(a_screenPoint)) {
 			pickSceneNode(a_screenPoint);

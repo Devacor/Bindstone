@@ -1063,25 +1063,34 @@ namespace {
 
 namespace {
 
-    // One instance of a generic method onto its class: an earlier instance of the name gives way, a private one keeps its label
-    checked_result<void> install_method_instance(class_definition& def, uint64_t name_id, const class_definition::generic_method_instance& instance, string_symbolizer& symbols) {
-        def.drop_method_overloads(name_id, instance.ast->is_static);
-        try {
-            if (instance.ast->is_static) {
-                def.add_static_script_method(instance.ast->name, instance.ast, instance.env);
-            } else {
-                def.add_script_method(instance.ast->name, instance.ast, instance.env);
+    // The instances of generic methods a class holds under one name onto the class, each an overload of that name: the
+    // name's earlier overloads give way, a private one keeps its label
+    checked_result<void> install_method_instances(class_definition& def, uint64_t name_id, string_symbolizer& symbols) {
+        const auto held = def.generic_method_instances().find(name_id);
+        if (held == def.generic_method_instances().end()) { return {}; }
+        for (const bool is_static : {false, true}) {
+            if (std::any_of(held->second.begin(), held->second.end(), [&](const class_definition::generic_method_instance& i) { return i.ast->is_static == is_static; })) {
+                def.drop_method_overloads(name_id, is_static);
             }
-        } catch (const runtime_error& e) {
-            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), "{0}", symbols.intern(e.what()));
         }
-        if (instance.access != access_level::public_access) { def.set_nonpublic_member(name_id, instance.access); }
+        for (const auto& instance : held->second) {
+            try {
+                if (instance.ast->is_static) {
+                    def.add_static_script_method(instance.ast->name, instance.ast, instance.env);
+                } else {
+                    def.add_script_method(instance.ast->name, instance.ast, instance.env);
+                }
+            } catch (const runtime_error& e) {
+                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), "{0}", symbols.intern(e.what()));
+            }
+            if (instance.access != access_level::public_access) { def.set_nonpublic_member(name_id, instance.access); }
+        }
         return {};
     }
 
     // A unit's instances of a class's generic methods (class_decl::method_instances): each joins the class the declaration
-    // names, where that class does not hold it already under the same stamp (detail/generics.hpp). The linker runs it once
-    // the class is declared.
+    // names, where that class does not hold it already under the same stamp (detail/generics.hpp), beside the instances
+    // other generic methods of the name have under that instance's name. The linker runs it once the class is declared.
     checked_result<void> declare_method_instances(class_decl* decl, const class_declaration_host& host) {
         string_symbolizer* symbols = host.symbols;
         auto global_env = engine_access::get_global_environment(host.eng);
@@ -1098,15 +1107,16 @@ namespace {
                 return checked_result<void>(make_error_code(runtime_error_code::class_not_found), "Class '{0}' not found", decl->name_id);
             }
             const auto held = class_def->generic_method_instances().find(ast->name_id);
-            if (held != class_def->generic_method_instances().end() && held->second.stamp == ast->instance_stamp) { continue; }
+            if (held != class_def->generic_method_instances().end() &&
+                std::any_of(held->second.begin(), held->second.end(), [&](const class_definition::generic_method_instance& i) { return i.stamp == ast->instance_stamp; })) { continue; }
             class_definition::generic_method_instance instance;
             instance.stamp = ast->instance_stamp;
             instance.ast = ast;
             instance.env = host.env;
             instance.access = member.visibility == class_decl::Private ? access_level::private_access
                             : member.visibility == class_decl::Protected ? access_level::protected_access : access_level::public_access;
-            JAISCRIPT_TRY(install_method_instance(*class_def, ast->name_id, instance, *symbols));
             class_def->hold_generic_method_instance(ast->name_id, std::move(instance));
+            JAISCRIPT_TRY(install_method_instances(*class_def, ast->name_id, *symbols));
         }
         return {};
     }
@@ -1144,11 +1154,17 @@ namespace {
         return {};
     }
 
+    // What a waiting instance is known by: a class's name, or a method's with its class's and its definition's shape (two
+    // generic methods that take the same type arguments are two instances of one name; one declared again is the same instance)
     std::string instance_key(const class_decl& decl) {
         std::string key(decl.name);
         if (!decl.method_instances) { return key; }
         for (const auto& member : decl.members) {
-            if (member.declaration && member.declaration->get_type() == node_type::function_decl) { key += ' '; key += static_cast<const function_decl&>(*member.declaration).instance_name; }
+            if (!member.declaration || member.declaration->get_type() != node_type::function_decl) { continue; }
+            const auto& fn = static_cast<const function_decl&>(*member.declaration);
+            key += ' ';
+            key += fn.instance_name;
+            key += parameter_signature(fn.parameters);
         }
         return key;
     }
@@ -1275,9 +1291,9 @@ std::vector<uint64_t> declared_instance_stamps(engine& eng, const std::string& n
         return stamps;
     }
     const std::string scope(generic.substr(0, cut));
-    if (const auto owner = engine_access::get_class_definition(eng, scope)) {   // a generic method's, on its class
+    if (const auto owner = engine_access::get_class_definition(eng, scope)) {   // a generic method's, on its class: one per overload
         const auto held = owner->generic_method_instances().find(engine_access::symbolize(eng, name));
-        if (held != owner->generic_method_instances().end()) { stamps.push_back(held->second.stamp); }
+        if (held != owner->generic_method_instances().end()) { for (const auto& instance : held->second) { stamps.push_back(instance.stamp); } }
         return stamps;
     }
     auto& spaces = engine_access::script_namespaces(eng);   // a namespace's function
@@ -1814,8 +1830,8 @@ checked_result<void> define_script_class(class_decl* decl, const class_declarati
         if (definition) { engine_access::get_class_registry(*eng).declared_generics_[definition->qualified_name()].insert(definition->stamp); }
     }
     if (is_redefinition) {   // the instances of its generic methods, which the units that call them declared
-        for (const auto& [name_id, instance] : class_def->generic_method_instances()) {
-            JAISCRIPT_TRY(install_method_instance(*class_def, name_id, instance, *symbols));
+        for (const auto& [name_id, instances] : class_def->generic_method_instances()) {
+            JAISCRIPT_TRY(install_method_instances(*class_def, name_id, *symbols));
         }
     }
 
@@ -1826,6 +1842,14 @@ checked_result<void> define_script_class(class_decl* decl, const class_declarati
 } // namespace
 
 } // namespace detail
+
+void class_definition::hold_generic_method_instance(uint64_t name_id, generic_method_instance instance) {
+    auto& held = generic_method_instances_[name_id];
+    const auto earlier = std::find_if(held.begin(), held.end(), [&](const generic_method_instance& i) {
+        return i.ast->is_static == instance.ast->is_static && detail::same_signature(i.ast->parameters, instance.ast->parameters);
+    });
+    if (earlier != held.end()) { *earlier = std::move(instance); } else { held.push_back(std::move(instance)); }
+}
 
 void class_definition::add_method(const std::string& name, script_function func, size_t arity,
                                   std::vector<param_type_info> param_types, param_type_info result) {

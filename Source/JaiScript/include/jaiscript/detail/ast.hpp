@@ -8,6 +8,7 @@
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/checked_result.hpp>
 #include "lexer.hpp"
+#include "generics.hpp"
 #include <initializer_list>
 #include <memory>
 #include <vector>
@@ -24,7 +25,6 @@ namespace jai {
     struct script_defined_function;   // environment.hpp; node mint caches hold it opaquely
     class class_definition;           // class_definition.hpp; node caches hold it by raw pointer
     namespace detail::regex { class compiled; }   // detail/regex.hpp; a constant pattern's compile, engine-independent
-    namespace detail { struct generic_definition; }   // detail/generics.hpp
 
     using ast_node_ptr = std::shared_ptr<ast_node>;
     using expression_ptr = std::shared_ptr<expression>;
@@ -1247,8 +1247,12 @@ namespace jai {
         std::string_view name;      // the instance's qualified name: Stack<int>, shop::Stack<shop::Product>, wire::decode<Cart>
         uint64_t name_id = UINT64_MAX;
         std::string_view generic;   // the generic's qualified name
+        // What identifies the instance beside its name (detail::generic_instance_id): the stamp of the definition a function's
+        // or a method's is made from, two overloads that take the same type arguments being two instances of one name; 0 for a class's
+        uint64_t stamp = 0;
         std::vector<type_info_ptr> arguments;
         std::string_view within;    // the instance whose text asked for this one; empty for the unit's own text
+        uint64_t within_stamp = 0;  // and its stamp
         std::vector<std::string_view> needs;   // the classes the instance waits for (class_decl::instance_needs)
         bool expanded = false;
         bool unresolved = false;    // no generic of that name was declared when it was asked for: asked again at the next check
@@ -1264,6 +1268,8 @@ namespace jai {
 
         generic_instance_decl(const source_location& loc, std::string_view n, uint64_t nid)
             : declaration(loc, node_type::generic_instance_decl), name(n), name_id(nid) {}
+        detail::generic_instance_id id() const { return {name, stamp}; }
+        detail::generic_instance_id asker() const { return {within, within_stamp}; }
     };
 
     inline void mark_result_discarded(expression* e) {

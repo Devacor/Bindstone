@@ -37,7 +37,7 @@ namespace jai::detail {
     // BUMP THIS on any change to what a parse produces: the serialized bytes and the parse-time semantics baked into the
     // AST (slot assignment, node and token numbers, capture plans). A stale sidecar is reparsed and rewritten (the version
     // check feeds the corrupt-file fallback), so a bump is always safe and a missed one leaves stale caches.
-    inline constexpr uint32_t k_jaibite_version = 66;
+    inline constexpr uint32_t k_jaibite_version = 67;
     // Header flags (u32):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -816,9 +816,11 @@ namespace jai::detail {
             auto* d = static_cast<const generic_instance_decl*>(n);
             str(d->name);
             str(d->generic);
+            fixed_u64(body_, d->stamp);
             varint(d->arguments.size());
             for (const auto& a : d->arguments) type(a);
             str(d->within);
+            fixed_u64(body_, d->within_stamp);
             varint(d->needs.size());
             for (const auto& need : d->needs) str(need);
             flag(d->expanded);
@@ -1902,10 +1904,12 @@ namespace jai::detail {
             const auto [id, name] = interned(varint());
             auto d = std::make_shared<generic_instance_decl>(loc, name, id);
             d->generic = view();
+            d->stamp = fixed_u64();
             uint64_t na = varint();
             check_count(na);
             for (uint64_t i = 0; i < na; ++i) d->arguments.push_back(type());
             d->within = view();
+            d->within_stamp = fixed_u64();
             for (uint64_t needs = varint(); needs > 0; --needs) { d->needs.push_back(view()); }
             d->expanded = flag();
             uint64_t nb = varint();

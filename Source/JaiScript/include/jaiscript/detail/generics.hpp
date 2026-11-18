@@ -78,6 +78,20 @@ namespace jai::detail {
 	};
 	using generic_definition_ptr = std::shared_ptr<const generic_definition>;
 
+	// What identifies an instance: its name and the declaration it is made from. Two generic functions (or methods) of a name
+	// that take the same type arguments are two instances of that one name, overloads of it as two functions written by hand
+	// are, so a function's or a method's instance carries its definition's stamp. A class's name is one class: its stamp here is 0.
+	struct generic_instance_id {
+		std::string_view name;
+		uint64_t stamp = 0;
+		friend bool operator==(const generic_instance_id&, const generic_instance_id&) = default;
+	};
+	struct generic_instance_id_hash {
+		size_t operator()(const generic_instance_id& id) const noexcept { return std::hash<std::string_view>()(id.name) ^ (static_cast<size_t>(id.stamp) * 0x9e3779b97f4a7c15ull); }
+	};
+	// the stamp a definition's instances are identified by (generic_instance_id)
+	inline uint64_t generic_instance_stamp(const generic_definition& definition) { return definition.kind == generic_kind::class_type ? 0 : definition.stamp; }
+
 	// An instance a check found the unit to need (check_options::generic_requests): the engine adds its request to the unit's others
 	struct generic_request {
 		std::string name;      // the instance's qualified name
@@ -86,6 +100,7 @@ namespace jai::detail {
 		generic_definition_ptr definition;
 		source_location at;
 		std::string within;    // the instance whose text asked
+		uint64_t within_stamp = 0;   // and its stamp (generic_instance_id)
 	};
 
 	// An instance the engine holds that a unit's declaration of its generic cannot make again (docs/site/guide/21-generics.html
@@ -95,6 +110,7 @@ namespace jai::detail {
 		std::string generic;   // the generic's
 		std::string reason;    // the error that keeps the declaration from making it
 		source_location at;    // the declaration
+		uint64_t stamp = 0;    // the instance's (generic_instance_id): 0 for a class's
 	};
 
 	// What a name that takes no type arguments is: Name<Args> on it fails the load once, wherever a type can stand

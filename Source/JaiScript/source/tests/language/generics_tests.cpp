@@ -890,6 +890,133 @@ public:
 			check_true(contains(failure(*e, "class Dup<T> {}\nclass Dup<U> {}\n"), "generic 'Dup<U>' is declared again: line 1 declares it with the same parameters"));
 		});
 
+		// ---- generics of one name that take the same type arguments: two instances of that name, one overload set
+
+		const std::string shows =
+			"string show<T>(array<T> xs) { return \"array \" + to_string(xs.size()); }\n"
+			"string show<T>(T x, int n) { return \"pair \" + to_string(n); }\n";
+
+		test("generics_that_take_the_same_type_arguments_are_overloads_of_one_instance_name", [this, shows]() {
+			auto e = stdlib_engine();
+			check_eq(std::string("array 1|pair 1"), e->execute(shows + "show([1]) + \"|\" + show(5, 1);").as_string());
+			// the functions written by hand that the two instances are
+			check_eq(std::string("array 1|pair 1"), stdlib_engine()->execute(
+				"string shown(array<int> xs) { return \"array \" + to_string(xs.size()); }\nstring shown(int x, int n) { return \"pair \" + to_string(n); }\n"
+				"shown([1]) + \"|\" + shown(5, 1);").as_string());
+			// the type arguments written: the value arguments pick among the instances, as among functions of one name
+			check_eq(std::string("array 2|pair 7"), stdlib_engine()->execute(shows + "show<int>([1, 2]) + \"|\" + show<int>(5, 7);").as_string());
+			const std::string kinds = "string kind<T>(array<T> xs) { return \"array\"; }\nstring kind<T>(T x) { return \"one\"; }\n";
+			check_eq(std::string("array|one|one"), stdlib_engine()->execute(kinds + "kind<int>([1]) + \"|\" + kind<int>(5) + \"|\" + kind<string>(\"s\");").as_string());
+			// deduced to the same arguments by both: the same overload set
+			check_eq(std::string("same|float"), stdlib_engine()->execute(
+				"string near<T>(T a, T b) { return \"same\"; }\nstring near<T>(T a, float b) { return \"float\"; }\nnear(1, 2) + \"|\" + near(1, 2.5);").as_string());
+			// no instance of the name takes the value arguments: the text two functions written by hand give
+			check_true(contains(failure(*e, kinds + "kind<int>(\"s\");\n"), "<script>:3:14: error: no overload of 'kind<int>' matches this call (1 argument(s)) (declared at 1:8)"));
+			check_true(contains(failure(*e, "string kinds(array<int> xs) { return \"\"; }\nstring kinds(int x) { return \"\"; }\nkinds(\"s\");\n"),
+				"<script>:3:10: error: no overload of 'kinds' matches this call (1 argument(s)) (declared at 1:8)"));
+			// generics that find different type arguments name different instances: the call is ambiguous
+			check_true(contains(failure(*e, kinds + "kind([1]);\n"), "call to 'kind' is ambiguous: the generics 'kind<T>' (<script>:1:8) and 'kind<T>' (<script>:2:8) both take it"));
+			// in a namespace, from inside and outside
+			check_eq(std::string("array 1|pair 1|array 0|pair 3"), stdlib_engine()->execute(
+				"namespace wire {\n" + shows + "string inside() { array<int> none; return show(none) + \"|\" + show<string>(\"x\", 3); }\n}\n"
+				"wire::show([1]) + \"|\" + wire::show(5, 1) + \"|\" + wire::inside();").as_string());
+		});
+
+		test("generic_methods_that_take_the_same_type_arguments_are_overloads_of_one_instance_name", [this, shows]() {
+			auto e = stdlib_engine();
+			check_eq(std::string("array 1|pair 1|array 2|pair 9"), e->execute(
+				"class Desk {\n" + shows + "}\nDesk d;\nd.show([1]) + \"|\" + d.show(5, 1) + \"|\" + d.show<int>([1, 2]) + \"|\" + d.show<int>(5, 9);").as_string());
+			check_eq(std::string("array 1|pair 1"), stdlib_engine()->execute(
+				"class Desk {\nstatic string show<T>(array<T> xs) { return \"array \" + to_string(xs.size()); }\nstatic string show<T>(T x, int n) { return \"pair \" + to_string(n); }\n}\n"
+				"Desk::show([1]) + \"|\" + Desk::show(5, 1);").as_string());
+			// a generic class's generic methods
+			check_eq(std::string("1|5|ab"), stdlib_engine()->execute(
+				"class Kit<T> {\n\tT base;\n\tU plus<U>(U x) { return x; }\n\tU plus<U>(U x, U y) { return x + y; }\n}\n"
+				"Kit<int> kit;\nto_string(kit.plus(1)) + \"|\" + to_string(kit.plus(2, 3)) + \"|\" + kit.plus<string>(\"a\", \"b\");").as_string());
+			// a function above the class calls both: each instance waits for the class and joins it
+			auto above = stdlib_engine();
+			check_eq(std::string("array 1|pair 1"), above->execute(
+				"string ask(Desk d) { return d.show([1]) + \"|\" + d.show(5, 1); }\nclass Desk {\n" + shows + "}\nask(Desk());").as_string());
+			check_true(detail::engine_access::get_class_registry(*above).waiting_instances_.empty());
+			auto waits = stdlib_engine();
+			check_true(contains(failure(*waits, "string ask(Desk d) { return d.show([1]) + \"|\" + d.show(5, 1); }\nthrow \"stopped\";\nclass Desk {\n" + shows + "}\n"), "stopped"));
+			check_eq((size_t)2, detail::engine_access::get_class_registry(*waits).waiting_instances_.size(), "one entry per instance: the two overloads are two");
+			waits->execute("class Desk {\n" + shows + "}\n");
+			check_eq(std::string("array 1|pair 1"), waits->execute("ask(Desk());").as_string());
+		});
+
+		test("units_share_each_overloads_instance_and_a_function_above_the_generics_calls_both", [this, shows]() {
+			auto e = stdlib_engine();
+			e->execute(shows);
+			e->execute("string first() { return show([1]); }");
+			e->execute("string second() { return show(5, 2); }");   // the name holds the other overload's instance: this one joins it
+			check_eq(std::string("array 1|pair 2|array 3|pair 4"), e->execute("first() + \"|\" + second() + \"|\" + show([1, 2, 3]) + \"|\" + show(0, 4);").as_string());
+			auto above = stdlib_engine();
+			check_eq(std::string("array 1|pair 1"), above->execute("string both() { return show([1]) + \"|\" + show(5, 1); }\n" + shows + "both();").as_string());
+			check_true(detail::engine_access::get_class_registry(*above).waiting_functions_.empty());
+			const auto directory = unit_directory("overload_units");
+			write_unit(directory, "shows.jai", shows);
+			write_unit(directory, "first.jai", "import \"shows.jai\";\nstring first() { return show([1]); }\n");
+			write_unit(directory, "second.jai", "import \"shows.jai\";\nstring second() { return show(5, 2); }\n");
+			const std::string root = write_unit(directory, "root.jai", "import \"first.jai\";\nimport \"second.jai\";\nfirst() + \"|\" + second() + \"|\" + show(7, 8);\n");
+			check_eq(std::string("array 1|pair 2|pair 8"), stdlib_engine()->execute_file(root).as_string());
+			check_eq(std::string("array 1|pair 2|pair 8"), stdlib_engine()->execute_file(root).as_string(), "and from the units' jaibite caches");
+		});
+
+		test("an_overload_declared_again_makes_again_its_own_instances_only", [this, shows]() {
+			auto e = stdlib_engine();
+			e->execute(shows);
+			e->execute("string first() { return show([1]); } string second() { return show(5, 2); }");
+			e->execute("string show<T>(T x, int n) { return \"PAIR \" + to_string(n); }");
+			check_true(warnings(*e).empty());
+			check_eq(std::string("array 1|PAIR 2"), e->execute("first() + \"|\" + second();").as_string());
+			e->execute("string show<T>(array<T> xs) { return \"ARRAY\"; }");
+			check_true(warnings(*e).empty());
+			check_eq(std::string("ARRAY|PAIR 2"), e->execute("first() + \"|\" + second();").as_string());
+			// one that cannot make its instance keeps it, with the warning, and the other overload's is made again all the same
+			e->execute("string show<T>(T x, int n) { return x.nope(); }\nstring show<T>(array<T> xs) { return \"third\"; }\n");
+			check_eq(std::vector<std::string>{"'show<int>' keeps its earlier declaration: this declaration of 'show' cannot make it: int has no member 'nope' (<script>:1:39)"}, warnings(*e));
+			check_eq(std::string("third|PAIR 2"), e->execute("first() + \"|\" + second();").as_string());
+			// a class declared again makes each of its generic methods' instances again
+			e->execute("class Desk {\n" + shows + "}\n");
+			e->execute("Desk desk; string desk_first() { return desk.show([1]); } string desk_second() { return desk.show(5, 2); }");
+			check_eq(std::string("array 1|pair 2"), e->execute("desk_first() + \"|\" + desk_second();").as_string());
+			e->execute("class Desk {\n\tstring show<T>(array<T> xs) { return \"ARRAY\"; }\n\tstring show<T>(T x, int n) { return \"PAIR\"; }\n}\n");
+			check_true(warnings(*e).empty());
+			check_eq(std::string("ARRAY|PAIR"), e->execute("desk_first() + \"|\" + desk_second();").as_string());
+			e->execute("class Desk {\n\tstring show<T>(array<T> xs) { return \"array again\"; }\n\tstring show<T>(T x, int n) { return x.nope(); }\n}\n");
+			check_eq(std::vector<std::string>{"'Desk::show<int>' keeps its earlier declaration: this declaration of 'Desk::show' cannot make it: int has no member 'nope' (<script>:3:40)"}, warnings(*e));
+			check_eq(std::string("array again|PAIR"), e->execute("desk_first() + \"|\" + desk_second();").as_string());
+		});
+
+		test("an_edit_to_one_overload_reaches_its_instance_and_leaves_the_others", [this, shows]() {
+			const auto directory = unit_directory("overload_reload");
+			const std::string lib = write_unit(directory, "shows.jai", shows);
+			write_unit(directory, "user.jai", "import \"shows.jai\";\nstring first() { return show([1]); }\nstring second() { return show(5, 2); }\n");
+			auto e = stdlib_engine();
+			e->add_include_path(directory.string());
+			e->execute("import \"user.jai\";");
+			check_eq(std::string("array 1|pair 2"), e->execute("first() + \"|\" + second();").as_string());
+			auto stamp = std::filesystem::last_write_time(lib);
+			std::string edited = shows;
+			edited.replace(edited.find("\"pair \""), 7, "\"PAIR \"");
+			write_unit(directory, "shows.jai", edited);
+			std::filesystem::last_write_time(lib, stamp + std::chrono::seconds(3));
+			check_true(e->execute("import(\"user.jai\");").as_bool());
+			check_true(warnings(*e).empty());
+			check_eq(std::string("array 1|PAIR 2"), e->execute("first() + \"|\" + second();").as_string());
+		});
+
+		test("a_jaibite_keeps_each_overloads_instance", [this, shows]() {
+			auto e = stdlib_engine();
+			auto bite = e->jaibite(shows + "class Desk {\n" + shows + "}\nDesk d;\nshow([1]) + \"|\" + show(5, 1) + \"|\" + d.show([1, 2]) + \"|\" + d.show(5, 3);\n");
+			check_eq(std::string("array 1|pair 1|array 2|pair 3"), bite.execute().as_string());
+			auto loader = stdlib_engine();
+			auto loaded = loader->jaibite_load_bytes(bite.save_bytes());
+			check_eq(std::string("array 1|pair 1|array 2|pair 3"), loaded.execute().as_string());
+			check_eq(std::string("array 0|pair 4"), loader->execute("array<string> none; show(none) + \"|\" + show(\"s\", 4);").as_string());
+		});
+
 		// ---- bounds
 
 		test("a_bound_is_checked_where_the_instance_is_asked_for", [this]() {

@@ -50,6 +50,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -1100,17 +1101,19 @@ private:
     std::unordered_map<std::string, std::vector<generic_definition_ptr>> generics_;   // this unit's, by qualified name
     std::unordered_set<std::string_view> generic_method_names_;                        // its generic methods' bare names
     bool generics_live_ = false;   // the unit or the program declares a generic: calls look their callee up among them
-    std::unordered_map<std::string_view, const generic_instance_decl*> instance_requests_;   // this unit's, by instance name
-    std::unordered_set<std::string_view> unmade_instances_;   // their bounds do not hold: their declarations are not checked
+    // This unit's requests, by instance name: one per definition the name's instances are made from (generic_instance_id; two
+    // generic functions that take the same type arguments are two instances of one name)
+    std::unordered_map<std::string_view, std::vector<const generic_instance_decl*>> instance_requests_;
+    std::unordered_set<const generic_instance_decl*> unmade_instances_;   // their bounds do not hold: their declarations are not checked
     struct method_instance {
         std::vector<const function_decl*> fns;
         uint8_t access = 0;
         std::string_view owner;
         bool is_static = false;
     };
-    std::unordered_map<std::string_view, method_instance> method_instances_;   // "Class::name<Args>" -> the unit's declaration
+    std::unordered_map<std::string_view, method_instance> method_instances_;   // "Class::name<Args>" -> the unit's declarations, one per definition
     std::vector<generic_request>* generic_requests_ = nullptr;
-    std::unordered_set<std::string> requested_now_;
+    std::set<std::pair<std::string, uint64_t>> requested_now_;   // the instances this check asked for, each by its name and stamp
     std::vector<generic_kept_instance>* remade_failures_ = nullptr;
     const std::vector<generic_kept_instance>* kept_instances_ = nullptr;
     const generic_instance_decl* instance_ctx_ = nullptr;      // the instance whose declarations are being walked
@@ -1127,7 +1130,7 @@ private:
                 }
                 case node_type::generic_instance_decl: {
                     auto* request = static_cast<const generic_instance_decl*>(d.get());
-                    instance_requests_.emplace(request->name, request);
+                    instance_requests_[request->name].push_back(request);
                     if (request->within.empty() && unit_file_.empty()) { unit_file_ = request->location.filename; }
                     break;
                 }
@@ -1145,7 +1148,8 @@ private:
                         } else if (cd->method_instances && m.declaration->get_type() == node_type::function_decl) {
                             auto* fn = static_cast<const function_decl*>(m.declaration.get());
                             method_instance& instance = method_instances_[fn->instance_name];
-                            instance.fns.assign(1, fn);
+                            const auto held = std::find_if(instance.fns.begin(), instance.fns.end(), [&](const function_decl* f) { return f->instance_stamp == fn->instance_stamp; });
+                            if (held == instance.fns.end()) { instance.fns.push_back(fn); } else { *held = fn; }
                             instance.access = m.visibility == class_decl::Private ? 1 : m.visibility == class_decl::Protected ? 2 : 0;
                             instance.owner = cd->name;
                             instance.is_static = fn->is_static;
@@ -1171,28 +1175,33 @@ private:
         size_t levels = 0;
         for (; instance && levels <= k_generic_depth_limit; ++levels) {
             if (levels < 4) { notes.push_back("in " + note_name(instance->name) + ", instantiated at " + instance->location.to_string()); }
-            const auto outer = instance->within.empty() ? instance_requests_.end() : instance_requests_.find(instance->within);
-            instance = outer != instance_requests_.end() ? outer->second : nullptr;
+            instance = instance->within.empty() ? nullptr : instance_request(instance->asker());
         }
         if (levels > 4) { notes.push_back("and " + std::to_string(levels - 4) + " more instantiations around these"); }
         return notes;
     }
-    const generic_instance_decl* instance_request(std::string_view name) const {
-        const auto held = instance_requests_.find(name);
-        return held != instance_requests_.end() ? held->second : nullptr;
+    const generic_instance_decl* instance_request(const generic_instance_id& instance) const {
+        const auto held = instance_requests_.find(instance.name);
+        if (held == instance_requests_.end()) { return nullptr; }
+        const auto request = std::find_if(held->second.begin(), held->second.end(), [&](const generic_instance_decl* r) { return r->stamp == instance.stamp; });
+        return request != held->second.end() ? *request : nullptr;
     }
+    // the request a function's or a method's instance was made for
+    const generic_instance_decl* instance_request(const function_decl& fn) const { return instance_request(generic_instance_id{fn.instance_name, fn.instance_stamp}); }
+    // a class instance's: a class's name is one class
+    const generic_instance_decl* class_instance_request(std::string_view name) const { return instance_request(generic_instance_id{name, 0}); }
     // The instance the unit makes again (generic_instance_decl::remade) that `instance` is, or was asked for by; null for one
     // the unit's own text asked for
     const generic_instance_decl* remade_root(const generic_instance_decl* instance) const {
         for (size_t levels = 0; instance && levels <= k_generic_depth_limit; ++levels) {
             if (instance->remade) { return instance; }
-            instance = instance->within.empty() ? nullptr : instance_request(instance->within);
+            instance = instance->within.empty() ? nullptr : instance_request(instance->asker());
         }
         return nullptr;
     }
     void note_remade_failure(const generic_instance_decl& remade, const source_location& at, const std::string& message) {
         const bool at_declaration = at.line == remade.location.line && at.column == remade.location.column && at.filename == remade.location.filename;
-        remade_failures_->push_back({std::string(remade.name), std::string(remade.generic), at_declaration ? message : message + " (" + at.to_string() + ")", remade.location});
+        remade_failures_->push_back({std::string(remade.name), std::string(remade.generic), at_declaration ? message : message + " (" + at.to_string() + ")", remade.location, remade.stamp});
     }
     // The instances a declaration of this unit could not make again keep the declaration they have
     void warn_kept_instances() {
@@ -1266,8 +1275,9 @@ private:
         for (const auto& m : cd->members) {
             if (!m.declaration || m.declaration->get_type() != node_type::function_decl) { continue; }
             auto* fn = static_cast<function_decl*>(m.declaration.get());
-            if (unmade_instances_.count(fn->instance_name)) { continue; }
-            instance_scope scope(instance_ctx_, instance_request(fn->instance_name));
+            const generic_instance_decl* request = instance_request(*fn);
+            if (unmade_instances_.count(request)) { continue; }
+            instance_scope scope(instance_ctx_, request);
             walk_function(fn);
         }
         class_ctx_ = enclosing;
@@ -1277,7 +1287,7 @@ private:
     // The request ahead of an instance's declarations: its bounds, checked where the instance was asked for, then whatever kept
     // the instance from being made
     void walk_instance_request(const generic_instance_decl* request) {
-        const generic_instance_decl* asker = request->within.empty() ? nullptr : instance_request(request->within);
+        const generic_instance_decl* asker = request->within.empty() ? nullptr : instance_request(request->asker());
         bool bounded = true;
         {
             instance_scope scope(instance_ctx_, asker);
@@ -1289,7 +1299,7 @@ private:
                 diag(diag_level::error, request->location, std::move(text), 0, 0, /*always_error=*/true);
             }
         }
-        if (!bounded) { unmade_instances_.insert(request->name); return; }
+        if (!bounded) { unmade_instances_.insert(request); return; }
         for (const auto& failure : request->failures) {
             const bool at_request = failure.at.line == request->location.line && failure.at.column == request->location.column &&
                                     failure.at.filename == request->location.filename;
@@ -1433,11 +1443,26 @@ private:
         for (size_t i = 0; i < g.parameters.size(); ++i) { text += (i ? ", " : "") + std::string(g.parameters[i].name); }
         return text + ">";
     }
+    // Whether the unit declares the instance of `g` under `instance`: the name alone for a class, and for a function or a
+    // method the one made from `g` among the name's overloads
     bool instance_declared(const generic_definition& g, const std::string& instance) {
+        const auto made_from = [&](const std::vector<const function_decl*>& overloads) {
+            return std::any_of(overloads.begin(), overloads.end(), [&](const function_decl* fn) { return fn->instance_stamp == g.stamp; });
+        };
         switch (g.kind) {
             case generic_kind::class_type: return classes_.count(instance) != 0;
-            case generic_kind::method: return method_instances_.count(instance) != 0;
-            default: return g.space.empty() ? functions_.count(instance) != 0 : namespace_fns_.count(instance) != 0;
+            case generic_kind::method: {
+                const auto held = method_instances_.find(instance);
+                return held != method_instances_.end() && made_from(held->second.fns);
+            }
+            default: {
+                if (g.space.empty()) {
+                    const auto held = functions_.find(instance);
+                    return held != functions_.end() && made_from(held->second);
+                }
+                const auto held = namespace_fns_.find(instance);
+                return held != namespace_fns_.end() && made_from(held->second);
+            }
         }
     }
 
@@ -1501,7 +1526,7 @@ private:
     // The generic and arguments a class is an instance of, or derives an instance of, when the generic is `generic`
     bool instance_arguments(std::string_view cls, std::string_view generic, std::vector<type_info_ptr>& arguments, int depth = 0) {
         if (depth > 32 || cls.empty()) { return false; }
-        if (const generic_instance_decl* request = instance_request(cls)) {
+        if (const generic_instance_decl* request = class_instance_request(cls)) {
             if (request->generic == generic) { arguments = request->arguments; return true; }
         } else {
             std::string made_from;
@@ -1697,37 +1722,39 @@ private:
             }
             return generic_call::pending;
         }
-        if (fitting.size() > 1) {
+        // Generics that take the same type arguments name one instance, each its own overload of that name: the call is that
+        // name's, and its value arguments pick among the overloads as among functions written by hand. Generics that name
+        // different instances cannot both take the call.
+        const generic_definition_ptr& g = fitting.front();
+        const std::string instance = generic_instance_name(g->qualified_name(), fitting_types.front());
+        for (size_t i = 1; i < fitting.size(); ++i) {
+            if (generic_instance_name(fitting[i]->qualified_name(), fitting_types[i]) == instance) { continue; }
             diag(diag_level::error, c->location, "call to '" + shown + "' is ambiguous: the generics '" + generic_spelling(*fitting[0]) + "' (" +
-                 fitting[0]->location.to_string() + ") and '" + generic_spelling(*fitting[1]) + "' (" + fitting[1]->location.to_string() + ") both take it");
+                 fitting[0]->location.to_string() + ") and '" + generic_spelling(*fitting[i]) + "' (" + fitting[i]->location.to_string() + ") both take it");
             return generic_call::pending;
         }
-        const generic_definition_ptr& g = fitting.front();
-        std::vector<type_info_ptr> types = std::move(fitting_types.front());
-        const std::string instance = generic_instance_name(g->qualified_name(), types);
-        if (generic_requests_ && remade_root(instance_request(instance)) && !remade_root(instance_ctx_) && requested_now_.insert(instance).second) {
-            generic_request request;   // the unit's own text names an instance it was only making again: the instance is the unit's
+        bool declared = true;
+        for (size_t i = fitting.size(); i-- > 0;) {   // the last first: each request stands ahead of the unit's others, so the overloads stand as declared
+            const generic_definition_ptr& overload = fitting[i];
+            const generic_instance_id asked{instance, generic_instance_stamp(*overload)};
+            const generic_instance_decl* standing = instance_request(asked);
+            const bool made = instance_declared(*overload, instance);
+            declared = declared && made;
+            // asked for when the unit does not declare it, and when the unit's own text names an instance it was only making
+            // again (the instance is the unit's from here)
+            const bool claims = remade_root(standing) && !remade_root(instance_ctx_);
+            if (!generic_requests_ || (made ? !claims : standing && !claims) || !requested_now_.emplace(instance, asked.stamp).second) { continue; }
+            generic_request request;
             request.name = instance;
-            request.generic = g->qualified_name();
-            request.arguments = types;
-            request.definition = g;
+            request.generic = overload->qualified_name();
+            request.arguments = fitting_types[i];
+            request.definition = overload;
             request.at = c->location;
             request.within = instance_ctx_ ? std::string(instance_ctx_->name) : std::string();
+            request.within_stamp = instance_ctx_ ? instance_ctx_->stamp : 0;
             generic_requests_->push_back(std::move(request));
         }
-        if (!instance_declared(*g, instance)) {
-            if (generic_requests_ && !instance_requests_.count(instance) && requested_now_.insert(instance).second) {
-                generic_request request;
-                request.name = instance;
-                request.generic = g->qualified_name();
-                request.arguments = std::move(types);
-                request.definition = g;
-                request.at = c->location;
-                request.within = instance_ctx_ ? std::string(instance_ctx_->name) : std::string();
-                generic_requests_->push_back(std::move(request));
-            }
-            return generic_call::pending;
-        }
+        if (!declared) { return generic_call::pending; }
         // the name the instance declares: what follows its generic's namespace; a method's in full (Base::tag<int>), which is
         // what keeps a generic method from being virtual
         const bool bare = g->kind == generic_kind::method || g->space.empty();
@@ -8116,16 +8143,17 @@ private:
     // request's needs, the very names the linker waits on). The texts are a plain name's.
     void report_instance_before_declaration(std::string_view instance, const source_location& at, bool call) {
         if (!top_level_code()) { return; }
-        const auto request = instance_requests_.find(instance);
-        if (request == instance_requests_.end()) { return; }
-        const std::string generic(request->second->generic);
+        const auto named = instance_requests_.find(instance);   // the requests of a name share its generic and what it waits for
+        if (named == instance_requests_.end()) { return; }
+        const generic_instance_decl* request = named->second.front();
+        const std::string generic(request->generic);
         if (const auto declared = generics_.find(generic); declared != generics_.end() && !declared->second.empty() &&
             declared->second.front()->kind != generic_kind::method && declared_after(declared->second.front()->location, at) && !eng_.generic_declared(generic)) {
             const char* use = call ? "call" : "use";
             diag(diag_level::error, at, "'" + generic + "' is " + (call ? "called" : "used") + " before its declaration (line " + std::to_string(declared->second.front()->location.line) +
                                         "): top-level code runs in order, so declare it above the " + use + " or make the " + use + " after it");
         }
-        for (const std::string_view need : request->second->needs) { report_class_before_declaration(need, at); }
+        for (const std::string_view need : request->needs) { report_class_before_declaration(need, at); }
     }
     void report_function_before_declaration(std::string_view name, const source_location& at, bool call) {
         report_use_before_declaration(name, at, call, [&] { return eng_.has_function(std::string(name)); });
@@ -10609,8 +10637,9 @@ private:
             case node_type::function_decl: {
                 auto* fn = static_cast<function_decl*>(d);
                 if (fn->instance_stamp != 0) {   // a generic's instance: its diagnostics say whose
-                    if (unmade_instances_.count(fn->instance_name)) { break; }
-                    instance_scope scope(instance_ctx_, instance_request(fn->instance_name));
+                    const generic_instance_decl* request = instance_request(*fn);
+                    if (unmade_instances_.count(request)) { break; }
+                    instance_scope scope(instance_ctx_, request);
                     walk_function_declaration(fn);
                     break;
                 }
@@ -10624,8 +10653,9 @@ private:
                     break;
                 }
                 if (cd->instance_stamp != 0) {
-                    if (unmade_instances_.count(cd->name)) { break; }
-                    instance_scope scope(instance_ctx_, instance_request(cd->name));
+                    const generic_instance_decl* request = class_instance_request(cd->name);
+                    if (unmade_instances_.count(request)) { break; }
+                    instance_scope scope(instance_ctx_, request);
                     if (!classes_.count(cd->name)) { collect_class(cd); }
                     walk_class(cd);
                     break;

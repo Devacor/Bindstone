@@ -60,6 +60,10 @@ namespace jai {
         struct execution_limits;
         struct parallel_engine_state;
         enum class parallel_capture_kind : int;
+        struct loaded_source;
+        struct text_stamp;
+        struct source_stamp;
+        enum class source_mode : uint8_t;
     }
 
     namespace serialization {
@@ -527,15 +531,26 @@ namespace jai {
         // The running executable, generic (forward-slash) spelling; empty when the platform cannot say
         static std::string executable_path();
 
-        // The (modification time, size) stamp that execute_file, include, import and their caches compare to see a file
-        // change, and that a read is checked under (a stamp that moves during the read marks the text torn). An empty
-        // source selects the file system's; a source answers nullopt for a file it cannot stamp.
+        // The (modification time, size) stamp that execute_file, include, import, a template and their caches compare to see
+        // a file change, and that every load is taken under: the engine queries a file's stamp, reads its bytes and queries
+        // the stamp again, and keeps the bytes only when the two agree, so a stamp it remembers is the stamp of the bytes it
+        // parsed. A stamp that moves during the read reads the file again, four times at most; a file that never settles is
+        // not loaded (a first load raises "Failed to read source file: <path> (it kept changing while it was read)", a reload
+        // keeps the code it had and tries again on its next pass). An empty source selects the file system's; a source
+        // answers nullopt for a file it cannot stamp, which loads but is never remembered.
         struct file_stamp {
             uint64_t mtime = 0;
             uint64_t size = 0;
         };
         using file_stamp_reading = std::function<std::optional<file_stamp>(const std::string& a_path)>;
         void file_stamp_source(file_stamp_reading a_source);
+        // Called with every source file the engine loads, each time it reads one whole: the path it opened, the stamp of
+        // exactly those bytes (nullopt for a file the stamp source cannot stamp) and the file's bytes as they were read. What
+        // the engine parses is those bytes (a script's with the platform's text-mode line endings), so a host that keeps
+        // them holds the program the engine runs without reading a file again. It runs on the engine's thread, inside the
+        // load, and must not call back into the engine. An empty observer removes it.
+        using source_file_observing = std::function<void(const std::string& a_path, const std::optional<file_stamp>& a_stamp, std::string_view a_bytes)>;
+        void source_file_observer(source_file_observing a_observer);
 
         // The HTTP stack spider::catch / sling / get / post send through (<jaiscript/core/http_transport.hpp>); none is
         // installed by default, and a call without one raises a catchable error naming this function. Install it on the
@@ -933,10 +948,16 @@ namespace jai {
         // include: the file runs at the include site, in the current scope and under the running unit, so
         // its declarations are the includer's (internal/global_shadowing.md). scope names the function or block the
         // include runs in (empty at program scope): an enum the file declares there stays local to it.
-        script_value execute_include_source(const std::string& resolved_path, const std::string& content, std::string_view scope = {});
-        // An include's file read for the backends: false = it cannot be opened. Inside a running import the file joins the
-        // module's closure under the stamp it was read at, so a later change to it re-runs the module.
-        bool read_include_file(const std::string& resolved_path, std::string& content);
+        script_value execute_include_source(const std::string& resolved_path, const detail::loaded_source& content, std::string_view scope = {});
+        // An include's file loaded for the backends (missing = it cannot be opened, unsettled = it never read whole). Inside a
+        // running import the file joins the module's closure under the stamp its text was loaded with, so a later change to
+        // it re-runs the module.
+        detail::loaded_source read_include_file(const std::string& resolved_path);
+        // The one source loader (detail/source_loading.hpp), and the stamp seam on its own for a cache that asks whether the
+        // files it remembers moved (stamp_source: false = the file cannot be stamped)
+        detail::loaded_source load_source(const std::string& path, detail::source_mode mode);
+        bool stamp_source(const std::string& path, uint64_t& mtime, uint64_t& size) const;
+        bool stamps_stand(const std::vector<detail::source_stamp>& stamps) const;
 
         // The sleep builtin (detail: script_run.cpp): seconds on the time source; suspends the innermost run when nothing pins it,
         // else blocks. sleep_callee: `function` is the core sleep function (a call of it runs the builtin)
@@ -1221,8 +1242,9 @@ namespace jai {
         uint64_t park_error_text(std::string_view text) const;
         // template(path, ...) with a path known at run time (detail/template_library.hpp): the unit `source` (a lambda over the
         // template) run under `unit`, its parse or check failure as the error; and whether that unit's parse still stands for
-        // every file it read
-        checked_result<script_value> run_template_unit(const std::string& unit, const std::string& source);
+        // every file it read. A failure leaves in `read` the files the failing load read, each under the stamp its text was
+        // loaded with; `unsettled` = one of them never read whole, so the failure is no verdict on the template
+        checked_result<script_value> run_template_unit(const std::string& unit, const std::string& source, std::vector<detail::source_stamp>& read, bool& unsettled);
         bool template_unit_current(const std::string& unit, const std::string& source);
 
         // Get class definition by type index
@@ -1716,7 +1738,8 @@ namespace jai {
                                     const instance_variables& instanceVars,
                                     const std::string& source_path,
                                     bool textual = false,   // textual: an include, run where it is written
-                                    std::string_view include_scope = {});
+                                    std::string_view include_scope = {},
+                                    const detail::text_stamp* loaded_under = nullptr);   // the stamp the loader gave the text; null = the host's own text
 
         // Lazily constructs + wires the selected backend on first use, so creating an
         // engine (or switching backend type) costs nothing until a script actually runs.

@@ -7896,10 +7896,14 @@ checked_result<void> interpreter::include_into_value_stack(expression* path_expr
     }
     std::string resolved_path = std::move(resolve_result.value());
 
-    std::string content;
-    if (!engine_ptr->read_include_file(resolved_path, content)) {   // KEEP BYTE-PARALLEL with the vm
+    const detail::loaded_source content = engine_ptr->read_include_file(resolved_path);   // KEEP BYTE-PARALLEL with the vm
+    if (content.status == detail::loaded_source::state::missing) {
         return checked_result<void>(make_error_code(runtime_error_code::file_not_found), "Failed to open include file: {0}",
                                     string_symbolizer_->intern(resolved_path));
+    }
+    if (content.status == detail::loaded_source::state::unsettled) {
+        return checked_result<void>(make_error_code(runtime_error_code::file_not_found), "{0}",
+                                    string_symbolizer_->intern(detail::unsettled_source_text(resolved_path)));
     }
 
     // Execute the included file. Pass the resolved path so every node in the included

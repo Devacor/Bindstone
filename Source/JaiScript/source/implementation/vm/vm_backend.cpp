@@ -20201,9 +20201,12 @@ op_status vm_backend::exec_include(frame& f, const vm_instruction& ins) {
 	}
 	std::string resolved_path = std::move(resolve_result.value());
 
-	std::string content;
-	if (!engine_->read_include_file(resolved_path, content)) {   // KEEP BYTE-PARALLEL with the interpreter
+	const detail::loaded_source content = engine_->read_include_file(resolved_path);   // KEEP BYTE-PARALLEL with the interpreter
+	if (content.status == detail::loaded_source::state::missing) {
 		return raise_(make_error_code(runtime_error_code::file_not_found), "Failed to open include file: {0}", symbolizer_->intern(resolved_path));
+	}
+	if (content.status == detail::loaded_source::state::unsettled) {
+		return raise_(make_error_code(runtime_error_code::file_not_found), "{0}", symbolizer_->intern(detail::unsettled_source_text(resolved_path)));
 	}
 
 	// Re-entrant into this backend's execute(); prepare_for_execution preserves any

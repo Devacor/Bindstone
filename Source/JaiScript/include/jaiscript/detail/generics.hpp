@@ -58,6 +58,10 @@ namespace jai::detail {
 		uint64_t stamp = 0;          // what an instance's definition is compared by: the tokens and where they stand
 		std::vector<generic_value_parameter> values;   // a function's or a method's parameters
 		source_location location;    // the name's
+		// the stamp its file's text was loaded with (the engine sets it at every load of that text); unset = the host
+		// supplied the text, and the engine never read the file
+		mutable uint64_t file_mtime = 0, file_size = 0;
+		mutable bool file_stamped = false;
 
 		// "Stack", "shop::Stack", "wire::decode", "Request::json"
 		std::string qualified_name() const {

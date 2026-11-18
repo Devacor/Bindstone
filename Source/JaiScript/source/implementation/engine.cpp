@@ -886,11 +886,10 @@ struct engine::implementation {
     }
     engine::import_behavior import_behavior = engine::import_behavior::file_timestamp; // Default
     
-    struct closure_stamp {
-        std::string path;
-        uint64_t mtime = 0;
-        uint64_t size = 0;
-    };
+    using closure_stamp = detail::source_stamp;   // a file under the stamp the loader gave its text (load_source)
+    struct script_cache_entry;
+    // a loaded unit as a check judged it: the unit and the entry it had run from
+    using judged_unit = std::pair<uint32_t, std::weak_ptr<script_cache_entry>>;
     struct import_record {
         std::string resolved_path;
         // (mtime, size) stamp via stat_mtime_size, matching the script cache: 100 ns
@@ -905,10 +904,11 @@ struct engine::implementation {
         uint64_t failed_mtime = 0;
         uint64_t failed_size = 0;
         std::vector<closure_stamp> failed_closure;   // other files the failure involved (a dependent it broke, a file its parse read): a change to one lets it try again
+        std::vector<judged_unit> failed_units;       // the loaded units the failure broke, as it judged them: one that is loaded again lets it try again
         bool missing = false;   // its file was gone at a check (raised once): it waits until a check finds the file again
         uint64_t runs = 0;      // runs started: a nested module queued to re-run is skipped when something ran it meanwhile
         // the rest of the module's closure: every file its last run included (top level, nested, spliced into a function
-        // body), each stamped as it was read; a pass queries each like the module itself
+        // body), each under the stamp its text was loaded with; a pass queries each like the module itself
         std::vector<closure_stamp> closure;
         // the modules its last run imported: a pass that checks this module checks them too, and a changed one re-runs alone
         std::vector<std::string> children;
@@ -979,7 +979,8 @@ struct engine::implementation {
     };
     std::vector<import_frame> import_frames_;   // per running import, innermost last
 
-    // a file the running import read: a second read under another stamp leaves a zero stamp, which the next pass sees moved
+    // a file the running import loaded, under the stamp of the text it loaded (unstamped: a file the stamp source cannot
+    // stamp, or one that never read whole): a second load under another stamp leaves a zero stamp, which the next pass sees moved
     void note_closure_file(const std::string& path, bool stamped, uint64_t mtime, uint64_t size) {
         if (import_frames_.empty()) { return; }
         if (!stamped) { mtime = 0; size = 0; }
@@ -1017,7 +1018,8 @@ struct engine::implementation {
     }
     bool closure_moved(const import_record& record) { return stamps_moved(record.closure); }
     bool held_failure(const import_record& record, uint64_t mtime, uint64_t size) {
-        return record.failed && mtime == record.failed_mtime && size == record.failed_size && !stamps_moved(record.failed_closure);
+        return record.failed && mtime == record.failed_mtime && size == record.failed_size && !stamps_moved(record.failed_closure) &&
+               units_stand(record.failed_units);
     }
     bool stamps_moved(const std::vector<closure_stamp>& stamps) {
         for (const auto& s : stamps) {
@@ -1060,6 +1062,9 @@ struct engine::implementation {
         bool closure_filesystem = true;   // permission under which dependencies were gathered
         std::vector<closure_stamp> closure_stamps;
         std::vector<closure_stamp> spliced_stamps;   // files spliced into function bodies at parse time: a change re-parses this entry; such a unit writes no jaibite cache
+        std::vector<detail::generic_definition_ptr> generics;   // the generics its text declares (note_text_stamp)
+        bool generics_gathered = false;
+        detail::text_stamp loaded_under;   // the stamp its text was last loaded with (note_text_stamp): a parse of that text again keeps it
         // the unit's reload hook (hot_reload_migrate at its top level): kept off the program - never defined, never callable - and
         // run after a re-run of the unit; check_declarations = the program and the hook, what the checker and the proof pass walk
         std::shared_ptr<function_decl> reload_hook;
@@ -1514,7 +1519,7 @@ struct engine::implementation {
     // back in `made` behind the requests that text makes itself. What keeps it from being made stays on the request, for the
     // check to report.
     void instantiate_generic(engine& self, const std::vector<declaration_ptr>& decls, const generic_request_index& requests,
-                             generic_instance_decl& request, std::vector<declaration_ptr>& made, std::vector<std::string>& files) {
+                             generic_instance_decl& request, std::vector<declaration_ptr>& made, std::vector<closure_stamp>& files) {
         const auto fail = [&](std::string message, bool unresolved = false) {
             request.failures.push_back({request.location, std::move(message)});
             request.unresolved = unresolved;
@@ -1607,6 +1612,7 @@ struct engine::implementation {
         const std::vector<token> text = detail::generic_instance_tokens(*definition, request.arguments, simple, string_symbolizer_);
         parser reader(text, &string_symbolizer_, &self, registeredTemplateTypes, file);
         auto parsed = reader.parse();
+        refuse_unsettled(reader);
         for (const auto& spliced : reader.spliced_files()) { files.push_back(spliced); }
         if (!parsed) {
             for (auto& issue : reader.issues()) { request.failures.push_back({std::move(issue.at), std::move(issue.message)}); }
@@ -1627,7 +1633,11 @@ struct engine::implementation {
         }
         request.expanded = true;
         request.file = file;
-        files.push_back(file);
+        // the generic's file under the stamp its text was loaded with; text the host supplied (execute_file_source) was never
+        // loaded here, so its file is stamped as it stands now
+        closure_stamp origin{file, definition->file_mtime, definition->file_size};
+        if (!definition->file_stamped && !file.empty() && file != "<script>") { (void)stat_mtime_size(file, origin.mtime, origin.size); }
+        files.push_back(std::move(origin));
         note_instance(std::string(request.name), generic, request.arguments);
         if (definition->kind != detail::generic_kind::class_type && !instance_shapes_.count(definition->stamp)) {
             auto shape = std::make_shared<detail::generic_definition>(*definition);
@@ -1745,7 +1755,7 @@ struct engine::implementation {
 
     // Every request of the unit that is not made yet, in order; an instance's own requests follow its request, ahead of its
     // declarations (a base's instance before the class that derives from it). True when the declarations changed.
-    bool expand_generics(engine& self, std::vector<declaration_ptr>& decls, std::vector<std::string>& files) {
+    bool expand_generics(engine& self, std::vector<declaration_ptr>& decls, std::vector<closure_stamp>& files) {
         bool changed = false;
         generic_request_index requests;   // every request there is, whatever its place: an instance's chain of askers reads it
         for (const auto& d : decls) {
@@ -1833,7 +1843,7 @@ struct engine::implementation {
     // the declarations, with a reload hook after them.
     template <typename View>
     check_report check_expanding(engine& self, std::vector<declaration_ptr>& declarations, View&& view, detail::check_options o,
-                                 std::vector<std::string>& files, bool& changed, const std::vector<std::string>* extra_globals = nullptr) {
+                                 std::vector<closure_stamp>& files, bool& changed, const std::vector<std::string>* extra_globals = nullptr) {
         changed = expand_generics(self, declarations, files);
         std::vector<detail::generic_kept_instance> kept;   // what the unit's declarations cannot make again: the check warns of each
         const auto remake = [&] {   // a class made again declares its generic methods again: until nothing more is held
@@ -1864,15 +1874,29 @@ struct engine::implementation {
             changed = true;
         }
     }
-    // the files an entry's instances were made from stand beside its spliced includes: a change re-parses the entry
-    void stamp_generic_files(script_cache_entry& entry, const std::vector<std::string>& files) {
-        for (const auto& f : files) {
+    // the files an entry's instances were made from stand beside its spliced includes, each under the stamp the text it
+    // was made from was loaded with: a change re-parses the entry
+    void stamp_generic_files(script_cache_entry& entry, const std::vector<closure_stamp>& files) {
+        for (const auto& made_from : files) {
+            const std::string& f = made_from.path;
             if (f != entry.source_path) { entry.outside_generics = true; }
             if (f.empty() || f == "<script>") { continue; }
             if (f == entry.source_path || std::any_of(entry.spliced_stamps.begin(), entry.spliced_stamps.end(), [&](const closure_stamp& s) { return s.path == f; })) { continue; }
-            closure_stamp s{f, 0, 0};
-            (void)stat_mtime_size(f, s.mtime, s.size);
-            entry.spliced_stamps.push_back(std::move(s));
+            entry.spliced_stamps.push_back(made_from);
+        }
+    }
+    // The stamp an entry's text was loaded with reaches the generics it declares: an instance made from one is stamped with
+    // it (null: the host supplied the text)
+    void note_text_stamp(script_cache_entry& entry, const detail::text_stamp* loaded_under) {
+        entry.loaded_under = loaded_under ? *loaded_under : detail::text_stamp{};
+        if (!entry.generics_gathered) {
+            entry.generics_gathered = true;
+            collect_generics(entry.declarations, entry.generics);
+        }
+        for (const auto& g : entry.generics) {
+            g->file_stamped = loaded_under && loaded_under->stamped;
+            g->file_mtime = g->file_stamped ? loaded_under->mtime : 0;
+            g->file_size = g->file_stamped ? loaded_under->size : 0;
         }
     }
 
@@ -1978,7 +2002,9 @@ struct engine::implementation {
             prs.source_text(content);
             auto parse_result = prs.parse();
             if (!parse_result) {
-                for (const auto& f : prs.spliced_files()) { uint64_t mtime = 0, size = 0; const bool ok = stat_mtime_size(f, mtime, size); note_closure_file(f, ok, mtime, size); }
+                for (const auto& f : prs.spliced_files()) { note_closure_file(f.path, true, f.mtime, f.size); }
+                if (!prs.unsettled_file().empty()) { note_closure_file(prs.unsettled_file(), false, 0, 0); }
+                refuse_unsettled(prs);
                 throw parse_error(self.format_error(parse_result));
             }
             auto decls = std::move(parse_result.value());
@@ -2007,9 +2033,11 @@ struct engine::implementation {
     bool reparse_if_moved(engine& self, std::shared_ptr<script_cache_entry>& held, const std::string& source) {
         if (!parse_moved(*held)) { return false; }
         const std::string path = held->source_path;
+        const detail::text_stamp loaded_under = held->loaded_under;   // the same text, parsed again: no file is read for it
         std::filesystem::path cacheFile;
         bool cacheFresh = false;
         held = acquire_entry(self, source, path, cacheFile, cacheFresh);
+        note_text_stamp(*held, loaded_under.stamped ? &loaded_under : nullptr);
         pool_unit(held->declarations, path, unit_key(*held, source));
         return true;
     }
@@ -2017,7 +2045,10 @@ struct engine::implementation {
     // Depth-first in source order; a unit the runtime cannot resolve or read is skipped here
     // and reported by the runtime exactly as before, when it executes. A unit that fails to
     // parse is collected in parse_failures (its text, path and position included). Every
-    // resolved unit leaves a stamp (taken before the read, so a later edit shows as newer).
+    // resolved unit leaves the stamp its text was loaded with. A unit that never read whole
+    // keeps the declarations the program has for it and leaves a zero stamp, so the next
+    // gather is due; one the program never loaded ends the gather (source_unsettled): no
+    // check stands on a text nobody read.
     void collect_closure_units(engine& self, const std::vector<std::string>& paths, std::unordered_set<std::string>& visited,
                                std::vector<closure_unit>& out, std::vector<closure_stamp>& stamps, const std::string& from_file,
                                std::string& parse_failures) {
@@ -2027,14 +2058,21 @@ struct engine::implementation {
                 auto resolved = resolve_include_path(path, &self, from_file);
                 if (!resolved || !visited.insert(resolved.value()).second) { continue; }
                 unit.path = std::move(resolved.value());
-                closure_stamp stamp{unit.path, 0, 0};
-                const bool stamped = stat_mtime_size(unit.path, stamp.mtime, stamp.size);
-                const uint64_t mtime = stamp.mtime, size = stamp.size;
-                stamps.push_back(std::move(stamp));
-                if (read_for_load(unit.path, stamped, mtime, size, unit.source) == stamped_read::missing) { continue; }
+                detail::loaded_source loaded = load_source(unit.path, detail::source_mode::text);
+                if (loaded.status == detail::loaded_source::state::unsettled) {
+                    if (!pooled_unit_keys_.count(unit.path)) { throw detail::source_unsettled(unit.path); }
+                    stamps.push_back({unit.path, 0, 0});
+                    continue;
+                }
+                stamps.push_back({unit.path, loaded.stamp.mtime, loaded.stamp.size});
+                if (loaded.status == detail::loaded_source::state::missing) { continue; }
+                unit.source = std::move(loaded.text);
                 std::filesystem::path cacheFile;
                 bool cacheFresh = false;
                 unit.entry = acquire_entry(self, unit.source, unit.path, cacheFile, cacheFresh);
+                note_text_stamp(*unit.entry, &loaded.stamp);
+            } catch (const detail::source_unsettled&) {
+                throw;
             } catch (const parse_error& e) {
                 note_parse_failure(e, parse_failures);
                 continue;
@@ -2132,7 +2170,7 @@ struct engine::implementation {
         if (need_check && entry.stamp_loaded && !remakes && outside_key(self, entry.context.outside) == entry.context.outside_key) {
             entry.check_result = {};   // the loaded stamp's names resolve here as where it was checked
             entry.outside_keyed = true;
-            std::vector<std::string> generic_files;
+            std::vector<closure_stamp> generic_files;
             expand_generics(self, entry.declarations, generic_files);   // a cached unit holds its instances: the engine learns what each was made from
         } else if (need_check) {   // the diagnostics walk leaves the proofs alone: the proof pass follows, and it alone reads the program's globals
             detail::set_aggregate_view(entry.lowering, false);   // diagnostics read the parsed bodies
@@ -2142,7 +2180,7 @@ struct engine::implementation {
             const bool first = jaibite_cache_enabled && entry.source_path != "<script>" && !entry.context_recorded;
             std::vector<std::string> outside;
             if (first) { o.outside = &outside; }
-            std::vector<std::string> generic_files;
+            std::vector<closure_stamp> generic_files;
             bool expanded = false;
             entry.check_result = check_expanding(self, entry.declarations, [&]() -> const std::vector<declaration_ptr>& {
                 if (entry.reload_hook) {
@@ -2193,6 +2231,7 @@ struct engine::implementation {
     // republished on every call, gathered or not.
     const check_report& checked_report(engine& self, std::shared_ptr<script_cache_entry>& held, std::string_view source) {
         if (closure_due(*held)) {
+            held->closure_epoch = UINT64_MAX;   // a gather that does not end (a unit never read whole) is due again
             std::vector<std::string> roots;
             literal_unit_paths(held->declarations, roots);
             std::vector<closure_unit> closure;
@@ -2373,8 +2412,10 @@ struct engine::implementation {
 
     // A reload's dependents: every loaded unit but the re-running ones, checked again (never run again) against the program as
     // the reload would leave it, its new declarations pooled. A gating diagnostic the unit's own last check did not raise is the
-    // reload's; the listing names the unit's file and line, and the files that failed land in failing_files (unstamped).
-    std::string reload_dependents_listing(engine& self, const std::unordered_set<uint32_t>& rerunning, std::vector<closure_stamp>& failing_files) {
+    // reload's; the listing names the unit's file and line, the files that failed land in failing_files (unstamped) and the
+    // units, each with the entry that was judged, in failing_units.
+    std::string reload_dependents_listing(engine& self, const std::unordered_set<uint32_t>& rerunning, std::vector<closure_stamp>& failing_files,
+                                          std::vector<judged_unit>& failing_units) {
         std::vector<uint32_t> units;
         for (const auto& [unit, loaded] : loaded_units_) {
             if (!rerunning.count(unit) && loaded.entry->checked) { units.push_back(unit); }
@@ -2402,8 +2443,18 @@ struct engine::implementation {
             if (broken.diagnostics.empty()) { continue; }
             listing += broken.format(loaded.source, entry.source_path);
             if (entry.source_path != "<script>") { failing_files.push_back({entry.source_path, 0, 0}); }
+            failing_units.emplace_back(unit, loaded.entry);
         }
         return listing;
+    }
+    // every unit is still loaded from the entry a check judged
+    bool units_stand(const std::vector<judged_unit>& units) const {
+        for (const auto& [unit, judged] : units) {
+            const auto loaded = loaded_units_.find(unit);
+            const auto entry = judged.lock();
+            if (!entry || loaded == loaded_units_.end() || loaded->second.entry != entry) { return false; }
+        }
+        return true;
     }
     uint32_t loaded_unit_of(const std::string& path) const {
         auto it = unit_index_.find(std::filesystem::path(path).lexically_normal().string());
@@ -2547,10 +2598,10 @@ struct engine::implementation {
         return nullptr;
     }
 
-    // the files a parse spliced into function bodies, stamped now; a later stamp change makes the entry stale
-    void stamp_spliced(script_cache_entry& entry, const std::vector<std::string>& files) {
-        entry.spliced_stamps.clear();
-        for (const auto& f : files) { closure_stamp s{f, 0, 0}; (void)stat_mtime_size(f, s.mtime, s.size); entry.spliced_stamps.push_back(std::move(s)); }
+    // the files a parse spliced into function bodies, each under the stamp the spliced text was loaded with; a later stamp
+    // change makes the entry stale
+    void stamp_spliced(script_cache_entry& entry, const std::vector<closure_stamp>& files) {
+        entry.spliced_stamps = files;
     }
     // A cached parse no longer stands for its text: an include it spliced changed, or a namespace class it asked about is answered otherwise
     bool parse_moved(script_cache_entry& entry) {
@@ -2896,33 +2947,92 @@ struct engine::implementation {
         return true;
     }
 
-    // A file's text read under the (mtime, size) stamp taken just before the read: the stamp queried again after it must
-    // agree, or a save landed mid-read and the text may mix two versions (torn: read it again later)
-    enum class stamped_read { missing, torn, stable };
-    stamped_read read_under_stamp(const std::string& path, bool stamped, uint64_t mtime, uint64_t size, std::string& content) {
-        {
-            ++source_reads_;
-            std::ifstream file(path);
-            if (!file.is_open()) { return stamped_read::missing; }
-            std::stringstream buffer;
-            buffer << file.rdbuf();
-            content = buffer.str();
-        }
-        if (!stamped) { return stamped_read::stable; }
-        uint64_t after_mtime = 0, after_size = 0;
-        return stat_mtime_size(path, after_mtime, after_size) && after_mtime == mtime && after_size == size
-            ? stamped_read::stable : stamped_read::torn;
-    }
-
     // A load (an execute, or an import the host's call reached) reads each file once: the closure gather, the imports and
-    // includes that run the gathered units and the gathers nested in them take a text read earlier in the load while the
-    // file's stamp still matches the one it was read under. The texts go when the outermost load ends.
+    // includes that run the gathered units and the gathers nested in them take a text loaded earlier in the load while the
+    // file's stamp still matches the one it was loaded with. The texts go when the outermost load ends.
     struct load_text {
+        bool held = false;
         uint64_t mtime = 0, size = 0;
         std::string text;
     };
-    std::unordered_map<std::string, load_text> load_texts_;
+    std::unordered_map<std::string, std::array<load_text, 2>> load_texts_;   // per file, by detail::source_mode
     uint32_t load_depth_ = 0;
+    engine::source_file_observing source_file_observer;
+
+    // What the platform's text mode reads of a file's bytes, as a script always was read: on Windows a "\r\n" is one '\n'
+    // and the text ends at a Ctrl-Z; elsewhere the bytes
+    static std::string text_mode_reading(std::string bytes) {
+#ifdef _WIN32
+        if (bytes.find_first_of("\r\x1A") == std::string::npos) { return bytes; }
+        size_t kept = 0;
+        for (size_t i = 0; i < bytes.size(); ++i) {
+            const char c = bytes[i];
+            if (c == '\x1A') { break; }
+            if (c == '\r' && i + 1 < bytes.size() && bytes[i + 1] == '\n') { continue; }
+            bytes[kept++] = c;
+        }
+        bytes.resize(kept);
+#endif
+        return bytes;
+    }
+
+    // THE source loader: the one place the engine, the parser and the template machinery open a source file (a root, a
+    // module, an include, a file spliced into a function body, a template, a generic's file). It returns the file's bytes
+    // with the stamp of exactly those bytes: the stamp is queried, the bytes are read, and the stamp queried again must
+    // agree, or a save landed in between and the file is read again, k_source_load_tries times in all. A file whose stamp
+    // moved during every read is unsettled: no read of it stands for a version of the file, so nothing is parsed, run or
+    // remembered from it. Every stamp the engine remembers for a file is one returned here with the bytes it stands for.
+    detail::loaded_source load_source(const std::string& path, detail::source_mode mode) {
+        detail::loaded_source result;
+        for (int attempt = 0; attempt < detail::k_source_load_tries; ++attempt) {
+            detail::text_stamp before;
+            before.stamped = stat_mtime_size(path, before.mtime, before.size);
+            load_text* kept = nullptr;
+            if (before.stamped && load_depth_ > 0) {
+                kept = &load_texts_[path][static_cast<size_t>(mode)];
+                if (kept->held && kept->mtime == before.mtime && kept->size == before.size) {
+                    result.status = detail::loaded_source::state::loaded;
+                    result.stamp = before;
+                    result.text = kept->text;
+                    return result;
+                }
+            }
+            std::string bytes;
+            {
+                ++source_reads_;
+                std::ifstream file(path, std::ios::binary);
+                if (!file.is_open()) { return result; }
+                std::stringstream buffer;
+                buffer << file.rdbuf();
+                bytes = std::move(buffer).str();
+            }
+            detail::text_stamp after;
+            after.stamped = stat_mtime_size(path, after.mtime, after.size);
+            if (after.stamped != before.stamped || after.mtime != before.mtime || after.size != before.size) { continue; }
+            if (source_file_observer) {
+                source_file_observer(path, before.stamped ? std::optional<engine::file_stamp>(engine::file_stamp{before.mtime, before.size}) : std::nullopt, bytes);
+            }
+            result.status = detail::loaded_source::state::loaded;
+            result.stamp = before;
+            result.text = mode == detail::source_mode::text ? text_mode_reading(std::move(bytes)) : std::move(bytes);
+            if (kept) { *kept = {true, before.mtime, before.size, result.text}; }
+            return result;
+        }
+        result.status = detail::loaded_source::state::unsettled;
+        return result;
+    }
+    // a parse that met a file that never read whole is no verdict on the program's text
+    static void refuse_unsettled(const parser& prs) {
+        if (!prs.unsettled_file().empty()) { throw detail::source_unsettled(prs.unsettled_file()); }
+    }
+    // every file still carries the stamp it is remembered under
+    bool stamps_stand(const std::vector<closure_stamp>& stamps) const {
+        for (const auto& s : stamps) {
+            uint64_t mtime = 0, size = 0;
+            if (!stat_mtime_size(s.path, mtime, size) || mtime != s.mtime || size != s.size) { return false; }
+        }
+        return true;
+    }
     struct load_scope {
         implementation& impl;
         explicit load_scope(implementation& a_impl) : impl(a_impl) { ++impl.load_depth_; }
@@ -2932,18 +3042,6 @@ struct engine::implementation {
             if (--impl.load_depth_ == 0) { impl.load_texts_.clear(); }
         }
     };
-    stamped_read read_for_load(const std::string& path, bool stamped, uint64_t mtime, uint64_t size, std::string& content) {
-        if (stamped) {
-            if (auto it = load_texts_.find(path); it != load_texts_.end() && it->second.mtime == mtime && it->second.size == size) {
-                content = it->second.text;
-                return stamped_read::stable;
-            }
-        }
-        const stamped_read result = read_under_stamp(path, stamped, mtime, size, content);
-        if (result == stamped_read::stable && stamped && load_depth_ > 0) { load_texts_[path] = {mtime, size, content}; }
-        return result;
-    }
-
     // Jaibite disk cache (engine.hpp doc): <folder>/.cache/<file>.jaibite, or below the host's cache directory, maintained
     // for every file-based load. std::filesystem only; every touch is best-effort via error_code.
     bool jaibite_cache_enabled = true;
@@ -4283,17 +4381,28 @@ script_value engine::execute_file_source(const std::string& resolvedPath, const 
     return execute_source(content, instance_variables{}, resolvedPath);
 }
 
-bool engine::read_include_file(const std::string& resolvedPath, std::string& content) {
-    uint64_t mtime = 0, size = 0;
-    const bool stamped = impl->stat_mtime_size(resolvedPath, mtime, size);
-    const auto read = impl->read_for_load(resolvedPath, stamped, mtime, size, content);
-    if (read == implementation::stamped_read::missing) { return false; }
-    impl->note_closure_file(resolvedPath, stamped && read == implementation::stamped_read::stable, mtime, size);
-    return true;
+detail::loaded_source engine::read_include_file(const std::string& resolvedPath) {
+    detail::loaded_source loaded = impl->load_source(resolvedPath, detail::source_mode::text);
+    if (loaded.status != detail::loaded_source::state::missing) {
+        impl->note_closure_file(resolvedPath, loaded.status == detail::loaded_source::state::loaded && loaded.stamp.stamped, loaded.stamp.mtime, loaded.stamp.size);
+    }
+    return loaded;
 }
 
-script_value engine::execute_include_source(const std::string& resolvedPath, const std::string& content, std::string_view scope) {
-    return execute_source(content, instance_variables{}, resolvedPath, true, scope);
+detail::loaded_source engine::load_source(const std::string& path, detail::source_mode mode) {
+    return impl->load_source(path, mode);
+}
+
+bool engine::stamp_source(const std::string& path, uint64_t& mtime, uint64_t& size) const {
+    return impl->stat_mtime_size(path, mtime, size);
+}
+
+bool engine::stamps_stand(const std::vector<detail::source_stamp>& stamps) const {
+    return impl->stamps_stand(stamps);
+}
+
+script_value engine::execute_include_source(const std::string& resolvedPath, const detail::loaded_source& content, std::string_view scope) {
+    return execute_source(content.text, instance_variables{}, resolvedPath, true, scope, &content.stamp);
 }
 
 held_value engine::execute(script_source source) { return hold(execute_unheld(source)); }
@@ -4324,7 +4433,7 @@ script_value engine::execute_unheld(script_source source) {
     return result;
 }
 
-script_value engine::execute_source(const std::string& scriptContent, const instance_variables& instanceVars, const std::string& sourcePath, bool textual, std::string_view include_scope) {
+script_value engine::execute_source(const std::string& scriptContent, const instance_variables& instanceVars, const std::string& sourcePath, bool textual, std::string_view include_scope, const detail::text_stamp* loaded_under) {
     impl->binding_gate(*this);
     impl->has_executed_ = true;
     implementation::load_scope loading(*impl);
@@ -4344,6 +4453,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         std::filesystem::path cacheFile;
         bool cacheFresh = false;
         auto cached = impl->acquire_entry(*this, scriptContent, sourcePath, cacheFile, cacheFresh);
+        impl->note_text_stamp(*cached, loaded_under);
         for (const auto& s : cached->spliced_stamps) { impl->note_closure_file(s.path, true, s.mtime, s.size); }
 
         // Static-check hook: one place, at the parse-cache entry — covers execute(),
@@ -4496,7 +4606,7 @@ void engine::check_bite(jai::jaibite& bite, const std::string* source) {
         if (record) { o.outside = &outside; }
         check_report r;
         if (need_check) {   // the bite declares the instances its text needs (detail/generics.hpp)
-            std::vector<std::string> generic_files;
+            std::vector<implementation::closure_stamp> generic_files;
             bool expanded = false;
             r = impl->check_expanding(*this, bite.declarations_, [&]() -> const std::vector<declaration_ptr>& { return bite.declarations_; }, o, generic_files, expanded);
             if (expanded) { bite.compiled_.reset(); }
@@ -4794,6 +4904,7 @@ check_report engine::check(const std::string& scriptContent) {
         parser.source_text(scriptContent);
         auto parse_result = parser.parse();
         if (!parse_result) {
+            implementation::refuse_unsettled(parser);
             throw parse_error(format_error(parse_result));
         }
         cached = impl->store_cached_script("<script>", scriptContent, std::move(parse_result.value()));
@@ -4884,6 +4995,8 @@ script_value engine::execute_file_unheld(const std::string& scriptPath, const in
     const std::string& attributed = canon.empty() ? scriptPath : canon;
     impl->note_root_source(attributed);
     implementation::running_root_scope running_root(impl->running_roots_, attributed);
+    detail::loaded_source loaded;
+    bool reloaded = false;
     if (statOk) {
         auto it = impl->file_script_cache.find(canon);
         if (it != impl->file_script_cache.end()) {
@@ -4895,12 +5008,10 @@ script_value engine::execute_file_unheld(const std::string& scriptPath, const in
             if (stampValid && !node.verified) {
                 // One-shot equal-stamp verify: an edit in the same filesystem tick as
                 // the original read is invisible to the stat, so compare bytes once.
-                std::ifstream verifyFile(scriptPath);
-                std::stringstream verifyBuffer;
-                if (verifyFile.is_open()) {
-                    verifyBuffer << verifyFile.rdbuf();
-                }
-                if (verifyFile.is_open() && verifyBuffer.view() == node.source) {
+                loaded = impl->load_source(scriptPath, detail::source_mode::text);
+                reloaded = true;
+                if (loaded.status == detail::loaded_source::state::loaded && loaded.stamp.stamped && loaded.stamp.mtime == node.mtime &&
+                    loaded.stamp.size == node.size && loaded.text == node.source) {
                     node.verified = true;
                 } else {
                     stampValid = false;
@@ -4913,22 +5024,21 @@ script_value engine::execute_file_unheld(const std::string& scriptPath, const in
         }
     }
 
-    // a save landing mid-read re-reads at once (bounded); text still torn after that runs, but is not remembered
-    std::string content;
-    bool stable = false;
-    for (int attempt = 0; ; ++attempt) {
-        const auto read = impl->read_under_stamp(scriptPath, statOk, mtime, size, content);
-        if (read == implementation::stamped_read::missing) {
-            throw runtime_error("Failed to open script file: " + scriptPath);
-        }
-        stable = read == implementation::stamped_read::stable;
-        if (stable || attempt == 3) { break; }
-        statOk = impl->stat_mtime_size(scriptPath, mtime, size);
+    // the text and its stamp come from the loader together; a file that never read whole runs nothing and is not remembered
+    if (!reloaded) { loaded = impl->load_source(scriptPath, detail::source_mode::text); }
+    if (loaded.status == detail::loaded_source::state::missing) {
+        throw runtime_error("Failed to open script file: " + scriptPath);
     }
-    script_value result = execute_source(content, instanceVars, attributed);
+    if (loaded.status == detail::loaded_source::state::unsettled) {
+        throw detail::source_unsettled(scriptPath);
+    }
+    std::string& content = loaded.text;
+    mtime = loaded.stamp.mtime;
+    size = loaded.stamp.size;
+    script_value result = execute_source(content, instanceVars, attributed, false, {}, &loaded.stamp);
 
-    // Stamp AFTER a successful execute, with the stamp the read was taken under
-    if (statOk && stable && !canon.empty()) {
+    // Stamp AFTER a successful execute, with the stamp the text was loaded with
+    if (loaded.stamp.stamped && !canon.empty()) {
         if (auto entry = impl->find_cached_script(attributed, content)) {
             if (impl->file_script_cache.size() >= implementation::script_cache_max &&
                 impl->file_script_cache.find(canon) == impl->file_script_cache.end()) {
@@ -5202,7 +5312,7 @@ bool engine::declares_generics() const { return !impl->generics_.empty(); }
 bool engine::names_generic_method(const std::string& name) const { return impl->generic_method_names_.count(name) != 0; }
 
 check_report engine::check_expanding(std::vector<declaration_ptr>& declarations, detail::check_options options, const std::vector<std::string>* extra_globals) {
-    std::vector<std::string> files;
+    std::vector<implementation::closure_stamp> files;
     bool expanded = false;
     return impl->check_expanding(*this, declarations, [&]() -> const std::vector<declaration_ptr>& { return declarations; }, std::move(options), files, expanded, extra_globals);
 }
@@ -6592,14 +6702,35 @@ size_t engine::scoped_template_output_limit() const {
     return impl->limits_.scoped_template_output_limit;
 }
 
-checked_result<script_value> engine::run_template_unit(const std::string& unit, const std::string& source) {
+checked_result<script_value> engine::run_template_unit(const std::string& unit, const std::string& source, std::vector<detail::source_stamp>& read, bool& unsettled) {
     std::string failure;
+    read.clear();
+    unsettled = false;
+    // the files the unit's load reads are noted in a frame of its own, then join the import that is running (its closure)
+    impl->import_frames_.emplace_back();
+    const auto end_frame = [&](bool failed, bool never_settled) {
+        implementation::import_frame frame = impl->end_import_frame();
+        for (const auto& s : frame.files) { impl->note_closure_file(s.path, s.mtime != 0 || s.size != 0, s.mtime, s.size); }
+        for (const auto& c : frame.children) { impl->note_import_child(c); }
+        unsettled = never_settled;
+        if (failed && !never_settled) { read = std::move(frame.files); }
+    };
     try {
-        return execute_source(source, instance_variables{}, unit);
+        script_value result = execute_source(source, instance_variables{}, unit);
+        end_frame(false, false);
+        return result;
     } catch (const parse_error& e) {
         failure = e.what();
+        end_frame(true, false);
     } catch (const static_check_error& e) {
         failure = e.what();
+        end_frame(true, false);
+    } catch (const detail::source_unsettled& e) {
+        failure = e.what();
+        end_frame(true, true);
+    } catch (...) {
+        end_frame(false, false);
+        throw;
     }
     return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed), "{0}", park_error_text(failure));
 }
@@ -6920,6 +7051,10 @@ std::string engine::app_cache_dir(const std::string& app) const {
 
 void engine::file_stamp_source(file_stamp_reading source) {
     impl->file_stamp_source = std::move(source);
+}
+
+void engine::source_file_observer(source_file_observing observer) {
+    impl->source_file_observer = std::move(observer);
 }
 
 void engine::http_transport(std::shared_ptr<jai::http_transport> transport) {
@@ -7790,35 +7925,55 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         rec->second.failed_mtime = m.mtime;
         rec->second.failed_size = m.size;
         rec->second.failed_closure.clear();
+        rec->second.failed_units.clear();
     };
-    // a failure before the run waits on every file it involved, each stamped now: the module's closure, what its parse read,
-    // the dependents it broke
-    const auto involve_in_failure = [&](const import_unit& m, const std::vector<implementation::closure_stamp>& files) {
+    // a failure before the run waits on every file it involved, each under the stamp of the text the failing check judged:
+    // what its load read (as the loader stamped it), the dependents it broke (a module under the stamp it last ran from; a
+    // unit whose text the host supplied was never loaded here, so its file is stamped as it stands now), and the rest of the
+    // module's closure where it still stands as the module last loaded it (the check read none of those). It waits on the
+    // dependents themselves too: one that is loaded again is other code than the check judged, whatever its file's stamp.
+    const auto involve_in_failure = [&](const import_unit& m, const std::vector<implementation::closure_stamp>& files, const std::vector<implementation::judged_unit>& units) {
         auto rec = I.import_cache.find(m.resolved);
         if (rec == I.import_cache.end() || !rec->second.failed) { return; }
+        rec->second.failed_units = units;
         auto& involved = rec->second.failed_closure;
-        const auto add = [&](const std::string& path) {
-            for (const auto& s : involved) { if (s.path == path) { return; } }
-            implementation::closure_stamp stamp{path, 0, 0};
-            ++I.import_stats_;
-            if (impl->stat_mtime_size(path, stamp.mtime, stamp.size)) { involved.push_back(std::move(stamp)); }
+        const auto known = [&](const std::string& path) {
+            return std::any_of(involved.begin(), involved.end(), [&](const implementation::closure_stamp& s) { return s.path == path; });
         };
-        for (const auto& s : rec->second.closure) { add(s.path); }
-        for (const auto& s : files) { add(s.path); }
+        for (const auto& s : files) {
+            if (known(s.path)) { continue; }
+            if (s.mtime != 0 || s.size != 0) { involved.push_back(s); continue; }
+            implementation::closure_stamp stamp{s.path, 0, 0};
+            ++I.import_stats_;
+            if (const auto loaded = I.import_cache.find(s.path); loaded != I.import_cache.end() && !loaded->second.missing) {
+                stamp.mtime = loaded->second.mtime;
+                stamp.size = loaded->second.size;
+                involved.push_back(std::move(stamp));
+            } else if (impl->stat_mtime_size(s.path, stamp.mtime, stamp.size)) {
+                involved.push_back(std::move(stamp));
+            }
+        }
+        for (const auto& s : rec->second.closure) {
+            if (known(s.path)) { continue; }
+            ++I.import_stats_;
+            if (I.stamps_stand({s})) { involved.push_back(s); }
+        }
     };
-    // a module runs only from text read under its stamp: a save landing mid-read holds a module that ran before until the next
-    // pass (its record keeps the old stamp), and a first load reads again at once (bounded); false = held
+    // a module runs only from text the loader read whole, under that text's stamp: a file that never settles holds a module
+    // that ran before until the next pass (its record keeps the stamp it ran from), and is a first load's error; false = held
     const auto read_module = [&](import_unit& m, std::string& content) -> bool {
         const bool loaded_before = I.import_cache.count(m.resolved) != 0;
-        for (int attempt = 0; ; ++attempt) {
-            const auto read = impl->read_for_load(m.resolved, m.stamped, m.mtime, m.size, content);
-            if (read == implementation::stamped_read::missing) { throw runtime_error("Failed to open import file: " + m.resolved); }
-            if (read == implementation::stamped_read::stable) { return true; }
+        detail::loaded_source loaded = impl->load_source(m.resolved, detail::source_mode::text);
+        if (loaded.status == detail::loaded_source::state::missing) { throw runtime_error("Failed to open import file: " + m.resolved); }
+        if (loaded.status == detail::loaded_source::state::unsettled) {
             if (loaded_before) { return false; }
-            if (attempt == 3) { return true; }
-            ++I.import_stats_;
-            m.stamped = impl->stat_mtime_size(m.resolved, m.mtime, m.size);
+            throw detail::source_unsettled(m.resolved);
         }
+        m.stamped = loaded.stamp.stamped;
+        m.mtime = loaded.stamp.mtime;
+        m.size = loaded.stamp.size;
+        content = std::move(loaded.text);
+        return true;
     };
     // parses and checks a group (the names its modules declare known to each other), then, for a re-run, its dependents: every
     // loaded unit outside the group, against the new declarations. The group's first `originals` modules are the ones reached:
@@ -7827,8 +7982,10 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
     struct group_verdict {
         size_t failed = 0;
         std::exception_ptr first;
+        std::exception_ptr unsettled;   // a file the check needed never read whole: no verdict, nothing recorded
         std::string failures;
         std::vector<implementation::closure_stamp> involved;
+        std::vector<implementation::judged_unit> units;   // the loaded units the reload would break
     };
     const auto check_group = [&](std::vector<import_unit>& group, const std::vector<std::string>& contents, size_t originals, bool rerun) {
         group_verdict v;
@@ -7845,11 +8002,19 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             bool open = true;
             ~frame_scope() { if (open) { impl.end_import_frame(); } }
         } parse_frame{I};
+        const auto unsettle = [&] {
+            if (!v.unsettled) { v.unsettled = std::current_exception(); }
+            ++v.failed;
+        };
         for (size_t k = 0; k < group.size(); ++k) {
             std::filesystem::path cacheFile;
             bool fresh = false;
             try {
                 entries[k] = I.acquire_entry(*this, contents[k], group[k].resolved, cacheFile, fresh);
+                const detail::text_stamp loaded_under{group[k].mtime, group[k].size, group[k].stamped};
+                I.note_text_stamp(*entries[k], &loaded_under);
+            } catch (const detail::source_unsettled&) {
+                unsettle();
             } catch (const std::exception& e) {
                 fail(k, e);
             }
@@ -7860,6 +8025,9 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         for (size_t k = 0; k < group.size(); ++k) {
             try {
                 if (entries[k]) { I.reparse_if_moved(*this, entries[k], contents[k]); }
+            } catch (const detail::source_unsettled&) {
+                entries[k] = nullptr;
+                unsettle();
             } catch (const std::exception& e) {
                 entries[k] = nullptr;
                 fail(k, e);
@@ -7872,6 +8040,8 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             if (originals < group.size()) { entries[k]->checked = false; }   // a cached verdict never knew the pending modules' text
             try {
                 I.gate_checked(I.checked_report(*this, entries[k], contents[k]), contents[k], path);
+            } catch (const detail::source_unsettled&) {
+                unsettle();
             } catch (const std::exception& e) {
                 fail(k, e);
             }
@@ -7880,7 +8050,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         if (!v.failed && rerun) {
             std::unordered_set<uint32_t> rerunning;
             for (const auto& m : group) { rerunning.insert(I.loaded_unit_of(m.resolved)); }
-            const std::string listing = I.reload_dependents_listing(*this, rerunning, v.involved);
+            const std::string listing = I.reload_dependents_listing(*this, rerunning, v.involved, v.units);
             if (!listing.empty()) {
                 for (size_t k = 0; k < originals; ++k) { record_failure(group[k]); }
                 v.failures = "static check failed:\n" + listing;
@@ -7899,7 +8069,11 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         if (v.failed) {
             I.restore_program_pools(std::move(pools));
             v.involved.insert(v.involved.end(), reads.files.begin(), reads.files.end());
-            for (const auto& e : entries) { if (e) { v.involved.insert(v.involved.end(), e->spliced_stamps.begin(), e->spliced_stamps.end()); } }
+            for (const auto& e : entries) {
+                if (!e) { continue; }
+                v.involved.insert(v.involved.end(), e->spliced_stamps.begin(), e->spliced_stamps.end());
+                v.involved.insert(v.involved.end(), e->closure_stamps.begin(), e->closure_stamps.end());   // what its gather loaded
+            }
         } else if (originals < group.size()) {
             I.restore_program_pools(std::move(pools));
             for (size_t k = 0; k < originals; ++k) { I.pool_unit(entries[k]->declarations, group[k].resolved, I.unit_key(*entries[k], contents[k])); }
@@ -7942,7 +8116,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         if (group.size() > 1 || rerun) {
             const size_t originals = group.size();
             group_verdict verdict = check_group(group, contents, originals, rerun);
-            if (verdict.failed && rerun) {
+            if (verdict.failed && rerun && !verdict.unsettled) {
                 std::vector<import_unit> pending = pending_modules(group);
                 std::vector<import_unit> widened = group;
                 std::vector<std::string> widened_contents = contents;
@@ -7954,13 +8128,23 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
                 }
                 if (widened.size() > originals) {
                     group_verdict together = check_group(widened, widened_contents, originals, true);
-                    for (size_t k = originals; k < widened.size(); ++k) { together.involved.push_back({widened[k].resolved, 0, 0}); }
+                    for (size_t k = originals; k < widened.size(); ++k) { together.involved.push_back({widened[k].resolved, widened[k].mtime, widened[k].size}); }   // as read for this check
                     together.involved.insert(together.involved.end(), verdict.involved.begin(), verdict.involved.end());
+                    together.units.insert(together.units.end(), verdict.units.begin(), verdict.units.end());
                     verdict = std::move(together);
                 }
             }
+            if (verdict.unsettled) {   // a reload keeps the code it had and tries again on the next pass; a first load raises
+                if (rerun) {
+                    for (size_t k = 0; k < originals; ++k) {
+                        if (auto rec = I.import_cache.find(group[k].resolved); rec != I.import_cache.end()) { rec->second.failed = false; }
+                    }
+                    return false;
+                }
+                std::rethrow_exception(verdict.unsettled);
+            }
             if (verdict.failed) {
-                for (size_t k = 0; k < originals; ++k) { involve_in_failure(group[k], verdict.involved); }
+                for (size_t k = 0; k < originals; ++k) { involve_in_failure(group[k], verdict.involved, verdict.units); }
                 if (verdict.failed == 1) { std::rethrow_exception(verdict.first); }
                 throw static_check_error(verdict.failures);
             }
@@ -7984,7 +8168,8 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             } scope{I.importing_, m.resolved};
             I.import_frames_.emplace_back();
             try {
-                execute_source(contents[k], instance_variables{}, m.resolved);
+                const detail::text_stamp loaded_under{m.mtime, m.size, m.stamped};
+                execute_source(contents[k], instance_variables{}, m.resolved, false, {}, &loaded_under);
             } catch (const static_check_error&) {
                 I.merge_import_frame(m.resolved, I.end_import_frame());
                 record_failure(m);
@@ -8259,6 +8444,10 @@ std::vector<std::string> engine::get_imported_files() const {
     return result;
 }
 
+std::string detail::unsettled_source_text(const std::string& path) {
+    return "Failed to read source file: " + path + " (it kept changing while it was read)";
+}
+
 script_value engine::execute_import(const std::string& resolved_path) {
     auto allowed = require_permission(permissions::filesystem);
     if (!allowed) { throw runtime_error(format_error(allowed)); }
@@ -8285,11 +8474,6 @@ script_value engine::execute_import(const std::string& resolved_path) {
                 uint64_t current_mtime = 0, current_size = 0;
                 if (impl->stat_mtime_size(resolved_path, current_mtime, current_size)) {
                     should_import = current_mtime != it->second.mtime || current_size != it->second.size || impl->closure_moved(it->second);
-                    if (should_import) {
-                        // Update the stamp for next check
-                        it->second.mtime = current_mtime;
-                        it->second.size = current_size;
-                    }
                 } else {
                     // If we can't stat the file, import it
                     should_import = true;
@@ -8309,23 +8493,26 @@ script_value engine::execute_import(const std::string& resolved_path) {
             ~importing_scope() { set.erase(path); }
         } scope{impl->importing_, resolved_path};
 
-        // the record keeps the stamp the text was read under; a zero stamp (no stat, or a save landing mid-read) makes
+        // the record keeps the stamp the text was loaded with; a zero stamp (a file the stamp source cannot stamp) makes
         // the next file_timestamp check import again
         implementation::import_record record;
         record.resolved_path = resolved_path;
-        const bool stamped = impl->stat_mtime_size(resolved_path, record.mtime, record.size);
-        std::string content;
-        const auto read = impl->read_for_load(resolved_path, stamped, record.mtime, record.size, content);
-        if (read == implementation::stamped_read::missing) {
+        const detail::loaded_source loaded = impl->load_source(resolved_path, detail::source_mode::text);
+        if (loaded.status == detail::loaded_source::state::missing) {
             throw runtime_error("Failed to open import file: " + resolved_path);
         }
-        if (read != implementation::stamped_read::stable || !stamped) { record.mtime = 0; record.size = 0; }
+        if (loaded.status == detail::loaded_source::state::unsettled) {
+            throw detail::source_unsettled(resolved_path);
+        }
+        record.mtime = loaded.stamp.mtime;
+        record.size = loaded.stamp.size;
+        const std::string& content = loaded.text;
 
         // Attribute the imported unit to its resolved path (stack traces / debugger).
         impl->import_frames_.emplace_back();
         script_value result = [&] {
             try {
-                return execute_source(content, instance_variables{}, resolved_path);
+                return execute_source(content, instance_variables{}, resolved_path, false, {}, &loaded.stamp);
             } catch (...) {
                 impl->merge_import_frame(resolved_path, impl->end_import_frame());
                 throw;

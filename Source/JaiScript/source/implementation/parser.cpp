@@ -11,7 +11,6 @@
 #include "../../include/jaiscript/detail/program_slots.hpp"
 #include "../../include/jaiscript/detail/template_library.hpp"
 #include <algorithm>
-#include <fstream>
 #include <iterator>
 #include <sstream>
 #include <optional>
@@ -1716,13 +1715,11 @@ JAI_NOINLINE checked_result<expression_ptr> parser::template_call() {
     if (std::find(template_chain_.begin(), template_chain_.end(), resolved.value()) != template_chain_.end() || template_chain_.size() >= 32) {
         return dynamic(literal_text(resolved.value()));
     }
-    std::ifstream file(resolved.value(), std::ios::binary);
-    if (!file) {
-        report_error("template file '" + spelled_path + "' cannot be read", name);
+    std::string content;
+    if (!load_spliced(resolved.value(), content)) {
+        report_error(unsettled_file_ == resolved.value() ? detail::unsettled_source_text(resolved.value()) : "template file '" + spelled_path + "' cannot be read", name);
         return reported();
     }
-    const std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    spliced_files_.push_back(resolved.value());
     template_chain_.push_back(resolved.value());
     auto body = template_text_body(content, resolved.value(), std::move(barrier));
     template_chain_.pop_back();
@@ -1780,13 +1777,10 @@ JAI_NOINLINE checked_result<expression_ptr> parser::scoped_template_call(bool te
             return reported();
         }
         const std::string& resolved_path = found.resolved;
-        std::ifstream file(resolved_path, std::ios::binary);
-        if (!file) {
-            report_error("template file '" + source + "' cannot be read", name);
+        if (!load_spliced(resolved_path, content)) {
+            report_error(unsettled_file_ == resolved_path ? detail::unsettled_source_text(resolved_path) : "template file '" + source + "' cannot be read", name);
             return reported();
         }
-        content.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        spliced_files_.push_back(resolved_path);
         label = resolved_path;
     }
     template_barrier barrier;
@@ -4724,6 +4718,17 @@ void parser::reject_class_in_function_body(const token& at) {
     report_error("a class cannot be declared inside a function body (a class is a program-scope type); declare it at program scope or import its file", at);
 }
 
+// A file this parse reads into the program (a function-body include, a template): its bytes from the engine's loader, noted
+// with the stamp of those bytes. False = it cannot be opened, or it never read whole (unsettled_file_ names it then).
+bool parser::load_spliced(const std::string& resolved_path, std::string& content) {
+    detail::loaded_source loaded = detail::engine_access::load_source(*engine_, resolved_path, detail::source_mode::binary);
+    if (loaded.status == detail::loaded_source::state::unsettled && unsettled_file_.empty()) { unsettled_file_ = resolved_path; }
+    if (loaded.status != detail::loaded_source::state::loaded) return false;
+    content = std::move(loaded.text);
+    spliced_files_.push_back({resolved_path, loaded.stamp.mtime, loaded.stamp.size});
+    return true;
+}
+
 // A literal include inside a function body is textual at parse time, as C++'s is: the included file's declarations are
 // parsed here, in this scope, so the function's parameters and locals are theirs and theirs are the function's, and the
 // checker and both backends see one function. A computed path stays a runtime include (it runs in the environment and
@@ -4746,9 +4751,12 @@ bool parser::splice_include(const declaration_ptr& decl, std::vector<declaration
         report_error_at("include '" + path + "' includes itself or nests too deep", decl->location);
         return true;
     }
-    std::ifstream file(resolved.value(), std::ios::binary);
-    if (!file) return false;
-    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    std::string content;
+    if (!load_spliced(resolved.value(), content)) {
+        if (unsettled_file_ != resolved.value()) return false;
+        report_error_at(detail::unsettled_source_text(resolved.value()), decl->location);
+        return true;
+    }
     lexer lex(content, symbolizer_, resolved.value());
     const std::vector<token> lexed = lex.tokenize();
     std::vector<token> qualified;
@@ -4774,7 +4782,6 @@ bool parser::splice_include(const declaration_ptr& decl, std::vector<declaration
     splice_active_.pop_back(); --splice_depth_;
     stream_ = saved_stream; current_ = saved_current; pushed_back_token_ = saved_pushed_back;
     paren_close_.erase(&tokens);
-    spliced_files_.push_back(resolved.value());
     return true;
 }
 

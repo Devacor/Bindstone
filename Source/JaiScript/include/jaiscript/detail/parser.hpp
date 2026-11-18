@@ -5,6 +5,7 @@
 #include "foreign_keyword.hpp"
 #include "generics.hpp"
 #include "native_stack.hpp"
+#include "source_loading.hpp"
 #include <jaiscript/core/types.hpp>
 #include <jaiscript/core/checked_result.hpp>
 #include <jaiscript/core/parse_errors.hpp>
@@ -32,8 +33,10 @@ namespace jai {
         std::vector<std::string> get_errors() const;
         // the source text the tokens came from: a failed parse's listing shows each error's line with a caret under it
         void source_text(std::string_view source) { source_ = source; }
-        // the files spliced into function bodies by this parse (resolved paths), for the parse cache's stamps
-        const std::vector<std::string>& spliced_files() const { return spliced_files_; }
+        // the files spliced into function bodies by this parse (resolved paths), each under the stamp its text was loaded
+        // with, for the parse cache's stamps; and the first one that never read whole (the parse failed on it)
+        const std::vector<detail::source_stamp>& spliced_files() const { return spliced_files_; }
+        const std::string& unsettled_file() const { return unsettled_file_; }
         // the namespace classes this parse asked the engine about, sorted: "space::Name" (space declares class Name) or a bare
         // "Name" (some namespace does); the parse holds wherever the engine answers them alike (engine.cpp namespace_answers)
         std::vector<std::string> namespace_queries() const { return {namespace_queries_.begin(), namespace_queries_.end()}; }
@@ -90,7 +93,9 @@ namespace jai {
         // A literal include inside a function body is spliced here at parse time (internal/global_shadowing.md): the included
         // declarations become the function's own, so they see its parameters and locals and it sees theirs; the files read
         // (the engine stamps them: a change re-parses the includer), the chain being spliced (a cycle guard) and its depth
-        std::vector<std::string> spliced_files_;
+        std::vector<detail::source_stamp> spliced_files_;
+        std::string unsettled_file_;
+        bool load_spliced(const std::string& resolved_path, std::string& content);
         std::vector<std::string> splice_active_;
         std::vector<std::string> splice_spelled_;   // the paths as written, for the include's own texts
         int splice_depth_ = 0;

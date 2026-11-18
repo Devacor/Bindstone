@@ -34,7 +34,6 @@
 
 #include <cctype>
 #include <filesystem>
-#include <fstream>
 #include <iterator>
 #include <memory>
 #include <optional>
@@ -57,6 +56,7 @@ namespace {
 		expression_ptr body;
 	};
 
+	// each stamp here is the one the engine's loader gave the text it stands for (detail/source_loading.hpp)
 	struct scoped_file_entry {
 		std::string content;
 		bool loaded = false;
@@ -72,7 +72,7 @@ namespace {
 		std::string source;
 		int64_t next_check = 0;
 		bool failed = false;
-		uint64_t failed_mtime = 0, failed_size = 0;
+		std::vector<source_stamp> failed_files;   // what the failing load read: the failure stands until one of them moves
 	};
 
 	struct library {
@@ -121,24 +121,6 @@ namespace {
 			case script_value::TYPEID_FUNCTION: return "function";
 			default: return "object";
 		}
-	}
-
-	bool stat_file(const std::string& a_path, uint64_t& a_mtime, uint64_t& a_size) {
-		std::error_code ec;
-		const auto when = std::filesystem::last_write_time(a_path, ec);
-		if (ec) { return false; }
-		const auto bytes = std::filesystem::file_size(a_path, ec);
-		if (ec) { return false; }
-		a_mtime = static_cast<uint64_t>(when.time_since_epoch().count());
-		a_size = static_cast<uint64_t>(bytes);
-		return true;
-	}
-
-	bool read_whole_file(const std::string& a_path, std::string& a_out) {
-		std::ifstream file(a_path, std::ios::binary);
-		if (!file) { return false; }
-		a_out.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-		return true;
 	}
 
 	// a lies inside dir: both canonical, dir's components a prefix of a's
@@ -1155,27 +1137,32 @@ void register_library(engine& eng) {
 		scoped_file_entry& file = lib->scoped_files[resolved_path];
 		if (!file.loaded || check_due(e, file.next_check)) {
 			uint64_t mtime = 0, size = 0;
-			const bool stamped = stat_file(resolved_path, mtime, size);
+			const bool stamped = engine_access::stamp_source(e, resolved_path, mtime, size);
 			const bool moved = !file.loaded || !stamped || mtime != file.mtime || size != file.size;
 			const bool held = file.loaded && file.failed && stamped && mtime == file.failed_mtime && size == file.failed_size;
 			if (moved && !held) {
-				std::string content;
-				if (!read_whole_file(resolved_path, content)) {
-					if (!file.loaded) { return lib->refused("template file '" + a_args[0].deref().as_string() + "' cannot be read"); }
+				// the text and the stamp remembered for it (the version kept, or the failure held) come from one load; a file
+				// that never read whole keeps the version rendered before, and is the first render's error
+				loaded_source source = engine_access::load_source(e, resolved_path, source_mode::binary);
+				if (source.status != loaded_source::state::loaded) {
+					if (!file.loaded) {
+						return lib->refused(source.status == loaded_source::state::unsettled ? unsettled_source_text(resolved_path)
+							: "template file '" + a_args[0].deref().as_string() + "' cannot be read");
+					}
 				} else {
 					std::string error;
-					if (!compile_scoped(*lib, content, resolved_path, error)) {
+					if (!compile_scoped(*lib, source.text, resolved_path, error)) {
 						if (!file.loaded) { return lib->refused(error); }
-						file.failed = true;
-						file.failed_mtime = mtime;
-						file.failed_size = size;
+						file.failed = source.stamp.stamped;
+						file.failed_mtime = source.stamp.mtime;
+						file.failed_size = source.stamp.size;
 						return lib->refused(error);
 					}
-					file.content = std::move(content);
+					file.content = std::move(source.text);
 					file.loaded = true;
 					file.failed = false;
-					file.mtime = mtime;
-					file.size = size;
+					file.mtime = source.stamp.mtime;
+					file.size = source.stamp.size;
 				}
 			}
 		}
@@ -1216,19 +1203,24 @@ void register_library(engine& eng) {
 		}
 		if (entry.function) {
 			if (engine_access::template_unit_current(e, entry.unit, entry.source)) { return *entry.function; }
-			uint64_t mtime = 0, size = 0;
-			if (entry.failed && stat_file(resolved.value(), mtime, size) && mtime == entry.failed_mtime && size == entry.failed_size) { return *entry.function; }
+			if (entry.failed && engine_access::stamps_stand(e, entry.failed_files)) { return *entry.function; }
 		}
-		R made = engine_access::run_template_unit(e, entry.unit, entry.source);
+		// a failure is held against the files the failing load read, each under the stamp its text was loaded with; a
+		// load that met a file that never read whole reads nothing to hold, so the next render tries again
+		std::vector<source_stamp> read;
+		bool unsettled = false;
+		R made = engine_access::run_template_unit(e, entry.unit, entry.source, read, unsettled);
 		if (!made) {
 			if (entry.function) {
-				entry.failed = true;
-				(void)stat_file(resolved.value(), entry.failed_mtime, entry.failed_size);
+				if (unsettled) { return *entry.function; }
+				entry.failed = !read.empty();
+				entry.failed_files = std::move(read);
 			}
 			return made;
 		}
 		entry.function = std::move(made.value());
 		entry.failed = false;
+		entry.failed_files.clear();
 		return *entry.function;
 	}, serial);
 }

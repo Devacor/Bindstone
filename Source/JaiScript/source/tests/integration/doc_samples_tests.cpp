@@ -23,6 +23,8 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -1554,6 +1556,28 @@ public:
 			                 print("level: ", p.level);
 			                 try { print(p.speed); } catch (e) { print("speed: ", e); } )");
 			// [/sample]
+			run.finish();
+		});
+
+		test("hot_reload_observer", [this]() {
+			auto eng = make_engine();
+			cpp_sample run(*this, "embedding/07-hot-reload.html", "hot-reload-observer");
+			// [sample hot-reload-observer]
+			struct parsed_file {
+			    std::optional<jai::engine::file_stamp> stamp;
+			    std::string bytes;
+			};
+			std::map<std::string, parsed_file> parsed;   // what this engine parsed, by path
+			eng->source_file_observer([&](const std::string& path, const std::optional<jai::engine::file_stamp>& stamp, std::string_view bytes) {
+			    parsed[path] = {stamp, std::string(bytes)};
+			});
+			// [/sample]
+			const auto file = jai::foundry::test_temp_directory() / "doc_observer.jai";
+			{ std::ofstream out(file, std::ios::binary | std::ios::trunc); out << "40 + 2;"; }
+			eng->jaibite_cache(false);
+			check_eq(jai::script_int(42), eng->execute_file(file.string()).as_int());
+			check_true(parsed.size() == 1 && parsed.begin()->second.bytes == "40 + 2;" && parsed.begin()->second.stamp.has_value(), "the observer got the file the engine parsed");
+			std::filesystem::remove(file);
 			run.finish();
 		});
 

@@ -420,8 +420,10 @@ print("{}", total);</code></pre></div>
 <tr><td><code>file_timestamp</code> (<strong>default</strong>)</td><td>Re-runs a module when its file&#x27;s (modification time, size) stamp, or that of a file its last run included, changed.</td></tr>
 <tr><td>Recheck passes</td><td>Engine-wide, at most once per <code>import_recheck_interval</code> (0.2 s by default; 0 checks on every reach).</td></tr>
 <tr><td>A module whose file disappears</td><td>Raises <code>Failed to open import file</code> once, then waits until the file is back.</td></tr>
-<tr><td>A stamp that moves during a read</td><td>Never re-runs a loaded module from that read; the next pass reads it whole.</td></tr>
+<tr><td>A load</td><td>Queries the file&#x27;s stamp, reads its bytes, queries the stamp again; the bytes are kept when the two agree, so a remembered stamp is the stamp of the bytes parsed.</td></tr>
+<tr><td>A stamp that moves during a read</td><td>The file is read again, four times at most. A file that never settles is not loaded: a first load raises <code>Failed to read source file</code>, a reload keeps the code it had and tries again on the next pass.</td></tr>
 <tr><td><code>eng-&gt;file_stamp_source(fn)</code></td><td>Supplies the stamps: <code>fn(path)</code> returns a <code>jai::engine::file_stamp</code> or <code>std::nullopt</code>; empty = the file system&#x27;s.</td></tr>
+<tr><td><code>eng-&gt;source_file_observer(fn)</code></td><td>Sees every file the engine loads: <code>fn(path, stamp, bytes)</code>, the stamp being that of exactly those bytes.</td></tr>
 <tr><td><code>once</code></td><td>Imports exactly once; ignores later file changes.</td></tr>
 <tr><td><code>always</code></td><td>Treats <code>import</code> as <code>include</code> (runs every time).</td></tr>
 </tbody></table></div>

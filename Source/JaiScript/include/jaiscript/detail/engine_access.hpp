@@ -8,6 +8,8 @@
 // forced-inline forwarders (by-value class parameters forwarded perfectly), so a call through one compiles to the member call
 // itself; plain inline left some out of line where the optimizer's budget runs out.
 
+#include <jaiscript/detail/source_loading.hpp>
+
 namespace jai::detail {
 
     struct engine_access {
@@ -22,8 +24,11 @@ namespace jai::detail {
         using load_session = engine::load_session;
         using load_field = engine::load_field;
         template<typename F> JAI_FORCEINLINE static script_function guard_function(engine& a_engine, F&& function, const permission_set& required) { return a_engine.guard_function(std::forward<F>(function), required); }
-        JAI_FORCEINLINE static script_value execute_include_source(engine& a_engine, const std::string& resolved_path, const std::string& content, std::string_view scope = {}) { return a_engine.execute_include_source(resolved_path, content, scope); }
-        JAI_FORCEINLINE static bool read_include_file(engine& a_engine, const std::string& resolved_path, std::string& content) { return a_engine.read_include_file(resolved_path, content); }
+        JAI_FORCEINLINE static script_value execute_include_source(engine& a_engine, const std::string& resolved_path, const loaded_source& content, std::string_view scope = {}) { return a_engine.execute_include_source(resolved_path, content, scope); }
+        JAI_FORCEINLINE static loaded_source read_include_file(engine& a_engine, const std::string& resolved_path) { return a_engine.read_include_file(resolved_path); }
+        JAI_FORCEINLINE static loaded_source load_source(engine& a_engine, const std::string& path, source_mode mode) { return a_engine.load_source(path, mode); }
+        JAI_FORCEINLINE static bool stamp_source(const engine& a_engine, const std::string& path, uint64_t& mtime, uint64_t& size) { return a_engine.stamp_source(path, mtime, size); }
+        JAI_FORCEINLINE static bool stamps_stand(const engine& a_engine, const std::vector<source_stamp>& stamps) { return a_engine.stamps_stand(stamps); }
         JAI_FORCEINLINE static checked_result<script_value> sleep_builtin(engine& a_engine, const script_value& seconds) { return a_engine.sleep_builtin(seconds); }
         JAI_FORCEINLINE static bool sleep_callee(const engine& a_engine, const void* function) noexcept { return a_engine.sleep_callee(function); }
         JAI_FORCEINLINE static void add_format_literal(engine& a_engine, std::string_view name, script_function literal, engine::host_direct_invoke invoke, const void* target) { return a_engine.add_format_literal(name, std::move(literal), invoke, target); }
@@ -136,7 +141,7 @@ namespace jai::detail {
         JAI_FORCEINLINE static string_symbolizer* get_symbolizer(engine& a_engine) { return a_engine.get_symbolizer(); }
         JAI_FORCEINLINE static uint64_t symbolize(const engine& a_engine, std::string_view str) { return a_engine.symbolize(str); }
         JAI_FORCEINLINE static uint64_t park_error_text(const engine& a_engine, std::string_view text) { return a_engine.park_error_text(text); }
-        JAI_FORCEINLINE static checked_result<script_value> run_template_unit(engine& a_engine, const std::string& unit, const std::string& source) { return a_engine.run_template_unit(unit, source); }
+        JAI_FORCEINLINE static checked_result<script_value> run_template_unit(engine& a_engine, const std::string& unit, const std::string& source, std::vector<source_stamp>& read, bool& unsettled) { return a_engine.run_template_unit(unit, source, read, unsettled); }
         JAI_FORCEINLINE static bool template_unit_current(engine& a_engine, const std::string& unit, const std::string& source) { return a_engine.template_unit_current(unit, source); }
         JAI_FORCEINLINE static std::shared_ptr<class_definition> get_class_definition_by_type(const engine& a_engine, const std::type_index& type) { return a_engine.get_class_definition_by_type(type); }
         JAI_FORCEINLINE static size_t binding_settle_count(const engine& a_engine) { return a_engine.binding_settle_count(); }

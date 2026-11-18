@@ -63,6 +63,7 @@ namespace jai::detail {
         JAI_FORCEINLINE static const std::unordered_map<std::string, std::vector<std::string>>& constant_texts_by_name(const engine& a_engine) { return a_engine.constant_texts_by_name(); }
         JAI_FORCEINLINE static const std::vector<std::shared_ptr<const generic_definition>>* find_generics(const engine& a_engine, const std::string& a_qualified) { return a_engine.find_generics(a_qualified); }
         JAI_FORCEINLINE static bool generic_instance(const engine& a_engine, const std::string& a_name, std::string& a_generic, std::vector<type_info_ptr>& a_arguments) { return a_engine.generic_instance(a_name, a_generic, a_arguments); }
+        JAI_FORCEINLINE static std::vector<declaration_ptr> carried_declarations(const engine& a_engine, const std::vector<declaration_ptr>& a_declarations) { return a_engine.carried_declarations(a_declarations); }
         JAI_FORCEINLINE static bool declares_generics(const engine& a_engine) { return a_engine.declares_generics(); }
         JAI_FORCEINLINE static bool names_generic_method(const engine& a_engine, const std::string& a_name) { return a_engine.names_generic_method(a_name); }
         JAI_FORCEINLINE static check_report check_expanding(engine& a_engine, std::vector<declaration_ptr>& a_declarations, check_options a_options, const std::vector<std::string>* a_extra = nullptr) { return a_engine.check_expanding(a_declarations, std::move(a_options), a_extra); }

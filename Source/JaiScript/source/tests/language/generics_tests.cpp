@@ -730,6 +730,20 @@ public:
 			check_eq((int64_t)3, e->execute("count.n();").as_int());
 		});
 
+		test("warn_mode_makes_the_units_own_instances_and_never_replaces_one_it_only_makes_again", [this]() {
+			auto e = stdlib_engine();
+			// an instance the unit's text names is made, its errors warnings like the unit's others
+			e->execute("[[warn_mode]];\nclass Lax<T> { T v; int n() { return v.nope(); } int ok() { return 1; } }\nLax<int> lax;\n");
+			check_eq(std::vector<std::string>{"int has no member 'nope'"}, warnings(*e));
+			check_eq((int64_t)1, e->execute("lax.ok();").as_int());
+			// an instance the unit only makes again keeps its earlier declaration when the new text does not check for it
+			e->execute("class Box<T> { T v; int n() { return 1; } }");
+			e->execute("Box<int> b; int use() { return b.n(); }");
+			e->execute("[[warn_mode]];\nclass Box<T> { T v; int n() { return v.nope(); } }\n");
+			check_eq(std::vector<std::string>{"'Box<int>' keeps its earlier declaration: this declaration of 'Box' cannot make it: int has no member 'nope' (<script>:2:40)"}, warnings(*e));
+			check_eq((int64_t)1, e->execute("use();").as_int());
+		});
+
 		test("a_generic_class_declared_again_with_another_parameter_list_replaces_the_first", [this]() {
 			auto e = stdlib_engine();
 			e->execute("class Box<T> { T v; int n() { return 1; } }");
@@ -1109,6 +1123,22 @@ public:
 			check_eq(std::string("array 1|PAIR 2"), e->execute("first() + \"|\" + second();").as_string());
 		});
 
+		test("a_loaded_units_instance_belongs_to_the_overload_it_was_made_from", [this, shows]() {
+			auto saver = stdlib_engine();
+			auto bite = saver->jaibite(shows + "string first() { return show([1]); }\n");
+			auto e = stdlib_engine();
+			e->jaibite_load_bytes(bite.save_bytes()).execute();
+			check_eq(std::string("array 1"), e->execute("first();").as_string());
+			// the other overload declared again, with a body int does not check for: it made no show<int>, and makes none now
+			e->execute("string show<T>(T x, int n) { return x.nope(); }");
+			check_true(warnings(*e).empty(), warnings(*e).empty() ? std::string() : warnings(*e).front());
+			check_eq(std::string("array 1"), e->execute("first();").as_string());
+			// its own overload declared again: the instance the loaded unit declared is made again
+			e->execute("string show<T>(array<T> xs) { return \"ARRAY\"; }");
+			check_true(warnings(*e).empty());
+			check_eq(std::string("ARRAY"), e->execute("first();").as_string());
+		});
+
 		test("a_jaibite_keeps_each_overloads_instance", [this, shows]() {
 			auto e = stdlib_engine();
 			auto bite = e->jaibite(shows + "class Desk {\n" + shows + "}\nDesk d;\nshow([1]) + \"|\" + show(5, 1) + \"|\" + d.show([1, 2]) + \"|\" + d.show(5, 3);\n");
@@ -1359,6 +1389,39 @@ public:
 			second->execute("class Cell<T> { T v; T twice() { return v + v; } }");
 			auto reloaded = second->jaibite_load_bytes(user.save_bytes());
 			check_near(3.0, reloaded.execute().as_float(), 1e-9);
+		});
+
+		test("a_saved_bite_carries_no_instance_it_only_made_again", [this]() {
+			const std::string first = "class Box<T> { T v; int get() { return 1; } }\nT twice<T>(T x) { return x; }\n";
+			auto e = stdlib_engine();
+			e->execute(first);
+			e->execute("Box<int> a; int use() { return twice<int>(4) + a.get(); }");
+			// the bite declares the generics again and names no instance: Box<int> and twice<int> are made again in this engine
+			auto bite = e->jaibite("class Box<T> { T v; int get() { return 2; } }\nT twice<T>(T x) { return x + x; }\n");
+			bite.execute();
+			check_eq((int64_t)10, e->execute("use();").as_int());
+			const std::vector<uint8_t> bytes = bite.save_bytes();
+			// a fresh engine holds no instance: the loaded bite declares its generics and nothing else
+			auto fresh = stdlib_engine();
+			auto loaded = fresh->jaibite_load_bytes(bytes);
+			loaded.execute();
+			check_false(fresh->execute("reflect::classes().contains(\"Box<int>\");").as_bool(), "an instance the saving engine held is no part of the unit");
+			check_false(fresh->has_function("twice<int>") || fresh->has_variable("twice<int>"));
+			check_eq((int64_t)10, fresh->execute("Box<int> b; twice<int>(4) + b.get();").as_int());
+			// an engine that holds instances: the loaded bite makes those again, as the unit freshly checked there does
+			auto holder = stdlib_engine();
+			holder->execute(first);
+			holder->execute("Box<string> s; int use() { return twice<int>(4) + s.get(); } float half() { return twice<float>(1.5); }");
+			auto there = holder->jaibite_load_bytes(bytes);
+			there.execute();
+			check_true(warnings(*holder).empty());
+			check_eq((int64_t)10, holder->execute("use();").as_int());
+			check_near(3.0, holder->execute("half();").as_float(), 1e-9);
+			check_false(holder->execute("reflect::classes().contains(\"Box<int>\");").as_bool(), "what this engine does not hold is not declared");
+			// an instance the bite's own text names is the bite's, and is carried
+			auto named = e->jaibite("class Box<T> { T v; int get() { return 3; } }\nBox<int> mine;\nmine.get();\n");
+			auto elsewhere = stdlib_engine();
+			check_eq((int64_t)3, elsewhere->jaibite_load_bytes(named.save_bytes()).execute().as_int());
 		});
 
 		test("a_cached_unit_keeps_its_instances_where_the_first_use_put_them", [this]() {

@@ -1077,10 +1077,12 @@ private:
               size_t related_line = 0, size_t related_column = 0, bool always_error = false) {
         if (!collect_diagnostics_) { return; }
         const uint8_t mode = region_mode();
-        if (mode == check_mode_attr_warn && !always_error) { severity = diag_level::warning; }
-        if (severity == diag_level::error && remade_failures_) {   // an error in an instance the unit only makes again is that instance's
+        // an error in an instance the unit only makes again is that instance's, which keeps its earlier declaration: under
+        // [[warn_mode]] too, where the unit's own errors are warnings
+        if (severity == diag_level::error && remade_failures_) {
             if (const generic_instance_decl* remade = remade_root(instance_ctx_)) { note_remade_failure(*remade, loc, message); }
         }
+        if (mode == check_mode_attr_warn && !always_error) { severity = diag_level::warning; }
         if (diags_.size() >= k_check_diagnostic_cap) {
             capped_ = true;
             return;

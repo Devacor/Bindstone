@@ -1667,12 +1667,26 @@ struct engine::implementation {
         if (!definition->file_stamped && !file.empty() && file != "<script>") { (void)stat_mtime_size(file, origin.mtime, origin.size); }
         files.push_back(std::move(origin));
         note_instance(std::string(request.name), generic, request.arguments);
-        if (definition->kind != detail::generic_kind::class_type && !instance_shapes_.count(definition->stamp)) {
-            auto shape = std::make_shared<detail::generic_definition>(*definition);
-            shape->tokens = {};
-            for (auto& parameter : shape->parameters) { parameter.bound = {}; }
-            instance_shapes_.emplace(definition->stamp, std::move(shape));
-        }
+        keep_instance_shape(*definition);
+    }
+    // the shape of a function's or a method's definition an instance was made from, by its stamp (instance_shapes_)
+    void keep_instance_shape(const detail::generic_definition& definition) {
+        if (definition.kind == detail::generic_kind::class_type || instance_shapes_.count(definition.stamp)) { return; }
+        auto shape = std::make_shared<detail::generic_definition>(definition);
+        shape->tokens = {};
+        for (auto& parameter : shape->parameters) { parameter.bound = {}; }
+        instance_shapes_.emplace(definition.stamp, std::move(shape));
+    }
+    // A loaded unit's instance (a saved bite's, a cached unit's) was made where the engine did not see it: its request names
+    // the stamp of the definition it was made from, which the unit itself declares or the engine holds
+    void note_loaded_instance(const std::vector<declaration_ptr>& decls, const generic_instance_decl& request) {
+        if (!generic_instances_.count(std::string(request.name))) { note_instance(std::string(request.name), std::string(request.generic), request.arguments); }
+        if (request.stamp == 0 || instance_shapes_.count(request.stamp)) { return; }
+        std::vector<detail::generic_definition_ptr> declared;
+        collect_generics(decls, declared);
+        if (const auto held = generics_.find(std::string(request.generic)); held != generics_.end()) { declared.insert(declared.end(), held->second.begin(), held->second.end()); }
+        const auto made_from = std::find_if(declared.begin(), declared.end(), [&](const detail::generic_definition_ptr& g) { return g->stamp == request.stamp; });
+        if (made_from != declared.end()) { keep_instance_shape(**made_from); }
     }
 
     // The request a unit only makes again (generic_instance_decl::remade) that `request` is, or was asked for by; null for one
@@ -1785,6 +1799,28 @@ struct engine::implementation {
         return true;
     }
 
+    // A unit's declarations as a saved bite carries them: less the instances the unit only made again
+    // (generic_instance_decl::remade) and what their text alone asked for. Those rest on what the engine held when the unit
+    // was checked, not on the unit: the engine that loads the bite makes again the instances it holds itself, as a unit
+    // freshly checked there does (check_bite).
+    static std::vector<declaration_ptr> carried_declarations(const std::vector<declaration_ptr>& decls) {
+        const generic_request_index requests = index_requests(decls);
+        std::vector<declaration_ptr> carried;
+        carried.reserve(decls.size());
+        for (const auto& d : decls) {
+            generic_instance_decl* request = nullptr;
+            if (d && d->get_type() == node_type::generic_instance_decl) {
+                request = static_cast<generic_instance_decl*>(d.get());
+            } else if (d) {
+                const detail::generic_instance_id made = instance_of(*d);
+                const auto asked = made.name.empty() ? requests.end() : requests.find(made);
+                if (asked != requests.end()) { request = asked->second; }
+            }
+            if (!remade_root(requests, request)) { carried.push_back(d); }
+        }
+        return carried;
+    }
+
     // Every request of the unit that is not made yet, in order; an instance's own requests follow its request, ahead of its
     // declarations (a base's instance before the class that derives from it). True when the declarations changed.
     bool expand_generics(engine& self, std::vector<declaration_ptr>& decls, std::vector<closure_stamp>& files) {
@@ -1801,9 +1837,7 @@ struct engine::implementation {
                 continue;
             }
             if (request->expanded || (!request->failures.empty() && !request->unresolved)) {
-                if (request->expanded && !generic_instances_.count(std::string(request->name))) {
-                    note_instance(std::string(request->name), std::string(request->generic), request->arguments);   // a loaded unit's
-                }
+                if (request->expanded) { note_loaded_instance(decls, *request); }
                 continue;
             }
             request->failures.clear();
@@ -4840,6 +4874,8 @@ void engine::check_bite(jai::jaibite& bite, const std::string* source) {
     const bool remakes = impl->remakes_instances(*this, bite.declarations_);   // as for a unit's entry (check_entry)
     if (bite.stamp_loaded_ && !remakes && impl->outside_key(*this, bite.context_.outside) == bite.context_.outside_key) {
         bite.check_state_ = jaibite::check_state::clean;   // the names the stamp resolved resolve here as where it was checked
+        std::vector<implementation::closure_stamp> generic_files;
+        impl->expand_generics(*this, bite.declarations_, generic_files);   // a loaded bite holds its instances: the engine learns what each was made from
     }
     bite.stamp_loaded_ = false;
     if (!bite.lowering_) { bite.lowering_ = std::make_shared<detail::aggregate_lowering_state>(); }
@@ -4925,10 +4961,9 @@ std::vector<uint8_t> jaibite::save_bytes() const {
     }
     uint32_t flags = (check_state_ == check_state::clean) ? detail::jaibite_checked_clean_flags() : 0;
     detail::aggregate_source_view source(lowering_ ? std::static_pointer_cast<detail::aggregate_lowering_state>(lowering_).get() : nullptr);
-    if (!reload_hook_) { return detail::serialize_jaibite(declarations_, *detail::engine_access::get_symbolizer(*owner), owner->registration_fingerprint(), flags, {}, {}, &context_); }
-    std::vector<declaration_ptr> with_hook = declarations_;
-    with_hook.push_back(reload_hook_);
-    return detail::serialize_jaibite(with_hook, *detail::engine_access::get_symbolizer(*owner), owner->registration_fingerprint(), flags, {}, {}, &context_);
+    std::vector<declaration_ptr> carried = detail::engine_access::carried_declarations(*owner, declarations_);   // no instance the unit only made again
+    if (reload_hook_) { carried.push_back(reload_hook_); }
+    return detail::serialize_jaibite(carried, *detail::engine_access::get_symbolizer(*owner), owner->registration_fingerprint(), flags, {}, {}, &context_);
 }
 
 void jaibite::save(const std::string& path) const {
@@ -5591,6 +5626,8 @@ bool engine::generic_instance(const std::string& name, std::string& generic, std
     arguments = made->second.arguments;
     return true;
 }
+
+std::vector<declaration_ptr> engine::carried_declarations(const std::vector<declaration_ptr>& declarations) const { return implementation::carried_declarations(declarations); }
 
 bool engine::declares_generics() const { return !impl->generics_.empty(); }
 

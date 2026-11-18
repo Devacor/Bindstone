@@ -927,6 +927,8 @@ namespace jai {
         // declared into `declarations` (ahead of the declaration that first uses each), repeated until the check asks for no more
         const std::vector<std::shared_ptr<const detail::generic_definition>>* find_generics(const std::string& qualified) const;
         bool generic_instance(const std::string& name, std::string& generic, std::vector<type_info_ptr>& arguments) const;
+        // a unit's declarations as a saved bite carries them: without the instances it only made again (engine.cpp carried_declarations)
+        std::vector<declaration_ptr> carried_declarations(const std::vector<declaration_ptr>& declarations) const;
         bool declares_generics() const;
         bool names_generic_method(const std::string& name) const;   // some class declares a generic method of that bare name
         check_report check_expanding(std::vector<declaration_ptr>& declarations, detail::check_options options, const std::vector<std::string>* extra_globals = nullptr);

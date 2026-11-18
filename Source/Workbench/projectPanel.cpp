@@ -31,7 +31,7 @@ namespace Workbench {
 
 		std::string tileGlyphForExtension(const std::string& a_extension) {
 			if (a_extension == ".scene") { return "S"; }
-			if (a_extension == ".bindsnap") { return "P"; }
+			if (a_extension == ".bindsnap") { return "snap"; }
 			if (a_extension == ".png" || a_extension == ".jpg") { return "img"; }
 			if (a_extension == ".script" || a_extension == ".jai") { return "{}"; }
 			if (a_extension == ".ttf") { return "F"; }

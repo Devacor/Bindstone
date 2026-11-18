@@ -103,18 +103,30 @@ inline constexpr nodiscard_option nodiscard{};
 inline constexpr serial_option serial{};
 inline constexpr exclude_execution_time_option exclude_execution_time{};
 
+// What a call with type arguments answers, in terms of its first type argument T (docs/site/embedding/17-host-api.html "Type
+// arguments"): T itself, array<T> or shared_ptr<T>. The checker types the call so (auto rows = db.query<User>(...) is an
+// array<User>); the host returns a value of that type.
+struct type_result_option {
+    std::uint8_t shape = 0;
+};
+inline constexpr type_result_option returns_type_argument{1};
+inline constexpr type_result_option returns_array_of_type_argument{2};
+inline constexpr type_result_option returns_shared_ptr_of_type_argument{3};
+
 // What the trailing options of add_function, add_variadic_function and a binder's method, static_method and constructor add up
 // to: any number, in any order, as in add_function("save", fn, jai::nodiscard, jai::serial, GamePermission::cheats)
 struct function_options {
     permission_set required;
     bool nodiscard = false;
     bool serial = false;
+    std::uint8_t type_result = 0;   // type_result_option::shape
 };
 
 namespace detail {
     template<typename O>
     concept function_option = permission_enum<std::remove_cvref_t<O>> || std::is_same_v<std::remove_cvref_t<O>, nodiscard_option> ||
-                              std::is_same_v<std::remove_cvref_t<O>, serial_option> || std::is_same_v<std::remove_cvref_t<O>, exclude_execution_time_option>;
+                              std::is_same_v<std::remove_cvref_t<O>, serial_option> || std::is_same_v<std::remove_cvref_t<O>, exclude_execution_time_option> ||
+                              std::is_same_v<std::remove_cvref_t<O>, type_result_option>;
 
     // Whether a binding's options carry jai::exclude_execution_time: read where the binding is made, so an unmarked binding
     // compiles what it always did and a marked one stores the timed callable (engine::time_excluded_function)
@@ -127,6 +139,8 @@ namespace detail {
             a_options.nodiscard = true;
         } else if constexpr (std::is_same_v<O, serial_option>) {
             a_options.serial = true;
+        } else if constexpr (std::is_same_v<O, type_result_option>) {
+            a_options.type_result = a_option.shape;
         } else if constexpr (std::is_same_v<O, exclude_execution_time_option>) {
         } else {
             a_options.required.add(permission_id(a_option));

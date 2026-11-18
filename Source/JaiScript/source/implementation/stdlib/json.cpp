@@ -7,6 +7,8 @@
 #include <jaiscript/detail/work_budget.hpp>
 #include <jaiscript/detail/coroutine_snapshot.hpp>
 #include <jaiscript/detail/type_name_key.hpp>
+#include <jaiscript/detail/type_value.hpp>
+#include <jaiscript/core/script_type.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/convenience.hpp>
@@ -620,6 +622,16 @@ namespace stdlib {
 		return reconstruct_archive_value(eng, value, json_string_keys, handles);
 	}
 
+	script_value parse_json_text(engine* eng, const std::string& json) {
+		detail::engine_access::load_session session(eng);
+		serialization::json_archive_reader reader(json, eng, true);
+		script_value parsed = reader.read_value();
+		// a text with no '$' key holds no archive record: the parse is the value the rebuild would copy out
+		script_value result = reader.has_archive_keys() ? load_archive_value(eng, parsed, true) : std::move(parsed);
+		session.complete();
+		return result;
+	}
+
     // Register JSON and binary serialization functions with an engine
     void register_json_functions(engine& eng_ref) {
         engine* eng = &eng_ref;
@@ -643,14 +655,14 @@ namespace stdlib {
         }, serial);
         
 		eng_ref.add_function("from_json", [eng](const std::string& json) -> script_value {
-			detail::engine_access::load_session session(eng);
-			serialization::json_archive_reader reader(json, eng, true);
-			script_value parsed = reader.read_value();
-			// a text with no '$' key holds no archive record: the parse is the value the rebuild would copy out
-			script_value result = reader.has_archive_keys() ? load_archive_value(eng, parsed, true) : std::move(parsed);
-			session.complete();
-			return result;
+			return parse_json_text(eng, json);
 		}, serial);
+		// from_json<T>(text): the document as a T, a class built from an object by jai::make_record's rules
+		eng_ref.add_function("from_json", [eng](const script_type& type, const std::string& json) -> script_value {
+			auto built = detail::json_to_type(*eng, parse_json_text(eng, json), type.info(), "from_json");
+			if (!built) { throw runtime_error(eng->format_error(built)); }
+			return std::move(built.value());
+		}, serial, returns_type_argument);
         
         eng_ref.add_variadic_function("to_binary", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {

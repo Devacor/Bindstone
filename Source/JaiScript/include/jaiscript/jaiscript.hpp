@@ -33,6 +33,7 @@
 // 7. Execution backends (depends on value)
 // 8. Engine (depends on all above)
 #include "core/engine.hpp"
+#include "core/records.hpp"
 
 // 9. Class building system (depends on engine) - LAST!
 #include "core/dynamic_binder.hpp"

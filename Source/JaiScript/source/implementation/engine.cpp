@@ -38,6 +38,7 @@
 #include <jaiscript/detail/math_component_store.hpp>
 #include <jaiscript/detail/release_machine.hpp>
 #include <jaiscript/detail/constant_arguments.hpp>
+#include <jaiscript/detail/type_value.hpp>
 #include <jaiscript/detail/run_record.hpp>
 #include <jaiscript/core/script_run.hpp>
 #ifdef JAISCRIPT_VM_COVERAGE
@@ -500,6 +501,7 @@ struct engine::implementation {
     std::unordered_set<std::string> serial_functions_;
     std::unordered_set<std::string> serial_namespaces_;
     std::unordered_set<std::string> nodiscard_callables_;
+    std::unordered_map<std::string, uint8_t> type_result_callables_;
     std::unordered_set<std::string> host_function_names_;
     std::unordered_set<std::string> host_global_names_;
     size_t script_layer_sweep_watermark_ = 64;
@@ -2064,6 +2066,7 @@ struct engine::implementation {
         }
         for (const auto& [index, refusal] : self.constant_argument_indexes(name)) { fold(mix_key(0xA1, index)); }
         if (nodiscard_callables_.count(name)) { fold(0xD1); }
+        if (auto typed = type_result_callables_.find(name); typed != type_result_callables_.end()) { fold(mix_key(0xD2, typed->second)); }
         if (name == detail::k_outside_constants) {
             std::vector<const std::pair<const std::string, std::vector<std::string>>*> texts;
             for (const auto& entry : self.constant_texts_by_name()) { texts.push_back(&entry); }
@@ -3337,6 +3340,8 @@ void engine::initialize_engine_reference() {
     // regex, regex::match and regex::escape (detail/regex_library.hpp): engine-core, so a constant pattern compiles once at load
     detail::regex_library::register_library(*this);
     detail::template_library::register_library(*this);
+    // reflect::type, the value a type argument passes (detail/type_value.hpp)
+    detail::register_type_library(*this);
     // the library's builtins that touch what other threads share: output, scheduling, a nested region, an object's class, a
     // callback into script; every other one is parallel
     for (const char* name : {"print", "sleep", "extend", "parallel_transform", "parallel_reduce", "array::map", "array::filter", "array::sort", "map::filter"}) {
@@ -4445,6 +4450,13 @@ void engine::serial_function(const std::string& name) { impl->serial_functions_.
 void engine::nodiscard_function(const std::string& callable) { impl->nodiscard_callables_.insert(callable); }
 
 bool engine::is_nodiscard_function(const std::string& callable) const { return impl->nodiscard_callables_.count(callable) != 0; }
+
+void engine::type_result_function(const std::string& callable, uint8_t shape) { impl->type_result_callables_[callable] = shape; }
+
+uint8_t engine::type_argument_result(const std::string& callable) const {
+    auto found = impl->type_result_callables_.find(callable);
+    return found != impl->type_result_callables_.end() ? found->second : 0;
+}
 
 void engine::serial_namespace(const std::string& space) { impl->serial_namespaces_.insert(space); }
 

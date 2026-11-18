@@ -36,7 +36,7 @@ namespace jai::detail {
     // BUMP THIS on any change to what a parse produces: the serialized bytes and the parse-time semantics baked into the
     // AST (slot assignment, node and token numbers, capture plans). A stale sidecar is reparsed and rewritten (the version
     // check feeds the corrupt-file fallback), so a bump is always safe and a missed one leaves stale caches.
-    inline constexpr uint32_t k_jaibite_version = 62;
+    inline constexpr uint32_t k_jaibite_version = 63;
     // Header flags (u32):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -466,6 +466,7 @@ namespace jai::detail {
             node(e->callee.get());
             varint(e->arguments.size());
             for (const auto& a : e->arguments) node(a.get());
+            u8(e->type_argument_count);
         }
 
         JAI_NOINLINE void write_member_expr(const ast_node* n) {
@@ -544,7 +545,8 @@ namespace jai::detail {
         JAI_NOINLINE void write_cast_expr(const ast_node* n) {
             auto* e = static_cast<const cast_expr*>(n);
             type(e->target);
-            u8(static_cast<uint8_t>((e->by_reference ? 1 : 0) | (e->implicit_ref ? 2 : 0) | (e->binding_ref ? 4 : 0) | (e->dynamic ? 8 : 0)));
+            u8(static_cast<uint8_t>((e->by_reference ? 1 : 0) | (e->implicit_ref ? 2 : 0) | (e->binding_ref ? 4 : 0) | (e->dynamic ? 8 : 0) |
+                (e->type_value ? 16 : 0)));
             node(e->operand.get());
         }
 
@@ -1351,6 +1353,7 @@ namespace jai::detail {
         JAI_NOINLINE ast_node_ptr read_call_expr(const source_location& loc) {
             auto callee = expr_req();
             auto e = std::make_shared<call_expr>(loc, callee, expr_list());
+            e->type_argument_count = u8();
             return e;
         }
 
@@ -1471,6 +1474,7 @@ namespace jai::detail {
             e->implicit_ref = (cast_flags & 2) != 0;
             e->binding_ref = (cast_flags & 4) != 0;
             e->dynamic = (cast_flags & 8) != 0;
+            e->type_value = (cast_flags & 16) != 0;
             return e;
         }
 

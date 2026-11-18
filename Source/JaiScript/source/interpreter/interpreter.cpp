@@ -30,6 +30,7 @@
 #include <jaiscript/detail/capture_ladder.hpp> // shared capture-source ladder (vm parity)
 #include <jaiscript/detail/loop_binding.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (vm parity)
+#include <jaiscript/detail/type_value.hpp>
 #include <jaiscript/detail/const_rules.hpp>   // const guards (vm parity)
 #include <jaiscript/detail/aggregate_init.hpp>
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (vm parity)
@@ -5861,6 +5862,10 @@ checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const repla
             return non_lvalue_target(expr->operand.get());
         }
         push_value(std::move(operand));
+        return {};
+    }
+    if (expr->type_value) {   // KEEP BYTE-PARALLEL with the vm's exec_cast
+        push_value(detail::make_type_value(expr->target, engine_));
         return {};
     }
     if (expr->by_reference) {

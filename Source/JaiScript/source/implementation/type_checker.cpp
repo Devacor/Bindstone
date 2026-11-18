@@ -352,6 +352,10 @@ public:
     std::string unit_label(uint32_t unit) const { return engine_access::unit_label(engine_, unit); }
     bool host_function_result(const std::string& name, script_value_type& out) const { note(name); return engine_access::host_function_result(engine_, name, out); }
     bool host_nodiscard(const std::string& callable) const { note(callable); return engine_.is_nodiscard_function(callable); }
+    uint8_t type_argument_result(const std::string& callable) const { note(callable); return engine_.type_argument_result(callable); }
+    // array<T> and shared_ptr<T> as the engine interns them (a typed host result: jai::returns_array_of_type_argument)
+    const type_info* array_type_of(const type_info* element) const { return engine_access::get_type_info_array(engine_, const_cast<type_info*>(element)); }
+    const type_info* shared_type_of(const type_info* pointee) const { return engine_access::get_type_info_shared_ptr(engine_, const_cast<type_info*>(pointee)); }
     std::vector<std::string> registered_class_names() const { return engine_.registered_class_names(); }
     std::string unbound_instantiation_text(std::string_view name) const { note(name); return detail::unbound_instantiation_text(engine_, name); }
     std::vector<std::pair<size_t, const std::string*>> constant_argument_indexes(const std::string& callable) const { note(callable); return engine_access::constant_argument_indexes(engine_, callable); }
@@ -573,6 +577,11 @@ private:
     struct nodiscard_callee { std::string name; std::string twin; };
     nodiscard_callee nodiscard_hit_;
     std::unordered_map<const call_expr*, nodiscard_callee> nodiscard_calls_;
+    // A call with type arguments (call_expr::type_argument_count) being resolved: the script function it resolved to (an error:
+    // only a host takes a type argument), else the host callable whose registration may type its result
+    bool type_argument_call_ = false;
+    std::string type_argument_script_callee_;
+    std::string type_argument_host_callee_;
     // Every name the program scope declares (top level and namespace bodies, any order): a function reads a global declared
     // after it, so "undeclared" fires for names absent from this set AND the engine surface. A name a block, function, lambda
     // or class declares is visible only in its own scope, which the walk's scopes and member lookups resolve.
@@ -3538,6 +3547,24 @@ private:
 
     void note_host_nodiscard(const std::string& callable) {
         if (eng_.host_nodiscard(callable)) { nodiscard_hit_ = {callable, {}}; }
+        if (type_argument_call_) { type_argument_host_callee_ = callable; }
+    }
+    // a script callee of a call with type arguments: the call's one error, in place of the overload verdict
+    bool script_callee_takes_type_arguments(std::string_view fname) {
+        if (!type_argument_call_) { return false; }
+        type_argument_script_callee_ = std::string(fname);
+        return true;
+    }
+    // A host registration's typed result (core/permission.hpp jai::returns_type_argument and its siblings): the first type
+    // argument T, array<T> or shared_ptr<T>
+    ctype type_argument_result(const call_expr* c, uint8_t shape) {
+        const type_info* t = static_cast<const cast_expr*>(c->arguments[0].get())->target.get();
+        switch (shape) {
+            case 1: return ctype_from_type_info(t);
+            case 2: return ctype_from_type_info(eng_.array_type_of(t));
+            case 3: return ctype_from_type_info(eng_.shared_type_of(t));
+            default: return {};
+        }
     }
     void check_namespace_function_nodiscard(const std::string& qualified, const std::vector<const function_decl*>& decls) {
         if (decls.empty()) { return; }
@@ -3656,6 +3683,7 @@ private:
         if (sit == space->signatures.end()) { return {}; }
         const host_entry_signature& sig = sit->second;
         if (sig.nodiscard) { nodiscard_hit_ = {qualified, sig.in_place_twin ? std::string(m->member) : std::string()}; }
+        if (type_argument_call_) { type_argument_host_callee_ = qualified; }
         if (args.size() < sig.min_args || args.size() > sig.max_args) {
             const std::string expected = sig.min_args == sig.max_args ? std::to_string(sig.min_args)
                 : std::to_string(sig.min_args) + " to " + std::to_string(sig.max_args);
@@ -4449,6 +4477,7 @@ private:
     // program takes it; the result is typed only when the one that does is this unit's own, and no proof rests on the set
     ctype check_program_overloads(std::string_view fname, const std::vector<const function_decl*>& own, const std::vector<const function_decl*>& foreign,
                                   const std::vector<ctype>& args, const source_location& loc) {
+        if (script_callee_takes_type_arguments(fname)) { return {}; }
         std::vector<const function_decl*> all(own);
         all.insert(all.end(), foreign.begin(), foreign.end());
         const bool rivals = arity_rivals(all, args.size());
@@ -4477,6 +4506,7 @@ private:
     call_check check_script_overloads(std::string_view fname, const std::vector<const function_decl*>& overloads,
                                       const std::vector<ctype>& args, const source_location& loc, bool foreign = false,
                                       bool scored = true) {
+        if (script_callee_takes_type_arguments(fname)) { return {}; }
         const function_decl* only_viable = nullptr;
         int viable_count = 0;
         int nodiscard_viable = 0;
@@ -6293,6 +6323,11 @@ private:
             return operand_t;
         }
         ctype operand_t = infer(c->operand.get());
+        if (c->type_value) {   // a type argument: its type names a type, as a declaration's does
+            stamp_const(c->const_check, const_none, {});
+            check_spelled_type(c->target.get(), c->location);
+            return ctype::object("reflect::type");
+        }
         if (c->by_reference) { report_mixed_reference_conditional(c->operand.get()); }
         check_const_cast(c);
         ctype t = ctype_from_type_info(c->target.get());
@@ -6619,10 +6654,11 @@ private:
     void check_constant_arguments(const std::string& callable, const std::string& shown, const call_expr* c) {
         if (!eng_.has_constant_arguments()) { return; }
         for (const auto& [index, refusal] : eng_.constant_argument_indexes(callable)) {
-            if (index >= c->arguments.size()) { continue; }
+            const size_t at = index + c->type_argument_count;   // an index counts the value arguments
+            if (at >= c->arguments.size()) { continue; }
             std::vector<std::string> texts;
-            if (detail::constant_texts(c->arguments[index].get(), eng_.constant_texts_by_name(), texts)) { continue; }
-            diag(diag_level::error, c->arguments[index]->location, "argument " + std::to_string(index + 1) + " of '" + shown + "' is not a constant: " + *refusal);
+            if (detail::constant_texts(c->arguments[at].get(), eng_.constant_texts_by_name(), texts)) { continue; }
+            diag(diag_level::error, c->arguments[at]->location, "argument " + std::to_string(index + 1) + " of '" + shown + "' is not a constant: " + *refusal);
         }
     }
 
@@ -6654,8 +6690,26 @@ private:
         const std::vector<const function_decl*>* ov = nullptr;   // the statically resolved same-script overload set
         ov_class_ = {};
         nodiscard_hit_ = {};
+        // a call in the callee's receiver resolves its own type arguments: the enclosing call's state comes back after it
+        const bool outer_type_argument_call = type_argument_call_;
+        std::string outer_script_callee = std::move(type_argument_script_callee_), outer_host_callee = std::move(type_argument_host_callee_);
+        type_argument_call_ = c->type_argument_count > 0;
+        type_argument_script_callee_.clear();
+        type_argument_host_callee_.clear();
         narrow_callee seen;
         ctype t = infer_call_impl(c, args, ov, seen);
+        if (c->type_argument_count > 0) {
+            if (!type_argument_script_callee_.empty()) {
+                diag(diag_level::error, c->location, "'" + type_argument_script_callee_ + "' takes no type arguments: a type argument goes to a host function");
+                ov = nullptr;
+                t = {};
+            } else if (!type_argument_host_callee_.empty()) {
+                if (const uint8_t shape = eng_.type_argument_result(type_argument_host_callee_)) { t = type_argument_result(c, shape); }
+            }
+        }
+        type_argument_call_ = outer_type_argument_call;
+        type_argument_script_callee_ = std::move(outer_script_callee);
+        type_argument_host_callee_ = std::move(outer_host_callee);
         narrow_call_arguments(c, ov, seen);
         t = check_call(c, args, ov, std::move(t));
         if (!nodiscard_hit_.name.empty() && collect_diagnostics_) { nodiscard_calls_[c] = std::move(nodiscard_hit_); }
@@ -6892,6 +6946,7 @@ private:
             if (const var_entry* local = find_local(id->name, &scope_index); local && (id->global_qualified ||
                 (!member_hides_program_name(id->name, scope_index) && !namespace_hides_program_name(id->name, scope_index)))) {
                 if (scope_index == 0) { note_global_use(id->name); }
+                if (local->lambda && script_callee_takes_type_arguments(id->name)) { return {}; }
                 if (!local->dynamic && signature_slot(local->type)) { return check_signature_call("'" + std::string(id->name) + "'", local->type.ti, c, args); }
                 return {};   // a callable local without a signature
             }
@@ -6936,6 +6991,7 @@ private:
                 return check_script_overloads(id->name, it->second, args, c->location).result;
             }
             if (const sclass* sc = find_sclass(id->name)) {
+                if (script_callee_takes_type_arguments(id->name)) { return {}; }
                 report_class_before_declaration(id->name, c->location);
                 const bool may_copy = check_ctor_call(id->name, *sc, args, c->location);
                 if (sc->provable && !may_copy) { ov = &sc->ctors; }

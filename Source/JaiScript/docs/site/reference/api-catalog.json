@@ -2728,6 +2728,22 @@
     },
     {
       "owner": "global",
+      "name": "from_json",
+      "signature": "from_json<T>(text: string) -> T",
+      "provider": "stdlib",
+      "effect": "deserialize",
+      "notes": "The document as a T: a class is built with T() and its fields stored by name (from_json<array<T>>, shared_ptr<T> and maps alike); a key the class has no field for is skipped.",
+      "source": "include/jaiscript/stdlib/json.hpp",
+      "form": "function",
+      "availability": "register_all() or area registration",
+      "display": "from_json<T>(text: string) -> T",
+      "example": {
+        "code": "class Pet { string name; int age = 1; }\nPet p = from_json<Pet>(\"{\\\"name\\\": \\\"rex\\\"}\");\nprint(p.name, \" \", p.age);",
+        "output": "rex 1"
+      }
+    },
+    {
+      "owner": "global",
       "name": "to_binary",
       "signature": "to_binary(value: var) -> string",
       "provider": "stdlib",
@@ -8001,6 +8017,30 @@
       "form": "method",
       "availability": "Every engine",
       "display": "web::html.to_string() -> string"
+    },
+    {
+      "owner": "reflect::type",
+      "name": "name",
+      "signature": "name() -> string",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "The type's canonical spelling: User, array<User>, shared_ptr<shop::Product>.",
+      "source": "source/implementation/records.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "reflect::type.name() -> string"
+    },
+    {
+      "owner": "reflect::type",
+      "name": "to_string",
+      "signature": "to_string() -> string",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "The same spelling.",
+      "source": "source/implementation/records.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "reflect::type.to_string() -> string"
     },
     {
       "owner": "reflect",

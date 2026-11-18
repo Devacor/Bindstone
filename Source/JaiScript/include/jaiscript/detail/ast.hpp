@@ -347,6 +347,8 @@ namespace jai {
         // regex(pattern[, flags]) with literal texts while `regex` names the engine's constructor: the pattern compiled at load
         // (the checker's stamp, never serialized); both backends make the value from it while the name still binds the constructor
         mutable std::shared_ptr<const detail::regex::compiled> regex_constant;
+        // callee<T, ...>(args): the leading arguments that are type values (cast_expr::type_value), which only a host takes
+        uint8_t type_argument_count = 0;
 
         call_expr(const source_location& loc, expression_ptr c, std::vector<expression_ptr> args)
             : expression(loc, node_type::call_expr), callee(c), arguments(std::move(args)) {}
@@ -609,6 +611,8 @@ namespace jai {
         // dynamic_cast: the handle form (dynamic_cast<shared_ptr<T>>(e), dynamic_pointer_cast<T>(e)) answers null where
         // cast<shared_ptr<T>>(e) raises for an operand that holds no T; the reference form is cast<T&>(e) with a checked operand
         bool dynamic = false;
+        // a type argument (db.query<User>(...)): no operand read, the reflect::type value naming target (detail/type_value.hpp)
+        bool type_value = false;
         expression_ptr operand;
         mutable const_site const_check;   // cast<T&>(c) / cast<shared_ptr<T>>(c) of a const
 

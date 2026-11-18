@@ -405,6 +405,38 @@ take the option too, in a list with the others: <code>jai::nodiscard, jai::seria
 namespace entry described with a <code>host_entry_signature</code> sets its <code>nodiscard</code> field;
 <code>in_place_twin</code> adds that the entry copies what the same-named method changes in place, and the error then
 names that method.</p>
+<h2 id="type-arguments-host">Type arguments<a class="hlink" href="#type-arguments-host" aria-label="link">&#8203;</a></h2>
+<p>A script call may pass types ahead of its arguments, <code>load&lt;Pet&gt;("rex")</code> (<a href="../guide/06-functions.html#type-arguments">Type arguments</a>). Each arrives as the host object <code>reflect::type</code>, which a function or bound method takes as a <code>const jai::script_type&amp;</code> parameter (<code>jaiscript/core/script_type.hpp</code>): <code>name()</code> is the canonical spelling (<code>"array&lt;Pet&gt;"</code>), <code>class_name()</code> the class it names (<code>T</code> or <code>shared_ptr&lt;T&gt;</code>'s pointee, else empty) and <code>info()</code> the engine's <code>type_info</code>. A class is named, not captured, so the host builds whatever class of that name is loaded when it builds.</p>
+<p>A trailing option declares the result in terms of the first type argument, so the checker types the call: <code>jai::returns_type_argument</code> (<code>T</code>), <code>jai::returns_array_of_type_argument</code> (<code>array&lt;T&gt;</code>) or <code>jai::returns_shared_ptr_of_type_argument</code> (<code>shared_ptr&lt;T&gt;</code>). It goes on <code>add_function</code>, <code>add_variadic_function</code>, a binder's <code>.method</code> and <code>.static_method</code>, beside the others, and covers every call with type arguments of that name; the host must return a value of that type. <code>type_argument_result(callable)</code> asks, by <code>"name"</code> or <code>"Class.method"</code>.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">jai::engine* raw = eng.get();
+eng-&gt;add_function("load", [raw](const jai::script_type&amp; type, const std::string&amp; name) {
+    jai::record_field_list fields = read_saved_fields(name);         // (name, value) pairs
+    auto made = jai::make_record(*raw, type, fields, "load");
+    if (!made) { throw std::runtime_error(raw-&gt;format_error(made)); }
+    return std::move(made.value());
+}, jai::returns_type_argument);</code></pre></div>
+<div class="codeblock cb-jai" data-host="load"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">auto rex = load&lt;Pet&gt;("rex");      // a Pet: rex.nmae is a load error</code></pre></div>
+<ul>
+<li><strong>A script callee takes none.</strong> A call with type arguments the checker resolves to a script function, method, constructor or local lambda fails the load: <code>'f' takes no type arguments: a type argument goes to a host function</code>.</li>
+<li><strong>Constant arguments count the value arguments.</strong> <code>constant_argument("Database.query", 0, ...)</code> names the SQL text of <code>db.query(sql)</code> and of <code>db.query&lt;User&gt;(sql)</code> alike; the host's own index is its C++ parameter's, after the types.</li>
+<li><strong>Overloads.</strong> A typed form binds beside an untyped one of the same name: the <code>jai::script_type</code> parameter takes only a type value, so <code>query(sql, id)</code> and <code>query&lt;User&gt;(sql)</code> each find theirs.</li>
+</ul>
+<h2 id="records">Records<a class="hlink" href="#records" aria-label="link">&#8203;</a></h2>
+<p><code>jaiscript/core/records.hpp</code> builds script class instances from named values and reads them back, by the rules a script store follows; a database row, a JSON document or a form are the usual sources. <code>who</code> leads every error text.</p>
+<div class="tablewrap"><table><thead><tr><th>Call</th><th>Answers</th></tr></thead><tbody>
+<tr><td><code>jai::make_record(eng, type, fields, who)</code></td><td>a <code>T</code>: constructed with <code>T()</code>, then each named value stored in the field of that name. <code>fields</code> is a <code>jai::record_field_list</code> (<code>(name, value)</code> pairs) or a map with string keys. A name the class has no field for is skipped; a field nothing names keeps its initializer.</td></tr>
+<tr><td><code>jai::make_shared_record(eng, type, fields, who)</code></td><td>the same object as a <code>shared_ptr&lt;T&gt;</code>, as <code>make_shared&lt;T&gt;()</code> answers it</td></tr>
+<tr><td><code>jai::record_fields(eng, record, who)</code></td><td>an instance's fields, bases first and in declaration order, or a map's string-keyed entries; an array, map or class value as its <code>to_json</code> text, for storage</td></tr>
+</tbody></table></div>
+<p>Each answers a <code>checked_result</code>; <code>eng.format_error(result)</code> is the text. Beyond a script store, <code>make_record</code> converts what a row or a document holds: an int <code>0</code> or <code>1</code> into a <code>bool</code> field, an int into a <code>float</code> field, text into an array, map or class field (read as JSON, as <code>from_json</code> reads it), a map into a class or <code>shared_ptr</code> field (its own record), and each element of an array or map field the same way. What still does not fit raises:</p>
+<ul>
+<li><code>load: field 'age' of 'Pet' is int, not string</code>: a value the field's type refuses (the class, the field and both types).</li>
+<li><code>load: field 'age' of 'Pet' is int and cannot be null</code>: null into a field that cannot be empty.</li>
+<li><code>load: 'Pet' has no constructor taking no arguments</code>: every constructor of the class takes arguments.</li>
+<li><code>load: a record is an object of a script class, not array&lt;Pet&gt;</code>: the type names no script class (<code>unknown class 'Nope'</code>, <code>'Inventory' is not a script class</code> for a host one).</li>
+<li><code>load: text for 'array&lt;string&gt;' is not JSON: ...</code>: a text field value that does not parse.</li>
+<li><code>record_fields: a record is an object of a script class or a map, not int</code>.</li>
+</ul>
 <h2 id="the-time-source">The time source<a class="hlink" href="#the-time-source" aria-label="link">&#8203;</a></h2>
 <p>Every <code>time::</code> call a script makes (<a href="../guide/14-time.html">Time</a>) reads an engine-owned clock
 the host can replace. It lives on <code>eng-&gt;time()</code>, in <code>&lt;jaiscript/core/engine_time.hpp&gt;</code>.</p>

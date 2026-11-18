@@ -212,8 +212,9 @@ namespace jai::detail {
 			const auto found = rules.find(constant_call_key(c));
 			if (found == rules.end()) { return; }
 			for (constant_argument_rule* rule : found->second) {
-				if (rule->index >= c->arguments.size()) { continue; }
-				const expression* argument = c->arguments[rule->index].get();
+				const size_t at = rule->index + c->type_argument_count;   // an index counts the value arguments
+				if (at >= c->arguments.size()) { continue; }
+				const expression* argument = c->arguments[at].get();
 				std::vector<std::string> texts;
 				if (constant_texts(argument, consts, texts)) { rule->texts.insert(texts.begin(), texts.end()); }
 				pending_constant_names(argument, rule->pending_names);

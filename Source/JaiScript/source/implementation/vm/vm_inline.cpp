@@ -310,7 +310,7 @@ script_value_type value_kind(const expression* e, const inline_context& c) {
 		const K a = value_kind(t->then_expression.get(), c);
 		return a == value_kind(t->else_expression.get(), c) ? a : K::jai_null_type;
 	}
-	case node_type::cast_expr: { auto* k = static_cast<const cast_expr*>(e); return !k->by_reference && scalar_type(k->target.get()) ? k->target->base_type : K::jai_null_type; }
+	case node_type::cast_expr: { auto* k = static_cast<const cast_expr*>(e); return !k->by_reference && !k->type_value && scalar_type(k->target.get()) ? k->target->base_type : K::jai_null_type; }
 	default: return K::jai_null_type;
 	}
 }
@@ -371,7 +371,7 @@ script_value_type kind_of(const expression* e, const F& slot_kind, const call_ex
 		const K a = kind_of(t->then_expression.get(), slot_kind, replace, replace_kind);
 		return a == kind_of(t->else_expression.get(), slot_kind, replace, replace_kind) ? a : K::jai_null_type;
 	}
-	case node_type::cast_expr: { auto* k = static_cast<const cast_expr*>(e); return !k->by_reference && scalar_type(k->target.get()) ? k->target->base_type : K::jai_null_type; }
+	case node_type::cast_expr: { auto* k = static_cast<const cast_expr*>(e); return !k->by_reference && !k->type_value && scalar_type(k->target.get()) ? k->target->base_type : K::jai_null_type; }
 	case node_type::call_expr: return e == replace ? replace_kind : K::jai_null_type;
 	default: return K::jai_null_type;
 	}
@@ -659,6 +659,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		if (!c.ok) return nullptr;
 		auto made = c.make<cast_expr>(k->location, k->target, k->by_reference, o);
 		made->dynamic = k->dynamic;
+		made->type_value = k->type_value;
 		return made;
 	}
 	case node_type::call_expr: {
@@ -690,6 +691,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		n->proven_method_decl = ce->proven_method_decl;
 		n->static_arg_proofs = ce->static_arg_proofs; n->proof_globals = ce->proof_globals; n->proven_callee_decl = ce->proven_callee_decl;
 		n->builtin_receiver = ce->builtin_receiver; n->builtin_receiver_open = ce->builtin_receiver_open;
+		n->type_argument_count = ce->type_argument_count;
 		c.origins[n.get()] = ce;
 		for (auto* pins : { c.alias_pins, c.callee_probes }) {
 			if (!pins) continue;

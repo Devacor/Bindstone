@@ -50,6 +50,7 @@
 #include "implementation/regex/regex_engine.cpp"
 #include "implementation/regex/regex_library.cpp"
 #include "implementation/templates.cpp"
+#include "implementation/records.cpp"
 #include "implementation/stdlib/json.cpp"
 #include "implementation/stdlib/io.cpp"
 #include "implementation/stdlib/containers.cpp"

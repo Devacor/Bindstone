@@ -224,7 +224,9 @@ namespace jai {
         checked_result<expression_ptr> ternary_rest(expression_ptr condition);
         checked_result<expression_ptr> coalesce_rest(expression_ptr left);
         checked_result<expression_ptr> unary_operator();
-        bool postfix_operator_ahead() const;
+        bool postfix_operator_ahead(const expression_ptr& expr) const;
+        bool type_arguments_ahead() const;
+        checked_result<expression_ptr> type_argument_call(expression_ptr callee);
         checked_result<expression_ptr> postfix_rest(expression_ptr expr, size_t chain_start, bool chain_starts_clean);
         checked_result<expression_ptr> postfix_operator(expression_ptr expr, std::vector<size_t>& null_links);
         checked_result<expression_ptr> brace_construction(expression_ptr expr);

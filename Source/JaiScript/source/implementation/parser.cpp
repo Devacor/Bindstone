@@ -2934,24 +2934,78 @@ checked_result<expression_ptr> parser::postfix() {
     const size_t chain_start = current_;
     const bool chain_starts_clean = !pushed_back_token_.has_value();
     auto operand = primary();
-    if (!operand || !postfix_operator_ahead()) { return operand; }
+    if (!operand || !postfix_operator_ahead(operand.value())) { return operand; }
     return postfix_rest(std::move(operand.value()), chain_start, chain_starts_clean);
 }
 
-bool parser::postfix_operator_ahead() const {
+bool parser::postfix_operator_ahead(const expression_ptr& expr) const {
     switch (peek().type) {
         case token_type::left_paren: case token_type::left_brace: case token_type::dot: case token_type::question_dot:
         case token_type::arrow: case token_type::colon_colon: case token_type::left_bracket: case token_type::plus_plus:
         case token_type::minus_minus:
             return true;
+        case token_type::less:   // f<T>(...), a.m<T>(...), ns::f<T>(...)
+            return expr && (expr->get_type() == node_type::identifier_expr || expr->get_type() == node_type::member_expr) && type_arguments_ahead();
         default:
             return false;
     }
 }
 
+// C#'s rule: '<' opens type arguments only when the type-shaped run it starts closes on a '>' that a '(' follows ('>>' closes
+// two); anything else keeps '<' a comparison, so (a < b) > (c) needs its parentheses
+bool parser::type_arguments_ahead() const {
+    if (pushed_back_token_ || peek().type != token_type::less) { return false; }
+    const std::vector<token>& tokens = *stream_;
+    int depth = 0;
+    for (size_t i = current_; i < tokens.size(); ++i) {
+        switch (tokens[i].type) {
+            case token_type::less: ++depth; break;
+            case token_type::greater: case token_type::right_shift:
+                depth -= tokens[i].type == token_type::greater ? 1 : 2;
+                if (depth < 0) { return false; }
+                if (depth == 0) { return i + 1 < tokens.size() && tokens[i + 1].type == token_type::left_paren; }
+                break;
+            case token_type::identifier: case token_type::colon_colon: case token_type::comma: case token_type::int_keyword:
+            case token_type::float_keyword: case token_type::string_keyword: case token_type::bool_keyword: case token_type::char_keyword:
+            case token_type::array_keyword: case token_type::map_keyword: case token_type::shared_ptr_keyword:
+            case token_type::weak_ptr_keyword: case token_type::var_keyword:
+                break;
+            default:
+                return false;
+        }
+    }
+    return false;
+}
+
+// callee<T1, T2>(args) is callee(T1, T2, args): each type argument a type value (cast_expr::type_value), which a host takes
+// as a jai::script_type
+JAI_NOINLINE checked_result<expression_ptr> parser::type_argument_call(expression_ptr callee) {
+    advance();   // '<'
+    std::vector<expression_ptr> type_values;
+    do {
+        const source_location at = peek().location;
+        JAISCRIPT_TRY_ASSIGN(type_info_ptr type, parse_type());   // never auto or void: type_arguments_ahead admits neither
+        auto value = std::make_shared<cast_expr>(at, type, false,
+            std::make_shared<literal_expr>(at, script_value(script_value::ast_literal_tag{}, std::monostate{})));
+        value->type_value = true;
+        type_values.push_back(std::move(value));
+    } while (match(token_type::comma));
+    if (type_values.size() > UINT8_MAX) {
+        report_error("a call takes at most 255 type arguments", previous());
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    consume_greater_in_generic("expected '>' after type arguments");
+    JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after type arguments"));
+    JAISCRIPT_TRY_ASSIGN(expression_ptr call, finish_call(std::move(callee)));
+    auto* c = static_cast<call_expr*>(call.get());
+    c->arguments.insert(c->arguments.begin(), std::make_move_iterator(type_values.begin()), std::make_move_iterator(type_values.end()));
+    c->type_argument_count = static_cast<uint8_t>(type_values.size());
+    return call;
+}
+
 JAI_NOINLINE checked_result<expression_ptr> parser::postfix_rest(expression_ptr expr, size_t chain_start, bool chain_starts_clean) {
     std::vector<size_t> null_links;   // the ?. tokens of this chain
-    while (postfix_operator_ahead()) {
+    while (postfix_operator_ahead(expr)) {
         JAISCRIPT_TRY_ASSIGN(expr, postfix_operator(std::move(expr), null_links));
     }
     if (!null_links.empty() && chain_starts_clean && !pushed_back_token_) { return null_chain_rest(chain_start, null_links, expr); }
@@ -2973,6 +3027,7 @@ JAI_NOINLINE checked_result<expression_ptr> parser::postfix_operator(expression_
     if (match(token_type::arrow)) { return finish_member_access(std::move(expr), true); }
     if (match(token_type::colon_colon)) { return static_member_access(std::move(expr)); }
     if (match(token_type::left_bracket)) { return subscript(std::move(expr)); }
+    if (check(token_type::less)) { return type_argument_call(std::move(expr)); }
     advance();
     const token& op = previous();   // postfix increment/decrement
     if (expr->get_type() != node_type::identifier_expr) {

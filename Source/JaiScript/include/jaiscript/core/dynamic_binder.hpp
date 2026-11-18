@@ -1217,6 +1217,7 @@ public:
         constexpr uint64_t writeback = detail::tuple_writeback_mask<typename traits::argument_types>::value;
         class_def_->add_static_method(name, writeback_tagged<writeback>(engine_.template bound_function<detail::excludes_execution_time<Options...>>(make_function_binder(std::forward<Callable>(callable), &engine_).bind(), folded.required)), traits::arity);
         if (folded.nodiscard) { engine_.nodiscard_function(class_name_ + "." + name); }
+        if (folded.type_result) { engine_.type_result_function(class_name_ + "." + name, folded.type_result); }
         if (folded.serial) { class_def_->mark_serial_static_method(engine_.symbolize(name)); }
         return *this;
     }
@@ -1253,6 +1254,7 @@ public:
 private:
     dynamic_binder& apply_method_options(const std::string& name, bool is_const, const function_options& options) {
         if (options.nodiscard) { engine_.nodiscard_function(class_name_ + "." + name); }
+        if (options.type_result) { engine_.type_result_function(class_name_ + "." + name, options.type_result); }
         if (options.serial) {
             const uint64_t name_id = engine_.symbolize(name);
             const serial_overloads* marked = class_def_->serial_method(name_id);

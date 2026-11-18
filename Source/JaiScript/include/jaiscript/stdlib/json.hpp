@@ -25,6 +25,8 @@ namespace stdlib {
 
 	// One archive's script value back to live values: classes by name, handles by id
 	script_value load_archive_value(engine* eng, const script_value& value, bool json_string_keys);
+	// What from_json(text) answers: the parse, its archive records rebuilt
+	script_value parse_json_text(engine* eng, const std::string& json);
 
 	// A constructed object's saved values, in the class's property order (base first; unknown keys ignored, a missing
 	// key keeps the constructed value): a script field writes its storage, a C++ property its binding, and a value that

@@ -759,6 +759,13 @@ print(w.size(), &quot; &quot;, to_json(w.to_string().to_bytes()));</code></pre><
 print(v[&quot;hp&quot;], &quot; &quot;, v[&quot;tags&quot;][0]);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3 a</code></pre></div>
 </div>
+<div class="api-entry" data-provider="stdlib" data-search="from_json&lt;t&gt;(text: string) -&gt; t deserialize the document as a t: a class is built with t() and its fields stored by name (from_json&lt;array&lt;t&gt;&gt;, shared_ptr&lt;t&gt; and maps alike); a key the class has no field for is skipped. register_all() or area registration"><h3 id="api-bb431b116690"><code>from_json&lt;T&gt;(text: string) -&gt; T</code></h3><p><strong>register_all() or area registration</strong> &middot; deserialize</p>
+<p>The document as a T: a class is built with T() and its fields stored by name (from_json&lt;array&lt;T&gt;&gt;, shared_ptr&lt;T&gt; and maps alike); a key the class has no field for is skipped.</p>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Pet { string name; int age = 1; }
+Pet p = from_json&lt;Pet&gt;(&quot;{\&quot;name\&quot;: \&quot;rex\&quot;}&quot;);
+print(p.name, &quot; &quot;, p.age);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">rex 1</code></pre></div>
+</div>
 <div class="api-entry" data-provider="core" data-search="import_recheck_interval() -&gt; float configure queries import polling window in seconds. every engine"><h3 id="api-0d92d601292e"><code>import_recheck_interval() -&gt; float</code></h3><p><strong>Every engine</strong> &middot; configure</p>
 <p>Queries import polling window in seconds.</p>
 </div>
@@ -1441,6 +1448,14 @@ print(reflect::invoke(Orc(), &quot;add&quot;, 2, 3));</code></pre></div>
 <p>The bytes one template() render may write, as the host set it (default 10485760; 0 = no limit); scripts read it, hosts change it.</p>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="reflect::type_name(value: var) -&gt; string observe  register_all() or area registration"><h3 id="api-3fc8abef3afe"><code>reflect::type_name(value: var) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+</div>
+</section>
+<section class="api-group"><h2 id="group-reflect-type">reflect::type</h2>
+<div class="api-entry" data-provider="core" data-search="reflect::type.name() -&gt; string observe the type&#x27;s canonical spelling: user, array&lt;user&gt;, shared_ptr&lt;shop::product&gt;. every engine"><h3 id="api-be9d06ed8f79"><code>reflect::type.name() -&gt; string</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>The type&#x27;s canonical spelling: User, array&lt;User&gt;, shared_ptr&lt;shop::Product&gt;.</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="reflect::type.to_string() -&gt; string observe the same spelling. every engine"><h3 id="api-6c89edb5e207"><code>reflect::type.to_string() -&gt; string</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>The same spelling.</p>
 </div>
 </section>
 <section class="api-group"><h2 id="group-regex">regex</h2>

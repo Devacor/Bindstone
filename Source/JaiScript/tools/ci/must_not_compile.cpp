@@ -25,7 +25,7 @@
 // must_not_compile 21: declares exactly one jai_auto_bind, and not a template
 // must_not_compile 22: a class with no context declares static void jai_auto_bind(jai::dynamic_binder<T>&), without a context
 // must_not_compile 23: a class with a context C declares static void jai_auto_bind(jai::dynamic_binder<T>&, const C&)
-// must_not_compile 24: JAI_METHOD: an option is jai::nodiscard, jai::serial or a permission enum
+// must_not_compile 24: JAI_METHOD: an option is jai::nodiscard, jai::serial, a typed result (jai::returns_type_argument) or a permission enum
 // must_not_compile 25: a && member cannot be called on a script receiver
 // must_not_compile 26: default arguments
 #include <jaiscript/jaiscript.hpp>

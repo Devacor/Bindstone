@@ -40,6 +40,7 @@
 #include <jaiscript/detail/body_walker.hpp>
 #include <jaiscript/detail/expr_children.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (interp parity)
+#include <jaiscript/detail/type_value.hpp>
 #include <jaiscript/detail/const_rules.hpp>   // const guards (interp parity)
 #include <jaiscript/detail/aggregate_init.hpp>
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (interp parity)
@@ -20557,6 +20558,10 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 			return non_lvalue_target(expr->operand.get());
 		}
 		stack_.push_back(std::move(operand));
+		return {};
+	}
+	if (expr->type_value) {   // KEEP BYTE-PARALLEL with the interpreter's visit_cast_expr
+		stack_.push_back(detail::make_type_value(expr->target, engine_));
 		return {};
 	}
 	if (expr->by_reference) {

@@ -368,6 +368,9 @@ namespace jai {
         bool constant_argument_admits(const std::string& callable, size_t index, std::string_view text) const;
         // Whether a host function ("name") or a bound method ("Class.method") was registered with jai::nodiscard.
         bool is_nodiscard_function(const std::string& callable) const;
+        // The typed result a host function ("name") or a bound method ("Class.method") declared for a call with type arguments
+        // (jai::returns_type_argument 1, returns_array_of_type_argument 2, returns_shared_ptr_of_type_argument 3); 0 for none.
+        uint8_t type_argument_result(const std::string& callable) const;
 
         // Global registration
         void add_global(const std::string& name, script_value value, bool is_serializable = true);
@@ -890,12 +893,15 @@ namespace jai {
         friend class caught_error_scope;
         // [[nodiscard]] for a host function ("name") or a bound method ("Class.method"): what jai::nodiscard records.
         void nodiscard_function(const std::string& callable);
+        // What jai::returns_type_argument and its siblings record
+        void type_result_function(const std::string& callable, uint8_t shape);
         // A host function a parallel body may not call: what jai::serial records. Every other registered host function, the
         // library's own included, is taken to be safe on any thread. A namespace entry is marked by its qualified name.
         void serial_function(const std::string& name);
         void apply_function_options(const std::string& name, function_options options) {
             if (options.nodiscard) { nodiscard_function(name); }
             if (options.serial) { serial_function(name); }
+            if (options.type_result) { type_result_function(name, options.type_result); }
         }
 
         // Attach a requirement to the actual callable, so aliases, overload dispatch

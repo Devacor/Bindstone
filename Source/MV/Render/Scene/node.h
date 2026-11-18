@@ -13,11 +13,17 @@ namespace MV {
 			friend Component;
 
 			struct LoadOptions {
-				LoadOptions(MV::Services &a_services, bool a_doPostLoad) : doPostLoad(a_doPostLoad), services(a_services) {
+				// A load may start inside another's post-load step (a BindSnapInstance reading its file): the outer
+				// load's options come back when the inner one is done.
+				LoadOptions(MV::Services &a_services, bool a_doPostLoad) : doPostLoad(a_doPostLoad), services(a_services), outer(a_services.get<LoadOptions>(false)) {
 					services.connect(this);
 				}
 				~LoadOptions() {
-					services.disconnect<LoadOptions>();
+					if (outer) {
+						services.connect(outer);
+					} else {
+						services.disconnect<LoadOptions>();
+					}
 				}
 
 				// Depth tracking for load_complete: incremented when load_and_construct
@@ -29,6 +35,7 @@ namespace MV {
 				bool doPostLoad;
 			private:
 				MV::Services &services;
+				LoadOptions* outer = nullptr;
 				int depth = 0;
 				LoadOptions(const LoadOptions &) = delete;
 				LoadOptions& operator=(const LoadOptions &) = delete;
@@ -190,6 +197,9 @@ namespace MV {
 			std::shared_ptr<Node> saveJai(const std::string &a_filename, MV::Services& a_services, bool a_renameNodeToFile = true);
 			std::shared_ptr<Node> saveJai(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId);
 			static std::shared_ptr<Node> loadJai(const std::string &a_filename, MV::Services& a_services, bool a_doPostLoadStep = true);
+			// Loads a node from the JSON text of a scene or BindSnap, as load does from the file; a_name is what an
+			// error names.
+			static std::shared_ptr<Node> loadText(const std::string& a_json, const std::string& a_name, MV::Services& a_services, bool a_doPostLoadStep = true);
 			static std::shared_ptr<Node> loadJai(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId, bool a_doPostLoadStep = true);
 			std::shared_ptr<Node> loadChildJai(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId = "");
 
@@ -738,6 +748,9 @@ namespace MV {
 
 			//manual post load only if you know what you're doing.
 			void postLoadStep();
+			// Takes the components and children of a node loaded without its post-load step as this node's own,
+			// not saved with it, and finishes their load here (MV::Scene::BindSnapInstance).
+			void adoptLoaded(const std::shared_ptr<Node>& a_loaded);
 
 		private:
 			std::unique_ptr<Task> rootTask;
@@ -898,6 +911,8 @@ namespace MV {
 
 			template <typename MakeReader>
 			static std::shared_ptr<Node> loadFile(const char* a_loader, const std::string& a_filename, MV::Services& a_services, const std::string& a_newNodeId, bool a_doPostLoadStep, MakeReader a_makeReader);
+			template <typename MakeReader>
+			static std::shared_ptr<Node> loadContents(const char* a_loader, const std::string& a_filename, const std::string& a_contents, MV::Services& a_services, const std::string& a_newNodeId, bool a_doPostLoadStep, MakeReader a_makeReader);
 
 			void markMatrixDirty(bool a_rootCall = true);
 

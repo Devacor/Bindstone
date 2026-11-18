@@ -21,6 +21,7 @@
 #include <jaiscript/serialization/json_archive.hpp>
 #include "fast_json.hpp"
 #include "MV/Render/Scene/emitter.h"
+#include "MV/Render/Scene/bindSnapInstance.h"
 #include <chrono>
 #include <algorithm>
 #include <vector>
@@ -2348,6 +2349,58 @@ static int RunAssetVerification() {
 			std::cout << "[FAIL] " << path << ": " << e.what() << std::endl;
 			++failed;
 		}
+	}
+
+	// Every BindSnap also builds as a linked instance: a scene that saves only the link and loads it back, nothing
+	// of the instance's own after a few frames left alone, and unpacked, the kinds of thing its file holds
+	{
+		MV::Scene::BindSnapTracking tracking;
+		managers.services.connect(&tracking);
+		for (const char* path : nodeFiles) {
+			if (std::filesystem::path(path).extension() != ".bindsnap") {
+				continue;
+			}
+			try {
+				auto original = MV::fileContents(path, true);
+				auto holder = fakeRoot->make("linked");
+				auto instance = holder->make("placed")->attach<MV::Scene::BindSnapInstance>(managers.services)->source(path);
+				if (!instance->built()) { throw std::runtime_error("the instance did not build"); }
+				for (int frame = 0; frame < 10; ++frame) {
+					holder->update(0.05);
+				}
+				instance->captureOverrides();
+				if (!instance->overrides().empty()) {
+					std::string listed;
+					for (auto&& entry : instance->overrides()) {
+						listed += " [" + entry.node + "|" + entry.component + "|" + entry.property + "]";
+					}
+					throw std::runtime_error("left alone it has " + std::to_string(instance->overrides().size()) + " overrides:" + listed);
+				}
+				auto [linkedFile, linkedJson] = saveJsonToScratch(holder, "linked.scene");
+				auto linkedTypes = typeTagCounts(linkedJson);
+				if (linkedTypes.size() != 1 || linkedTypes["BindSnapInstance"] != 1) {
+					throw std::runtime_error("the scene holds more than the link: " + describeTypeTagDrift({ { "BindSnapInstance", 1 } }, linkedTypes));
+				}
+				holder->removeFromParent();
+				auto again = MV::Scene::Node::load(linkedFile, managers.services, false);
+				fakeRoot->add(again);
+				again->postLoadStep();
+				auto placedAgain = again->get("placed");
+				auto instanceAgain = placedAgain->component<MV::Scene::BindSnapInstance>(false, false);
+				if (!instanceAgain || !instanceAgain->built()) { throw std::runtime_error("the saved link did not build on load"); }
+				instanceAgain->unpack();
+				auto unpackedJson = saveJsonToScratch(placedAgain, "unpacked.scene").second;
+				again->removeFromParent();
+				auto typeDrift = describeTypeTagDrift(typeTagCounts(original), typeTagCounts(unpackedJson));
+				if (!typeDrift.empty()) { throw std::runtime_error("$type multiset drift file->linked->unpacked: " + typeDrift); }
+				std::cout << "[OK]   " << path << " as a linked instance (link only in the scene, no overrides, same kinds unpacked)" << std::endl;
+				++passed;
+			} catch (std::exception& e) {
+				std::cout << "[FAIL] " << path << " as a linked instance: " << e.what() << std::endl;
+				++failed;
+			}
+		}
+		managers.services.disconnect<MV::Scene::BindSnapTracking>();
 	}
 
 	try {

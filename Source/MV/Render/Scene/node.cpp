@@ -14,6 +14,7 @@
 #include "text.h"
 #include "clickable.h"
 #include "focusGroup.h"
+#include "bindSnapInstance.h"
 #include "clipped.h"
 #include "stencil.h"
 
@@ -42,6 +43,9 @@ namespace MV {
 			});
 			a_builder.method("componentButton", [](Node& a_self) {
 				return a_self.componentInChildren<Clickable>(false, true, true).self();
+			});
+			a_builder.method("componentBindSnapInstance", [](Node& a_self) {
+				return a_self.component<BindSnapInstance>(false, false).self();
 			});
 			a_builder.method("componentFocusGroup", [](Node& a_self) {
 				return a_self.componentInChildren<FocusGroup>(false, true, true).self();
@@ -250,7 +254,11 @@ namespace MV {
 		std::shared_ptr<Node> Node::loadFile(const char* a_loader, const std::string& a_filename, MV::Services& a_services, const std::string& a_newNodeId, bool a_doPostLoadStep, MakeReader a_makeReader) {
 			auto contents = fileContents(a_filename);
 			require<ResourceException>(!contents.empty(), "File not found for ", a_loader, ": ", a_filename);
+			return loadContents(a_loader, a_filename, contents, a_services, a_newNodeId, a_doPostLoadStep, a_makeReader);
+		}
 
+		template <typename MakeReader>
+		std::shared_ptr<Node> Node::loadContents(const char* a_loader, const std::string& a_filename, const std::string& contents, MV::Services& a_services, const std::string& a_newNodeId, bool a_doPostLoadStep, MakeReader a_makeReader) {
 			LoadOptions nodeOptions(a_services, a_doPostLoadStep);
 			auto* engine = a_services.get<jai::engine>();
 
@@ -283,6 +291,12 @@ namespace MV {
 					<< "  walk+postLoad: " << ms(tParse1, tWalk1) << " ms\n";
 			}
 			return result;
+		}
+
+		std::shared_ptr<Node> Node::loadText(const std::string& a_json, const std::string& a_name, MV::Services& a_services, bool a_doPostLoadStep) {
+			return loadContents("Node::loadText", a_name, a_json, a_services, "", a_doPostLoadStep, [](const std::string& a_contents, jai::engine* a_engine) {
+				return jai::serialization::json_archive_reader(a_contents, a_engine);
+			});
 		}
 
 		std::shared_ptr<Node> Node::load(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId, bool a_doPostLoadStep) {
@@ -1207,11 +1221,15 @@ namespace MV {
 			}
 		}
 
+		// Both walks go over copies: a component's post-load step may put more on its node (a BindSnapInstance
+		// building its file's content), and what it adds it finishes itself.
 		void Node::localAndChildPostLoadInitializeComponents() {
-			for (auto&& child : childNodes) {
+			const std::vector<std::shared_ptr<Node>> children = childNodes.get();
+			for (auto&& child : children) {
 				child->localAndChildPostLoadInitializeComponents();
 			}
-			for (auto&& childComponent : childComponents) {
+			const std::vector<std::shared_ptr<Component>> components = childComponents.get();
+			for (auto&& childComponent : components) {
 				childComponent->postLoadInitialize();
 			}
 		}
@@ -1220,13 +1238,45 @@ namespace MV {
 			fixChildOwnership();
 			quietLocalMatrixFix();
 
-			for (auto&& child : childNodes) {
+			const std::vector<std::shared_ptr<Node>> children = childNodes.get();
+			for (auto&& child : children) {
 				child->recalculateMatrixAfterLoad();
 			}
 
-			for (auto&& childComponent : childComponents){
+			const std::vector<std::shared_ptr<Component>> components = childComponents.get();
+			for (auto&& childComponent : components){
 				childComponent->postLoadInitialize();
 			}
+		}
+
+		void Node::adoptLoaded(const std::shared_ptr<Node>& a_loaded) {
+			auto self = shared_from_this();
+			const std::vector<std::shared_ptr<Component>> components = a_loaded->childComponents.get();
+			const std::vector<std::shared_ptr<Node>> children = a_loaded->childNodes.get();
+			a_loaded->childComponents = std::vector<std::shared_ptr<Component>>();
+			a_loaded->childNodes = std::vector<std::shared_ptr<Node>>();
+			// the order a load takes: everything in place, owners, the children's post-load step, then the components'
+			for (auto&& child : children) {
+				child->myParent = nullptr;
+				child->serializable(false);
+				add(child, false);
+			}
+			for (auto&& component : components) {
+				component->serializable(false);
+				childComponents->push_back(component);
+			}
+			for (auto&& component : components) {
+				component->reattached(self);
+			}
+			for (auto&& child : children) {
+				child->postLoadStep();
+			}
+			for (auto&& component : components) {
+				component->postLoadInitialize();
+				onAttachSignal(component);
+			}
+			dirtyLocalBounds = true;
+			markParentBoundsDirty();
 		}
 
 		Point<> Node::localFromScreen(const Point<int> &a_screen) {

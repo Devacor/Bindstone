@@ -11,6 +11,8 @@ Submodules:
   selection context (a window or a tab strip); `TapDevice::focusContext` keeps the focus to the one in use.
   The focus arriving by a move asks every component above it to show it (`Component::focusOnChild`, which a
   `Scroller` answers by scrolling); `Node::visibleScreenBounds` is what a Clipped or Stencil leaves showing.
+- `Render/Scene/bindSnapInstance.h` links a node to a `.bindsnap` file: the file's content is the node's but not
+  saved, and the scene keeps the file name and the instance's overrides.
 - `Network` – networking utilities (`network.h`, `networkObject.h`, `webServer.h`, etc.).
 - `Physics` – `collider.*`: the Box2D-backed collider component.
 - `Render` – rendering system, textures/atlases and the scene graph (`Scene` holds `Node`, `Sprite`,

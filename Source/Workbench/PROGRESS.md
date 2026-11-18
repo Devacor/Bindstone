@@ -899,6 +899,34 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Not yet: asking for a name, a preview on the tile, the file changing on disk reaching the scene, and a node
   that refers to something outside what is saved (an anchor's parent, say), which is written with it.
 
+## Increment 46: linked BindSnap instances in the engine (2026-11-17)
+- `MV::Scene::BindSnapInstance` links its node to a `.bindsnap` file. The file's root gives the node its components
+  and children, marked not saved; the scene keeps only `source` (the file) and `overrides`. The node's own id and
+  transform are the instance's. Anything put on the node itself afterwards is saved with it as usual.
+- An override is `{ node, component, property, value }`: the node path of ids below the instance ("" for the
+  instance's node), the component by type name with `#1` for the second of a type ("" for the node's own
+  properties), the property's file key, and its saved value as JSON text. Dev approved these keys 2026-11-17.
+- On load the overrides are put into the file's JSON text before it is read, so the content loads exactly as if
+  the file held those values (a Sprite's points rebuild its bounds, for one). An override whose node, component or
+  property the file no longer has is dropped with a warning. A root node's own properties are never taken from an
+  override: they are the instance's.
+- `captureOverrides()` adds what changed since the content was built. It needs `BindSnapTracking` connected to the
+  services (an editor does that); the game never pays for it, and its instances keep the overrides they loaded.
+  Properties that hold other objects (nodes, components, anchors' parents) are never overrides.
+- `refresh()` reads the file again keeping the overrides, `revert()` drops them, `saveContentAs(file)` writes the
+  node as a plain BindSnap and clears the overrides (applying it when the file is the source), `unpack()` makes the
+  content the node's own and removes the link, `sourceOfPresentContent(file)` links a node that already holds what
+  was just written to the file. `BindSnapInstance::holding(node)` names the instance a node of content belongs to.
+- A clone builds the file itself and carries the instance's changes.
+- `Node::adoptLoaded` takes a loaded node's components and children as a node's own, unsaved, finishing their load
+  in place. `Node::loadText` loads from JSON text. `LoadOptions` restores an outer load's options when a load
+  starts inside another's post-load step. The post-load walks run over copies of the child lists.
+- Tests: `bindsnap_instance_tests.cpp`; `-verifyassets` also places every shipped BindSnap as a linked instance,
+  checks the scene holds only the link, that ten frames left alone make no overrides, and that unpacking gives the
+  file's kinds of thing back.
+- Not yet: added or removed children and components as overrides (an instance's own child goes on the instance's
+  node, which is saved; one added deeper is lost), nested instances inside a BindSnap file, the Workbench verbs.
+
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.
 - Authoring verbs still only in Source/Editor: the component kinds Add Component does not list — old-editor

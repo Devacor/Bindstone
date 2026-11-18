@@ -7,6 +7,7 @@
 	#include "MV/Render/Scene/clickable.h"
 	#include "MV/Render/Scene/controllerCursor.h"
 	#include "MV/Render/Scene/focusGroup.h"
+	#include "MV/Render/Scene/bindSnapInstance.h"
 	#include "MV/Render/Scene/scroller.h"
 	#include "MV/Render/Scene/button.h"
 	#include "MV/Render/Scene/text.h"

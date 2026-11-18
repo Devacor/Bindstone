@@ -1287,7 +1287,7 @@ private:
         if (callee->get_type() == node_type::identifier_expr) {
             auto* id = static_cast<identifier_expr*>(callee);
             if (!id->global_qualified) {
-                if (find_local(id->name)) { return {}; }
+                if (size_t scope_index = 0; callable_variable(id, &scope_index)) { return {}; }
                 if (class_ctx_) {
                     auto found = class_generics(class_ctx_name_, id->name);
                     if (!found.empty()) { return found; }

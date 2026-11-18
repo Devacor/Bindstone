@@ -852,6 +852,57 @@ public:
             });
         });
 
+        // A namespace's generics meet its other members under their bare names as under shop::name: a generic function is
+        // found and its type arguments deduced from a member's declared result, an instance's body is checked as hand-written
+        // code is, a plain function of a generic's name keeps the calls it takes, and an enum is a type argument
+        test("a_namespaces_generics_meet_its_bare_names_as_its_qualified_ones", [&]() {
+            const std::string twice = "T twice<T>(T x) { return x + x; } ";
+            const std::string tax = "int tax(int p) { return p + 1; } ";
+            const std::string pick = "T pick<T>(T x) { return x; } int pick(int x) { return x + 100; } ";
+            program_files files("generics");
+            files.write("tax.jai", "namespace shop { " + tax + "}");
+            files.write("twice.jai", "namespace shop { " + twice + "}");
+            files.write("bump.jai", "namespace shop { T bump<T>(T x) { tax(x); return x; } }");
+            files.write("kind.jai", "namespace shop { enum Kind { a, b } }");
+            // {program, its value or what the load says, the note under an instance's error}: @ is "" and then "shop::"
+            check_each(std::vector<std::tuple<std::string, std::string, std::string>>{
+                {"namespace shop { " + twice + "int go() { return @twice(4) + @twice<int>(1); } } shop::go()", "10", ""},
+                {"namespace shop { " + twice + tax + "int go() { return @twice(@tax(1)); } } shop::go()", "4", ""},
+                {"namespace shop { " + twice + "int go() { return @twice(@tax(1)); } " + tax + "} shop::go()", "4", ""},
+                {"import \"tax.jai\"; namespace shop { " + twice + "int go() { return @twice(@tax(1)); } } shop::go()", "4", ""},
+                {"namespace shop { " + twice + "int go() { return @twice(@tax(1)); } } import \"tax.jai\"; shop::go()", "4", ""},
+                {"import \"twice.jai\"; namespace shop { " + tax + "int go() { return @twice(@tax(1)); } } shop::go()", "4", ""},
+                {"namespace shop { " + twice + "auto loose(p) { return p; } int go() { return @twice(@loose(1)); } } shop::go()",
+                 "cannot deduce T for 'twice': argument 1's type is not known at load; write twice<T>(...)", ""},
+                {"namespace shop { " + tax + "int base = 10; T bump<T>(T x) { @base = @base + @tax(1); return x; } int go() { return @bump(4) + @base; } } shop::go()", "16", ""},
+                {"namespace shop { " + tax + "T bump<T>(T x) { @tax(x, 2); return x; } int go() { return @bump(4); } } shop::go()",
+                 "'shop::tax' expects 1 argument(s), got 2", "in shop::bump<int>, instantiated at"},
+                {"namespace shop { " + tax + "T bump<T>(T x) { @tax(x); return x; } int go() { return @bump(4); } string bad() { return @bump(\"s\"); } } shop::go()",
+                 "argument 1 of 'shop::tax': cannot pass 'string' to 'p' declared 'int'", "in shop::bump<string>, instantiated at"},
+                {"import \"bump.jai\"; namespace shop { " + tax + "int go() { return @bump(4); } } shop::go()", "4", ""},
+                {"import \"bump.jai\"; import \"tax.jai\"; namespace shop { string go() { return @bump(\"s\"); } } shop::go()",
+                 "argument 1 of 'shop::tax': cannot pass 'string' to 'p' declared 'int'", "in shop::bump<string>, instantiated at"},
+                {"int tax(int p, int q) { return p + q; } T both<T>(T x) { return tax(x, x); } namespace shop { " + tax + "} both(4)", "8", ""},
+                {"namespace shop { " + pick + "string go() { return to_string(@pick(1)) + @pick(\"s\") + @pick<string>(\"t\"); } } shop::go()", "101st", ""},
+                {"namespace shop { string go() { return to_string(@pick(1)) + @pick(\"s\") + @pick<string>(\"t\"); } " + pick + "} shop::go()", "101st", ""},
+                {"namespace shop { " + pick + "string go() { string s = @pick(1); return s; } } shop::go()", "cannot initialize 's' declared 'string' with 'int'", ""},
+                {"namespace shop { enum Kind { a, b } class Stack<T> { array<T> items; } Kind kind<T>(T v) { return Kind::b; } "
+                 "int go() { Stack<Kind> s; s.items.push(@kind(1)); return s.items.size(); } } "
+                 "shop::Stack<shop::Kind> s; s.items.push(shop::kind(\"x\")); `${type_of(s)} ${s.items[0] == shop::Kind::b} ${type_of(s.items[0])} ${shop::go()}`",
+                 "shop::Stack<shop::Kind> true shop::Kind 1", ""},
+                {"import \"kind.jai\"; namespace shop { class Stack<T> { array<T> items; } Kind kind<T>(T v) { return Kind::b; } "
+                 "string go() { Stack<Kind> s; s.items.push(@kind(1)); return type_of(s) + type_of(s.items[0]); } } shop::go()", "shop::Stack<shop::Kind>shop::Kind", ""},
+            }, [&](const auto& c) {
+                for (const std::string prefix : std::vector<std::string>{"", "shop::"}) {
+                    std::string program = std::get<0>(c);
+                    for (size_t at = program.find('@'); at != std::string::npos; at = program.find('@', at)) { program.replace(at, 1, prefix); }
+                    const std::string got = outcome(*files.engine(), program);
+                    const std::string& expected = std::get<1>(c);
+                    check_true(got == expected || (got.size() > 30 && got.find(expected) != std::string::npos && got.find(std::get<2>(c)) != std::string::npos), program + "\n" + got);
+                }
+            });
+        });
+
         test("a_qualified_host_registration_is_a_namespace_member", [&]() {
             // add_global("game::tick") and add_function("game::spawn") register into namespace game, as the library's
             // namespaces do: game::tick reads them, the namespace's code reads them bare, and script cannot assign them

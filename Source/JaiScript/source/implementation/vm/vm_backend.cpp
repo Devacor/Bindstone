@@ -20845,7 +20845,7 @@ op_status vm_backend::run_dispatch_loop(frame*& fp, const size_t records_base) {
 				JAI_SWITCH_FRAME(fp);
 
 			case opcode::op_const: JAI_OP_LABEL(op_const) push_constant(*f.code, ins.a); JAI_NEXT_OP();
-			case opcode::op_const_folded: push_constant(*f.code, ins.a); break;
+			case opcode::op_const_folded: stack_.push_back(f.code->constants[ins.a]); break;   // the value the read gave, with its type (an enum's value is that enum's)
 
 			case opcode::op_null: stack_.push_back(make_null()); break;
 			case opcode::op_true: stack_.push_back(script_value(true, engine_)); break;

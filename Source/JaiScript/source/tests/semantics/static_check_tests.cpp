@@ -3958,6 +3958,10 @@ public:
             auto rep = e->check(clean);
             check_eq((size_t)0, error_count(rep), rep.format(clean));
             check_eq(std::string("Dir Dir:0 int:1 int:2 Dir:5 int:6 Dir:01 true east Dir,Dir,int,int 5 4 2 1"), e->execute(clean).as_string());
+            // a value read again keeps its enum's type (the VM folds a repeated E::v read into a constant)
+            check_eq(std::string("DirDir DirDir DirDir"), e->execute(decl +
+                "string kinds() { auto k = Dir::east; auto j = Dir::west; j = Dir::north; return `${type_of(k)}${type_of(j)}`; }\n"
+                "`${kinds()} ${kinds()} ${kinds()}`;").as_string());
             // through a var the run time decides: one of the enum's values enters and takes the type, any other int is refused
             check_eq(std::string("Dir:5|Cannot initialize 'd' (declared Dir) with int|Cannot assign int to 'd' (declared Dir)|Cannot pass int to parameter 'where' of 'go' (declared Dir)|"
                                  "Cannot cast 3 to 'Dir': not one of its values|Cannot cast 'string' to 'Dir'"),

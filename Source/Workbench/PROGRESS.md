@@ -881,10 +881,28 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   a pointer's press not scrolling, hidden rows from outside, what shows of a node, an explicit group on a list).
 - Not yet: the scroll is at once, not eased; a Scroller has no wheel or stick scrolling of its own.
 
+## Increment 45: a Hierarchy row dragged into a folder is saved as a BindSnap (2026-11-17)
+- A Hierarchy row let go on the Project panel is written as `<node id>.bindsnap` in the folder it is over
+  (`App::saveAsBindSnap`): a folder's row in the tree, a folder's tile, else the folder shown. A file of that name
+  is replaced without asking (Dev). The node stays in the scene as it was, with no link to the file.
+- While the row is dragged over the panel a label beside the pointer says `Save as <path>` or `Replace <path>`
+  (`Tooltips::dragNote`), and the folder is marked: its tree row, its tile, or a frame round the tiles for the
+  folder shown. The Console gets a `Saved` or `Replaced` line and the new file has a tile at once.
+- The node is written as it stands, its position included, with its id kept (the legacy editor's
+  `Prefabs/<id>.bindsnap` did the same). Characters a file name cannot hold become `_`.
+- A BindSnap's tile let go on a Hierarchy row goes under that row's node where its file put it; on the Hierarchy
+  below the rows it goes under the scene's root. Over the viewport it still goes under the root at that point.
+- `TreeView` reports a row drag as it moves (`onDragOver`, `onDragEnd`) and marks a row a drag from elsewhere
+  would land on (`markDropTarget`). `DockSpace::panelShowingAt` is the panel in front at a point.
+- The self-test drags a row into a folder in the temp directory, drags it again to replace the file, drags it
+  onto a folder's tile, reads each file back, and places one on a Hierarchy row and undoes it.
+- Not yet: asking for a name, a preview on the tile, the file changing on disk reaching the scene, and a node
+  that refers to something outside what is saved (an anchor's parent, say), which is written with it.
+
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.
-- Authoring verbs still only in Source/Editor: save selection as BindSnap, and the component kinds Add Component
-  does not list — old-editor deletion awaits that parity (Dev sign-off).
+- Authoring verbs still only in Source/Editor: the component kinds Add Component does not list — old-editor
+  deletion awaits that parity (Dev sign-off).
 - Gizmo residue (increment 13): aspect-lock not ported; inspector refreshes at gesture end;
   selection rubber band deferred.
 - Bindstone_Common.vcxitems is shared with the Android client project — Workbench compiles

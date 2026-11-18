@@ -42,6 +42,10 @@ namespace Workbench {
 		std::function<void(const TItem& a_dragged, const TItem& a_target, RowZone a_zone)> onReparent;
 		// A row dragged and released off the tree: another panel may take it.
 		std::function<void(const TItem& a_dragged, const MV::Point<int>& a_screenPoint)> onDropOutside;
+		// A row being dragged, at each move: where the pointer is and whether it has left the tree. Then the drag
+		// being over, however it ended.
+		std::function<void(const TItem& a_dragged, const MV::Point<int>& a_screenPoint, bool a_outside)> onDragOver;
+		std::function<void()> onDragEnd;
 
 		void root(const TItem& a_root, bool a_showRoot = true) {
 			rootItem = a_root;
@@ -99,6 +103,21 @@ namespace Workbench {
 			rebuild();
 		}
 
+		// Marks a row as where something dragged from elsewhere would land; null clears it.
+		void markDropTarget(const TItem* a_item) {
+			int index = -1;
+			for (size_t row = 0; a_item && row < rowItems.size(); ++row) {
+				if (rowItems[row] == *a_item) {
+					index = static_cast<int>(row);
+					break;
+				}
+			}
+			const int previous = dropMarkIndex;
+			dropMarkIndex = index;
+			restoreRowColor(previous);
+			restoreRowColor(dropMarkIndex);
+		}
+
 		// Returns true when the item was not already marked expanded; the caller rebuilds.
 		bool expand(const TItem& a_item) {
 			auto found = expanded.find(a_item);
@@ -119,6 +138,9 @@ namespace Workbench {
 			if (rowDragActive && !a_alive(dragItem)) {
 				rowDragActive = false;
 				dragItem = TItem{};
+				if (onDragEnd) {
+					onDragEnd();
+				}
 			}
 		}
 
@@ -130,6 +152,7 @@ namespace Workbench {
 			builtHeight = 0.0f;
 			rowIndex = 0;
 			hoverIndex = -1;
+			dropMarkIndex = -1;
 			rowBackgrounds.clear();
 			rowBaseColors.clear();
 			rowItems.clear();
@@ -159,7 +182,7 @@ namespace Workbench {
 
 		void restoreRowColor(int a_index) {
 			if (a_index >= 0 && a_index < static_cast<int>(rowBackgrounds.size())) {
-				rowBackgrounds[static_cast<size_t>(a_index)]->color(rowBaseColors[static_cast<size_t>(a_index)]);
+				rowBackgrounds[static_cast<size_t>(a_index)]->color(a_index == dropMarkIndex ? theme.dropHint() : rowBaseColors[static_cast<size_t>(a_index)]);
 			}
 		}
 
@@ -174,7 +197,7 @@ namespace Workbench {
 			}
 			restoreRowColor(hoverIndex);
 			hoverIndex = index;
-			if (hoverIndex >= 0 && !(hasSelection && rowItems[static_cast<size_t>(hoverIndex)] == selected)) {
+			if (hoverIndex >= 0 && hoverIndex != dropMarkIndex && !(hasSelection && rowItems[static_cast<size_t>(hoverIndex)] == selected)) {
 				rowBackgrounds[static_cast<size_t>(hoverIndex)]->color(theme.rowHover());
 			}
 		}
@@ -195,6 +218,9 @@ namespace Workbench {
 			hoverIndex = -1;
 			auto marker = host->get("insertMarker", false);
 			int target = rowAt(a_screenPoint);
+			if (onDragOver) {
+				onDragOver(dragItem, a_screenPoint, target < 0);
+			}
 			if (target < 0 || rowItems[static_cast<size_t>(target)] == dragItem) {
 				if (marker) { marker->hide(); }
 				return;
@@ -220,6 +246,9 @@ namespace Workbench {
 			}
 			TItem dragged = dragItem;
 			rowDragActive = false;
+			if (onDragEnd) {
+				onDragEnd();
+			}
 			if (target >= 0 && !(rowItems[static_cast<size_t>(target)] == dragged) && onReparent) {
 				onReparent(dragged, rowItems[static_cast<size_t>(target)], zoneWithinRow(a_screenPoint, target));
 			} else if (target < 0 && onDropOutside) {
@@ -348,6 +377,7 @@ namespace Workbench {
 		std::vector<MV::Color> rowBaseColors;
 		std::vector<TItem> rowItems;
 		int hoverIndex = -1;
+		int dropMarkIndex = -1;
 		bool rowDragActive = false;
 		TItem dragItem{};
 		MV::TapDevice::SignalType hoverReceiver;

@@ -1961,6 +1961,108 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.runFrames(5);
 		expect(a_app.dockLayout() == starting && a_app.errors() == 0, "the layout ends where it started");
 	}
+
+	// A Hierarchy row dragged into a Project folder is saved there as a BindSnap, and a BindSnap let go on a
+	// Hierarchy row goes under that row's node
+	{
+		auto& mouse = *a_managers.services.get<MV::TapDevice>();
+		auto& project = a_app.project();
+		auto& docking = a_app.docking();
+		auto hold = [&](const MV::Point<int>& a_at, bool a_down, int a_frames = 2) {
+			mouse.simulate(a_at, a_down);
+			a_app.runFrames(a_frames);
+		};
+		// carries a press from one place to another and returns the label beside the pointer before letting go
+		auto drag = [&](const MV::Point<int>& a_from, const MV::Point<int>& a_to) {
+			hold(a_from, false);
+			hold(a_from, true);
+			for (int step = 1; step <= 4; ++step) {
+				hold(MV::Point<int>(a_from.x + (a_to.x - a_from.x) * step / 4, a_from.y + (a_to.y - a_from.y) * step / 4), true, 1);
+			}
+			hold(a_to, true);
+			std::string note = a_app.dragNote();
+			hold(a_to, false);
+			mouse.stopSimulating();
+			return note;
+		};
+		auto childCount = [](const std::shared_ptr<MV::Scene::Node>& a_node) {
+			return static_cast<size_t>(std::distance(a_node->begin(), a_node->end()));
+		};
+		auto childrenInFile = [&](const std::filesystem::path& a_file) -> int {
+			try {
+				auto loaded = MV::Scene::Node::loadJai(a_file.generic_string(), a_managers.services, false);
+				return loaded->id() == "Crate" ? static_cast<int>(childCount(loaded)) : -1;
+			} catch (const std::exception&) {
+				return -1;
+			}
+		};
+
+		auto folder = std::filesystem::temp_directory_path() / "workbench_selftest_bindsnaps";
+		std::error_code ignored;
+		std::filesystem::remove_all(folder, ignored);
+		std::filesystem::create_directories(folder / "inner", ignored);
+		auto file = folder / "Crate.bindsnap";
+		auto innerFile = folder / "inner" / "Crate.bindsnap";
+
+		a_app.newScene();
+		a_app.select(nullptr);
+		auto crate = a_app.createChildNode();
+		crate->id("Crate");
+		a_app.select(crate);
+		auto inside = a_app.createChildNode();
+		a_app.hierarchy().refresh();
+		docking.show(docking.panelTitled("Hierarchy"));
+		docking.show(docking.panelTitled("Project"));
+		project.showFolder(folder);
+		a_app.select(crate);
+		a_app.runFrames(3);
+
+		auto row = a_app.hierarchy().rowScreenPoint(crate);
+		expect(row.has_value(), "the node to save has a Hierarchy row");
+		if (row) {
+			auto note = drag(*row, project.tileAreaScreenPoint());
+			expect(note == "Save as " + file.generic_string(), "a row dragged over the Project panel says where letting go will save it: " + note);
+			expect(a_app.dragNote().empty(), "and the label goes when the drag ends");
+			expect(childrenInFile(file) == 1, "letting go writes the node and its child as <id>.bindsnap in the folder shown");
+			expect(project.entryScreenPoint("Crate.bindsnap").has_value(), "the file has a tile at once");
+			expect(crate->parent() == a_app.scene() && childCount(crate) == 1, "the node stays in the scene as it was");
+
+			a_app.select(crate);
+			a_app.createChildNode();
+			a_app.select(crate);
+			a_app.runFrames(3);
+			row = a_app.hierarchy().rowScreenPoint(crate);
+			note = row ? drag(*row, project.tileAreaScreenPoint()) : std::string();
+			expect(note == "Replace " + file.generic_string(), "over a folder that has a file of that name it says so: " + note);
+			expect(childrenInFile(file) == 2, "and the file is replaced by the node as it is now");
+
+			auto innerTile = project.entryScreenPoint("inner");
+			row = a_app.hierarchy().rowScreenPoint(crate);
+			expect(innerTile.has_value() && row.has_value(), "the folder inside has a tile");
+			if (innerTile && row) {
+				note = drag(*row, *innerTile);
+				expect(note == "Save as " + innerFile.generic_string(), "over a folder's tile the label names that folder: " + note);
+				expect(childrenInFile(innerFile) == 2, "and letting go there saves into it");
+			}
+
+			a_app.select(inside);
+			a_app.runFrames(3);
+			auto insideRow = a_app.hierarchy().rowScreenPoint(inside);
+			expect(insideRow.has_value() && childCount(inside) == 0, "the child has a row to drop on");
+			if (insideRow) {
+				a_app.dropPrefab(file.generic_string(), *insideRow);
+				a_app.runFrames(3);
+				auto placed = a_app.selected();
+				expect(placed && placed != inside && placed->parent() == inside && placed->id() == "Crate" && childCount(placed) == 2, "a BindSnap let go on a Hierarchy row goes under that row's node, selected");
+				pressWithControl(SDLK_z);
+				expect(childCount(inside) == 0, "and undo takes it out again");
+			}
+		}
+
+		project.showFolder("Assets");
+		a_app.runFrames(2);
+		std::filesystem::remove_all(folder, ignored);
+	}
 }
 
 static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", bool a_loadDefaultScene = false, bool a_selectForGizmo = false, bool a_selfTest = false) {

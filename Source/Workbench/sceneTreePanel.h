@@ -32,6 +32,10 @@ namespace Workbench {
 
 		// A row dragged out of the tree and released elsewhere (the inspector's reference fields take these).
 		std::function<void(const std::shared_ptr<MV::Scene::Node>&, const MV::Point<int>&)> onNodeDroppedOutside;
+		// A row being dragged, at each move: where the pointer is and whether it has left the tree. Then the drag
+		// being over, however it ended.
+		std::function<void(const std::shared_ptr<MV::Scene::Node>&, const MV::Point<int>&, bool a_outside)> onNodeDragged;
+		std::function<void()> onNodeDragEnded;
 
 		// Highlights and reveals the app's selection; never calls back into the app.
 		void showSelection(const std::shared_ptr<MV::Scene::Node>& a_node);

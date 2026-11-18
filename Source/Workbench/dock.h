@@ -142,6 +142,8 @@ namespace Workbench {
 		// Which resize cursor (if any) belongs at this point — splitter grips report their axis.
 		CursorHint cursorHintAt(const MV::Point<>& a_worldPoint) const;
 
+		// The panel in front at a point, below its tab bar; null on a tab bar or off every panel.
+		Panel* panelShowingAt(const MV::Point<>& a_worldPoint) const;
 		// True when the given UI-world point sits over the transparent viewport leaf.
 		bool viewportAt(const MV::Point<>& a_worldPoint) const;
 		// Content rect (below the tab strip) of the transparent viewport leaf; zero-size when unlaid.

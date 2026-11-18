@@ -16,6 +16,7 @@
 #include "settingsPanel.h"
 #include "tooltips.h"
 #include "consolePanel.h"
+#include "projectPanel.h"
 #include "messageLog.h"
 #include "MV/Render/Scene/parallax.h"
 
@@ -26,7 +27,15 @@ namespace Workbench {
 		App(Managers& a_managers, MV::TapDevice& a_mouse, const Theme& a_theme);
 		~App();
 
+		// Places a BindSnap in the scene as one undo step. Let go over the viewport it goes under the scene's root
+		// at that point; over a Hierarchy row, under that row's node where its file put it.
 		void dropPrefab(const std::string& a_fileName, const MV::Point<int>& a_screenPoint);
+		// Writes a node and all under it as <its id>.bindsnap in a folder, replacing a file of that name. Returns
+		// the file written, empty when the write failed. A Hierarchy row let go on the Project panel does this.
+		std::string saveAsBindSnap(const std::shared_ptr<MV::Scene::Node>& a_node, const std::string& a_folder);
+		ProjectPanel& project() { return *projectPanel; }
+		// The label beside the pointer while a Hierarchy row is dragged; empty when there is none.
+		const std::string& dragNote() const { return tooltips->dragNote(); }
 
 		// Removes the selected node, or adds a copy of it beside it; false when the selection is nothing or the scene's root.
 		bool deleteSelected();
@@ -169,6 +178,8 @@ namespace Workbench {
 		bool unsavedChangesResolved();
 		std::string documentName() const;
 		static std::string assetFile(const std::string& a_fileName);
+		static std::filesystem::path bindSnapFileFor(const std::shared_ptr<MV::Scene::Node>& a_node, const std::string& a_folder);
+		void previewedLayersDisplaced(bool a_displaced);
 		static void forEachParallax(const std::shared_ptr<MV::Scene::Node>& a_node, const std::function<void(const std::shared_ptr<MV::Scene::Parallax>&)>& a_visit);
 		void frameNode(const DockRect& a_view, const std::shared_ptr<MV::Scene::Node>& a_node, float a_fill, float a_maximumZoom);
 		template <typename Step>
@@ -210,6 +221,7 @@ namespace Workbench {
 		float titleInteractiveWidth = 0.0f;
 		SceneTreePanel* treePanel = nullptr;
 		InspectorPanel* inspectorPanel = nullptr;
+		ProjectPanel* projectPanel = nullptr;
 		SettingsPanel* settingsPanel = nullptr;
 		ConsolePanel* consolePanel = nullptr;
 		std::shared_ptr<MessageLog> messageLog;

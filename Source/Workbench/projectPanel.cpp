@@ -121,7 +121,7 @@ namespace Workbench {
 			return;
 		}
 		// The dock wheel-scrolls the whole content node; counter-scroll to pin the footer.
-		float offset = theme->tabHeight + theme->pad - contentNode->position().y;
+		float offset = scrolled();
 		footerHost->position(MV::point(-theme->pad, offset + panelSize.height - footerHeight() + theme->pad));
 	}
 
@@ -138,6 +138,81 @@ namespace Workbench {
 		currentFolder = a_folder;
 		rebuildBreadcrumb();
 		rebuildTiles();
+	}
+
+	void ProjectPanel::refresh() {
+		if (folderTree) {
+			folderTree->rebuild();
+		}
+		rebuildTiles();
+	}
+
+	std::string ProjectPanel::folderAt(const MV::Point<int>& a_screenPoint) const {
+		if (auto* folder = folderTree ? folderTree->itemAt(a_screenPoint) : nullptr) {
+			return *folder;
+		}
+		for (auto&& entry : shownEntries) {
+			auto node = entry.node.lock();
+			if (entry.folder && node && node->screenFromLocal(node->bounds(false)).contains(a_screenPoint)) {
+				return entry.path.generic_string();
+			}
+		}
+		return currentFolder.generic_string();
+	}
+
+	void ProjectPanel::markDropFolder(const std::string& a_folder) {
+		if (folderTree) {
+			folderTree->markDropTarget(a_folder.empty() ? nullptr : &a_folder);
+		}
+		bool onTile = false;
+		for (auto&& entry : shownEntries) {
+			if (auto mark = entry.dropMark.lock()) {
+				const bool marked = !a_folder.empty() && entry.path.generic_string() == a_folder;
+				if (marked) {
+					mark->show();
+				} else {
+					mark->hide();
+				}
+				onTile = onTile || marked;
+			}
+		}
+		const bool wholeFolder = !a_folder.empty() && !onTile && a_folder == currentFolder.generic_string() && contentNode;
+		if (!wholeFolder && dropAreaMark) {
+			dropAreaMark->removeFromParent();
+			dropAreaMark.reset();
+		} else if (wholeFolder && !dropAreaMark) {
+			const float edge = theme->px(2.0f);
+			const float top = theme->rowHeight + theme->pad;
+			MV::Color wash = theme->dropHint();
+			wash.A = 0.12f;
+			dropAreaMark = contentNode->make("dropArea");
+			dropAreaMark->position(MV::point(treeWidth + theme->pad - edge, scrolled() + top - edge));
+			const MV::Size<> area(std::max(theme->px(40.0f), panelSize.width - treeWidth - theme->pad * 2.0f + edge * 2.0f), std::max(theme->px(20.0f), panelSize.height - top - footerHeight() + edge));
+			dropAreaMark->attach<MV::Scene::Sprite>()->bounds(area)->color(wash);
+			// a frame of four thin sprites: the tiles show through the middle
+			const MV::BoxAABB<> sides[] {
+				MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::size(area.width, edge)),
+				MV::BoxAABB<>(MV::point(0.0f, area.height - edge), MV::size(area.width, edge)),
+				MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::size(edge, area.height)),
+				MV::BoxAABB<>(MV::point(area.width - edge, 0.0f), MV::size(edge, area.height)) };
+			for (auto&& side : sides) {
+				dropAreaMark->attach<MV::Scene::Sprite>()->bounds(side)->color(theme->accent());
+			}
+		}
+	}
+
+	MV::Point<int> ProjectPanel::tileAreaScreenPoint() const {
+		return contentNode->screenFromLocal(MV::point(panelSize.width - theme->pad * 6.0f, scrolled() + panelSize.height - footerHeight() - theme->pad * 2.0f));
+	}
+
+	std::optional<MV::Point<int>> ProjectPanel::entryScreenPoint(const std::string& a_name) const {
+		for (auto&& entry : shownEntries) {
+			auto node = entry.node.lock();
+			if (node && entry.path.filename().string() == a_name) {
+				return node->screenFromLocal(node->bounds(false)).centerPoint();
+			}
+		}
+		return std::nullopt;
 	}
 
 	void ProjectPanel::openImagePreview(const std::string& a_fileName) {
@@ -227,6 +302,11 @@ namespace Workbench {
 			return;
 		}
 		tileHost->clear();
+		shownEntries.clear();
+		if (dropAreaMark) {
+			dropAreaMark->removeFromParent();
+			dropAreaMark.reset();
+		}
 		float scale = theme->scaleFactor();
 		float tileSize = tileSizeFor();
 		bool listMode = listModeFor();
@@ -270,6 +350,14 @@ namespace Workbench {
 				auto label = makeLabel(row, *services, *theme, "caption", MV::size(rowWidth - iconSize - theme->pad * 2.0f, theme->rowHeight), entry.filename().string());
 				label->owner()->position(MV::point(iconSize + theme->pad, 0.0f));
 
+				std::shared_ptr<MV::Scene::Node> dropMark;
+				if (isFolder) {
+					dropMark = row->make("dropMark");
+					dropMark->attach<MV::Scene::Sprite>()->bounds(MV::size(rowWidth, theme->rowHeight))->color(theme->dropHint());
+					dropMark->hide();
+				}
+				shownEntries.push_back({ entry, isFolder, row, dropMark });
+
 				auto rowClick = row->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(rowWidth, theme->rowHeight));
 				hoverTint(rowClick, row->component<MV::Scene::Sprite>(false, false).self(), index % 2 == 0 ? theme->panelAlt() : theme->panelBg(), theme->rowHover());
 				wireEntryInteractions(rowClick, entry, isFolder, isPrefab);
@@ -298,6 +386,15 @@ namespace Workbench {
 			auto underPointer = tile->make("hover");
 			underPointer->position(MV::point(-theme->px(4.0f), -theme->px(4.0f)));
 			auto hoverBack = attachRoundedRect(underPointer, *services, *theme, MV::size(tileSize + theme->px(8.0f), tileSize + captionHeight + theme->px(8.0f)), theme->rowHover());
+
+			std::shared_ptr<MV::Scene::Node> dropMark;
+			if (isFolder) {
+				dropMark = tile->make("dropMark");
+				dropMark->position(MV::point(-theme->px(4.0f), -theme->px(4.0f)));
+				attachRoundedRect(dropMark, *services, *theme, MV::size(tileSize + theme->px(8.0f), tileSize + captionHeight + theme->px(8.0f)), theme->dropHint());
+				dropMark->hide();
+			}
+			shownEntries.push_back({ entry, isFolder, tile, dropMark });
 
 			std::string extension = entry.extension().string();
 			bool isImage = extension == ".png" || extension == ".jpg";

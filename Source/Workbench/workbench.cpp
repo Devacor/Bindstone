@@ -191,7 +191,32 @@ namespace Workbench {
 		inspectorPanel->onRemoveComponent = [this](const std::shared_ptr<MV::Scene::Component>& a_component) { removeComponent(a_component); };
 		inspectorPanel->onAddComponent = [this](const MV::Point<int>& a_screenPoint) { menuBar->openContext(a_screenPoint, addComponentItems()); };
 		treePanel->onNodeDroppedOutside = [this](const std::shared_ptr<MV::Scene::Node>& a_node, const MV::Point<int>& a_screenPoint) {
-			inspectorPanel->dropNode(a_node, a_screenPoint);
+			if (inspectorPanel->dropNode(a_node, a_screenPoint)) {
+				return;
+			}
+			if (projectPanel && dock->panelShowingAt(managers.renderer.worldFromScreen(a_screenPoint)) == projectPanel) {
+				saveAsBindSnap(a_node, projectPanel->folderAt(a_screenPoint));
+			}
+		};
+		treePanel->onNodeDragged = [this](const std::shared_ptr<MV::Scene::Node>& a_node, const MV::Point<int>& a_screenPoint, bool a_outside) {
+			std::string folder;
+			std::string note;
+			if (a_outside && projectPanel && dock->panelShowingAt(managers.renderer.worldFromScreen(a_screenPoint)) == projectPanel) {
+				folder = projectPanel->folderAt(a_screenPoint);
+				auto file = bindSnapFileFor(a_node, folder);
+				std::error_code ignored;
+				note = (std::filesystem::exists(file, ignored) ? "Replace " : "Save as ") + file.generic_string();
+			}
+			if (projectPanel) {
+				projectPanel->markDropFolder(folder);
+			}
+			tooltips->dragNote(note);
+		};
+		treePanel->onNodeDragEnded = [this]() {
+			if (projectPanel) {
+				projectPanel->markDropFolder("");
+			}
+			tooltips->dragNote("");
 		};
 		inspectorPanel->parallaxPreviewActive = [this]() { return parallaxPreviewing(); };
 		std::vector<SettingsPanel::Row> settingRows {
@@ -226,7 +251,7 @@ namespace Workbench {
 		statusBar = uiRoot->make("statusBar");
 		Panel* viewportPanel = dock->registerPanel(std::move(viewport));
 		Panel* filePanel = dock->registerPanel(std::move(file));
-		Panel* projectPanel = dock->registerPanel(std::move(project));
+		projectPanel = static_cast<ProjectPanel*>(dock->registerPanel(std::move(project)));
 
 		menuPanels = { treePanel, filePanel, viewportPanel, projectPanel, inspectorPanel, settingsPanel, consolePanel };
 
@@ -353,20 +378,32 @@ namespace Workbench {
 
 	void App::dropPrefab(const std::string& a_fileName, const MV::Point<int>& a_screenPoint) {
 		auto worldPoint = managers.renderer.worldFromScreen(a_screenPoint);
-		if (!dock->viewportAt(worldPoint)) {
+		std::shared_ptr<MV::Scene::Node> parent;
+		bool atPoint = false;
+		if (treePanel && dock->panelShowingAt(worldPoint) == treePanel) {
+			parent = treePanel->nodeAt(a_screenPoint);
+			if (!parent) {
+				parent = sceneRoot;
+			}
+		} else if (dock->viewportAt(worldPoint)) {
+			parent = sceneRoot;
+			atPoint = true;
+		}
+		if (!parent) {
 			return;
 		}
 		try {
 			auto prefab = MV::Scene::Node::loadJai(a_fileName, managers.services, false);
-			auto dropPosition = sceneRoot->localFromScreen(a_screenPoint);
-			auto scene = sceneRoot;
-			sceneRoot->add(prefab);
-			prefab->position(dropPosition);
+			parent->add(prefab);
+			if (atPoint) {
+				prefab->position(parent->localFromScreen(a_screenPoint));
+			}
+			auto dropPosition = prefab->position();
 			prefab->postLoadStep();
 			forEachParallax(prefab, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
 			history.record("place " + std::filesystem::path(a_fileName).filename().string(),
-				[scene, prefab, dropPosition]() {
-					scene->add(prefab);
+				[parent, prefab, dropPosition]() {
+					parent->add(prefab);
 					prefab->position(dropPosition);
 				},
 				[prefab]() {
@@ -1125,17 +1162,58 @@ namespace Workbench {
 		}
 	}
 
-	bool App::saveScene(const std::string& a_fileName) {
-		// a previewed layer is displaced: it goes back to rest for the write
-		auto previewLayers = [this](bool a_preview) {
-			for (auto&& weakParallax : previewedParallax) {
-				if (auto parallax = weakParallax.lock()) {
-					parallax->authoringPreview(a_preview);
-				}
+	// a previewed layer is displaced: it goes back to rest for a write
+	void App::previewedLayersDisplaced(bool a_displaced) {
+		for (auto&& weakParallax : previewedParallax) {
+			if (auto parallax = weakParallax.lock()) {
+				parallax->authoringPreview(a_displaced);
 			}
-		};
+		}
+	}
+
+	std::filesystem::path App::bindSnapFileFor(const std::shared_ptr<MV::Scene::Node>& a_node, const std::string& a_folder) {
+		std::string name = a_node->id();
+		for (auto&& character : name) {
+			if (static_cast<unsigned char>(character) < 32 || std::string_view("<>:\"/\\|?*").find(character) != std::string_view::npos) {
+				character = '_';
+			}
+		}
+		return std::filesystem::path(a_folder) / ((name.empty() ? std::string("node") : name) + ".bindsnap");
+	}
+
+	std::string App::saveAsBindSnap(const std::shared_ptr<MV::Scene::Node>& a_node, const std::string& a_folder) {
+		if (!a_node) {
+			return {};
+		}
+		auto file = bindSnapFileFor(a_node, a_folder);
+		auto shown = file.generic_string();
+		// the leading "./" keeps MV's file layer from redirecting a write to the player-preferences folder
+		auto writePath = file.is_absolute() || shown.starts_with("./") ? shown : "./" + shown;
+		std::error_code ignored;
+		const bool replaced = std::filesystem::exists(file, ignored);
+		std::string result;
+		previewedLayersDisplaced(false);
+		try {
+			a_node->saveJai(writePath, managers.services, false);
+			if (!std::filesystem::exists(file, ignored)) {
+				throw std::runtime_error("nothing was written");
+			}
+			result = shown;
+			std::cout << "Workbench saved BindSnap: " << shown << std::endl;
+			messageLog->add(MessageLevel::INFO, (replaced ? "Replaced " : "Saved ") + shown);
+		} catch (const std::exception& a_error) {
+			reportError("BindSnap save failed (" + shown + "): " + a_error.what());
+		}
+		previewedLayersDisplaced(true);
+		if (projectPanel) {
+			projectPanel->refresh();
+		}
+		return result;
+	}
+
+	bool App::saveScene(const std::string& a_fileName) {
 		bool result = true;
-		previewLayers(false);
+		previewedLayersDisplaced(false);
 		try {
 			auto assetPath = assetFile(a_fileName);
 			sceneRoot->saveJai(assetPath, managers.services, false);
@@ -1147,7 +1225,7 @@ namespace Workbench {
 			reportError("save failed (" + a_fileName + "): " + a_error.what());
 			result = false;
 		}
-		previewLayers(true);
+		previewedLayersDisplaced(true);
 		return result;
 	}
 

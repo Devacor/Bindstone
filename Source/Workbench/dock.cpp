@@ -1110,6 +1110,19 @@ namespace Workbench {
 		layoutChanged();
 	}
 
+	Panel* DockSpace::panelShowingAt(const MV::Point<>& a_worldPoint) const {
+		DropZone zone = DropZone::None;
+		DockNode* leaf = leafUnder(a_worldPoint, zone);
+		if (!leaf || leaf->panels.empty()) {
+			return nullptr;
+		}
+		auto rect = leafRects.find(leaf);
+		if (rect == leafRects.end() || a_worldPoint.y < rect->second.position.y + theme.tabHeight) {
+			return nullptr;
+		}
+		return leaf->panels[static_cast<size_t>(leaf->active)];
+	}
+
 	bool DockSpace::viewportAt(const MV::Point<>& a_worldPoint) const {
 		DropZone zone = DropZone::None;
 		DockNode* leaf = leafUnder(a_worldPoint, zone);

@@ -497,6 +497,8 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>--port N</code></td><td>The port (default 8080; 0 picks a free one, named in the spinning line).</td></tr>
 <tr><td><code>--host ADDR</code></td><td>The IPv4 address to listen on (default 127.0.0.1; 0.0.0.0 for every interface).</td></tr>
 <tr><td><code>--root DIR</code></td><td>The static root (default: the app's <code>public/</code> folder when it exists).</td></tr>
+<tr><td><code>--workers N</code></td><td>The worker threads that run the app, each request in a fresh engine (default: one per hardware thread; 1 to 1024): <a href="../embedding/19-jai-spider.html#workers">Workers and request isolation</a>.</td></tr>
+<tr><td><code>--queue N</code></td><td>The requests that may wait for a free worker (default 1024; 0 to 1000000); past it 503 with <code>Retry-After: 1</code>.</td></tr>
 <tr><td><code>--max-body N</code></td><td>The largest request body, with <code>K</code>, <code>M</code> or <code>G</code> (default 2M).</td></tr>
 <tr><td><code>--timeout S</code></td><td>Seconds a request may take to arrive and a response to leave (default 30).</td></tr>
 <tr><td><code>--budget S</code></td><td>The execution budget per request (default 30; 0 is unlimited).</td></tr>
@@ -510,6 +512,13 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <div class="tablewrap"><table><thead><tr><th>Key</th><th>Meaning</th></tr></thead><tbody>
 <tr><td><code>budget</code></td><td>Seconds a request may run.</td></tr>
 <tr><td><code>max_body</code></td><td>The largest request body, in bytes.</td></tr>
+</tbody></table></div>
+<h3 id="spider-every"><code>spider::every</code><a class="hlink" href="#spider-every" aria-label="link">&#8203;</a></h3>
+<p>A background task the app declares at its top level: <a href="../embedding/19-jai-spider.html#every">Background tasks</a>.</p>
+<div class="tablewrap"><table><thead><tr><th>Part</th><th>Rule</th></tr></thead><tbody>
+<tr><td><code>spider::every(seconds, fn)</code></td><td><code>fn()</code> runs on a worker in a fresh engine; <code>seconds</code> is a number above 0, else <a href="errors.html#err-spider-every-period"><code>spider::every: the period must be above 0 seconds, got 0.0</code></a>.</td></tr>
+<tr><td>Schedule</td><td>A period after the server starts, then a period after each run starts; never two runs of one task at once.</td></tr>
+<tr><td>Reload</td><td>Each build reads the declarations again; a task keeps its schedule while its place and period stay.</td></tr>
 </tbody></table></div>
 <h3 id="spider-request"><code>spider::Request</code><a class="hlink" href="#spider-request" aria-label="link">&#8203;</a></h3>
 <p>A script class in <code>lib/spider.jai</code>: <a href="../embedding/19-jai-spider.html#request-response">Request and Response</a>.</p>
@@ -545,7 +554,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td>A header name that is not a token, or a header value holding a line break or NUL</td><td>500, logged: <code>Response header &#x27;N&#x27; is not a header name, or its value holds a line break or NUL</code></td></tr>
 <tr><td>A cookie line holding a line break or NUL</td><td>500, logged: <code>Response cookie &#x27;L&#x27; holds a line break or NUL</code></td></tr>
 <tr><td>An app that never called <code>spider::spin</code></td><td>500 naming the missing call.</td></tr>
-<tr><td>A handler that runs past its budget</td><td>500 through the execution budget (<a href="../embedding/05-safety-rails.html">Safety Rails</a>); the engine serves on.</td></tr>
+<tr><td>A handler that runs past its budget</td><td>500 through the execution budget (<a href="../embedding/05-safety-rails.html">Safety Rails</a>); the server serves on, the next request in a fresh engine.</td></tr>
 <tr><td>A body over the maximum (2 MiB by default)</td><td>413 before the body is read.</td></tr>
 <tr><td>A request head over 64 KiB</td><td>431 (414 for a request line alone).</td></tr>
 <tr><td>A malformed request, both Content-Length and Transfer-Encoding, a header field holding a bare CR, LF or NUL, a dot segment in the path</td><td>400.</td></tr>
@@ -554,6 +563,8 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td>A Host header that is not <code>localhost</code>, a <code>127.x</code> address or <code>[::1]</code>, when the server listens on a loopback address</td><td>421, so a page whose own name resolves to 127.0.0.1 (DNS rebinding) cannot reach the app.</td></tr>
 <tr><td>A request that takes longer than <code>--timeout</code> to arrive, or a response to leave</td><td>The connection closes.</td></tr>
 <tr><td>More than 512 open connections, or more than 128 from one address</td><td>503.</td></tr>
+<tr><td>Every worker busy and <code>--queue</code> requests waiting already</td><td>503 with <code>Retry-After: 1</code>: <code>503 Service Unavailable: every worker is busy and N requests wait already</code></td></tr>
+<tr><td>A <code>spider::every</code> task that raises</td><td>Logged with its place and period (<code>jai_spider: spider::every task 2 (every 60 s) failed:</code>, then the error and its trace); the task runs again on its schedule.</td></tr>
 </tbody></table></div>
 <h2 id="command-line-runner">Command-line runner<a class="hlink" href="#command-line-runner" aria-label="link">&#8203;</a></h2>
 <p><code>jaiscript</code>, the reference embedding: the <code>jaiscript_runner</code> target (on by default) builds it into <code>build/bin/</code>. Full notes: <a href="https://github.com/Devacor/jaiscript/blob/main/tools/jaiscript/README.md">tools/jaiscript/README.md</a>. It always registers:</p>

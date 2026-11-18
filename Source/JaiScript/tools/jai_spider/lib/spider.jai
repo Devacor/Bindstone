@@ -1,6 +1,7 @@
-// jai_spider's script surface, all under spider::: Request, Upload, the response helpers, Router and spin. Response is
-// the library's spider::Response, the class spider::catch answers too. The host imports this file before the app and
-// calls spider_host_serve once per request; the app hands its handler to spider::spin.
+// jai_spider's script surface, all under spider::: Request, Upload, the response helpers, Router, spin and every.
+// Response is the library's spider::Response, the class spider::catch answers too. The host imports this file and then
+// the app into a fresh engine for each request, and calls spider_host_serve once in it; the app hands its handler to
+// spider::spin. A task the app declares with spider::every runs the same way, through spider_host_run_task.
 //
 // The host functions it stands on: parse_cookies, parse_multipart, read_file and write_file;
 // web::parse_query is the web library's, crypto::random_hex the crypto library's.
@@ -218,7 +219,7 @@ class Router {
 	}
 }
 
-// The app's handler and its options; spin again (a reload re-runs the app's spin) to replace them
+// The app's handler and its options; a second spin replaces them
 function spun;
 map<string, var> spun_options;
 
@@ -241,10 +242,41 @@ void spin(spider::Router routes, map<string, var> options = {}) {
 void serve(function handler, map<string, var> options = {}) { spider::spin(handler, options); }
 void serve(spider::Router routes, map<string, var> options = {}) { spider::spin(routes, options); }
 
+class Task {
+	float seconds;
+	function run;
 }
 
-// the host's entries: the options the app spun with, and one request in, its response's parts out
+// The app's background tasks, in the order it declared them
+array<spider::Task> tasks;
+
+// task() runs every `seconds` in a fresh engine of its own, as a request does: first a period after the server starts,
+// then a period after each run starts, and never while its last run is still going. A failure is logged.
+void every(float seconds, function task) {
+	if (!(seconds > 0.0)) { throw "spider::every: the period must be above 0 seconds, got " + to_string(seconds); }
+	spider::Task t;
+	t.seconds = seconds;
+	t.run = task;
+	spider::tasks.push(t);
+}
+
+}
+
+// the host's entries: the options the app spun with, its tasks' periods, a task's run, and one request in, its
+// response's parts out
 map<string, var> spider_host_options() { return spider::spun_options; }
+
+array<float> spider_host_tasks() {
+	array<float> periods;
+	for (auto& t : spider::tasks) { periods.push(t.seconds); }
+	return periods;
+}
+
+bool spider_host_run_task(int index) {
+	if (index < 0 || index >= spider::tasks.size()) { return false; }
+	spider::tasks[index].run();
+	return true;
+}
 
 map<string, var> spider_host_serve(map<string, var> raw) {
 	if (spider::spun == null) { throw "the app never handed a handler to spider::spin(handler)"; }

@@ -1,13 +1,19 @@
 // Guestbook: a page that lists signatures, a form that adds one, a JSON API over the same table, a cookie session
 // that remembers the visitor's name. Run it with `jai_spider examples/guestbook/app.jai` and open http://127.0.0.1:8080/;
 // edit this file, views.jai or a template under views/ while it runs and reload the page.
+//
+// Each request runs in a fresh engine, so this file runs again for every one: what must outlast a request (the
+// entries, the sessions, the page count) lives in the database.
 import "spider.jai";
 import "session.jai";
 import "views.jai";
 
 Database db = open_database("guestbook.db");
 db.execute("CREATE TABLE IF NOT EXISTS entries (id INTEGER PRIMARY KEY, name TEXT NOT NULL, message TEXT NOT NULL, created INTEGER NOT NULL)");
+db.execute("CREATE TABLE IF NOT EXISTS counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL)");
 spider::SessionStore sessions = spider::SessionStore(db);
+
+spider::every(3600, () => sessions.purge_expired());   // hourly, in the background
 
 // one row of entries: query<Entry> fills it by column name, insert writes it back
 class Entry {
@@ -19,15 +25,14 @@ class Entry {
 const string NEWEST = "SELECT * FROM entries ORDER BY id DESC LIMIT 50";
 const string ENTRY = "SELECT * FROM entries WHERE id = ?";
 
-int page_views;                   // declared without an initializer: the count survives every reload
-
 spider::Router routes = spider::Router();
 
 routes.get("/", (spider::Request req) => {
-	page_views += 1;
+	db.execute("INSERT INTO counters (name, value) VALUES ('views', 1) ON CONFLICT(name) DO UPDATE SET value = value + 1");
+	int views = db.value("SELECT value FROM counters WHERE name = 'views'");
 	spider::Session s = sessions.load(req);
 	array<Entry> entries = db.query<Entry>(NEWEST);
-	spider::Response r = spider::html(home_page(entries, s.get("name", ""), s.take("flash", ""), page_views));
+	spider::Response r = spider::html(home_page(entries, s.get("name", ""), s.take("flash", ""), views));
 	sessions.save(s, r);
 	return r;
 });

@@ -120,7 +120,7 @@ EMBEDDING = [
     ("18-build-integration.html", "Building JaiScript into a Host",
      "Every way into a project in full: CMake, Visual Studio and MSBuild, Xcode and an installed package, with the sources, flags and defines each needs, one file or per file, and Debug and Release notes."),
     ("19-jai-spider.html", "jai_spider: a Web Application Host",
-     "jai_spider serves a JaiScript program over HTTP/1.1: the handler the app hands to spider::spin, Request and a Router in script, spider::Response shared with the spider:: client, SQLite bound as a class, cookie sessions, static files, and modules that reload on the request after they are saved."),
+     "jai_spider serves a JaiScript program over HTTP/1.1: the handler the app hands to spider::spin, run on a pool of workers in a fresh engine for every request, Request and a Router in script, spider::Response shared with the spider:: client, SQLite bound as a class, cookie sessions, background tasks, static files, and edits that apply on the next request."),
     ("20-foundry.html", "Foundry: Testing a Host",
      "Foundry is the test framework JaiScript's own suite is written in, one header and one runner source file: suites, checks, the runner's flags, and a test executable for a project of your own."),
     ("21-visual-studio.html", "Visual Studio, Step by Step",

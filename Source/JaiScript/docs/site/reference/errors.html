@@ -457,6 +457,10 @@ try {
 <tr id="err-insufficient-permission-filesystem"><td><code>Insufficient permission: filesystem.</code></td><td><code>include</code>, <code>import</code>, <code>template</code>, <code>scoped_template</code> or a file builtin, with the filesystem permission disabled by the host.</td><td>The host enables <code>jai::permissions::filesystem</code>, or the script leaves files alone.</td></tr>
 <tr id="err-cannot-read-file"><td><code>Cannot read file 'saves/world.gqw': not found</code></td><td>The runner's <code>read_file</code>, or <code>crypto::sha256_file</code>, cannot read the path (<code>not a file</code>, <code>permission denied</code>, <code>cannot be opened</code>, <code>read failed</code> alike).</td><td>Correct the path; check the file exists and is readable.</td></tr>
 </tbody></table></div>
+<h4 id="errors-jai-spider">jai_spider<a class="hlink" href="#errors-jai-spider" aria-label="link">&#8203;</a></h4>
+<div class="tablewrap"><table><thead><tr><th>Text</th><th>When</th><th>Fix</th></tr></thead><tbody>
+<tr id="err-spider-every-period"><td><code>spider::every: the period must be above 0 seconds, got 0.0</code></td><td><a href="../embedding/19-jai-spider.html#every"><code>spider::every(seconds, fn)</code></a> gets a period of 0, below it, or NaN; the app's load fails there.</td><td>Pass the seconds between runs, above 0.</td></tr>
+</tbody></table></div>
 <h4 id="errors-archives">Archives<a class="hlink" href="#errors-archives" aria-label="link">&#8203;</a></h4>
 <div class="tablewrap"><table><thead><tr><th>Text</th><th>When</th><th>Fix</th></tr></thead><tbody>
 <tr id="err-invalid-shared-ptr-id"><td><code>Invalid shared_ptr ID: 4</code></td><td><code>from_json</code>, <code>from_binary</code> or <code>from_base64</code> of a handle whose object the save never wrote.</td><td>Load unedited data a matching save wrote.</td></tr>

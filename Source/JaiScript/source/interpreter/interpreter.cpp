@@ -4197,8 +4197,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
         // ONLY if name is NOT a namespace itself
         // For "my::nested::cat::meow()", name would be "my::nested::cat" which is NOT a namespace
         // We need to detect this pattern and split it into namespace="my::nested" and class="cat"
-        if (!is_namespace && name.find("::") != std::string::npos) {
-            size_t last_colon = name.rfind("::");
+        if (const size_t last_colon = is_namespace ? std::string::npos : class_qualifier_cut(name); last_colon != std::string::npos) {
             std::string potential_ns = name.substr(0, last_colon);
             std::string potential_class = name.substr(last_colon + 2);
 

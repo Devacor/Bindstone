@@ -82,6 +82,10 @@ namespace jai {
     // name that spells no argument list
     bool template_name_arguments(std::string_view name, std::string_view& base, std::vector<std::string_view>& arguments);
 
+    // Where a class's qualified name parts from its namespace: its last "::" outside the brackets of an instance's arguments
+    // (shop::Shelf<shop::Item> is Shelf<shop::Item> of shop), npos for a name no namespace qualifies
+    size_t class_qualifier_cut(std::string_view name);
+
     // Forward declarations
     class type_info;
 

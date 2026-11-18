@@ -15341,8 +15341,7 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 	auto ns_it = namespaces.find(name_id);
 	const bool is_namespace = (ns_it != namespaces.end());
 
-	if (!is_namespace && name.find("::") != std::string::npos) {
-		size_t last_colon = name.rfind("::");
+	if (const size_t last_colon = is_namespace ? std::string::npos : class_qualifier_cut(name); last_colon != std::string::npos) {
 		std::string potential_ns = name.substr(0, last_colon);
 		std::string potential_class = name.substr(last_colon + 2);
 

@@ -1188,7 +1188,7 @@ struct engine::implementation {
         ++pooled_class_moves_;
         pooled_namespace_classes_.clear();
         for (const auto& [name, declaration] : program_classes_) {
-            if (const size_t cut = name.rfind("::"); cut != std::string::npos) { pooled_namespace_classes_.insert(name.substr(cut + 2)); }
+            if (const size_t cut = class_qualifier_cut(name); cut != std::string::npos) { pooled_namespace_classes_.insert(name.substr(cut + 2)); }
         }
         for (const auto& [name, units] : program_enums_) {
             if (const size_t cut = name.rfind("::"); cut != std::string::npos) { pooled_namespace_classes_.insert(name.substr(cut + 2)); }

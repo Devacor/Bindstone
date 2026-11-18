@@ -84,6 +84,17 @@ bool template_name_arguments(std::string_view name, std::string_view& base, std:
     return depth == 0;
 }
 
+size_t class_qualifier_cut(std::string_view name) {
+    int depth = 0;
+    for (size_t i = name.size(); i-- > 1;) {
+        const char c = name[i];
+        if (c == '>' || c == ')') { ++depth; }
+        else if (c == '<' || c == '(') { --depth; }
+        else if (depth == 0 && c == ':' && name[i - 1] == ':') { return i - 1; }
+    }
+    return std::string_view::npos;
+}
+
 // A composite type names its parameters on an explicit work list: the parser names each level of a nested type while the
 // levels around it are still on the stack, so the name never recurses
 std::string type_info::canonical_name() const {

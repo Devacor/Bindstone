@@ -27,7 +27,7 @@ namespace jai::detail {
 	inline void register_namespace_class(engine& eng, script_namespace_data& ns, const class_decl& decl) {
 		auto def = engine_access::get_class_definition(eng, std::string(decl.name));
 		if (!def) { return; }
-		const size_t cut = decl.name.rfind("::");
+		const size_t cut = class_qualifier_cut(decl.name);
 		ns.classes[engine_access::get_symbolizer(eng)->intern(cut == std::string_view::npos ? decl.name : decl.name.substr(cut + 2))] = std::move(def);
 	}
 

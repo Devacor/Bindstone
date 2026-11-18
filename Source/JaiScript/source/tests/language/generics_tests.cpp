@@ -1773,6 +1773,20 @@ public:
 			check_eq((int64_t)3, e->execute("int n = 3; int i = 0; for (i = 0; i < n; i += 1) {} i;").as_int());
 		});
 
+		// A namespace lists a class under its bare name, which for an instance holds its arguments: Shelf<shop::Item> of shop,
+		// cut at the last '::' outside them
+		test("a_namespace_generics_instance_made_with_a_namespace_class_is_constructed_by_name", [this]() {
+			auto e = stdlib_engine();
+			check_eq(std::string("shop::Shelf<shop::Item>|shop::Shelf<array<shop::Item>>|shop::Shelf<shop::Shelf<int>>|shop::Shelf<shop::Item>|3|4|1|2"), e->execute(
+				"namespace shop {\n\tclass Item { int n = 1; }\n\tclass Shelf<T> { T item; static int made = 3; static int count() { return 4; } int size() { return 2; } }\n"
+				"\tstring inside() { auto s = Shelf<Item>(); return reflect::type_of(s); }\n}\n"
+				"auto a = shop::Shelf<shop::Item>();\nauto b = shop::Shelf<array<shop::Item>>();\nauto c = shop::Shelf<shop::Shelf<int>>();\n"
+				"`${reflect::type_of(a)}|${reflect::type_of(b)}|${reflect::type_of(c)}|${shop::inside()}|${shop::Shelf<shop::Item>::made}|${shop::Shelf<shop::Item>::count()}|${a.item.n}|${c.item.size()}`;").as_string());
+			// in a later unit too, and an instance of a program-scope generic keeps its one name
+			check_eq(std::string("2|Box<shop::Item>"), e->execute("class Box<T> { T v; }\nauto later = shop::Shelf<shop::Item>();\nauto boxed = Box<shop::Item>();\n"
+				"`${later.size()}|${reflect::type_of(boxed)}`;").as_string());
+		});
+
 		test("the_typed_result_options_are_spelled_returns_of_a_shape", [this]() {
 			auto e = make_engine();
 			stdlib::register_all(*e);

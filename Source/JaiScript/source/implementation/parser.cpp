@@ -3721,13 +3721,19 @@ JAI_NOINLINE checked_result<expression_ptr> parser::postfix_operator(expression_
     return std::make_shared<unary_expr>(op.location, op, expr, true);  // true = postfix
 }
 
-// Brace initialization: Type{args...}, only after a type name
+// Brace initialization: Type{args...}, only after a type name, bare or qualified (shop::Item{}, shop::Shelf<int>{})
 JAI_NOINLINE checked_result<expression_ptr> parser::brace_construction(expression_ptr expr) {
-    if (expr->get_type() == node_type::identifier_expr) {
-        auto* identExpr = static_cast<identifier_expr*>(expr.get());
+    std::string name;
+    const jai::expression* head = expr.get();
+    while (head->get_type() == node_type::member_expr && static_cast<const member_expr*>(head)->is_static) {
+        name.insert(0, "::" + std::string(static_cast<const member_expr*>(head)->member));
+        head = static_cast<const member_expr*>(head)->object.get();
+    }
+    if (head->get_type() == node_type::identifier_expr) {
+        name.insert(0, static_cast<const identifier_expr*>(head)->name);
         JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(true));
-        auto type_info = store_type_info(type_info::make_object(*symbolizer_, identExpr->name));
-        return std::make_shared<new_expr>(identExpr->location, type_info, std::move(arguments));
+        auto type_info = store_type_info(type_info::make_object(*symbolizer_, name));
+        return std::make_shared<new_expr>(head->location, type_info, std::move(arguments));
     }
     report_error("expected ';' after expression", previous());   // `i++ {`: only a type name takes a brace initializer
     return make_error_code(parse_error_code::syntax_error);

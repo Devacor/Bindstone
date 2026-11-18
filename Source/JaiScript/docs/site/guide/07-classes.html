@@ -110,7 +110,7 @@ two ints
 caught: No overload of 'add' takes (array, int)</code></pre></div>
 <p>A mismatch the checker can see is the load error <code>no overload of 'add' matches this call</code>. When only one overload has the argument count, it binds like a lone function and its parameter raises its own text.</p>
 <h2 id="aggregate-initialization">Aggregate initialization<a class="hlink" href="#aggregate-initialization" aria-label="link">&#8203;</a></h2>
-<p>A class that declares no constructor is an aggregate, as in C++: <code>T x{a, b}</code>, <code>T{a, b}</code>, <code>T x(a, b)</code> and <code>T(a, b)</code> fill its fields in declaration order, base classes' fields first.</p>
+<p>A class that declares no constructor is an aggregate, as in C++: <code>T x{a, b}</code>, <code>T{a, b}</code>, <code>T x(a, b)</code> and <code>T(a, b)</code> fill its fields in declaration order, base classes' fields first. A class a namespace declares takes each form by its qualified name: <code>geo::Pt{1, 2}</code>, <code>geo::Pt(1, 2)</code>.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cell { int row; int col; }
 class Move { Cell from; Cell to; int cost = 1; string note = "step"; }
 Cell a{1, 2};                     // fields in declaration order

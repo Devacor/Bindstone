@@ -53,7 +53,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <li>A generic&#x27;s own text is parsed when its file loads, used or not, so a syntax error in it always fails the load. Its types are checked per instance.</li>
 </ul>
 <h2 id="generic-classes">Generic classes<a class="hlink" href="#generic-classes" aria-label="link">&#8203;</a></h2>
-<p><code>class Name&lt;T, ...&gt;</code> declares one. <code>Name&lt;Args&gt;</code> then stands wherever a class name does: a declaration, a parameter, a field, a base class, <code>new Name&lt;Args&gt;(...)</code>, <code>Name&lt;Args&gt;(...)</code>, <code>Name&lt;Args&gt;{...}</code>, <code>Name&lt;Args&gt;::member</code>, <code>cast&lt;Name&lt;Args&gt;&gt;</code>, <code>dynamic_cast&lt;Name&lt;Args&gt;&gt;</code>.</p>
+<p><code>class Name&lt;T, ...&gt;</code> declares one. <code>Name&lt;Args&gt;</code> then stands wherever a class name does: a declaration, a parameter, a field, a base class, <code>new Name&lt;Args&gt;(...)</code>, <code>Name&lt;Args&gt;(...)</code>, <code>Name&lt;Args&gt;{...}</code>, <code>Name&lt;Args&gt;::member</code>, <code>cast&lt;Name&lt;Args&gt;&gt;</code>, <code>dynamic_cast&lt;Name&lt;Args&gt;&gt;</code>. A namespace&#x27;s generic class takes each form by its qualified name, as a namespace&#x27;s class does: <code>shop::Shelf&lt;int&gt;(...)</code>, <code>shop::Shelf&lt;shop::Item&gt;{...}</code>.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Stack&lt;T&gt; {
     array&lt;T&gt; items;
     void push(T item) { items.push(item); }

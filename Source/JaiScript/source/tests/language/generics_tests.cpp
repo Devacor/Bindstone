@@ -1787,6 +1787,36 @@ public:
 				"`${later.size()}|${reflect::type_of(boxed)}`;").as_string());
 		});
 
+		// Type{...} after a qualified name is the construction it is after a bare one: a namespace's class, a namespace generic's
+		// instance, and a type parameter whose argument is either
+		test("a_braced_construction_takes_a_qualified_name", [this]() {
+			auto e = stdlib_engine();
+			check_eq(std::string("1|2|shop::Shelf<int>|7|shop::Shelf<shop::Item>|1|2"), e->execute(
+				"namespace shop {\n\tclass Item { int n = 1; }\n\tclass Pt { int x; int y; }\n\tclass Shelf<T> { T item; int size() { return 2; } }\n}\n"
+				"class Box<T> { T fresh() { return T{}; } }\n"
+				"auto i = shop::Item{};\nauto s = shop::Shelf<int>{};\nauto p = shop::Pt{3, 4};\nauto both = shop::Shelf<shop::Item>{};\n"
+				"Box<shop::Item> items;\nBox<shop::Shelf<int>> shelves;\n"
+				"`${i.n}|${s.size()}|${reflect::type_of(s)}|${p.x + p.y}|${reflect::type_of(both)}|${items.fresh().n}|${shelves.fresh().size()}`;").as_string());
+			check_eq((int64_t)5, e->execute("namespace a { namespace b { class Deep { int n = 5; } } }\nauto d = a::b::Deep{};\nd.n;").as_int());
+			// each place a bare name's braces stand takes the qualified name's beside it: an initializer, an argument, a declaration,
+			// an element, a result, a receiver, a condition, a generic's instance, and the namespace's own code
+			check_eq(std::string("M0001_Initial M0001_Initial|42 42|3 3|4 4|5 5|8 8|2 2|yes yes|10 10"), e->execute(
+				"namespace mv {\n\tclass Migration { int version; string name; function apply; }\n\tclass Pt { int x; int y; }\n\tclass Shelf<T> { T item; int size() { return 2; } }\n"
+				"\tint inside() { return Pt{9, 1}.x + mv::Pt{0, 1}.y; }\n}\n"
+				"class Migration { int version; string name; function apply; }\nclass Pt { int x; int y; }\nclass Shelf<T> { T item; int size() { return 2; } }\n"
+				"int run(mv::Migration m) { return m.apply() + m.version; }\nint run_plain(Migration m) { return m.apply() + m.version; }\n"
+				"mv::Pt make() { return mv::Pt{5, 6}; }\nPt make_plain() { return Pt{5, 6}; }\n"
+				"function fn = () => 40;\nauto q = mv::Migration{1, \"M0001_Initial\", fn};\nauto u = Migration{1, \"M0001_Initial\", fn};\n"
+				"mv::Pt a{1, 2};\nPt b{1, 2};\narray<mv::Pt> qs = [mv::Pt{1, 2}, mv::Pt{3, 4}];\narray<Pt> us = [Pt{1, 2}, Pt{3, 4}];\n"
+				"string met = mv::Pt{1, 2}.x == 1 ? \"yes\" : \"no\";\nstring met_plain = Pt{1, 2}.x == 1 ? \"yes\" : \"no\";\n"
+				"`${q.name} ${u.name}|${run(mv::Migration{2, \"x\", fn})} ${run_plain(Migration{2, \"x\", fn})}|${a.x + a.y} ${b.x + b.y}|${qs[1].y} ${us[1].y}|${make().x} ${make_plain().x}`"
+				" + `|${mv::Pt{7, 8}.y} ${Pt{7, 8}.y}|${mv::Shelf<mv::Pt>{}.size()} ${Shelf<Pt>{}.size()}|${met} ${met_plain}|${mv::inside()} ${Pt{9, 1}.x + Pt{0, 1}.y}`;").as_string());
+			// what is no type's name takes no brace initializer, as before
+			check_true(contains(failure(*e, "class Holder { int n = 1; }\nHolder h;\nauto x = h.n{};"), "expected ';' after expression"));
+			check_true(contains(failure(*e, "namespace shop { class Solo<T> { T v; } }\nauto x = shop::Solo{};"),
+				"'shop::Solo' is a generic class: name its type arguments (shop::Solo<T>)"));
+		});
+
 		test("the_typed_result_options_are_spelled_returns_of_a_shape", [this]() {
 			auto e = make_engine();
 			stdlib::register_all(*e);

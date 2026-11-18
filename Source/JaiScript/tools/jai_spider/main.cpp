@@ -678,12 +678,12 @@ private:
 		built->watched = std::move(failed);
 		for (const auto& [path, stamp] : snapshot.stamps) { built->watched.emplace(path, stamp); }
 		std::string error;
-		const fs::path shadow = sources_.shadow_of(snapshot, error);
-		if (shadow.empty()) {
+		const spider_host::shadow_folder shadow = sources_.shadow_of(snapshot, app_dir_, library_dir(), error);
+		if (shadow.folder.empty()) {
 			built->failure = "the last good code could not be written out: " + error;
 			return built;
 		}
-		const auto mirror = [&](const fs::path& path) { return spider_host::app_sources::mirror(shadow, path); };
+		const auto mirror = [&](const fs::path& path) { return shadow.of(path).value_or(path); };
 		bool library_failed = false;
 		built->eng = build_engine(mirror(app_path_), {mirror(app_dir_), mirror(library_dir())}, nullptr, built->failure, library_failed);
 		if (built->eng) {

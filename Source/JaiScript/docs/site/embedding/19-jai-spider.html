@@ -331,8 +331,8 @@ good build or as a failure: one that read an older version and finished late, or
 save, judges nothing, and the next build does.</p>
 <p>An edit that fails to parse or check is logged once, and the app serves the code it had until the file is saved
 again. The host keeps the texts of the last build that checked; while the edit stays broken, engines are built from
-those texts, written out once into a folder under the app's <code>.cache</code> folder at the paths they had (a trace from such an engine
-names that copy). Saving the file again tries it anew:</p>
+those texts, written out once into a folder under the app's <code>.cache</code> folder and laid out there as they were around the
+app (a trace from such an engine names that copy). Saving the file again tries it anew:</p>
 <div class="codeblock cb-plain"><span class="cb-label">console</span><pre><code class="lang-plain">jai_spider: the edit was rejected; serving the code the app had:
 static check failed:
 views.jai:7:25: error: cannot initialize 'n' declared 'int' with 'string'

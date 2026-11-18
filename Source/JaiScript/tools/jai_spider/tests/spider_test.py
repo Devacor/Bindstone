@@ -712,7 +712,9 @@ def run_workers(exe, backend, verbose):
 
 def run_guestbook(exe, backend, verbose):
 	work = pathlib.Path(tempfile.mkdtemp(prefix="spider_guestbook_"))
-	app_dir = work / "guestbook"
+	# the app sits about 150 characters deep, as a project in a user's folders can: a copy of the last good code whose
+	# path held the app's path twice would pass the 260 characters a path ends at on Windows
+	app_dir = work / ("d" * max(8, 150 - len(str(work)) - len("/guestbook") - 1)) / "guestbook"
 	shutil.copytree(EXAMPLE, app_dir, ignore=shutil.ignore_patterns("*.db", "*.db-*", ".cache"))
 	server = Server(exe, app_dir, backend, [])
 	suite = Suite(server, app_dir, verbose)

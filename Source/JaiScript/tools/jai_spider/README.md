@@ -263,8 +263,8 @@ nothing, and the next build does. Editing `lib/spider.jai` under `--dev` applies
 
 A rejected edit prints its listing once, and the app answers with the code it had until the file is saved again: the
 host keeps the texts of the last build that checked, and while the edit stays broken it builds each engine from those
-texts, written once into a folder under the app's `.cache` folder at the paths they had, so imports and templates resolve there
-as they did beside the app (a trace from such an engine names that copy). The copy goes when the server stops; a killed server leaves it there.
+texts, written once into a folder under the app's `.cache` folder and laid out there as they were around the app, so
+imports and templates resolve there as they did beside the app (a trace from such an engine names that copy). The copy goes when the server stops; a killed server leaves it there.
 
 ## Model and limits
 

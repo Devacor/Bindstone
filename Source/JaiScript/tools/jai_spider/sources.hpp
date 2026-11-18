@@ -8,12 +8,14 @@
 //   it ends is judged: kept as the last good one, or reported as a failure.
 // - app_sources: shared by every worker. The last build that checked (its stamps and the bytes it parsed), and the
 //   stamps of the files that failed the check since. While an edit does not check, engines are built from the last good
-//   bytes, written once into a folder under the app's .cache folder that mirrors their paths, so imports and templates
-//   resolve there as they did beside the app. The host never reads a source file itself.
+//   bytes, written once into a folder under the app's .cache folder and laid out there as they were around the app
+//   (shadow_folder), so imports and templates resolve there as they did beside the app. The host never reads a source
+//   file itself.
 #include <jaiscript/jaiscript.hpp>
 
-#include <cctype>
+#include <algorithm>
 #include <cstdint>
+#include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -84,6 +86,66 @@ inline bool stamps_hold(const stamp_set& a_stamps) {
 	}
 	return true;
 }
+
+// two names are one to the file system (Windows folds case)
+inline bool same_name(const fs::path& a_left, const fs::path& a_right) {
+#ifdef _WIN32
+	const std::wstring& left = a_left.native();
+	const std::wstring& right = a_right.native();
+	return std::equal(left.begin(), left.end(), right.begin(), right.end(), [](wchar_t a, wchar_t b) { return std::towlower(a) == std::towlower(b); });
+#else
+	return a_left == a_right;
+#endif
+}
+
+// a path without "." and ".." steps or a closing separator, so its parts compare with another's
+inline fs::path plain_path(const fs::path& a_path) {
+	fs::path result = a_path.lexically_normal();
+	return result.has_filename() ? result : result.parent_path();
+}
+
+// the deepest folder two plain paths are both in or below; empty when they share no drive or share
+inline fs::path shared_folder(const fs::path& a_left, const fs::path& a_right) {
+	fs::path result;
+	for (auto left = a_left.begin(), right = a_right.begin(); left != a_left.end() && right != a_right.end() && same_name(*left, *right); ++left, ++right) {
+		result /= *left;
+	}
+	return result.has_root_directory() ? result : fs::path();
+}
+
+// a plain path's steps from a plain folder it is, or is below; nullopt for a path outside it
+inline std::optional<fs::path> path_from(const fs::path& a_folder, const fs::path& a_path) {
+	auto step = a_path.begin();
+	for (auto part = a_folder.begin(); part != a_folder.end(); ++part, ++step) {
+		if (step == a_path.end() || !same_name(*part, *step)) { return std::nullopt; }
+	}
+	fs::path result;
+	for (; step != a_path.end(); ++step) { result /= *step; }
+	return result;
+}
+
+// Where the copies of a snapshot's texts live. The host library's sit below lib/. Every other source sits below app/ at
+// its path from `base`: the app's folder, or the folder above it that holds every source the app read. The copies keep
+// their places relative to one another, so a relative import resolves among them, and no copy's path holds the app's
+// whole path a second time (on Windows a path ends at 260 characters). A source on another drive or share has no copy:
+// only its absolute path reaches it, and that names the file itself.
+struct shadow_folder {
+	fs::path folder;    // empty: the copies could not be written
+	fs::path library;   // plain paths
+	fs::path base;
+
+	std::optional<fs::path> of(const fs::path& a_path) const {
+		const fs::path path = plain_path(a_path);
+		const char* below = "lib";
+		std::optional<fs::path> steps = path_from(library, path);
+		if (!steps) {
+			below = "app";
+			steps = path_from(base, path);
+		}
+		if (!steps) { return std::nullopt; }
+		return steps->empty() ? folder / below : folder / below / *steps;
+	}
+};
 
 // What one engine read while it was built, on that engine's thread: each file it loaded, with the bytes it parsed and
 // the stamp of those bytes (engine::source_file_observer), and each path it asked a stamp of and did not load
@@ -224,39 +286,39 @@ public:
 		shadow_root_ = a_folder / ("jai_spider-last-good-" + std::to_string(process_id()));
 	}
 
-	// the folder holding the snapshot's texts at their own paths, written the first time a build asks
-	fs::path shadow_of(const source_snapshot& a_snapshot, std::string& a_error) {
+	// the folder holding the snapshot's texts, written the first time a build asks, and where each copy is in it
+	// (shadow_folder), given the app's folder and the host library's
+	shadow_folder shadow_of(const source_snapshot& a_snapshot, const fs::path& a_app, const fs::path& a_library, std::string& a_error) {
 		std::lock_guard<std::mutex> hold(lock_);
+		shadow_folder result;
 		if (shadow_root_.empty()) {
 			a_error = "no folder was given for the copies";
-			return {};
+			return result;
 		}
-		const fs::path folder = shadow_root_ / std::to_string(a_snapshot.generation);
-		if (written_generation_ == a_snapshot.generation) { return folder; }
+		result.library = plain_path(a_library);
+		result.base = plain_path(a_app);
+		for (const auto& [path, text] : a_snapshot.texts) {
+			const fs::path source = plain_path(path);
+			if (path_from(result.library, source)) { continue; }
+			if (const fs::path shared = shared_folder(result.base, source.parent_path()); !shared.empty()) { result.base = shared; }
+		}
+		result.folder = shadow_root_ / std::to_string(a_snapshot.generation);
+		if (written_generation_ == a_snapshot.generation) { return result; }
 		std::error_code ec;   // an older generation's folder stays until exit: a build may still be reading it
 		for (const auto& [path, text] : a_snapshot.texts) {
-			const fs::path target = mirror(folder, path);
-			fs::create_directories(target.parent_path(), ec);
-			std::ofstream file(target, std::ios::binary | std::ios::trunc);
+			const std::optional<fs::path> target = result.of(path);
+			if (!target) { continue; }
+			fs::create_directories(target->parent_path(), ec);
+			std::ofstream file(*target, std::ios::binary | std::ios::trunc);
 			file.write(text.data(), static_cast<std::streamsize>(text.size()));
 			if (!file) {
-				a_error = "cannot write " + target.string();
-				return {};
+				a_error = "cannot write " + target->string();
+				result.folder.clear();
+				return result;
 			}
 		}
 		written_generation_ = a_snapshot.generation;
-		return folder;
-	}
-
-	// where a source's copy lives in a shadow folder: its absolute path below it, a drive or share name as a folder
-	static fs::path mirror(const fs::path& a_folder, const fs::path& a_path) {
-		fs::path result = a_folder;
-		std::string root;
-		for (char c : a_path.root_name().string()) {
-			if (std::isalnum(static_cast<unsigned char>(c))) { root += c; }
-		}
-		if (!root.empty()) { result /= root; }
-		return result / a_path.relative_path();
+		return result;
 	}
 
 private:

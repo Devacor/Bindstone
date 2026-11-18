@@ -347,6 +347,12 @@ struct rebinder {
 		finish();
 	}
 
+	void run_value(const script_value& a_source, script_value& a_copy) {
+		pairs.push_back({&a_source, &a_copy});
+		drain(0);
+		finish();
+	}
+
 	void finish() {
 		if (copies.empty() || found.empty() || !eng) { return; }
 		string_symbolizer* symbols = engine_access::get_symbolizer(*eng);
@@ -412,6 +418,11 @@ JAI_NOINLINE bool binds_class_instance(const script_value& a_callable) noexcept 
 	if (!holder || !holder->is_coroutine_handle()) { return false; }
 	const auto* handle = static_cast<const coroutine_handle*>(holder->object());
 	return handle && copy_rebind_impl::instance_of(handle->receiver());
+}
+
+JAI_NOINLINE void rebind_copied_callables(const script_value& a_source, script_value& a_copy) {
+	copy_rebind_impl::rebinder rebinder;
+	rebinder.run_value(a_source, a_copy);
 }
 
 JAI_NOINLINE void rebind_copied_callables(const class_instance& a_source, class_instance& a_copy) {

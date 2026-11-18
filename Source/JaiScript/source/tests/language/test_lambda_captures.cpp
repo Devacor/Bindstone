@@ -388,6 +388,33 @@ public:
                    "a copy of the lambda itself, and of a handle, shares");
             expect(cls + "auto p = new Outer(); p.arm(elsewhere); Outer b = p; b.poke(); `${p.inner.n}|${b.inner.n}`", "0|1",
                    "a copy made through a handle binds to the copy");
+            // the value copied is the root, whatever it is: a lambda in one element bound to another element binds to that element's copy
+            const std::string siblings =
+                "class Counter { int n = 0; var bump; var other; Counter() { bump = [this]() { n += 1; return n; }; } }\n"
+                "class Team { array<Counter> members; }\n"
+                "array<Counter> pair; pair.push(Counter()); pair.push(Counter()); pair[0].other = pair[1].bump;\n";
+            expect(siblings + "var copy = pair; copy[0].other(); copy[0].other(); `${pair[1].n}|${copy[1].n}`", "0|2", "an array of siblings");
+            expect(siblings + "Team t; t.members = pair; Team u = t; u.members[0].other(); `${pair[1].n}|${t.members[1].n}|${u.members[1].n}`", "0|0|1",
+                   "the same array inside an object");
+            expect(siblings + "map<string, Counter> named; named[\"a\"] = Counter(); named[\"b\"] = Counter(); named[\"a\"].other = named[\"b\"].bump; "
+                   "auto copy = named; copy[\"a\"].other(); `${named[\"b\"].n}|${copy[\"b\"].n}`", "0|1", "a map of siblings");
+            expect(siblings + "map<string, var> groups; groups[\"x\"] = [Counter()]; groups[\"y\"] = [Counter()]; groups[\"x\"][0].other = groups[\"y\"][0].bump; "
+                   "var copy = groups; copy[\"x\"][0].other(); `${groups[\"y\"][0].n}|${copy[\"y\"][0].n}`", "0|1", "arrays nested in a map");
+            expect(siblings + "array<var> mixed = [Counter(), 1, \"s\"]; mixed.push(mixed[0].bump); var copy = mixed; copy[3](); copy[3](); `${mixed[0].n}|${copy[0].n}`", "0|2",
+                   "an untyped array holding a lambda beside the object it is bound to");
+            expect(siblings + "int poke(array<Counter> a_pair) { a_pair[0].other(); return a_pair[1].n; } array<Counter> same() { return pair; } "
+                   "int inside = poke(pair); auto back = same(); back[0].other(); auto held = [pair]() { pair[0].other(); return pair[1].n; }; "
+                   "`${inside}|${back[1].n}|${held()}|${pair[1].n}`", "1|1|1|0", "a by-value argument, a return and a capture are copies of the array");
+            expect(siblings + "Counter outside; pair[1].other = outside.bump; var copy = pair; copy[1].other(); auto g = pair[1].bump; g(); `${outside.n}|${pair[1].n}|${copy[1].n}`",
+                   "1|1|0", "a lambda bound outside the copied value, and a lambda copied by itself, stay bound");
+            const std::string typed =
+                "class Unit { int n = 0; function<int()> bump; coroutine<int> route = walk(); Unit() { bump = [this]() { n += 1; return n; }; }\n"
+                "  coroutine int walk() { while (true) { n += 10; yield n; } } }\n"
+                "class Squad { array<Unit> members; array<function<int()>> orders; array<coroutine<int>> routes; }\n";
+            expect(typed + "array<Unit> units; units.push(Unit()); units.push(Unit()); auto copy = units; copy[0].bump(); copy[1].route.next(); "
+                   "`${units[0].n}|${units[1].n}|${copy[0].n}|${copy[1].n}`", "0|0|1|10", "function<R()> and coroutine<Y> fields");
+            expect(typed + "Squad s; s.members.push(Unit()); s.orders.push(s.members[0].bump); s.routes.push(s.members[0].walk()); "
+                   "Squad t = s; t.orders[0](); t.routes[0].next(); `${s.members[0].n}|${t.members[0].n}`", "0|11", "arrays of function<R()> and of coroutine<Y>");
             // below the depth a copy nests natively its levels are steps on a work list: the rebind is the step after an object's members
             const std::string deep =
                 "class Leaf { int n = 0; var bump; void arm() { bump = [this]() { n += 1; return n; }; } }\n"

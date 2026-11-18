@@ -1577,6 +1577,11 @@ script_value script_value::clone() const {
     return clone_level(work, 0);
 }
 
+JAI_NOINLINE void script_value::end_watched_copy(script_value& copy, detail::deep_copy_work& work) const {
+    work.met_bound_callable = 0;
+    detail::rebind_copied_callables(*this, copy);
+}
+
 void script_value::clone_element_into(script_value& dest, detail::deep_copy_work& work, unsigned depth) const {
     if (element_copies_shallow()) {
         dest = *this;
@@ -1700,6 +1705,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                     // a slot holds the object itself, never a placeholder: each one is a step that copies and pushes it
                     for (size_t i = n; i-- > 0;) { work.push_back({detail::deep_copy_item::step::slot, &other_node, new_node.get(), i}); }
                 } else {
+                    ++work.watched;   // one element's closure may be bound to another element
                     for (size_t i = 0; i < n; ++i) {
                         script_value element = other_node.get(i, other_node.owner);
                         if (element.element_copies_shallow()) {
@@ -1713,6 +1719,9 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                         }
                         copy_step(other_node.owner, n, i);
                     }
+                    result.storage_ = new_node;
+                    if (--work.watched == 0 && work.met_bound_callable != 0) [[unlikely]] { end_watched_copy(result, work); }
+                    break;
                 }
                 result.storage_ = new_node;
                 break;
@@ -1736,6 +1745,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             auto& copied = new_node->values();
             copied.reserve(n);   // no reallocation: a deferred element's placeholder stays where it is
             const size_t first_step = work.size();
+            if (depth <= detail::k_inline_copy_depth) { ++work.watched; }   // past it the elements are steps under a watch a level above holds
             for (size_t i = 0; i < n; ++i) {
                 const script_value& elem = other_array[i];
                 if (elem.element_copies_shallow()) {
@@ -1748,6 +1758,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             }
             std::reverse(work.begin() + static_cast<ptrdiff_t>(first_step), work.end());
             result.storage_ = new_node;
+            if (depth <= detail::k_inline_copy_depth && --work.watched == 0 && work.met_bound_callable != 0) [[unlikely]] { end_watched_copy(result, work); }
             break;
         }
         case script_value_type::jai_map_type: {
@@ -1765,6 +1776,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                 break;
             }
             size_t i = 0;
+            ++work.watched;
             for (const auto& [key, value] : other_map) {
                 if (value.element_copies_shallow()) {
                     new_map->emplace(key.clone_element(), value);
@@ -1775,6 +1787,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                 copy_step(other_map.owner, n, i++);
             }
             result.storage_ = new_map;
+            if (--work.watched == 0 && work.met_bound_callable != 0) [[unlikely]] { end_watched_copy(result, work); }
             break;
         }
         case script_value_type::jai_object_type: {

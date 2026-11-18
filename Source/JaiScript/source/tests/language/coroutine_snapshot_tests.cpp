@@ -599,6 +599,16 @@ public:
 				H a; a.co = free_body(); H b = a; a.co.next(); b.co.next(); `${b.co.done()}`
 			)", "false", "a coroutine bound to no object is shared by the copy");
 			check_both(R"(
+				class Npc { int steps = 0; var partner; coroutine int walk() { while (true) { steps += 1; yield steps; } } }
+				class Camp { array<Npc> pair; }
+				array<Npc> duo; duo.push(Npc()); duo.push(Npc()); duo[0].partner = duo[1].walk(); duo[0].partner.next();
+				var copy = duo; copy[0].partner.next(); copy[0].partner.next();
+				Camp camp; camp.pair = duo; Camp other = camp; other.pair[0].partner.next();
+				map<string, Npc> named; named["a"] = Npc(); named["b"] = Npc(); named["a"].partner = named["b"].walk();
+				auto named_copy = named; named_copy["a"].partner.next();
+				`${duo[1].steps}|${copy[1].steps}|${camp.pair[1].steps}|${other.pair[1].steps}|${named["b"].steps}|${named_copy["b"].steps}`
+			)", "1|3|1|2|0|1", "a coroutine in one element whose receiver is another element runs on that element's copy: an array, the array in an object, a map");
+			check_both(R"(
 				class H { int got = 0; auto co = body(); coroutine int body() { while (true) { var v = yield got; got += 1; } } }
 				H a; a.co.next(); H b = a; a.co.next();
 				string r = `${b.co.done()}`;

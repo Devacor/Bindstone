@@ -262,9 +262,12 @@ namespace detail {
             void* dest;
             size_t index = 0;
         };
-        // The list, and what the copies of instances whose class can hold a callable keep (class_instance::deep_copy_with_care):
-        // how many of them are open around the value being copied, and whether a closure or a coroutine bound to a class
-        // instance was met under one. A copy that holds no such instance never reads or writes either
+        // The list, and the watch a copy keeps over what could hold a callable: how many watched copies are open around the
+        // value being copied (an instance whose class can hold one, class_instance::deep_copy_with_care; an array of objects,
+        // an untyped array and a map, which count once around their elements), and whether a closure or a coroutine bound to
+        // a class instance was met under one. The outermost watched copy that met one binds, inside the copy, every callable
+        // that was bound to an instance inside the original. A typed buffer and an instance whose class cannot hold a
+        // callable never read or write either
         struct deep_copy_work : std::vector<deep_copy_item> {
             uint32_t watched = 0;
             uint32_t met_bound_callable = 0;   // a flag, sized so the two are one word a copy clears beside its list
@@ -406,6 +409,9 @@ namespace detail {
         void clone_element_into(script_value& dest, detail::deep_copy_work& work, unsigned depth) const;
         // The copy of a subtree below detail::k_inline_copy_depth, on a work list
         void clone_subtree_into(script_value& dest, detail::deep_copy_work& outer) const;
+        // The outermost watched copy was this array's or this map's and met a closure or a coroutine bound to an instance:
+        // those bound to an instance this value holds are bound to the copy's (detail/copy_rebind.hpp)
+        void end_watched_copy(script_value& copy, detail::deep_copy_work& work) const;
 
         // Parallel-region detach (parallel_transform v0): deep copy where EVERY heavy
         // node gets a fresh strong_ptr - including strings, which clone() and plain

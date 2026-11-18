@@ -138,17 +138,23 @@ for value instances in the archive format.
 
 ### Copy and restore agree
 
-Dev's ruling (2026-11-17): a lambda or coroutine held by its own object rebinds to the copy when the object is copied. For
-everything an object holds by value, a copy behaves as an archive round trip of the object; handles to objects outside
-the copy stay shared.
+Dev's ruling (2026-11-17): a lambda or coroutine held by its own object rebinds to the copy when the object is copied. The
+general rule: copying a value rebinds, inside the copy, every callable that was bound to an instance inside the original.
+The value copied is the root whatever it is (an object, an array, a map, a nesting of them); handles to objects outside the
+copy stay shared. For an object that holds its own coroutine, a copy behaves as an archive round trip of the object.
 
 - **The handle is held by its own receiver** (`class Brain { int ticks = 0; auto run = think(); coroutine int think()
   {...} }`). `Brain b = a;` and `Brain b = from_binary(to_binary(a));` give the same `b`: a second coroutine paused at the
   same yield whose `this` is `b`. `b.run.next()` changes `b.ticks` and leaves `a` and `a.run` alone.
 - **The receiver is outside the copied value** (`auto h = a.think(); auto g = h;`). A copy shares: `g` is `h`. A save and a
   load of `h` alone carries the receiver as the coroutine's own object (`"this": {"$id": M, "$type": "Brain", "$val":
-  ...}`), so the loaded coroutine acts on a loaded copy of `a` that only it holds. This is the one shape where the two
-  differ, and it is the handle's own copy, not an object's.
+  ...}`), so the loaded coroutine acts on a loaded copy of `a` that only it holds. Here the two differ, and it is the
+  handle's own copy, not an object's.
+- **The receiver is a sibling** (`array<Npc> duo; duo[0].partner = duo[1].walk();`). `var copy = duo;` gives `copy[0]` a
+  coroutine whose `this` is `copy[1]`, in an array a variable holds as in one an object's field holds. The archive gives
+  an instance written by value no identity (above), so `to_json(duo)` refuses (`its receiver is saved by value elsewhere in
+  the same save`); and `to_json` writes a lambda as null where `to_binary` refuses it, so no save keeps
+  `duo[0].other = duo[1].bump`. A copy takes more than a save does; where both succeed they agree.
 
 The kernel is `detail/copy_rebind.hpp` + `source/implementation/copy_rebind.cpp`, and the copy of an instance decides
 whether it runs. A copy asks its class one memoized fact, `class_definition::copy_care()` (the copy facts' epoch, so a
@@ -167,14 +173,25 @@ definition settles it and a reload renews it):
 - **`copy_care_constructor`**: the user copy constructor builds the copy (`deep_copy_with_care`), and a class that can
   also hold a callable is rebound after it.
 
+A container is watched the same way, so the root of the copy is the value copied and not the first object in it.
+`clone_level` opens the watch around the elements of an array of objects, of an untyped array and of a map: one counter
+step before the loop and one after it, with nothing per element, and the loops are the ones that copy a container of plain
+data. A typed buffer (`array<int>`, `array<string>`, the vector kinds) never reaches the counter. The counter is the whole
+test because no fact about a container's type could stand in for it: a map and an untyped array hold values of any kind,
+and an array of objects holds whichever subclass was stored, so only the instances' own classes say what they can hold
+(`copy_care`). Whichever watched copy is outermost (the root array, map or instance) runs the kernel when a bound
+callable was met under it: `script_value::end_watched_copy` over the container and its copy,
+`class_instance::end_watched_copy` over an instance and its copy. A by-value argument, return and capture are `clone()`s
+of the value passed, so each is its own root.
+
 Every route that copies a class instance reaches `class_instance::deep_copy_level` through `script_value::clone()`: a
 declaration or a store into a value slot, by-value arguments and non-elided returns, by-value captures, element and entry
-copies of containers, container copies (each element is its own outermost instance), `cast<T>`, `new T(v)`, a value made
-from a handle. `=` into an existing object keeps the object and assigns its members (`implicit_copy_assign`), which
-watches the members' copies the same way and rebinds onto the assigned object. The parallel detach refuses a function
-value and an object holding one (`value is not value-semantic (function)`), so no worker copy holds a closure to rebind.
+copies of containers, container copies, `cast<T>`, `new T(v)`, a value made from a handle. `=` into an existing object
+keeps the object and assigns its members (`implicit_copy_assign`), which watches the members' copies the same way and
+rebinds onto the assigned object. The parallel detach refuses a function value and an object holding one (`value is not
+value-semantic (function)`), so no worker copy holds a closure to rebind.
 
-The kernel walks the source instance and its copy side by side on an explicit work list (fields slot by slot, array
+The kernel walks the source value and its copy side by side on an explicit work list (fields slot by slot, array
 elements by index, map entries in order while their keys match), pairs each instance the source holds by value with its
 copy, and notes every function and coroutine the copy holds. Then, per noted site:
 

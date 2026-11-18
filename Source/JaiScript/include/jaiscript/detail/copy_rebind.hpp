@@ -1,10 +1,10 @@
 #pragma once
 
 // What a copy does with the closures and coroutines its source holds (internal/coroutine_snapshot_design.md "Copy and
-// restore agree"): a lambda, a bound method or a method coroutine the copy holds by value that is bound to an instance the
-// source holds by value is rebuilt bound to that instance's copy. One kernel for both backends: the copy of an instance
-// whose class can hold a callable ends here when it met one bound to an instance (class_instance::deep_copy_with_care), and
-// no other copy does.
+// restore agree"): copying a value rebinds, inside the copy, every lambda, bound method and method coroutine that was bound
+// to an instance inside the original. One kernel for both backends: the outermost watched copy (an instance whose class can
+// hold a callable, an array or a map holding more than scalars, strings and handles) ends here when it met a callable bound
+// to an instance, and no other copy does.
 
 #include <jaiscript/core/value.hpp>
 
@@ -22,5 +22,8 @@ bool binds_class_instance(const script_value& a_callable) noexcept;
 // receiver: a lambda gets its own captured values, a coroutine its own frame paused where the source's is. A coroutine
 // whose state has no copy leaves a handle that is never done and raises the reason when it is resumed
 void rebind_copied_callables(const class_instance& a_source, class_instance& a_copy);
+
+// The same for an array or a map and its copy: an element's closure bound to another element is bound to that element's copy
+void rebind_copied_callables(const script_value& a_source, script_value& a_copy);
 
 } // namespace jai::detail

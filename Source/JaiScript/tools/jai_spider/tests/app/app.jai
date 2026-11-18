@@ -159,4 +159,48 @@ routes.post("/sql/types", (spider::Request req) => {
 	return db.query("SELECT typeof(v) AS t, v FROM kinds ORDER BY rowid");
 });
 
+// typed rows: a class's fields are the columns it reads and writes
+db.execute("CREATE TABLE IF NOT EXISTS members (id INTEGER PRIMARY KEY, handle TEXT NOT NULL, admin INTEGER NOT NULL DEFAULT 0, score REAL NOT NULL DEFAULT 0, tags TEXT NOT NULL DEFAULT '[]')");
+db.execute("CREATE TABLE IF NOT EXISTS keyless (v TEXT)");
+class Member {
+	int id;
+	string handle;
+	bool admin;
+	float score;
+	array<string> tags;
+	string shown() { return handle + (admin ? " (admin)" : "") + " " + to_string(score); }
+}
+const string ALL_MEMBERS = "SELECT * FROM members ORDER BY id";
+const string FIND_MEMBER = "SELECT * FROM members WHERE id = ?";
+routes.post("/members", (spider::Request req) => {
+	Member m = from_json<Member>(req.body);
+	return spider::json({"id": db.insert("members", m)}, 201);
+});
+routes.get("/members", (spider::Request req) => {
+	array<string> shown;
+	auto all = db.query<Member>(ALL_MEMBERS);
+	for (auto& m : all) { shown.push(m.shown()); }
+	return {"shown": shown, "tags": all.size() > 0 ? all[0].tags : array<string>()};
+});
+routes.get("/members/:id", (spider::Request req) => {
+	shared_ptr<Member> m = db.query_one<Member>(FIND_MEMBER, req.param("id").to_int());
+	return m == null ? spider::not_found("no member") : spider::json({"handle": m->handle, "admin": m->admin, "tags": m->tags});
+});
+routes.put("/members/:id", (spider::Request req) => {
+	shared_ptr<Member> m = db.query_one<Member>(FIND_MEMBER, req.param("id").to_int());
+	m->score = 9.5;
+	m->tags.push("edited");
+	return spider::json({"changed": db.update("members", m)});
+});
+routes.post("/members/from-map", (spider::Request req) => spider::json({"id": db.insert("members", {"handle": "mapped", "admin": true, "unknown": 1})}));
+class WrongMember { int id; int handle; }
+routes.get("/member-errors/wrong-type", (spider::Request req) => db.query<WrongMember>(ALL_MEMBERS));
+routes.get("/member-errors/run-time-table", (spider::Request req) => {
+	var table = req.query.get("t", "members");
+	[[warn_mode]] return spider::json({"id": db.insert(table, {"handle": "x"})});
+});
+routes.get("/member-errors/no-table", (spider::Request req) => spider::json({"id": db.insert("nowhere_at_all", {"v": 1})}));
+routes.get("/member-errors/no-key", (spider::Request req) => spider::json({"changed": db.update("keyless", {"v": "x"})}));
+routes.get("/member-errors/missing-key", (spider::Request req) => spider::json({"changed": db.update("members", {"handle": "x"})}));
+
 spider::spin(routes, {"max_body": 65536});

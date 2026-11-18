@@ -177,6 +177,49 @@ then raises again; inside another transaction it is a savepoint. <code>begin</co
 <code>is_open</code> and <code>close</code> exist too.</li>
 <li><strong>Errors</strong> are catchable and carry SQLite's message: <code>SQLite error: no such table: posts</code>.</li>
 </ul>
+<h3 id="typed-rows">Typed rows: a class for a table<a class="hlink" href="#typed-rows" aria-label="link">&#8203;</a></h3>
+<p>Given a class as a <a href="../guide/06-functions.html#type-arguments">type argument</a>, <code>query</code> and
+<code>query_one</code> answer records instead of maps, and <code>insert</code> and <code>update</code> write one back.
+The SQL text is a constant as before, and so is the table's name.</p>
+<div class="codeblock cb-jai" data-host="jai_spider"><span class="cb-label">jaiscript (under jai_spider)</span><pre><code class="lang-jai">db.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, handle TEXT NOT NULL, admin INTEGER NOT NULL DEFAULT 0, tags TEXT NOT NULL DEFAULT '[]')");
+class User {
+    int id;
+    string handle;
+    bool admin;
+    array&lt;string&gt; tags;
+}
+const string FANS = "SELECT u.* FROM users u JOIN follows f ON f.fan = u.id WHERE f.artist = ?";
+const string FIND = "SELECT * FROM users WHERE id = ?";
+
+array&lt;User&gt; fans = db.query&lt;User&gt;(FANS, artist.id);       // each row a User
+shared_ptr&lt;User&gt; one = db.query_one&lt;User&gt;(FIND, id);        // a handle, or null when no row
+User fresh = from_json&lt;User&gt;(req.body);
+fresh.id = db.insert("users", fresh);                         // the new rowid
+one-&gt;tags.push("artist");
+int changed = db.update("users", one);                        // WHERE id = one-&gt;id</code></pre></div>
+<ul>
+<li><strong><code>query&lt;T&gt;(sql, ...)</code></strong> answers an <code>array&lt;T&gt;</code> and
+<strong><code>query_one&lt;T&gt;(sql, ...)</code></strong> a <code>shared_ptr&lt;T&gt;</code>, <code>null</code> when no row
+matches; the checker knows both, so <code>fans[0].handel</code> is a load error. Each row is built with <code>T()</code>
+and each column stored in the field of its name (<a href="17-host-api.html#records">records</a>): an INTEGER
+<code>0</code>/<code>1</code> fills a <code>bool</code>, an INTEGER a <code>float</code>, a TEXT holding JSON an array, map or
+class field. A column the class lacks is skipped, so <code>SELECT *</code> keeps working after a migration adds one; a
+field no column names keeps its initializer. A column that does not fit raises <code>Database.query: field 'handle' of
+'User' is int, not string</code> (<code>... and cannot be null</code> for a NULL).</li>
+<li><strong><code>insert(table, record)</code></strong> writes the record's fields that are columns of the table and
+answers the new rowid. An <code>INTEGER PRIMARY KEY</code> field holding <code>0</code> or <code>null</code> is left out,
+so SQLite assigns it; a field that is no column is skipped. An array, map or class field is stored as its JSON text.
+<strong><code>update(table, record)</code></strong> sets every other column the record has, <code>WHERE</code> the
+table's primary key equals the record's, and answers the rows changed. A record may also be a
+<code>map&lt;string, var&gt;</code>. A field and a column match by exact name, both ways.</li>
+<li><strong>The table name</strong> is a constant argument (<code>argument 1 of 'insert' is not a constant: a table name
+must be a constant; a value never names a table</code>, and the same text at run time) and names an existing table. The
+columns come from the schema, read once and again after any schema change; every identifier in the statement comes
+from there, quoted, and every value binds.</li>
+<li><strong>Errors</strong>: <code>SQLite error: no table named 'posts'</code>, <code>SQLite error: table 'log' has no
+primary key, which update needs</code>, <code>SQLite error: the record has no field 'id' for the primary key of
+'users'</code>, <code>SQLite error: the record has no column of 'users' to update besides its primary key</code>.</li>
+</ul>
 <h2 id="sessions">Sessions<a class="hlink" href="#sessions" aria-label="link">&#8203;</a></h2>
 <p><code>lib/session.jai</code> keeps sessions in a table of the app's database (<code>spider_sessions</code>). The cookie
 carries only a 256-bit random id (<a href="../guide/18-random.html#crypto"><code>crypto::random_hex(32)</code></a>);

@@ -76,13 +76,13 @@ guestbook's views are `examples/guestbook/views/*.spider`:
 
 ```
 <article>
-<p class="message">${entry["message"]}</p>
-<p class="byline"><a href="/entries/${entry["id"]}">${entry["name"]}, ${when(entry["created"])}</a></p>
+<p class="message">${entry.message}</p>
+<p class="byline"><a href="/entries/${entry.id}">${entry.name}, ${when(entry.created)}</a></p>
 </article>
 ```
 
 ```cpp
-web::html home_page(array<map<string, var>> entries, string name, string flash, int views) {
+web::html home_page(array<Entry> entries, string name, string flash, int views) {
 	string title = "Guestbook";
 	web::html body = template("views/home.spider", entries, name, flash, views);
 	return template("views/layout.spider", title, body);
@@ -164,6 +164,12 @@ db.query("SELECT * FROM t ORDER BY {}", sql_choose(sort, ["created", "title"]));
 db.query("SELECT * FROM t WHERE id = :id", {"id": 3});                  // one map binds by name
 db.transaction(() => { ... });                  // commits, or rolls back and raises again
 db.begin(); db.commit(); db.rollback(); db.last_insert_id(); db.close();
+
+class User { int id; string handle; bool admin; array<string> tags; }
+array<User> fans = db.query<User>(FANS, artist.id);    // each row a User, by column name
+shared_ptr<User> one = db.query_one<User>(FIND, id);    // a handle, or null when no row
+int id = db.insert("users", user);                      // the fields that are columns; returns the new rowid
+db.update("users", user);                               // the other columns, WHERE the primary key matches; rows changed
 ```
 
 The SQL text must be one of the program's own constants: a string literal, a `const` holding one, a ternary or
@@ -174,6 +180,14 @@ parameters; there is no escape or quote function. `sql_choose(value, choices)` a
 for a `{}` slot (a sort column, a direction) and raises for anything else; its choices are constants too. Statements
 are prepared once per text and kept until the database closes. An SQLite failure is a catchable error carrying
 SQLite's message (`SQLite error: no such table: posts`). Files open in WAL mode.
+
+With a class as a type argument, `query<T>` and `query_one<T>` answer records (`jai::make_record`): each column fills
+the field of its name, a column the class lacks is skipped (a `SELECT *` survives a migration), an INTEGER 0/1 fills
+a `bool`, an INTEGER a `float` and a TEXT of JSON an array, map or class field. `insert(table, record)` and
+`update(table, record)` take the table's name as a constant too and the columns from its schema (`PRAGMA
+table_info`, read again after a schema change), so every identifier comes from the schema, quoted, and every value
+binds. An `INTEGER PRIMARY KEY` holding 0 or null is left for SQLite to assign; an array, map or class field is
+stored as JSON; a record may also be a `map<string, var>`.
 
 **Sessions** (`lib/session.jai`): `spider::SessionStore sessions = spider::SessionStore(db);`, then
 `spider::Session s = sessions.load(req)`, `s.get/set/erase/take`, `sessions.save(s, response)`,

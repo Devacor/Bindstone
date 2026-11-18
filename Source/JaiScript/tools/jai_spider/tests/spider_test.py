@@ -171,6 +171,7 @@ class Suite:
 		self.cookies_and_sessions()
 		self.database()
 		self.sql_safety()
+		self.typed_rows()
 		self.errors()
 		self.hot_reload()
 		self.static_files()
@@ -299,6 +300,38 @@ class Suite:
 		r = self.request("POST", "/sql/types")
 		self.check("int, float, bool, null and text bind as themselves", r.json() == [
 			{"t": "integer", "v": 1}, {"t": "real", "v": 2.5}, {"t": "integer", "v": 1}, {"t": "null", "v": None}, {"t": "text", "v": "it's \"q\" é"}], r.text())
+
+	def typed_rows(self):
+		r = self.request("POST", "/members", json.dumps({"handle": "rex", "admin": True, "score": 2, "tags": ["pup", "artist"]}), {"Content-Type": "application/json"})
+		self.check("from_json<T> builds a class, and insert writes its fields as columns", r.status == 201 and r.json() == {"id": 1}, r.text())
+		r = self.request("POST", "/members/from-map")
+		self.check("insert takes a map, and a key that is no column is skipped", r.json() == {"id": 2}, r.text())
+		r = self.request("GET", "/members")
+		self.check("query<T> answers records: an INTEGER 0/1 column fills a bool, a REAL a float, a JSON TEXT an array",
+			r.json() == {"shown": ["rex (admin) 2.0", "mapped (admin) 0.0"], "tags": ["pup", "artist"]}, r.text())
+		r = self.request("GET", "/members/1")
+		self.check("query_one<T> answers a handle", r.json() == {"handle": "rex", "admin": True, "tags": ["pup", "artist"]}, r.text())
+		r = self.request("GET", "/members/9")
+		self.check("query_one<T> of no row is null", r.status == 404, r.text())
+		r = self.request("PUT", "/members/1")
+		self.check("update writes the other columns WHERE the primary key matches", r.json() == {"changed": 1}, r.text())
+		r = self.request("GET", "/members")
+		self.check("the update stored the float and the array", r.json()["shown"][0] == "rex (admin) 9.5", r.text())
+		r = self.request("GET", "/members/1")
+		self.check("an array field round-trips as JSON text", r.json()["tags"] == ["pup", "artist", "edited"], r.text())
+		r = self.request("GET", "/member-errors/wrong-type")
+		self.check("a column that does not fit its field raises naming both types",
+			r.status == 500 and b"Database.query: field &#39;handle&#39; of &#39;WrongMember&#39; is int, not string" in r.body, r.text()[:200])
+		r = self.request("GET", "/member-errors/run-time-table?t=items")
+		self.check("a table name the program does not spell is refused",
+			r.status == 500 and b"a table name must be a constant; a value never names a table" in r.body, r.text()[:200])
+		r = self.request("GET", "/member-errors/no-table")
+		self.check("insert into a missing table raises", r.status == 500 and b"SQLite error: no table named &#39;nowhere_at_all&#39;" in r.body, r.text()[:200])
+		r = self.request("GET", "/member-errors/no-key")
+		self.check("update needs a primary key", r.status == 500 and b"SQLite error: table &#39;keyless&#39; has no primary key, which update needs" in r.body, r.text()[:200])
+		r = self.request("GET", "/member-errors/missing-key")
+		self.check("update needs the record's key field",
+			r.status == 500 and b"SQLite error: the record has no field &#39;id&#39; for the primary key of &#39;members&#39;" in r.body, r.text()[:200])
 
 	def errors(self):
 		r = self.request("GET", "/boom")
@@ -548,7 +581,7 @@ def run_guestbook(exe, backend, verbose):
 		card.write_text(original.replace("<article>", '<article class="edited">'), encoding="utf-8")
 		r = suite.request("GET", "/")
 		suite.check("guestbook: an edited template applies on the next request", b'<article class="edited">' in r.body, r.text()[:400])
-		card.write_text(original.replace('${entry["message"]}', "${missing_name}"), encoding="utf-8")
+		card.write_text(original.replace('${entry.message}', "${missing_name}"), encoding="utf-8")
 		r = suite.request("GET", "/")
 		suite.check("guestbook: a template edit that does not check leaves the last version serving",
 			r.status == 200 and b'<article class="edited">' in r.body and b"&lt;b&gt;hi&lt;/b&gt;" in r.body, r.text()[:400])

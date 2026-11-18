@@ -8,16 +8,23 @@
 //   db.execute(sql, a, b, ...) -> int               // rows changed; a text of several statements (no parameters) runs them all
 //   db.query(sql, a, b, ...) -> array<map<string, var>>
 //   db.query_one(sql, ...) -> map<string, var> or null
+//   db.query<T>(sql, ...) -> array<T>               // each row a record of the script class T (jai::make_record)
+//   db.query_one<T>(sql, ...) -> shared_ptr<T> or null
 //   db.value(sql, ...) -> the first column of the first row, or null
+//   db.insert(table, record) -> int                 // the new rowid; the record's fields that are columns of the table
+//   db.update(table, record) -> int                 // rows changed; WHERE the table's primary key = the record's
 //   db.transaction(fn)  db.begin()  db.commit()  db.rollback()  db.last_insert_id()  db.close()  db.is_open()
 //
 // Each ? takes the next argument; an array argument expands its ? to one placeholder per element (IN (?) with [1, 2, 3]).
 // Each {} takes the next argument too, which must be sql_choose(value, ["created", "title"]): one of the constant choices,
 // for what a parameter cannot be (a column to sort by). One map argument binds :name, @name or $name instead. A row maps
-// column names to int, float, string (TEXT, and BLOB as its bytes) or null.
+// column names to int, float, string (TEXT, and BLOB as its bytes) or null; a typed row stores each column in the class's field
+// of that name (a column the class lacks is skipped). insert and update take the table's name as a constant too, and the
+// columns from the table's schema: every identifier they write comes from the schema, quoted, and every value binds.
 #include <sqlite3.h>
 #include <jaiscript/jaiscript.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <cstring>
 #include <filesystem>
@@ -32,6 +39,7 @@
 namespace spider_host {
 
 inline constexpr const char* k_sql_refusal = "SQL text must be a constant; pass values as parameters (?)";
+inline constexpr const char* k_table_refusal = "a table name must be a constant; a value never names a table";
 
 // One of a sql_choose call's constant choices: the only thing a {} slot of a statement takes
 class sql_fragment {
@@ -67,6 +75,14 @@ public:
 	sqlite3* handle = nullptr;
 	std::unordered_map<std::string, sqlite3_stmt*> statements;
 	int savepoint_depth = 0;
+	// insert and update read a table's columns once per schema: a change to any table (PRAGMA schema_version) drops them all
+	struct table_column {
+		std::string name;
+		bool rowid_alias = false;   // INTEGER PRIMARY KEY: SQLite assigns it when an insert leaves it out
+		int primary_key = 0;        // its position in the primary key, from 1; 0 when it is not part of it
+	};
+	std::unordered_map<std::string, std::vector<table_column>> tables;
+	jai::script_int tables_schema = -1;
 };
 
 // A constant SQL text split at its slots: pieces[i] slot[i] pieces[i + 1] ..., 'v' a ? value slot, 'f' a {} fragment slot;
@@ -204,6 +220,74 @@ public:
 		return row_of(use.statement);
 	}
 
+	jai::script_value query(const jai::script_type& type, const std::string& sql, const std::vector<jai::script_value>& params) {
+		admit(sql, "Database.query");
+		bound_statement use(*this, sql, params);
+		jai::script_value rows = jai::script_value::make_array(type.info(), eng_);
+		while (step_row(use.statement)) { rows.unchecked_get_array_storage()->push(record_of(type, use.statement, false, "Database.query")); }
+		return rows;
+	}
+
+	jai::script_value query_one(const jai::script_type& type, const std::string& sql, const std::vector<jai::script_value>& params) {
+		admit(sql, "Database.query_one");
+		bound_statement use(*this, sql, params);
+		if (!step_row(use.statement)) { return jai::script_value(std::monostate{}, eng_); }
+		return record_of(type, use.statement, true, "Database.query_one");
+	}
+
+	// INSERT INTO "table" (the record's fields that are columns) VALUES (?, ...); an INTEGER PRIMARY KEY holding 0 or null is
+	// left out, so SQLite assigns it
+	jai::script_int insert(const std::string& table, const jai::script_value& record) {
+		const auto& columns = table_columns(table, "Database.insert");
+		const jai::record_field_list fields = fields_of(record, "Database.insert");
+		std::string names, slots;
+		std::vector<const jai::script_value*> values;
+		for (const auto& column : columns) {
+			const jai::script_value* value = field_named(fields, column.name);
+			if (!value) { continue; }
+			const jai::script_value& v = value->deref();
+			if (column.rowid_alias && (v.is_null() || (v.is_int() && v.as_int() == 0))) { continue; }
+			names += (names.empty() ? "" : ", ") + quoted(column.name);
+			slots += values.empty() ? "?" : ", ?";
+			values.push_back(value);
+		}
+		const std::string sql = values.empty() ? "INSERT INTO " + quoted(table) + " DEFAULT VALUES"
+			: "INSERT INTO " + quoted(table) + " (" + names + ") VALUES (" + slots + ")";
+		run_bound(sql, values);
+		return static_cast<jai::script_int>(sqlite3_last_insert_rowid(open_handle()));
+	}
+
+	// UPDATE "table" SET (every other column the record has) WHERE (the primary key's columns) = the record's
+	jai::script_int update(const std::string& table, const jai::script_value& record) {
+		const auto& columns = table_columns(table, "Database.update");
+		const jai::record_field_list fields = fields_of(record, "Database.update");
+		std::vector<const sqlite_connection::table_column*> key;
+		for (const auto& column : columns) {
+			if (column.primary_key > 0) { key.push_back(&column); }
+		}
+		if (key.empty()) { fail(("table '" + table + "' has no primary key, which update needs").c_str()); }
+		std::sort(key.begin(), key.end(), [](const auto* a, const auto* b) { return a->primary_key < b->primary_key; });
+		std::string set, where;
+		std::vector<const jai::script_value*> values, key_values;
+		for (const auto& column : columns) {
+			if (column.primary_key > 0) { continue; }
+			const jai::script_value* value = field_named(fields, column.name);
+			if (!value) { continue; }
+			set += (set.empty() ? "" : ", ") + quoted(column.name) + " = ?";
+			values.push_back(value);
+		}
+		for (const auto* column : key) {
+			const jai::script_value* value = field_named(fields, column->name);
+			if (!value) { fail(("the record has no field '" + column->name + "' for the primary key of '" + table + "'").c_str()); }
+			where += (where.empty() ? "" : " AND ") + quoted(column->name) + " = ?";
+			key_values.push_back(value);
+		}
+		if (values.empty()) { fail(("the record has no column of '" + table + "' to update besides its primary key").c_str()); }
+		values.insert(values.end(), key_values.begin(), key_values.end());
+		run_bound("UPDATE " + quoted(table) + " SET " + set + " WHERE " + where, values);
+		return static_cast<jai::script_int>(sqlite3_changes64(open_handle()));
+	}
+
 	jai::script_value value(const std::string& sql, const std::vector<jai::script_value>& params) {
 		admit(sql, "Database.value");
 		bound_statement use(*this, sql, params);
@@ -264,6 +348,102 @@ private:
 
 	void admit(const std::string& sql, const char* callable) {
 		if (!eng_ || !eng_->constant_argument_admits(callable, 0, sql)) { throw std::runtime_error(k_sql_refusal); }
+	}
+
+	// A row as a record of the class `type` names (a shared handle for query_one): columns by name, a column the class lacks skipped
+	jai::script_value record_of(const jai::script_type& type, sqlite3_stmt* statement, bool shared, const char* who) {
+		jai::record_field_list fields;
+		const int columns = sqlite3_column_count(statement);
+		fields.reserve(static_cast<size_t>(columns));
+		for (int column = 0; column < columns; ++column) {
+			const char* name = sqlite3_column_name(statement, column);
+			fields.emplace_back(std::string(name ? name : ""), column_value(statement, column));
+		}
+		auto made = shared ? jai::make_shared_record(*eng_, type, fields, who) : jai::make_record(*eng_, type, fields, who);
+		if (!made) { throw std::runtime_error(eng_->format_error(made)); }
+		return std::move(made.value());
+	}
+
+	jai::record_field_list fields_of(const jai::script_value& record, const char* who) {
+		auto fields = jai::record_fields(*eng_, record, who);
+		if (!fields) { throw std::runtime_error(eng_->format_error(fields)); }
+		return std::move(fields.value());
+	}
+
+	// a field fills the column of its exact name, as a row's column fills the field of its exact name (query<T>)
+	static const jai::script_value* field_named(const jai::record_field_list& fields, const std::string& column) {
+		for (const auto& [name, value] : fields) {
+			if (name == column) { return &value; }
+		}
+		return nullptr;
+	}
+
+	static std::string quoted(const std::string& identifier) {
+		std::string out = "\"";
+		for (char c : identifier) {
+			out += c;
+			if (c == '"') { out += '"'; }
+		}
+		return out + "\"";
+	}
+
+	// The columns of a table the program names by a constant, read from the schema
+	const std::vector<sqlite_connection::table_column>& table_columns(const std::string& table, const char* callable) {
+		if (!eng_ || !eng_->constant_argument_admits(callable, 0, table)) { throw std::runtime_error(k_table_refusal); }
+		sqlite3* handle = open_handle();
+		const jai::script_int schema = plain_int("PRAGMA schema_version");
+		if (schema != connection_->tables_schema) {
+			connection_->tables.clear();
+			connection_->tables_schema = schema;
+		}
+		if (auto found = connection_->tables.find(table); found != connection_->tables.end()) { return found->second; }
+		sqlite3_stmt* statement = nullptr;
+		if (sqlite3_prepare_v2(handle, "SELECT name, type, pk FROM pragma_table_info(?)", -1, &statement, nullptr) != SQLITE_OK) { fail(); }
+		std::vector<sqlite_connection::table_column> columns;
+		int key_columns = 0;
+		sqlite3_bind_text64(statement, 1, table.data(), table.size(), SQLITE_TRANSIENT, SQLITE_UTF8);
+		int code = SQLITE_ROW;
+		while ((code = sqlite3_step(statement)) == SQLITE_ROW) {
+			sqlite_connection::table_column column;
+			const auto* name = reinterpret_cast<const char*>(sqlite3_column_text(statement, 0));
+			const auto* declared = reinterpret_cast<const char*>(sqlite3_column_text(statement, 1));
+			column.name = name ? name : "";
+			column.primary_key = sqlite3_column_int(statement, 2);
+			std::string type = declared ? declared : "";
+			for (char& c : type) { c = static_cast<char>(std::toupper(static_cast<unsigned char>(c))); }
+			column.rowid_alias = column.primary_key == 1 && type == "INTEGER";
+			key_columns += column.primary_key > 0;
+			columns.push_back(std::move(column));
+		}
+		sqlite3_finalize(statement);
+		if (code != SQLITE_DONE) { fail(); }
+		if (columns.empty()) { fail(("no table named '" + table + "'").c_str()); }
+		if (key_columns != 1) {
+			for (auto& column : columns) { column.rowid_alias = false; }   // only a lone INTEGER PRIMARY KEY is the rowid
+		}
+		return connection_->tables.emplace(table, std::move(columns)).first->second;
+	}
+
+	jai::script_int plain_int(const char* sql) {
+		sqlite3_stmt* statement = prepare_uncached(sql, nullptr);
+		jai::script_int value = 0;
+		if (sqlite3_step(statement) == SQLITE_ROW) { value = static_cast<jai::script_int>(sqlite3_column_int64(statement, 0)); }
+		sqlite3_finalize(statement);
+		return value;
+	}
+
+	// A statement made from the schema's identifiers, its values bound in order
+	void run_bound(const std::string& sql, const std::vector<const jai::script_value*>& values) {
+		sqlite3_stmt* statement = cached_statement(sql);
+		struct reset_on_exit {
+			sqlite3_stmt* statement;
+			~reset_on_exit() {
+				sqlite3_reset(statement);
+				sqlite3_clear_bindings(statement);
+			}
+		} reset{statement};
+		for (size_t i = 0; i < values.size(); ++i) { bind_one(statement, static_cast<int>(i + 1), *values[i]); }
+		step_to_end(statement);
 	}
 
 	// The text SQLite prepares: each {} replaced by its sql_choose choice, each ? of an array argument by one ? per element;
@@ -471,10 +651,23 @@ auto database_method(Body body, std::index_sequence<I...>) {
 	};
 }
 
+template<typename Body, size_t... I>
+auto typed_database_method(Body body, std::index_sequence<I...>) {
+	return [body](database& self, const jai::script_type& type, const std::string& sql, database_argument<I>... params) {
+		return body(self, type, sql, std::vector<jai::script_value>{params...});
+	};
+}
+
 // one overload per argument count, 0 to 16 parameters after the SQL text
 template<typename Binder, typename Body, size_t... Counts>
 void bind_database_method(Binder& binder, const char* name, Body body, std::index_sequence<Counts...>) {
 	(binder.method(name, database_method(body, std::make_index_sequence<Counts>{})), ...);
+}
+
+// the same after a type argument (db.query<T>(sql, ...)), whose result the option types
+template<typename Binder, typename Body, typename Option, size_t... Counts>
+void bind_typed_database_method(Binder& binder, const char* name, Body body, Option result, std::index_sequence<Counts...>) {
+	(binder.method(name, typed_database_method(body, std::make_index_sequence<Counts>{}), result), ...);
 }
 
 inline void register_database(jai::engine& eng, const std::filesystem::path& app_dir) {
@@ -496,6 +689,14 @@ inline void register_database(jai::engine& eng, const std::filesystem::path& app
 	bind_database_method(binder, "value", [](database& self, const std::string& sql, const std::vector<jai::script_value>& params) {
 		return self.value(sql, params);
 	}, counts);
+	bind_typed_database_method(binder, "query", [](database& self, const jai::script_type& type, const std::string& sql, const std::vector<jai::script_value>& params) {
+		return self.query(type, sql, params);
+	}, jai::returns_array_of_type_argument, counts);
+	bind_typed_database_method(binder, "query_one", [](database& self, const jai::script_type& type, const std::string& sql, const std::vector<jai::script_value>& params) {
+		return self.query_one(type, sql, params);
+	}, jai::returns_shared_ptr_of_type_argument, counts);
+	binder.method("insert", [](database& self, const std::string& table, const jai::script_value& record) { return self.insert(table, record); });
+	binder.method("update", [](database& self, const std::string& table, const jai::script_value& record) { return self.update(table, record); });
 	binder.method("transaction", [](database& self, const jai::script_value& fn) { return self.transaction(fn); });
 	binder.method("begin", [](database& self) { self.begin(); });
 	binder.method("commit", [](database& self) { self.commit(); });
@@ -508,6 +709,9 @@ inline void register_database(jai::engine& eng, const std::filesystem::path& app
 	binder.build();
 	for (const char* method : {"Database.execute", "Database.query", "Database.query_one", "Database.value"}) {
 		eng.constant_argument(method, 0, k_sql_refusal);
+	}
+	for (const char* method : {"Database.insert", "Database.update"}) {
+		eng.constant_argument(method, 0, k_table_refusal);
 	}
 	eng.constant_argument("sql_choose", 1, "sql_choose's choices must be constants: an array literal of strings, or a const of one");
 	jai::engine* engine_pointer = &eng;

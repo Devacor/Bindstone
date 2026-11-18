@@ -9,6 +9,16 @@ Database db = open_database("guestbook.db");
 db.execute("CREATE TABLE IF NOT EXISTS entries (id INTEGER PRIMARY KEY, name TEXT NOT NULL, message TEXT NOT NULL, created INTEGER NOT NULL)");
 spider::SessionStore sessions = spider::SessionStore(db);
 
+// one row of entries: query<Entry> fills it by column name, insert writes it back
+class Entry {
+	int id;
+	string name;
+	string message;
+	int created;
+}
+const string NEWEST = "SELECT * FROM entries ORDER BY id DESC LIMIT 50";
+const string ENTRY = "SELECT * FROM entries WHERE id = ?";
+
 int page_views;                   // declared without an initializer: the count survives every reload
 
 spider::Router routes = spider::Router();
@@ -16,7 +26,7 @@ spider::Router routes = spider::Router();
 routes.get("/", (spider::Request req) => {
 	page_views += 1;
 	spider::Session s = sessions.load(req);
-	array<map<string, var>> entries = db.query("SELECT id, name, message, created FROM entries ORDER BY id DESC LIMIT 50");
+	array<Entry> entries = db.query<Entry>(NEWEST);
 	spider::Response r = spider::html(home_page(entries, s.get("name", ""), s.take("flash", ""), page_views));
 	sessions.save(s, r);
 	return r;
@@ -42,7 +52,7 @@ routes.post("/sign", (spider::Request req) => {
 });
 
 routes.get("/entries/:id", (spider::Request req) => {
-	var entry = db.query_one("SELECT id, name, message, created FROM entries WHERE id = ?", req.param("id"));
+	shared_ptr<Entry> entry = db.query_one<Entry>(ENTRY, req.param("id"));
 	if (entry == null) { return spider::not_found("No entry " + req.param("id")); }
 	return spider::html(entry_page(entry));
 });
@@ -66,6 +76,9 @@ routes.post("/api/entries", (spider::Request req) => {
 spider::spin(routes);
 
 int add_entry(string name, string message) {
-	db.execute("INSERT INTO entries (name, message, created) VALUES (?, ?, ?)", name, message, time::unix_ms() / 1000);
-	return db.last_insert_id();
+	Entry entry;
+	entry.name = name;
+	entry.message = message;
+	entry.created = time::unix_ms() / 1000;
+	return db.insert("entries", entry);   // id 0 is left out, so SQLite assigns it
 }

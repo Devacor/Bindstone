@@ -201,17 +201,35 @@ entries declare theirs too (`'time::now' expects 0 argument(s), got 1`, `time::d
 error in a `parallel_for` body or a lambda handed to `parallel_transform`/`parallel_reduce`, a warning in a destructor or a
 `hot_reload_migrate` (a run cannot suspend there).
 
-**Script namespaces** — `ns::f(args)` checks as the bare call does, at any depth (`using ns::f;` is a token rewrite, so it
-is the qualified call): against the unit's declarations of the function (a later declaration of a signature replaces the
-earlier one) together with any the engine holds from another unit's run, an error only when none takes the call; a namespace
-only another unit declared checks against the engine's held declarations the same way. `ns::x` reads and stores by the
-declared type of the unit's own namespace variable (tentative: diagnostics, never a proof; a class-typed value slot types
-nothing, since it may hold a subclass). A class of the namespace's name keeps the call lenient (its statics answer too).
-A bare name in a namespace's code is the member a declaration of that namespace makes, then of each enclosing one, in any
-unit of the program (`namespace_member_declared`: the unit's own members, the program's names, the engine's): a function or a
-variable another unit declares resolves as its qualified spelling does, lenient until that unit has run. A class is named
-by the parser, which reads the bare name as the qualified one (`parser::qualify_namespace_classes`), so the checker never
-counts a class as such a member, nor a nested namespace, which only its path names.
+**Script namespaces** — a namespace's member has two spellings, `ns::f` anywhere (`using ns::f;` is a token rewrite, so it
+is the qualified name) and a bare `f` in the namespace's code, and one resolution judges both: a bare name the walk's scopes
+do not hold as a variable, and no member of the class being walked takes, is the member of the innermost enclosing namespace
+that declares it (`enclosing_namespace_member`, over `namespace_member_declared`: the unit's own members, the program's
+names, the engine's), and from there the bare use and the qualified one run the same code (`check_namespace_call`,
+`namespace_member_read`, `check_namespace_variable_store`) and report under the qualified name. The lookup happens when the
+code runs, so a bare name that something outside the namespace declares too (an enclosing namespace's member, a program-scope
+name) is judged as the member only once the member's declaration is sure to have run: it stands above the use in the unit, or
+the engine holds it (`namespace_member_settled`); otherwise a function called from top-level code above the declaration, or
+before the declaring file's import, reaches the outside name, and the use stays lenient. A namespace's function is
+never a variable of its body's scope: the walk still enters it there (`var_entry::namespace_function`, for the redeclaration
+and shadow reports), and every lookup sees through the entry, so a function declared above the call checks as one declared
+below it or in another block. A call checks against the function's declarations (`namespace_function_overloads`): the unit's
+own (a later declaration of a signature replaces the earlier one), the ones other units of the program make (the pooled
+table, under the qualified name) and the ones the engine holds from a run, an error only when none takes the call. Its
+result is typed (tentative: diagnostics, never a proof) when the one declaration that takes it is the unit's own, or another
+unit's that nothing else of its signature can stand in for: no second unit declares that signature, and the engine holds
+none of it but that declaration or the same unit's earlier text, which its reload replaces. `[[nodiscard]]`, default
+arguments, coroutines and the narrowing a call ends follow from the same declarations. A function read as a value is a
+`function`, with its declarations for a signature slot to judge when the unit makes every one a call could reach. A
+variable reads and stores by the declared type of the unit's own declaration, else of the one another unit of the program
+makes (tentative; a class-typed value slot types nothing, since it may hold a subclass; a namespace's top-level store to a
+member declared further down is left alone, as the read is, since the name still reaches what is outside). A class of the
+namespace's name keeps the call lenient (its statics answer too), as does a unit with a dynamic-path import for a member it
+does not declare, and a member only the host registers. A class is named by the parser, which reads the bare name as the
+qualified one (`parser::qualify_namespace_classes`), so the checker never counts a class as such a member, nor a nested
+namespace, which only its path names. `::f` is the program scope's, whatever a local or a namespace holds under the name,
+and a call whose bare name a local, a member or a namespace's member takes is never judged as another unit's program-scope
+function of that name (`reaches_program_scope`).
 
 **Members** — on a receiver whose class is fully known (in-script hierarchy resolvable, or
 engine-registered `class_definition` incl. `_get_`/`_set_` properties and statics),
@@ -443,8 +461,10 @@ checker cannot catch. The class table rides the engine the same way; a class re-
 a different shape replaces its entry at the next gather (the last unit gathered wins), and a
 unit's own declaration always wins over the table's.
 
-**Functions and globals across units** — a call of a free function the unit does not declare checks against the one
-declaration exactly one other unit of the program makes (`program_function`: its count, its arguments, its result as a
+**Functions and globals across units** — the path-keyed tables hold each unit's functions and variables, a namespace's
+under their qualified names (`collect_unit_functions`, `collect_unit_globals`: `shop::tax`), which is what a namespace
+member's check reads of other units (Script namespaces above). A call of a free function the unit does not declare checks
+against the one declaration exactly one other unit of the program makes (`program_function`: its count, its arguments, its result as a
 tentative type); a read of a program-scope variable another unit declares once with a spelled scalar, text, container or
 math type is that type (tentative), as a store already checks. The engine may hold the name from that same unit's earlier
 run (the table's declaration replaces it: a reload's dependents check against the new text); any other holder (another

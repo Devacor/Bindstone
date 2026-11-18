@@ -126,13 +126,15 @@ namespace jai {
         // replaces an entry (newest declaration wins); a unit's own declaration always wins
         // over the table.
         using program_class_map = std::unordered_map<std::string, std::shared_ptr<class_decl>>;
-        // Program closure functions: name -> unit path -> the unit's declarations of it (a re-gather of a unit replaces its own; the
-        // declarations stay alive with the table, so a stamped decl never dangles and no address is reused). A call whose name the
+        // Program closure functions: name -> unit path -> the unit's declarations of it, a namespace's function under its qualified
+        // name ("shop::tax": what a call of it checks against in another unit). A re-gather of a unit replaces its own; the
+        // declarations stay alive with the table, so a stamped decl never dangles and no address is reused. A call whose name the
         // unit does not declare, and exactly one other unit declares once, resolves to that decl for the inliner and the argument
         // proofs, and the diagnostics check the call against it (its count, its arguments, the use of its result).
         using program_function_map = std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std::shared_ptr<const function_decl>>>>;
-        // Program closure globals: name -> unit path -> the unit's top-level variable declarations of it (kept alive like the
-        // functions). A name the unit does not declare, and exactly one other unit declares once with a spelled non-reference type,
+        // Program closure globals: name -> unit path -> the unit's top-level variable declarations of it, a namespace's variable
+        // under its qualified name (kept alive like the functions). A name the unit does not declare, and exactly one other unit
+        // declares once with a spelled non-reference type,
         // is typed by that declaration in the proof pass; a class-typed one is typed once its class is defined, and a unit whose
         // proofs waited re-stamps after each import completes (proof_stats::deferred). The diagnostics read a scalar, text, container
         // or math one by it (tentative), and check a store against it.
@@ -196,7 +198,8 @@ namespace jai {
         void collect_unit_names(const std::vector<declaration_ptr>& decls, std::unordered_set<std::string>& out);
         // Every top-level class `decls` declares (namespace members flattened), newest wins; true when an entry changed.
         bool collect_unit_classes(const std::vector<declaration_ptr>& decls, program_class_map& out);
-        // Every top-level free function `decls` declares, under the unit's path (its earlier entry replaced).
+        // Every free function `decls` declares at the top level or in a namespace (qualified), under the unit's path (its earlier
+        // entry replaced); collect_unit_globals does the same for variables.
         void collect_unit_functions(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_function_map& out);
         void collect_unit_globals(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_global_map& out);
         void collect_unit_enums(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_enum_map& out);

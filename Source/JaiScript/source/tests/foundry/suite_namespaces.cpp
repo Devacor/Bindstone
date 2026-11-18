@@ -573,6 +573,97 @@ public:
             });
         });
 
+        // A bare name that resolves to a namespace's member is checked as its qualified spelling is, wherever the member is
+        // declared: above the use, below it, in another block of the namespace or in another file of the program
+        test("a_bare_namespace_member_checks_as_its_qualified_spelling", [&]() {
+            const std::string members = "int tax(int p) { return p + 1; } int rate(int a, int b = 2) { return a + b; } int sq(int v) { return v; } "
+                "int sq(int v, int w) { return v * w; } [[nodiscard]] int fee() { return 1; } coroutine int twice() { yield 1; yield 2; } int base = 10; ";
+            // {the namespace's code, what the load says of it}: the same code names each member bare and as shop::member
+            const std::vector<std::pair<std::string, std::string>> uses{
+                {"int use() { return @tax(\"x\", 2, 3); }", "'shop::tax' expects 1 argument(s), got 3"},
+                {"int use() { return @tax(\"x\"); }", "argument 1 of 'shop::tax': cannot pass 'string' to 'p' declared 'int'"},
+                {"int use() { string s = @tax(1); return 0; }", "cannot initialize 's' declared 'string' with 'int'"},
+                {"int use() { return @rate(); }", "'shop::rate' expects 1 to 2 argument(s), got 0"},
+                {"int use() { return @sq(1, 2, 3); }", "no overload of 'shop::sq' matches this call (3 argument(s))"},
+                {"void use() { @fee(); }", "the result of 'shop::fee' is discarded, but 'shop::fee' is [[nodiscard]]"},
+                {"int use() { int k = @twice(); return k; }", "cannot initialize 'k' declared 'int' with 'coroutine<int>'"},
+                {"int use() { string s = @base; return 0; }", "cannot initialize 's' declared 'string' with 'int'"},
+                {"void use() { @base = \"x\"; }", "cannot assign 'string' to 'shop::base' declared 'int'"},
+                {"int use() { int n = 0; for (var v : @twice()) { n += v; } auto _ = @fee(); @base = @sq(2) + @sq(2, 3) + @rate(1); return @tax(@base) + n; }", ""},
+            };
+            const auto spelled = [](std::string text, const std::string& prefix) {
+                for (size_t at = text.find('@'); at != std::string::npos; at = text.find('@', at)) { text.replace(at, 1, prefix); }
+                return text;
+            };
+            program_files files("bare");
+            files.write("declaring.jai", "namespace shop { " + members + "}");
+            check_each(uses, [&](const auto& use) {
+                for (const std::string prefix : std::vector<std::string>{"", "shop::"}) {
+                    const std::string code = "namespace shop { " + spelled(use.first, prefix) + " }";
+                    files.write("naming.jai", code);
+                    for (const std::string& program : std::vector<std::string>{
+                        "namespace shop { " + members + "} " + code + " shop::use(); 1",
+                        code + " namespace shop { " + members + "} shop::use(); 1",
+                        "import \"declaring.jai\"; import \"naming.jai\"; shop::use(); 1",
+                        "import \"naming.jai\"; import \"declaring.jai\"; shop::use(); 1",
+                    }) {
+                        const std::string got = outcome(*files.engine(), program);
+                        check_true(use.second.empty() ? got == "1" : got.find(use.second) != std::string::npos, program + "\n" + code + "\n" + got);
+                    }
+                }
+            });
+            // a function read as a value carries the declarations a signature slot judges
+            check_each(std::vector<std::string>{"tax", "shop::tax"}, [&](const std::string& name) {
+                const std::string got = outcome(*files.engine(), "namespace shop { int tax(int p) { return p + 1; } int use() { function<int(int)> fits = " + name +
+                    "; function<string(string)> f = " + name + "; return fits(1); } } shop::use()");
+                check_true(got.find("cannot initialize 'f' declared 'function<string(string)>' with 'function': 'shop::tax' declares parameter 'p' as 'int'") != std::string::npos, got);
+            });
+            // the name a bare use reaches is the nearest one: a local or a parameter, then the namespace's member, then each enclosing
+            // namespace's, then the program's; ::name is the program's
+            const std::string nested = R"(
+                int f(int a) { return 1; }
+                string base = "program";
+                namespace outer {
+                    int f(int a, int b) { return 2; }
+                    int base = 5;
+                    int g(int a) { return 7; }
+                    namespace inner {
+                        int f(int a, int b, int c) { return 3; }
+                        USE
+                    }
+                }
+            )";
+            check_each(std::vector<std::pair<std::string, std::string>>{
+                {"int use() { return f(1, 2, 3) * 100 + ::f(1) * 10 + outer::f(1, 2) + g(1) + base; }", "324"},
+                {"string use(function<string(string)> f, string base) { string s = base; return f(s) + to_string(::f(1)) + ::base; }", "program!1program"},
+                {"int use() { auto g = [](string s) { return s.size(); }; return g(\"four\"); }", "4"},
+                {"int use() { return f(1); }", "'outer::inner::f' expects 3 argument(s), got 1"},
+                {"int use() { return f(1, 2); }", "'outer::inner::f' expects 3 argument(s), got 2"},
+                {"int use() { return ::f(1, 2); }", "'f' expects 1 argument(s), got 2"},
+                {"int use() { return g(1, 2); }", "'outer::g' expects 1 argument(s), got 2"},
+                {"int use() { string s = base; return 0; }", "cannot initialize 's' declared 'string' with 'int'"},
+                {"int use() { int n = ::base; return n; }", "cannot initialize 'n' declared 'int' with 'string'"},
+            }, [&](const auto& c) {
+                std::string program = nested;
+                program.replace(program.find("USE"), 3, c.first);
+                program += c.first.find("function<string(string)> f") != std::string::npos ? "outer::inner::use([](string s) { return s + \"!\"; }, base)" : "outer::inner::use()";
+                const std::string got = outcome(*files.engine(), program);
+                check_true(got == c.second || (got.size() > 30 && got.find(c.second) != std::string::npos), c.first + "\n" + got);
+            });
+            // another file's program-scope function of the name is judged only where the bare name reaches the program scope
+            files.write("quiet.jai", "[[nodiscard]] int quiet(int x) { return x + 1; }");
+            check_eq(std::string("6"), outcome(*files.engine(), "import \"quiet.jai\"; namespace shop { void quiet(string s) { } int use() { quiet(\"member\"); return 1; } } "
+                "int local() { auto quiet = [](string s) { return 0; }; quiet(\"local\"); return 2; } class K { void quiet(string s) { } int run() { quiet(\"method\"); return 3; } } "
+                "shop::use() + local() + K().run()"));
+            const std::string dropped = outcome(*files.engine(), "import \"quiet.jai\"; void drop() { quiet(1); } 1");
+            check_true(dropped.find("the result of 'quiet' is discarded") != std::string::npos, dropped);
+            // code that runs before the member's declaration reaches what is outside the namespace under the name, so a name both
+            // declare is judged as the member only where the member's declaration stands above the use
+            check_eq(std::string("1"), outcome(*files.engine(), "namespace a { int v = 1; } namespace a::b { int g() { int k = v; return k; } int z = g(); string v = \"s\"; } a::b::z"));
+            files.write("early.jai", "string base = \"program\"; int tax(string s) { return 5; } namespace shop { string early() { string s = base; return s + to_string(tax(s)); } } string first = shop::early();");
+            check_eq(std::string("program5"), outcome(*files.engine(), "import \"early.jai\"; import \"declaring.jai\"; first"));
+        });
+
         // A reload pools what its files declare now, each parsed knowing the others: a member the namespace gains is found
         // bare by the namespace's other files, and a program that still names a dropped member no longer loads
         test("a_reload_brings_a_namespaces_new_members_to_its_other_files", [&]() {

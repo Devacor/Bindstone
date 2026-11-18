@@ -1159,27 +1159,21 @@ struct engine::implementation {
     std::unordered_set<std::string> program_names_;
     detail::program_class_map program_classes_;
     detail::program_enum_map program_enums_;   // the closure units' top-level enums (an enum value read is no user code: member_expr::enum_constant)
-    detail::program_function_map program_functions_;   // the closure units' free functions (internal/static_checking.md "Programs"; the inliner's cross-unit leaves)
-    detail::program_global_map program_globals_;   // the closure units' top-level variables: the proof pass types them (internal/static_checking.md "Proofs")
+    detail::program_function_map program_functions_;   // the closure units' free functions, a namespace's qualified (internal/static_checking.md "Programs"; the inliner's cross-unit leaves)
+    detail::program_global_map program_globals_;   // the closure units' top-level and namespace variables: the proof pass types the top-level ones (internal/static_checking.md "Proofs")
     std::unordered_map<std::string, std::unordered_map<std::string, uint64_t>> program_name_units_;   // name -> unit path -> unit_key of the unit declaring it
     std::unordered_map<std::string, uint64_t> pooled_unit_keys_;   // unit path -> the unit_key its names were pooled under
-    std::unordered_map<std::string, std::vector<declaration_ptr>> pooled_unit_declarations_;   // unit path -> its functions, globals and enums the tables hold
+    std::unordered_map<std::string, std::vector<declaration_ptr>> pooled_unit_declarations_;   // unit path -> its functions, variables and enums the tables hold
     // moves whenever what the checker reads of the pools (names, class models, enums) changes: a verdict holds while it stands
     uint64_t program_union_epoch_ = 0;
-    static bool pooled_by_path(const declaration_ptr& d) {
-        if (!d) { return false; }
-        const node_type type = d->get_type();
-        return type == node_type::function_decl || type == node_type::variable_decl || type == node_type::enum_decl;
-    }
-    // whether the path-keyed tables already hold exactly these declarations of the unit
-    static bool pools_as(const std::vector<declaration_ptr>& pooled, const std::vector<declaration_ptr>& decls) {
-        size_t next = 0;
+    // the declarations the path-keyed tables hold of a unit: its functions, variables and enums, and its namespaces' functions and variables
+    static void pooled_by_path(const std::vector<declaration_ptr>& decls, bool in_namespace, std::vector<declaration_ptr>& out) {
         for (const auto& d : decls) {
-            if (!pooled_by_path(d)) { continue; }
-            if (next == pooled.size() || pooled[next] != d) { return false; }
-            ++next;
+            if (!d) { continue; }
+            const node_type type = d->get_type();
+            if (type == node_type::function_decl || type == node_type::variable_decl || (type == node_type::enum_decl && !in_namespace)) { out.push_back(d); }
+            else if (type == node_type::namespace_decl) { pooled_by_path(static_cast<const namespace_decl*>(d.get())->declarations, true, out); }
         }
-        return next == pooled.size();
     }
     // The pooled classes a namespace declares, by bare name, and a count that moves whenever the pooled classes do: a parse reads a
     // bare name in a namespace's code as that namespace's class (parser::qualify_namespace_classes), whichever unit declares it
@@ -1210,9 +1204,10 @@ struct engine::implementation {
         moved = detail::collect_unit_classes(decls, program_classes_) || moved;
         if (program_classes_.size() != classes_before) { index_pooled_namespace_classes(); }
         register_generics(decls, path);
-        if (std::vector<declaration_ptr>& pooled = pooled_unit_declarations_[path]; !pools_as(pooled, decls)) {
-            pooled.clear();
-            for (const auto& d : decls) { if (pooled_by_path(d)) { pooled.push_back(d); } }
+        std::vector<declaration_ptr> held;
+        pooled_by_path(decls, false, held);
+        if (std::vector<declaration_ptr>& pooled = pooled_unit_declarations_[path]; pooled != held) {
+            pooled = std::move(held);
             detail::collect_unit_enums(decls, path, program_enums_);
             detail::collect_unit_functions(decls, path, program_functions_);
             detail::collect_unit_globals(decls, path, program_globals_);

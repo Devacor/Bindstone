@@ -299,17 +299,18 @@ public:
 	jai::script_int changes() { return static_cast<jai::script_int>(sqlite3_changes64(open_handle())); }
 	bool in_transaction() { return sqlite3_get_autocommit(open_handle()) == 0; }
 
-	void begin() { run_plain("BEGIN"); }
+	// IMMEDIATE: a deferred read-then-write fails at once, with no busy wait, when another connection committed in between
+	void begin() { run_plain("BEGIN IMMEDIATE"); }
 	void commit() { run_plain("COMMIT"); }
 	void rollback() { run_plain("ROLLBACK"); }
 
-	// fn runs inside BEGIN/COMMIT (a SAVEPOINT when a transaction is open); its failure rolls back and raises again
+	// fn runs inside BEGIN IMMEDIATE/COMMIT (a SAVEPOINT when a transaction is open); its failure rolls back and raises again
 	jai::script_value transaction(const jai::script_value& fn) {
 		sqlite3* handle = open_handle();
 		const bool nested = sqlite3_get_autocommit(handle) == 0;
 		const std::string savepoint = "spider_" + std::to_string(connection_->savepoint_depth + 1);
 		auto body = jai::convert_script_function<jai::script_value()>(fn);   // the throwing flavor: a failure inside raises here
-		run_plain(nested ? "SAVEPOINT " + savepoint : std::string("BEGIN"));
+		run_plain(nested ? "SAVEPOINT " + savepoint : std::string("BEGIN IMMEDIATE"));
 		++connection_->savepoint_depth;
 		jai::script_value result(std::monostate{}, eng_);
 		try {

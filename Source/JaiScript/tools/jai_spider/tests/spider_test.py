@@ -9,7 +9,8 @@ and transactions, script errors and the execution budget (500 with the process a
 requests, a rejected reload that keeps serving, globals that start over in each request's engine, static files (types,
 ETag, 304, HEAD, traversal), the limits (413, 431, 400), chunked bodies, keep-alive and pipelining, and the shutdown
 endpoint; the workers (tests/workers: slow requests that run at once, pipelined answers in order, --workers 1 and the
-queue's 503, spider::every's runs that never overlap and survive a reload); then serves a copy of examples/guestbook
+queue's 503, transactions that read and then write on eight workers at once, spider::every's runs that never overlap and
+survive a reload); then serves a copy of examples/guestbook
 and walks its pages, form, session and JSON API. With --runner, the runner's
 spider:: client (tests/client.jai, tests/client_catch.jai) calls the same server through each transport the build has:
 methods, content kinds, options, the redirect policy, timeouts and errors.
@@ -657,6 +658,23 @@ def check_one_worker(suite):
 	suite.check("one worker: the server serves on after a 503", r.status == 200 and r.text() == "1", r.text())
 
 
+def check_transactions(suite):
+	count = 16
+	def hit():
+		try:
+			return suite_request_fresh(suite, "/hit")
+		except (http.client.HTTPException, OSError):
+			return None
+	answers = in_threads(*[hit] * count)
+	said = ["none" if a is None else str(a.status) + " " + a.text()[:200] for a in answers]
+	committed = [a for a in answers if a is not None and a.status == 200]
+	suite.check("transactions: %d that read and then write at once all commit" % count, len(committed) == count, "; ".join(said))
+	suite.check("transactions: each read what the one before it wrote",
+		sorted(a.text() for a in committed) == sorted(str(n) for n in range(1, count + 1)), "; ".join(said))
+	total = suite.request("GET", "/hits", fresh=True)
+	suite.check("transactions: the count ends at exactly %d" % count, total.status == 200 and total.text() == str(count), total.text()[:200])
+
+
 def check_tasks(suite):
 	def finished_runs():
 		return [row for row in suite.request("GET", "/runs").json() if row["ended"] is not None]
@@ -687,6 +705,7 @@ def run_workers(exe, backend, verbose):
 	return all([
 		worker_server(exe, backend, verbose, "two workers", ["--workers", "2"], "app.jai", check_two_workers),
 		worker_server(exe, backend, verbose, "one worker", ["--workers", "1", "--queue", "1"], "app.jai", check_one_worker),
+		worker_server(exe, backend, verbose, "transactions", ["--workers", "8"], "app.jai", check_transactions),
 		worker_server(exe, backend, verbose, "tasks", ["--workers", "2"], "tasks.jai", check_tasks),
 	])
 

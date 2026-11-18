@@ -182,7 +182,10 @@ whatever path it took (`engine::constant_argument`, gathered from every unit as 
 parameters; there is no escape or quote function. `sql_choose(value, choices)` answers the choice equal to `value`
 for a `{}` slot (a sort column, a direction) and raises for anything else; its choices are constants too. Statements
 are prepared once per text and kept until the database closes. An SQLite failure is a catchable error carrying
-SQLite's message (`SQLite error: no such table: posts`). Files open in WAL mode.
+SQLite's message (`SQLite error: no such table: posts`). Files open in WAL mode. A transaction (`transaction(fn)`,
+`begin()`) takes the database's write lock when it begins (`BEGIN IMMEDIATE`), so transactions on several connections
+queue, each waiting up to the busy timeout for its turn, instead of failing; inside one, `transaction(fn)` is a
+savepoint.
 
 With a class as a type argument, `query<T>` and `query_one<T>` answer records (`jai::make_record`): each column fills
 the field of its name, a column the class lacks is skipped (a `SELECT *` survives a migration), an INTEGER 0/1 fills
@@ -217,7 +220,9 @@ request in a fresh process:
   requests arrive slower than the workers can build, and past that rate they queue. The startup line names how long
   the first (cold) build took; a small app builds in a few milliseconds, one of thousands of lines and dozens of
   templates in tens.
-- **Each engine opens its own SQLite connection** (WAL, a 5 s busy timeout), so engines share no connection.
+- **Each engine opens its own SQLite connection** (WAL, a 5 s busy timeout), so engines share no connection. A
+  transaction takes the write lock when it begins, so the transactions of several workers take turns: what one reads
+  is still so when it writes.
 - **Answers on one connection keep their order**: a connection holds one request at a time, so pipelined requests are
   answered in the order they came, while requests on different connections run at once.
 - **A full house is 503**: past `--queue N` waiting requests (1024 by default) the answer is 503 with `Retry-After: 1`.

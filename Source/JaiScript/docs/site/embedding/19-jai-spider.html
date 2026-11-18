@@ -172,7 +172,10 @@ its bytes) or <code>null</code>.</li>
 <li><strong>Statements</strong> are prepared once and kept until the database closes. A constant text of several
 statements given to <code>execute</code> without values runs them all, which suits a schema.</li>
 <li><strong><code>transaction(fn)</code></strong> commits when <code>fn</code> returns and rolls back when it raises,
-then raises again; inside another transaction it is a savepoint. <code>begin</code>, <code>commit</code>,
+then raises again; inside another transaction it is a savepoint. A transaction takes the database's write lock when it
+begins (<code>BEGIN IMMEDIATE</code>, from <code>transaction</code> and from <code>begin</code>), so transactions on
+several connections queue, each waiting up to the busy timeout for its turn, instead of failing: what one reads is
+still so when it writes. <code>begin</code>, <code>commit</code>,
 <code>rollback</code>, <code>last_insert_id</code>, <code>changes</code>, <code>in_transaction</code>,
 <code>is_open</code> and <code>close</code> exist too.</li>
 <li><strong>Errors</strong> are catchable and carry SQLite's message: <code>SQLite error: no such table: posts</code>.</li>
@@ -279,7 +282,8 @@ build's work, and a worker rebuilding is not yet free: the server keeps up while
 workers can build, and past that rate they queue. The startup line names how long the first build took (a cold one);
 a small app builds in a few milliseconds, one of thousands of lines and dozens of templates in tens.</li>
 <li><strong>Each engine opens its own SQLite connection</strong> (WAL mode, a 5 second busy timeout), so engines never
-share a connection and need no locks; writers wait their turn in SQLite.</li>
+share a connection and need no locks; writers wait their turn in SQLite, and so do transactions, which take the write
+lock when they begin.</li>
 <li><strong>Answers on one connection go out in order.</strong> A connection holds one request at a time, so pipelined
 requests are answered in the order they came; requests on different connections run at once.</li>
 <li><strong>A full house is 503.</strong> When every worker is busy, requests wait in a queue

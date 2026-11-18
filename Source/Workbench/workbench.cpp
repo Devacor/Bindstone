@@ -37,6 +37,7 @@ namespace Workbench {
 		visor(MV::Scene::Node::make(a_managers.renderer, "workbenchVisor")),
 		uiRoot(MV::Scene::Node::make(a_managers.renderer, "workbenchUi")) {
 
+		managers.services.connect(&bindSnapTracking);
 		visor->cameraId(99);
 		viewportClip = visor->make("viewportClip");
 		viewportStencil = viewportClip->attach<MV::Scene::Stencil>();
@@ -195,8 +196,11 @@ namespace Workbench {
 				return;
 			}
 			if (projectPanel && dock->panelShowingAt(managers.renderer.worldFromScreen(a_screenPoint)) == projectPanel) {
-				saveAsBindSnap(a_node, projectPanel->folderAt(a_screenPoint));
+				nodeDroppedOnProject(a_node, a_screenPoint);
 			}
+		};
+		treePanel->canReparent = [this](const std::shared_ptr<MV::Scene::Node>& a_node, const std::shared_ptr<MV::Scene::Node>& a_newParent) {
+			return !contentLocked(a_node, "move") && !contentLocked(a_newParent, "move a node under");
 		};
 		treePanel->onNodeDragged = [this](const std::shared_ptr<MV::Scene::Node>& a_node, const MV::Point<int>& a_screenPoint, bool a_outside) {
 			std::string folder;
@@ -204,8 +208,16 @@ namespace Workbench {
 			if (a_outside && projectPanel && dock->panelShowingAt(managers.renderer.worldFromScreen(a_screenPoint)) == projectPanel) {
 				folder = projectPanel->folderAt(a_screenPoint);
 				auto file = bindSnapFileFor(a_node, folder);
-				std::error_code ignored;
-				note = (std::filesystem::exists(file, ignored) ? "Replace " : "Save as ") + file.generic_string();
+				switch (bindSnapDropKind(a_node, file)) {
+					case BindSnapDrop::SAVE:
+						note = "Save as " + file.generic_string();
+					break;
+					case BindSnapDrop::APPLY:
+						note = "Apply to " + file.generic_string();
+					break;
+					default:
+						note = "Replace or New Asset: " + file.generic_string();
+				}
 			}
 			if (projectPanel) {
 				projectPanel->markDropFolder(folder);
@@ -298,6 +310,7 @@ namespace Workbench {
 
 	App::~App() {
 		managers.services.disconnect<Tooltips>();
+		managers.services.disconnect<MV::Scene::BindSnapTracking>();
 		SDL_SetCursor(SDL_GetDefaultCursor());
 		for (auto&& cursor : { cursorArrow, cursorResizeH, cursorResizeV }) {
 			if (cursor) {
@@ -376,6 +389,49 @@ namespace Workbench {
 		}
 	}
 
+	namespace {
+		std::string unusedChildId(const std::shared_ptr<MV::Scene::Node>& a_parent, const std::string& a_base);
+		std::string nodeLabel(const std::shared_ptr<MV::Scene::Node>& a_node);
+
+		// A BindSnap's file as a linked node names it: what Node::make takes, with no "./" or "Assets/" before it.
+		std::string bindSnapSourceName(const std::filesystem::path& a_file) {
+			std::string name = a_file.generic_string();
+			for (const std::string lead : { "./", "Assets/" }) {
+				if (name.starts_with(lead)) {
+					name = name.substr(lead.size());
+				}
+			}
+			return name;
+		}
+
+		// The link on a node whose file's content is on it.
+		std::shared_ptr<MV::Scene::BindSnapInstance> linkOn(const std::shared_ptr<MV::Scene::Node>& a_node) {
+			if (!a_node) {
+				return nullptr;
+			}
+			auto found = a_node->component<MV::Scene::BindSnapInstance>(false, false);
+			return found && found->built() ? found.self() : nullptr;
+		}
+
+		// Every link on a node and below it, the deepest first.
+		void collectLinks(const std::shared_ptr<MV::Scene::Node>& a_node, std::vector<std::shared_ptr<MV::Scene::BindSnapInstance>>& a_links) {
+			for (auto&& child : *a_node) {
+				collectLinks(child, a_links);
+			}
+			if (auto link = linkOn(a_node)) {
+				a_links.push_back(link);
+			}
+		}
+
+		void captureLinks(const std::shared_ptr<MV::Scene::Node>& a_node) {
+			std::vector<std::shared_ptr<MV::Scene::BindSnapInstance>> links;
+			collectLinks(a_node, links);
+			for (auto&& link : links) {
+				link->captureOverrides();
+			}
+		}
+	}
+
 	void App::dropPrefab(const std::string& a_fileName, const MV::Point<int>& a_screenPoint) {
 		auto worldPoint = managers.renderer.worldFromScreen(a_screenPoint);
 		std::shared_ptr<MV::Scene::Node> parent;
@@ -389,35 +445,189 @@ namespace Workbench {
 			parent = sceneRoot;
 			atPoint = true;
 		}
-		if (!parent) {
+		if (!parent || (linkOn(parent) == nullptr && contentLocked(parent, "place a BindSnap under"))) {
 			return;
 		}
 		try {
-			auto prefab = MV::Scene::Node::loadJai(a_fileName, managers.services, false);
-			parent->add(prefab);
-			if (atPoint) {
-				prefab->position(parent->localFromScreen(a_screenPoint));
+			const auto sourceName = bindSnapSourceName(a_fileName);
+			auto placed = parent->make(unusedChildId(parent, "placing"));
+			auto link = placed->attach<MV::Scene::BindSnapInstance>(managers.services)->placeSource(sourceName);
+			if (!link->built()) {
+				parent->remove(placed);
+				throw std::runtime_error("the file could not be read");
 			}
-			auto dropPosition = prefab->position();
-			prefab->postLoadStep();
-			forEachParallax(prefab, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
+			placed->id(unusedChildId(parent, link->sourceRootId().empty() ? std::string("node") : link->sourceRootId()));
+			if (atPoint) {
+				placed->position(parent->localFromScreen(a_screenPoint));
+			}
+			forEachParallax(placed, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
+			link->markUnchanged();
 			history.record("place " + std::filesystem::path(a_fileName).filename().string(),
-				[parent, prefab, dropPosition]() {
-					parent->add(prefab);
-					prefab->position(dropPosition);
+				[parent, placed]() {
+					parent->add(placed, false);
 				},
-				[prefab]() {
-					prefab->removeFromParent();
+				[placed]() {
+					placed->removeFromParent();
 				});
+			noteBindSnapWritten(sourceName);
 			if (treePanel) {
 				treePanel->refresh();
 			}
-			select(prefab);
+			select(placed);
 			std::cout << "Workbench placed BindSnap: " << a_fileName << std::endl;
 			messageLog->add(MessageLevel::INFO, "Placed " + a_fileName);
 		} catch (const std::exception& a_error) {
 			reportError("BindSnap drop failed (" + a_fileName + "): " + a_error.what());
 		}
+	}
+
+	bool App::contentLocked(const std::shared_ptr<MV::Scene::Node>& a_node, const std::string& a_verb) {
+		auto holder = MV::Scene::BindSnapInstance::holding(a_node);
+		if (!holder) {
+			return false;
+		}
+		messageLog->add(MessageLevel::WARNING, "Cannot " + a_verb + " " + nodeLabel(a_node) + ": it is content of " + holder->source() + ". Unpack " + nodeLabel(holder->owner()) + " first, or change the file.");
+		return true;
+	}
+
+	App::BindSnapDrop App::bindSnapDropKind(const std::shared_ptr<MV::Scene::Node>& a_node, const std::filesystem::path& a_file) const {
+		auto link = linkOn(a_node);
+		if (link && bindSnapSourceName(link->source()) == bindSnapSourceName(a_file)) {
+			return BindSnapDrop::APPLY;
+		}
+		std::error_code ignored;
+		return std::filesystem::exists(a_file, ignored) ? BindSnapDrop::ASK : BindSnapDrop::SAVE;
+	}
+
+	void App::nodeDroppedOnProject(const std::shared_ptr<MV::Scene::Node>& a_node, const MV::Point<int>& a_screenPoint) {
+		const auto folder = projectPanel->folderAt(a_screenPoint);
+		const auto file = bindSnapFileFor(a_node, folder);
+		if (bindSnapDropKind(a_node, file) != BindSnapDrop::ASK) {
+			saveAsBindSnap(a_node, folder);
+			return;
+		}
+		std::weak_ptr<MV::Scene::Node> weakNode = a_node;
+		auto choose = [this, weakNode, folder](BindSnapClash a_onClash) {
+			if (auto node = weakNode.lock()) {
+				saveAsBindSnap(node, folder, a_onClash);
+			}
+		};
+		menuBar->openContext(a_screenPoint, {
+			{ "Replace " + file.filename().string(), "", [choose]() { choose(BindSnapClash::REPLACE); } },
+			{ "New Asset", "", [choose]() { choose(BindSnapClash::NEW_ASSET); } } });
+	}
+
+	void App::noteBindSnapWritten(const std::string& a_sourceName) {
+		std::error_code failed;
+		auto written = std::filesystem::last_write_time(assetFile(a_sourceName), failed);
+		if (!failed) {
+			bindSnapWriteTimes[a_sourceName] = written;
+		}
+	}
+
+	void App::linksChanged() {
+		if (selectedNode && !inScene(selectedNode)) {
+			select(nullptr);
+		}
+		if (treePanel) {
+			treePanel->refresh();
+		}
+		if (inspectorPanel) {
+			inspectorPanel->inspect(selectedNode);
+		}
+	}
+
+	void App::refreshLinksTo(const std::string& a_sourceName, const std::shared_ptr<MV::Scene::Node>& a_except) {
+		std::vector<std::shared_ptr<MV::Scene::BindSnapInstance>> links;
+		collectLinks(sceneRoot, links);
+		for (auto&& link : links) {
+			// one refreshed earlier in the list may have rebuilt what this one was in
+			if (link->ownerIsAlive() && link->owner() != a_except && inScene(link->owner()) && bindSnapSourceName(link->source()) == a_sourceName) {
+				link->refresh();
+				auto node = link->owner();
+				forEachParallax(node, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
+				link->markUnchanged();
+			}
+		}
+	}
+
+	void App::checkBindSnapFiles() {
+		std::vector<std::shared_ptr<MV::Scene::BindSnapInstance>> links;
+		collectLinks(sceneRoot, links);
+		std::vector<std::string> changed;
+		for (auto&& link : links) {
+			const auto sourceName = bindSnapSourceName(link->source());
+			std::error_code failed;
+			auto written = std::filesystem::last_write_time(assetFile(sourceName), failed);
+			if (failed) {
+				continue;
+			}
+			auto seen = bindSnapWriteTimes.find(sourceName);
+			if (seen == bindSnapWriteTimes.end()) {
+				bindSnapWriteTimes[sourceName] = written;
+			} else if (seen->second != written) {
+				seen->second = written;
+				changed.push_back(sourceName);
+			}
+		}
+		for (auto&& sourceName : changed) {
+			refreshLinksTo(sourceName, nullptr);
+			messageLog->add(MessageLevel::INFO, "Reloaded " + sourceName + ": it changed on disk");
+		}
+		if (!changed.empty()) {
+			linksChanged();
+		}
+	}
+
+	bool App::unpackBindSnap(const std::shared_ptr<MV::Scene::Node>& a_node) {
+		auto link = linkOn(a_node);
+		if (!link) {
+			return false;
+		}
+		link->captureOverrides();
+		const auto source = link->source();
+		const auto overrides = link->overrides();
+		link->unpack();
+		auto* services = &managers.services;
+		history.record("unpack " + nodeLabel(a_node),
+			[a_node]() {
+				if (auto linked = linkOn(a_node)) {
+					linked->unpack();
+				}
+			},
+			[this, services, a_node, source, overrides]() {
+				// the content is the node's own here: linked again, it is rebuilt from the file with what it had changed
+				a_node->attach<MV::Scene::BindSnapInstance>(*services)->sourceOfPresentContent(source)->overrides(overrides);
+				linksChanged();
+			});
+		linksChanged();
+		messageLog->add(MessageLevel::INFO, "Unpacked " + nodeLabel(a_node) + " from " + source);
+		return true;
+	}
+
+	bool App::revertBindSnap(const std::shared_ptr<MV::Scene::Node>& a_node) {
+		auto link = linkOn(a_node);
+		if (!link) {
+			return false;
+		}
+		link->captureOverrides();
+		const auto overrides = link->overrides();
+		link->revert();
+		history.record("revert " + nodeLabel(a_node),
+			[this, a_node]() {
+				if (auto linked = linkOn(a_node)) {
+					linked->revert();
+				}
+				linksChanged();
+			},
+			[this, a_node, overrides]() {
+				if (auto linked = linkOn(a_node)) {
+					linked->overrides(overrides);
+				}
+				linksChanged();
+			});
+		linksChanged();
+		return true;
 	}
 
 	bool App::selectionIsRemovable() const {
@@ -431,7 +641,7 @@ namespace Workbench {
 	}
 
 	bool App::deleteSelected() {
-		if (!selectionIsRemovable()) {
+		if (!selectionIsRemovable() || contentLocked(selectedNode, "delete")) {
 			return false;
 		}
 		auto node = selectedNode;
@@ -534,6 +744,9 @@ namespace Workbench {
 
 	std::shared_ptr<MV::Scene::Node> App::createChildNode() {
 		auto parent = selectedNode && inScene(selectedNode) ? selectedNode : sceneRoot;
+		if (contentLocked(parent, "create a child of")) {
+			return nullptr;
+		}
 		auto node = parent->make(unusedChildId(parent, "node"));
 		std::weak_ptr<MV::Scene::Node> weakParent = parent;
 		history.record("create " + nodeLabel(node),
@@ -570,7 +783,7 @@ namespace Workbench {
 
 	std::shared_ptr<MV::Scene::Component> App::attachComponent(const std::string& a_typeName) {
 		auto node = selectedNode;
-		if (!node || !inScene(node)) {
+		if (!node || !inScene(node) || contentLocked(node, "add a component to")) {
 			return nullptr;
 		}
 		for (auto&& type : attachableComponentTypes()) {
@@ -600,6 +813,17 @@ namespace Workbench {
 	bool App::removeComponent(const std::shared_ptr<MV::Scene::Component>& a_component) {
 		auto node = a_component ? a_component->owner() : nullptr;
 		if (!node || !inScene(node)) {
+			return false;
+		}
+		if (std::dynamic_pointer_cast<MV::Scene::BindSnapInstance>(a_component)) {
+			// taking the link off a node is unpacking it: its content stays, as the node's own
+			return unpackBindSnap(node);
+		}
+		if (contentLocked(node, "remove a component of")) {
+			return false;
+		}
+		if (auto link = linkOn(node); link && !a_component->serializable()) {
+			messageLog->add(MessageLevel::WARNING, "Cannot remove a component of " + nodeLabel(node) + ": it is content of " + link->source() + ". Unpack " + nodeLabel(node) + " first, or change the file.");
 			return false;
 		}
 		auto order = componentsOf(node);
@@ -654,7 +878,7 @@ namespace Workbench {
 	}
 
 	bool App::duplicateSelected() {
-		if (!selectionIsRemovable()) {
+		if (!selectionIsRemovable() || contentLocked(selectedNode, "duplicate")) {
 			return false;
 		}
 		// a previewed layer is displaced: the copy is taken at rest
@@ -1147,6 +1371,16 @@ namespace Workbench {
 			viewCamera->add(sceneRoot);
 			sceneRoot->postLoadStep();
 			forEachParallax(sceneRoot, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
+			{
+				// the layers going to rest is not a change to a linked node, and its file is read as of now
+				bindSnapWriteTimes.clear();
+				std::vector<std::shared_ptr<MV::Scene::BindSnapInstance>> links;
+				collectLinks(sceneRoot, links);
+				for (auto&& link : links) {
+					link->markUnchanged();
+					noteBindSnapWritten(bindSnapSourceName(link->source()));
+				}
+			}
 			if (treePanel) {
 				treePanel->refresh();
 			}
@@ -1181,33 +1415,97 @@ namespace Workbench {
 		return std::filesystem::path(a_folder) / ((name.empty() ? std::string("node") : name) + ".bindsnap");
 	}
 
-	std::string App::saveAsBindSnap(const std::shared_ptr<MV::Scene::Node>& a_node, const std::string& a_folder) {
-		if (!a_node) {
+	std::string App::saveAsBindSnap(const std::shared_ptr<MV::Scene::Node>& a_node, const std::string& a_folder, BindSnapClash a_onClash) {
+		if (!a_node || contentLocked(a_node, "save")) {
 			return {};
 		}
 		auto file = bindSnapFileFor(a_node, a_folder);
+		std::error_code ignored;
+		const auto kind = bindSnapDropKind(a_node, file);
+		std::optional<CommandHistory::Group> steps;
+		if (!linkOn(a_node) || (kind == BindSnapDrop::ASK && a_onClash == BindSnapClash::NEW_ASSET)) {
+			steps.emplace(history, "save " + nodeLabel(a_node) + " as a BindSnap");
+		}
+		if (kind == BindSnapDrop::ASK && a_onClash == BindSnapClash::NEW_ASSET) {
+			// a name no file in the folder has and no node beside this one
+			auto parent = a_node->parent();
+			const std::string base = file.stem().string();
+			std::string name;
+			for (int number = 2; ; ++number) {
+				name = base + "_" + std::to_string(number);
+				const bool besideIt = parent && std::any_of(parent->begin(), parent->end(), [&](const std::shared_ptr<MV::Scene::Node>& a_child) { return a_child != a_node && a_child->id() == name; });
+				if (!besideIt && !std::filesystem::exists(std::filesystem::path(a_folder) / (name + ".bindsnap"), ignored)) {
+					break;
+				}
+			}
+			const auto oldId = a_node->id();
+			a_node->id(name);
+			history.record("rename " + oldId,
+				[a_node, name]() { a_node->id(name); },
+				[a_node, oldId]() { a_node->id(oldId); });
+			file = bindSnapFileFor(a_node, a_folder);
+		}
 		auto shown = file.generic_string();
 		// the leading "./" keeps MV's file layer from redirecting a write to the player-preferences folder
 		auto writePath = file.is_absolute() || shown.starts_with("./") ? shown : "./" + shown;
-		std::error_code ignored;
 		const bool replaced = std::filesystem::exists(file, ignored);
+		const auto sourceName = bindSnapSourceName(file);
 		std::string result;
 		previewedLayersDisplaced(false);
 		try {
-			a_node->saveJai(writePath, managers.services, false);
+			captureLinks(a_node);
+			auto link = linkOn(a_node);
+			if (link) {
+				const auto oldSource = link->source();
+				link->saveContentAs(writePath);
+				if (bindSnapSourceName(oldSource) != sourceName) {
+					link->sourceOfPresentContent(sourceName);
+					history.record("link " + nodeLabel(a_node),
+						[a_node, sourceName]() {
+							if (auto linked = linkOn(a_node)) {
+								linked->sourceOfPresentContent(sourceName);
+							}
+						},
+						[a_node, oldSource]() {
+							if (auto linked = linkOn(a_node)) {
+								linked->sourceOfPresentContent(oldSource);
+							}
+						});
+				}
+			} else {
+				a_node->saveJai(writePath, managers.services, false);
+			}
 			if (!std::filesystem::exists(file, ignored)) {
 				throw std::runtime_error("nothing was written");
 			}
+			if (!link) {
+				auto* services = &managers.services;
+				auto linkIt = [services, a_node, sourceName]() {
+					a_node->attach<MV::Scene::BindSnapInstance>(*services)->sourceOfPresentContent(sourceName);
+				};
+				linkIt();
+				history.record("link " + nodeLabel(a_node), linkIt, [a_node]() {
+					if (auto linked = linkOn(a_node)) {
+						linked->unpack();
+					}
+				});
+			}
 			result = shown;
 			std::cout << "Workbench saved BindSnap: " << shown << std::endl;
-			messageLog->add(MessageLevel::INFO, (replaced ? "Replaced " : "Saved ") + shown);
+			messageLog->add(MessageLevel::INFO, (kind == BindSnapDrop::APPLY ? "Applied to " : replaced ? "Replaced " : "Saved ") + shown);
 		} catch (const std::exception& a_error) {
 			reportError("BindSnap save failed (" + shown + "): " + a_error.what());
 		}
 		previewedLayersDisplaced(true);
+		steps.reset();
+		if (!result.empty()) {
+			noteBindSnapWritten(sourceName);
+			refreshLinksTo(sourceName, a_node);
+		}
 		if (projectPanel) {
 			projectPanel->refresh();
 		}
+		linksChanged();
 		return result;
 	}
 
@@ -1216,6 +1514,8 @@ namespace Workbench {
 		previewedLayersDisplaced(false);
 		try {
 			auto assetPath = assetFile(a_fileName);
+			// each linked node's changes go into the scene as its overrides
+			captureLinks(sceneRoot);
 			sceneRoot->saveJai(assetPath, managers.services, false);
 			documentPath = a_fileName;
 			history.markSaved();
@@ -1259,6 +1559,11 @@ namespace Workbench {
 	bool App::update(double a_dt) {
 		lastDelta = a_dt;
 		tooltips->update(a_dt);
+		bindSnapCheckWait += a_dt;
+		if (bindSnapCheckWait >= 0.5) {
+			bindSnapCheckWait = 0.0;
+			checkBindSnapFiles();
+		}
 		lastSceneDelta = scenePaused ? 0.0 : a_dt * sceneSpeed;
 		if (scenePaused && sceneStepQueued) {
 			lastSceneDelta = 1.0 / 60.0;
@@ -1376,11 +1681,16 @@ namespace Workbench {
 	}
 
 	std::vector<MenuItem> App::nodeContextItems() {
-		return {
+		std::vector<MenuItem> result {
 			{ "Create Child", "", [this]() { createChildNode(); } },
 			{ "Frame", "F", [this]() { frameSelectionInViewport(); }, true, {}, [this]() { return static_cast<bool>(selectedNode); } },
 			{ "Duplicate", "Ctrl+D", [this]() { duplicateSelected(); }, true, {}, [this]() { return selectionIsRemovable(); } },
 			{ "Delete", "Del", [this]() { deleteSelected(); }, false, {}, [this]() { return selectionIsRemovable(); } } };
+		if (linkOn(selectedNode)) {
+			result.push_back({ "Revert to BindSnap", "", [this]() { revertBindSnap(selectedNode); }, true });
+			result.push_back({ "Unpack BindSnap", "", [this]() { unpackBindSnap(selectedNode); } });
+		}
+		return result;
 	}
 
 	std::vector<MenuItem> App::tabContextItems(Panel* a_panel) {

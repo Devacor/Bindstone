@@ -56,11 +56,17 @@ namespace MV {
 			// The file, named as Node::make takes it. Setting it drops the overrides and builds that file's content.
 			std::string source() const { return sourceFile; }
 			std::shared_ptr<BindSnapInstance> source(const std::string& a_fileName);
+			// As source, for a node being placed: the node also takes the position, rotation and scale of the file's root.
+			std::shared_ptr<BindSnapInstance> placeSource(const std::string& a_fileName);
+			// The id the file's root had when the content was last built from it.
+			const std::string& sourceRootId() const { return rootId; }
 			// Links a node that already holds the file's content, as when the file was just written from it:
 			// everything on the node becomes the file's and nothing is loaded.
 			std::shared_ptr<BindSnapInstance> sourceOfPresentContent(const std::string& a_fileName);
 
 			const std::vector<BindSnapOverride>& overrides() const { return *overrideList; }
+			// Replaces the overrides and rebuilds the content with them.
+			std::shared_ptr<BindSnapInstance> overrides(const std::vector<BindSnapOverride>& a_overrides);
 			// The file's content is on the node. False until the node is loaded or a source is set, and after a file
 			// that could not be read.
 			bool built() const { return isBuilt; }
@@ -71,6 +77,8 @@ namespace MV {
 			void captureOverrides();
 			// Reads the file again and rebuilds the content, keeping what the instance had changed.
 			bool refresh();
+			// Takes the content as it stands for unchanged, as when an editor has put it in its own resting state.
+			void markUnchanged() { rememberContent(); }
 			// Drops the overrides and rebuilds the content as the file has it.
 			bool revert();
 			// Writes the node as it stands, content and all, as a plain .bindsnap with no link in it. What is on the
@@ -114,7 +122,7 @@ namespace MV {
 			void postLoadInitialize() override;
 
 		private:
-			bool build();
+			bool build(bool a_takeRootTransform = false);
 			void removeContent();
 			std::string withOverrides(const std::string& a_fileText);
 			void rememberContent();
@@ -125,6 +133,7 @@ namespace MV {
 			JAI_NAMED_PROPERTY((std::vector<BindSnapOverride>), "overrides", overrideList);
 
 			MV::Services& services;
+			std::string rootId;
 			bool isBuilt = false;
 			bool tracked = false;
 			// node, component and property to the saved value last seen there

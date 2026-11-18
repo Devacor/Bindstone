@@ -851,6 +851,14 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.dropPrefab("Prefabs/SimpleButton.bindsnap", MV::Point<int>(windowSize.width / 2, windowSize.height / 2));
 		// a node the rest of the scene refers to: the delete clears the reference so the file drops the node, undo restores it
 		auto placedButton = *std::prev(a_app.scene()->end());
+		{
+			// placed, the button is linked to its file and its views are the file's: one is not deleted until it is unpacked
+			auto linkedButton = placedButton->component<MV::Scene::Button>(false, false);
+			auto linkedView = linkedButton ? linkedButton->idleNode() : nullptr;
+			a_app.select(linkedView);
+			expect(linkedView && placedButton->component<MV::Scene::BindSnapInstance>(false, false) && !a_app.deleteSelected() && linkedView->parent() == placedButton, "a node that is content of a linked BindSnap is not deleted");
+			expect(a_app.unpackBindSnap(placedButton) && !placedButton->component<MV::Scene::BindSnapInstance>(false, false) && linkedView->parent() == placedButton, "unpacking makes the content the node's own");
+		}
 		auto buttonComponent = placedButton->component<MV::Scene::Button>(false, false);
 		auto idleView = buttonComponent ? buttonComponent->idleNode() : nullptr;
 		expect(idleView && idleView->parent() == placedButton, "the placed button holds its Idle view as a child");
@@ -2018,46 +2026,140 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.select(crate);
 		a_app.runFrames(3);
 
-		auto row = a_app.hierarchy().rowScreenPoint(crate);
-		expect(row.has_value(), "the node to save has a Hierarchy row");
-		if (row) {
-			auto note = drag(*row, project.tileAreaScreenPoint());
+		auto& menus = a_app.menus();
+		auto click = [&](const MV::Point<int>& a_at) {
+			hold(a_at, false);
+			hold(a_at, true);
+			hold(a_at, false);
+			mouse.stopSimulating();
+		};
+		auto linkOf = [](const std::shared_ptr<MV::Scene::Node>& a_node) {
+			return a_node->component<MV::Scene::BindSnapInstance>(false, false);
+		};
+		auto childPlace = [](const std::shared_ptr<MV::Scene::Node>& a_node) {
+			return a_node && a_node->begin() != a_node->end() ? (*a_node->begin())->position() : MV::point(-1.0f, -1.0f);
+		};
+		auto childPlaceInFile = [&](const std::filesystem::path& a_file) {
+			try {
+				return childPlace(MV::Scene::Node::loadJai(a_file.generic_string(), a_managers.services, false));
+			} catch (const std::exception&) {
+				return MV::point(-2.0f, -2.0f);
+			}
+		};
+		// selects a node so its row shows, and drags that row to a place
+		auto dragNode = [&](const std::shared_ptr<MV::Scene::Node>& a_node, const MV::Point<int>& a_to) {
+			a_app.select(a_node);
+			a_app.runFrames(3);
+			auto row = a_app.hierarchy().rowScreenPoint(a_node);
+			return row ? drag(*row, a_to) : std::string("(no row)");
+		};
+		auto linkedSceneFile = (std::filesystem::temp_directory_path() / "workbench_selftest_linked.scene").string();
+		auto savedScene = [&]() {
+			return a_app.saveScene(linkedSceneFile) ? MV::fileContents(linkedSceneFile, true) : std::string();
+		};
+		auto countOf = [](const std::string& a_text, const std::string& a_part) {
+			size_t count = 0;
+			for (auto at = a_text.find(a_part); at != std::string::npos; at = a_text.find(a_part, at + a_part.size())) {
+				++count;
+			}
+			return count;
+		};
+
+		{
+			auto note = dragNode(crate, project.tileAreaScreenPoint());
 			expect(note == "Save as " + file.generic_string(), "a row dragged over the Project panel says where letting go will save it: " + note);
 			expect(a_app.dragNote().empty(), "and the label goes when the drag ends");
 			expect(childrenInFile(file) == 1, "letting go writes the node and its child as <id>.bindsnap in the folder shown");
 			expect(project.entryScreenPoint("Crate.bindsnap").has_value(), "the file has a tile at once");
-			expect(crate->parent() == a_app.scene() && childCount(crate) == 1, "the node stays in the scene as it was");
+			expect(crate->parent() == a_app.scene() && childCount(crate) == 1 && *crate->begin() == inside, "the node stays in the scene as it was");
+			auto link = linkOf(crate);
+			expect(link && link->built() && !inside->serializable(), "and is linked to the file, its content now the file's");
+			auto text = savedScene();
+			expect(countOf(text, "BindSnapInstance") == 1 && countOf(text, "\"nodeId\"") == 2, "the scene saves the link and none of the content");
+			a_app.select(inside);
+			expect(!a_app.deleteSelected() && !a_app.createChildNode() && inside->parent() == crate, "content of a linked node is not deleted or added to");
 
-			a_app.select(crate);
-			a_app.createChildNode();
-			a_app.select(crate);
-			a_app.runFrames(3);
-			row = a_app.hierarchy().rowScreenPoint(crate);
-			note = row ? drag(*row, project.tileAreaScreenPoint()) : std::string();
-			expect(note == "Replace " + file.generic_string(), "over a folder that has a file of that name it says so: " + note);
-			expect(childrenInFile(file) == 2, "and the file is replaced by the node as it is now");
+			inside->position(MV::point(33.0f, 44.0f));
+			note = dragNode(crate, project.tileAreaScreenPoint());
+			expect(note == "Apply to " + file.generic_string(), "a linked node dragged back over its own file says it applies: " + note);
+			expect(!menus.contextOpen() && sameXY(childPlaceInFile(file), MV::point(33.0f, 44.0f)) && link->overrides().empty(), "and letting go writes it to the file without asking");
+
+			auto rootRow = a_app.hierarchy().rowScreenPoint(a_app.scene());
+			expect(rootRow.has_value(), "the scene's root has a row");
+			if (rootRow) {
+				a_app.dropPrefab(file.generic_string(), *rootRow);
+				a_app.runFrames(3);
+			}
+			auto second = a_app.selected();
+			expect(second && second != crate && second->parent() == a_app.scene() && second->id() == "Crate_2" && linkOf(second) && sameXY(childPlace(second), MV::point(33.0f, 44.0f)), "a BindSnap let go on a Hierarchy row goes under that row's node, linked to its file");
+			if (second && second != crate) {
+				pressWithControl(SDLK_z);
+				expect(!second->parent(), "undo takes it out again");
+				pressWithControl(SDLK_y);
+				expect(second->parent() == a_app.scene(), "and redo puts it back");
+
+				(*crate->begin())->position(MV::point(70.0f, 80.0f));
+				dragNode(crate, project.tileAreaScreenPoint());
+				expect(sameXY(childPlace(second), MV::point(70.0f, 80.0f)), "applying one linked node to the file changes the other");
+
+				(*second->begin())->position(MV::point(5.0f, 6.0f));
+				text = savedScene();
+				expect(countOf(text, "\"overrides\"") == 2 && linkOf(second)->overrides().size() == 1 && linkOf(crate)->overrides().empty(), "what a linked node changes is saved with the scene as its overrides");
+				expect(a_app.revertBindSnap(second) && sameXY(childPlace(second), MV::point(70.0f, 80.0f)), "Revert puts a linked node back as its file has it");
+				pressWithControl(SDLK_z);
+				expect(sameXY(childPlace(second), MV::point(5.0f, 6.0f)), "and undo brings its changes back");
+
+				try {
+					auto outside = MV::Scene::Node::loadJai(file.generic_string(), a_managers.services, false);
+					(*outside->begin())->position(MV::point(9.0f, 9.0f));
+					outside->saveJai(file.generic_string(), a_managers.services, false);
+					std::filesystem::last_write_time(file, std::filesystem::last_write_time(file) + std::chrono::seconds(3));
+				} catch (const std::exception& a_error) {
+					expect(false, std::string("the file is rewritten from outside the editor: ") + a_error.what());
+				}
+				a_app.checkBindSnapFiles();
+				a_app.runFrames(2);
+				expect(sameXY(childPlace(crate), MV::point(9.0f, 9.0f)) && sameXY(childPlace(second), MV::point(5.0f, 6.0f)), "a file changed on disk reaches the nodes linked to it, each keeping what it had changed");
+
+				a_app.select(nullptr);
+				auto shelf = a_app.createChildNode();
+				a_app.select(shelf);
+				auto other = a_app.createChildNode();
+				other->id("Crate");
+				a_app.hierarchy().refresh();
+				note = dragNode(other, project.tileAreaScreenPoint());
+				expect(note == "Replace or New Asset: " + file.generic_string(), "a node that is not linked, over a file of its name, says it will ask: " + note);
+				expect(menus.contextOpen() && menus.rowCount() == 2 && menus.rowLabel(0) == "Replace Crate.bindsnap" && menus.rowLabel(1) == "New Asset", "and letting go asks which");
+				if (menus.contextOpen()) {
+					click(menus.rowScreenPoint(1));
+				}
+				expect(other->id() == "Crate_2" && std::filesystem::exists(folder / "Crate_2.bindsnap") && linkOf(other) && childrenInFile(file) == 1, "New Asset gives the node a name nothing there has and saves it beside the other, which is left alone");
+
+				a_app.select(shelf);
+				auto third = a_app.createChildNode();
+				third->id("Crate");
+				a_app.hierarchy().refresh();
+				dragNode(third, project.tileAreaScreenPoint());
+				expect(menus.contextOpen(), "the same clash asks again");
+				if (menus.contextOpen()) {
+					click(menus.rowScreenPoint(0));
+				}
+				expect(childrenInFile(file) == 0 && linkOf(third) && childCount(crate) == 0, "Replace writes over the file, and the nodes linked to it take it up");
+
+				expect(a_app.unpackBindSnap(second) && !linkOf(second), "Unpack cuts a node's link");
+				pressWithControl(SDLK_z);
+				expect(static_cast<bool>(linkOf(second)), "and undo links it again");
+			}
 
 			auto innerTile = project.entryScreenPoint("inner");
-			row = a_app.hierarchy().rowScreenPoint(crate);
-			expect(innerTile.has_value() && row.has_value(), "the folder inside has a tile");
-			if (innerTile && row) {
-				note = drag(*row, *innerTile);
+			expect(innerTile.has_value(), "the folder inside has a tile");
+			if (innerTile) {
+				note = dragNode(crate, *innerTile);
 				expect(note == "Save as " + innerFile.generic_string(), "over a folder's tile the label names that folder: " + note);
-				expect(childrenInFile(innerFile) == 2, "and letting go there saves into it");
+				expect(std::filesystem::exists(innerFile) && linkOf(crate) && linkOf(crate)->source() == innerFile.generic_string(), "and letting go there saves a new file the node is then linked to");
 			}
-
-			a_app.select(inside);
-			a_app.runFrames(3);
-			auto insideRow = a_app.hierarchy().rowScreenPoint(inside);
-			expect(insideRow.has_value() && childCount(inside) == 0, "the child has a row to drop on");
-			if (insideRow) {
-				a_app.dropPrefab(file.generic_string(), *insideRow);
-				a_app.runFrames(3);
-				auto placed = a_app.selected();
-				expect(placed && placed != inside && placed->parent() == inside && placed->id() == "Crate" && childCount(placed) == 2, "a BindSnap let go on a Hierarchy row goes under that row's node, selected");
-				pressWithControl(SDLK_z);
-				expect(childCount(inside) == 0, "and undo takes it out again");
-			}
+			std::error_code removeFailed;
+			std::filesystem::remove(linkedSceneFile, removeFailed);
 		}
 
 		project.showFolder("Assets");

@@ -19,6 +19,8 @@
 #include "projectPanel.h"
 #include "messageLog.h"
 #include "MV/Render/Scene/parallax.h"
+#include "MV/Render/Scene/bindSnapInstance.h"
+#include <map>
 
 namespace Workbench {
 
@@ -27,12 +29,24 @@ namespace Workbench {
 		App(Managers& a_managers, MV::TapDevice& a_mouse, const Theme& a_theme);
 		~App();
 
-		// Places a BindSnap in the scene as one undo step. Let go over the viewport it goes under the scene's root
-		// at that point; over a Hierarchy row, under that row's node where its file put it.
+		// Places a BindSnap in the scene as one undo step: a node linked to the file (MV::Scene::BindSnapInstance),
+		// which the scene saves as the file's name and what the node changed. Let go over the viewport it goes
+		// under the scene's root at that point; over a Hierarchy row, under that row's node where its file put it.
 		void dropPrefab(const std::string& a_fileName, const MV::Point<int>& a_screenPoint);
-		// Writes a node and all under it as <its id>.bindsnap in a folder, replacing a file of that name. Returns
-		// the file written, empty when the write failed. A Hierarchy row let go on the Project panel does this.
-		std::string saveAsBindSnap(const std::shared_ptr<MV::Scene::Node>& a_node, const std::string& a_folder);
+		// Writes a node and all under it as <its id>.bindsnap in a folder and links the node to that file. A
+		// node already linked to that very file is applied to it. When another file of that name is there,
+		// REPLACE writes over it and NEW_ASSET gives the node, and so the file, a name nothing there has. Every
+		// other node in the scene linked to the file written takes it up. Returns the file written, empty when
+		// the write failed. A Hierarchy row let go on the Project panel does this, asking which when names clash.
+		enum class BindSnapClash { REPLACE, NEW_ASSET };
+		std::string saveAsBindSnap(const std::shared_ptr<MV::Scene::Node>& a_node, const std::string& a_folder, BindSnapClash a_onClash = BindSnapClash::REPLACE);
+		// Cuts a linked node's link, its content becoming its own; and puts a linked node back as its file has
+		// it. Each is one undo step.
+		bool unpackBindSnap(const std::shared_ptr<MV::Scene::Node>& a_node);
+		bool revertBindSnap(const std::shared_ptr<MV::Scene::Node>& a_node);
+		// Reads again each file a linked node in the scene names that has changed on disk since it was last
+		// read, keeping what each node changed. update() does this twice a second.
+		void checkBindSnapFiles();
 		ProjectPanel& project() { return *projectPanel; }
 		// The label beside the pointer while a Hierarchy row is dragged; empty when there is none.
 		const std::string& dragNote() const { return tooltips->dragNote(); }
@@ -179,6 +193,17 @@ namespace Workbench {
 		std::string documentName() const;
 		static std::string assetFile(const std::string& a_fileName);
 		static std::filesystem::path bindSnapFileFor(const std::shared_ptr<MV::Scene::Node>& a_node, const std::string& a_folder);
+		// What letting a node go on a folder does: writes a new file, applies the node to the file it is linked
+		// to, or meets another file of that name and asks.
+		enum class BindSnapDrop { SAVE, APPLY, ASK };
+		BindSnapDrop bindSnapDropKind(const std::shared_ptr<MV::Scene::Node>& a_node, const std::filesystem::path& a_file) const;
+		void nodeDroppedOnProject(const std::shared_ptr<MV::Scene::Node>& a_node, const MV::Point<int>& a_screenPoint);
+		void refreshLinksTo(const std::string& a_sourceName, const std::shared_ptr<MV::Scene::Node>& a_except);
+		void noteBindSnapWritten(const std::string& a_sourceName);
+		void linksChanged();
+		// True, with a line in the Console, for a node that is the content of a linked BindSnap: what is done
+		// to it there would not be saved.
+		bool contentLocked(const std::shared_ptr<MV::Scene::Node>& a_node, const std::string& a_verb);
 		void previewedLayersDisplaced(bool a_displaced);
 		static void forEachParallax(const std::shared_ptr<MV::Scene::Node>& a_node, const std::function<void(const std::shared_ptr<MV::Scene::Parallax>&)>& a_visit);
 		void frameNode(const DockRect& a_view, const std::shared_ptr<MV::Scene::Node>& a_node, float a_fill, float a_maximumZoom);
@@ -186,6 +211,9 @@ namespace Workbench {
 		void guarded(const char* a_stage, Step&& a_step);
 
 		Managers& managers;
+		MV::Scene::BindSnapTracking bindSnapTracking;
+		std::map<std::string, std::filesystem::file_time_type> bindSnapWriteTimes;
+		double bindSnapCheckWait = 0.0;
 		MV::TapDevice& mouse;
 		MV::ControllerDevice controller;
 		MV::ControllerDevice::ButtonSignalType controllerReceiver;

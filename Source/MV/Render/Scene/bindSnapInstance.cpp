@@ -283,12 +283,31 @@ namespace MV {
 				}
 			}
 
+			// Below the root, what is not saved belongs to an instance inside the content: that instance's own
+			// overrides, a property of its component here, carry what was changed in it.
+			std::vector<std::shared_ptr<Component>> savedComponentsOf(const std::shared_ptr<Node>& a_node) {
+				auto result = componentsOf(a_node);
+				std::erase_if(result, [](const std::shared_ptr<Component>& a_component) { return !a_component->serializable(); });
+				return result;
+			}
+
 			template<typename Visit>
 			void visitNode(const std::shared_ptr<Node>& a_node, const std::string& a_path, Visit& a_visit) {
 				visitProperties(*a_node, a_path, "", a_visit);
-				visitComponents(componentsOf(a_node), a_path, a_visit);
+				visitComponents(savedComponentsOf(a_node), a_path, a_visit);
 				for (auto&& child : *a_node) {
-					visitNode(child, a_path + "/" + child->id(), a_visit);
+					if (child->serializable()) {
+						visitNode(child, a_path + "/" + child->id(), a_visit);
+					}
+				}
+			}
+
+			void captureInstancesUnder(const std::shared_ptr<Node>& a_node) {
+				for (auto&& child : *a_node) {
+					captureInstancesUnder(child);
+				}
+				if (auto instance = a_node->component<BindSnapInstance>(false, false)) {
+					instance->captureOverrides();
 				}
 			}
 		}
@@ -312,6 +331,23 @@ namespace MV {
 			removeContent();
 			sourceFile = a_fileName;
 			overrideList = std::vector<BindSnapOverride>();
+			build();
+			return self;
+		}
+
+		std::shared_ptr<BindSnapInstance> BindSnapInstance::placeSource(const std::string& a_fileName) {
+			auto self = std::static_pointer_cast<BindSnapInstance>(shared_from_this());
+			removeContent();
+			sourceFile = a_fileName;
+			overrideList = std::vector<BindSnapOverride>();
+			build(true);
+			return self;
+		}
+
+		std::shared_ptr<BindSnapInstance> BindSnapInstance::overrides(const std::vector<BindSnapOverride>& a_overrides) {
+			auto self = std::static_pointer_cast<BindSnapInstance>(shared_from_this());
+			removeContent();
+			overrideList = a_overrides;
 			build();
 			return self;
 		}
@@ -375,7 +411,7 @@ namespace MV {
 			return nullptr;
 		}
 
-		bool BindSnapInstance::build() {
+		bool BindSnapInstance::build(bool a_takeRootTransform) {
 			if (isBuilt || sourceFile->empty() || !ownerIsAlive()) {
 				return isBuilt;
 			}
@@ -397,6 +433,12 @@ namespace MV {
 			} catch (const std::exception& a_error) {
 				MV::error("BindSnapInstance [", owner()->id(), "] could not read ", *sourceFile, ": ", a_error.what());
 				return false;
+			}
+			rootId = loaded->id();
+			if (a_takeRootTransform) {
+				owner()->position(loaded->position());
+				owner()->rotation(loaded->rotation());
+				owner()->scale(loaded->scale());
 			}
 			owner()->adoptLoaded(loaded);
 			isBuilt = true;
@@ -491,6 +533,10 @@ namespace MV {
 		void BindSnapInstance::captureOverrides() {
 			if (!isBuilt || !tracked || !ownerIsAlive()) {
 				return;
+			}
+			// the instances inside the content first: what they changed shows here as their overrides property
+			for (auto&& child : contentChildren()) {
+				captureInstancesUnder(child);
 			}
 			std::vector<BindSnapOverride> result = overrideList.get();
 			std::set<std::string> present;

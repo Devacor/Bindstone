@@ -927,6 +927,33 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Not yet: added or removed children and components as overrides (an instance's own child goes on the instance's
   node, which is saved; one added deeper is lost), nested instances inside a BindSnap file, the Workbench verbs.
 
+## Increment 47: linked BindSnaps in the Workbench (2026-11-17)
+- A BindSnap placed in the scene is a node linked to its file (`BindSnapInstance`), not a copy. The Hierarchy
+  shows the file's name beside the node's. The scene saves the link and the node's overrides, which `saveScene`
+  works out first.
+- A Hierarchy row let go on a Project folder (Dev's rulings):
+  - A node not linked, no file of its name there: the file is written and the node is linked to it.
+  - A node linked to that very file: applied to it without asking (the label says `Apply to <file>`).
+  - Another file of that name there: a menu asks `Replace <file>` or `New Asset`. New Asset gives the node, and
+    so the file, a name nothing there has (`Crate_2`); Replace writes over the file.
+  - A linked node let go somewhere its file is not: a new file there, which the node is then linked to.
+  - Every other node in the scene linked to the file written takes it up, keeping what it had changed.
+- Twice a second the editor checks the files the scene's linked nodes name and reloads those that changed on
+  disk (`App::checkBindSnapFiles`), each node keeping its changes. This is a poll of write times, not a watcher.
+- A linked node's right-press menu has `Revert to BindSnap` and `Unpack BindSnap`, each one undo step. Removing
+  the link component from the inspector unpacks.
+- What a link's content holds cannot be deleted, duplicated, moved, given a child or a component, or have a
+  component removed: none of that would be saved. The Console says so and names what to unpack. Changing a
+  property is an override and is saved. A child or component put on the linked node itself is the node's own.
+- A Parallax layer going to rest in the editor is not taken for a change (`markUnchanged`).
+- The self-test covers: save and link, the scene holding only the link, content being locked, apply by dragging
+  back, a second node placed from the file following an apply, overrides in the saved scene, revert and its
+  undo, a file rewritten on disk, the Replace or New Asset menu both ways, unpack and its undo, and a linked
+  node saved into another folder.
+- Not yet: New Asset does not open the new file's name for typing, nothing marks an overridden value in the
+  inspector or applies or reverts one property, a child added inside content or one removed is not an override,
+  and the Project panel does not notice files changing by itself.
+
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.
 - Authoring verbs still only in Source/Editor: the component kinds Add Component does not list — old-editor

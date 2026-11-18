@@ -36,6 +36,8 @@ namespace Workbench {
 		// being over, however it ended.
 		std::function<void(const std::shared_ptr<MV::Scene::Node>&, const MV::Point<int>&, bool a_outside)> onNodeDragged;
 		std::function<void()> onNodeDragEnded;
+		// Asked before a row dropped on the tree moves its node under a new parent; false leaves it where it is.
+		std::function<bool(const std::shared_ptr<MV::Scene::Node>& a_node, const std::shared_ptr<MV::Scene::Node>& a_newParent)> canReparent;
 
 		// Highlights and reveals the app's selection; never calls back into the app.
 		void showSelection(const std::shared_ptr<MV::Scene::Node>& a_node);

@@ -1,4 +1,6 @@
 #include "sceneTreePanel.h"
+#include "MV/Render/Scene/bindSnapInstance.h"
+#include <filesystem>
 #include <iostream>
 
 namespace Workbench {
@@ -46,7 +48,12 @@ namespace Workbench {
 		};
 		adapter.label = [](const SceneTreeItem& a_item) {
 			auto node = a_item.node.lock();
-			return !node || node->id().empty() ? std::string("(node)") : node->id();
+			std::string result = !node || node->id().empty() ? std::string("(node)") : node->id();
+			// a node linked to a BindSnap names its file
+			if (auto link = node ? node->component<MV::Scene::BindSnapInstance>(false, false) : MV::Scene::SafeComponent<MV::Scene::BindSnapInstance>()) {
+				result += "  [" + std::filesystem::path(link->source()).filename().string() + "]";
+			}
+			return result;
 		};
 		adapter.hasChildren = [](const SceneTreeItem& a_item) {
 			auto node = a_item.node.lock();
@@ -93,6 +100,11 @@ namespace Workbench {
 				}
 			}
 			auto oldParent = dragged->parent() ? dragged->parent() : scene;
+			auto newParent = a_zone == TreeView<SceneTreeItem>::RowZone::Onto ? target : target->parent() ? target->parent() : scene;
+			if (canReparent && !canReparent(dragged, newParent)) {
+				refresh();
+				return;
+			}
 			float oldDepth = dragged->depth();
 			auto zone = a_zone;
 			auto performMove = [dragged, target, scene, zone]() {

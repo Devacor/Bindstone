@@ -5,4 +5,5 @@ namespace shop {
 	int tax(int p) { return p + 1; }
 	int base = 10;
 	enum Kind { plain, fancy }
+	namespace stock { int count() { return 2; } }
 }

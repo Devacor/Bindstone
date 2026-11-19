@@ -134,6 +134,9 @@ struct ctype {
     // proof source for the operand class stamp (the typed rows guard it at runtime) while it stays
     // tentative for diagnostics, so no load-time text changes
     bool element_proof = false;
+    // tentative, yet the kind is what a namespace variable's declaration spells (or what is read through one): the diagnostics
+    // hold the name to it as to a declared local, and no proof rests on it
+    bool declared_slot = false;
     // a reference alias of a declared typed container (var& x = G): its element reads may prove while
     // diagnostics still see a reference
     bool alias_proof = false;
@@ -619,6 +622,7 @@ private:
     std::unordered_set<std::string_view> namespaces_;
     std::unordered_set<std::string> namespace_members_;   // this unit's namespace members and paths (collect_namespace_members)
     std::unordered_map<std::string, const variable_decl*> namespace_vars_;   // "path::name" -> its declaration (null: two spellings)
+    std::unordered_map<std::string, ctype> namespace_inferred_types_;   // "path::name" -> what the walk inferred for an auto namespace variable it has passed
     std::unordered_map<std::string, std::vector<const function_decl*>> namespace_fns_;   // "path::name" -> the unit's declarations of it
     // [[nodiscard]] (docs/site/guide/06-functions.html): what resolving the call being inferred found, and every such call the walk met;
     // twin names the in-place method a builtin namespace copy pairs with (empty for everything else)
@@ -2112,13 +2116,24 @@ private:
     ctype namespace_variable_type(const std::string& path, std::string_view member, namespace_variable_hit* declared = nullptr) {
         const namespace_variable_hit hit = namespace_variable(path, member);
         const variable_decl* nv = hit.decl;
-        if (!nv || !nv->type || nv->type->is_reference() || nv->function_spelling) { return {}; }
-        ctype t = ctype_from_type_info(nv->type.get());
-        if (t.kind == ctype::object_k && nv->type->base_type != script_value_type::jai_shared_ptr_type) { return {}; }
+        if (!nv || (nv->type && nv->type->is_reference()) || nv->function_spelling) { return {}; }
+        ctype t = nv->type ? ctype_from_type_info(nv->type.get()) : ctype{};
+        if (t.is_unknown() && !hit.foreign) {   // auto: what the walk inferred, once it has passed the declaration, as at program scope
+            const auto inferred = namespace_inferred_types_.find(path + "::" + std::string(member));
+            if (inferred != namespace_inferred_types_.end()) { t = inferred->second; }
+        }
         if (declared) { *declared = hit; }
-        t.tentative = true;
-        return t;
+        return read_through_declared_slot(t);
     }
+    static ctype read_through_declared_slot(ctype a_type) {
+        if (a_type.is_unknown()) { return a_type; }
+        a_type.tentative = true;
+        a_type.declared_slot = true;
+        a_type.element_proof = false;
+        a_type.alias_proof = false;
+        return a_type;
+    }
+    static bool kind_certain(const ctype& a_type) { return !a_type.tentative || a_type.declared_slot; }
     // a store to it: the declared type the right side must fit, unknown when no spelled declaration is in sight
     ctype check_namespace_variable_store(const std::string& path, std::string_view member, const ctype& rhs, bool compound, token_type base_op,
                                          const source_location& loc) {
@@ -3754,6 +3769,7 @@ private:
         // only an array's element proves (a typed map's value could, a missing key raising, but it is not claimed yet)
         result.element_proof = container.kind == ctype::array_k && (!container.tentative || container.alias_proof) &&
                                (result.kind == ctype::int_k || result.kind == ctype::float_k);
+        result.declared_slot = container.declared_slot;
         return result;
     }
 
@@ -4587,17 +4603,34 @@ private:
         if (!class_too) {
             result = fns.only_own() ? check_script_overloads(qualified, fns.typed, args, loc).result
                                     : check_program_overloads(qualified, fns.typed, fns.untyped, args, loc, /*foreign_first=*/fns.own_typed == 0);
-            result.tentative = true;
+            result = read_through_declared_slot(result);
         }
         if (fns.all_nodiscard()) { nodiscard_hit_ = {qualified, {}}; }
         return true;
+    }
+
+    // The class `qualified` names, by its own spelling (the program's or the engine's); empty when it names none
+    std::string_view namespace_class_named(const std::string& qualified) {
+        if (const sclass* sc = find_sclass(qualified)) { return sc->decl->name; }
+        const auto held = engine_class(qualified);
+        return held ? std::string_view(held->get_name()) : std::string_view{};
+    }
+    // `ns::C::member`: the receiver is a namespace's class, read as any class's statics are (a namespace of C's path keeps its own lookup)
+    bool namespace_class_receiver(const member_expr* m) {
+        const std::string path = member_path(m);
+        return !path.empty() && path.find("::") != std::string::npos && !namespace_known(path) && !namespace_class_named(path).empty();
     }
 
     // What a read of the namespace member `path::member` gives: a function (its declarations, when the unit makes every one a
     // call could reach), else the declared type of a variable
     ctype namespace_member_read(const std::string& path, std::string_view member) {
         const namespace_overloads fns = namespace_function_overloads(path, member);
-        if (fns.empty()) { return namespace_variable_type(path, member); }
+        if (fns.empty()) {
+            if (const std::string_view cls = namespace_class_named(path + "::" + std::string(member)); !cls.empty()) {
+                return read_through_declared_slot(ctype{ctype::class_ref_k, cls});
+            }
+            return namespace_variable_type(path, member);
+        }
         ctype named = ctype::make(ctype::function_k);
         if (fns.only_own() && fns.typed.size() == fns.own->size() && !find_sclass(path) && !known_class(path)) { named.fns = fns.own; }
         return named;
@@ -4612,8 +4645,13 @@ private:
     }
     ctype check_namespace_call(const std::string& path, std::string_view member, const std::vector<ctype>& args, const source_location& loc, narrow_callee& seen) {
         if (ctype result; check_namespace_function_call(path, member, args, loc, seen, result)) { return result; }
-        if (namespaces_.count(std::string_view(path))) { return {}; }
         const std::string qualified = path + "::" + std::string(member);
+        if (const std::string_view cls = namespace_class_named(qualified); !cls.empty()) {   // a construction, typed as the bare spelling is
+            if (script_callee_takes_type_arguments(cls)) { return {}; }
+            if (const sclass* sc = find_sclass(cls)) { check_ctor_call(cls, *sc, args, loc); }
+            return read_through_declared_slot(object_of(cls));
+        }
+        if (namespaces_.count(std::string_view(path))) { return {}; }
         script_namespace_data* space = eng_.find_namespace(path);
         if (!space) { return {}; }
         eng_.note(qualified);
@@ -7490,7 +7528,7 @@ private:
     ctype infer_member_impl(member_expr* m, bool writing, const variable_decl** typed_field_out,
                             ctype* recv_out, member_hit* hit_out) {
         if (m->is_static && binary_width_token(m)) { return object_of("binary::width"); }
-        if (m->is_static && namespace_path_receiver(m)) {
+        if (m->is_static && namespace_path_receiver(m) && !namespace_class_receiver(m)) {
             if (const enum_decl* named = namespace_enum(m)) { return ctype{ctype::enum_ref_k, named->name}; }
             const bool enum_value = m->object->get_type() == node_type::member_expr && namespace_enum(static_cast<const member_expr*>(m->object.get()));
             if (!enum_value) {
@@ -7532,16 +7570,17 @@ private:
             recv.kind == ctype::string_k || recv.kind == ctype::utf8_k || recv.kind == ctype::function_k || recv.kind == ctype::weak_k || recv.kind == ctype::null_k ||
             recv.kind == ctype::int_k || recv.kind == ctype::float_k || recv.kind == ctype::char_k ||
             recv.kind == ctype::bool_k) {
-            if (!writing && !recv.tentative && !m->is_static) {
+            if (!writing && kind_certain(recv) && !m->is_static) {
                 builtin_method_value(recv, m);
                 scalar_member_missing(recv, m, false);
             }
-            if (writing && recv.kind == ctype::map_k && !recv.tentative && !m->is_static) {
+            if (writing && recv.kind == ctype::map_k && kind_certain(recv) && !m->is_static) {
                 diag(diag_level::error, m->location, "cannot assign to member '" + std::string(m->member) + "' of a map; store the key as [\"" + std::string(m->member) + "\"]");
             }
             return {};   // builtin methods / map keys / dynamic: lenient
         }
-        return infer_class_member(m, recv, writing, typed_field_out, hit_out);
+        const ctype member = infer_class_member(m, recv, writing, typed_field_out, hit_out);
+        return recv.declared_slot ? read_through_declared_slot(member) : member;
     }
 
     // obj.name where name is a static of obj's script class and no instance member: the run finds no such member on an instance,
@@ -8106,7 +8145,7 @@ private:
                     return math_intrinsic_result(fn, args);
                 }
                 if (ctype t; library_namespace_call(c, m, args, t)) { return t; }
-                if (namespace_path_receiver(m)) {
+                if (namespace_path_receiver(m) && !namespace_class_receiver(m)) {
                     check_namespace_member(m);
                     return check_namespace_entry(m, args, c->location, seen);
                 }
@@ -8149,7 +8188,10 @@ private:
             if (recv.kind == ctype::array_k && !m->is_static) { check_array_sizing_arguments(m->member, recv, args.data(), args.size(), c->location); }
             if (recv.const_key && string_mutator_name(m->member)) { map_key_mutation(m->location, m->object.get()); }
             if (class_dot_receiver(m, recv)) { return {}; }
-            if (recv.kind == ctype::object_k || recv.kind == ctype::class_ref_k) { return class_member_call(c, m, recv, args, &ov); }
+            if (recv.kind == ctype::object_k || recv.kind == ctype::class_ref_k) {
+                if (recv.declared_slot) { return read_through_declared_slot(class_member_call(c, m, recv, args, nullptr)); }
+                return class_member_call(c, m, recv, args, &ov);
+            }
             if (recv.is_unknown() && !m->is_static) {
                 if (const ctype held = referent_receiver(m->object.get()); held.kind == ctype::object_k) { class_member_call(c, m, held, args, nullptr); }
             }
@@ -8166,7 +8208,7 @@ private:
                 }
             }
             seen.copies = proven != 0;   // the library's string, array and map methods
-            if (!recv.tentative && !m->is_static) {
+            if (kind_certain(recv) && !m->is_static) {
                 scalar_member_missing(recv, m, true);
                 check_builtin_member(recv, m);
                 checkBuiltinArity(recv, m, c);
@@ -8193,6 +8235,7 @@ private:
                     }
                 }
             }
+            if (recv.declared_slot && !m->is_static) { return read_through_declared_slot(builtin_result(recv, m, args)); }
             return !recv.tentative && !m->is_static ? builtin_result(recv, m, args) : ctype{};   // builtin container/string methods etc.
         }
         if (const ctype held = infer(callee); signature_slot(held)) { return check_signature_call("the callee", held.ti, c, args); }
@@ -10434,6 +10477,11 @@ private:
                 namespace_scopes_.push_back(scopes_.size() - 1);
                 namespace_walk_names_.push_back(n->name);
                 for (auto& inner : n->declarations) { walk_decl(inner.get()); }
+                for (const auto& [name, entry] : scopes_.back()) {
+                    if (!entry.dynamic && !entry.declared && !entry.is_reference && !entry.type.is_unknown() && entry.type.kind != ctype::function_k) {
+                        namespace_inferred_types_[std::string(n->name) + "::" + std::string(name)] = entry.type;
+                    }
+                }
                 namespace_walk_names_.pop_back();
                 namespace_scopes_.pop_back();
                 scopes_.pop_back();

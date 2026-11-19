@@ -6,6 +6,7 @@ namespace shop {
 		return tax(stocked.price) + base;
 	}
 	Kind shelf_kind() { return Kind::fancy; }
+	int shelf_count() { return stock::count(); }
 }
 
 print(shop::shelf_total());

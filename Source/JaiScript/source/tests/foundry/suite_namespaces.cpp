@@ -903,6 +903,164 @@ public:
             });
         });
 
+        // C++ [namespace.qual]: the first segment of a qualified name is looked up as a bare name is, so namespace code names a
+        // nested namespace from where it stands, innermost first, whichever file opens it
+        test("namespace_code_names_a_nested_namespace_relatively", [&]() {
+            const std::string declaring = R"(
+                namespace outer {
+                    namespace inner {
+                        class Item { int v = 2; static int made() { return 7; } }
+                        enum Kind { a, b }
+                        int base = 10;
+                        const int LIMIT = 3;
+                        int k() { return 4; }
+                        namespace deep { int k() { return 5; } class Far { int v = 6; } }
+                    }
+                }
+            )";
+            const std::string naming = R"(
+                namespace outer {
+                    int call() { return inner::k() + inner::deep::k(); }
+                    int read() { return inner::base + inner::LIMIT; }
+                    void store() { inner::base = 20; }
+                    int typed() { inner::Item i; inner::deep::Far f; array<inner::Item> all = [inner::Item()]; return i.v + f.v + all.size() + inner::Item::made(); }
+                    inner::Kind kind(inner::Kind given) { inner::Kind k = inner::Kind::b; return given == k ? k : inner::Kind::a; }
+                    auto later() { return [](int x) { return inner::k() + x; }; }
+                    class User { int field = inner::k(); int method() { return inner::deep::k() + field; } }
+                    namespace inner { int up() { return deep::k() + k(); } }
+                    namespace other { int across() { return inner::k() * 2; } }
+                }
+                namespace outer::inner::deep { int sibling() { return deep::k(); } }
+                string report() {
+                    outer::store();
+                    return `${outer::call()} ${outer::read()} ${outer::typed()} ${outer::kind(outer::inner::Kind::b) == outer::inner::Kind::b} ${outer::later()(1)} ` +
+                           `${outer::User().method()} ${outer::inner::up()} ${outer::other::across()} ${outer::inner::deep::sibling()} ${outer::inner::k()}`;
+                }
+            )";
+            const std::string expected = "9 23 16 true 5 9 9 8 5 4";
+            const std::string hidden = "namespace inner { int k() { return 1; } int only() { return 2; } } namespace outer { namespace inner { int k() { return 40; } } ";
+            program_files files("relative");
+            files.write("declaring.jai", declaring);
+            files.write("naming.jai", naming);
+            files.write("nested_later.jai", "namespace outer { namespace inner { int late() { return 8; } } }");
+            files.write("using_relative.jai", "namespace outer { namespace inner { int k() { return 4; } } using inner::k; int use() { return k(); } }");
+            check_each(std::vector<std::pair<std::string, std::string>>{
+                {declaring + naming + "report()", expected},
+                {"import \"declaring.jai\"; import \"naming.jai\"; report()", expected},
+                {"import \"naming.jai\"; import \"declaring.jai\"; report()", expected},
+                {"import \"nested_later.jai\"; namespace outer { int use() { return inner::late(); } } outer::use()", "8"},
+                {"namespace outer { int use() { return inner::late(); } } import \"nested_later.jai\"; outer::use()", "8"},
+                {"import \"using_relative.jai\"; outer::use()", "4"},
+                // the innermost namespace of the name wins, and the search stops there; ::inner reaches the program's
+                {hidden + "int use() { return inner::k() + ::inner::k(); } } outer::use()", "41"},
+                {hidden + "int use() { return outer::inner::k(); } } outer::use()", "40"},
+                {hidden + "int use() { return inner::only(); } } outer::use()", "no member 'only' in namespace 'outer::inner'"},
+                {"namespace inner { int k() { return 1; } } namespace outer { int use() { return inner::k(); } } outer::use()", "1"},
+                {"namespace outer { int use() { return nowhere::k(); } } outer::use()", "use of undeclared identifier 'nowhere'"},
+                {"namespace game { namespace ai { int level() { return depth; } } extern ai::depth; } 1", "1"},
+            }, [&](const auto& c) {
+                auto eng = files.engine();
+                const std::string got = outcome(*eng, c.first);
+                check_true(got == c.second || (c.second.size() > 8 && got.find(c.second) != std::string::npos), c.first + "\n" + got);
+            });
+            auto earlier_run = files.engine();
+            earlier_run->execute(declaring);
+            check_eq(std::string("9"), outcome(*earlier_run, "namespace outer { int again() { return inner::k() + inner::deep::k(); } } outer::again()"), "a namespace an earlier run opened");
+        });
+
+        // A namespace's object is as typed through its qualified name as a program-scope object is through its own
+        test("a_member_taken_through_a_qualified_namespace_variable_is_checked", [&]() {
+            struct database { int rows = 2; };
+            const std::string declaring = R"(
+                class Part { int v = 2; }
+                class Store { int n = 1; array<int> items = [1]; Part part; static int count = 5; int get(int k) { return n + k; } Part make() { return Part(); } static int made(int k) { return k; } }
+                class Sub : Store { int get(int k) override { return 100; } int only = 5; }
+                class List<T> { array<T> xs; int size() { return xs.size(); } void add(T v) { xs.push(v); } T first() { return xs[0]; } }
+                T twice<T>(T v) { return v + v; }
+                namespace mv {
+                    Store db;
+                    shared_ptr<Store> held = make_shared<Store>();
+                    array<Store> list = [Store()];
+                    map<string, Store> table = {"a": Store()};
+                    array<int> numbers = [1, 2];
+                    string title = "x";
+                    auto inferred = Store();
+                    var loose = Store();
+                    Database host;
+                    List<int> ints;
+                    class Item { int n = 1; Item() {} Item(int k) { n = k; } static int made() { return 7; } static int count = 3; }
+                    class Box<T> { T v; T get() { return v; } }
+                    List<int> fresh() { List<int> l; l.add(4); return l; }
+                    namespace in { Store deep; }
+                }
+            )";
+            program_files files("receivers");
+            files.write("declaring.jai", declaring);
+            const auto engine = [&]() {
+                auto result = files.engine();
+                dynamic_binder<database>(*result, "Database").constructor<>().method("rows", [](database& self) { return self.rows; }).method("add", [](database& self, int a_count) { self.rows += a_count; }).build();
+                return result;
+            };
+            const std::vector<std::pair<std::string, std::string>> refused{
+                {"mv::db.nope();", "no member 'nope' in class 'Store'"},
+                {"mv::db.nope = 1;", "no member 'nope' in class 'Store'"},
+                {"string s = mv::db.get(1);", "cannot initialize 's' declared 'string' with 'int'"},
+                {"mv::db.get(\"x\", 2);", "'get' expects 1 argument(s), got 2"},
+                {"mv::db.get(\"x\");", "argument 1 of 'get': cannot pass 'string' to 'k' declared 'int'"},
+                {"mv::db.n = \"x\";", "cannot assign 'string' to field 'n' declared 'int'"},
+                {"mv::db.items.nope();", "no member 'nope' on 'array<int>'"},
+                {"string s = mv::db.items.size();", "cannot initialize 's' declared 'string' with 'int'"},
+                {"mv::db.part.nope;", "no member 'nope' in class 'Part'"},
+                {"mv::db.make().nope();", "no member 'nope' in class 'Part'"},
+                {"mv::held.nope();", "no member 'nope' in class 'Store'"},
+                {"string s = mv::held.get(1);", "cannot initialize 's' declared 'string' with 'int'"},
+                {"mv::list[0].nope;", "no member 'nope' in class 'Store'"},
+                {"mv::table[\"a\"].nope();", "no member 'nope' in class 'Store'"},
+                {"mv::numbers.nope();", "no member 'nope' on 'array<int>'"},
+                {"mv::numbers.push(\"x\");", "cannot push into 'array<int>'"},
+                {"string s = mv::numbers.size();", "cannot initialize 's' declared 'string' with 'int'"},
+                {"mv::title.nope();", "no member 'nope' on 'string'"},
+                {"mv::in::deep.nope();", "no member 'nope' in class 'Store'"},
+                {"mv::db = 3;", "cannot assign 'int' to 'mv::db' declared 'Store'"},
+                {"mv::host.nope();", "no member 'nope' in class 'Database'"},
+                {"mv::ints.nope();", "no member 'nope' in class 'List<int>'"},
+                {"mv::ints.add(\"x\");", "argument 1 of 'add': cannot pass 'string' to 'v' declared 'int'"},
+                {"string s = mv::fresh().size();", "cannot initialize 's' declared 'string' with 'int'"},
+                {"mv::Item().nope();", "no member 'nope' in class 'mv::Item'"},
+                {"mv::Item(1, 2);", "mv::Item"},
+                {"string s = mv::Item().n;", "cannot initialize 's' declared 'string' with 'int'"},
+                {"string s = mv::Box<int>().get();", "cannot initialize 's' declared 'string' with 'int'"},
+                {"string s = mv::Item::made();", "cannot initialize 's' declared 'string' with 'int'"},
+                {"mv::Item::nope();", "no static member 'nope' in class 'mv::Item'"},
+                {"string s = mv::Item::count;", "cannot initialize 's' declared 'string' with 'int'"},
+            };
+            const std::string import_first = "import \"declaring.jai\"; ";
+            auto same_file = engine();
+            auto other_file = engine();
+            check_each(refused, [&](const auto& c) {
+                const std::string in_function = "void f() { " + c.first + " } 1";
+                const check_report here = same_file->check(declaring + in_function);
+                check_true(here.has_errors() && here.format().find(c.second) != std::string::npos, "the same file: " + here.format());
+                other_file->check(import_first + in_function);
+                const check_report there = other_file->check(import_first + in_function);
+                check_true(there.has_errors() && there.format().find(c.second) != std::string::npos, "another file: " + there.format());
+            });
+            const std::string inferred = outcome(*engine(), declaring + "void f() { mv::inferred.nope(); } 1");   // auto: typed below its declaration, as at program scope
+            check_true(inferred.find("no member 'nope' in class 'Store'") != std::string::npos, inferred);
+            check_each(std::vector<std::pair<std::string, std::string>>{
+                {"mv::db = Sub(); `${mv::db.get(1)} ${mv::db.n} ${cast<Sub&>(mv::db).only}`", "100 1 5"},   // the slot holds the subclass: the run dispatches on it
+                {"Store& r = mv::db; r.n = 9; mv::db.items.push(2); `${mv::db.n} ${mv::db.items.size()}`", "9 2"},
+                {"`${mv::held.get(1)} ${mv::list[0].n} ${mv::table[\"a\"].get(2)} ${mv::in::deep.n} ${mv::inferred.n} ${mv::numbers.size()} ${mv::title.size()}`", "2 1 3 1 1 2 1"},
+                {"mv::loose.anything_at_all = 1; 1", "Cannot"},   // a var slot stays the run's to judge
+                {"mv::host.add(3); mv::host.rows()", "5"},
+                {"mv::ints.add(3); `${twice(mv::ints.size())} ${twice(mv::ints.first())} ${twice(mv::fresh().size())} ${twice(mv::db.get(1))}`", "2 6 2 4"},
+                {"`${twice(mv::Item().n)} ${twice(mv::Item(4).n)} ${mv::Item::made()} ${mv::Item::count} ${twice(mv::Box<int>().get())}`", "2 8 7 3 0"},
+            }, [&](const auto& c) {
+                const std::string got = outcome(*engine(), declaring + c.first);
+                check_true(got == c.second || (c.second == "Cannot" && got.find("static check failed") == std::string::npos), c.first + "\n" + got);
+            });
+        });
+
         test("a_qualified_host_registration_is_a_namespace_member", [&]() {
             // add_global("game::tick") and add_function("game::spawn") register into namespace game, as the library's
             // namespaces do: game::tick reads them, the namespace's code reads them bare, and script cannot assign them

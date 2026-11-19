@@ -1190,6 +1190,20 @@ struct engine::implementation {
             if (const size_t cut = name.rfind("::"); cut != std::string::npos) { pooled_namespace_classes_.insert(name.substr(cut + 2)); }
         }
     }
+    // The namespaces the pooled units open inside another, by last segment: a parse reads inner::k in outer's code as
+    // outer::inner::k (program_names_ holds each path as "outer::inner::")
+    std::unordered_set<std::string> pooled_nested_namespaces_;
+    void note_pooled_namespace_path(const std::string& name) {
+        if (name.size() < 2 || name.compare(name.size() - 2, 2, "::") != 0) { return; }
+        const size_t cut = name.rfind("::", name.size() - 3);
+        if (cut == std::string::npos) { return; }
+        pooled_nested_namespaces_.insert(name.substr(cut + 2, name.size() - cut - 4));
+        ++pooled_class_moves_;
+    }
+    void index_pooled_namespace_paths() {
+        pooled_nested_namespaces_.clear();
+        for (const auto& name : program_names_) { note_pooled_namespace_path(name); }
+    }
     // A unit's declarations into the program pools, each name under the unit that declares it; a unit pooled again under the
     // key it was pooled with brings the names it brought before, and again with the same declarations changes nothing but the
     // class models, where the unit pooled last wins
@@ -1201,7 +1215,10 @@ struct engine::implementation {
             detail::collect_unit_names(decls, names);
             for (const auto& n : names) {
                 program_name_units_[n][path] = key;
-                moved = program_names_.insert(n).second || moved;
+                if (program_names_.insert(n).second) {
+                    moved = true;
+                    note_pooled_namespace_path(n);
+                }
             }
         }
         const size_t classes_before = program_classes_.size();
@@ -2156,6 +2173,18 @@ struct engine::implementation {
         detail::set_aggregate_view(state, lowering_on());
     }
 
+    // the unit declares its instances now: what was built from its declarations is built again
+    void adopt_expanded_instances(script_cache_entry& entry, const std::vector<closure_stamp>& generic_files) {
+        entry.compiled.reset();
+        if (entry.lowering.built) { entry.lowering = detail::aggregate_lowering_state{}; }
+        stamp_generic_files(entry, generic_files);
+        if (std::any_of(entry.declarations.begin(), entry.declarations.end(), [](const declaration_ptr& d) {
+                return d && d->get_type() == node_type::generic_instance_decl && static_cast<const generic_instance_decl&>(*d).remade; })) {
+            entry.outside_generics = true;
+        }
+        if (pooled_unit_keys_.count(entry.source_path) && detail::collect_unit_classes(entry.declarations, program_classes_)) { ++program_union_epoch_; }
+    }
+
     void check_entry(engine& self, script_cache_entry& entry, bool want_diagnostics) {
         gather_entry_constants(entry);
         const uint64_t want_proof_epoch = type_proofs_ ? check_surface_epoch_ : UINT64_MAX;
@@ -2190,16 +2219,7 @@ struct engine::implementation {
                 }
                 return checked_declarations(entry);
             }, o, generic_files, expanded);
-            if (expanded) {   // the unit declares its instances now: what was built from its declarations is built again
-                entry.compiled.reset();
-                if (entry.lowering.built) { entry.lowering = detail::aggregate_lowering_state{}; }
-                stamp_generic_files(entry, generic_files);
-                if (std::any_of(entry.declarations.begin(), entry.declarations.end(), [](const declaration_ptr& d) {
-                        return d && d->get_type() == node_type::generic_instance_decl && static_cast<const generic_instance_decl&>(*d).remade; })) {
-                    entry.outside_generics = true;
-                }
-                if (pooled_unit_keys_.count(entry.source_path) && detail::collect_unit_classes(entry.declarations, program_classes_)) { ++program_union_epoch_; }
-            }
+            if (expanded) { adopt_expanded_instances(entry, generic_files); }
             if (first) {
                 entry.restamp = entry.stamp_loaded || (entry.cache_unstamped && !entry.check_result.has_errors());
                 entry.outside_keyed = !entry.check_result.has_errors();
@@ -2250,6 +2270,13 @@ struct engine::implementation {
                     }
                 }
                 reparse_if_moved(self, held, std::string(source));
+                // the instances each unit's text names, before any unit is checked: the type of another unit's variable or result may be one
+                if (parse_failures.empty()) {
+                    for (auto& unit : closure) {
+                        std::vector<closure_stamp> generic_files;
+                        if (expand_generics(self, unit.entry->declarations, generic_files)) { adopt_expanded_instances(*unit.entry, generic_files); }
+                    }
+                }
             }
             script_cache_entry& entry = *held;
             entry.closure_root = !roots.empty();
@@ -2481,6 +2508,7 @@ struct engine::implementation {
     void restore_program_pools(program_pools&& saved) {
         ++program_union_epoch_;
         program_names_ = std::move(saved.names);
+        index_pooled_namespace_paths();
         program_name_units_ = std::move(saved.name_units);
         pooled_unit_keys_ = std::move(saved.unit_keys);
         pooled_unit_declarations_ = std::move(saved.unit_declarations);
@@ -2622,7 +2650,23 @@ struct engine::implementation {
         for (const auto& q : queries) { result.push_back(namespace_class_known(q) ? '1' : '0'); }
         return result;
     }
+    // "outer::inner" opens a namespace; a bare "inner": some namespace nested in another ends in it
+    bool nested_namespace_known(std::string_view path) const {
+        const size_t cut = path.rfind("::");
+        if (cut != std::string_view::npos) {
+            if (program_names_.count(std::string(path) + "::") != 0) { return true; }
+            const auto id = string_symbolizer_.find(path);
+            return id && script_namespaces_.count(*id) != 0;
+        }
+        if (pooled_nested_namespaces_.count(std::string(path)) != 0) { return true; }
+        const std::string ending = "::" + std::string(path);
+        return std::any_of(script_namespaces_.begin(), script_namespaces_.end(), [&](const auto& entry) {
+            const std::string_view held = string_symbolizer_.get_string(entry.first);
+            return held.size() > ending.size() && held.compare(held.size() - ending.size(), ending.size(), ending) == 0;
+        });
+    }
     bool namespace_class_known(std::string_view query) const {
+        if (query.size() > 2 && query.compare(query.size() - 2, 2, "::") == 0) { return nested_namespace_known(query.substr(0, query.size() - 2)); }
         const size_t cut = query.rfind("::");
         const std::string spelled(query);
         if (cut == std::string_view::npos ? pooled_namespace_classes_.count(spelled) != 0 : program_classes_.count(spelled) != 0 || program_enums_.count(spelled) != 0) { return true; }
@@ -2638,9 +2682,9 @@ struct engine::implementation {
         const auto it = script_namespaces_.find(*space);
         return it != script_namespaces_.end() && declares(it->second);
     }
-    // classes and enums are only ever added to a namespace and the pools count their own moves, so an unchanged count answers every question as before
+    // namespaces, and the classes and enums in them, are only ever added and the pools count their own moves, so an unchanged count answers every question as before
     size_t namespace_class_count() const {
-        size_t result = pooled_class_moves_;
+        size_t result = pooled_class_moves_ + script_namespaces_.size();
         for (const auto& [id, space] : script_namespaces_) { if (space) { result += space->classes.size() + space->enums.size(); } }
         return result;
     }
@@ -2652,6 +2696,13 @@ struct engine::implementation {
             if (i < context.namespace_answers.size() && context.namespace_answers[i] == answers[i]) { continue; }
             const std::string& query = context.namespace_queries[i];
             const bool saved = i < context.namespace_answers.size() && context.namespace_answers[i] == '1';
+            if (query.size() > 2 && query.compare(query.size() - 2, 2, "::") == 0) {
+                const std::string path = query.substr(0, query.size() - 2);
+                const std::string nested = path.find("::") == std::string::npos ? "a namespace nested in another ending in '" + path + "'" : "'" + path + "' a namespace";
+                report.diagnostics.push_back({check_diagnostic::level::error, 0, 0, "the bite was parsed " + std::string(saved ? "with " : "without ") + nested + "; here " +
+                                              (saved ? "there is none" : "there is one") + ": save it again from source"});
+                continue;
+            }
             const size_t cut = query.rfind("::");
             const std::string what = cut == std::string::npos
                 ? std::string(saved ? "a namespace declared class or enum '" : "no namespace declared class or enum '") + query + "'; here " + (saved ? "none does" : "one does")
@@ -5709,9 +5760,11 @@ bool engine::namespace_class_known(std::string_view query) const {
     return impl->namespace_class_known(query);
 }
 
-void engine::pool_program_classes(const detail::program_class_map& classes, const detail::program_enum_map& enums) {
+void engine::pool_program_classes(const detail::program_class_map& classes, const detail::program_enum_map& enums, const std::unordered_set<std::string>& names) {
     impl->program_classes_ = classes;
     impl->program_enums_ = enums;
+    impl->program_names_ = names;
+    impl->index_pooled_namespace_paths();
     impl->index_pooled_namespace_classes();
     ++impl->program_union_epoch_;
 }

@@ -222,12 +222,21 @@ none of it but that declaration or the same unit's earlier text, which its reloa
 arguments, coroutines and the narrowing a call ends follow from the same declarations. A function read as a value is a
 `function`, with its declarations for a signature slot to judge when the unit makes every one a call could reach. A
 variable reads and stores by the declared type of the unit's own declaration, else of the one another unit of the program
-makes (tentative; a class-typed value slot types nothing, since it may hold a subclass; a namespace's top-level store to a
-member declared further down is left alone, as the read is, since the name still reaches what is outside). A class of the
+makes (`ctype::declared_slot`: tentative, so no proof rests on it, since a class slot may hold a subclass, yet its kind is
+certain, so what is read through it, a member, a method, an element, a builtin of a container, checks as through a declared
+local, and an `auto` variable types by what the walk inferred once it has passed the declaration; a namespace's top-level
+store to a member declared further down is left alone, as the read is, since the name still reaches what is outside).
+`ns::C()` constructs and `ns::C::member` reads the class's statics by the same rules. The closure's units declare the
+instances their text names before any unit is checked (`checked_report`), so a variable or result of a generic's instance
+another unit declares has its class in the pool whatever the import order. A class of the
 namespace's name keeps the call lenient (its statics answer too), as does a unit with a dynamic-path import for a member it
 does not declare, and a member only the host registers. A class is named by the parser, which reads the bare name as the
 qualified one (`parser::qualify_namespace_classes`), so the checker never counts a class as such a member, nor a nested
-namespace, which only its path names. An enum is named by the parser the same way ("Enums in a namespace" below). `::f` is
+namespace, which only its path names. That pass also reads the first segment of a qualified name from where it stands
+(C++ [namespace.qual]): `inner::k` in `outer` is `outer::inner::k` when an enclosing namespace, innermost first, holds a
+namespace `inner` (this stream's, the pool's "outer::inner::" path, an earlier run's; the question `namespace_class_known`
+answers carries the trailing `::`), so every later stage sees the full path. An extern's own name is left alone: it is
+already relative to its namespace. An enum is named by the parser the same way ("Enums in a namespace" below). `::f` is
 the program scope's, whatever a local or a namespace holds under the name,
 and a call whose bare name a local, a member or a namespace's member takes is never judged as another unit's program-scope
 function of that name (`reaches_program_scope`).

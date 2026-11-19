@@ -552,7 +552,7 @@ std::vector<std::string> workspace::program_units(const std::string& path) {
 // asks the engine, which answers from the program handed to it here
 void workspace::pool_classes(const program& prog) {
 	if (pooled_program_ == prog.signature) { return; }
-	jai::detail::engine_access::pool_program_classes(*engine_, prog.classes, prog.enums);
+	jai::detail::engine_access::pool_program_classes(*engine_, prog.classes, prog.enums, prog.names);
 	pooled_program_ = prog.signature;
 }
 

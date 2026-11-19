@@ -37,8 +37,10 @@ namespace jai {
         // with, for the parse cache's stamps; and the first one that never read whole (the parse failed on it)
         const std::vector<detail::source_stamp>& spliced_files() const { return spliced_files_; }
         const std::string& unsettled_file() const { return unsettled_file_; }
-        // the namespace classes and enums this parse asked the engine about, sorted: "space::Name" (space declares a class or an
-        // enum Name) or a bare "Name" (some namespace does); the parse holds wherever the engine answers them alike (engine.cpp
+        // the namespace classes, enums and nested namespaces this parse asked the engine about, sorted: "space::Name" (space declares
+        // a class or an enum Name), a bare "Name" (some namespace does), "space::Name::" (space holds a namespace Name), a bare
+        // "Name::" (some nested namespace is named so); the parse holds wherever the engine answers them alike (engine.cpp
+        // namespace_answers)
         std::vector<std::string> namespace_queries() const { return {namespace_queries_.begin(), namespace_queries_.end()}; }
         // after a failed parse: the top-level declarations that parsed around the errors (a tool checks what it can)
         std::vector<declaration_ptr>& recovered_declarations() { return recovered_; }

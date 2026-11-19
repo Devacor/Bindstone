@@ -612,6 +612,8 @@ private:
     const program_class_map* program_classes_ = nullptr;
     const program_function_map* program_functions_ = nullptr;
     const program_global_map* program_globals_ = nullptr;
+    struct top_var_decl { const variable_decl* decl = nullptr; size_t count = 0; };
+    std::unordered_map<std::string_view, top_var_decl> top_var_decls_;   // the unit's program-scope variables, ahead of the walk that meets them
     const program_enum_map* program_enums_ = nullptr;
     bool deferred_ = false;   // a program-table class met before the engine defined it: the unit's proofs re-stamp after the next import
     std::vector<std::string>* deferred_out_ = nullptr;   // their names, for the engine's re-stamp test
@@ -2031,6 +2033,7 @@ private:
                     break;
                 case node_type::variable_decl:
                     global_var_names_.insert(static_cast<const variable_decl*>(d.get())->name);
+                    if (!collecting_namespace_) { ++top_var_decls_[static_cast<const variable_decl*>(d.get())->name].count; top_var_decls_[static_cast<const variable_decl*>(d.get())->name].decl = static_cast<const variable_decl*>(d.get()); }
                     if (!collecting_namespace_ && static_cast<const variable_decl*>(d.get())->is_const) {
                         top_consts_[static_cast<const variable_decl*>(d.get())->name] = static_cast<const variable_decl*>(d.get());
                     }
@@ -4187,6 +4190,37 @@ private:
         if (src.origin && src.origin->get_type() == node_type::this_expr && handle_type(target)) {
             static_cast<this_expr*>(const_cast<expression*>(src.origin))->into_handle = true;
         }
+    }
+    // The declared type of the slot an expression names, read from the declarations rather than the walk: a program-scope variable
+    // declared below its use or in another unit (the program declares the name once), an element or entry of one
+    const type_info* declared_slot_type(const expression* e) {
+        if (!e) { return nullptr; }
+        if (e->get_type() == node_type::identifier_expr) {
+            const auto* id = static_cast<const identifier_expr*>(e);
+            if (find_local(id->name)) { return nullptr; }
+            if (auto top = top_var_decls_.find(id->name); top != top_var_decls_.end()) {
+                return top->second.count == 1 && top->second.decl ? top->second.decl->type.get() : nullptr;
+            }
+            if (!program_globals_) { return nullptr; }
+            const auto held = program_globals_->find(std::string(id->name));
+            if (held == program_globals_->end() || held->second.size() != 1 || held->second.begin()->second.size() != 1) { return nullptr; }
+            const variable_decl* g = held->second.begin()->second.front().get();
+            return g ? g->type.get() : nullptr;
+        }
+        if (e->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(e)->op.type == token_type::left_bracket) {
+            const type_info* container = declared_slot_type(static_cast<const binary_expr*>(e)->left.get());
+            if (!container) { return nullptr; }
+            if (container->base_type == script_value_type::jai_array_type) { return container->element_type().get(); }
+            if (container->base_type == script_value_type::jai_map_type) { return container->value_type().get(); }
+        }
+        return nullptr;
+    }
+    // a `this` stored where the walk has no type for the slot, which its declaration may give
+    void note_this_into_declared_slot(const expression* value, const expression* slot, bool element) {
+        if (!value || value->get_type() != node_type::this_expr) { return; }
+        const type_info* t = declared_slot_type(slot);
+        if (t && element) { t = t->base_type == script_value_type::jai_array_type ? t->element_type().get() : nullptr; }
+        if (handle_type(t)) { static_cast<this_expr*>(const_cast<expression*>(value))->into_handle = true; }
     }
     // a class held by value (never null); a handle, a var and an unknown wrapper are not
     static bool class_value(const ctype& t) {
@@ -8220,6 +8254,9 @@ private:
             }
             if (recv.kind == ctype::coroutine_k && !m->is_static) { return coroutine_method_call(recv, m, c, args); }
             if (ctype t; binary_member_call(c, m, recv, args, t)) { return t; }
+            if ((m->member == "push" && c->arguments.size() == 1) || (m->member == "insert" && c->arguments.size() == 2)) {
+                note_this_into_declared_slot(c->arguments.back().get(), m->object.get(), true);
+            }
             if (recv.kind == ctype::array_k && recv.ti && m->member == "insert" && args.size() == 2) {
                 note_this_into_handle(args[1], recv.ti->element_type().get());
                 const auto issue = container_element_issue(args[1], recv.ti->element_type().get());
@@ -8391,6 +8428,7 @@ private:
     }
 
     ctype infer_assignment_impl(assignment_expr* a, uint8_t& store_proof) {
+        if (a->op.type == token_type::equal) { note_this_into_declared_slot(a->value.get(), a->target.get(), false); }
         if (a->bare_condition) {
             diag(diag_level::error, a->location, "assignment used as a condition: write '==' to compare, or '((a = b))' with parentheses of its own to assign");
         }

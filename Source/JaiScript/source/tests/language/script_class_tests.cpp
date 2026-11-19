@@ -1243,6 +1243,12 @@ public:
                 auto m = make_shared<Ent>(); REG[1].n = 8; out += "|" + to_string(m.n);
                 e.self = null; m.self = null; out;
             )").as_string(), "this in a constructor new runs is the handle's object");
+            check_eq(std::string("3|4"), fresh()->execute(R"(
+                class Late { int n = 0; Late() { LATE.push(this); LATE_MAP["k"] = this; } }
+                array<shared_ptr<Late>> LATE;
+                map<string, shared_ptr<Late>> LATE_MAP;
+                auto x = new Late(); LATE[0].n = 3; string out = to_string(x.n); LATE_MAP["k"].n = 4; out + "|" + to_string(x.n);
+            )").as_string(), "a program-scope container declared below the constructor shares the handle's object");
             const auto refusal = [&](const std::string& body) {
                 try { fresh()->execute(classes + body); } catch (const std::exception& ex) { return std::string(ex.what()); }
                 return std::string("loaded");
@@ -1268,6 +1274,11 @@ public:
                 {"Dog d; d.own();", "'this' becomes a handle only on an object reached through a shared_ptr, and this one is a class value"},
                 {"array<shared_ptr<Ent>> REG; class Ent { Ent() { REG.push(this); } } Ent e;", "'this' becomes a handle only on an object reached through a shared_ptr, and this one is a class value"},
                 {"class Ent { shared_ptr<Ent> self = null; Ent() { self = this; } } shared_ptr<Ent> h = Ent();", "'this' becomes a handle only on an object reached through a shared_ptr, and this one is a class value"},
+                // the slot's declared type decides, wherever the program declares it (here below the class that stores into it)
+                {"class Late { Late() { LATE.push(this); } } array<shared_ptr<Late>> LATE; Late l;", "'this' becomes a handle only on an object reached through a shared_ptr, and this one is a class value"},
+                {"class LateMap { LateMap() { LATE_MAP[\"k\"] = this; } } map<string, shared_ptr<LateMap>> LATE_MAP; LateMap m;", "'this' becomes a handle only on an object reached through a shared_ptr, and this one is a class value"},
+                {"class LateSlot { LateSlot() { LATE_SLOT[0] = this; } } array<shared_ptr<LateSlot>> LATE_SLOT = [null]; LateSlot s;", "'this' becomes a handle only on an object reached through a shared_ptr, and this one is a class value"},
+                {"class LateInsert { LateInsert() { LATE_INSERT.insert(0, this); } } array<shared_ptr<LateInsert>> LATE_INSERT; LateInsert s;", "'this' becomes a handle only on an object reached through a shared_ptr, and this one is a class value"},
             };
             for (const auto& row : refused) { check_true(refusal(row.first).find(row.second) != std::string::npos, row.first); }
         });

@@ -1775,7 +1775,7 @@ public:
             check_true(threw, "subtype member on a certain base receiver is a strict error");
             check_eq((int64_t)2, e->execute(prelude + "cast<T&>(h.p).t").as_int());
             check_eq((int64_t)2, e->execute(prelude + "T tv = cast<T>(h.p); tv.t").as_int());
-            check_eq((int64_t)2, e->execute(prelude + "shared_ptr<T> th = cast<shared_ptr<T>>(h.p); th.t").as_int());
+            check_eq((int64_t)2, e->execute(prelude + "shared_ptr<S> sp = new T(); shared_ptr<T> th = cast<shared_ptr<T>>(sp); th.t").as_int());
             // the cast's class is certain: a missing member on it is still an error
             threw = false;
             std::string message;
@@ -2005,7 +2005,7 @@ public:
             auto r = e->check(P + "C c0 = C(); auto& r = c0; auto c = cast<C>(r);");
             check_eq((size_t)0, error_count(r));
             check_eq((size_t)1, warning_count(r));
-            check_true(has_diag(r, dlevel::warning, "cast<C>(r) copies the instance - use cast<C&>(r) to alias it or cast<shared_ptr<C>>(r) to share it"));
+            check_true(has_diag(r, dlevel::warning, "cast<C>(r) copies the instance - use cast<C&>(r) to alias it"));
             r = e->check(P + "C c0 = C(); var& vr = c0; auto c = cast<C>(vr);");
             check_eq((size_t)1, warning_count(r));
             check_true(has_diag(r, dlevel::warning, "cast<C>(vr) copies the instance"));

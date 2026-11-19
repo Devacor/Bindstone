@@ -150,6 +150,7 @@ namespace {
 	// push's element (C++ moves a temporary into push_back): a prvalue instance moves in when its copy's extra death and
 	// its copy are unobservable - no destructor in its value tree, a copyable script class, no C++ object; else the copy
 	checked_result<script_value> vm_convert_pushed_element(engine* eng, script_value& element, type_info_ptr element_type) {
+		if (element_type && element_type->base_type == script_value_type::jai_shared_ptr_type) { return detail::convert_owned_element(eng, element, element_type); }
 		if (element.raw_storage_index() == script_value::TYPEID_OBJECT && detail::uniquely_held(element)) {
 			const auto* instance = static_cast<const class_instance*>(element.unchecked_object_handle()->object());
 			const class_definition* def = instance->get_class_definition();
@@ -11745,7 +11746,7 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 			if (infer_pointee) {
 				// Take the initializer's exact class; thereafter the tag behaves
 				// exactly like the explicit spelling (reassignment enforcement
-				// reads it) - construct-and-share included.
+				// reads it), a class value included.
 				std::string actual_class;
 				if (auto instance = value.get_class_instance()) {
 					actual_class = instance->get_class_name();
@@ -11760,6 +11761,7 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 					return raise_(make_error_code(runtime_error_code::type_mismatch),
 						"Cannot infer shared_ptr<auto> pointee from this initializer - use var, or an explicit shared_ptr<T>");
 				}
+				detail::value_into_handle(value);
 				value.set_type_info(inferred);
 				return define_decl_value(f, decl, std::move(value), decl->ref_escaping);
 			}
@@ -11771,6 +11773,7 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 					"Cannot initialize shared_ptr<{0}> with {1}: type must match or be a subclass",
 					decl->type->element_type()->id, symbolizer_->intern(detail::shared_handle_judged_class(value, engine_)));
 			}
+			detail::value_into_handle(value);
 			value.set_type_info(decl->type);
 			return define_decl_value(f, decl, std::move(value), decl->ref_escaping);
 		}
@@ -14683,6 +14686,9 @@ op_status vm_backend::exec_from_this(frame& f, const vm_instruction& ins) {
 	if (!this_val.is_object()) {
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			"{0}() can only be called from within a method", sym);
+	}
+	if (!this_val.is_shared_ptr_type()) {   // KEEP BYTE-PARALLEL with the interpreter's visit_call_expr
+		return raise_(make_error_code(runtime_error_code::type_mismatch), detail::from_this_of_value_text, sym);
 	}
 	if (ins.a) {
 		auto weak_result = script_value::make_weak_ptr(this_val, engine_);

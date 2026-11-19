@@ -616,6 +616,8 @@ namespace jai {
         bool dynamic = false;
         // a type argument (db.query<User>(...)): no operand read, the reflect::type value naming target (detail/type_value.hpp)
         bool type_value = false;
+        // read only for its truth (a condition, !, && and ||, == null and != null): a handle form is the test and makes no handle
+        bool truth_read = false;
         expression_ptr operand;
         mutable const_site const_check;   // cast<T&>(c) / cast<shared_ptr<T>>(c) of a const
 

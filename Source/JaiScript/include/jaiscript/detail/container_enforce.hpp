@@ -375,7 +375,7 @@ namespace jai::detail {
 			return script_value(std::string(1, actual_element.unchecked_as_char()), eng);
 		}
 		if (target_type == script_value_type::jai_shared_ptr_type && elem_type == script_value_type::jai_object_type) {
-			return actual_element;   // the handle rows' store: the object travels as the handle, its own tag
+			return clone_for_assignment(actual_element);   // a handle never aliases a value slot: the element's handle holds a copy
 		}
 		if (is_math_type(target_type) && is_math_type(elem_type)) {
 			if (math::narrows(elem_type, target_type)) { return byte_element_mismatch_error(eng, actual_element, *element_type); }   // a host store arrives unchecked
@@ -398,10 +398,23 @@ namespace jai::detail {
 		return actual_element.clone_element();
 	}
 
+	// A class value bound for a handle element that no slot holds: it is the handle's object, where convert_container_element, whose
+	// source may be the slot itself, copies
+	inline bool prvalue_for_handle_element(const script_value& element, const type_info_ptr& element_type) noexcept {
+		return element_type && element_type->base_type == script_value_type::jai_shared_ptr_type && !element.is_reference() &&
+		       !element.is_shared_ptr_type() && object_is_prvalue(element);
+	}
+	// convert_container_element of a value the caller owns: an argument, a temporary, a copy it just made
+	inline checked_result<script_value> convert_owned_element(engine* eng, const script_value& element, const type_info_ptr& element_type) {
+		if (prvalue_for_handle_element(element, element_type)) { return element; }
+		return convert_container_element(eng, element, element_type);
+	}
+
 	// A replacing element store: a prvalue class instance (uniquely held) moves in and is the stored object, carrying its
 	// class as the object row's copy would; a prvalue array or map the element boundary leaves as it is moves in as the
 	// handle the boundary hands back (the copy's node would hold the same elements); anything else takes the converting copy
 	inline checked_result<script_value> convert_container_element_taking(engine* eng, script_value& element, const type_info_ptr& element_type) {
+		if (prvalue_for_handle_element(element, element_type)) { return std::move(element); }
 		if (element_type && element_type->base_type == script_value_type::jai_object_type &&
 		    element.raw_storage_index() == script_value::TYPEID_OBJECT && !element.is_shared_ptr_type() && uniquely_held(element)) {
 			const type_info* tag = element.get_type_info().get();
@@ -744,6 +757,7 @@ namespace jai::detail {
 				out.value = std::move(value);
 				return out;
 			}
+			const bool source_dies = !src->is_typed() && uniquely_held(value);   // a literal's elements are the copies it already made
 			script_value rebuilt = script_value::make_array(element_type, eng);
 			auto& dest = *rebuilt.get_array_storage();
 			dest.reserve(count);
@@ -756,7 +770,7 @@ namespace jai::detail {
 					dest.push(std::move(element));
 					continue;
 				}
-				auto converted = convert_container_element(eng, src->get(i, eng), element_type);
+				auto converted = source_dies ? convert_owned_element(eng, src->values()[i], element_type) : convert_container_element(eng, src->get(i, eng), element_type);
 				if (!converted) {
 					out.error = converted.error_value();
 					return out;
@@ -830,11 +844,12 @@ namespace jai::detail {
 				out.value = std::move(value);
 				return out;
 			}
+			const bool source_dies = uniquely_held(value);
 			script_value rebuilt = script_value::make_map(key_type, value_type, eng);
 			auto& dest = rebuilt.get_map_storage();
 			for (const auto& entry : entries) {
 				const script_value& actual_key = entry.first.is_reference() ? entry.first.deref() : entry.first;
-				auto converted = convert_container_element(eng, entry.second, value_type);
+				auto converted = source_dies ? convert_owned_element(eng, entry.second, value_type) : convert_container_element(eng, entry.second, value_type);
 				if (!converted) {
 					out.error = converted.error_value();
 					return out;

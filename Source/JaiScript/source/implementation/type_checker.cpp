@@ -42,6 +42,7 @@
 #include <cctype>
 #include <jaiscript/detail/return_flow.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
+#include <jaiscript/detail/cast_kernel.hpp>
 #include <jaiscript/detail/constant_arguments.hpp>
 #include <jaiscript/detail/format_text.hpp>
 #include <jaiscript/detail/regex_library.hpp>
@@ -3235,7 +3236,7 @@ private:
         }
     }
 
-    // a T& / var& / shared_ptr<T> declaration bound to a const (an auto& or a const T& takes it as a const reference)
+    // a T& / var& declaration bound to a const (an auto& or a const T& takes it as a const reference)
     void check_const_bind(variable_decl* decl, var_entry& entry) {
         if (decl->is_const) {
             entry.is_const = true;
@@ -3244,34 +3245,27 @@ private:
             return;
         }
         if (!decl->initializer || !decl->type) { stamp_const(decl->const_check, const_none, {}); return; }
-        const bool reference = decl->type->base_type == script_value_type::jai_reference_type;
-        const bool handle = handle_type(decl->type.get());
-        if (!reference && !handle) { stamp_const(decl->const_check, const_none, {}); return; }
-        const const_hit h = const_path(decl->initializer.get(), /*value_too=*/handle);
+        if (decl->type->base_type != script_value_type::jai_reference_type) { stamp_const(decl->const_check, const_none, {}); return; }
+        const const_hit h = const_path(decl->initializer.get());
         if (!h.verdict) { stamp_const(decl->const_check, const_none, {}); return; }
-        const type_info* referent = reference ? const_referent(decl->type.get()) : nullptr;
-        if (reference && !referent) {   // auto& deduces const T& (C++)
+        if (!const_referent(decl->type.get())) {   // auto& deduces const T& (C++)
             entry.is_const = h.verdict == const_raises;
             stamp_const(decl->const_check, const_none, {});
             return;
         }
-        if (handle && h.final_known && h.final_cls.empty()) { stamp_const(decl->const_check, const_none, {}); return; }
         const std::string declared = decl->type->canonical_name();
-        auto text = [&] {
-            return reference ? detail::const_bind_text(decl->name, declared, decl->initializer.get(), h.root, false)
-                             : detail::const_share_text(decl->initializer.get(), h.root, declared);
-        };
+        auto text = [&] { return detail::const_bind_text(decl->name, declared, decl->initializer.get(), h.root, false); };
         stamp_const(decl->const_check, h.verdict, text);
         if (h.verdict == const_raises) { diag(diag_level::error, decl->location, detail::const_lowercase(text()), h.line, h.column); }
     }
 
-    // cast<T&>(c) and cast<shared_ptr<T>>(c) name the const as writable (no const_cast)
+    // cast<T&>(c) names the const as writable (no const_cast)
     void check_const_cast(cast_expr* c) {
-        if (c->implicit_ref || !(c->by_reference || handle_type(c->target.get()))) { stamp_const(c->const_check, const_none, {}); return; }
-        const const_hit h = const_path(c->operand.get(), handle_type(c->target.get()));
-        if (!h.verdict || (handle_type(c->target.get()) && h.final_known && h.final_cls.empty())) { stamp_const(c->const_check, const_none, {}); return; }
-        const std::string target = c->target ? c->target->canonical_name() + (c->by_reference && c->target->base_type != script_value_type::jai_reference_type ? "&" : "") : std::string("T&");
-        auto text = [&] { return handle_type(c->target.get()) ? detail::const_share_text(c->operand.get(), h.root, target) : detail::const_cast_text(c->operand.get(), h.root, target); };
+        if (c->implicit_ref || !c->by_reference) { stamp_const(c->const_check, const_none, {}); return; }
+        const const_hit h = const_path(c->operand.get());
+        if (!h.verdict) { stamp_const(c->const_check, const_none, {}); return; }
+        const std::string target = c->target ? c->target->canonical_name() + (c->target->base_type != script_value_type::jai_reference_type ? "&" : "") : std::string("T&");
+        auto text = [&] { return detail::const_cast_text(c->operand.get(), h.root, target); };
         stamp_const(c->const_check, h.verdict, text);
         if (h.verdict == const_raises) { diag(diag_level::error, c->location, detail::const_lowercase(text()), h.line, h.column); }
     }
@@ -3491,10 +3485,24 @@ private:
         }
         const std::string cls = c->target->canonical_name();
         const std::string src = cast_operand_spelling(operand);
+        const bool handle_operand = cast_operand_source(operand, operand_t) == cast_source::handle;
         diag(diag_level::warning, c->location,
-             "cast<" + cls + ">(" + src + ") copies the instance - use cast<" + cls + "&>(" + src +
-             ") to alias it or cast<shared_ptr<" + cls + ">>(" + src + ") to share it",
+             "cast<" + cls + ">(" + src + ") copies the instance - use cast<" + cls + "&>(" + src + ") to alias it" +
+             (handle_operand ? " or cast<shared_ptr<" + cls + ">>(" + src + ") to share it" : ""),
              related_line, related_column);
+    }
+    // A handle form over a class value a slot holds, used as an object: a handle never aliases a value slot. Read for its truth it is
+    // the test; a var or a reference may hold a handle, and the run decides
+    void refuse_handle_of_value(const cast_expr* c, const ctype& operand) {
+        if (c->by_reference || c->truth_read || !handle_type(c->target.get()) || !c->target->element_type()) { return; }
+        if (operand.kind != ctype::object_k || operand.cls.empty() || operand.tentative || operand.narrowed) { return; }
+        if (operand.ti && (operand.ti->base_type == script_value_type::jai_shared_ptr_type || operand.ti->base_type == script_value_type::jai_weak_ptr_type)) { return; }
+        if (!detail::cast_lvalue_source(c->operand.get()) || cast_operand_source(c->operand.get(), operand) != cast_source::plain) { return; }
+        const std::string name(c->target->element_type()->type_name);
+        const std::string src = cast_operand_spelling(c->operand.get());
+        const std::string test = "dynamic_cast<" + name + ">(" + src + ")";
+        diag(diag_level::error, c->location, (c->dynamic ? test : "cast<shared_ptr<" + name + ">>(" + src + ")") + ": '" + src +
+             "' is a class value, and a handle never aliases one; test it with if (" + test + "), or take a reference with dynamic_cast<" + name + "&>(" + src + ")");
     }
     static bool certain_scalar(const ctype& t) {
         return (!t.tentative || t.element_proof) && (t.kind == ctype::int_k || t.kind == ctype::float_k || t.kind == ctype::bool_k ||
@@ -7361,6 +7369,7 @@ private:
             return {};
         }
         if (c->dynamic) { check_dynamic_cast(c, operand_t); }
+        refuse_handle_of_value(c, operand_t);
         if (collect_diagnostics_ && !c->by_reference && c->target->base_type == script_value_type::jai_object_type) {
             warn_cast_copy(c, operand_t);
         }

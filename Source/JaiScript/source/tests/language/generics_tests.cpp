@@ -1283,7 +1283,7 @@ public:
 				namespace shop { class Item { } class Stack<T> { int n = 5; } }
 				shared_ptr<Animal> dog = new Dog(); shared_ptr<Animal> other = new Animal();
 				var stack = Stack<int>(); shop::Stack<shop::Item> crate;
-				`${tricks_of<Dog>(dog)}|${tricks_of<Dog>(other)}|${dynamic_cast<shop::Stack<shop::Item>>(crate).n}|${dynamic_cast<Stack<int>>(stack) != null}|` +
+				`${tricks_of<Dog>(dog)}|${tricks_of<Dog>(other)}|${dynamic_cast<shop::Stack<shop::Item>&>(crate).n}|${dynamic_cast<Stack<int>>(stack) != null}|` +
 				`${dynamic_cast<shared_ptr<Stack<int>>>(stack) != null}|${dynamic_cast<Stack<int>&>(stack).items.empty()}`;
 			)").as_string());
 			const std::string builtin = failure(*e, "class Shape { } class Probe<T> { int f(Shape& s) { dynamic_cast<T&>(s); return 1; } } Probe<int> p;");

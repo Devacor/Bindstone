@@ -660,6 +660,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		auto made = c.make<cast_expr>(k->location, k->target, k->by_reference, o);
 		made->dynamic = k->dynamic;
 		made->type_value = k->type_value;
+		made->truth_read = k->truth_read;
 		return made;
 	}
 	case node_type::call_expr: {

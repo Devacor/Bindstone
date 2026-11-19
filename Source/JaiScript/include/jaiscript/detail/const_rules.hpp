@@ -70,10 +70,6 @@ namespace jai::detail {
 		return "Cannot cast " + what + " to " + std::string(target) + ": cast<" + std::string(target.substr(0, target.size() && target.back() == '&' ? target.size() - 1 : target.size())) +
 		       ">(" + const_spelled(operand) + ") copies it";
 	}
-	inline std::string const_share_text(const expression* source, std::string_view root, std::string_view handle) {
-		std::string what = const_names_root(source) ? "const '" + std::string(root) + "'" : "'" + const_spelled(source) + "' of const '" + std::string(root) + "'";
-		return "Cannot share " + what + " as " + std::string(handle) + "; copy it into a variable first";
-	}
 	inline std::string const_return_text(const expression* value, std::string_view root, std::string_view fn, std::string_view declared) {
 		std::string what = const_names_root(value) ? "const '" + std::string(root) + "'" : "'" + const_spelled(value) + "' of const '" + std::string(root) + "'";
 		return "Cannot return " + what + " from '" + std::string(fn) + "' by reference (declared -> " + std::string(declared) + "); return it by value";
@@ -435,7 +431,7 @@ namespace jai::detail {
 					}
 					case node_type::cast_expr: {
 						auto* c = static_cast<const cast_expr*>(e);
-						if ((c->by_reference || const_handle_type(c->target.get())) && !c->implicit_ref) {
+						if (c->by_reference && !c->implicit_ref) {
 							if (const uint8_t p = path(c->operand.get())) { note(c, false); (void)p; }
 						}
 						expr(c->operand.get());

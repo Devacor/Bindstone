@@ -463,7 +463,8 @@ its values are walked without running code, and a write that crosses a handle ru
 | a typed reference loop variable over a const's elements | `Cannot bind 'x' (declared int&) to an element of const 'xs'; declare it const int& or auto&` | the same, lowercase |
 | a const passed to a reference parameter its callee writes through | `Cannot pass const 'a' to parameter 'x' of 'inc': 'inc' writes through it (line 1)` | `'inc' writes through parameter 'x' (line 1); 'a' is const` |
 | `cast<T&>` of a const | `Cannot cast const 'a' to int&: cast<int>(a) copies it` | the same, lowercase |
-| `cast<shared_ptr<T>>` of a const, or a const instance stored into a `shared_ptr<T>` | `Cannot share const 'p' as shared_ptr<P>; copy it into a variable first` | the same, lowercase |
+| a handle-form cast over a declared class value, used as an object | a `var` or reference operand copies at run time | `dynamic_cast<D>(p): 'p' is a class value, and a handle never aliases one; test it with if (dynamic_cast<D>(p)), or take a reference with dynamic_cast<D&>(p)` |
+| `shared_from_this()` / `weak_from_this()` on a class value | `shared_from_this() needs an object reached through a shared_ptr, and this one is a class value` | - |
 | a const returned from a `-> T&` function | `Cannot return const 'a' from 'f' by reference (declared -> int&); return it by value` | the same, lowercase |
 | a const without an initializer | - | parse error: `const 'x' needs an initializer: const int x = value;` |
 | `engine::add_global` / `add_global_ref` over a const | `Cannot assign to 'LIMIT': it is read-only` (thrown to the host) | - |

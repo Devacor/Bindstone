@@ -363,7 +363,6 @@ of an assignment included), so the error is the same whichever operand would hav
 | a typed reference loop variable over a const's elements | `Cannot bind 'x' (declared int&) to an element of const 'xs'; declare it const int& or auto&` | the same, lowercase |
 | a const into a reference parameter its callee writes through | `Cannot pass const 'n' to parameter 'x' of 'inc': 'inc' writes through it (line 12)` | `'inc' writes through parameter 'x' (line 12); 'n' is const` |
 | `cast<T&>` of a const | `Cannot cast const 'c' to int&: cast<int>(c) copies it` | the same, lowercase |
-| `cast<shared_ptr<T>>` of a const, a const stored into a `shared_ptr<T>` | `Cannot share const 'c' as shared_ptr<Foo>; copy it into a variable first` | the same, lowercase |
 | a const returned by reference | `Cannot return const 'MAX' from 'f' by reference (declared -> int&); return it by value` | the same, lowercase |
 | two definitions of one signature in one unit (4.3) | none | `'m' is already defined with parameters (int&) at 4:5`; a program-scope function: `'f' is already defined at 4:5` |
 | a function another unit defined (4.3) | none | warning: `'f' redefines the function defined in <file>:4` |

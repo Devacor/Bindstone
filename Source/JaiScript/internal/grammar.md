@@ -1028,7 +1028,7 @@ string healthLevel = health > 75 ? "healthy" :
     or be a subclass"); derived→base upcasts stay legal, null initialization is fine, and
     null stays assignable after establishment. `shared_ptr<auto>` INFERS the pointee from
     the initializer's exact class, then enforces it exactly like the explicit spelling
-    (construct-and-share `shared_ptr<auto> v = T();` included) — a missing, null, or
+    (a class value included: `shared_ptr<auto> v = T();`) — a missing, null, or
     non-class initializer has nothing to infer and errors (use `var`, or an explicit
     `shared_ptr<T>`). Inference is a DECLARATION feature: `shared_ptr<auto>` fields infer
     from their default (field writes keep the lenient field-store semantics of explicit

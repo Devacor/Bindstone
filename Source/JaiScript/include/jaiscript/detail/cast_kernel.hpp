@@ -50,6 +50,9 @@ namespace jai::detail {
 		return t == node_type::binary_expr && static_cast<const binary_expr*>(e)->op.type == token_type::left_bracket;
 	}
 
+	// shared_from_this() / weak_from_this() on an object reached as a value: there is no handle to hand out
+	inline constexpr std::string_view from_this_of_value_text = "{0}() needs an object reached through a shared_ptr, and this one is a class value";
+
 	inline constexpr std::string_view cast_non_lvalue_text =
 		"Cannot take reference of non-lvalue expression in cast<T&> (computed properties, "
 		"C++-backed members and non-object receivers are not ref-bindable)";
@@ -102,14 +105,15 @@ namespace jai::detail {
 	const script_value* library_instance_test_cell(engine& eng);
 	// dynamic_cast<T>(e): e's object as a shared_ptr<T> when it is a T, and null when e
 	// names no object (null, an expired weak handle, a value that is no object) or an object of another class. A weak handle
-	// answers for the object it locks.
+	// answers for the object it locks; a class value a slot holds gives a handle to a copy, unless the cast is only read for its truth.
 	JAI_NOINLINE inline script_value cast_dynamic_null(const cast_expr& c, engine* eng) {
 		script_value none(std::monostate{}, eng);
 		none.set_type_info(c.target);
 		return none;
 	}
 	inline script_value cast_dynamic_handle(script_value seen, const cast_expr& c, engine* eng) {
-		if (seen.raw_storage_index() == script_value::TYPEID_WEAK_PTR) {
+		const bool through_weak = seen.raw_storage_index() == script_value::TYPEID_WEAK_PTR;
+		if (through_weak) {
 			auto locked = seen.get_weak_ptr().lock();
 			if (!locked) { return cast_dynamic_null(c, eng); }
 			script_value held(std::monostate{}, eng);
@@ -118,6 +122,7 @@ namespace jai::detail {
 		}
 		const type_info* cls = cast_target_class(*c.target);
 		if (!cls || cls->is_enum || !instance_of_class(seen, cls->type_name, eng)) { return cast_dynamic_null(c, eng); }
+		if (!through_weak && !c.truth_read) { value_into_handle(seen); }
 		seen.set_type_info(c.target);
 		return seen;
 	}
@@ -155,7 +160,7 @@ namespace jai::detail {
 
 	// Value and shared_ptr forms with a CLASS target: null passes tagged into the shared_ptr form alone; an admitted object is
 	// tagged - the value form copies like a typed declaration (existing storage clones, a handle
-	// deep-copies into a value, a temporary moves), the shared_ptr form shares the instance.
+	// deep-copies into a value, a temporary moves), the shared_ptr form shares a handle's instance and takes a value as a handle does.
 	inline constexpr std::string_view cast_enum_value_text = "Cannot cast {0} to '{1}': not one of its values";
 
 	// cast<E>(n): the int n as E's value; an int no value of E has raises, anything but an int is the cast's own error
@@ -193,6 +198,8 @@ namespace jai::detail {
 				script_value copy = clone_for_assignment(seen);
 				seen = std::move(copy);
 			}
+		} else if (!c.truth_read) {
+			value_into_handle(seen);
 		}
 		seen.set_type_info(c.target);
 		return seen;

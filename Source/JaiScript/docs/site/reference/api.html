@@ -770,8 +770,8 @@ auto&amp; r = a;
 print(same_object(a, b), &quot; &quot;, same_object(a, r), &quot; &quot;, a == b);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">false true true</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="shared_from_this() -&gt; shared_ptr&lt;t&gt; observe method context only. every engine"><h3 id="api-0cb76b5518ef"><code>shared_from_this() -&gt; shared_ptr&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; observe</p>
-<p>Method context only.</p>
+<div class="api-entry" data-provider="core" data-search="shared_from_this() -&gt; shared_ptr&lt;t&gt; observe method context only, on an object reached through a shared_ptr; on a class value it raises. every engine"><h3 id="api-0cb76b5518ef"><code>shared_from_this() -&gt; shared_ptr&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>Method context only, on an object reached through a shared_ptr; on a class value it raises.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="sleep(seconds: number) -&gt; void wait waits seconds on the engine&#x27;s time source: inside a run engine::start began, the run suspends and returns to the host until then; elsewhere it blocks. every engine"><h3 id="api-556785430d43"><code>sleep(seconds: number) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; wait</p>
 <p>Waits seconds on the engine&#x27;s time source: inside a run engine::start began, the run suspends and returns to the host until then; elsewhere it blocks.</p>
@@ -816,8 +816,8 @@ print(to_json([1, 2], 2));</code></pre></div>
 print(vformat(pattern, &quot;orc&quot;, 7));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">orc has 7 hp</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="weak_from_this() -&gt; weak_ptr&lt;t&gt; observe method context only. every engine"><h3 id="api-c099161bf101"><code>weak_from_this() -&gt; weak_ptr&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; observe</p>
-<p>Method context only.</p>
+<div class="api-entry" data-provider="core" data-search="weak_from_this() -&gt; weak_ptr&lt;t&gt; observe method context only, on an object reached through a shared_ptr; on a class value it raises. every engine"><h3 id="api-c099161bf101"><code>weak_from_this() -&gt; weak_ptr&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>Method context only, on an object reached through a shared_ptr; on a class value it raises.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="working_dir() -&gt; string observe  every engine"><h3 id="api-e0d948fd29b5"><code>working_dir() -&gt; string</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>

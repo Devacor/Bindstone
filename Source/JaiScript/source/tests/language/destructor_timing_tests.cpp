@@ -777,7 +777,7 @@ public:
 
         test("assignment_keeps_the_object_references_and_handles_name", [this]() {
             expect_log(R"(
-                function f() -> string { Token x = Token("a"); Token& r = x; shared_ptr<Token> h = x; x = Token("b"); return r.name + h.name + to_string(same_object(h, x)); }
+                function f() -> string { shared_ptr<Token> h = new Token("a"); Token& x = cast<Token&>(h); Token& r = x; x = Token("b"); return r.name + h.name + to_string(same_object(h, x)); }
                 string out = f(); out + ":" + LOG;
             )", "bbtrue:bb");
             expect_log(R"(
@@ -792,17 +792,17 @@ public:
         test("assignment_from_another_admitted_class_reclasses_the_object_in_place", [this]() {
             const std::pair<std::string, std::string> cases[] = {
                 {std::string(k_family) + R"(
-                function f() -> string { Base x = Base(); shared_ptr<Base> h = x; D2 s = D2(); s.a = 5; s.d2 = 6; x = s; LOG = LOG + "|";
+                function f() -> string { Base x = Base(); Base& h = x; D2 s = D2(); s.a = 5; s.d2 = 6; x = s; LOG = LOG + "|";
                     return to_string(x.a) + reflect::type_of(h) + to_string(same_object(h, x)) + to_string(cast<D2&>(x).d2); }
                 string out = f(); out + ":" + LOG;
             )", "5D2true6:|2B2B"},
                 {std::string(k_family) + R"(
-                function f() -> string { Base x = D1(); shared_ptr<Base> h = x; D2 s = D2(); s.a = 7; LOG = LOG + "|"; x = s; LOG = LOG + "|";
+                function f() -> string { Base x = D1(); Base& h = x; D2 s = D2(); s.a = 7; LOG = LOG + "|"; x = s; LOG = LOG + "|";
                     return to_string(x.a) + to_string(cast<D2&>(h).d2) + to_string(same_object(h, x)); }
                 string out = f(); out + ":" + LOG;
             )", "73true:|1t|2B2B"},
                 {std::string(k_family) + R"(
-                function f() -> string { Base x = D1(); shared_ptr<Base> h = x; Base b = Base(); b.a = 9; LOG = LOG + "|"; x = b; LOG = LOG + "|";
+                function f() -> string { Base x = D1(); Base& h = x; Base b = Base(); b.a = 9; LOG = LOG + "|"; x = b; LOG = LOG + "|";
                     string r = to_string(x.a) + reflect::type_of(h) + to_string(same_object(h, x));
                     try { int k = cast<D1&>(x).d1; r = r + "no"; } catch (e) { r = r + "!"; }
                     return r; }
@@ -849,7 +849,7 @@ public:
             expect_log(std::string(k_family) + R"(
                 [[warn_mode]]
                 class Other { int a = 1; Other() {} }
-                function f() -> string { Base x = Base(); shared_ptr<Base> h = x; var o = Other(); string r = "";
+                function f() -> string { Base x = Base(); Base& h = x; var o = Other(); string r = "";
                     try { x = o; r = "no"; } catch (e) { r = e; }
                     return r + "|" + reflect::type_of(h) + to_string(same_object(h, x)); }
                 string out = f(); LOG = ""; out;
@@ -859,33 +859,33 @@ public:
         test("every_by_value_slot_reclasses_in_place", [this]() {
             const std::string family = std::string(k_family);
             expect_log(family + R"(
-                function f() -> string { array<Base> a; a.push(Base()); shared_ptr<Base> h = a[0]; a[0] = D2(); return reflect::type_of(a[0]) + to_string(same_object(h, a[0])) + to_string(cast<D2&>(h).d2); }
+                function f() -> string { array<Base> a; a.push(Base()); Base& h = a[0]; a[0] = D2(); return reflect::type_of(a[0]) + to_string(same_object(h, a[0])) + to_string(cast<D2&>(h).d2); }
                 string out = f(); LOG = ""; out;
             )", "D2true3");
             expect_log(family + R"(
                 class Holder { Base b; }
-                function f() -> string { Holder o; shared_ptr<Base> h = o.b; o.b = D2(); return reflect::type_of(h) + to_string(same_object(h, o.b)) + to_string(cast<D2&>(o.b).d2); }
+                function f() -> string { Holder o; Base& h = o.b; o.b = D2(); return reflect::type_of(h) + to_string(same_object(h, o.b)) + to_string(cast<D2&>(o.b).d2); }
                 string out = f(); LOG = ""; out;
             )", "D2true3");
             expect_log(family + R"(
                 class S { static Base st; }
-                function f() -> string { shared_ptr<Base> h = S::st; S::st = D2(); return reflect::type_of(h) + to_string(same_object(h, S::st)) + to_string(cast<D2&>(S::st).d2); }
+                function f() -> string { Base& h = S::st; S::st = D2(); return reflect::type_of(h) + to_string(same_object(h, S::st)) + to_string(cast<D2&>(S::st).d2); }
                 string out = f(); LOG = ""; out;
             )", "D2true3");
             expect_log(family + R"(
-                function f() -> string { map<string, Base> m; m["k"] = Base(); shared_ptr<Base> h = m["k"]; m["k"] = D2(); return reflect::type_of(h) + to_string(same_object(h, m["k"])) + to_string(cast<D2&>(m["k"]).d2); }
+                function f() -> string { map<string, Base> m; m["k"] = Base(); Base& h = m["k"]; m["k"] = D2(); return reflect::type_of(h) + to_string(same_object(h, m["k"])) + to_string(cast<D2&>(m["k"]).d2); }
                 string out = f(); LOG = ""; out;
             )", "D2true3");
             expect_log(family + R"(
                 function put(Base& p) -> void { p = D2(); }
-                function f() -> string { Base x = Base(); shared_ptr<Base> h = x; Base& r = x; r = D1(); string first = reflect::type_of(h); put(x);
+                function f() -> string { Base x = Base(); Base& h = x; Base& r = x; r = D1(); string first = reflect::type_of(h); put(x);
                     return first + reflect::type_of(h) + to_string(same_object(h, x)); }
                 string out = f(); LOG = ""; out;
             )", "D1D2true");
             expect_log(family + R"(
                 class Acc { int n = 0; Acc() {} Acc(int v) { n = v; } function operator+(Acc o) -> Acc { return Sum(n + o.n); } }
                 class Sum : Acc { int parts = 2; Sum(int v) { n = v; } }
-                function f() -> string { Acc x = Acc(1); shared_ptr<Acc> h = x; Acc two = Acc(2); x += two; return reflect::type_of(h) + to_string(h.n) + to_string(same_object(h, x)) + to_string(cast<Sum&>(x).parts); }
+                function f() -> string { Acc x = Acc(1); Acc& h = x; Acc two = Acc(2); x += two; return reflect::type_of(h) + to_string(h.n) + to_string(same_object(h, x)) + to_string(cast<Sum&>(x).parts); }
                 string out = f(); LOG = ""; out;
             )", "Sum3true2");
         });
@@ -903,20 +903,20 @@ public:
         test("field_element_map_and_static_stores_copy_assign", [this]() {
             expect_log(R"(
                 class Holder { Token t; }
-                function f() -> string { Holder o; shared_ptr<Token> h = o.t; o.t = Token("n"); LOG = LOG + "|"; return h.name + to_string(same_object(h, o.t)); }
+                function f() -> string { Holder o; Token& h = o.t; o.t = Token("n"); LOG = LOG + "|"; return h.name + to_string(same_object(h, o.t)); }
                 string out = f(); out + ":" + LOG;
             )", "ntrue:n|n");
             expect_log(R"(
-                function f() -> string { array<Token> a; Token p = Token("p"); a.push(p); shared_ptr<Token> h = a[0]; a[0] = Token("q"); LOG = LOG + "|"; return h.name + to_string(same_object(h, a[0])); }
+                function f() -> string { array<Token> a; Token p = Token("p"); a.push(p); Token& h = a[0]; a[0] = Token("q"); LOG = LOG + "|"; return h.name + to_string(same_object(h, a[0])); }
                 string out = f(); out + ":" + LOG;
             )", "qtrue:q|pq");
             expect_log(R"(
-                function f() -> string { map<string, Token> m; m["k"] = Token("m"); LOG = LOG + "/"; shared_ptr<Token> h = m["k"]; m["k"] = Token("n"); LOG = LOG + "|"; return h.name + to_string(same_object(h, m["k"])); }
+                function f() -> string { map<string, Token> m; m["k"] = Token("m"); LOG = LOG + "/"; Token& h = m["k"]; m["k"] = Token("n"); LOG = LOG + "|"; return h.name + to_string(same_object(h, m["k"])); }
                 string out = f(); out + ":" + LOG;
             )", "ntrue:/n|n");
             expect_log(R"(
                 class S { static Token st; }
-                function f() -> string { shared_ptr<Token> h = S::st; S::st = Token("s"); LOG = LOG + "|"; return h.name + to_string(same_object(h, S::st)); }
+                function f() -> string { Token& h = S::st; S::st = Token("s"); LOG = LOG + "|"; return h.name + to_string(same_object(h, S::st)); }
                 string out = f(); out + ":" + LOG;
             )", "strue:s|");
         });
@@ -935,7 +935,7 @@ public:
         test("a_compound_assignment_copy_assigns_the_operator_result", [this]() {
             expect_log(R"(
                 class Acc { int n = 0; Acc(int v) { n = v; } ~Acc() { LOG = LOG + to_string(n); } function operator+(Acc o) -> Acc { return Acc(n + o.n); } }
-                function f() -> string { Acc x = Acc(1); shared_ptr<Acc> h = x; Acc two = Acc(2); x += two; LOG = LOG + "|"; return to_string(h.n) + to_string(same_object(h, x)); }
+                function f() -> string { Acc x = Acc(1); Acc& h = x; Acc two = Acc(2); x += two; LOG = LOG + "|"; return to_string(h.n) + to_string(same_object(h, x)); }
                 string out = f(); out + ":" + LOG;
             )", "3true:23|23");
             // a declared operator+= (and ++, --) is what the compound calls, on the object in place: no temporary, nothing stored
@@ -954,7 +954,7 @@ public:
                 class Box { Acc a = Acc(7); void bump() { a += 1; } }
                 function twice(Acc& r) -> void { r += 2; r += 2; }
                 function f() -> string {
-                    Acc x = Acc(1); shared_ptr<Acc> h = x;
+                    Acc x = Acc(1); Acc& h = x;
                     x += 2; ++x; auto& back = (x -= 1); back += 10; twice(x);
                     auto old = x++; LOG = LOG + "|";
                     array<Acc> xs = [Acc(5)]; xs[0] += 1; Box b; b.bump(); b.a += 1; var v = Acc(3); v += 1; h += 1;
@@ -969,7 +969,42 @@ public:
             expect_log(R"(
                 function f() -> string { var v = Token("a"); shared_ptr<Token> h = v; v = Token("b"); LOG = LOG + "|"; return h.name + v.name; }
                 string out = f(); out + ":" + LOG;
-            )", "ab:|ab");
+            )", "ab:a|ab");
+        });
+
+        // A handle never aliases a value slot: what it holds is a copy, which dies with the handle, and the value dies with its scope
+        test("a_handle_made_from_a_value_leaves_the_value_its_scope", [this]() {
+            const std::pair<std::string, std::string> cases[] = {
+                {R"(
+                function f() -> string { shared_ptr<Token> keep = null; { Token x = Token("a"); shared_ptr<Token> h = x; h.name = "c"; keep = h; LOG = LOG + "|"; } LOG = LOG + "|"; return keep.name; }
+                string out = f(); out + ":" + LOG;
+            )", "c:|a|c"},
+                {R"(
+                function f() -> void { Token x = Token("a"); { shared_ptr<Token> h = x; h.name = "c"; } LOG = LOG + "|"; }
+                f(); LOG;
+            )", "c|a"},
+                {R"(
+                function f() -> void { shared_ptr<Token> h = Token("t"); LOG = LOG + "|"; }
+                f(); LOG;
+            )", "|t"},
+                {R"(
+                function f() -> void { array<shared_ptr<Token>> all; { Token x = Token("a"); all.push(x); all[0].name = "c"; } LOG = LOG + "|"; }
+                f(); LOG;
+            )", "a|c"},
+                {R"(
+                function f() -> void { map<string, shared_ptr<Token>> all; { Token x = Token("a"); all["k"] = x; all["k"].name = "c"; } LOG = LOG + "|"; }
+                f(); LOG;
+            )", "a|c"},
+                {R"(
+                function f() -> void { var v = Token("a"); { auto h = dynamic_cast<Token>(v); h.name = "c"; } LOG = LOG + "|"; }
+                f(); LOG;
+            )", "c|a"},
+                {R"(
+                function f() -> void { Token x = Token("a"); if (dynamic_cast<Token>(x)) { LOG = LOG + "|"; } LOG = LOG + "|"; }
+                f(); LOG;
+            )", "||a"},
+            };
+            check_each(cases, [&](const auto& c) { expect_log(c.first, c.second); });
         });
 
         test("a_hot_reloaded_instance_copy_assigns_with_the_new_layout", [this]() {
@@ -977,7 +1012,7 @@ public:
             jai::stdlib::register_all(eng);
             eng->execute(std::string(k_prelude) + R"(
                 Token held = Token("x");
-                shared_ptr<Token> alias = held;
+                Token& alias = held;
             )");
             const std::string got = eng->execute(R"(
                 class Token { string name = ""; int hp = 7; Token() {} Token(string n) { name = n; } ~Token() { LOG = LOG + name; } }
@@ -995,7 +1030,7 @@ public:
             jai::stdlib::register_all(eng);
             eng->execute(std::string(k_prelude) + k_family + R"(
                 Base held = Base();
-                shared_ptr<Base> alias = held;
+                Base& alias = held;
                 held = D2();
             )");
             const std::string got = eng->execute(R"(

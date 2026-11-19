@@ -23,6 +23,21 @@ namespace jai::detail {
         }
     }
 
+    // A value no slot holds, of a script class or a host class
+    inline bool object_is_prvalue(const script_value& v) noexcept {
+        if (v.raw_storage_index() != script_value::TYPEID_OBJECT) { return false; }
+        const auto& holder = v.unchecked_object_handle();
+        return holder && holder.use_count() == 1 && (holder->holds_object() ? holder->object_use_count() == 1 : holder->has_keep_alive());
+    }
+
+    // What a handle takes from a class value: a handle never aliases a value slot, so a prvalue is the handle's object and a value
+    // a slot holds is copied, as make_shared<T>(value) copies it. A handle stays the handle
+    inline void value_into_handle(script_value& value) {
+        if (value.raw_storage_index() != script_value::TYPEID_OBJECT || value.is_shared_ptr_type() || object_is_prvalue(value)) { return; }
+        script_value copy = clone_for_assignment(value);
+        value = std::move(copy);
+    }
+
     // A replacing store's value: a prvalue (uniquely held) moves in and is the stored object, anything else is the
     // assignment copy
     inline script_value take_for_assignment(script_value& value) {

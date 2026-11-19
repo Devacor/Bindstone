@@ -2497,7 +2497,7 @@ public:
 				var h = Holder();
 				var d = Dog();
 				d.id = 4;
-				shared_ptr<Animal> kept = h.pet;
+				Animal& kept = h.pet;
 				put(h.pet, d);
 				same_object(kept, h.pet) ? h.pet.id * 10 + h.pet.extra : -1;
 			)", "41"},

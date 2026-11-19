@@ -158,6 +158,8 @@ true</code></pre></div>
 <div class="tablewrap"><table><thead><tr><th>Written</th><th>Does</th></tr></thead><tbody>
 <tr><td><code>sp = new Node();</code> (a handle on the right)</td><td>points <code>sp</code> at another object</td></tr>
 <tr><td><code>sp = Node();</code> (a value on the right)</td><td>assigns into the shared object: every alias sees it</td></tr>
+<tr><td><code>shared_ptr&lt;Node&gt; h = value;</code>, <code>handles.push(value)</code>, <code>table["k"] = value</code></td><td>the handle holds a <strong>copy</strong>, as <code>make_shared&lt;Node&gt;(value)</code> does: a handle never aliases a value slot, and <code>value</code> dies with its scope. A temporary is the handle's object, uncopied</td></tr>
+<tr><td><code>shared_from_this()</code>, <code>weak_from_this()</code></td><td>the handle of an object the method was reached through a handle on; on a class value they raise, since no handle to it exists</td></tr>
 <tr><td><code>sp.reset(h)</code>, <code>sp.reset()</code></td><td>repoints to <code>h</code>'s object or empties <code>sp</code>, never writing through; a value or a primitive argument raises</td></tr>
 <tr><td><code>Node fresh = sp;</code>, <code>array&lt;Node&gt; xs = [sp];</code>, <code>xs.push(sp)</code></td><td>a handle into a value slot copies the object (C++'s <code>*sp</code>); an untyped container or a <code>shared_ptr&lt;Node&gt;</code> element keeps the handle</td></tr>
 <tr><td><code>weak_ptr&lt;Node&gt; w = sp;</code></td><td>only a handle seeds a <code>weak_ptr</code>: a value is a load error (a run-time error through a <code>var</code>)</td></tr>
@@ -167,19 +169,18 @@ true</code></pre></div>
 </tbody></table></div>
 <p>A <code>shared_ptr</code>, a <code>weak_ptr</code>, a <code>function</code> and a <code>var</code> can hold <code>null</code>; a class value never does (<a href="07-classes.html#class-values-are-never-null">Classes</a>).</p>
 <h2 id="cast-reference"><code>cast&lt;T&amp;&gt;</code>: a reference by another type<a class="hlink" href="#cast-reference" aria-label="link">&#8203;</a></h2>
-<p><code>cast&lt;T&gt;(e)</code> is a copy, <code>cast&lt;T&amp;&gt;(e)</code> a reference to the same object and <code>cast&lt;shared_ptr&lt;T&gt;&gt;(e)</code> a handle sharing it. The reference form is how a base-typed slot gives up a member only the derived class declares, and it is an lvalue: it can be assigned, bound by <code>auto&amp;</code> and passed to a <code>&amp;</code> parameter. The value form on a handle or a reference still copies, and the checker warns (<code>cast&lt;C&gt;(h) copies the instance - use cast&lt;C&amp;&gt;(h) to alias it or cast&lt;shared_ptr&lt;C&gt;&gt;(h) to share it</code>). A cast to an unrelated class raises the catchable <code>Cannot cast 'X' to 'T'</code>. Primitive casts are in <a href="02-type-ladder.html#cast-the-explicit-boundary">the Type Ladder</a>.</p>
+<p><code>cast&lt;T&gt;(e)</code> is a copy, <code>cast&lt;T&amp;&gt;(e)</code> a reference to the same object and <code>cast&lt;shared_ptr&lt;T&gt;&gt;(e)</code> a handle to the object another handle names. The reference form is how a base-typed slot gives up a member only the derived class declares, and it is an lvalue: it can be assigned, bound by <code>auto&amp;</code> and passed to a <code>&amp;</code> parameter. The value form on a handle or a reference still copies, and the checker warns (<code>cast&lt;C&gt;(h) copies the instance - use cast&lt;C&amp;&gt;(h) to alias it or cast&lt;shared_ptr&lt;C&gt;&gt;(h) to share it</code>). A cast to an unrelated class raises the catchable <code>Cannot cast 'X' to 'T'</code>. Primitive casts are in <a href="02-type-ladder.html#cast-the-explicit-boundary">the Type Ladder</a>.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Base { int a = 1; }
 class Derived : Base { int t = 9; }
 Base h = Derived();                      // a Base slot; the object inside is a Derived
-cast&lt;Derived&amp;&gt;(h).t = 5;                 // the same object
-shared_ptr&lt;Derived&gt; s = cast&lt;shared_ptr&lt;Derived&gt;&gt;(h);
-s.t += 70;
+cast&lt;Derived&amp;&gt;(h).t = 75;                // the same object
 Derived copy = cast&lt;Derived&gt;(h);         // a separate object
 copy.t = 0;
 var n = 3;
 cast&lt;int&amp;&gt;(n) += 2;                      // stores an int into the var
 print("{} {} {}", cast&lt;Derived&amp;&gt;(h).t, copy.t, n);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">75 0 5</code></pre></div>
+<p>A handle form over a class value is a test. <code>if (dynamic_cast&lt;Dog&gt;(pet)) { pet.tricks += 1; }</code> copies nothing and writes to <code>pet</code> itself; binding the result (<code>auto d = dynamic_cast&lt;Dog&gt;(pet);</code>) fails the load, because the handle would outlive or outrun the slot, and <code>dynamic_cast&lt;Dog&amp;&gt;(pet)</code> is the spelling that reaches the object (<a href="../reference/rules.html#handle-of-a-value">every case</a>). What a <code>var</code> holds is judged when the line runs: a handle is shared, a class value gives a handle to a copy.</p>
 <h2 id="lost-writes">Lost writes fail the load<a class="hlink" href="#lost-writes" aria-label="link">&#8203;</a></h2>
 <p>A write into a copy that nothing reads afterwards changes nothing, and is nearly always a loop variable or a parameter that was meant to be a reference. The checker refuses the cases it can prove:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Enemy { int hp = 10; }

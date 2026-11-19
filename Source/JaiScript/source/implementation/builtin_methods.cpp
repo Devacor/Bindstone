@@ -70,7 +70,7 @@ namespace {
                 if (!detail::container_element_compatible(output, valueType, engine)) {
                     return checked_result<script_value>(make_error_code(runtime_error_code::map_value_type_mismatch), "Cannot store '{0}' in map value of type '{1}'", detail::engine_access::symbolize(*engine, detail::container_value_type_name(output)), detail::engine_access::symbolize(*engine, detail::type_info_display_name(valueType)));
                 }
-                auto converted = detail::convert_container_element(engine, output, valueType);
+                auto converted = detail::convert_owned_element(engine, output, valueType);
                 if (!converted) { return converted.error_value(); }
                 output = std::move(converted.value());
             }
@@ -529,7 +529,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
 
         // Convert element if needed (e.g., int -> float for array<float>)
-        auto converted_result = detail::convert_container_element(ctx.get_engine(), args[0], element_type);
+        auto converted_result = detail::convert_owned_element(ctx.get_engine(), args[0], element_type);
         if (!converted_result) { return converted_result.error_value(); }
         script_value converted = std::move(converted_result.value());
 
@@ -1074,7 +1074,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 				if (!detail::container_element_compatible(value, element_type, eng)) {
 					return detail::element_type_error(ctx.get_string_symbolizer(), runtime_error_code::array_element_type_mismatch, "Cannot push '{0}' to array<{1}>", value, element_type);
 				}
-				auto converted = detail::convert_container_element(eng, value, element_type);
+				auto converted = detail::convert_owned_element(eng, value, element_type);
 				if (!converted) { return converted.error_value(); }
 				value = std::move(converted.value());
 			}
@@ -1258,7 +1258,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 					if (!detail::container_element_compatible(value, type, eng)) {
 						return detail::element_type_error(a_context.get_string_symbolizer(), runtime_error_code::array_element_type_mismatch, "Cannot push '{0}' to array<{1}>", value, type);
 					}
-					auto converted = detail::convert_container_element(eng, value, type);
+					auto converted = detail::convert_owned_element(eng, value, type);
 					if (!converted) { return converted.error_value(); }
 					value = std::move(converted.value());
 				}
@@ -1288,7 +1288,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (!detail::container_element_compatible(args[1], element_type, eng)) {
             return detail::element_type_error(ctx.get_string_symbolizer(), runtime_error_code::array_element_type_mismatch, "Cannot insert '{0}' into array<{1}>", args[1], element_type);
         }
-        auto converted = detail::convert_container_element(eng, args[1], element_type);
+        auto converted = detail::convert_owned_element(eng, args[1], element_type);
         if (!converted) { return converted.error_value(); }
         if (!detail::engine_access::execution_limits(*eng).memory_charge(sizeof(script_value))) [[unlikely]] {
             return detail::raise_memory_cap(detail::engine_access::execution_limits(*eng));

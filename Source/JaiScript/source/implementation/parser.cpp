@@ -2178,6 +2178,23 @@ JAI_NOINLINE checked_result<expression_ptr> parser::cast_expression() {
     return std::make_shared<cast_expr>(castToken.location, target, by_reference, std::move(operand));
 }
 
+// A cast whose result is read only for its truth: a handle form there is a test and makes no handle
+static void note_read_for_truth(const expression_ptr& e) {
+    if (e && e->get_type() == node_type::cast_expr) { static_cast<cast_expr*>(e.get())->truth_read = true; }
+}
+static bool is_null_literal(const expression_ptr& e) {
+    return e && e->get_type() == node_type::literal_expr && static_cast<const literal_expr*>(e.get())->value.is_null();
+}
+static void note_operands_read_for_truth(token_type op, const expression_ptr& left, const expression_ptr& right) {
+    if (op == token_type::ampersand_ampersand || op == token_type::pipe_pipe) {
+        note_read_for_truth(left);
+        note_read_for_truth(right);
+    } else if (op == token_type::equal_equal || op == token_type::bang_equal) {
+        if (is_null_literal(right)) { note_read_for_truth(left); }
+        if (is_null_literal(left)) { note_read_for_truth(right); }
+    }
+}
+
 // dynamic_cast<T>(e) for a class T is C++'s dynamic_cast<T*>: e's object as a shared_ptr<T> when it is a T and null when it is not
 // (a T already spelled shared_ptr<U> is that handle). dynamic_cast<T&>(e) is cast<T&>(e): the reference, or the cast's error
 JAI_NOINLINE checked_result<expression_ptr> parser::dynamic_cast_expression() {
@@ -2647,6 +2664,7 @@ JAI_NOINLINE checked_result<expression_ptr> parser::operator_rest(expression_ptr
         if (precedence >= k_additive_precedence) {
             left = try_constant_fold(std::move(left), op, std::move(right));
         } else {
+            note_operands_read_for_truth(op.type, left, right);
             left = std::make_shared<binary_expr>(op.location, std::move(left), op, std::move(right));
         }
     }
@@ -2828,6 +2846,7 @@ JAI_NOINLINE expression_ptr parser::identifier_map_key() {
 }
 
 JAI_NOINLINE checked_result<expression_ptr> parser::ternary_rest(expression_ptr condition) {
+    note_read_for_truth(condition);
     advance();
     const token& question = previous();
     JAISCRIPT_TRY_ASSIGN(expression_ptr then_expression, expression());
@@ -3081,6 +3100,7 @@ JAI_NOINLINE checked_result<expression_ptr> parser::unary_operator() {
                 return std::make_shared<literal_expr>(op.location, script_value(script_value::ast_literal_tag{}, -lv.unchecked_as_float()));
             }
         }
+        if (op.type == token_type::bang) { note_read_for_truth(right); }
         return std::make_shared<unary_expr>(op.location, op, right);
     }
 
@@ -4903,6 +4923,7 @@ checked_result<statement_ptr> parser::expression_statement() {
 
 // `if (a = b)`: the assignment is the condition itself; `if ((a = b))` has parentheses of its own and is left unmarked
 void parser::mark_bare_condition(const expression_ptr& condition, size_t first_token) {
+    note_read_for_truth(condition);
     if (!condition || condition->get_type() != node_type::assignment_expr) return;
     auto* assign = static_cast<assignment_expr*>(condition.get());
     if (assign->op.type != token_type::equal || assign->incdec_desugar) return;

@@ -2964,7 +2964,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                 if (infer_pointee) {
                     // Take the initializer's exact class; thereafter the tag behaves
                     // exactly like the explicit spelling (reassignment enforcement
-                    // reads it) - construct-and-share included.
+                    // reads it), a class value included.
                     std::string actual_class;
                     if (auto instance = value.get_class_instance()) {
                         actual_class = instance->get_class_name();
@@ -2979,6 +2979,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
                             "Cannot infer shared_ptr<auto> pointee from this initializer - use var, or an explicit shared_ptr<T>");
                     }
+                    detail::value_into_handle(value);
                     value.set_type_info(inferred);
                     JAISCRIPT_TRY(define_variable(std::move(value)));
                     return {};
@@ -2991,8 +2992,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                         "Cannot initialize shared_ptr<{0}> with {1}: type must match or be a subclass",
                         decl->type->element_type()->id, string_symbolizer_->intern(detail::shared_handle_judged_class(value, engine_)));
                 }
-                // Initialize with object/shared_ptr - that's fine, objects are already shared_ptr
-                // Mark the type as shared_ptr to ensure reference semantics
+                detail::value_into_handle(value);
                 value.set_type_info(decl->type);
                 JAISCRIPT_TRY(define_variable(std::move(value)));
             } else {   // a primitive or a container: the declaration's rejection (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
@@ -3592,6 +3592,9 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
             if (!this_val.is_object()) {
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
                     "{0}() can only be called from within a method", ident_expr->symbol_id);
+            }
+            if (!this_val.is_shared_ptr_type()) {   // KEEP BYTE-PARALLEL with vm_backend::exec_from_this
+                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), detail::from_this_of_value_text, ident_expr->symbol_id);
             }
 
             if (ident_expr->symbol_id == weak_from_this_id_) {

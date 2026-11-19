@@ -1329,7 +1329,7 @@ public:
             check_both(with_prelude("cast<T&>(h.p).t").c_str(), "2", "reference form reads the subtype member");
             check_both(with_prelude("cast<T&>(h.p).t = 5; var d = h.p; to_string(d.t)").c_str(), "5", "reference form writes through");
             check_both(with_prelude("T tv = cast<T>(h.p); tv.t = 9; var d = h.p; to_string(d.t) + \",\" + to_string(tv.t)").c_str(), "2,9", "value form is an independent copy");
-            check_both(with_prelude("shared_ptr<T> th = cast<shared_ptr<T>>(h.p); th.t = 11; var d = h.p; to_string(d.t)").c_str(), "11", "shared_ptr form shares the instance");
+            check_both(with_prelude("shared_ptr<S> sp = new T(); shared_ptr<T> th = cast<shared_ptr<T>>(sp); th.t = 11; to_string(cast<T&>(sp).t)").c_str(), "11", "shared_ptr form shares a handle's instance");
             check_both(with_prelude("auto& r = cast<T&>(h.p); r.t = 21; cast<T&>(h.p).t").c_str(), "21", "auto& aliases the cast reference");
             check_both(with_prelude("T tmp = T(); auto& r = cast<T&>(tmp); r.t = 33; to_string(tmp.t)").c_str(), "33", "identifier operand binds the variable");
             check_both(with_prelude("cast<T&>(T()).t").c_str(), "2", "temporary operand is pinned");
@@ -1341,7 +1341,7 @@ public:
         test("cast_upcast_and_null", [this, check_both, with_prelude]() {
             check_both(with_prelude("S up = cast<S>(T()); to_string(up.x)").c_str(), "1", "upcast by value");
             check_both(with_prelude("cast<S&>(h.p).x").c_str(), "1", "upcast by reference");
-            check_both(with_prelude("shared_ptr<S> sh = cast<shared_ptr<S>>(h.p); to_string(sh.x)").c_str(), "1", "upcast handle");
+            check_both(with_prelude("shared_ptr<T> sp = new T(); shared_ptr<S> sh = cast<shared_ptr<S>>(sp); to_string(sh.x)").c_str(), "1", "upcast handle");
             check_both("class T { int t = 2; } var n = null; var c = \"\"; try { cast<T>(n); } catch (e) { c = e; } c + \",\" + to_string(cast<shared_ptr<T>>(n) == null)", "Cannot cast 'null' to 'T',true", "null fails the value form and passes the shared_ptr form");
             check_both("class T { int t = 2; } var n = null; var c = \"\"; try { cast<T&>(n).t; } catch (e) { c = e; } c", "Cannot cast 'null' to 'T&'", "null fails the reference form");
         });
@@ -1349,7 +1349,7 @@ public:
         test("cast_failures_are_catchable_with_exact_text", [this, check_both, with_prelude]() {
             check_both(with_prelude("var c = \"\"; try { var bad = cast<H>(h.p); } catch (e) { c = e; } c").c_str(), "Cannot cast 'T' to 'H'", "unrelated class, value form");
             check_both(with_prelude("var c = \"\"; try { cast<H&>(h.p).p; } catch (e) { c = e; } c").c_str(), "Cannot cast 'T' to 'H&'", "unrelated class, reference form");
-            check_both(with_prelude("var c = \"\"; try { var bad = cast<shared_ptr<H>>(h.p); } catch (e) { c = e; } c").c_str(), "Cannot cast 'T' to 'shared_ptr<H>'", "unrelated class, shared_ptr form");
+            check_both(with_prelude("shared_ptr<S> sp = new T(); var c = \"\"; try { var bad = cast<shared_ptr<H>>(sp); } catch (e) { c = e; } c").c_str(), "Cannot cast 'T' to 'shared_ptr<H>'", "unrelated class, shared_ptr form");
             check_both("class T { int t = 2; } var v = 5; var c = \"\"; try { var bad = cast<T>(v); } catch (e) { c = e; } c", "Cannot cast 'int' to 'T'", "non-object into a class");
             check_both("var v = \"abc\"; var c = \"\"; try { var bad = cast<int>(v); } catch (e) { c = e; } c", "Cannot cast 'string' to 'int'", "unconvertible primitive");
             check_both(with_prelude("var c = \"\"; try { var ok = cast<T>(h.p); c = \"ran\"; } catch (e) { c = e; } c").c_str(), "ran", "admitted casts do not raise");
@@ -1823,8 +1823,8 @@ public:
             // reflect::type_of answers what reflect::type_name answers - the INSTANCE's class, never
             // the value tag. cast<Base>(d) copies rather than slices, so all four spellings
             // still hold a Derived.
-            check_quad("class Base { int a = 1; } class Derived : Base { int b = 2; } Derived d = Derived(); auto v = cast<Base>(d); "
-                       "reflect::type_of(v) + \",\" + reflect::type_of(cast<Base&>(d)) + \",\" + reflect::type_of(cast<shared_ptr<Base>>(d)) + \",\" + reflect::type_of(d)",
+            check_quad("class Base { int a = 1; } class Derived : Base { int b = 2; } Derived d = Derived(); shared_ptr<Derived> sd = new Derived(); auto v = cast<Base>(d); "
+                       "reflect::type_of(v) + \",\" + reflect::type_of(cast<Base&>(d)) + \",\" + reflect::type_of(cast<shared_ptr<Base>>(sd)) + \",\" + reflect::type_of(d)",
                        "Derived,Derived,Derived,Derived", "value / reference / handle casts and the variable");
         });
 

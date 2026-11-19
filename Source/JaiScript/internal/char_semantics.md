@@ -5,7 +5,7 @@ byte minting.
 
 ## The model in one paragraph
 
-`char` stays a distinct immediate type — no allocation, no strong_ptr traffic, `type_of`
+`char` stays a distinct immediate type — no allocation, no strong_ptr traffic, `reflect::type_of`
 says `"char"`, it hashes and keys maps. A char
 operand enters **every binary numeric context** — arithmetic, bitwise, AND comparisons —
 under C++-style **integral promotion**: it participates as an `int64` in **0..255**
@@ -54,7 +54,7 @@ Both directions of the char↔int door are open:
   static checker sees the promoted type and reports both at load (`"" + to_char(a) + to_char(b)`
   builds the text).
 
-There is **no implicit int→char**: `type_of('a' + 1) == "int"`.
+There is **no implicit int→char**: `reflect::type_of('a' + 1) == "int"`.
 
 ## Casts
 
@@ -106,7 +106,7 @@ a char.
 ## Iterating a string
 
 Range-`for` over a string yields its chars in order, one per element, exactly the reads
-`s[i]` gives (`type_of(c) == "char"`, promotion applies as above). The binding is by value
+`s[i]` gives (`reflect::type_of(c) == "char"`, promotion applies as above). The binding is by value
 only: a char is a read, never a cell, so `for (auto& c : s)` raises `Cannot iterate a string
 by reference: its chars are not lvalues (use for (auto c : s))` before the first element.
 An empty string iterates zero times; `break`, `continue` and `yield` behave as in an array
@@ -149,7 +149,7 @@ ref_lvalue.hpp parity-by-construction pattern:
   orders, equals and hashes as its one-character string (value.cpp, core/script_map.hpp).
 - lexer: `\xNN` in `scan_string`/`scan_char` (`hex_digit_value`, exactly two digits);
   a parse change bumps `k_jaibite_version` (`detail/ast_serializer.hpp`).
-- stdlib: `to_char` registered beside `type_of` (stdlib/io.hpp).
+- stdlib: `to_char` registered beside `reflect::type_of` (stdlib/io.hpp).
 - casts: `include/jaiscript/detail/cast_kernel.hpp` (`cast_char_rule_applies` +
   `cast_char_value`), consumed verbatim by `interpreter::visit_cast_expr` and
   `vm_backend::exec_cast` ahead of the assignment table; rows in the Strong Types cast

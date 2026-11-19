@@ -473,7 +473,7 @@ kind. Floats use the shortest text that round-trips the binary32 value, so `0.1f
 - `(1.0, 2.5, 3.0)`, `(4, -2, 0)`, `(1.0, 0.5, 0.0, 1.0)` for a color;
 - a `mat4` (not built) prints four rows `[a, b, c, d]`, as MV's `operator<<` does.
 
-`type_of(v)` is `math::vec3`. **[Dev]** The alternative is a constructor-shaped `math::vec3(1.0, 2.5, 3.0)`, which is
+`reflect::type_of(v)` is `math::vec3`. **[Dev]** The alternative is a constructor-shaped `math::vec3(1.0, 2.5, 3.0)`, which is
 longer but round-trips through the language.
 
 ## 6. API
@@ -925,7 +925,7 @@ untouched; `-verifyassets` round-trips them.
 
 ### 11.5 Behavior
 
-- `type_of(p)` answers `math::vec3`.
+- `reflect::type_of(p)` answers `math::vec3`.
 - `NODE.position().x = 5`-style stores into math temporaries raise.
 - A host that binds an adapted type through `dynamic_binder` fails to compile (the static_assert of 8.3).
 

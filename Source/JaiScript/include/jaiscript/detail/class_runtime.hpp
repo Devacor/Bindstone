@@ -2019,7 +2019,7 @@ checked_result<slot_conversion> signature_slot_conversion(const script_value& va
 // A coroutine<Y> slot takes null and the handle of a coroutine declared to yield Y (any handle when Y is var) (environment.cpp)
 checked_result<slot_conversion> coroutine_slot_conversion(const script_value& value, const type_info_ptr& target, engine* eng);
 bool coroutine_slot_admits(const script_value& value, const type_info& target);
-// coroutine<Y> as type_of and the slot texts name a handle: Y is its coroutine's declared type, var when it declares none
+// coroutine<Y> as reflect::type_of and the slot texts name a handle: Y is its coroutine's declared type, var when it declares none
 std::string coroutine_type_name(const script_value& value);
 
 // weak_ptr<T> slot taking a shared_ptr handle (C++: weak = shared): the pointee class must be

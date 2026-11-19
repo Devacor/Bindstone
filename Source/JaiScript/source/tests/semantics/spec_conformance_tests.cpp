@@ -504,9 +504,9 @@ public:
 					void put(var& target, var value) { target.n = value; }
 					for (int i=0; i<4; ++i) { put(object, i); }
 				)");
-				std::string before = e.execute("type_of(object.n);").as_string();
+				std::string before = e.execute("reflect::type_of(object.n);").as_string();
 				e.execute("class A { float n = 0.0; } put(object, 2.5);");
-				std::string after = e.execute("type_of(object.n) + \"|\" + to_string(object.n);").as_string();
+				std::string after = e.execute("reflect::type_of(object.n) + \"|\" + to_string(object.n);").as_string();
 				e.execute(R"(
 					class A { float n = 0.0; float stored = 0.0; float _get_n() { return stored / 10.0; } void _set_n(float value) { stored = value * 10.0; } }
 					put(object, 7.0);
@@ -587,7 +587,7 @@ public:
 		test("api_consistency_byte_chars_whitespace_and_map_default", [this]() {
 			expect("byte observers", R"(
 				string s = "abc"; char a = s.at(0); char b = s.front(); char c = s.back();
-				type_of(a) + "|" + type_of(b) + "|" + type_of(c) + "|" + to_string(s.at(-1) == s[2]);
+				reflect::type_of(a) + "|" + reflect::type_of(b) + "|" + reflect::type_of(c) + "|" + to_string(s.at(-1) == s[2]);
 			)", "char|char|char|true");
 			expect("shared whitespace", R"(
 				string s = " \x0b\x0c\tvalue\r\n "; string t = string::trim(s); s.trim();
@@ -828,7 +828,7 @@ private:
 					var r7 = c.set_bare();
 					var r8 = c.set_this();
 					var r9 = (flags[0] = true);
-					return `${r1},${r2},${r3},${r4},${r5},${r6},${r7},${r8},${r9}|${type_of(r1)}${type_of(r5)}${type_of(r6)}${type_of(r9)}`;
+					return `${r1},${r2},${r3},${r4},${r5},${r6},${r7},${r8},${r9}|${reflect::type_of(r1)}${reflect::type_of(r5)}${reflect::type_of(r6)}${reflect::type_of(r9)}`;
 				}
 				run();
 			)", "3.0,4.0,5.0,40,2.0,1.0,7.0,8.0,1|floatfloatfloatint");
@@ -847,7 +847,7 @@ private:
 					var r6 = (xs[0] -= 1);
 					var half = 0.5; string refused = "";
 					try { xs[0] -= half; } catch (e) { refused = e; }
-					return `${r1},${r2},${r3},${r4},${r5},${r6}|${t},${c.n},${xs[0]},${m["k"]}|${type_of(r1)}${type_of(r2)}|${refused}`;
+					return `${r1},${r2},${r3},${r4},${r5},${r6}|${t},${c.n},${xs[0]},${m["k"]}|${reflect::type_of(r1)}${reflect::type_of(r2)}|${refused}`;
 				}
 				run();
 			)", "3.0,3.0,5,5,7,6|3.0,3.0,6,4|floatfloat|Cannot assign 'float' to element of type 'int'");
@@ -856,7 +856,7 @@ private:
 			// "A setter-only member (no field, no getter in the chain) yields its right-hand side"; the int parameter converts
 			expect("setter only", R"(
 				class W { var got = null; void _set_v(int x) { got = x; } }
-				function run() -> string { W w = W(); var r = (w.v = true); return `${r}|${w.got}|${type_of(r)}`; }
+				function run() -> string { W w = W(); var r = (w.v = true); return `${r}|${w.got}|${reflect::type_of(r)}`; }
 				run();
 			)", "true|1|bool");
 		});
@@ -916,7 +916,7 @@ private:
 		test("defaulted_class_fields_take_their_type_defaults", [this]() {
 			expect("field defaults", R"(
 				class Q { int a; string b; array<int> c; bool d; float f; var v; }
-				function run() -> string { Q q = Q(); return `${q.a}|${q.b}|${q.c.size()}|${q.d}|${q.f}|${type_of(q.v)}`; }
+				function run() -> string { Q q = Q(); return `${q.a}|${q.b}|${q.c.size()}|${q.d}|${q.f}|${reflect::type_of(q.v)}`; }
 				run();
 			)", "0||0|false|0.0|null");
 		});
@@ -1479,7 +1479,7 @@ private:
 				)");
 				e.execute("namespace a { int again() { return K().who(); } }");
 				std::string out = spec::render(e.execute(R"(
-					`${x.who()}${y.who()}${z.g}${a::again()}|${type_of(x)} ${type_of(y)} ${type_of(z)} ${type_of(a::build().self())}|${outer::inner::read()} ${type_of(outer::inner::D())} ${outer::inner::D().p}`;
+					`${x.who()}${y.who()}${z.g}${a::again()}|${reflect::type_of(x)} ${reflect::type_of(y)} ${reflect::type_of(z)} ${reflect::type_of(a::build().self())}|${outer::inner::read()} ${reflect::type_of(outer::inner::D())} ${outer::inner::D().p}`;
 				)"));
 				e.execute("namespace a { class K { int v = 1; int who() { return 11; } } }");
 				out += "|" + spec::render(e.execute(R"(`${x.who()} ${y.who()} ${z.g}`;)"));
@@ -1506,7 +1506,7 @@ private:
 					try { n4::y = half; } catch (e) { s += `${e}|`; }
 					var r = (n4::y = true);
 					n4::y += 2; n4::y++;
-					return `${s}${type_of(r)}:${r}|${n4::y}`;
+					return `${s}${reflect::type_of(r)}:${r}|${n4::y}`;
 				}
 				run();
 			)", "Cannot assign string to 'y' (declared int)|Cannot assign float to 'y' (declared int)|int:1|4");
@@ -1680,7 +1680,7 @@ private:
 	void chars() {
 		test("char_promotion_in_division_bitwise_and_map_keys", [this]() {
 			expect("chars", R"(
-				class C { string got = ""; C operator+(var x) { got = type_of(x); return this; } }
+				class C { string got = ""; C operator+(var x) { got = reflect::type_of(x); return this; } }
 				function run() -> string {
 					string s = "";
 					s += `${('d' / 2)},${('a' / 2.0)},`;
@@ -1692,7 +1692,7 @@ private:
 					var c = C(); var r = c + 'a';
 					s += c.got + ",";
 					var k = {}; k[98] = 1; k['a'] = 2; k[1] = 3;
-					string order = ""; for (auto kv : k) { order += type_of(kv.first) + " "; }
+					string order = ""; for (auto kv : k) { order += reflect::type_of(kv.first) + " "; }
 					s += to_string(order == "int int char " || order == "char int int ");
 					return s;
 				}
@@ -2367,8 +2367,8 @@ private:
 		});
 		test("operator_assign_value_is_the_destination_and_a_copy", [this, OK]() {
 			expect("expression value", std::string(OK) + R"(
-				function local() -> string { OK2 a = OK2(); var r = (a = 6); r.v = 1; return `${type_of(r)}:${a.v}`; }
-				function global() -> string { var r = (g = 9); r.v = 2; return `${type_of(r)}:${g.v}`; }
+				function local() -> string { OK2 a = OK2(); var r = (a = 6); r.v = 1; return `${reflect::type_of(r)}:${a.v}`; }
+				function global() -> string { var r = (g = 9); r.v = 2; return `${reflect::type_of(r)}:${g.v}`; }
 				local() + "|" + global();
 			)", "OK2:60|OK2:90");
 		});
@@ -3040,7 +3040,7 @@ private:
 				auto z = v; z = "t";
 				auto w = f(); w = 1.5;
 				auto m = c ? 1 : "q"; m = 2.5;
-				`${type_of(x)}:${x}|${type_of(y)}:${y}|${type_of(z)}:${z}|${type_of(w)}:${w}|${type_of(m)}:${m}`;
+				`${reflect::type_of(x)}:${x}|${reflect::type_of(y)}:${y}|${reflect::type_of(z)}:${z}|${reflect::type_of(w)}:${w}|${reflect::type_of(m)}:${m}`;
 			)";
 			const std::string want = "string:s|float:2.5|string:t|float:1.5|float:2.5";
 			expect("auto from var (warn region)", src, want, warn_region);
@@ -3055,7 +3055,7 @@ private:
 				auto s = "a"; s = `b${5}`;
 				auto p = P();
 				function t(function g) -> string { string r = "none"; try { g(); } catch (err) { r = err; } return r; }
-				`${type_of(n)}:${n}|${type_of(e)}:${e}|${s}|${t([]() { auto q = P(); var o = 5; q = o; })}|${t([]() { auto k = 5; var h = 1.5; k = h; })}|${t([]() { auto k = ai[0]; var h = 2.9; k = h; })}`;
+				`${reflect::type_of(n)}:${n}|${reflect::type_of(e)}:${e}|${s}|${t([]() { auto q = P(); var o = 5; q = o; })}|${t([]() { auto k = 5; var h = 1.5; k = h; })}|${t([]() { auto k = ai[0]; var h = 2.9; k = h; })}`;
 			)";
 			expect("auto from known", src, "int:1|int:0|b5|Cannot assign int to 'q' (declared P)|Cannot assign float to 'k' (declared int)|Cannot assign float to 'k' (declared int)", warn_region);
 		});
@@ -3081,7 +3081,7 @@ private:
 		});
 		test("a_jaibite_keeps_the_auto_spelling_and_types_it_again_at_load", [this]() {
 			every_config("auto through jaibite", "string:s|int:1", [](engine& e) {
-				auto bite = e.jaibite(spec::in_warn_region("var arr = [1]; auto x = arr[0]; x = \"s\"; auto n = 5; n = true; `${type_of(x)}:${x}|${type_of(n)}:${n}`;"));
+				auto bite = e.jaibite(spec::in_warn_region("var arr = [1]; auto x = arr[0]; x = \"s\"; auto n = 5; n = true; `${reflect::type_of(x)}:${x}|${reflect::type_of(n)}:${n}`;"));
 				std::string first = spec::render(e.execute(bite));
 				auto loaded = e.jaibite_load_bytes(bite.save_bytes());
 				std::string second = spec::render(e.execute(loaded));
@@ -3098,7 +3098,7 @@ private:
 				shared_ptr<Foo> sp = Foo();
 				weak_ptr<Foo> w = sp;
 				auto h = (w = sp);
-				type_of(h);
+				reflect::type_of(h);
 			)", "weak_ptr", warn_region);
 		});
 		test("f3_a_store_takes_its_right_sides_value_before_the_target", [this]() {
@@ -3157,7 +3157,7 @@ private:
 				var r2 = 0; r2 = (a[0] = 3);
 				string r3 = to_string(a[0] = 4);
 				var r4 = id(C::s = 5);
-				`${type_of(r1)}:${r1} ${type_of(r2)}:${r2} ${r3} ${type_of(r4)}:${r4}`;
+				`${reflect::type_of(r1)}:${r1} ${reflect::type_of(r2)}:${r2} ${r3} ${reflect::type_of(r4)}:${r4}`;
 			)", "float:3.0 float:3.0 4.0 float:5.0", warn_region);
 		});
 		test("f2_a_handle_store_yields_a_value", [this]() {
@@ -3736,8 +3736,8 @@ private:
 				check_true(report.find(text) != std::string::npos, std::string(source) + " -> " + report);
 			}
 			check_eq(int64_t(42), e->execute("apply(x => x * 2, 21);").as_int(), "an untyped parameter takes int");
-			check_eq(std::string("int"), e->execute("string t = \"\"; apply(x => { t = type_of(x); return x; }, 1); t;").to_string(), "and holds an int");
-			check_eq(std::string("a/float"), e->execute("string seen = \"\"; each_name((n, w) => { seen = n + \"/\" + type_of(w); }); seen;").to_string(), "a void(string, double) callback");
+			check_eq(std::string("int"), e->execute("string t = \"\"; apply(x => { t = reflect::type_of(x); return x; }, 1); t;").to_string(), "and holds an int");
+			check_eq(std::string("a/float"), e->execute("string seen = \"\"; each_name((n, w) => { seen = n + \"/\" + reflect::type_of(w); }); seen;").to_string(), "a void(string, double) callback");
 		});
 		test("an_enum_parameter_of_a_host_function_takes_an_int", [this]() {
 			enum class mood { calm = 0, angry = 1 };
@@ -4195,7 +4195,7 @@ private:
 			expect("one compound table", R"(
 				class T { string s = "a"; var n = 7; int big = 9007199254740993; float f = 1.0; void half() { n /= 2; } void addc() { s += 'c'; } }
 				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
-				t([]() { T o; o.half(); return `${type_of(o.n)}:${o.n}`; }) + "|" +
+				t([]() { T o; o.half(); return `${reflect::type_of(o.n)}:${o.n}`; }) + "|" +
 				t([]() { T o; o.n /= 2; return o.n; }) + "|" +
 				t([]() { T o; o.big /= 1; return o.big; }) + "|" +
 				t([]() { T o; o.s += 'c'; o.addc(); return o.s; }) + "|" +
@@ -4237,7 +4237,7 @@ private:
 				t([]() { float x = 5.0; x %= 0.0; return x; }) + "|" +
 				t([]() { float x = 5.0; float z = 0.0; return x / z; }) + "|" +
 				t([]() { float x = 5.0; x /= 0; return x; }) + "|" +
-				t([]() { var x = 5; x /= 0.0; return `${type_of(x)}:${x}`; }) + "|" +
+				t([]() { var x = 5; x /= 0.0; return `${reflect::type_of(x)}:${x}`; }) + "|" +
 				t([]() { var x = 5.0; int z = 0; return x % z; }) + "|" +
 				t([]() { var z = 0.0; var h = 0.5; return `${0.5 / z},${0.5 % z},${h % 0.0}`; }) + "|" +
 				t([]() { T o; o.f /= 0.0; o.n %= 0; return `${o.f},${o.n}`; }) + "|" +
@@ -4277,9 +4277,9 @@ private:
 				var G = a;
 				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
 				t([]() { var v = a; v.push("s"); return v.size(); }) + "|" +
-				t([]() { var v = a; v.push(2); v[0] = true; return `${v.size()} ${a.size()} ${type_of(v[0])}:${v[0]}`; }) + "|" +
+				t([]() { var v = a; v.push(2); v[0] = true; return `${v.size()} ${a.size()} ${reflect::type_of(v[0])}:${v[0]}`; }) + "|" +
 				t([]() { var v = a; var f = 2.9; v[0] = f; return v[0]; }) + "|" +
-				t([]() { var v = a; v = "hello"; v = 5; return `${type_of(v)}:${v}`; }) + "|" +
+				t([]() { var v = a; v = "hello"; v = 5; return `${reflect::type_of(v)}:${v}`; }) + "|" +
 				t([]() { var v = 1; v = a; v.push("s"); return 1; }) + "|" +
 				t([]() { G.push("s"); return 1; }) + "|" +
 				t([]() { G = "g"; G = a; array<int> c = G; c.push(3); return `${c.size()} ${G.size()}`; }) + "|" +
@@ -4316,8 +4316,8 @@ private:
 			expect("no slicing", R"(
 				class B { int a = 1; } class D : B { int d = 2; }
 				B b = D(); B c = b; array<B> xs = [D()];
-				function by_value(B p) -> string { return type_of(p); }
-				`${type_of(b)} ${type_of(c)} ${type_of(cast<B>(D()))} ${cast<D&>(b).d} ${type_of(xs[0])} ${by_value(D())}`;
+				function by_value(B p) -> string { return reflect::type_of(p); }
+				`${reflect::type_of(b)} ${reflect::type_of(c)} ${reflect::type_of(cast<B>(D()))} ${cast<D&>(b).d} ${reflect::type_of(xs[0])} ${by_value(D())}`;
 			)", "D D D 2 D D", warn_region);
 		});
 	}
@@ -4329,14 +4329,14 @@ private:
 				class Inv { char grade = 'a'; map<int, string> slots; map<char, int> counts; map<int, string> none; var loose = {1: "x", "k": 2}; }
 				Inv a; a.grade = 'z'; a.slots[3] = "sword"; a.slots[10] = "bow"; a.counts['q'] = 2;
 				var b = from_json(to_json(a));
-				`${to_json('z')}|${to_json({1: "a", 2: "b"})}|${to_json({"s": 'c'})}|${type_of(b.grade)}:${b.grade}|${b.slots[3]},${b.slots[10]}|${b.counts['q']}|${b.none.size()}|${b.loose[1]}${b.loose["k"]}|${type_of(from_json("{\"$char\": 300}"))}|${type_of(from_json("{\"$map\": [1]}"))}|${type_of(from_json("{\"$map\": [[1, 2]], \"x\": 1}"))}`;
+				`${to_json('z')}|${to_json({1: "a", 2: "b"})}|${to_json({"s": 'c'})}|${reflect::type_of(b.grade)}:${b.grade}|${b.slots[3]},${b.slots[10]}|${b.counts['q']}|${b.none.size()}|${b.loose[1]}${b.loose["k"]}|${reflect::type_of(from_json("{\"$char\": 300}"))}|${reflect::type_of(from_json("{\"$map\": [1]}"))}|${reflect::type_of(from_json("{\"$map\": [[1, 2]], \"x\": 1}"))}`;
 			)", "{\"$char\":122}|{\"$map\":[[1,\"a\"],[2,\"b\"]]}|{\"s\":{\"$char\":99}}|char:z|sword,bow|2|0|x2|map|map|map", warn_region);
 			// a float no JSON number spells is {"$float": "inf" | "-inf" | "nan"}: a value, a map key and a vector component alike
 			expect("json float tags", R"(
 				map<float, int> m = {}; m[-math::INF] = 3; m[math::NAN_VALUE] = 4; m[1.0] = 1;
 				var back = from_json(to_json(m));
 				var v = from_json(to_json(math::vec2(math::INF, 1.0)));
-				`${to_json([math::INF, -math::INF, math::NAN_VALUE])}|${to_json(m)}|${back.size()} ${back[math::NAN_VALUE]} ${back[-math::INF]}|${type_of(v)} ${v.x}|${type_of(from_json("{\"$float\": \"big\"}"))}`;
+				`${to_json([math::INF, -math::INF, math::NAN_VALUE])}|${to_json(m)}|${back.size()} ${back[math::NAN_VALUE]} ${back[-math::INF]}|${reflect::type_of(v)} ${v.x}|${reflect::type_of(from_json("{\"$float\": \"big\"}"))}`;
 			)", "[{\"$float\":\"inf\"},{\"$float\":\"-inf\"},{\"$float\":\"nan\"}]|{\"$map\":[[{\"$float\":\"-inf\"},3],[1.0,1],[{\"$float\":\"nan\"},4]]}|3 4 3|math::vec2 inf|map", warn_region);
 		});
 	}
@@ -4349,11 +4349,11 @@ private:
 				var FLAG = true;
 				class C { auto n = 5; auto v = FLAG ? 1 : "s"; auto f = FLAG ? 1 : 2.5; }
 				function t(function f) -> string { string r = "none"; try { r = `${f()}`; } catch (e) { r = e; } return r; }
-				t([]() { C c; c.n = true; return `${type_of(c.n)}:${c.n}`; }) + "|" +
+				t([]() { C c; c.n = true; return `${reflect::type_of(c.n)}:${c.n}`; }) + "|" +
 				t([]() { C c; var f = 2.9; c.n = f; return c.n; }) + "|" +
 				t([]() { C c; var s = "s"; c.n = s; return c.n; }) + "|" +
-				t([]() { C c; c.v = 2.5; c.v = "t"; return `${type_of(c.v)}:${c.v}`; }) + "|" +
-				t([]() { C c; return `${type_of(c.f)}:${c.f}`; });
+				t([]() { C c; c.v = 2.5; c.v = "t"; return `${reflect::type_of(c.v)}:${c.v}`; }) + "|" +
+				t([]() { C c; return `${reflect::type_of(c.f)}:${c.f}`; });
 			)", "int:1|Cannot assign float to field 'n' of C (declared int)|Cannot assign string to field 'n' of C (declared int)|string:t|float:1.0", warn_region);
 		});
 	}
@@ -4364,10 +4364,10 @@ private:
 			expect("numeric ternary", R"(
 				var FLAG = true;
 				function t(function f) -> string { string r = "none"; try { r = `${f()}`; } catch (e) { r = e; } return r; }
-				t([]() { auto x = FLAG ? 1 : 2.5; return `${type_of(x)}:${x}`; }) + "|" +
-				t([]() { auto x = FLAG ? 2.5 : 1; x = 3; return `${type_of(x)}:${x}`; }) + "|" +
+				t([]() { auto x = FLAG ? 1 : 2.5; return `${reflect::type_of(x)}:${x}`; }) + "|" +
+				t([]() { auto x = FLAG ? 2.5 : 1; x = 3; return `${reflect::type_of(x)}:${x}`; }) + "|" +
 				t([]() { auto x = FLAG ? 1 : 2.5; var s = "s"; x = s; return x; }) + "|" +
-				t([]() { auto y = FLAG ? 1 : "s"; y = 2.5; return type_of(y); });
+				t([]() { auto y = FLAG ? 1 : "s"; y = 2.5; return reflect::type_of(y); });
 			)", "float:1.0|float:3.0|Cannot assign string to 'x' (declared float)|float", warn_region);
 			every_config("no warning for the numeric pair", "0|1", [](engine& e) {
 				auto numeric = e.check("var F = true; auto x = F ? 1 : 2.5;");
@@ -4386,7 +4386,7 @@ private:
 				class Ok { int v = 0; }
 				function t(function f) -> string { string r = "none"; try { r = `${f()}`; } catch (e) { r = e; } return r; }
 				t([]() { var x = from_json("{\"$type\": \"R\", \"$val\": {\"v\": 3}}"); return "loaded"; }) + "|" +
-				t([]() { var x = from_json("{\"$type\": \"Ok\", \"$val\": {\"v\": 3}}"); return `${type_of(x)}:${x.v}`; });
+				t([]() { var x = from_json("{\"$type\": \"Ok\", \"$val\": {\"v\": 3}}"); return `${reflect::type_of(x)}:${x.v}`; });
 			)", "no R|Ok:3", warn_region);
 		});
 	}
@@ -4397,14 +4397,14 @@ private:
 			expect("typed range-for", R"(
 				class A { int v = 1; } class B : A { }
 				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
-				t([]() { var a = [true, 2]; string s = ""; for (int v : a) { s += `${type_of(v)}:${v} `; } return s; }) + "|" +
-				t([]() { var a = [1.5, 2.5]; string s = ""; for (int v : a) { s += `${type_of(v)}:${v} `; } return s; }) + "|" +
-				t([]() { var a = [1, 2]; string s = ""; for (string v : a) { s += `${type_of(v)}:${v} `; } return s; }) + "|" +
-				t([]() { var a = ["x"]; string s = ""; for (int v : a) { s += type_of(v); } return s; }) + "|" +
+				t([]() { var a = [true, 2]; string s = ""; for (int v : a) { s += `${reflect::type_of(v)}:${v} `; } return s; }) + "|" +
+				t([]() { var a = [1.5, 2.5]; string s = ""; for (int v : a) { s += `${reflect::type_of(v)}:${v} `; } return s; }) + "|" +
+				t([]() { var a = [1, 2]; string s = ""; for (string v : a) { s += `${reflect::type_of(v)}:${v} `; } return s; }) + "|" +
+				t([]() { var a = ["x"]; string s = ""; for (int v : a) { s += reflect::type_of(v); } return s; }) + "|" +
 				t([]() { var a = [1, 2.5]; int n = 0; for (int& v : a) { v = v + 1; n += 1; } return n; }) + "|" +
 				t([]() { var a = [B(), A()]; int n = 0; for (A& r : a) { r.v = 7; n += r.v; } return n; }) + "|" +
 				t([]() { var a = [1, 2]; string s = ""; for (auto x : a) { x = "s"; s += x; } return s; }) + "|" +
-				t([]() { array<int> b = [1]; string s = ""; for (auto x : b) { x = true; s += `${type_of(x)}:${x}`; } return s; });
+				t([]() { array<int> b = [1]; string s = ""; for (auto x : b) { x = true; s += `${reflect::type_of(x)}:${x}`; } return s; });
 			)", "int:1 int:2 |Cannot initialize 'v' (declared int) with float|Cannot initialize 'v' (declared string) with int|Cannot initialize 'v' (declared int) with string|Cannot initialize 'v' (declared int) with float|"
 			    "14|ss|int:1", warn_region);
 			every_config("checker", "2|0", [](engine& e) {
@@ -4420,12 +4420,12 @@ private:
 			expect("ref store", R"(
 				function t(function f) -> string { string r = "none"; try { r = `${f()}`; } catch (e) { r = e; } return r; }
 				function set37(int& a) { a = 3.7; }
-				t([]() { int x = 1; var& r = x; var s = "s"; r = s; return type_of(x); }) + "|" +
-				t([]() { int x = 1; var& r = x; r = 2.9; return `${type_of(x)}:${x}`; }) + "|" +
-				t([]() { int x = 2; var& r = x; r = true; return `${type_of(x)}:${x}`; }) + "|" +
-				t([]() { string x = "a"; var& r = x; r = 5; return `${type_of(x)}:${x}`; }) + "|" +
-				t([]() { var x = 1; var& r = x; r = "free"; return type_of(x); }) + "|" +
-				t([]() { int u = 1; set37(u); return `${type_of(u)}:${u}`; });
+				t([]() { int x = 1; var& r = x; var s = "s"; r = s; return reflect::type_of(x); }) + "|" +
+				t([]() { int x = 1; var& r = x; r = 2.9; return `${reflect::type_of(x)}:${x}`; }) + "|" +
+				t([]() { int x = 2; var& r = x; r = true; return `${reflect::type_of(x)}:${x}`; }) + "|" +
+				t([]() { string x = "a"; var& r = x; r = 5; return `${reflect::type_of(x)}:${x}`; }) + "|" +
+				t([]() { var x = 1; var& r = x; r = "free"; return reflect::type_of(x); }) + "|" +
+				t([]() { int u = 1; set37(u); return `${reflect::type_of(u)}:${u}`; });
 			)", "Cannot assign string to 'r' (declared int&)|Cannot assign float to 'r' (declared int&)|int:1|Cannot assign int to 'r' (declared string&)|string|Cannot assign float to 'a' (declared int&)", warn_region);
 		});
 		test("a_store_through_a_reference_copies_like_the_variables_own_store", [this]() {
@@ -4703,12 +4703,12 @@ private:
 					void put_this(var v) { this.d = v; }
 				}
 				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
-				t([]() { var v = new E(); H h = H(); h.d = v; return type_of(h.d); }) + "|" +
-				t([]() { var v = new D(); H h = H(); h.d = v; return type_of(h.d); }) + "|" +
-				t([]() { var v = new E(); H h = H(); h.b = v; return type_of(h.b); }) + "|" +
-				t([]() { var v = new E(); H h = H(); h.put(v); return type_of(h.d); }) + "|" +
-				t([]() { var v = new E(); H h = H(); h.put_this(v); return type_of(h.d); }) + "|" +
-				t([]() { H h = H(); string s = ""; for (int i = 0; i < 4; i++) { var v = i < 3 ? new D() : new E(); try { h.put(v); s += "D"; } catch (e) { s += "x"; } } return s + type_of(h.d); });
+				t([]() { var v = new E(); H h = H(); h.d = v; return reflect::type_of(h.d); }) + "|" +
+				t([]() { var v = new D(); H h = H(); h.d = v; return reflect::type_of(h.d); }) + "|" +
+				t([]() { var v = new E(); H h = H(); h.b = v; return reflect::type_of(h.b); }) + "|" +
+				t([]() { var v = new E(); H h = H(); h.put(v); return reflect::type_of(h.d); }) + "|" +
+				t([]() { var v = new E(); H h = H(); h.put_this(v); return reflect::type_of(h.d); }) + "|" +
+				t([]() { H h = H(); string s = ""; for (int i = 0; i < 4; i++) { var v = i < 3 ? new D() : new E(); try { h.put(v); s += "D"; } catch (e) { s += "x"; } } return s + reflect::type_of(h.d); });
 			)", "Cannot assign E to field 'd' of H (declared shared_ptr<D>)|D|E|Cannot assign E to field 'd' of H (declared shared_ptr<D>)|"
 			    "Cannot assign E to field 'd' of H (declared shared_ptr<D>)|DDDxD");
 		});

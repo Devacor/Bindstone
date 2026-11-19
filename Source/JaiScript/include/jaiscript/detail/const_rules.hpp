@@ -348,7 +348,7 @@ namespace jai::detail {
 					auto* m = static_cast<const member_expr*>(callee);
 					if (m->is_static && m->object && m->object->get_type() == node_type::identifier_expr) {
 						const std::string_view ns = static_cast<const identifier_expr*>(m->object.get())->name;
-						if (ns == "math" || ns == "string" || ns == "array" || ns == "map") { return; }
+						if (ns == "math" || ns == "string" || ns == "array" || ns == "map" || ref_write_copying_entry(ns, m->member)) { return; }
 					}
 					if (!m->is_static && ref_write_builtin_method(m->member)) { return; }
 				}

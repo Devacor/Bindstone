@@ -153,7 +153,7 @@ public:
                 Lap l; l.sw.start(); advance(0.5);
                 Lap m = l;
                 m.sw.stop();
-                `${l.sw.is_running()} ${l.sw.elapsed()} ${m.sw.is_running()} ${type_of(l.sw)}`;)",
+                `${l.sw.is_running()} ${l.sw.elapsed()} ${m.sw.is_running()} ${reflect::type_of(l.sw)}`;)",
                 "true 0.5 false time::stopwatch", "a stopwatch field copies with its instance");
         });
 
@@ -296,7 +296,7 @@ public:
             expect(R"(var d = time::utc_date(2024, 2, 29, 23, 59, 58, 999);
                 `${d.year}-${d.month}-${d.day} ${d.hour}:${d.minute}:${d.second}.${d.millisecond} ${d.weekday} ${d.yearday} ${d.utc} ${d.to_string()}`;)",
                    "2024-2-29 23:59:58.999 4 60 true 2024-02-29T23:59:58.999Z", "field reads");
-            expect(R"(time::date z; string before = z.to_string(); z.year = 2000; z.month = 2; z.day = 29; z.hour = 12; z.minute = 30; z.second = 15; z.millisecond = 250; `${before} ${z.to_string()} ${type_of(z)}`;)",
+            expect(R"(time::date z; string before = z.to_string(); z.year = 2000; z.month = 2; z.day = 29; z.hour = 12; z.minute = 30; z.second = 15; z.millisecond = 250; `${before} ${z.to_string()} ${reflect::type_of(z)}`;)",
                    "1970-01-01T00:00:00.000Z 2000-02-29T12:30:15.250Z time::date", "default date and field stores");
             expect(R"(`${time::utc_date(2026, 12, 31).yearday} ${time::utc_date(2024, 12, 31).yearday} ${time::utc_date(1970, 1, 1).weekday} ${time::utc_date(2000, 1, 1).weekday}`;)",
                    "365 366 4 6", "yearday and weekday");
@@ -404,7 +404,7 @@ public:
                 time::date direct = time::utc_date(2020, 1, 1);
                 string names = "";
                 for (time::date x : list) { names += x.format("${day} "); }
-                `${span(list[1], list[0])} ${later(ev.when).format("${month}/${day}")} ${names}${type_of(c)} ${h.year} ${direct.year} ${ev.clock.is_running()} ${type_of(time::stopwatch())}`;)",
+                `${span(list[1], list[0])} ${later(ev.when).format("${month}/${day}")} ${names}${reflect::type_of(c)} ${h.year} ${direct.year} ${ev.clock.is_running()} ${reflect::type_of(time::stopwatch())}`;)",
                    "777600.0 5/2 11 2 time::date 1970 2020 false time::stopwatch", "parameters, returns, fields, arrays, references, casts, handles, loops");
         });
 

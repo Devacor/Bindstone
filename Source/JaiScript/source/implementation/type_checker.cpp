@@ -10,6 +10,7 @@
 // callable slots additionally enforce the approved static contract.
 
 #include <jaiscript/detail/type_checker.hpp>
+#include <jaiscript/detail/foreign_keyword.hpp>
 #include <jaiscript/detail/generics.hpp>
 #include <filesystem>
 #include <jaiscript/detail/inline_variable.hpp>
@@ -6114,7 +6115,7 @@ private:
 
     // -------------------------------------------------------------- flow narrowing
     //
-    // A test of what a local holds (reflect::is_instance_of(x, "T"), a dynamic handle cast of x, type_of(x) == "int") gives the name that type where
+    // A test of what a local holds (reflect::is_instance_of(x, "T"), a dynamic handle cast of x, reflect::type_of(x) == "int") gives the name that type where
     // the test is known to have held: a fact on narrow_facts_, read by infer_identifier (a reference's by referent_receiver).
     // narrow_end is everything that can give the variable another value. A fact changes no declaration and no run-time path:
     // the proofs a narrowed read feeds select lanes that keep their run-time guards (internal/static_checking.md "Flow narrowing").
@@ -6287,7 +6288,7 @@ private:
         out.type = t;
         return true;
     }
-    // type_of(x) == "int": a var holds exactly that kind
+    // reflect::type_of(x) == "int": a var holds exactly that kind
     bool narrow_kind_fact(const var_entry& e, ctype::kind_t kind, narrow_fact& out) {
         if (!e.dynamic || e.is_reference || e.alias.kind != ctype::unknown) { return false; }
         out = narrow_fact{};
@@ -6296,13 +6297,6 @@ private:
         out.type.narrowed = true;
         out.proof_only = true;
         return true;
-    }
-    bool narrow_builtin_type_of(const identifier_expr* id) {
-        const std::string name(id->name);
-        if (find_local(id->name) || functions_.count(id->name) || program_function(id->name)) { return false; }
-        if (class_ctx_ && lookup_member(class_ctx_name_, id->name, /*want_static=*/false).found) { return false; }
-        if (!id->global_qualified && !enclosing_namespace_member(id->name).empty()) { return false; }
-        return eng_.has_function(name) && eng_.held_function_declarations(id->name).empty();
     }
     static ctype::kind_t narrow_kind_name(std::string_view name) {
         return name == "int" ? ctype::int_k : name == "float" ? ctype::float_k : name == "bool" ? ctype::bool_k
@@ -6360,9 +6354,9 @@ private:
                 std::string name;
                 if (!call || call->get_type() != node_type::call_expr || !narrow_text_literal(text, name)) { return; }
                 auto* c = static_cast<const call_expr*>(call);
-                if (c->arguments.size() != 1 || !c->callee || c->callee->get_type() != node_type::identifier_expr) { return; }
-                auto* callee = static_cast<const identifier_expr*>(c->callee.get());
-                if (callee->name == "type_of" && narrow_builtin_type_of(callee)) { narrow_named_test(c->arguments[0].get(), name, /*kinds=*/true, out); }
+                if (c->arguments.size() != 1 || !c->callee || c->callee->get_type() != node_type::member_expr) { return; }
+                auto* callee = static_cast<const member_expr*>(c->callee.get());
+                if (static_path(callee, "reflect") && callee->member == "type_of") { narrow_named_test(c->arguments[0].get(), name, /*kinds=*/true, out); }
                 return;
             }
             case node_type::cast_expr: {
@@ -6443,8 +6437,8 @@ private:
             if (t == node_type::cast_expr && static_cast<const cast_expr*>(e)->dynamic) { return true; }
             if (t == node_type::call_expr) {
                 const expression* callee = static_cast<const call_expr*>(e)->callee.get();
-                if (callee && callee->get_type() == node_type::identifier_expr && static_cast<const identifier_expr*>(callee)->name == "type_of") { return true; }
-                if (callee && callee->get_type() == node_type::member_expr && static_cast<const member_expr*>(callee)->member == "is_instance_of") { return true; }
+                if (callee && callee->get_type() == node_type::member_expr &&
+                    (static_cast<const member_expr*>(callee)->member == "is_instance_of" || static_cast<const member_expr*>(callee)->member == "type_of")) { return true; }
             }
             if (t == node_type::lambda_expr && narrow_has_test(static_cast<const lambda_expr*>(e)->body.get())) { return true; }
             for_each_child_expression(e, [&](const expression* k) { found = found || narrow_has_test(k); });
@@ -8125,6 +8119,11 @@ private:
             if (!id->global_qualified && report_cdtor_call(id->name, id->location)) { return {}; }
             if (program_or_derived_name(id->name)) { return {}; }
             if (stale_field_context()) { return {}; }
+            if (id->name == "type_of" || id->name == "is_registered_type") {
+                diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, id->location,
+                     std::string(detail::foreign_word_text(id->name == "type_of" ? detail::foreign_word::bare_type_of : detail::foreign_word::bare_is_registered_type)));
+                return {};
+            }
             undeclared(id->location, id->name);
             return {};
         }

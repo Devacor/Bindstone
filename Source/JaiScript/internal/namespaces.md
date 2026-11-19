@@ -63,7 +63,7 @@ the namespace, or in another one, the bare name is undeclared.
 
 ## Classes
 
-A class declared inside a namespace is named `ns::Rect` (C++): its type id, class variable, constructor, `type_of` and
+A class declared inside a namespace is named `ns::Rect` (C++): its type id, class variable, constructor, `reflect::type_of` and
 archive `$type` all carry the qualified name, and it is recorded as the namespace's member under its bare name.
 `ns::Rect()` constructs it and `ns::Rect::method()` reaches its statics. Its methods, constructors and field
 initializers run over the namespace's scope (the class records it for an implicit construction), so they read
@@ -107,6 +107,9 @@ parameter, member, function, class or enum of that name, and a second using of t
 
 `reflect` and `jai` (and every `reflect::...` / `jai::...`) are the engine's: a script cannot declare or
 reopen them (`Namespace 'jai::x' is reserved for the engine (C++-registered only)`). `math` is open.
+Because nothing but the host writes them, the VM reads `reflect::f` / `jai::x` from the variable's cell
+(`op_namespace_entry`, and a call's callee operand with `load_flag_namespace_cell`, which takes the call
+site's caches and the loops' call cells as a bare name's does); a parallel worker reads its region's pins.
 
 ## Reflection
 

@@ -434,7 +434,7 @@ public:
                     LOG = LOG + "|" + b.n + c.n + d.n + e.n + g.n + t.n + to_string(same_object(d, h)) + "|";
                     Q q = Q("q"); shared_ptr<Q> qh = new Q("r"); Q q1 = Q(q); auto q2 = new Q(qh); Q q3 = Q(Q("t"));
                     R r0 = R(1); R r1 = R(r0); auto root = new S(); auto child = new S(root);
-                    LOG = LOG + "|" + type_of(r1.held) + to_string(same_object(child.parent, root)) + "|";
+                    LOG = LOG + "|" + reflect::type_of(r1.held) + to_string(same_object(child.parent, root)) + "|";
                 }
                 f(); LOG;
             )", "|ahhahtfalse|cq'cr'|inttrue|~t~r'~q'~r~q~t~h~a~h~h~a~h~a");
@@ -793,7 +793,7 @@ public:
             const std::pair<std::string, std::string> cases[] = {
                 {std::string(k_family) + R"(
                 function f() -> string { Base x = Base(); shared_ptr<Base> h = x; D2 s = D2(); s.a = 5; s.d2 = 6; x = s; LOG = LOG + "|";
-                    return to_string(x.a) + type_of(h) + to_string(same_object(h, x)) + to_string(cast<D2&>(x).d2); }
+                    return to_string(x.a) + reflect::type_of(h) + to_string(same_object(h, x)) + to_string(cast<D2&>(x).d2); }
                 string out = f(); out + ":" + LOG;
             )", "5D2true6:|2B2B"},
                 {std::string(k_family) + R"(
@@ -803,7 +803,7 @@ public:
             )", "73true:|1t|2B2B"},
                 {std::string(k_family) + R"(
                 function f() -> string { Base x = D1(); shared_ptr<Base> h = x; Base b = Base(); b.a = 9; LOG = LOG + "|"; x = b; LOG = LOG + "|";
-                    string r = to_string(x.a) + type_of(h) + to_string(same_object(h, x));
+                    string r = to_string(x.a) + reflect::type_of(h) + to_string(same_object(h, x));
                     try { int k = cast<D1&>(x).d1; r = r + "no"; } catch (e) { r = r + "!"; }
                     return r; }
                 string out = f(); out + ":" + LOG;
@@ -851,7 +851,7 @@ public:
                 class Other { int a = 1; Other() {} }
                 function f() -> string { Base x = Base(); shared_ptr<Base> h = x; var o = Other(); string r = "";
                     try { x = o; r = "no"; } catch (e) { r = e; }
-                    return r + "|" + type_of(h) + to_string(same_object(h, x)); }
+                    return r + "|" + reflect::type_of(h) + to_string(same_object(h, x)); }
                 string out = f(); LOG = ""; out;
             )", "Cannot assign Other to 'x' (declared Base)|Basetrue");
         });
@@ -859,33 +859,33 @@ public:
         test("every_by_value_slot_reclasses_in_place", [this]() {
             const std::string family = std::string(k_family);
             expect_log(family + R"(
-                function f() -> string { array<Base> a; a.push(Base()); shared_ptr<Base> h = a[0]; a[0] = D2(); return type_of(a[0]) + to_string(same_object(h, a[0])) + to_string(cast<D2&>(h).d2); }
+                function f() -> string { array<Base> a; a.push(Base()); shared_ptr<Base> h = a[0]; a[0] = D2(); return reflect::type_of(a[0]) + to_string(same_object(h, a[0])) + to_string(cast<D2&>(h).d2); }
                 string out = f(); LOG = ""; out;
             )", "D2true3");
             expect_log(family + R"(
                 class Holder { Base b; }
-                function f() -> string { Holder o; shared_ptr<Base> h = o.b; o.b = D2(); return type_of(h) + to_string(same_object(h, o.b)) + to_string(cast<D2&>(o.b).d2); }
+                function f() -> string { Holder o; shared_ptr<Base> h = o.b; o.b = D2(); return reflect::type_of(h) + to_string(same_object(h, o.b)) + to_string(cast<D2&>(o.b).d2); }
                 string out = f(); LOG = ""; out;
             )", "D2true3");
             expect_log(family + R"(
                 class S { static Base st; }
-                function f() -> string { shared_ptr<Base> h = S::st; S::st = D2(); return type_of(h) + to_string(same_object(h, S::st)) + to_string(cast<D2&>(S::st).d2); }
+                function f() -> string { shared_ptr<Base> h = S::st; S::st = D2(); return reflect::type_of(h) + to_string(same_object(h, S::st)) + to_string(cast<D2&>(S::st).d2); }
                 string out = f(); LOG = ""; out;
             )", "D2true3");
             expect_log(family + R"(
-                function f() -> string { map<string, Base> m; m["k"] = Base(); shared_ptr<Base> h = m["k"]; m["k"] = D2(); return type_of(h) + to_string(same_object(h, m["k"])) + to_string(cast<D2&>(m["k"]).d2); }
+                function f() -> string { map<string, Base> m; m["k"] = Base(); shared_ptr<Base> h = m["k"]; m["k"] = D2(); return reflect::type_of(h) + to_string(same_object(h, m["k"])) + to_string(cast<D2&>(m["k"]).d2); }
                 string out = f(); LOG = ""; out;
             )", "D2true3");
             expect_log(family + R"(
                 function put(Base& p) -> void { p = D2(); }
-                function f() -> string { Base x = Base(); shared_ptr<Base> h = x; Base& r = x; r = D1(); string first = type_of(h); put(x);
-                    return first + type_of(h) + to_string(same_object(h, x)); }
+                function f() -> string { Base x = Base(); shared_ptr<Base> h = x; Base& r = x; r = D1(); string first = reflect::type_of(h); put(x);
+                    return first + reflect::type_of(h) + to_string(same_object(h, x)); }
                 string out = f(); LOG = ""; out;
             )", "D1D2true");
             expect_log(family + R"(
                 class Acc { int n = 0; Acc() {} Acc(int v) { n = v; } function operator+(Acc o) -> Acc { return Sum(n + o.n); } }
                 class Sum : Acc { int parts = 2; Sum(int v) { n = v; } }
-                function f() -> string { Acc x = Acc(1); shared_ptr<Acc> h = x; Acc two = Acc(2); x += two; return type_of(h) + to_string(h.n) + to_string(same_object(h, x)) + to_string(cast<Sum&>(x).parts); }
+                function f() -> string { Acc x = Acc(1); shared_ptr<Acc> h = x; Acc two = Acc(2); x += two; return reflect::type_of(h) + to_string(h.n) + to_string(same_object(h, x)) + to_string(cast<Sum&>(x).parts); }
                 string out = f(); LOG = ""; out;
             )", "Sum3true2");
         });
@@ -895,7 +895,7 @@ public:
                 [[warn_mode]]
                 function f() -> string { Base x = D1(); D1& r = cast<D1&>(x); string out = "";
                     try { var s = D2(); r = s; out = "no"; } catch (e) { out = e; }
-                    return out + "|" + type_of(x); }
+                    return out + "|" + reflect::type_of(x); }
                 string out = f(); LOG = ""; out;
             )", "Cannot assign D2 to 'r' (declared D1&)|D1");
         });
@@ -1001,7 +1001,7 @@ public:
             const std::string got = eng->execute(R"(
                 class D2 : Base { int d2 = 3; int extra = 5; D2() {} ~D2() { LOG = LOG + "2"; } }
                 LOG = "";
-                type_of(alias) + to_string(cast<D2&>(held).extra) + to_string(same_object(alias, held)) + ":" + LOG;
+                reflect::type_of(alias) + to_string(cast<D2&>(held).extra) + to_string(same_object(alias, held)) + ":" + LOG;
             )").as_string();
             check_eq(std::string("D25true:"), got);
         });

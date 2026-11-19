@@ -179,7 +179,7 @@ public:
             script_value result = engine->execute("try { throw 42; } catch (e) { return e; }");
             check_eq(result.is_int(), true);
             check_eq(result.as<int>(), 42);
-            check_eq(std::string("int true 43 42"), engine->execute("try { throw 42; } catch (e) { return type_of(e) + \" \" + to_string(e == 42) + \" \" + to_string(e + 1) + \" \" + to_string(e); }").as_string());
+            check_eq(std::string("int true 43 42"), engine->execute("try { throw 42; } catch (e) { return reflect::type_of(e) + \" \" + to_string(e == 42) + \" \" + to_string(e + 1) + \" \" + to_string(e); }").as_string());
         });
 
         test("catch_clauses_take_a_thrown_value_by_type_and_a_run_time_error_by_kind", [this]() {
@@ -192,12 +192,12 @@ public:
                 "string which(var thrower) {\n"
                 "    try { thrower(); }\n"
                 "    catch (Other o) { return \"other\"; }\n"
-                "    catch (Oops o) { return \"oops \" + to_string(o.code) + \" \" + type_of(o); }\n"
+                "    catch (Oops o) { return \"oops \" + to_string(o.code) + \" \" + reflect::type_of(o); }\n"
                 "    catch (int n) { return \"int \" + to_string(n + 1); }\n"
                 "    catch (string s) { return \"string \" + s; }\n"
                 "    catch (array<int> a) { return \"array \" + to_string(a.size()); }\n"
                 "    catch (error e) { return \"error \" + e.kind + \": \" + e.message; }\n"
-                "    catch (e) { return \"all \" + type_of(e); }\n"
+                "    catch (e) { return \"all \" + reflect::type_of(e); }\n"
                 "    return \"none\";\n"
                 "}\n";
             const std::vector<std::pair<std::string, std::string>> cases = {
@@ -216,19 +216,19 @@ public:
                  "error type: Cannot initialize 'n' (declared int) with string|error container: Cannot pop from empty array"},
                 {"print(which(() => { return to_char(999); }));", "error host: to_char expects 0..255, got 999"},
                 // the catch-all's variable is the thrown value; a value with a node also answers its place while the handler runs
-                {"try { throw {\"k\": 5}; } catch (e) { print(type_of(e), \" \", e[\"k\"], \" \", e.line); }", "map 5 17"},
-                {"try { throw [1, 2]; } catch (e) { print(type_of(e), \" \", e.size(), \" \", e[1], \" \", e.line); }", "array 2 2 17"},
-                {"try { throw Oops(); } catch (e) { print(type_of(e), \" \", e.code, \" \", e.line, \" \", e.message, \" \", e, \" \", e.value.code, \" \", e.stack.size()); }", "Oops 7 17 oops! oops! 7 1"},
-                {"try { throw \"s\"; } catch (e) { print(type_of(e), \" \", e, \" \", e.line, \" \", e.value); }", "string s 17 s"},
-                {"try { var v = [1]; v[9]; } catch (e) { print(type_of(e), \" \", e, \"|\", e.kind, \" \", e.kind == error_kind::bounds, \" \", e.line, \" \", e.value); }",
+                {"try { throw {\"k\": 5}; } catch (e) { print(reflect::type_of(e), \" \", e[\"k\"], \" \", e.line); }", "map 5 17"},
+                {"try { throw [1, 2]; } catch (e) { print(reflect::type_of(e), \" \", e.size(), \" \", e[1], \" \", e.line); }", "array 2 2 17"},
+                {"try { throw Oops(); } catch (e) { print(reflect::type_of(e), \" \", e.code, \" \", e.line, \" \", e.message, \" \", e, \" \", e.value.code, \" \", e.stack.size()); }", "Oops 7 17 oops! oops! 7 1"},
+                {"try { throw \"s\"; } catch (e) { print(reflect::type_of(e), \" \", e, \" \", e.line, \" \", e.value); }", "string s 17 s"},
+                {"try { var v = [1]; v[9]; } catch (e) { print(reflect::type_of(e), \" \", e, \"|\", e.kind, \" \", e.kind == error_kind::bounds, \" \", e.line, \" \", e.value); }",
                  "error Array index 9 out of bounds for array of size 1|bounds true 17 null"},
-                {"try { var v = [1]; v[9]; } catch (e) { string m = e; print(type_of(m), \" \", m.size(), \" \", e + \"!\"); }", "string 47 Array index 9 out of bounds for array of size 1!"},
+                {"try { var v = [1]; v[9]; } catch (e) { string m = e; print(reflect::type_of(m), \" \", m.size(), \" \", e + \"!\"); }", "string 47 Array index 9 out of bounds for array of size 1!"},
                 // a thrown number answers .value and .message through its catch variable, a lambda's copy of it included
                 {"int h() { try { throw 3; } catch (e) { var f = [=]() { return e.value * 2; }; return f() + e.value; } return 0; } print(h());\ntry { throw 2.5; } catch (e) { print(e.message + \"!\", \" \", e.value); }", "9\n2.5! 2.5"},
                 // the variable is the thrown instance: no copy is made, and a write reaches e.value
                 {"try { throw Counted(); } catch (Counted c) { c.n = 5; print(copies, \" \", c.n); }\ntry { throw Counted(); } catch (const Counted& c) { print(copies, \" \", c.n); }\n"
                  "try { throw Counted(); } catch (e) { e.n = 9; print(copies, \" \", e.value.n); }", "0 5\n0 1\n0 9"},
-                {"try { throw new Oops(); } catch (Oops o) { print(o.code, \" \", type_of(o)); }", "7 Oops"},
+                {"try { throw new Oops(); } catch (Oops o) { print(o.code, \" \", reflect::type_of(o)); }", "7 Oops"},
                 // no clause takes it: the error goes on to the next handler from where it was raised
                 {"void typed_only() { try { throw \"nope\"; } catch (int n) { print(\"int\"); } }\ntry { typed_only(); } catch (e) { print(\"propagated \", e, \" \", e.line); }", "propagated nope 17"},
                 // a try none of whose clauses takes the error is passed without entering a handler: the stack is the raise's
@@ -263,7 +263,7 @@ public:
                 "    outer();\n"                                                          // 7
                 "} catch (err) {\n"                                                       // 8
                 "    var copy = err;\n"                                                   // 9
-                "    info = err + \"|\" + err.message + \"|\" + to_string(err.line) + \"|\" + err.stack.join(\",\") + \"|\" + type_of(err) + \":\" + err.kind +\n"
+                "    info = err + \"|\" + err.message + \"|\" + to_string(err.line) + \"|\" + err.stack.join(\",\") + \"|\" + reflect::type_of(err) + \":\" + err.kind +\n"
                 "           \"|\" + to_string(err == \"Array index 5 out of bounds for array of size 1\") + \"|\" + to_string(err.value == null) +\n"
                 "           \"|\" + to_string(copy.line) + \"|\" + to_string(err.file == \"" + path + "\") + \"|\" + to_string(err.column > 0);\n"
                 "    string made = err + \"\";\n"

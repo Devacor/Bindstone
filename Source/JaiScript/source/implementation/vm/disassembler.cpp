@@ -152,6 +152,7 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 				}
 				break;
 			case opcode::op_get_static:
+			case opcode::op_namespace_entry:
 			case opcode::op_set_member:
 			case opcode::op_set_static:
 			case opcode::op_member_compound:

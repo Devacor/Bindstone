@@ -49,7 +49,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <p>Every variable, field and parameter picks one of three rungs of strictness, and the rungs mix freely in one file:</p>
 <div class="tablewrap"><table><thead><tr><th>Declaration</th><th>Meaning</th></tr></thead><tbody><tr><td><code>int x = 5;</code> (any spelled type)</td><td><strong>Enforced.</strong> The slot holds that type for good. A store converts when <a href="#conversion-table-typed-locked-auto-targets">the conversion table</a> allows it and is an error when not.</td></tr><tr><td><code>auto x = 5;</code></td><td><strong>Inferred, then enforced.</strong> The slot takes the initializer&#x27;s static type and from then on behaves as if that type were spelled.</td></tr><tr><td><code>var x = 5;</code></td><td><strong>Dynamic.</strong> Any value at any time. An untyped parameter is a <code>var</code>.</td></tr></tbody></table></div>
 <p>Three of the names have a C++ spelling and a JavaScript spelling that mean the same thing:</p>
-<div class="tablewrap"><table><thead><tr><th></th><th>C++ spelling</th><th>JavaScript spelling</th></tr></thead><tbody><tr><td>dynamic variable</td><td></td><td><code>var x</code>, <code>let x</code></td></tr><tr><td>64-bit float</td><td><code>double</code></td><td><code>float</code> (the name <code>type_of</code> reports)</td></tr><tr><td>the empty handle</td><td><code>nullptr</code></td><td><code>null</code></td></tr></tbody></table></div>
+<div class="tablewrap"><table><thead><tr><th></th><th>C++ spelling</th><th>JavaScript spelling</th></tr></thead><tbody><tr><td>dynamic variable</td><td></td><td><code>var x</code>, <code>let x</code></td></tr><tr><td>64-bit float</td><td><code>double</code></td><td><code>float</code> (the name <code>reflect::type_of</code> reports)</td></tr><tr><td>the empty handle</td><td><code>nullptr</code></td><td><code>null</code></td></tr></tbody></table></div>
 <p><code>let</code> stands wherever <code>var</code> may (<code>let x = 5;</code>, <code>for (let i = 0; ...)</code>, <code>let&amp; r = x;</code>). Every declaration, under any keyword, is scoped to its block, and a C-style <code>for</code> variable that a lambda captures by reference is a fresh variable on each iteration (<a href="06-functions.html#lambdas-and-captures">Functions &amp; Lambdas</a>).</p>
 <h2 id="when-a-mismatch-is-caught">When a mismatch is caught<a class="hlink" href="#when-a-mismatch-is-caught" aria-label="link">&#8203;</a></h2>
 <p>The checker reads the whole program before its first statement runs. A mismatch between two types it can see is a <strong>load error</strong>, and nothing executes:</p>
@@ -82,7 +82,7 @@ x is still 5</code></pre></div>
 int hits; float speed; string name; array&lt;int&gt; scores; var anything; Vec2 home;
 Vec2 a(3.0, 4.0);
 int lives{3};
-print("{} {} [{}] {} {} {} {} {}", hits, speed, name, scores.size(), type_of(anything), home.x, a.y, lives);</code></pre></div>
+print("{} {} [{}] {} {} {} {} {}", hits, speed, name, scores.size(), reflect::type_of(anything), home.x, a.y, lives);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">0 0.0 [] 0 null 1.5 4.0 3</code></pre></div>
 <p>A class value is never null. <code>Hero h = null;</code> is a load error that names <code>shared_ptr&lt;Hero&gt;</code> and <code>var</code>, the slots that can be empty, and a class cannot hold itself by value: <code>class Node { Node next; }</code> fails the load, and the link is a <code>shared_ptr&lt;Node&gt;</code>.</p>
 <h2 id="auto-locks-on-first-use">auto takes the static type<a class="hlink" href="#auto-locks-on-first-use" aria-label="link">&#8203;</a></h2>
@@ -100,7 +100,7 @@ a = "now a string";
 auto late;
 late = 5;            // locks to int here
 try { late = "s"; } catch (e) { print("caught: ", e); }
-print("{} ({}), {} ({}), {} ({})", y, type_of(y), a, type_of(a), late, type_of(late));</code></pre></div>
+print("{} ({}), {} ({}), {} ({})", y, reflect::type_of(y), a, reflect::type_of(a), late, reflect::type_of(late));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Cannot assign string to &#x27;late&#x27; (declared int)
 2.0 (float), now a string (string), 5 (int)</code></pre></div>
 <p id="auto-copies-a-value"><code>auto y = x;</code> copies what C++ <code>auto</code> copies: a value (a class instance, an array, a map) becomes a new value, a handle (<code>new T()</code>, a <code>shared_ptr&lt;T&gt;</code>) becomes a second handle to the same object, and a reference result is copied because <code>auto</code> drops the reference (<code>auto&amp;</code> keeps it). <code>T y = handle;</code> copies the object the handle points at. <a href="03-value-semantics.html">Value Semantics</a> shows each case.</p>
@@ -110,7 +110,7 @@ print("{} ({}), {} ({}), {} ({})", y, type_of(y), a, type_of(a), late, type_of(l
 y = "now a string";
 let mixed = [1, "two", 3.14, true];
 mixed = {"even": "a map now"};
-print("{} {}", type_of(y), type_of(mixed));</code></pre></div>
+print("{} {}", reflect::type_of(y), reflect::type_of(mixed));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">string map</code></pre></div>
 <h2 id="conversion-table-typed-locked-auto-targets">The one conversion table<a class="hlink" href="#conversion-table-typed-locked-auto-targets" aria-label="link">&#8203;</a></h2>
 <p>Every typed slot runs the same table: a declaration, <code>=</code>, a by-value parameter, a return, a field, a static. A refused store is a load error where the checker sees both types and a catchable run-time error where one arrives through a <code>var</code>.</p>
@@ -187,9 +187,9 @@ float f = 7.0;
 f /= 2;
 var v = 7;
 v /= 2;              // int / int: still an int
-print("{} {} {} ({})", i, f, v, type_of(v));
+print("{} {} {} ({})", i, f, v, reflect::type_of(v));
 v += 0.5;            // a float result changes what the var holds
-print("{} ({})", v, type_of(v));</code></pre></div>
+print("{} ({})", v, reflect::type_of(v));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">-3 3.5 3 (int)
 3.5 (float)</code></pre></div><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/01-hello.html"><span>&larr; previous</span>Hello &amp; Basics</a><a class="next" rel="next" href="../guide/03-value-semantics.html"><span>next &rarr;</span>Value Semantics &amp; References</a></nav></article>
 </main>

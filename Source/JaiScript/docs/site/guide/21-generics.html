@@ -74,7 +74,7 @@ print(numbers.pop(), &quot; &quot;, numbers.size());
 
 auto hp = Pair&lt;string, int&gt;(&quot;hp&quot;, 10);   // a construction names the arguments
 print(hp.first, &quot; = &quot;, hp.second);
-print(type_of(numbers), &quot; / &quot;, type_of(hp));</code></pre></div>
+print(reflect::type_of(numbers), &quot; / &quot;, reflect::type_of(hp));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">9 1
 hp = 10
 Stack&lt;int&gt; / Pair&lt;string, int&gt;</code></pre></div>
@@ -181,7 +181,7 @@ print(int(2.9), &quot; &quot;, float(3), &quot; &quot;, string() + &quot;|&quot;
 <li><strong>A type parameter&#x27;s name is reserved in its generic</strong>: a variable, a parameter, a field or a method named <code>T</code> fails the load (<code>&#x27;T&#x27; is a type parameter of &#x27;Stack&#x27;: a declaration cannot reuse its name</code>). A member read, <code>x.T</code>, is no use of the parameter.</li>
 </ul>
 <h2 id="identity">One instance, one class<a class="hlink" href="#identity" aria-label="link">&#8203;</a></h2>
-<p>An instance&#x27;s name is its canonical spelling, the one <code>type_of</code>, <code>reflect::type_name</code>, <code>reflect::classes()</code>, error texts, stack traces and <code>$type</code> in JSON show: <code>Stack&lt;int&gt;</code>, <code>Pair&lt;string, int&gt;</code>, <code>shop::Shelf&lt;shop::Product&gt;</code>. A class argument is named by its qualified name, so the two spellings below are one class. <code>var</code> as an argument is spelled <code>var</code> (<code>Cell&lt;var&gt;</code>). An instance joins its arguments with a comma and a space, a builtin container with a comma alone (<code>Pair&lt;string, int&gt;</code>, <code>Cell&lt;map&lt;string,int&gt;&gt;</code>), and that is the only spelling ever printed or saved. A name that <em>arrives</em> as text is matched without its whitespace: a <code>$type</code> in JSON or in a binary or base64 archive, the class name <code>reflect::construct</code> and the other <code>reflect::</code> functions take, a name a host looks a class up by. <code>Pair&lt;string,int&gt;</code>, <code>Pair&lt;string, int&gt;</code> and <code>Pair&lt; string , int &gt;</code> reach one class; case stays significant.</p>
+<p>An instance&#x27;s name is its canonical spelling, the one <code>reflect::type_of</code>, <code>reflect::type_name</code>, <code>reflect::classes()</code>, error texts, stack traces and <code>$type</code> in JSON show: <code>Stack&lt;int&gt;</code>, <code>Pair&lt;string, int&gt;</code>, <code>shop::Shelf&lt;shop::Product&gt;</code>. A class argument is named by its qualified name, so the two spellings below are one class. <code>var</code> as an argument is spelled <code>var</code> (<code>Cell&lt;var&gt;</code>). An instance joins its arguments with a comma and a space, a builtin container with a comma alone (<code>Pair&lt;string, int&gt;</code>, <code>Cell&lt;map&lt;string,int&gt;&gt;</code>), and that is the only spelling ever printed or saved. A name that <em>arrives</em> as text is matched without its whitespace: a <code>$type</code> in JSON or in a binary or base64 archive, the class name <code>reflect::construct</code> and the other <code>reflect::</code> functions take, a name a host looks a class up by. <code>Pair&lt;string,int&gt;</code>, <code>Pair&lt;string, int&gt;</code> and <code>Pair&lt; string , int &gt;</code> reach one class; case stays significant.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">namespace shop {
     class Product { string title = &quot;tee&quot;; }
     class Shelf&lt;T&gt; { array&lt;T&gt; items; }
@@ -191,7 +191,7 @@ print(int(2.9), &quot; &quot;, float(3), &quot; &quot;, string() + &quot;|&quot;
 shop::Shelf&lt;shop::Product&gt; outside;               // the same class, by its qualified spelling
 shop::inside.items.push(shop::Product());
 outside = shop::inside;
-print(type_of(outside), &quot; &quot;, outside.items.size());
+print(reflect::type_of(outside), &quot; &quot;, outside.items.size());
 
 class Cell&lt;T&gt; { T held; }
 class Item { int n = 0; }

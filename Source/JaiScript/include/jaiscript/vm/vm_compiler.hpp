@@ -417,6 +417,9 @@ namespace jai::vm {
         bool try_emit_fused_index_store_shape(binary_expr* sub, const expression_ptr& value, bool no_result, uint32_t string_site, uint32_t compound = k_invalid_u32);
         bool try_emit_fused_push(const std::shared_ptr<call_expr>& call);
         bool try_emit_instance_test(const std::shared_ptr<call_expr>& call);
+        const script_value* reserved_namespace_cell(const member_expr* member) const;
+        uint32_t namespace_cell_row(const std::shared_ptr<member_expr>& member, const script_value* cell);
+        bool namespace_callee(const call_expr* call) const;
         // Branch-position condition: &&/|| thread straight to conditional jumps (no bool
         // materialization; each comparison pairs into fused_cmp_jump). Falsy control lands
         // on the collected jumps — the caller patches them to the else/exit target.

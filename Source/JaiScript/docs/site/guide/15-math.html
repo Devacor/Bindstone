@@ -62,7 +62,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <p><code>math::min</code>, <code>math::max</code> and <code>math::clamp</code> return the winning operand unchanged, so with an int and a float the result&#x27;s type depends on the values:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var a = math::max(1, 0.5);
 var b = math::max(1, 2.5);
-print(a, " ", type_of(a), " / ", b, " ", type_of(b), " / ", type_of(math::clamp(5, 0.5, 2.5)));</code></pre></div>
+print(a, " ", reflect::type_of(a), " / ", b, " ", reflect::type_of(b), " / ", reflect::type_of(math::clamp(5, 0.5, 2.5)));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 int / 2.5 float / float</code></pre></div>
 <h2 id="making-vectors">Making vectors<a class="hlink" href="#making-vectors" aria-label="link">&#8203;</a></h2>
 <ul>
@@ -72,13 +72,13 @@ print(a, " ", type_of(a), " / ", b, " ", type_of(b), " / ", type_of(math::clamp(
 <li>A constructor names its type, so it converts what it is handed: <code>math::ivec2(v)</code> and <code>math::ivec2(2.7, 1.2)</code> truncate as the cast does.</li>
 <li>A color takes <code>(r, g, b)</code> with alpha 1, <code>(r, g, b, a)</code>, nothing or another color.</li>
 <li id="typed-slots">Every declared vector slot (a variable, a parameter, a return, a field, an array element, a store through a reference) widens an ivec and refuses a vec for an ivec: a load error where both types are visible (<code>cannot initialize 'cell' declared 'math::ivec2' with 'math::vec2': cast&lt;math::ivec2&gt;(v) truncates each component toward zero</code>), the typed-slot error through a <code>var</code>. A <code>string</code> slot takes text only, so give it <code>to_string(v)</code>; anything else is rejected with the typed-slot text.</li>
-<li><code>using</code> brings the names into a file (<a href="11-kitchen-sink.html">Namespaces</a>); <code>type_of</code> still reports the full name.</li>
+<li><code>using</code> brings the names into a file (<a href="11-kitchen-sink.html">Namespaces</a>); <code>reflect::type_of</code> still reports the full name.</li>
 </ul>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">using math::vec3, math::ivec2;
 
 vec3 b = vec3(1, 2.5);                        // missing components are 0
 math::vec4 q{1, 2, 3, 4};
-print(b, " ", q, " ", type_of(b), " ", vec3(math::vec2(1, 2), 3), " ", math::color(1, 0, 0));
+print(b, " ", q, " ", reflect::type_of(b), " ", vec3(math::vec2(1, 2), 3), " ", math::color(1, 0, 0));
 
 ivec2 cell = cast&lt;ivec2&gt;(math::vec2(3.9, -4.2));   // a vec enters an ivec slot through the cast
 math::vec2 center(math::vec2 at) { return at + 0.5; }
@@ -99,7 +99,7 @@ v.depth *= 2;                                 // depth is z
 math::ivec2 p;
 p.x++;
 math::vec2 tiny = math::vec2(0.1, 1e300);
-print(v, " ", p, " ", type_of(v.x), " ", tiny, " ", tiny.x == 0.1);
+print(v, " ", p, " ", reflect::type_of(v.x), " ", tiny, " ", tiny.x == 0.1);
 try { p.x = 3000000000; } catch (e) { print(e); }
 try { var w = math::vec2(); w.z = 1; } catch (e) { print(e); }
 try { var s = "a"; v.x = s; } catch (e) { print(e); }</code></pre></div>
@@ -193,7 +193,7 @@ math::sqrt expects a numeric argument</code></pre></div>
 
 vec3 v = vec3(3, 4, 0);
 vec3 x = vec3(1, 0, 0);
-print(v.dot(x), " ", x.cross(vec3(0, 1, 0)), " ", math::cross(vec2(1, 2), vec2(3, 4)), " ", type_of(math::dot(ivec2(2, 3), ivec2(4, 5))));
+print(v.dot(x), " ", x.cross(vec3(0, 1, 0)), " ", math::cross(vec2(1, 2), vec2(3, 4)), " ", reflect::type_of(math::dot(ivec2(2, 3), ivec2(4, 5))));
 print(math::normalize(v), " ", v.normalized(), " ", v);            // v is unchanged
 print(math::distance(vec2(0, 0), vec2(3, 4)), " ", vec2(0, 0).distance_to(vec2(3, 4)));
 print(math::round(math::rotate(vec2(2, 0), math::PI / 2)), " ", math::round(x.rotated(vec3(0, 0, 1), math::PI / 2)));
@@ -231,7 +231,7 @@ tiles[math::ivec2(1, 2)] = "door";
 print(pts, " ", cells[0], " ", tiles[math::ivec2(1, 2)]);
 
 string j = to_json(math::vec2(0.1, 1e30));
-print(j, " ", type_of(from_json(j)), " ", from_base64(to_base64(math::color(1, 0.5, 0))));</code></pre></div>
+print(j, " ", reflect::type_of(from_json(j)), " ", from_base64(to_base64(math::color(1, 0.5, 0))));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Cannot push &#x27;math::vec2&#x27; to array&lt;math::vec3&gt;
 [(1.0, 0.0, 9.0), (1.0, 2.0, 3.0), (14.0, 5.0, 6.0)] (1, 0, 9) door
 {&quot;$type&quot;:&quot;math::vec2&quot;,&quot;$val&quot;:{&quot;x&quot;:0.1,&quot;y&quot;:1e+30}} math::vec2 (1.0, 0.5, 0.0, 1.0)</code></pre></div>

@@ -787,12 +787,12 @@ public:
             check_false(eng->execute("bop13 == null").as_bool(), "opaque bound != null (ruled)");
             check_true(eng->execute("bop13 == bop13").as_bool(), "opaque bound self-identity");
             jai::stdlib::register_all(*eng);
-            check_false(eng->execute("is_registered_type(bop13)").as_bool(),
-                        "is_registered_type false for opaque host tokens");
-            check_true(eng->execute("class Marker {} is_registered_type(Marker())").as_bool(),
-                       "is_registered_type true for script objects");
-            check_true(eng->execute("is_registered_type(42)").as_bool(),
-                       "is_registered_type true for ordinary values");
+            check_false(eng->execute("reflect::is_registered_type(bop13)").as_bool(),
+                        "reflect::is_registered_type false for opaque host tokens");
+            check_true(eng->execute("class Marker {} reflect::is_registered_type(Marker())").as_bool(),
+                       "reflect::is_registered_type true for script objects");
+            check_true(eng->execute("reflect::is_registered_type(42)").as_bool(),
+                       "reflect::is_registered_type true for ordinary values");
         });
     }
 };

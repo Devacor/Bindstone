@@ -259,7 +259,7 @@ void print_usage() {
 		"           a piped REPL exits 1 when any input failed.\n"
 		"\n"
 		"environment: the full JaiScript stdlib is always registered (print/format/to_string/\n"
-		"  type_of, math, to_json/from_json, containers, the random type, crypto:: hashes, HMAC,\n"
+		"  reflect::type_of, math, to_json/from_json, containers, the random type, crypto:: hashes, HMAC,\n"
 		"  secure random and passwords), the web::\n"
 		"  library (html_escape, url_encode, form_encode, parse_query, build_query, parse_url, ...),\n"
 		"  the spider:: HTTP client (spider::catch(url[, options]), also spelled spider::get;\n"

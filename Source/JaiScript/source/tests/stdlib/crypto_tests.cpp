@@ -39,7 +39,7 @@ public:
 			check_eq(std::string("2c8d07cd986f58eb210bd800133d6645c7340c59865377c8ea431cebca0b3113"), es("crypto::sha256(\"\\x00\\xFF\\x00\");"));
 			check_eq(std::string("4a99557e4033c3539de2eb65472017cad5f9557f7a0625a09f1c3f6e2ba69c4c 4a99557e4033c3539de2eb65472017cad5f9557f7a0625a09f1c3f6e2ba69c4c"),
 				es("crypto::sha256(utf8_string(\"\xC3\xA9\")) + \" \" + crypto::sha256(\"\xC3\xA9\");"));
-			check_eq(std::string("string"), es("type_of(crypto::sha256(\"a\"));"));
+			check_eq(std::string("string"), es("reflect::type_of(crypto::sha256(\"a\"));"));
 		});
 
 		test("sha512_matches_the_nist_vectors_at_every_block_boundary", [this, es]() {

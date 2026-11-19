@@ -907,7 +907,7 @@ try {
 }
 
 try { throw 42; } catch (e) { int code = e; }   // e is the thrown value with its type (int 42)
-try { xs[9]; } catch (error e) { e.kind == error_kind::bounds; }   // a run-time error: its message as a string, type_of "error"
+try { xs[9]; } catch (error e) { e.kind == error_kind::bounds; }   // a run-time error: its message as a string, reflect::type_of "error"
 // e.message, e.file, e.line, e.column, e.stack ("file:line", innermost first) on an error and a thrown string, array, map or instance
 
 // Catch without variable

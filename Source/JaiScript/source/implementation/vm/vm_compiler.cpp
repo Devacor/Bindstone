@@ -261,6 +261,7 @@ namespace {
 			case opcode::op_set_member_fused:
 			case opcode::op_member_compound:
 			case opcode::op_get_static:
+			case opcode::op_namespace_entry:
 			case opcode::op_set_static:
 			case opcode::op_new:
 			case opcode::op_ref_target_store:
@@ -493,6 +494,7 @@ namespace {
 			case opcode::op_get_member_path:
 			case opcode::op_get_member_this:
 			case opcode::op_get_static:
+			case opcode::op_namespace_entry:
 			case opcode::op_set_member:
 			case opcode::op_set_member_fused:
 			case opcode::op_set_static:
@@ -3724,7 +3726,7 @@ void vm_compiler::lower_dynamic_ops(chunk& c) {
 			out = k_typed_const_bit | o.const_index;
 			return true;
 		}
-		if (o.slot == k_invalid_u32 || o.slot >= k_typed_env_bit || (o.load_flags & (load_flag_type_ctor | load_flag_global_only))) return false;
+		if (o.slot == k_invalid_u32 || o.slot >= k_typed_env_bit || (o.load_flags & load_flags_unscoped)) return false;
 		out = o.slot;
 		return true;
 	};
@@ -4798,7 +4800,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// return the raw protocol does not take, re-runs the return's tail from its first instruction, so the tail's operands stay live
 				ir_op ret; ret.kind = ir::ret; ret.origin = static_cast<uint32_t>(ip);
 				if (st.op == opcode::op_return_ident) {
-					if (st.a == k_invalid_u32 || st.a >= k_typed_slot_mask || (st.c & (load_flag_type_ctor | load_flag_global_only))) { refuse(chunk::cell_refusal_translation, ip); break; }
+					if (st.a == k_invalid_u32 || st.a >= k_typed_slot_mask || (st.c & load_flags_unscoped)) { refuse(chunk::cell_refusal_translation, ip); break; }
 					use_slot(st.a, 0, false, 0, nullptr, ip); ret.a = st.a; slot_read(ret, st.a);
 					ret.proto = 0;
 					op = ret;
@@ -7783,7 +7785,7 @@ bool vm_compiler::call_temp_operand(const expression* e) const {
 	if (!e || e->get_type() != node_type::call_expr) return false;
 	const auto* call = static_cast<const call_expr*>(e);
 	if (call->callee && call->callee->get_type() == node_type::member_expr) {
-		return !static_cast<const member_expr*>(call->callee.get())->is_static && call->arguments.size() <= 8;
+		return (!static_cast<const member_expr*>(call->callee.get())->is_static || namespace_callee(call)) && call->arguments.size() <= 8;
 	}
 	if (!call->callee || call->callee->get_type() != node_type::identifier_expr) return false;
 	const auto* ident = static_cast<const identifier_expr*>(call->callee.get());
@@ -9281,7 +9283,8 @@ JAI_NOINLINE void vm_compiler::compile_call(const std::shared_ptr<call_expr>& ex
 	// op_probe_callee at the pre-args observation point into the pending register -
 	// no value-stack materialization, byte-identical semantics. Other callee shapes
 	// keep the verbatim load+op_call pair.
-	const bool probe_callee = expr->callee->get_type() == node_type::identifier_expr;
+	const bool cell_callee = namespace_callee(expr.get());
+	const bool probe_callee = expr->callee->get_type() == node_type::identifier_expr || cell_callee;
 	size_t probe_ip = SIZE_MAX;
 	size_t staged_args = 0;
 	std::vector<uint32_t> staged_slots;
@@ -9306,7 +9309,12 @@ JAI_NOINLINE void vm_compiler::compile_call(const std::shared_ptr<call_expr>& ex
 	}
 	site_lease site(pending_sites_);
 	site->call_node = add_node(expr);
-	if (probe_callee) {
+	if (cell_callee) {
+		const auto member = std::static_pointer_cast<member_expr>(expr->callee);
+		site->callee.symbol = add_symbol(member->member_id != UINT64_MAX ? member->member_id : detail::engine_access::symbolize(*engine_, member->member));
+		site->callee.load_flags = load_flag_namespace_cell;
+		site->callee.namespace_cell = namespace_cell_row(member, reserved_namespace_cell(member.get()));
+	} else if (probe_callee) {
 		site->callee = make_fused_operand(expr->callee);
 	}
 	site->arg_symbols.reserve(expr->arguments.size());
@@ -9337,7 +9345,7 @@ JAI_NOINLINE void vm_compiler::compile_call(const std::shared_ptr<call_expr>& ex
 			for (size_t ip : captures_at->second) { chunk_->code[ip].a = static_cast<uint32_t>(chunk_->call_sites.size() - 1); }
 			capture_sites_.erase(captures_at);
 		}
-		const bool sleep_call = expr->arguments.size() == 1 && static_cast<const identifier_expr*>(expr->callee.get())->name == "sleep";
+		const bool sleep_call = !cell_callee && expr->arguments.size() == 1 && static_cast<const identifier_expr*>(expr->callee.get())->name == "sleep";
 		emit(sleep_call ? opcode::op_sleep : expr->literal_format_call() ? opcode::op_format_call : opcode::op_call_from_scratch, static_cast<uint32_t>(expr->arguments.size()),
 		     static_cast<uint32_t>(chunk_->call_sites.size() - 1), tail_site ? 1u : 0u);
 	} else {
@@ -9388,8 +9396,39 @@ void vm_compiler::member_tail_into_temp(const expression* e) {
 	code[n - 1] = vm_instruction{opcode::op_load, t, temp_symbol_index(), 0};
 }
 
+// reflect::name, jai::name: no script declares into these namespaces, so the name is this cell for as long as the engine lives, and a
+// host that binds the name again assigns into it
+const script_value* vm_compiler::reserved_namespace_cell(const member_expr* member) const {
+	if (reference_ || !engine_ || !member->object || member->object->get_type() != node_type::identifier_expr) return nullptr;
+	const std::string_view name = static_cast<const identifier_expr*>(member->object.get())->name;
+	if (!is_reserved_namespace_name(name)) return nullptr;
+	engine& eng = const_cast<engine&>(*engine_);
+	auto& spaces = detail::engine_access::script_namespaces(eng);
+	const auto space = spaces.find(detail::engine_access::symbolize(eng, name));
+	if (space == spaces.end() || !space->second) return nullptr;
+	const uint64_t entry = detail::engine_access::symbolize(eng, member->member);
+	if (space->second->scope && space->second->scope->get_own_value_ptr(entry)) return nullptr;
+	const auto cell = space->second->variables.find(entry);
+	return cell == space->second->variables.end() ? nullptr : &cell->second;
+}
+
+uint32_t vm_compiler::namespace_cell_row(const std::shared_ptr<member_expr>& member, const script_value* cell) {
+	chunk_->namespace_cells.push_back(chunk::namespace_cell{cell, add_node(member)});
+	return static_cast<uint32_t>(chunk_->namespace_cells.size() - 1);
+}
+
+// reflect::f(args): the callee is resolved as a bare name's is (a probe ahead of the arguments, the site's caches, the loops' call cells)
+bool vm_compiler::namespace_callee(const call_expr* call) const {
+	return call->callee && call->callee->get_type() == node_type::member_expr && static_cast<const member_expr*>(call->callee.get())->is_static &&
+	       reserved_namespace_cell(static_cast<const member_expr*>(call->callee.get())) != nullptr;
+}
+
 JAI_NOINLINE void vm_compiler::compile_member(const std::shared_ptr<member_expr>& expr) {
 	if (expr->is_static) {
+		if (const script_value* cell = reserved_namespace_cell(expr.get())) {
+			emit(opcode::op_namespace_entry, add_node(expr), namespace_cell_row(expr, cell));
+			return;
+		}
 		emit(opcode::op_get_static, add_node(expr));
 		return;
 	}

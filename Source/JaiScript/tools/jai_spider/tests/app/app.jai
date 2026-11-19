@@ -192,7 +192,7 @@ routes.get("/members/generic", (spider::Request req) => {
 	array<Member> all = db.query<Member>(ALL_MEMBERS);
 	auto page = page_of(all);
 	shared_ptr<Labeled<string>> one = db.query_one<Labeled<string>>(FIND_MEMBER, 1);
-	return {"labels": labels, "total": page.total, "first": page.rows[0].handle, "type": type_of(page), "one": one->handle + " " + type_of(one)};
+	return {"labels": labels, "total": page.total, "first": page.rows[0].handle, "type": reflect::type_of(page), "one": one->handle + " " + reflect::type_of(one)};
 });
 routes.get("/members/:id", (spider::Request req) => {
 	shared_ptr<Member> m = db.query_one<Member>(FIND_MEMBER, req.param("id").to_int());

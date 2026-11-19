@@ -133,7 +133,7 @@ public:
 						map<string, int> counts = {"a": 1};
 						auto inferred = typed;
 						typed.push(3); counts["b"] = 2;
-						yield `${typed.size()} ${counts.size()} ${inferred.size()} ${type_of(typed)} ${type_of(inferred)}`;
+						yield `${typed.size()} ${counts.size()} ${inferred.size()} ${reflect::type_of(typed)} ${reflect::type_of(inferred)}`;
 						return x;
 					}
 					function make() { return body(5, "hi"); }

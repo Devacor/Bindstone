@@ -244,7 +244,7 @@ public:
         // shared_ptr paths (incl. the fixed composite intern), container elements,
         // conversion_registry, base upcasts, opaque tokens - ALL keyed correctly
         // (std::type_index or pointee-id keys); these pins keep them that way.
-        // type_of() reports the REGISTERED NAME for registered instances (it agrees with
+        // reflect::type_of() reports the REGISTERED NAME for registered instances (it agrees with
         // reflect::type_name), so two instantiations sharing one name are still
         // indistinguishable through it; registration_fingerprint does distinguish them.
 
@@ -348,7 +348,7 @@ public:
         });
 
         test("audit_registration_fingerprint_distinguishes_instantiations", [this]() {
-            // (h) type_of reports the registered NAME, which both instantiations share, so
+            // (h) reflect::type_of reports the registered NAME, which both instantiations share, so
             // it does not distinguish them; the registration fingerprint DOES.
             auto e_i = jai::foundry::make_engine();
             dynamic_binder<audit_pt<int>>(*e_i, "AuditP").constructor<>().method("kind", &audit_pt<int>::kind).build();
@@ -358,7 +358,7 @@ public:
             check_eq((int64_t)1, e_i->execute("AuditP().kind()").as_int());
             check_eq((int64_t)2, e_f->execute("AuditP().kind()").as_int());
             jai::stdlib::register_all(*e_i);
-            check_eq(std::string("AuditP"), e_i->execute("type_of(AuditP())").as<std::string>());
+            check_eq(std::string("AuditP"), e_i->execute("reflect::type_of(AuditP())").as<std::string>());
             // and differently-shaped registrations fingerprint differently
             auto e_two = jai::foundry::make_engine();
             register_audit_points(*e_two);
@@ -531,14 +531,14 @@ public:
                 try { return eng->execute(source).to_string(); } catch (const std::exception& err) { return std::string(err.what()); }
             };
             check_eq(std::string("TplBox<int> TplTagged<string, int> TplTagged<string, int>"),
-                     run("`${type_of(reflect::construct(\"TplBox< int >\"))} ${type_of(reflect::construct(\"TplTagged<string,int>\"))} "
+                     run("`${reflect::type_of(reflect::construct(\"TplBox< int >\"))} ${reflect::type_of(reflect::construct(\"TplTagged<string,int>\"))} "
                          "${reflect::type_name(reflect::construct_shared(\"TplTagged< string , int >\"))}`"));
             check_eq(std::string("true true"), run("TplBox<int> b; `${reflect::has_method(\"TplBox< int >\", \"kind\")} ${reflect::is_instance_of(b, \" TplBox<int> \")}`"));
             check_eq(std::string("reflect::construct: unknown class 'No Such'"), run("var c = \"\"; try { reflect::construct(\"No Such\"); } catch (e) { c = e; } c"));
             // an archive names its class as registered and reads the name whatever its spacing
             check_eq(std::string("ns::K 5 {\"$type\":\"ns::K\",\"$val\":{\"v\":5}}"),
-                     run("namespace ns { class K { int v = 1; } } auto k = from_json(\"{\\\"$type\\\": \\\"ns :: K\\\", \\\"$val\\\": {\\\"v\\\": 5}}\"); `${type_of(k)} ${k.v} ${to_json(k)}`"));
-            check_eq(std::string("Wide 2"), run("class Thin { int t = 0; } class Wide : Thin { int v = 1; } auto w = extend(Thin(), \" Wide \"); `${type_of(w)} ${w.v + 1}`"));
+                     run("namespace ns { class K { int v = 1; } } auto k = from_json(\"{\\\"$type\\\": \\\"ns :: K\\\", \\\"$val\\\": {\\\"v\\\": 5}}\"); `${reflect::type_of(k)} ${k.v} ${to_json(k)}`"));
+            check_eq(std::string("Wide 2"), run("class Thin { int t = 0; } class Wide : Thin { int v = 1; } auto w = extend(Thin(), \" Wide \"); `${reflect::type_of(w)} ${w.v + 1}`"));
         });
 
         test("a_template_base_name_is_not_a_reserved_word", [this]() {
@@ -941,7 +941,7 @@ public:
             eng->bind_static_types<TplLeaf, TplBox<int64_t>, TplBox<TplLeaf>, TplBox<std::vector<int64_t>>, TplBox<std::map<std::string, double>>,
                                    TplBinderKVPair<std::string, double>>();
             // of<T>(box) names the T the call deduced: the argument list of the instance Of<T>
-            eng->execute("class Of<T> {} string name<T>() { string n = type_of(Of<T>()); return n.substr(3, n.size() - 4); }"
+            eng->execute("class Of<T> {} string name<T>() { string n = reflect::type_of(Of<T>()); return n.substr(3, n.size() - 4); }"
                          " string of<T>(TplBox<T> b) { return name<T>(); }"
                          " string both<K, V>(TplBinderKVPair<K, V> p) { return name<K>() + \"/\" + name<V>(); }"
                          " K key_of<K, V>(TplBinderKVPair<K, V> p) { K k = p.key; return k; }"
@@ -976,19 +976,19 @@ public:
             dynamic_binder<TplTagged<int64_t, int64_t>>(*eng, "TplHand<int,int>").constructor<>().property("tag", &TplTagged<int64_t, int64_t>::tag).build();
             for (const char* spelled : {"TplBinderKVPair<string, float>", "TplBinderKVPair<string,float>", " TplBinderKVPair < string , float > "}) {
                 const std::string quoted = "\"" + std::string(spelled) + "\"";
-                check_eq(std::string("TplBinderKVPair<string, float>"), eng->execute("type_of(reflect::construct(" + quoted + "));").as_string(), spelled);
-                check_eq(std::string("TplBinderKVPair<string, float>"), eng->execute("type_of(reflect::construct_shared(" + quoted + "));").as_string(), spelled);
+                check_eq(std::string("TplBinderKVPair<string, float>"), eng->execute("reflect::type_of(reflect::construct(" + quoted + "));").as_string(), spelled);
+                check_eq(std::string("TplBinderKVPair<string, float>"), eng->execute("reflect::type_of(reflect::construct_shared(" + quoted + "));").as_string(), spelled);
                 check_true(eng->execute("reflect::has_field(" + quoted + ", \"key\");").as_bool(), spelled);
                 check_eq(std::string("TplBinderKVPair<string, float>"), detail::registered_type_spelling(eng.get(), spelled), spelled);
             }
             for (const char* spelled : {"TplBox<map<string,float>>", "TplBox<map<string, float>>", "TplBox< map<string , float> >"}) {
-                check_eq(std::string("TplBox<map<string,float>>"), eng->execute("type_of(reflect::construct(\"" + std::string(spelled) + "\"));").as_string(), spelled);
+                check_eq(std::string("TplBox<map<string,float>>"), eng->execute("reflect::type_of(reflect::construct(\"" + std::string(spelled) + "\"));").as_string(), spelled);
             }
             for (const char* spelled : {"TplHand<int,int>", "TplHand<int, int>", "TplHand < int , int >"}) {
-                check_eq(std::string("TplHand<int,int>"), eng->execute("type_of(reflect::construct(\"" + std::string(spelled) + "\"));").as_string(), spelled);
+                check_eq(std::string("TplHand<int,int>"), eng->execute("reflect::type_of(reflect::construct(\"" + std::string(spelled) + "\"));").as_string(), spelled);
                 check_eq(std::string("TplHand<int,int>"), detail::registered_type_spelling(eng.get(), spelled), spelled);
             }
-            check_eq(std::string("TplBinderKVPair<string, float>"), eng->execute("TplBinderKVPair<string,float> p; type_of(p);").as_string(), "printed as registered");
+            check_eq(std::string("TplBinderKVPair<string, float>"), eng->execute("TplBinderKVPair<string,float> p; reflect::type_of(p);").as_string(), "printed as registered");
             check_true(detail::registered_type_spelling(eng.get(), "tplbinderkvpair<string, float>").empty(), "case stays significant");
             check_false(eng->is_type_registered("TplBinderKVPair<string,float>"), "the host's own lookup is by the registered spelling");
         });

@@ -607,7 +607,7 @@ Box&lt;float&gt; f;
 f.value = 2.5;
 Box&lt;int32&gt; w;            // Box&lt;int32_t&gt;, bound with Box&lt;int64_t&gt;
 print("{} {} {}", b.get(), f.get(), w.get());
-print(type_of(b), " ", type_of(f), " ", type_of(w));</code></pre></div>
+print(reflect::type_of(b), " ", reflect::type_of(f), " ", reflect::type_of(w));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">sum 3.5
 4 2.5 0
 Box&lt;int&gt; Box&lt;float&gt; Box&lt;int32&gt;</code></pre></div>

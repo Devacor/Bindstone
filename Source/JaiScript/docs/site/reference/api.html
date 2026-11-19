@@ -686,8 +686,6 @@ print(p.name, &quot; &quot;, p.age);</code></pre></div>
 <div class="api-entry" data-provider="core" data-search="import_recheck_interval(seconds: number) -&gt; void configure sets polling window; zero checks every reach. every engine"><h3 id="api-adb3a6ddd041"><code>import_recheck_interval(seconds: number) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; configure</p>
 <p>Sets polling window; zero checks every reach.</p>
 </div>
-<div class="api-entry" data-provider="stdlib" data-search="is_registered_type(value: var) -&gt; bool observe  register_all() or area registration"><h3 id="api-3d1626c826fd"><code>is_registered_type(value: var) -&gt; bool</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
-</div>
 <div class="api-entry" data-provider="runner" data-search="key_down(name: string) -&gt; bool input current held key; arrows and named keys or letters; console/platform dependent. standalone jaiscript.exe"><h3 id="api-44a58c408539"><code>key_down(name: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; input</p>
 <p>Current held key; arrows and named keys or letters; console/platform dependent.</p>
 </div>
@@ -795,7 +793,7 @@ print(same_object(a, b), &quot; &quot;, same_object(a, r), &quot; &quot;, a == b
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="to_char(code: int) -&gt; char convert byte code conversion. register_all() or area registration"><h3 id="api-28005c097351"><code>to_char(code: int) -&gt; char</code></h3><p><strong>register_all() or area registration</strong> &middot; convert</p>
 <p>Byte code conversion.</p>
-<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(to_char(65), &quot; &quot;, type_of(to_char(65)));</code></pre></div>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(to_char(65), &quot; &quot;, reflect::type_of(to_char(65)));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">A char</code></pre></div>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="to_json(value: var, indent: int = -1) -&gt; string serialize  register_all() or area registration"><h3 id="api-78e34a34fc6d"><code>to_json(value: var, indent: int = -1) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; serialize</p>
@@ -811,10 +809,6 @@ print(to_json([1, 2], 2));</code></pre></div>
 <p>The display text print shows: a container&#x27;s contents, an instance&#x27;s to_string(), else its class name and fields.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(to_string(3) + &quot;!&quot;, &quot; &quot;, to_string(2.5), &quot; &quot;, to_string([1, &quot;two&quot;]));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3! 2.5 [1, &quot;two&quot;]</code></pre></div>
-</div>
-<div class="api-entry" data-provider="stdlib" data-search="type_of(value: var) -&gt; string observe  register_all() or area registration"><h3 id="api-b30f6412a259"><code>type_of(value: var) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
-<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(type_of(1), &quot; &quot;, type_of(1.5), &quot; &quot;, type_of(&quot;s&quot;), &quot; &quot;, type_of([1]));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">int float string array</code></pre></div>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="utf8_string(value: var) -&gt; utf8_string convert  register_all() or area registration"><h3 id="api-ecc77b2a8369"><code>utf8_string(value: var) -&gt; utf8_string</code></h3><p><strong>register_all() or area registration</strong> &middot; convert</p>
 </div>
@@ -1388,6 +1382,8 @@ print(reflect::invoke(Orc(), &quot;add&quot;, 2, 3));</code></pre></div>
 <div class="api-entry" data-provider="stdlib" data-search="reflect::is_instance_of(value: var, class_name: string) -&gt; bool observe true for an object of the class or of one derived from it, false for any other value. an unknown class name raises. register_all() or area registration"><h3 id="api-681163e55228"><code>reflect::is_instance_of(value: var, class_name: string) -&gt; bool</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
 <p>True for an object of the class or of one derived from it, false for any other value. An unknown class name raises.</p>
 </div>
+<div class="api-entry" data-provider="stdlib" data-search="reflect::is_registered_type(value: var) -&gt; bool observe  register_all() or area registration"><h3 id="api-1d15a1486daf"><code>reflect::is_registered_type(value: var) -&gt; bool</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+</div>
 <div class="api-entry" data-provider="stdlib" data-search="reflect::method_arguments(object_or_class: var, name: string) -&gt; array&lt;array&lt;map&lt;string,var&gt;&gt;&gt; observe one parameter-description array per overload. register_all() or area registration"><h3 id="api-2fb244a65849"><code>reflect::method_arguments(object_or_class: var, name: string) -&gt; array&lt;array&lt;map&lt;string,var&gt;&gt;&gt;</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
 <p>One parameter-description array per overload.</p>
 </div>
@@ -1405,6 +1401,10 @@ print(reflect::invoke(Orc(), &quot;add&quot;, 2, 3));</code></pre></div>
 <p>The bytes one template() render may write, as the host set it (default 10485760; 0 = no limit); scripts read it, hosts change it.</p>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="reflect::type_name(value: var) -&gt; string observe  register_all() or area registration"><h3 id="api-3fc8abef3afe"><code>reflect::type_name(value: var) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="reflect::type_of(value: var) -&gt; string observe  register_all() or area registration"><h3 id="api-d649f461f606"><code>reflect::type_of(value: var) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(reflect::type_of(1), &quot; &quot;, reflect::type_of(1.5), &quot; &quot;, reflect::type_of(&quot;s&quot;), &quot; &quot;, reflect::type_of([1]));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">int float string array</code></pre></div>
 </div>
 </section>
 <section class="api-group"><h2 id="group-reflect-type">reflect::type</h2>
@@ -1603,7 +1603,7 @@ print(reflect::invoke(Orc(), &quot;add&quot;, 2, 3));</code></pre></div>
 <div class="api-entry" data-provider="core" data-search="string.at(index: int) -&gt; char observe returns an inline byte char like []; no temporary string allocation. negative indices count from end; out-of-range raises. every engine"><h3 id="api-b5c09b083fa9"><code>string.at(index: int) -&gt; char</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Returns an inline byte char like []; no temporary string allocation. Negative indices count from end; out-of-range raises.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string s = &quot;abc&quot;;
-print(s.at(1), &quot; &quot;, s[2], &quot; &quot;, type_of(s.at(0)));</code></pre></div>
+print(s.at(1), &quot; &quot;, s[2], &quot; &quot;, reflect::type_of(s.at(0)));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">b c char</code></pre></div>
 </div>
 <div class="api-entry" data-provider="core" data-search="string.back() -&gt; char observe returns an inline byte char like []; no temporary string allocation. empty text raises. every engine"><h3 id="api-4a239136f77a"><code>string.back() -&gt; char</code></h3><p><strong>Every engine</strong> &middot; observe</p>

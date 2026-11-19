@@ -9,7 +9,7 @@ and this one explains the mechanism.
 
 The premise: the runtime already keeps rich type information (class definitions, declared field
 types, method ASTs, access labels, host binding signatures) — script just has no syntax to ask
-about it beyond `type_of`/`to_json`/`from_json`. Reflection v1 is a set of ordinary builtins over
+about it beyond `reflect::type_of`/`to_json`/`from_json`. Reflection v1 is a set of ordinary builtins over
 data that (almost entirely) already exists.
 
 **Naming:** all builtins live in the **reserved `reflect::` namespace** —
@@ -46,8 +46,8 @@ and an intrinsic promotion would need no script changes.
 | Field-name→member write dispatch precedent (setter-first, data-not-code) | `reconstruct_typed_object` in from_json/from_binary | stdlib/json.hpp:463-518 |
 | Hot-reload field walk | `redefine_class` + `class_instance::migrate_fields` (defaults replaced **before** the migrate-hook loop runs) | class_definition.hpp:1077-1230, 1588-1639 |
 | Access-enforcement kernel + caller context | shared `detail::enforce_member_access(cls, member_id, ctx)`; both backends pass `environment_->find_access_context()` | class_definition.hpp:1527-1542, environment.hpp:160, interpreter.cpp:3861, vm_backend.cpp:5662 |
-| Coarse dynamic type | `type_of` (kind names; the object row is `stdlib::object_type_name`, shared with `reflect::type_name`, so an instance reports its class) | stdlib/io.hpp:174-190, 376-395 |
-| Opaque-token predicate | `is_registered_type` (§13 ruling: unregistered host pass-through tokens answer false) | stdlib/io.hpp:336-347 |
+| Coarse dynamic type | `reflect::type_of` (kind names; the object row is `stdlib::object_type_name`, shared with `reflect::type_name`, so an instance reports its class) | stdlib/io.hpp:174-190, 376-395 |
+| Opaque-token predicate | `reflect::is_registered_type` (§13 ruling: unregistered host pass-through tokens answer false) | stdlib/io.hpp:336-347 |
 | Registration-surface enumeration precedent | `registration_fingerprint()` iterates sorted registered function/class names | engine.hpp:190-193 |
 
 The debugger's Locals view (`controller::list_locals`, controller.cpp:113-140) stringifies
@@ -127,7 +127,7 @@ reflect::is_cpp_bound(v | "Class")   // -> bool; VALUE form: C++-backed (cpp_bou
                                      //    deref); CLASS form: host-registered vs script-declared
 ```
 
-`type_of` keeps its coarse kind names everywhere except the object row, which it shares verbatim
+`reflect::type_of` keeps its coarse kind names everywhere except the object row, which it shares verbatim
 with `reflect::type_name` (`stdlib::object_type_name`). `reflect::type_name` is its precise sibling —
 class name for objects (**the naming-ladder name**: `class_definition::get_name()`, which the
 does-all-things work keeps identical to the serialization `$type` and the script-visible
@@ -153,7 +153,7 @@ semantic index — reflection must never report storage wrappers (the var-flatte
   element/key/value types are `reflect::type_name`'s job (`"array<int>"`). Not an error — a property
   grid should be able to call `reflect::fields` on anything.
 - **Opaque host tokens** (unregistered `make_value(T*)` pass-throughs): empty array, consistent
-  with `is_registered_type` answering false (io.hpp:336-347 §13 ruling).
+  with `reflect::is_registered_type` answering false (io.hpp:336-347 §13 ruling).
 
 ### Deterministic field order
 
@@ -258,7 +258,7 @@ doesn't have anyway.
   `std::function`, so parity is by construction (invariant #6) with **zero twins** — except the
   one `current_access_context()` accessor, which is a data read of state both backends already
   maintain for the shared enforcement kernel. (Registration could equally live in
-  `stdlib/reflection.hpp` beside `type_of`; recommended: stdlib header, engine-core wiring
+  `stdlib/reflection.hpp` beside `reflect::type_of`; recommended: stdlib header, engine-core wiring
   decision at implementation. Either way it is once-per-engine, backend-neutral.)
 - **Zero cost when unused.** Builtins only cost when called. No dispatch path, no member-access
   site, and no vm run-loop opcode changes (nothing near invariant #5's frame ceiling). The only
@@ -444,7 +444,7 @@ suite runs on both backends via `--backend=vm`):
   error text byte-for-byte; reads succeed everywhere with correct `access` values.
 - Error-text pins for every family message in §2 (parity: identical on vm).
 - Host-bound type: property list + types from a `dynamic_binder` fixture; read_only property
-  set_field error; method params report types; opaque token → empty + `is_registered_type`
+  set_field error; method params report types; opaque token → empty + `reflect::is_registered_type`
   false; array/map/primitive → empty; `reflect::type_name` covers typed/any containers.
 - construct: overload resolution, trailing defaults, non-converting-ctor ruling holds through
   `construct`, `construct_shared` reference semantics (mutation visible through the copy).

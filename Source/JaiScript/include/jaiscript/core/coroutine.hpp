@@ -114,7 +114,7 @@ private:
 };
 
 namespace detail {
-// coroutine<Y> as type_of names a handle: Y is its coroutine's declared type, var when it declares none
+// coroutine<Y> as reflect::type_of names a handle: Y is its coroutine's declared type, var when it declares none
 std::string coroutine_type_name(const script_value& value);
 // that name interned, for an error text's argument (out of line: the member paths that raise with it stay small)
 uint64_t coroutine_type_symbol(const script_value& value, engine* eng);

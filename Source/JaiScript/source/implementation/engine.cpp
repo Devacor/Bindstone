@@ -503,6 +503,7 @@ struct engine::implementation {
     std::unordered_map<const void*, weaker_ptr<class_instance>> script_layers_;
     std::unordered_set<std::string> serial_functions_;
     std::unordered_set<std::string> serial_namespaces_;
+    std::unordered_set<std::string> parallel_namespace_entries_;   // the members of a serial namespace that read only their argument
     std::unordered_set<std::string> nodiscard_callables_;
     std::unordered_map<std::string, uint8_t> type_result_callables_;
     std::unordered_set<std::string> host_function_names_;
@@ -4337,6 +4338,7 @@ void engine::initialize_engine_reference() {
     }
     serial_function(std::string(parallel_for_stmt::k_counted_range));
     serial_namespace("reflect");
+    impl->parallel_namespace_entries_ = {"reflect::type_of", "reflect::is_registered_type"};
 }
 
 
@@ -5551,6 +5553,7 @@ void engine::serial_namespace(const std::string& space) { impl->serial_namespace
 
 bool engine::host_function_serial(const std::string& name) const {
     if (impl->serial_functions_.count(name)) { return true; }
+    if (impl->parallel_namespace_entries_.count(name)) { return false; }
     const size_t cut = name.rfind("::");
     return cut != std::string::npos && impl->serial_namespaces_.count(name.substr(0, cut)) != 0;
 }

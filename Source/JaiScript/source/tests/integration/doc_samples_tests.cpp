@@ -1315,7 +1315,7 @@ public:
 			eng->add_global("marker", eng->make_object(marker));
 
 			eng->execute(R"(
-			    print(type_of(marker.position), " ", marker.tint);
+			    print(reflect::type_of(marker.position), " ", marker.tint);
 			    marker.position = math::vec3(1, 2, 3);
 			    marker.position.x += 4;
 			    marker.velocity.y = 2;
@@ -1551,7 +1551,7 @@ public:
 			                     void hot_reload_migrate() { level = 5; }
 			                 } )");
 
-			eng->execute(R"( print("hp: ", type_of(p.hp), " ", p.hp);
+			eng->execute(R"( print("hp: ", reflect::type_of(p.hp), " ", p.hp);
 			                 print("name: ", p.name);
 			                 print("level: ", p.level);
 			                 try { print(p.speed); } catch (e) { print("speed: ", e); } )");

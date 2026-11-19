@@ -131,7 +131,7 @@ spider::Response not_found(string text = "Not Found") { return spider::plain_tex
 // a handler may answer a Response, a string or a web::html (an HTML page), null (204) or any other value (JSON)
 spider::Response to_response(var result) {
 	if (result == null) { return spider::Response(204); }
-	string kind = type_of(result);
+	string kind = reflect::type_of(result);
 	if (kind == "spider::Response") { return result; }
 	if (kind == "string" || kind == "utf8_string") { return spider::html(result); }
 	if (kind == "web::html") { return spider::html(result.to_string()); }

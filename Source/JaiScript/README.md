@@ -60,7 +60,7 @@ for (auto n : countdown(3)) { print("countdown {}", n); }   // a coroutine drive
 
 var loose = 1;
 loose = "now a string";                           // var is the opt-out from typing
-print("{} {}", type_of(loose), cast<int>('a'));   // char converts only through a cast
+print("{} {}", reflect::type_of(loose), cast<int>('a'));   // char converts only through a cast
 
 try { int x = loose; print("{}", x); } catch (e) { print("caught: {}", e); }
 ```

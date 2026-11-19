@@ -58,7 +58,7 @@ print(`&lt;p title=&quot;${web::html_escape(name)}&quot;&gt;`);
 print(web::html_unescape(&quot;caf&amp;eacute; &amp;copy 2026 &amp;#x1F642; &amp;#150; &amp;#0; &amp;bogus; AT&amp;T&quot;));
 print(web::html_unescape(web::html_escape(name)) == name);
 utf8_string word = &quot;café&quot;;
-print(type_of(web::html_escape(word)));</code></pre></div>
+print(reflect::type_of(web::html_escape(word)));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">&lt;p title=&quot;Tom &amp;amp; Jerry&amp;#39;s &amp;lt;b&amp;gt;show&amp;lt;/b&amp;gt;&quot;&gt;
 café © 2026 🙂 – � &amp;bogus; AT&amp;T
 true

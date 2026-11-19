@@ -250,7 +250,7 @@ abc[1]</code></pre></div>
 <h2 id="bytes-and-chars">Bytes and chars: <code>s[i]</code>, <code>\xNN</code>, <code>cast&lt;char&gt;</code><a class="hlink" href="#bytes-and-chars" aria-label="link">&#8203;</a></h2>
 <p><code>s[i]</code> reads a <code>char</code>. In arithmetic, bitwise operators and comparisons with numbers a char is an integer 0–255, always unsigned (<code>"\xC3"[0] + 0</code> is <code>195</code>), the unary <code>-c</code>, <code>+c</code> and <code>~c</code> included: <code>-'a'</code> is <code>-97</code>. Beside a string it is text (<a href="04-operators.html#chars-promote">Operators</a>). The byte-work idioms:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var s = "Jai\x21";                             // \xNN: exactly two hex digits
-print(s, " ", s[0], " ", type_of(s[0]), " ", s[0] + 0, " ", "7"[0] - '0', " ", s[3] == 0x21);
+print(s, " ", s[0], " ", reflect::type_of(s[0]), " ", s[0] + 0, " ", "7"[0] - '0', " ", s[3] == 0x21);
 print((s[0] + 0) | ((s[1] + 0) &lt;&lt; 8));         // a little-endian u16 from two bytes
 var out = "";
 out += to_char(0x4A);                          // int -&gt; char, range-checked 0..255
@@ -309,7 +309,7 @@ caught: Cannot write 256 as uint8 (0 to 255)</code></pre></div>
 print(s.size(), " bytes, ", s.utf8_length(), " characters, valid: ", s.is_valid_utf8());
 print(s.utf8_chars(), " ", "é".code(), " ", string::from_code(233));
 utf8_string name = "Zoë 🙂";
-print(name.size(), " ", name[2], " ", name.byte_size(), " ", name.substr(0, 3), " ", type_of(name[2]));
+print(name.size(), " ", name[2], " ", name.byte_size(), " ", name.substr(0, 3), " ", reflect::type_of(name[2]));
 for (auto c : name) { print(c, skip_newline); }
 string raw = name;                  // the same bytes, counted as bytes
 print(" ", raw.size(), " ", name == raw);

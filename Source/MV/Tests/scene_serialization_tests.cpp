@@ -199,7 +199,7 @@ namespace mv_tests {
 				host.engine->add_global("p", host.engine->make_value(palette));
 				host.engine->add_global("n", host.engine->make_value(scene));
 				check_eq(std::string("math::vec3 math::vec3 math::vec3 math::vec3"),
-					host.engine->execute("type_of(g.topLeftOffset) + \" \" + type_of(g.cellDimensions) + \" \" + type_of(n.translateTo) + \" \" + type_of(p.selectorPercentSize)").to_string(), "types");
+					host.engine->execute("reflect::type_of(g.topLeftOffset) + \" \" + reflect::type_of(g.cellDimensions) + \" \" + reflect::type_of(n.translateTo) + \" \" + reflect::type_of(p.selectorPercentSize)").to_string(), "types");
 				host.engine->execute("g.topLeftOffset = math::vec3(1, 2, 3); g.topLeftOffset.x = 5; g.topLeftOffset.y += 10; g.topLeftOffset.z++; "
 					"g.cellDimensions.width = 4; g.cellDimensions.height += 2; n.translateTo.x = 7; n.translateTo.y -= 3; p.selectorPercentSize.width *= 2;");
 				const MV::Point<> offset = grid->gridOffset();
@@ -208,7 +208,7 @@ namespace mv_tests {
 				check_true(scene->position().x == 7.0f && scene->position().y == -3.0f, "a node property");
 				check_eq(std::string("true"), host.engine->execute("to_string(math::abs(p.selectorPercentSize.width - 1.7) < 0.0001)").to_string(), "a private palette property reads back the store");
 				host.engine->execute("p.color(math::color(1, 0.25, 0, 1));");
-				check_eq(std::string("math::color (1.0, 0.25, 0.0, 1.0)"), host.engine->execute("type_of(p.color()) + \" \" + to_string(p.color())").to_string(), "a property named like its method is reached through the method");
+				check_eq(std::string("math::color (1.0, 0.25, 0.0, 1.0)"), host.engine->execute("reflect::type_of(p.color()) + \" \" + to_string(p.color())").to_string(), "a property named like its method is reached through the method");
 			});
 
 			test("PathMap keeps its Drawable-level state through save and load", [] {

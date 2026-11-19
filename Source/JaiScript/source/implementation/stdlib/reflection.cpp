@@ -480,6 +480,56 @@ void register_reflection_functions(engine& eng_ref) {
             script_value::make_function(std::move(fn), eng);
     };
 
+    // Opaque host pointers (make_value(T*) on an UNREGISTERED
+    // type) are non-null/truthy to script but the engine cannot name them — this
+    // predicate is how scripts tell a registered/script object (true) from an opaque
+    // host-only pass-through token (false). All ordinary values answer true.
+    eng_ref.add_function("reflect::is_registered_type", [](const script_value& val) -> bool {
+        const script_value& d = val.is_reference() ? val.deref() : val;
+        if (d.raw_storage_index() == script_value::TYPEID_CPP_BOUND &&
+            !d.is_int() && !d.is_float() && !d.is_bool() && !d.is_char() && !d.is_string()) {
+            return false;
+        }
+        return true;
+    });
+
+    // The kind of a value (array); type_name is its full spelling (array<int>)
+    eng_ref.add_function("reflect::type_of", [eng = &eng_ref](const script_value& val) -> std::string {
+        switch (val.type()) {
+            case script_value_type::jai_null_type: return "null";
+            case script_value_type::jai_bool_type: return "bool";
+            case script_value_type::jai_int_type: {
+                const type_info* tag = val.deref().type_info_raw();
+                return tag && tag->is_enum ? tag->type_name : std::string("int");
+            }
+            case script_value_type::jai_float_type: return "float";
+            case script_value_type::jai_char_type: return "char";
+            case script_value_type::jai_string_type: return detail::engine_access::is_caught_runtime_error(*eng, val) ? "error" : "string";
+            case script_value_type::jai_utf8_string_type: return "utf8_string";
+            case script_value_type::jai_array_type: return "array";
+            case script_value_type::jai_map_type: return "map";
+            case script_value_type::jai_function_type: return "function";
+            // A typed null keeps the bare kind (its tag is a class, its value is not)
+            case script_value_type::jai_object_type:
+            case script_value_type::jai_shared_ptr_type:
+                return val.is_object() ? object_type_name(val) : "object";
+            case script_value_type::jai_reference_type: return "reference";
+            case script_value_type::jai_weak_ptr_type: return "weak_ptr";
+            case script_value_type::jai_vec2_type:
+            case script_value_type::jai_vec3_type:
+            case script_value_type::jai_vec4_type:
+            case script_value_type::jai_color_type:
+            case script_value_type::jai_ivec2_type:
+            case script_value_type::jai_ivec3_type: return math_type_name(val.type());
+            default: return "unknown";
+        }
+    });
+
+    constexpr auto any = script_value_type::jai_null_type;
+    auto& space = detail::engine_access::script_namespaces(eng_ref)[detail::engine_access::get_symbolizer(eng_ref)->intern("reflect")];
+    space->signatures[detail::engine_access::get_symbolizer(eng_ref)->intern("type_of")] = {1, 1, {any}, script_value_type::jai_string_type};
+    space->signatures[detail::engine_access::get_symbolizer(eng_ref)->intern("is_registered_type")] = {1, 1, {any}, script_value_type::jai_bool_type};
+
     add("type_name", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_args(args, 1, "type_name");
         return script_value(reflect_detail::semantic_type_name(args[0], eng), eng);

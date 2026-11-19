@@ -348,9 +348,10 @@ namespace jai::vm {
         op_try_types,       // a=nodes index (a try_stmt with clause_types), after its op_try_push: the record takes only what those clauses take
         op_instance_test,   // a = call site, b = chunk::instance_tests index, c = the class name's constant: reflect::is_instance_of(x, "T") over x on top; while reflect:: holds
                             // the library's function and a class is registered under T the instance test in place, else the call
+        op_namespace_entry, // a=node index (member_expr), b=chunk::namespace_cells index: op_get_static of a member of a namespace only the host fills, pushed from its cell
     };
     inline constexpr size_t k_opcode_space = 512;   // tables indexed by opcode (the coverage report's) are this long
-    static_assert(static_cast<size_t>(opcode::op_instance_test) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
+    static_assert(static_cast<size_t>(opcode::op_namespace_entry) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
     static_assert(static_cast<uint32_t>(opcode::op_d_jne) < 256 && static_cast<uint32_t>(opcode::op_t_load) < 256, "a cell instruction packs a typed opcode above k_cell_op_shift in 8 bits");
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
@@ -385,6 +386,8 @@ namespace jai::vm {
     inline constexpr uint32_t load_flag_global_only = 2; // ::name - resolve in the GLOBAL env only
                                                          // (locals/captures/member scope all skipped)
     inline constexpr uint32_t load_flag_take = 4;        // a compiler temp's last read: its value leaves the slot
+    inline constexpr uint32_t load_flag_namespace_cell = 8;   // a callee operand that is chunk::namespace_cells[namespace_cell]: no scope is searched
+    inline constexpr uint32_t load_flags_unscoped = load_flag_type_ctor | load_flag_global_only | load_flag_namespace_cell;   // no lookup cache serves these
     // op_return b: 0 plain, return_mode_converted = the value
     // was already converted at its in-region return site (op_return_convert)
     inline constexpr uint32_t return_mode_converted = 2;
@@ -705,6 +708,7 @@ namespace jai::vm {
             case opcode::op_fresh_cell: return "FRESH_CELL";
             case opcode::op_try_types: return "TRY_TYPES";
             case opcode::op_instance_test: return "INSTANCE_TEST";
+            case opcode::op_namespace_entry: return "NAMESPACE_ENTRY";
             case opcode::op_sleep: return "SLEEP";
             case opcode::op_format_call: return "FORMAT_CALL";
             case opcode::op_c_load_f: return "C_LOAD_F";

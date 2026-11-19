@@ -1498,7 +1498,7 @@ public:
             auto off = make_engine();
             off->type_proofs(false);
             const char* snippets[] = {
-                "int x = 1; x = 2; x = 2.5; type_of(x) + \":\" + to_string(x)",
+                "int x = 1; x = 2; x = 2.5; reflect::type_of(x) + \":\" + to_string(x)",
                 "string s = \"a\"; s = \"b\"; s = 3; s",
                 "float f = 1.0; f = 2.0; f = 3; f",
                 "bool b = true; b = false; b = 1; b",
@@ -4077,14 +4077,14 @@ public:
                 "Dir d = Dir::south; Dir first; int n = d; auto a = Dir::west; a = pick(Dir.east); var v = Dir::west; Walker w;\n"
                 "array<int> xs = [d]; map<int,string> names = {}; names[d] = \"s\"; array<Dir> ds = [Dir::north]; ds.push(d); map<Dir,int> m = {}; m[Dir::east] = 1;\n"
                 "Dir c = cast<Dir>(5); string out = \"\"; switch (c) { case Dir::east: out = \"east\"; break; default: out = \"other\"; }\n"
-                "`${type_of(d)} ${type_of(first)}:${first} ${type_of(n)}:${n} ${type_of(d + 1)}:${d + 1} ${type_of(a)}:${a} ${type_of(v)}:${v} ${type_of(w.facing)}:${w.facing}${w.back} "
+                "`${reflect::type_of(d)} ${reflect::type_of(first)}:${first} ${reflect::type_of(n)}:${n} ${reflect::type_of(d + 1)}:${d + 1} ${reflect::type_of(a)}:${a} ${reflect::type_of(v)}:${v} ${reflect::type_of(w.facing)}:${w.facing}${w.back} "
                 "${d == 1} ${out} ${which(d)},${which(Dir::north)},${which(3)},${which(v)} ${Dir[\"east\"]} ${Dir.size()} ${ds.size()} ${m[Dir::east]}`;";
             auto rep = e->check(clean);
             check_eq((size_t)0, error_count(rep), rep.format(clean));
             check_eq(std::string("Dir Dir:0 int:1 int:2 Dir:5 int:6 Dir:01 true east Dir,Dir,int,int 5 4 2 1"), e->execute(clean).as_string());
             // a value read again keeps its enum's type (the VM folds a repeated E::v read into a constant)
             check_eq(std::string("DirDir DirDir DirDir"), e->execute(decl +
-                "string kinds() { auto k = Dir::east; auto j = Dir::west; j = Dir::north; return `${type_of(k)}${type_of(j)}`; }\n"
+                "string kinds() { auto k = Dir::east; auto j = Dir::west; j = Dir::north; return `${reflect::type_of(k)}${reflect::type_of(j)}`; }\n"
                 "`${kinds()} ${kinds()} ${kinds()}`;").as_string());
             // through a var the run time decides: one of the enum's values enters and takes the type, any other int is refused
             check_eq(std::string("Dir:5|Cannot initialize 'd' (declared Dir) with int|Cannot assign int to 'd' (declared Dir)|Cannot pass int to parameter 'where' of 'go' (declared Dir)|"
@@ -4092,7 +4092,7 @@ public:
                      e->execute(decl +
                 "string t(function f) { string r = \"\"; try { r = `${f()}`; } catch (err) { r = err; } return r; }\n"
                 "void go(Dir where) {}\n"
-                "t([]() { var five = 5; Dir d = five; return `${type_of(d)}:${d}`; }) + \"|\" + t([]() { var three = 3; Dir d = three; return 1; }) + \"|\" +\n"
+                "t([]() { var five = 5; Dir d = five; return `${reflect::type_of(d)}:${d}`; }) + \"|\" + t([]() { var three = 3; Dir d = three; return 1; }) + \"|\" +\n"
                 "t([]() { var three = 3; Dir d = Dir::north; d = three; return 1; }) + \"|\" + t([]() { var three = 3; go(three); return 1; }) + \"|\" +\n"
                 "t([]() { return cast<Dir>(3); }) + \"|\" + t([]() { var s = \"east\"; return cast<Dir>(s); });").as_string());
         });
@@ -4120,8 +4120,8 @@ public:
                 "enum Dir { north, south } class P { int a = 0; }\n"
                 "bool c = true; float f = c ? 1 : 2.5; auto a = c ? 1 : 2.5; array<int> xs = [1]; float sum = 0.0; for (float w : xs) { sum += w; }\n"
                 "map<Dir, string> names = {Dir::south: \"S\", Dir::north: \"N\"};\n"
-                "string caught = \"\"; try { throw Dir::south; } catch (int e) { caught = \"int\"; } catch (Dir e) { caught = `${type_of(e)}:${e}`; }\n"
-                "`${type_of(a)} ${sum} ${names[Dir::south]}${names.size()} ${caught}`;";
+                "string caught = \"\"; try { throw Dir::south; } catch (int e) { caught = \"int\"; } catch (Dir e) { caught = `${reflect::type_of(e)}:${e}`; }\n"
+                "`${reflect::type_of(a)} ${sum} ${names[Dir::south]}${names.size()} ${caught}`;";
             auto rep = e->check(clean);
             check_eq((size_t)0, error_count(rep), rep.format(clean));
             check_eq(std::string("float 1.0 S2 Dir:1"), e->execute(clean).as_string());

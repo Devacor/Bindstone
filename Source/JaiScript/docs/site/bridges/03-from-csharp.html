@@ -334,7 +334,7 @@ failed: no such slot (slot 7)</code></pre></div>
 <tr><td>null</td><td><code>null</code>, <code>int?</code></td><td><code>null</code>, held by a <code>var</code>, a <code>shared_ptr&lt;T&gt;</code> or a <code>function</code>; never by an <code>int</code> or a class value</td></tr>
 <tr><td>narrowing</td><td><code>int i = (int)3.9;</code></td><td><code>int i = cast&lt;int&gt;(3.9);</code>; a float never enters an <code>int</code> implicitly</td></tr>
 <tr><td>collections</td><td><code>new List&lt;int&gt; { 1, 2 }</code>, <code>new Dictionary&lt;string, int&gt; { ["a"] = 1 }</code></td><td><code>array&lt;int&gt; xs = [1, 2];</code>, <code>map&lt;string, int&gt; m = {"a": 1};</code></td></tr>
-<tr><td>type name</td><td><code>x.GetType().Name</code></td><td><code>type_of(x)</code></td></tr>
+<tr><td>type name</td><td><code>x.GetType().Name</code></td><td><code>reflect::type_of(x)</code></td></tr>
 </tbody></table></div>
 <h3 id="collections-and-linq">Collections and LINQ<a class="hlink" href="#collections-and-linq" aria-label="link">&#8203;</a></h3>
 <p>The <code>array::</code> and <code>map::</code> functions return a new container, like LINQ; the dot methods of the same name change the container in place and return nothing, like <code>List&lt;T&gt;.Sort</code>. Nothing is deferred: each step runs when called.</p>
@@ -367,7 +367,7 @@ failed: no such slot (slot 7)</code></pre></div>
 <tr><td>equality</td><td>reference equality by default</td><td><code>==</code> compares fields; <code>operator==</code> replaces it; <code>same_object(a, b)</code> is identity</td></tr>
 <tr><td>operators</td><td><code>public static Vec operator+(Vec a, Vec b)</code></td><td><code>Vec operator+(Vec o)</code>, a method</td></tr>
 <tr><td><code>as</code></td><td><code>x as Hero</code></td><td><code>cast&lt;Hero&amp;&gt;(x)</code>, which raises a catchable error when <code>x</code> is not a <code>Hero</code></td></tr>
-<tr><td><code>is</code>, <code>as</code></td><td><code>x is Hero</code>, <code>x is Hero h</code>, <code>x as Hero</code></td><td>C#&#x27;s <code>x is Hero h</code> is <code>if (auto h = dynamic_cast&lt;Hero&gt;(x))</code>: the handle typed <code>shared_ptr&lt;Hero&gt;</code>, or null, which is <code>x as Hero</code> too. <code>x is Hero</code> alone is <code>if (dynamic_cast&lt;Hero&gt;(x))</code>, or <code>reflect::is_instance_of(x, "Hero")</code> for a bool. <code>type_of(x) == "Hero"</code> is the exact class only</td></tr>
+<tr><td><code>is</code>, <code>as</code></td><td><code>x is Hero</code>, <code>x is Hero h</code>, <code>x as Hero</code></td><td>C#&#x27;s <code>x is Hero h</code> is <code>if (auto h = dynamic_cast&lt;Hero&gt;(x))</code>: the handle typed <code>shared_ptr&lt;Hero&gt;</code>, or null, which is <code>x as Hero</code> too. <code>x is Hero</code> alone is <code>if (dynamic_cast&lt;Hero&gt;(x))</code>, or <code>reflect::is_instance_of(x, "Hero")</code> for a bool. <code>reflect::type_of(x) == "Hero"</code> is the exact class only</td></tr>
 <tr><td>using, IDisposable, finally</td><td><code>using (var f = Open())</code>, <code>finally { }</code></td><td>a destructor, <code>~File()</code>, runs when its scope ends, a throw included; no <code>finally</code></td></tr>
 </tbody></table></div>
 <div class="tabs" id="classes-sample-tabs">
@@ -422,7 +422,7 @@ p.hp = -3;                                   // through _set_hp
 var anyone = p;
 var text = "text";
 print(p.describe(), " ", p.hp, " ", Hero::count, " hero: " + p);
-print(type_of(anyone) == "Hero", " ", reflect::is_instance_of(anyone, "Hero"), " ", reflect::is_instance_of(text, "Hero"));
+print(reflect::type_of(anyone) == "Hero", " ", reflect::is_instance_of(anyone, "Hero"), " ", reflect::is_instance_of(text, "Hero"));
 try { throw anyone; } catch (Hero h) { print("caught a Hero: ", h.name); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Sir Ada 0 1 hero: Ada (0 hp)
 false true false

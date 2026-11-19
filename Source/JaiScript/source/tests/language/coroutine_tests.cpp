@@ -324,7 +324,7 @@ public:
                 var d = g.next();
                 var e = g.next();
                 to_string(a) + "|" + to_string(b) + "|" + to_string(d) + "|" +
-                    type_of(e) + ":" + to_string(e) + "|" + to_string(g.done()) + "|" + to_string(c.x)
+                    reflect::type_of(e) + ":" + to_string(e) + "|" + to_string(g.done()) + "|" + to_string(c.x)
             )", "1|10|15|int:1|true|15", "this-field reads/writes across suspensions + typed final return + done()"},
                 {R"(
                 class Gen {
@@ -498,7 +498,7 @@ public:
             }
             for (const char* head : heads) {
                 for (bool use_vm : {false, true}) {
-                    check_eq(std::string("int:1"), run(use_vm, std::string(head) + " { yield 1; return true; }\nauto h = gen(); h.next(); var r = h.next(); type_of(r) + \":\" + to_string(r)"),
+                    check_eq(std::string("int:1"), run(use_vm, std::string(head) + " { yield 1; return true; }\nauto h = gen(); h.next(); var r = h.next(); reflect::type_of(r) + \":\" + to_string(r)"),
                         std::string(head) + (use_vm ? " vm" : " interp") + ": the completion value converts to int");
                 }
             }
@@ -596,7 +596,7 @@ public:
                 `${to_string(a)}|${to_string(b)}|${w.extra}`
             )", "40|41|e", "field added mid-suspension: old body continues on stable storage");
             check_both(R"(
-                class W { int v = 1; coroutine var gen() { yield v; yield type_of(v); return 0; } }
+                class W { int v = 1; coroutine var gen() { yield v; yield reflect::type_of(v); return 0; } }
                 var w = W();
                 w.v = 40;
                 var h = w.gen();
@@ -876,7 +876,7 @@ public:
         });
 
         test("typed_completion_values", [this, both_drained]() {
-            both_drained("coroutine float g() { yield 1; return 2; }\nauto h = g(); var a = h.next(); var b = h.next(); type_of(a) + \":\" + to_string(a) + \"|\" + type_of(b) + \":\" + to_string(b)",
+            both_drained("coroutine float g() { yield 1; return 2; }\nauto h = g(); var a = h.next(); var b = h.next(); reflect::type_of(a) + \":\" + to_string(a) + \"|\" + reflect::type_of(b) + \":\" + to_string(b)",
                 "float:1.0|float:2.0", "the yields and the completion value convert to the declared type");
             both_drained("coroutine int g() { yield 1; var f = 2.7; return f; }\nauto h = g(); h.next(); string t = \"\"; try { h.next(); } catch (e) { t = to_string(e); } t + \"|\" + to_string(h.done())",
                 "Cannot return float from 'g' (declared -> int)|true", "a float never completes an int coroutine");
@@ -890,13 +890,13 @@ public:
 
         test("yields_take_the_declared_type", [this, both_drained, check_parity]() {
             // a yield hands out the declared type like a return: the slot table converts, a mismatch raises the yield's text
-            both_drained("coroutine int g() { yield true; var f = 2.9; yield f; return 0; }\nauto h = g(); var a = h.next(); string t = \"\"; try { h.next(); } catch (e) { t = to_string(e); } type_of(a) + \":\" + to_string(a) + \"|\" + t",
+            both_drained("coroutine int g() { yield true; var f = 2.9; yield f; return 0; }\nauto h = g(); var a = h.next(); string t = \"\"; try { h.next(); } catch (e) { t = to_string(e); } reflect::type_of(a) + \":\" + to_string(a) + \"|\" + t",
                 "int:1|Cannot yield float from 'g' (declared -> int)", "a bool converts into int, a float never does");
             both_drained("coroutine string g() { var n = 1; yield n; return \"x\"; }\nauto h = g(); string t = \"\"; try { h.next(); } catch (e) { t = to_string(e); } t",
                 "Cannot yield int from 'g' (declared -> string)", "an int never converts into string");
             check_true(check_parity("coroutine string g() { yield 1; return \"x\"; }", "a known yield").find("cannot yield 'int' from 'g' declared to return 'string'") != std::string::npos,
                 "a yield of a known type the declared one never takes fails the load");
-            both_drained("coroutine float g() { yield 1; yield 2; return 0.0; }\nstring s = \"\"; for (auto v : g()) { s += type_of(v); } s",
+            both_drained("coroutine float g() { yield 1; yield 2; return 0.0; }\nstring s = \"\"; for (auto v : g()) { s += reflect::type_of(v); } s",
                 "floatfloat", "a range-for drive sees the converted values");
             both_drained("coroutine int g() { var s = \"s\"; yield s; yield 2; return 0; }\nauto h = g(); string t = \"\"; try { h.next(); } catch (e) { t = to_string(e); } t + \"|\" + to_string(h.done())",
                 "Cannot yield string from 'g' (declared -> int)|true", "a mismatch raises at the resume; the handle is done");
@@ -1187,10 +1187,10 @@ public:
         });
 
         test("handle_type_of_and_to_string_parity", [this, check_parity]() {
-            std::string r = check_parity("coroutine int g() { yield 1; }\nauto h = g(); auto h2 = h;\ntype_of(h) + \"|\" + to_string(to_string(h) != \"\") + \"|\" + to_string(h == null) + \"|\" + to_string(h == h2)",
-                "type_of / to_string / equality of a coroutine handle");
-            check_eq(std::string("coroutine<int>|true|false|true"), r, "a handle's type_of is its coroutine<Y>, the name its error texts use");
-            check_eq(std::string("coroutine<var>"), check_parity("coroutine g() { yield 1; }\ntype_of(g())", "an undeclared coroutine"), "an undeclared yield is var");
+            std::string r = check_parity("coroutine int g() { yield 1; }\nauto h = g(); auto h2 = h;\nreflect::type_of(h) + \"|\" + to_string(to_string(h) != \"\") + \"|\" + to_string(h == null) + \"|\" + to_string(h == h2)",
+                "reflect::type_of / to_string / equality of a coroutine handle");
+            check_eq(std::string("coroutine<int>|true|false|true"), r, "a handle's reflect::type_of is its coroutine<Y>, the name its error texts use");
+            check_eq(std::string("coroutine<var>"), check_parity("coroutine g() { yield 1; }\nreflect::type_of(g())", "an undeclared coroutine"), "an undeclared yield is var");
         });
 
         // A brace-less body that completes AT the yield leaves no inner frame: the enclosing

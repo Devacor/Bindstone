@@ -679,7 +679,7 @@ one same-script callee a call resolves to (`call_expr::proven_callee_decl`,
 typed store lowering, the argument and return proofs and the resolved callee admit the
 inliner, the operand class picks the typed row. Every lane they select keeps a TOTAL runtime
 guard, and a guard miss runs the existing code byte for byte; the interpreter reads none of
-them. There is therefore no program whose value, printed output, error text or `type_of`
+them. There is therefore no program whose value, printed output, error text or `reflect::type_of`
 differs between `engine::type_proofs(true)` (the default) and `type_proofs(false)`.
 
 **Certain types** — a proof is stamped only from a certain static type on BOTH sides: a
@@ -762,8 +762,8 @@ aliasing boundary.
 value and the facts both sides give otherwise, a condition that is a dynamic handle cast of the name (`dynamic_cast<T>(x)`: true where
 the handle is not null) and `reflect::is_instance_of(x, "T")` give a class (the VM compiles that call, its name a literal, to
 `op_instance_test`: `detail::instance_of_class` in place while the reflect entry is the library's and a class stands under the
-text, the call through its site otherwise), `type_of(x) == "k"` a
-kind (the engine's own `type_of` only: a local, a script function, a member or a held script declaration of that name
+text, the call through its site otherwise), `reflect::type_of(x) == "k"` a
+kind (the engine's own `reflect::type_of` only: a local, a script function, a member or a held script declaration of that name
 disqualifies it). `narrow_class_fact` judges against the declared type and the narrowing in force: an ancestor or the
 same class adds nothing, an unrelated class marks the fact `open` (diagnostics leave a miss to the run time, both for a `var`
 and after two unrelated tests), a value class keeps a value type_info, a handle the tested class's `shared_ptr` type_info, a

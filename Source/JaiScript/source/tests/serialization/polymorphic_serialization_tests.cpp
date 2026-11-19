@@ -1069,7 +1069,7 @@ public:
                     shared_ptr<P> p = new P();
                     p.x = 7;
                     var q = trip(p, how);
-                    out += how + ": " + type_of(q) + " " + to_string(q.x) + " " + q.s;
+                    out += how + ": " + reflect::type_of(q) + " " + to_string(q.x) + " " + q.s;
                     var alias = q;
                     alias.x = 9;
                     out += " handle " + to_string(q.x);
@@ -1108,7 +1108,7 @@ public:
             auto r = eng->execute(R"(
                 string out = "";
                 try { from_json("{\"$id\": 4}"); out = "loaded"; } catch (e) { out = e; }
-                out += " | " + type_of(from_json("{\"$ref\": 4}"));
+                out += " | " + reflect::type_of(from_json("{\"$ref\": 4}"));
                 try { from_json("{\"$id\": 1, \"$val\": {\"a\": {\"$id\": 1}}}"); out += " | loaded"; } catch (e) { out += " | " + e; }
                 out;
             )");
@@ -1346,7 +1346,7 @@ public:
     void every_entry_is_the_layer_checked(const std::shared_ptr<engine>& eng, const std::shared_ptr<T>& object, const std::string& kin,
                                           const std::string& order) {
         auto is_kin = [&](const std::string& expr, const std::string& what) {
-            check_eq(kin, eng->execute("type_of(" + expr + ")").as<std::string>(), order + ": " + what);
+            check_eq(kin, eng->execute("reflect::type_of(" + expr + ")").as<std::string>(), order + ": " + what);
             check_eq((script_int)3, eng->execute(expr + ".chomp").as_int(), order + ": " + what + " reaches the script field");
         };
         is_kin("hero", "the global");
@@ -1364,7 +1364,7 @@ public:
             auto ran = f.as_function()({e->make_value(object)});
             return ran ? ran.value().template as<std::string>() : std::string("call failed");
         });
-        check_eq(kin, eng->execute("visit(function(var x) -> string { return type_of(x); })").as<std::string>(), order + ": a callback argument");
+        check_eq(kin, eng->execute("visit(function(var x) -> string { return reflect::type_of(x); })").as<std::string>(), order + ": a callback argument");
         check_eq((script_int)3, eng->execute("hero.health - 97").as_int(), order + ": the C++ property reads through the layer");
     }
 
@@ -1384,7 +1384,7 @@ public:
             eng->add_global("hero", eng->make_object(object));
             eng->add_global("again", object);
             (void)eng->extend(object, kin);
-            check_eq(kin, eng->execute("type_of(again)").template as<std::string>(), kin + " two globals then extend: the second global follows");
+            check_eq(kin, eng->execute("reflect::type_of(again)").template as<std::string>(), kin + " two globals then extend: the second global follows");
         });
     }
     // The observable identity of a layer reached from C++: the boundary return IS the layer
@@ -1786,25 +1786,25 @@ public:
             auto whole = std::make_shared<NestedWhole>();
             eng->add_global("whole", whole);
             eng->add_global("part", std::shared_ptr<NestedPart>(whole, &whole->part));
-            check_eq(std::string("NestedPart"), eng->execute("type_of(part)").as<std::string>());
+            check_eq(std::string("NestedPart"), eng->execute("reflect::type_of(part)").as<std::string>());
             check_eq((script_int)7, eng->execute("part.depth").as_int());
             eng->add_global("whole_again", whole);
-            check_eq(std::string("NestedWhole"), eng->execute("type_of(whole_again)").as<std::string>());
+            check_eq(std::string("NestedWhole"), eng->execute("reflect::type_of(whole_again)").as<std::string>());
             check_true(eng->execute("same_object(whole, whole_again)").as<bool>(), "the whole keeps its one identity");
 
             auto poly = std::make_shared<NestedPolyWhole>();
             eng->add_global("poly", poly);
             eng->add_global("poly_part", std::shared_ptr<NestedPolyPart>(poly, &poly->part));
-            check_eq(std::string("NestedPolyPart"), eng->execute("type_of(poly_part)").as<std::string>());
+            check_eq(std::string("NestedPolyPart"), eng->execute("reflect::type_of(poly_part)").as<std::string>());
             check_eq((script_int)8, eng->execute("poly_part.depth").as_int());
 
             auto extended = std::make_shared<NestedWhole>();
             (void)eng->extend(extended, "WholeKin");
             eng->add_global("kin", extended);
             eng->add_global("kin_part", std::shared_ptr<NestedPart>(extended, &extended->part));
-            check_eq(std::string("NestedPart"), eng->execute("type_of(kin_part)").as<std::string>(), "the part is not the whole's layer");
+            check_eq(std::string("NestedPart"), eng->execute("reflect::type_of(kin_part)").as<std::string>(), "the part is not the whole's layer");
             eng->add_global("kin_again", extended);
-            check_eq(std::string("WholeKin"), eng->execute("type_of(kin_again)").as<std::string>(), "the whole keeps its layer");
+            check_eq(std::string("WholeKin"), eng->execute("reflect::type_of(kin_again)").as<std::string>(), "the whole keeps its layer");
             check_eq((script_int)3, eng->execute("kin_again.chomp").as_int());
         });
 
@@ -1815,7 +1815,7 @@ public:
             (void)eng->extend(as_base, "PolyKin");
             dynamic_binder<OrderElite>(*eng, "OrderElite").constructor<>().base_class<OrderPoly>().property("rank", &OrderElite::rank).build();
             eng->add_global("hero", elite);
-            check_eq(std::string("PolyKin"), eng->execute("type_of(hero)").as<std::string>(), "the global is the layer");
+            check_eq(std::string("PolyKin"), eng->execute("reflect::type_of(hero)").as<std::string>(), "the global is the layer");
             check_eq((script_int)3, eng->execute("hero.chomp").as_int(), "the layer's script field");
             eng->add_global("via_base", as_base);
             check_true(eng->execute("same_object(hero, via_base)").as<bool>(), "the base pointer reaches the same layer");
@@ -2458,7 +2458,7 @@ public:
             eng->add_global("twin", eng->extend(twin, "Markkin"));
             check(twin->script_layer_from_json(state), "the state hydrates: " + state);
             check_eq(std::string("char q 6 true"), eng->execute(
-                "`${type_of(twin.mark)} ${twin.mark} ${to_string(twin.pal.n)} ${to_string(same_object(twin.seen.lock(), twin.pal))}`").as<std::string>(),
+                "`${reflect::type_of(twin.mark)} ${twin.mark} ${to_string(twin.pal.n)} ${to_string(same_object(twin.seen.lock(), twin.pal))}`").as<std::string>(),
                 "a char field stays a char, a handle field its object, a weak_ptr to it the same object: " + state);
         });
 

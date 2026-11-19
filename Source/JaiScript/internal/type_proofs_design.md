@@ -20,7 +20,7 @@ guard reads only facts its own unit owns (section 6.1, "Unguarded facts").
 
 Byte-parallel contract: for every program, both backends with `type_proofs(true)` and
 `type_proofs(false)` produce identical results, identical printed output, identical error text,
-identical `type_of`/`type_info` observations. Section 7's differential gate pins it.
+identical `reflect::type_of`/`type_info` observations. Section 7's differential gate pins it.
 
 Terms. *Certain*: a static type for which the payload guard is total (section 4.2). *same_type*:
 target and RHS certain and identical.
@@ -287,4 +287,4 @@ asserts equality against a `type_proofs(false)` twin, never a literal alone.
 - Same-type proofs on compound assignment / `++`/`--` desugars, `store_through` references, `environment::assign`'s method-env fallback, static fields, `super.f`, `?.` receivers, engine globals, hybrid (cpp-base) classes, extended layers, transparent wrappers.
 - Worker (parallel) frames.
 - Invalidating compiled vm chunks on re-stamp; serializing proofs in `.jaibite`; a per-call re-stamp on the instanceVars path.
-- Any change to error texts, `type_of` results, tag stamping, clone/value semantics, or reference normalization.
+- Any change to error texts, `reflect::type_of` results, tag stamping, clone/value semantics, or reference normalization.

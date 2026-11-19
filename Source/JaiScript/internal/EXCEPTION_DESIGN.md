@@ -5,7 +5,7 @@
 > - **The catch variable is the thrown value; a run-time error is an error value.** A `throw value` binds the value
 >   itself (`throw 42`: `e` is the int 42; an instance, an array or a map is the thrown one, never a copy). A
 >   run-time error binds its message as a string - every string operation reads it unchanged (printing,
->   `to_string(e)`, `e + "..."`, `e == "text"`, a `string` slot, the string methods) - whose `type_of` is `"error"`
+>   `to_string(e)`, `e + "..."`, `e == "text"`, a `string` slot, the string methods) - whose `reflect::type_of` is `"error"`
 >   in a dynamic variable and that answers `e.kind` (`error_kind_of` over the failure's code;
 >   `script_exception::kind` carries it through a rethrow). One engine call builds the variable at every catch on
 >   both backends (`engine::make_caught_error`). A value with a node (a string, an instance, an array, a map) keys an

@@ -44,6 +44,7 @@ namespace jai::vm {
         // Env-resolved plain identifier: chunk::nodes index of its identifier_expr, read live
         // for field proofs (internal/type_proofs_design.md); invalid = slotted / literal / subscript
         uint32_t ident_node = k_invalid_u32;
+        uint32_t namespace_cell = k_invalid_u32;   // load_flag_namespace_cell: the chunk::namespace_cells row
         // a bare name the body's class resolves to a plain field (chunk::member_class): its slot + 1 there, 0 for none
         uint32_t this_slot = 0;
         // a bare name the body's class resolves past its members: read from the environment while the frame's layout holds (chunk::this_global_uses)
@@ -504,6 +505,10 @@ namespace jai::vm {
         // texts the call passes should `regex` bind something else
         struct regex_constant { std::shared_ptr<const detail::regex::compiled> re; uint32_t argc = 1; };
         std::vector<regex_constant> regex_constants;
+        // A reserved namespace's variable (it lives as long as the engine) read by op_namespace_entry or a call's callee operand, and the
+        // member_expr a parallel worker reads it through instead
+        struct namespace_cell { const script_value* cell = nullptr; uint32_t node = k_invalid_u32; };
+        std::vector<namespace_cell> namespace_cells;
         // reflect::is_instance_of(x, "T") sites with a literal class name (op_instance_test): the reflect namespace's cell for the name
         // and the library's function it held when the site compiled (the pin keeps that identity from being recycled); registered once
         // a class stands under the text, from where the test is detail::instance_of_class over it
@@ -742,7 +747,7 @@ namespace jai::vm {
             case opcode::op_cfor_prep: case opcode::op_cfor_back: case opcode::op_cfor_pop: case opcode::op_loop_back: case opcode::op_cells_back:
             case opcode::op_cells_cfor_back: case opcode::op_fused_cmp_jump: case opcode::op_cast: case opcode::op_index_store_fused: case opcode::op_index_compound_operand:
                 return cell_refusal_translation;
-            case opcode::op_get_member: case opcode::op_get_member_path: case opcode::op_set_member: case opcode::op_member_compound: case opcode::op_get_static: case opcode::op_set_static:
+            case opcode::op_get_member: case opcode::op_get_member_path: case opcode::op_set_member: case opcode::op_member_compound: case opcode::op_get_static: case opcode::op_namespace_entry: case opcode::op_set_static:
             case opcode::op_this: case opcode::op_super: case opcode::op_from_this: case opcode::op_null_guard: case opcode::op_probe_member:
             case opcode::op_array: case opcode::op_map: case opcode::op_new: case opcode::op_decl_ref_ident: case opcode::op_decl_ref_value: case opcode::op_destructure:
                 return cell_refusal_representation;

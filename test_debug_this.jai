@@ -4,7 +4,7 @@ class Counter {
 
     Counter() {
         print("In constructor");
-        print("this type: " + type_of(this));
+        print("this type: " + reflect::type_of(this));
 
         // Try accessing instance field - should work
         value = 5;

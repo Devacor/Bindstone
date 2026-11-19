@@ -105,7 +105,7 @@ caught: Cannot yield string from &#x27;g&#x27; (declared -&gt; float)
 true</code></pre></div>
 <p>A coroutine cannot be a lambda, return a reference, or take a parameter by reference (<code>T&amp;</code>, <code>const T&amp;</code>, <code>auto&amp;</code>, <code>var&amp;</code>). All are parse errors: <code>coroutine int count_up(int&amp; n)</code> reports <code>coroutine 'count_up' cannot take 'n' by reference: it runs on after the call returns, past the argument's lifetime; take it by value (int n), or pass a shared_ptr to share an object</code>.</p>
 <h2 id="the-handle-type">The handle&#x27;s type: <code>coroutine&lt;Y&gt;</code><a class="hlink" href="#the-handle-type" aria-label="link">&#8203;</a></h2>
-<p>A call of a coroutine declared to yield <code>Y</code> makes a <code>coroutine&lt;Y&gt;</code>: <code>coroutine int waves()</code> makes a <code>coroutine&lt;int&gt;</code>, and one that declares no type a <code>coroutine&lt;var&gt;</code>. The type goes wherever a type does: a local, a field, a parameter, a return, an element, a map value, a <code>function&lt;coroutine&lt;int&gt;()&gt;</code>. <code>auto</code> takes it from the call, and <code>type_of</code> and <code>reflect::</code> name it. <code>coroutine&lt;auto&gt;</code> and <code>coroutine&lt;void&gt;</code> are the parse error <code>a coroutine type declares what its coroutine yields: coroutine&lt;T&gt;, with var for any</code>.</p>
+<p>A call of a coroutine declared to yield <code>Y</code> makes a <code>coroutine&lt;Y&gt;</code>: <code>coroutine int waves()</code> makes a <code>coroutine&lt;int&gt;</code>, and one that declares no type a <code>coroutine&lt;var&gt;</code>. The type goes wherever a type does: a local, a field, a parameter, a return, an element, a map value, a <code>function&lt;coroutine&lt;int&gt;()&gt;</code>. <code>auto</code> takes it from the call, and <code>reflect::type_of</code> and <code>reflect::</code> name it. <code>coroutine&lt;auto&gt;</code> and <code>coroutine&lt;void&gt;</code> are the parse error <code>a coroutine type declares what its coroutine yields: coroutine&lt;T&gt;, with var for any</code>.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int waves() { yield 1; yield 2; return 9; }
 coroutine string chatter() { yield "hi"; }
 coroutine wander() { yield 1; yield "two"; }
@@ -113,7 +113,7 @@ coroutine wander() { yield 1; yield "two"; }
 coroutine&lt;int&gt; brain = waves();      // a handle of a coroutine declared int
 auto other = chatter();              // auto holds coroutine&lt;string&gt;
 coroutine&lt;var&gt; any = wander();       // coroutine&lt;var&gt; holds any handle
-print(type_of(brain), " ", type_of(other), " ", type_of(any));
+print(reflect::type_of(brain), " ", reflect::type_of(other), " ", reflect::type_of(any));
 
 int first = brain.next();            // next() and range-for hand out the declared type
 for (int w : brain) { print("wave ", w); }

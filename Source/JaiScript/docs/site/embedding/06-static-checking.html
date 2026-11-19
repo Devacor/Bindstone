@@ -230,7 +230,7 @@ eng-&gt;execute(&quot;extern function spawn_wave; print(spawn_wave(3));&quot;); 
 
 <h2 id="proofs">Proofs: the same walk, put to work<a class="hlink" href="#proofs" aria-label="link">&#8203;</a></h2>
 <p>The walk also stamps <strong>proofs</strong> on the AST: notes that the conversion a store, argument or return would run is the identity, and the static class of a binary&#x27;s operands. The VM&#x27;s compiler reads them to choose typed lowerings and what it may inline. Every lane they select keeps a full run-time guard, and a guard miss runs the ordinary code. Proofs are stamped only where the checker is certain, which excludes every row of the precision map, cross-unit classes until their unit has run, and every accessor-bearing member.</p>
-<p>No program&#x27;s value, printed output, error text or <code>type_of</code> differs between <code>engine::type_proofs(true)</code> (the default) and <code>type_proofs(false)</code>.</p>
+<p>No program&#x27;s value, printed output, error text or <code>reflect::type_of</code> differs between <code>engine::type_proofs(true)</code> (the default) and <code>type_proofs(false)</code>.</p>
 <ul>
 <li>Turning proofs off strips cached stamps at their next execute.</li>
 <li><code>engine::last_proof_stats()</code> counts the stamps of the most recent pass, for tests.</li>

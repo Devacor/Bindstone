@@ -873,15 +873,15 @@ public:
         test("a_lambda_takes_its_parameter_types_from_the_signature_it_initializes", [this]() {
             const std::pair<const char*, const char*> cases[] = {
                 {"function<float(int)> half = x => x / 2.0; to_string(half(3));", "1.5"},
-                {"function<string(int)> name = x => type_of(x); name(1);", "int"},
+                {"function<string(int)> name = x => reflect::type_of(x); name(1);", "int"},
                 {"function<int(float)> f = x => cast<int>(x * 2); to_string(f(3));", "6"},
-                {"function<string(float)> f = x => type_of(x); f(3);", "float"},
+                {"function<string(float)> f = x => reflect::type_of(x); f(3);", "float"},
                 {"function<void(string)> f; string seen = \"\"; f = s => { seen = string::to_upper(s); }; f(\"ok\"); seen;", "OK"},
                 {"class Hero { string name; int hp; Hero(string n, int h) { name = n; hp = h; } }\n"
                  "array<Hero> sort_by(array<Hero> heroes, function<int(Hero)> key) { heroes.sort((a, b) => key(a) < key(b)); return heroes; }\n"
                  "string order = \"\"; for (auto h : sort_by([Hero(\"b\", 7), Hero(\"a\", 3)], h => h.hp)) { order += h.name; } order;", "ab"},
-                {"var dyn = (x) => type_of(x); function<string(int)> typed = x => type_of(x); dyn(\"s\") + typed(1);", "stringint"},
-                {"var f = 0; function<string(int)> g = x => { var t = x; return type_of(t); }; g(5);", "int"},
+                {"var dyn = (x) => reflect::type_of(x); function<string(int)> typed = x => reflect::type_of(x); dyn(\"s\") + typed(1);", "stringint"},
+                {"var f = 0; function<string(int)> g = x => { var t = x; return reflect::type_of(t); }; g(5);", "int"},
             };
             check_each(cases, [&](const auto& c) {
                 auto engine = make_engine();
@@ -1136,7 +1136,7 @@ public:
                     var iv = 3; string err = "";
                     try { setf(iv, 2); } catch (e) { err = e; }
                     int& rx = x; bump(rx, 10);
-                    return to_string(x) + " " + to_string(a.size()) + to_string(a[0]) + to_string(a[3]) + " " + to_string(v) + type_of(v) + " " +
+                    return to_string(x) + " " + to_string(a.size()) + to_string(a[0]) + to_string(a[3]) + " " + to_string(v) + reflect::type_of(v) + " " +
                            to_string(k) + "/" + to_string(got) + " [" + err + "] " + to_string(iv);
                 }
                 run();

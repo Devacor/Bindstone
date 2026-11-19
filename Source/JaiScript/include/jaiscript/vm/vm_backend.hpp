@@ -2260,6 +2260,8 @@ namespace jai::vm {
         // reflect::is_instance_of(x, "T") with a literal class name: the instance test in place, else the call through the site
         op_status exec_instance_test(frame& f, const vm_instruction& ins);
         op_status instance_test_call(frame& f, const vm_instruction& ins);
+        op_status exec_namespace_entry(frame& f, const vm_instruction& ins);
+        const script_value* namespace_cell_value(frame& f, const fused_operand& operand, std::optional<script_value>& scratch);
         op_status exec_format_call(frame& f, const vm_instruction& ins);
         op_status exec_cells_enter(frame& f, const vm_instruction& ins);
         int math_alias_verdict(frame& f, const call_site& site, uint8_t fn, size_t cache_slot);   // 1 builtin, 0 parked, -1 raised

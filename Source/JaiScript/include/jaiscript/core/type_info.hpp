@@ -16,7 +16,7 @@
 
 namespace jai {
 
-    // The script spelling of a math kind (the type name, type_of, diagnostics); null for any other type
+    // The script spelling of a math kind (the type name, reflect::type_of, diagnostics); null for any other type
     constexpr const char* math_type_name(script_value_type kind) noexcept {
         switch (kind) {
             case script_value_type::jai_vec2_type: return "math::vec2";

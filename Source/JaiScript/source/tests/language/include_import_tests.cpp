@@ -2465,7 +2465,7 @@ public:
                          "declarations without an initializer keep their values; the one that assigns resets");
                 write_module("ia_state.jai", "float kills;\nint resets = 0;\narray<int> pack;\nclass KeepBox { int n = 0; }\nKeepBox held;\nvar loose;\n");
                 eng->execute("load_state();");
-                check_eq(std::string("float 0.0 3"), eng->execute("type_of(kills) + \" \" + to_string(kills) + \" \" + to_string(pack.size());").to_string(), "a declared type change resets to the new default");
+                check_eq(std::string("float 0.0 3"), eng->execute("reflect::type_of(kills) + \" \" + to_string(kills) + \" \" + to_string(pack.size());").to_string(), "a declared type change resets to the new default");
                 // the host's re-run of the same file is the same unit and keeps too
                 const std::string host_path = (dir / "ia_host_state.jai").string();
                 check_eq((int64_t)0, eng->execute_file_source(host_path, "int hp;\nhp;").as_int());
@@ -2478,7 +2478,7 @@ public:
 
         test("an_imported_namespace_class_is_named_by_its_qualified_spelling", [=, this]() {
             // the importer never saw `namespace nq { class Box }`: the class is nq::Box (C++), the name that types declarations,
-            // parameters, returns, fields, containers, handles and references, that type_of and the checker report, and that
+            // parameters, returns, fields, containers, handles and references, that reflect::type_of and the checker report, and that
             // reaches the redefined class after a re-import. Inside its namespace the bare name reads as nq::Box, outside it only
             // through using, and another namespace's Box is another class
             const auto dir = jai::foundry::test_temp_directory();
@@ -2520,7 +2520,7 @@ public:
                 "array<int> got = [a.n, h.box.n, d.n, twice(a).n, bag.b.n, sum, named[\"k\"].n, weak.lock()->n, converted.n, cast<nq::Box>(bare).n, leaf.d];\n"
                 "string out = \"\";\n"
                 "for (int v : got) { out += to_string(v) + \" \"; }\n"
-                "out + type_of(a) + \" \" + type_of(handle) + \" \" + type_of(other::make()) + \" \" + other::make().s;\n";
+                "out + reflect::type_of(a) + \" \" + reflect::type_of(handle) + \" \" + reflect::type_of(other::make()) + \" \" + other::make().s;\n";
             for (bool proofs : {true, false}) {
                 write_module(module_v1);
                 auto eng = make_engine();

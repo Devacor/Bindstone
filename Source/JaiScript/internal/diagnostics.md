@@ -415,7 +415,7 @@ Each is recognized only in that position, so a script using one of these words a
 | `super.speak()` | a bare `super` (no `::`) in an expression | `A base class method is called with super::name(args), not super.name` |
 | `super(5);` | a bare `super` followed by `(` in a body | `super(...) constructs the base only in a constructor's initializer list (: super(args)); call a base method with super::name(args)` |
 | `&x` | expression start | `JaiScript has no address-of '&x': bind a reference with auto& r = x, or pass x to a T& parameter` |
-| `catch (Error e)`, `catch (int e)` | catch clause | `catch takes one name and no type: catch (e) { ... }; e.value is what was thrown and type_of(e.value) its type` |
+| `catch (Error e)`, `catch (int e)` | catch clause | `catch takes one name and no type: catch (e) { ... }; e.value is what was thrown and reflect::type_of(e.value) its type` |
 | `class B extends A` | class head | `JaiScript has no 'extends': derive with class Name : Base` |
 | `a === b` | after `==` | `JaiScript has no '===': == never converts between types, so a == b already compares without coercion` |
 | `a !== b` | after `!=` | `JaiScript has no '!==': != never converts between types, so a != b already compares without coercion` |
@@ -434,6 +434,7 @@ Each is recognized only in that position, so a script using one of these words a
 | `std::vector<int>, std::cout` | a type or expression, unless the unit declares `std` | `JaiScript has no 'std::': write array<T> for vector, map<K, V> for map, string for string and print(...) for cout` |
 | `a.push_back(v)`, `a.pop_back()`, `a.emplace_back(v)` on an array | the missing-member error | `...: write a.push(v)`, `...: write a.pop()`, `...: construct the value and push it: a.push(T(args))` |
 | `s.c_str()` on a string | the missing-member error | `...: a string is already its text: pass s itself` |
+| `type_of(x)`, `is_registered_type(x)` | a call of the bare name nothing declares (the checker) | `there is no bare 'type_of': write reflect::type_of(x)` (`'is_registered_type'` alike) |
 
 `let` is not on the list: it is a synonym of `var`.
 

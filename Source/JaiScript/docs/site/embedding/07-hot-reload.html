@@ -69,7 +69,7 @@ eng-&gt;execute(R&quot;( class Player {
                      void hot_reload_migrate() { level = 5; }
                  } )&quot;);
 
-eng-&gt;execute(R&quot;( print(&quot;hp: &quot;, type_of(p.hp), &quot; &quot;, p.hp);
+eng-&gt;execute(R&quot;( print(&quot;hp: &quot;, reflect::type_of(p.hp), &quot; &quot;, p.hp);
                  print(&quot;name: &quot;, p.name);
                  print(&quot;level: &quot;, p.level);
                  try { print(p.speed); } catch (e) { print(&quot;speed: &quot;, e); } )&quot;);</code></pre></div>

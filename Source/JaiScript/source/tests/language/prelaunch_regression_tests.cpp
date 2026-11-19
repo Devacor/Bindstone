@@ -357,10 +357,10 @@ public:
 					array<var> payload = [box, {"point": SavedPoint()}];
 				)");
 				eng->execute("var restored = from_" + format + "(to_" + format + "(payload));");
-				check_eq(std::string("SavedBox"), eng->execute("type_of(restored[0]);").as_string());
-				check_eq(std::string("SavedPoint"), eng->execute("type_of(restored[0].child);").as_string());
+				check_eq(std::string("SavedBox"), eng->execute("reflect::type_of(restored[0]);").as_string());
+				check_eq(std::string("SavedPoint"), eng->execute("reflect::type_of(restored[0].child);").as_string());
 				check_eq(script_int{17}, eng->execute("restored[0].child.x;").as_int());
-				check_eq(std::string("SavedPoint"), eng->execute("type_of(restored[1][\"point\"]);").as_string());
+				check_eq(std::string("SavedPoint"), eng->execute("reflect::type_of(restored[1][\"point\"]);").as_string());
 				check_eq(script_int{17}, eng->execute("restored[1][\"point\"].x;").as_int());
 			});
 		}

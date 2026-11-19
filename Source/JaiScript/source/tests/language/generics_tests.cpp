@@ -178,7 +178,7 @@ public:
 			check_eq((int64_t)10, e->execute("Stack<int> s; s.push(3); s.push(9); s.pop() + s.size();").as_int());
 			check_eq(std::string("hp10"), e->execute("auto p = Pair<string, int>(\"hp\", 10); p.first + to_string(p.second);").as_string());
 			check_eq(std::string("Stack<int>|Pair<string, int>|Stack<array<string>>"),
-				e->execute("Stack<int> s; Pair<string, int> p(\"a\", 1); Stack<array<string>> n; type_of(s) + \"|\" + type_of(p) + \"|\" + type_of(n);").as_string());
+				e->execute("Stack<int> s; Pair<string, int> p(\"a\", 1); Stack<array<string>> n; reflect::type_of(s) + \"|\" + reflect::type_of(p) + \"|\" + reflect::type_of(n);").as_string());
 			check_eq(std::string("b"), e->execute("Stack<string> names; names.push(\"a\"); names.push(\"b\"); names.pop();").as_string());
 		});
 
@@ -191,7 +191,7 @@ public:
 			check_eq((int64_t)6, e->execute("W<int> w{6}; w.get();").as_int());
 			check_eq((int64_t)7, e->execute("auto w = new W<int>(7); w.get();").as_int());
 			check_eq((int64_t)8, e->execute("auto w = make_shared<W<int>>(8); w.get();").as_int());
-			check_eq(std::string("W<int>"), e->execute("shared_ptr<W<int>> w = new W<int>(7); type_of(w);").as_string());
+			check_eq(std::string("W<int>"), e->execute("shared_ptr<W<int>> w = new W<int>(7); reflect::type_of(w);").as_string());
 		});
 
 		test("inside_an_instance_the_parameter_reads_as_its_argument", [this]() {
@@ -212,7 +212,7 @@ public:
 			check_eq(std::string("!"), e->execute("Maker<string>::make() + \"!\";").as_string());
 			check_eq((int64_t)7, e->execute("Maker<P>::make().n;").as_int());
 			check_eq((int64_t)14, e->execute("Maker<P> m; m.fresh().n + m.boxed().n;").as_int());
-			check_eq(std::string("P"), e->execute("Maker<P> m; type_of(m.boxed());").as_string());
+			check_eq(std::string("P"), e->execute("Maker<P> m; reflect::type_of(m.boxed());").as_string());
 			// T(v) is a class's construction and a primitive's conversion; T x; is each one's default
 			check_eq((int64_t)2, e->execute("Maker<int> m; m.from(2.9) + m.fresh();").as_int());
 			check_true(e->execute("Test<P> t; t.is(P()) && t.is(new P()) && !t.is(4);").as_bool());
@@ -221,7 +221,7 @@ public:
 			check_true(contains(builtin, "dynamic_cast takes a class: dynamic_cast<T>(e) is e as a shared_ptr<T>, null when it is no T, and dynamic_cast<T&>(e) is the reference") && contains(builtin, "in Test<int>, instantiated at <script>:1:5"));
 			check_false(contains(builtin, "undeclared"));
 			check_eq((int64_t)5, e->execute("Maker<int> m; var v = 4; m.as(v) + 1;").as_int());
-			check_eq(std::string("1:float"), e->execute("Maker<float> m; auto xs = m.some(); to_string(xs.size()) + \":\" + type_of(xs[0]);").as_string());
+			check_eq(std::string("1:float"), e->execute("Maker<float> m; auto xs = m.some(); to_string(xs.size()) + \":\" + reflect::type_of(xs[0]);").as_string());
 		});
 
 		test("a_primitive_constructs_by_its_own_name", [this]() {
@@ -230,7 +230,7 @@ public:
 			check_eq((int64_t)0, e->execute("int() + int{};").as_int());
 			check_eq(std::string(""), e->execute("string();").as_string());
 			check_false(e->execute("bool();").as_bool());
-			check_eq(std::string("float"), e->execute("type_of(float(3));").as_string());
+			check_eq(std::string("float"), e->execute("reflect::type_of(float(3));").as_string());
 			check_true(contains(failure(*e, "int(1, 2);"), "a 'int' is initialized by one value, not 2"));
 		});
 
@@ -258,13 +258,13 @@ public:
 		test("every_kind_of_type_is_an_argument", [this]() {
 			auto e = stdlib_engine();
 			e->execute("class Cell<T> { T v; }");
-			check_eq(std::string("Cell<Color>:1"), e->execute("enum Color { red, green } Cell<Color> c; c.v = Color::green; type_of(c) + \":\" + to_string(c.v);").as_string());
+			check_eq(std::string("Cell<Color>:1"), e->execute("enum Color { red, green } Cell<Color> c; c.v = Color::green; reflect::type_of(c) + \":\" + to_string(c.v);").as_string());
 			check_near(3.0, e->execute("Cell<math::vec2> c; c.v = math::vec2(1, 2); c.v.x + c.v.y;").as_float(), 1e-9);
 			check_eq((int64_t)4, e->execute("Cell<map<string, int>> m; m.v[\"a\"] = 4; m.v[\"a\"];").as_int());
 			check_eq((int64_t)8, e->execute("Cell<function> f; f.v = (x) => x * 2; f.v(4);").as_int());
-			check_eq(std::string("Cell<var>"), e->execute("Cell<var> a; a.v = \"s\"; type_of(a);").as_string());
-			check_eq(std::string("Cell<int>"), e->execute("Cell<Cell<int>> o; o.v.v = 3; type_of(o.v);").as_string());
-			check_eq(std::string("Cell<weak_ptr<Cell<int>>>"), e->execute("Cell<weak_ptr<Cell<int>>> w; type_of(w);").as_string());
+			check_eq(std::string("Cell<var>"), e->execute("Cell<var> a; a.v = \"s\"; reflect::type_of(a);").as_string());
+			check_eq(std::string("Cell<int>"), e->execute("Cell<Cell<int>> o; o.v.v = 3; reflect::type_of(o.v);").as_string());
+			check_eq(std::string("Cell<weak_ptr<Cell<int>>>"), e->execute("Cell<weak_ptr<Cell<int>>> w; reflect::type_of(w);").as_string());
 			check_true(contains(failure(*e, "Cell<auto> c;"), "a type argument names a type: 'auto' is not one an instance can be made with"));
 			check_true(contains(failure(*e, "Cell<void> c;"), "a type argument names a type: 'void' is not one an instance can be made with"));
 		});
@@ -274,12 +274,12 @@ public:
 			check_eq(std::string("6Box<int>"), e->execute(R"(
 				class Box<T> { T item; Box(T x) { item = x; } Box<T> same() { return Box(item); } Box other() { return Box<T>(item); } }
 				auto b = Box<int>(3);
-				to_string(b.same().item + b.other().item) + type_of(b.same());
+				to_string(b.same().item + b.other().item) + reflect::type_of(b.same());
 			)").as_string());
 			check_eq(std::string("4Node<int>"), e->execute(R"(
 				class Node<T> { T value; shared_ptr<Node<T>> next; }
 				auto n = new Node<int>(); n.value = 4; n.next = new Node<int>();
-				to_string(n.value) + type_of(n.next);
+				to_string(n.value) + reflect::type_of(n.next);
 			)").as_string());
 			check_eq(std::string("8true9"), e->execute(R"(
 				class Base<T> { T held; Base(T x) { held = x; } }
@@ -301,7 +301,7 @@ public:
 				shop::Stack<shop::Product> outside;
 				outside.push(shop::Product());
 				shop::inside = outside;
-				type_of(outside) + "|" + to_string(shop::inside.size()) + "|" + type_of(shop::inside) + "|" + to_string(reflect::type_name(outside) == type_of(shop::inside));
+				reflect::type_of(outside) + "|" + to_string(shop::inside.size()) + "|" + reflect::type_of(shop::inside) + "|" + to_string(reflect::type_name(outside) == reflect::type_of(shop::inside));
 			)").as_string());
 		});
 
@@ -491,7 +491,7 @@ public:
 			std::filesystem::last_write_time(item, stamp + std::chrono::seconds(2));
 			check_true(e->execute("import(\"user.jai\");").as_bool());
 			check_eq((int64_t)55, e->execute("user_value();").as_int());
-			check_eq(std::string("Box<Item>"), e->execute("Box<Item> again; type_of(again);").as_string());
+			check_eq(std::string("Box<Item>"), e->execute("Box<Item> again; reflect::type_of(again);").as_string());
 		});
 
 		test("errors_in_an_instance_name_the_generic_and_where_it_was_asked_for", [this]() {
@@ -574,7 +574,7 @@ public:
 			write_unit(directory, "second.jai", "import \"stack.jai\";\nStack<int> second_stack;\nint made_in_second() { return Stack<int>::made; }\n");
 			const std::string root = write_unit(directory, "root.jai",
 				"import \"first.jai\";\nimport \"second.jai\";\nsecond_stack = take_first();\nsecond_stack.push(2);\n"
-				"to_string(second_stack.items.size()) + \"|\" + to_string(Stack<int>::made) + \"|\" + to_string(made_in_second()) + \"|\" + type_of(second_stack);\n");
+				"to_string(second_stack.items.size()) + \"|\" + to_string(Stack<int>::made) + \"|\" + to_string(made_in_second()) + \"|\" + reflect::type_of(second_stack);\n");
 			auto e = stdlib_engine();
 			// each unit declares the instance it names; the second unit's declaration finds the class there and leaves its statics alone
 			check_eq(std::string("2|2|2|Stack<int>"), e->execute_file(root).as_string());
@@ -817,7 +817,7 @@ public:
 			check_eq((int64_t)8, e->execute("array<int> scores = [4, 8, 2]; int top = largest(scores); top;").as_int());
 			check_eq(std::string("1.5b"), e->execute("to_string(largest([1.5, 0.5])) + largest([\"a\", \"b\"]);").as_string());
 			check_eq(std::string("4s2.5trueGoblinGoblin"), e->execute(
-				"to_string(id(4)) + id(\"s\") + to_string(id(2.5)) + to_string(id(true)) + type_of(id(Goblin())) + type_of(id(new Goblin()));").as_string());
+				"to_string(id(4)) + id(\"s\") + to_string(id(2.5)) + to_string(id(true)) + reflect::type_of(id(Goblin())) + reflect::type_of(id(new Goblin()));").as_string());
 			check_eq(std::string("k"), e->execute("map<string, int> m = {\"k\": 1}; first(m);").as_string());
 			check_eq(std::string("j"), e->execute("first({\"j\": 1});").as_string());
 			check_eq((int64_t)7, e->execute("auto b = Box<int>(7); unbox(b);").as_int());
@@ -860,7 +860,7 @@ public:
 			auto e = stdlib_engine();
 			e->execute(deducible);
 			// of<T>(x) names the T the call deduced: the argument list of the instance Of<T>
-			e->execute("class Of<T> {} string of<T>(T x) { string name = type_of(Of<T>()); return name.substr(3, name.size() - 4); }");
+			e->execute("class Of<T> {} string of<T>(T x) { string name = reflect::type_of(Of<T>()); return name.substr(3, name.size() - 4); }");
 			// a primitive's construction, a class's and an instance's, by every spelling
 			check_eq(std::string("int float string bool char int"), e->execute(
 				"of(int(2.5)) + \" \" + of(float(2)) + \" \" + of(string(2)) + \" \" + of(bool(1)) + \" \" + of(char(65)) + \" \" + of(int());").as_string());
@@ -1123,7 +1123,7 @@ public:
 			auto loaded = loader->jaibite_load_bytes(bytes);
 			check_eq((int64_t)8, loaded.execute().as_int());
 			// the generic a bite declares instantiates for the units that run after it
-			check_eq(std::string("abab|Cell<string>"), loader->execute("Cell<string> s; s.v = same(\"ab\"); s.twice() + \"|\" + type_of(s);").as_string());
+			check_eq(std::string("abab|Cell<string>"), loader->execute("Cell<string> s; s.v = same(\"ab\"); s.twice() + \"|\" + reflect::type_of(s);").as_string());
 			// a bite that only uses a generic carries its instances
 			auto user = loader->jaibite("Cell<float> f; f.v = 1.5; f.twice();");
 			auto second = stdlib_engine();
@@ -1146,11 +1146,11 @@ public:
 			e->execute("class Cell<T> { T v; }\nclass User { string name; }\nclass Page<T> { array<T> rows; int total = 0; }");
 			check_eq(std::string("Cell<int>|true"), e->execute("Cell<int> c; reflect::type_name(c) + \"|\" + to_string(reflect::classes().contains(\"Cell<int>\"));").as_string());
 			check_eq(std::string("{\"$type\":\"Cell<int>\",\"$val\":{\"v\":4}}"), e->execute("Cell<int> c; c.v = 4; to_json(c);").as_string());
-			check_eq(std::string("4Cell<int>"), e->execute("Cell<int> c; c.v = 4; var back = from_json(to_json(c)); to_string(back.v) + type_of(back);").as_string());
+			check_eq(std::string("4Cell<int>"), e->execute("Cell<int> c; c.v = 4; var back = from_json(to_json(c)); to_string(back.v) + reflect::type_of(back);").as_string());
 			check_eq(std::string("int"), e->execute("Cell<int> c; reflect::fields(c)[0][\"type\"];").as_string());
 			// a type argument to a host names an instance like any class
 			check_eq(std::string("ann1Page<User>"), e->execute(
-				R"(Page<User> p = from_json<Page<User>>("{\"rows\": [{\"name\": \"ann\"}], \"total\": 1}"); p.rows[0].name + to_string(p.total) + type_of(p);)").as_string());
+				R"(Page<User> p = from_json<Page<User>>("{\"rows\": [{\"name\": \"ann\"}], \"total\": 1}"); p.rows[0].name + to_string(p.total) + reflect::type_of(p);)").as_string());
 		});
 
 		test("a_type_naming_an_instance_the_program_never_made_raises", [this]() {
@@ -1160,9 +1160,9 @@ public:
 			check_true(contains(failure(*e, R"(from_json("{\"$type\":\"Cell<float>\",\"$val\":{\"v\":1.5}}");)"), text));
 			check_eq(text, e->execute(R"(string got = ""; try { from_json("[{\"$type\":\"Cell<float>\",\"$val\":{\"v\":1.5}}]"); } catch (e) { got = e; } got;)").as_string());
 			// named where it is loaded, the instance is made; a name no generic declares is data, as any unknown class's is
-			check_eq(std::string("1.5Cell<float>"), e->execute(R"(auto c = from_json<Cell<float>>("{\"$type\":\"Cell<float>\",\"$val\":{\"v\":1.5}}"); to_string(c.v) + type_of(c);)").as_string());
-			check_eq(std::string("map"), e->execute(R"(type_of(from_json("{\"$type\":\"Shelf<float>\",\"$val\":{\"v\":1.5}}"));)").as_string());
-			check_eq(std::string("map"), e->execute(R"(type_of(from_json("{\"$type\":\"Nowhere\",\"$val\":{\"v\":1.5}}"));)").as_string());
+			check_eq(std::string("1.5Cell<float>"), e->execute(R"(auto c = from_json<Cell<float>>("{\"$type\":\"Cell<float>\",\"$val\":{\"v\":1.5}}"); to_string(c.v) + reflect::type_of(c);)").as_string());
+			check_eq(std::string("map"), e->execute(R"(reflect::type_of(from_json("{\"$type\":\"Shelf<float>\",\"$val\":{\"v\":1.5}}"));)").as_string());
+			check_eq(std::string("map"), e->execute(R"(reflect::type_of(from_json("{\"$type\":\"Nowhere\",\"$val\":{\"v\":1.5}}"));)").as_string());
 		});
 
 		test("printed_and_saved_type_names_keep_their_spellings", [this]() {
@@ -1171,19 +1171,19 @@ public:
 			           " Duo<int, string> d; Box<map<string, int>> bm; Box<Duo<int, array<float>>> nested; shop::Shelf<shop::Item> shelf; Box<var> any; Box<Box<var>> inner; Box<array<var>> list;");
 			// an instance joins its arguments with ", ", a builtin container with ","
 			check_eq(std::string("Duo<int, string>|Box<map<string,int>>|Box<Duo<int, array<float>>>|shop::Shelf<shop::Item>"),
-				e->execute("type_of(d) + \"|\" + type_of(bm) + \"|\" + reflect::type_name(nested) + \"|\" + type_of(shelf);").as_string());
+				e->execute("reflect::type_of(d) + \"|\" + reflect::type_of(bm) + \"|\" + reflect::type_name(nested) + \"|\" + reflect::type_of(shelf);").as_string());
 			check_eq(std::string("{\"$type\":\"Duo<int, string>\",\"$val\":{\"a\":0,\"b\":\"\"}}"), e->execute("to_json(d);").as_string());
 			check_eq(std::string("{\"$type\":\"Box<map<string,int>>\",\"$val\":{\"v\":{}}}"), e->execute("to_json(bm);").as_string());
 			check_true(e->execute("reflect::classes().contains(\"Duo<int, string>\") && !reflect::classes().contains(\"Duo<int,string>\");").as_bool());
 			check_true(contains(e->execute("to_binary(d);").as_string(), "Duo<int, string>"));
 			check_true(contains(e->execute("to_binary(bm);").as_string(), "Box<map<string,int>>"));
 			// var is spelled var in an instance's name, at any depth; a builtin container's own name is what it was
-			check_eq(std::string("Box<var>|Box<Box<var>>|Box<array<var>>"), e->execute("type_of(any) + \"|\" + type_of(inner) + \"|\" + type_of(list);").as_string());
+			check_eq(std::string("Box<var>|Box<Box<var>>|Box<array<var>>"), e->execute("reflect::type_of(any) + \"|\" + reflect::type_of(inner) + \"|\" + reflect::type_of(list);").as_string());
 			check_eq(std::string("{\"$type\":\"Box<var>\",\"$val\":{\"v\":null}}"), e->execute("to_json(any);").as_string());
-			check_eq(std::string("Box<var>|7"), e->execute("any.v = 7; auto back = from_json(to_json(any)); type_of(back) + \"|\" + to_string(back.v);").as_string());
+			check_eq(std::string("Box<var>|7"), e->execute("any.v = 7; auto back = from_json(to_json(any)); reflect::type_of(back) + \"|\" + to_string(back.v);").as_string());
 			check_eq(std::string("array<any>"), detail::engine_access::get_type_info_array(*e, detail::engine_access::get_type_info_any(*e))->canonical_name());
 			check_eq(std::string("array<var>"), detail::engine_access::get_type_info_array(*e, detail::engine_access::get_type_info_any(*e))->spelling());
-			check_eq(std::string("array|map"), e->execute("array<var> xs; map<string, var> m; type_of(xs) + \"|\" + type_of(m);").as_string());
+			check_eq(std::string("array|map"), e->execute("array<var> xs; map<string, var> m; reflect::type_of(xs) + \"|\" + reflect::type_of(m);").as_string());
 		});
 
 		test("a_type_name_that_arrives_as_text_is_read_without_its_spacing", [this]() {
@@ -1192,10 +1192,10 @@ public:
 			           " Duo<int, string> d; d.a = 4; Box<map<string, int>> bm; shop::Shelf<shop::Item> shelf;");
 			const auto reaches = [&](const std::string& spelled, const std::string& name) {
 				const std::string quoted = "\"" + spelled + "\"";
-				check_eq(name, e->execute("type_of(reflect::construct(" + quoted + "));").as_string(), "reflect::construct " + spelled);
-				check_eq(name, e->execute("type_of(reflect::construct_shared(" + quoted + "));").as_string(), "reflect::construct_shared " + spelled);
+				check_eq(name, e->execute("reflect::type_of(reflect::construct(" + quoted + "));").as_string(), "reflect::construct " + spelled);
+				check_eq(name, e->execute("reflect::type_of(reflect::construct_shared(" + quoted + "));").as_string(), "reflect::construct_shared " + spelled);
 				check_true(e->execute("reflect::fields(" + quoted + ").size() > 0 && reflect::is_instance_of(reflect::construct(" + quoted + "), " + quoted + ");").as_bool(), "reflect:: " + spelled);
-				check_eq(name, e->execute("type_of(from_json(\"{\\\"$type\\\":\\\"" + spelled + "\\\",\\\"$val\\\":{}}\"));").as_string(), "from_json " + spelled);
+				check_eq(name, e->execute("reflect::type_of(from_json(\"{\\\"$type\\\":\\\"" + spelled + "\\\",\\\"$val\\\":{}}\"));").as_string(), "from_json " + spelled);
 				check_eq(name, detail::registered_type_spelling(e.get(), spelled), "the registered spelling of " + spelled);
 			};
 			for (const char* spelled : {"Duo<int, string>", "Duo<int,string>", "Duo< int , string >", "  Duo <int ,  string> "}) { reaches(spelled, "Duo<int, string>"); }
@@ -1212,8 +1212,8 @@ public:
 			blob.replace(at, 16, "Duo< int,string>");
 			e->add_function("spaced_blob", [blob]() { return blob; });
 			e->add_function("spaced_base64", [blob]() { return jai::detail::base64_encode(blob); });
-			check_eq(std::string("Duo<int, string>4"), e->execute("auto back = from_binary(spaced_blob()); type_of(back) + to_string(back.a);").as_string());
-			check_eq(std::string("Duo<int, string>4"), e->execute("auto again = from_base64(spaced_base64()); type_of(again) + to_string(again.a);").as_string());
+			check_eq(std::string("Duo<int, string>4"), e->execute("auto back = from_binary(spaced_blob()); reflect::type_of(back) + to_string(back.a);").as_string());
+			check_eq(std::string("Duo<int, string>4"), e->execute("auto again = from_base64(spaced_base64()); reflect::type_of(again) + to_string(again.a);").as_string());
 			// an instance that waits and one the program never made are told from their keys too
 			check_eq(std::string("reflect::construct: 'Rack<Part>' is not declared yet: it waits for 'Part'|'Rack<Part>' is not declared yet: it waits for 'Part'"), e->execute(R"(
 				class Rack<T> { T v; }
@@ -1240,7 +1240,7 @@ public:
 				class Purse<T : Entity> {
 					int take(Entity e) { if (reflect::is_instance_of(e, "Goblin")) { return e.gold + 5; } return -1; }
 				}
-				string kind<T>(var v) { if (type_of(v) == "int") { int n = v; return "int"; } return "other"; }
+				string kind<T>(var v) { if (reflect::type_of(v) == "int") { int n = v; return "int"; } return "other"; }
 				Goblin g; Entity plain; Purse<Goblin> purse;
 				`${gold_of<Goblin>(g)}|${gold_of<Goblin>(plain)}|${purse.take(g)}|${kind<bool>(4)}|${kind<bool>("s")}`;
 			)").as_string());
@@ -1389,7 +1389,7 @@ public:
 					int held() { Shelf<Plain> s; return s.held.n + s.n; }
 					namespace inner { int deep() { Deep<Item> d; Flat f; Shelf<int> s; return d.d.price + f.f + s.n; } }
 				}
-				string report() { shop::Shelf<shop::Item> last; return `${shop::generic()} ${shop::plain()} ${shop::ints()} ${shop::held()} ${shop::inner::deep()} ${type_of(last)}`; }
+				string report() { shop::Shelf<shop::Item> last; return `${shop::generic()} ${shop::plain()} ${shop::ints()} ${shop::held()} ${shop::inner::deep()} ${reflect::type_of(last)}`; }
 			)";
 			write_unit(directory, "naming.jai", naming);
 			write_unit(directory, "naming_imports.jai", "import \"declaring.jai\";\n" + naming);

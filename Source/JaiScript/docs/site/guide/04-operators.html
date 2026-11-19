@@ -143,7 +143,7 @@ value target -&gt; 6</code></pre></div>
 <h2 id="chars-promote">Chars: numbers in arithmetic, text beside a string<a class="hlink" href="#chars-promote" aria-label="link">&#8203;</a></h2>
 <p>A <code>char</code> operand enters arithmetic, bitwise operators, comparisons with numbers, and the unary <code>-</code>, <code>+</code> and <code>~</code> as an <code>int</code> in <strong>0–255, always unsigned</strong>. <code>s[i]</code> reads a char from a string, so byte parsing is ordinary arithmetic:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var s = "abc";
-print('z' - 'a', " ", s[0] + 0, " ", s[0] == 97, " ", 'a' &amp; 0x7F, " ", -'a', " ", ~'a', " ", type_of('a' + 1));
+print('z' - 'a', " ", s[0] + 0, " ", s[0] == 97, " ", 'a' &amp; 0x7F, " ", -'a', " ", ~'a', " ", reflect::type_of('a' + 1));
 string word = "banana";
 int count = 0;
 for (auto ch : word) { if (ch == "a") { count++; } }

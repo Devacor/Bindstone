@@ -4396,7 +4396,8 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
                                                   std::optional<script_value>& scratch,
                                                   size_t cache_slot, bool* observed, bool resolving_callee) {
 	const uint64_t sym = f.code->symbols[operand.symbol];
-	if (operand.load_flags & load_flag_global_only) {
+	if (operand.load_flags & (load_flag_global_only | load_flag_namespace_cell)) {
+		if (operand.load_flags & load_flag_namespace_cell) { return namespace_cell_value(f, operand, scratch); }
 		// ::name - GLOBAL env only (KEEP BYTE-PARALLEL with exec_load's door)
 		if (script_value* g = program_scope()->get_value_ptr(sym)) {
 			return &binding_value(*g, observed);
@@ -4792,7 +4793,7 @@ op_status vm_backend::exec_math_pair(frame& f, const vm_instruction& ins, detail
 // else takes the probe's outcome (0 parked for the real call, -1 raised)
 int vm_backend::math_alias_verdict(frame& f, const call_site& site, uint8_t fn, size_t cache_slot) {
 	const void* identity = math_alias_rows_ ? math_alias_rows_[fn].identity : nullptr;
-	std::vector<env_lookup_cache_entry>* rows = identity && site.callee.slot == k_invalid_u32 && !(site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only)) ? frame_lookup_rows(f) : nullptr;
+	std::vector<env_lookup_cache_entry>* rows = identity && site.callee.slot == k_invalid_u32 && !(site.callee.load_flags & load_flags_unscoped) ? frame_lookup_rows(f) : nullptr;
 	if (rows) {
 		bool plain_frame = !f.locals || f.top_level;
 		if (!plain_frame && !f.locals->is_method) { ensure_frame_member_scope(f, environment_.get()); plain_frame = !frame_scope_active(f); }
@@ -5346,7 +5347,7 @@ static bool plain_concat_text(const script_value& v, std::string_view& out) {
 JAI_NOINLINE bool vm_backend::self_concat_store(frame& f, const fused_binary_dst_proto& dp, op_status& st) {
 	const fused_binary_proto& p = f.code->fused_binary_protos[dp.binary_proto];
 	if (!has_slots(f) || has_custom_numeric_ops_ || (operator_table_ && operator_table_->any()) ||
-	    p.left.const_index != k_invalid_u32 || p.left.is_subscript() || (p.left.load_flags & (load_flag_type_ctor | load_flag_global_only))) return false;
+	    p.left.const_index != k_invalid_u32 || p.left.is_subscript() || (p.left.load_flags & load_flags_unscoped)) return false;
 	script_value* slot = frame_slot(f, dp.slot);
 	bool retag = false;
 	if (slot && slot->raw_storage_index() == script_value::TYPEID_REFERENCE) { slot = text_store_referent(*slot, retag); }   // a reference parameter or alias
@@ -5407,7 +5408,7 @@ const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand&
 	if (operand.is_subscript()) {
 		return nullptr;   // element reads bail to the pair (exec_binary_fused resolves them)
 	}
-	if (operand.load_flags & (load_flag_type_ctor | load_flag_global_only)) {
+	if (operand.load_flags & load_flags_unscoped) {
 		return nullptr;
 	}
 	if (operand.slot != k_invalid_u32 && has_slots(f)) {
@@ -8699,7 +8700,7 @@ bool vm_backend::raw_probe(frame& f, const chunk::cell_loop& loop, uint32_t inde
 	if (parallel_worker_) { return false; }
 	if (debug_hook_ || has_custom_numeric_ops_ || !cached_global_env_ || !f.window_backed || !f.locals || f.top_level || f.locals->is_method) return false;
 	const call_site& site = f.code->call_sites[f.code->code[cc.probe_ip].a];
-	if (!site.ic_fn || site.ic_argc != cc.args.size() || site.callee.slot != k_invalid_u32 || (site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) return false;
+	if (!site.ic_fn || site.ic_argc != cc.args.size() || site.callee.slot != k_invalid_u32 || (site.callee.load_flags & load_flags_unscoped)) return false;
 	ensure_frame_member_scope(f, environment_.get());
 	if (frame_scope_active(f)) return false;
 	const auto& cache = f.code->env_lookup_cache;
@@ -8746,7 +8747,7 @@ void vm_backend::park_raw_callee(frame& f, const chunk::cell_loop& loop) {
 const script_value* vm_backend::raw_env_value(const chunk& body, const chunk::cell_loop& loop, uint32_t k) const {
 	const chunk::cell_loop::cell& cl = loop.cells[k];
 	const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
-	if (!cached_global_env_ || er.cache_slot >= body.env_lookup_cache.size() || (er.operand.load_flags & (load_flag_type_ctor | load_flag_global_only))) return nullptr;
+	if (!cached_global_env_ || er.cache_slot >= body.env_lookup_cache.size() || (er.operand.load_flags & load_flags_unscoped)) return nullptr;
 	const env_lookup_cache_entry& e = body.env_lookup_cache[er.cache_slot];
 	if (!e.fast_ptr || e.fast_env != environment_.get() || e.fast_serial != env_symbolizer_->env_epoch()) return nullptr;
 	const script_value* v = e.fast_ptr;
@@ -12378,7 +12379,7 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 	const call_site& site = f.code->call_sites[ins.a];
 	const size_t argc = ins.b;
 	if (f.this_inst && site.mic_cd == f.this_cd && site.mic_dispatch && park_frame_sibling(f, site)) { return {}; }
-	if (parallel_worker_ && site.callee.slot == k_invalid_u32 && !(site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) {
+	if (parallel_worker_ && site.callee.slot == k_invalid_u32 && !(site.callee.load_flags & load_flags_unscoped)) {
 		if (const worker_chunk_env_cache::call_ic* ic = worker_call_ic(f, site); ic && ic->identity && (ic->fn ? argc == ic->argc : ic->native)) {
 			bool plain_frame = !f.locals || f.top_level;
 			if (!plain_frame && !f.locals->is_method) { ensure_frame_member_scope(f, environment_.get()); plain_frame = !frame_scope_active(f); }
@@ -12393,24 +12394,30 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 			}
 		}
 	}
-	if (cached_global_env_ && ((site.ic_fn && argc == site.ic_argc) || site.ic_native) && site.callee.slot == k_invalid_u32 && !(site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) {
-		bool plain_frame = !f.locals || f.top_level;
-		if (!plain_frame && !f.locals->is_method) { ensure_frame_member_scope(f, environment_.get()); plain_frame = !frame_scope_active(f); }
-		const auto& cache = f.code->env_lookup_cache;
-		const size_t slot = f.ip * 3;
-		if (plain_frame && slot < cache.size()) {
-			const env_lookup_cache_entry& e = cache[slot];
-			if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() &&
-			    e.fast_ptr->raw_storage_index() == script_value::TYPEID_FUNCTION && &e.fast_ptr->unchecked_as_function() == site.ic_identity) {
-				pending_callee& pc = pending_callees_.emplace_back();
-				pc.fn = site.ic_fn;
-				if (!site.ic_fn) {   // a script callee and a direct host callee borrow the site's
-					if (!site.ic_host_checked) [[unlikely]] { fill_host_site(site, *e.fast_ptr); }
-					if (site.ic_host_target) { pc.host_fn = site.ic_pin.get(); } else { pc.pin = site.ic_pin; }
-				}
-				pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
-				return {};
+	if (cached_global_env_ && ((site.ic_fn && argc == site.ic_argc) || site.ic_native) && site.callee.slot == k_invalid_u32 &&
+	    !(site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) {
+		const script_value* fast = nullptr;
+		if (site.callee.load_flags & load_flag_namespace_cell) {
+			fast = f.code->namespace_cells[site.callee.namespace_cell].cell;
+		} else {
+			bool plain_frame = !f.locals || f.top_level;
+			if (!plain_frame && !f.locals->is_method) { ensure_frame_member_scope(f, environment_.get()); plain_frame = !frame_scope_active(f); }
+			const auto& cache = f.code->env_lookup_cache;
+			const size_t slot = f.ip * 3;
+			if (plain_frame && slot < cache.size()) {
+				const env_lookup_cache_entry& e = cache[slot];
+				if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch()) { fast = e.fast_ptr; }
 			}
+		}
+		if (fast && fast->raw_storage_index() == script_value::TYPEID_FUNCTION && &fast->unchecked_as_function() == site.ic_identity) {
+			pending_callee& pc = pending_callees_.emplace_back();
+			pc.fn = site.ic_fn;
+			if (!site.ic_fn) {   // a script callee and a direct host callee borrow the site's
+				if (!site.ic_host_checked) [[unlikely]] { fill_host_site(site, *fast); }
+				if (site.ic_host_target) { pc.host_fn = site.ic_pin.get(); } else { pc.pin = site.ic_pin; }
+			}
+			pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
+			return {};
 		}
 	}
 	if (site.mic_cd && park_sibling_method(f, site)) { return {}; }
@@ -12469,7 +12476,7 @@ bool vm_backend::park_sibling_method(frame& f, const call_site& site) {
 // park_sibling_method on a lazy frame whose layout holds: the frame has no scope of its own and its receiver is the bound instance, so the
 // site's method of that class at its epoch answers unless a field of the instance takes the name
 JAI_FORCEINLINE bool vm_backend::park_frame_sibling(frame& f, const call_site& site) {
-	if (!cached_global_env_ || site.callee.slot != k_invalid_u32 || (site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only)) ||
+	if (!cached_global_env_ || site.callee.slot != k_invalid_u32 || (site.callee.load_flags & load_flags_unscoped) ||
 	    f.this_gen != *layout_gen_ || f.this_inst->get_class_definition() != f.this_cd || f.this_cd->method_epoch() != site.mic_epoch ||
 	    mic_field_shadowed(site, *f.this_inst, f.code->symbols[site.callee.symbol])) {
 		return false;
@@ -12509,7 +12516,7 @@ int vm_backend::worker_park_sibling(frame& f, const call_site& site) {
 // name, a single overload on an all-public chain; the class has no field of the name
 void vm_backend::arm_sibling_method(frame& f, const call_site& site, const script_value& resolved) {
 	if (parallel_worker_ || !cached_global_env_ || !f.locals || f.top_level || !f.locals->is_method || !f.locals->scope_this) return;
-	if (site.callee.symbol == k_invalid_u32 || site.callee.slot != k_invalid_u32 || (site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) return;
+	if (site.callee.symbol == k_invalid_u32 || site.callee.slot != k_invalid_u32 || (site.callee.load_flags & load_flags_unscoped)) return;
 	if (resolved.raw_storage_index() != script_value::TYPEID_FUNCTION) return;
 	const auto* thunk = resolved.unchecked_as_function().target<script_callable_thunk>();
 	if (!thunk || thunk->eng != engine_ || thunk->payload.kind != script_callable::kind_type::bound_method || !thunk->payload.this_obj() || !thunk->payload.bound_dispatch()) return;
@@ -20708,6 +20715,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_super: return exec_super(f, ins);
 		case opcode::op_from_this: return exec_from_this(f, ins);
 		case opcode::op_get_static: return exec_get_static(f, ins);
+		case opcode::op_namespace_entry: return exec_namespace_entry(f, ins);
 		case opcode::op_set_static: return exec_set_static(f, ins);
 		case opcode::op_member_compound: return exec_member_compound(f, ins, static_cast<size_t>(&ins - f.code->code.data()));
 		case opcode::op_concat_pending: return exec_concat_pending(f, ins);
@@ -21210,6 +21218,7 @@ op_status vm_backend::run_dispatch_loop(frame*& fp, const size_t records_base) {
 			case opcode::op_super:
 			case opcode::op_from_this:
 			case opcode::op_get_static:
+			case opcode::op_namespace_entry:
 			case opcode::op_set_static:
 			case opcode::op_member_compound:
 			case opcode::op_new:
@@ -22161,7 +22170,7 @@ JAI_NOINLINE vm_backend::frame* vm_backend::enter_probed_call(frame& f, const vm
 #else
 	const call_site& site = f.code->call_sites[ins.a];
 	if (debug_hook_ || parallel_worker_ || !cached_global_env_ || site.callee.slot != k_invalid_u32 ||
-	    (site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) {
+	    (site.callee.load_flags & load_flags_unscoped)) {
 		return nullptr;
 	}
 	if (f.this_inst && site.mic_cd == f.this_cd && site.mic_dispatch) {
@@ -24190,6 +24199,22 @@ JAI_NOINLINE op_status vm_backend::instance_test_call(frame& f, const vm_instruc
 	stack_.push_back(std::move(seen));
 	stack_.push_back(materialize_constant(*f.code, ins.c));
 	return exec_call(f, vm_instruction{opcode::op_call, 2, ins.a, 0});
+}
+
+// A worker reads what its region pinned (static_member_value), never the engine's cell
+JAI_NOINLINE const script_value* vm_backend::namespace_cell_value(frame& f, const fused_operand& operand, std::optional<script_value>& scratch) {
+	const chunk::namespace_cell& row = f.code->namespace_cells[operand.namespace_cell];
+	if (!parallel_worker_) [[likely]] { return row.cell; }
+	script_value read = make_null();
+	if (static_member_value(f, static_cast<member_expr*>(f.code->nodes[row.node].get()), read) == op_status::failed) { return nullptr; }
+	scratch.emplace(std::move(read));
+	return &scratch.value();
+}
+
+JAI_NOINLINE op_status vm_backend::exec_namespace_entry(frame& f, const vm_instruction& ins) {
+	if (parallel_worker_) [[unlikely]] { return exec_get_static(f, ins); }
+	stack_.push_back(*f.code->namespace_cells[ins.b].cell);
+	return {};
 }
 
 } // namespace jai::vm

@@ -2432,8 +2432,8 @@ public:
 				parallel_for (auto& x : bs) { x.a = x.a + 10; }
 				for (auto& x : serial) { x.a = x.a + 10; }
 				var p = []; var q = [];
-				for (auto x : bs) { p.push(x.a); p.push(type_of(x)); }
-				for (auto x : serial) { q.push(x.a); q.push(type_of(x)); }
+				for (auto x : bs) { p.push(x.a); p.push(reflect::type_of(x)); }
+				for (auto x : serial) { q.push(x.a); q.push(reflect::type_of(x)); }
 				p.push(cast<D>(bs[3]).b); p.push(cast<D>(bs[3]).tag);
 				q.push(cast<D>(serial[3]).b); q.push(cast<D>(serial[3]).tag);
 				return [p, q];
@@ -3648,7 +3648,7 @@ public:
 				"crypto::random_bytes", "crypto::random_hex", "crypto::random_int", "crypto::sha1", "crypto::sha1_bytes",
 				"crypto::sha256", "crypto::sha256_bytes", "crypto::sha512", "crypto::sha512_bytes", "current_script_dir",
 				"current_script_path", "executable_dir", "executable_path", "file_name", "format", "format_value",
-				"is_registered_type", "jai::permissions::is_enabled", "math::abs", "math::acos", "math::angle", "math::angle_between", "math::asin", "math::atan", "math::atan2",
+				"reflect::is_registered_type", "jai::permissions::is_enabled", "math::abs", "math::acos", "math::angle", "math::angle_between", "math::asin", "math::atan", "math::atan2",
 				"math::cbrt", "math::ceil", "math::clamp", "math::color", "math::cos", "math::cosh", "math::cross", "math::degrees",
 				"math::degrees_to_radians", "math::distance", "math::distance_squared", "math::dot", "math::exp", "math::exp2",
 				"math::floor", "math::fmod", "math::from_angle", "math::hypot", "math::ifloor", "math::is_inf", "math::is_nan", "math::itrunc",
@@ -3662,7 +3662,7 @@ public:
 				"pair", "parent_dir", "random", "regex", "regex::match", "root_script_dir", "root_script_path", "same_object",
 				"skip_flush_t", "skip_newline_t", "string::append", "string::from_bytes", "string::from_code", "string::is_valid_utf8",
 				"string::join", "string::pad_left", "string::pad_right", "string::repeat", "string::replace", "string::to_lower",
-				"string::to_upper", "string::trim", "thread_count", "to_char", "to_string", "type_of", "utf8_string", "vformat",
+				"string::to_upper", "string::trim", "thread_count", "to_char", "to_string", "reflect::type_of", "utf8_string", "vformat",
 				"web::build_query", "web::form_decode", "web::form_encode", "web::html", "web::html_escape", "web::html_unescape",
 				"web::parse_query", "web::parse_query_all", "web::parse_url", "web::url", "web::url_decode", "web::url_encode",
 				"working_dir"
@@ -4044,7 +4044,7 @@ public:
 			check_eq((size_t)64, node->size());
 			check_false(ks.checked_as_array().has_value(), "the array<var> view stays unavailable (not demoted)");
 			auto r = e->execute(R"(
-				var out = [ks[0].a, ks[7].a, ks[63].a, type_of(ks) + "/" + type_of(ks[63])];
+				var out = [ks[0].a, ks[7].a, ks[63].a, reflect::type_of(ks) + "/" + reflect::type_of(ks[63])];
 				[[warn_mode]] try { ks.push(5); out.push("accepted"); } catch (err) { out.push(err); }
 				[[warn_mode]] try { ks[0] = "s"; out.push("accepted"); } catch (err) { out.push(err); }
 				ks.push(K(3));
@@ -4309,7 +4309,7 @@ public:
 				array<K> one = [K(9)];
 				parallel_for (auto& k : one) { k.a = k.a + 1; }
 				parallel_for (auto k : one) { k.a = 77; }
-				return [none.size(), one.size(), one[0].a, type_of(one[0])];
+				return [none.size(), one.size(), one[0].a, reflect::type_of(one[0])];
 			)");
 			const auto& vals = r.as_array();
 			check_eq((int64_t)0, vals[0].as_int());

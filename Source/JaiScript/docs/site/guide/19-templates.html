@@ -71,7 +71,7 @@ int count = 3;
 float ratio = 0.75;
 web::html page = template(&quot;greeting.spider&quot;, name, count, ratio);
 print(page);
-print(type_of(page), &quot; &quot;, page.to_string().size());</code></pre></div>
+print(reflect::type_of(page), &quot; &quot;, page.to_string().size());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">&lt;p&gt;Hello, Ada &amp;lt;admin&amp;gt;! You have 3 new messages (0.8).&lt;/p&gt;
 web::html 63</code></pre></div>
 <h2 id="what-a-template-sees">What a template sees<a class="hlink" href="#what-a-template-sees" aria-label="link">&#8203;</a></h2>

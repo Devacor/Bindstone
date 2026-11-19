@@ -758,7 +758,7 @@
       "availability": "Every engine",
       "display": "string.at(index: int) -> char",
       "example": {
-        "code": "string s = \"abc\";\nprint(s.at(1), \" \", s[2], \" \", type_of(s.at(0)));",
+        "code": "string s = \"abc\";\nprint(s.at(1), \" \", s[2], \" \", reflect::type_of(s.at(0)));",
         "output": "b c char"
       }
     },
@@ -2640,34 +2640,6 @@
     },
     {
       "owner": "global",
-      "name": "type_of",
-      "signature": "type_of(value: var) -> string",
-      "provider": "stdlib",
-      "effect": "observe",
-      "notes": "",
-      "source": "include/jaiscript/stdlib/io.hpp",
-      "form": "function",
-      "availability": "register_all() or area registration",
-      "display": "type_of(value: var) -> string",
-      "example": {
-        "code": "print(type_of(1), \" \", type_of(1.5), \" \", type_of(\"s\"), \" \", type_of([1]));",
-        "output": "int float string array"
-      }
-    },
-    {
-      "owner": "global",
-      "name": "is_registered_type",
-      "signature": "is_registered_type(value: var) -> bool",
-      "provider": "stdlib",
-      "effect": "observe",
-      "notes": "",
-      "source": "include/jaiscript/stdlib/io.hpp",
-      "form": "function",
-      "availability": "register_all() or area registration",
-      "display": "is_registered_type(value: var) -> bool"
-    },
-    {
-      "owner": "global",
       "name": "to_char",
       "signature": "to_char(code: int) -> char",
       "provider": "stdlib",
@@ -2678,7 +2650,7 @@
       "availability": "register_all() or area registration",
       "display": "to_char(code: int) -> char",
       "example": {
-        "code": "print(to_char(65), \" \", type_of(to_char(65)));",
+        "code": "print(to_char(65), \" \", reflect::type_of(to_char(65)));",
         "output": "A char"
       }
     },
@@ -4873,6 +4845,34 @@
       "form": "method",
       "availability": "register_all() or area registration",
       "display": "time::date.between(start: time::date, end: time::date) -> bool"
+    },
+    {
+      "owner": "reflect",
+      "name": "type_of",
+      "signature": "reflect::type_of(value: var) -> string",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "",
+      "source": "include/jaiscript/stdlib/reflection.hpp",
+      "form": "function",
+      "availability": "register_all() or area registration",
+      "display": "reflect::type_of(value: var) -> string",
+      "example": {
+        "code": "print(reflect::type_of(1), \" \", reflect::type_of(1.5), \" \", reflect::type_of(\"s\"), \" \", reflect::type_of([1]));",
+        "output": "int float string array"
+      }
+    },
+    {
+      "owner": "reflect",
+      "name": "is_registered_type",
+      "signature": "reflect::is_registered_type(value: var) -> bool",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "",
+      "source": "include/jaiscript/stdlib/reflection.hpp",
+      "form": "function",
+      "availability": "register_all() or area registration",
+      "display": "reflect::is_registered_type(value: var) -> bool"
     },
     {
       "owner": "reflect",

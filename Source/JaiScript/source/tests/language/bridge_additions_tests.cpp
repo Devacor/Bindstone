@@ -71,7 +71,7 @@ public:
                 {"array_map_untyped_and_typed", R"JS(
                 var a = [1, 2, 3];
                 var d = array::map(a, (x) => x * 2);
-                print(to_json(d), " ", type_of(d));
+                print(to_json(d), " ", reflect::type_of(d));
                 array<int> b = [5, 6];
                 auto t = array::map(b, [](int x) -> int { return x + 1; });
                 print(to_json(t));
@@ -501,6 +501,8 @@ public:
                 {"class A { } var a = new A(); a instanceof A && print(1);", foreign_word::instanceof_operator},
                 {"namespace n { class A { } } var a = new n::A(); print(a instanceof n::A ? 1 : 2);", foreign_word::instanceof_operator},
                 {"var s = \"x\"; var b = s instanceof string;", foreign_word::instanceof_operator},
+                {"print(type_of(1));", foreign_word::bare_type_of},
+                {"bool b = is_registered_type(1);", foreign_word::bare_is_registered_type},
             };
             for (const auto& s : samples) {
                 const std::string err = error_text(s.source);
@@ -514,6 +516,12 @@ public:
                 function delete(int n) { return n + 1; }
                 var goto = 5;
                 print(virtual, " ", delete(3), " ", goto);
+            )JS"));
+            check_eq(std::string("mine:int 2 yes\n"), run_output(R"JS(
+                string type_of(var x) { return "mine:" + reflect::type_of(x); }
+                class Probe { int is_registered_type = 2; string type_of() { return "yes"; } }
+                Probe p;
+                print(type_of(1), " ", p.is_registered_type, " ", p.type_of());
             )JS"));
             check_eq(std::string("7 8 9 2 1 5 2\n"), run_output(R"JS(
                 class Box { int instanceof = 9; int n = 1; }

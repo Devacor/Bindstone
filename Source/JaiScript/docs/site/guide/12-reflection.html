@@ -55,7 +55,8 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 </ul>
 <h2 id="ask-what-shape-is-this">Ask: what shape is this?<a class="hlink" href="#ask-what-shape-is-this" aria-label="link">&#8203;</a></h2>
 <div class="tablewrap"><table><thead><tr><th>Call</th><th>Answers</th></tr></thead><tbody>
-<tr><td><code>reflect::type_name(v)</code></td><td><code>type_of</code>, except that a typed container gives its canonical tag (<code>"array&lt;int&gt;"</code>, not <code>"array"</code>)</td></tr>
+<tr><td><code>reflect::type_of(v)</code></td><td>the kind: <code>"int"</code>, <code>"array"</code>, a class&#x27;s name, ...</td></tr>
+<tr><td><code>reflect::type_name(v)</code></td><td><code>reflect::type_of</code>, except that a typed container gives its canonical tag (<code>"array&lt;int&gt;"</code>, not <code>"array"</code>)</td></tr>
 <tr><td><code>reflect::fields(v)</code></td><td>one map per field: <code>name</code>, <code>type</code>, <code>kind</code>, <code>access</code>, <code>static</code>, <code>from</code> (the declaring class)</td></tr>
 <tr><td><code>reflect::methods(v)</code></td><td>one map <strong>per overload</strong>: <code>name</code>, <code>arity</code>, <code>static</code>, <code>access</code>, <code>from</code>, <code>params</code></td></tr>
 <tr><td><code>reflect::has_field(v, "name")</code>, <code>reflect::has_method(v, "name")</code></td><td>bool; both walk the inheritance chain</td></tr>
@@ -85,7 +86,7 @@ wound arity 2 (private) {&quot;default&quot;: true, &quot;name&quot;: &quot;crit
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Goblin { int hp = 10; float speed = 1.5; }
 
 function field_count(auto v) -&gt; int {
-    if (type_of(v) == "string") { return 0; }       // a string would be read as a class name
+    if (reflect::type_of(v) == "string") { return 0; }       // a string would be read as a class name
     return reflect::fields(v).size();
 }
 array&lt;var&gt; things = [Goblin(), "hello", 5, null];

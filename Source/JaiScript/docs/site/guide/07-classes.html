@@ -257,7 +257,7 @@ class Tiger : Cat {
     string speak() override { return "ROAR (base said: " + super::speak() + ")"; }
 }
 Cat c = Tiger();                       // a Cat slot holding a whole Tiger
-print(c.speak(), " ", type_of(c));
+print(c.speak(), " ", reflect::type_of(c));
 // print(c.stripes);                   // load error: no member 'stripes' in class 'Cat'
 cast&lt;Tiger&amp;&gt;(c).stripes = 5;           // a reference to the same object
 var anything = c;                      // a var receiver resolves members when it runs
@@ -282,7 +282,7 @@ class Paladin : Hero { string smite() { return name + " smites"; } }
 array&lt;Hero&gt; party = [Hero(), Paladin()];          // a Hero element keeps a whole Paladin
 for (auto&amp; h : party) {
     if (dynamic_cast&lt;Paladin&gt;(h)) { print(h.smite()); }     // h is a Paladin in this branch
-    else { print(type_of(h), " ", reflect::is_instance_of(h, "Hero"), " ", reflect::is_instance_of(h, "Paladin")); }
+    else { print(reflect::type_of(h), " ", reflect::is_instance_of(h, "Hero"), " ", reflect::is_instance_of(h, "Paladin")); }
 }
 array&lt;shared_ptr&lt;Hero&gt;&gt; handles = [new Hero(), new Paladin()];
 for (auto h : handles) {

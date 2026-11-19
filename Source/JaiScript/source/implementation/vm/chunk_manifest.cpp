@@ -93,6 +93,7 @@ namespace {
 					    << esc(rc.re ? detail::regex::flags_of(*rc.re) : std::string()) << " argc=" << rc.argc << "\n";
 				}
 			}
+			if (!ch.namespace_cells.empty()) { out << pre << "namespace_cells " << ch.namespace_cells.size() << "\n"; }
 			if (!ch.instance_tests.empty()) {
 				out << pre << "instance_tests " << ch.instance_tests.size() << "\n";
 				for (size_t i = 0; i < ch.instance_tests.size(); ++i) { out << pre << " " << i << " class=" << esc(ch.instance_tests[i].class_name) << "\n"; }

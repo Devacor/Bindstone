@@ -639,7 +639,7 @@ public:
                     m.big = m.big + 1; m.small = m.small - 1; m.tiny = 201 + i; m.wide = 10 + i;
                     m.speed = m.speed * 2.0; m.ratio = 0.5; m.flag = !m.flag; m.name = m.name + "x";
                 }
-                s += type_of(m.big) + type_of(m.speed) + type_of(m.ratio) + type_of(m.flag) + type_of(m.name);
+                s += reflect::type_of(m.big) + reflect::type_of(m.speed) + reflect::type_of(m.ratio) + reflect::type_of(m.flag) + reflect::type_of(m.name);
                 s;
             )").as_string();
             check_eq(std::string("7,-3,200,9,1.5,0.25,true,lane,5|8,-4,201,10,3.0,0.5,false,lanex,5|9,-5,202,11,6.0,0.5,true,lanexx,5|intfloatfloatboolstring"), out);
@@ -759,7 +759,7 @@ public:
             auto watched = eng->execute(R"(
                 shared_ptr<LaneSchemaOwner> o = new LaneSchemaOwner();
                 var r = [];
-                for (int i = 0; i < 2; ++i) { r.push(type_of(o.watched)); o.watched = 9 + i; }
+                for (int i = 0; i < 2; ++i) { r.push(reflect::type_of(o.watched)); o.watched = 9 + i; }
                 r;
             )");
             check_true(watched.as_array()[0].as_string() == watched.as_array()[1].as_string(), "an observable property keeps its getter's value kind");
@@ -2961,7 +2961,7 @@ public:
             const std::string at_run = failure_of([&] { eng->execute("[[warn_mode]]; class NamedThing { int mine = 1; } NamedThing().mine;"); });
             check_true(at_run.find(refusal) != std::string::npos && at_run.find("error: ") == std::string::npos, at_run);
             check_eq(std::string("named"), eng->execute("NamedThing().name;").as_string(), "the host class stands");
-            check_eq(std::string("named 1 NamedHeir"), eng->execute("class NamedHeir : NamedThing { int mine = 1; } NamedHeir h; h.name + \" \" + to_string(h.mine) + \" \" + type_of(h);").as_string());
+            check_eq(std::string("named 1 NamedHeir"), eng->execute("class NamedHeir : NamedThing { int mine = 1; } NamedHeir h; h.name + \" \" + to_string(h.mine) + \" \" + reflect::type_of(h);").as_string());
             check_eq((int64_t)3, eng->execute("namespace kept { class NamedThing { int mine = 3; } } kept::NamedThing().mine;").as_int(), "a namespace's class is its own name");
             // an enum of the name could name none of its values (E::value reads the class): refused in a warn region too
             for (const char* source : {"enum NamedThing { first, second }", "[[warn_mode]]; enum NamedThing { first, second }"}) {
@@ -3006,12 +3006,12 @@ public:
             check_eq(std::string("object value"), message("Label l; Crate c = l; Crate d = 3; `${c.held} ${d.held}`"));
             // a derived class is its base, and the base's declared type is not the derived class (cast<Square&> or a dynamic_cast condition narrows)
             check_eq(std::string("4 4 Square Square"), message("Square q; Shape s = q; int sides(Shape x) { return x.sides; } Square back = cast<Square&>(s); "
-                                                               "string narrowed(Shape x) { if (dynamic_cast<Square>(x)) { Square y = x; return type_of(y); } return \"\"; } "
-                                                               "`${s.sides} ${sides(q)} ${type_of(back)} ${narrowed(s)}`"));
+                                                               "string narrowed(Shape x) { if (dynamic_cast<Square>(x)) { Square y = x; return reflect::type_of(y); } return \"\"; } "
+                                                               "`${s.sides} ${sides(q)} ${reflect::type_of(back)} ${narrowed(s)}`"));
             refused("Shape s = Square(); Square back = s;", "cannot initialize 'back' declared 'Square' with 'Shape'");
             // a script class deriving a bound class, and one deriving two
-            check_eq(std::string("3 Tri"), message("class Tri : Shape { Tri() { sides = 3; } } Tri t; Shape s = t; `${s.sides} ${type_of(s)}`"));
-            check_eq(std::string("Both 0"), message("class Both : Shape, Label { } Both b; string named(Label l) { return type_of(l); } int sides(Shape s) { return s.sides; } `${named(b)} ${sides(b)}`"));
+            check_eq(std::string("3 Tri"), message("class Tri : Shape { Tri() { sides = 3; } } Tri t; Shape s = t; `${s.sides} ${reflect::type_of(s)}`"));
+            check_eq(std::string("Both 0"), message("class Both : Shape, Label { } Both b; string named(Label l) { return reflect::type_of(l); } int sides(Shape s) { return s.sides; } `${named(b)} ${sides(b)}`"));
             // what the checker does not know stays the run time's
             check_eq(std::string("4"), message("var v = Square(); Shape s = v; auto a = Square(); Shape t = a; `${t.sides}`"));
             check_eq(std::string("No overload of 'Shape' takes (Label)"), message("var v = Label(); var c = \"\"; try { Shape s = v; } catch (e) { c = e; } c"));

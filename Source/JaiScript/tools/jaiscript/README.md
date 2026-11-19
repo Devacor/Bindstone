@@ -149,7 +149,7 @@ counts from 0.
 ## Environment the runner provides
 
 The full JaiScript stdlib is always registered (`jai::stdlib::register_all`): formatted
-`print` / `format` / `to_string` / `type_of`, math, `to_json` / `from_json`, container
+`print` / `format` / `to_string` / `reflect::type_of`, math, `to_json` / `from_json`, container
 helpers, the `random` type, `crypto::` (hashes such as `crypto::sha256(s)` and `crypto::sha256_file(path)`, HMAC,
 secure random bytes and password hashing; `crypto::sha256_file` needs the `filesystem` permission and raises `read_file`'s
 error below), and the opt-in `web::` library (`jai::stdlib::register_web`: `web::html_escape`, `web::url_encode`, `web::form_encode`,

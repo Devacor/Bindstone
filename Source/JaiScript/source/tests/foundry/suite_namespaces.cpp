@@ -75,7 +75,7 @@ public:
                 };
                 const char* be = use_vm ? " (vm)" : " (interpreter)";
                 check_eq(std::string("8"), run(utils + "using utils::add, utils::LIMIT; add(LIMIT, 1)"), std::string("a function and a variable") + be);
-                check_eq(std::string("14.0math::vec3"), run("using math::vec3, math::dot; vec3 a = vec3(1, 2, 3); to_string(dot(a, a)) + type_of(a)"), std::string("math types") + be);
+                check_eq(std::string("14.0math::vec3"), run("using math::vec3, math::dot; vec3 a = vec3(1, 2, 3); to_string(dot(a, a)) + reflect::type_of(a)"), std::string("math types") + be);
                 check_eq(std::string("4.0"), run("using math::vec2; function f(vec2 p) -> vec2 { return p * 2; } to_string(f(vec2(1, 2)).y)"), std::string("types in signatures") + be);
                 check_eq(std::string("7"), run(utils + "class C { int add = 5; } using utils::add; var c = C(); c.add + add(1, 1)"), std::string("a member name after '.' stays") + be);
                 check_eq(std::string("x7"), run(utils + "using utils::LIMIT; `x${LIMIT}`"), std::string("a template string's splice") + be);
@@ -736,23 +736,23 @@ public:
                 namespace a { namespace b { Level bottom = Level::low; enum Side { left, right } } }
             )";
             check_each(std::vector<std::pair<std::string, std::string>>{
-                {"`${shop::Kind::b} ${shop::Kind.c} ${shop::Kind::d} ${Kind::other} ${shop::outer()} ${type_of(Kind::plain)}`", "1 6 7 41 41 Kind"},
-                {"`${shop::next(shop::Kind::a)} ${type_of(shop::next(shop::Kind::b))} ${shop::all()} ${shop::named()} ${shop::word(shop::Kind::c)} ${shop::through_lambda()}`",
+                {"`${shop::Kind::b} ${shop::Kind.c} ${shop::Kind::d} ${Kind::other} ${shop::outer()} ${reflect::type_of(Kind::plain)}`", "1 6 7 41 41 Kind"},
+                {"`${shop::next(shop::Kind::a)} ${reflect::type_of(shop::next(shop::Kind::b))} ${shop::all()} ${shop::named()} ${shop::word(shop::Kind::c)} ${shop::through_lambda()}`",
                  "1 shop::Kind [0, 7] {\"first\": 0, \"last\": 7} c 8"},
-                {"shop::Item i; `${i.kind} ${type_of(i.kind)} ${i.bump()} ${type_of(shop::Item::first())} ${i.tags} ${reflect::fields(i)[0][\"type\"]} ${reflect::fields(i)[1][\"type\"]}`",
+                {"shop::Item i; `${i.kind} ${reflect::type_of(i.kind)} ${i.bump()} ${reflect::type_of(shop::Item::first())} ${i.tags} ${reflect::fields(i)[0][\"type\"]} ${reflect::fields(i)[1][\"type\"]}`",
                  "1 shop::Kind 6 shop::Kind [0, 6] shop::Kind array<shop::Kind>"},
                 {"shop::Kind k; array<shop::Kind> ks = [shop::Kind::b]; map<string, shop::Kind> m; m[\"x\"] = k; shop::Kind same(shop::Kind v) { return v; }\n"
-                 "`${k} ${type_of(k)} ${type_of(ks[0])} ${type_of(same(cast<shop::Kind>(6)))} ${type_of(m[\"x\"])}`", "0 shop::Kind shop::Kind shop::Kind shop::Kind"},
+                 "`${k} ${reflect::type_of(k)} ${reflect::type_of(ks[0])} ${reflect::type_of(same(cast<shop::Kind>(6)))} ${reflect::type_of(m[\"x\"])}`", "0 shop::Kind shop::Kind shop::Kind shop::Kind"},
                 {"var out = \"\"; try { cast<shop::Kind>(9); } catch (e) { out = e; } out", "Cannot cast 9 to 'shop::Kind': not one of its values"},
                 {"string s = \"\"; for (auto [name, n] : shop::Kind) { s += name + \"=\" + to_string(n) + \" \"; } s + to_string(shop::count())", "a=0 b=1 c=6 d=7 4"},
-                {"var v = shop::Kind::b; shop::Kind k = v; var out = \"\"; try { throw shop::Kind::c; } catch (shop::Kind e) { out = type_of(e); }\n"
-                 "`${type_of(v)} ${type_of(k)} ${shop::over(k)} ${shop::over(1)} ${out}`", "int shop::Kind kind int shop::Kind"},
+                {"var v = shop::Kind::b; shop::Kind k = v; var out = \"\"; try { throw shop::Kind::c; } catch (shop::Kind e) { out = reflect::type_of(e); }\n"
+                 "`${reflect::type_of(v)} ${reflect::type_of(k)} ${shop::over(k)} ${shop::over(1)} ${out}`", "int shop::Kind kind int shop::Kind"},
                 {"shop::Item i; i.bump(); string j = to_json(i); shop::Item back = from_json(j); shop::Kind k = from_json(to_json(shop::Kind::d));\n"
                  "shop::Item binary = from_binary(to_binary(i)); array<shop::Kind> ks = from_json(\"[0, 6]\");\n"
-                 "`${j} ${type_of(back.kind)} ${back.kind} ${type_of(back.tags[1])} ${type_of(k)} ${k} ${type_of(binary.kind)} ${type_of(binary.tags[1])} ${type_of(ks[1])}`",
+                 "`${j} ${reflect::type_of(back.kind)} ${back.kind} ${reflect::type_of(back.tags[1])} ${reflect::type_of(k)} ${k} ${reflect::type_of(binary.kind)} ${reflect::type_of(binary.tags[1])} ${reflect::type_of(ks[1])}`",
                  "{\"$type\":\"shop::Item\",\"$val\":{\"kind\":6,\"tags\":[0,6]}} shop::Kind 6 shop::Kind shop::Kind 7 shop::Kind shop::Kind shop::Kind"},
-                {"`${shop::later} ${type_of(shop::later)} ${a::b::top()} ${type_of(a::b::bottom)} ${a::b::Level::high} ${type_of(a::b::Side::right)}`", "7 shop::Kind 2 a::b::Level 2 a::b::Side"},
-                {"using a::b::Level, shop::Item; Level l = Level::high; array<Level> ls = [l, Level.low]; Item i; `${l} ${type_of(ls[1])} ${type_of(i.kind)}`", "2 a::b::Level shop::Kind"},
+                {"`${shop::later} ${reflect::type_of(shop::later)} ${a::b::top()} ${reflect::type_of(a::b::bottom)} ${a::b::Level::high} ${reflect::type_of(a::b::Side::right)}`", "7 shop::Kind 2 a::b::Level 2 a::b::Side"},
+                {"using a::b::Level, shop::Item; Level l = Level::high; array<Level> ls = [l, Level.low]; Item i; `${l} ${reflect::type_of(ls[1])} ${reflect::type_of(i.kind)}`", "2 a::b::Level shop::Kind"},
                 {"namespace shop { int local() { enum Kind { x = 9, y } return Kind::y + Kind.size(); } int after() { return Kind::c; } } `${shop::local()} ${shop::after()}`", "12 6"},
                 // the checker's rules, under the qualified name
                 {"shop::Kind[\"a\"] = 5;", "error: cannot assign to 'shop::Kind[...]': 'shop::Kind' is const (declared at 4:26)"},
@@ -779,7 +779,7 @@ public:
             // a later run names what an earlier one declared: the engine knows the enum, its values are the run's to find
             check_each(std::vector<std::pair<std::string, std::string>>{
                 {"shop::Kind k = shop::Kind::b; Kind g = Kind::other; namespace shop { Kind again(Kind v) { return v == Kind::b ? Kind::c : v; } }\n"
-                 "`${type_of(k)} ${type_of(g)} ${shop::again(k)} ${type_of(shop::again(k))}`", "shop::Kind Kind 6 shop::Kind"},
+                 "`${reflect::type_of(k)} ${reflect::type_of(g)} ${shop::again(k)} ${reflect::type_of(shop::again(k))}`", "shop::Kind Kind 6 shop::Kind"},
                 {"shop::Kind k = 2;", "error: cannot initialize 'k' declared 'shop::Kind' with 'int': cast<shop::Kind>(n) converts an int that is one of its values"},
                 {"shop::Kind::zzz", "No value 'zzz' in enum 'shop::Kind'"},
                 {"shop::Kind[\"a\"] = 5;", "error: cannot assign to 'shop::Kind[...]': 'shop::Kind' is const"},
@@ -793,9 +793,9 @@ public:
             });
             // a unit that declares the enum where it names it, in any order
             check_each(std::vector<std::pair<std::string, std::string>>{
-                {"namespace shop { enum Kind { a, b } Kind k = Kind::b; } shop::Kind j = shop::k; `${j} ${type_of(j)}`", "1 shop::Kind"},
+                {"namespace shop { enum Kind { a, b } Kind k = Kind::b; } shop::Kind j = shop::k; `${j} ${reflect::type_of(j)}`", "1 shop::Kind"},
                 {"namespace shop { enum Kind { a, b } class Kind2 {} enum Other { Kind2, Kind = 5 } } `${shop::Other::Kind2} ${shop::Other::Kind}`", "0 5"},
-                {"namespace shop { Kind first() { return Kind::a; } enum Kind { a = 3, b } } `${shop::first()} ${type_of(shop::first())}`", "3 shop::Kind"},
+                {"namespace shop { Kind first() { return Kind::a; } enum Kind { a = 3, b } } `${shop::first()} ${reflect::type_of(shop::first())}`", "3 shop::Kind"},
                 {"namespace shop { enum Kind { a, b } } namespace shop { enum Kind { c, d, e } } `${shop::Kind}`", "{\"c\": 0, \"d\": 1, \"e\": 2}"},
                 {"namespace shop { enum Kind { a, b = Kind::zzz } }", "parse failed:\n<script>:1:37: error: enum value 'b' names 'zzz', which is not an earlier value of 'shop::Kind'"},
             }, [&](const auto& c) {
@@ -819,7 +819,7 @@ public:
                 }
                 string report() {
                     shop::Tagged t = from_json(to_json(shop::Tagged()));
-                    return `${shop::pick(1)} ${type_of(shop::pick(0))} ${type_of(shop::both()[1])} ${type_of(t.kind)} ${type_of(t.named["x"])} ${shop::table()}`;
+                    return `${shop::pick(1)} ${reflect::type_of(shop::pick(0))} ${reflect::type_of(shop::both()[1])} ${reflect::type_of(t.kind)} ${reflect::type_of(t.named["x"])} ${shop::table()}`;
                 }
             )";
             const std::string expected = "1 shop::Kind shop::Kind shop::Kind shop::Kind 2";
@@ -836,7 +836,7 @@ public:
                 {"import \"declaring.jai\"; import \"naming.jai\"; report()", expected},
                 {"import \"naming.jai\"; import \"declaring.jai\"; report()", expected},
                 {"import \"naming_imports.jai\"; report()", expected},
-                {"import \"naming_using.jai\"; import \"declaring.jai\"; `${outside()} ${type_of(outside())} ${Kind::global}`", "1 shop::Kind 9"},
+                {"import \"naming_using.jai\"; import \"declaring.jai\"; `${outside()} ${reflect::type_of(outside())} ${Kind::global}`", "1 shop::Kind 9"},
                 {"import \"declaring.jai\"; import \"declaring_again.jai\"; `${shop::Kind}`", "{\"c\": 0, \"d\": 1, \"e\": 2}"},
                 {"import \"declaring_again.jai\"; import \"declaring.jai\"; `${shop::Kind}`", "{\"a\": 0, \"b\": 1}"},
                 {"import \"naming_value.jai\"; import \"declaring.jai\"; shop::wrong()", "No value 'zzz' in enum 'shop::Kind'"},
@@ -888,10 +888,10 @@ public:
                 {"namespace shop { " + pick + "string go() { string s = @pick(1); return s; } } shop::go()", "cannot initialize 's' declared 'string' with 'int'", ""},
                 {"namespace shop { enum Kind { a, b } class Stack<T> { array<T> items; } Kind kind<T>(T v) { return Kind::b; } "
                  "int go() { Stack<Kind> s; s.items.push(@kind(1)); return s.items.size(); } } "
-                 "shop::Stack<shop::Kind> s; s.items.push(shop::kind(\"x\")); `${type_of(s)} ${s.items[0] == shop::Kind::b} ${type_of(s.items[0])} ${shop::go()}`",
+                 "shop::Stack<shop::Kind> s; s.items.push(shop::kind(\"x\")); `${reflect::type_of(s)} ${s.items[0] == shop::Kind::b} ${reflect::type_of(s.items[0])} ${shop::go()}`",
                  "shop::Stack<shop::Kind> true shop::Kind 1", ""},
                 {"import \"kind.jai\"; namespace shop { class Stack<T> { array<T> items; } Kind kind<T>(T v) { return Kind::b; } "
-                 "string go() { Stack<Kind> s; s.items.push(@kind(1)); return type_of(s) + type_of(s.items[0]); } } shop::go()", "shop::Stack<shop::Kind>shop::Kind", ""},
+                 "string go() { Stack<Kind> s; s.items.push(@kind(1)); return reflect::type_of(s) + reflect::type_of(s.items[0]); } } shop::go()", "shop::Stack<shop::Kind>shop::Kind", ""},
             }, [&](const auto& c) {
                 for (const std::string prefix : std::vector<std::string>{"", "shop::"}) {
                     std::string program = std::get<0>(c);

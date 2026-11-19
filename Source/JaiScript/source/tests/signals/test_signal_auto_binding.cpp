@@ -349,7 +349,7 @@ public:
 				s.on_scored.connect("t", "log += \"t\";");
 				s.score(1);
 				s.score(2);
-				log + " | " + to_string(mon.hp) + " " + type_of(mon.hp) + " " + mon.pad + " | " + to_string(s.seen) + " " + s.tag;
+				log + " | " + to_string(mon.hp) + " " + reflect::type_of(mon.hp) + " " + mon.pad + " | " + to_string(s.seen) + " " + s.tag;
 			)");
 			check_eq(std::string("a1B1H1tA2B2H2t | 7.0 float p | 3 v2"), r.as<std::string>());
 		});

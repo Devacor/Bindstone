@@ -73,11 +73,11 @@ var j = to_json(p);
 print(j);
 
 var q = from_json(j);          // reconstructs a Player via the $type discriminator
-print(type_of(q.hp) + " " + to_string(q.hp) + ", " + q.name);
+print(reflect::type_of(q.hp) + " " + to_string(q.hp) + ", " + q.name);
 
 // A float payload landing in an int field: the load converts, it does not trust.
 var r = from_json("{\"$type\": \"Player\", \"$val\": {\"hp\": 7.9, \"speed\": 2, \"name\": \"clone\"}}");
-print(type_of(r.hp) + " " + to_string(r.hp) + ", " + type_of(r.speed));
+print(reflect::type_of(r.hp) + " " + to_string(r.hp) + ", " + reflect::type_of(r.speed));
 
 // Plain values and containers round-trip too.
 var m = from_json(to_json({"a": [1, 2.5, "three", true, null]}));

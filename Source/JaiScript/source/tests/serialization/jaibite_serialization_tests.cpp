@@ -170,14 +170,14 @@ public:
             const std::pair<std::string, std::string> programs[] = {
                 {"typed_callables", R"(
                 class Hero { int hp = 3; }
-                function<string(int)> name = x => type_of(x);
+                function<string(int)> name = x => reflect::type_of(x);
                 array<function<int(int)>> steps = [x => x + 1, x => x * 2];
                 int apply(function<int(Hero)> key, Hero h) { return key(h); }
                 coroutine int gen() { yield 4; }
                 coroutine<int> h = gen();
-                class Button { function<string(float)> label; Button() : label(v => type_of(v)) {} }
+                class Button { function<string(float)> label; Button() : label(v => reflect::type_of(v)) {} }
                 Button b;
-                name(1) + "|" + to_string(steps[1](steps[0](1))) + "|" + to_string(apply(e => e.hp, Hero())) + "|" + type_of(h) + "|" + to_string(h.next()) + "|" + b.label(1);
+                name(1) + "|" + to_string(steps[1](steps[0](1))) + "|" + to_string(apply(e => e.hp, Hero())) + "|" + reflect::type_of(h) + "|" + to_string(h.next()) + "|" + b.label(1);
             )"},
                 {"arithmetic_strings", R"(
                 int a = 7; int b = 3;
@@ -261,7 +261,7 @@ public:
                 var last = t.next();
                 string e = "";
                 try { t.next(); } catch (err) { e = to_string(err); }
-                to_string(total) + "|" + s + "|" + type_of(last) + ":" + to_string(last) + "|" + e;
+                to_string(total) + "|" + s + "|" + reflect::type_of(last) + ":" + to_string(last) + "|" + e;
             )"},
                 {"coroutines_range_for", R"(
                 coroutine int gen(int n) {
@@ -360,7 +360,7 @@ public:
                     class SessionStore { int db = 0; SessionStore() {} SessionStore(int d) { db = d; } Session load() { Session s; s.a = db; return s; } }
                 }
                 spider::SessionStore sessions = spider::SessionStore(3);
-                type_of(sessions) + " " + type_of(sessions.load()) + " " + to_string(sessions.load().a);
+                reflect::type_of(sessions) + " " + reflect::type_of(sessions.load()) + " " + to_string(sessions.load().a);
             )"},
             };
             check_each(programs, [&](const auto& program) { check_roundtrip(program.second); });

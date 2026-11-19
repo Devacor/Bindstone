@@ -1517,7 +1517,7 @@ namespace jai {
         uint64_t clock_sample_count() const noexcept;
 
         // The catch variable's value, both backends at the catch. A throw binds the thrown value itself; a run-time error
-        // binds an error: its message as a string (every string operation reads it unchanged) whose type_of is "error" and
+        // binds an error: its message as a string (every string operation reads it unchanged) whose reflect::type_of is "error" and
         // that answers e.kind. A string, an instance, an array or a map (a value with a node to key on) also answers
         // e.message, e.file, e.line, e.column, e.stack (file:line per frame, innermost first) and e.value while its handler
         // runs; a string keeps answering afterwards. The place is the throw's, else the innermost frame's statement.
@@ -1533,7 +1533,7 @@ namespace jai {
         // A member read the receiver's own members did not answer, on a caught value (nullopt: not one, or not an error member)
         // catch_variable: the receiver is read through a handler's variable, where any thrown value answers .value and .message
         std::optional<script_value> caught_error_member(const script_value& receiver, uint64_t member_id, bool catch_variable = false);
-        // Whether a run-time error's catch variable (type_of's "error", `catch (error e)`)
+        // Whether a run-time error's catch variable (reflect::type_of's "error", `catch (error e)`)
         bool is_caught_runtime_error(const script_value& value) const noexcept;
         int caught_error_tag(const script_value& value) const noexcept;
         // Whether a typed catch clause takes the value: the clause's type by name, a class through its bases

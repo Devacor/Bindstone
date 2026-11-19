@@ -1041,9 +1041,9 @@ public:
                     string out;
                     array<shared_ptr<Unit>> party = [new Unit(), new Hero(), new Paladin(), new Cleric()];
                     for (auto u : party) {
-                        out += type_of(u) + ":" + flag(dynamic_cast<Unit>(u) != null) + flag(dynamic_cast<shared_ptr<Hero>>(u) != null) +
+                        out += reflect::type_of(u) + ":" + flag(dynamic_cast<Unit>(u) != null) + flag(dynamic_cast<shared_ptr<Hero>>(u) != null) +
                                flag(dynamic_cast<Paladin>(u) != null) + flag(dynamic_cast<Healer>(u) != null) + " ";
-                        if (auto knight = dynamic_cast<Paladin>(u)) { out += knight.smite() + ":" + type_of(knight) + " "; }
+                        if (auto knight = dynamic_cast<Paladin>(u)) { out += knight.smite() + ":" + reflect::type_of(knight) + " "; }
                     }
                     // a value, a reference, a var, a null handle, a live and an expired weak handle; the handle names the operand's own object
                     Paladin p;
@@ -1178,7 +1178,7 @@ public:
                 int looped(array<shared_ptr<Unit>> xs) { int t = 0; for (auto x : xs) { if (!dynamic_cast<Hero>(x)) { continue; } t += x.mana; } return t; }
                 int walked(shared_ptr<Unit> u) { int n = 0; while (dynamic_cast<shared_ptr<Paladin>>(u)) { n += u.faith; u = new Unit(); } return n; }
                 int stepped(shared_ptr<Unit> u) { int n = 0; for (; reflect::is_instance_of(u, "Hero"); u = new Unit()) { n += u.mana; } return n; }
-                int kinds(var x) { if (type_of(x) == "int") { return x + 1; } if (type_of(x) != "string") { return 0; } return x.size(); }
+                int kinds(var x) { if (reflect::type_of(x) == "int") { return x + 1; } if (reflect::type_of(x) != "string") { return 0; } return x.size(); }
                 int typed(var v) { try { throw v; } catch (Hero e) { return e.mana; } return 0; }
                 int caught(var v) { try { return typed(v); } catch (err) { return 0; } }
                 int reflected(Unit u) { if (reflect::is_instance_of(u, "Paladin")) { return u.faith; } return 0; }
@@ -1190,7 +1190,7 @@ public:
                 int declared(shared_ptr<Unit> u) { if (auto h = dynamic_cast<Hero>(u)) { return h.mana; } return 0; }   // the declared name has the cast's type
                 void keep(shared_ptr<Unit>& r, Unit& v) { }
                 int bound(shared_ptr<Unit> u, Unit w) { if (reflect::is_instance_of(u, "Hero") && reflect::is_instance_of(w, "Hero")) { int m = u.mana + w.mana; keep(u, w); shared_ptr<Unit>& a = u; return m; } return 0; }   // a reference binds the variable as declared
-                int compared(var x) { if (type_of(x) == "int") { return x == "5" || x == null ? 1 : 0; } return 2; }   // a var keeps its run-time comparisons
+                int compared(var x) { if (reflect::type_of(x) == "int") { return x == "5" || x == null ? 1 : 0; } return 2; }   // a var keeps its run-time comparisons
                 Paladin p;
                 `${direct(Hero())} ${direct(Unit())} ${handle(new Paladin())} ${handle(new Hero())} ${chained(Hero())} ${chained(5)} ${either(Hero())} ${either(Rogue())} ` +
                 `${otherwise(Paladin())} ${looped([new Hero(), new Unit(), new Paladin()])} ${walked(new Paladin())} ${stepped(new Hero())} ${kinds(41)} ${kinds("four")} ${kinds(2.5)} ` +
@@ -1303,7 +1303,7 @@ public:
         });
 
         test("new_keyword_matches_shared_ptr_spelling", [this]() {
-            // new P() and shared_ptr<P>(...) are the same expression: same type_of,
+            // new P() and shared_ptr<P>(...) are the same expression: same reflect::type_of,
             // same sharing behavior, brace form included
             const char* src = R"(
                 class P { int x = 1; P() { x = 1; } }
@@ -1314,7 +1314,7 @@ public:
                 aliasA.x = 10;
                 var aliasB = b;
                 aliasB.x = 20;
-                (type_of(a) == type_of(b) ? "same" : "diff") + "|" + to_string(a.x)
+                (reflect::type_of(a) == reflect::type_of(b) ? "same" : "diff") + "|" + to_string(a.x)
                     + "|" + to_string(b.x) + "|" + to_string(braced.x);
             )";
             for (bool use_vm : {false, true}) {
@@ -1937,7 +1937,7 @@ public:
                 {"var p = new C(); var a = p; p.reset(new C()); to_string(p.v) + \" \" + to_string(a.v) + \" \" + to_string(same_object(p, a))", "1 1 false"},
                 {"shared_ptr<C> p = new C(); shared_ptr<C> q = fresh(7); p.reset(q); to_string(same_object(p, q)) + \" \" + to_string(p.v)", "true 7"},
                 {"shared_ptr<C> p = new C(); p.reset(make_shared<C>()); to_string(p.v)", "1"},
-                {"shared_ptr<C> p = new C(); p.reset(new D()); type_of(p)", "D"},
+                {"shared_ptr<C> p = new C(); p.reset(new D()); reflect::type_of(p)", "D"},
                 {"shared_ptr<C> p = new C(); shared_ptr<C> n = null; p.reset(n); to_string(p == null)", "true"},
                 {"shared_ptr<C> p = new C(); p.reset(null); to_string(p == null)", "true"},
                 {"shared_ptr<C> p = null; p.reset(fresh(4)); to_string(p.v)", "4"},

@@ -766,7 +766,7 @@ public:
                 {"namespace shop { int wrong() { return Kind.zzz; } }", "error: no value 'zzz' in enum 'shop::Kind' (declared at 4:26)"},
                 {"int x = shop::Kind;", "error: cannot initialize 'x' declared 'int' with 'enum shop::Kind': an enum's name is its value table, a map<string,int>; name one of its values (shop::Kind::a)"},
                 {"array<shop::Kind> xs = [1];", "error: cannot initialize 'xs' declared 'array<shop::Kind>' with 'array': array element 0: expected 'shop::Kind', got 'int'"},
-                {"var p = dynamic_cast<shared_ptr<shop::Kind>>(null);", "error: dynamic_cast<shared_ptr<shop::Kind>> names a class, and 'shop::Kind' is an enum: cast<shop::Kind>(n) converts an int that is one of its values"},
+                {"var p = dynamic_cast<shared_ptr<shop::Kind>>(null);", "error: dynamic_cast<shop::Kind> names a class, and 'shop::Kind' is an enum: cast<shop::Kind>(n) converts an int that is one of its values"},
                 {"a::Side s;", "error: unknown type 'a::Side'"},
                 {"shop::Kind k = shop::Kinds::a;", "error: no member 'Kinds' in namespace 'shop'"},
             }, [&](const auto& c) {

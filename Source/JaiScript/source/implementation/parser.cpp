@@ -2627,20 +2627,8 @@ checked_result<expression_ptr> parser::operator_expression(int min_precedence) {
     stack_.guard(peek().location);
     const size_t operand_start = current_;
     auto left = unary();
-    if (left && check(token_type::identifier) && instanceof_operator_at(current_)) [[unlikely]] {
-        report_foreign(detail::foreign_word::instanceof_operator, peek());
-        return make_error_code(parse_error_code::syntax_error);
-    }
     if (!left || infix_precedence() < min_precedence) { return left; }
     return operator_rest(std::move(left.value()), min_precedence, operand_start);
-}
-
-// JavaScript's `x instanceof T`: the word where an operator stands, a type's name after it. A declaration's name is never followed
-// by a type's name, so a variable, field or function called instanceof reads as it did
-bool parser::instanceof_operator_at(size_t at) const {
-    if (at + 1 >= stream_->size() || (*stream_)[at].type != token_type::identifier || (*stream_)[at].lexeme != "instanceof") { return false; }
-    const token_type then = (*stream_)[at + 1].type;
-    return then == token_type::identifier || is_type_keyword_token(then);
 }
 
 JAI_NOINLINE checked_result<expression_ptr> parser::operator_rest(expression_ptr left, int min_precedence, size_t operand_start) {
@@ -4168,7 +4156,7 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::declaration_rest() {
         }
         if (after != current_ && after + 1 < stream_->size()) {
             const token_type next = (*stream_)[after].type;
-            if (next == token_type::identifier && !instanceof_operator_at(after)) {
+            if (next == token_type::identifier) {
                 const bool is_function = (*stream_)[after + 1].type == token_type::left_paren && !paren_group_ends_statement(after + 1);
                 current_ = savedPos;
                 return is_function ? function_declaration() : variable_declaration();
@@ -4226,7 +4214,7 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::declaration_rest() {
             errors_.resize(errors_before);
             pushed_back_token_ = pushed_before;
             generic_uses_.resize(uses_before);
-        } else if (check(token_type::identifier) && !instanceof_operator_at(current_)) {
+        } else if (check(token_type::identifier)) {
             // Pattern: identifier identifier - a declaration. A '(' after the second
             // identifier makes it a class-typed free function (C++ return-type-first,
             // same as the namespace path); otherwise a variable: Point p; / Point mk() {...}
@@ -4980,7 +4968,7 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::unterminated_declaration(bo
         auto type_probe = parse_type();
         if (type_probe && errors_.size() == errors_before) {
             const bool binary_and = match(token_type::ampersand) && condition && !keyword_type;
-            declares = check(token_type::identifier) && !instanceof_operator_at(current_) &&
+            declares = check(token_type::identifier) &&
                        (!binary_and || (current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::equal));
         }
         current_ = type_start;

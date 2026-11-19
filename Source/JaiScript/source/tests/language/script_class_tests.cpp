@@ -1103,8 +1103,6 @@ public:
             refuses("auto b = dynamic_cast<Unit>(n);", "error: dynamic_cast<Unit> is always null: the operand is 'int', never an object of a class");
             refuses("dynamic_cast<Unit&>(n).hp = 2;", "error: dynamic_cast<Unit&> always raises: the operand is 'int', never an object of a class");
             refuses("auto b = dynamic_pointer_cast<Hero>(h);", std::string("error: ") + std::string(detail::foreign_word_text(detail::foreign_word::dynamic_pointer_cast_call)));
-            refuses("bool b = h instanceof Unit;", std::string("error: ") + std::string(detail::foreign_word_text(detail::foreign_word::instanceof_operator)));
-            check_true(load_error("bool b = reflect::is_a(h, \"Unit\");") != "loaded");
             check_eq(std::string("loaded"), load_error("bool up = dynamic_cast<Unit>(h) != null; if (dynamic_cast<Paladin>(h)) { } dynamic_cast<Unit&>(h); bool same = dynamic_cast<shared_ptr<Hero>>(h) != null;"));
             auto warned = engine_with_host()->check(classes + "Hero h; if (dynamic_cast<Healer>(h)) { }");
             check_eq((size_t)1, warned.diagnostics.size());

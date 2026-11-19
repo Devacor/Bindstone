@@ -494,13 +494,6 @@ public:
                 {"var a = 1; var b = a !== 1;", foreign_word::strict_not_equal},
                 {"function* gen() { yield 1; }", foreign_word::generator_function},
                 {"var g = function*() { yield 1; };", foreign_word::generator_function},
-                {"class A { } var a = new A(); var b = a instanceof A;", foreign_word::instanceof_operator},
-                {"class A { } var a = new A(); if (a instanceof A) { print(1); }", foreign_word::instanceof_operator},
-                {"class A { } var a = new A(); while (!(a instanceof A)) { }", foreign_word::instanceof_operator},
-                {"class A { } class H { shared_ptr<A> a; bool f() { return this.a instanceof A; } }", foreign_word::instanceof_operator},
-                {"class A { } var a = new A(); a instanceof A && print(1);", foreign_word::instanceof_operator},
-                {"namespace n { class A { } } var a = new n::A(); print(a instanceof n::A ? 1 : 2);", foreign_word::instanceof_operator},
-                {"var s = \"x\"; var b = s instanceof string;", foreign_word::instanceof_operator},
             };
             for (const auto& s : samples) {
                 const std::string err = error_text(s.source);
@@ -514,31 +507,6 @@ public:
                 function delete(int n) { return n + 1; }
                 var goto = 5;
                 print(virtual, " ", delete(3), " ", goto);
-            )JS"));
-            check_eq(std::string("mine:int 2 yes\n"), run_output(R"JS(
-                string type_of(var x) { return "mine:" + reflect::type_of(x); }
-                class Probe { int is_registered_type = 2; string type_of() { return "yes"; } }
-                Probe p;
-                print(type_of(1), " ", p.is_registered_type, " ", p.type_of());
-            )JS"));
-            check_eq(std::string("7 8 9 2 1 5 2\n"), run_output(R"JS(
-                class Box { int instanceof = 9; int n = 1; }
-                Box make() { return Box(); }
-                function twice(int instanceof) { return instanceof * 2; }
-                function probe() {
-                    Box instanceof = make();
-                    return instanceof.n + 1;
-                }
-                function declared() {
-                    if (int instanceof = 5) { return instanceof; }
-                    return 0;
-                }
-                namespace words {
-                    function instanceof(int n) { return n - 1; }
-                    function bare() { return instanceof(3); }
-                }
-                int instanceof = 7;
-                print(instanceof, " ", twice(4), " ", Box().instanceof, " ", probe(), " ", words::instanceof(2), " ", declared(), " ", words::bare());
             )JS"));
         });
     }

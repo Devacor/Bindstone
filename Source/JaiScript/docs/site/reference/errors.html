@@ -769,7 +769,6 @@ try {
 <tr><td><code>class B extends A</code></td><td><code>JaiScript has no 'extends': derive with class Name : Base</code></td></tr>
 <tr><td><code>a === b</code> · <code>a !== b</code></td><td><code>JaiScript has no '===': == never converts between types, so a == b already compares without coercion</code> (<code>'!=='</code> alike)</td></tr>
 <tr><td><code>function* g()</code></td><td><code>JaiScript has no 'function*': a generator is a coroutine, coroutine name(...) { yield v; }</code></td></tr>
-<tr><td><code>x instanceof T</code></td><td><code>JaiScript has no 'instanceof': if (dynamic_cast&lt;T&gt;(x)) tests whether x is a T (the cast is x as a shared_ptr&lt;T&gt;, null when it is not one), and reflect::is_instance_of(x, "T") answers true or false</code></td></tr>
 <tr><td><code>dynamic_pointer_cast&lt;T&gt;(x)</code></td><td><code>JaiScript has no 'dynamic_pointer_cast': dynamic_cast&lt;T&gt;(x) is x as a shared_ptr&lt;T&gt;, null when it is not one</code></td></tr>
 <tr><td><code>[...a, 3]</code>, <code>f(...args)</code></td><td><code>JaiScript has no spread '...': join arrays with array::concat(a, b) (a.concat(b) appends in place), and pass arguments one by one</code></td></tr>
 <tr><td><code>if (a = b)</code>, <code>while (a = b)</code></td><td><code>assignment used as a condition: write '==' to compare, or '((a = b))' with parentheses of its own to assign</code></td></tr>

@@ -421,7 +421,6 @@ Each is recognized only in that position, so a script using one of these words a
 | `a !== b` | after `!=` | `JaiScript has no '!==': != never converts between types, so a != b already compares without coercion` |
 | `function* g()`, `function*()` | declaration or expression | `JaiScript has no 'function*': a generator is a coroutine, coroutine name(...) { yield v; }` |
 | `[...a, 3]`, `f(...args)` | an expression | `JaiScript has no spread '...': join arrays with array::concat(a, b) (a.concat(b) appends in place), and pass arguments one by one` |
-| `x instanceof T` | after an operand, a type's name after the word | `JaiScript has no 'instanceof': if (dynamic_cast<T>(x)) tests whether x is a T (the cast is x as a shared_ptr<T>, null when it is not one), and reflect::is_instance_of(x, "T") answers true or false` |
 | `dynamic_pointer_cast<T>(x)` | expression start, before `<` | `JaiScript has no 'dynamic_pointer_cast': dynamic_cast<T>(x) is x as a shared_ptr<T>, null when it is not one` |
 | `struct P { ... };` | statement or member start, before a name and `{`, `:` or `;` | `JaiScript has no 'struct': write class Name { ... }; its members start public` |
 | `int* p, T* p = e, void f(T* p)` | after a type; at statement start `T* p` before `=` or a function's `(`, and before `;` when the unit declares T | `JaiScript has no pointer types: hold a value as T x, share an object as shared_ptr<T>, and pass one to change it as T&` |

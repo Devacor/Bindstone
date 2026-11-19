@@ -760,6 +760,11 @@ bool parser::apply_using_declarations(const std::vector<token>& in, std::vector<
                 std::vector<token> target(in.begin() + static_cast<std::ptrdiff_t>(start), in.begin() + static_cast<std::ptrdiff_t>(j));
                 const std::string_view last = target.back().lexeme;
                 const size_t cut = last.rfind("::");
+                if (target.size() == 1 && cut == std::string_view::npos && j < n && in[j].type == token_type::equal) {
+                    report_foreign(detail::foreign_word::using_alias, target.back());
+                    ok = false;
+                    break;
+                }
                 if (target.size() == 1 && cut == std::string_view::npos) {
                     report_error("'using" + std::string(" ") + std::string(last) + "' names no namespace: a using declaration takes a qualified name (using ns::name;)", in[start]);
                     ok = false;
@@ -1156,6 +1161,7 @@ void parser::report_error(const std::string& message, const token& token) {
 }
 
 void parser::report_error_at(const std::string& message, const source_location& at) {
+    if (errors_.size() >= foreign_stop_) { return; }   // what follows a foreign construct is the construct's own text, not more errors
     errors_.push_back({at, message});
 }
 
@@ -1452,6 +1458,10 @@ JAI_NOINLINE checked_result<expression_ptr> parser::primary_rest() {
 
     if (arrow_function_ahead()) {
         return arrow_function_expression();
+    }
+    if (std_qualifier_ahead()) {
+        stop_at_foreign(detail::foreign_word::std_namespace, peek());
+        return make_error_code(parse_error_code::syntax_error);
     }
     if (check(token_type::identifier) && peek().lexeme == "const_cast" && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::less) {
         report_foreign(detail::foreign_word::const_cast_call, peek());
@@ -2206,6 +2216,19 @@ JAI_NOINLINE checked_result<expression_ptr> parser::dynamic_cast_expression() {
 
 // Type parsing
 checked_result<type_info_ptr> parser::parse_type() {
+    auto type = parse_type_head();
+    if (type && check(token_type::star) && !pushed_back_token_ && current_ + 1 < stream_->size()) {
+        const token_type next = (*stream_)[current_ + 1].type;
+        if (next == token_type::identifier || next == token_type::comma || next == token_type::right_paren || next == token_type::greater ||
+            next == token_type::star || next == token_type::ampersand) {
+            stop_at_foreign(detail::foreign_word::pointer_type, peek());
+            return make_error_code(parse_error_code::syntax_error);
+        }
+    }
+    return type;
+}
+
+checked_result<type_info_ptr> parser::parse_type_head() {
     stack_.guard(peek().location);
     switch (peek().type) {
         case token_type::array_keyword:
@@ -2347,6 +2370,17 @@ JAI_NOINLINE checked_result<type_info_ptr> parser::named_type() {
     if (check(token_type::identifier) && peek().lexeme == "double") {
         advance();  // consume "double"
         return builtin_type("double", store_type_info(type_info::make_float(*symbolizer_)));
+    }
+
+    if (check(token_type::identifier)) {
+        if (const auto word = foreign_type_word(peek().lexeme)) {
+            stop_at_foreign(*word, peek());
+            return make_error_code(parse_error_code::syntax_error);
+        }
+        if (std_qualifier_ahead()) {
+            stop_at_foreign(detail::foreign_word::std_namespace, peek());
+            return make_error_code(parse_error_code::syntax_error);
+        }
     }
 
     // User-defined type (potentially templated)
@@ -7511,12 +7545,65 @@ void parser::report_foreign(detail::foreign_word w, const token& at) {
     report_error(std::string(detail::foreign_word_text(w)), at);
 }
 
+void parser::stop_at_foreign(detail::foreign_word w, const token& at) {
+    report_foreign(w, at);
+    foreign_stop_ = errors_.size();
+    current_ = stream_->size() - 1;
+    pushed_back_token_.reset();
+}
+
+// The name is the script's own when this unit declares it
+bool parser::unit_declares_type_name(std::string_view name) const {
+    for (size_t i = 0; i + 1 < stream_->size(); ++i) {
+        const token_type k = (*stream_)[i].type;
+        if ((k == token_type::class_keyword || k == token_type::enum_keyword || k == token_type::namespace_keyword) &&
+            (*stream_)[i + 1].type == token_type::identifier && (*stream_)[i + 1].lexeme == name) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::optional<detail::foreign_word> parser::foreign_type_word(std::string_view name) const {
+    const std::optional<detail::foreign_word> word = name == "unsigned" ? detail::foreign_word::unsigned_type
+                                                   : name == "long" ? detail::foreign_word::long_type
+                                                   : name == "short" ? detail::foreign_word::short_type
+                                                   : std::optional<detail::foreign_word>{};
+    return word && !unit_declares_type_name(name) ? word : std::nullopt;
+}
+
+bool parser::std_qualifier_ahead() const {
+    return check(token_type::identifier) && peek().lexeme == "std" && current_ + 1 < stream_->size() &&
+           (*stream_)[current_ + 1].type == token_type::colon_colon && !unit_declares_type_name("std");
+}
+
 bool parser::foreign_word_at_statement() {
     const token& t = peek();
     if (t.type != token_type::identifier || current_ + 1 >= stream_->size()) return false;
     const token& next = (*stream_)[current_ + 1];
     const bool declaration_follows = next.type == token_type::identifier || is_type_keyword_token(next.type) || next.type == token_type::const_keyword ||
                                      next.type == token_type::static_keyword;
+    const token_type after_next = current_ + 2 < stream_->size() ? (*stream_)[current_ + 2].type : token_type::eof;
+    std::optional<detail::foreign_word> stop;
+    if (t.lexeme == "struct" && next.type == token_type::identifier &&
+        (after_next == token_type::left_brace || after_next == token_type::colon || after_next == token_type::semicolon)) {
+        stop = detail::foreign_word::struct_declaration;
+    } else if (t.lexeme == "typedef" && declaration_follows) {
+        stop = detail::foreign_word::typedef_declaration;
+    } else if (declaration_follows && next.type != token_type::static_keyword) {
+        stop = foreign_type_word(t.lexeme);
+    } else if (next.type == token_type::star && after_next == token_type::identifier && current_ + 3 < stream_->size()) {
+        // T* p; (T a class this unit declares), T* p = e; T* f(...) { }: x * y; stays the expression it is
+        const token_type then = (*stream_)[current_ + 3].type;
+        if ((then == token_type::semicolon && unit_declares_type_name(t.lexeme)) || then == token_type::equal ||
+            (then == token_type::left_paren && !paren_group_ends_statement(current_ + 3))) {
+            stop = detail::foreign_word::pointer_type;
+        }
+    }
+    if (stop) {
+        stop_at_foreign(*stop, t);
+        return true;
+    }
     if (t.lexeme == "template" && next.type == token_type::less) {
         report_foreign(detail::foreign_word::template_prefix, t);
         return true;

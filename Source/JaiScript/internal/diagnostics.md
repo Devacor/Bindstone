@@ -423,6 +423,17 @@ Each is recognized only in that position, so a script using one of these words a
 | `[...a, 3]`, `f(...args)` | an expression | `JaiScript has no spread '...': join arrays with array::concat(a, b) (a.concat(b) appends in place), and pass arguments one by one` |
 | `x instanceof T` | after an operand, a type's name after the word | `JaiScript has no 'instanceof': if (dynamic_cast<T>(x)) tests whether x is a T (the cast is x as a shared_ptr<T>, null when it is not one), and reflect::is_instance_of(x, "T") answers true or false` |
 | `dynamic_pointer_cast<T>(x)` | expression start, before `<` | `JaiScript has no 'dynamic_pointer_cast': dynamic_cast<T>(x) is x as a shared_ptr<T>, null when it is not one` |
+| `struct P { ... };` | statement or member start, before a name and `{`, `:` or `;` | `JaiScript has no 'struct': write class Name { ... }; its members start public` |
+| `int* p, T* p = e, void f(T* p)` | after a type; at statement start `T* p` before `=` or a function's `(`, and before `;` when the unit declares T | `JaiScript has no pointer types: hold a value as T x, share an object as shared_ptr<T>, and pass one to change it as T&` |
+| `#define N 4` | the lexer, through the end of the directive | `JaiScript has no '#define': write const int N = 4; for a constant and a function for a macro` |
+| `typedef int id;` | statement or member start, before a type or name | `JaiScript has no 'typedef': write the type itself, or make a class that holds it` |
+| `using X = int;` | a using declaration | `JaiScript has no type aliases ('using X = T'): write the type itself, or make a class that holds it` |
+| `unsigned int a` | a type, unless the unit declares the name | `JaiScript has no 'unsigned': int is a signed 64-bit integer, and array<uint8> holds bytes` |
+| `long a` | a type, unless the unit declares the name | `JaiScript has no 'long': int is already 64 bits` |
+| `short a` | a type, unless the unit declares the name | `JaiScript has no 'short': write int` |
+| `std::vector<int>, std::cout` | a type or expression, unless the unit declares `std` | `JaiScript has no 'std::': write array<T> for vector, map<K, V> for map, string for string and print(...) for cout` |
+| `a.push_back(v)`, `a.pop_back()`, `a.emplace_back(v)` on an array | the missing-member error | `...: write a.push(v)`, `...: write a.pop()`, `...: construct the value and push it: a.push(T(args))` |
+| `s.c_str()` on a string | the missing-member error | `...: a string is already its text: pass s itself` |
 
 `let` is not on the list: it is a synonym of `var`.
 

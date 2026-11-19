@@ -770,6 +770,17 @@ try {
 <tr><td><code>x instanceof T</code></td><td><code>JaiScript has no 'instanceof': if (dynamic_cast&lt;T&gt;(x)) tests whether x is a T (the cast is x as a shared_ptr&lt;T&gt;, null when it is not one), and reflect::is_instance_of(x, "T") answers true or false</code></td></tr>
 <tr><td><code>dynamic_pointer_cast&lt;T&gt;(x)</code></td><td><code>JaiScript has no 'dynamic_pointer_cast': dynamic_cast&lt;T&gt;(x) is x as a shared_ptr&lt;T&gt;, null when it is not one</code></td></tr>
 <tr><td><code>[...a, 3]</code>, <code>f(...args)</code></td><td><code>JaiScript has no spread '...': join arrays with array::concat(a, b) (a.concat(b) appends in place), and pass arguments one by one</code></td></tr>
+<tr><td><code>struct P { ... };</code></td><td><code>JaiScript has no 'struct': write class Name { ... }; its members start public</code></td></tr>
+<tr><td><code>int* p, T* p = e, void f(T* p)</code></td><td><code>JaiScript has no pointer types: hold a value as T x, share an object as shared_ptr&lt;T&gt;, and pass one to change it as T&amp;</code></td></tr>
+<tr><td><code>#define N 4</code></td><td><code>JaiScript has no '#define': write const int N = 4; for a constant and a function for a macro</code></td></tr>
+<tr><td><code>typedef int id;</code></td><td><code>JaiScript has no 'typedef': write the type itself, or make a class that holds it</code></td></tr>
+<tr><td><code>using X = int;</code></td><td><code>JaiScript has no type aliases ('using X = T'): write the type itself, or make a class that holds it</code></td></tr>
+<tr><td><code>unsigned int a</code></td><td><code>JaiScript has no 'unsigned': int is a signed 64-bit integer, and array&lt;uint8&gt; holds bytes</code></td></tr>
+<tr><td><code>long a</code></td><td><code>JaiScript has no 'long': int is already 64 bits</code></td></tr>
+<tr><td><code>short a</code></td><td><code>JaiScript has no 'short': write int</code></td></tr>
+<tr><td><code>std::vector&lt;int&gt;, std::cout</code></td><td><code>JaiScript has no 'std::': write array&lt;T&gt; for vector, map&lt;K, V&gt; for map, string for string and print(...) for cout</code></td></tr>
+<tr><td><code>a.push_back(v)</code> · <code>a.pop_back()</code> · <code>a.emplace_back(v)</code></td><td><code>no member 'push_back' on 'array&lt;int&gt;': write a.push(v)</code> · <code>...: write a.pop()</code> · <code>...: construct the value and push it: a.push(T(args))</code>; at run time <code>array has no member 'push_back': write a.push(v)</code></td></tr>
+<tr><td><code>s.c_str()</code></td><td><code>no member 'c_str' on 'string': a string is already its text: pass s itself</code></td></tr>
 </tbody></table></div>
 <p>Other parse errors in the same voice:</p>
 <ul>

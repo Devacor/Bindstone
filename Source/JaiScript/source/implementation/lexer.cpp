@@ -1,5 +1,6 @@
 #include "../../include/jaiscript/detail/lexer.hpp"
 #include "../../include/jaiscript/detail/string_symbolizer.hpp"
+#include "../../include/jaiscript/detail/foreign_keyword.hpp"
 #include "../../include/jaiscript/detail/format_spec.hpp"
 #include "../../include/jaiscript/detail/float_text.hpp"
 #include <cctype>
@@ -214,6 +215,10 @@ token lexer::next_token() {
             token_column_ = hash_column;
             if (next.type == token_type::identifier) {
                 const std::string name(next.lexeme);
+                if (name == "define") {
+                    for (char last = 0; !is_at_end() && (peek() != '\n' || last == '\\'); ) { const char c = advance(); if (c != '\r') { last = c; } }
+                    return error_token(std::string(detail::foreign_define_text));
+                }
                 return error_token("unexpected '#' before '" + name + "': JaiScript has no length operator; write " + name + ".size()");
             }
             return error_token("unexpected '#': it begins only #include, #import and a first-line #! shebang");

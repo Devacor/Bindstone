@@ -4835,6 +4835,10 @@ private:
         const auto& ids = eng_.builtin_method_ids(kind);
         if (ids.count(eng_.symbolize(m->member))) { return; }
         if (kind == 1) { map_dot_key(m); return; }
+        if (const std::string_view hint = detail::foreign_member_text(ctype_name(recv), m->member); !hint.empty()) {
+            diag(diag_level::error, m->location, "no member '" + std::string(m->member) + "' on '" + ctype_name(recv) + "': " + std::string(hint));
+            return;
+        }
         std::string best;
         size_t best_distance = 3;
         for (const uint64_t id : ids) {

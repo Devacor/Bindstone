@@ -73,6 +73,7 @@ namespace jai {
         void check_reload_hook(const jai::declaration& d, bool& seen);
         std::string filename_;
         size_t current_ = 0;
+        size_t foreign_stop_ = SIZE_MAX;   // the error count at which a foreign construct ended the parse
         struct parse_diagnostic {
             source_location at;
             std::string message;
@@ -226,6 +227,11 @@ namespace jai {
         bool foreign_word_at_statement();
         bool instanceof_operator_at(size_t at) const;
         void report_foreign(detail::foreign_word w, const token& at);
+        // The construct's one error ends the parse: its remains would only report errors of their own
+        void stop_at_foreign(detail::foreign_word w, const token& at);
+        bool unit_declares_type_name(std::string_view name) const;
+        std::optional<detail::foreign_word> foreign_type_word(std::string_view name) const;
+        bool std_qualifier_ahead() const;
         
         // expression parsing (precedence climbing)
         checked_result<expression_ptr> expression();
@@ -309,6 +315,7 @@ namespace jai {
         checked_result<expression_ptr> parse_map_literal();
         expression_ptr identifier_map_key();
         checked_result<type_info_ptr> parse_type();
+        checked_result<type_info_ptr> parse_type_head();
         // the generic types nest: each parses in its own frame and builds its type_info in another (a type_info is large)
         checked_result<type_info_ptr> array_type();
         checked_result<type_info_ptr> map_type();

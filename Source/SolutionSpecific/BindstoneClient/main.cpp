@@ -17,6 +17,11 @@
 #include <filesystem>
 #include <fstream>
 #include <cstdlib>
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 #include <jaiscript/serialization/json_archive.hpp>
 #include "fast_json.hpp"
@@ -32,6 +37,29 @@
 // (std::map<script_value,script_value>) vs the flat arena parser, same input, same run.
 // This quantifies, in the real engine, how much of a JaiScript scene load is the DOM build
 // and how much a flat DOM would save. Run: BindstoneClient.exe -bench
+//A folder of this process alone: two clients checking themselves at once must not share a scratch file.
+static const std::filesystem::path& processScratchDirectory() {
+	struct ScratchDirectory {
+		std::filesystem::path path;
+		ScratchDirectory() :
+#ifdef _WIN32
+			path(std::filesystem::temp_directory_path() / ("bindstone_" + std::to_string(_getpid()))) {
+#else
+			path(std::filesystem::temp_directory_path() / ("bindstone_" + std::to_string(getpid()))) {
+#endif
+
+			std::error_code ignored;
+			std::filesystem::create_directories(path, ignored);
+		}
+		~ScratchDirectory() {
+			std::error_code ignored;
+			std::filesystem::remove_all(path, ignored);
+		}
+	};
+	static const ScratchDirectory scratch;
+	return scratch.path;
+}
+
 static void RunJsonParseBenchmark(jai::engine* eng) {
 	const char* candidates[] = {
 		"Assets/Scenes/map.scene",
@@ -470,7 +498,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 	expect(std::abs(framedBounds.width - authoredBounds.width) > 1.0f || !sameXY(a_app.scene()->worldPosition(), authoredPosition), "framing the scene moves the camera");
 	expect(sameXY(a_app.scene()->position(), authoredPosition) && sameXY(a_app.scene()->scale(), authoredScale), "the camera leaves the document root's transform alone");
 
-	auto savedFile = (std::filesystem::temp_directory_path() / "workbench_selftest.scene").string();
+	auto savedFile = (processScratchDirectory() / "workbench_selftest.scene").string();
 	expect(a_app.saveScene(savedFile), "the scene saves");
 	try {
 		auto saved = MV::Scene::Node::load(savedFile, a_managers.services, false);
@@ -803,7 +831,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(std::distance(a_app.scene()->begin(), a_app.scene()->end()) == countBefore + 1 && a_app.selected() == copy, "redo puts the same copy back, selected");
 		pressWithControl(SDLK_z);
 
-		auto historyFile = (std::filesystem::temp_directory_path() / "workbench_selftest_history.scene").string();
+		auto historyFile = (processScratchDirectory() / "workbench_selftest_history.scene").string();
 		auto starred = [&a_app]() { return a_app.title().find('*') != std::string::npos; };
 		expect(a_app.saveScene(historyFile) && !a_app.modified() && !starred(), "a save leaves the scene unmodified and its title plain");
 		moveBy(last, MV::point(12.0f, 0.0f));
@@ -867,7 +895,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			a_app.select(idleView);
 			expect(a_app.deleteSelected() && !idleView->parent() && !buttonComponent->idleNode(), "deleting a node clears the references the scene holds to it");
 			a_app.runFrames(3);
-			auto referenceFile = (std::filesystem::temp_directory_path() / "workbench_selftest_reference.scene").string();
+			auto referenceFile = (processScratchDirectory() / "workbench_selftest_reference.scene").string();
 			expect(a_app.saveScene(referenceFile), "the scene saves after the delete");
 			try {
 				auto written = *std::prev(MV::Scene::Node::load(referenceFile, a_managers.services, false)->end());
@@ -1034,7 +1062,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(history.position() == 4 && captionStarts("4 / 4"), "a position typed but not entered is dropped when the field is left, got " + strip.caption());
 
 		expect(history.savedPosition() == std::optional<size_t>(0), "the saved mark sits where the scene was loaded");
-		auto stripFile = (std::filesystem::temp_directory_path() / "workbench_selftest_strip.scene").string();
+		auto stripFile = (processScratchDirectory() / "workbench_selftest_strip.scene").string();
 		expect(a_app.saveScene(stripFile) && history.savedPosition() == std::optional<size_t>(4), "a save moves the saved mark to the handle");
 		std::error_code stripIgnored;
 		std::filesystem::remove(stripFile, stripIgnored);
@@ -1098,7 +1126,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		gizmoLayer.rotateSelected(40.0f, true);
 		expect(a_app.rotationSnap() == 30.0f && std::abs(std::remainder(subject->rotation().z, 30.0f)) < 0.001f, "Rotation snap sets the degrees a snapped turn lands on");
 
-		auto settingsFile = (std::filesystem::temp_directory_path() / "workbench_selftest_settings.txt").string();
+		auto settingsFile = (processScratchDirectory() / "workbench_selftest_settings.txt").string();
 		std::filesystem::remove(settingsFile, stripIgnored);
 		a_app.useSettingsFile(settingsFile);
 		expect(a_app.undoSteps() == 2 && a_app.gridSize().width == 50.0f, "a missing settings file changes nothing");
@@ -1797,7 +1825,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.runFrames(5);
 	}
 
-	auto savedMap = (std::filesystem::temp_directory_path() / "workbench_selftest_map.scene").string();
+	auto savedMap = (processScratchDirectory() / "workbench_selftest_map.scene").string();
 	expect(a_app.saveScene(savedMap), "the map saves during a preview");
 	try {
 		auto saved = MV::Scene::Node::load(savedMap, a_managers.services, false);
@@ -1849,7 +1877,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(a_app.dockLayout(allDocked) && a_app.dockLayout() == allDocked, "a layout with every panel docked applies from text");
 		a_app.runFrames(3);
 
-		auto layoutSettings = (std::filesystem::temp_directory_path() / "workbench_selftest_layout_settings.txt").string();
+		auto layoutSettings = (processScratchDirectory() / "workbench_selftest_layout_settings.txt").string();
 		std::filesystem::remove(layoutSettings, ignored);
 		a_app.useSettingsFile(layoutSettings);
 
@@ -1867,7 +1895,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(widened.rfind("H 0.18 ", 0) != 0 && widened.rfind("H 0.", 0) == 0 && widened.find("[Hierarchy,File]") != std::string::npos, "dragging the outer splitter changes its ratio: " + widened);
 		expect(MV::fileContents(layoutSettings).find("layout = " + widened) != std::string::npos, "and letting go writes it");
 
-		auto layoutFile = (std::filesystem::temp_directory_path() / "workbench_selftest.bindlayout").string();
+		auto layoutFile = (processScratchDirectory() / "workbench_selftest.bindlayout").string();
 		expect(a_app.saveDockLayout(layoutFile), "the layout saves to a file");
 		a_app.resetDockLayout();
 		expect(a_app.dockLayout() == starting, "Reset Layout returns to the starting layout: " + a_app.dockLayout());
@@ -2006,7 +2034,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			}
 		};
 
-		auto folder = std::filesystem::temp_directory_path() / "workbench_selftest_bindsnaps";
+		auto folder = processScratchDirectory() / "workbench_selftest_bindsnaps";
 		std::error_code ignored;
 		std::filesystem::remove_all(folder, ignored);
 		std::filesystem::create_directories(folder / "inner", ignored);
@@ -2075,7 +2103,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			pushKey(SDLK_RETURN);
 			a_app.runFrames(3);
 		};
-		auto linkedSceneFile = (std::filesystem::temp_directory_path() / "workbench_selftest_linked.scene").string();
+		auto linkedSceneFile = (processScratchDirectory() / "workbench_selftest_linked.scene").string();
 		auto savedScene = [&]() {
 			return a_app.saveScene(linkedSceneFile) ? MV::fileContents(linkedSceneFile, true) : std::string();
 		};
@@ -2542,7 +2570,7 @@ static int RunAssetVerification() {
 		"Assets/Prefabs/SimpleButton.bindsnap",
 	};
 	int passed = 0, failed = 0;
-	const auto scratchDirectory = std::filesystem::temp_directory_path() / "bindstone_verify";
+	const auto scratchDirectory = processScratchDirectory();
 	auto saveJsonToScratch = [&](const std::shared_ptr<MV::Scene::Node>& a_root, const char* a_name) {
 		auto file = (scratchDirectory / a_name).string();
 		a_root->saveJai(file, managers.services, false);

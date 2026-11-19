@@ -10,6 +10,7 @@
 #include "implementation/value_text.cpp"
 #include "implementation/environment.cpp"
 #include "implementation/engine.cpp"
+#include "implementation/load_report.cpp"
 #include "implementation/lexer.cpp"
 #include "implementation/parser.cpp"
 #include "implementation/builtin_methods.cpp"

@@ -1199,6 +1199,7 @@ namespace jai::vm {
         void debug_stop_at(const ast_node* node);   // a statement the backend runs outside any chunk (a namespace's class)
 
         // the compiled body of a function object, cached per (body, unit): the unit is the function's own
+        std::shared_ptr<chunk> compile_unit(const std::vector<declaration_ptr>& declarations);   // a program's top level
         std::shared_ptr<chunk> chunk_for_body(std::string_view name,
                                               const std::vector<parameter>& params,
                                               const std::shared_ptr<block_stmt>& body,

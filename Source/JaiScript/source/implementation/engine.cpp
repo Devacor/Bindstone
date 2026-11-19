@@ -25,6 +25,8 @@
 #include <jaiscript/detail/parallel_transform.hpp>
 #include <jaiscript/thread_pool.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>   // jaibite save/load
+#include <jaiscript/core/load_report.hpp>
+#include <jaiscript/detail/load_collector.hpp>
 #include <jaiscript/detail/structural_equality.hpp>
 #include <jaiscript/detail/format_spec.hpp>       // format_value builtin (template-string specs)
 #include <jaiscript/detail/value_text.hpp>
@@ -1774,6 +1776,7 @@ struct engine::implementation {
     // Every request of the unit that is not made yet, in order; an instance's own requests follow its request, ahead of its
     // declarations (a base's instance before the class that derives from it). True when the declarations changed.
     bool expand_generics(engine& self, std::vector<declaration_ptr>& decls, std::vector<closure_stamp>& files) {
+        detail::load_phase_scope reporting(collector(), load_phase::generics);
         bool changed = false;
         generic_request_index requests;   // every request there is, whatever its place: an instance's chain of askers reads it
         for (const auto& d : decls) {
@@ -1996,6 +1999,9 @@ struct engine::implementation {
     // caller whether to rewrite the cache afterwards.
     std::shared_ptr<script_cache_entry> acquire_entry(engine& self, const std::string& content, const std::string& sourcePath,
                                                       std::filesystem::path& cacheFile, bool& cacheFresh) {
+        detail::load_collector* report = collector();
+        detail::load_phase_scope reporting(report, sourcePath, load_phase::other);
+        if (report) { report->row(report->row_of(sourcePath)).source_bytes = content.size(); }
         cacheFile.clear();
         cacheFresh = false;
         std::filesystem::path shipped;   // with a cache directory set, the .cache beside the source is read, never written
@@ -2003,9 +2009,12 @@ struct engine::implementation {
             cacheFile = jaibite_cache_file(sourcePath);
             if (!cacheFile.empty() && !jaibite_cache_directory_.empty()) { shipped = jaibite_beside_file(sourcePath); }
         }
+        if (report && cacheFile.empty()) { report->note_cache(sourcePath, load_cache::not_cacheable, no_cache_reason(self, sourcePath)); }
         auto cached = find_cached_script(sourcePath, content);
         std::optional<detail::jaibite_source_identity> identity;
         if (cached) {
+            if (report && !cacheFile.empty()) { report->note_cache(sourcePath, load_cache::memory, ""); }
+            detail::load_phase_scope comparing(report, load_phase::freshness);
             cacheFresh = !cacheFile.empty() && (cache_holds(*cached, cacheFile, content) || (!shipped.empty() && cache_holds(*cached, shipped, content)));
         } else if (!cacheFile.empty()) {
             // a cache loads only when it records this exact source; anything else parses below and is rewritten
@@ -2015,10 +2024,16 @@ struct engine::implementation {
         }
         if (!cached) {
             lexer lex(content, &string_symbolizer_, sourcePath);
-            auto tokens = lex.tokenize();
+            auto tokens = [&] {
+                detail::load_phase_scope timed(report, load_phase::lex);
+                return lex.tokenize();
+            }();
             parser prs(tokens, &string_symbolizer_, &self, registeredTemplateTypes);
             prs.source_text(content);
-            auto parse_result = prs.parse();
+            auto parse_result = [&] {
+                detail::load_phase_scope timed(report, load_phase::parse);
+                return prs.parse();
+            }();
             if (!parse_result) {
                 for (const auto& f : prs.spliced_files()) { note_closure_file(f.path, true, f.mtime, f.size); }
                 if (!prs.unsettled_file().empty()) { note_closure_file(prs.unsettled_file(), false, 0, 0); }
@@ -2037,6 +2052,31 @@ struct engine::implementation {
         return cached;
     }
 
+    // Why a source has no cache file to look at (the load report)
+    const char* no_cache_reason(const engine& self, const std::string& sourcePath) const {
+        if (sourcePath == "<script>") { return "source text"; }
+        if (!jaibite_cache_enabled) { return "cache off"; }
+        if (!self.is_enabled(permissions::filesystem)) { return "filesystem off"; }
+        return "no cache path";
+    }
+    // What became of a unit's cache file once its check passed; the unit's reason for keeping none outranks how it was found
+    void note_cache_write(detail::load_collector& report, const script_cache_entry& entry, const std::string& sourcePath,
+                          const std::filesystem::path& cacheFile, bool wanted) {
+        load_report_row& row = report.row(report.row_of(sourcePath));
+        if (!entry.spliced_stamps.empty() || entry.outside_generics) {
+            const char* why = entry.outside_generics ? "another file's generics" : "spliced files";
+            report.note_cache(sourcePath, load_cache::not_cacheable, why);
+            row.cache_write = why;
+        } else if (!wanted) {
+            if (row.cache_write.empty()) { row.cache_write = "up to date"; }
+        } else if (entry.cache_write_failed == cacheFile) {
+            row.cache_write = "failed";
+        } else {
+            row.cache_write = "written";
+            if (row.cache_bytes == 0) { row.cache_bytes = entry.cache_size; }
+        }
+    }
+
     static void note_parse_failure(const parse_error& e, std::string& parse_failures) {
         std::string_view listing = e.what();
         constexpr std::string_view k_header = "parse failed:\n";
@@ -2051,6 +2091,9 @@ struct engine::implementation {
     bool reparse_if_moved(engine& self, std::shared_ptr<script_cache_entry>& held, const std::string& source) {
         if (!parse_moved(*held)) { return false; }
         const std::string path = held->source_path;
+        detail::load_collector* report = collector();
+        detail::load_phase_scope reporting(report, path, load_phase::reparse);
+        detail::load_reparse_scope reparsing(report);
         const detail::text_stamp loaded_under = held->loaded_under;   // the same text, parsed again: no file is read for it
         std::filesystem::path cacheFile;
         bool cacheFresh = false;
@@ -2070,6 +2113,7 @@ struct engine::implementation {
     void collect_closure_units(engine& self, const std::vector<std::string>& paths, std::unordered_set<std::string>& visited,
                                std::vector<closure_unit>& out, std::vector<closure_stamp>& stamps, const std::string& from_file,
                                std::string& parse_failures) {
+        detail::load_phase_scope reporting(collector(), detail::load_collector::k_no_file, load_phase::import_bookkeeping);
         for (const auto& path : paths) {
             closure_unit unit;
             try {
@@ -2127,6 +2171,7 @@ struct engine::implementation {
     // A proof-only walk over an entry (diagnostics off): the program's globals type here, and a class-typed one waits for its class
     // (entry.proofs_deferred; restamp_deferred after an import completes)
     void stamp_proofs(engine& self, script_cache_entry& entry) {
+        detail::load_phase_scope reporting(collector(), entry.source_path, load_phase::proofs);
         detail::check_options o = program_check_options(type_proofs_ ? detail::check_options::proofs_t::stamp : detail::check_options::proofs_t::clear);
         o.diagnostics = false;
         o.stats = &last_proof_stats_;
@@ -2186,6 +2231,8 @@ struct engine::implementation {
     }
 
     void check_entry(engine& self, script_cache_entry& entry, bool want_diagnostics) {
+        detail::load_collector* report = collector();
+        detail::load_phase_scope reporting(report, entry.source_path, load_phase::other);
         gather_entry_constants(entry);
         const uint64_t want_proof_epoch = type_proofs_ ? check_surface_epoch_ : UINT64_MAX;
         // a moved union re-derives a failing verdict (the names it lacked may be there now); a clean one breaking is a reload's
@@ -2200,9 +2247,12 @@ struct engine::implementation {
         if (need_check && entry.stamp_loaded && !remakes && outside_key(self, entry.context.outside) == entry.context.outside_key) {
             entry.check_result = {};   // the loaded stamp's names resolve here as where it was checked
             entry.outside_keyed = true;
+            if (report) { ++report->row(report->current_row()).checks_trusted; }
             std::vector<closure_stamp> generic_files;
             expand_generics(self, entry.declarations, generic_files);   // a cached unit holds its instances: the engine learns what each was made from
         } else if (need_check) {   // the diagnostics walk leaves the proofs alone: the proof pass follows, and it alone reads the program's globals
+            detail::load_phase_scope checking(report, load_phase::check);
+            if (report) { ++report->row(report->current_row()).checks_run; }
             detail::set_aggregate_view(entry.lowering, false);   // diagnostics read the parsed bodies
             detail::check_options o = program_check_options(detail::check_options::proofs_t::leave);
             o.diagnostics = true;
@@ -2235,6 +2285,7 @@ struct engine::implementation {
             entry.checked_union = program_union_epoch_;
         }
         if (need_check || need_proofs) {
+            detail::load_phase_scope proving(report, load_phase::proofs);
             lowering_view(self, checked_declarations(entry), entry.lowering);
             stamp_proofs(self, entry);
             entry.proof_epoch = want_proof_epoch;
@@ -2395,6 +2446,7 @@ struct engine::implementation {
     // mirrors execute_source's hit path — prepare, static-check hook, execute_parsed.
     script_value execute_cache_hit(engine& self, std::shared_ptr<script_cache_entry> held,
                                    const instance_variables& instanceVars, std::string_view source) {
+        detail::load_phase_scope reporting(collector(), held->source_path, load_phase::other);
         binding_gate(self);
         has_executed_ = true;
         load_scope loading(*this);
@@ -2568,6 +2620,7 @@ struct engine::implementation {
             previous = unit_snapshot(self, runner);
         }
         if (!entry.loaded_noted) { note_loaded_unit(held, source); }   // after the re-run test: noting numbers the unit
+        detail::load_phase_scope running(collector(), entry.source_path, load_phase::run);
         script_value result = self.execute_parsed(entry.declarations, compiled_slot, instanceVars, unit_of(entry, source), textual);
         if (previous) { run_reload_hook(self, *entry.reload_hook, runner, std::move(*previous)); }
         return result;
@@ -2993,6 +3046,16 @@ struct engine::implementation {
     // A file's stamp through the host's engine::file_stamp_source, else the file system's
     engine::file_stamp_reading file_stamp_source;
     bool stat_mtime_size(const std::string& path, uint64_t& mtime, uint64_t& size) const {
+        detail::load_collector* report = collector();
+        if (report) [[unlikely]] {
+            detail::load_phase_scope querying(report, load_phase::stamp_query);
+            const bool stamped = query_stamp(path, mtime, size);
+            if (stamped) { report->retarget(report->row_of(path)); }   // a file that is not there has no row
+            return stamped;
+        }
+        return query_stamp(path, mtime, size);
+    }
+    bool query_stamp(const std::string& path, uint64_t& mtime, uint64_t& size) const {
         if (!file_stamp_source) { return stat_file(path, mtime, size); }
         const std::optional<engine::file_stamp> stamp = file_stamp_source(path);
         if (!stamp) { return false; }
@@ -3012,6 +3075,13 @@ struct engine::implementation {
     std::unordered_map<std::string, std::array<load_text, 2>> load_texts_;   // per file, by detail::source_mode
     uint32_t load_depth_ = 0;
     engine::source_file_observing source_file_observer;
+    // The load report while it is on. One replaced in the middle of a load stays until the engine goes: its scopes are still open.
+    std::unique_ptr<detail::load_collector> load_collector_;
+    std::vector<std::unique_ptr<detail::load_collector>> retired_load_collectors_;
+    detail::load_collector* collector() const noexcept {
+        if (!load_collector_) [[likely]] { return nullptr; }
+        return parallel_ && parallel_->active_region ? nullptr : load_collector_.get();
+    }
 
     // What the platform's text mode reads of a file's bytes, as a script always was read: on Windows a "\r\n" is one '\n'
     // and the text ends at a Ctrl-Z; elsewhere the bytes
@@ -3037,6 +3107,12 @@ struct engine::implementation {
     // moved during every read is unsettled: no read of it stands for a version of the file, so nothing is parsed, run or
     // remembered from it. Every stamp the engine remembers for a file is one returned here with the bytes it stands for.
     detail::loaded_source load_source(const std::string& path, detail::source_mode mode) {
+        detail::load_collector* report = collector();
+        detail::load_phase_scope reporting(report, load_phase::source_read);
+        const auto report_row = [&]() -> load_report_row& {   // the file is there: the read is its own
+            report->retarget(report->row_of(path));
+            return report->row(report->current_row());
+        };
         detail::loaded_source result;
         for (int attempt = 0; attempt < detail::k_source_load_tries; ++attempt) {
             detail::text_stamp before;
@@ -3045,6 +3121,7 @@ struct engine::implementation {
             if (before.stamped && load_depth_ > 0) {
                 kept = &load_texts_[path][static_cast<size_t>(mode)];
                 if (kept->held && kept->mtime == before.mtime && kept->size == before.size) {
+                    if (report) { ++report_row().source_reuses; }
                     result.status = detail::loaded_source::state::loaded;
                     result.stamp = before;
                     result.text = kept->text;
@@ -3056,9 +3133,11 @@ struct engine::implementation {
                 ++source_reads_;
                 std::ifstream file(path, std::ios::binary);
                 if (!file.is_open()) { return result; }
+                if (report) { ++report_row().source_reads; }
                 std::stringstream buffer;
                 buffer << file.rdbuf();
                 bytes = std::move(buffer).str();
+                if (report) { report_row().source_bytes = bytes.size(); }
             }
             detail::text_stamp after;
             after.stamped = stat_mtime_size(path, after.mtime, after.size);
@@ -3224,33 +3303,54 @@ struct engine::implementation {
     std::shared_ptr<script_cache_entry> try_load_jaibite_entry(engine& self, const std::filesystem::path& cacheFile,
                                                                const std::string& sourcePath, const std::string& source,
                                                                std::optional<detail::jaibite_source_identity>& identity) {
+        detail::load_collector* report = collector();
+        const auto missed = [&](const char* why) -> std::shared_ptr<script_cache_entry> {
+            if (report) { report->note_cache(sourcePath, load_cache::miss, why); }
+            return nullptr;
+        };
         try {
             uint64_t cacheMtime = 0, cacheSize = 0;
-            if (!stat_cache_file(cacheFile, cacheMtime, cacheSize)) {
-                return nullptr;
+            {
+                detail::load_phase_scope comparing(report, sourcePath, load_phase::freshness);
+                if (!stat_cache_file(cacheFile, cacheMtime, cacheSize)) {
+                    return missed("no file");
+                }
+                if (!identity) { identity = detail::jaibite_identity_of(source); }
             }
-            if (!identity) { identity = detail::jaibite_identity_of(source); }
-            std::ifstream file(cacheFile, std::ios::binary);
-            if (!file.is_open()) {
-                return nullptr;
+            std::vector<uint8_t> bytes;
+            {
+                detail::load_phase_scope reading(report, sourcePath, load_phase::cache_read);
+                std::ifstream file(cacheFile, std::ios::binary);
+                if (!file.is_open()) {
+                    return missed("no file");
+                }
+                bytes.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+                if (report) { report->row(report->current_row()).cache_bytes = bytes.size(); }
             }
-            std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
             uint64_t savedFingerprint = 0;
             detail::jaibite_source_identity recorded;
             if (!detail::read_jaibite_header(bytes.data(), bytes.size(), savedFingerprint, recorded) ||
                 recorded != *identity || savedFingerprint != self.registration_fingerprint()) {
-                return nullptr;
+                if (!report) { return nullptr; }
+                if (bytes.size() < detail::k_jaibite_header_size || std::memcmp(bytes.data(), detail::k_jaibite_magic, 4) != 0) { return missed("corrupt"); }
+                if (std::memcmp(bytes.data() + 4, &detail::k_jaibite_version, 4) != 0) { return missed("format version"); }
+                return missed(recorded != *identity ? "different source" : "fingerprint");
             }
             uint32_t flags = 0;
             detail::jaibite_context context;
-            auto declarations = detail::deserialize_jaibite(bytes.data(), bytes.size(), &self, savedFingerprint, &flags, nullptr, sourcePath, &context);
-            if (namespace_answers(context.namespace_queries) != context.namespace_answers) {
-                return nullptr;   // a namespace class the parse asked about is answered otherwise here: the text parses otherwise
+            std::vector<declaration_ptr> declarations;
+            {
+                detail::load_phase_scope decoding(report, sourcePath, load_phase::decode);
+                declarations = detail::deserialize_jaibite(bytes.data(), bytes.size(), &self, savedFingerprint, &flags, nullptr, sourcePath, &context);
+                if (namespace_answers(context.namespace_queries) != context.namespace_answers) {
+                    return missed("namespace classes");   // a namespace class the parse asked about is answered otherwise here: the text parses otherwise
+                }
+                // jaibite carries structure, not the parser-pass flags (ref-escape,
+                // value-decl naming, transient reads) — re-derive
+                // them exactly like the parse tail does
+                if (detail::run_ast_marking_passes(declarations, &string_symbolizer_)) { entry_stamps = true; }
             }
-            // jaibite carries structure, not the parser-pass flags (ref-escape,
-            // value-decl naming, transient reads) — re-derive
-            // them exactly like the parse tail does
-            if (detail::run_ast_marking_passes(declarations, &string_symbolizer_)) { entry_stamps = true; }
+            if (report) { report->note_cache(sourcePath, load_cache::hit, ""); }
             auto hook = take_reload_hook(declarations);
             auto entry = store_cached_script(sourcePath, source, std::move(declarations));
             adopt_reload_hook(*entry, std::move(hook));
@@ -3266,8 +3366,51 @@ struct engine::implementation {
             entry->cache_unstamped = !entry->stamp_loaded;
             return entry;
         } catch (...) {
-            return nullptr;
+            return missed("corrupt");
         }
+    }
+
+    // What only the program's trees can tell the load report: each file's functions, which were compiled, their encoded size
+    void count_report_functions(const std::vector<declaration_ptr>& declarations, const detail::load_collector& report, const std::string& path, load_report_row& row) const {
+        for (const auto& d : declarations) {
+            if (!d) { continue; }
+            if (d->get_type() == node_type::namespace_decl) {
+                count_report_functions(static_cast<const namespace_decl&>(*d).declarations, report, path, row);
+            } else if (d->get_type() == node_type::class_decl) {
+                std::vector<declaration_ptr> members;
+                for (const auto& m : static_cast<const class_decl&>(*d).members) { members.push_back(m.declaration); }
+                count_report_functions(members, report, path, row);
+            } else if (d->get_type() == node_type::function_decl) {
+                const auto& f = static_cast<const function_decl&>(*d);
+                if (!f.body) { continue; }
+                uint64_t bytes = 0;
+                try {
+                    bytes = detail::ast_writer(string_symbolizer_, true, path).in_body().as_parsed().node_key(f.body.get()).size();
+                } catch (const std::exception&) {
+                }
+                ++row.functions;
+                row.function_bytes += bytes;
+                if (report.body_compiled(f.body.get())) {
+                    ++row.functions_compiled;
+                    row.function_bytes_compiled += bytes;
+                }
+            }
+        }
+    }
+    load_report_summary load_report_snapshot() {
+        detail::load_collector& report = *load_collector_;
+        for (auto& [unit, loaded] : loaded_units_) {   // every text run as source shares the one "<script>" row
+            if (!loaded.entry) { continue; }
+            load_report_row& row = report.row(report.row_of(loaded.entry->source_path));
+            row.functions = row.functions_compiled = row.function_bytes = row.function_bytes_compiled = 0;
+        }
+        for (auto& [unit, loaded] : loaded_units_) {
+            if (!loaded.entry) { continue; }
+            load_report_row& row = report.row(report.row_of(loaded.entry->source_path));
+            detail::aggregate_source_view view(&loaded.entry->lowering);   // what a cache holds: the parsed bodies
+            count_report_functions(loaded.entry->declarations, report, loaded.entry->source_path, row);
+        }
+        return report.summary();
     }
 
     // Best-effort cache write: failures are SILENT (cache is an optimization, never an error — read-only asset dirs,
@@ -4429,6 +4572,7 @@ held_value engine::execute(const std::string& scriptContent, const instance_vari
 }
 
 script_value engine::execute_file_source(const std::string& resolvedPath, const std::string& content) {
+    detail::load_phase_scope reporting(impl->collector(), detail::load_collector::k_no_file, load_phase::other);
     std::error_code ec;
     const std::filesystem::path canonical = is_enabled(permissions::filesystem) ? std::filesystem::weakly_canonical(resolvedPath, ec) : std::filesystem::path();
     implementation::running_root_scope running_root(impl->running_roots_, canonical.empty() || ec ? resolvedPath : canonical.string());
@@ -4488,6 +4632,8 @@ script_value engine::execute_unheld(script_source source) {
 }
 
 script_value engine::execute_source(const std::string& scriptContent, const instance_variables& instanceVars, const std::string& sourcePath, bool textual, std::string_view include_scope, const detail::text_stamp* loaded_under) {
+    detail::load_collector* report = impl->collector();
+    detail::load_phase_scope reporting(report, sourcePath, load_phase::other);
     impl->binding_gate(*this);
     impl->has_executed_ = true;
     implementation::load_scope loading(*impl);
@@ -4530,9 +4676,12 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         // Rewrite a missing/stale/rejected cache AFTER the check hook so a clean check
         // stamps checked_clean, and BEFORE execution on purpose: a runtime error doesn't
         // invalidate a good parse.
-        if (!cacheFile.empty() && (!cacheFresh || cached->restamp) && cached->spliced_stamps.empty() && !cached->outside_generics) {   // a unit with spliced includes keeps no cache: its freshness knows only its own file
+        const bool cacheWanted = !cacheFile.empty() && (!cacheFresh || cached->restamp);
+        if (cacheWanted && cached->spliced_stamps.empty() && !cached->outside_generics) {   // a unit with spliced includes keeps no cache: its freshness knows only its own file
+            detail::load_phase_scope writing(report, load_phase::cache_write);
             impl->write_jaibite_cache(*this, cacheFile, *cached, sourcePath, scriptContent);
         }
+        if (report && !cacheFile.empty()) { impl->note_cache_write(*report, *cached, sourcePath, cacheFile, cacheWanted); }
 
         // a textual include runs under the including unit and compiles once per such unit: the VM's chunk caches belong to one unit
         std::shared_ptr<void>& compiled_slot = textual ? cached->textual_compiled[backend()->current_unit().id] : cached->compiled;
@@ -5030,6 +5179,7 @@ held_value engine::execute_file(const std::string& scriptPath, const instance_va
 script_value engine::execute_file_unheld(const std::string& scriptPath, const instance_variables& instanceVars) {
     auto allowed = require_permission(permissions::filesystem);
     if (!allowed) { throw runtime_error(format_error(allowed)); }
+    detail::load_phase_scope reporting(impl->collector(), detail::load_collector::k_no_file, load_phase::other);
     // File fast lane (parse-avoidance ladder): canonical-path key + one-stat gate. A
     // stamp-valid re-execute touches zero file bytes. Any stamp change, epoch bump or a
     // failed verify falls through to the read below. The unit is attributed to the
@@ -5123,6 +5273,30 @@ void engine::jaibite_cache(bool enabled) {
 
 bool engine::jaibite_cache() const {
     return impl->jaibite_cache_enabled;
+}
+
+void engine::load_report(bool enabled) {
+    if (impl->load_collector_ && impl->load_collector_->active()) { impl->retired_load_collectors_.push_back(std::move(impl->load_collector_)); }
+    impl->load_collector_ = enabled ? std::make_unique<detail::load_collector>() : nullptr;
+}
+
+bool engine::load_report() const {
+    return impl->load_collector_ != nullptr;
+}
+
+void engine::load_report_setup_time(double seconds) {
+    if (impl->load_collector_) { impl->load_collector_->setup_nanoseconds = static_cast<uint64_t>(seconds * 1e9); }
+}
+
+load_report_summary engine::load_report_snapshot() const {
+    if (!impl->load_collector_) { return {}; }
+    load_report_summary result = impl->load_report_snapshot();
+    result.vm = get_backend_type() == backend_type::vm;
+    return result;
+}
+
+detail::load_collector* engine::load_report_collector() const noexcept {
+    return impl->collector();
 }
 
 size_t engine::jaibite_cache_write_failures() const {
@@ -7810,6 +7984,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
     if (!allowed) { return allowed.error_value(); }
     implementation& I = *impl;
     implementation::load_scope loading(I);
+    detail::load_phase_scope reporting(I.collector(), detail::load_collector::k_no_file, load_phase::import_bookkeeping);
     detail::execution_limits& limits = I.limits_;
     const bool always = I.import_behavior == import_behavior::always;
     const bool once = I.import_behavior == import_behavior::once;
@@ -8513,6 +8688,7 @@ std::string detail::unsettled_source_text(const std::string& path) {
 script_value engine::execute_import(const std::string& resolved_path) {
     auto allowed = require_permission(permissions::filesystem);
     if (!allowed) { throw runtime_error(format_error(allowed)); }
+    detail::load_phase_scope reporting(impl->collector(), detail::load_collector::k_no_file, load_phase::import_bookkeeping);
     // Check import behavior
     bool should_import = false;
     

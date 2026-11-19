@@ -46,7 +46,8 @@ namespace jai {
     struct import_site;
     namespace vm { class vm_backend; struct coverage_tables; }
     namespace debug { class controller; class transport; }
-    namespace detail { struct release_machine; struct run_record; struct run_entry_state; struct run_registry; struct engine_access; class pending_binder; }
+    namespace detail { struct release_machine; struct run_record; struct run_entry_state; struct run_registry; struct engine_access; class pending_binder; class load_collector; }
+    struct load_report_summary;
     struct script_namespace_data;
 
     // engine::vm_coverage_summary: the report's class totals as numbers, for a harness that aggregates many runs
@@ -232,6 +233,14 @@ namespace jai {
         // The cache file the engine writes for source_path (empty for a .jaibite source, which keeps none, and for a source
         // outside confine_paths when no cache directory is set)
         std::string jaibite_cache_path(const std::string& source_path) const;
+
+        // Where loading spends its time, per file and per phase (core/load_report.hpp has the rows; `jaiscript --load-report`
+        // prints them). Off by default: each phase boundary then tests one pointer. Turning it on starts an empty report,
+        // turning it off drops it; a snapshot may be taken at any time. No program behaves differently with it on.
+        void load_report(bool enabled);
+        bool load_report() const;
+        void load_report_setup_time(double seconds);   // what the host spent making and registering this engine, shown beside the load
+        load_report_summary load_report_snapshot() const;
 
         // Execute already-read script file contents with jaibite disk-cache maintenance
         // keyed beside resolved_path — for hosts that read files through their own VFS but
@@ -961,6 +970,7 @@ namespace jai {
         detail::loaded_source load_source(const std::string& path, detail::source_mode mode);
         bool stamp_source(const std::string& path, uint64_t& mtime, uint64_t& size) const;
         bool stamps_stand(const std::vector<detail::source_stamp>& stamps) const;
+        detail::load_collector* load_report_collector() const noexcept;   // null while the report is off, and inside a parallel region
 
         // The sleep builtin (detail: script_run.cpp): seconds on the time source; suspends the innermost run when nothing pins it,
         // else blocks. sleep_callee: `function` is the core sleep function (a call of it runs the builtin)

@@ -6,6 +6,7 @@
 // text forms of HTTP (http_text.hpp), SQLite (database.hpp), the console (console.hpp) and the app's sources
 // (sources.hpp) live here, Request and Router are script (lib/spider.jai), Response is the library's spider::Response.
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/core/load_report.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
 #include "../jaiscript/http_transport.hpp"
@@ -78,6 +79,7 @@ struct options {
 	std::string shutdown_token;   // --allow-shutdown TOKEN: a loopback POST /__spider/shutdown carrying it stops the server
 	bool dev = false;             // --dev: error pages carry the error and its trace; lib/ is imported from the checkout
 	bool quiet = false;
+	std::string load_report;      // --load-report[=json]: where the first engine build spent its time, on stderr; empty = off
 };
 
 void print_usage() {
@@ -108,6 +110,8 @@ void print_usage() {
 		"  --backend vm|interp execution backend (default vm)\n"
 		"  --dev               development: an error page shows the error and its trace, and lib/ is imported\n"
 		"                      from the source checkout so an edit to spider.jai applies on the next request\n"
+		"  --load-report       print where the first engine build spent its time, per file and phase, on stderr\n"
+		"                      (--load-report=json: the same as one line of JSON)\n"
 		"  --allow-shutdown T  POST /__spider/shutdown from this machine with the header X-Spider-Shutdown: T\n"
 		"                      stops the server\n"
 		"  --quiet             no request log\n"
@@ -207,6 +211,8 @@ int parse_args(int argc, char** argv, options& opt) {
 			if (opt.shutdown_token.empty()) { return refuse("--allow-shutdown takes a token the shutdown request carries"); }
 		}
 		else if (a == "--dev") { opt.dev = true; }
+		else if (a == "--load-report") { opt.load_report = "table"; }
+		else if (a == "--load-report=json") { opt.load_report = "json"; }
 		else if (a == "--quiet") { opt.quiet = true; }
 		else if (a == "--version" || a == "-v") { std::printf("jai_spider (JaiScript %s, SQLite %s)\n", jai::version().c_str(), sqlite3_libversion()); std::exit(0); }
 		else if (a == "--help" || a == "-h" || a == "/?") { print_usage(); std::exit(0); }
@@ -655,7 +661,7 @@ private:
 		auto record = std::make_shared<spider_host::stamp_record>();
 		auto built = std::make_shared<app_build>();
 		bool library_failed = false;
-		built->eng = build_engine(app_path_, {app_dir_, library_dir()}, record, built->failure, library_failed);
+		built->eng = build_engine(app_path_, {app_dir_, library_dir()}, record, built->failure, library_failed, at_start && !opt_.load_report.empty());
 		built->watched = record->files();
 		if (library_failed && at_start) {
 			console_.err(colors_.red("jai_spider: lib/spider.jai did not load:") + "\n" + built->failure + "\n");
@@ -696,7 +702,8 @@ private:
 
 	// the engine with the host's registrations, the library and the app imported; null with the failure on error
 	std::shared_ptr<jai::engine> build_engine(const fs::path& app, const std::vector<fs::path>& include_paths,
-			const std::shared_ptr<spider_host::stamp_record>& record, std::string& failure, bool& library_failed) {
+			const std::shared_ptr<spider_host::stamp_record>& record, std::string& failure, bool& library_failed, bool report_load = false) {
+		const auto began = steady::now();
 		auto eng = jai::engine::make();
 		eng->set_backend(opt_.backend == "interp" ? jai::backend_type::interpreter : jai::backend_type::vm);
 		eng->execution_budget(opt_.budget);
@@ -714,6 +721,10 @@ private:
 		register_http_text(*eng);
 		spider_host::register_database(*eng, app_dir_);
 		for (const fs::path& path : include_paths) { eng->add_include_path(path.generic_string()); }
+		if (report_load) {
+			eng->load_report(true);
+			eng->load_report_setup_time(std::chrono::duration<double>(steady::now() - began).count());
+		}
 		try {
 			eng->execute("import \"spider.jai\";");
 		} catch (const std::exception& e) {
@@ -731,6 +742,11 @@ private:
 		} catch (const std::exception& e) {
 			failure = trimmed(e.what());
 			return nullptr;
+		}
+		if (report_load) {
+			const jai::load_report_summary report = eng->load_report_snapshot();
+			console_.err(opt_.load_report == "json" ? report.json() + "\n" : report.format());
+			eng->load_report(false);
 		}
 		return eng;
 	}

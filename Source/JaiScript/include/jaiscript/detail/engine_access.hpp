@@ -29,6 +29,7 @@ namespace jai::detail {
         JAI_FORCEINLINE static loaded_source load_source(engine& a_engine, const std::string& path, source_mode mode) { return a_engine.load_source(path, mode); }
         JAI_FORCEINLINE static bool stamp_source(const engine& a_engine, const std::string& path, uint64_t& mtime, uint64_t& size) { return a_engine.stamp_source(path, mtime, size); }
         JAI_FORCEINLINE static bool stamps_stand(const engine& a_engine, const std::vector<source_stamp>& stamps) { return a_engine.stamps_stand(stamps); }
+        JAI_FORCEINLINE static load_collector* load_report_collector(const engine& a_engine) noexcept { return a_engine.load_report_collector(); }
         JAI_FORCEINLINE static checked_result<script_value> sleep_builtin(engine& a_engine, const script_value& seconds) { return a_engine.sleep_builtin(seconds); }
         JAI_FORCEINLINE static bool sleep_callee(const engine& a_engine, const void* function) noexcept { return a_engine.sleep_callee(function); }
         JAI_FORCEINLINE static void add_format_literal(engine& a_engine, std::string_view name, script_function literal, engine::host_direct_invoke invoke, const void* target) { return a_engine.add_format_literal(name, std::move(literal), invoke, target); }

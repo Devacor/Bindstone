@@ -4,6 +4,7 @@
 // no host binding and no script code.
 
 #include <jaiscript/detail/template_library.hpp>
+#include <jaiscript/detail/load_collector.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/core/execution_backend.hpp>
@@ -980,6 +981,7 @@ namespace {
 	std::shared_ptr<const scoped_program> compile_scoped(library& a_lib, const std::string& a_content, const std::string& a_label, std::string& a_error) {
 		const std::string key = a_label + '\n' + a_content;
 		if (auto it = a_lib.scoped_programs.find(key); it != a_lib.scoped_programs.end()) { return it->second; }
+		load_phase_scope reporting(engine_access::load_report_collector(*a_lib.eng), a_label, load_phase::template_compile);
 		string_symbolizer* symbols = engine_access::get_symbolizer(*a_lib.eng);
 		auto program = std::make_shared<scoped_program>();
 		lexer lex(a_content, symbols, a_label);

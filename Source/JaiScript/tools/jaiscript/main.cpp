@@ -6,6 +6,7 @@
 
 #include "profile_capture.hpp"
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/core/load_report.hpp>
 #include <jaiscript/core/engine_time.hpp>
 #include <jaiscript/core/script_run.hpp>
 #include <jaiscript/testing/temporary_directory.hpp>
@@ -148,6 +149,7 @@ struct options {
 	std::string disasm;                    // --disasm=<file>: every chunk the VM compiles, disassembled with its regions' IR, in compile order
 	std::string manifest;                  // --manifest=<file>: the same chunks' semantic manifests (the identity gate's text)
 	std::string coverage;                  // --coverage=<file>: the vm's execution-coverage census at exit (a build with JAISCRIPT_VM_COVERAGE)
+	std::string load_report;               // --load-report[=json]: where the load spent its time, on stderr ("table" or "json"); empty = off
 	int benchmark_main = 0;               // file execution warms main; then call it N more times
 	std::vector<std::string> script_args;  // everything after `--`, exposed as global ARGS
 };
@@ -233,6 +235,8 @@ void print_usage() {
 		"                        error (default 0 = unlimited - infinite loops are your business;\n"
 		"                        the embedded-engine default of 5.0s is deliberately lifted here)\n"
 		"  --time                print wall time for each run\n"
+		"  --load-report         when the script's top level ends, print on stderr where loading spent its time, per\n"
+		"                        file and phase (--load-report=json: the same as one line of JSON)\n"
 		"  --warnings            list the static checker's warnings on stderr before a script runs (errors\n"
 		"                        always fail the load and print)\n"
 		"  --benchmark-main=N    execute file as warm-up, then call its repeatable main() N times\n"
@@ -359,6 +363,8 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		else if (a == "--pause") { opt.pause_mode = 1; }
 		else if (a == "--no-pause") { opt.pause_mode = 0; }
 		else if (a == "--selftest") { opt.selftest = true; }
+		else if (a == "--load-report") { opt.load_report = "table"; }
+		else if (a == "--load-report=json") { opt.load_report = "json"; }
 		else if (is_flag("--benchmark-main")) {
 			auto n = number_of("--benchmark-main", 0, INT_MAX, "a count from 0");
 			if (!n) { return 2; }
@@ -404,6 +410,10 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 	}
 	if (opt.benchmark_main < 0 || (opt.benchmark_main > 0 && (opt.script.empty() || opt.watch))) {
 		std::fprintf(stderr, "--benchmark-main needs a file, a non-negative count and no --watch\n");
+		return 2;
+	}
+	if (!opt.load_report.empty() && (opt.watch || (opt.script.empty() && opt.sources.empty()))) {
+		std::fprintf(stderr, "--load-report needs a file or -e, and no --watch\n");
 		return 2;
 	}
 	if (opt.backend == "interpreter") { opt.backend = "interp"; }
@@ -1441,6 +1451,15 @@ run_result run_file_in_engine(jai::engine& eng, const std::string& path, bool pr
 	return r;
 }
 
+// The runner's program is its file's top level, so the report follows it: load time and the first file's own run stay separate lines
+void print_load_report(const options& opt, const jai::engine& eng) {
+	if (opt.load_report.empty()) { return; }
+	std::fflush(stdout);
+	const jai::load_report_summary report = eng.load_report_snapshot();
+	const std::string text = opt.load_report == "json" ? report.json() + "\n" : report.format();
+	std::fputs(text.c_str(), stderr);
+}
+
 int run_file_mode(const options& opt, const console_state& con) {
 	if (opt.sources.empty() && !fs::exists(opt.script)) {
 		std::fprintf(stderr, "%s\n", con.red("jaiscript: no such file: " + opt.script).c_str());
@@ -1450,13 +1469,19 @@ int run_file_mode(const options& opt, const console_state& con) {
 		std::fprintf(stderr, "%s\n", con.red("jaiscript: --coverage needs a build with JAISCRIPT_VM_COVERAGE (cmake -DJAISCRIPT_VM_COVERAGE=ON)").c_str());
 		return 2;
 	}
+	const auto setup_began = std::chrono::steady_clock::now();
 	auto eng = make_runner_engine(opt, nullptr);
+	if (!opt.load_report.empty()) {
+		eng->load_report(true);
+		eng->load_report_setup_time(std::chrono::duration<double>(std::chrono::steady_clock::now() - setup_began).count());
+	}
 	std::ostringstream debug_note;
 	wire_debugger(opt, *eng, con, debug_note);
 	if (!debug_note.str().empty()) { std::fputs(debug_note.str().c_str(), stderr); }
 
 	if (opt.benchmark_main > 0) { std::cout << "JAI_BENCHMARK_PHASE warmup\n"; }
 	run_result r = opt.sources.empty() ? run_file_in_engine(*eng, opt.script, opt.warnings) : run_sources_in_engine(*eng, opt.sources, opt.warnings);
+	print_load_report(opt, *eng);
 	if (r.ok && r.exit_code == 0 && opt.benchmark_main > 0) {
 		for (int repetition = 1; repetition <= opt.benchmark_main; ++repetition) {
 			std::cout << "JAI_BENCHMARK_PHASE measured " << repetition << "\n";
@@ -1972,6 +1997,8 @@ int run_selftest(const console_state& con) {
 		expect(parse({"--workers=abc"}) == 2 && parse({"--workers=-1"}) == 2 && parse({"--debug-port=70000"}) == 2 &&
 			parse({"--budget=nan"}) == 2 && parse({"--benchmark-main=1x"}) == 2 && parse({"--workers"}) == 2, "flags: a malformed or missing number exits 2");
 		expect(parse({"--workers", "3", "--budget=1.5", "--debug-port=52490"}) == -1, "flags: a value follows its flag or its '='");
+		expect(parse({"--load-report", "a.jai"}) == -1 && parsed.load_report == "table" && parse({"--load-report=json", "a.jai"}) == -1 && parsed.load_report == "json", "flags: --load-report takes a table or json");
+		expect(parse({"--load-report=xml", "a.jai"}) == 2 && parse({"--load-report"}) == 2 && parse({"--load-report", "--watch", "a.jai"}) == 2, "flags: --load-report needs a file and a known form");
 		auto eng = make_runner_engine(opt, nullptr);
 		expect(run_sources_in_engine(*eng, {"300"}).exit_code == 44 && run_sources_in_engine(*eng, {"-1"}).exit_code == 255 &&
 			run_sources_in_engine(*eng, {"4294967296"}).exit_code == 0, "exit code: an int result outside 0..255 keeps its low byte");

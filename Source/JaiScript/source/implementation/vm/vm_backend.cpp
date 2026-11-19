@@ -1,4 +1,5 @@
 #include <jaiscript/detail/structural_ordering.hpp>
+#include <jaiscript/detail/load_collector.hpp>
 #include <jaiscript/detail/float_text.hpp>
 #include <jaiscript/detail/generics.hpp>
 #include <jaiscript/detail/uniquely_held.hpp>
@@ -986,6 +987,15 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 	}
 
 	return run_fiber(handle, state);
+}
+
+// The load report's collector, while the engine keeps one, and the row a function body is charged to: the file that declares it
+static detail::load_collector* load_report_of(const engine* a_engine) noexcept {
+	return a_engine ? detail::engine_access::load_report_collector(*a_engine) : nullptr;
+}
+static int load_report_row_of(detail::load_collector* a_report, const block_stmt* a_body) {
+	if (!a_report) { return detail::load_collector::k_no_file; }
+	return a_body ? a_report->row_of(a_body->location.filename) : a_report->current_row();
 }
 
 void vm_backend::open_fiber(coroutine_handle& handle, vm_coroutine_state& state, const std::shared_ptr<function_decl>& function) {
@@ -19196,6 +19206,9 @@ chunk* vm_backend::constructor_chunk(const std::shared_ptr<script_class_definiti
 	if (engine_ && engine_->parallel_region_active()) [[unlikely]] {
 		region_compile_guard = std::unique_lock<std::mutex>(engine_->parallel_compile_mutex());
 	}
+	detail::load_collector* report = load_report_of(engine_);
+	detail::load_phase_scope reporting(report, load_report_row_of(report, ctor->body.get()), load_phase::body_compile);
+	if (report) { report->note_body_compiled(ctor->body.get()); }
 	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 	compiler_.ir_passes(!engine_ || engine_->ir_passes());
 	arm_listing();
@@ -21632,12 +21645,18 @@ void vm_backend::retire_unreachable_code() {
 	cache_size_after_retire_ = chunk_cache_.size() + expr_chunk_cache_.size() + decl_chunk_cache_.size() + ctor_chunks_.size();
 }
 
-script_value vm_backend::execute(const std::vector<declaration_ptr>& declarations) {
+std::shared_ptr<chunk> vm_backend::compile_unit(const std::vector<declaration_ptr>& declarations) {
+	detail::load_phase_scope reporting(load_report_of(engine_), load_phase::vm_compile);
 	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 	compiler_.ir_passes(!engine_ || engine_->ir_passes());
 	arm_listing();
 	auto program = compiler_.compile_program(declarations, true);
 	note_compiled(*program);
+	return program;
+}
+
+script_value vm_backend::execute(const std::vector<declaration_ptr>& declarations) {
+	auto program = compile_unit(declarations);
 	script_value result = run_program(std::move(program));
 	retire_unreachable_code();
 	return result;
@@ -21646,11 +21665,7 @@ script_value vm_backend::execute(const std::vector<declaration_ptr>& declaration
 script_value vm_backend::execute(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) {
 	auto program = std::static_pointer_cast<chunk>(compiled_slot);
 	if (!program) {
-		compiler_.typed_lowering(!engine_ || engine_->type_proofs());
-		compiler_.ir_passes(!engine_ || engine_->ir_passes());
-		arm_listing();
-		program = compiler_.compile_program(declarations, true);
-		note_compiled(*program);
+		program = compile_unit(declarations);
 		compiled_slot = program;
 	}
 	script_value result = run_program(std::move(program));
@@ -21661,11 +21676,7 @@ script_value vm_backend::execute(const std::vector<declaration_ptr>& declaration
 script_value vm_backend::execute_textual(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) {
 	auto program = std::static_pointer_cast<chunk>(compiled_slot);
 	if (!program) {
-		compiler_.typed_lowering(!engine_ || engine_->type_proofs());
-		compiler_.ir_passes(!engine_ || engine_->ir_passes());
-		arm_listing();
-		program = compiler_.compile_program(declarations, true);
-		note_compiled(*program);
+		program = compile_unit(declarations);
 		compiled_slot = program;
 	}
 	script_value result = run_program(std::move(program), true);
@@ -21865,6 +21876,9 @@ std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,
 	if (engine_ && engine_->parallel_region_active()) [[unlikely]] {
 		region_compile_guard = std::unique_lock<std::mutex>(engine_->parallel_compile_mutex());
 	}
+	detail::load_collector* report = load_report_of(engine_);
+	detail::load_phase_scope reporting(report, load_report_row_of(report, body.get()), load_phase::body_compile);
+	if (report) { report->note_body_compiled(body.get()); }
 	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 	compiler_.ir_passes(!engine_ || engine_->ir_passes());
 	arm_listing();

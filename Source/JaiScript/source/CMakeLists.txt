@@ -16,6 +16,7 @@ set(JAISCRIPT_SOURCES
     implementation/environment.cpp
     implementation/jaibite_checker_revision.cpp
     implementation/lexer.cpp
+    implementation/load_report.cpp
     implementation/no_interpreter.cpp
     implementation/parallel_transform.cpp
     implementation/parse_errors.cpp

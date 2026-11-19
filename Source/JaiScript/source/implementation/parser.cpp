@@ -1,5 +1,6 @@
 #include "../../include/jaiscript/detail/parser.hpp"
 #include "../../include/jaiscript/core/engine.hpp"
+#include "../../include/jaiscript/detail/load_collector.hpp"
 #include "../../include/jaiscript/core/script_namespace.hpp"
 #include "../../include/jaiscript/detail/integer_ops.hpp"  // checked constant folding
 #include "../../include/jaiscript/detail/scalar_ops.hpp"  // an enumerator initializer's arithmetic
@@ -1711,6 +1712,7 @@ expression_ptr parser::template_builtin(std::string_view name, const source_loca
 
 // A template's text parsed here, under `barrier`: its tokens replace the stream until the body ends
 checked_result<expression_ptr> parser::template_text_body(const std::string& content, const std::string& file, template_barrier barrier) {
+    detail::load_phase_scope reporting(engine_ ? detail::engine_access::load_report_collector(*engine_) : nullptr, file, load_phase::template_compile);
     lexer lex(content, symbolizer_, file);
     const std::vector<token> tokens = lex.tokenize_template(symbolizer_->intern(detail::template_library::k_joiner), symbolizer_->intern(detail::template_library::k_splice));
     const std::vector<token>* saved_stream = stream_;

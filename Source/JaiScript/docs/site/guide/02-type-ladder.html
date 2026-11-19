@@ -119,7 +119,7 @@ print("{} {}", reflect::type_of(y), reflect::type_of(mixed));</code></pre></div>
 <tr><td><code>bool</code></td><td>int, float, null, an object, by truthiness (<code>0</code> is <code>false</code>)</td><td>a string, an array or a map: <code>!s.empty()</code> or a comparison</td></tr>
 <tr><td><code>string</code></td><td>utf8_string (its bytes), char, an object with <code>to_string()</code></td><td>an int, float, bool, null or container: <code>to_string(x)</code> or <code>`${x}`</code></td></tr>
 <tr><td>class <code>C</code></td><td><code>C</code> or a subclass, as a copy that keeps its own class and overrides; a <code>shared_ptr</code> to one (copies the pointee); a value that exactly one one-argument constructor <code>C(src)</code> takes; on <code>=</code>, a value an <code>operator=</code> of <code>C</code> takes</td><td><code>null</code>; a parent, sibling or unrelated class</td></tr>
-<tr><td><code>shared_ptr&lt;C&gt;</code></td><td>a handle to <code>C</code> or a subclass, a value of one (the handle holds a copy; a temporary is its object), <code>null</code></td><td>a <code>shared_ptr&lt;Base&gt;</code>: <code>cast&lt;shared_ptr&lt;C&gt;&gt;(b)</code></td></tr>
+<tr><td><code>shared_ptr&lt;C&gt;</code></td><td>a handle to <code>C</code> or a subclass, <code>null</code></td><td>a <code>shared_ptr&lt;Base&gt;</code>: <code>cast&lt;shared_ptr&lt;C&gt;&gt;(b)</code>; a <code>C</code> value, which <code>make_shared&lt;C&gt;(value)</code> copies into a new handle</td></tr>
 </tbody></table></div>
 <p>Every slot (<code>float</code>, enums, <code>char</code>, containers, <code>weak_ptr</code>, <code>T&amp;</code>, <code>function</code>, <code>auto</code>): <a href="../reference/rules.html#type-conversions">the conversion table</a>.</p>
 <ul>

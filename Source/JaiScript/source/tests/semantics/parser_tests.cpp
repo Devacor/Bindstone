@@ -5,6 +5,7 @@
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>
+#include <jaiscript/detail/generics.hpp>
 #include "../case_table.hpp"
 
 using namespace jai::foundry;
@@ -16,6 +17,47 @@ public:
     parser_tests() : suite("Parser Tests") {}
     
     void forge_tests() override {
+        test("a_generic_definition_owns_its_token_text", [this]() {
+            // A generic keeps its declaration's tokens after the lexer is gone (instances, stamps and the jaibite writer read
+            // them later), and a literal's lexeme pointed into the lexer's copy of the source: each kept lexeme must be
+            // symbolizer storage
+            auto eng = make_engine();
+            auto* symbolizer = detail::engine_access::get_symbolizer(*eng);
+            std::vector<declaration_ptr> decls;
+            {
+                const std::string code =
+                    "T pick<T>(T a, T b) { float f = 2.5; string s = \"text\"; string r = R\"(raw)\"; char c = 'q'; return 7 > 3 ? a : b; }"
+                    " class Box<T : Base> { T held; int n = 42; string label() { return \"box\"; } }";
+                lexer lex(code, symbolizer, "test.jai");
+                auto tokens = lex.tokenize();
+                std::unordered_set<std::string> empty_types;
+                parser p(tokens, symbolizer, eng.get(), empty_types, "test.jai");
+                auto parsed = p.parse();
+                check(!p.has_errors() && parsed.has_value(), "parses");
+                if (parsed) { decls = std::move(parsed.value()); }
+            }
+            size_t generics = 0, literals = 0;
+            const auto owned = [&](const token& t, const std::string& where) {
+                if (t.lexeme.empty()) { return; }
+                if (t.type == token_type::integer_literal || t.type == token_type::float_literal || t.type == token_type::string_literal ||
+                    t.type == token_type::char_literal) { ++literals; }
+                const auto id = symbolizer->find(t.lexeme);
+                check_true(id.has_value() && symbolizer->get_string(*id).data() == t.lexeme.data(),
+                    where + ": '" + std::string(t.lexeme) + "' is not symbolizer storage");
+            };
+            for (const auto& d : decls) {
+                if (!d || d->get_type() != node_type::generic_decl) { continue; }
+                const auto& definition = *static_cast<const generic_decl*>(d.get())->definition;
+                ++generics;
+                for (const token& t : definition.tokens) { owned(t, std::string(definition.name)); }
+                for (const auto& parameter : definition.parameters) {
+                    for (const token& t : parameter.bound) { owned(t, std::string(definition.name) + " bound"); }
+                }
+            }
+            check_eq((size_t)2, generics, "both generics kept their tokens");
+            check_eq((size_t)8, literals, "every literal spelling was looked at");
+        });
+
         test("function_spelling_is_kept_for_the_checker", [this]() {
             // `function f = expr;` parses as a callable-or-null slot that remembers its spelling at top
             // level, in a body and as a field; the flag rides the jaibite so a re-check of a loaded bite

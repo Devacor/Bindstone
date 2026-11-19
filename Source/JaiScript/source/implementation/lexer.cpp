@@ -522,7 +522,7 @@ token lexer::scan_number() {
         }
     }
 
-    // Use string_view into source_ (permanent storage)
+    // A view into source_, the lexer's copy, which dies with the lexer: a token kept longer owns its text (own_token_text)
     std::string_view lexeme_view(source_.data() + start, current_ - start);
     source_location loc = current_location();
     loc.column = startColumn;

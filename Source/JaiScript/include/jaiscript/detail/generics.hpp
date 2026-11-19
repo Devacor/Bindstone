@@ -112,6 +112,11 @@ namespace jai::detail {
 	// The stamp of a definition's tokens: kinds, spellings, literal values, lines and columns
 	uint64_t generic_stamp(const std::vector<token>& tokens);
 
+	// A definition keeps its tokens after the lexer that made them is gone, and a literal's lexeme points into that lexer's copy
+	// of the source: every kept spelling moves into the symbolizer, so each lexeme is symbolizer storage or a static string as a
+	// token's lexeme must be (lexer.hpp), for the instances, the stamps and the jaibite writer that read them later
+	void own_token_text(generic_definition& definition, string_symbolizer& symbols);
+
 	// A type as the tokens that spell it where a type parameter stood (each at `at`): `shop::Stack<int>` is `shop` `::` and the one
 	// name `Stack<int>`, the class an instance declares. False for a type no argument may be (auto, void, a reference).
 	bool generic_argument_tokens(const type_info& type, const source_location& at, string_symbolizer& symbols, std::vector<token>& out);

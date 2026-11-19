@@ -3534,6 +3534,7 @@ checked_result<declaration_ptr> parser::generic_declaration(const generic_site& 
         }
     }
     definition->tokens.assign(tokens.begin() + static_cast<std::ptrdiff_t>(site.begin), tokens.begin() + static_cast<std::ptrdiff_t>(end));
+    detail::own_token_text(*definition, *symbolizer_);
     definition->name_token = static_cast<uint32_t>(site.name_at - site.begin);
     definition->list_end = static_cast<uint32_t>(list_end - site.begin);
     definition->stamp = detail::generic_stamp(definition->tokens);

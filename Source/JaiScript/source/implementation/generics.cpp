@@ -136,6 +136,16 @@ bool same_generic_signature(const generic_definition& a, const generic_definitio
 	return true;
 }
 
+void own_token_text(generic_definition& definition, string_symbolizer& symbols) {
+	const auto own = [&](std::vector<token>& tokens) {
+		for (token& t : tokens) {
+			if (!t.lexeme.empty()) { t.lexeme = symbols.intern_with_view(t.lexeme).second; }
+		}
+	};
+	own(definition.tokens);
+	for (generic_parameter& parameter : definition.parameters) { own(parameter.bound); }
+}
+
 uint64_t generic_stamp(const std::vector<token>& tokens) {
 	uint64_t hash = 14695981039346656037ull;
 	for (const token& t : tokens) {

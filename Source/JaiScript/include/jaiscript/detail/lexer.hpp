@@ -64,7 +64,7 @@ namespace jai {
     struct token {
         token_type type;
         bool joins_text = false;   // a template string's own '+': its splice becomes text, as `${x}` promises
-        std::string_view lexeme;  // Points to symbolizer storage (permanent) or static strings
+        std::string_view lexeme;  // symbolizer storage or a static string; a literal's points into the lexer's copy of the source, which dies with the lexer (a token kept longer owns its text: detail::own_token_text)
         uint64_t symbol_id = 0;   // Pre-interned symbol ID for identifiers (0 = not interned)
         source_location location;
         std::string_view using_name;   // the first token of a name a using declaration rewrote: the name as written (declaration sites reject it)

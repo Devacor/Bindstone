@@ -1,7 +1,7 @@
 // The portable math check (docs/site/stability.html): every math:: function IEEE does not round exactly, and the
 // rotations, angles, eased mixes and color blends built on them, over a fixed sweep; each result's 64 bits are written in
 // order and hashed. Every platform, compiler and backend prints the same hash.
-const string EXPECTED = "84b0de5308bfbaa226296503dae76c313521a004c652f531cbbc89e3a865fb19";
+const string EXPECTED = "6b90815dec6934f660c04ec3abaabf4828411d9bdad26d62b5db7adefaf0354f";
 
 int state = 20261119;
 int next_bits() {

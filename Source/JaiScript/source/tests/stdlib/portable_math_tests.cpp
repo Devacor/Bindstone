@@ -574,6 +574,10 @@ public:
 				sample_unit(-x);
 			}
 			for (int i = 0; i < 300; ++i) { sample_unit(in.scattered(-60.0, 0.0)); }
+			for (int i = -200; i <= 200; ++i) {   // where the series meets the half-angle form
+				sample_unit(0.5 + static_cast<double>(i) * 0x1p-50);
+				sample_unit(-0.5 + static_cast<double>(i) * 0x1p-50);
+			}
 			for (int i = 0; i < 3000; ++i) {
 				const double x = in.scattered(-40.0, 70.0);
 				note(at, ulp_error(pm::atan(x), ref.atan(dd{x})), x);
@@ -677,6 +681,10 @@ public:
 				const double x = std::fabs(in.scattered(-20.0, 20.0));
 				const double target = in.uniform(-1074.5, 1023.99);
 				sample(x, target / std::log2(x));
+			}
+			for (int i = 0; i < 1000; ++i) {   // |y log x| beside 32, where log's precise form takes over
+				const double x = in.uniform(0.01, 100.0);
+				sample(x, ((i & 1) != 0 ? 32.0 : -32.0) * (1.0 + in.uniform(-1e-6, 1e-6)) / std::log(x));
 			}
 			for (int i = 0; i < 1000; ++i) {   // integer exponents of negative bases
 				sample(-in.uniform(0.0, 10.0), std::round(in.uniform(-300.0, 300.0)));

@@ -180,6 +180,13 @@ def main():
     hi, lo = dd(1 / ln10)
     const("INV_LN10_HI", hi)
     const("INV_LN10_LO", lo)
+    # 1/ln2 and 1/ln10 as a 26-bit part and the rest: a 26-bit factor times the 26-bit part is exact
+    h = bits_rounded(1 / ln2, 26)
+    const("INV_LN2_26", h)
+    const("INV_LN2_26T", dbl(1 / ln2 - Fraction(h)))
+    h = bits_rounded(1 / ln10, 26)
+    const("INV_LN10_26", h)
+    const("INV_LN10_26T", dbl(1 / ln10 - Fraction(h)))
     log10_2 = ln2 / ln10
     l102 = bits_rounded(log10_2, 42)
     const("LOG10_2_HI", l102)
@@ -197,6 +204,13 @@ def main():
     series("EXP_TAYLOR", [Fraction(1, math.factorial(n)) for n in range(2, 7)], "exp: x^2 .. x^6")
     series("ATAN_TAYLOR", [Fraction((-1) ** n, 2 * n + 1) for n in range(1, 8)], "atan: x^3 .. x^15")
     series("LOG1P_TAYLOR", [Fraction((-1) ** (n + 1), n) for n in range(2, 10)], "log1p: x^2 .. x^9")
+    # tan's Taylor coefficients: the series of sin over the series of cos, in exact rationals
+    sin_c = [Fraction((-1) ** k, math.factorial(2 * k + 1)) for k in range(9)]
+    cos_c = [Fraction((-1) ** k, math.factorial(2 * k)) for k in range(9)]
+    tan_c = []
+    for k in range(9):
+        tan_c.append(sin_c[k] - sum(tan_c[i] * cos_c[k - i] for i in range(k)))
+    series("TAN_TAYLOR", tan_c[1:8], "tan: x^3 .. x^15")
     series("CBRT_CORRECTION", [Fraction(1, 3), Fraction(-1, 9), Fraction(5, 81), Fraction(-10, 243)],
            "(1 + d)^(1/3) - 1: d .. d^4")
     put("")
@@ -212,8 +226,8 @@ def main():
 
     # log: m in [sqrt(1/2), sqrt(2)), 257 intervals; c ~ 1/m with 16 bits (c = 1 beside 1.0), -log(c) as hi + lo
     put("\t// log's intervals of m in [sqrt(1/2), sqrt(2)): index (m >= 1 ? 150 + top 8 mantissa bits : top 8 mantissa bits - 106);")
-    put("\t// c (16 significant bits, 1 on the two intervals beside 1) and -log(c) as hi, lo")
-    put("\tinline constexpr double LOG_TABLE[257][3] = {")
+    put("\t// c (16 significant bits, 1 on the two intervals beside 1), then -log(c), -log2(c) and -log10(c), each hi, lo")
+    put("\tinline constexpr double LOG_TABLE[257][7] = {")
     sqrt2 = Fraction(Decimal(2).sqrt())
     worst_r = Fraction(0)
     for idx in range(257):
@@ -231,8 +245,12 @@ def main():
             c = bits_rounded(2 / (a + b), 16)
         for m in (a, b):
             worst_r = max(worst_r, abs(m * Fraction(c) - 1))
-        hi, lo = dd(-frac(Decimal(c).ln())) if c != 1.0 else (0.0, 0.0)
-        put(f"\t\t{{{hexf(c)}, {hexf(hi)}, {hexf(lo)}}},")
+        ln_c = Decimal(c).ln()
+        cols = [hexf(c)]
+        for v in (-ln_c, -ln_c / D_LN2, -ln_c / D_LN10):
+            hi, lo = dd(frac(v)) if c != 1.0 else (0.0, 0.0)
+            cols += [hexf(hi), hexf(lo)]
+        put("\t\t{" + ", ".join(cols) + "},")
     put("\t};")
     put(f"\t// the largest |m c - 1| over the intervals: {float(worst_r)!r}")
     put("")
@@ -249,13 +267,24 @@ def main():
     put("")
 
     # sin and cos at j pi/256, j = 0..64
-    put("\t// sin(j pi/256) and cos(j pi/256): sin hi, sin lo, cos hi, cos lo")
-    put("\tinline constexpr double SINCOS_PI_256[65][4] = {")
-    for j in range(65):
+    put("\t// sin(j pi/256) and cos(j pi/256) for j = -64..64: sin hi, sin lo, cos hi, cos lo")
+    put("\tinline constexpr double SINCOS_PI_256[129][4] = {")
+    for j in range(-64, 65):
         a = D_PI * j / 256
         s_hi, s_lo = dd(frac(d_sin(a)))
         c_hi, c_lo = dd(frac(d_cos(a)))
         put(f"\t\t{{{hexf(s_hi)}, {hexf(s_lo)}, {hexf(c_hi)}, {hexf(c_lo)}}},")
+    put("\t};")
+    put("")
+
+    # tan at m pi/256, m = 0..120, with 1 + tan^2
+    put("\t// tan(m pi/256): hi, lo, and 1 + tan^2 rounded")
+    put("\tinline constexpr double TAN_PI_256[121][3] = {")
+    for m in range(121):
+        a = D_PI * m / 256
+        t = d_sin(a) / d_cos(a)
+        t_hi, t_lo = dd(frac(t))
+        put(f"\t\t{{{hexf(t_hi)}, {hexf(t_lo)}, {hexf(dbl(frac(1 + t * t)))}}},")
     put("\t};")
     put("")
 
@@ -304,6 +333,41 @@ def main():
     put("\tinline constexpr double CBRT_GUESS[6] = {" + ", ".join(hexf(c) for c in coeffs) + "};")
     hi = [dbl(frac(Decimal(2) ** (Decimal(i) / 3))) for i in range(3)]
     put("\tinline constexpr double CBRT_2_I[3] = {" + ", ".join(hexf(c) for c in hi) + "};")
+    put("")
+
+    # asin(s) = s + s z (1/6 + z P(z)/Q(z)), z = s^2 <= 1/4: P/Q (degrees 4 and 4, Q's constant 1) interpolates
+    # g(z) = ((asin(s) - s) / (s z) - 1/6) / z at 9 Chebyshev nodes, solved in exact rationals
+    def asin_g(z):
+        sq = z.sqrt()
+        return ((d_atan(sq / (1 - z).sqrt()) - sq) / (sq * z) - Decimal(1) / 6) / z
+
+    deg_p, deg_q = 4, 4
+    count = deg_p + deg_q + 1
+    nodes = [Fraction(0.125 + 0.125 * math.cos(math.pi * (k + 0.5) / count)) for k in range(count)]
+    rows = []
+    for z in nodes:
+        gz = frac(asin_g(Decimal(z.numerator) / Decimal(z.denominator)))
+        rows.append([z ** k for k in range(deg_p + 1)] + [-gz * z ** k for k in range(1, deg_q + 1)] + [gz])
+    for col in range(count):
+        piv = max(range(col, count), key=lambda r: abs(rows[r][col]))
+        rows[col], rows[piv] = rows[piv], rows[col]
+        for r in range(count):
+            if r != col and rows[r][col] != 0:
+                f = rows[r][col] / rows[col][col]
+                rows[r] = [u - f * v for u, v in zip(rows[r], rows[col])]
+    solution = [rows[r][count] / rows[r][r] for r in range(count)]
+    asin_p = [dbl(v) for v in solution[:deg_p + 1]]
+    asin_q = [dbl(v) for v in solution[deg_p + 1:]]
+    worst = Fraction(0)
+    for k in range(1, 201):
+        z = Fraction(k, 800)
+        pv = sum(Fraction(c) * z ** i for i, c in enumerate(asin_p))
+        qv = 1 + sum(Fraction(c) * z ** (i + 1) for i, c in enumerate(asin_q))
+        worst = max(worst, abs(pv / qv - frac(asin_g(Decimal(z.numerator) / Decimal(z.denominator)))))
+    put(f"\t// asin's z P(z)/Q(z) term on [0, 1/4], absolute error {float(worst):.3g}: P's z^0 .. z^4, Q's z^1 .. z^4")
+    put("\tinline constexpr double ASIN_P[5] = {" + ", ".join(hexf(c) for c in asin_p) + "};")
+    put("\tinline constexpr double ASIN_Q[4] = {" + ", ".join(hexf(c) for c in asin_q) + "};")
+    put(f"\tinline constexpr double SIXTH = {hexf(dbl(Fraction(1, 6)))};")
     put("")
     put("} // namespace jai::detail::portable_math_tables")
     text = "\n".join(lines) + "\n"

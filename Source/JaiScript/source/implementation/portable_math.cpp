@@ -80,6 +80,20 @@ JAI_FORCEINLINE dd two_product(double a, double b) noexcept {
 	const double al = a - ah, bl = b - bh;
 	return {p, ((ah * bh - p) + ah * bl + al * bh) + al * bl};
 }
+// x's top 26 significant bits: a product of two such is exact
+JAI_FORCEINLINE double high_26(double x) noexcept { return from_bits(bits_of(x) & ~((std::uint64_t{1} << 27) - 1)); }
+// a * b exactly as hi + lo through 26-bit splits (no operand above 2^995, no partial product below 2^-969)
+JAI_FORCEINLINE dd exact_product(double a, double b) noexcept {
+	const double ah = high_26(a), bh = high_26(b);
+	const double al = a - ah, bl = b - bh;
+	const double p = a * b;
+	return {p, ((ah * bh - p) + ah * bl + al * bh) + al * bl};
+}
+JAI_FORCEINLINE dd exact_square(double a) noexcept {
+	const double ah = high_26(a), al = a - ah;
+	const double p = a * a;
+	return {p, ((ah * ah - p) + 2.0 * ah * al) + al * al};
+}
 // (n.hi + n.lo) / (d.hi + d.lo)
 JAI_FORCEINLINE dd divide(dd n, dd d) noexcept {
 	const double q = n.hi / d.hi;
@@ -236,42 +250,43 @@ JAI_FORCEINLINE dd quadrant_sin_pair(double hi, double lo, int quadrant) noexcep
 	return {ma, m * t[o + 1] + (mb * sin_d + ma * cos_d_less_1)};
 }
 
-// sin(x + extra pi/2) as an unrounded pair for |x| < 2^14 by one rounding to n = round(x 256/pi): n gives the quadrant,
-// the table row j pi/256 (|j| <= 64) and r = x - n pi/256 (|r| <= pi/512, its error under 2^-72) together, and the
-// table's identities give the value. False within 7.5 pi/256 of a multiple of pi/2, where the result is small: there the
-// reduction by pi/2 and Taylor keep the relative accuracy.
-JAI_FORCEINLINE bool sin_pair_by_pi_256(double x, int extra, dd& out) noexcept {
+// |x| < 2^14 by one rounding to n = round(x 256/pi): n gives the quadrant, the table row j pi/256 (|j| <= 64) and
+// r = x - n pi/256 (|r| <= pi/512, its error under 2^-72) together. False within 7.5 pi/256 of a multiple of pi/2, where
+// the result is small: there the reduction by pi/2 and Taylor keep the relative accuracy.
+struct pi_256_reduced {
+	int quadrant;
+	int j;
+	dd r;
+};
+JAI_FORCEINLINE bool reduce_pi_256(double x, pi_256_reduced& out) noexcept {
 	const double shifted = x * INV_PI_256 + k_round_shift;
 	const double nd = shifted - k_round_shift;
 	const std::int64_t n = static_cast<std::int64_t>(bits_of(shifted) - bits_of_constant(k_round_shift));
 	const std::int64_t q = (n + 64) >> 7;
 	const int j = static_cast<int>(n - q * 128);
-	if (j > -8 && j < 8) {
-		return false;
-	}
-	const dd r = fast_two_sum(x - nd * PI_256_1, -(nd * PI_256_1T));
-	const double z = r.hi * r.hi;
-	const double sin_r_tail = r.lo + r.hi * z * (SIN_TAYLOR[0] + z * (SIN_TAYLOR[1] + z * SIN_TAYLOR[2]));
-	const double cos_r_less_1 = z * (-0.5 + z * (COS_TAYLOR[0] + z * COS_TAYLOR[1])) - r.hi * r.lo;
-	// sine row: a = sin(j pi/256) (odd in j), b = cos; cosine row: a = cos, b = -sin(j pi/256); the quadrant's sign on both
-	const int quadrant = static_cast<int>(q) + extra;
+	out = {static_cast<int>(q), j, fast_two_sum(x - nd * PI_256_1, -(nd * PI_256_1T))};
+	return j <= -8 || j >= 8;
+}
+// sin(x + extra pi/2) as an unrounded pair from the table's identities:
+//   sin(a + r) = sin a + (cos a sin r + sin a (cos r - 1)),  cos(a + r) = cos a + (-sin a sin r + cos a (cos r - 1))
+// (r^7/7! and r r_lo in cos r are under 2^-63 of the result, so they are left out)
+JAI_FORCEINLINE dd sin_pair_pi_256(const pi_256_reduced& p, int extra) noexcept {
+	const double r = p.r.hi;
+	const double z = r * r;
+	const double sin_r_tail = p.r.lo + r * z * (SIN_TAYLOR[0] + z * SIN_TAYLOR[1]);
+	const double cos_r_less_1 = z * (-0.5 + z * (COS_TAYLOR[0] + z * COS_TAYLOR[1]));
+	// sine row: a = sin(j pi/256), b = cos; cosine row: a = cos, b = -sin(j pi/256); the quadrant's sign on both
+	const int quadrant = p.quadrant + extra;
 	const std::uint64_t odd = static_cast<std::uint64_t>(quadrant & 1);
 	const std::uint64_t negate = static_cast<std::uint64_t>(quadrant & 2) << 62;
-	const std::uint64_t j_negative = static_cast<std::uint64_t>(j < 0) << 63;
-	const double* t = SINCOS_PI_256[j < 0 ? -j : j];
+	const double* t = SINCOS_PI_256[p.j + 64];
 	const int o = static_cast<int>(odd) * 2;
-	const std::uint64_t a_sign = (j_negative & (odd - 1)) ^ negate;
-	const std::uint64_t b_sign = ((j_negative ^ k_sign_bit) & (0 - odd)) ^ negate;
-	const double a = from_bits(bits_of(t[o]) ^ a_sign), b = from_bits(bits_of(t[2 - o]) ^ b_sign);
-	out = {a, b * r.hi + (from_bits(bits_of(t[o + 1]) ^ a_sign) + (b * sin_r_tail + a * cos_r_less_1))};
-	return true;
+	const std::uint64_t b_sign = (odd << 63) ^ negate;
+	const double a = from_bits(bits_of(t[o]) ^ negate), b = from_bits(bits_of(t[2 - o]) ^ b_sign);
+	return {a, b * r + (from_bits(bits_of(t[o + 1]) ^ negate) + (b * sin_r_tail + a * cos_r_less_1))};
 }
-// sin(x + extra pi/2) as an unrounded pair, x finite
-JAI_FORCEINLINE dd quadrant_sin(double x, int extra) noexcept {
-	dd out;
-	if (magnitude_bits(x) < bits_of_constant(0x1p14) && sin_pair_by_pi_256(x, extra, out)) {
-		return out;
-	}
+// sin(x + extra pi/2) for finite x outside the table path, as an unrounded pair
+JAI_NOINLINE dd quadrant_sin_general(double x, int extra) noexcept {
 	const reduced r = reduce(x);
 	return quadrant_sin_pair(r.hi, r.lo, r.quadrant + extra);
 }
@@ -289,7 +304,7 @@ JAI_FORCEINLINE scaled exp_reduce(double x, double xlo) noexcept {
 	const double r = ((x - kd * LN2_128_HI) - kd * LN2_128_LO) + xlo;
 	const double z = r * r;
 	const double* c = EXP_TAYLOR;
-	const double p = r + z * (c[0] + r * (c[1] + r * (c[2] + r * (c[3] + r * c[4]))));
+	const double p = r + z * ((c[0] + r * c[1]) + z * ((c[2] + r * c[3]) + z * c[4]));
 	const std::int64_t k = static_cast<std::int64_t>(kd);
 	const double* t = EXP2_128[k & 127];
 	return {static_cast<int>(k >> 7), t[0], t[1] + t[0] * p};
@@ -364,29 +379,37 @@ JAI_FORCEINLINE log_parts log_reduce(double x) noexcept {
 	const double m_high = from_bits(m_bits & ~((std::uint64_t{1} << 27) - 1));   // 26 bits: m_high c and (m - m_high) c are exact
 	const double* row = LOG_TABLE[index];
 	const double c = row[0];
-	return {static_cast<double>(e), two_sum(m_high * c - 1.0, (m - m_high) * c), row};
+	// the sum is exact unless m_high c - 1 is below (m - m_high) c, which leaves an error under 2^-79
+	return {static_cast<double>(e), fast_two_sum(m_high * c - 1.0, (m - m_high) * c), row};
 }
-// log1p(r) - r for |r| <= 2^-8, to 2^-62 relative
+// log1p(r) - r for |r| <= 2^-8, to 2^-59 relative
 JAI_FORCEINLINE double log1p_tail(double r) noexcept {
 	const double* c = LOG1P_TAYLOR;
-	return r * r * (c[0] + r * (c[1] + r * (c[2] + r * (c[3] + r * (c[4] + r * (c[5] + r * c[6]))))));
+	const double r2 = r * r;
+	return r2 * (((c[0] + r * c[1]) + r2 * (c[2] + r * c[3])) + (r2 * r2) * (c[4] + r * c[5]));
 }
 // log(m) = -log c + log1p(r) as a pair
 JAI_FORCEINLINE dd log_mantissa(const log_parts& p) noexcept {
 	const dd s = fast_two_sum(p.row[1], p.r.hi);
 	return fast_two_sum(s.hi, ((s.lo + p.row[2]) + p.r.lo) + log1p_tail(p.r.hi));
 }
-// log x as a pair to 2^-70 relative (pow's): the square term exact, log1p to r^9
-dd log_precise(double x) noexcept {
-	const log_parts p = log_reduce(x);
+// (r.hi + r.lo) c for a constant c = c26 + c26t (c26 with 26 bits) as a pair: r.hi's top 26 bits times c26 is exact
+JAI_FORCEINLINE dd scaled_by_constant(dd r, double c26, double c26t, double c) noexcept {
+	const double rh = from_bits(bits_of(r.hi) & ~((std::uint64_t{1} << 27) - 1));
+	return {rh * c26, (rh * c26t + (r.hi - rh) * c) + r.lo * c};
+}
+// log x as a pair to 2^-66 relative (pow's for |y log x| >= 8): the square term exact, log1p to r^8
+JAI_NOINLINE dd log_precise(const log_parts& p) noexcept {
 	const double r = p.r.hi;
 	const dd t1 = fast_two_sum(p.e * LN2_HI, p.row[1]);
 	const dd s = fast_two_sum(t1.hi, r);
-	const dd sq = two_product(r, r);
+	const dd sq = exact_square(r);
 	const dd s2 = fast_two_sum(s.hi, -0.5 * sq.hi);
 	const double* c = LOG1P_TAYLOR;
-	const double cube = r * sq.hi * (c[1] + r * (c[2] + r * (c[3] + r * (c[4] + r * (c[5] + r * (c[6] + r * c[7]))))));
-	const double lo = ((((((t1.lo + s.lo) + s2.lo) - 0.5 * sq.lo) + p.e * LN2_LO) + p.row[2]) + (p.r.lo - r * p.r.lo)) + cube;
+	// short chains (Estrin's grouping, a tree of sums): pow waits on this value
+	const double r2 = sq.hi, r4 = r2 * r2;
+	const double cube = r * r2 * (((c[1] + r * c[2]) + r2 * (c[3] + r * c[4])) + r4 * (c[5] + r * c[6]));
+	const double lo = (((t1.lo + s.lo) + (s2.lo - 0.5 * sq.lo)) + ((p.e * LN2_LO + p.row[2]) + (p.r.lo - r * p.r.lo))) + cube;
 	return fast_two_sum(s2.hi, lo);
 }
 // the shared special cases of log, log2 and log10; false with the result set, true for a positive finite x
@@ -399,42 +422,93 @@ JAI_FORCEINLINE bool log_argument(double x, double& result) noexcept {
 	return false;
 }
 
+// e^(y log x) for x > 0 finite and 0 < |y| <= 2^64, with y log x exact as a pair. An error e in y log x is a relative
+// error e in the result, so log to r^8 (2^-62) serves while |y log x| < 32; beyond, log_precise
+JAI_FORCEINLINE double pow_positive(double x, double y) noexcept {
+	const log_parts p = log_reduce(x);
+	const dd t1 = fast_two_sum(p.e * LN2_HI, p.row[1]);
+	const dd t2 = fast_two_sum(t1.hi, p.r.hi);
+	const double r = p.r.hi, r2 = r * r;
+	const double* c = LOG1P_TAYLOR;
+	const double tail = r2 * (((c[0] + r * c[1]) + r2 * (c[2] + r * c[3])) + (r2 * r2) * ((c[4] + r * c[5]) + r2 * c[6]));
+	dd l = fast_two_sum(t2.hi, ((t1.lo + t2.lo) + (p.e * LN2_LO + p.row[2])) + (p.r.lo + tail));
+	if (!(magnitude(y * l.hi) < 32.0)) {
+		l = log_precise(p);
+	}
+	const dd z = exact_product(y, l.hi);
+	const double z_lo = z.lo + y * l.lo;
+	if (z.hi > 709.8) {
+		return k_infinity;
+	}
+	if (z.hi < -746.0) {
+		return 0.0;
+	}
+	const scaled s = exp_reduce(z.hi, z_lo);
+	return scale(s.e, s.hi, s.lo);
+}
+
+// ---- asin, acos -----------------------------------------------------------------------------------------------------------
+
+// (asin s - s) / (s z) for z = s^2 <= 1/4: 1/6 + z P(z)/Q(z), a rational within 2^-53 of the exact term
+JAI_FORCEINLINE double asin_series(double z) noexcept {
+	const double* p = ASIN_P;
+	const double* q = ASIN_Q;
+	const double num = p[0] + z * (p[1] + z * (p[2] + z * (p[3] + z * p[4])));
+	const double den = 1.0 + z * (q[0] + z * (q[1] + z * (q[2] + z * q[3])));
+	return SIXTH + z * (num / den);
+}
+// asin(s) for s = sqrt(z), z = (1 - |x|) / 2, as s + rest: s's own rounding carried in rest by a 26-bit split
+struct half_angle {
+	double s;
+	double rest;
+};
+JAI_FORCEINLINE half_angle asin_half_angle(double one_less_x) noexcept {
+	const double z = one_less_x * 0.5;
+	const double s = std::sqrt(z);
+	const double sh = high_26(s), sl = s - sh;
+	const double s_lo = ((z - sh * sh) - sl * (sh + s)) / (s + s);
+	return {s, s_lo + s * (z * asin_series(z))};
+}
+
 // ---- atan --------------------------------------------------------------------------------------------------------------
 
-// atan(t + tlo) as a pair for 0 <= t <= 1: under 1/16 Taylor; above, the table's nearest point c = j/256 and
-// atan t = atan c + atan((t - c) / (1 + t c)), |(t - c) / (1 + t c)| <= 2^-9
-dd atan_reduced(double t, double tlo) noexcept {
-	const double jd = (t * 256.0 + k_round_shift) - k_round_shift;
-	if (jd < 16.0) {
-		const double z = t * t;
-		const double* a = ATAN_TAYLOR;
-		const double p = t * z * (a[0] + z * (a[1] + z * (a[2] + z * (a[3] + z * (a[4] + z * (a[5] + z * a[6]))))));
-		return fast_two_sum(t, tlo + p);
-	}
-	const double c = jd * 0x1p-8;
-	const double u = (t - c) / (1.0 + t * c);
+// atan t for t <= 1/16 as a pair, t + tlo: Taylor
+JAI_FORCEINLINE dd atan_small(double t, double tlo) noexcept {
+	const double z = t * t, z2 = z * z;
+	const double* a = ATAN_TAYLOR;
+	const double p = t * z * (((a[0] + z * a[1]) + z2 * (a[2] + z * a[3])) + (z2 * z2) * ((a[4] + z * a[5]) + z2 * a[6]));
+	return fast_two_sum(t, tlo + p);
+}
+// atan c + atan u as a pair, c = j/256 from the table, |u| <= 2^-9 (u's error under 2^-61)
+JAI_FORCEINLINE dd atan_from_table(int j, double u) noexcept {
 	const double uz = u * u;
 	const double atan_u = u + u * uz * (ATAN_TAYLOR[0] + uz * (ATAN_TAYLOR[1] + uz * ATAN_TAYLOR[2]));
-	const double* row = ATAN_256[static_cast<int>(jd)];
-	return fast_two_sum(row[0], row[1] + (atan_u + tlo / (1.0 + t * t)));
+	const double* row = ATAN_256[j];
+	return fast_two_sum(row[0], row[1] + atan_u);
 }
-// atan(n / d) for 0 <= n <= d as a pair (n, d pairs; the quotient's rounding carried)
-JAI_FORCEINLINE dd atan_of_ratio(dd n, dd d) noexcept {
-	const dd q = divide(n, d);
-	return atan_reduced(q.hi, q.lo);
-}
-// atan2(n, d) for n, d >= 0 pairs, both nonzero: atan(n/d) or pi/2 - atan(d/n)
-JAI_FORCEINLINE dd first_quadrant_angle(dd n, dd d) noexcept {
-	if (n.hi <= d.hi) {
-		return atan_of_ratio(n, d);
+// atan t for 0 <= t <= 1: under 1/16 Taylor; above, the table's nearest point c = j/256 and
+// atan t = atan c + atan((t - c) / (1 + t c)), |(t - c) / (1 + t c)| <= 2^-9
+JAI_FORCEINLINE dd atan_reduced(double t) noexcept {
+	const double jd = (t * 256.0 + k_round_shift) - k_round_shift;
+	if (jd < 16.0) {
+		return atan_small(t, 0.0);
 	}
-	return subtract_from(PIO2_HI, PIO2_LO, atan_of_ratio(d, n));
+	const double c = jd * 0x1p-8;
+	return atan_from_table(static_cast<int>(jd), (t - c) / (1.0 + t * c));
 }
-// sqrt(1 - x^2) as a pair for |x| < 1, 1 - x^2 exact before the root
-JAI_FORCEINLINE dd cosine_of_asin(double ax) noexcept {
-	const dd square = two_product(ax, ax);
-	const dd d = two_sum(1.0, -square.hi);
-	return square_root(fast_two_sum(d.hi, d.lo - square.lo));
+// atan(n / d) for 0 < n <= d without forming the quotient exactly: with c = j/256 near n/d,
+// atan(n/d) = atan c + atan((n - c d) / (d + c n)), and n - c d is exact through d's 26-bit split
+dd atan_of_ratio(double n, double d) noexcept {
+	const double inverse = 1.0 / d;
+	const double q = n * inverse;
+	const double jd = (q * 256.0 + k_round_shift) - k_round_shift;
+	if (jd < 16.0) {   // atan t is about t here, so the quotient carries its rounding: n/d = q + (n - q d)/d
+		const dd qd = exact_product(q, d);
+		return atan_small(q, ((n - qd.hi) - qd.lo) * inverse);
+	}
+	const double c = jd * 0x1p-8;
+	const double dh = high_26(d);
+	return atan_from_table(static_cast<int>(jd), ((n - c * dh) - c * (d - dh)) / (d + c * n));
 }
 
 } // namespace
@@ -443,89 +517,134 @@ JAI_FORCEINLINE dd cosine_of_asin(double ax) noexcept {
 
 double sin(double x) noexcept {
 	const std::uint64_t ux = magnitude_bits(x);
+	pi_256_reduced p;
+	if (ux < bits_of_constant(0x1p14) && reduce_pi_256(x, p)) {
+		const dd s = sin_pair_pi_256(p, 0);
+		return s.hi + s.lo;
+	}
 	if (ux < bits_of_constant(0x1p-26)) {   // sin x rounds to x (signed zeros and subnormals included)
 		return x;
 	}
 	if (ux >= k_infinity_bits) {
 		return k_nan;
 	}
-	const dd s = quadrant_sin(x, 0);
+	const dd s = quadrant_sin_general(x, 0);
 	return s.hi + s.lo;
 }
 
 double cos(double x) noexcept {
 	const std::uint64_t ux = magnitude_bits(x);
+	pi_256_reduced p;
+	if (ux < bits_of_constant(0x1p14) && reduce_pi_256(x, p)) {
+		const dd c = sin_pair_pi_256(p, 1);
+		return c.hi + c.lo;
+	}
 	if (ux < bits_of_constant(0x1p-27)) {
 		return 1.0;
 	}
 	if (ux >= k_infinity_bits) {
 		return k_nan;
 	}
-	const dd c = quadrant_sin(x, 1);
+	const dd c = quadrant_sin_general(x, 1);
 	return c.hi + c.lo;
 }
 
 void sincos(double x, double& sin_out, double& cos_out) noexcept {
 	const std::uint64_t ux = magnitude_bits(x);
-	if (ux < bits_of_constant(0x1p-26)) {
-		sin_out = x;
-		cos_out = cos(x);
+	pi_256_reduced p;
+	if (ux < bits_of_constant(0x1p14) && reduce_pi_256(x, p)) {
+		const dd s = sin_pair_pi_256(p, 0), c = sin_pair_pi_256(p, 1);
+		sin_out = s.hi + s.lo;
+		cos_out = c.hi + c.lo;
 		return;
 	}
-	if (ux >= k_infinity_bits) {
-		sin_out = cos_out = k_nan;
-		return;
+	sin_out = sin(x);
+	cos_out = cos(x);
+}
+
+// tan through the pi/256 reduction: x - quadrant pi/2 = j pi/256 + r, and an odd quadrant is tan(. + pi/2), so x is
+// m pi/256 + r modulo pi with |m| <= 120. tan(a + r) = tan a + tan r (1 + tan^2 a) / (1 - tan a tan r): the second term
+// is under a sixteenth of the result, so its plain rounding stays small.
+JAI_FORCEINLINE double tan_pi_256(const pi_256_reduced& p) noexcept {
+	int m = p.j + ((p.quadrant & 1) << 7);
+	m = m > 128 ? m - 256 : m;
+	const double* t = TAN_PI_256[m < 0 ? -m : m];
+	const std::uint64_t sign = static_cast<std::uint64_t>(m < 0) << 63;
+	const double ta = from_bits(bits_of(t[0]) ^ sign), ta_lo = from_bits(bits_of(t[1]) ^ sign);
+	const double r = p.r.hi, z = r * r;
+	const double* c = TAN_TAYLOR;
+	const double tan_r = r + (p.r.lo + r * z * (c[0] + z * (c[1] + z * c[2])));
+	return ta + (ta_lo + tan_r * t[2] / (1.0 - ta * tan_r));
+}
+JAI_NOINLINE double tan_general(double x) noexcept {
+	const reduced r = reduce(x);
+	if ((r.quadrant & 1) == 0 && magnitude(r.hi) < 0.1) {   // Taylor: the result is small, the reduction kept it exact
+		const double z = r.hi * r.hi;
+		const double* c = TAN_TAYLOR;
+		const double p = r.hi * z * (c[0] + z * (c[1] + z * (c[2] + z * (c[3] + z * (c[4] + z * (c[5] + z * c[6]))))));
+		return r.hi + (r.lo + p);
 	}
-	const dd s = quadrant_sin(x, 0), c = quadrant_sin(x, 1);
-	sin_out = s.hi + s.lo;
-	cos_out = c.hi + c.lo;
+	const dd sp = quadrant_sin_pair(r.hi, r.lo, r.quadrant), cp = quadrant_sin_pair(r.hi, r.lo, r.quadrant + 1);
+	const dd q = divide(fast_two_sum(sp.hi, sp.lo), fast_two_sum(cp.hi, cp.lo));
+	return q.hi + q.lo;
 }
 
 double tan(double x) noexcept {
 	const std::uint64_t ux = magnitude_bits(x);
+	pi_256_reduced p;
+	if (ux < bits_of_constant(0x1p14) && reduce_pi_256(x, p)) {
+		return tan_pi_256(p);
+	}
 	if (ux < bits_of_constant(0x1p-27)) {   // tan x = x + x^3/3 rounds to x
 		return x;
 	}
 	if (ux >= k_infinity_bits) {
 		return k_nan;
 	}
-	const dd sp = quadrant_sin(x, 0), cp = quadrant_sin(x, 1);
-	const dd q = divide(fast_two_sum(sp.hi, sp.lo), fast_two_sum(cp.hi, cp.lo));
-	return q.hi + q.lo;
+	return tan_general(x);
 }
 
 double asin(double x) noexcept {
-	const double ax = magnitude(x);
 	const std::uint64_t ux = magnitude_bits(x);
-	if (ux < bits_of_constant(0x1p-26)) {   // asin x = x + x^3/6 rounds to x
-		return x;
+	if (ux <= bits_of_constant(0.5)) {
+		if (ux < bits_of_constant(0x1p-26)) {   // asin x = x + x^3/6 rounds to x
+			return x;
+		}
+		const double z = x * x;
+		return x + x * (z * asin_series(z));
 	}
 	if (ux >= bits_of_constant(1.0)) {
 		return ux == bits_of_constant(1.0) ? with_sign_of(PIO2_HI, x) : k_nan;
 	}
-	const dd c = cosine_of_asin(ax);
-	const dd a = first_quadrant_angle({ax, 0.0}, c);
-	return with_sign_of(a.hi + a.lo, x);
+	// asin |x| = pi/2 - 2 asin(s), s = sqrt((1 - |x|) / 2) <= 1/2
+	const half_angle h = asin_half_angle(1.0 - magnitude(x));
+	const dd d = fast_two_sum(PIO2_HI, -2.0 * h.s);
+	return with_sign_of(d.hi + (d.lo + (PIO2_LO - 2.0 * h.rest)), x);
 }
 
 double acos(double x) noexcept {
-	const double ax = magnitude(x);
 	const std::uint64_t ux = magnitude_bits(x);
+	if (ux <= bits_of_constant(0.5)) {   // pi/2 - asin x
+		if (ux < bits_of_constant(0x1p-55)) {   // pi/2 - x rounds to pi/2
+			return PIO2_HI;
+		}
+		const double z = x * x;
+		const dd d = fast_two_sum(PIO2_HI, -x);
+		return d.hi + (d.lo + (PIO2_LO - x * (z * asin_series(z))));
+	}
 	if (ux >= bits_of_constant(1.0)) {
 		if (ux != bits_of_constant(1.0)) {
 			return k_nan;
 		}
 		return sign_set(x) ? PI_HI : 0.0;
 	}
-	if (ux < bits_of_constant(0x1p-55)) {   // pi/2 - x rounds to pi/2
-		return PIO2_HI;
+	// 2 asin(s) with s = sqrt((1 - |x|) / 2), from pi for a negative x
+	const half_angle h = asin_half_angle(1.0 - magnitude(x));
+	if (!sign_set(x)) {
+		return 2.0 * (h.s + h.rest);
 	}
-	const dd a = first_quadrant_angle(cosine_of_asin(ax), {ax, 0.0});
-	if (sign_set(x)) {
-		const dd b = subtract_from(PI_HI, PI_LO, a);
-		return b.hi + b.lo;
-	}
-	return a.hi + a.lo;
+	const dd d = fast_two_sum(PI_HI, -2.0 * h.s);
+	return d.hi + (d.lo + (PI_LO - 2.0 * h.rest));
 }
 
 double atan(double x) noexcept {
@@ -539,9 +658,9 @@ double atan(double x) noexcept {
 	}
 	dd a;
 	if (ax <= 1.0) {
-		a = atan_reduced(ax, 0.0);
+		a = atan_reduced(ax);
 	} else {
-		a = subtract_from(PIO2_HI, PIO2_LO, atan_of_ratio({1.0, 0.0}, {ax, 0.0}));
+		a = subtract_from(PIO2_HI, PIO2_LO, atan_of_ratio(1.0, ax));
 	}
 	return with_sign_of(a.hi + a.lo, x);
 }
@@ -585,7 +704,7 @@ double atan2(double y, double x) noexcept {
 			a = subtract_from(PIO2_HI, PIO2_LO, a);
 		}
 	} else {
-		a = first_quadrant_angle({ay, 0.0}, {ax, 0.0});
+		a = ay <= ax ? atan_of_ratio(ay, ax) : subtract_from(PIO2_HI, PIO2_LO, atan_of_ratio(ax, ay));
 	}
 	if (x_negative) {
 		a = subtract_from(PI_HI, PI_LO, a);
@@ -624,7 +743,7 @@ double exp2(double x) noexcept {
 	const double r = (x - kd * 0x1p-7) * LN2;
 	const double z = r * r;
 	const double* c = EXP_TAYLOR;
-	const double p = r + z * (c[0] + r * (c[1] + r * (c[2] + r * (c[3] + r * c[4]))));
+	const double p = r + z * ((c[0] + r * c[1]) + z * ((c[2] + r * c[3]) + z * c[4]));
 	const std::int64_t k = static_cast<std::int64_t>(kd);
 	const double* t = EXP2_128[k & 127];
 	return scale(static_cast<int>(k >> 7), t[0], t[1] + t[0] * p);
@@ -638,7 +757,7 @@ double log(double x) noexcept {
 	const log_parts p = log_reduce(x);
 	const dd t1 = fast_two_sum(p.e * LN2_HI, p.row[1]);
 	const dd s = fast_two_sum(t1.hi, p.r.hi);
-	return s.hi + (((((t1.lo + s.lo) + p.e * LN2_LO) + p.row[2]) + p.r.lo) + log1p_tail(p.r.hi));
+	return s.hi + (((t1.lo + s.lo) + (p.e * LN2_LO + p.row[2])) + (p.r.lo + log1p_tail(p.r.hi)));
 }
 
 double log2(double x) noexcept {
@@ -647,10 +766,10 @@ double log2(double x) noexcept {
 		return special;
 	}
 	const log_parts p = log_reduce(x);
-	const dd l = log_mantissa(p);
-	const dd q = two_product(l.hi, INV_LN2_HI);
-	const dd s = fast_two_sum(p.e, q.hi);
-	return s.hi + (s.lo + ((q.lo + l.hi * INV_LN2_LO) + l.lo * INV_LN2_HI));
+	const dd t1 = fast_two_sum(p.e, p.row[3]);
+	const dd q = scaled_by_constant(p.r, INV_LN2_26, INV_LN2_26T, INV_LN2_HI);
+	const dd s = fast_two_sum(t1.hi, q.hi);
+	return s.hi + (((t1.lo + s.lo) + (p.row[4] + q.lo)) + log1p_tail(p.r.hi) * INV_LN2_HI);
 }
 
 double log10(double x) noexcept {
@@ -659,13 +778,14 @@ double log10(double x) noexcept {
 		return special;
 	}
 	const log_parts p = log_reduce(x);
-	const dd l = log_mantissa(p);
-	const dd q = two_product(l.hi, INV_LN10_HI);
-	const dd s = fast_two_sum(p.e * LOG10_2_HI, q.hi);
-	return s.hi + ((s.lo + p.e * LOG10_2_LO) + ((q.lo + l.hi * INV_LN10_LO) + l.lo * INV_LN10_HI));
+	const dd t1 = fast_two_sum(p.e * LOG10_2_HI, p.row[5]);
+	const dd q = scaled_by_constant(p.r, INV_LN10_26, INV_LN10_26T, INV_LN10_HI);
+	const dd s = fast_two_sum(t1.hi, q.hi);
+	return s.hi + (((t1.lo + s.lo) + (p.e * LOG10_2_LO + p.row[6])) + (q.lo + log1p_tail(p.r.hi) * INV_LN10_HI));
 }
 
-double pow(double x, double y) noexcept {
+// pow off the fast path: zeros, infinities, NaNs, negative and subnormal bases, and exponents beyond 2^64
+JAI_NOINLINE double pow_special(double x, double y) noexcept {
 	const std::uint64_t ux = magnitude_bits(x), uy_magnitude = magnitude_bits(y);
 	if (uy_magnitude == 0 || bits_of(x) == bits_of_constant(1.0)) {   // pow(x, +-0) and pow(1, y) are 1, NaN or not
 		return 1.0;
@@ -711,17 +831,16 @@ double pow(double x, double y) noexcept {
 	if (ay > 0x1p64) {   // |log x| >= 2^-54 for x != 1, so |y log x| > 746
 		return (ax > 1.0) != y_negative ? k_infinity : 0.0;
 	}
-	const dd l = log_precise(ax);
-	const dd z = two_product(y, l.hi);
-	const double z_lo = z.lo + y * l.lo;
-	if (z.hi > 709.8) {
-		return sign * k_infinity;
+	return sign * pow_positive(ax, y);
+}
+
+double pow(double x, double y) noexcept {
+	// a positive normal finite x and a nonzero y within 2^64 take the general formula directly
+	if (bits_of(x) - std::uint64_t{0x0010000000000000} < k_infinity_bits - std::uint64_t{0x0010000000000000} &&
+	    magnitude_bits(y) - 1 < bits_of_constant(0x1p64) - 1) {
+		return pow_positive(x, y);
 	}
-	if (z.hi < -746.0) {
-		return sign * 0.0;
-	}
-	const scaled s = exp_reduce(z.hi, z_lo);
-	return sign * scale(s.e, s.hi, s.lo);
+	return pow_special(x, y);
 }
 
 double sinh(double x) noexcept {
@@ -807,7 +926,8 @@ double cbrt(double x) noexcept {
 	return with_sign_of(root * power_of_two(q + adjust), x);
 }
 
-double hypot(double x, double y) noexcept {
+// hypot outside [2^-450, 2^500]: infinities, NaNs, zeros, and squares that would overflow or underflow, scaled by 2^-+600
+JAI_NOINLINE double hypot_general(double x, double y) noexcept {
 	const std::uint64_t ux = magnitude_bits(x), uy = magnitude_bits(y);
 	if (ux == k_infinity_bits || uy == k_infinity_bits) {
 		return k_infinity;
@@ -838,6 +958,19 @@ double hypot(double x, double y) noexcept {
 	const dd s = fast_two_sum(xx.hi, yy.hi);
 	const dd root = square_root(fast_two_sum(s.hi, (s.lo + xx.lo) + yy.lo));
 	return (root.hi + root.lo) * unscale;
+}
+
+double hypot(double x, double y) noexcept {
+	const std::uint64_t ux = magnitude_bits(x), uy = magnitude_bits(y);
+	constexpr std::uint64_t low = bits_of_constant(0x1p-450), span = bits_of_constant(0x1p500) - low;
+	if (ux - low > span || uy - low > span) {
+		return hypot_general(x, y);
+	}
+	// x^2 + y^2 exactly as a pair rounded once: the root of that rounding is off by at most 0.36 ulp, so with the root's
+	// own rounding the result is within 0.86 ulp
+	const dd xx = exact_square(x), yy = exact_square(y);
+	const dd s = two_sum(xx.hi, yy.hi);
+	return std::sqrt(s.hi + (s.lo + (xx.lo + yy.lo)));
 }
 
 } // namespace jai::detail::portable_math

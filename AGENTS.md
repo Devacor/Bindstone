@@ -90,6 +90,11 @@ Release suites. `LAND_NO_STAMPS=1` runs everything. The Android gate (`gates.sh 
 regenerates JaiScript's checker revision (`Source/JaiScript/tools/ci/checker_revision.py`: a hash of the code of every C++
 file under the package's `include/` and `source/` but the tests) and commits it when it moved.
 
+`Tools/Landing/build_main.sh [target...]` gives a program that runs main between landings (a server, a port) a current
+build: under the landing lock it builds the targets (default `jaiscript_runner jai_spider`) in the landing's Release tree,
+copies the result to `Source/JaiScript/out/main-current/<tip>/` and writes that path to `main-current/latest.txt`. A landing
+that trusts every stamp builds nothing, so the landing tree itself can lag main.
+
 ### JaiScript work
 
 JaiScript has its own CMake build and test suite; `Source/JaiScript/AGENTS.md` has the workflow. In short:

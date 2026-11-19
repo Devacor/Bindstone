@@ -120,6 +120,8 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
 - Never read a `script_value` after moving from it (the move constructor nulls the source).
 - Integer arithmetic goes through `jai::ints::try_add/try_sub/try_mul/try_div/mod`, never raw `a + b` on `script_int`:
   the overflow policy (checked by default, `JAISCRIPT_WRAP_ON_OVERFLOW` wraps) lives there, and arithmetic is never UB.
+- Transcendentals (sin, exp, log, pow, cbrt, hypot and the rest) go through `detail/portable_math.hpp`, never `<cmath>`, so
+  every platform computes the same bits.
 - Error text is built only on the failing path (a cold, non-inlined helper), never eagerly on a hot path, with bytes
   identical to the catalogued text.
 - Code marked `KEEP BYTE-PARALLEL` exists in both the interpreter and the VM: change both sides together. A rule both

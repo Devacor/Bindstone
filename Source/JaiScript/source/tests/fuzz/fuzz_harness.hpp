@@ -298,6 +298,9 @@ namespace jai::fuzz {
 			segments_finished.fetch_add(1, std::memory_order_relaxed);
 			if (cfg.after_segment) cfg.after_segment(out.segment_results.size() - 1, *eng);
 		}
+		// whether the engine still runs code, not how fast: on a loaded machine the probe alone can outlast a short budget
+		eng->execution_budget(0);
+		eng->execution_step_budget(0);
 		try {
 			out.alive = (eng->execute("1 + 1").as_int() == 2);
 			out.alias_binds = detail::engine_access::parameter_alias_binds(*eng);

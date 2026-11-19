@@ -21,7 +21,7 @@ capitalized first word):
   the main thread; a worker gets the slot-less / list-free shape of the same text
   (`Array index out of bounds`, `String index out of bounds`, `Cannot insert outside the array`,
   `Cannot cast the value to the target type` when a spelling was never interned,
-  `Cannot assign to a string character (it takes a char or a string)`, `merge() expects exactly 2 arguments`,
+  `Cannot assign to a string character (it takes a char or a string)`, `merge() takes exactly one argument`,
   `'f' was called with the wrong number of arguments` for a callee declaring 64 or more parameters,
   `A host call failed during a parallel region`, `Undefined variable` for a host's by-name lookup of an unknown name);
 - a text that embeds a value (a host exception's `what()`, a binary reader's position, a `time::` date, a name nothing

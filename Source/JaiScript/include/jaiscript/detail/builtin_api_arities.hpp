@@ -21,7 +21,7 @@ namespace jai::detail {
 		uint8_t shapes[BUILTIN_SHAPE_SLOTS];
 	};
 
-	inline constexpr std::array<BuiltinArity, 160> BUILTIN_ARITIES{{
+	inline constexpr std::array<BuiltinArity, 161> BUILTIN_ARITIES{{
 		{0, "append", 1, 1, BuiltinResult::open, {4, 255, 255, 255, 255, 255}},
 		{0, "assign", 2, 2, BuiltinResult::open, {1, 255, 255, 255, 255, 255}},
 		{0, "back", 0, 0, BuiltinResult::element, {255, 255, 255, 255, 255, 255}},
@@ -66,6 +66,7 @@ namespace jai::detail {
 		{1, "has", 1, 1, BuiltinResult::bool_result, {255, 255, 255, 255, 255, 255}},
 		{1, "keys", 0, 0, BuiltinResult::open, {255, 255, 255, 255, 255, 255}},
 		{1, "length", 0, 0, BuiltinResult::int_result, {255, 255, 255, 255, 255, 255}},
+		{1, "merge", 1, 1, BuiltinResult::open, {255, 255, 255, 255, 255, 255}},
 		{1, "remove", 1, 1, BuiltinResult::bool_result, {255, 255, 255, 255, 255, 255}},
 		{1, "remove_if", 1, 1, BuiltinResult::int_result, {16, 255, 255, 255, 255, 255}},
 		{1, "size", 0, 0, BuiltinResult::int_result, {255, 255, 255, 255, 255, 255}},
@@ -285,7 +286,7 @@ namespace jai::detail {
 		BuiltinReceiverEffect effect;
 	};
 
-	inline constexpr std::array<BuiltinEffect, 90> BUILTIN_RECEIVER_EFFECTS{{
+	inline constexpr std::array<BuiltinEffect, 91> BUILTIN_RECEIVER_EFFECTS{{
 		{"append", BuiltinReceiverEffect::writes},
 		{"assign", BuiltinReceiverEffect::writes},
 		{"at", BuiltinReceiverEffect::reads},
@@ -333,6 +334,7 @@ namespace jai::detail {
 		{"lines", BuiltinReceiverEffect::reads},
 		{"lock", BuiltinReceiverEffect::reads},
 		{"map", BuiltinReceiverEffect::writes},
+		{"merge", BuiltinReceiverEffect::writes},
 		{"pad_center", BuiltinReceiverEffect::writes},
 		{"pad_left", BuiltinReceiverEffect::writes},
 		{"pad_right", BuiltinReceiverEffect::writes},

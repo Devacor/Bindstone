@@ -70,11 +70,12 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td>typed array (<code>array&lt;int&gt;</code>)</td><td>Checks every store against its element type.</td></tr>
 <tr><td><code>array&lt;var&gt;</code>, a literal with no spelled element type</td><td>Holds anything.</td></tr>
 </tbody></table></div>
-<h3 id="maps">Maps (14)<a class="hlink" href="#maps" aria-label="link">&#8203;</a></h3>
+<h3 id="maps">Maps (15)<a class="hlink" href="#maps" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th>kind</th><th>methods</th></tr></thead><tbody>
 <tr><td>observers</td><td><code>size</code> <code>length</code> <code>empty</code> <code>contains</code> <code>has</code> <code>get</code> <code>keys</code> <code>values</code> <code>to_array</code></td></tr>
 <tr><td><strong>change in place, return nothing</strong></td><td><code>clear</code> <code>filter</code></td></tr>
 <tr><td><strong>change in place, return what they took</strong></td><td><code>erase</code> <code>remove</code> (whether the key was there) <code>remove_if</code> (the count)</td></tr>
+<tr><td>return a new map</td><td><code>merge</code></td></tr>
 </tbody></table></div>
 <div class="tablewrap"><table><thead><tr><th>On</th><th>Rule</th></tr></thead><tbody>
 <tr><td><code>m[key] = v</code></td><td>Inserts or overwrites.</td></tr>
@@ -83,6 +84,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>get(key)</code></td><td>The value, or null for a missing key.</td></tr>
 <tr><td><code>get(key, default)</code></td><td>The value, or the explicit fallback.</td></tr>
 <tr><td><code>filter</code></td><td>The predicate takes <code>(key, value)</code>; keeps the accepted entries. <code>map::filter(m, f)</code> returns a new map.</td></tr>
+<tr><td><code>merge</code></td><td>Puts <code>other</code>&#x27;s entries into the map, <code>other</code>&#x27;s value winning on a shared key, held to the map&#x27;s key and value types (an entry they refuse raises and the map stays as it was); returns nothing. <code>map::merge(m, other)</code> returns a new map.</td></tr>
 <tr><td>keys</td><td>Ordered (<a href="#map-key-order">key order</a>). Any script value can be a key: the total ordering of <code>&lt;=&gt;</code> guarantees it.</td></tr>
 <tr><td>declared key type</td><td>Enforced on stores (<code>map&lt;string,int&gt; m; m[5] = 1</code> raises). Keys never coerce.</td></tr>
 </tbody></table></div>
@@ -136,6 +138,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>xs.sort()</code>, <code>xs.sort(f)</code></td><td><code>array::sort(xs)</code>, <code>array::sort(xs, f)</code></td></tr>
 <tr><td><code>xs.reverse()</code></td><td><code>array::reverse(xs)</code></td></tr>
 <tr><td><code>m.filter(f)</code></td><td><code>map::filter(m, f)</code></td></tr>
+<tr><td><code>m.merge(other)</code></td><td><code>map::merge(m, other)</code></td></tr>
 <tr><td><code>s.append(text)</code></td><td><code>string::append(s, text)</code></td></tr>
 <tr><td><code>s.trim()</code></td><td><code>string::trim(s)</code></td></tr>
 <tr><td><code>s.to_lower()</code>, <code>s.to_upper()</code></td><td><code>string::to_lower(s)</code>, <code>string::to_upper(s)</code></td></tr>
@@ -451,7 +454,7 @@ print(to_json({"a": [1, 2]}, 2));</code></pre></div>
 <tr><td>host math types</td><td><code>JAI_BIND_VEC2</code> / <code>VEC3</code> / <code>VEC4</code> / <code>IVEC2</code> / <code>IVEC3</code> / <code>COLOR</code> in a C++ type&#x27;s header make it cross the boundary as the native kind.</td><td><a href="../embedding/15-math-adapters.html">Math Adapters</a></td></tr>
 <tr><td>printing and conversion</td><td><code>print</code> (tokens <code>skip_newline</code> <code>skip_flush</code>) <code>format</code> <code>vformat</code> <code>format_value</code> <code>to_string</code> <code>to_char</code> <code>utf8_string</code> <code>cast&lt;T&gt;</code>; <a href="#format-specs">format specs</a></td><td><a href="../guide/09-containers-strings.html#printing-values">Containers &amp; Strings</a></td></tr>
 <tr><td>text</td><td><code>string</code> is bytes; <code>utf8_string</code> counts characters (<code>size</code>, <code>u[i]</code>, <code>substr</code>, range-<code>for</code>). <code>split()</code> splits on whitespace (<code>string::whitespace</code>). <a href="#strings">String methods</a>.</td><td><a href="../guide/09-containers-strings.html#utf-8-text">Containers &amp; Strings</a></td></tr>
-<tr><td>containers and objects</td><td><a href="#arrays">array</a> and <a href="#maps">map</a> methods, the <code>array::</code> and <code>map::</code> copies; <code>merge</code> <code>pair</code> (<code>first</code> <code>second</code>); <code>same_object</code> <code>extend</code> <code>shared_from_this</code> <code>weak_from_this</code></td><td><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></td></tr>
+<tr><td>containers and objects</td><td><a href="#arrays">array</a> and <a href="#maps">map</a> methods, the <code>array::</code> and <code>map::</code> copies; <code>pair</code> (<code>first</code> <code>second</code>); <code>same_object</code> <code>extend</code> <code>shared_from_this</code> <code>weak_from_this</code></td><td><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></td></tr>
 <tr><td>regular expressions</td><td><code>regex(pattern, [flags])</code>, <code>regex::escape(text)</code>, <code>regex::match</code>: <a href="#regex-calls">calls</a>, <a href="#regex-syntax">syntax</a>, <a href="#regex-flags">flags</a> <code>i m s x</code>, <a href="#regex-replacement">replacements</a> <code>$1 ${name} $0 $$</code>. Linear time; bytes on a string, characters on a utf8_string; a constant pattern compiles at load.</td><td><a href="../guide/09-containers-strings.html#regular-expressions">Containers &amp; Strings</a></td></tr>
 <tr><td>binary data</td><td><code>s.reader()</code> / <code>binary::reader(s)</code>, <code>binary::writer w;</code>, <code>binary::layout("field", width, ...)</code> with <code>r.unpack</code>, <code>w.pack</code> and <code>r.read(Class, layout)</code>: <a href="#binary-reader">reader</a>, <a href="#binary-writer">writer</a>, <a href="#binary-layout">layouts</a>. <code>s.to_bytes()</code> and <code>string::from_bytes(b)</code>. <code>array&lt;uint8&gt;</code> / <code>array&lt;int8&gt;</code> are one-byte buffers.</td><td><a href="../guide/09-containers-strings.html#binary-data">Containers &amp; Strings</a></td></tr>
 <tr><td>JSON and archives</td><td><code>to_json(x)</code> compact, <code>to_json(x, n)</code> with <code>n</code> spaces per level; <code>from_json(s)</code> rebuilds class instances (through their constructor), chars and non-string map keys (<a href="#json-encoding">encoding</a>). <code>to_binary</code> <code>from_binary</code>; <code>base64_encode</code> <code>base64_decode</code> turn bytes into text and back (<code>base64_encode(to_binary(x))</code>, <code>from_binary(base64_decode(s))</code>).</td><td><a href="../guide/09-containers-strings.html#json">Containers &amp; Strings</a></td></tr>

@@ -54,8 +54,8 @@ namespace jai {
         {"reverse", "array::reverse(@) returns a reversed copy"}, {"slice", "array::slice(@, start, end) returns a copy of the range"},
         {"sort", "array::sort(@) returns a sorted copy"}
     }};
-    inline constexpr std::array<in_place_method, 2> k_map_in_place_methods = {{
-        {"clear", {}}, {"filter", "map::filter(@, f) returns a filtered copy"}
+    inline constexpr std::array<in_place_method, 3> k_map_in_place_methods = {{
+        {"clear", {}}, {"filter", "map::filter(@, f) returns a filtered copy"}, {"merge", "map::merge(@, other) returns a merged copy"}
     }};
     inline constexpr std::array<in_place_method, 8> k_string_in_place_twins = {{
         {"append", "string::append(@, text) returns a joined copy"}, {"pad_left", "string::pad_left(@, width) returns a padded copy"},
@@ -77,9 +77,10 @@ namespace jai {
         }
         return std::nullopt;
     }
-    // a name some receiver kind's in-place builtin answers to (a map's are an array's names; a handle's reset): the compile-time gate
+    // a name some receiver kind's in-place builtin answers to (an array's, a map's, a string's; a handle's reset): the compile-time gate
     inline bool is_in_place_method_name(std::string_view a_name) noexcept {
         for (const auto& m : k_array_in_place_methods) { if (m.name == a_name) { return true; } }
+        for (const auto& m : k_map_in_place_methods) { if (m.name == a_name) { return true; } }
         for (std::string_view m : k_string_mutator_method_names) { if (m == a_name) { return true; } }
         return a_name == "reset";
     }

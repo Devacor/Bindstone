@@ -695,6 +695,18 @@
       "display": "map::filter(values: map<K,V>, predicate: function(K, V) -> bool) -> map<K,V>"
     },
     {
+      "owner": "map",
+      "name": "merge",
+      "signature": "merge(values: map<K,V>, other: map) -> map<K,V>",
+      "provider": "core",
+      "effect": "copy",
+      "notes": "Returns a new map of values' entries and other's, other's values replacing colliding keys, held to values' key/value constraints; neither input mutates. Only values retained in the result copy; explicit handles retain identity.",
+      "source": "include/jaiscript/detail/array_namespace.hpp",
+      "form": "namespace",
+      "availability": "Every engine",
+      "display": "map::merge(values: map<K,V>, other: map) -> map<K,V>"
+    },
+    {
       "owner": "map<K,V>",
       "name": "remove_if",
       "signature": "remove_if(predicate: function(K, V) -> bool) -> int",
@@ -2739,19 +2751,19 @@
       "display": "base64_decode(text: string) -> string"
     },
     {
-      "owner": "global",
+      "owner": "map<K,V>",
       "name": "merge",
-      "signature": "merge(first: map<K,V>, second: map) -> map<K,V>",
-      "provider": "stdlib",
-      "effect": "copy",
-      "notes": "Preserves the first input key/value constraints and converts selected second values through normal map-store rules. Second entries replace colliding keys. Only values retained in the result copy; explicit handles retain identity. Inputs do not mutate.",
-      "source": "include/jaiscript/stdlib/containers.hpp",
-      "form": "function",
-      "availability": "register_all() or area registration",
-      "display": "merge(first: map<K,V>, second: map) -> map<K,V>",
+      "signature": "merge(other: map) -> void",
+      "provider": "core",
+      "effect": "mutate",
+      "notes": "Puts other's entries into the map in place, other's values replacing colliding keys, held to the map's key/value constraints through normal map-store rules, and returns nothing; map::merge returns a copy. Every entry is converted before any is stored, so a refused entry raises with the map unchanged. other does not mutate.",
+      "source": "source/implementation/builtin_methods.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "map<K,V>.merge(other: map) -> void",
       "example": {
-        "code": "print(to_json(merge({\"a\": 1, \"b\": 2}, {\"b\": 3})));",
-        "output": "{\"a\":1,\"b\":3}"
+        "code": "map<string, int> base = {\"a\": 1, \"b\": 2};\nmap<string, int> both = map::merge(base, {\"b\": 3, \"c\": 4});   // a copy\nbase.merge({\"b\": 3});                                         // in place\nprint(to_json(both), \" \", to_json(base));",
+        "output": "{\"a\":1,\"b\":3,\"c\":4} {\"a\":1,\"b\":3}"
       }
     },
     {

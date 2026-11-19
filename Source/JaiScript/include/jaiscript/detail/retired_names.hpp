@@ -37,6 +37,7 @@ inline constexpr retired_name k_retired_names[] = {
 	{"jai::permissions::scoped_template", "jai::permissions::untrusted_template",
 	 "JaiScript has no 'jai::permissions::scoped_template': write jai::permissions::untrusted_template"},
 	{"crypto::equals", "crypto::constant_time_equals", "JaiScript has no 'crypto::equals': write crypto::constant_time_equals(a, b)"},
+	{"merge", "map::merge", "JaiScript has no 'merge' function: write map::merge(a, b) for the merged copy, or a.merge(b) to merge b into a"},
 };
 
 // Builtin methods that have a new spelling: a call on a receiver that declares no method of the name (a class's own same_as

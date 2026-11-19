@@ -226,6 +226,31 @@ public:
 			check_true(raised.find("has no member 'same_as': write same_object(a, b)") != std::string::npos, "a var receiver raises at run time with the advice: " + raised);
 		});
 
+		test("merge_is_map_merge_or_the_in_place_method", [this]() {
+			const std::string errors = load_errors("var m = merge({\"a\": 1}, {\"b\": 2});");
+			check_true(errors.find("JaiScript has no 'merge' function: write map::merge(a, b) for the merged copy, or a.merge(b) to merge b into a") != std::string::npos, errors);
+			check_eq(std::string("{\"a\":1,\"b\":3,\"c\":4} {\"a\":1,\"b\":2} {\"b\":3,\"c\":4}\n{\"a\":1,\"b\":3,\"c\":4} {\"b\":3,\"c\":4}\n"), run_output(R"(
+				map<string, int> a = {"a": 1, "b": 2};
+				map<string, int> b = {"b": 3, "c": 4};
+				auto both = map::merge(a, b);
+				print(to_json(both), " ", to_json(a), " ", to_json(b));
+				a.merge(b);
+				print(to_json(a), " ", to_json(b));
+			)"));
+			check_eq(std::string("Cannot store 'float' in map value of type 'int' {\"a\":1}\n"), run_output(R"(
+				map<string, int> ints = {"a": 1};
+				try { ints.merge({"z": 3, "b": 2.5}); } catch (e) { print(e, " ", to_json(ints)); }
+			)"));
+			const std::string used = load_errors("map<string, int> m = {\"a\": 1};\nauto c = m.merge({\"b\": 2});");
+			check_true(used.find("merge changes m in place and returns nothing; map::merge(m, other) returns a merged copy") != std::string::npos, used);
+			std::string raised;
+			try { library_engine()->execute("[[warn_mode]];\nvar m = {\"a\": 1};\nvar c = m.merge({\"b\": 2});"); } catch (const std::exception& error) { raised = error.what(); }
+			check_true(raised.find("merge changes m in place and returns nothing; map::merge(m, other) returns a merged copy") != std::string::npos, "a var receiver raises at run time: " + raised);
+			check_true(!load_errors("const map<string, int> k = {\"a\": 1};\nk.merge({\"b\": 2});").empty(), "a const map does not merge in place");
+			check_eq(std::string("mine 3\n"), run_output("string merge(int a, int b) { return \"mine \" + to_string(a + b); }\nprint(merge(1, 2));\n"));
+			check_true(!load_errors("map<string, int> m = {\"a\": 1};\nm.merge();").empty(), "the method takes one map");
+		});
+
 		test("an_engine_without_the_replacement_reports_the_plain_undeclared_name", [this]() {
 			auto e = make_engine();
 			stdlib::register_all(*e);

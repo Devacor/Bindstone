@@ -680,11 +680,11 @@ public:
 			expect("merge avoids overwritten copies and keeps constraints", R"(
 				nocopy class Item { int n = 1; }
 				map<string,var> left = {"x":Item()}; map<string,var> right = {"x":2};
-				var replaced = merge(left,right);
-				map<string,int> integers = {"a":1}; var flags = {"b":true}; auto joined = merge(integers,flags); bool rejects = false;
+				var replaced = map::merge(left, right);
+				map<string,int> integers = {"a":1}; var flags = {"b":true}; auto joined = map::merge(integers, flags); bool rejects = false;
 				try { joined["a"] = "bad"; } catch (e) { rejects = true; }
 				var floats = {"c":2.5}; string refused = "";
-				try { merge(integers,floats); } catch (e) { refused = e; }
+				try { integers.merge(floats); } catch (e) { refused = e; }
 				to_json(replaced) + "|" + to_json(joined) + "|" + to_string(rejects) + "|" + refused;
 			)", "{\"x\":2}|{\"a\":1,\"b\":1}|true|Cannot store 'float' in map value of type 'int'");
 			expect("handle projections", R"(

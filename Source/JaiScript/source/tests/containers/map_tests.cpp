@@ -435,23 +435,33 @@ public:
             eng->execute(R"(
                 auto map1 = {"key": "value1", "other": "data"};
                 auto map2 = {"key": "value2"};
-                auto merged = merge(map1, map2);
+                auto merged = map::merge(map1, map2);
             )");
 
-            // Second map should override first
+            // Second map should override first; map::merge leaves map1 as it is
             check_eq(eng->execute("merged[\"key\"]").as<std::string>(), "value2");
             check_eq(eng->execute("merged[\"other\"]").as<std::string>(), "data");
+            check_eq(eng->execute("map1[\"key\"]").as<std::string>(), "value1");
+
+            // the dot form merges into map1 itself
+            eng->execute("map1.merge(map2);");
+            check_eq(eng->execute("map1[\"key\"]").as<std::string>(), "value2");
+            check_eq(eng->execute("map1[\"other\"]").as<std::string>(), "data");
+            check_eq(eng->execute("map2.size()").as_int(), script_int{1});
         });
 
-        test("merge_arity_text_spells_the_count", [&]() {
+        test("merge_takes_one_map", [&]() {
             auto eng = make_engine();
             stdlib::register_all(eng);
             auto caught = eng->execute(R"(
-                var text = "";
-                try { merge({"a": 1}); } catch (e) { text = e; }
-                text
+                var m = {"a": 1};
+                var arity = "";
+                try { m.merge(); } catch (e) { arity = e; }
+                var kind = "";
+                try { m.merge(5); } catch (e) { kind = e; }
+                arity + "|" + kind
             )");
-            check_eq(std::string("merge() expects exactly 2 arguments, got 1"), caught.as<std::string>());
+            check_eq(std::string("merge() takes exactly one argument|merge() argument must be a map"), caught.as<std::string>());
         });
 
         test("map_with_numeric_string_keys", [&]() {

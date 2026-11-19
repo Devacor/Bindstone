@@ -808,6 +808,7 @@ try {
 <tr><td><code>jai::permissions::scoped_template</code></td><td><code>JaiScript has no 'jai::permissions::scoped_template': write jai::permissions::untrusted_template</code></td></tr>
 <tr><td><code>crypto::equals(a, b)</code></td><td><code>JaiScript has no 'crypto::equals': write crypto::constant_time_equals(a, b)</code></td></tr>
 <tr><td><code>a.same_as(b)</code>, where the receiver&#x27;s class declares no <code>same_as</code></td><td><code>JaiScript has no 'same_as' method: write same_object(a, b)</code>; at run time, on a <code>var</code> receiver, <code>C has no member 'same_as': write same_object(a, b)</code></td></tr>
+<tr><td><code>merge(a, b)</code></td><td><code>JaiScript has no 'merge' function: write map::merge(a, b) for the merged copy, or a.merge(b) to merge b into a</code></td></tr>
 </tbody></table></div>
 <p>Other parse errors in the same voice:</p>
 <ul>

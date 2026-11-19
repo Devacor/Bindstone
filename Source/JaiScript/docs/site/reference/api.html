@@ -708,11 +708,6 @@ print(p.name, &quot; &quot;, p.age);</code></pre></div>
 <div class="api-entry" data-provider="runner" data-search="load_sound(path: string) -&gt; sound audio opens a wav, midi or mp3 file (the header decides, else the extension) and preloads it in the background; null for a missing file, an unknown format, or off windows. standalone jaiscript.exe"><h3 id="api-579b6cf87920"><code>load_sound(path: string) -&gt; sound</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; audio</p>
 <p>Opens a WAV, MIDI or MP3 file (the header decides, else the extension) and preloads it in the background; null for a missing file, an unknown format, or off Windows.</p>
 </div>
-<div class="api-entry" data-provider="stdlib" data-search="merge(first: map&lt;k,v&gt;, second: map) -&gt; map&lt;k,v&gt; copy preserves the first input key/value constraints and converts selected second values through normal map-store rules. second entries replace colliding keys. only values retained in the result copy; explicit handles retain identity. inputs do not mutate. register_all() or area registration"><h3 id="api-723e9adc001f"><code>merge(first: map&lt;K,V&gt;, second: map) -&gt; map&lt;K,V&gt;</code></h3><p><strong>register_all() or area registration</strong> &middot; copy</p>
-<p>Preserves the first input key/value constraints and converts selected second values through normal map-store rules. Second entries replace colliding keys. Only values retained in the result copy; explicit handles retain identity. Inputs do not mutate.</p>
-<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(to_json(merge({&quot;a&quot;: 1, &quot;b&quot;: 2}, {&quot;b&quot;: 3})));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;a&quot;:1,&quot;b&quot;:3}</code></pre></div>
-</div>
 <div class="api-entry" data-provider="runner" data-search="net_channel() -&gt; net_channel construct  standalone jaiscript.exe"><h3 id="api-72916627be92"><code>net_channel() -&gt; net_channel</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; construct</p>
 </div>
 <div class="api-entry" data-provider="runner" data-search="net_host_name() -&gt; string observe  standalone jaiscript.exe"><h3 id="api-0d74c1840472"><code>net_host_name() -&gt; string</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; observe</p>
@@ -866,6 +861,9 @@ print(vformat(pattern, &quot;orc&quot;, 7));</code></pre></div>
 <div class="api-entry" data-provider="core" data-search="map::filter(values: map&lt;k,v&gt;, predicate: function(k, v) -&gt; bool) -&gt; map&lt;k,v&gt; copy, callback returns a new map of the entries the predicate accepts, preserving key/value constraints; the input does not mutate. only selected value elements copy; explicit handles retain identity. every engine"><h3 id="api-b8f32f5469d5"><code>map::filter(values: map&lt;K,V&gt;, predicate: function(K, V) -&gt; bool) -&gt; map&lt;K,V&gt;</code></h3><p><strong>Every engine</strong> &middot; copy, callback</p>
 <p>Returns a new map of the entries the predicate accepts, preserving key/value constraints; the input does not mutate. Only selected value elements copy; explicit handles retain identity.</p>
 </div>
+<div class="api-entry" data-provider="core" data-search="map::merge(values: map&lt;k,v&gt;, other: map) -&gt; map&lt;k,v&gt; copy returns a new map of values&#x27; entries and other&#x27;s, other&#x27;s values replacing colliding keys, held to values&#x27; key/value constraints; neither input mutates. only values retained in the result copy; explicit handles retain identity. every engine"><h3 id="api-54acb62f7c0f"><code>map::merge(values: map&lt;K,V&gt;, other: map) -&gt; map&lt;K,V&gt;</code></h3><p><strong>Every engine</strong> &middot; copy</p>
+<p>Returns a new map of values&#x27; entries and other&#x27;s, other&#x27;s values replacing colliding keys, held to values&#x27; key/value constraints; neither input mutates. Only values retained in the result copy; explicit handles retain identity.</p>
+</div>
 </section>
 <section class="api-group"><h2 id="group-map-k-v">map&lt;K,V&gt;</h2>
 <div class="api-entry" data-provider="core" data-search="map&lt;k,v&gt;.clear() -&gt; void mutate  every engine"><h3 id="api-0119c6fa6e22"><code>map&lt;K,V&gt;.clear() -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
@@ -909,6 +907,14 @@ print(to_json(stock.keys()), &quot; &quot;, to_json(stock.values()));</code></pr
 </div>
 <div class="api-entry" data-provider="core" data-search="map&lt;k,v&gt;.length() -&gt; int observe alias of size. every engine"><h3 id="api-9599618ab78c"><code>map&lt;K,V&gt;.length() -&gt; int</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Alias of size.</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="map&lt;k,v&gt;.merge(other: map) -&gt; void mutate puts other&#x27;s entries into the map in place, other&#x27;s values replacing colliding keys, held to the map&#x27;s key/value constraints through normal map-store rules, and returns nothing; map::merge returns a copy. every entry is converted before any is stored, so a refused entry raises with the map unchanged. other does not mutate. every engine"><h3 id="api-338f8b7169c0"><code>map&lt;K,V&gt;.merge(other: map) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Puts other&#x27;s entries into the map in place, other&#x27;s values replacing colliding keys, held to the map&#x27;s key/value constraints through normal map-store rules, and returns nothing; map::merge returns a copy. Every entry is converted before any is stored, so a refused entry raises with the map unchanged. other does not mutate.</p>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">map&lt;string, int&gt; base = {&quot;a&quot;: 1, &quot;b&quot;: 2};
+map&lt;string, int&gt; both = map::merge(base, {&quot;b&quot;: 3, &quot;c&quot;: 4});   // a copy
+base.merge({&quot;b&quot;: 3});                                         // in place
+print(to_json(both), &quot; &quot;, to_json(base));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;a&quot;:1,&quot;b&quot;:3,&quot;c&quot;:4} {&quot;a&quot;:1,&quot;b&quot;:3}</code></pre></div>
 </div>
 <div class="api-entry" data-provider="core" data-search="map&lt;k,v&gt;.remove(key: k) -&gt; bool mutate true if an entry was removed; false when absent. every engine"><h3 id="api-fb840d75cef0"><code>map&lt;K,V&gt;.remove(key: K) -&gt; bool</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
 <p>True if an entry was removed; false when absent.</p>

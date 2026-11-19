@@ -274,7 +274,7 @@ public:
 				{entries, "{ var k = m.keys(); n = k.size(); }", "n", "0", "150000"},
 				{entries, "{ var pairs = m.to_array(); n = pairs.size(); }", "n", "0", "150000"},
 				{entries, "{ var c = m; c[-1] = 0; n = c.size(); }", "n", "0", "150001"},
-				{entries, "{ var both = merge(m, m); n = both.size(); }", "n", "0", "150000"},
+				{entries, "{ var both = map::merge(m, m); n = both.size(); }", "n", "0", "150000"},
 			};
 			const std::string spent = "Script execution budget exceeded - raise engine::execution_step_budget or break up the work";
 			check_each(rows, [&](const long_builtin& row) {

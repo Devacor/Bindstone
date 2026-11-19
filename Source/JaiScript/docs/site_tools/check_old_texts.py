@@ -19,6 +19,8 @@ OLD_TEXTS = [
     r"Insufficient permission: scoped_template",
     r"a scoped template",
     r"crypto::equals expects",
+    r"merge\(\) expects exactly 2 arguments",
+    r"merge\(\) requires two map arguments",
     r"is marked serial_function\(\)",
     r"is marked serial_static_method\(\)",
     r"is marked serial_method\(\)",

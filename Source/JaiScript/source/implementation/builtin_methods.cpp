@@ -29,6 +29,65 @@
 namespace jai {
 
 namespace {
+
+    // a.merge(b) puts b's entries into a, b's value replacing a's on a shared key, under a's key and value types, and returns
+    // nothing; map::merge(a, b) (ctx.copy_array_result) returns that map as a copy and leaves a as it is. b never changes. Every
+    // entry is converted before any is stored, so an entry a's types refuse raises with a unchanged.
+    checked_result<script_value> map_merge(const builtin_method_context& ctx, script_value& a_left, const script_value& a_right) {
+        if (!a_right.is_map()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "merge() argument must be a map");
+        }
+        engine* engine = ctx.get_engine();
+        const auto tag = a_left.get_type_info();
+        const auto keyType = tag ? tag->key_type() : nullptr, valueType = tag ? tag->value_type() : nullptr;
+        const bool copy = ctx.copy_array_result;
+        script_value result = copy ? script_value::make_map(keyType, valueType, engine) : ctx.make_value();
+        using Entry = std::pair<script_value, script_value>;
+        std::vector<Entry> entries;
+        entries.reserve((copy ? a_left.unchecked_as_map().size() : 0) + a_right.unchecked_as_map().size());
+        detail::work_meter work(engine);
+        // Decide the output before copying: an overwritten input value is only read.
+        if (copy) {
+            for (const auto& [key,value] : a_left.unchecked_as_map()) {
+                if (a_right.unchecked_as_map().find(key) == a_right.unchecked_as_map().end()) { entries.emplace_back(key,value); }
+                if (work.spend(2)) [[unlikely]] { return work.spent(); }
+            }
+        }
+        for (const auto& [key,value] : a_right.unchecked_as_map()) {
+            entries.emplace_back(key,value);
+            if (work.spend(1)) [[unlikely]] { return work.spent(); }
+        }
+        std::vector<Entry> stored;
+        stored.reserve(entries.size());
+        for (const auto& [key,value] : entries) {
+            if (work.spend(4)) [[unlikely]] { return work.spent(); }
+            if (keyType && keyType->base_type != script_value_type::jai_any_type && keyType->base_type != script_value_type::jai_null_type &&
+                !detail::map_key_kind_admits(key.type(), detail::map_key_kind(*keyType))) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::map_key_type_mismatch), "Cannot use '{0}' as a key of type '{1}'", detail::engine_access::symbolize(*engine, detail::container_value_type_name(key)), detail::engine_access::symbolize(*engine, detail::type_info_display_name(keyType)));
+            }
+            script_value output = value.clone_element();
+            if (valueType && valueType->base_type != script_value_type::jai_any_type && valueType->base_type != script_value_type::jai_null_type) {
+                if (!detail::container_element_compatible(output, valueType, engine)) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::map_value_type_mismatch), "Cannot store '{0}' in map value of type '{1}'", detail::engine_access::symbolize(*engine, detail::container_value_type_name(output)), detail::engine_access::symbolize(*engine, detail::type_info_display_name(valueType)));
+                }
+                auto converted = detail::convert_container_element(engine, output, valueType);
+                if (!converted) { return converted.error_value(); }
+                output = std::move(converted.value());
+            }
+            if (keyType && keyType->base_type != script_value_type::jai_any_type && keyType->base_type != script_value_type::jai_null_type &&
+                key.type() != detail::map_key_kind(*keyType)) {
+                auto converted_key = detail::map_key_in_kind(key, detail::map_key_kind(*keyType), engine);
+                if (!converted_key) { return converted_key.error_value(); }
+                stored.emplace_back(std::move(converted_key.value()), std::move(output));
+                continue;
+            }
+            stored.emplace_back(key.clone_element(), std::move(output));
+        }
+        auto& target = *(copy ? result : a_left).unchecked_get_map_storage();
+        for (auto& [key, value] : stored) { target[std::move(key)] = std::move(value); }
+        return result;
+    }
+
     // An in-place builtin (it returns nothing) changes its receiver: the API catalog, which the const rules read, says so too
     constexpr bool in_place_methods_write() {
         const auto writes = [](std::string_view a_name) {
@@ -1258,6 +1317,13 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
     // Map methods
     out.map_methods = {
+        {symbolizer->intern("merge"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "merge() takes exactly one argument");
+        }
+        return map_merge(ctx, self, args[0].deref());
+    }},
+
         {symbolizer->intern("size"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "size() takes no arguments");

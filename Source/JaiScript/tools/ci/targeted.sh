@@ -139,12 +139,15 @@ classify() {
 		include/jaiscript/detail/* | source/implementation/parser.cpp | source/implementation/lexer.cpp | source/implementation/type_checker.cpp | \
 		source/implementation/builtin_methods.cpp)
 			vm_tier "a kernel both backends share ($p)"; interp_tier "a kernel both backends share ($p)"; pick wasm "a 32-bit libc++ build runs the examples ($p)"
-			pick selftest "the runner's REPL retries on the parser's missing-';' text ($p)" ;;
+			pick selftest "the runner's REPL retries on the parser's missing-';' text ($p)"
+			pick spider "jai_spider rebuilds an app after a failed load, the one gate that does ($p)" ;;
 		include/jaiscript/properties/* | include/jaiscript/properties.hpp | include/jaiscript/serialization/* | source/implementation/serialization/* | \
 		source/implementation/properties.cpp | source/implementation/schema_binding.cpp)
 			vm_tier "the property system or the archives ($p)"; HOST_ARCHIVES=1; pick wasm "a 32-bit libc++ build runs the examples ($p)" ;;
 		source/implementation/stdlib/spider.cpp | include/jaiscript/stdlib/spider.hpp | include/jaiscript/core/http_transport.hpp | include/jaiscript/net/*)
 			vm_tier "the spider:: client ($p)"; pick spider "the spider:: client against a live server ($p)"; pick wasm "a 32-bit libc++ build runs the examples ($p)" ;;
+		source/implementation/engine.cpp | source/implementation/generics.cpp | source/implementation/templates.cpp)
+			vm_tier "the library's loading ($p)"; pick spider "jai_spider rebuilds an app after a failed load, the one gate that does ($p)"; pick wasm "a 32-bit libc++ build runs the examples ($p)" ;;
 		include/* | source/implementation/*) vm_tier "the library ($p)"; pick wasm "a 32-bit libc++ build runs the examples ($p)" ;;
 		CMakeLists.txt | */CMakeLists.txt | cmake/* | source/jaiscript.cpp | CMakePresets.json)
 			vm_tier "the build ($p)"; pick amalgamation "the build's file lists ($p)"; pick wasm "a 32-bit libc++ build runs the examples ($p)" ;;

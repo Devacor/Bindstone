@@ -37,6 +37,13 @@ namespace writeback_hosts {
         int64_t operator()(gate&) const { return ++n; }
     };
     inline int64_t halved(int64_t x) { return x / 2; }
+    // a host class with a reference member: C++ cannot point at a reference member, so script reaches it through an accessor
+    struct gate_ref {
+        gate& g;
+        explicit gate_ref(gate& a_gate) : g(a_gate) {}
+        gate& target() { return g; }
+        void bump() { g.count += 1; }
+    };
 }
 JAI_BIND_VEC2((writeback_hosts::flat2), x, y)
 
@@ -92,6 +99,11 @@ public:
 			.constructor<int64_t&>()
 			.property("n", &made::n)
 			.build();
+		dynamic_binder<gate_ref>(*e, "GateRef")
+			.constructor<gate&>()
+			.method("target", &gate_ref::target)
+			.method("bump", &gate_ref::bump)
+			.build();
 		return e;
 	}
 
@@ -106,6 +118,15 @@ public:
 				check_eq(expected, run(src, use_vm), std::string(what) + (use_vm ? " (vm)" : " (interpreter)"));
 			}
 		};
+
+		// A bound constructor taking T& binds the script's object, never a copy, and an accessor returning T& for a host reference
+		// member reads and writes the object it names
+		test("a_host_reference_member_binds_the_script_object", [expect]() {
+			expect("var g = Gate(); var h = GateRef(g); h.bump(); h.bump(); to_string(g.count)", "2", "a bound T& constructor");
+			expect("var g = Gate(); var h = new GateRef(g); h.target().count = 5; to_string(g.count) + to_string(h.target().count)", "55",
+			       "an accessor returning T&");
+			expect("var g = Gate(); var h = GateRef(g); auto& t = h.target(); t.count = 7; to_string(g.count)", "7", "a reference bound to the accessor");
+		});
 
 		test("every_value_kind_writes_back", [expect]() {
 			expect("int a = 2; add_i64(a, 40); to_string(a)", "42", "int64_t&");

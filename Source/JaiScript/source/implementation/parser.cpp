@@ -2494,6 +2494,7 @@ JAI_NOINLINE checked_result<type_info_ptr> parser::array_type() {
     } else {
         JAISCRIPT_TRY_ASSIGN(element_type, parse_type());
     }
+    if (check(token_type::ampersand)) { return expected_token(reference_storage_text(element_type, "an element")); }
     consume_greater_in_generic("expected '>' after array element type");
     return array_type_of(element_type);
 }
@@ -2505,6 +2506,7 @@ JAI_NOINLINE checked_result<type_info_ptr> parser::map_type() {
     JAISCRIPT_TRY_ASSIGN(type_info_ptr keyType, parse_type());
     JAISCRIPT_TRY(expect(token_type::comma, "expected ',' after map key type"));
     JAISCRIPT_TRY_ASSIGN(type_info_ptr valueType, parse_type());
+    if (check(token_type::ampersand)) { return expected_token(reference_storage_text(valueType, "an element")); }
     consume_greater_in_generic("expected '>' after map value type");
     return map_type_of(keyType, valueType);
 }
@@ -5995,7 +5997,13 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                 continue;
             }
             type_info_ptr type = std::move(type_result.value());
-            if (reference_method_head()) { type = wrap_reference_return_type(std::move(type)); }   // float& px() { ... }
+            if (reference_method_head()) {
+                type = wrap_reference_return_type(std::move(type));   // float& px() { ... }
+            } else if (!function_spelling && check(token_type::ampersand)) {   // H& r; names storage it does not hold
+                report_error(reference_storage_text(type, "a field"), peek());
+                synchronize_class_member(class_open_index);
+                continue;
+            }
             const type_info_ptr method_return_type = function_spelling ? nullptr : type;
 
             if (check(token_type::identifier) && reject_using_name(peek(), "member")) {
@@ -7029,6 +7037,16 @@ bool parser::reject_coroutine_reference_parameter(const function_decl& coroutine
 }
 
 // `& name(` / `& operator..` after a member's type: a reference-returning method (a class has no reference fields)
+// A reference names storage it does not hold, so no slot is one: a class referent steers to the handles, any other to the value
+std::string parser::reference_storage_text(const type_info_ptr& referent, std::string_view slot) {
+    const bool object = referent && referent->base_type == script_value_type::jai_object_type && !referent->type_name.empty();
+    const std::string name = !referent || referent->base_type == script_value_type::jai_any_type ? std::string("value") : referent->canonical_name();
+    if (object) {
+        return "A reference cannot be " + std::string(slot) + ": hold a shared_ptr<" + name + "> (owning) or a weak_ptr<" + name + "> (observing)";
+    }
+    return "A reference cannot be " + std::string(slot) + ": hold the " + name + " itself, or a shared_ptr<T> to the object that owns it";
+}
+
 bool parser::reference_method_head() const {
     if (!check(token_type::ampersand) || current_ + 2 >= stream_->size() || (*stream_)[current_ + 1].type != token_type::identifier) {
         return false;

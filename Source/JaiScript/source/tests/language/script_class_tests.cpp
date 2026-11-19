@@ -14,6 +14,29 @@ public:
     script_class_tests() : suite("Script Class Tests") {}
     
     void forge_tests() override {
+        // A reference names storage it does not hold, so it is never a field or an element: the parse says which handle to hold
+        test("a_reference_is_never_a_field_or_an_element", [this]() {
+            auto e = make_engine();
+            auto diagnosed = [&](const std::string& src) {
+                std::string all;
+                try {
+                    for (const auto& d : e->check(src).diagnostics) { all += d.message + "\n"; }
+                } catch (const std::exception& ex) { all = ex.what(); }
+                return all;
+            };
+            const std::string h = "class H { int hp = 0; }\nH g;\n";
+            const std::string handles = "A reference cannot be a field: hold a shared_ptr<H> (owning) or a weak_ptr<H> (observing)";
+            check_true(diagnosed(h + "class C { H& r; }").find(handles) != std::string::npos, diagnosed(h + "class C { H& r; }"));
+            check_true(diagnosed(h + "class C { const H& r = g; }").find(handles) != std::string::npos, "a const reference field");
+            check_true(diagnosed("class C { var& r; }").find("A reference cannot be a field: hold the value itself, or a shared_ptr<T> to the object that owns it") !=
+                       std::string::npos, diagnosed("class C { var& r; }"));
+            check_true(diagnosed("array<int&> xs;").find("A reference cannot be an element: hold the int itself, or a shared_ptr<T> to the object that owns it") !=
+                       std::string::npos, diagnosed("array<int&> xs;"));
+            check_true(diagnosed(h + "map<string, H&> m;").find("A reference cannot be an element: hold a shared_ptr<H> (owning) or a weak_ptr<H> (observing)") !=
+                       std::string::npos, diagnosed(h + "map<string, H&> m;"));
+            check_true(diagnosed(h + "class C { H& get() { return g; } }").empty(), "a reference-returning method stays a method");
+        });
+
         test("class_typed_reference_declaration_aliases_the_object", [this]() {
             // `Base& b = derived;` at statement level is a reference declaration on both
             // backends (it parsed as bitwise-and plus an assignment to an undeclared name):

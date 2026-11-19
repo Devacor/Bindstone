@@ -372,6 +372,7 @@ namespace jai {
         // return (int& f() / -> int& / auto&). No-op when the next token isn't '&'.
         type_info_ptr wrap_reference_return_type(type_info_ptr return_type);
         bool reference_method_head() const;
+        static std::string reference_storage_text(const type_info_ptr& referent, std::string_view slot);
         
         // Helper for parsing > in generic contexts (handles >> token splitting)
         void consume_greater_in_generic(std::string_view message);

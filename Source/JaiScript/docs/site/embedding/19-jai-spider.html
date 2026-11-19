@@ -70,9 +70,8 @@ POST /sign 303 2.40 ms
 jai_spider: reloaded views.jai
 GET / 200 1.87 ms</code></pre></div>
 <p>The <code>jai_spider</code> CMake target builds <code>bin/jai_spider</code> beside the runner
-(<code>JAISCRIPT_BUILD_SPIDER</code>, on in a standalone build). SQLite is the system's (3.37 or newer) when CMake finds
-one, otherwise the official amalgamation, downloaded at configure time and checked against a pinned hash;
-<code>-DJAI_SPIDER_SQLITE_ZIP=&lt;zip&gt;</code> or <code>-DJAI_SPIDER_SQLITE_DIR=&lt;dir&gt;</code> supply it offline.
+(<code>JAISCRIPT_BUILD_SPIDER</code>, on in a standalone build). SQLite's official amalgamation is in the repository, under
+<code>tools/jai_spider/third_party/sqlite</code>, and is compiled into it: nothing needs installing or downloading.
 Ctrl+C stops the server and closes every database. In the request log a control or non-ASCII byte of the path is
 written as <code>\xNN</code>.</p>
 <p id="options">The usual options are <code>--port N</code> (default 8080), <code>--root DIR</code> for the static root and <code>--dev</code> for error pages that show the error. Every option: <a href="../reference/host.html#spider-options">command-line options</a>.</p>

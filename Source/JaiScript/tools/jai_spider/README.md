@@ -10,20 +10,9 @@ app's `public/` folder are served as they are, and the `spider::` client reaches
 Built by the `jai_spider` CMake target (on by default, `JAISCRIPT_BUILD_SPIDER`); the binary lands in the build
 directory's `bin/` next to `jai_spider_lib/`, the script library apps import.
 
-SQLite is not in the repository. The build uses a system SQLite 3.37 or newer when CMake finds one (vcpkg, apt
-`libsqlite3-dev`, brew); otherwise it downloads the official amalgamation zip (3.54.1, `sqlite-amalgamation-3540100.zip`
-from sqlite.org) at configure time into the build tree, checks it against the pinned SHA3-256
-`92281c86e2957f9b9305890f9ac04204caa7b677cc868dc326d942689df28e30` (the hash sqlite.org publishes) and compiles it with
-`SQLITE_OMIT_LOAD_EXTENSION`, `SQLITE_DQS=0` and `SQLITE_THREADSAFE=1`. The configure output says which source was used.
-Offline, or to pick the source yourself:
-
-- `-DJAI_SPIDER_SQLITE_ZIP=<path>` uses a local copy of that zip (hash-checked);
-- `-DJAI_SPIDER_SQLITE_DIR=<dir>` compiles an unpacked amalgamation (`sqlite3.c`, `sqlite3.h`) as it is;
-- `-DJAI_SPIDER_SQLITE_FETCH=OFF` turns the download into a configure error.
-
-A configure with no system SQLite, no network and neither path set fails with a message; it never builds a
-`jai_spider` without a database. To update the pin, change the version, zip name and hash at the top of
-`CMakeLists.txt`.
+SQLite is part of the repository: `third_party/sqlite` holds the official amalgamation (3.54.1), and the build compiles
+it with `SQLITE_OMIT_LOAD_EXTENSION`, `SQLITE_DQS=0` and `SQLITE_THREADSAFE=1`. Nothing needs installing or downloading.
+`third_party/sqlite/README.md` says how to update it.
 
 ```
 jai_spider examples/guestbook/app.jai

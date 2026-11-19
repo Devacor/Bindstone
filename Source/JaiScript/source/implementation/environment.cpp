@@ -390,7 +390,13 @@ std::optional<checked_result<value_store>> slot_value_assign(const script_value&
     const type_info* value_tag = value.type_info_raw();
     if (value_tag && value_tag->base_type == script_value_type::jai_shared_ptr_type) { return std::nullopt; }   // a handle rebinds
     const type_info* tag = storage.type_info_raw();
-    if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return handle_value_assign(storage, tag, value, declared_var || tag->dynamic_pointee, eng); }
+    if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) {
+        const bool dynamic_holder = declared_var || tag->dynamic_pointee;
+        if (!dynamic_holder) {   // a shared_ptr<T> slot takes a handle, never a class value (a var holding a handle assigns into its object)
+            if (const std::string held = value_for_handle_slot(value); !held.empty()) { refuse_value_into_handle(held); }
+        }
+        return handle_value_assign(storage, tag, value, dynamic_holder, eng);
+    }
     if (!declared_var && tag && !var_slot(tag)) { return std::nullopt; }
     class_instance* instance = held_instance(storage);
     const class_definition* def = instance ? instance->get_class_definition() : nullptr;

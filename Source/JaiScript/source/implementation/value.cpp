@@ -2,6 +2,7 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
+#include <jaiscript/detail/uniquely_held.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
@@ -2494,6 +2495,14 @@ std::string script_value::to_string() const {
         default:
             return "[unknown]";
     }
+}
+
+std::string detail::value_for_handle_slot(const script_value& value_in) {
+    const script_value& value = value_in.deref();
+    if (value.raw_storage_index() != script_value::TYPEID_OBJECT || value.is_null() || value.is_shared_ptr_type()) { return {}; }
+    auto instance = const_cast<script_value&>(value).get_class_instance();
+    if (!instance || !instance->get_class_definition()) { return {}; }
+    return instance->get_class_definition()->get_name();
 }
 
 namespace {

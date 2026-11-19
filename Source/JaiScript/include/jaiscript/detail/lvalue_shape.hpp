@@ -204,6 +204,9 @@ namespace jai::detail {
 		}
 	}
 
+	// A class value never becomes a handle on its own, as in C++: {0} the class (the checker's text starts lowercase)
+	inline constexpr std::string_view value_into_handle_text = "A {0} value does not become a handle: make_shared<{0}>(value) copies it into a new one";
+
 	// A non-const reference declaration over a temporary (docs/site/reference/errors.html); the checker's load text starts lowercase
 	inline constexpr std::string_view non_lvalue_reference_text = "Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, "
 		"subscript chains like arr[i] or grid[y][x], map entries, object fields like obj.field and C++ properties; "

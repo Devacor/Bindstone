@@ -5,6 +5,7 @@
 
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/detail/environment.hpp>
+#include <jaiscript/detail/lvalue_shape.hpp>
 
 namespace jai::detail {
 
@@ -36,6 +37,15 @@ namespace jai::detail {
         if (value.raw_storage_index() != script_value::TYPEID_OBJECT || value.is_shared_ptr_type() || object_is_prvalue(value)) { return; }
         script_value copy = clone_for_assignment(value);
         value = std::move(copy);
+    }
+
+    // A class value bound for a handle slot (a declaration, a store, an element, a field): no implicit conversion, as in C++; the
+    // class's name for the refusal, empty when the value is a handle, null or no class value
+    std::string value_for_handle_slot(const script_value& value_in);   // value.cpp
+    [[noreturn]] JAI_NOINLINE inline void refuse_value_into_handle(const std::string& class_name) {
+        std::string text(value_into_handle_text);
+        for (size_t at = text.find("{0}"); at != std::string::npos; at = text.find("{0}", at + class_name.size())) { text.replace(at, 3, class_name); }
+        throw runtime_error(text);
     }
 
     // A replacing store's value: a prvalue (uniquely held) moves in and is the stored object, anything else is the

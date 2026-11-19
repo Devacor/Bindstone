@@ -1200,30 +1200,30 @@ public:
             };
             // each body runs at the top level and inside a function, where the VM reads locals from their slots
             const std::pair<const char*, const char*> rows[] = {
-                {"Dog d; shared_ptr<Dog> h = d; h.name = \"x\"; OUT = `${d.name} ${h.name} ${h.copies}`;", "d x 1"},
-                {"Dog d; shared_ptr<auto> h = d; h.name = \"x\"; OUT = `${d.name} ${h.name}`;", "d x"},
-                {"Pup p; shared_ptr<Dog> h = p; h.name = \"x\"; OUT = `${p.name} ${reflect::type_of(h)}`;", "d Pup"},
-                {"shared_ptr<Dog> h = Dog(); OUT = to_string(h.copies);", "0"},
+                {"Dog d; shared_ptr<Dog> h = make_shared<Dog>(d); h.name = \"x\"; OUT = `${d.name} ${h.name} ${h.copies}`;", "d x 1"},
+                {"Dog d; shared_ptr<auto> h = make_shared<Dog>(d); h.name = \"x\"; OUT = `${d.name} ${h.name}`;", "d x"},
+                {"Pup p; shared_ptr<Dog> h = make_shared<Pup>(p); h.name = \"x\"; OUT = `${p.name} ${reflect::type_of(h)}`;", "d Pup"},
+                {"shared_ptr<Dog> h = make_shared<Dog>(); OUT = to_string(h.copies);", "0"},
                 {"shared_ptr<Dog> a = new Dog(); shared_ptr<Dog> b = a; b.name = \"x\"; OUT = `${a.name} ${same_object(a, b)}`;", "x true"},
-                {"Dog d; var v = d; shared_ptr<Dog> h = v; h.name = \"x\"; OUT = `${v.name} ${h.name}`;", "d x"},
+                {"Dog d; var v = d; shared_ptr<Dog> h = make_shared<Dog>(v); h.name = \"x\"; OUT = `${v.name} ${h.name}`;", "d x"},
                 {"shared_ptr<Dog> a = new Dog(); var v = a; shared_ptr<Dog> h = v; h.name = \"x\"; OUT = a.name;", "x"},
-                {"Dog d; Dog& r = d; shared_ptr<Dog> h = r; h.name = \"x\"; OUT = d.name;", "d"},
-                {"const Dog c; shared_ptr<Dog> h = c; h.name = \"x\"; OUT = c.name;", "d"},
-                {"array<Dog> ds; ds.push(Dog()); shared_ptr<Dog> h = ds[0]; h.name = \"x\"; OUT = ds[0].name;", "d"},
-                {"Kennel k; shared_ptr<Dog> h = k.resident; h.name = \"x\"; OUT = k.resident.name;", "d"},
-                {"Dog d; shared_ptr<Dog> h = true ? d : d; h.name = \"x\"; OUT = d.name;", "d"},
+                {"Dog d; Dog& r = d; shared_ptr<Dog> h = make_shared<Dog>(r); h.name = \"x\"; OUT = d.name;", "d"},
+                {"const Dog c; shared_ptr<Dog> h = make_shared<Dog>(c); h.name = \"x\"; OUT = c.name;", "d"},
+                {"array<Dog> ds; ds.push(Dog()); shared_ptr<Dog> h = make_shared<Dog>(ds[0]); h.name = \"x\"; OUT = ds[0].name;", "d"},
+                {"Kennel k; shared_ptr<Dog> h = make_shared<Dog>(k.resident); h.name = \"x\"; OUT = k.resident.name;", "d"},
+                {"Dog d; shared_ptr<Dog> h = make_shared<Dog>(true ? d : d); h.name = \"x\"; OUT = d.name;", "d"},
                 {"shared_ptr<Dog> a = new Dog(); auto h = a.own(); h.name = \"x\"; OUT = a.name;", "x"},
-                {"Dog d; array<shared_ptr<Dog>> all; all.push(d); all[0].name = \"x\"; OUT = `${d.name} ${all[0].copies}`;", "d 1"},
-                {"array<shared_ptr<Dog>> all; all.push(Dog()); OUT = to_string(all[0].copies);", "0"},
-                {"array<Dog> ds; ds.push(Dog()); array<shared_ptr<Dog>> all; all.push(ds[0]); all[0].name = \"x\"; OUT = ds[0].name;", "d"},
-                {"Dog d; array<shared_ptr<Dog>> all = [new Dog()]; all[0] = d; all[0].name = \"x\"; OUT = d.name;", "d"},
-                {"Dog d; array<shared_ptr<Dog>> all; all.insert(0, d); all[0].name = \"x\"; OUT = d.name;", "d"},
-                {"Dog d; array<shared_ptr<Dog>> all = [d]; all[0].name = \"x\"; OUT = `${d.name} ${all[0].copies}`;", "d 1"},
-                {"Dog d; map<string, shared_ptr<Dog>> all; all[\"k\"] = d; all[\"k\"].name = \"x\"; OUT = d.name;", "d"},
-                {"Dog d; map<string, shared_ptr<Dog>> all = {\"k\": d}; all[\"k\"].name = \"x\"; OUT = `${d.name} ${all[\"k\"].copies}`;", "d 1"},
-                {"Dog d; Kennel k; k.star = d; k.star.name = \"x\"; OUT = d.name;", "d"},
-                {"Dog d; Kennel k; k.pack.push(d); k.pack[0].name = \"x\"; OUT = d.name;", "d"},
-                {"array<Dog> ds; ds.push(Dog()); for (shared_ptr<Dog> h : ds) { h.name = \"x\"; OUT = h.name; } OUT = OUT + ds[0].name;", "xd"},
+                {"Dog d; array<shared_ptr<Dog>> all; all.push(make_shared<Dog>(d)); all[0].name = \"x\"; OUT = `${d.name} ${all[0].copies}`;", "d 1"},
+                {"array<shared_ptr<Dog>> all; all.push(make_shared<Dog>()); OUT = to_string(all[0].copies);", "0"},
+                {"array<Dog> ds; ds.push(Dog()); array<shared_ptr<Dog>> all; all.push(make_shared<Dog>(ds[0])); all[0].name = \"x\"; OUT = ds[0].name;", "d"},
+                {"Dog d; array<shared_ptr<Dog>> all = [new Dog()]; all[0] = make_shared<Dog>(d); all[0].name = \"x\"; OUT = d.name;", "d"},
+                {"Dog d; array<shared_ptr<Dog>> all; all.insert(0, make_shared<Dog>(d)); all[0].name = \"x\"; OUT = d.name;", "d"},
+                {"Dog d; array<shared_ptr<Dog>> all = [make_shared<Dog>(d)]; all[0].name = \"x\"; OUT = `${d.name} ${all[0].copies}`;", "d 1"},
+                {"Dog d; map<string, shared_ptr<Dog>> all; all[\"k\"] = make_shared<Dog>(d); all[\"k\"].name = \"x\"; OUT = d.name;", "d"},
+                {"Dog d; map<string, shared_ptr<Dog>> all = {\"k\": make_shared<Dog>(d)}; all[\"k\"].name = \"x\"; OUT = `${d.name} ${all[\"k\"].copies}`;", "d 1"},
+                {"Dog d; Kennel k; k.star = make_shared<Dog>(d); k.star.name = \"x\"; OUT = d.name;", "d"},
+                {"Dog d; Kennel k; k.pack.push(make_shared<Dog>(d)); k.pack[0].name = \"x\"; OUT = d.name;", "d"},
+                {"array<Dog> ds; ds.push(Dog()); for (Dog h : ds) { h.name = \"x\"; OUT = h.name; } OUT = OUT + ds[0].name;", "xd"},
                 // what the checker cannot call a value is judged when the line runs
                 {"Dog d; var v = d; int was = v.copies; auto h = dynamic_cast<Dog>(v); h.name = \"x\"; OUT = `${v.name} ${h.name} ${h.copies - was}`;", "d x 1"},
                 {"Dog d; var v = d; int was = v.copies; auto h = cast<shared_ptr<Dog>>(v); h.name = \"x\"; OUT = `${v.name} ${h.copies - was}`;", "d 1"},
@@ -1247,6 +1247,19 @@ public:
                 check_eq(std::string(row.second), fresh()->execute(classes + row.first + "\nOUT;").as_string(), row.first);
                 check_eq(std::string(row.second), fresh()->execute(classes + "void run() { " + row.first + " }\nrun(); OUT;").as_string(), row.first);
             }
+            // a class value never becomes a handle on its own, as in C++: the load refuses what it sees, the run time a var path
+            const std::string into_handle_refused = "a Dog value does not become a handle: make_shared<Dog>(value) copies it into a new one";
+            for (const char* form : {"Dog d; shared_ptr<Dog> h = d;", "shared_ptr<Dog> h = Dog();", "shared_ptr<Dog> h = new Dog(); Dog d; h = d;",
+                                     "Dog d; array<shared_ptr<Dog>> all; all.push(d);", "Dog d; map<string, shared_ptr<Dog>> all; all[\"k\"] = d;",
+                                     "Dog d; Kennel k; k.star = d;", "void take(shared_ptr<Dog> h) {} Dog d; take(d);",
+                                     "shared_ptr<Dog> give() { Dog d; return d; }"}) {
+                std::string all;
+                try { for (const auto& d : fresh()->check(classes + form).diagnostics) { all += d.message + "\n"; } } catch (const std::exception& ex) { all = ex.what(); }
+                check_true(all.find(into_handle_refused) != std::string::npos, std::string(form) + " -> " + all);
+            }
+            check_eq(std::string("A Dog value does not become a handle: make_shared<Dog>(value) copies it into a new one"),
+                     fresh()->execute("[[warn_mode]];\n" + classes + "Dog d; var v = d; try { shared_ptr<Dog> h = v; } catch (e) { OUT = e; }\nOUT;").as_string(),
+                     "the run time refuses a var path");
             check_eq((int64_t)2, fresh()->execute(classes + "int bump() { Dog s = Pup(); if (dynamic_cast<Pup>(s)) { s.bones += 1; return s.bones; } return 0; } bump();").as_int(),
                      "the test narrows the slot, and a write reaches it");
             // a constructor new or make_shared runs builds the handle's object: a handle made from its `this` shares it
@@ -1294,7 +1307,7 @@ public:
                 // `this` into a handle on a class value raises; a copy would be another object
                 {"Dog d; d.own();", "'this' becomes a handle only on an object reached through a shared_ptr, and this one is a class value"},
                 {"array<shared_ptr<Ent>> REG; class Ent { Ent() { REG.push(this); } } Ent e;", "'this' becomes a handle only on an object reached through a shared_ptr, and this one is a class value"},
-                {"class Ent { shared_ptr<Ent> self = null; Ent() { self = this; } } shared_ptr<Ent> h = Ent();", "'this' becomes a handle only on an object reached through a shared_ptr, and this one is a class value"},
+                {"class Ent { shared_ptr<Ent> self = null; Ent() { self = this; } } Ent e;", "'this' becomes a handle only on an object reached through a shared_ptr, and this one is a class value"},
                 // the slot's declared type decides, wherever the program declares it (here below the class that stores into it)
                 {"class Late { Late() { LATE.push(this); } } array<shared_ptr<Late>> LATE; Late l;", "'this' becomes a handle only on an object reached through a shared_ptr, and this one is a class value"},
                 {"class LateMap { LateMap() { LATE_MAP[\"k\"] = this; } } map<string, shared_ptr<LateMap>> LATE_MAP; LateMap m;", "'this' becomes a handle only on an object reached through a shared_ptr, and this one is a class value"},
@@ -1425,7 +1438,7 @@ public:
 
         // `new T(args)` is pure sugar for shared_ptr<T>(args) construction:
         // same new_expr, same tagging, reference semantics opt-in. A 'var'
-        // decl keeps the shared_ptr marker (var p = new P() IS shared_ptr<P> p = P()).
+        // decl keeps the shared_ptr marker (var p = new P() IS shared_ptr<P> p = make_shared<P>()).
         test("new_keyword_shared_ptr_sugar_basics", [this]() {
             const char* src = R"(
                 class P { int x = 3; P() { x = 3; } P(int v) { x = v; } }
@@ -1816,20 +1829,20 @@ public:
                 e->execute(R"(
                     class Foo { int x = 1; }
                     class Bar { int y = 2; }
-                    shared_ptr<Foo> a = Foo();
-                    shared_ptr<Bar> b = Bar();
+                    shared_ptr<Foo> a = make_shared<Foo>();
+                    shared_ptr<Bar> b = make_shared<Bar>();
                 )");
                 check_eq((int64_t)1, e->execute("a.x").as_int());
                 check_eq((int64_t)2, e->execute("b.y").as_int());
                 // Typed shared_ptr decls ENFORCE the pointee
                 // class - wrong-class value init and wrong-class sp-aliasing both
                 // error; upcasts (script chains) stay legal; null stays assignable.
-                check_throws([&]() { e->execute("shared_ptr<Bar> wrong = Foo();"); });
+                check_throws([&]() { e->execute("shared_ptr<Bar> wrong = make_shared<Foo>();"); });
                 check_throws([&]() { e->execute("shared_ptr<Bar> wrong2 = a;"); });   // aliasing a shared_ptr<Foo>
                 e->execute(R"(
                     class Base { int bv = 5; }
                     class Derived : Base { int dv = 6; }
-                    shared_ptr<Base> up1 = Derived();
+                    shared_ptr<Base> up1 = make_shared<Derived>();
                     var d = new Derived();
                     shared_ptr<Base> up2 = d;
                     shared_ptr<Base> nul = null;
@@ -1852,7 +1865,7 @@ public:
                     class Foo { int x = 1; }
                     class Bar { int y = 2; }
                     shared_ptr<auto> a = new Foo();      // infer from new
-                    shared_ptr<auto> b = Foo();          // the temporary is the object (mirrors shared_ptr<Foo> b = Foo())
+                    shared_ptr<auto> b = make_shared<Foo>();          // the temporary is the object (mirrors shared_ptr<Foo> b = make_shared<Foo>())
                     shared_ptr<auto> c = a;              // infer from a shared_ptr variable
                     var arr = [new Foo()];
                     shared_ptr<auto> d = arr[0];         // infer from an element read
@@ -1875,9 +1888,9 @@ public:
                 e->execute(R"(
                     class Base { int bv = 5; }
                     class Derived : Base { int dv = 6; }
-                    shared_ptr<auto> up = Base();
+                    shared_ptr<auto> up = make_shared<Base>();
                     up = new Derived();
-                    shared_ptr<auto> down = Derived();
+                    shared_ptr<auto> down = make_shared<Derived>();
                 )");
                 check_eq((int64_t)5, e->execute("up.bv").as_int());
                 check_throws([&]() { e->execute("down = Base();"); });
@@ -1909,7 +1922,7 @@ public:
             // meaning something different inside angle brackets would muddy the ladder.
             // The error teaches the two real spellings.
             for (bool use_vm : {false, true}) {
-                for (const char* src : { "class Foo { int x = 1; } shared_ptr<var> p = Foo();",
+                for (const char* src : { "class Foo { int x = 1; } shared_ptr<var> p = make_shared<Foo>();",
                                          "shared_ptr<var> n = null;",
                                          "function f(shared_ptr<var> a) { return a; }" }) {
                     auto e = jai::foundry::make_default_engine();
@@ -2003,10 +2016,11 @@ public:
                 // ...and the var stays dynamic after a value rebind - it accepts a handle again
                 e->execute("pv = new Bar();");
                 check_eq((int64_t)2, e->execute("pv.y").as_int());
-                // TYPED tier UNCHANGED: value-rhs still auto-unwraps INTO the held handle
-                // (same-class copies fields into the shared object; cross-class errors)
-                e->execute("shared_ptr<Foo> tu = new Foo(); shared_ptr<Foo> tualias = tu; auto tsrc = Foo(); tsrc.x = 7; tu = tsrc;");
-                check_eq((int64_t)7, e->execute("tualias.x").as_int());   // typed reaches THROUGH the handle
+                // TYPED tier: a class value never becomes a handle, as in C++ (make_shared<Foo>(value) is the copy; Foo& through
+                // the handle assigns into the shared object)
+                check_throws([&]() { e->execute("shared_ptr<Foo> tu = new Foo(); auto tsrc = Foo(); tu = tsrc;"); });
+                e->execute("shared_ptr<Foo> tu2 = new Foo(); shared_ptr<Foo> tualias = tu2; auto tsrc2 = Foo(); tsrc2.x = 7; Foo& into = tu2; into = tsrc2;");
+                check_eq((int64_t)7, e->execute("tualias.x").as_int());   // the reference reaches THROUGH the handle
                 check_throws([&]() { e->execute("shared_ptr<Foo> tf2 = new Foo(); tf2 = Bar();"); });
                 // typed handle-rhs still enforces; auto copies of a var handle
                 // re-lock to the plain spelling (infer-then-enforce)

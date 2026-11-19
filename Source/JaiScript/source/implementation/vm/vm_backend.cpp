@@ -2811,7 +2811,11 @@ checked_result<script_value> vm_backend::enforce_type_compatibility_named(script
 		}
 		case verdict::handle_target:
 			// shared_ptr<T> / weak_ptr<T> `=`: a same-kind tag stores as-is when a shared handle's judged class is T or a
-			// subclass; a shared handle downgrades into a weak_ptr<T> slot exactly as the declaration form does (outside the table)
+			// subclass; a shared handle downgrades into a weak_ptr<T> slot exactly as the declaration form does (outside the table);
+			// a class value never becomes a handle
+			if (target_type->base_type == script_value_type::jai_shared_ptr_type) {
+				if (const std::string held = detail::value_for_handle_slot(value); !held.empty()) { detail::refuse_value_into_handle(held); }
+			}
 			if (value.type() == target_type->base_type &&
 			    (target_type->base_type != script_value_type::jai_shared_ptr_type || handle_admits(value, target_type))) {
 				return std::move(value);
@@ -2935,7 +2939,10 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 		}
 		case verdict::handle_target: {
 			// shared_ptr<T> / weak_ptr<T> parameters and returns (outside the table): a same-kind
-			// payload, a matching or derived handle binds as-is
+			// payload, a matching or derived handle binds as-is; a class value never becomes a handle
+			if (target_base_type == script_value_type::jai_shared_ptr_type) {
+				if (const std::string held = detail::value_for_handle_slot(derefed_arg); !held.empty()) { detail::refuse_value_into_handle(held); }
+			}
 			if (derefed_arg.current_type() == target_base_type) {
 				return arg;
 			}
@@ -11762,7 +11769,7 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 					return raise_(make_error_code(runtime_error_code::type_mismatch),
 						"Cannot infer shared_ptr<auto> pointee from this initializer - use var, or an explicit shared_ptr<T>");
 				}
-				detail::value_into_handle(value);
+				if (const std::string held = detail::value_for_handle_slot(value); !held.empty()) { detail::refuse_value_into_handle(held); }
 				value.set_type_info(inferred);
 				return define_decl_value(f, decl, std::move(value), decl->ref_escaping);
 			}
@@ -11774,7 +11781,7 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 					"Cannot initialize shared_ptr<{0}> with {1}: type must match or be a subclass",
 					decl->type->element_type()->id, symbolizer_->intern(detail::shared_handle_judged_class(value, engine_)));
 			}
-			detail::value_into_handle(value);
+			if (const std::string held = detail::value_for_handle_slot(value); !held.empty()) { detail::refuse_value_into_handle(held); }
 			value.set_type_info(decl->type);
 			return define_decl_value(f, decl, std::move(value), decl->ref_escaping);
 		}

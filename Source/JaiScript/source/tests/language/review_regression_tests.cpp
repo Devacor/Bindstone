@@ -1567,7 +1567,7 @@ public:
                 {"decl_fast_shared_weak_decls_unaffected", R"(
                 class P { int v = 1; }
                 auto f() {
-                    shared_ptr<P> a = P();
+                    shared_ptr<P> a = make_shared<P>();
                     var b = a;
                     b.v = 7;
                     weak_ptr<P> w = a;
@@ -1710,7 +1710,7 @@ public:
             )").c_str(), "|map has no member 'nosuch'; read the key as [\"nosuch\"]", "map receiver", false);
             expect_order((std::string(side_prelude) + R"(
                 class W { int x = 0; }
-                shared_ptr<W> o = W(); weak_ptr<W> w = o; var caught = "";
+                shared_ptr<W> o = make_shared<W>(); weak_ptr<W> w = o; var caught = "";
                 try { w.nosuch(side()); } catch (e) { caught = e; }
                 log + "|" + caught;
             )").c_str(), "|weak_ptr has no member 'nosuch'", "weak_ptr receiver", true);
@@ -4681,7 +4681,7 @@ public:
             std::string err;
             try { e->execute("class Node { int v = 0; Node next; }"); } catch (const std::exception& ex) { err = ex.what(); }
             check_true(err.find("class 'Node' holds itself by value (Node.next): a class value is never null; make one link a 'shared_ptr<Node>' (an array or a map of them starts empty)") != std::string::npos, err);
-            check_eq((int64_t)2, e->execute("class Link { int v = 0; shared_ptr<Link> next = null; Link(int x) { v = x; } } Link a = Link(1); a.next = Link(2); a.next.v").as_int());
+            check_eq((int64_t)2, e->execute("class Link { int v = 0; shared_ptr<Link> next = null; Link(int x) { v = x; } } Link a = Link(1); a.next = make_shared<Link>(2); a.next.v").as_int());
         });
         test("ctor_throw_leaks_no_instance", [this]() {
             // A throw propagates, the target keeps its value, and the half-built instance runs no destructor

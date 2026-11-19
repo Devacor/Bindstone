@@ -212,7 +212,7 @@ print("RAN");)element"},
 print("RAN");)element"},
 			{"F00_push_and_store_typed_derived", R"element(class Foo { int n = 0; } class Bar : Foo { int m = 0; } array<Foo> a = []; Bar b = Bar(); a.push(b); a[0] = b;
 print("RAN");)element"},
-			{"F01_push_shared_handle_into_class", R"element(class Foo { int n = 0; } array<Foo> a = []; shared_ptr<Foo> h = Foo(); a.push(h);
+			{"F01_push_shared_handle_into_class", R"element(class Foo { int n = 0; } array<Foo> a = []; shared_ptr<Foo> h = make_shared<Foo>(); a.push(h);
 print("RAN");)element"},
 			{"F02_push_instance_into_shared_array", R"element(class Foo { int n = 0; } array<shared_ptr<Foo>> a = []; a.push(Foo());
 print("RAN");)element"},

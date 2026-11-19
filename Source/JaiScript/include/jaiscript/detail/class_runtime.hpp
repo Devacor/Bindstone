@@ -2327,6 +2327,7 @@ inline std::optional<script_value> field_handle_rows(const script_value& v, cons
     if (ri != script_value::TYPEID_OBJECT && ri != script_value::TYPEID_CPP_BOUND) {
         return std::nullopt;
     }
+    if (const std::string held = value_for_handle_slot(v); !held.empty()) { refuse_value_into_handle(held); }   // as in C++
     if (v.get_object_holder() == nullptr || declared->type_name.empty()) {
         return v;
     }

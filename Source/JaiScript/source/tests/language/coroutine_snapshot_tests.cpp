@@ -238,7 +238,7 @@ public:
 						yield total;
 						{ auto bump = [&total]() { total += 1; }; bump(); }
 						yield alias;
-						shared_ptr<Node> node = Node(7);
+						shared_ptr<Node> node = make_shared<Node>(7);
 						auto same = node;
 						yield node.value;
 						same.value = 9;
@@ -524,7 +524,7 @@ public:
 				{"auto h = count(0, 9); h.next(); var l = from_binary(to_binary([h, h, {\"again\": h}])); `${l[0].next()} ${l[1].next()} ${l[2][\"again\"].next()} ${h.next()}`", "1 2 3 1"},
 				{"auto h = Box::ticks(); h.next(); auto l = from_json(to_json(h)); `${l.next()} ${h.next()}`", "2 2"},
 				{"auto h = tools::twice(4); h.next(); auto l = from_binary(base64_decode(base64_encode(to_binary(h)))); `${l.next()} ${h.next()} ${to_json(h).contains(\"tools::twice\")}`", "8 8 true"},
-				{"shared_ptr<Box> b = Box(); auto h = b.drain(); h.next(); var l = from_json(to_json([b, h])); `${l[1].next()} ${l[0].n} ${b.n}`", "2 2 3"},
+				{"shared_ptr<Box> b = make_shared<Box>(); auto h = b.drain(); h.next(); var l = from_json(to_json([b, h])); `${l[1].next()} ${l[0].n} ${b.n}`", "2 2 3"},
 				{"auto h = count(0, 3); h.next(); auto c = from_binary(to_binary(h)); auto d = h; `${c.next()} ${h.next()} ${d.next()} ${c.next()} ${c.next()} ${c.done()} ${h.done()}`", "1 1 2 2 99 true false"},
 				{"Box b; auto h = b.drain(); h.next(); auto c = from_binary(to_binary(h)); `${c.next()} ${h.next()} ${b.n}`", "2 2 2"},
 			};

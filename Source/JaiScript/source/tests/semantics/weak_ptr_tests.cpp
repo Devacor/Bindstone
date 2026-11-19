@@ -102,7 +102,7 @@ public:
         test("use_count_reports_script_alias_ladder", [this]() {
             const char* src = R"(
                 class T { int x = 1; }
-                shared_ptr<T> a = T();
+                shared_ptr<T> a = make_shared<T>();
                 var r1 = a.use_count();
                 var u1 = a.unique();
                 var b = a;
@@ -130,7 +130,7 @@ public:
             // follows: while any alias keeps the count >= 1 the weak_ptr stays alive
             const char* src = R"(
                 class T { int x = 1; }
-                shared_ptr<T> a = T();
+                shared_ptr<T> a = make_shared<T>();
                 weak_ptr<T> w = a;
                 var b = a;
                 to_string(a.use_count()) + ":" + to_string(w.expired());
@@ -165,7 +165,7 @@ public:
         test("transient_count_audit_canonical_call", [this]() {
             const char* src = R"(
                 class T { int x = 1; }
-                shared_ptr<T> a = T();
+                shared_ptr<T> a = make_shared<T>();
                 function probe(auto p) -> auto { return p.use_count(); }
                 var inside = probe(a);
                 var top = a.use_count();
@@ -190,7 +190,7 @@ public:
                 stdlib::register_all(*e);
                 e->execute(R"(
                     class T { int x = 1; }
-                    shared_ptr<T> a = T();
+                    shared_ptr<T> a = make_shared<T>();
                     var b = a;
                 )");
                 check_eq((int64_t)2, e->execute("a.cpp_ref_count()").as_int(),
@@ -672,7 +672,7 @@ public:
                 {"class Accumulator { int total = 0; Accumulator(int t) { total = t; } auto operator=(int v) { total = total + v; return this; } }",
                  "auto a = shared_ptr<Accumulator>(0); auto b = a; auto c = a; a = 10; b = 20; c = 5; a.total == 35 && b.total == 35 && c.total == 35"},
                 {"class Point { int x = 0; int y = 0; Point(int px, int py) { x = px; y = py; } }",
-                 "auto a = shared_ptr<Point>(1, 2); auto b = a; a = Point(10, 20); a.x == 10 && a.y == 20 && b.x == 10 && b.y == 20"},
+                 "auto a = shared_ptr<Point>(1, 2); auto b = a; Point& into = a; into = Point(10, 20); a.x == 10 && a.y == 20 && b.x == 10 && b.y == 20"},
                 {"class Animal { string name = \"\"; Animal(string n) { name = n; } } class Dog : Animal { Dog(string n) : super(n) {} }",
                  "auto dog = shared_ptr<Dog>(\"Rex\"); shared_ptr<Animal> animal = dog; animal.name == \"Rex\""},
             });

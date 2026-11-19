@@ -967,32 +967,32 @@ public:
 
         test("a_var_slot_replaces_its_value", [this]() {
             expect_log(R"(
-                function f() -> string { var v = Token("a"); shared_ptr<Token> h = v; v = Token("b"); LOG = LOG + "|"; return h.name + v.name; }
+                function f() -> string { var v = Token("a"); shared_ptr<Token> h = make_shared<Token>(v); v = Token("b"); LOG = LOG + "|"; return h.name + v.name; }
                 string out = f(); out + ":" + LOG;
             )", "ab:a|ab");
         });
 
-        // A handle never aliases a value slot: what it holds is a copy, which dies with the handle, and the value dies with its scope
+        // make_shared<T>(value) holds a copy, which dies with the handle, and the value dies with its scope
         test("a_handle_made_from_a_value_leaves_the_value_its_scope", [this]() {
             const std::pair<std::string, std::string> cases[] = {
                 {R"(
-                function f() -> string { shared_ptr<Token> keep = null; { Token x = Token("a"); shared_ptr<Token> h = x; h.name = "c"; keep = h; LOG = LOG + "|"; } LOG = LOG + "|"; return keep.name; }
+                function f() -> string { shared_ptr<Token> keep = null; { Token x = Token("a"); shared_ptr<Token> h = make_shared<Token>(x); h.name = "c"; keep = h; LOG = LOG + "|"; } LOG = LOG + "|"; return keep.name; }
                 string out = f(); out + ":" + LOG;
             )", "c:|a|c"},
                 {R"(
-                function f() -> void { Token x = Token("a"); { shared_ptr<Token> h = x; h.name = "c"; } LOG = LOG + "|"; }
+                function f() -> void { Token x = Token("a"); { shared_ptr<Token> h = make_shared<Token>(x); h.name = "c"; } LOG = LOG + "|"; }
                 f(); LOG;
             )", "c|a"},
                 {R"(
-                function f() -> void { shared_ptr<Token> h = Token("t"); LOG = LOG + "|"; }
+                function f() -> void { shared_ptr<Token> h = make_shared<Token>("t"); LOG = LOG + "|"; }
                 f(); LOG;
             )", "|t"},
                 {R"(
-                function f() -> void { array<shared_ptr<Token>> all; { Token x = Token("a"); all.push(x); all[0].name = "c"; } LOG = LOG + "|"; }
+                function f() -> void { array<shared_ptr<Token>> all; { Token x = Token("a"); all.push(make_shared<Token>(x)); all[0].name = "c"; } LOG = LOG + "|"; }
                 f(); LOG;
             )", "a|c"},
                 {R"(
-                function f() -> void { map<string, shared_ptr<Token>> all; { Token x = Token("a"); all["k"] = x; all["k"].name = "c"; } LOG = LOG + "|"; }
+                function f() -> void { map<string, shared_ptr<Token>> all; { Token x = Token("a"); all["k"] = make_shared<Token>(x); all["k"].name = "c"; } LOG = LOG + "|"; }
                 f(); LOG;
             )", "a|c"},
                 {R"(

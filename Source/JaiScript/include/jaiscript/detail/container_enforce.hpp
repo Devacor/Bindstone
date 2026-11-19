@@ -375,7 +375,8 @@ namespace jai::detail {
 			return script_value(std::string(1, actual_element.unchecked_as_char()), eng);
 		}
 		if (target_type == script_value_type::jai_shared_ptr_type && elem_type == script_value_type::jai_object_type) {
-			return clone_for_assignment(actual_element);   // a handle never aliases a value slot: the element's handle holds a copy
+			if (const std::string held = value_for_handle_slot(actual_element); !held.empty()) { refuse_value_into_handle(held); }   // as in C++
+			return clone_for_assignment(actual_element);
 		}
 		if (is_math_type(target_type) && is_math_type(elem_type)) {
 			if (math::narrows(elem_type, target_type)) { return byte_element_mismatch_error(eng, actual_element, *element_type); }   // a host store arrives unchecked
@@ -398,15 +399,8 @@ namespace jai::detail {
 		return actual_element.clone_element();
 	}
 
-	// A class value bound for a handle element that no slot holds: it is the handle's object, where convert_container_element, whose
-	// source may be the slot itself, copies
-	inline bool prvalue_for_handle_element(const script_value& element, const type_info_ptr& element_type) noexcept {
-		return element_type && element_type->base_type == script_value_type::jai_shared_ptr_type && !element.is_reference() &&
-		       !element.is_shared_ptr_type() && object_is_prvalue(element);
-	}
 	// convert_container_element of a value the caller owns: an argument, a temporary, a copy it just made
 	inline checked_result<script_value> convert_owned_element(engine* eng, const script_value& element, const type_info_ptr& element_type) {
-		if (prvalue_for_handle_element(element, element_type)) { return element; }
 		return convert_container_element(eng, element, element_type);
 	}
 
@@ -414,7 +408,6 @@ namespace jai::detail {
 	// class as the object row's copy would; a prvalue array or map the element boundary leaves as it is moves in as the
 	// handle the boundary hands back (the copy's node would hold the same elements); anything else takes the converting copy
 	inline checked_result<script_value> convert_container_element_taking(engine* eng, script_value& element, const type_info_ptr& element_type) {
-		if (prvalue_for_handle_element(element, element_type)) { return std::move(element); }
 		if (element_type && element_type->base_type == script_value_type::jai_object_type &&
 		    element.raw_storage_index() == script_value::TYPEID_OBJECT && !element.is_shared_ptr_type() && uniquely_held(element)) {
 			const type_info* tag = element.get_type_info().get();
@@ -734,6 +727,9 @@ namespace jai::detail {
 						out.expected = target_type->canonical_name();
 						return out;
 					}
+					if (target_elem_base == script_value_type::jai_shared_ptr_type) {   // a class value never becomes a handle element
+						if (const std::string held = value_for_handle_slot(actual); !held.empty()) { refuse_value_into_handle(held); }
+					}
 					if (actual.type() != target_elem_base &&
 					    (target_elem_base == script_value_type::jai_int_type ||
 					     target_elem_base == script_value_type::jai_float_type ||
@@ -800,6 +796,9 @@ namespace jai::detail {
 				if (!key_open && !map_key_kind_admits(actual_key.type(), map_key_kind(*key_type))) { return &actual_key; }
 				const script_value& actual = entry.second.is_reference() ? entry.second.deref() : entry.second;
 				if (!value_open && !container_element_compatible(actual, value_type, eng)) { return &actual; }
+				if (value_type && value_type->base_type == script_value_type::jai_shared_ptr_type) {   // a class value never becomes a handle entry
+					if (const std::string held = value_for_handle_slot(actual); !held.empty()) { refuse_value_into_handle(held); }
+				}
 				return nullptr;
 			};
 			// the checks are pure: they run in the index's order, and only a failure walks the keys in order for the first one

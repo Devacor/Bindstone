@@ -156,30 +156,30 @@ public:
 				function put(var& x, var val) { x = val; }
 				var out = [];
 				function cap(string label, function body) { try { out.push(label + ":" + to_string(body())); } catch (err) { out.push(label + "!" + err); } }
-				cap("decl", function() -> string { shared_ptr<Foo> h = Foo(); array<shared_ptr<Foo>> a = [null, h]; return to_string(a[0] == null) + "," + to_string(a[1] == null) + "," + to_string(a[1].n); });
-				cap("push", function() -> string { array<shared_ptr<Foo>> a = []; shared_ptr<Foo> h = Foo(); a.push(null); a.push(h); a.push(null); return to_string(a.size()) + "," + to_string(a[0] == null) + "," + to_string(a[1].n); });
-				cap("store", function() -> string { array<shared_ptr<Foo>> a = [null]; shared_ptr<Foo> h = Foo(); a[0] = h; int n = a[0].n; a[0] = null; return to_string(n) + "," + to_string(a[0] == null); });
-				cap("ref", function() -> string { array<shared_ptr<Foo>> a = [null]; shared_ptr<Foo> h = Foo(); put(a[0], h); int n = a[0].n; put(a[0], null); return to_string(n) + "," + to_string(a[0] == null); });
+				cap("decl", function() -> string { shared_ptr<Foo> h = make_shared<Foo>(); array<shared_ptr<Foo>> a = [null, h]; return to_string(a[0] == null) + "," + to_string(a[1] == null) + "," + to_string(a[1].n); });
+				cap("push", function() -> string { array<shared_ptr<Foo>> a = []; shared_ptr<Foo> h = make_shared<Foo>(); a.push(null); a.push(h); a.push(null); return to_string(a.size()) + "," + to_string(a[0] == null) + "," + to_string(a[1].n); });
+				cap("store", function() -> string { array<shared_ptr<Foo>> a = [null]; shared_ptr<Foo> h = make_shared<Foo>(); a[0] = h; int n = a[0].n; a[0] = null; return to_string(n) + "," + to_string(a[0] == null); });
+				cap("ref", function() -> string { array<shared_ptr<Foo>> a = [null]; shared_ptr<Foo> h = make_shared<Foo>(); put(a[0], h); int n = a[0].n; put(a[0], null); return to_string(n) + "," + to_string(a[0] == null); });
 				cap("var-null", function() -> string { array<shared_ptr<Foo>> a = []; var v = null; a.push(v); a[0] = v; return to_string(a.size()) + "," + to_string(a[0] == null); });
 				cap("map-decl", function() -> string { map<string, shared_ptr<Foo>> m = {"k": null}; return to_string(m["k"] == null); });
-				cap("map-store", function() -> string { map<string, shared_ptr<Foo>> m = {}; m["k"] = null; shared_ptr<Foo> h = Foo(); m["k"] = h; int n = m["k"].n; m["k"] = null; return to_string(n) + "," + to_string(m["k"] == null); });
+				cap("map-store", function() -> string { map<string, shared_ptr<Foo>> m = {}; m["k"] = null; shared_ptr<Foo> h = make_shared<Foo>(); m["k"] = h; int n = m["k"].n; m["k"] = null; return to_string(n) + "," + to_string(m["k"] == null); });
 				cap("weak", function() -> string { array<weak_ptr<Foo>> a = [null]; a.push(null); a[0] = null; return to_string(a.size()) + "," + to_string(a[0] == null); });
-				cap("weak-push-shared", function() -> string { array<weak_ptr<Foo>> a = []; shared_ptr<Foo> h = Foo(); shared_ptr<Dog> d = Dog(); a.push(h); a.push(d); return to_string(a.size()) + "," + to_string(a[0].expired()) + "," + to_string(a[1].expired()); });
-				cap("weak-store-shared", function() -> string { array<weak_ptr<Foo>> a = [null]; shared_ptr<Foo> h = Foo(); a[0] = h; bool live = !a[0].expired(); h = null; return to_string(live) + "," + to_string(a[0].expired()); });
-				cap("weak-map-shared", function() -> string { map<string, weak_ptr<Foo>> m = {}; shared_ptr<Foo> h = Foo(); m["k"] = h; bool live = !m["k"].expired(); h = null; return to_string(live) + "," + to_string(m["k"].expired()); });
-				cap("weak-literal-shared", function() -> string { shared_ptr<Foo> h = Foo(); array<weak_ptr<Foo>> a = [h, null]; return to_string(a[0].expired()) + "," + to_string(a[1] == null); });
+				cap("weak-push-shared", function() -> string { array<weak_ptr<Foo>> a = []; shared_ptr<Foo> h = make_shared<Foo>(); shared_ptr<Dog> d = make_shared<Dog>(); a.push(h); a.push(d); return to_string(a.size()) + "," + to_string(a[0].expired()) + "," + to_string(a[1].expired()); });
+				cap("weak-store-shared", function() -> string { array<weak_ptr<Foo>> a = [null]; shared_ptr<Foo> h = make_shared<Foo>(); a[0] = h; bool live = !a[0].expired(); h = null; return to_string(live) + "," + to_string(a[0].expired()); });
+				cap("weak-map-shared", function() -> string { map<string, weak_ptr<Foo>> m = {}; shared_ptr<Foo> h = make_shared<Foo>(); m["k"] = h; bool live = !m["k"].expired(); h = null; return to_string(live) + "," + to_string(m["k"].expired()); });
+				cap("weak-literal-shared", function() -> string { shared_ptr<Foo> h = make_shared<Foo>(); array<weak_ptr<Foo>> a = [h, null]; return to_string(a[0].expired()) + "," + to_string(a[1] == null); });
 				cap("weak-null-handle", function() -> string { shared_ptr<Foo> n = null; array<weak_ptr<Foo>> a = []; a.push(n); a.push(null); return to_string(a.size()) + "," + to_string(a[0] == null); });
-				cap("weak-wrong-class", function() -> int { array<weak_ptr<Foo>> a = []; shared_ptr<Bar> b = Bar(); a.push(b); return 0; });
-				cap("iterate", function() -> int { array<shared_ptr<Foo>> a = [null]; shared_ptr<Foo> h = Foo(); a.push(h); a.push(null); int c = 0; for (auto x : a) { if (x != null) { c += x.n; } } return c; });
-				cap("raw-push", function() -> string { array<shared_ptr<Foo>> a = []; a.push(Foo()); return reflect::type_of(a[0]) + "," + to_string(a[0].n) + "," + to_string(a[0] == null); });
-				cap("raw-decl", function() -> string { array<shared_ptr<Foo>> a = [Foo(), null]; return to_string(a.size()) + "," + reflect::type_of(a[0]) + "," + to_string(a[1] == null); });
-				cap("raw-store", function() -> string { array<shared_ptr<Foo>> a = [null]; a[0] = Foo(); a[0].n = 4; return to_string(a[0].n); });
-				cap("raw-map", function() -> string { map<string, shared_ptr<Foo>> m = {}; m["k"] = Foo(); return to_string(m["k"].n); });
-				cap("raw-shares-like-a-handle-slot", function() -> string { Foo f = Foo(); shared_ptr<Foo> h = f; h.n = 5; Foo g = Foo(); array<shared_ptr<Foo>> a = []; a.push(g); a[0].n = 5; return to_string((f.n == 5) == (g.n == 5)); });
-				cap("raw-subclass", function() -> string { array<shared_ptr<Foo>> a = []; a.push(Dog()); shared_ptr<Dog> d = Dog(); a.push(d); return to_string(a.size()) + "," + reflect::type_of(a[0]) + "," + reflect::type_of(a[1]); });
-				cap("handle-array-widens", function() -> string { array<shared_ptr<Dog>> ds = [Dog()]; array<shared_ptr<Foo>> fs = ds; return to_string(fs.size()) + "," + reflect::type_of(fs[0]); });
+				cap("weak-wrong-class", function() -> int { array<weak_ptr<Foo>> a = []; shared_ptr<Bar> b = make_shared<Bar>(); a.push(b); return 0; });
+				cap("iterate", function() -> int { array<shared_ptr<Foo>> a = [null]; shared_ptr<Foo> h = make_shared<Foo>(); a.push(h); a.push(null); int c = 0; for (auto x : a) { if (x != null) { c += x.n; } } return c; });
+				cap("raw-push", function() -> string { array<shared_ptr<Foo>> a = []; a.push(make_shared<Foo>()); return reflect::type_of(a[0]) + "," + to_string(a[0].n) + "," + to_string(a[0] == null); });
+				cap("raw-decl", function() -> string { array<shared_ptr<Foo>> a = [make_shared<Foo>(), null]; return to_string(a.size()) + "," + reflect::type_of(a[0]) + "," + to_string(a[1] == null); });
+				cap("raw-store", function() -> string { array<shared_ptr<Foo>> a = [null]; a[0] = make_shared<Foo>(); a[0].n = 4; return to_string(a[0].n); });
+				cap("raw-map", function() -> string { map<string, shared_ptr<Foo>> m = {}; m["k"] = make_shared<Foo>(); return to_string(m["k"].n); });
+				cap("raw-shares-like-a-handle-slot", function() -> string { Foo f = Foo(); shared_ptr<Foo> h = make_shared<Foo>(f); h.n = 5; Foo g = Foo(); array<shared_ptr<Foo>> a = []; a.push(make_shared<Foo>(g)); a[0].n = 5; return to_string((f.n == 5) == (g.n == 5)); });
+				cap("raw-subclass", function() -> string { array<shared_ptr<Foo>> a = []; a.push(make_shared<Dog>()); shared_ptr<Dog> d = make_shared<Dog>(); a.push(d); return to_string(a.size()) + "," + reflect::type_of(a[0]) + "," + reflect::type_of(a[1]); });
+				cap("handle-array-widens", function() -> string { array<shared_ptr<Dog>> ds = [make_shared<Dog>()]; array<shared_ptr<Foo>> fs = ds; return to_string(fs.size()) + "," + reflect::type_of(fs[0]); });
 				cap("wrong-class-raw", function() -> int { array<shared_ptr<Foo>> a = []; a.push(Bar()); return 0; });
-				cap("wrong-class-handle", function() -> int { array<shared_ptr<Foo>> a = []; shared_ptr<Bar> b = Bar(); a.push(b); return 0; });
+				cap("wrong-class-handle", function() -> int { array<shared_ptr<Foo>> a = []; shared_ptr<Bar> b = make_shared<Bar>(); a.push(b); return 0; });
 				cap("wrong-class-store", function() -> int { array<shared_ptr<Foo>> a = [null]; a[0] = Bar(); return 0; });
 				cap("int-into-handle-array", function() -> int { array<shared_ptr<Foo>> a = [5]; return 0; });
 				cap("value-decl", function() -> int { array<Foo> a = [null]; return 0; });
@@ -523,7 +523,7 @@ public:
             check_values({
                 {"auto obj = shared_ptr<TestClass>(); obj = null; obj == null", true, test_class},
                 {"auto shared = shared_ptr<TestClass>(); auto weak = weak_ptr<TestClass>(shared); shared = null; weak.expired()", true, test_class},
-                {"shared_ptr<TestObj> obj = TestObj(); obj = null; obj = new TestObj(); obj.x", 1, "class TestObj { int x = 1; }"},
+                {"shared_ptr<TestObj> obj = make_shared<TestObj>(); obj = null; obj = new TestObj(); obj.x", 1, "class TestObj { int x = 1; }"},
             });
         });
 
@@ -1799,8 +1799,8 @@ public:
             check_quad(q("array<K> ks = [K(1)]; reflect::type_of(ks) + \"|\" + reflect::type_of(ks[0])").c_str(), "array|K", "reflect::type_of");
             check_quad(q("array<K> ks = [K(1), K(2)]; to_json(ks)").c_str(), "[{\"$type\":\"K\",\"$val\":{\"a\":1}},{\"$type\":\"K\",\"$val\":{\"a\":2}}]", "json");
             check_quad(q("array<K> a = [K(1)]; array<K> b = a; array<K> c = [K(2)]; to_string(a == b) + \",\" + to_string(a == c) + \",\" + to_string(same_object(a, b))").c_str(), "true,false,false", "equality is memberwise (a copy equals its source, identity via same_object)");
-            check_quad(q("shared_ptr<K> sp = K(7); array<K> ks = [sp]; sp.a = 8; to_string(ks[0].a) + \"|\" + reflect::type_of(ks[0])").c_str(), "7|K", "a handle stored into a class element copies its instance");
-            check_quad(q("shared_ptr<K> sp = K(7); array<shared_ptr<K>> ks = [sp]; auto c = ks; c[0].a = 9; to_string(ks[0].a) + \",\" + to_string(sp.a)").c_str(), "9,9", "copying an array keeps a shared element shared (C++ copy semantics)");
+            check_quad(q("shared_ptr<K> sp = make_shared<K>(7); array<K> ks = [sp]; sp.a = 8; to_string(ks[0].a) + \"|\" + reflect::type_of(ks[0])").c_str(), "7|K", "a handle stored into a class element copies its instance");
+            check_quad(q("shared_ptr<K> sp = make_shared<K>(7); array<shared_ptr<K>> ks = [sp]; auto c = ks; c[0].a = 9; to_string(ks[0].a) + \",\" + to_string(sp.a)").c_str(), "9,9", "copying an array keeps a shared element shared (C++ copy semantics)");
             check_quad(q("array<K> ks = [K(1), K(2), K(3)]; to_string(array::filter(ks, [](K k) { return k.a > 1; }).size())").c_str(), "2", "filter");
             check_quad(q("array<K> ks = [K(1)]; ks.clear(); ks.push(K(4)); to_string(ks.size()) + \":\" + to_string(ks[0].a)").c_str(), "1:4", "clear then push");
             check_quad(q("array<K> ks = [K(1)]; var v = ks; string r = \"\"; try { v.push(5); } catch (e) { r = e; } v.push(K(2)); v = 5; r + \"|\" + reflect::type_of(v)").c_str(), "Cannot push 'int' to array<K>|int", "a var copy keeps array<K>, the var stays a var");
@@ -2039,7 +2039,7 @@ public:
             check_quad(q("o.setVar(\"anything\") + \" \" + o.setVar([1,2,3]) + \" \" + o.dump()").c_str(), "ok ok 1|1.5|a|false|10|[1, 2, 3]|2|1|true", "var field takes anything");
             check_quad(q("o.setArr([4,5,6]) + \" \" + o.setArr([\"a\"]) + \" \" + o.setArr(7) + \" \" + o.dump()").c_str(), "ok Cannot assign array to field 'arr' of F (declared array<int>) Cannot assign int to field 'arr' of F (declared array<int>) 1|1.5|a|false|10|0|3|1|true", "typed array field: typed array ok, wrong element type and scalar raise");
             check_quad(q("auto o2 = O(); string r1 = o.setOther(o2); o2.i = 99; r1 + \" \" + to_string(o.other.i) + \" \" + o.setOther(5) + \" \" + o.setOther(null)").c_str(), "ok 1 Cannot assign int to field 'other' of F (declared O) Cannot assign null to field 'other' of F (declared O)", "object field: by-value copy, scalar and null raise");
-            check_quad(q("o.setSp(shared_ptr<F>()) + \" \" + o.setSp(F()) + \" \" + o.setSp(3) + \" \" + o.dump()").c_str(), "ok ok Cannot assign int to field 'sp' of F (declared shared_ptr<F>) 1|1.5|a|false|10|0|2|1|false", "shared_ptr field: handle, value, scalar");
+            check_quad(q("o.setSp(shared_ptr<F>()) + \" \" + o.setSp(F()) + \" \" + o.setSp(3) + \" \" + o.dump()").c_str(), "ok A F value does not become a handle: make_shared<F>(value) copies it into a new one Cannot assign int to field 'sp' of F (declared shared_ptr<F>) 1|1.5|a|false|10|0|2|1|false", "shared_ptr field: handle, value, scalar");
             check_quad(q("to_string(o.loopStore(1000)) + \" \" + o.dump()").c_str(), "999 999|999.0|a|false|10|0|2|1|true", "1000 stores at one site (the cached lane)");
             check_quad(q("to_string(o.chainStore()) + \",\" + to_string(o.storeResult()) + \",\" + to_string(o.storeResultConv()) + \",\" + to_string(o.i)").c_str(), "8,42,1.0,1", "store as expression: value is the stored (converted) value");
             check_quad(q("o.setStatic(9) + \" \" + o.setStatic(\"bad\") + \" \" + to_string(F::st)").c_str(), "ok Cannot assign string to static 'st' of F (declared int) 9", "static field stores enforce like instance fields (not the this-field lane)");
@@ -2104,7 +2104,7 @@ public:
             check_quad(q("setV(\"anything\") + \" \" + setV([1, 2, 3]) + \" \" + o.dump()").c_str(), "ok ok 1|1.5|a|false|10|[1, 2, 3]|2|0|true|true", "var static takes anything");
             check_quad(q("setArr([4, 5, 6]) + \" \" + setArr([\"a\"]) + \" \" + setArr(7) + \" \" + o.dump()").c_str(), "ok Cannot assign array to static 'arr' of C (declared array<int>) Cannot assign int to static 'arr' of C (declared array<int>) 1|1.5|a|false|10|0|3|0|true|true", "array<int> static: typed array ok, wrong element type and scalar raise");
             check_quad(q("auto o2 = O(); string r1 = setOther(o2); o2.x = 99; r1 + \" \" + to_string(C::other.x) + \" \" + setOther(5) + \" \" + to_string(C::other.x) + \" \" + setOther(null)").c_str(), "ok 0 ok 7 Cannot assign null to static 'other' of C (declared O)", "object static: by-value copy, a scalar converts through O(var), null raises");
-            check_quad(q("setSp(shared_ptr<C>()) + \" \" + setSp(C()) + \" \" + setSp(3) + \" \" + o.dump()").c_str(), "ok ok Cannot assign int to static 'sp' of C (declared shared_ptr<C>) 1|1.5|a|false|10|0|2|0|false|true", "shared_ptr static: handle, value, scalar");
+            check_quad(q("setSp(shared_ptr<C>()) + \" \" + setSp(C()) + \" \" + setSp(3) + \" \" + o.dump()").c_str(), "ok A C value does not become a handle: make_shared<C>(value) copies it into a new one Cannot assign int to static 'sp' of C (declared shared_ptr<C>) 1|1.5|a|false|10|0|2|0|false|true", "shared_ptr static: handle, value, scalar");
             check_quad(q("auto keep = shared_ptr<C>(); setW(keep) + \" \" + setW(C()) + \" \" + o.dump()").c_str(), "ok Cannot assign C to static 'w' of C (declared weak_ptr<C>) 1|1.5|a|false|10|0|2|0|true|false", "weak_ptr static: the instance-field rows (a shared handle downgrades, a value raises)");
             check_quad("class P { int v = 1; } class S { static shared_ptr<P> p; } auto h = shared_ptr<P>(); S::p = h; h.v = 5; to_string(S::p.v)", "5", "shared_ptr static shares the handle on both backends");
             check_quad(q("int r = (C::i = 42); to_string(r)").c_str(), "42", "store as expression");
@@ -2621,7 +2621,7 @@ public:
             check(ol.unchecked_array_node()->kind() == jai::script_array::kind_t::obj, "a var copy keeps the object slot buffer");
             auto oa = e->execute("class K4 { int a = 1; } auto inferred4 = [K4(), K4()]; inferred4");
             check(oa.unchecked_array_node()->kind() == jai::script_array::kind_t::hetero, "an auto object literal stays dynamic");
-            auto os = e->execute("class K5 { int a = 1; } shared_ptr<K5> sp = K5(); array<K5> ks5 = [sp]; ks5");
+            auto os = e->execute("class K5 { int a = 1; } shared_ptr<K5> sp = make_shared<K5>(); array<K5> ks5 = [sp]; ks5");
             check(os.unchecked_array_node()->kind() == jai::script_array::kind_t::obj, "a shared_ptr-tagged element lives in the object buffer");
         });
 
@@ -2658,7 +2658,7 @@ public:
             const char* decl = "class P { int v = 0; } ";
             check_both((std::string(decl) + "auto p = P(); reflect::type_of(p)").c_str(), "P", "value instance");
             check_both((std::string(decl) + "var p = new P(); reflect::type_of(p)").c_str(), "P", "new P()");
-            check_both((std::string(decl) + "shared_ptr<P> p = P(); reflect::type_of(p)").c_str(), "P", "shared_ptr<P> p = P()");
+            check_both((std::string(decl) + "shared_ptr<P> p = make_shared<P>(); reflect::type_of(p)").c_str(), "P", "shared_ptr<P> p = make_shared<P>()");
             check_both((std::string(decl) + "auto p = shared_ptr<P>(); reflect::type_of(p)").c_str(), "P", "auto p = shared_ptr<P>()");
             // value == shared, on the same class, in one program
             check_both((std::string(decl) +
@@ -2768,8 +2768,8 @@ public:
             check_proof_run({"var v = 1; v = \"s\"; v = 2.5; reflect::type_of(v) + \":\" + to_string(v)"}, "float:2.5", "var");
             check_proof_run({"auto n; n = 3; n = 4; reflect::type_of(n) + \":\" + to_string(n)"}, "int:4", "auto without initializer");
             check_proof_error({"auto n; n = 3; n = \"s\"; n"}, "auto locks at its first assignment");
-            check_proof_run({cls + "shared_ptr<C> sp = C(); shared_ptr<C> sq = sp; sq.v = 5; to_string(sp.v)"}, "5", "shared_ptr handle");
-            check_proof_run({cls + "shared_ptr<C> sp = C(); weak_ptr<C> wp = sp; to_string(wp.expired()) + \":\" + to_string(wp.lock().v)"}, "false:1", "weak_ptr handle");
+            check_proof_run({cls + "shared_ptr<C> sp = make_shared<C>(); shared_ptr<C> sq = sp; sq.v = 5; to_string(sp.v)"}, "5", "shared_ptr handle");
+            check_proof_run({cls + "shared_ptr<C> sp = make_shared<C>(); weak_ptr<C> wp = sp; to_string(wp.expired()) + \":\" + to_string(wp.lock().v)"}, "false:1", "weak_ptr handle");
             check_proof_run({"array<int> a = [1, 2]; array<int> b = a; b[0] = 9; to_string(a[0]) + to_string(b[0])"}, "19", "typed array copies");
             check_proof_run({"map<string,int> m = {\"a\": 1}; map<string,int> n = m; n[\"a\"] = 2; to_string(m[\"a\"]) + to_string(n[\"a\"])"}, "12", "typed map copies");
             check_proof_run({"int x = 1; int& r = x; r = 5; to_string(x)"}, "5", "reference declaration");
@@ -2780,7 +2780,7 @@ public:
             check_proof_run({cls + "C a = C(); a = null; reflect::type_of(a)"}, "", "null into an object slot");
             check_proof_run({cls + "C a; C b = a; reflect::type_of(b)"}, "", "typed-null placeholder");
             check_proof_run({cls + "C b = D(); to_string(b.v) + \":\" + reflect::type_of(b)"}, "1:D", "derived into base");
-            check_proof_run({cls + "shared_ptr<C> sp = C(); C c = sp; c.v = 9; to_string(sp.v) + \":\" + to_string(c.v)"}, "", "handle into a value slot");
+            check_proof_run({cls + "shared_ptr<C> sp = make_shared<C>(); C c = sp; c.v = 9; to_string(sp.v) + \":\" + to_string(c.v)"}, "", "handle into a value slot");
             check_proof_error({"int x = 1; x = \"s\"; x"}, "string into int raises");
             check_proof_error({"char c = 'a'; c = 65; c"}, "int into char raises");
             check_proof_error({"int f(int v) { return v; } f(\"s\")"}, "string argument into an int parameter raises");
@@ -3350,7 +3350,7 @@ public:
                 string local1() { string r = ""; try { weak_ptr<Foo> w; var o = Foo(); w = o; } catch (e) { r = e; } return r; }
                 string local2() { string r = ""; try { var o = Foo(); weak_ptr<Foo> w = o; } catch (e) { r = e; } return r; }
                 r1 + "|" + r2 + "|" + r3 + "|" + r4 + "|" + r5 + "|" + r6 + "|" + r7 + "|" + r8 + "|" + r9 + "|" + local1() + "|" + local2()
-            )JAI", "Cannot initialize 'w' (declared weak_ptr<Foo>) with Foo|Cannot initialize 'w' (declared weak_ptr<Foo>) with int|Cannot initialize 'w' (declared weak_ptr<Foo>) with Bar|Cannot assign Foo to 'w' (declared weak_ptr<Foo>)|Cannot assign int to 'w' (declared weak_ptr<Foo>)|Cannot assign Bar to 'w' (declared weak_ptr<Foo>)|Cannot assign string to 'p' (declared shared_ptr<Foo>)|Cannot assign array to 'p' (declared shared_ptr<Foo>)|Cannot assign Bar to 'p' (declared shared_ptr<Foo>)|Cannot assign Foo to 'w' (declared weak_ptr<Foo>)|Cannot initialize 'w' (declared weak_ptr<Foo>) with Foo",
+            )JAI", "Cannot initialize 'w' (declared weak_ptr<Foo>) with Foo|Cannot initialize 'w' (declared weak_ptr<Foo>) with int|Cannot initialize 'w' (declared weak_ptr<Foo>) with Bar|Cannot assign Foo to 'w' (declared weak_ptr<Foo>)|Cannot assign int to 'w' (declared weak_ptr<Foo>)|Cannot assign Bar to 'w' (declared weak_ptr<Foo>)|Cannot assign string to 'p' (declared shared_ptr<Foo>)|Cannot assign array to 'p' (declared shared_ptr<Foo>)|A Bar value does not become a handle: make_shared<Bar>(value) copies it into a new one|Cannot assign Foo to 'w' (declared weak_ptr<Foo>)|Cannot initialize 'w' (declared weak_ptr<Foo>) with Foo",
                 "handle variables name the slot and spell the payload's type (globals and slotted locals alike)");
             check_both(R"JAI(
                 class Foo { int a = 1; }

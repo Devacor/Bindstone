@@ -1412,7 +1412,7 @@ public:
 				{"tier1_bst_insert_by_ref", R"(
 				class TreeNode { int value = 0; shared_ptr<TreeNode> left = null; shared_ptr<TreeNode> right = null; TreeNode(int val) { value = val; } }
 				function insertNode(var& node, int val) {
-					if (node == null) { node = TreeNode(val); return; }
+					if (node == null) { node = make_shared<TreeNode>(val); return; }
 					if (val < node.value) { insertNode(node.left, val); } else { insertNode(node.right, val); }
 				}
 				function inorderSum(var node) -> int {
@@ -2476,7 +2476,7 @@ public:
 				{"deep_tier1_bst_sequential", R"(
 				class TreeNode { int value = 0; shared_ptr<TreeNode> left = null; shared_ptr<TreeNode> right = null; TreeNode(int v) { value = v; } }
 				function insertNode(var& node, int val) {
-					if (node == null) { node = TreeNode(val); return; }
+					if (node == null) { node = make_shared<TreeNode>(val); return; }
 					if (val < node.value) { insertNode(node.left, val); } else { insertNode(node.right, val); }
 				}
 				var root = null;
@@ -2908,7 +2908,7 @@ public:
 		// Tier 3(b): the exact-class-match conversion skip must keep value semantics -
 		// exact match still deep-clones; subclass args keep the full path.
 		// `new` sugar: a 'var' decl keeps a shared_ptr-tagged
-		// initializer's marker (var sp = shared_ptr<P>() ≡ shared_ptr<P> sp = P()), so
+		// initializer's marker (var sp = shared_ptr<P>() ≡ shared_ptr<P> sp = make_shared<P>()), so
 		// sp's arg tag forces sharing through the exact-class param (14,14) — matching
 		// what the decl-typed spelling does.
 		test("tier3_exact_class_param_still_clones", [this, run_both_backends]() {
@@ -3192,7 +3192,7 @@ public:
 				// Comprehensive Scope Tests::mixed_scopes_comprehensive).
 				{"stage1_closure_callee_capture_dies_with_scope", R"(
 				class T { int x = 1; }
-				shared_ptr<T> a = T();
+				shared_ptr<T> a = make_shared<T>();
 				var w = weak_ptr<T>(a);
 				function run(auto p) -> auto {
 					var l = [p]() { return p.x; };
@@ -3209,7 +3209,7 @@ public:
 				// releases it.
 				{"stage1_live_lambda_capture_keeps_object_alive", R"(
 				class T { int x = 1; }
-				shared_ptr<T> a = T();
+				shared_ptr<T> a = make_shared<T>();
 				var w = weak_ptr<T>(a);
 				function mk(auto p) -> auto { return [p]() { return p.x; }; }
 				var l = mk(a);
@@ -3226,7 +3226,7 @@ public:
 				class T { int x = 1; }
 				var w = null;
 				function make() -> auto {
-					shared_ptr<T> p = T();
+					shared_ptr<T> p = make_shared<T>();
 					w = weak_ptr<T>(p);
 					return 7;
 				}
@@ -3239,7 +3239,7 @@ public:
 				{"stage1_arg_copies_do_not_outlive_call", R"(
 				class T { int x = 5; }
 				function take(auto p) -> auto { return p.x; }
-				shared_ptr<T> a = T();
+				shared_ptr<T> a = make_shared<T>();
 				var w = weak_ptr<T>(a);
 				var r = 0;
 				for (var i = 0; i < 3; i += 1) { r += take(a); }

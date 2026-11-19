@@ -280,10 +280,10 @@ public:
                 check_eq((int64_t)2, e->execute("var b = new PointF(); b.kind()").as_int());
                 check_eq((int64_t)1, e->execute("auto c = shared_ptr<PointI>(); c.kind()").as_int());
                 check_eq((int64_t)2, e->execute("auto d = shared_ptr<PointF>(); d.kind()").as_int());
-                check_eq((int64_t)1, e->execute("shared_ptr<PointI> g = PointI(); g.kind()").as_int());
-                check_eq((int64_t)2, e->execute("shared_ptr<PointF> h = PointF(); h.kind()").as_int());
+                check_eq((int64_t)1, e->execute("shared_ptr<PointI> g = make_shared<PointI>(); g.kind()").as_int());
+                check_eq((int64_t)2, e->execute("shared_ptr<PointF> h = make_shared<PointF>(); h.kind()").as_int());
                 // wrong-pointee decl errors (typed sp enforcement ruling)
-                check_throws([&]() { e->execute("shared_ptr<PointF> w = PointI();"); });
+                check_throws([&]() { e->execute("shared_ptr<PointF> w = make_shared<PointI>();"); });
                 // host-side: the factory returns distinct type_infos
                 auto* ti_i = detail::engine_access::get_type_info_object(*e, detail::engine_access::symbolize(*e, "PointI"));
                 auto* ti_f = detail::engine_access::get_type_info_object(*e, detail::engine_access::symbolize(*e, "PointF"));
@@ -302,8 +302,8 @@ public:
                 check_eq((int64_t)1, e->execute("array<PointI> ai = [PointI(5)]; ai[0].kind()").as_int());
                 check_eq((int64_t)2, e->execute("array<PointF> af = [PointF(2.5)]; af[0].kind()").as_int());
                 // (f) upcast to the common base from both: each keeps ITS class
-                check_eq((int64_t)1, e->execute("shared_ptr<PBase> u1 = PointI(7); u1.kind()").as_int());
-                check_eq((int64_t)2, e->execute("shared_ptr<PBase> u2 = PointF(7.0); u2.kind()").as_int());
+                check_eq((int64_t)1, e->execute("shared_ptr<PBase> u1 = make_shared<PointI>(7); u1.kind()").as_int());
+                check_eq((int64_t)2, e->execute("shared_ptr<PBase> u2 = make_shared<PointF>(7.0); u2.kind()").as_int());
                 check_eq((int64_t)99, e->execute("u1.base_tag()").as_int());
                 check_eq((int64_t)99, e->execute("u2.base_tag()").as_int());
             }

@@ -101,7 +101,8 @@ public:
 			expect("a binding's operator= assigns into the shared object", R"(var a = make_gauge(1); var b = a; a = HostGauge(2); return to_string(b.value) + " " + to_string(same_object(a, b));)", "102 true");
 			expect("a var field", R"(Holder h = Holder(); h.m = make_node(1); h.m = HostNode(8); return reflect::type_of(h.m) + " " + to_string(h.m.value);)", "HostNode 8");
 			expect("an element", R"(array<var> xs = [make_node(1)]; xs[0] = HostNode(8); return reflect::type_of(xs[0]) + " " + to_string(xs[0].value);)", "HostNode 8");
-			expect("a typed handle still raises", R"(shared_ptr<HostNode> h = make_node(1); h = HostNode(8); return "stored";)", "ERR Cannot assign HostNode to 'h' (declared shared_ptr<HostNode>)");
+			expect("a typed handle takes no value", R"(shared_ptr<HostNode> h = make_node(1); var v = HostNode(8); h = v; return "stored";)",
+			       "ERR A HostNode value does not become a handle: make_shared<HostNode>(value) copies it into a new one");
 			auto eng = make_engine();
 			jai::stdlib::register_all(eng);
 			bind_hosts(eng);
@@ -113,10 +114,11 @@ public:
 			check_eq(std::string("84 84 84 "), out, "a global var taking a value, then a host handle, each run");
 		});
 
+		// A typed handle takes a handle, never a value (as in C++); a reference to its object assigns into the shared object
 		test("a_typed_handle_local_assigns_a_value_into_its_object", [this]() {
-			expect("shared_ptr<R> local", R"(shared_ptr<R> h = new R(); shared_ptr<R> h2 = h; R n = R(); n.x = 2; h = n; return to_string(h2.x);)", "102");
-			expect("shared_ptr<P> local takes a subclass value", R"(shared_ptr<P> h = new P(); shared_ptr<P> h2 = h; D n = D(); n.x = 4; h = n; return to_string(h2.x) + " " + reflect::type_of(h2);)", "4 D");
-			expect("an unrelated value stays an error", R"(shared_ptr<P> h = new P(); h = B(); return "stored";)", "ERR Cannot assign B to 'h' (declared shared_ptr<P>)");
+			expect("through a reference to the object", R"(shared_ptr<R> h = new R(); shared_ptr<R> h2 = h; R n = R(); n.x = 2; R& into = h; into = n; return to_string(h2.x);)", "102");
+			expect("a value through a var", R"(shared_ptr<R> h = new R(); var n = R(); h = n; return "stored";)", "ERR A R value does not become a handle: make_shared<R>(value) copies it into a new one");
+			expect("an unrelated value", R"(shared_ptr<P> h = new P(); var b = B(); h = b; return "stored";)", "ERR A B value does not become a handle: make_shared<B>(value) copies it into a new one");
 		});
 
 		test("a_var_holding_an_object_runs_an_operator_that_takes_the_value", [this]() {

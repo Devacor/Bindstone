@@ -406,11 +406,11 @@ private:
 
 		test("rules_123_nullable_handle_elements", [this]() {
 			for (const char* source : {
-				"class C { int n = 4; } array<shared_ptr<C>> a = [null, C()]; a.push(null); a[1] = null; a[0] == null && a[1] == null && a.size() == 3;",
+				"class C { int n = 4; } array<shared_ptr<C>> a = [null, make_shared<C>()]; a.push(null); a[1] = null; a[0] == null && a[1] == null && a.size() == 3;",
 				"class C {} array<weak_ptr<C>> a = [null]; a.push(null); a[0] = null; a.size() == 2 && a[0] == null;",
-				"class C { int n = 4; } map<string,shared_ptr<C>> m = {{\"k\",null}}; m[\"k\"] = C(); int n = m[\"k\"].n; m[\"k\"] = null; n == 4 && m[\"k\"] == null;",
+				"class C { int n = 4; } map<string,shared_ptr<C>> m = {{\"k\",null}}; m[\"k\"] = make_shared<C>(); int n = m[\"k\"].n; m[\"k\"] = null; n == 4 && m[\"k\"] == null;",
 				"class C {} map<string,weak_ptr<C>> m = {{\"k\",null}}; m[\"k\"] = null; m[\"k\"] == null;",
-				"class C { int n = 4; } class D : C {} array<shared_ptr<D>> ds = [D()]; array<shared_ptr<C>> cs = ds; cs.push(D()); cs[0].n + cs[1].n == 8;"
+				"class C { int n = 4; } class D : C {} array<shared_ptr<D>> ds = [make_shared<D>()]; array<shared_ptr<C>> cs = ds; cs.push(make_shared<D>()); cs[0].n + cs[1].n == 8;"
 			}) {
 				auto eng = make_engine();
 				const auto report = eng->check(source);
@@ -422,14 +422,14 @@ private:
 		test("rules_123_handle_element_mismatches", [this]() {
 			for (const char* source : {
 				"class C {} class D {} array<shared_ptr<C>> a = [D()];",
-				"class C {} class D {} shared_ptr<D> d = D(); array<shared_ptr<C>> a = []; a.push(d);",
+				"class C {} class D {} shared_ptr<D> d = make_shared<D>(); array<shared_ptr<C>> a = []; a.push(d);",
 				"class C {} class D {} array<shared_ptr<C>> a = [null]; a[0] = D();",
 				"class C {} class D {} map<string,shared_ptr<C>> m = {{\"k\",D()}};",
 				"class C {} array<C> a = [null];",
 				"array<int> a = [null];",
 				"array<string> a = [null];",
 				"class C {} array<weak_ptr<C>> a = [C()];",
-				"class C {} class D {} shared_ptr<D> d = D(); array<weak_ptr<C>> a = []; a.push(d);"
+				"class C {} class D {} shared_ptr<D> d = make_shared<D>(); array<weak_ptr<C>> a = []; a.push(d);"
 			}) {
 				auto eng = make_engine();
 				check_true(eng->check(source).has_errors(), source);

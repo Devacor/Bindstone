@@ -3123,7 +3123,7 @@ private:
 			// the vm hands back the right-hand side (the shared handle) of a consumed store into a weak_ptr
 			expect("weak store value", R"(
 				class Foo { int v = 1; }
-				shared_ptr<Foo> sp = Foo();
+				shared_ptr<Foo> sp = make_shared<Foo>();
 				weak_ptr<Foo> w = sp;
 				auto h = (w = sp);
 				reflect::type_of(h);
@@ -3191,11 +3191,11 @@ private:
 		test("f2_a_handle_store_yields_a_value", [this]() {
 			expect("handle store value", R"(
 				class Foo { int v = 1; }
-				shared_ptr<Foo> sp = Foo();
+				shared_ptr<Foo> sp = make_shared<Foo>();
 				weak_ptr<Foo> w = sp;
 				auto r1 = (w = null);
 				auto r2 = (w = sp);
-				shared_ptr<Foo> s2 = Foo();
+				shared_ptr<Foo> s2 = make_shared<Foo>();
 				auto r3 = (s2 = null);
 				`${(r1 == null)} ${(r2 != null)} ${(r3 == null)}`;
 			)", "true true true", warn_region);

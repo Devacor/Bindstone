@@ -404,7 +404,7 @@ public:
                 int identity() { Def d = G; return same_object(d, G) ? 1 : 0; }
                 int callee_writes() { Def d = G; bump(); int c = d.atk; G.atk = 3; return c; }
                 int local_source_written() { Def a = Def(); Def b = a; [[warn_mode]] a.atk = 8; return b.atk; }
-                int handle_alias() { shared_ptr<Def> hp = G; Def d = G; hp.atk = 77; int c = d.atk; G.atk = 3; return c; }
+                int handle_alias() { shared_ptr<Def> hp = make_shared<Def>(G); Def d = G; hp.atk = 77; int c = d.atk; G.atk = 3; return c; }
                 int ref_arg_write() { Def d = G; write_ref(G.atk); int c = d.atk; G.atk = 3; return c; }
                 int ref_param_write(Def& q) { Def d = G; q.atk = 44; int c = d.atk; return c; }
                 int getter() { Acc a = Acc(); Def d = G; int h = a.hp; int c = d.atk; G.atk = 3; return c + h; }
@@ -553,7 +553,7 @@ public:
                 class Foo { int x = 1; Foo() {} }
                 class Holder { Foo foo = Foo(); Holder() {} }
                 class Tracked { int v = 2; ~Tracked() { DEAD = DEAD + 1; } }
-                shared_ptr<Holder> H = Holder();
+                shared_ptr<Holder> H = make_shared<Holder>();
                 Foo G = Foo();
                 Tracked T = Tracked();
                 int other_ref(Foo p, Foo& q) { q.x = 5; return p.x; }

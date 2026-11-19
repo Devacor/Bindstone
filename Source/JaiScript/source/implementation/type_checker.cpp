@@ -3915,6 +3915,7 @@ private:
         if (dst.kind == ctype::array_k || dst.kind == ctype::map_k) {
             return container_issue(src, dst, depth + 1);
         }
+        if (std::string issue = value_into_handle_issue(src, target); !issue.empty()) { return issue; }
         bool accepted = src.kind == dst.kind || char_text_slot(src, dst);
         if (vec_narrows(src, dst)) { return "expected '" + ctype_name(dst) + "', got '" + ctype_name(src) + "'" + vec_narrowing_fix(dst); }
         if (enum_value(dst)) {
@@ -4297,8 +4298,19 @@ private:
     }
     // A class held by value copies out of the handle a dynamic_cast<T>(e) gives, which is null where e is no T: the warning beside
     // cast<T>(handle)'s names the tested form and the reference form
+    // A class value never becomes a handle on its own (C++): make_shared<T>(value) is the copy into a new one
+    std::string value_into_handle_issue(const ctype& src, const type_info* slot) {
+        if (!handle_type(slot) || !class_value(src)) { return {}; }
+        std::string text(detail::value_into_handle_text);
+        const std::string cls = ctype_name(src);
+        for (size_t at = text.find("{0}"); at != std::string::npos; at = text.find("{0}", at + cls.size())) { text.replace(at, 3, cls); }
+        return detail::const_lowercase(text);
+    }
     void warn_dynamic_handle_copy(const ctype& src, const ctype& dst) {
         note_this_into_handle(src, dst.ti);
+        if (src.origin && !dst.tentative) {
+            if (const std::string issue = value_into_handle_issue(src, dst.ti); !issue.empty()) { diag(diag_level::error, src.origin->location, issue); }
+        }
         if (!collect_diagnostics_ || !class_value(dst) || !src.origin || src.origin->get_type() != node_type::cast_expr) { return; }
         const auto* c = static_cast<const cast_expr*>(src.origin);
         if (!c->dynamic || c->by_reference || !c->target || !c->target->element_type() || class_relation(src.cls, dst.cls) == 0) { return; }

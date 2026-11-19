@@ -1262,7 +1262,7 @@ public:
             check_eq((size_t)1, error_count(e->check(
                 "class Foo { int x = 1; } class Bar { int y = 2; } shared_ptr<Bar> wrong = Foo();")));
             check_eq((size_t)0, error_count(e->check(
-                "class Base { int b = 1; } class D : Base { int d = 2; } shared_ptr<Base> ok = D();")));
+                "class Base { int b = 1; } class D : Base { int d = 2; } shared_ptr<Base> ok = make_shared<D>();")));
             check_eq((size_t)0, error_count(e->check(
                 "class Foo2 { int x = 1; } shared_ptr<Foo2> n = null;")));
         });
@@ -1281,11 +1281,11 @@ public:
                 "class Foo { int x = 1; } shared_ptr<auto> p = 5;")), "int init");
             // infer-then-enforce: wrong-class reassign errors, upcast + null stay clean
             check_eq((size_t)1, error_count(e->check(
-                "class Foo { int x = 1; } class Bar { int y = 2; } shared_ptr<auto> p = Foo(); p = Bar();")), "wrong-class reassign");
+                "class Foo { int x = 1; } class Bar { int y = 2; } shared_ptr<auto> p = make_shared<Foo>(); p = Bar();")), "wrong-class reassign");
             check_eq((size_t)0, error_count(e->check(
-                "class Base { int b = 1; } class D : Base { int d = 2; } shared_ptr<auto> p = Base(); p = new D();")), "upcast reassign");
+                "class Base { int b = 1; } class D : Base { int d = 2; } shared_ptr<auto> p = make_shared<Base>(); p = new D();")), "upcast reassign");
             check_eq((size_t)0, error_count(e->check(
-                "class Foo { int x = 1; } shared_ptr<auto> p = Foo(); p = null; int x = p.x;")), "null reassign + member");
+                "class Foo { int x = 1; } shared_ptr<auto> p = make_shared<Foo>(); p = null; int x = p.x;")), "null reassign + member");
             // inferred tag models member usage exactly like the explicit spelling
             // (parity-equality: whatever the explicit twin reports, inferred matches)
             for (const char* tail : { "shared_ptr<%s> p = new Foo(); string s = p.x;",
@@ -1986,7 +1986,7 @@ public:
             r = e->check(P + "function mk() -> shared_ptr<C> { return shared_ptr<C>(); } auto c = cast<C>(mk());");
             check_eq((size_t)1, warning_count(r));
             check_true(has_diag(r, dlevel::warning, "cast<C>(...) copies the instance - use cast<C&>(...) to alias it or cast<shared_ptr<C>>(...) to share it"));
-            r = e->check(P + "shared_ptr<auto> h = C(); auto c = cast<C>(h);");
+            r = e->check(P + "shared_ptr<auto> h = make_shared<C>(); auto c = cast<C>(h);");
             check_eq((size_t)1, warning_count(r));
             check_true(has_diag(r, dlevel::warning, text));
             r = e->check(P + "function f(shared_ptr<C> p) -> int { auto q = cast<C>(p); return q.v; }");

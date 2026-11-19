@@ -1,8 +1,8 @@
 // The portable math kernel (include/jaiscript/detail/portable_math.hpp): every function built from IEEE basic operations
 // (+ - * / sqrt, exact on every conforming target) in a fixed order, with its data in portable_math_tables.hpp. No fused
 // multiply-add, no reassociation: the pragmas keep both off under any flags a host builds with, fast-math included, save
-// Clang's -ffp-contract=fast, which overrides pragmas. Every special value is told apart by its bits, so an assumption
-// of finite math changes nothing.
+// Clang's -ffp-contract=fast, which overrides pragmas (and which -ffast-math implies on targets without float_control,
+// such as 32-bit ARM). Every special value is told apart by its bits, so an assumption of finite math changes nothing.
 #include <jaiscript/detail/portable_math.hpp>
 #include <jaiscript/jaiscript_fwd.hpp>
 #include "portable_math_tables.hpp"
@@ -17,8 +17,12 @@
 #endif
 
 #if defined(__clang__)
+// float_control is not available on every target (32-bit ARM ignores it); there the clang fp pragmas still hold
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wignored-pragmas"
 #pragma float_control(precise, on, push)
-#pragma clang fp contract(off)
+#pragma clang diagnostic pop
+#pragma clang fp contract(off) reassociate(off)
 #elif defined(_MSC_VER)
 #pragma float_control(precise, on, push)
 #pragma fp_contract(off)
@@ -838,7 +842,12 @@ double hypot(double x, double y) noexcept {
 
 } // namespace jai::detail::portable_math
 
-#if defined(__clang__) || defined(_MSC_VER)
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wignored-pragmas"
+#pragma float_control(pop)
+#pragma clang diagnostic pop
+#elif defined(_MSC_VER)
 #pragma float_control(pop)
 #elif defined(__GNUC__)
 #pragma GCC pop_options

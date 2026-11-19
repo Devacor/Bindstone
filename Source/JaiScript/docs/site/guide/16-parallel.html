@@ -62,7 +62,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <li><code>parallel_reduce</code> folds by chunk. The result is bit-identical at every worker count, but a float fold is grouped differently from a left-to-right loop, and a non-identity <code>init</code> is counted once per chunk (<a href="#reductions">Reductions</a>).</li>
 <li>After an error, index writes hold up to the failing element, as in the serial loop, but an element changed in place past it may or may not have been written.</li>
 </ul>
-<p>A read that would depend on scheduling, such as <code>time::now()</code>, is refused.</p>
+<p>A read that would depend on scheduling, such as <code>time::engine_elapsed()</code>, is refused.</p>
 <h2 id="parallel-for"><code>parallel_for</code> and <code>parallel_transform</code><a class="hlink" href="#parallel-for" aria-label="link">&#8203;</a></h2>
 <p><code>parallel_for</code> runs its body once per element. <code>parallel_transform(arr, fn)</code> returns a new array with <code>out[i] = fn(arr[i])</code>.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var nums = [1, 2, 3, 4, 5, 6, 7, 8];

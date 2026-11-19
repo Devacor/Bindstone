@@ -129,7 +129,7 @@ caught: Cannot assign to 'to_lower': it is read-only</code></pre></div>
 <li>An enum declared in a namespace is named <code>ns::Mode</code> the same way: <code>reflect::type_of</code> and every message give that name, <code>ns::Mode::busy</code> is a value and <code>ns::Mode</code> the value table. Inside the namespace the bare <code>Mode</code> works as a type, before a value and as the table. A program-scope <code>Mode</code> is another enum, and the namespace's code reads its values as <code>::Mode::busy</code>.</li>
 <li>A namespace may share a class's name. Its functions replace the class's static methods of matching arity when they say <code>override</code>; without it the collision is an error.</li>
 <li>A qualified name the namespace does not declare fails the load: <code>no member 'sqroot' in namespace 'math'</code>. Every declaration counts (any file, an earlier run, the host), so a script's <code>namespace math { }</code> adds to <code>math::</code>. A file with a dynamic-path include gets a warning instead.</li>
-<li>The host's entries (<code>string::to_lower</code>, <code>time::now</code>) are read-only.</li>
+<li>The host's entries (<code>string::to_lower</code>, <code>time::engine_elapsed</code>) are read-only.</li>
 <li>Any reserved word but <code>this</code> and <code>super</code> names a namespace member or an enum value, reached qualified: <code>spider::catch(url)</code>, <code>Mode::default</code> (<a href="07-classes.html#reference-returns-and-keyword-names">keyword member names</a>).</li>
 </ul>
 <h3 id="using-declarations"><code>using ns::name;</code><a class="hlink" href="#using-declarations" aria-label="link">&#8203;</a></h3>

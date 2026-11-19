@@ -551,9 +551,9 @@ function main() -> int {
 	check(np_host_can_start(), "fresh recount agrees");
 	NP_READY_SET = {};                                   // the 10s grace path, isolated
 	NP_ALL_READY = false;
-	NP_WI_T0 = time::now();
+	NP_WI_T0 = time::engine_elapsed();
 	check(!np_host_can_start(), "cleared votes hold the start again");
-	NP_WI_T0 = time::now() - 11.0;
+	NP_WI_T0 = time::engine_elapsed() - 11.0;
 	check(np_host_can_start(), "the 10s grace unlocks the start");
 	NP_WI_T0 = null;
 	FA.send(to_json({"t": "READY", "s": 1}));
@@ -626,11 +626,11 @@ function main() -> int {
 	check(GAME_MAP == "E1M1" && !NP_WI_PEND, "no self-advance: the host owns NEXT");
 
 	// NEXT arrives ~150ms late; the client keeps ticking E1M1 until it lands
-	float due = time::now() + 0.15;
+	float due = time::engine_elapsed() + 0.15;
 	bool nsent = false;
 	int spin = 0;
 	while (spin < 400 && !NP_WI_PEND) {
-		if (!nsent && time::now() >= due) {
+		if (!nsent && time::engine_elapsed() >= due) {
 			FH.send(FH_CID, to_json({"t": "NEXT", "s": 0, "mapname": "E1M1", "next": "E1M2",
 				"k": 80, "i": 60, "s2": 33, "secs": 90}));
 			nsent = true;

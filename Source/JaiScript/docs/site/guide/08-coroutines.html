@@ -212,9 +212,9 @@ try { to_binary(mid); } catch (e) { print(e); }</code></pre></div>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int countdown(int from) {
     for (int n = from; n &gt; 0; --n) { sleep(0.01); yield n; }
 }
-float start = time::now();
+float start = time::engine_elapsed();
 for (int n : countdown(3)) { print("{}...", n); }
-print("liftoff after at least 30 ms: {}", time::now() - start &gt;= 0.03);</code></pre></div>
+print("liftoff after at least 30 ms: {}", time::engine_elapsed() - start &gt;= 0.03);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3...
 2...
 1...

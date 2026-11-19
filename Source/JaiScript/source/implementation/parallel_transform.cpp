@@ -434,7 +434,7 @@ namespace {
 		state.worker_overhead_ns = best;
 	}
 
-	// A host function a script namespace holds (time::now, web::url_encode), or null for anything else under that name
+	// A host function a script namespace holds (time::engine_elapsed, web::url_encode), or null for anything else under that name
 	const script_value* namespace_host_entry(engine& eng, std::string_view space, std::string_view member) {
 		auto& spaces = engine_access::script_namespaces(eng);
 		const auto found = spaces.find(engine_access::symbolize(eng, space));

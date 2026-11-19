@@ -14,6 +14,8 @@ import sys
 SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
 
 OLD_TEXTS = [
+    r"time::now expects no arguments",
+    r"to_base64 expects exactly",
     r"is marked serial_function\(\)",
     r"is marked serial_static_method\(\)",
     r"is marked serial_method\(\)",

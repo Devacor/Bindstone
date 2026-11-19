@@ -443,7 +443,7 @@ eng-&gt;add_function("load", [raw](const jai::script_type&amp; type, const std::
 <p>Every <code>time::</code> call a script makes (<a href="../guide/14-time.html">Time</a>) reads an engine-owned clock
 the host can replace. It lives on <code>eng-&gt;time()</code>, in <code>&lt;jaiscript/core/engine_time.hpp&gt;</code>.</p>
 <div class="tablewrap"><table><thead><tr><th>Provider</th><th>Behind</th><th>Empty means</th></tr></thead><tbody>
-<tr><td>monotonic</td><td><code>time::now()</code>, <code>time::engine_elapsed()</code>, <code>time::execute_elapsed()</code>, every stopwatch</td><td><code>steady_clock</code></td></tr>
+<tr><td>monotonic</td><td><code>time::engine_elapsed()</code>, <code>time::execute_elapsed()</code>, every stopwatch</td><td><code>steady_clock</code></td></tr>
 <tr><td>wall (nanoseconds since the Unix epoch, UTC)</td><td><code>time::unix_time()</code>, every date</td><td><code>system_clock</code></td></tr>
 <tr><td>sleep</td><td>a <code>sleep</code> that blocks</td><td><code>this_thread::sleep_for</code></td></tr>
 </tbody></table></div>
@@ -455,7 +455,7 @@ eng-&gt;time().source(
     [&amp;] { return epoch + sim_now; },                                  // wall
     [&amp;](std::chrono::nanoseconds d) { sim_now += d; });              // sleep advances the simulation
 sim_now += std::chrono::milliseconds(1500);
-eng-&gt;execute(&quot;print(time::now(), &#x27; &#x27;, time::utc_now().to_string());&quot;);</code></pre></div>
+eng-&gt;execute(&quot;print(time::engine_elapsed(), &#x27; &#x27;, time::utc_now().to_string());&quot;);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1.5 2023-11-14T22:13:21.500Z</code></pre></div>
 <ul>
 <li><strong>Reads are countable,</strong> so a provider that replays recorded readings sees the same sequence on every
@@ -481,7 +481,7 @@ runs as a <strong>run</strong>: <code>eng-&gt;start(...)</code> runs it to its f
 eng-&gt;time().source([&amp;] { return now; }, {}, {});
 jai::script_run run = eng-&gt;start(R&quot;(
     for (int wave = 1; wave &lt;= 3; ++wave) {
-        print(&quot;wave {} at {}&quot;, wave, time::now());
+        print(&quot;wave {} at {}&quot;, wave, time::engine_elapsed());
         sleep(2.0);
     }
     &quot;cleared&quot;;

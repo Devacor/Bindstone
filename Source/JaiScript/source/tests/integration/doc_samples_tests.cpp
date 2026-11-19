@@ -918,7 +918,7 @@ public:
 				    [&] { return epoch + sim_now; },                                  // wall
 				    [&](std::chrono::nanoseconds d) { sim_now += d; });              // sleep advances the simulation
 				sim_now += std::chrono::milliseconds(1500);
-				eng->execute("print(time::now(), ' ', time::utc_now().to_string());");
+				eng->execute("print(time::engine_elapsed(), ' ', time::utc_now().to_string());");
 				// [/sample]
 			});
 		});
@@ -932,7 +932,7 @@ public:
 				eng->time().source([&] { return now; }, {}, {});
 				jai::script_run run = eng->start(R"(
 				    for (int wave = 1; wave <= 3; ++wave) {
-				        print("wave {} at {}", wave, time::now());
+				        print("wave {} at {}", wave, time::engine_elapsed());
 				        sleep(2.0);
 				    }
 				    "cleared";

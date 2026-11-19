@@ -4452,18 +4452,6 @@
     },
     {
       "owner": "time",
-      "name": "now",
-      "signature": "now() -> float",
-      "provider": "stdlib",
-      "effect": "observe",
-      "notes": "Engine elapsed seconds, monotonic.",
-      "source": "include/jaiscript/stdlib/time.hpp",
-      "form": "function",
-      "availability": "register_all() or area registration",
-      "display": "time::now() -> float"
-    },
-    {
-      "owner": "time",
       "name": "engine_elapsed",
       "signature": "engine_elapsed() -> float",
       "provider": "stdlib",

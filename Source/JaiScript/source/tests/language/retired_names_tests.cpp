@@ -157,6 +157,13 @@ public:
 			check_eq(std::string("mine [1]\n"), run_output("string to_base64(var v) { return \"mine \" + to_string(v); }\nprint(to_base64([1]));\n"));
 		});
 
+		test("the_engine_clock_has_one_name", [this]() {
+			const std::string errors = load_errors("float t = time::now();");
+			check_true(errors.find("JaiScript has no 'time::now': write time::engine_elapsed()") != std::string::npos, errors);
+			check_eq(std::string("true\n"), run_output("float a = time::engine_elapsed(); float b = time::engine_elapsed(); print(b >= a && a >= 0.0);\n"));
+			check_eq(std::string("mine\n"), run_output("namespace time { string now() { return \"mine\"; } }\nprint(time::now());\n"));
+		});
+
 		test("an_engine_without_the_replacement_reports_the_plain_undeclared_name", [this]() {
 			auto e = make_engine();
 			stdlib::register_all(*e);

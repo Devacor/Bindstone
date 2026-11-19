@@ -177,7 +177,6 @@ public:
                 check_eq(std::string("1/0"), reads("sw.resume();"), std::string("resume") + be);
                 check_eq(std::string("1/0"), reads("sw.stop();"), std::string("stop") + be);
                 check_eq(std::string("0/0"), reads("sw.stop(); sw.elapsed(); sw.pause();"), std::string("idle reads") + be);
-                check_eq(std::string("1/0"), reads("time::now();"), std::string("now") + be);
                 check_eq(std::string("1/0"), reads("time::engine_elapsed();"), std::string("engine_elapsed") + be);
                 check_eq(std::string("0/1"), reads("time::unix_time();"), std::string("unix_time") + be);
                 check_eq(std::string("0/1"), reads("time::unix_ms();"), std::string("unix_ms") + be);
@@ -190,13 +189,13 @@ public:
         // ------------------------------------------------------------ engine and entry clocks
 
         test("now_and_engine_elapsed_follow_the_source", [this, expect]() {
-            expect(R"(`${time::now()} ${time::engine_elapsed()}`;)", "100.0 100.0", "a host source's reading is engine_elapsed");
-            expect(R"(advance(1.5); `${time::now()} ${time::engine_elapsed()}`;)", "101.5 101.5", "advancing the host clock");
+            expect(R"(`${time::engine_elapsed()}`;)", "100.0", "a host source's reading is engine_elapsed");
+            expect(R"(advance(1.5); `${time::engine_elapsed()}`;)", "101.5", "advancing the host clock");
             for (bool use_vm : {false, true}) {
                 auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(e);
-                auto r = e->execute(R"(var a = time::now(); var b = time::engine_elapsed(); var c = time::now(); a >= 0.0 && b >= a && c >= b && a < 3600.0;)");
+                auto r = e->execute(R"(var a = time::engine_elapsed(); var b = time::engine_elapsed(); a >= 0.0 && b >= a && a < 3600.0;)");
                 check_true(r.as<bool>(), "the system source counts from construction");
                 check_true(e->engine_elapsed() >= 0.0, "the host reads the same clock");
             }
@@ -421,13 +420,13 @@ public:
                     check_eq((int64_t)250000000, (int64_t)clk.sleeps[0].count(), std::string("sleep(seconds)") + be);
                     check_eq((int64_t)10000000, (int64_t)clk.sleeps[1].count(), std::string("a fraction of a second") + be);
                 }
-                check_eq(std::string("100.26"), e->execute("time::now();").to_string(), std::string("a sleep advances a host clock") + be);
+                check_eq(std::string("100.26"), e->execute("time::engine_elapsed();").to_string(), std::string("a sleep advances a host clock") + be);
                 check_near(100.26, e->engine_elapsed(), 1e-9);
                 check_eq((int64_t)std::chrono::nanoseconds(clk.mono).count(), (int64_t)e->time().monotonic_now().count(), std::string("monotonic_now") + be);
                 check_eq((int64_t)clk.wall.count(), (int64_t)e->time().wall_now().count(), std::string("wall_now") + be);
                 const int reads = clk.mono_reads;
                 e->time().source({}, {}, {});
-                check_true(e->execute("var a = time::now(); a >= 0.0 && a < 3600.0;").as<bool>(), std::string("the system source is back") + be);
+                check_true(e->execute("var a = time::engine_elapsed(); a >= 0.0 && a < 3600.0;").as<bool>(), std::string("the system source is back") + be);
                 check_eq(reads, clk.mono_reads, std::string("the host clock is no longer read") + be);
                 auto errors = e->execute(R"(var out = ""; var s = "x"; try { sleep(s); } catch (e) { out += e; } out += " | "; try { reflect::call("sleep", 1, 2); } catch (e) { out += e; } out;)").to_string();
                 check_eq(std::string("sleep expects a number of seconds | No overload of 'sleep' takes (int, int)"), errors, std::string("sleep errors") + be);
@@ -439,7 +438,7 @@ public:
                 string out = "";
                 for (auto p : args) { out += `${p["name"]}:${p["type"]}:${p["default"]} `; }
                 var fns = reflect::functions();
-                `${out}${fns.contains("time::now")} ${fns.contains("time::utc_date")} ${reflect::function_arguments("time::now")[0].size()}`;)",
+                `${out}${fns.contains("time::engine_elapsed")} ${fns.contains("time::utc_date")} ${reflect::function_arguments("time::engine_elapsed")[0].size()}`;)",
                    "arg0:float:false arg1:bool:true true true 0", "declared signatures answer reflection");
         });
 
@@ -457,8 +456,8 @@ public:
                     [&] { return epoch + sim_now; },
                     [&](std::chrono::nanoseconds d) { sim_now += d; });
                 sim_now += std::chrono::milliseconds(1500);
-                eng->execute("print(time::now(), ' ', time::utc_now().to_string());");
-                eng->execute("sleep(2.0); print(time::now());");
+                eng->execute("print(time::engine_elapsed(), ' ', time::utc_now().to_string());");
+                eng->execute("sleep(2.0); print(time::engine_elapsed());");
                 check_eq(std::string("1.5 2023-11-14T22:13:21.500Z\n3.5\n"), out->str(), use_vm ? "vm" : "interpreter");
             }
         });
@@ -470,7 +469,7 @@ public:
                 const std::string what = use_vm ? "vm" : "interpreter";
                 auto r = e->execute(R"(
                     array<float> xs = [1.0, 2.0, 3.0];
-                    try { parallel_for (auto& x : xs) { x = time::now(); } } catch (e) { return e; }
+                    try { parallel_for (auto& x : xs) { x = time::engine_elapsed(); } } catch (e) { return e; }
                     return "no-error";)").to_string();
                 check_true(r.find("time:: calls are not allowed in a parallel body (engine-owned clock)") != std::string::npos, "parallel_for (" + what + "): " + r);
                 auto t = e->execute(R"(
@@ -491,7 +490,7 @@ public:
                 }
                 return std::string("clean");
             };
-            check_eq(std::string("'time::now' expects 0 argument(s), got 1"), first_error("time::now(5);"), "arity");
+            check_eq(std::string("'time::engine_elapsed' expects 0 argument(s), got 1"), first_error("time::engine_elapsed(5);"), "arity");
             check_eq(std::string("'time::date_from_unix' expects 1 to 2 argument(s), got 3"), first_error("time::date_from_unix(1, true, 3);"), "an arity range");
             check_eq(std::string("argument 1 of 'sleep': cannot pass 'string' where a number is expected"), first_error("sleep(\"x\");"), "an argument type");
             check_eq(std::string("argument 2 of 'time::date_from_unix': cannot pass 'int' where a bool is expected"), first_error("time::date_from_unix(1, 1);"), "a bool argument");
@@ -501,7 +500,7 @@ public:
             check_eq(std::string("no member 'nope' in class 'time::date'"), first_error("time::local_now().nope;"), "a result's members");
             const std::string clean = R"(
                 time::stopwatch sw; sw.start(); float e1 = sw.elapsed(); float d1 = sw.delta(); bool r = sw.is_running();
-                float n = time::now(); float ee = time::engine_elapsed(); float xe = time::execute_elapsed(); float ut = time::unix_time(); int um = time::unix_ms();
+                float ee = time::engine_elapsed(); float xe = time::execute_elapsed(); float ut = time::unix_time(); int um = time::unix_ms();
                 string s = time::date_now("${year}"); time::date d = time::local_now(); time::date u = time::utc_now(); time::date f = time::date_from_unix(0, true);
                 time::date g = time::utc_date(2024, 1, 1); time::date h = time::local_date(2024, 1, 1, 12); int y = d.year; d.month = 3; float gap = u - d;
                 bool b = d.between(f, g) && d < g; string iso = d.to_string(); time::date t = d.add_days(1).add_hours(1.5).to_utc(); time::stopwatch w = time::stopwatch();

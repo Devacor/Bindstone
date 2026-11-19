@@ -644,7 +644,7 @@ class HostSession : Session {
 		}
 		players[0] = new LocalPlayer(0, NP_NAME);
 		NP_LOBBY = "listening";
-		NP_LOBBY_T0 = time::now();
+		NP_LOBBY_T0 = time::engine_elapsed();
 		return true;
 	}
 
@@ -785,7 +785,7 @@ class ClientSession : Session {
 			return false;
 		}
 		NP_LOBBY = "connecting";
-		NP_LOBBY_T0 = time::now();
+		NP_LOBBY_T0 = time::engine_elapsed();
 		return true;
 	}
 
@@ -893,7 +893,7 @@ var NP_TAKE_PEND = {};
 var NP_READY_SET = {};
 var NP_NEXT_SENT = false;
 var NP_EXIT_SENT = false;
-var NP_WI_T0 = null;          // host intermission entry (time::now()): the 10s-grace baseline
+var NP_WI_T0 = null;          // host intermission entry (time::engine_elapsed()): the 10s-grace baseline
 var NP_LAST_STATE = [];
 var NP_PROJ_NEXT = 0;         // monotonic net ids (never reset: stale packets can't collide)
 var NP_PROJ_MINE = {};        // my announced live projectiles: mobj idx -> net id
@@ -1197,7 +1197,7 @@ function np_lobby_join(string host, int port) -> bool {
 function np_lobby_frame() -> void {
 	if (SESSION == null) { return; }
 	SESSION.pump();
-	if (NP_LOBBY == "connecting" && time::now() - NP_LOBBY_T0 > 10.0) {
+	if (NP_LOBBY == "connecting" && time::engine_elapsed() - NP_LOBBY_T0 > 10.0) {
 		NP_LOBBY = "failed: no answer";
 		np_cancel();
 	}
@@ -1365,11 +1365,11 @@ function np_host_can_start() -> bool {
 	if (SESSION == null) { return true; }
 	int need = np_ready_need();
 	if (need <= 0 || np_ready_have() >= need) { return true; }
-	return NP_WI_T0 != null && time::now() - NP_WI_T0 > 10.0;
+	return NP_WI_T0 != null && time::engine_elapsed() - NP_WI_T0 > 10.0;
 }
 
 function np_wi_begin() -> void {
-	NP_WI_T0 = time::now();
+	NP_WI_T0 = time::engine_elapsed();
 }
 
 function np_next_map(string mapname) -> void {

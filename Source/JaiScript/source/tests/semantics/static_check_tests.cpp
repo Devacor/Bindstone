@@ -2901,20 +2901,20 @@ public:
                 try { e->execute(source); } catch (const static_check_error& err) { return std::string(err.what()); }
                 return std::string("loaded");
             };
-            check_true(message("bool t() { return time::now() >= 0.0; }").find("error: use of undeclared identifier 'time'") != std::string::npos,
-                       message("bool t() { return time::now() >= 0.0; }"));
+            check_true(message("bool t() { return time::engine_elapsed() >= 0.0; }").find("error: use of undeclared identifier 'time'") != std::string::npos,
+                       message("bool t() { return time::engine_elapsed() >= 0.0; }"));
             check_true(message("namespace game { int k = 1; } int t() { return game::tick; }").find("error: no member 'tick' in namespace 'game'") != std::string::npos);
             auto e = make_engine();
-            e->execute("extern function time::now;\nextern int game::tick;\nextern a::b::c;\n"
+            e->execute("extern function time::engine_elapsed;\nextern int game::tick;\nextern a::b::c;\n"
                        "namespace zone { extern function spawn; extern int depth; extern inner::depth; int level() { return depth + 1; } }\n"
-                       "bool t() { return time::now() >= 0.0; }\nint tick() { return game::tick + 1; }\nvoid set_tick() { game::tick = 2; }\n"
+                       "bool t() { return time::engine_elapsed() >= 0.0; }\nint tick() { return game::tick + 1; }\nvoid set_tick() { game::tick = 2; }\n"
                        "void bump_tick() { game::tick += 2; }\nvar read_c() { return a::b::c; }\nvoid set_c() { a::b::c = 1; }\n"
                        "int spawn_one() { return zone::spawn(1); }\nvar inner_depth() { return zone::inner::depth; }\n");
             const auto raises = [&](const std::string& source, const std::string& text) {
                 const std::string got = outcome(*e, source);
                 check_true(got.rfind("ERROR " + text, 0) == 0, source + " -> " + got);
             };
-            raises("t();", "'time::now' is declared extern but never defined");
+            raises("t();", "'time::engine_elapsed' is declared extern but never defined");
             raises("tick();", "'game::tick' is declared extern but never defined (an 'inline' declaration creates it)");
             raises("set_tick();", "'game::tick' is declared extern but never defined (an 'inline' declaration creates it)");
             raises("bump_tick();", "'game::tick' is declared extern but never defined (an 'inline' declaration creates it)");
@@ -2924,7 +2924,7 @@ public:
             raises("zone::level();", "'depth' is declared extern but never defined (an 'inline' declaration creates it)");
             raises("inner_depth();", "'zone::inner::depth' is declared extern but never defined (an 'inline' declaration creates it)");
             jai::stdlib::register_time_functions(*e);
-            check_true(e->execute("t();").as_bool(), "the host registered time::now after the script loaded");
+            check_true(e->execute("t();").as_bool(), "the host registered time::engine_elapsed after the script loaded");
             e->execute("namespace game { int tick = 41; }\nnamespace a::b { var c = \"c\"; }\nnamespace zone { int spawn(int n) { return n + 6; } int depth = 6; }");
             check_eq((int64_t)42, e->execute("tick();").as_int(), "a later unit defines game::tick");
             check_eq(std::string("c"), e->execute("read_c();").as_string());

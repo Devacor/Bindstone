@@ -4839,6 +4839,10 @@ private:
             if (namespace_known(path)) { space = path; next = k + 1; }
         }
         if (space.empty() || namespace_declares(space, parts[next])) { return; }
+        if (const detail::retired_name* retired = retired_call(space + "::" + std::string(parts[next]))) {
+            diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, m->location, std::string(retired->text));
+            return;
+        }
         diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, m->location,
              "no member '" + std::string(parts[next]) + "' in namespace '" + space + "'");
     }

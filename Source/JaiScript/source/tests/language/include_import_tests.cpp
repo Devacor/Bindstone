@@ -2134,11 +2134,11 @@ public:
                     check_eq(stats, detail::engine_access::import_stat_count(*eng), "and query no file" + be);
                     eng->import_recheck_interval(0.001);
                     check_eq(std::string(host_clock ? "1 0 0" : "1 0 1"), eng->execute(
-                        "int s0 = stats();\npoll();\nint s1 = stats();\nwait_ms(5);\npoll();\nint s2 = stats();\ntime::now();\npoll();\nint s3 = stats();\n"
+                        "int s0 = stats();\npoll();\nint s1 = stats();\nwait_ms(5);\npoll();\nint s2 = stats();\ntime::engine_elapsed();\npoll();\nint s3 = stats();\n"
                         "to_string(s1 - s0) + \" \" + to_string(s2 - s1) + \" \" + to_string(s3 - s2);").to_string(),
                         "the entry opens a pass; the frame coming around after the window opens none until a system-clock read samples" + be);
                     eng->execution_budget(jai::foundry::k_test_budget_seconds);
-                    check_eq(std::string("5000"), eng->execute("int n = 0;\nfor (int i = 0; i < 5000; i++) { time::now(); n++; }\nn;").to_string(),
+                    check_eq(std::string("5000"), eng->execute("int n = 0;\nfor (int i = 0; i < 5000; i++) { time::engine_elapsed(); n++; }\nn;").to_string(),
                              "a host clock racing ahead never trips the budget" + be);
                 }
             }

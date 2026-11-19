@@ -195,7 +195,7 @@ checked against it - the `string::` library declares one per function, so
 `string::repeat(to_char(a), 3)` is `argument 1 of 'string::repeat': cannot pass 'char' where a
 string is expected`, a wrong count is `'string::pad_left' expects 2 to 3 argument(s), got 1`, and
 the result is typed (text of the first argument's kind, `bool` for `is_valid_utf8`); the `time::`
-entries declare theirs too (`'time::now' expects 0 argument(s), got 1`, `time::date_from_unix("x")` is `argument 1 of
+entries declare theirs too (`'time::engine_elapsed' expects 0 argument(s), got 1`, `time::date_from_unix("x")` is `argument 1 of
 'time::date_from_unix': cannot pass 'string' where a number is expected`, `time::local_now()` types as `time::date`). The core
 `sleep` checks the same way (`argument 1 of 'sleep': cannot pass 'string' where a number is expected`), and its place: an
 error in a `parallel_for` body or a lambda handed to `parallel_transform`/`parallel_reduce`, a warning in a destructor or a

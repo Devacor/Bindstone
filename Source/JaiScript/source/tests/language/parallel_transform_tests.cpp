@@ -3637,7 +3637,7 @@ public:
 				"resolve_path", "sleep", "spider::Response", "spider::catch", "spider::get", "spider::post", "spider::sling",
 				"template#dynamic", "template#html", "template#raw", "template#scoped", "template#scoped_file", "template#splice",
 				"time::date", "time::date_from_unix", "time::date_now", "time::engine_elapsed", "time::execute_elapsed",
-				"time::local_date", "time::local_now", "time::now", "time::stopwatch", "time::unix_ms", "time::unix_time",
+				"time::local_date", "time::local_now", "time::stopwatch", "time::unix_ms", "time::unix_time",
 				"time::utc_date", "time::utc_now", "to_binary", "to_json"
 			};
 			const std::set<std::string> parallel = {

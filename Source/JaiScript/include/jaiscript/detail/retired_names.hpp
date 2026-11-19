@@ -28,6 +28,7 @@ inline constexpr retired_name k_retired_names[] = {
 	{"is_registered_type", "", "JaiScript has no 'is_registered_type': write reflect::is_registered_type(x)"},
 	{"to_base64", "base64_encode", "JaiScript has no 'to_base64': write base64_encode(to_binary(value))"},
 	{"from_base64", "base64_decode", "JaiScript has no 'from_base64': write from_binary(base64_decode(text))"},
+	{"time::now", "time::engine_elapsed", "JaiScript has no 'time::now': write time::engine_elapsed()"},
 };
 
 inline constexpr const retired_name* find_retired_name(std::string_view name) noexcept {

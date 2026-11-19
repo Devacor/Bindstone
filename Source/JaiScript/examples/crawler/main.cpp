@@ -1,7 +1,7 @@
 // jai_crawler: GRUBWELL's native host, a thin console shell around a JaiScript engine.
 // Everything that makes the game (the raycast view, dungeon generation, combat, AI, items, the
 // screens) lives in scripts/*.jai. The host gives the script a terminal (raw keys, the console
-// size, its colour depth, an alternate screen it restores on every exit), a seeded Rng, file IO
+// size, its colour depth, an alternate screen it restores on every exit), a seeded_rng, file IO
 // for saves, and the command-line flags as globals. scripts/crawler.jai is the same contract
 // written in script for the standalone runner.
 
@@ -391,7 +391,7 @@ struct console_host {
 	}
 };
 
-// Deterministic xorshift64*, the only randomness the game rules touch. Bound as script class Rng
+// Deterministic xorshift64*, the only randomness the game rules touch. Bound as script class seeded_rng
 // so a seed replays a run exactly.
 struct crawler_rng {
 	uint64_t s;
@@ -618,7 +618,7 @@ int main(int argc, char** argv) {
 		return std::to_string(size) + ":" + std::to_string(static_cast<long long>(written.time_since_epoch().count()));
 	});
 
-	jai::dynamic_binder<crawler_rng>(*eng, "Rng")
+	jai::dynamic_binder<crawler_rng>(*eng, "seeded_rng")
 		.constructor<jai::script_int>()
 		.method("next", &crawler_rng::next)
 		.method("roll", &crawler_rng::roll)

@@ -518,7 +518,7 @@ s.onWave.connect("logger", "print(\"wave logged\");");     // named script-text 
 s.onWave.connected("hud");                                 // true
 s.onWave.disconnect("hud");</code></pre></div>
 <ul>
-<li><strong>One generic <code>Signal</code> class serves every signature.</strong> Reading a signal member hands script a view over three type-erased operations (connect, disconnect, connected) built where the emitter&#x27;s type is known.</li>
+<li><strong>One generic <code>signal</code> class serves every signature.</strong> Reading a signal member hands script a view over three type-erased operations (connect, disconnect, connected) built where the emitter&#x27;s type is known.</li>
 <li><strong>The lookup walks the inheritance chain</strong>, so a signal declared on a base connects through a derived registration, in either registration order.</li>
 <li><strong>Script-text receivers work however the object was made</strong> (in script, in C++, or by a load): connecting gives the emitter the binding engine.</li>
 <li><strong>A view shares the signal&#x27;s state.</strong> It follows its owner through moves; once the owner is gone it reports nothing connected and its <code>connect</code> fails with <code>Signal view is not backed by a live signal</code>.</li>

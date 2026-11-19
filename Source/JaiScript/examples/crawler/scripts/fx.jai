@@ -1,6 +1,6 @@
 // What a turn leaves in the view: damage numbers, slashes, a slain monster melting into sparks,
 // spells in flight with their own light, the alarm over a monster that just saw you, and the
-// banners for a new floor, a level, a find or a reload. Effects read the game and never its Rng,
+// banners for a new floor, a level, a find or a reload. Effects read the game and never its RNG,
 // so the smoke hash never sees them. Each lives a turn or two; a dump draws it at rest (FX_REST),
 // and an interactive turn plays it through four in-between frames first.
 

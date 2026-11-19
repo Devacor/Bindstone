@@ -273,7 +273,7 @@ function title_screen(bool can_continue) -> string {
 }
 
 // What lives in the Well: embers rising out of the glow toward you, and pairs of eyes in the
-// brickwork that open, watch and blink. Placed by the presentation hash, never the game's Rng.
+// brickwork that open, watch and blink. Placed by the presentation hash, never the game's RNG.
 function shaft_life(int frame) -> void {
 	float cx = PAGE_W / 2.0;
 	float cy = PAGE_H * 1.2;
@@ -618,7 +618,7 @@ function death_overlay() -> void {
 array<int> RAINBOW = [0xFF3030, 0xFF9020, 0xFFE040, 0x50E060, 0x40C8FF, 0x6060FF, 0xD050FF];
 
 // The stolen fire comes home: flames climb the screen in rainbow bands rising like the colour
-// climbing the Well. The flames run on their own little LCG, never the game's Rng.
+// climbing the Well. The flames run on their own little LCG, never the game's RNG.
 function victory_screen() -> void {
 	if (G.smoke && VIEW_PROBE == null && !HOST_ANIM) { return; }   // a dump or an --anim run draws the ending too
 	page_open(page_size_cols(), page_size_rows());

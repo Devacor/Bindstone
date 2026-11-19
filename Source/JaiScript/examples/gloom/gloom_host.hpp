@@ -1,6 +1,6 @@
 // GLOOM shared host: the language-agnostic console shell. reference/README.md is the
 // game/host spec. The host owns: VT console, held-key state + key events, a monotonic
-// clock, the xorshift64* Rng, command-line flags, and the --smoke/--bench
+// clock, the xorshift64* rng, command-line flags, and the --smoke/--bench
 // harnesses with their hashes. A script_adapter supplies everything
 // language-specific: engine creation, host-API binding, script loading, and the
 // six gloom_* entry-point calls.
@@ -69,7 +69,7 @@ std::string locate_scripts_dir(const std::string& override_dir, const char* argv
 
 // Deterministic xorshift64* — the ONLY randomness the game may touch, so runs
 // replay identically from a seed in every port (that is the parity contract).
-// Bind this exact struct as the script-visible "Rng" class in every language.
+// Bind this exact struct as the script-visible class in every language: seeded_rng in JaiScript, Rng in the ports.
 struct gloom_rng {
 	uint64_t s;
 

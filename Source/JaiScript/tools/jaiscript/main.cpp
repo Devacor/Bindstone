@@ -15,7 +15,7 @@
 #include <jaiscript/properties/property_serialization.hpp>   // property_manager::load template bodies
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 #include <jaiscript/debug/connector.hpp>
-#include "fetch.hpp"   // Download, zip_entries, zip_extract (runner host API)
+#include "fetch.hpp"   // download, zip_entries, zip_extract (runner host API)
 #include "sound.hpp"   // load_sound, play_sound, stop_sounds (runner host API)
 #include "http_transport.hpp"   // spider::catch / sling / get / post over WinHTTP or sockets
 #endif
@@ -45,7 +45,7 @@
 #include <vector>
 
 #include "file_io.hpp"      // read_file, write_file and the rest of the host file IO
-#include "net_socket.hpp"   // the socket primitives NetChannel and NetServer stand on
+#include "net_socket.hpp"   // the socket primitives net_channel and net_server stand on
 
 #ifdef _WIN32
 #include <windows.h>
@@ -263,7 +263,7 @@ void print_usage() {
 		"  each answers a spider::Response; WinHTTP on Windows, sockets elsewhere, HTTPS through OpenSSL\n"
 		"  when the build found it), with the network permission granted,\n"
 		"  plus host file IO: read_file(path),\n"
-		"  write_file(path, text) (creates missing folders), file_exists(path), delete_file(path), Download,\n"
+		"  write_file(path, text) (creates missing folders), file_exists(path), delete_file(path), download,\n"
 		"  zip_entries(zip), zip_extract(zip, entry, dest), dir_exists(path),\n"
 		"  make_dirs(path), list_dir(path), writable_dir(path). Locations are language builtins:\n"
 		"  executable_dir() (alias bin_dir()), root_script_dir() (the script this run started with),\n"
@@ -273,13 +273,13 @@ void print_usage() {
 		"  from any working directory when its paths start from one of these; and console-game IO:\n"
 		"  key_down(name), read_key(), term_cols(), term_rows(), env_var(name) (clocks are time::,\n"
 		"  waits sleep()),\n"
-		"  sound: load_sound(path) -> Sound (play()/play(true) loops/stop()/playing()/volume(0..1)/\n"
+		"  sound: load_sound(path) -> sound (play()/play(true) loops/stop()/playing()/volume(0..1)/\n"
 		"  format(); wav, midi or mp3 by the file's header), play_sound(path[, loop]), stop_sounds()\n"
-		"  (each Sound mixes with the others; Windows only, null elsewhere). POSIX terminals synthesize\n"
-		"  key_down from auto-repeat; there are no key-up events. Networking: NetChannel\n"
-		"  (new NetChannel(); listen(port)/connect(host,port)/send(bytes)/pump()/close();\n"
+		"  (each sound mixes with the others; Windows only, null elsewhere). POSIX terminals synthesize\n"
+		"  key_down from auto-repeat; there are no key-up events. Networking: net_channel\n"
+		"  (new net_channel(); listen(port)/connect(host,port)/send(bytes)/pump()/close();\n"
 		"  signals on_packet(bytes)/on_connect()/on_disconnect(reason) fire during pump();\n"
-		"  4-byte big-endian length framing) and NetServer (N clients on one\n"
+		"  4-byte big-endian length framing) and net_server (N clients on one\n"
 		"  port: listen/send(id,bytes)/broadcast/pump/kick/client_count; per-client signals\n"
 		"  on_client_connect(id)/on_client_packet(id,bytes)/on_client_disconnect(id,reason)),\n"
 		"  net_host_name() and net_local_addresses() (this machine's IPv4 addresses).\n"
@@ -1209,7 +1209,7 @@ private:
 };
 
 void register_net_channel(jai::engine& eng) {
-	jai::dynamic_binder<net_server>(eng, "NetServer")
+	jai::dynamic_binder<net_server>(eng, "net_server")
 		.constructor<>()
 		.method("listen", &net_server::listen)
 		.method("send", &net_server::send)
@@ -1220,7 +1220,7 @@ void register_net_channel(jai::engine& eng) {
 		.method("listening", &net_server::listening)
 		.method("close", &net_server::close)
 		.build();
-	jai::dynamic_binder<net_channel>(eng, "NetChannel")
+	jai::dynamic_binder<net_channel>(eng, "net_channel")
 		.constructor<>()
 		.method("listen", &net_channel::listen)
 		.method("connect", &net_channel::connect)
@@ -2148,7 +2148,7 @@ int run_selftest(const console_state& con) {
 	}
 
 	for (const char* backend : {"interp", "vm"}) {
-		// Process-owned fixtures only. The invalid URL is rejected before Download
+		// Process-owned fixtures only. The invalid URL is rejected before download
 		// starts a worker, and missing audio files cannot produce audible output.
 		const fs::path fixture = dir / (std::string("filesystem permission ") + backend);
 		auto expect_permission = [&](bool ok, const std::string& name) {
@@ -2177,7 +2177,7 @@ int run_selftest(const console_state& con) {
 			}, jai::permissions::filesystem);
 			expect_permission(eng->execute("read_file(fixture + \"/content.txt\");").as_string() == "unchanged",
 				"default file access remains enabled");
-			eng->execute("var saved_read = read_file; var pending = Download(); var saved_start = reflect::bind(pending, \"start\");");
+			eng->execute("var saved_read = read_file; var pending = download(); var saved_start = reflect::bind(pending, \"start\");");
 			eng->execute("revoke_filesystem();");
 			expect_permission(revoke_calls == 1 && !eng->is_enabled(jai::permissions::filesystem),
 				"host callback revokes subsequent access");
@@ -2208,11 +2208,11 @@ int run_selftest(const console_state& con) {
 				{"crypto::sha256_file(fixture + \"/content.txt\")", "crypto::sha256_file"},
 				{"zip_entries(fixture + \"/missing.zip\")", "zip_entries"},
 				{"zip_extract(fixture + \"/missing.zip\", \"entry\", fixture + \"/extracted.txt\")", "zip_extract"},
-				{"pending.start(\"jaiscript-selftest://never-network\", fixture + \"/download.bin\")", "Download.start"},
+				{"pending.start(\"jaiscript-selftest://never-network\", fixture + \"/download.bin\")", "download.start"},
 				{"saved_read(fixture + \"/content.txt\")", "saved read_file alias"},
-				{"saved_start(\"jaiscript-selftest://never-network\", fixture + \"/alias.bin\")", "saved Download.start alias"},
+				{"saved_start(\"jaiscript-selftest://never-network\", fixture + \"/alias.bin\")", "saved download.start alias"},
 				{"reflect::call(\"read_file\", fixture + \"/content.txt\")", "reflected read_file"},
-				{"reflect::invoke(pending, \"start\", \"jaiscript-selftest://never-network\", fixture + \"/reflected.bin\")", "reflected Download.start"}
+				{"reflect::invoke(pending, \"start\", \"jaiscript-selftest://never-network\", fixture + \"/reflected.bin\")", "reflected download.start"}
 			};
 			for (const auto& [expression, name] : denied_calls) { expect_denied(expression, name); }
 			expect_denied("guarded_probe()", "host callback");
@@ -2233,13 +2233,13 @@ int run_selftest(const console_state& con) {
 				"denied archive/download operations create nothing");
 			expect_permission(eng->execute("!pending.pump() && !pending.done() && !pending.success() && "
 				"pending.error() == \"\" && pending.total() == -1 && pending.fraction() == 0;").as_bool(),
-				"denied start does not alter Download state; memory queries remain available");
+				"denied start does not alter download state; memory queries remain available");
 #if !defined(_WIN32) && !defined(JAISCRIPT_RUNNER_HAS_CURL)
 			// Only the curl-executable fallback polls the output file for progress.
-			expect_denied("pending.received()", "Download.received filesystem fallback");
+			expect_denied("pending.received()", "download.received filesystem fallback");
 #else
 			expect_permission(eng->execute("pending.received();").as_int() == 0,
-				"Download.received remains available when progress is memory-only");
+				"download.received remains available when progress is memory-only");
 #endif
 			expect_permission(eng->execute("pending.cancel(); stop_sounds(); true;").as_bool(),
 				"explicit cancel, stop and status remain available");
@@ -2260,13 +2260,13 @@ int run_selftest(const console_state& con) {
 			expect_permission(!eng->execute("saved_start(\"jaiscript-selftest://never-network\", "
 				"fixture + \"/reenabled-download.bin\");").as_bool()
 				&& eng->execute("pending.error();").as_string() == "download: only http and https URLs are supported",
-				"reenabled Download alias reaches its original validation without network access");
+				"reenabled download alias reaches its original validation without network access");
 			expect_permission(eng->execute("guarded_probe();").as_bool() && guarded_calls == 1,
 				"reenabled callback enters exactly once");
 			eng->disable(jai::permissions::network);
-			expect_permission(eng->execute("var m = \"\"; try { auto d = Download(); d.start(\"http://127.0.0.1:1/\", fixture + \"/net.bin\"); } "
+			expect_permission(eng->execute("var m = \"\"; try { auto d = download(); d.start(\"http://127.0.0.1:1/\", fixture + \"/net.bin\"); } "
 				"catch (e) { m = e; } m;").as_string().find("network") != std::string::npos && !fs::exists(fixture / "net.bin"),
-				"Download.start needs the network permission too");
+				"download.start needs the network permission too");
 			eng->enable(jai::permissions::network);
 		} catch (const std::exception& error) {
 			expect_permission(false, "fixture/setup or recovery");

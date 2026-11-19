@@ -1,7 +1,7 @@
 // demoreel.jai — drag-drop shim: runs the demoreel on the standalone jaiscript
 // runner with zero C++ beyond the runner itself. Recreates the C++ host contract
 // (demoreel_host.cpp) in script: the ESC global, the itrunc/ifloor casts, host_log
-// and the seeded xorshift64* Rng class, bit-exact under checked int64 (16-bit-limb
+// and the xorshift64* seeded_rng class, bit-exact under checked int64 (16-bit-limb
 // multiplies, masked logical shifts). Then it imports the scene files in the host's
 // load order and pumps demo_frame at 30 fps.
 //
@@ -54,9 +54,9 @@ function u64_shr(int x, int k) -> int {
 	return (x >> k) & ((1 << (64 - k)) - 1);
 }
 
-class Rng {
+class seeded_rng {
 	int s = 0;
-	Rng(int seed) {
+	seeded_rng(int seed) {
 		s = seed != 0 ? seed : -7046029254386353131;   // 0x9E3779B97F4A7C15
 		for (int i = 0; i < 4; ++i) { raw(); }
 	}

@@ -571,9 +571,9 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <ul id="runner-builtins">
 <li>the full stdlib, the <code>web::</code> library</li>
 <li>the <a href="../guide/17-web.html#spider"><code>spider::</code> HTTP client</a> (WinHTTP on Windows, sockets elsewhere, the <code>network</code> permission granted)</li>
-<li>file IO (<code>read_file</code>, <code>write_file</code>, <code>file_exists</code>, <code>delete_file</code>, <code>move_file</code>, <code>dir_exists</code>, <code>make_dirs</code>, <code>list_dir</code>, <code>writable_dir</code>, plus <code>Download</code>, <code>zip_entries</code> and <code>zip_extract</code>)</li>
+<li>file IO (<code>read_file</code>, <code>write_file</code>, <code>file_exists</code>, <code>delete_file</code>, <code>move_file</code>, <code>dir_exists</code>, <code>make_dirs</code>, <code>list_dir</code>, <code>writable_dir</code>, plus <code>download</code>, <code>zip_entries</code> and <code>zip_extract</code>)</li>
 <li>a console-game surface (<a href="../guide/20-terminal-games.html">A Terminal Game in One File</a>: <code>read_key</code>, <code>key_down</code>, <code>term_cols</code>, <code>term_rows</code>, <code>env_var</code>, and sound: <code>load_sound</code>, <code>play_sound</code>, <code>stop_sounds</code>; clocks are the standard library&#x27;s <code>time::</code>)</li>
-<li>two socket classes, <code>NetServer</code> and <code>NetChannel</code>, and <code>net_host_name</code> and <code>net_local_addresses</code></li>
+<li>two socket classes, <code>net_server</code> and <code>net_channel</code>, and <code>net_host_name</code> and <code>net_local_addresses</code></li>
 </ul>
 <div class="tablewrap"><table><thead><tr><th>Invocation</th><th>What happens</th></tr></thead><tbody><tr><td><code>jaiscript file.jai [-- args...]</code></td><td>Runs the file as a suspendable run (each <code>sleep</code> returns to the runner, which waits on the engine&#x27;s clock and resumes it), then exits.</td></tr>
 <tr><td>Exit code</td><td>The script&#x27;s trailing int expression if any; 1 on a script error; 2 on a usage error (unknown flag, missing or malformed value).</td></tr>
@@ -617,8 +617,8 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <h3 id="runner-host-api">The runner's host API<a class="hlink" href="#runner-host-api" aria-label="link">&#8203;</a></h3>
 <p>Registered on every engine the runner builds; a host embedding JaiScript registers its own. Signatures: <a href="api.html">API reference</a>, under the standalone runner.</p>
 <ul>
-<li>Calls that name a file (the file functions, <code>Download.start</code>, <code>load_sound</code>, <code>play_sound</code>) need the engine's <code>filesystem</code> permission, else <code>Insufficient permission: filesystem.</code></li>
-<li><code>Download.start</code> needs the <code>network</code> permission too.</li>
+<li>Calls that name a file (the file functions, <code>download.start</code>, <code>load_sound</code>, <code>play_sound</code>) need the engine's <code>filesystem</code> permission, else <code>Insufficient permission: filesystem.</code></li>
+<li><code>download.start</code> needs the <code>network</code> permission too.</li>
 <li>Locations (<code>executable_dir()</code>, <code>root_script_dir()</code>, <code>current_script_dir()</code>, <code>resolve_path(name)</code>, <code>app_data_dir(name)</code> and the rest) are language builtins on every engine: <a href="../guide/10-modules.html">Modules</a>.</li>
 </ul>
 <div class="tablewrap"><table><thead><tr><th>Files and folders</th><th>Behavior</th></tr></thead><tbody>
@@ -633,7 +633,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>list_dir(path) -&gt; array&lt;string&gt;</code></td><td>Entry names, sorted; empty for a folder that cannot be read.</td></tr>
 <tr><td><code>writable_dir(path) -&gt; bool</code></td><td>Creates the folder if missing, then writes and removes a probe file: whether it can take a save.</td></tr>
 <tr><td><code>zip_entries(zip) -&gt; array&lt;string&gt;</code>, <code>zip_extract(zip, entry, dest) -&gt; bool</code></td><td>A zip archive's entry names; one entry written to <code>dest</code>, CRC-32 verified.</td></tr>
-<tr><td><code>Download()</code></td><td>Asynchronous download, polled from the script&#x27;s loop. A failed transfer leaves no partial file.</td></tr>
+<tr><td><code>download()</code></td><td>Asynchronous download, polled from the script&#x27;s loop. A failed transfer leaves no partial file.</td></tr>
 <tr><td><code>start(url, path)</code></td><td>Begins it (http or https); <code>false</code> with <code>error()</code> set when it cannot begin.</td></tr>
 <tr><td><code>pump()</code></td><td><code>true</code> once it is done.</td></tr>
 <tr><td><code>success()</code>, <code>error()</code></td><td>The outcome.</td></tr>
@@ -648,16 +648,16 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>env_var(name) -&gt; string</code></td><td>An environment variable, <code>""</code> when unset. <code>env_var("COLORTERM")</code> is <code>"truecolor"</code> or <code>"24bit"</code> in a terminal that takes 24-bit colour.</td></tr>
 </tbody></table></div>
 <div class="tablewrap"><table><thead><tr><th>Sound</th><th>Behavior</th></tr></thead><tbody>
-<tr><td><code>load_sound(path) -&gt; Sound</code></td><td>Opens a WAV, MIDI or MP3 file and returns at once; it preloads in the background. <code>null</code> for a missing file or another format.</td></tr>
+<tr><td><code>load_sound(path) -&gt; sound</code></td><td>Opens a WAV, MIDI or MP3 file and returns at once; it preloads in the background. <code>null</code> for a missing file or another format.</td></tr>
 <tr><td>Format</td><td>Named by the first bytes (<code>RIFF</code>/<code>WAVE</code>, <code>MThd</code>, an <code>ID3</code> tag or an MPEG frame); an unrecognized header falls back to the extension (<code>.wav</code>, <code>.mid</code>, <code>.midi</code>, <code>.mp3</code>).</td></tr>
-<tr><td><code>s.play()</code>, <code>s.play(true)</code> <code>-&gt; bool</code></td><td>Starts from the beginning, looping forever with <code>true</code>; returns at once. A playing Sound restarts. <code>false</code> once the file proved unplayable (its data did not decode).</td></tr>
+<tr><td><code>s.play()</code>, <code>s.play(true)</code> <code>-&gt; bool</code></td><td>Starts from the beginning, looping forever with <code>true</code>; returns at once. A playing sound restarts. <code>false</code> once the file proved unplayable (its data did not decode).</td></tr>
 <tr><td><code>s.stop()</code>, <code>s.playing() -&gt; bool</code></td><td><code>playing()</code> is <code>true</code> from <code>play()</code> until <code>stop()</code>, <code>stop_sounds()</code> or the end of a sound played once.</td></tr>
-<tr><td><code>s.volume(level)</code></td><td><code>0.0</code> to <code>1.0</code>, clamped; a Sound starts at <code>1.0</code>.</td></tr>
+<tr><td><code>s.volume(level)</code></td><td><code>0.0</code> to <code>1.0</code>, clamped; a sound starts at <code>1.0</code>.</td></tr>
 <tr><td><code>s.format() -&gt; string</code></td><td><code>"wav"</code>, <code>"midi"</code> or <code>"mp3"</code></td></tr>
-<tr><td><code>play_sound(path)</code>, <code>play_sound(path, true)</code> <code>-&gt; Sound</code></td><td><code>load_sound</code> then <code>play</code>. Plays to its end (or forever, looped) even when the result is dropped; the result stops it. <code>null</code> as <code>load_sound</code>.</td></tr>
-<tr><td><code>stop_sounds()</code></td><td>Stops every Sound.</td></tr>
-<tr><td>Voices</td><td>Every Sound is its own voice; several play at once, mixed.</td></tr>
-<tr><td>Lifetime</td><td>A Sound closes when the last variable holding it lets go; a copy of a Sound is the same sound.</td></tr>
+<tr><td><code>play_sound(path)</code>, <code>play_sound(path, true)</code> <code>-&gt; sound</code></td><td><code>load_sound</code> then <code>play</code>. Plays to its end (or forever, looped) even when the result is dropped; the result stops it. <code>null</code> as <code>load_sound</code>.</td></tr>
+<tr><td><code>stop_sounds()</code></td><td>Stops every sound.</td></tr>
+<tr><td>Voices</td><td>Every sound is its own voice; several play at once, mixed.</td></tr>
+<tr><td>Lifetime</td><td>A sound closes when the last variable holding it lets go; a copy of a sound is the same sound.</td></tr>
 <tr><td>Cost</td><td>Loading costs more than playing: load once, play again. No call waits on the audio device (one audio thread drives the devices).</td></tr>
 <tr><td>Platforms</td><td>Windows, and the site's Play and Sandbox pages. Elsewhere <code>load_sound</code> and <code>play_sound</code> return <code>null</code>: a script that checks for <code>null</code> runs unchanged, silent.</td></tr>
 </tbody></table></div>
@@ -667,13 +667,13 @@ if (music != null) { music.volume(0.6); music.play(true); }   // loops until sto
 if (hit != null) { hit.play(); }                               // again and again, each restarting it
 play_sound("door.wav");                                        // fire and forget</code></pre></div>
 <div class="tablewrap"><table><thead><tr><th>Networking</th><th>Behavior</th></tr></thead><tbody>
-<tr><td><code>NetChannel()</code></td><td>One framed TCP connection: <code>listen(port)</code> waits for one peer, <code>connect(host, port)</code> dials one, <code>send(bytes)</code> queues a packet, <code>pump()</code> moves the bytes and fires the signals, <code>close()</code> drops the connection.</td></tr>
+<tr><td><code>net_channel()</code></td><td>One framed TCP connection: <code>listen(port)</code> waits for one peer, <code>connect(host, port)</code> dials one, <code>send(bytes)</code> queues a packet, <code>pump()</code> moves the bytes and fires the signals, <code>close()</code> drops the connection.</td></tr>
 <tr><td><code>connected()</code>, <code>status()</code></td><td><code>"idle"</code>, <code>"listening"</code>, <code>"connecting"</code>, <code>"connected"</code>, <code>"closed: &lt;reason&gt;"</code>, <code>"error: &lt;reason&gt;"</code></td></tr>
-<tr><td><code>NetChannel</code> signals</td><td><code>on_connect()</code>, <code>on_packet(bytes)</code> and <code>on_disconnect(reason)</code></td></tr>
-<tr><td><code>NetChannel.connect</code> is asynchronous</td><td><code>false</code> only when the attempt fails at once (the host name does not resolve, the socket cannot be made), reason in <code>status()</code>. Otherwise <code>true</code> while the connection is still being made.</td></tr>
+<tr><td><code>net_channel</code> signals</td><td><code>on_connect()</code>, <code>on_packet(bytes)</code> and <code>on_disconnect(reason)</code></td></tr>
+<tr><td><code>net_channel.connect</code> is asynchronous</td><td><code>false</code> only when the attempt fails at once (the host name does not resolve, the socket cannot be made), reason in <code>status()</code>. Otherwise <code>true</code> while the connection is still being made.</td></tr>
 <tr><td>Connect outcome</td><td>Arrives through <code>pump()</code>: <code>on_connect()</code> when the peer accepts, <code>on_disconnect("connect refused")</code> when not. Packets sent before then wait in the queue.</td></tr>
-<tr><td><code>NetServer()</code></td><td>Many framed TCP clients on one port: <code>listen(port)</code>, <code>send(id, bytes)</code>, <code>broadcast(bytes)</code> (the count of clients it reached), <code>pump()</code>, <code>kick(id)</code>, <code>client_count()</code>, <code>listening()</code>, <code>close()</code>. Client ids count up from 1, never reused by one server.</td></tr>
-<tr><td><code>NetServer</code> signals</td><td><code>on_client_connect(id)</code>, <code>on_client_packet(id, bytes)</code> and <code>on_client_disconnect(id, reason)</code></td></tr>
+<tr><td><code>net_server()</code></td><td>Many framed TCP clients on one port: <code>listen(port)</code>, <code>send(id, bytes)</code>, <code>broadcast(bytes)</code> (the count of clients it reached), <code>pump()</code>, <code>kick(id)</code>, <code>client_count()</code>, <code>listening()</code>, <code>close()</code>. Client ids count up from 1, never reused by one server.</td></tr>
+<tr><td><code>net_server</code> signals</td><td><code>on_client_connect(id)</code>, <code>on_client_packet(id, bytes)</code> and <code>on_client_disconnect(id, reason)</code></td></tr>
 <tr><td>Packet</td><td>One <code>send</code>'s bytes, delivered whole and in order. On the wire: a 4-byte big-endian length, then the bytes.</td></tr>
 <tr><td>Threads</td><td>None. The sockets do not block; signals fire only inside <code>pump()</code>, on the script's own call stack. A game calls <code>pump()</code> once a frame.</td></tr>
 <tr><td>Disconnect reason</td><td><code>"closed by peer"</code>, <code>"recv error"</code>, <code>"send error"</code>, <code>"oversized frame"</code> (a length over 64 MiB) or, for a server's client, <code>"kicked"</code>.</td></tr>

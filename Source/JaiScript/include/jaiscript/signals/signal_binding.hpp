@@ -45,7 +45,7 @@ namespace jai {
 
 	// Named connections are owned by the signal, so they persist for its lifetime.
 	// Registers both jai::signal<Sig> (a_name) and jai::signal_emitter<Sig>
-	// (a_name + "Emitter") — members are exposed as either. Sync is the emitter policy the bound types carry.
+	// (a_name + "_emitter") — members are exposed as either. Sync is the emitter policy the bound types carry.
 	template<typename Sig, typename Sync = signal_unsynchronized>
 	void bind_signal_type(engine_ref a_engine, const std::string& a_name) {
 		if (!a_engine->is_type_registered(a_name)) {
@@ -65,7 +65,7 @@ namespace jai {
 			});
 			builder.build();
 		}
-		const std::string emitter_name = a_name + "Emitter";
+		const std::string emitter_name = a_name + "_emitter";
 		if (!a_engine->is_type_registered(emitter_name)) {
 			dynamic_binder<signal_emitter<Sig, Sync>> builder(a_engine, emitter_name);
 			builder.method("connect", [](signal_emitter<Sig, Sync>& a_self, const std::string& a_id, script_value a_callback) {

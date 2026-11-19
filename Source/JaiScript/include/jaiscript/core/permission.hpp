@@ -25,7 +25,7 @@ enum class permission : std::int32_t {
 
 namespace permissions {
     // enforced by the engine: files and paths, untrusted templates under their own root (detail/template_library.hpp), and
-    // jai_spider's requests and the runner's Download.start
+    // jai_spider's requests and the runner's download.start
     inline constexpr permission filesystem = permission::filesystem;
     inline constexpr permission scoped_template = permission::scoped_template;
     inline constexpr permission network = permission::network;

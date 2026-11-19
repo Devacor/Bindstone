@@ -8,7 +8,7 @@
 //
 // The runner provides the console (key_down, read_key, term_cols, term_rows,
 // print) and the stdlib's time:: the clock. This file supplies the rest of the
-// host contract of reference/README.md section 2 in script (the Rng, host_log,
+// host contract of reference/README.md section 2 in script (the seeded_rng, host_log,
 // itrunc, ifloor, utf8, ESC and the HOST_* globals from ARGS), imports
 // scripts/main.jai and runs the frame loop gloom_host.cpp runs.
 
@@ -28,17 +28,17 @@ bool HOST_ASCII = false;    // --ascii for terminals without block glyphs
 bool HOST_DEV = false;      // --dev: the showcase look's scripts reload when they change
 string HOST_SOUND_DIR = ""; // where the showcase look writes its synthesized effects to play them; "" is silence
 
-// ---------------------------------------------------------- host API: Rng ---
+// --------------------------------------------------- host API: seeded_rng ---
 // xorshift64* per gloom_host.hpp, the ONLY randomness (STATE_HASH folds
 // state() every tick). s ^= s>>12; s ^= s<<25; s ^= s>>27; return s * M —
 // all uint64. Script ints are checked int64: >> is arithmetic (mask after),
 // << wraps (verified), and the M-multiply wraps via 16-bit limb products.
 // Proven bit-exact against an independent wrap-arithmetic reference for
 // seed 666 (state + first 6 raws) and by the smoke checkpoint table below.
-class Rng {
+class seeded_rng {
 	int s = 0;
 
-	Rng(int seed) {
+	seeded_rng(int seed) {
 		s = seed != 0 ? seed : ((0x9E3779B9 << 32) | 0x7F4A7C15);
 		for (int i = 0; i < 4; ++i) { step(); }
 	}

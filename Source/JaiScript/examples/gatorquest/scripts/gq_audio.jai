@@ -1,7 +1,7 @@
 // Gator Quest - sound and music with zero audio assets: every effect is
 // synthesized into an 8-bit WAV and every realm's theme is composed into a
 // MIDI file on first use, cached under the data folder. Playback is the
-// runner's Sound: each effect loads once and replays, the theme loops on
+// runner's sound: each effect loads once and replays, the theme loops on
 // its own (no sound where the runner has none).
 
 import "gq_render.jai";
@@ -9,9 +9,9 @@ import "gq_render.jai";
 bool AUDIO_ON;
 string AUDIO_DIR;
 map<string, string> SFX_PATH;
-map<string, var> SFX_SOUND;     // name -> its loaded Sound, null when it will not load
+map<string, var> SFX_SOUND;     // name -> its loaded sound, null when it will not load
 map<string, int> SFX_LAST;
-var MUSIC = null;               // the theme's Sound
+var MUSIC = null;               // the theme's sound
 
 int SFX_RATE = 11025;
 

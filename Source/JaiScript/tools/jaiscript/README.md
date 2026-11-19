@@ -193,11 +193,11 @@ take a file. A script dropped onto the executable therefore runs the same from a
 directory. JaiDoom chooses the folder above `scripts/` when it is writable and
 `app_data_dir("JaiDOOM")` otherwise.
 
-The host also binds `Download`, an asynchronous download the script polls from its own loop,
-the same shape as the `NetChannel` binding (`tools/jaiscript/fetch.hpp`):
+The host also binds `download`, an asynchronous download the script polls from its own loop,
+the same shape as the `net_channel` binding (`tools/jaiscript/fetch.hpp`):
 
 ```
-auto d = Download();
+auto d = download();
 d.start(url, path)          // http or https; false with d.error() set when it cannot begin
 while (!d.pump()) { ... }   // d.received(), d.total() (-1 until known), d.fraction()
 d.success()  d.error()  d.cancel()

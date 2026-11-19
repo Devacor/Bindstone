@@ -44,7 +44,7 @@ public:
 		jai_runner::register_file_io(*eng_);
 		jai_runner::register_sound(*eng_);
 
-		jai::dynamic_binder<gloom::gloom_rng>(*eng_, "Rng")
+		jai::dynamic_binder<gloom::gloom_rng>(*eng_, "seeded_rng")
 			.constructor<jai::script_int>()
 			.method("next", &gloom::gloom_rng::next)
 			.method("roll", &gloom::gloom_rng::roll)

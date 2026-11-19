@@ -5813,26 +5813,26 @@
     {
       "owner": "global",
       "name": "load_sound",
-      "signature": "load_sound(path: string) -> Sound",
+      "signature": "load_sound(path: string) -> sound",
       "provider": "runner",
       "effect": "audio",
       "notes": "Opens a WAV, MIDI or MP3 file (the header decides, else the extension) and preloads it in the background; null for a missing file, an unknown format, or off Windows.",
       "source": "tools/jaiscript/sound.hpp",
       "form": "function",
       "availability": "Standalone jaiscript.exe",
-      "display": "load_sound(path: string) -> Sound"
+      "display": "load_sound(path: string) -> sound"
     },
     {
       "owner": "global",
       "name": "play_sound",
-      "signature": "play_sound(path: string, loop: bool = false) -> Sound",
+      "signature": "play_sound(path: string, loop: bool = false) -> sound",
       "provider": "runner",
       "effect": "audio",
-      "notes": "load_sound then play: the Sound keeps playing when the result is dropped, and stops with stop() or stop_sounds(); null as load_sound.",
+      "notes": "load_sound then play: the sound keeps playing when the result is dropped, and stops with stop() or stop_sounds(); null as load_sound.",
       "source": "tools/jaiscript/sound.hpp",
       "form": "function",
       "availability": "Standalone jaiscript.exe",
-      "display": "play_sound(path: string, loop: bool = false) -> Sound"
+      "display": "play_sound(path: string, loop: bool = false) -> sound"
     },
     {
       "owner": "global",
@@ -5840,26 +5840,26 @@
       "signature": "stop_sounds() -> void",
       "provider": "runner",
       "effect": "audio",
-      "notes": "Stops every Sound.",
+      "notes": "Stops every sound.",
       "source": "tools/jaiscript/sound.hpp",
       "form": "function",
       "availability": "Standalone jaiscript.exe",
       "display": "stop_sounds() -> void"
     },
     {
-      "owner": "Sound",
+      "owner": "sound",
       "name": "play",
       "signature": "play(loop: bool = false) -> bool",
       "provider": "runner",
       "effect": "audio",
-      "notes": "Starts from the beginning (a playing Sound restarts), looping when loop is true, and returns at once; false once the file proved unplayable.",
+      "notes": "Starts from the beginning (a playing sound restarts), looping when loop is true, and returns at once; false once the file proved unplayable.",
       "source": "tools/jaiscript/sound.hpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "Sound.play(loop: bool = false) -> bool"
+      "display": "sound.play(loop: bool = false) -> bool"
     },
     {
-      "owner": "Sound",
+      "owner": "sound",
       "name": "stop",
       "signature": "stop() -> void",
       "provider": "runner",
@@ -5868,10 +5868,10 @@
       "source": "tools/jaiscript/sound.hpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "Sound.stop() -> void"
+      "display": "sound.stop() -> void"
     },
     {
-      "owner": "Sound",
+      "owner": "sound",
       "name": "playing",
       "signature": "playing() -> bool",
       "provider": "runner",
@@ -5880,10 +5880,10 @@
       "source": "tools/jaiscript/sound.hpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "Sound.playing() -> bool"
+      "display": "sound.playing() -> bool"
     },
     {
-      "owner": "Sound",
+      "owner": "sound",
       "name": "volume",
       "signature": "volume(level: float) -> void",
       "provider": "runner",
@@ -5892,10 +5892,10 @@
       "source": "tools/jaiscript/sound.hpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "Sound.volume(level: float) -> void"
+      "display": "sound.volume(level: float) -> void"
     },
     {
-      "owner": "Sound",
+      "owner": "sound",
       "name": "format",
       "signature": "format() -> string",
       "provider": "runner",
@@ -5904,7 +5904,7 @@
       "source": "tools/jaiscript/sound.hpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "Sound.format() -> string"
+      "display": "sound.format() -> string"
     },
     {
       "owner": "global",
@@ -6064,42 +6064,42 @@
     },
     {
       "owner": "global",
-      "name": "Download",
-      "signature": "Download() -> Download",
+      "name": "download",
+      "signature": "download() -> download",
       "provider": "runner",
       "effect": "construct",
       "notes": "",
       "source": "tools/jaiscript/fetch.hpp",
       "form": "function",
       "availability": "Standalone jaiscript.exe",
-      "display": "Download() -> Download"
+      "display": "download() -> download"
     },
     {
       "owner": "global",
-      "name": "NetChannel",
-      "signature": "NetChannel() -> NetChannel",
+      "name": "net_channel",
+      "signature": "net_channel() -> net_channel",
       "provider": "runner",
       "effect": "construct",
       "notes": "",
       "source": "tools/jaiscript/fetch.hpp",
       "form": "function",
       "availability": "Standalone jaiscript.exe",
-      "display": "NetChannel() -> NetChannel"
+      "display": "net_channel() -> net_channel"
     },
     {
       "owner": "global",
-      "name": "NetServer",
-      "signature": "NetServer() -> NetServer",
+      "name": "net_server",
+      "signature": "net_server() -> net_server",
       "provider": "runner",
       "effect": "construct",
       "notes": "",
       "source": "tools/jaiscript/fetch.hpp",
       "form": "function",
       "availability": "Standalone jaiscript.exe",
-      "display": "NetServer() -> NetServer"
+      "display": "net_server() -> net_server"
     },
     {
-      "owner": "Download",
+      "owner": "download",
       "name": "start",
       "signature": "start(url: string, destination: string) -> bool",
       "provider": "runner",
@@ -6108,10 +6108,10 @@
       "source": "tools/jaiscript/fetch.hpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "Download.start(url: string, destination: string) -> bool"
+      "display": "download.start(url: string, destination: string) -> bool"
     },
     {
-      "owner": "Download",
+      "owner": "download",
       "name": "pump",
       "signature": "pump() -> bool",
       "provider": "runner",
@@ -6120,10 +6120,10 @@
       "source": "tools/jaiscript/fetch.hpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "Download.pump() -> bool"
+      "display": "download.pump() -> bool"
     },
     {
-      "owner": "Download",
+      "owner": "download",
       "name": "cancel",
       "signature": "cancel() -> void",
       "provider": "runner",
@@ -6132,10 +6132,10 @@
       "source": "tools/jaiscript/fetch.hpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "Download.cancel() -> void"
+      "display": "download.cancel() -> void"
     },
     {
-      "owner": "Download",
+      "owner": "download",
       "name": "done",
       "signature": "done() -> bool",
       "provider": "runner",
@@ -6144,10 +6144,10 @@
       "source": "tools/jaiscript/fetch.hpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "Download.done() -> bool"
+      "display": "download.done() -> bool"
     },
     {
-      "owner": "NetChannel",
+      "owner": "net_channel",
       "name": "listen",
       "signature": "listen(port: int) -> bool",
       "provider": "runner",
@@ -6156,10 +6156,10 @@
       "source": "tools/jaiscript/main.cpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "NetChannel.listen(port: int) -> bool"
+      "display": "net_channel.listen(port: int) -> bool"
     },
     {
-      "owner": "NetChannel",
+      "owner": "net_channel",
       "name": "connect",
       "signature": "connect(host: string, port: int) -> bool",
       "provider": "runner",
@@ -6168,10 +6168,10 @@
       "source": "tools/jaiscript/main.cpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "NetChannel.connect(host: string, port: int) -> bool"
+      "display": "net_channel.connect(host: string, port: int) -> bool"
     },
     {
-      "owner": "NetChannel",
+      "owner": "net_channel",
       "name": "send",
       "signature": "send(bytes: string) -> bool",
       "provider": "runner",
@@ -6180,10 +6180,10 @@
       "source": "tools/jaiscript/main.cpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "NetChannel.send(bytes: string) -> bool"
+      "display": "net_channel.send(bytes: string) -> bool"
     },
     {
-      "owner": "NetChannel",
+      "owner": "net_channel",
       "name": "pump",
       "signature": "pump() -> int",
       "provider": "runner",
@@ -6192,10 +6192,10 @@
       "source": "tools/jaiscript/main.cpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "NetChannel.pump() -> int"
+      "display": "net_channel.pump() -> int"
     },
     {
-      "owner": "NetChannel",
+      "owner": "net_channel",
       "name": "close",
       "signature": "close() -> void",
       "provider": "runner",
@@ -6204,10 +6204,10 @@
       "source": "tools/jaiscript/main.cpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "NetChannel.close() -> void"
+      "display": "net_channel.close() -> void"
     },
     {
-      "owner": "NetChannel",
+      "owner": "net_channel",
       "name": "connected",
       "signature": "connected() -> bool",
       "provider": "runner",
@@ -6216,10 +6216,10 @@
       "source": "tools/jaiscript/main.cpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "NetChannel.connected() -> bool"
+      "display": "net_channel.connected() -> bool"
     },
     {
-      "owner": "NetChannel",
+      "owner": "net_channel",
       "name": "status",
       "signature": "status() -> string",
       "provider": "runner",
@@ -6228,10 +6228,10 @@
       "source": "tools/jaiscript/main.cpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "NetChannel.status() -> string"
+      "display": "net_channel.status() -> string"
     },
     {
-      "owner": "NetServer",
+      "owner": "net_server",
       "name": "listen",
       "signature": "listen(port: int) -> bool",
       "provider": "runner",
@@ -6240,10 +6240,10 @@
       "source": "tools/jaiscript/main.cpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "NetServer.listen(port: int) -> bool"
+      "display": "net_server.listen(port: int) -> bool"
     },
     {
-      "owner": "NetServer",
+      "owner": "net_server",
       "name": "send",
       "signature": "send(client: int, bytes: string) -> bool",
       "provider": "runner",
@@ -6252,10 +6252,10 @@
       "source": "tools/jaiscript/main.cpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "NetServer.send(client: int, bytes: string) -> bool"
+      "display": "net_server.send(client: int, bytes: string) -> bool"
     },
     {
-      "owner": "NetServer",
+      "owner": "net_server",
       "name": "broadcast",
       "signature": "broadcast(bytes: string) -> int",
       "provider": "runner",
@@ -6264,10 +6264,10 @@
       "source": "tools/jaiscript/main.cpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "NetServer.broadcast(bytes: string) -> int"
+      "display": "net_server.broadcast(bytes: string) -> int"
     },
     {
-      "owner": "NetServer",
+      "owner": "net_server",
       "name": "pump",
       "signature": "pump() -> int",
       "provider": "runner",
@@ -6276,10 +6276,10 @@
       "source": "tools/jaiscript/main.cpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "NetServer.pump() -> int"
+      "display": "net_server.pump() -> int"
     },
     {
-      "owner": "NetServer",
+      "owner": "net_server",
       "name": "kick",
       "signature": "kick(client: int) -> void",
       "provider": "runner",
@@ -6288,10 +6288,10 @@
       "source": "tools/jaiscript/main.cpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "NetServer.kick(client: int) -> void"
+      "display": "net_server.kick(client: int) -> void"
     },
     {
-      "owner": "NetServer",
+      "owner": "net_server",
       "name": "client_count",
       "signature": "client_count() -> int",
       "provider": "runner",
@@ -6300,10 +6300,10 @@
       "source": "tools/jaiscript/main.cpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "NetServer.client_count() -> int"
+      "display": "net_server.client_count() -> int"
     },
     {
-      "owner": "NetServer",
+      "owner": "net_server",
       "name": "listening",
       "signature": "listening() -> bool",
       "provider": "runner",
@@ -6312,10 +6312,10 @@
       "source": "tools/jaiscript/main.cpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "NetServer.listening() -> bool"
+      "display": "net_server.listening() -> bool"
     },
     {
-      "owner": "NetServer",
+      "owner": "net_server",
       "name": "close",
       "signature": "close() -> void",
       "provider": "runner",
@@ -6324,10 +6324,10 @@
       "source": "tools/jaiscript/main.cpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "NetServer.close() -> void"
+      "display": "net_server.close() -> void"
     },
     {
-      "owner": "Signal",
+      "owner": "signal",
       "name": "connect",
       "signature": "connect(id: string, callback: function or string) -> void",
       "provider": "host-bound",
@@ -6336,10 +6336,10 @@
       "source": "include/jaiscript/signals/signal_binding.hpp",
       "form": "method",
       "availability": "When the host binds this signal type",
-      "display": "Signal.connect(id: string, callback: function or string) -> void"
+      "display": "signal.connect(id: string, callback: function or string) -> void"
     },
     {
-      "owner": "Signal",
+      "owner": "signal",
       "name": "connect_source",
       "signature": "connect_source(id: string, lambda: function) -> void",
       "provider": "host-bound",
@@ -6348,10 +6348,10 @@
       "source": "include/jaiscript/signals/signal_binding.hpp",
       "form": "method",
       "availability": "When the host binds this signal type",
-      "display": "Signal.connect_source(id: string, lambda: function) -> void"
+      "display": "signal.connect_source(id: string, lambda: function) -> void"
     },
     {
-      "owner": "Signal",
+      "owner": "signal",
       "name": "disconnect",
       "signature": "disconnect(id: string) -> void",
       "provider": "host-bound",
@@ -6360,10 +6360,10 @@
       "source": "include/jaiscript/signals/signal_binding.hpp",
       "form": "method",
       "availability": "When the host binds this signal type",
-      "display": "Signal.disconnect(id: string) -> void"
+      "display": "signal.disconnect(id: string) -> void"
     },
     {
-      "owner": "Signal",
+      "owner": "signal",
       "name": "connected",
       "signature": "connected(id: string) -> bool",
       "provider": "host-bound",
@@ -6372,10 +6372,10 @@
       "source": "include/jaiscript/signals/signal_binding.hpp",
       "form": "method",
       "availability": "When the host binds this signal type",
-      "display": "Signal.connected(id: string) -> bool"
+      "display": "signal.connected(id: string) -> bool"
     },
     {
-      "owner": "SignalEmitter",
+      "owner": "signal_emitter",
       "name": "connect",
       "signature": "connect(id: string, callback: function or string) -> void",
       "provider": "host-bound",
@@ -6384,10 +6384,10 @@
       "source": "include/jaiscript/signals/signal_binding.hpp",
       "form": "method",
       "availability": "When the host binds this signal type",
-      "display": "SignalEmitter.connect(id: string, callback: function or string) -> void"
+      "display": "signal_emitter.connect(id: string, callback: function or string) -> void"
     },
     {
-      "owner": "SignalEmitter",
+      "owner": "signal_emitter",
       "name": "connect_source",
       "signature": "connect_source(id: string, lambda: function) -> void",
       "provider": "host-bound",
@@ -6396,10 +6396,10 @@
       "source": "include/jaiscript/signals/signal_binding.hpp",
       "form": "method",
       "availability": "When the host binds this signal type",
-      "display": "SignalEmitter.connect_source(id: string, lambda: function) -> void"
+      "display": "signal_emitter.connect_source(id: string, lambda: function) -> void"
     },
     {
-      "owner": "SignalEmitter",
+      "owner": "signal_emitter",
       "name": "disconnect",
       "signature": "disconnect(id: string) -> void",
       "provider": "host-bound",
@@ -6408,10 +6408,10 @@
       "source": "include/jaiscript/signals/signal_binding.hpp",
       "form": "method",
       "availability": "When the host binds this signal type",
-      "display": "SignalEmitter.disconnect(id: string) -> void"
+      "display": "signal_emitter.disconnect(id: string) -> void"
     },
     {
-      "owner": "SignalEmitter",
+      "owner": "signal_emitter",
       "name": "connected",
       "signature": "connected(id: string) -> bool",
       "provider": "host-bound",
@@ -6420,10 +6420,10 @@
       "source": "include/jaiscript/signals/signal_binding.hpp",
       "form": "method",
       "availability": "When the host binds this signal type",
-      "display": "SignalEmitter.connected(id: string) -> bool"
+      "display": "signal_emitter.connected(id: string) -> bool"
     },
     {
-      "owner": "SignalEmitter",
+      "owner": "signal_emitter",
       "name": "emit",
       "signature": "emit(payload: bound_signal_arguments...) -> void",
       "provider": "host-bound",
@@ -6432,7 +6432,7 @@
       "source": "include/jaiscript/signals/signal_binding.hpp",
       "form": "method",
       "availability": "When the host binds this signal type",
-      "display": "SignalEmitter.emit(payload: bound_signal_arguments...) -> void"
+      "display": "signal_emitter.emit(payload: bound_signal_arguments...) -> void"
     },
     {
       "owner": "global",
@@ -6495,7 +6495,7 @@
       "display": "binary::reader.text() -> string"
     },
     {
-      "owner": "Download",
+      "owner": "download",
       "name": "success",
       "signature": "success() -> bool",
       "provider": "runner",
@@ -6504,10 +6504,10 @@
       "source": "tools/jaiscript/fetch.hpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "Download.success() -> bool"
+      "display": "download.success() -> bool"
     },
     {
-      "owner": "Download",
+      "owner": "download",
       "name": "error",
       "signature": "error() -> string",
       "provider": "runner",
@@ -6516,10 +6516,10 @@
       "source": "tools/jaiscript/fetch.hpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "Download.error() -> string"
+      "display": "download.error() -> string"
     },
     {
-      "owner": "Download",
+      "owner": "download",
       "name": "received",
       "signature": "received() -> int",
       "provider": "runner",
@@ -6528,10 +6528,10 @@
       "source": "tools/jaiscript/fetch.hpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "Download.received() -> int"
+      "display": "download.received() -> int"
     },
     {
-      "owner": "Download",
+      "owner": "download",
       "name": "total",
       "signature": "total() -> int",
       "provider": "runner",
@@ -6540,10 +6540,10 @@
       "source": "tools/jaiscript/fetch.hpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "Download.total() -> int"
+      "display": "download.total() -> int"
     },
     {
-      "owner": "Download",
+      "owner": "download",
       "name": "fraction",
       "signature": "fraction() -> float",
       "provider": "runner",
@@ -6552,7 +6552,7 @@
       "source": "tools/jaiscript/fetch.hpp",
       "form": "method",
       "availability": "Standalone jaiscript.exe",
-      "display": "Download.fraction() -> float"
+      "display": "download.fraction() -> float"
     },
     {
       "owner": "jai::permissions",
@@ -8667,49 +8667,49 @@
       "notes": "Available on the caught error value, not ordinary text."
     },
     {
-      "owner": "NetChannel",
+      "owner": "net_channel",
       "name": "on_packet",
-      "type": "Signal",
+      "type": "signal",
       "provider": "runner",
       "access": "receiver view",
       "notes": "Packets carry bytes; disconnect carries reason; connect has no payload."
     },
     {
-      "owner": "NetChannel",
+      "owner": "net_channel",
       "name": "on_connect",
-      "type": "Signal",
+      "type": "signal",
       "provider": "runner",
       "access": "receiver view",
       "notes": "Packets carry bytes; disconnect carries reason; connect has no payload."
     },
     {
-      "owner": "NetChannel",
+      "owner": "net_channel",
       "name": "on_disconnect",
-      "type": "Signal",
+      "type": "signal",
       "provider": "runner",
       "access": "receiver view",
       "notes": "Packets carry bytes; disconnect carries reason; connect has no payload."
     },
     {
-      "owner": "NetServer",
+      "owner": "net_server",
       "name": "on_client_connect",
-      "type": "Signal",
+      "type": "signal",
       "provider": "runner",
       "access": "receiver view",
       "notes": "Payload starts with client id, then bytes or reason where applicable."
     },
     {
-      "owner": "NetServer",
+      "owner": "net_server",
       "name": "on_client_packet",
-      "type": "Signal",
+      "type": "signal",
       "provider": "runner",
       "access": "receiver view",
       "notes": "Payload starts with client id, then bytes or reason where applicable."
     },
     {
-      "owner": "NetServer",
+      "owner": "net_server",
       "name": "on_client_disconnect",
-      "type": "Signal",
+      "type": "signal",
       "provider": "runner",
       "access": "receiver view",
       "notes": "Payload starts with client id, then bytes or reason where applicable."

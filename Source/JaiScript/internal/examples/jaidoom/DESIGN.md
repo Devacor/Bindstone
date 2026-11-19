@@ -67,7 +67,7 @@ sound.jai          DS* -> WAV, positional stereo variants
 mus.jai            MUS -> MIDI transcode, MAPxx music table
 demo.jai           demo record/playback + state hash (determinism harness)
 save.jai           whole-sim JSON save/load
-netplay.jai        up to 16 players: Player/Session class hierarchy over NetServer/NetChannel
+netplay.jai        up to 16 players: Player/Session class hierarchy over net_server/net_channel
 jaidoom_demo.jai   scripted fly-through demo on the stock runner
 extract_audio.jai  standalone sound/music extraction into cache/
 jaidoom_net.json   persisted lobby address and last demo name
@@ -143,17 +143,17 @@ classic typed cheats (iddqd/idkfa/idfa/idclip/idclev/idbehold*/iddt), whole-sim 
   cooldowns halved at use sites — MINFO untouched) + corpse respawn ~30s where they fell
   (DSTELEPT + TFOG fog, kill tally can pass 100% like vanilla).
 
-## Netplay (up to 16 players: a NetServer star, organized as classes)
+## Netplay (up to 16 players: a net_server star, organized as classes)
 
-Pure script over the runner's generic networking: the host owns a `NetServer` (N framed
-clients on one port, per-client signals), each client one `NetChannel`. `netplay.jai` is
+Pure script over the runner's generic networking: the host owns a `net_server` (N framed
+clients on one port, per-client signals), each client one `net_channel`. `netplay.jai` is
 class-organized:
 
 	Player            slot / name / frags / deaths / pose / ghost mobj index / lerp
 	├─ LocalPlayer    me: pose reads the live P_* globals, builds STATE actions
 	└─ Puppet         a remote player: PLAY-sprite ghost driven by the wire
 	Session           slot-keyed PLAYERS, the action dispatch table, tic/frame/respawn
-	├─ HostSession    NetServer hub: HELLO -> slot + roster, GO start, RELAYS, co-op authority
+	├─ HostSession    net_server hub: HELLO -> slot + roster, GO start, RELAYS, co-op authority
 	└─ ClientSession  one channel to the host; receives host-authored + relayed actions
 
 The mobj pool stays flat (parallel-admission rules); classes hold indices into it. The free

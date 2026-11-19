@@ -183,7 +183,7 @@ function poll_key(float seconds) -> string {
 	return "";
 }
 
-// ---- the deterministic Rng: a bit-exact xorshift64* twin of main.cpp's crawler_rng ----
+// ---- the deterministic seeded_rng: a bit-exact xorshift64* twin of main.cpp's crawler_rng ----
 // Checked int64 arithmetic cannot wrap, so the mod-2^64 multiply runs in 16- and 32-bit limbs,
 // and since >> is arithmetic a logical shift masks after shifting.
 int RNG_GOLDEN = -7046029254386353131;   // 0x9E3779B97F4A7C15 as a signed int64
@@ -220,10 +220,10 @@ function u64_mod_small(int x, int n) -> int {
 	return r;
 }
 
-class Rng {
+class seeded_rng {
 	int s = 0;
 
-	Rng(int seed) {
+	seeded_rng(int seed) {
 		s = seed != 0 ? seed : RNG_GOLDEN;
 		for (int i = 0; i < 4; ++i) { step(); }
 	}

@@ -14,7 +14,7 @@ namespace jai {
 	class engine;
 
 	// Type-erased script surface over any signal<Sig> / signal_emitter<Sig>.
-	// The engine binds ONE generic "Signal" view class over this table, so
+	// The engine binds ONE generic "signal" view class over this table, so
 	// signal members reach script with no per-signature bind_signal_type
 	// ceremony (that path still works and takes precedence when registered).
 	// The thunks instantiate wherever make_signal_script_ops is called —

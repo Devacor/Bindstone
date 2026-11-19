@@ -259,7 +259,7 @@ the checkpoint hashes above are the contract.
 
 ### 1.13 RNG — the determinism contract
 
-The host `Rng` (§2.3) is the ONLY randomness. **Ports must consume it in
+The host generator (§2.3) is the ONLY randomness. **Ports must consume it in
 identical order** — the order is defined by the reference code paths (§1.3
 order + the call sites in combat/enemies/particles). No RNG is consumed at
 boot, during map load, or in non-play modes. Practical conformance: compare
@@ -306,6 +306,8 @@ Bindings the script consumes:
   up down left right`; consumed by the FIRST tick of the frame.
 
 ### 2.3 Rng (bind identically in every port)
+
+The class is `seeded_rng` in the JaiScript adapter and `Rng` in the ports.
 
 xorshift64\*: state `s` = seed (0 → 0x9E3779B97F4A7C15), warmed by 4 discarded
 steps at construction. Step: `s ^= s>>12; s ^= s<<25; s ^= s>>27;

@@ -135,7 +135,7 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
   conversions out of headers that do not need them (schema-driven primitive property binders live out of line in
   `schema_binding.cpp`).
 - A binding pays only for what is particular to it. Work that does not depend on the bound type (class and instance
-  creation, `class_definition` registration, the `Signal` view, the stdlib) is defined in the library, not in a header.
+  creation, `class_definition` registration, the `signal` view, the stdlib) is defined in the library, not in a header.
   A stored callable is one erased type over a static function (`detail::host_method_call`, registry
   `conversion_entry`), never a fresh lambda inside a `std::function`; a bound type's `std::vector`/`std::map` shapes
   register eagerly and compile only where a caller names them. Measure a change by object size per bound item.

@@ -1,8 +1,8 @@
-// JaiDOOM netplay.jai — up to 16 players over the runner's NetServer/NetChannel,
+// JaiDOOM netplay.jai — up to 16 players over the runner's net_server/net_channel,
 // organized as classes: a Player per slot (LocalPlayer = me, Puppet = a
 // net-driven PLAY-sprite ghost), and a Session owning the wire (HostSession =
-// NetServer star hub: assigns slots, relays, runs co-op authority;
-// ClientSession = one NetChannel to the host). One action pattern carries
+// net_server star hub: assigns slots, relays, runs co-op authority;
+// ClientSession = one net_channel to the host). One action pattern carries
 // everything: one JSON map per packet, "t" type + "s" sender slot,
 // dispatched by Session.apply. The mobj pool stays flat (admission rules);
 // classes hold INDICES into it. Free np_* functions remain the boundary the
@@ -625,16 +625,16 @@ class Session {
 	}
 }
 
-// host: the NetServer star hub — slots assigned on HELLO, everything relayed
+// host: the net_server star hub — slots assigned on HELLO, everything relayed
 class HostSession : Session {
 	var srv = null;
-	var cid_slot = {};            // NetServer client id -> slot
+	var cid_slot = {};            // net_server client id -> slot
 	var slot_cid = {};
 
 	HostSession() : super() {}
 
 	bool open(int port) {
-		srv = new NetServer();
+		srv = new net_server();
 		srv.on_client_connect.connect("np", [](var cid) { SESSION.on_join(cid); });
 		srv.on_client_packet.connect("np", [](var cid, var bytes) { SESSION.on_wire(cid, bytes); });
 		srv.on_client_disconnect.connect("np", [](var cid, var reason) { SESSION.on_leave(cid, "" + reason); });
@@ -776,7 +776,7 @@ class ClientSession : Session {
 	ClientSession() : super() {}
 
 	bool open(string host, int port) {
-		ch = new NetChannel();
+		ch = new net_channel();
 		ch.on_connect.connect("np", []() { SESSION.on_up(); });
 		ch.on_packet.connect("np", [](var bytes) { SESSION.on_wire_c(bytes); });
 		ch.on_disconnect.connect("np", [](var reason) { SESSION.on_down("" + reason); });
@@ -1174,7 +1174,7 @@ function np_lobby_host(int port, bool coop, string mapname, int skill) -> bool {
 		if (!s.open(port)) { SESSION = null; return false; }
 		return true;
 	} catch (e) {
-		// a copied jaiscript.exe from before the net layer has no NetServer
+		// a copied jaiscript.exe from before the net layer has no net_server
 		set_msg("this jaiscript.exe predates networking - copy a fresh one");
 		SESSION = null;
 		return false;

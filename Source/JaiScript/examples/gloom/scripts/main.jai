@@ -30,7 +30,7 @@ bool FORCE_PILOT = false;
 function gloom_force_autopilot() -> void { FORCE_PILOT = true; }
 
 function gloom_boot(int w, int h) -> void {
-	RNG = Rng(HOST_SEED);
+	RNG = seeded_rng(HOST_SEED);
 	SHOWCASE = HOST_LOOK == "showcase";
 	if (HOST_ASCII) { PIXW = 1; PIXH = 1; }
 	else if (HOST_PIX == 0) { PIXW = 1; PIXH = 2; }

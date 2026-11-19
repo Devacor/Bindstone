@@ -100,7 +100,7 @@ int run_menutest(string base_dir, int port) {
 	check(TM_HUE == 2, "left/right pick the color");
 	mt_keys("down enter");
 	check(TM_PAGE == "host" && TM_SEL == 1, "Host a game opens the host page on Start hosting");
-	shared_ptr<NetServer> blocker = new NetServer();
+	shared_ptr<net_server> blocker = new net_server();
 	bool blocked = blocker.listen(port + 1);
 	title_key("up");
 	mt_clear_field(6);

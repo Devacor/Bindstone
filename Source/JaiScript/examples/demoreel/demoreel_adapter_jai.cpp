@@ -86,7 +86,7 @@ public:
 		if (opt.workers > 0) { eng_->parallel_thread_count(static_cast<size_t>(opt.workers)); }
 		jai::stdlib::register_all(eng_);
 
-		jai::dynamic_binder<demoreel::demo_rng>(*eng_, "Rng")
+		jai::dynamic_binder<demoreel::demo_rng>(*eng_, "seeded_rng")
 			.constructor<jai::script_int>()
 			.method("next", &demoreel::demo_rng::next)
 			.method("roll", &demoreel::demo_rng::roll)

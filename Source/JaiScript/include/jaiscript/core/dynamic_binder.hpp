@@ -308,7 +308,7 @@ namespace detail {
 		void require_object(const script_value& v) const;
 	};
 
-	// One engine-wide "Signal" class serves every signature through the erased table; registered the first time any
+	// One engine-wide "signal" class serves every signature through the erased table; registered the first time any
 	// signal member binds
 	void ensure_signal_view_type_registered(engine& eng);
 	script_value make_signal_view(engine* eng, const signal_script_ops& ops);
@@ -1362,7 +1362,7 @@ private:
         }
         else if constexpr (dynamic_binder_validation::is_signal_type<P>::value) {
             // Typed per-signature bindings (bind_signal_type) take precedence
-            // when present; otherwise the generic "Signal" view serves the
+            // when present; otherwise the generic "signal" view serves the
             // member ceremony-free through the erased connect table.
             if (engine_ptr->template has_registered_class<P>()) {
                 // a copy of a view shares its emitter's state, so script keeps reaching it through the owner's moves
@@ -1993,7 +1993,7 @@ private:
             const std::type_index value_type = prop_meta->value_type_id;
             const bool is_observable = prop_meta->is_observable;
 
-            // JAI_SIGNAL entries expose the generic Signal view —
+            // JAI_SIGNAL entries expose the generic signal view —
             // declaring the signal is the whole registration.
             if (prop_meta->is_signal) {
                 bind_signal_property_view(prop_name);
@@ -2011,7 +2011,7 @@ private:
     }
 
     // JAI_SIGNAL schema entries become read-only properties returning
-    // the generic Signal view over the live property's erased connect table.
+    // the generic signal view over the live property's erased connect table.
     // Lookup is find_reflected_property (virtual, whole chain), so inherited
     // signal properties resolve against the most-derived live object.
     void bind_signal_property_view(const std::string& prop_name) {

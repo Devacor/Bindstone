@@ -1,5 +1,5 @@
 // P9 gate: N-player netplay, headless in one process — the REAL HostSession on
-// its NetServer vs THREE fake clients speaking raw protocol JSON over real
+// its net_server vs THREE fake clients speaking raw protocol JSON over real
 // loopback sockets. Proves: slot assignment + roster, GO start, relay fan-out
 // (A's STATE reaches B and C, never A), DAMAGE victim-routing, frag table +
 // scoreboard, JOINED/LEFT puppet lifecycle, suicide scoring, the DM client
@@ -36,7 +36,7 @@ var GA = [];
 var GB = [];
 var GC = [];
 
-// the client-side section's fake HOST (a raw NetServer speaking protocol JSON)
+// the client-side section's fake HOST (a raw net_server speaking protocol JSON)
 var FH = null;
 var FH_CID = -1;
 var HSIG = 0;                 // the host's map-placed walk signature (index alignment)
@@ -60,7 +60,7 @@ function map_sig() -> int {
 }
 
 function fake(int which) -> var {
-	var c = new NetChannel();
+	var c = new net_channel();
 	if (which == 0) { c.on_packet.connect("g", [](var b) { GA.push(b); }); }
 	else if (which == 1) { c.on_packet.connect("g", [](var b) { GB.push(b); }); }
 	else { c.on_packet.connect("g", [](var b) { GC.push(b); }); }
@@ -595,7 +595,7 @@ function main() -> int {
 	// deliveries land late, the client keeps simulating, and it never travels
 	// until the host's START says so.
 	GA = [];
-	FH = new NetServer();
+	FH = new net_server();
 	FH.on_client_connect.connect("g", [](var cid) { FH_CID = cid + 0; });
 	FH.on_client_packet.connect("g", [](var cid, var b) { GA.push(b); });
 	check(FH.listen(28958), "fake host listens");

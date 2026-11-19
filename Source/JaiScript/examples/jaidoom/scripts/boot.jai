@@ -6,7 +6,7 @@
 // before touching the shareware episode (free to redistribute, not open source);
 // `jaidoom.jai -- bootstrap` does the same without a screen for scripts and CI.
 //
-// Host API used (runner): Download, zip_extract, write_file, file_exists; crypto::sha256_file is the stdlib's.
+// Host API used (runner): download, zip_extract, write_file, file_exists; crypto::sha256_file is the stdlib's.
 
 import "wad.jai";
 import "sound.jai";
@@ -100,7 +100,7 @@ function boot_pump_keys() -> string {
 
 // ---------------------------------------------------------------- transfers ---
 function boot_fetch(string label, string url, string dest) -> bool {
-	auto d = Download();
+	auto d = download();
 	if (!d.start(url, dest)) { boot_settle("FAILED  " + label + ": " + d.error()); return false; }
 	BOOT_ACTIVE = "fetching " + label;
 	BOOT_FRACTION = 0.0;

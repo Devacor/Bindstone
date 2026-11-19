@@ -1,6 +1,6 @@
 // Signal auto-binding: declaring a JAI_SIGNAL (or exposing a plain
 // signal member via .property) is the whole registration — script connects
-// through the generic "Signal" view with no bind_signal_type ceremony, and
+// through the generic "signal" view with no bind_signal_type ceremony, and
 // typed per-signature bindings keep precedence when present.
 
 #include <jaiscript/testing/foundry.hpp>

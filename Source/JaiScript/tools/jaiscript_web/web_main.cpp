@@ -102,14 +102,14 @@ double wav_seconds(const std::string& a_bytes) {
 	return 0.0;
 }
 
-// The page plays one voice a sound; the device goes when the last Sound naming it does (a copy names the same one)
+// The page plays one voice a sound; the device goes when the last sound naming it does (a copy names the same one)
 struct page_sound_device {
 	int id = 0;
 	jai_runner::sound_format format = jai_runner::sound_format::none;
 	double seconds = 0.0;          // 0: unknown (MIDI, MP3), so a one-shot counts as playing until stopped
 	bool looping = false;
 	bool stopped = true;
-	bool finish_when_dropped = false;   // play_sound's: its last voice plays out after the Sound is gone
+	bool finish_when_dropped = false;   // play_sound's: its last voice plays out after the sound is gone
 	std::chrono::steady_clock::time_point started;
 	~page_sound_device() { send_sound(sound_op::release, id, finish_when_dropped ? 1.0 : 0.0); }
 };
@@ -160,7 +160,7 @@ std::shared_ptr<page_sound> load_page_sound(const std::string& a_path) {
 
 // The runner's sound builtins by the same names and shapes, played by the page
 void register_page_sound(jai::engine& eng) {
-	jai::dynamic_binder<page_sound>(eng, "Sound")
+	jai::dynamic_binder<page_sound>(eng, "sound")
 		.method("play", &page_sound::play)
 		.method("play", &page_sound::play_looped)
 		.method("stop", &page_sound::stop)

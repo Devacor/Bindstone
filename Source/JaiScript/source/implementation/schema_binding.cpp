@@ -362,9 +362,9 @@ void bound_class_conversion::require_object(const script_value& v) const {
 }
 
 void ensure_signal_view_type_registered(engine& a_engine) {
-	if (a_engine.is_type_registered("Signal")) { return; }
+	if (a_engine.is_type_registered("signal")) { return; }
 	engine* eng = &a_engine;
-	dynamic_binder<signal_script_ops> builder(a_engine, "Signal");
+	dynamic_binder<signal_script_ops> builder(a_engine, "signal");
 	// serial: a receiver list other objects' code reads and fires
 	builder.method("connect", [eng](signal_script_ops& self, const std::string& id, const script_value& cb) {
 		if (!self.valid() || !self.connect_fn(self.source.get(), id, cb, eng)) { throw runtime_error("Signal view is not backed by a live signal"); }

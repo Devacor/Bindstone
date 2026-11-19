@@ -2,7 +2,7 @@
 // are DMX: u16 format(3), u16 sample rate, u32 length (incl. 16+16 pad
 // bytes), then 8-bit unsigned PCM — which is exactly WAV's 8-bit encoding,
 // so the samples pass through VERBATIM behind a minted 44-byte RIFF header.
-// The runner's Sound does the playback (each loaded once, replays restart it,
+// The runner's sound does the playback (each loaded once, replays restart it,
 // silent off Windows). Lumps convert lazily to cached .wav files on first play.
 
 import "wad.jai";
@@ -14,7 +14,7 @@ extern float P_Y;
 extern float P_ANG;
 
 bool SND_ON = false;          // play() flips it on; gates and benches stay silent
-var SND_READY = {};           // lump name -> its Sound (null = missing/undecodable)
+var SND_READY = {};           // lump name -> its sound (null = missing/undecodable)
 
 function snd_wav_bytes(string name) -> string {
 	int lu = lump_num(name);
@@ -61,7 +61,7 @@ function snd_play(string name) -> void {
 // cached STEREO wav variant whose per-ear gains were baked into the samples
 // at generation time. ~25 sounds x at most 9 variants, lazily created.
 
-var SND_POS_READY = {};       // "NAME_tN_pP" -> its Sound (null = missing/undecodable)
+var SND_POS_READY = {};       // "NAME_tN_pP" -> its sound (null = missing/undecodable)
 int SPA_TIER = 0;             // 0 full <320, 1 mid <704, 2 far <1200
 int SPA_PAN = 0;              // 0 center, 1 left, 2 right (bearing beyond ±0.5 rad)
 

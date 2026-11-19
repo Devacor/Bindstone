@@ -513,7 +513,7 @@ function accumulate_hash() -> void {
 	G.hash = h;
 }
 
-// a level's boon: the pilot draws one from the Rng, a player picks on the level-up screen
+// a level's boon: the pilot draws one from the RNG, a player picks on the level-up screen
 function choose_boon() -> void {
 	while (G.level_pending) {
 		string key = G.autopilot ? to_string(1 + RNG.next(4)) : level_up_screen();

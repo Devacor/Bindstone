@@ -150,7 +150,7 @@ sq_pop(vm, 1);</code></pre></div>
 auto eng = jai::engine::make();
 jai::stdlib::register_all(eng);
 
-jai::dynamic_binder&lt;gloom_rng&gt;(*eng, "Rng")
+jai::dynamic_binder&lt;gloom_rng&gt;(*eng, "seeded_rng")
     .constructor&lt;jai::script_int&gt;()
     .method("roll", &amp;gloom_rng::roll);
 

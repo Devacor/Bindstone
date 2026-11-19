@@ -1,5 +1,5 @@
-// Gator Quest - multiplayer over the runner's NetServer/NetChannel. A star:
-// the host owns the world and a NetServer; each client is one NetChannel.
+// Gator Quest - multiplayer over the runner's net_server/net_channel. A star:
+// the host owns the world and a net_server; each client is one net_channel.
 // Clients send only intents; every sim tick the host sends each player a
 // snapshot of what that player can know (gq_proto.jai), the same text a
 // local player reads. One message per packet, a type then '|' fields:
@@ -19,7 +19,7 @@ string NET_CLOSE_WHY;       // why the interactive client's session ended (the t
 
 // ------------------------------------------------------------------ host ---
 bool net_host_start(int port) {
-	NET_SRV = new NetServer();
+	NET_SRV = new net_server();
 	NET_SRV.on_client_connect.connect("gq", [](int id) { NH_KIND.push(0); NH_ID.push(id); NH_TXT.push(""); });
 	NET_SRV.on_client_packet.connect("gq", [](int id, string bytes) { NH_KIND.push(1); NH_ID.push(id); NH_TXT.push(bytes); });
 	NET_SRV.on_client_disconnect.connect("gq", [](int id, string reason) { NH_KIND.push(2); NH_ID.push(id); NH_TXT.push(reason); });
@@ -214,7 +214,7 @@ int net_sim_delay() {
 // ---------------------------------------------------------------- client ---
 int net_client_open(string host, int port) {
 	int s = NCS_CH.size();
-	shared_ptr<NetChannel> ch = new NetChannel();
+	shared_ptr<net_channel> ch = new net_channel();
 	NCS_CH.push(ch);
 	NCS_INBOX.push([]);
 	NCS_OUT_DUE.push([]);

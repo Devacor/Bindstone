@@ -117,13 +117,13 @@ print(drops.join(" "), " / serial: ", in_order.join(" "));</code></pre></div>
 <ul>
 <li><strong>Secure randomness</strong>: <code>crypto::random_bytes(n)</code>, <code>crypto::random_hex(n)</code> (2n hex digits, a ready-made token) and <code>crypto::random_int(lo, hi)</code> read the operating system&#x27;s generator (BCryptGenRandom on Windows, getrandom on Linux and Android, arc4random_buf on Apple platforms and the BSDs).</li>
 <li><strong>Digests</strong>: <code>crypto::sha256(s)</code> and <code>crypto::sha512(s)</code> hash the bytes of <code>s</code> to lowercase hex. <code>crypto::sha1</code> and <code>crypto::md5</code> exist only to read and write formats that name them and protect nothing. <code>crypto::sha256_file(path)</code> streams a file and needs the filesystem permission.</li>
-<li><strong>MACs</strong>: <code>crypto::hmac_sha256(key, message)</code> and <code>crypto::hmac_sha512</code>. Check one with <code>crypto::equals(a, b)</code>, which takes time that depends only on the length.</li>
+<li><strong>MACs</strong>: <code>crypto::hmac_sha256(key, message)</code> and <code>crypto::hmac_sha512</code>. Check one with <code>crypto::constant_time_equals(a, b)</code>, which takes time that depends only on the length.</li>
 <li>Every digest and MAC has a <code>_bytes</code> twin that returns raw bytes (<code>crypto::sha256_bytes</code>).</li>
 <li>Every function runs in a parallel body except <code>crypto::sha256_file</code> (<code>parallel_for: crypto::sha256_file cannot be called in a parallel body (it reads a file)</code>).</li>
 </ul>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(crypto::sha256("abc"), " ", crypto::sha256_bytes("abc").size());
 string signature = crypto::hmac_sha256("server secret", "user=7&amp;expires=1700000000");
-print(crypto::equals(signature, crypto::hmac_sha256("server secret", "user=7&amp;expires=1700000000")));
+print(crypto::constant_time_equals(signature, crypto::hmac_sha256("server secret", "user=7&amp;expires=1700000000")));
 print(crypto::random_hex(16).size(), " ", crypto::random_bytes(8).size(), " ", crypto::random_int(1, 6) &lt;= 6);
 
 string stored = "$2y$10$.vGA1O9wmRjrwAVXD98HNOgsNpDczlqm3Jq7KnEd1rVAGv3Fykk1a";   // written by PHP's password_hash

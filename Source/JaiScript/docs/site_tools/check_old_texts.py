@@ -18,6 +18,7 @@ OLD_TEXTS = [
     r"to_base64 expects exactly",
     r"Insufficient permission: scoped_template",
     r"a scoped template",
+    r"crypto::equals expects",
     r"is marked serial_function\(\)",
     r"is marked serial_static_method\(\)",
     r"is marked serial_method\(\)",

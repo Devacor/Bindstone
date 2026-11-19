@@ -7848,15 +7848,15 @@
     },
     {
       "owner": "crypto",
-      "name": "equals",
-      "signature": "equals(a: text, b: text) -> bool",
+      "name": "constant_time_equals",
+      "signature": "constant_time_equals(a: text, b: text) -> bool",
       "provider": "stdlib",
       "effect": "observe",
       "notes": "Equal bytes, compared in time that depends only on the length.",
       "source": "include/jaiscript/stdlib/crypto.hpp",
       "form": "namespace",
       "availability": "register_all() or area registration",
-      "display": "crypto::equals(a: text, b: text) -> bool"
+      "display": "crypto::constant_time_equals(a: text, b: text) -> bool"
     },
     {
       "owner": "crypto",

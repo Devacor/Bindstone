@@ -36,6 +36,7 @@ inline constexpr retired_name k_retired_names[] = {
 	 "JaiScript has no 'reflect::scoped_template_output_limit': write reflect::untrusted_template_output_limit()"},
 	{"jai::permissions::scoped_template", "jai::permissions::untrusted_template",
 	 "JaiScript has no 'jai::permissions::scoped_template': write jai::permissions::untrusted_template"},
+	{"crypto::equals", "crypto::constant_time_equals", "JaiScript has no 'crypto::equals': write crypto::constant_time_equals(a, b)"},
 };
 
 inline constexpr const retired_name* find_retired_name(std::string_view name) noexcept {

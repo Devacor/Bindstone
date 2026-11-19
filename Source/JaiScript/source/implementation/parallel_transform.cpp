@@ -461,7 +461,7 @@ namespace {
 			"web::html_escape", "web::html_unescape", "web::url_encode", "web::url_decode", "web::form_encode", "web::form_decode",
 			"web::parse_query", "web::parse_query_all", "web::build_query", "web::parse_url",
 			"crypto::sha256", "crypto::sha256_bytes", "crypto::sha512", "crypto::sha512_bytes", "crypto::sha1", "crypto::sha1_bytes", "crypto::md5", "crypto::md5_bytes",
-			"crypto::hmac_sha256", "crypto::hmac_sha256_bytes", "crypto::hmac_sha512", "crypto::hmac_sha512_bytes", "crypto::equals",
+			"crypto::hmac_sha256", "crypto::hmac_sha256_bytes", "crypto::hmac_sha512", "crypto::hmac_sha512_bytes", "crypto::constant_time_equals",
 			"crypto::random_bytes", "crypto::random_hex", "crypto::random_int", "crypto::password_hash", "crypto::password_verify",
 		};
 		for (auto w : k_whitelist) {

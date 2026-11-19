@@ -188,6 +188,14 @@ public:
 			check_eq(std::string("mine x\n"), run_output("string scoped_template_text(string t, var m) { return \"mine \" + t; }\nprint(scoped_template_text(\"x\", {}));\n"));
 		});
 
+		test("constant_time_comparison_says_so", [this]() {
+			const std::string errors = load_errors("bool same = crypto::equals(\"a\", \"a\");");
+			check_true(errors.find("JaiScript has no 'crypto::equals': write crypto::constant_time_equals(a, b)") != std::string::npos, errors);
+			check_eq(std::string("true false false\n"), run_output(
+				"print(crypto::constant_time_equals(\"abc\", \"abc\"), \" \", crypto::constant_time_equals(\"abc\", \"abd\"), \" \", crypto::constant_time_equals(\"ab\", \"abc\"));\n"));
+			check_true(load_errors("crypto::constant_time_equals(\"a\");").find("'crypto::constant_time_equals' expects 2 argument(s), got 1") != std::string::npos, "arity");
+		});
+
 		test("an_engine_without_the_replacement_reports_the_plain_undeclared_name", [this]() {
 			auto e = make_engine();
 			stdlib::register_all(*e);

@@ -770,6 +770,8 @@ try {
 <tr><td><code>x instanceof T</code></td><td><code>JaiScript has no 'instanceof': if (dynamic_cast&lt;T&gt;(x)) tests whether x is a T (the cast is x as a shared_ptr&lt;T&gt;, null when it is not one), and reflect::is_instance_of(x, "T") answers true or false</code></td></tr>
 <tr><td><code>dynamic_pointer_cast&lt;T&gt;(x)</code></td><td><code>JaiScript has no 'dynamic_pointer_cast': dynamic_cast&lt;T&gt;(x) is x as a shared_ptr&lt;T&gt;, null when it is not one</code></td></tr>
 <tr><td><code>[...a, 3]</code>, <code>f(...args)</code></td><td><code>JaiScript has no spread '...': join arrays with array::concat(a, b) (a.concat(b) appends in place), and pass arguments one by one</code></td></tr>
+<tr><td><code>if (a = b)</code>, <code>while (a = b)</code></td><td><code>assignment used as a condition: write '==' to compare, or '((a = b))' with parentheses of its own to assign</code></td></tr>
+<tr><td><code>if (s)</code>, <code>while (s)</code> on a <code>string</code></td><td><code>a string is not a condition: write !s.empty()</code></td></tr>
 <tr><td><code>struct P { ... };</code></td><td><code>JaiScript has no 'struct': write class Name { ... }; its members start public</code></td></tr>
 <tr><td><code>int* p, T* p = e, void f(T* p)</code></td><td><code>JaiScript has no pointer types: hold a value as T x, share an object as shared_ptr&lt;T&gt;, and pass one to change it as T&amp;</code></td></tr>
 <tr><td><code>#define N 4</code></td><td><code>JaiScript has no '#define': write const int N = 4; for a constant and a function for a macro</code></td></tr>

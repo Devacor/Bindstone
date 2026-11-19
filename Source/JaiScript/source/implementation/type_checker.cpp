@@ -8348,7 +8348,7 @@ private:
 
     ctype infer_assignment_impl(assignment_expr* a, uint8_t& store_proof) {
         if (a->bare_condition) {
-            diag(diag_level::warning, a->location, "assignment used as a condition: write '==' to compare, or '((a = b))' with parentheses of its own to assign");
+            diag(diag_level::error, a->location, "assignment used as a condition: write '==' to compare, or '((a = b))' with parentheses of its own to assign");
         }
         const type_info* slot = a->op.type == token_type::equal && contextual_literal(a->value.get()) ? peek_declared_type(a->target.get()) : nullptr;
         ctype rhs = infer_expecting(a->value.get(), slot);
@@ -9952,9 +9952,16 @@ private:
         narrow_in_list_ = false;
     }
 
+    // A string's truth is no question C++ lets a condition ask: the test is spelled
+    void check_condition_type(const expression* condition, const ctype& type) {
+        if (type.tentative || (type.kind != ctype::string_k && type.kind != ctype::utf8_k)) { return; }
+        const std::string name = condition->get_type() == node_type::identifier_expr ? std::string(static_cast<const identifier_expr*>(condition)->name) : std::string("s");
+        diag(diag_level::error, condition->location, "a string is not a condition: write !" + name + ".empty()");
+    }
+
     JAI_NOINLINE void walk_while(while_stmt* w, bool in_list) {
         const size_t mark = narrow_ended_.size();
-        infer(w->condition.get());
+        check_condition_type(w->condition.get(), infer(w->condition.get()));
         const size_t tested = narrow_ended_.size();
         std::vector<narrow_fact> when_true, when_false;
         narrow_conclude(w->condition.get(), mark, when_true, when_false);
@@ -9976,7 +9983,7 @@ private:
 
     JAI_NOINLINE void walk_if(if_stmt* i, bool in_list) {
         const size_t mark = narrow_ended_.size();
-        infer(i->condition.get());
+        check_condition_type(i->condition.get(), infer(i->condition.get()));
         std::vector<narrow_fact> when_true, when_false;
         narrow_conclude(i->condition.get(), mark, when_true, when_false);
         const size_t held = narrow_facts_.size();

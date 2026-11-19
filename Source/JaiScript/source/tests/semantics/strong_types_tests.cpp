@@ -3134,7 +3134,7 @@ public:
                 check_eq(si, sv, std::string("load listing parity: ") + src);
                 check_true(si.find("ERROR: static check failed") == 0 && si.find(text) != std::string::npos, std::string("load error for ") + src + ": " + si);
             }
-            check_both("string s = \"a\"; array<int> xs = []; int n = 0; if (s) { n += 1; } if (!xs) { n += 2; } if (s && !xs) { n += 4; } to_string(n)", "7", "conditions keep truthiness for declared text and containers");
+            check_both("string s = \"a\"; array<int> xs = []; int n = 0; if (!s.empty()) { n += 1; } if (!xs) { n += 2; } if (s && !xs) { n += 4; } to_string(n)", "7", "conditions keep truthiness for declared text and containers");
             check_both(R"JAI(
                 class B { bool to_bool() { return false; } }
                 bool p(bool x) { return x; }

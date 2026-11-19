@@ -165,12 +165,12 @@ public:
             check_eq((size_t)0, quiet.diagnostics.size());
         });
 
-        test("an_assignment_as_a_condition_warns_unless_it_has_its_own_parentheses", [this]() {
+        test("an_assignment_as_a_condition_is_an_error_unless_it_has_its_own_parentheses", [this]() {
             auto e = make_engine();
             const std::string text = "assignment used as a condition: write '==' to compare, or '((a = b))' with parentheses of its own to assign";
             auto warned = e->check("int a = 0; int b = 3;\nif (a = b) { }\nwhile (a = 0) { }\ndo { } while (a = 0);\nfor (; a = 0; ) { }\nif ((a) = b) { }");
-            check_eq((size_t)0, error_count(warned));
-            check_eq((size_t)5, warning_count(warned));
+            check_eq((size_t)5, error_count(warned));
+            check_eq((size_t)0, warning_count(warned));
             for (size_t i = 0; i < warned.diagnostics.size(); ++i) {
                 check_eq(text, warned.diagnostics[i].message);
                 check_eq(i + 2, warned.diagnostics[i].line);
@@ -4157,7 +4157,7 @@ public:
             }
             // conditions keep truthiness, numbers, null and handles still convert, and a var's string converts at run time
             const std::string clean = "class K {} string s = \"x\"; string none = \"\"; bool a = !s.empty(); bool b = s == \"x\"; bool c = 1; bool d = 0.5; bool e = !s; bool f = s && true;\n"
-                                      "var v = \"x\"; bool g = v; var blank = \"\"; bool g2 = blank; shared_ptr<K> p = null; bool h = p; int taken = 0; if (s) { taken += 1; } if (none) { taken += 10; }\n"
+                                      "var v = \"x\"; bool g = v; var blank = \"\"; bool g2 = blank; shared_ptr<K> p = null; bool h = p; int taken = 0; if (!s.empty()) { taken += 1; } if (!none.empty()) { taken += 10; }\n"
                                       "`${a}${b}${c}${d}${e}${f}${g}${g2}${h}${taken}`;";
             auto rep = e->check(clean);
             check_eq((size_t)0, error_count(rep), rep.format(clean));

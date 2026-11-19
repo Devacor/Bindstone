@@ -62,6 +62,22 @@ public:
 			}
 		});
 
+		test("conditions_refuse_assignment_and_strings", [this]() {
+			const auto message = [this](const char* code) {
+				auto e = make_engine();
+				try { e->execute(code); } catch (const std::exception& error) { return std::string(error.what()); }
+				return std::string();
+			};
+			const std::string assigned = "assignment used as a condition: write '==' to compare, or '((a = b))' with parentheses of its own to assign";
+			check(message("int a = 0; int b = 1; if (a = b) { }").find(assigned) != std::string::npos);
+			check(message("int a = 1; while (a = 0) { }").find(assigned) != std::string::npos);
+			check(message("string s = \"x\"; if (s) { }").find("a string is not a condition: write !s.empty()") != std::string::npos);
+			check(message("string s = \"x\"; while (s) { }").find("a string is not a condition: write !s.empty()") != std::string::npos);
+			auto e = make_engine();
+			check_eq((int64_t)1, e->execute("int a = 0; int b = 1; if ((a = b)) { a; } else { 9; } a;").as_int());
+			check_eq((int64_t)2, e->execute("string s = \"x\"; int n = 0; if (!s.empty()) { n = 2; } n;").as_int());
+		});
+
 		test("the_words_stay_ordinary_names", [this]() {
 			auto e = make_engine();
 			check_eq((int64_t)10, e->execute(

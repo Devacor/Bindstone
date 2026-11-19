@@ -668,6 +668,15 @@ namespace jai {
             bool empty() const { return top_ == 0; }
             size_t size() const { return top_; }
 
+            // The values above `mark` die in stack order; what lies below belongs to the evaluation that ran this code (a
+            // destructor that fires while a call releases its arguments runs above the value the call pushed)
+            void truncate(size_t mark) {
+                if (top_ <= mark) { return; }
+                std::vector<script_value> released(std::make_move_iterator(values_.begin() + static_cast<std::ptrdiff_t>(mark)),
+                                                   std::make_move_iterator(values_.begin() + static_cast<std::ptrdiff_t>(top_)));
+                top_ = mark;
+            }
+
             void clear() {
                 // Actually destroy the values to release references
                 values_.clear();

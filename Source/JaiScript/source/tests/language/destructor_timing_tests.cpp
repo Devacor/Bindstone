@@ -1574,6 +1574,64 @@ public:
                  "case:true count:1 untyped:true call:true body:true elem:true eloop:true continue:true subject:true param:true local:true ");
         });
 
+        // A call's arguments die after it pushed its result: a destructor that runs blocks, loops, calls, a caught throw or a
+        // coroutine step then runs above that result, and the evaluation around the call goes on with it
+        test("a_destructor_that_runs_code_while_a_call_releases_its_arguments", [this]() {
+            struct Scale { int weigh(const script_value&) const { return 3; } };
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            eng->add_function("probe", [](const script_value&) { return std::string("p"); });
+            eng->add_function("probe", [](const script_value&, int a_n) { return std::string("q") + std::to_string(a_n); });
+            dynamic_binder<Scale>(*eng, "Scale").constructor<>().method("weigh", &Scale::weigh).build();
+            check_eq(std::string("<true><Busy><p><q2><3><true><true><true><5><7><m><m><2>|a3b3c3d3e3c3cs1f3g3h3i3j3"), eng->execute(R"(
+                string LOG = "";
+                class Busy {
+                    string tag = "";
+                    Busy(string t) { tag = t; }
+                    ~Busy() {
+                        int n = 0;
+                        for (int i = 0; i < 3; i++) { n += i; }
+                        while (n > 10) { n -= 1; }
+                        { int inner = n; LOG = LOG + tag + to_string(inner); }
+                    }
+                }
+                shared_ptr<Busy> make(string t) { return new Busy(t); }
+                int helper(int x) { int s = 0; for (int i = 0; i < x; i++) { s += i; } return s; }
+                class Caller { string tag = ""; Caller(string t) { tag = t; } ~Caller() { LOG = LOG + tag + to_string(helper(3)); } }
+                class Catcher { ~Catcher() { try { throw "x"; } catch (e) { LOG = LOG + "c"; } } }
+                coroutine int steps() { yield 1; yield 2; }
+                var gen = steps();
+                class Stepper { ~Stepper() { LOG = LOG + "s" + to_string(gen.next()); } }
+                class Num { int v = 4; int operator+(shared_ptr<Busy> b) { return v + 1; } }
+                class Keep { int k = 0; Keep(shared_ptr<Busy> b) { k = 7; } }
+                class Show { string show(shared_ptr<Busy> b) { return "m"; } }
+                Scale scale;
+                Num num;
+                Show sh;
+                var bound = reflect::bind(sh, "show");
+                string out = "<" + to_string(reflect::is_instance_of(make("a"), "Busy")) + ">";
+                out += "<" + reflect::type_name(make("b")) + ">";
+                out += "<" + probe(make("c")) + ">" + "<" + probe(make("d"), 2) + ">";
+                out += "<" + to_string(scale.weigh(make("e"))) + ">";
+                out += "<" + to_string(reflect::is_instance_of(new Caller("c"), "Caller")) + ">";
+                out += "<" + to_string(reflect::is_instance_of(new Catcher(), "Catcher")) + ">";
+                out += "<" + to_string(reflect::is_instance_of(new Stepper(), "Stepper")) + ">";
+                out += "<" + to_string(num + make("f")) + ">";
+                out += "<" + to_string(Keep(make("g")).k) + ">";
+                out += "<" + sh.show(make("h")) + ">" + "<" + bound(make("i")) + ">";
+                out += "<" + to_string(1 + helper(2) + reflect::type_name(make("j")).size() * 0) + ">";
+                out + "|" + LOG;
+            )").as_string());
+            // a destructor's uncaught throw reaches the call's caller
+            check_eq(std::string("caught boom tt"), eng->execute(R"(
+                string TRAIL = "";
+                class Thrower { ~Thrower() { for (int i = 0; i < 2; i++) { TRAIL = TRAIL + "t"; } throw "boom"; } }
+                string got = "";
+                try { got = "<" + reflect::type_name(new Thrower()) + ">"; } catch (e) { got = got + "caught " + e; }
+                got + " " + TRAIL;
+            )").as_string());
+        });
+
         test("a_destructor_class_declared_after_a_function_compiled_runs_on_time", [this]() {
             expect_outcome({R"(
                 string LOG = "";

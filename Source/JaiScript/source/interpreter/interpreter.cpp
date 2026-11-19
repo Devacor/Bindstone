@@ -2751,6 +2751,7 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
         // With lazy caching, this is O(1) - no flat_lookup_ copy needed
         environment_ = block_environment(environment_);
     }
+    const size_t stack_mark = valueStack_.size();
 
     try {
         // The resumed statement consumes its own frames (expression replay); the rest run cold
@@ -2764,9 +2765,7 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
             // This ensures objects are destroyed at statement boundaries, not just at block exit
             // Variable declarations pop their values, but some other declarations (like expression_decl)
             // may leave values on the stack
-            if (valueStack_.size() > 0) {
-                valueStack_.clear();
-            }
+            valueStack_.truncate(stack_mark);
 
             if (!result) {
                 kill_scope_slots(stmt->declarations);
@@ -2811,10 +2810,8 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
         throw;
     }
 
-    // Clear the value stack before releasing scope
-    // This ensures any lingering object references on the stack are released
-    // Block statements don't produce a value, so the stack should be cleared
-    valueStack_.clear();
+    // A block produces no value: what it left on the stack is released before its scope
+    valueStack_.truncate(stack_mark);
     kill_scope_slots(stmt->declarations);
 
     // Restore the previous scope - only release if we created it
@@ -10043,6 +10040,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         }
         bool had_error = false;
         size_t last_body_idx = start_index;
+        const size_t stack_mark = valueStack_.size();
 
         for (size_t i = start_index; i < function->body->declarations.size(); ++i) {
             last_body_idx = i;
@@ -10055,9 +10053,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
                 : dispatch_decl(function->body->declarations[i].get());
             // Statement boundary (visit_block_stmt parity): partial operands never
             // accumulate across the resumed body
-            if (valueStack_.size() > 0) {
-                valueStack_.clear();
-            }
+            valueStack_.truncate(stack_mark);
 
             if (!decl_result) {
                 if (decl_result.error() != std::error_code()) {

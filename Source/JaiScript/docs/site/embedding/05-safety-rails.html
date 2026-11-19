@@ -47,11 +47,18 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a><span class="sep" aria-hidden="true">/</span><a href="index.html">Embedding</a><span class="sep" aria-hidden="true">/</span>05</nav>
 <article class="chapter"><h1 id="safety-rails">Safety Rails<a class="hlink" href="#safety-rails" aria-label="link">&#8203;</a></h1>
 <p>A host decides what a script can reach (the engine&#x27;s permissions, plus its own for its API) and what it can spend (time, memory, call depth, scan and render sizes). The model:</p>
-<ul><li><strong>A default engine is not a sandbox.</strong> It reads any file the process can read (<code>include</code>, <code>import</code>, path queries), has no memory cap, a 5 second execution budget, and runs parallel loops on a pool of worker threads.</li>
+<ul><li><strong>A default engine trusts its scripts; it is not a sandbox.</strong> It reads any file the process can read (<code>include</code>, <code>import</code>, path queries), has no memory cap, a 5 second execution budget, and runs parallel loops on a pool of worker threads. For a script you do not trust, start with <code>eng-&gt;set_strict();</code> and <a href="#strict-engine">enable what it needs</a>.</li>
 <li><strong>The host grants, the script only asks.</strong> A script reads these settings through <code>reflect::</code> and changes none of them.</li>
 <li><strong>A refusal is a catchable script error</strong>, except a budget overrun and a second memory-cap denial in one execute, which are terminal.</li>
 <li><strong>The rails bound script, not the process.</strong> Whatever the host binds reaches what its C++ reaches; process isolation is the operating system&#x27;s job.</li></ul>
 <p>The <a href="#putting-it-together-running-untrusted-script">untrusted-script recipe</a> puts every setting together.</p>
+<h2 id="strict-engine">A strict engine: nothing until you enable it<a class="hlink" href="#strict-engine" aria-label="link">&#8203;</a></h2>
+<p>The defaults suit a host running its own scripts. A host that wants to name everything a script may reach starts from nothing instead:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto eng = jai::engine::make();
+eng-&gt;set_strict();                                // every permission off
+eng-&gt;enable(jai::permissions::filesystem);        // then only what this host needs
+eng-&gt;confine_paths({&quot;scripts&quot;});</code></pre></div>
+<p><code>set_strict()</code> withdraws every permission the engine holds: the ones on by default, and any granted before the call, the host&#x27;s own included. Each <code>enable</code> after it grants what it names and nothing more, so there is no list of things to remember to turn off. It follows the rules for changing a permission. It governs what a script can reach, and leaves the <a href="#1-execution-budget-terminal-uncatchable-by-script">budget, the memory cap and the other limits</a> as they are. The sections below detail what each permission grants when enabled. It is separate from <code>[[strict_mode]]</code>, which is about how a region&#x27;s <a href="06-static-checking.html">static check</a> reports errors.</p>
 <h2 id="filesystem-permission">Filesystem access is a host choice<a class="hlink" href="#filesystem-permission" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto eng = jai::engine::make();
 eng-&gt;disable(jai::permissions::filesystem);
@@ -79,13 +86,6 @@ eng-&gt;execute(&quot;2 + 2&quot;);                          // in-memory code s
 eng-&gt;add_variadic_function(&quot;write_assets&quot;, writeAssets, jai::permissions::filesystem);</code></pre></div>
 <p><code>.method</code>, <code>.static_method</code> and <code>.constructor</code> take the same trailing list, beside <code>jai::nodiscard</code>, <code>jai::serial</code> and <code>jai::exclude_execution_time</code>, in any order. A binding without one enforces what it needs itself. The standalone runner gates its file, directory, file-archive, download and audio-file start calls this way.</p>
 <p><strong>What filesystem does not cover.</strong> It is not a network or audio permission: the <a href="17-host-api.html#http-transport"><code>spider::</code> HTTP client</a> needs <code>jai::permissions::network</code>, disabled until the host enables it. It cannot revoke a stream or C++ object the host already exposed. The runner&#x27;s download progress queries stay available, except <code>download.received()</code> on the POSIX curl-executable fallback, which polls the output file and so requires filesystem.</p>
-<h3 id="strict-engine">A strict engine: nothing until you enable it<a class="hlink" href="#strict-engine" aria-label="link">&#8203;</a></h3>
-<p>The defaults suit a host running its own scripts. A host that wants to name everything a script may reach starts from nothing instead:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto eng = jai::engine::make();
-eng-&gt;set_strict();                                // every permission off
-eng-&gt;enable(jai::permissions::filesystem);        // then only what this host needs
-eng-&gt;confine_paths({&quot;scripts&quot;});</code></pre></div>
-<p><code>set_strict()</code> withdraws every permission the engine holds: the ones on by default, and any granted before the call, the host&#x27;s own included. Each <code>enable</code> after it grants what it names and nothing more, so there is no list of things to remember to turn off. It follows the rules for changing a permission. It governs what a script can reach, and leaves the <a href="#1-execution-budget-terminal-uncatchable-by-script">budget, the memory cap and the other limits</a> as they are. It is separate from <code>[[strict_mode]]</code>, which is about how a region&#x27;s <a href="06-static-checking.html">static check</a> reports errors.</p>
 <h3 id="confine-paths">What filesystem access reaches<a class="hlink" href="#confine-paths" aria-label="link">&#8203;</a></h3>
 <p>Enabled, <code>include</code> and <code>import</code> open any file the process can read: an absolute path or a <code>..</code> step leaves the include paths. A file that fails to parse or check is quoted line by line in an error the script can catch, and a successful load writes a <code>.cache</code> folder beside the source. To narrow that, confine the engine to chosen folders:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_include_path(&quot;scripts&quot;);
@@ -201,7 +201,8 @@ eng-&gt;disable(jai::permissions::untrusted_template);              // and with 
 <li>Scripts read the list with <code>reflect::untrusted_template_dirs()</code>. The host changes it under the permission rules.</li></ul>
 <h2 id="putting-it-together-running-untrusted-script">Putting it together: running untrusted script<a class="hlink" href="#putting-it-together-running-untrusted-script" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto eng = jai::engine::make();
-eng-&gt;set_strict();                       // no files, templates, network or source receivers: source arrives in memory
+eng-&gt;set_strict();                       // reach: no files, templates, network or source receivers; source arrives in memory
+// limits: numbers only the host can choose
 eng-&gt;execution_budget(0.005);            // 5 ms per execute
 eng-&gt;memory_cap(16 * 1024 * 1024);       // 16 MB high-water
 eng-&gt;parallel_thread_count(1);           // parallel loops stay on the calling thread

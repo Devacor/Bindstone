@@ -147,6 +147,9 @@ namespace jai {
         // element with a removed one below it moves
         void views_kept(const std::vector<uint8_t>& a_kept) noexcept;
         void views_kept_range(size_t a_start, size_t a_end) noexcept;
+        // a sort or reverse assigned into the slots: an element reference keeps its slot, and a field reference into an element's
+        // object names that field of the object now in its slot, as C++'s sort assigns into the elements
+        void views_permuted() noexcept;
 
         size_t size() const noexcept;
         bool empty() const noexcept { return size() == 0; }

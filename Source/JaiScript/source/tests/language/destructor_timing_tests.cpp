@@ -1734,7 +1734,7 @@ public:
                 string& name = xs[0].t.name;
                 xs.clear(); LOG = LOG + "|";
                 try { LOG = LOG + name; } catch (e) { LOG = LOG + e; } LOG;
-            )", "e|Reference to a destroyed object"},
+            )", "e|Reference to a removed array element"},
                 // what keeps an object alive: the local a reference starts from, and a temporary for its full-expression
                 {R"(
                 class Box { Token t = Token("b"); }

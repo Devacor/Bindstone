@@ -482,6 +482,32 @@ public:
 				var m = {"a": 1, "b": 2}; auto& e = m["b"]; m["0"] = 0; m.erase("a"); e = 7;
 				`${a}|${moved}|${b}|${m}`;
 			)", "[99, 10, 20, 30]|Reference to a moved array element|[9, 2, 3]|{\"0\": 0, \"b\": 7}");
+			// a field reference into an element's object follows the element reference's rule: an insert or remove at or below
+			// the element moves it, a sort or reverse keeps the slot (it names that field of the object now there), and an element
+			// that is a handle leaves its pointee's field to the pointee
+			expect("a field reference into an element never reseats", R"(
+				class H { int hp = 0; H() {} H(int v) { hp = v; } }
+				class Box { H inner; }
+				string log = "";
+				array<H> xs = [H(1), H(2), H(3)];
+				auto& f = xs[1].hp; xs.insert(0, H(9));
+				try { f = 5; } catch (err) { log = log + err + "|"; }
+				auto& z = xs[3].hp; xs.pop();
+				try { z = 1; } catch (err) { log = log + err + "|"; }
+				array<Box> bs = [Box(), Box()];
+				auto& d = bs[1].inner.hp; bs.remove(0);
+				try { d = 4; } catch (err) { log = log + err + "|"; }
+				void touch(H& e) { auto& h = e.hp; xs.insert(0, H(0)); try { h = 1; } catch (err) { log = log + "param " + err + "|"; } }
+				touch(xs[1]);
+				array<H> ys = [H(1), H(2), H(3)];
+				auto& k = ys[0].hp;
+				ys.sort([](const H& a, const H& b) { return a.hp > b.hp; });
+				k = 7; ys.reverse(); k += 1;
+				array<shared_ptr<H>> hs = [new H(1), new H(2)];
+				auto& p = hs[1].hp; hs.insert(0, new H(0)); p = 8;
+				`${log}${ys[0].hp},${ys[2].hp}|${hs[2].hp}`;
+			)", "Reference to a moved array element|Reference to a removed array element|Reference to a moved array element|"
+			    "param Reference to a moved array element|2,7|8");
 		});
 		test("inline_float_parse_preserves_fallback_and_text_contract", [this]() {
 			expect("complete parse and fallback", R"(

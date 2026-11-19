@@ -500,7 +500,8 @@ namespace detail {
         // A reference minted through an element of `root` (a chain rooted at arr[i]: nested
         // field, nested element) also counts in root->live_elem_refs, so a parallel fork over
         // `root` can prove its elements reference-free without touching one (value.cpp).
-        static void pin_element_root(script_value& reference, const strong_ptr<script_array>& root);
+        static void pin_element_root(script_value& reference, const strong_ptr<script_array>& root,
+                                     const strong_ptr<script_array>& parent = {}, size_t parent_index = SIZE_MAX);
         // A reference minted through a chain whose base is a boxed local holds that local's cell (value.cpp)
         static void pin_root_cell(script_value& reference, const script_value& base_slot);
         // A reference value a binding takes (a reference variable, parameter or loop variable) becomes a view (value.cpp)
@@ -510,7 +511,7 @@ namespace detail {
         // The live element and map-entry references into a container (value.cpp's view list): what the container let go of
         // they name no more. An element change: its kind, its index or range, and an in-place filter's keep marks.
         struct element_view_change {
-            enum class kind : uint8_t { scratch_only, removed_from, erased_at, inserted_at, kept, kept_range };
+            enum class kind : uint8_t { scratch_only, removed_from, erased_at, inserted_at, kept, kept_range, permuted };
             kind what = kind::scratch_only;
             size_t first = 0;
             size_t end = 0;
@@ -2288,7 +2289,13 @@ namespace detail {
             bool object_borrowed = false;   // an object view's inline value holds no count of its own (owner_weak keeps the block)
             bool owner_gone() const noexcept { return owner_weak.owner_identity() != nullptr && owner_weak.expired(); }
             class_instance* live_owner() const noexcept { return owner_gone() ? nullptr : owner_instance; }
-            const char* field_gone_text() const noexcept { return owner_gone() ? "Reference to a destroyed object" : "Reference to a removed field"; }
+            // a field of an array's element (arr[i].f): the element an insert or remove moved, or a removal took, is not the
+            // object the reference names, as for an element reference
+            bool element_view_gone() const noexcept { return elem_parent && view_state != view_live; }
+            bool field_gone() const noexcept { return owner_gone() || element_view_gone(); }
+            const char* field_gone_text() const noexcept {
+                return element_view_gone() ? element_gone_text() : owner_gone() ? "Reference to a destroyed object" : "Reference to a removed field";
+            }
             uint64_t field_id = UINT64_MAX;
             // the field's slot as the owner's class assigned it (a slot never moves within a class; a re-class changes the class, a
             // reload bumps its field-shape epoch): field_cell() reads the slot while both match, else finds the field by id and
@@ -2300,6 +2307,11 @@ namespace detail {
             // The array this reference was minted THROUGH (chain rooted at arr[i]; null when
             // not): counted in its live_elem_refs like a direct element reference.
             strong_ptr<script_array> elem_root;
+            // A field reference into an element's object (arr[i].f, a value path from the element): the array that holds the element
+            // and its index there. The reference is a view in that array's list, so an insert, a remove or a removal marks it
+            strong_ptr<script_array> elem_parent;
+            size_t elem_parent_index = SIZE_MAX;
+            size_t view_index() const noexcept { return container ? container_index : elem_parent_index; }
             // The cell of the local a chain starts from (local[0], local.h): a reference keeps alive the local it starts from
             strong_ptr<reference_holder> root_cell;
             // OBJECT mode (`U& r = p` over a handle p, a U& parameter given one): the reference names the handle's object, never

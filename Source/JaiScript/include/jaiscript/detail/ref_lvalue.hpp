@@ -692,11 +692,26 @@ namespace jai::detail {
 		// below it counts in that array's live_elem_refs (parallel forks prove exclusivity
 		// from the declared type when it is zero)
 		strong_ptr<script_array> chain_root;
-		auto rooted = [&chain_root, base_slot](script_value ref) -> checked_result<script_value> {
-			if (chain_root) { script_value::pin_element_root(ref, chain_root); }
+		strong_ptr<script_array> chain_parent;   // the array whose element holds the object the next member steps read (no handle between)
+		size_t chain_parent_index = SIZE_MAX;
+		auto rooted = [&chain_root, &chain_parent, &chain_parent_index, base_slot](script_value ref) -> checked_result<script_value> {
+			if (chain_root) { script_value::pin_element_root(ref, chain_root, chain_parent, chain_parent_index); }
 			if (base_slot && base_slot->is_reference()) { script_value::pin_root_cell(ref, *base_slot); }
 			return ref;
 		};
+		// a base that is itself a view of an element (a reference parameter or loop variable over arr[i]) roots the chain there
+		if (const auto* base_view = base_slot && base_slot->is_reference() && !engine_access::parallel_region_active(*eng) ? base_slot->get_reference_holder() : nullptr;
+		    base_view && !cur.is_shared_ptr_type() && !cur.is_weak_ptr_type()) {
+			if (base_view->container) {
+				chain_root = base_view->elem_root ? base_view->elem_root : base_view->container;
+				chain_parent = base_view->container;
+				chain_parent_index = base_view->container_index;
+			} else if (base_view->elem_parent) {
+				chain_root = base_view->elem_root;
+				chain_parent = base_view->elem_parent;
+				chain_parent_index = base_view->elem_parent_index;
+			}
+		}
 		for (size_t i = step_count; i-- > 0;) {
 			const bool is_final = (i == 0);
 			const expression* step = step_at(i);
@@ -711,6 +726,7 @@ namespace jai::detail {
 				if (auto done = ref_member_step(cur, static_cast<const member_expr*>(step), is_final, caller_env, eng, symbolizer, rooted)) {
 					return std::move(*done);
 				}
+				if (chain_parent && (cur.is_shared_ptr_type() || cur.is_weak_ptr_type())) { chain_parent.reset(); }   // past a handle: the pointee
 			} else {
 				const auto* b = static_cast<const binary_expr*>(step);
 				script_value key(std::monostate{}, eng);
@@ -737,6 +753,7 @@ namespace jai::detail {
 						auto derefed = ref_checked_deref(value_ref);
 						if (!derefed) { return derefed; }
 						cur = std::move(derefed.value());
+						chain_parent.reset();
 						continue;
 					}
 					if (value_ref.is_reference()) {
@@ -771,11 +788,15 @@ namespace jai::detail {
 				if (storage->is_typed()) {
 					// no element cell: a boxed read (an object slot's handle) carries the chain on
 					cur = storage->get(static_cast<size_t>(index), eng);
+					chain_parent = cur.is_shared_ptr_type() || cur.is_weak_ptr_type() ? strong_ptr<script_array>() : storage;
+					chain_parent_index = static_cast<size_t>(index);
 					continue;
 				}
 				auto derefed = ref_checked_deref(storage->values()[static_cast<size_t>(index)]);
 				if (!derefed) { return derefed; }
 				cur = std::move(derefed.value());
+				chain_parent = cur.is_shared_ptr_type() || cur.is_weak_ptr_type() ? strong_ptr<script_array>() : storage;
+				chain_parent_index = static_cast<size_t>(index);
 			}
 		}
 		return ref_non_lvalue_error();   // unreachable: step_count >= 1
@@ -791,8 +812,11 @@ namespace jai::detail {
 		auto value = ref_checked_deref(object);
 		if (!value) { return none; }
 		const strong_ptr<script_array> root = holder->elem_root ? holder->elem_root : holder->container;
-		auto rooted = [&root](script_value ref) -> checked_result<script_value> {
-			if (root) { script_value::pin_element_root(ref, root); }
+		const bool handle = value.value().is_shared_ptr_type() || value.value().is_weak_ptr_type();
+		const strong_ptr<script_array> parent = handle ? strong_ptr<script_array>() : holder->container ? holder->container : holder->elem_parent;
+		const size_t parent_index = holder->container ? holder->container_index : holder->elem_parent_index;
+		auto rooted = [&root, &parent, parent_index](script_value ref) -> checked_result<script_value> {
+			if (root) { script_value::pin_element_root(ref, root, parent, parent_index); }
 			return ref;
 		};
 		auto bound = ref_member_step(value.value(), m, true, caller_env, eng, symbolizer, rooted);
@@ -836,8 +860,8 @@ namespace jai::detail {
 
 	// A field reference stores what the direct field store stores, with its text
 	inline checked_result<script_value> ref_field_store(const auto& holder, const script_value& value, engine* eng) {
-		if (holder.owner_gone()) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a destroyed object");
+		if (holder.field_gone()) {
+			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), holder.field_gone_text());
 		}
 		const class_definition* owner = holder.owner_instance ? holder.owner_instance->get_class_definition() : nullptr;
 		if (holder.owner_instance && holder.container_element_type &&
@@ -896,7 +920,7 @@ namespace jai::detail {
 			refLocal.assign_through(std::move(v));
 			return;
 		}
-		if (holder && holder->owner_gone()) { throw runtime_error(holder->field_gone_text()); }
+		if (holder && holder->field_gone()) { throw runtime_error(holder->field_gone_text()); }
 		if (holder && holder->object_view) {   // the object's own assignment, never a rebind of the reference
 			refLocal.assign_through(std::move(v));
 			return;

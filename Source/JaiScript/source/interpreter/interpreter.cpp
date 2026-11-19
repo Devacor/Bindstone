@@ -2646,7 +2646,7 @@ checked_result<void> interpreter::store_through_subscript_reference(script_value
     } else {
         target_ptr = refHolder->resolve_target();
         if (!target_ptr) {
-            return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), refHolder->owner_gone() ? refHolder->field_gone_text() : "Invalid reference in assignment");
+            return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), refHolder->field_gone() ? refHolder->field_gone_text() : "Invalid reference in assignment");
         }
     }
 

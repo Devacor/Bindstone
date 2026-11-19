@@ -6166,7 +6166,7 @@ op_status vm_backend::exec_index_assign(frame& f, const vm_instruction& ins) {
 	} else {
 		target_ptr = refHolder->resolve_target();
 		if (!target_ptr) {
-			return raise_(make_error_code(runtime_error_code::invalid_reference), refHolder->owner_gone() ? refHolder->field_gone_text() : "Invalid reference in assignment");
+			return raise_(make_error_code(runtime_error_code::invalid_reference), refHolder->field_gone() ? refHolder->field_gone_text() : "Invalid reference in assignment");
 		}
 	}
 

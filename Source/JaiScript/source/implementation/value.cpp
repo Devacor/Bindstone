@@ -268,7 +268,7 @@ void script_value::change_element_views(script_array& node, const element_view_c
             view->has_elem_scratch = false;
         }
         if (view->view_state != reference_holder::view_live) { continue; }
-        const size_t index = view->container_index;
+        const size_t index = view->view_index();
         uint8_t state = reference_holder::view_live;
         switch (change.what) {
             case kind::scratch_only: break;
@@ -289,6 +289,22 @@ void script_value::change_element_views(script_array& node, const element_view_c
             case kind::kept_range:
                 state = index < change.first || index >= change.end ? reference_holder::view_removed
                       : change.first > 0 ? reference_holder::view_moved : state;
+                break;
+            case kind::permuted:
+                if (view->elem_parent && view->owner_instance && index < node.size()) {
+                    script_value element = node.is_typed() ? node.get(index, node.owner) : node.values()[index];
+                    script_value& object = const_cast<script_value&>(element.deref());
+                    strong_ptr<class_instance> inst = object.is_object() && !object.is_null() ? object.get_class_instance() : nullptr;
+                    if (!inst) {
+                        state = reference_holder::view_moved;
+                    } else if (inst.get() != view->owner_instance) {
+                        if (!view->owner_gone()) { view->owner_instance->note_field_ref_released(); }
+                        inst->note_field_ref_minted();
+                        view->owner_instance = inst.get();
+                        view->owner_weak = jai::detail::weak_from_object(static_cast<object_holder*>(static_cast<void*>(inst.get())));
+                        view->field_class = nullptr;
+                    }
+                }
                 break;
         }
         if (state != reference_holder::view_live) { view->mark_view_gone(state); }
@@ -315,6 +331,8 @@ void script_value::reference_holder::unlink_view() noexcept {
         container->view_head = view_next;
     } else if (container_map) {
         container_map->view_head = view_next;
+    } else if (elem_parent) {
+        elem_parent->view_head = view_next;
     }
     if (view_next) { view_next->view_prev = view_prev; }
     view_prev = nullptr;
@@ -348,6 +366,10 @@ void script_array::views_kept(const std::vector<uint8_t>& a_kept) noexcept {
     script_value::change_element_views(*this, {script_value::element_view_change::kind::kept, first_dropped, 0, &a_kept});
 }
 
+void script_array::views_permuted() noexcept {
+    script_value::change_element_views(*this, {script_value::element_view_change::kind::permuted});
+}
+
 void script_array::views_kept_range(size_t a_start, size_t a_end) noexcept {
     script_value::change_element_views(*this, {script_value::element_view_change::kind::kept_range, a_start, a_end});
 }
@@ -372,8 +394,9 @@ void script_array::views_remain(script_array* a_node) noexcept {
 
 script_value::reference_holder::~reference_holder() {
     if (view_linked) {
-        if (container || container_map) { unlink_view(); }
+        if (container || container_map || elem_parent) { unlink_view(); }
         if (container && container->live_elem_refs) { --container->live_elem_refs; }
+        if (elem_parent && elem_parent != elem_root && elem_parent->live_elem_refs) { --elem_parent->live_elem_refs; }
         if (container_map && container_map->live_entry_refs) { --container_map->live_entry_refs; }
         if (elem_root && elem_root->live_elem_refs) { --elem_root->live_elem_refs; }
     }
@@ -583,7 +606,7 @@ script_value* script_value::reference_holder::resolve_target() {
 }
 
 script_value* script_value::reference_holder::field_cell() const {
-    if (owner_gone()) [[unlikely]] { return nullptr; }
+    if (field_gone()) [[unlikely]] { return nullptr; }
     class_instance* inst = owner_instance;
     const class_definition* cd = inst->get_class_definition();
     if (cd && cd == field_class && cd->field_shape_epoch() == field_class_epoch) {
@@ -1471,12 +1494,17 @@ void script_value::pin_root_cell(script_value& reference, const script_value& ba
     }
 }
 
-void script_value::pin_element_root(script_value& reference, const strong_ptr<script_array>& root) {
+void script_value::pin_element_root(script_value& reference, const strong_ptr<script_array>& root, const strong_ptr<script_array>& parent,
+                                    size_t parent_index) {
     auto holder = reference.get_reference_holder();
     if (!holder || !root || holder->elem_root || holder->container == root) {
         return;   // a direct element reference on root already counts
     }
     holder->elem_root = root;
+    if (parent && holder->owner_instance && !holder->container && !holder->elem_parent) {
+        holder->elem_parent = parent;
+        holder->elem_parent_index = parent_index;
+    }
 }
 
 script_value script_value::make_object_view(const script_value& handle, engine* eng) {
@@ -1524,6 +1552,9 @@ void script_value::bind_view(const script_value& reference) noexcept {
     } else if (holder->container_map) {
         ++holder->container_map->live_entry_refs;
         holder->link_view(holder->container_map->view_head);
+    } else if (holder->elem_parent) {
+        if (holder->elem_parent != holder->elem_root) { ++holder->elem_parent->live_elem_refs; }
+        holder->link_view(holder->elem_parent->view_head);
     }
     if (holder->elem_root) { ++holder->elem_root->live_elem_refs; }
 }

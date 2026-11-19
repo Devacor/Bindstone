@@ -889,6 +889,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			} else {
 				node.values() = std::move(values);
 			}
+			if (node.live_elem_refs) [[unlikely]] { node.views_permuted(); }
 			return a_context.make_value();
 		}},
 
@@ -897,6 +898,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reverse() takes no arguments");
         }
         self.unchecked_get_array_storage()->reverse();
+        if (self.unchecked_array_node()->live_elem_refs) [[unlikely]] { self.unchecked_get_array_storage()->views_permuted(); }
         if (detail::work_meter work(ctx.get_engine()); work.spend(self.unchecked_array_node()->size())) [[unlikely]] { return work.spent(); }
         return ctx.make_value();
     }},

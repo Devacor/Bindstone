@@ -201,7 +201,8 @@ public:
 		});
 
 		test("a_reference_parameter_without_a_place_raises", [this]() {
-			both("int f() { return 3; } class D { int d = 0; D(int& r) { r = r + 1; d = r; } } string s = \"made\"; try { D(f()); } catch (e) { s = to_string(e); } s;",
+			// the checker sees this call and refuses it at load; a [[warn_mode]] region leaves it to the bind
+			both("[[warn_mode]]; int f() { return 3; } class D { int d = 0; D(int& r) { r = r + 1; d = r; } } string s = \"made\"; try { D(f()); } catch (e) { s = to_string(e); } s;",
 			     "Cannot pass non-lvalue to reference parameter", "the class's own constructor");
 			both("int f() { return 3; } class S { S(int& x) { x = x * 2; } } class U : S { U() : super(f()) {} } string s = \"made\"; try { U(); } catch (e) { s = to_string(e); } s;",
 			     "Cannot pass non-lvalue to reference parameter", "a base level's constructor");

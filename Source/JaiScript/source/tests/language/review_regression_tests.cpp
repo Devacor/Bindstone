@@ -162,7 +162,7 @@ public:
                     )";
                     try { return e->execute("[[warn_mode]]; " + src).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
                 };
-                check_eq(std::string("22|1|"), run("function probe() -> int { var data = [3]; var& value = data[0]; data.pop(); value += restore_array(data); return value; } got = probe();"), label + " a removed array element restored by the right side");
+                check_eq(std::string("0|1|Reference to a removed array element"), run("function probe() -> int { var data = [3]; var& value = data[0]; data.pop(); value += restore_array(data); return value; } got = probe();"), label + " a removed array element stays removed when the right side pushes again");
                 check_eq(std::string("22|1|"), run("function probe() -> int { var data = {\"key\": 3}; var& value = data[\"key\"]; data.erase(\"key\"); value += restore_map(data); return value; } got = probe();"), label + " a removed map entry restored by the right side");
                 check_eq(std::string("0|1|boom"), run("function probe() -> int { var data = [3]; var& value = data[0]; data.pop(); value += boom(); return value; } got = probe();"), label + " the right side's own error comes first");
                 check_eq(std::string("0|0|Reference to a removed array element"), run("function probe() -> int { var data = [3]; var& value = data[0]; data.pop(); value += 2; return value; } got = probe();"), label + " a literal right side: the target's error stands");
@@ -188,9 +188,9 @@ public:
                 check_eq(std::string("Reference to a removed map entry|finished"),
                          run(R"(string msg = ""; try { var data = {"key": 3}; var& value = data["key"]; data.erase("key"); value -= 2; } catch (err) { msg = err; } return msg + "|finished";)"),
                          label + " a removed map entry at program scope");
-                check_eq(std::string("22|finished"),
+                check_eq(std::string("0Reference to a removed array element|finished"),
                          run(R"(string msg = ""; var got = 0; try { var data = [3]; var& value = data[0]; data.pop(); data.push(20); value += 2; got = value; } catch (err) { msg = err; } return to_string(got) + msg + "|finished";)"),
-                         label + " control: a restored element at program scope");
+                         label + " an element pushed at a removed reference's index is another element");
             }
         });
         test("a_raising_left_operand_stops_the_expression_on_both_backends", [this]() {

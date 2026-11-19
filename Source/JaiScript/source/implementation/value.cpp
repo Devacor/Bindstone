@@ -256,11 +256,109 @@ script_value::script_value(const ivec3& v, engine* eng) : script_value(vec_from(
 script_value::script_value(const color& v, engine* eng) : script_value(vec_from(v, script_value_type::jai_color_type, eng)) {}
 
 
+// Every element reference into node: its scratch lets go of the element's handle, and the change names the state it takes.
+// The released handles die after the walk: a destructor they run may make or drop references.
+void script_value::change_element_views(script_array& node, const element_view_change& change) noexcept {
+    using kind = element_view_change::kind;
+    std::vector<script_value> released;
+    for (auto* view = static_cast<reference_holder*>(node.view_head); view; view = view->view_next) {
+        if (view->has_elem_scratch) {
+            released.push_back(std::move(*view->cell()));
+            view->cell()->~script_value();
+            view->has_elem_scratch = false;
+        }
+        if (view->view_state != reference_holder::view_live) { continue; }
+        const size_t index = view->container_index;
+        bool gone = false;
+        switch (change.what) {
+            case kind::scratch_only: break;
+            case kind::removed_from: gone = index >= change.first; break;
+            case kind::removed_at: gone = index == change.first; break;
+            case kind::kept: gone = index < change.kept->size() && !(*change.kept)[index]; break;
+            case kind::kept_range: gone = index < change.first || index >= change.end; break;
+        }
+        if (gone) { view->mark_view_gone(reference_holder::view_removed); }
+    }
+}
+
+void script_value::remove_map_views(script_map& map) noexcept {
+    for (auto* view = static_cast<reference_holder*>(map.view_head); view; view = view->view_next) {
+        view->mark_view_gone(reference_holder::view_removed);
+    }
+}
+
+void script_value::reference_holder::link_view(void*& head) noexcept {
+    view_prev = nullptr;
+    view_next = static_cast<reference_holder*>(head);
+    if (view_next) { view_next->view_prev = this; }
+    head = this;
+}
+
+void script_value::reference_holder::unlink_view() noexcept {
+    if (view_prev) {
+        view_prev->view_next = view_next;
+    } else if (container) {
+        container->view_head = view_next;
+    } else if (container_map) {
+        container_map->view_head = view_next;
+    }
+    if (view_next) { view_next->view_prev = view_prev; }
+    view_prev = nullptr;
+    view_next = nullptr;
+}
+
+void script_value::reference_holder::mark_view_gone(uint8_t state) noexcept {
+    view_state = state;
+    if (container) { container_index = SIZE_MAX; }
+}
+
+void script_array::release_element_views() noexcept {
+    script_value::change_element_views(*this, {});
+}
+
+void script_array::views_removed_from(size_t a_first) noexcept {
+    script_value::change_element_views(*this, {script_value::element_view_change::kind::removed_from, a_first});
+}
+
+void script_array::views_removed_at(size_t a_index) noexcept {
+    script_value::change_element_views(*this, {script_value::element_view_change::kind::removed_at, a_index});
+}
+
+void script_array::views_kept(const std::vector<uint8_t>& a_kept) noexcept {
+    script_value::change_element_views(*this, {script_value::element_view_change::kind::kept, 0, 0, &a_kept});
+}
+
+void script_array::views_kept_range(size_t a_start, size_t a_end) noexcept {
+    script_value::change_element_views(*this, {script_value::element_view_change::kind::kept_range, a_start, a_end});
+}
+
+void script_map::views_remain(script_map* a_map) noexcept {
+    if (a_map->views_only) { return; }
+    engine* eng = a_map->owner;
+    if (!eng || detail::engine_access::parallel_region_active(*eng)) { return; }
+    a_map->views_only = true;
+    script_value::remove_map_views(*a_map);
+    a_map->clear();
+}
+
+void script_array::views_remain(script_array* a_node) noexcept {
+    if (a_node->views_only) { return; }
+    engine* eng = a_node->owner;
+    if (!eng || detail::engine_access::parallel_region_active(*eng)) { return; }
+    a_node->views_only = true;
+    a_node->views_removed_from(0);
+    a_node->clear();
+}
+
 script_value::reference_holder::~reference_holder() {
-    if (container && container->live_elem_refs) { --container->live_elem_refs; }
-    if (elem_root && elem_root->live_elem_refs) { --elem_root->live_elem_refs; }
+    if (view_linked) {
+        if (container || container_map) { unlink_view(); }
+        if (container && container->live_elem_refs) { --container->live_elem_refs; }
+        if (container_map && container_map->live_entry_refs) { --container_map->live_entry_refs; }
+        if (elem_root && elem_root->live_elem_refs) { --elem_root->live_elem_refs; }
+    }
     if (owner_instance) { owner_instance->note_field_ref_released(); }
-    if (has_cell || has_map_key || has_elem_scratch ||
+    if (has_cell || has_map_key || has_elem_scratch || object_view ||
         (property && (property->live_member || property->has_scratch))) {
         cell()->~script_value();
         has_cell = false;
@@ -427,6 +525,7 @@ void script_value::reference_holder::commit_scratch() {
 }
 
 script_value* script_value::reference_holder::map_entry_value() const {
+    if (view_state != view_live) [[unlikely]] { return nullptr; }
     script_map::entry_memo memo{container_map.get(), map_memo_gen, map_memo_entry};
     auto* kv = container_map->recall(memo, *cell());
     map_memo_gen = memo.gen;
@@ -452,6 +551,9 @@ script_value* script_value::reference_holder::resolve_target() {
     }
     if (owner_instance) {
         return field_cell();
+    }
+    if (object_view) {
+        return cell();   // the object itself: stores copy-assign into it (element_copy_assign over its class)
     }
     return nullptr;   // CPP-MEMBER / PROPERTY (no addressable cell); else unreachable: every factory sets a mode
 }
@@ -1276,9 +1378,8 @@ script_value script_value::make_element_reference(const strong_ptr<script_array>
     v.set_stamp(detail::engine_access::get_type_info_reference(*eng, referent_tag));
     auto ref = acquire_reference_holder(eng);
     ref->container_element_type = element_type;
-    ref->container = container;          // owns the node (keeps it alive) + enables re-resolve
+    ref->container = container;          // the node outlives the reference; its owners decide when the elements die
     ref->container_index = index;
-    ++container->live_elem_refs;
     v.storage_ = ref;
     return v;
 }
@@ -1294,7 +1395,7 @@ script_value script_value::make_removed_element_reference(const strong_ptr<scrip
     ref->container_element_type = element_type;
     ref->container = container;
     ref->container_index = index;
-    ++container->live_elem_refs;
+    ref->mark_view_gone(reference_holder::view_removed);
     v.storage_ = ref;
     return v;
 }
@@ -1336,13 +1437,54 @@ script_value script_value::make_field_reference(strong_ptr<class_instance> owner
     return v;
 }
 
+void script_value::pin_root_cell(script_value& reference, const script_value& base_slot) {
+    if (base_slot.raw_storage_index() != TYPEID_REFERENCE || reference.raw_storage_index() != TYPEID_REFERENCE) { return; }
+    reference_holder* base = base_slot.storage_.get<strong_ptr<reference_holder>>().get();
+    reference_holder* holder = reference.storage_.get<strong_ptr<reference_holder>>().get();
+    if (base && holder && base != holder && base->plain_cell() && !holder->root_cell) {
+        holder->root_cell = detail::strong_from_object(base);
+    }
+}
+
 void script_value::pin_element_root(script_value& reference, const strong_ptr<script_array>& root) {
     auto holder = reference.get_reference_holder();
     if (!holder || !root || holder->elem_root || holder->container == root) {
         return;   // a direct element reference on root already counts
     }
     holder->elem_root = root;
-    ++root->live_elem_refs;
+}
+
+script_value script_value::make_object_view(const script_value& handle, engine* eng) {
+    const type_info_ptr handle_tag = handle.get_type_info();
+    const type_info_ptr object_tag = handle_tag && handle_tag->base_type == script_value_type::jai_shared_ptr_type ? handle_tag->element_type() : handle_tag;
+    script_value v(std::monostate{}, eng);
+    v.set_stamp(detail::engine_access::get_type_info_reference(*eng, object_tag));
+    auto ref = acquire_reference_holder(eng);
+    new (ref->cell_storage) script_value(handle);
+    if (object_tag) { ref->cell()->set_type_info(object_tag); }
+    ref->object_view = true;
+    ref->container_element_type = object_tag;
+    v.storage_ = std::move(ref);
+    return v;
+}
+
+// A reference made while an expression runs lives no longer than its full-expression and holds what it reaches like the
+// temporary it reads; a binding (a reference variable, parameter or loop variable) makes it a view: it counts in its
+// containers and its container's list from now on, and holds nothing those containers let go of
+void script_value::bind_view(const script_value& reference) noexcept {
+    if (reference.raw_storage_index() != TYPEID_REFERENCE) { return; }
+    reference_holder* holder = reference.storage_.get<strong_ptr<reference_holder>>().get();
+    if (!holder || holder->view_linked || (!holder->container && !holder->container_map && !holder->elem_root)) { return; }
+    if (holder->owner && detail::engine_access::parallel_region_active(*holder->owner)) { return; }
+    holder->view_linked = true;
+    if (holder->container) {
+        ++holder->container->live_elem_refs;
+        holder->link_view(holder->container->view_head);
+    } else if (holder->container_map) {
+        ++holder->container_map->live_entry_refs;
+        holder->link_view(holder->container_map->view_head);
+    }
+    if (holder->elem_root) { ++holder->elem_root->live_elem_refs; }
 }
 
 type_info_ptr script_value::cpp_bound_type_info(engine* eng, uint8_t semantic_index) {
@@ -2331,6 +2473,9 @@ const script_value& script_value::deref_slow() const {
     if (refHolder->component_base) {
         return refHolder->materialize_component(refHolder->owner);
     }
+    if (refHolder->object_view) {
+        return *refHolder->cell();
+    }
     throw runtime_error("Null reference");   // unreachable: every factory sets a mode
 }
 
@@ -2403,6 +2548,13 @@ void script_value::assign_through_reference(V&& value) {
     }
     if (refHolder->component_base) {
         refHolder->store_component(value, refHolder->owner);
+        return;
+    }
+    if (refHolder->object_view) {
+        // the object's own assignment, as C++ assigns through a reference: never a rebind of the reference
+        auto assigned = detail::class_copy_assign(*refHolder->cell(), value, refHolder->owner);
+        if (!assigned) { throw runtime_error("Cannot assign to a reference to an object of another class"); }
+        if (!*assigned) { throw runtime_error(format_error(*assigned, *detail::engine_access::get_symbolizer(*refHolder->owner))); }
         return;
     }
     throw runtime_error("Null reference in assign_through");   // unreachable: every factory sets a mode

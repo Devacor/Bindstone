@@ -2846,6 +2846,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
         if (decl->ref_escaping && !value.is_reference()) {
             value = script_value::make_cell_reference(std::move(value), engine_);
         }
+        if (decl->type && value.is_reference()) { JAISCRIPT_TRY(detail::bind_handle_object(value, decl->type.get(), engine_)); }   // KEEP BYTE-PARALLEL with the vm's define_ref_decl_value
         if (value.is_reference() && detail::reference_decl_checks_admission(*decl)) [[unlikely]] {
             if (auto rejected = detail::reference_decl_rejection(*decl, value, engine_)) {
                 // a const T& over another type's lvalue binds a T made from it (KEEP BYTE-PARALLEL with the vm's define_ref_decl_value)
@@ -2863,6 +2864,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             (decl->ref_escaping || decl->slot_index == SIZE_MAX || call_stack_.empty())) {
             detail::ref_declare(value, decl->type->element_type().get(), engine_);
         }
+        if (value.is_reference()) { script_value::bind_view(value); }   // KEEP BYTE-PARALLEL with the vm's define_ref_decl_value
         if (decl->slot_index != SIZE_MAX && !call_stack_.empty()) {
             if (decl->ref_escaping && !parallel_worker_) [[unlikely]] {
                 // a loop's next iteration drops the cell the last one shared: checked for a cycle once the slot lets go
@@ -6633,9 +6635,10 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                     if (auto* cursor = use_slot ? loop_var_ptr->element_cursor_holder() : nullptr;
                         cursor && cursor->container.get() == array_storage.get() &&
                         cursor->container_element_type == element_constraint) {
-                        cursor->container_index = i;
+                        cursor->repoint_element(i);
                     } else {
                         *loop_var_ptr = script_value::make_element_reference(array_storage, i, engine_, element_constraint);
+                        script_value::bind_view(*loop_var_ptr);
                     }
                     if (stmt->element_type) {   // a T& binds an element holding a T (KEEP BYTE-PARALLEL with vm exec_iter_next)
                         auto bound = detail::range_for_bind(*loop_var_ptr, stmt->element_type, true, stmt->variable_name, engine_);
@@ -6841,6 +6844,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                     const auto& entry = *it;
                     if (!detail::reaim_map_entry_cursor(loop_var_ptr, map_storage, entry.first, map_value_type)) {
                         *loop_var_ptr = script_value::make_map_entry_reference(map_storage, entry.first, &entry.second, engine_, map_value_type);
+                        script_value::bind_view(*loop_var_ptr);
                     }
                 } else {
                     script_value first = make_value();
@@ -8618,10 +8622,7 @@ checked_result<script_value> interpreter::declared_component_reference(variable_
         });
     }
     if (!part.value().is_reference()) {
-        return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference),
-            "Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, "
-            "subscript chains like arr[i] or grid[y][x], map entries, object fields like obj.field and C++ properties; "
-            "computed script properties are not ref-bindable)");
+        return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), detail::non_lvalue_reference_text);
     }
     return part;
 }
@@ -9235,6 +9236,9 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                     cleanup();
                     return bound.error_value();
                 }
+                // the evaluated argument the call keeps names the same element as the parameter the binder resolved: a view too, as
+                // the vm's argument is the parameter itself
+                script_value::bind_view(arg);
             } else {
                 // No metadata: external (C++) invocation. Object values are handles, so a
                 // shallow copy aliases the same underlying object - reference semantics hold.
@@ -9392,8 +9396,15 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             }
             continue;
         }
-        if (!param.type) { continue; }
         const script_value* bound = call_stack_[frame_index].get_local(param.slot_index);
+        if (bound) {   // KEEP BYTE-PARALLEL with vm_backend::bind_parameters
+            if (auto named = detail::bind_handle_object(*const_cast<script_value*>(bound), param.type.get(), engine_); !named) {
+                cleanup();
+                return named.error_value();
+            }
+            script_value::bind_view(*bound);
+        }
+        if (!param.type) { continue; }
         if (bound && !detail::reference_binding_admits(param.type.get(), *bound, engine_)) {
             // a const T& binds a T made from the argument, as a T parameter converts it (C++; KEEP BYTE-PARALLEL with vm_backend::bind_parameters)
             if (param.is_const) {
@@ -9454,6 +9465,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     } catch (...) {
         if (call_stack_.size() > frame_index) {
             while (call_stack_.size() > frame_index + 1) { call_stack_.pop_back(); }   // frames an unwound callee left behind
+            if (!trace_captured_) { capture_stack_trace(); }   // the trace names the frame that raised it, as the vm's in-frame conversion does
             cleanup();
         }
         throw;

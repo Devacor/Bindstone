@@ -698,6 +698,96 @@ private:
 
     // A reference bound to a conditional names the arm the condition picks; arms of two types make a converted temporary in C++,
     // which a non-const reference cannot bind
+    std::unordered_map<const call_expr*, ctype> call_results_;   // what each call the walk inferred yields
+    std::unordered_set<const function_decl*> auto_value_returns_;   // auto functions whose every return yields a value (names_a_value)
+    // A value the checker knows, which names no storage once a call returns it: not a handle, a function or a coroutine
+    static bool names_a_value(const ctype& r) {
+        return !r.is_unknown() && r.kind != ctype::function_k && r.kind != ctype::coroutine_k && r.kind != ctype::null_k &&
+               !(r.ti && handle_type(r.ti)) && (r.kind != ctype::object_k || !r.cls.empty());
+    }
+    // every function a call names is an auto one whose returns all yield values
+    bool call_returns_auto_value(const call_expr* c) {
+        if (!c->callee || c->callee->get_type() != node_type::identifier_expr) { return false; }
+        auto it = functions_.find(static_cast<const identifier_expr*>(c->callee.get())->name);
+        if (it == functions_.end() || it->second.empty()) { return false; }
+        for (const auto* fn : it->second) { if (!auto_value_returns_.count(fn)) { return false; } }
+        return true;
+    }
+    // call_returns_by_value, also for a program function named at program scope (its name is a variable holding the function)
+    bool call_certainly_by_value(const call_expr* c) {
+        if (call_returns_by_value(c)) { return true; }
+        if (!c->callee || c->callee->get_type() != node_type::identifier_expr || class_ctx_) { return false; }
+        const auto* id = static_cast<const identifier_expr*>(c->callee.get());
+        if (id->global_qualified) { return false; }
+        const var_entry* v = find_local(id->name);
+        if (!v || v->type.kind != ctype::function_k || !v->type.fns || v->type.fns->empty()) { return false; }
+        for (const auto* fn : *v->type.fns) {
+            if (fn->return_type && fn->return_type->is_reference()) { return false; }
+        }
+        return true;
+    }
+    // Whether every function a call may reach returns a handle (shared_ptr<T>): its result names an object, as C++'s *make() does
+    bool call_returns_handle(const call_expr* c) {
+        if (!c->callee || c->callee->get_type() != node_type::identifier_expr) { return false; }
+        auto it = functions_.find(static_cast<const identifier_expr*>(c->callee.get())->name);
+        if (it == functions_.end() || it->second.empty()) { return false; }
+        for (const auto* fn : it->second) {
+            if (!fn->return_type || fn->return_type->base_type != script_value_type::jai_shared_ptr_type) { return false; }
+        }
+        return true;
+    }
+
+    // An expression the checker knows names no storage: a literal, an operator's result, a construction or a call that returns
+    // a value (a handle names its object, so a handle result is not one)
+    bool certainly_temporary(const expression* e) {
+        if (!e) { return false; }
+        switch (e->get_type()) {
+            case node_type::literal_expr: case node_type::array_literal_expr: case node_type::map_literal_expr:
+                return true;
+            case node_type::call_expr: {
+                const auto* c = static_cast<const call_expr*>(e);
+                if (!call_certainly_by_value(c) || call_returns_handle(c)) { return false; }
+                const auto found = call_results_.find(c);
+                if (found == call_results_.end()) { return false; }
+                return found->second.is_unknown() ? call_returns_auto_value(c) : names_a_value(found->second);
+            }
+            case node_type::binary_expr: {
+                const auto* b = static_cast<const binary_expr*>(e);
+                return b->op.type != token_type::left_bracket && (b->op.type == token_type::plus || b->op.type == token_type::minus ||
+                       b->op.type == token_type::star || b->op.type == token_type::slash || b->op.type == token_type::percent) &&
+                       certainly_temporary_operand(b->left.get()) && certainly_temporary_operand(b->right.get());
+            }
+            default:
+                return false;
+        }
+    }
+    // an operand of a builtin arithmetic operator: a literal or a variable the checker knows holds a number (a class
+    // operator may return a reference)
+    bool certainly_temporary_operand(const expression* e) {
+        if (e->get_type() == node_type::literal_expr) { return true; }
+        if (e->get_type() != node_type::identifier_expr) { return false; }
+        const var_entry* v = find_local(static_cast<const identifier_expr*>(e)->name);
+        return v && !v->dynamic && !v->is_reference && !v->type.tentative && (v->type.kind == ctype::int_k || v->type.kind == ctype::float_k);
+    }
+    // A chain of member reads and subscripts whose base is a temporary: the element or field of an object that dies with
+    // its statement
+    bool rooted_in_temporary(const expression* e) {
+        bool stepped = false;
+        while (e) {
+            if (e->get_type() == node_type::member_expr) {
+                const auto* m = static_cast<const member_expr*>(e);
+                if (m->is_static || m->null_safe || m->is_arrow) { return false; }
+                e = m->object.get();
+            } else if (e->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(e)->op.type == token_type::left_bracket) {
+                e = static_cast<const binary_expr*>(e)->left.get();
+            } else {
+                return stepped && certainly_temporary(e);
+            }
+            stepped = true;
+        }
+        return false;
+    }
+
     void report_mixed_reference_conditional(const expression* e) {
         if (!detail::conditional_names_storage(e)) { return; }
         auto found = mixed_ternaries_.find(e);
@@ -832,6 +922,8 @@ private:
         std::unordered_set<std::string_view> globals_used;
         uint8_t inferred_return = 0;      // auto: the kind every return so far certainly yields (1 int, 2 float, 3 bool)
         bool inferred_mixed = false;      // auto: a return of another kind, of an uncertain kind, or without a value
+        bool returns_seen = false;        // auto: a return with a value was walked
+        bool returns_values = true;       // auto: every return yields a value the checker knows (no handle, no reference, no function)
         const std::string* file = nullptr;   // the file the body is written in (a declaration from another one was spliced by an include)
     };
     std::vector<fn_ctx> fn_stack_;
@@ -7818,6 +7910,7 @@ private:
         t = check_call(c, args, ov, std::move(t));
         if (!nodiscard_hit_.name.empty() && collect_diagnostics_) { nodiscard_calls_[c] = std::move(nodiscard_hit_); }
         nodiscard_hit_ = {};
+        call_results_[c] = t;
         return t;
     }
 
@@ -7929,8 +8022,7 @@ private:
             // temporary for a string& overload; otherwise it binds a temporary when the callee (every override of a method)
             // never writes through the parameter, else the load reports the write
             for (size_t i = 0; i < c->arguments.size() && i < args.size(); ++i) {
-                const node_type k = c->arguments[i]->get_type();
-                if (k != node_type::literal_expr && k != node_type::array_literal_expr && k != node_type::map_literal_expr) { continue; }
+                if (!certainly_temporary(c->arguments[i].get()) && !rooted_in_temporary(c->arguments[i].get())) { continue; }
                 std::vector<const function_decl*> by_ref;
                 bool all_ref = false;
                 for (const auto* fn : *ov) {
@@ -10383,6 +10475,8 @@ private:
                             : value.kind == ctype::int_k ? (enum_value(value) ? 0 : 1) : value.kind == ctype::float_k ? 2 : value.kind == ctype::bool_k ? 3 : 0;
             if (k == 0 || (open.inferred_return != 0 && open.inferred_return != k)) { open.inferred_mixed = true; }
             else { open.inferred_return = k; }
+            open.returns_seen = true;
+            if (!r->value || r->binds_reference || !names_a_value(value)) { open.returns_values = false; }
         }
         if (fn.is_coroutine && r->value) { check_coroutine_value(value, r->location, "return"); }
         if (fn.is_coroutine || !fn.ret) { return; }   // coroutine returns/yields + auto: lenient
@@ -10706,6 +10800,9 @@ private:
         bool is_handle_decl = handle_type(decl->type.get());
         if (has_init) {
             if (is_reference_decl && !decl->is_const) { report_mixed_reference_conditional(decl->initializer.get()); }
+            if (is_reference_decl && !decl->is_const && (certainly_temporary(decl->initializer.get()) || rooted_in_temporary(decl->initializer.get()))) {
+                diag(diag_level::error, decl->initializer->location, std::string(detail::non_lvalue_reference_text_lower));
+            }
             if (init.const_key && (is_reference_decl || is_handle_decl)) {
                 map_key_alias(decl->location, decl->initializer.get());
             }
@@ -10907,6 +11004,7 @@ private:
         narrow_frames_.pop_back();
         check_falls_off_end(fn);
         lw_close_region(&fn->parameters, nullptr, fn->body.get());
+        if (!fn->return_type && !fn->is_coroutine && fn_stack_.back().returns_seen && fn_stack_.back().returns_values) { auto_value_returns_.insert(fn); }
         fn_stack_.pop_back();
         scopes_.pop_back();
         capture_stack_.swap(saved_captures);

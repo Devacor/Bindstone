@@ -93,6 +93,30 @@ namespace {
                 escape(static_cast<const identifier_expr*>(arg)->symbol_id);
             }
         }
+        // A returned chain (local[0], local.h.x, either arm of a conditional) keeps alive the local it starts from: the local
+        // boxes, and the reference the chain mints holds its cell
+        void escape_returned_chain(const expression* e) {
+            while (e) {
+                switch (e->get_type()) {
+                    case node_type::member_expr: e = static_cast<const member_expr*>(e)->object.get(); break;
+                    case node_type::binary_expr: {
+                        const auto* b = static_cast<const binary_expr*>(e);
+                        if (b->op.type != token_type::left_bracket) { return; }
+                        e = b->left.get();
+                        break;
+                    }
+                    case node_type::cast_expr: e = static_cast<const cast_expr*>(e)->operand.get(); break;
+                    case node_type::ternary_expr: {
+                        const auto* t = static_cast<const ternary_expr*>(e);
+                        escape_returned_chain(t->then_expression.get());
+                        e = t->else_expression.get();
+                        break;
+                    }
+                    case node_type::identifier_expr: escape_arg(e); return;
+                    default: return;
+                }
+            }
+        }
 
         // Default-[&] lambda bodies: every identifier resolving OUTSIDE the lambda's own
         // scope is captured by reference, so its declaration must cell-box (C++ lambda
@@ -538,7 +562,7 @@ namespace {
                         // Ref-return producer: the operand binds as a reference; a
                         // bare-identifier operand escapes (its decl boxes from the start)
                         r->binds_reference = true;
-                        escape_arg(r->value.get());
+                        escape_returned_chain(r->value.get());
                     }
                     walk_expr(r->value.get());
                     break;

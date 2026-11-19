@@ -443,6 +443,7 @@ namespace {
         const strong_ptr<script_array> storage = a_self.unchecked_get_array_storage();
         const size_t old_size = storage->size();
         if (a_size <= old_size) {
+            if (storage->live_elem_refs) [[unlikely]] { storage->views_removed_from(a_size); }
             storage->truncate(a_size);
             return a_context.make_value();
         }
@@ -567,6 +568,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
         auto size = array_size_argument(args[0], "assign() size must be an int");
         if (!size) { return size.error_value(); }
+        if (auto& node = *self.unchecked_get_array_storage(); node.live_elem_refs) [[unlikely]] { node.views_removed_from(0); }   // vector::assign
         auto assigned = assign_elements(ctx, self, size.value(), args[1]);
         if (!assigned || ctx.unwinding()) { return assigned; }
         return resize_array(ctx, self, size.value(), &args[1]);
@@ -611,6 +613,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot pop from empty array");
         }
         script_value last = node.get(node.size() - 1, ctx.get_engine());
+        if (node.live_elem_refs) [[unlikely]] { node.views_removed_from(node.size() - 1); }
         node.pop_back();
         return last;
     }},
@@ -626,7 +629,9 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "clear() takes no arguments");
         }
-        self.unchecked_get_array_storage()->clear();
+        auto& node = *self.unchecked_get_array_storage();
+        if (node.live_elem_refs) [[unlikely]] { node.views_removed_from(0); }
+        node.clear();
         return ctx.make_value();
     }},
 
@@ -735,7 +740,9 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			}
 
 			if (!a_context.copy_array_result) {
-				a_self.unchecked_get_array_storage()->retain_range(static_cast<size_t>(start), static_cast<size_t>(end));
+				auto& kept = *a_self.unchecked_get_array_storage();
+				if (kept.live_elem_refs) [[unlikely]] { kept.views_kept_range(static_cast<size_t>(start), static_cast<size_t>(end)); }
+				kept.retain_range(static_cast<size_t>(start), static_cast<size_t>(end));
 				return a_context.make_value();
 			}
 			// Preserve the receiver's declared element type in the copy.
@@ -771,6 +778,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 				} else { selected.push_back(keep ? uint8_t{1} : uint8_t{0}); }
 			}
 			if (a_context.copy_array_result) { return result; }
+			if (array->live_elem_refs) [[unlikely]] { array->views_kept(selected); }
 			array->retain_selected(selected);
 			return a_context.make_value();
 		}},
@@ -907,6 +915,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             return ctx.make_value(false);
         }
 
+        if (node.live_elem_refs) [[unlikely]] { node.views_removed_at(static_cast<size_t>(index)); }
         node.erase_at(static_cast<size_t>(index));
         if (detail::work_meter work(ctx.get_engine()); work.spend(node.size() - static_cast<size_t>(index))) [[unlikely]] { return work.spent(); }
         return ctx.make_value(true);
@@ -934,6 +943,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			? node.materialize_values(ctx.get_engine()) : node.values();
 		std::vector<script_value> kept;
 		kept.reserve(snapshot.size());
+		std::vector<uint8_t> kept_at;
 		detail::work_meter work(ctx.get_engine());
 		for (auto& elem : snapshot) {
 			auto call_result = lvalues ? call_with_lvalues(predicate, lvalues, {&elem}, ctx.get_engine()) : predicate({elem});
@@ -944,10 +954,13 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			if (work.spend(1)) [[unlikely]] { return work.spent(); }
 			if (call_result.value().is_bool() && call_result.value().unchecked_as_bool()) {
 				++removed_count;          // dropped
+				kept_at.push_back(0);
 			} else {
 				kept.push_back(elem);     // survivor
+				kept_at.push_back(1);
 			}
 		}
+		if (node.live_elem_refs) [[unlikely]] { node.views_kept(kept_at); }
 		if (node.is_typed()) {
 			node.clear();
 			for (auto& v : kept) { node.push(std::move(v)); }

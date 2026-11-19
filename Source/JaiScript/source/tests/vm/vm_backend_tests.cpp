@@ -1483,11 +1483,11 @@ public:
 				var g = Box();
 				var arr = [1, 2, 3];
 				function fldWrite(int& x) { g = null; x = x + 1; return x; }
-				function elemWrite(int& x) { arr = null; x = x + 1; return x; }
+				function elemWrite(int& x) { arr = null; try { x = x + 1; } catch (e) { return 7; } return x; }
 				var a = fldWrite(g.v);
 				var b = elemWrite(arr[1]);
 				a * 10 + b;
-			)", 63},
+			)", 67},
 				// Chain resolution happens at bind time, after ALL args evaluate: a later
 				// arg that swaps the chain spine changes what binds (identifier precedent)
 				{"tier1_bind_time_ordering_pinned", R"(

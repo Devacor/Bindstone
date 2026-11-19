@@ -964,6 +964,7 @@ void coroutine_snapshot_impl::rebuild_from_record(engine& a_engine, coroutine_ha
 					if (element && element->base_type != script_value_type::jai_any_type && element->base_type != script_value_type::jai_null_type) { constraint = element; }
 				}
 				slot_of(local) = script_value::make_element_reference(const_cast<script_value&>(range).get_array_storage(), loop.at, &a_engine, constraint);
+				script_value::bind_view(slot_of(local));
 				continue;
 			}
 			if (saved.is_null() && local.binds_entry && range.is_map()) {
@@ -972,6 +973,7 @@ void coroutine_snapshot_impl::rebuild_from_record(engine& a_engine, coroutine_ha
 				if (found == entries->end()) { reader.fail("its save holds a loop at an entry its map does not have"); }
 				const type_info* tag = range.get_type_info();
 				slot_of(local) = script_value::make_map_entry_reference(entries, found->first, &found->second, &a_engine, tag ? tag->value_type() : nullptr);
+				script_value::bind_view(slot_of(local));
 				continue;
 			}
 			if (local.by_reference && !coroutine_of(range)) { reader.fail("its save does not fit the function's locals"); }

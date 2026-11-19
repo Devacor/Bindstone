@@ -276,6 +276,38 @@ namespace jai::detail {
 
 	// Mirrors script_value::deref() with checked errors instead of throws (bind-time
 	// resolution must never throw). Returns a shallow copy of the dereferenced value.
+	inline checked_result<script_value> ref_checked_deref(const script_value& v);
+
+	// A U& binding over a handle lvalue (shared_ptr<U> p, a handle field or element) names the handle's object, as C++ binds
+	// U& r = *p: never the handle, so no later store to the handle reseats or nulls it. A null handle has no object to name.
+	// KEEP BYTE-PARALLEL: both backends' reference declarations and T& parameters bind through it
+	inline checked_result<void> bind_handle_object(script_value& bound, const type_info* referent, engine* eng) {
+		if (!referent || referent->base_type == script_value_type::jai_reference_type) { referent = referent ? referent->element_type().get() : nullptr; }
+		if (!referent || referent->base_type != script_value_type::jai_object_type || referent->type_name.empty() || !bound.is_reference()) { return {}; }
+		if (bound.get_reference_holder()->object_view) { return {}; }
+		auto target = ref_checked_deref(bound);
+		if (!target) { return {}; }
+		const script_value& object = target.value();
+		const type_info* tag = object.type_info_raw();
+		if (!tag || tag->base_type != script_value_type::jai_shared_ptr_type) { return {}; }   // a value: the binding names its slot
+		if (object.raw_storage_index() != script_value::TYPEID_OBJECT || !object.unchecked_object_handle()) {
+			return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+		}
+		bound = script_value::make_object_view(object, eng);
+		return {};
+	}
+
+	// The lean call's test: a T& parameter of a class type given a handle lvalue binds through bind_handle_object
+	inline bool binds_handle_object(const type_info* referent, const script_value& bound) {
+		if (!referent || !bound.is_reference()) { return false; }
+		if (referent->base_type == script_value_type::jai_reference_type) { referent = referent->element_type().get(); }
+		if (!referent || referent->base_type != script_value_type::jai_object_type || referent->type_name.empty()) { return false; }
+		if (bound.get_reference_holder()->object_view) { return false; }
+		auto target = ref_checked_deref(bound);
+		const type_info* tag = target ? target.value().type_info_raw() : nullptr;
+		return tag && tag->base_type == script_value_type::jai_shared_ptr_type;
+	}
+
 	inline checked_result<script_value> ref_checked_deref(const script_value& v) {
 		const script_value* cur = &v;
 		while (cur->is_reference()) {
@@ -285,11 +317,11 @@ namespace jai::detail {
 				continue;
 			}
 			if (holder->has_map_key) {
-				auto it = holder->container_map->find(*holder->cell());
-				if (it == holder->container_map->end()) {
+				const script_value* entry_value = holder->map_entry_value();
+				if (!entry_value) {
 					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed map entry");
 				}
-				cur = &it->second;
+				cur = entry_value;
 				continue;
 			}
 			if (holder->container) {
@@ -324,6 +356,10 @@ namespace jai::detail {
 				} catch (const std::exception&) {
 					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a component of a value that is no longer a vector");
 				}
+			}
+			if (holder->object_view) {
+				cur = holder->cell();
+				continue;
 			}
 			// unreachable: every factory sets a mode
 			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Null reference");
@@ -621,9 +657,11 @@ namespace jai::detail {
 		};
 
 		script_value cur(std::monostate{}, eng);
+		const script_value* base_slot = nullptr;   // a boxed local's cell: what the chain mints keeps it alive
 		if (base->get_type() == node_type::identifier_expr) {
 			const auto* ident = static_cast<const identifier_expr*>(base);
 			const script_value* base_ptr = resolve_identifier_ptr(ident);
+			base_slot = base_ptr;
 			if (base_access_error) { return base_access_error->error_value(); }
 			if (!base_ptr) {
 				auto read = bare_property_base(ident);
@@ -651,8 +689,9 @@ namespace jai::detail {
 		// below it counts in that array's live_elem_refs (parallel forks prove exclusivity
 		// from the declared type when it is zero)
 		strong_ptr<script_array> chain_root;
-		auto rooted = [&chain_root](script_value ref) -> checked_result<script_value> {
+		auto rooted = [&chain_root, base_slot](script_value ref) -> checked_result<script_value> {
 			if (chain_root) { script_value::pin_element_root(ref, chain_root); }
+			if (base_slot && base_slot->is_reference()) { script_value::pin_root_cell(ref, *base_slot); }
 			return ref;
 		};
 		for (size_t i = step_count; i-- > 0;) {

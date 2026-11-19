@@ -204,6 +204,14 @@ namespace jai::detail {
 		}
 	}
 
+	// A non-const reference declaration over a temporary (docs/site/reference/errors.html); the checker's load text starts lowercase
+	inline constexpr std::string_view non_lvalue_reference_text = "Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, "
+		"subscript chains like arr[i] or grid[y][x], map entries, object fields like obj.field and C++ properties; "
+		"computed script properties are not ref-bindable)";
+	inline constexpr std::string_view non_lvalue_reference_text_lower = "cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, "
+		"subscript chains like arr[i] or grid[y][x], map entries, object fields like obj.field and C++ properties; "
+		"computed script properties are not ref-bindable)";
+
 	// A subscript store whose operator[] (the class's or the global one) returned a value, not a T&: raised once the call ran
 	inline constexpr std::string_view by_value_subscript_store_text = "Cannot assign to a call result: 'operator[]' returns by value";
 

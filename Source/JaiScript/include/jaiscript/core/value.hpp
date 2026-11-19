@@ -501,6 +501,23 @@ namespace detail {
         // field, nested element) also counts in root->live_elem_refs, so a parallel fork over
         // `root` can prove its elements reference-free without touching one (value.cpp).
         static void pin_element_root(script_value& reference, const strong_ptr<script_array>& root);
+        // A reference minted through a chain whose base is a boxed local holds that local's cell (value.cpp)
+        static void pin_root_cell(script_value& reference, const script_value& base_slot);
+        // A reference value a binding takes (a reference variable, parameter or loop variable) becomes a view (value.cpp)
+        static void bind_view(const script_value& reference) noexcept;
+        // The reference a U& binding makes of a handle lvalue: it names the handle's object (value.cpp)
+        static script_value make_object_view(const script_value& handle, engine* eng);
+        // The live element and map-entry references into a container (value.cpp's view list): what the container let go of
+        // they name no more. An element change: its kind, its index or range, and an in-place filter's keep marks.
+        struct element_view_change {
+            enum class kind : uint8_t { scratch_only, removed_from, removed_at, kept, kept_range };
+            kind what = kind::scratch_only;
+            size_t first = 0;
+            size_t end = 0;
+            const std::vector<uint8_t>* kept = nullptr;
+        };
+        static void change_element_views(script_array& node, const element_view_change& change) noexcept;
+        static void remove_map_views(script_map& map) noexcept;
         // Cell reference (Lua-upvalue box): the reference OWNS the boxed value. Escape-marked
         // variables hold one from declaration; ref binding/aliasing shares the handle, and the
         // cell keeps the value alive for as long as any handle exists (escape-legal semantics).
@@ -2201,6 +2218,22 @@ namespace detail {
             std::unique_ptr<detail::argument_capture_storage> argument_source;
             bool has_cell = false;      // inline storage holds the OWNED value
             bool has_map_key = false;   // inline storage holds the map KEY (container_map set)
+            // An element or map-entry reference is a view: linked in its container's list (view_head) while it lives, so
+            // the container that removes what it names, or empties itself, marks it gone
+            bool view_linked = false;   // bound (bind_view): counted in its containers and in its container's list
+            uint8_t view_state = view_live;
+            static constexpr uint8_t view_live = 0;
+            static constexpr uint8_t view_removed = 1;
+            reference_holder* view_prev = nullptr;
+            reference_holder* view_next = nullptr;
+            void link_view(void*& head) noexcept;     // value.cpp
+            void unlink_view() noexcept;
+            // the view names nothing from now on: an element reference's index leaves the array, so every touch fails its
+            // bounds test and raises (detail::element_gone_text names why)
+            void mark_view_gone(uint8_t state) noexcept;
+            // a by-ref loop's cursor names the next element: a new binding, whatever the last one met
+            void repoint_element(size_t index) noexcept { container_index = index; view_state = view_live; }
+            void revive_view() noexcept { view_state = view_live; }
             strong_ptr<script_map> container_map;
             // the key's entry as the last touch found it, valid while the map's generation holds (script_map::recall)
             mutable uint64_t map_memo_gen = 0;
@@ -2254,6 +2287,11 @@ namespace detail {
             // The array this reference was minted THROUGH (chain rooted at arr[i]; null when
             // not): counted in its live_elem_refs like a direct element reference.
             strong_ptr<script_array> elem_root;
+            // The cell of the local a chain starts from (local[0], local.h): a reference keeps alive the local it starts from
+            strong_ptr<reference_holder> root_cell;
+            // OBJECT mode (`U& r = p` over a handle p, a U& parameter given one): the reference names the handle's object, never
+            // the handle. The inline storage holds the object as a U value; a store copy-assigns into it.
+            bool object_view = false;
 
             // CPP-MEMBER / PROPERTY modes (null in every other mode; checked last on
             // every touch so those pay nothing). resolve_target() answers null for both:
@@ -3124,7 +3162,8 @@ namespace detail {
     inline script_array::script_array() : values_() {}
     inline script_array::script_array(kind_t k) : kind_(k) { construct_lane(); }
 
-    inline script_array::script_array(const script_array& other) : live_elem_refs(other.live_elem_refs), kind_(other.kind_), owner(other.owner) {
+    // references stay on the node they were made into: a copy or a move starts with none
+    inline script_array::script_array(const script_array& other) : kind_(other.kind_), owner(other.owner) {
         switch (lane_of(kind_)) {
             case lane_t::values: new (&values_) std::vector<script_value>(other.values_); break;
             case lane_t::ints: new (&ints_) std::vector<script_int>(other.ints_); break;
@@ -3134,7 +3173,7 @@ namespace detail {
             case lane_t::objs: new (&objs_) std::vector<obj_slot>(other.objs_); break;
         }
     }
-    inline script_array::script_array(script_array&& other) noexcept : live_elem_refs(other.live_elem_refs), kind_(other.kind_), owner(other.owner) {
+    inline script_array::script_array(script_array&& other) noexcept : kind_(other.kind_), owner(other.owner) {
         switch (lane_of(kind_)) {
             case lane_t::values: new (&values_) std::vector<script_value>(std::move(other.values_)); break;
             case lane_t::ints: new (&ints_) std::vector<script_int>(std::move(other.ints_)); break;
@@ -3153,8 +3192,8 @@ namespace detail {
     }
     inline script_array& script_array::operator=(script_array&& other) noexcept {
         if (this != &other) {
+            if (live_elem_refs) [[unlikely]] { release_element_views(); }
             destroy_lane();
-            live_elem_refs = other.live_elem_refs;
             kind_ = other.kind_;
             owner = other.owner;
             switch (lane_of(kind_)) {
@@ -3201,6 +3240,7 @@ namespace detail {
         }
     }
     inline void script_array::clear() noexcept {
+        if (live_elem_refs) [[unlikely]] { release_element_views(); }
         switch (lane_of(kind_)) {
             case lane_t::values: detail::clear_elements(values_); break;
             case lane_t::ints: ints_.clear(); break;
@@ -3246,6 +3286,7 @@ namespace detail {
 	}
 
 	inline void script_array::retain_range(size_t a_start, size_t a_end) {
+		if (live_elem_refs) [[unlikely]] { release_element_views(); }
 		// the dropped elements die last to first: the tail, then the head
 		auto retain = [&](auto& a_buffer, size_t a_stride = 1) {
 			using buffer_t = std::remove_reference_t<decltype(a_buffer)>;
@@ -3268,6 +3309,7 @@ namespace detail {
 		}
 	}
 	inline void script_array::retain_selected(const std::vector<uint8_t>& a_selected) {
+		if (live_elem_refs) [[unlikely]] { release_element_views(); }
 		// the dropped elements die last to first, once the kept ones have closed ranks
 		auto retain = [&](auto& a_buffer, size_t a_stride = 1) {
 			using buffer_t = std::remove_reference_t<decltype(a_buffer)>;
@@ -3301,6 +3343,7 @@ namespace detail {
 	}
 
     inline void script_array::assign_buffer(const script_array& other) {
+        if (live_elem_refs) [[unlikely]] { release_element_views(); }
         switch_lane(other.kind_);
         switch (other.kind_) {
             case kind_t::i64: ints_ = other.ints_; break;
@@ -3370,10 +3413,12 @@ namespace detail {
                 bytes_[i] = static_cast<uint8_t>(v.unchecked_as_int());   // pre-converted: an int in the kind's range
                 break;
             case kind_t::str:
+                if (live_elem_refs) [[unlikely]] { release_element_views(); }
                 strs_[i] = v.unchecked_string_handle();   // pre-converted: exactly a string
                 break;
             case kind_t::obj:
                 assert(v.raw_storage_index() == script_value::TYPEID_OBJECT && "object slot store: caller converts first");
+                if (live_elem_refs) [[unlikely]] { release_element_views(); }
                 objs_[i] = obj_slot{v.unchecked_object_handle(), v.get_type_info()};   // pre-converted: exactly an object
                 break;
             case kind_t::v2: case kind_t::iv2: case kind_t::v3: case kind_t::iv3: case kind_t::v4: case kind_t::rgba:
@@ -3440,6 +3485,7 @@ namespace detail {
     }
 
     inline void script_array::truncate(size_t n) {
+        if (live_elem_refs) [[unlikely]] { release_element_views(); }
         switch (kind_) {
             case kind_t::i64: if (n < ints_.size()) { ints_.resize(n); } break;
             case kind_t::f64: if (n < floats_.size()) { floats_.resize(n); } break;
@@ -3459,6 +3505,7 @@ namespace detail {
     }
 
     inline void script_array::pop_back() {
+        if (live_elem_refs) [[unlikely]] { release_element_views(); }
         switch (kind_) {
             case kind_t::i64: ints_.pop_back(); break;
             case kind_t::f64: floats_.pop_back(); break;
@@ -3476,6 +3523,7 @@ namespace detail {
     }
 
     inline void script_array::erase_at(size_t i) {
+        if (live_elem_refs) [[unlikely]] { release_element_views(); }
         switch (kind_) {
             case kind_t::i64: ints_.erase(ints_.begin() + i); break;
             case kind_t::f64: floats_.erase(floats_.begin() + i); break;
@@ -3571,6 +3619,7 @@ namespace detail {
     }
 
     inline void script_array::demote_to_hetero(engine* eng) {
+        if (live_elem_refs) [[unlikely]] { release_element_views(); }
         if (kind_ == kind_t::hetero) { return; }
         std::vector<script_value> boxed;
         switch (kind_) {

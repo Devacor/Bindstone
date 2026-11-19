@@ -1681,6 +1681,63 @@ public:
                 LOG;
             )"}, "<d>?<d><d>");
         });
+        test("a_reference_never_keeps_an_element_its_container_let_go", [this]() {
+            // C++: an element dies when its container removes it, replaces its storage or dies, whatever references name it; the
+            // reference is then gone (here it raises at its next use), and a reference into a local keeps that local alive
+            const std::pair<std::string, std::string> cases[] = {
+                // a removal destroys the element at the removal, a read through the reference first (its view) included
+                {R"(
+                array<Token> xs = [Token("a"), Token("b")];
+                Token& r = xs[0]; string seen = r.name;
+                xs.clear(); LOG = LOG + "|";
+                try { LOG = LOG + r.name; } catch (e) { LOG = LOG + "!"; } LOG;
+            )", "ba|!"},
+                {R"(
+                array<Token> xs = [Token("a"), Token("b"), Token("c")];
+                function f(Token& t) -> void { string seen = t.name; xs.pop(); LOG = LOG + "|"; try { LOG = LOG + t.name; } catch (e) { LOG = LOG + "!"; } }
+                f(xs[2]); xs.remove(0); LOG = LOG + "|"; xs.resize(0); LOG;
+            )", "c|!a|b"},
+                // assigning the container destroys its old elements then; references into them raise, a reappearing index included
+                {R"(
+                array<Token> xs = [Token("a")];
+                function f(Token& t) -> void { xs = [Token("n")]; LOG = LOG + "|"; try { LOG = LOG + t.name; } catch (e) { LOG = LOG + "!"; } }
+                f(xs[0]); LOG = LOG + xs[0].name; LOG;
+            )", "a|!n"},
+                {R"(
+                class Bag { array<Token> items; }
+                Bag bag; bag.items.push(Token("a"));
+                Token& r = bag.items[0];
+                bag.items = array<Token>(); LOG = LOG + "|";
+                try { LOG = LOG + r.name; } catch (e) { LOG = LOG + "!"; } LOG;
+            )", "aa|!"},
+                // an inner array its outer one removes dies with its elements (a pushed temporary is copied: its own death logs first)
+                {R"(
+                array<array<Token>> grid; grid.push(array<Token>()); grid[0].push(Token("a"));
+                Token& r = grid[0][0];
+                grid.clear(); LOG = LOG + "|";
+                try { LOG = LOG + r.name; } catch (e) { LOG = LOG + "!"; } LOG;
+            )", "aa|!"},
+                // a map assigned over or cleared destroys its entries; entry references raise
+                {R"(
+                map<string, Token> m; m["k"] = Token("k");
+                Token& e = m["k"];
+                m = map<string, Token>(); LOG = LOG + "|";
+                try { LOG = LOG + e.name; } catch (e2) { LOG = LOG + "!"; } LOG;
+            )", "k|!"},
+                // a temporary lives to the end of its full-expression, whatever references its reads make
+                {R"(
+                function make() -> array<Token> { array<Token> r = [Token("t")]; return r; }
+                string n = make()[0].name; LOG = LOG + "|" + n; LOG;
+            )", "t|t"},
+                // a reference a function returns into its own local keeps that local alive, as [&] does
+                {R"(
+                function f() -> Token& { array<Token> local = [Token("x")]; return local[0]; }
+                function g() -> void { auto& r = f(); LOG = LOG + r.name + "|"; }
+                g(); LOG;
+            )", "x|x"},
+            };
+            for (const auto& [program, expected] : cases) { expect_log(program, expected); }
+        });
     }
 
     // the frames of the first error a program raises, as the engine's stack trace lists them

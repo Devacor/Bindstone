@@ -7231,6 +7231,7 @@ JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop
 				const auto* decl = static_cast<const variable_decl*>(f.code->nodes[rb.ref_decl].get());
 				detail::ref_declare(reference, decl->type->element_type().get(), engine_);
 			}
+			script_value::bind_view(reference);
 			frame_slot_set(f, loop.cells[k].slot, std::move(reference));
 			break;
 		}
@@ -11939,6 +11940,7 @@ static bool element_of_declared_class(const variable_decl& decl, const script_va
 }
 
 op_status vm_backend::define_ref_decl_value(frame& f, const vm_instruction& ins, const variable_decl* decl, script_value value) {
+	if (decl->type) { VM_TRY(detail::bind_handle_object(value, decl->type.get(), engine_)); }   // KEEP BYTE-PARALLEL with the interpreter's define_variable
 	if (ins.c & 2) [[unlikely]] {   // a reference must reference
 		if (!element_of_declared_class(*decl, value)) {
 			if (auto rejected = reference_admission(*decl, value, engine_)) {
@@ -11952,6 +11954,7 @@ op_status vm_backend::define_ref_decl_value(frame& f, const vm_instruction& ins,
 			}
 		}
 	}
+	script_value::bind_view(value);   // KEEP BYTE-PARALLEL with the interpreter's define_variable
 	return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), false, decl);
 }
 
@@ -12082,10 +12085,7 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 		return declared_ref_landed(f, ins, decl, define_ref_decl_value(f, ins, decl, std::move(held.value())));
 	}
 	// KEEP BYTE-PARALLEL with the interpreter's ref-decl branch
-	return raise_(make_error_code(runtime_error_code::invalid_reference),
-		"Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, "
-		"subscript chains like arr[i] or grid[y][x], map entries, object fields like obj.field and C++ properties; "
-		"computed script properties are not ref-bindable)");
+	return raise_(make_error_code(runtime_error_code::invalid_reference), detail::non_lvalue_reference_text);
 }
 
 op_status vm_backend::exec_destructure(frame& f, const vm_instruction& ins) {
@@ -13437,7 +13437,9 @@ bool vm_backend::bind_plain_references(const script_defined_function& function, 
 		const parameter& p = ps[i];
 		if (!p.is_reference) { continue; }
 		script_value& bound = stack_[args_base + i];
+		if (detail::binds_handle_object(p.type.get(), bound)) { return false; }   // the general bind names the handle's object
 		if (p.type && !detail::reference_binding_admits(p.type.get(), bound, engine_)) { return false; }
+		script_value::bind_view(bound);
 		if (p.ref_escaping || p.declared_ref_escapes) [[unlikely]] {
 			detail::ref_declare(bound, const_cast<type_info*>(detail::parameter_declared_ref(p)), engine_);
 		}
@@ -17639,6 +17641,7 @@ op_status vm_backend::exec_call_builtin(frame& f, const vm_instruction& ins) {
 			script_array& node = *const_cast<script_value&>(recv).unchecked_get_array_storage();
 			if (!node.empty()) {
 				result.emplace(node.get(node.size() - 1, engine_));
+				if (node.live_elem_refs) [[unlikely]] { node.views_removed_from(node.size() - 1); }
 				node.pop_back();
 			}
 		} else {
@@ -20076,7 +20079,7 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 					if (auto* cursor = cur->element_cursor_holder();
 					    cursor && cursor->container.get() == array_storage.get() &&
 					    cursor->container_element_type == element_constraint) {
-						cursor->container_index = state.index;
+						cursor->repoint_element(state.index);
 						++state.index;
 						if (proto.element_type) {
 							auto bound = detail::range_for_bind(*cur, proto.element_type, true, proto.var_name, engine_);
@@ -20088,6 +20091,7 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 				}
 			}
 			element = script_value::make_element_reference(array_storage, state.index, engine_, element_constraint);
+			script_value::bind_view(element);
 		} else if (array_storage->kind() == script_array::kind_t::obj) {
 			element = clone_for_assignment(array_storage->get(state.index, engine_));   // object slots deep-copy like boxed elements
 		} else if (array_storage->is_typed()) {
@@ -20160,6 +20164,7 @@ JAI_NOINLINE op_status vm_backend::iter_next_map_entry(frame& f, const iter_prot
 			return {};
 		}
 		element = script_value::make_map_entry_reference(map_storage, entry.first, &entry.second, engine_, state.map_value_type);
+		script_value::bind_view(element);
 	} else {
 		script_value first = make_null();
 		script_value second = make_null();
@@ -23709,8 +23714,12 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 			}
 			continue;
 		}
-		if (!param.type) { continue; }
 		const script_value* bound = frame_slot(callee, param.slot_index);
+		if (bound) {   // KEEP BYTE-PARALLEL with the interpreter's call_function
+			VM_TRY(detail::bind_handle_object(*const_cast<script_value*>(bound), param.type.get(), engine_));
+			script_value::bind_view(*bound);
+		}
+		if (!param.type) { continue; }
 		if (bound && !detail::reference_binding_admits(param.type.get(), *bound, engine_)) {
 			// a const T& binds a T made from the argument, as a T parameter converts it (C++; KEEP BYTE-PARALLEL with the interpreter)
 			if (param.is_const) {

@@ -78,6 +78,10 @@ namespace jai {
         // ~reference_holder). Zero lets a parallel fork prove exclusivity of a value-semantic
         // typed object array without walking the elements.
         uint32_t live_elem_refs = 0;
+        // Only references hold the node since its last owner let it go (views_remain): its elements were emptied
+        bool views_only = false;
+        // The element references into this node (value.cpp's view list: script_value::reference_holder), newest first
+        void* view_head = nullptr;
         // b8/c8/u8/i8 share one byte buffer (bool, char, uint8 and int8 payloads); the kind says how to box
         // str holds shared string handles (the same handle a boxed element would carry)
         // obj holds {object handle, class tag} slots (array<UserType>)
@@ -125,6 +129,21 @@ namespace jai {
 
         kind_t kind() const noexcept { return kind_; }
         bool is_typed() const noexcept { return kind_ != kind_t::hetero; }
+
+        // strong_ptr's release that leaves handles: when the references into the node are all that hold it, its elements
+        // die now and the references raise, unless a reference result carries the node out of its dying frame
+        static void partial_release(script_array* a_node, uint32_t a_left) noexcept {
+            if (a_left == a_node->live_elem_refs) [[unlikely]] { views_remain(a_node); }
+        }
+        static void views_remain(script_array* a_node) noexcept;
+        // a typed element reference's scratch holds the element's handle: the node lets go of an element only with it
+        void release_element_views() noexcept;
+        // the references into the elements from a_first on, or into element a_index, name nothing from now on
+        void views_removed_from(size_t a_first) noexcept;
+        void views_removed_at(size_t a_index) noexcept;
+        // an in-place filter or slice: the elements a_kept marks 0 (or outside [a_start, a_end)) leave the array
+        void views_kept(const std::vector<uint8_t>& a_kept) noexcept;
+        void views_kept_range(size_t a_start, size_t a_end) noexcept;
 
         size_t size() const noexcept;
         bool empty() const noexcept { return size() == 0; }

@@ -2380,6 +2380,34 @@ public:
             }
         });
 
+        // Any temporary the checker sees, not only a literal: a construction, a call returning a value, an operator's result. Passed to a
+        // T& the callee writes (returning it by reference is a write) it fails at load; bound by a non-const reference declaration,
+        // directly or as the element or field it reads, it fails at load too. A handle result names its object
+        test("a_temporary_bound_to_a_non_const_reference_fails_at_load", [this]() {
+            const std::string h = "class H { int hp = 10; }\nH make() { return H(); }\nauto bag() { array<H> a; a.push(H()); return a; }\n";
+            const std::string non_lvalue = "cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, subscript chains like arr[i] or grid[y][x], map entries, object fields like obj.field and C++ properties; computed script properties are not ref-bindable)";
+            for (bool proofs : {true, false}) {
+                auto e = make_engine();
+                e->type_proofs(proofs);
+                auto r = e->check(h + "H& pick(H& a) { return a; }\nH& t = pick(H());");
+                check_true(has_diag(r, dlevel::error, "'pick' writes through parameter 'a' (line 4); pass a variable"), r.format());
+                r = e->check(h + "void hit(H& a) { a.hp = 3; }\nhit(make());");
+                check_true(has_diag(r, dlevel::error, "'hit' writes through parameter 'a' (line 4); pass a variable"), r.format());
+                r = e->check("void inc(int& a) { a += 1; }\nint x = 1;\ninc(x + 1);");
+                check_true(has_diag(r, dlevel::error, "'inc' writes through parameter 'a' (line 1); pass a variable"), r.format());
+                check_eq((size_t)0, error_count(e->check(h + "int peek(H& a) { return a.hp; }\npeek(H());")), "a parameter the body only reads takes a temporary");
+                r = e->check(h + "H& e = make();");
+                check_true(has_diag(r, dlevel::error, non_lvalue), r.format());
+                r = e->check(h + "H& e = bag()[0];");
+                check_true(has_diag(r, dlevel::error, non_lvalue), r.format());
+                r = e->check(h + "int& v = make().hp;");
+                check_true(has_diag(r, dlevel::error, non_lvalue), r.format());
+                check_eq((size_t)0, error_count(e->check(h + "const H& c = make();\nconst H& d = bag()[0];")), "a const reference binds a temporary");
+                check_eq((size_t)0, error_count(e->check("class H { int hp = 10; }\nshared_ptr<H> mk() { return new H(); }\nint& v = mk().hp;")),
+                         "a handle result names its object");
+            }
+        });
+
         // A reference parameter's default names storage as in C++: a literal or an operator's result is a load error, and at the bind
         // (in a [[warn_mode]] region) a default yielding no reference raises; a const T& default binds a temporary, an lvalue default binds it
         test("a_reference_parameters_default_must_name_storage", [this]() {

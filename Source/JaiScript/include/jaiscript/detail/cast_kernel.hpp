@@ -52,6 +52,8 @@ namespace jai::detail {
 
 	// shared_from_this() / weak_from_this() on an object reached as a value: there is no handle to hand out
 	inline constexpr std::string_view from_this_of_value_text = "{0}() needs an object reached through a shared_ptr, and this one is a class value";
+	// `this` stored into a handle slot on an object reached as a value: a copy would be a different object
+	inline constexpr std::string_view this_into_handle_text = "'this' becomes a handle only on an object reached through a shared_ptr, and this one is a class value";
 
 	inline constexpr std::string_view cast_non_lvalue_text =
 		"Cannot take reference of non-lvalue expression in cast<T&> (computed properties, "

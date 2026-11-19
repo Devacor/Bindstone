@@ -575,6 +575,8 @@ namespace jai {
     // This expression
     class this_expr : public expression {
     public:
+        // the checker saw it stored into a handle slot: on a class value the run raises (a handle never aliases a value slot)
+        bool into_handle = false;
         this_expr(const source_location& loc) : expression(loc, node_type::this_expr) {}    };
 
     // Super expression

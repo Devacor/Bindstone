@@ -574,6 +574,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		return clone_identifier(id, c);
 	}
 	case node_type::this_expr:
+		if (static_cast<const this_expr*>(e.get())->into_handle) { c.fail("a this stored into a handle"); return nullptr; }
 		if (c.receiver) { return copy_identifier(c.receiver.get(), e->location, c); }
 		if (c.receiver_this) { return c.make<this_expr>(e->location); }
 		if (c.caller_this) { ++c.nodes; return e; }

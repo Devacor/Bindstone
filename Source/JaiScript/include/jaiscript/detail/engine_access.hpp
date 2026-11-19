@@ -228,6 +228,7 @@ namespace jai::detail {
         JAI_FORCEINLINE static void*& cell_cycle_registry_slot(engine& a_engine) { return a_engine.cell_cycle_registry_slot(); }
         JAI_FORCEINLINE static void set_cell_cycle_registry_teardown(engine& a_engine, void (*teardown)(void*)) { return a_engine.set_cell_cycle_registry_teardown(teardown); }
         JAI_FORCEINLINE static bool parallel_region_active(const engine& a_engine) noexcept { return a_engine.parallel_region_active(); }
+        JAI_FORCEINLINE static type_info*& handle_construction(engine& a_engine) noexcept { return a_engine.handle_construction_; }
         JAI_FORCEINLINE static void note_parallel_region(engine& a_engine, bool active) noexcept { return a_engine.note_parallel_region(active); }
         JAI_FORCEINLINE static std::unique_lock<std::mutex> parallel_instance_registry_lock(engine& a_engine) { return a_engine.parallel_instance_registry_lock(); }
         JAI_FORCEINLINE static bool park_parallel_registration(engine& a_engine, weaker_ptr<class_instance>& instance) { return a_engine.park_parallel_registration(instance); }

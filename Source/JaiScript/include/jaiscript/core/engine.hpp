@@ -1720,6 +1720,7 @@ namespace jai {
         bool skip_unknown_receivers_ = false;
         bool parallel_region_active_ = false;
         bool construction_access_waived_ = false;
+        type_info* handle_construction_ = nullptr;   // the handle type a new / make_shared construction about to start yields
         int* active_run_pins_ = nullptr;
         std::vector<field_migration_report> hot_reload_reports_;
         void register_location_builtins();   // engine-core script builtins: root/current_script_dir, resolve_path, app dirs

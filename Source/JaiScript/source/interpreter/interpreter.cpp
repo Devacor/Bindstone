@@ -5504,6 +5504,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
 
             script_value constructorFunc = std::move(ctor_result.value());
             const script_function& func = constructorFunc.as_function();
+            detail::handle_construction_scope handle_scope(engine_, expr->type.get());   // KEEP BYTE-PARALLEL with vm_backend::exec_new
             auto result = call_value(func, {});  // Call with no args
             if (!result) {
                 return result.error_value();
@@ -5549,6 +5550,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
 
         script_value constructorFunc = std::move(ctor_result.value());
         const script_function& func = constructorFunc.as_function();
+        detail::handle_construction_scope handle_scope(engine_, expr->type.get());   // KEEP BYTE-PARALLEL with vm_backend::exec_new
         auto result = invoke_constructor(func, args);
         if (!result) {
             return result.error_value();
@@ -5744,6 +5746,9 @@ checked_result<void> interpreter::visit_this_expr(this_expr* expr) {
         // 'this' can only be used inside methods
         return checked_result<void>(make_error_code(runtime_error_code::this_outside_method),
             "'this' can only be used inside methods");
+    }
+    if (expr->into_handle && !this_ptr->is_shared_ptr_type()) {   // KEEP BYTE-PARALLEL with vm_backend::exec_this
+        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), detail::this_into_handle_text);
     }
     push_value(*this_ptr);
     return {};

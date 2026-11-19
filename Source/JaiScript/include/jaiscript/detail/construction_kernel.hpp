@@ -260,6 +260,7 @@ template <class Host>
 checked_result<script_value> construct_default_instance(Host& host, const std::shared_ptr<script_class_definition>& cls,
                                                         const std::vector<script_value>& args) {
 	// arguments to a class without a constructor: a copy, or aggregate initialization
+	type_info* const handle = take_handle_construction(host.eng);
 	aggregate_plan aggregate;
 	if (!args.empty()) {
 		aggregate = plan_aggregate(*cls, args);
@@ -276,7 +277,7 @@ checked_result<script_value> construct_default_instance(Host& host, const std::s
 		// C++: the implicit default constructor, its bases ahead of its fields
 		auto instance = cls->create_instance();
 		instance->construction_pending(true);
-		auto this_value = script_value::make_class_object(*cls, instance, host.eng);
+		auto this_value = constructed_this(*cls, instance, handle, host.eng);
 		const auto definition_env = sandbox ? sandbox : cls->namespace_scope() ? cls->namespace_scope()
 			: cls->base_needs_construction() ? host.global_environment() : environment_chain_root(host.current_environment());
 		auto constructed = host.construct_implicitly(cls, definition_env, this_value);
@@ -286,7 +287,7 @@ checked_result<script_value> construct_default_instance(Host& host, const std::s
 	}
 	call_depth_guard initializer_depth(host.call_depth);
 	auto instance = cls->create_instance();
-	auto this_value = script_value::make_class_object(*cls, instance, host.eng);
+	auto this_value = constructed_this(*cls, instance, handle, host.eng);
 	if (!aggregate.fills()) {
 		if (!instance->seeded_from_plan()) { stamp_literal_field_initializers(*instance, *cls, false, host.eng); }
 		return this_value;

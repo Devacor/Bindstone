@@ -4181,6 +4181,13 @@ private:
         return result;
     }
 
+    // `this` stored into a handle slot: it is the handle's object where the receiver is one (a method called through a handle, a
+    // constructor new runs), and on a class value the run raises rather than copy it
+    static void note_this_into_handle(const ctype& src, const type_info* target) {
+        if (src.origin && src.origin->get_type() == node_type::this_expr && handle_type(target)) {
+            static_cast<this_expr*>(const_cast<expression*>(src.origin))->into_handle = true;
+        }
+    }
     // a class held by value (never null); a handle, a var and an unknown wrapper are not
     static bool class_value(const ctype& t) {
         return t.kind == ctype::object_k && t.ti && t.ti->base_type == script_value_type::jai_object_type && !t.ti->type_name.empty();
@@ -4188,6 +4195,7 @@ private:
     // A class held by value copies out of the handle a dynamic_cast<T>(e) gives, which is null where e is no T: the warning beside
     // cast<T>(handle)'s names the tested form and the reference form
     void warn_dynamic_handle_copy(const ctype& src, const ctype& dst) {
+        note_this_into_handle(src, dst.ti);
         if (!collect_diagnostics_ || !class_value(dst) || !src.origin || src.origin->get_type() != node_type::cast_expr) { return; }
         const auto* c = static_cast<const cast_expr*>(src.origin);
         if (!c->dynamic || c->by_reference || !c->target || !c->target->element_type() || class_relation(src.cls, dst.cls) == 0) { return; }
@@ -7370,6 +7378,7 @@ private:
         }
         if (c->dynamic) { check_dynamic_cast(c, operand_t); }
         refuse_handle_of_value(c, operand_t);
+        if (!c->by_reference && !c->truth_read) { note_this_into_handle(operand_t, c->target.get()); }
         if (collect_diagnostics_ && !c->by_reference && c->target->base_type == script_value_type::jai_object_type) {
             warn_cast_copy(c, operand_t);
         }
@@ -8212,10 +8221,12 @@ private:
             if (recv.kind == ctype::coroutine_k && !m->is_static) { return coroutine_method_call(recv, m, c, args); }
             if (ctype t; binary_member_call(c, m, recv, args, t)) { return t; }
             if (recv.kind == ctype::array_k && recv.ti && m->member == "insert" && args.size() == 2) {
+                note_this_into_handle(args[1], recv.ti->element_type().get());
                 const auto issue = container_element_issue(args[1], recv.ti->element_type().get());
                 if (!issue.empty()) { diag(diag_level::error, c->location, "cannot insert into '" + ctype_name(recv) + "': " + issue); }
             }
             if (recv.kind == ctype::array_k && recv.ti && m->member == "push" && args.size() == 1) {
+                note_this_into_handle(args[0], recv.ti->element_type().get());
                 const auto issue = container_element_issue(args[0], recv.ti->element_type().get());
                 if (!issue.empty()) {
                     diag(diag_level::error, c->location, "cannot push into '" + ctype_name(recv) + "': " + issue);

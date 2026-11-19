@@ -3324,7 +3324,7 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 		compile_import_expression(expr);
 		return;
 	case node_type::this_expr:
-		emit(opcode::op_this);
+		emit(opcode::op_this, static_cast<const this_expr*>(expr.get())->into_handle ? 1u : 0u);
 		return;
 	case node_type::super_expr:
 		emit(opcode::op_super);

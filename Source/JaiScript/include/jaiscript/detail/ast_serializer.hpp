@@ -37,7 +37,7 @@ namespace jai::detail {
     // BUMP THIS on any change to what a parse produces: the serialized bytes and the parse-time semantics baked into the
     // AST (slot assignment, node and token numbers, capture plans). A stale sidecar is reparsed and rewritten (the version
     // check feeds the corrupt-file fallback), so a bump is always safe and a missed one leaves stale caches.
-    inline constexpr uint32_t k_jaibite_version = 65;
+    inline constexpr uint32_t k_jaibite_version = 66;
     // Header flags (u32):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -332,6 +332,8 @@ namespace jai::detail {
                     write_map_literal_expr(n);
                     break;
                 case node_type::this_expr:
+                    u8(static_cast<const this_expr*>(n)->into_handle ? 1 : 0);
+                    break;
                 case node_type::super_expr:
                     break;
                 case node_type::throw_expr:
@@ -1524,6 +1526,7 @@ namespace jai::detail {
 
         JAI_NOINLINE ast_node_ptr read_this_expr(const source_location& loc) {
             auto e = std::make_shared<this_expr>(loc);
+            e->into_handle = u8() != 0;
             return e;
         }
 

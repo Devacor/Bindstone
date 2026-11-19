@@ -1191,7 +1191,6 @@ public:
                 {"array<Dog> ds; ds.push(Dog()); shared_ptr<Dog> h = ds[0]; h.name = \"x\"; OUT = ds[0].name;", "d"},
                 {"Kennel k; shared_ptr<Dog> h = k.resident; h.name = \"x\"; OUT = k.resident.name;", "d"},
                 {"Dog d; shared_ptr<Dog> h = true ? d : d; h.name = \"x\"; OUT = d.name;", "d"},
-                {"Dog d; auto h = d.own(); h.name = \"x\"; OUT = d.name;", "d"},
                 {"shared_ptr<Dog> a = new Dog(); auto h = a.own(); h.name = \"x\"; OUT = a.name;", "x"},
                 {"Dog d; array<shared_ptr<Dog>> all; all.push(d); all[0].name = \"x\"; OUT = `${d.name} ${all[0].copies}`;", "d 1"},
                 {"array<shared_ptr<Dog>> all; all.push(Dog()); OUT = to_string(all[0].copies);", "0"},
@@ -1229,6 +1228,21 @@ public:
             }
             check_eq((int64_t)2, fresh()->execute(classes + "int bump() { Dog s = Pup(); if (dynamic_cast<Pup>(s)) { s.bones += 1; return s.bones; } return 0; } bump();").as_int(),
                      "the test narrows the slot, and a write reaches it");
+            // a constructor new or make_shared runs builds the handle's object: a handle made from its `this` shares it
+            const std::string registry = R"(
+                array<shared_ptr<Ent>> REG;
+                shared_ptr<Ent> LAST = null;
+                void keep(shared_ptr<Ent> e) { LAST = e; }
+                class Ent { int n = 0; shared_ptr<Ent> self = null; Ent() { REG.push(this); self = this; keep(this); auto same = shared_from_this(); same.n = 1; } }
+            )";
+            check_eq(std::string("1|5|6|7|true|8"), fresh()->execute(registry + R"(
+                auto e = new Ent(); string out = to_string(e.n);
+                REG[0].n = 5; out += "|" + to_string(e.n);
+                e.self.n = 6; out += "|" + to_string(e.n);
+                LAST.n = 7; out += "|" + to_string(e.n) + "|" + to_string(same_object(e, REG[0]) && same_object(e, LAST));
+                auto m = make_shared<Ent>(); REG[1].n = 8; out += "|" + to_string(m.n);
+                e.self = null; m.self = null; out;
+            )").as_string(), "this in a constructor new runs is the handle's object");
             const auto refusal = [&](const std::string& body) {
                 try { fresh()->execute(classes + body); } catch (const std::exception& ex) { return std::string(ex.what()); }
                 return std::string("loaded");
@@ -1249,7 +1263,11 @@ public:
                 {"Kennel k; auto h = dynamic_cast<Dog>(k.resident);", names_both("dynamic_cast<Dog>(k.resident)", "k.resident", "Dog")},
                 {"Dog d; d.me();", "shared_from_this() needs an object reached through a shared_ptr, and this one is a class value"},
                 {"Dog d; d.weak_me();", "weak_from_this() needs an object reached through a shared_ptr, and this one is a class value"},
-                {"class Early { Early() { auto s = shared_from_this(); } } new Early();", "shared_from_this() needs an object reached through a shared_ptr, and this one is a class value"},
+                {"class Early { Early() { auto s = shared_from_this(); } } Early e;", "shared_from_this() needs an object reached through a shared_ptr, and this one is a class value"},
+                // `this` into a handle on a class value raises; a copy would be another object
+                {"Dog d; d.own();", "'this' becomes a handle only on an object reached through a shared_ptr, and this one is a class value"},
+                {"array<shared_ptr<Ent>> REG; class Ent { Ent() { REG.push(this); } } Ent e;", "'this' becomes a handle only on an object reached through a shared_ptr, and this one is a class value"},
+                {"class Ent { shared_ptr<Ent> self = null; Ent() { self = this; } } shared_ptr<Ent> h = Ent();", "'this' becomes a handle only on an object reached through a shared_ptr, and this one is a class value"},
             };
             for (const auto& row : refused) { check_true(refusal(row.first).find(row.second) != std::string::npos, row.first); }
         });

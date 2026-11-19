@@ -353,13 +353,17 @@ public:
                 if (dynamic_cast<Counted>(counted)) { before += 100; }
                 auto handed = dynamic_cast<Counted>(counted);
                 before += handed.copies * 10 + counted.copies;
+                class Owner { shared_ptr<Owner> me() { shared_ptr<Owner> s = this; return s; } }
+                Owner owner;
+                var raised = "";
+                try { owner.me(); } catch (e) { raised = e; }
                 T tmp = T();
                 auto& r = cast<T&>(tmp);
                 r.t = 3;
                 var f = 2.7;
                 var c = "";
                 try { var bad = cast<H>(h.p); } catch (e) { c = e; }
-                to_string(before) + "|" + to_string(cast<T&>(h.p).t) + "|" + to_string(tv.t) + "|" + to_string(tmp.t) + "|" + to_string(cast<int>(f)) + "|" + cast<string>(42) + "|" + c;
+                raised + "|" + to_string(before) + "|" + to_string(cast<T&>(h.p).t) + "|" + to_string(tv.t) + "|" + to_string(tmp.t) + "|" + to_string(cast<int>(f)) + "|" + cast<string>(42) + "|" + c;
             )"},
                 {"namespace_classes_keep_their_qualified_names", R"(
                 namespace spider {
@@ -440,7 +444,7 @@ public:
             // the format version sits right after the 4-byte magic
             using namespace jaibite_test_detail;
             auto bytes = fresh_engine(false, {})->jaibite("[[warn_mode]];\nextern int q;\nvar v = 1;").save_bytes();
-            check_eq((int)65, (int)bytes[4], "jaibite format version");
+            check_eq((int)66, (int)bytes[4], "jaibite format version");
             {   // import(...) round-trips: literal paths, a group, computed arguments and jai::force
                 const auto dir = jai::foundry::test_temp_directory();
                 { std::ofstream(dir / "jb_imp_a.jai") << "int JB_A = 3;\n"; }

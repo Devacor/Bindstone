@@ -14630,6 +14630,9 @@ checked_result<script_value> vm_backend::eval_expression(const expression_ptr& e
 
 op_status vm_backend::exec_this(frame& f, const vm_instruction& ins) {
 	if (script_value* tp = current_this(f)) {
+		if (ins.a && !tp->is_shared_ptr_type()) [[unlikely]] {   // KEEP BYTE-PARALLEL with interpreter::visit_this_expr
+			return raise_(make_error_code(runtime_error_code::type_mismatch), detail::this_into_handle_text);
+		}
 		stack_.push_back(*tp);
 		return {};
 	}
@@ -18220,6 +18223,8 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 	auto* expr = static_cast<new_expr*>(f.code->nodes[ins.a].get());
 	const size_t argc = ins.b;
+	// KEEP BYTE-PARALLEL with interpreter::visit_new_expr_t: the arguments are evaluated, so the construction this starts takes the stamp
+	detail::handle_construction_scope handle_scope(engine_, expr->type && expr->type->base_type == script_value_type::jai_shared_ptr_type ? expr->type.get() : nullptr);
 
 	auto args = acquire_arg_vector(argc);
 	arg_vector_return arg_return{this, &args, argc};

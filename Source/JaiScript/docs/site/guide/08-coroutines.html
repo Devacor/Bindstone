@@ -176,7 +176,7 @@ charge: charging
 charge: slam</code></pre></div>
 <p>A copy of the object takes the behaviour with it: the copy's <code>brain</code> is its own coroutine, paused where the original's is and acting on the copy, as a save and a load would give (<a href="03-value-semantics.html#copies-share-a-coroutine">Value Semantics</a>). A copy of the handle alone, <code>auto b = boss.brain;</code>, is the same coroutine.</p>
 <h2 id="saving">Saving<a class="hlink" href="#saving" aria-label="link">&#8203;</a></h2>
-<p>A paused coroutine is data. <code>to_json</code>, <code>to_binary</code> and <code>to_base64</code> write a handle wherever a value holds one (a variable, a container, a field), and the matching load gives back a coroutine paused at the same <code>yield</code> with the same locals, in the same program or in another engine running the same code.</p>
+<p>A paused coroutine is data. <code>to_json</code> and <code>to_binary</code> write a handle wherever a value holds one (a variable, a container, a field), and the matching load gives back a coroutine paused at the same <code>yield</code> with the same locals, in the same program or in another engine running the same code.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Boss {
     int hp = 30;
     coroutine string fight() {

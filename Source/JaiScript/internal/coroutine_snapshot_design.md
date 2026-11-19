@@ -1,6 +1,6 @@
 # Paused coroutines as data
 
-A coroutine handle saves and loads: `to_json` / `to_binary` / `to_base64` write a paused coroutine and the matching
+A coroutine handle saves and loads: `to_json` / `to_binary` write a paused coroutine and the matching
 loaders rebuild it at the same point, in the same engine or in a fresh engine running the same code. The interpreter and
 the VM write the same bytes for the same program state and each loads what the other wrote. The kernel is `detail/coroutine_snapshot.hpp` + `source/implementation/coroutine_snapshot.cpp`;
 each backend supplies two functions (`paused_coroutine_frame`, `pause_coroutine_at`).

@@ -681,8 +681,6 @@ print(w.size(), &quot; &quot;, to_json(w.to_string().to_bytes()));</code></pre><
 </div>
 <div class="api-entry" data-provider="core" data-search="format_value(value: var, specification: string) -&gt; string observe  every engine"><h3 id="api-497d9b94d285"><code>format_value(value: var, specification: string) -&gt; string</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
-<div class="api-entry" data-provider="stdlib" data-search="from_base64(text: string) -&gt; var deserialize  register_all() or area registration"><h3 id="api-2eb250be61c8"><code>from_base64(text: string) -&gt; var</code></h3><p><strong>register_all() or area registration</strong> &middot; deserialize</p>
-</div>
 <div class="api-entry" data-provider="stdlib" data-search="from_binary(bytes: string) -&gt; var deserialize  register_all() or area registration"><h3 id="api-5079eb33ba75"><code>from_binary(bytes: string) -&gt; var</code></h3><p><strong>register_all() or area registration</strong> &middot; deserialize</p>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="from_json(text: string) -&gt; var deserialize reconstructs registered classes when tagged; otherwise values/maps/arrays. register_all() or area registration"><h3 id="api-a94ccf3230d6"><code>from_json(text: string) -&gt; var</code></h3><p><strong>register_all() or area registration</strong> &middot; deserialize</p>
@@ -792,9 +790,6 @@ print(same_object(a, b), &quot; &quot;, same_object(a, r), &quot; &quot;, a == b
 </div>
 <div class="api-entry" data-provider="core" data-search="thread_count() -&gt; int observe the threads a parallel region runs on: the count the host set, else the performance cores, at most one fewer than the hardware threads. every engine"><h3 id="api-727520fe6e22"><code>thread_count() -&gt; int</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>The threads a parallel region runs on: the count the host set, else the performance cores, at most one fewer than the hardware threads.</p>
-</div>
-<div class="api-entry" data-provider="stdlib" data-search="to_base64(value: var) -&gt; string serialize binary archive encoded as base64. register_all() or area registration"><h3 id="api-cb32484c788c"><code>to_base64(value: var) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; serialize</p>
-<p>Binary archive encoded as Base64.</p>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="to_binary(value: var) -&gt; string serialize binary archive bytes, not a human-readable format. register_all() or area registration"><h3 id="api-0cf6cbcdbc2e"><code>to_binary(value: var) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; serialize</p>
 <p>Binary archive bytes, not a human-readable format.</p>

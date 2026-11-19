@@ -1062,7 +1062,7 @@ public:
                 function trip(var v, string how) -> var {
                     if (how == "json") { return from_json(to_json(v)); }
                     if (how == "binary") { return from_binary(to_binary(v)); }
-                    return from_base64(to_base64(v));
+                    return from_binary(base64_decode(base64_encode(to_binary(v))));
                 }
                 string out = "";
                 for (string how : ["json", "binary", "base64"]) {

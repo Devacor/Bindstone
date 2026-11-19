@@ -82,7 +82,7 @@ public:
 				random a(1234);
 				a.next_float();
 				var json = from_json(to_json(a));
-				var binary = from_base64(to_base64(a));
+				var binary = from_binary(base64_decode(base64_encode(to_binary(a))));
 				random copied(1);
 				copied.state = a.state;
 				int x = a.next_int(0, 1000000000);

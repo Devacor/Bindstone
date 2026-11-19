@@ -219,7 +219,7 @@ try { print(red + math::vec4(1, 1, 1, 1)); } catch (e) { print(e); }</code></pre
 Invalid operands for + operator</code></pre></div>
 <h2 id="arrays-and-maps-of-vectors">Arrays, maps, text and JSON<a class="hlink" href="#arrays-and-maps-of-vectors" aria-label="link">&#8203;</a></h2>
 <p><code>array&lt;math::vec3&gt;</code> (and the same for every math type) is a packed typed buffer. An element reads as a copy, element components store in place, and the element boundary widens an ivec as a slot does; an <code>array&lt;math::ivec3&gt;</code> into an <code>array&lt;math::vec3&gt;</code> copies element by element. An ivec makes a natural map key.</p>
-<p id="text-and-json">Text is the components in parentheses, floats in the shortest form that reads back the same 32-bit value. <code>to_json</code> writes the type and the named components and <code>from_json</code> rebuilds the same type; the binary archive (<code>to_base64</code> / <code>from_base64</code>) keeps the exact bits.</p>
+<p id="text-and-json">Text is the components in parentheses, floats in the shortest form that reads back the same 32-bit value. <code>to_json</code> writes the type and the named components and <code>from_json</code> rebuilds the same type; the binary archive (<code>to_binary</code> / <code>from_binary</code>) keeps the exact bits.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;math::vec3&gt; pts = [math::vec3(4, 5, 6), math::vec3(1, 2, 3)];
 pts.push(math::ivec3(1, 0, 9));                 // the element boundary widens
 pts[0].x += 10;
@@ -231,7 +231,7 @@ tiles[math::ivec2(1, 2)] = "door";
 print(pts, " ", cells[0], " ", tiles[math::ivec2(1, 2)]);
 
 string j = to_json(math::vec2(0.1, 1e30));
-print(j, " ", reflect::type_of(from_json(j)), " ", from_base64(to_base64(math::color(1, 0.5, 0))));</code></pre></div>
+print(j, " ", reflect::type_of(from_json(j)), " ", from_binary(to_binary(math::color(1, 0.5, 0))));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Cannot push &#x27;math::vec2&#x27; to array&lt;math::vec3&gt;
 [(1.0, 0.0, 9.0), (1.0, 2.0, 3.0), (14.0, 5.0, 6.0)] (1, 0, 9) door
 {&quot;$type&quot;:&quot;math::vec2&quot;,&quot;$val&quot;:{&quot;x&quot;:0.1,&quot;y&quot;:1e+30}} math::vec2 (1.0, 0.5, 0.0, 1.0)</code></pre></div>

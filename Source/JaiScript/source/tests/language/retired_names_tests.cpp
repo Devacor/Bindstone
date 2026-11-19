@@ -146,6 +146,17 @@ public:
 			check_eq(std::string("host:p\n"), run_output(e, "print(delete_file(\"p\"));\n"));
 		});
 
+		test("archive_base64_is_two_calls", [this]() {
+			check_true(load_errors("var t = to_base64([1, 2]);").find("JaiScript has no 'to_base64': write base64_encode(to_binary(value))") != std::string::npos, "to_base64");
+			check_true(load_errors("var v = from_base64(\"AA==\");").find("JaiScript has no 'from_base64': write from_binary(base64_decode(text))") != std::string::npos, "from_base64");
+			check_eq(std::string("true {\"a\": [1, 2]} true\n"), run_output(
+				"map<string, array<int>> m = {\"a\": [1, 2]};\n"
+				"string text = base64_encode(to_binary(m));\n"
+				"var back = from_binary(base64_decode(text));\n"
+				"print(base64_decode(text) == to_binary(m), \" \", back, \" \", back == m);\n"));
+			check_eq(std::string("mine [1]\n"), run_output("string to_base64(var v) { return \"mine \" + to_string(v); }\nprint(to_base64([1]));\n"));
+		});
+
 		test("an_engine_without_the_replacement_reports_the_plain_undeclared_name", [this]() {
 			auto e = make_engine();
 			stdlib::register_all(*e);

@@ -48,7 +48,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <article class="chapter"><h1 id="serialization">Serialization<a class="hlink" href="#serialization" aria-label="link">&#8203;</a></h1>
 <p>JaiScript serializes at two layers that share one wire vocabulary.</p>
 <ul id="which-layer-to-use">
-<li><strong>Script archives</strong> write a script value: the builtins <code>to_json</code> / <code>from_json</code>, <code>to_binary</code> / <code>from_binary</code> and <code>to_base64</code> / <code>from_base64</code>. Use them for script gameplay state.</li>
+<li><strong>Script archives</strong> write a script value: the builtins <code>to_json</code> / <code>from_json</code>, <code>to_binary</code> / <code>from_binary</code> (<code>base64_encode(to_binary(v))</code> for text). Use them for script gameplay state.</li>
 <li><strong>C++ archives</strong> write a host type as JSON or compact binary (<code>jai::to_json</code>, <code>jai::from_json&lt;T&gt;</code>, <code>jai::to_binary</code> and siblings). They dispatch like Cereal, to a member or free <code>serialize</code> / <code>save</code> / <code>load</code>, or to the <code>JAI_PROPERTY</code> fields of a <code>property_owner</code>. Use them for host objects, editor documents and network payloads.</li>
 </ul>
 <p>The rules that govern both:</p>
@@ -91,7 +91,7 @@ int 7, float
 <li>A known <code>$type</code> is constructed as <code>Name()</code> would construct it, then the payload writes its fields in declaration order (base first). The name is matched whatever its spacing (<code>"Duo&lt;int,string&gt;"</code> loads a <code>Duo&lt;int, string&gt;</code>) and written as the class is registered. A constructor that throws fails the <code>from_json</code> call with that error.</li>
 <li>An unknown <code>$type</code> is data, not an error: the load yields a plain <code>map</code> with both keys intact. So is a malformed tag (<code>{"$char": 300}</code>, a <code>$map</code> whose entries are not pairs).</li>
 <li>A <code>null</code> loads into a handle field as <code>= null</code> stores it. A weak pointer whose object nothing else in the save holds loads expired. An id the save never wrote fails with <code>Invalid shared_ptr ID: 4</code>.</li>
-<li>Floats round-trip at full precision (<code>-0.0</code> keeps its sign). JSON cannot spell an infinity or a NaN, so <code>to_json</code> writes <code>null</code>; <code>to_base64</code> / <code>from_base64</code> keep the exact bits.</li>
+<li>Floats round-trip at full precision (<code>-0.0</code> keeps its sign). JSON cannot spell an infinity or a NaN, so <code>to_json</code> writes <code>null</code>; <code>to_binary</code> / <code>from_binary</code> keep the exact bits.</li>
 <li>A payload nests as deep as memory allows. Only a host record type&#x27;s own recursion is bounded, by the host thread&#x27;s stack or <code>JAI_MAX_HOST_RECORD_DEPTH</code> = 1024 records.</li>
 <li>Trailing garbage is rejected, an invalid unicode escape is a serialization error, and a lone surrogate becomes the replacement character.</li>
 <li>A coroutine handle saves as the paused coroutine it is, and loads paused at the same <code>yield</code>, in this engine or in another running the same code (<a href="#coroutines">below</a>). A function value does not save: <code>to_json</code> writes <code>null</code> for one, <code>to_binary</code> raises.</li>

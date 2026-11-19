@@ -2740,30 +2740,6 @@
     },
     {
       "owner": "global",
-      "name": "to_base64",
-      "signature": "to_base64(value: var) -> string",
-      "provider": "stdlib",
-      "effect": "serialize",
-      "notes": "Binary archive encoded as Base64.",
-      "source": "include/jaiscript/stdlib/json.hpp",
-      "form": "function",
-      "availability": "register_all() or area registration",
-      "display": "to_base64(value: var) -> string"
-    },
-    {
-      "owner": "global",
-      "name": "from_base64",
-      "signature": "from_base64(text: string) -> var",
-      "provider": "stdlib",
-      "effect": "deserialize",
-      "notes": "",
-      "source": "include/jaiscript/stdlib/json.hpp",
-      "form": "function",
-      "availability": "register_all() or area registration",
-      "display": "from_base64(text: string) -> var"
-    },
-    {
-      "owner": "global",
       "name": "base64_encode",
       "signature": "base64_encode(bytes: string) -> string",
       "provider": "stdlib",

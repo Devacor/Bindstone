@@ -272,7 +272,7 @@ public:
             expect("var c = math::color(); string m = \"\"; try { math::vec4 v = c; } catch (e) { m = e; } to_string(m.contains(\"declared math::vec4\"))", "true", "a color does not convert to a vec4");
             expect("to_json(math::color(1, 0.5, 0, 1))", "{\"$type\":\"math::color\",\"$val\":{\"r\":1.0,\"g\":0.5,\"b\":0.0,\"a\":1.0}}", "JSON channels");
             expect("var c = from_json(to_json(math::color(0.1, 0.2, 0.3, 0.4))); to_string(c) + reflect::type_of(c)", "(0.1, 0.2, 0.3, 0.4)math::color", "JSON math::round trip");
-            expect("var c = from_base64(to_base64(math::color(0.1, 0.2, 0.3, 0.4))); to_string(c)", "(0.1, 0.2, 0.3, 0.4)", "binary round trip");
+            expect("var c = from_binary(base64_decode(base64_encode(to_binary(math::color(0.1, 0.2, 0.3, 0.4))))); to_string(c)", "(0.1, 0.2, 0.3, 0.4)", "binary round trip");
             // OKLab (reference values from an independent implementation of Ottosson's transform)
             expect("var m = math::mix(math::color(1, 0, 0), math::color(0, 0, 1), 0.5); "
                    "to_string(math::abs(m.r - 0.55044109) < 1e-5 && math::abs(m.g - 0.32562068) < 1e-5 && math::abs(m.b - 0.63650066) < 1e-5 && m.a == 1.0)",
@@ -604,7 +604,7 @@ public:
             expect("array<math::vec2> a = [math::vec2(1, 2)]; array<math::vec2> b = [math::vec2(3, 4)]; var c = array::append(a, b); c[1].x = 7; c.join(\" \") + b.join(\" \")",
                    "(1.0, 2.0) (7.0, 4.0)(3.0, 4.0)", "concatenate");
             expect("array<math::vec2> a = [math::vec2(1, 2), math::vec2(3, 4), math::vec2(5, 6)]; array::slice(a, 1, 3).join(\" \")", "(3.0, 4.0) (5.0, 6.0)", "slice");
-            expect("array<math::vec2> a = [math::vec2(0.1, 1e30)]; var j = from_json(to_json(a)); var b = from_base64(to_base64(a)); j.join(\" \") + b.join(\" \")",
+            expect("array<math::vec2> a = [math::vec2(0.1, 1e30)]; var j = from_json(to_json(a)); var b = from_binary(base64_decode(base64_encode(to_binary(a)))); j.join(\" \") + b.join(\" \")",
                    "(0.1, 1e+30)(0.1, 1e+30)", "text and binary archives");
             expect(raised("array<math::vec3> a; a.push(math::vec2(1, 2));"), "Cannot push 'math::vec2' to array<math::vec3>", "another dimension rejects");
             expect(raised("array<math::vec3> a = [math::vec3()]; var five = 5; a[0] = five;"), "Cannot assign 'int' to element of type 'math::vec3'", "a scalar element store rejects");
@@ -662,9 +662,9 @@ public:
         });
 
         test("binary_archive", [expect]() {
-            expect("var v = from_base64(to_base64(math::vec3(0.1, -2, 1e30))); to_string(v) + reflect::type_of(v)", "(0.1, -2.0, 1e+30)math::vec3", "binary32 bits math::round trip");
-            expect("var p = from_base64(to_base64(math::ivec2(-2147483647 - 1, 7))); to_string(p)", "(-2147483648, 7)", "int32 bits round trip");
-            expect("var q = from_base64(to_base64(math::vec4(0.1, 2, 3, -4))); to_string(q) + reflect::type_of(q)", "(0.1, 2.0, 3.0, -4.0)math::vec4", "vec4 math::round trip");
+            expect("var v = from_binary(base64_decode(base64_encode(to_binary(math::vec3(0.1, -2, 1e30))))); to_string(v) + reflect::type_of(v)", "(0.1, -2.0, 1e+30)math::vec3", "binary32 bits math::round trip");
+            expect("var p = from_binary(base64_decode(base64_encode(to_binary(math::ivec2(-2147483647 - 1, 7))))); to_string(p)", "(-2147483648, 7)", "int32 bits round trip");
+            expect("var q = from_binary(base64_decode(base64_encode(to_binary(math::vec4(0.1, 2, 3, -4))))); to_string(q) + reflect::type_of(q)", "(0.1, 2.0, 3.0, -4.0)math::vec4", "vec4 math::round trip");
         });
 
         test("static_checker", [this]() {

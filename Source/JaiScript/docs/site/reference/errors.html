@@ -463,7 +463,7 @@ try {
 </tbody></table></div>
 <h4 id="errors-archives">Archives<a class="hlink" href="#errors-archives" aria-label="link">&#8203;</a></h4>
 <div class="tablewrap"><table><thead><tr><th>Text</th><th>When</th><th>Fix</th></tr></thead><tbody>
-<tr id="err-invalid-shared-ptr-id"><td><code>Invalid shared_ptr ID: 4</code></td><td><code>from_json</code>, <code>from_binary</code> or <code>from_base64</code> of a handle whose object the save never wrote.</td><td>Load unedited data a matching save wrote.</td></tr>
+<tr id="err-invalid-shared-ptr-id"><td><code>Invalid shared_ptr ID: 4</code></td><td><code>from_json</code> or <code>from_binary</code> of a handle whose object the save never wrote.</td><td>Load unedited data a matching save wrote.</td></tr>
 <tr id="err-save-coroutine-running"><td><code>Cannot save coroutine 'fight': it is running</code></td><td>A save reaches a coroutine from inside its own body, or from inside a step it is taking.</td><td>Save between steps.</td></tr>
 <tr id="err-save-coroutine-in-expression"><td><code>Cannot save coroutine 'fight': it is paused inside an expression, and only a yield that is its own statement is saved</code></td><td>The coroutine is paused at a <code>yield</code> used as a value (<code>int x = yield 1;</code>, <code>f(yield 1)</code>).</td><td>Write the <code>yield</code> as its own statement.</td></tr>
 <tr id="err-save-coroutine-in-catch"><td><code>Cannot save coroutine 'fight': it is paused inside a catch block</code></td><td>The coroutine is paused at a <code>yield</code> in a <code>catch</code> block.</td><td>Yield after the <code>catch</code>.</td></tr>
@@ -798,6 +798,8 @@ try {
 <tr><td><code>writable_dir(p)</code></td><td><code>JaiScript has no 'writable_dir': write file::ensure_writable_directory(path)</code></td></tr>
 <tr><td><code>type_of(x)</code></td><td><code>JaiScript has no 'type_of': write reflect::type_of(x)</code></td></tr>
 <tr><td><code>is_registered_type(x)</code></td><td><code>JaiScript has no 'is_registered_type': write reflect::is_registered_type(x)</code></td></tr>
+<tr><td><code>to_base64(v)</code></td><td><code>JaiScript has no 'to_base64': write base64_encode(to_binary(value))</code></td></tr>
+<tr><td><code>from_base64(s)</code></td><td><code>JaiScript has no 'from_base64': write from_binary(base64_decode(text))</code></td></tr>
 </tbody></table></div>
 <p>Other parse errors in the same voice:</p>
 <ul>

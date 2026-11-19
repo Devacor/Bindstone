@@ -5618,7 +5618,7 @@ public:
                 {"var a = [1, 2]; to_string(a[1]) + format(\"{}\", a[0]);", "21"},
                 {"var a = [[1, 2], [3]]; var s = to_json(a[1], 2); s;", "[\n  3\n]"},
                 {"var a = [[1, 2], [3]]; to_binary(a[0]) == to_binary([1, 2]);", "true"},
-                {"var a = [[1, 2], [3]]; to_base64(a[0]) == to_base64([1, 2]);", "true"},
+                {"var a = [[1, 2], [3]]; base64_encode(to_binary(a[0])) == base64_encode(to_binary([1, 2]));", "true"},
             };
             std::string misses;
             for (const auto& [src, want] : rows) {

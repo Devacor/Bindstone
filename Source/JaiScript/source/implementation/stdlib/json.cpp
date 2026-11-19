@@ -720,32 +720,6 @@ namespace stdlib {
 			return result;
         }, serial);
 
-        eng_ref.add_variadic_function("to_base64", [eng](const std::vector<script_value>& args) -> script_value {
-            if (args.size() != 1) {
-                throw runtime_error("to_base64 expects exactly 1 argument, got " + std::to_string(args.size()));
-            }
-
-            serialization::binary_archive_writer writer(eng);
-            writer.count_work();
-            writer.write_value(args[0]);
-
-            const auto& data = writer.data();
-            std::string binary_str(data.begin(), data.end());
-            return script_value(base64_encode(binary_str), eng);
-        }, serial);
-
-        eng_ref.add_function("from_base64", [eng](const std::string& base64_str) -> script_value {
-            std::string binary_str = base64_decode(base64_str);
-            std::vector<uint8_t> data(binary_str.begin(), binary_str.end());
-
-            detail::engine_access::load_session session(eng);
-            serialization::binary_archive_reader reader(data, eng);
-            reader.count_work();
-			script_value result = load_archive_value(eng, reader.read_value(), false);
-			session.complete();
-			return result;
-        }, serial);
-
         eng_ref.add_function("base64_encode", [eng](const std::string& input) -> script_value {
             return script_value(base64_encode(input), eng);
         });

@@ -3627,7 +3627,7 @@ public:
 			const std::set<std::string> serial = {
 				"__jai_parallel_range",
 				"app_cache_dir", "app_data_dir", "array::filter", "array::map", "array::sort", "crypto::sha256_file", "extend",
-				"file::data", "from_base64", "from_binary", "from_json", "import_recheck_interval", "map::filter", "parallel_reduce",
+				"file::data", "from_binary", "from_json", "import_recheck_interval", "map::filter", "parallel_reduce",
 				"parallel_transform", "print", "reflect::bases", "reflect::bind", "reflect::call", "reflect::classes",
 				"reflect::construct", "reflect::construct_shared", "reflect::fields", "reflect::function_arguments",
 				"reflect::functions", "reflect::generation", "reflect::get", "reflect::globals", "reflect::has_field",
@@ -3638,7 +3638,7 @@ public:
 				"template#dynamic", "template#html", "template#raw", "template#scoped", "template#scoped_file", "template#splice",
 				"time::date", "time::date_from_unix", "time::date_now", "time::engine_elapsed", "time::execute_elapsed",
 				"time::local_date", "time::local_now", "time::now", "time::stopwatch", "time::unix_ms", "time::unix_time",
-				"time::utc_date", "time::utc_now", "to_base64", "to_binary", "to_json"
+				"time::utc_date", "time::utc_now", "to_binary", "to_json"
 			};
 			const std::set<std::string> parallel = {
 				"array::append", "array::concat", "array::fill", "array::resize", "array::reverse", "array::slice", "base64_decode",

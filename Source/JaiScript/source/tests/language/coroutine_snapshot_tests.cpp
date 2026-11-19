@@ -55,9 +55,9 @@ public:
 			return out;
 		}
 		function at_step(int k) { var h = make(); for (int i = 0; i < k; ++i) { h.next(); } return h; }
-		function saved_binary(int k) { return to_base64(at_step(k)); }
+		function saved_binary(int k) { return base64_encode(to_binary(at_step(k))); }
 		function saved_json(int k) { return base64_encode(to_json(at_step(k))); }
-		function rest_binary(string s) { return steps_of(from_base64(s)); }
+		function rest_binary(string s) { return steps_of(from_binary(base64_decode(s))); }
 		function rest_json(string s) { return steps_of(from_json(base64_decode(s))); }
 	)";
 
@@ -351,7 +351,7 @@ public:
 			const std::pair<const char*, const char*> routes[] = {
 				{"World w; tick(w); tick(w); trace(w, 4)", "an uninterrupted world"},
 				{"World w; tick(w); tick(w); World loaded = from_json(to_json(w)); trace(w, 4); trace(loaded, 4)", "a world loaded from text"},
-				{"World w; tick(w); tick(w); World loaded = from_base64(to_base64(w)); trace(w, 4); trace(loaded, 4)", "a world loaded from bytes"},
+				{"World w; tick(w); tick(w); World loaded = from_binary(base64_decode(base64_encode(to_binary(w)))); trace(w, 4); trace(loaded, 4)", "a world loaded from bytes"},
 			};
 			for (const auto& [source, what] : routes) { check_both(prelude + source, expected, what); }
 			check_both(prelude + R"(
@@ -359,7 +359,7 @@ public:
 				tick(w);
 				string first = to_json(w);
 				string owners = `${first.contains("\"owner\":1")} ${first.contains("\"owner\":2")} ${first.contains("\"this\":{\"$id\":")} ${first.contains("\"field\":\"path\"")}`;
-				`${owners} ${first == to_json(from_json(first))} ${to_base64(w) == to_base64(from_base64(to_base64(w)))}`
+				`${owners} ${first == to_json(from_json(first))} ${base64_encode(to_binary(w)) == base64_encode(to_binary(from_binary(base64_decode(base64_encode(to_binary(w))))))}`
 			)", "true true true true true true", "a loaded world saves to the same text and bytes");
 			// a coroutine saved on its own brings its receiver; one whose receiver the save also holds by value elsewhere is refused
 			const std::string refused = "Cannot save coroutine 'Npc::think': its receiver is saved by value elsewhere in the same save; hold the receiver in a "
@@ -523,7 +523,7 @@ public:
 				 "true null Cannot resume a completed coroutine"},
 				{"auto h = count(0, 9); h.next(); var l = from_binary(to_binary([h, h, {\"again\": h}])); `${l[0].next()} ${l[1].next()} ${l[2][\"again\"].next()} ${h.next()}`", "1 2 3 1"},
 				{"auto h = Box::ticks(); h.next(); auto l = from_json(to_json(h)); `${l.next()} ${h.next()}`", "2 2"},
-				{"auto h = tools::twice(4); h.next(); auto l = from_base64(to_base64(h)); `${l.next()} ${h.next()} ${to_json(h).contains(\"tools::twice\")}`", "8 8 true"},
+				{"auto h = tools::twice(4); h.next(); auto l = from_binary(base64_decode(base64_encode(to_binary(h)))); `${l.next()} ${h.next()} ${to_json(h).contains(\"tools::twice\")}`", "8 8 true"},
 				{"shared_ptr<Box> b = Box(); auto h = b.drain(); h.next(); var l = from_json(to_json([b, h])); `${l[1].next()} ${l[0].n} ${b.n}`", "2 2 3"},
 				{"auto h = count(0, 3); h.next(); auto c = from_binary(to_binary(h)); auto d = h; `${c.next()} ${h.next()} ${d.next()} ${c.next()} ${c.next()} ${c.done()} ${h.done()}`", "1 1 2 2 99 true false"},
 				{"Box b; auto h = b.drain(); h.next(); auto c = from_binary(to_binary(h)); `${c.next()} ${h.next()} ${b.n}`", "2 2 2"},
@@ -673,7 +673,7 @@ public:
 				{"auto h = count(); to_json(h) != \"null\"", "true"},
 				{"auto h = count(); to_json([1, h]).contains(\"coroutine\")", "true"},
 				{"auto h = count(); from_binary(to_binary({\"k\": h}))[\"k\"].next()", "1"},
-				{"Boss b; b.brain.next(); from_base64(to_base64(b)).brain.done()", "false"},
+				{"Boss b; b.brain.next(); from_binary(base64_decode(base64_encode(to_binary(b)))).brain.done()", "false"},
 			};
 			for (const auto& [source, expected] : cases) { check_both(prelude + source, expected, source); }
 		});

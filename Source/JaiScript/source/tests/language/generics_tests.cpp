@@ -1213,7 +1213,7 @@ public:
 			e->add_function("spaced_blob", [blob]() { return blob; });
 			e->add_function("spaced_base64", [blob]() { return jai::detail::base64_encode(blob); });
 			check_eq(std::string("Duo<int, string>4"), e->execute("auto back = from_binary(spaced_blob()); reflect::type_of(back) + to_string(back.a);").as_string());
-			check_eq(std::string("Duo<int, string>4"), e->execute("auto again = from_base64(spaced_base64()); reflect::type_of(again) + to_string(again.a);").as_string());
+			check_eq(std::string("Duo<int, string>4"), e->execute("auto again = from_binary(base64_decode(spaced_base64())); reflect::type_of(again) + to_string(again.a);").as_string());
 			// an instance that waits and one the program never made are told from their keys too
 			check_eq(std::string("reflect::construct: 'Rack<Part>' is not declared yet: it waits for 'Part'|'Rack<Part>' is not declared yet: it waits for 'Part'"), e->execute(R"(
 				class Rack<T> { T v; }

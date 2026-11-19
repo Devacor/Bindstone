@@ -26,6 +26,8 @@ inline constexpr retired_name k_retired_names[] = {
 	{"writable_dir", "file::ensure_writable_directory", "JaiScript has no 'writable_dir': write file::ensure_writable_directory(path)"},
 	{"type_of", "", "JaiScript has no 'type_of': write reflect::type_of(x)"},
 	{"is_registered_type", "", "JaiScript has no 'is_registered_type': write reflect::is_registered_type(x)"},
+	{"to_base64", "base64_encode", "JaiScript has no 'to_base64': write base64_encode(to_binary(value))"},
+	{"from_base64", "base64_decode", "JaiScript has no 'from_base64': write from_binary(base64_decode(text))"},
 };
 
 inline constexpr const retired_name* find_retired_name(std::string_view name) noexcept {

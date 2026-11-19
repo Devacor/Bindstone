@@ -1,5 +1,5 @@
 // The fixture for spider::every: a task that outlasts its period and records each run, so overlapping runs would show,
-// and one that fails every time.
+// one that fails every time, and one that returns false on its second run.
 import "spider.jai";
 
 Database db = open_database("tasks.db");
@@ -15,5 +15,13 @@ spider::every(0.2, () => {
 	db.execute("UPDATE runs SET ended = ? WHERE id = ?", time::unix_ms(), id);
 });
 spider::every(1, () => { throw "thrown by a task"; });
+
+db.execute("CREATE TABLE IF NOT EXISTS stopper (id INTEGER PRIMARY KEY)");
+routes.get("/stopper", (spider::Request req) => db.query("SELECT id FROM stopper"));
+// returns false on its second run: a stopped task is never run again
+spider::every(0.2, () => {
+	db.execute("INSERT INTO stopper DEFAULT VALUES");
+	return db.query("SELECT id FROM stopper").size() < 2;
+});
 
 spider::spin(routes);

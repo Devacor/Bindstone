@@ -251,7 +251,8 @@ class Task {
 array<spider::Task> tasks;
 
 // task() runs every `seconds` in a fresh engine of its own, as a request does: first a period after the server starts,
-// then a period after each run starts, and never while its last run is still going. A failure is logged.
+// then a period after each run starts, and never while its last run is still going. A failure is logged and the schedule
+// goes on; a run that returns false stops the task until the server restarts or its period is edited.
 void every(float seconds, function task) {
 	if (!(seconds > 0.0)) { throw "spider::every: the period must be above 0 seconds, got " + to_string(seconds); }
 	spider::Task t;
@@ -272,10 +273,9 @@ array<float> spider_host_tasks() {
 	return periods;
 }
 
-bool spider_host_run_task(int index) {
-	if (index < 0 || index >= spider::tasks.size()) { return false; }
-	spider::tasks[index].run();
-	return true;
+var spider_host_run_task(int index) {
+	if (index < 0 || index >= spider::tasks.size()) { return null; }
+	return spider::tasks[index].run();
 }
 
 map<string, var> spider_host_serve(map<string, var> raw) {

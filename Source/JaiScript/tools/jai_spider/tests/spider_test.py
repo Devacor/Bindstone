@@ -692,13 +692,21 @@ def check_tasks(suite):
 		all(runs[i + 1]["started"] >= runs[i]["ended"] for i in range(len(runs) - 1)), str(runs))
 	suite.check("spider::every: a failing task is logged with its place and period",
 		suite.wait_for_log("jai_spider: spider::every task 2 (every 1 s) failed:") and suite.wait_for_log("thrown by a task"), suite.server.log_text()[-600:])
-	before = len(runs)
+	stopper = lambda: len(suite.request("GET", "/stopper").json())
+	suite.check("spider::every: a task that returns false on its second run stops there",
+		suite.wait_for_log("jai_spider: spider::every task 3 (every 0.2 s) stopped: it returned false") and stopper() == 2, str(stopper()))
+	time.sleep(1.5)
+	later = wait_runs(len(runs) + 2)
+	suite.check("spider::every: the stopped task is not run again over several periods, while a task that returns nothing goes on",
+		stopper() == 2 and len(later) >= len(runs) + 2, str(stopper()) + " stopper runs, " + str(len(later)) + " runs after " + str(len(runs)))
+	before = len(later)
 	text = (suite.app_dir / "tasks.jai").read_text(encoding="utf-8")
 	suite.write_module("tasks.jai", text.replace("thrown by a task", "thrown after the edit"))
 	suite.check("spider::every: a task runs the edited code after a reload, with no request to start it",
 		suite.wait_for_log("thrown after the edit") and suite.wait_for_log("jai_spider: reloaded tasks.jai"), suite.server.log_text()[-600:])
 	runs = wait_runs(before + 2)
 	suite.check("spider::every: the schedule goes on across the reload", len(runs) >= before + 2, str(len(runs)) + " runs after " + str(before))
+	suite.check("spider::every: a stopped task stays stopped across the reload", stopper() == 2, str(stopper()))
 
 
 def run_workers(exe, backend, verbose):

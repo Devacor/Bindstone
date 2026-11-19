@@ -304,6 +304,10 @@ purging expired sessions, expiring unpaid quotes, retrying a webhook.</p>
 <div class="codeblock cb-jai" data-host="jai_spider"><span class="cb-label">jaiscript (under jai_spider)</span><pre><code class="lang-jai">spider::every(3600, () =&gt; sessions.purge_expired());
 spider::every(60, () =&gt; {
     db.execute("UPDATE quotes SET state = 'expired' WHERE state = 'sent' AND expires &lt; ?", time::unix_ms() / 1000);
+});
+spider::every(30, () =&gt; {
+    // retry the webhook until it succeeds, then stop
+    return !send_webhook();
 });</code></pre></div>
 <ul>
 <li><strong>A run is a request without a client.</strong> It runs on a worker in a fresh engine, under the same
@@ -313,6 +317,11 @@ A run never overlaps the task's last one: a run that outlasts its period delays 
 <li><strong>A failure is logged</strong> with the task's place and period
 (<code>jai_spider: spider::every task 2 (every 60 s) failed:</code>, then the error and its trace), and the schedule
 goes on.</li>
+<li><strong>A task stops by returning <code>false</code>.</strong> A run whose function returns exactly the bool
+<code>false</code> is its last: the host logs <code>jai_spider: spider::every task 2 (every 60 s) stopped: it returned
+false</code> and never schedules it again; nothing, <code>true</code> or any other value keeps the schedule. A stopped task
+stays stopped across rebuilds while its place and period stay; an edit to its period makes it a new task, and a server
+restart starts every task again.</li>
 <li><strong>The declarations follow the code.</strong> Each build reads them again, so an edit to a task runs on its
 next turn; a task keeps its schedule while its place and period stay. A period that is not above 0 raises
 <code>spider::every: the period must be above 0 seconds, got 0.0</code>.</li>

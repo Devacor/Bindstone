@@ -428,11 +428,12 @@ private:
 	bool closed_ = false;
 };
 
-// spider::every's tasks, as the newest build that checked declared them: due times, and whether a run is out
+// spider::every's tasks, as the newest build that checked declared them: due times, whether a run is out, and whether
+// the task stopped (a run returned false)
 class task_schedule {
 public:
-	// the periods a build declared: a task keeps its place while its period stays, and a new or changed one first runs
-	// a period from now
+	// the periods a build declared: a task keeps its place, schedule and stopped state while its period stays, and a new
+	// or changed one first runs a period from now
 	void declare(const std::vector<double>& a_periods) {
 		{
 			std::lock_guard<std::mutex> hold(lock_);
@@ -442,6 +443,7 @@ public:
 				if (tasks_[i].seconds != a_periods[i]) {
 					tasks_[i].seconds = a_periods[i];
 					tasks_[i].due = now + period(a_periods[i]);
+					tasks_[i].stopped = false;
 				}
 			}
 		}
@@ -456,7 +458,7 @@ public:
 			auto next = now + std::chrono::hours(1);
 			for (size_t i = 0; i < tasks_.size(); ++i) {
 				scheduled& task = tasks_[i];
-				if (task.out) { continue; }
+				if (task.out || task.stopped) { continue; }
 				if (task.due <= now) {
 					task.out = true;
 					task.due = now + period(task.seconds);
@@ -470,11 +472,12 @@ public:
 	}
 
 	// a run ended: the next one starts a period after this one started, and never before this one ended
-	void finished(size_t a_task) {
+	void finished(size_t a_task, bool a_stop) {
 		{
 			std::lock_guard<std::mutex> hold(lock_);
 			if (a_task >= tasks_.size()) { return; }
 			tasks_[a_task].out = false;
+			tasks_[a_task].stopped = tasks_[a_task].stopped || a_stop;
 			tasks_[a_task].due = std::max(tasks_[a_task].due, steady::now());
 		}
 		wake_.notify_all();
@@ -493,6 +496,7 @@ private:
 		double seconds = 0;
 		steady::time_point due;
 		bool out = false;
+		bool stopped = false;
 	};
 
 	static steady::duration period(double seconds) {
@@ -808,19 +812,26 @@ private:
 
 	void run_task(const app_build& built, size_t task) {
 		std::string error;
+		bool stop = false;
 		if (built.eng) {
 			try {
 				auto ran = built.eng->get_variable("spider_host_run_task").as_function()({jai::script_value(static_cast<jai::script_int>(task), built.eng.get())});
-				if (!ran) { error = built.eng->format_error(ran) + "\n" + built.eng->format_stack_trace(); }
+				if (!ran) {
+					error = built.eng->format_error(ran) + "\n" + built.eng->format_stack_trace();
+				} else {
+					stop = ran.value().is_bool() && !ran.value().as_bool();
+				}
 			} catch (const std::exception& e) {
 				error = e.what();
 			}
 		}
+		const std::string seconds = task < built.task_periods.size() ? seconds_text(built.task_periods[task]) : "?";
 		if (!error.empty()) {
-			const std::string seconds = task < built.task_periods.size() ? seconds_text(built.task_periods[task]) : "?";
 			console_.err(colors_.red("jai_spider: spider::every task " + std::to_string(task + 1) + " (every " + seconds + " s) failed:") + "\n" + trimmed(error) + "\n");
+		} else if (stop) {
+			console_.err("jai_spider: spider::every task " + std::to_string(task + 1) + " (every " + seconds + " s) stopped: it returned false\n");
 		}
-		schedule_.finished(task);
+		schedule_.finished(task, stop);
 	}
 
 	// the error and its trace go to the log; the page shows them only under --dev

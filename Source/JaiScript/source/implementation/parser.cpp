@@ -1502,9 +1502,14 @@ JAI_NOINLINE checked_result<expression_ptr> parser::primary_rest() {
     const bool make_shared_spelling = check(token_type::identifier) && peek().lexeme == "make_shared" &&
         current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::less;
     if (make_shared_spelling || match(token_type::new_keyword)) { return new_expression(make_shared_spelling); }
-    // dynamic_cast<T&>(e), dynamic_cast<shared_ptr<T>>(e) and dynamic_pointer_cast<T>(e); either word alone stays an ordinary name
-    if (check(token_type::identifier) && (peek().lexeme == "dynamic_cast" || peek().lexeme == "dynamic_pointer_cast") &&
-        current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::less) { return dynamic_cast_expression(); }
+    // dynamic_cast<T>(e) and dynamic_cast<T&>(e); the word alone stays an ordinary name, as C++'s dynamic_pointer_cast does
+    if (check(token_type::identifier) && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::less) {
+        if (peek().lexeme == "dynamic_cast") { return dynamic_cast_expression(); }
+        if (peek().lexeme == "dynamic_pointer_cast") {
+            report_foreign(detail::foreign_word::dynamic_pointer_cast_call, peek());
+            return make_error_code(parse_error_code::syntax_error);
+        }
+    }
 
     // A math type (one fused token, lexer.cpp) in expression position is the static member math::K the math::
     // intrinsics resolve, so math::vec3(1, 2, 3) calls the constructor intrinsic
@@ -2084,32 +2089,38 @@ JAI_NOINLINE checked_result<expression_ptr> parser::cast_expression() {
     return std::make_shared<cast_expr>(castToken.location, target, by_reference, std::move(operand));
 }
 
-// dynamic_cast<T&>(e) is cast<T&>(e) for a class T: the reference, or the cast's error. dynamic_cast<shared_ptr<T>>(e), which
-// dynamic_pointer_cast<T>(e) spells too, is the handle typed shared_ptr<T> when e's object is a T and null when it is not
+// dynamic_cast<T>(e) for a class T is C++'s dynamic_cast<T*>: e's object as a shared_ptr<T> when it is a T and null when it is not
+// (a T already spelled shared_ptr<U> is that handle). dynamic_cast<T&>(e) is cast<T&>(e): the reference, or the cast's error
 JAI_NOINLINE checked_result<expression_ptr> parser::dynamic_cast_expression() {
     const token word = advance();
-    const bool pointer_spelling = word.lexeme == "dynamic_pointer_cast";
-    const char* const forms = pointer_spelling ? "dynamic_pointer_cast names a class: dynamic_pointer_cast<T>(e)"
-                                               : "dynamic_cast takes a class by reference or by handle: dynamic_cast<T&>(e) or dynamic_cast<shared_ptr<T>>(e)";
+    const char* const forms = "dynamic_cast takes a class: dynamic_cast<T>(e) is e as a shared_ptr<T>, null when it is no T, and dynamic_cast<T&>(e) is the reference";
     advance();   // '<'
-    if (!check(token_type::identifier) && !(check(token_type::shared_ptr_keyword) && !pointer_spelling)) {
+    if (!check(token_type::identifier) && !check(token_type::shared_ptr_keyword)) {
         report_error(forms, peek());
         return make_error_code(parse_error_code::syntax_error);
     }
     JAISCRIPT_TRY_ASSIGN(type_info_ptr target, parse_type());
-    const bool by_reference = !pointer_spelling && match(token_type::ampersand);
+    const bool by_reference = match(token_type::ampersand);
     const bool handle = target && target->base_type == script_value_type::jai_shared_ptr_type;
     const type_info* named = handle ? target->element_type().get() : target.get();
     const bool class_named = named && named->base_type == script_value_type::jai_object_type && !named->type_name.empty();
-    if (!class_named || (pointer_spelling ? handle : handle == by_reference)) {
-        report_error(forms, word);
+    if (!class_named || (handle && by_reference)) {
+        // shared_ptr<shared_ptr<T>>, as a generic's dynamic_cast<shared_ptr<T>> spells with a handle for T
+        const type_info* inner = named;
+        while (inner && inner->base_type == script_value_type::jai_shared_ptr_type) { inner = inner->element_type().get(); }
+        if (handle && !by_reference && inner != named && inner && inner->base_type == script_value_type::jai_object_type && !inner->type_name.empty()) {
+            report_error("dynamic_cast<" + target->canonical_name() + "> names a handle to a handle: dynamic_cast takes a class or one shared_ptr to it, dynamic_cast<" +
+                         inner->canonical_name() + ">(e)", word);
+        } else {
+            report_error(forms, word);
+        }
         return make_error_code(parse_error_code::syntax_error);
     }
-    if (pointer_spelling) { target = shared_ptr_type_of(target); }
-    consume_greater_in_generic(pointer_spelling ? "expected '>' after dynamic_pointer_cast type" : "expected '>' after dynamic_cast type");
-    JAISCRIPT_TRY(expect(token_type::left_paren, pointer_spelling ? "expected '(' after dynamic_pointer_cast<T>" : "expected '(' after dynamic_cast type"));
+    if (!handle && !by_reference) { target = shared_ptr_type_of(target); }
+    consume_greater_in_generic("expected '>' after dynamic_cast type");
+    JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after dynamic_cast type"));
     JAISCRIPT_TRY_ASSIGN(auto operand, expression());
-    JAISCRIPT_TRY(expect(token_type::right_paren, pointer_spelling ? "expected ')' after dynamic_pointer_cast operand" : "expected ')' after dynamic_cast operand"));
+    JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after dynamic_cast operand"));
     if (by_reference) { operand = bound_conditional(std::move(operand)); }
     auto made = std::make_shared<cast_expr>(word.location, target, by_reference, std::move(operand));
     made->dynamic = true;
@@ -2486,8 +2497,20 @@ checked_result<expression_ptr> parser::operator_expression(int min_precedence) {
     stack_.guard(peek().location);
     const size_t operand_start = current_;
     auto left = unary();
+    if (left && check(token_type::identifier) && instanceof_operator_at(current_)) [[unlikely]] {
+        report_foreign(detail::foreign_word::instanceof_operator, peek());
+        return make_error_code(parse_error_code::syntax_error);
+    }
     if (!left || infix_precedence() < min_precedence) { return left; }
     return operator_rest(std::move(left.value()), min_precedence, operand_start);
+}
+
+// JavaScript's `x instanceof T`: the word where an operator stands, a type's name after it. A declaration's name is never followed
+// by a type's name, so a variable, field or function called instanceof reads as it did
+bool parser::instanceof_operator_at(size_t at) const {
+    if (at + 1 >= stream_->size() || (*stream_)[at].type != token_type::identifier || (*stream_)[at].lexeme != "instanceof") { return false; }
+    const token_type then = (*stream_)[at + 1].type;
+    return then == token_type::identifier || is_type_keyword_token(then);
 }
 
 JAI_NOINLINE checked_result<expression_ptr> parser::operator_rest(expression_ptr left, int min_precedence, size_t operand_start) {
@@ -4038,7 +4061,7 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::declaration_rest() {
         }
         if (after != current_ && after + 1 < stream_->size()) {
             const token_type next = (*stream_)[after].type;
-            if (next == token_type::identifier) {
+            if (next == token_type::identifier && !instanceof_operator_at(after)) {
                 const bool is_function = (*stream_)[after + 1].type == token_type::left_paren && !paren_group_ends_statement(after + 1);
                 current_ = savedPos;
                 return is_function ? function_declaration() : variable_declaration();
@@ -4096,7 +4119,7 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::declaration_rest() {
             errors_.resize(errors_before);
             pushed_back_token_ = pushed_before;
             generic_uses_.resize(uses_before);
-        } else if (check(token_type::identifier)) {
+        } else if (check(token_type::identifier) && !instanceof_operator_at(current_)) {
             // Pattern: identifier identifier - a declaration. A '(' after the second
             // identifier makes it a class-typed free function (C++ return-type-first,
             // same as the namespace path); otherwise a variable: Point p; / Point mk() {...}
@@ -4849,7 +4872,7 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::unterminated_declaration(bo
         auto type_probe = parse_type();
         if (type_probe && errors_.size() == errors_before) {
             const bool binary_and = match(token_type::ampersand) && condition && !keyword_type;
-            declares = check(token_type::identifier) &&
+            declares = check(token_type::identifier) && !instanceof_operator_at(current_) &&
                        (!binary_and || (current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::equal));
         }
         current_ = type_start;

@@ -466,8 +466,7 @@ includeExpression = "include" (STRING_LITERAL | "<" path ">" | "(" expression ")
 // 0..255 or a one-character string and raises "Cannot cast 'int' to 'char'" /
 // "Cannot cast 'string' to 'char'" otherwise.
 castExpression = "cast" "<" type "&"? ">" "(" expression ")"
-               | "dynamic_cast" "<" (className "&" | "shared_ptr" "<" className ">") ">" "(" expression ")"
-               | "dynamic_pointer_cast" "<" className ">" "(" expression ")"
+               | "dynamic_cast" "<" (className | className "&" | "shared_ptr" "<" className ">") ">" "(" expression ")"
                  (* each word is a cast only before "<"; alone it is a name *)
 
 literal = INTEGER_LITERAL

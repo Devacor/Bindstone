@@ -221,6 +221,7 @@ namespace jai {
         expression_ptr hidden_identifier(uint64_t id, std::string_view name, const source_location& loc);
         // A word or spelling another language uses, where it would otherwise fail to parse (detail/foreign_keyword.hpp)
         bool foreign_word_at_statement();
+        bool instanceof_operator_at(size_t at) const;
         void report_foreign(detail::foreign_word w, const token& at);
         
         // expression parsing (precedence climbing)

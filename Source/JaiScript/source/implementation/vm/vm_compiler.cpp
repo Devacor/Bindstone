@@ -220,6 +220,7 @@ namespace {
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_regex_constant:
+			case opcode::op_instance_test:
 			case opcode::op_call_from_scratch:
 			case opcode::op_sleep:
 			case opcode::op_format_call:
@@ -458,6 +459,7 @@ namespace {
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_regex_constant:
+			case opcode::op_instance_test:
 			case opcode::op_call_from_scratch:
 			case opcode::op_sleep:
 			case opcode::op_format_call:
@@ -9058,6 +9060,38 @@ void vm_compiler::record_argument_source(call_site& site, const expression_ptr& 
 	}
 }
 
+// reflect::is_instance_of(x, "T") with a literal class name, while the reflect namespace holds the library's function: x, then
+// op_instance_test. The call's own site stays for what the test does not answer (the name bound again, no class under the text, a worker),
+// and the entry is read after x where the call reads it before: nothing x runs can bind a reserved namespace's name
+JAI_NOINLINE bool vm_compiler::try_emit_instance_test(const std::shared_ptr<call_expr>& expr) {
+	if (reference_ || !engine_ || expr->arguments.size() != 2 || expr->type_argument_count != 0) return false;
+	const auto* member = static_cast<const member_expr*>(expr->callee.get());
+	if (member->member != "is_instance_of" || !member->object || member->object->get_type() != node_type::identifier_expr ||
+	    static_cast<const identifier_expr*>(member->object.get())->name != "reflect") return false;
+	const expression* named = expr->arguments[1].get();
+	if (named->get_type() != node_type::literal_expr || !static_cast<const literal_expr*>(named)->value.is_string()) return false;
+	const script_value& text = static_cast<const literal_expr*>(named)->value;
+	const script_value* cell = detail::library_instance_test_cell(const_cast<engine&>(*engine_));
+	if (!cell) return false;
+	site_lease site(pending_sites_);
+	site->call_node = add_node(expr);
+	site->arg_symbols.reserve(2);
+	site->arg_slots.reserve(2);
+	const uint32_t args_begin = static_cast<uint32_t>(chunk_->code.size());
+	record_argument_source(*site, expr->arguments[0], 2);
+	compile_expression(expr->arguments[0]);
+	record_argument_source(*site, expr->arguments[1], 2);
+	chunk_->call_arg_zones.emplace_back(args_begin, static_cast<uint32_t>(chunk_->code.size()));
+	chunk_->call_sites.push_back(std::move(*site));
+	chunk::instance_test test;
+	test.class_name = std::string(text.unchecked_as_string());
+	test.entry_cell = cell;
+	test.entry = *cell->get_storage().get_if<script_value::TYPEID_FUNCTION>();
+	chunk_->instance_tests.push_back(std::move(test));
+	emit(opcode::op_instance_test, static_cast<uint32_t>(chunk_->call_sites.size() - 1), static_cast<uint32_t>(chunk_->instance_tests.size() - 1), add_constant(text));
+	return true;
+}
+
 JAI_NOINLINE void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 	// Consumed HERE so nested arg calls never inherit the return-position hint
 	const bool tail_site = pending_tail_call_;
@@ -9128,6 +9162,7 @@ JAI_NOINLINE void vm_compiler::compile_call(const std::shared_ptr<call_expr>& ex
 				emit(opcode::op_math, static_cast<uint32_t>(fn), static_cast<uint32_t>(expr->arguments.size()));
 				return;
 			}
+			if (try_emit_instance_test(expr)) { return; }
 		}
 		if (!member->is_static) {
 			compile_expression(member->object);

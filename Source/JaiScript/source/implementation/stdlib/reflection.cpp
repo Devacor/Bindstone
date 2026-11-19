@@ -455,6 +455,19 @@ inline void collect_methods_of(engine* eng, const class_definition* def,
     }
 }
 
+// is_instance_of(x, "Class"): whether x holds an object of the class or of one derived from it. A named type, so a compiler can
+// tell the namespace still holds it (detail::library_instance_test_cell)
+struct instance_test {
+    engine* eng;
+    checked_result<script_value> operator()(const std::vector<script_value>& args) const {
+        expect_args(args, 2, "is_instance_of");
+        const script_value& named = args[1].is_reference() ? args[1].deref() : args[1];
+        if (!named.is_string()) { throw runtime_error("reflect::is_instance_of expects a value and a class name"); }
+        const class_definition* cls = resolve_class(eng, named, "is_instance_of");
+        return script_value(cls && detail::instance_of_class(args[0], cls->get_name(), eng), eng);
+    }
+};
+
 } // namespace reflect_detail
 
 void register_reflection_functions(engine& eng_ref) {
@@ -538,14 +551,7 @@ void register_reflection_functions(engine& eng_ref) {
         return arr;
     });
 
-    // is_instance_of(x, "Class"): whether x holds an object of the class or of one derived from it
-    add("is_instance_of", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
-        reflect_detail::expect_args(args, 2, "is_instance_of");
-        const script_value& named = args[1].is_reference() ? args[1].deref() : args[1];
-        if (!named.is_string()) { throw runtime_error("reflect::is_instance_of expects a value and a class name"); }
-        const class_definition* cls = reflect_detail::resolve_class(eng, named, "is_instance_of");
-        return script_value(cls && detail::instance_of_class(args[0], cls->get_name(), eng), eng);
-    });
+    add("is_instance_of", reflect_detail::instance_test{eng});
 
     add("generation", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_args(args, 1, "generation");
@@ -901,5 +907,17 @@ void register_reflection_functions(engine& eng_ref) {
 // shared_ptr / raw-pointer convenience, matching every other stdlib unit
 
 } // namespace stdlib
+
+const script_value* detail::library_instance_test_cell(engine& eng) {
+    auto& spaces = engine_access::script_namespaces(eng);
+    const auto space = spaces.find(engine_access::symbolize(eng, "reflect"));
+    if (space == spaces.end() || !space->second) { return nullptr; }
+    const uint64_t name = engine_access::symbolize(eng, "is_instance_of");
+    if (space->second->scope && space->second->scope->get_own_value_ptr(name)) { return nullptr; }
+    const auto entry = space->second->variables.find(name);
+    if (entry == space->second->variables.end() || entry->second.raw_storage_index() != script_value::TYPEID_FUNCTION) { return nullptr; }
+    return entry->second.unchecked_as_function().target<stdlib::reflect_detail::instance_test>() ? &entry->second : nullptr;
+}
+
 } // namespace jai
 

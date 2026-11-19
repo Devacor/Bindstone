@@ -97,7 +97,10 @@ namespace jai::detail {
 		const slot_class_view view = resolve_slot_class(seen, eng);   // a host object by its bound class
 		return view.def && view.def->is_subtype_of(class_name);
 	}
-	// dynamic_cast<shared_ptr<T>>(e) / dynamic_pointer_cast<T>(e): e's object as a shared_ptr<T> when it is a T, and null when e
+	// The reflect namespace's cell for is_instance_of while it holds the library's own function (stdlib/reflection.cpp), else null:
+	// the cell lives as long as the engine, and a host that binds the name again assigns into it
+	const script_value* library_instance_test_cell(engine& eng);
+	// dynamic_cast<T>(e): e's object as a shared_ptr<T> when it is a T, and null when e
 	// names no object (null, an expired weak handle, a value that is no object) or an object of another class. A weak handle
 	// answers for the object it locks.
 	JAI_NOINLINE inline script_value cast_dynamic_null(const cast_expr& c, engine* eng) {

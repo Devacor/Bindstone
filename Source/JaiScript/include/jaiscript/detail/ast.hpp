@@ -611,7 +611,7 @@ namespace jai {
         bool binding_ref = false;
         // a parallel body's rewritten `return e;` (parallel_transform.cpp): e converts as that function's return does, with its text
         std::string_view return_of;
-        // dynamic_cast: the handle form (dynamic_cast<shared_ptr<T>>(e), dynamic_pointer_cast<T>(e)) answers null where
+        // dynamic_cast: the handle form (dynamic_cast<T>(e), its target the shared_ptr<T>) answers null where
         // cast<shared_ptr<T>>(e) raises for an operand that holds no T; the reference form is cast<T&>(e) with a checked operand
         bool dynamic = false;
         // a type argument (db.query<User>(...)): no operand read, the reflect::type value naming target (detail/type_value.hpp)

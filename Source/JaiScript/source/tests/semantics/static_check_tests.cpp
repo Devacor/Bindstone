@@ -1935,6 +1935,40 @@ public:
         // cast<C>(h) on a handle or reference operand deep-copies (C++ value semantics - the
         // runtime is right); the checker names the aliasing spellings at warning severity.
 
+        // A class held by value copies out of a dynamic_cast's handle, which may be null: a warning, and the load proceeds
+        test("dynamic_cast_copied_into_a_value_warns", [this]() {
+            const std::string P = "class A { int v = 1; } class C : A { } class K { C kept; K(shared_ptr<C> c) { } void hold(C c) { } }\nshared_ptr<A> h = new C();\n";
+            const auto text = [](const std::string& operand) {
+                return "dynamic_cast<C>(" + operand + ") is copied into a value here and is null when the object is no C - test it first with if (auto x = dynamic_cast<C>(" + operand +
+                       ")), or use dynamic_cast<C&>(" + operand + ") when it must be one";
+            };
+            auto e = make_engine();
+            const std::vector<std::string> copies {
+                "C c = dynamic_cast<C>(h);", "A a = dynamic_cast<shared_ptr<C>>(h);", "C c; c = dynamic_cast<C>(h);", "K k = K(null); k.kept = dynamic_cast<C>(h);",
+                "void take(C c) { } take(dynamic_cast<C>(h));", "K k = K(null); k.hold(dynamic_cast<C>(h));", "C pick() { return dynamic_cast<C>(h); }",
+                "class F { C held = dynamic_cast<C>(h); }",
+            };
+            for (const auto& code : copies) {
+                auto r = e->check(P + code);
+                check_eq((size_t)0, error_count(r), r.format(code));
+                check_eq((size_t)1, warning_count(r), r.format(code));
+                check_true(has_diag(r, dlevel::warning, text("h")), r.format(code));
+                check_eq((size_t)3, r.diagnostics[0].line, "anchored at the cast");
+            }
+            check_true(has_diag(e->check(P + "shared_ptr<A> make() { return h; }\nC c = dynamic_cast<C>(make());"), dlevel::warning, text("...")));
+            // in a generic's instance the cast's class is the argument
+            check_true(has_diag(e->check(P + "class G<T> { T copy(shared_ptr<A> s) { T made = dynamic_cast<T>(s); return made; } } G<C> g;"), dlevel::warning, text("s")));
+            const std::vector<std::string> silent {
+                "auto c = dynamic_cast<C>(h);", "shared_ptr<C> c = dynamic_cast<C>(h);", "var c = dynamic_cast<C>(h);", "weak_ptr<C> c = dynamic_cast<C>(h);",
+                "C c = dynamic_cast<C&>(h);", "K k = dynamic_cast<C>(h);", "if (auto c = dynamic_cast<C>(h)) { C copy = c; }", "void share(shared_ptr<C> c) { } share(dynamic_cast<C>(h));",
+            };
+            for (const auto& code : silent) {
+                auto r = e->check(P + code);
+                check_eq((size_t)0, error_count(r), r.format(code));
+                check_eq((size_t)0, warning_count(r), r.format(code));
+            }
+        });
+
         test("cast_value_form_on_handle_warns", [this]() {
             const std::string P = "class C { int v = 1; } class H { shared_ptr<C> p = null; }\n";
             const std::string text = "cast<C>(h) copies the instance - use cast<C&>(h) to alias it or cast<shared_ptr<C>>(h) to share it";
@@ -2251,9 +2285,9 @@ public:
                 // declared, and one that stores to it ends the narrowing where it is made
                 {"class Unit { } class Hero : Unit { int hp; }\nfunction<int(Hero)> slot = h => h.hp;\nint run(Unit u) { return slot(u); }",
                  "argument 1 of 'slot': cannot pass 'Unit' where the signature takes 'Hero'"},
-                {"class Unit { } class Hero : Unit { int hp; }\nint run(Unit u) { if (dynamic_pointer_cast<Hero>(u)) { function<int(int)> by_ref = x => u.hp + x; } return 0; }",
+                {"class Unit { } class Hero : Unit { int hp; }\nint run(Unit u) { if (dynamic_cast<Hero>(u)) { function<int(int)> by_ref = x => u.hp + x; } return 0; }",
                  "no member 'hp' in class 'Unit'"},
-                {"class Unit { } class Hero : Unit { int hp; }\nint run(Unit u) { if (dynamic_pointer_cast<Hero>(u)) { function<int(int)> writer = x => { u = Unit(); return x; };\nreturn u.hp; } return 0; }",
+                {"class Unit { } class Hero : Unit { int hp; }\nint run(Unit u) { if (dynamic_cast<Hero>(u)) { function<int(int)> writer = x => { u = Unit(); return x; };\nreturn u.hp; } return 0; }",
                  "no member 'hp' in class 'Unit'"},
             };
             for (bool proofs : {true, false}) {
@@ -2271,8 +2305,8 @@ public:
                                       "coroutine int g() { yield 1; }\ncoroutine<int> k = g();\nauto j = g();\nk = j;\nint n = k.next();\nvar v = k.next();");
                 check_eq((size_t)0, error_count(clean), clean.format());
                 auto composed = e->check("class Unit { string name; } class Hero : Unit { int hp; }\nint measure(function<int(Hero)> key, Hero h) { return key(h); }\n"
-                                         "function<int(Hero)> slot = h => h.hp;\nfunction<int(Unit)> probe = u => { if (dynamic_pointer_cast<Hero>(u)) { return u.hp; } return 0; };\n"
-                                         "int run(Unit u) { int total = 0; if (dynamic_pointer_cast<Hero>(u)) { total += measure(h => h.hp, u);\n"
+                                         "function<int(Hero)> slot = h => h.hp;\nfunction<int(Unit)> probe = u => { if (dynamic_cast<Hero>(u)) { return u.hp; } return 0; };\n"
+                                         "int run(Unit u) { int total = 0; if (dynamic_cast<Hero>(u)) { total += measure(h => h.hp, u);\n"
                                          "function<int(int)> add = [u](x) { return u.hp + x; }; total += add(1); total += slot(u); } return total; }\n"
                                          "class Button { function<int(string)> on_click; Button() : on_click(s => s.size()) {} }");
                 check_eq((size_t)0, error_count(composed), composed.format());

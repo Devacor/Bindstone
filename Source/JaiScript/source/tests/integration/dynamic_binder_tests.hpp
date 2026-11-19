@@ -3006,7 +3006,7 @@ public:
             check_eq(std::string("object value"), message("Label l; Crate c = l; Crate d = 3; `${c.held} ${d.held}`"));
             // a derived class is its base, and the base's declared type is not the derived class (cast<Square&> or a dynamic_cast condition narrows)
             check_eq(std::string("4 4 Square Square"), message("Square q; Shape s = q; int sides(Shape x) { return x.sides; } Square back = cast<Square&>(s); "
-                                                               "string narrowed(Shape x) { if (dynamic_pointer_cast<Square>(x)) { Square y = x; return type_of(y); } return \"\"; } "
+                                                               "string narrowed(Shape x) { if (dynamic_cast<Square>(x)) { Square y = x; return type_of(y); } return \"\"; } "
                                                                "`${s.sides} ${sides(q)} ${type_of(back)} ${narrowed(s)}`"));
             refused("Shape s = Square(); Square back = s;", "cannot initialize 'back' declared 'Square' with 'Shape'");
             // a script class deriving a bound class, and one deriving two

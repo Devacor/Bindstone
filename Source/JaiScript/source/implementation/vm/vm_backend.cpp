@@ -20728,6 +20728,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_ref_target_store: return exec_ref_target_store(f, ins);
 		case opcode::op_const_guard: return exec_const_guard(f, ins);
 		case opcode::op_regex_constant: return exec_regex_constant(f, ins);
+		case opcode::op_instance_test: return exec_instance_test(f, ins);
 		case opcode::op_index_store: return exec_index_store(f, ins);
 		case opcode::op_index_compound_fused: return exec_index_compound_fused(f, ins);
 		case opcode::op_parallel_for: return exec_parallel_for(f, ins);
@@ -21209,6 +21210,7 @@ op_status vm_backend::run_dispatch_loop(frame*& fp, const size_t records_base) {
 			case opcode::op_take_temp:
 			case opcode::op_const_guard:
 			case opcode::op_regex_constant:
+			case opcode::op_instance_test:
 			case opcode::op_concat_pending:
 			case opcode::op_concat_operands:
 			case opcode::op_concat_store:
@@ -24112,6 +24114,45 @@ checked_result<script_value> vm_backend::run_callback(callback_session& s, const
 	}
 	cleanup();
 	return result;
+}
+
+// x on top. While the reflect entry is the function the site compiled against (the library's) and a class stands under the text,
+// the answer is that function's: the text names that class by exact lookup from then on (no class is ever removed), and the test
+// goes by name, so a redefined class answers as itself. A worker never reads or writes the site's state
+// Out of line and last in the file: placed among the ops, it moved exec_cast and cost the dynamic cast 4-8%
+JAI_NOINLINE op_status vm_backend::exec_instance_test(frame& f, const vm_instruction& ins) {
+	const chunk::instance_test& test = f.code->instance_tests[ins.b];
+	if (!parallel_worker_ && test.entry_cell->raw_storage_index() == script_value::TYPEID_FUNCTION &&
+	    &test.entry_cell->unchecked_as_function() == test.entry.get()) [[likely]] {
+		if (!test.registered) [[unlikely]] {
+			const auto named = engine_->get_class_definition(test.class_name);
+			test.registered = named && named->get_name() == test.class_name;
+		}
+		if (test.registered) [[likely]] {
+			script_value& top = stack_.back();
+			const bool is_instance = detail::instance_of_class(top, test.class_name, engine_);
+			top = script_value(is_instance, engine_);
+			return {};
+		}
+	}
+	return instance_test_call(f, ins);
+}
+
+// The call as written: the entry the namespace holds, x and the text as op_get_static and the argument loads leave them, then op_call
+JAI_NOINLINE op_status vm_backend::instance_test_call(frame& f, const vm_instruction& ins) {
+	const call_site& site = f.code->call_sites[ins.a];
+	auto* call = static_cast<call_expr*>(f.code->nodes[site.call_node].get());
+	script_value callee = make_null();
+	VM_TRY(static_member_value(f, static_cast<member_expr*>(call->callee.get()), callee));
+	if (is_unwinding_) {
+		stack_.back() = make_null();
+		return {};
+	}
+	script_value seen = std::move(stack_.back());
+	stack_.back() = std::move(callee);
+	stack_.push_back(std::move(seen));
+	stack_.push_back(materialize_constant(*f.code, ins.c));
+	return exec_call(f, vm_instruction{opcode::op_call, 2, ins.a, 0});
 }
 
 } // namespace jai::vm

@@ -218,9 +218,9 @@
           "match": "\\b(if|else|do|while|for|parallel_for|break|continue|return|try|catch|throw|switch|case|default|fallthrough|yield)\\b"
         },
         {
-          "comment": "dynamic_cast<T&>(e), dynamic_cast<shared_ptr<T>>(e), dynamic_pointer_cast<T>(e): each word is a cast only before '<'",
+          "comment": "dynamic_cast<T>(e), dynamic_cast<T&>(e): the word is a cast only before '<'",
           "name": "keyword.operator.cast.jaiscript",
-          "match": "(?<![.:>])\\b(dynamic_cast|dynamic_pointer_cast)\\b(?=\\s*<)"
+          "match": "(?<![.:>])\\bdynamic_cast\\b(?=\\s*<)"
         }
       ]
     },

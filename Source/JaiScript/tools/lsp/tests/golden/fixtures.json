@@ -34,7 +34,7 @@
   "auto",
   "blue",
   "class",
-  "dynamic_pointer_cast",
+  "dynamic_cast",
   "enum",
   "for",
   "green",
@@ -556,11 +556,11 @@
   {
    "range": {
     "end": {
-     "character": 30,
+     "character": 22,
      "line": 27
     },
     "start": {
-     "character": 26,
+     "character": 18,
      "line": 27
     }
    },

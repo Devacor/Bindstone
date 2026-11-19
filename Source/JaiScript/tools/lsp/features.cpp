@@ -538,8 +538,7 @@ std::vector<completion_item> workspace::completion(unit& u, text_pos pos) {
 	add_host_names(view, items);
 	for (auto word : language_keywords()) { items.add(std::string(word), 14, "keyword", 6); }
 	items.add("make_shared", 14, "make_shared<T>(args): the same expression as new T(args)", 6);
-	items.add("dynamic_cast", 14, "dynamic_cast<T&>(e): the object as a T, or an error; dynamic_cast<shared_ptr<T>>(e): its handle, or null", 6);
-	items.add("dynamic_pointer_cast", 14, "dynamic_pointer_cast<T>(e): the same expression as dynamic_cast<shared_ptr<T>>(e)", 6);
+	items.add("dynamic_cast", 14, "dynamic_cast<T>(e): the object as a shared_ptr<T>, or null; dynamic_cast<T&>(e): the object as a T, or an error", 6);
 	return items.take();
 }
 

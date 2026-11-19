@@ -206,7 +206,7 @@ public:
 					T as(var v) { return cast<T>(v); }
 					array<T> some() { array<T> xs; xs.push(T()); return xs; }
 				}
-				class Test<T> { bool is(var v) { return dynamic_cast<shared_ptr<T>>(v) != null; } T& same(T& v) { return dynamic_cast<T&>(v); } }
+				class Test<T> { bool is(var v) { return dynamic_cast<T>(v) != null; } T& same(T& v) { return dynamic_cast<T&>(v); } }
 			)");
 			check_eq((int64_t)0, e->execute("Maker<int>::make();").as_int());
 			check_eq(std::string("!"), e->execute("Maker<string>::make() + \"!\";").as_string());
@@ -218,7 +218,7 @@ public:
 			check_true(e->execute("Test<P> t; t.is(P()) && t.is(new P()) && !t.is(4);").as_bool());
 			// what the argument makes of the text is the argument's own rule: a dynamic cast names a class
 			const std::string builtin = failure(*e, "Test<int> t;");
-			check_true(contains(builtin, "dynamic_cast takes a class by reference or by handle: dynamic_cast<T&>(e) or dynamic_cast<shared_ptr<T>>(e)") && contains(builtin, "in Test<int>, instantiated at <script>:1:5"));
+			check_true(contains(builtin, "dynamic_cast takes a class: dynamic_cast<T>(e) is e as a shared_ptr<T>, null when it is no T, and dynamic_cast<T&>(e) is the reference") && contains(builtin, "in Test<int>, instantiated at <script>:1:5"));
 			check_false(contains(builtin, "undeclared"));
 			check_eq((int64_t)5, e->execute("Maker<int> m; var v = 4; m.as(v) + 1;").as_int());
 			check_eq(std::string("1:float"), e->execute("Maker<float> m; auto xs = m.some(); to_string(xs.size()) + \":\" + type_of(xs[0]);").as_string());
@@ -1252,27 +1252,42 @@ public:
 
 		test("the_dynamic_casts_take_a_type_parameter_and_an_instance", [this]() {
 			auto e = stdlib_engine();
-			check_eq(std::string("true|false|4|9|true|false"), e->execute(R"(
+			check_eq(std::string("true|false|4|9|true|false|true|false"), e->execute(R"(
 				class Shape { int sides = 0; }
 				class Square : Shape { Square() { sides = 4; } }
 				class Probe<T> {
-					bool holds(shared_ptr<Shape> s) { return dynamic_cast<shared_ptr<T>>(s) != null; }
+					bool holds(shared_ptr<Shape> s) { return dynamic_cast<T>(s) != null; }
 					int sides_of(Shape& s) { return dynamic_cast<T&>(s).sides; }
 				}
-				bool is<T>(shared_ptr<Shape> s) { return dynamic_cast<shared_ptr<T>>(s) != null; }
+				bool is<T>(shared_ptr<Shape> s) { return dynamic_cast<T>(s) != null; }
 				class Box<T> { T v; }
 				class Wide<T> : Box<T> { }
 				shared_ptr<Shape> sq = new Square(); shared_ptr<Shape> plain = new Shape();
 				Probe<Square> probe; Square real;
 				shared_ptr<Box<int>> held = new Wide<int>(); held.v = 9;
-				`${probe.holds(sq)}|${probe.holds(plain)}|${probe.sides_of(real)}|${dynamic_cast<shared_ptr<Wide<int>>>(held).v}|${is<Square>(sq)}|${is<Square>(plain)}`;
+				`${probe.holds(sq)}|${probe.holds(plain)}|${probe.sides_of(real)}|${dynamic_cast<shared_ptr<Wide<int>>>(held).v}|${is<Square>(sq)}|${is<Square>(plain)}|${is<shared_ptr<Square>>(sq)}|${is<shared_ptr<Square>>(plain)}`;
 			)").as_string());
-			// a handle as the type argument lands inside the cast, where a class is named: that instance alone fails
+			// a handle as the type argument is that handle (above); inside a spelled shared_ptr<T> it is a handle to a handle, and that instance alone fails
 			const std::string handle = failure(*e, "class Shape { } bool is<T>(shared_ptr<Shape> s) { return dynamic_cast<shared_ptr<T>>(s) != null; } shared_ptr<Shape> s = new Shape(); is<Shape>(s); is<shared_ptr<Shape>>(s);");
-			check_true(contains(handle, "dynamic_cast takes a class by reference or by handle: dynamic_cast<T&>(e) or dynamic_cast<shared_ptr<T>>(e)") &&
+			check_true(contains(handle, "dynamic_cast<shared_ptr<shared_ptr<Shape>>> names a handle to a handle: dynamic_cast takes a class or one shared_ptr to it, dynamic_cast<Shape>(e)") &&
 			           contains(handle, "in is<shared_ptr<Shape>>, instantiated at") && !contains(handle, "in is<Shape>"), handle);
+			const std::string plain = failure(*e, "class Shape { } bool is<T>(shared_ptr<Shape> s) { return dynamic_cast<T>(s) != null; } shared_ptr<Shape> s = new Shape(); is<Shape>(s); is<int>(s);");
+			check_true(contains(plain, "dynamic_cast takes a class: dynamic_cast<T>(e) is e as a shared_ptr<T>, null when it is no T, and dynamic_cast<T&>(e) is the reference") &&
+			           contains(plain, "in is<int>, instantiated at") && !contains(plain, "in is<Shape>"), plain);
+			// a bound's class in a condition declaration, an instance's name and a namespace's as the cast's class
+			check_eq(std::string("3|0|5|true|true|true"), e->execute(R"(
+				class Animal { int legs = 4; }
+				class Dog : Animal { int tricks = 3; }
+				int tricks_of<T : Animal>(shared_ptr<Animal> a) { if (auto found = dynamic_cast<T>(a)) { return found.tricks; } return 0; }
+				class Stack<T> { array<T> items; }
+				namespace shop { class Item { } class Stack<T> { int n = 5; } }
+				shared_ptr<Animal> dog = new Dog(); shared_ptr<Animal> other = new Animal();
+				var stack = Stack<int>(); shop::Stack<shop::Item> crate;
+				`${tricks_of<Dog>(dog)}|${tricks_of<Dog>(other)}|${dynamic_cast<shop::Stack<shop::Item>>(crate).n}|${dynamic_cast<Stack<int>>(stack) != null}|` +
+				`${dynamic_cast<shared_ptr<Stack<int>>>(stack) != null}|${dynamic_cast<Stack<int>&>(stack).items.empty()}`;
+			)").as_string());
 			const std::string builtin = failure(*e, "class Shape { } class Probe<T> { int f(Shape& s) { dynamic_cast<T&>(s); return 1; } } Probe<int> p;");
-			check_true(contains(builtin, "dynamic_cast takes a class by reference or by handle: dynamic_cast<T&>(e) or dynamic_cast<shared_ptr<T>>(e)") &&
+			check_true(contains(builtin, "dynamic_cast takes a class: dynamic_cast<T>(e) is e as a shared_ptr<T>, null when it is no T, and dynamic_cast<T&>(e) is the reference") &&
 			           contains(builtin, "in Probe<int>, instantiated at"), builtin);
 		});
 

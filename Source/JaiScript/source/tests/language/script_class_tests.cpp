@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/detail/foreign_keyword.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include "../case_table.hpp"
 #include <array>
@@ -1040,9 +1041,9 @@ public:
                     string out;
                     array<shared_ptr<Unit>> party = [new Unit(), new Hero(), new Paladin(), new Cleric()];
                     for (auto u : party) {
-                        out += type_of(u) + ":" + flag(dynamic_pointer_cast<Unit>(u) != null) + flag(dynamic_cast<shared_ptr<Hero>>(u) != null) +
-                               flag(dynamic_pointer_cast<Paladin>(u) != null) + flag(dynamic_pointer_cast<Healer>(u) != null) + " ";
-                        if (auto knight = dynamic_pointer_cast<Paladin>(u)) { out += knight.smite() + ":" + type_of(knight) + " "; }
+                        out += type_of(u) + ":" + flag(dynamic_cast<Unit>(u) != null) + flag(dynamic_cast<shared_ptr<Hero>>(u) != null) +
+                               flag(dynamic_cast<Paladin>(u) != null) + flag(dynamic_cast<Healer>(u) != null) + " ";
+                        if (auto knight = dynamic_cast<Paladin>(u)) { out += knight.smite() + ":" + type_of(knight) + " "; }
                     }
                     // a value, a reference, a var, a null handle, a live and an expired weak handle; the handle names the operand's own object
                     Paladin p;
@@ -1052,17 +1053,17 @@ public:
                     weak_ptr<Unit> live = party[2];
                     weak_ptr<Unit> dead;
                     { shared_ptr<Unit> gone = new Hero(); dead = gone; }
-                    out += "|" + flag(dynamic_pointer_cast<Hero>(p) != null) + flag(dynamic_pointer_cast<Paladin>(r) != null) + flag(dynamic_pointer_cast<Unit>(v) != null) +
-                           flag(dynamic_pointer_cast<Hero>(none) != null) + flag(dynamic_pointer_cast<Hero>(live) != null) + flag(dynamic_pointer_cast<Unit>(dead) != null) +
-                           flag(dynamic_pointer_cast<Paladin>(party[2]).same_as(party[2]));
+                    out += "|" + flag(dynamic_cast<Hero>(p) != null) + flag(dynamic_cast<Paladin>(r) != null) + flag(dynamic_cast<Unit>(v) != null) +
+                           flag(dynamic_cast<Hero>(none) != null) + flag(dynamic_cast<Hero>(live) != null) + flag(dynamic_cast<Unit>(dead) != null) +
+                           flag(dynamic_cast<Paladin>(party[2]).same_as(party[2]));
                     // a namespace's class, and the test by a name given at run time
                     game::Boss boss;
-                    out += "|" + flag(dynamic_pointer_cast<game::Boss>(boss) != null) + flag(reflect::is_instance_of(boss, "Unit")) + flag(reflect::is_instance_of(boss, "Hero")) +
+                    out += "|" + flag(dynamic_cast<game::Boss>(boss) != null) + flag(reflect::is_instance_of(boss, "Unit")) + flag(reflect::is_instance_of(boss, "Hero")) +
                            flag(reflect::is_instance_of(p, "Healer"));
                     // a var that holds no object names none, and never an error
                     var things = [null, 5, 2.5, "s", [1], {"a": 1}, [](){ return 1; }, math::vec2(1, 2), Dir::north];
                     out += "|";
-                    for (var t : things) { out += flag(dynamic_pointer_cast<Unit>(t) != null || reflect::is_instance_of(t, "Unit")); }
+                    for (var t : things) { out += flag(dynamic_cast<Unit>(t) != null || reflect::is_instance_of(t, "Unit")); }
                     // the reference form is cast<T&>: the object itself, or the cast's error
                     dynamic_cast<Unit&>(p).hp = 4;
                     out += "|" + dynamic_cast<Paladin&>(r).smite() + to_string(dynamic_cast<Hero&>(party[1]).hp) + " " + to_string(p.hp);
@@ -1071,8 +1072,8 @@ public:
                     try { var five = 5; dynamic_cast<Hero&>(five); } catch (err) { out += "|" + err; }
                     // host classes by the bases their binders name, a script class over one, and a host object in a var
                     HostDerived hd; var held = hd; Squire squire;
-                    out += "|" + flag(dynamic_pointer_cast<HostBase>(hd) != null) + flag(dynamic_pointer_cast<HostDerived>(held) != null) +
-                           flag(dynamic_pointer_cast<HostBase>(squire) != null) + flag(dynamic_pointer_cast<Unit>(held) != null) + to_string(dynamic_cast<HostBase&>(squire).id);
+                    out += "|" + flag(dynamic_cast<HostBase>(hd) != null) + flag(dynamic_cast<HostDerived>(held) != null) +
+                           flag(dynamic_cast<HostBase>(squire) != null) + flag(dynamic_cast<Unit>(held) != null) + to_string(dynamic_cast<HostBase&>(squire).id);
                     out += "|" + flag(reflect::is_instance_of(5, "Unit") == false) + flag(reflect::is_instance_of(none, "Hero"));
                     try { reflect::is_instance_of(p, "Nope"); } catch (err) { out += "|" + err; }
                     // each word alone is an ordinary name
@@ -1088,21 +1089,75 @@ public:
                 try { fresh->execute(classes + "Hero h; int n = 5;\n" + code); } catch (const std::exception& ex) { return std::string(ex.what()); }
                 return std::string("loaded");
             };
-            const std::string forms = "error: dynamic_cast takes a class by reference or by handle: dynamic_cast<T&>(e) or dynamic_cast<shared_ptr<T>>(e)";
-            check_true(load_error("auto b = dynamic_pointer_cast<Nope>(h);").find("error: unknown type in cast: 'Nope'") != std::string::npos);
-            check_true(load_error("auto b = dynamic_cast<int>(n);").find(forms) != std::string::npos);
-            check_true(load_error("auto b = dynamic_cast<Hero>(h);").find(forms) != std::string::npos);
-            check_true(load_error("auto b = dynamic_cast<shared_ptr<Hero>&>(h);").find(forms) != std::string::npos);
-            check_true(load_error("auto b = dynamic_pointer_cast<shared_ptr<Hero>>(h);").find("error: dynamic_pointer_cast names a class: dynamic_pointer_cast<T>(e)") != std::string::npos);
-            check_true(load_error("auto b = dynamic_pointer_cast<Dir>(h);").find("error: dynamic_cast<shared_ptr<Dir>> names a class, and 'Dir' is an enum: cast<Dir>(n) converts an int that is one of its values") != std::string::npos);
-            check_true(load_error("auto b = dynamic_pointer_cast<Unit>(n);").find("error: dynamic_cast<shared_ptr<Unit>> is always null: the operand is 'int', never an object of a class") != std::string::npos);
-            check_true(load_error("dynamic_cast<Unit&>(n).hp = 2;").find("error: dynamic_cast<Unit&> always raises: the operand is 'int', never an object of a class") != std::string::npos);
-            check_true(load_error("bool b = h instanceof Unit;") != "loaded");
+            const auto refuses = [&](const std::string& code, const std::string& text) {
+                const std::string error = load_error(code);
+                check_true(error.find(text) != std::string::npos, code + " -> " + error);
+            };
+            const std::string forms = "error: dynamic_cast takes a class: dynamic_cast<T>(e) is e as a shared_ptr<T>, null when it is no T, and dynamic_cast<T&>(e) is the reference";
+            refuses("auto b = dynamic_cast<Nope>(h);", "error: unknown type in cast: 'Nope'");
+            refuses("auto b = dynamic_cast<int>(n);", forms);
+            refuses("auto b = dynamic_cast<var>(h);", forms);
+            refuses("auto b = dynamic_cast<array<Hero>>(h);", forms);
+            refuses("auto b = dynamic_cast<shared_ptr<Hero>&>(h);", forms);
+            refuses("auto b = dynamic_cast<Dir>(h);", "error: dynamic_cast<Dir> names a class, and 'Dir' is an enum: cast<Dir>(n) converts an int that is one of its values");
+            refuses("auto b = dynamic_cast<Unit>(n);", "error: dynamic_cast<Unit> is always null: the operand is 'int', never an object of a class");
+            refuses("dynamic_cast<Unit&>(n).hp = 2;", "error: dynamic_cast<Unit&> always raises: the operand is 'int', never an object of a class");
+            refuses("auto b = dynamic_pointer_cast<Hero>(h);", std::string("error: ") + std::string(detail::foreign_word_text(detail::foreign_word::dynamic_pointer_cast_call)));
+            refuses("bool b = h instanceof Unit;", std::string("error: ") + std::string(detail::foreign_word_text(detail::foreign_word::instanceof_operator)));
             check_true(load_error("bool b = reflect::is_a(h, \"Unit\");") != "loaded");
-            check_eq(std::string("loaded"), load_error("auto up = dynamic_pointer_cast<Unit>(h); auto down = dynamic_pointer_cast<Paladin>(h); dynamic_cast<Unit&>(h);"));
-            auto warned = engine_with_host()->check(classes + "Hero h; auto side = dynamic_pointer_cast<Healer>(h);");
+            check_eq(std::string("loaded"), load_error("auto up = dynamic_cast<Unit>(h); auto down = dynamic_cast<Paladin>(h); dynamic_cast<Unit&>(h); shared_ptr<Hero> same = dynamic_cast<shared_ptr<Hero>>(h);"));
+            auto warned = engine_with_host()->check(classes + "Hero h; auto side = dynamic_cast<Healer>(h);");
             check_eq((size_t)1, warned.diagnostics.size());
-            check_true(!warned.has_errors() && warned.diagnostics[0].message == "dynamic_cast<shared_ptr<Healer>> is null for every 'Hero' but one whose class derives from 'Healer' too", warned.format(""));
+            check_true(!warned.has_errors() && warned.diagnostics[0].message == "dynamic_cast<Healer> is null for every 'Hero' but one whose class derives from 'Healer' too", warned.format(""));
+        });
+
+        // The VM answers reflect::is_instance_of(x, "T") with a literal name in place: each answer and error is the call's
+        test("an_instance_test_by_a_literal_name_answers_as_the_call_does", [this]() {
+            struct HostBase { int id = 1; };
+            struct HostDerived : HostBase { int extra = 2; };
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            dynamic_binder<HostBase>(*e, "HostBase").constructor<>().property("id", &HostBase::id).build();
+            dynamic_binder<HostDerived>(*e, "HostDerived").constructor<>().base_class<HostBase>().property("extra", &HostDerived::extra).build();
+            e->execute(R"JAI(
+                class Unit { int hp = 1; }
+                class Hero : Unit { }
+                class Squire : HostDerived { }
+                namespace game { class Boss : Unit { } }
+                string flag(bool b) { return b ? "T" : "F"; }
+                string probe(var x) {
+                    string out = flag(reflect::is_instance_of(x, "Unit")) + flag(reflect::is_instance_of(x, "Hero")) + flag(reflect::is_instance_of(x, "game::Boss")) +
+                                 flag(reflect::is_instance_of(x, "HostBase")) + flag(reflect::is_instance_of(x, " Hero "));
+                    try { out += flag(reflect::is_instance_of(x, "Late")); } catch (err) { out += "(" + err + ")"; }
+                    return out;
+                }
+                string sweep() {
+                    shared_ptr<Unit> none = null;
+                    weak_ptr<Unit> gone;
+                    { shared_ptr<Unit> held = new Hero(); gone = held; }
+                    var things = [Unit(), Hero(), game::Boss(), HostDerived(), Squire(), none, gone, 5, "Hero"];
+                    string out;
+                    for (var x : things) { out += probe(x) + " "; }
+                    return out;
+                }
+                var asked(var x) { return reflect::is_instance_of(x, "Hero"); }
+                string stand_in(var x, string name) { return "script:" + name; }
+                Hero first;
+            )JAI");
+            const std::string unknown = "(reflect::is_instance_of: unknown class 'Late')";
+            check_eq("TFFFF" + unknown + " TTFFT" + unknown + " TFTFF" + unknown + " FFFTF" + unknown + " FFFTF" + unknown + " FFFFF" + unknown + " FFFFF" + unknown +
+                     " FFFFF" + unknown + " FFFFF" + unknown + " ", e->execute("sweep()").as_string());
+            // the sites compiled before the class existed, and before it was redefined without its base (its objects follow the definition)
+            e->execute("class Late : Hero { }");
+            check_eq(std::string("TTFFTT TTFFTF"), e->execute("probe(Late()) + \" \" + probe(first)").as_string());
+            e->execute("class Hero { int mana = 2; }");
+            check_eq(std::string("FTFFTF FTFFTF FTFFTT"), e->execute("probe(Hero()) + \" \" + probe(first) + \" \" + probe(Late())").as_string());
+            // the name bound again by the host: its function is the one called, with the operand and the text
+            check_true(e->execute("asked(first)").as_bool());
+            e->add_global("reflect::is_instance_of", e->get_variable("stand_in"));
+            check_eq(std::string("script:Hero"), e->execute("asked(first)").as_string());
+            e->add_function("reflect::is_instance_of", [](int a_operand, std::string a_name) { return a_name + ":" + std::to_string(a_operand); });
+            check_eq(std::string("Hero:7"), e->execute("asked(7)").as_string());
         });
 
         test("a_passed_test_narrows_the_variable_until_something_can_change_it", [this]() {
@@ -1116,11 +1171,11 @@ public:
             )";
             const std::string narrowed = classes + R"(
                 int direct(Unit u) { if (reflect::is_instance_of(u, "Hero")) { Hero h = u; return u.mana + h.mana; } return 0; }
-                int handle(shared_ptr<Unit> u) { if (!dynamic_pointer_cast<Paladin>(u)) { return -1; } return u.faith; }
+                int handle(shared_ptr<Unit> u) { if (!dynamic_cast<Paladin>(u)) { return -1; } return u.faith; }
                 int chained(var v) { return dynamic_cast<shared_ptr<Hero>>(v) && v.mana > 1 ? v.mana : 0; }
-                int either(Unit u) { if (!dynamic_pointer_cast<Hero>(u) || u.mana < 0) { return 0; } return u.mana; }
+                int either(Unit u) { if (!dynamic_cast<Hero>(u) || u.mana < 0) { return 0; } return u.mana; }
                 int otherwise(Unit u) { if (!(reflect::is_instance_of(u, "Hero"))) { return 0; } else { return u.mana; } }
-                int looped(array<shared_ptr<Unit>> xs) { int t = 0; for (auto x : xs) { if (!dynamic_pointer_cast<Hero>(x)) { continue; } t += x.mana; } return t; }
+                int looped(array<shared_ptr<Unit>> xs) { int t = 0; for (auto x : xs) { if (!dynamic_cast<Hero>(x)) { continue; } t += x.mana; } return t; }
                 int walked(shared_ptr<Unit> u) { int n = 0; while (dynamic_cast<shared_ptr<Paladin>>(u)) { n += u.faith; u = new Unit(); } return n; }
                 int stepped(shared_ptr<Unit> u) { int n = 0; for (; reflect::is_instance_of(u, "Hero"); u = new Unit()) { n += u.mana; } return n; }
                 int kinds(var x) { if (type_of(x) == "int") { return x + 1; } if (type_of(x) != "string") { return 0; } return x.size(); }
@@ -1131,8 +1186,8 @@ public:
                 int snapshot(shared_ptr<Unit> u) { if (reflect::is_instance_of(u, "Hero")) { auto f = [u]() { return u.mana; }; u = new Unit(); return f(); } return 0; }
                 string passed(Unit u) { if (reflect::is_instance_of(u, "Hero")) { return who(u); } return "-"; }
                 int both(var v) { if (reflect::is_instance_of(v, "Hero") && reflect::is_instance_of(v, "Rogue")) { return v.mana + v.stealth; } return 3; }
-                int copied(shared_ptr<Unit> u) { if (dynamic_pointer_cast<Hero>(u)) { auto c = u; return c.mana; } return 0; }
-                int declared(shared_ptr<Unit> u) { if (auto h = dynamic_pointer_cast<Hero>(u)) { return h.mana; } return 0; }   // the declared name has the cast's type
+                int copied(shared_ptr<Unit> u) { if (dynamic_cast<Hero>(u)) { auto c = u; return c.mana; } return 0; }
+                int declared(shared_ptr<Unit> u) { if (auto h = dynamic_cast<Hero>(u)) { return h.mana; } return 0; }   // the declared name has the cast's type
                 void keep(shared_ptr<Unit>& r, Unit& v) { }
                 int bound(shared_ptr<Unit> u, Unit w) { if (reflect::is_instance_of(u, "Hero") && reflect::is_instance_of(w, "Hero")) { int m = u.mana + w.mana; keep(u, w); shared_ptr<Unit>& a = u; return m; } return 0; }   // a reference binds the variable as declared
                 int compared(var x) { if (type_of(x) == "int") { return x == "5" || x == null ? 1 : 0; } return 2; }   // a var keeps its run-time comparisons

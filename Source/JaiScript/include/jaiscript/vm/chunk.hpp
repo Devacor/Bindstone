@@ -504,6 +504,16 @@ namespace jai::vm {
         // texts the call passes should `regex` bind something else
         struct regex_constant { std::shared_ptr<const detail::regex::compiled> re; uint32_t argc = 1; };
         std::vector<regex_constant> regex_constants;
+        // reflect::is_instance_of(x, "T") sites with a literal class name (op_instance_test): the reflect namespace's cell for the name
+        // and the library's function it held when the site compiled (the pin keeps that identity from being recycled); registered once
+        // a class stands under the text, from where the test is detail::instance_of_class over it
+        struct instance_test {
+            std::string class_name;
+            const script_value* entry_cell = nullptr;
+            strong_ptr<script_function_node> entry;
+            mutable bool registered = false;
+        };
+        std::vector<instance_test> instance_tests;
         // Instruction ranges [begin, end) evaluating call arguments; consulted only on the
         // C++-exception path (interpreter parity: visit_call converts arg-eval throws into
         // script unwinding at the frame making the call, so its own try/catch can fire)

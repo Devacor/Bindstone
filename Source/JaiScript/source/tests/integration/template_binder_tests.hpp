@@ -474,7 +474,7 @@ public:
                                        "TplBox<bool> g() { return TplBox<bool>(); }", "array<TplBox<bool>> xs;", "map<string, TplBox<bool>> m;", "shared_ptr<TplBox<bool>> h;",
                                        "weak_ptr<TplBox<bool>> w;", "for (TplBox<bool> x : [1]) { }", "auto l = [](TplBox<bool> b) { return 1; };",
                                        "void f() { try { } catch (TplBox<bool> e) { } }", "extern TplBox<bool> held;", "var v = 1; cast<TplBox<bool>>(v);",
-                                       "var v = 1; dynamic_pointer_cast<TplBox<bool>>(v);", "void f() { auto p = new TplBox<bool>(); }",
+                                       "var v = 1; dynamic_cast<TplBox<bool>>(v);", "void f() { auto p = new TplBox<bool>(); }",
                                        "void f() { auto p = make_shared<TplBox<bool>>(); }", "void f() { auto b = TplBox<bool>(); }",
                                        "void f() { auto b = TplBox<bool>{}; }", "void f() { auto xs = array<TplBox<bool>>(); }"}) {
                 check_true(message(source).find("error: " + unbound) != std::string::npos, std::string(source) + " -> " + message(source));

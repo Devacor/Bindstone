@@ -339,10 +339,12 @@ operator function of that name are left to the run time.
 **Casts** — `cast<T>(e)` types as certain `T` (a typed local initialized from it proves
 `same_type`), `cast<T&>(e)` as `T` for member lookup only (a reference: never a store proof),
 `cast<shared_ptr<T>>(e)` as the handle spelling; primitives type as the primitive. `dynamic_cast` is the same node with
-`cast_expr::dynamic` set (`dynamic_cast<T&>(e)` the reference form, `dynamic_cast<shared_ptr<T>>(e)` and
-`dynamic_pointer_cast<T>(e)` the handle form, which `detail::cast_dynamic_handle` answers with null where the cast raises), typed
+`cast_expr::dynamic` set (`dynamic_cast<T&>(e)` the reference form; `dynamic_cast<T>(e)` the handle form, its target the
+`shared_ptr<T>` the parser makes of the class, which `detail::cast_dynamic_handle` answers with null where the cast raises), typed
 as its cast is; `check_dynamic_cast` alone judges its operand (a declared non-class kind is the load's error, two unrelated
-classes a warning). A condition's declaration (`if (auto d = e)`, `while (T x = e)`, `if (init; condition)`) is the parser's
+classes a warning). A class held by value that takes a dynamic handle cast directly (a declaration, a store, a field
+initializer, a script parameter, a return: `warn_dynamic_handle_copy`, by `ctype::origin`) draws the warning beside
+`cast<C>(h)`'s, naming the tested form and the reference form; the copy and its null check are the run time's. A condition's declaration (`if (auto d = e)`, `while (T x = e)`, `if (init; condition)`) is the parser's
 lowering to a block (`{ T x = e; if (x) ... }`, `for (;;) { T x = e; if (!x) break; body }`): the checker and both backends see
 ordinary declarations. A store through
 `cast<T&>(e)` (`=`, `op=`, `++`/`--`) checks the stored value against `T` with the assignment table
@@ -714,8 +716,10 @@ frame, a `[=]` lambda copies it, `[&]` and a bare `[]` alias it), and `narrow_al
 aliasing boundary.
 
 **Producing.** `narrow_collect(e, sense)` reads a condition: `!` flips the sense, `&&`/`||` take both sides where both had the
-value and the facts both sides give otherwise, a condition that is a dynamic handle cast of the name (`dynamic_cast<shared_ptr<T>>(x)`, `dynamic_pointer_cast<T>(x)`: true where
-the handle is not null) and `reflect::is_instance_of(x, "T")` give a class, `type_of(x) == "k"` a
+value and the facts both sides give otherwise, a condition that is a dynamic handle cast of the name (`dynamic_cast<T>(x)`: true where
+the handle is not null) and `reflect::is_instance_of(x, "T")` give a class (the VM compiles that call, its name a literal, to
+`op_instance_test`: `detail::instance_of_class` in place while the reflect entry is the library's and a class stands under the
+text, the call through its site otherwise), `type_of(x) == "k"` a
 kind (the engine's own `type_of` only: a local, a script function, a member or a held script declaration of that name
 disqualifies it). `narrow_class_fact` judges against the declared type and the narrowing in force: an ancestor or the
 same class adds nothing, an unrelated class marks the fact `open` (diagnostics leave a miss to the run time, both for a `var`

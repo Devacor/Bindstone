@@ -4056,6 +4056,28 @@ private:
     static bool class_value(const ctype& t) {
         return t.kind == ctype::object_k && t.ti && t.ti->base_type == script_value_type::jai_object_type && !t.ti->type_name.empty();
     }
+    // A class held by value copies out of the handle a dynamic_cast<T>(e) gives, which is null where e is no T: the warning beside
+    // cast<T>(handle)'s names the tested form and the reference form
+    void warn_dynamic_handle_copy(const ctype& src, const ctype& dst) {
+        if (!collect_diagnostics_ || !class_value(dst) || !src.origin || src.origin->get_type() != node_type::cast_expr) { return; }
+        const auto* c = static_cast<const cast_expr*>(src.origin);
+        if (!c->dynamic || c->by_reference || !c->target || !c->target->element_type() || class_relation(src.cls, dst.cls) == 0) { return; }
+        size_t related_line = 0, related_column = 0;
+        if (var_entry* local = cast_operand_local(c->operand.get())) {
+            related_line = local->line;
+            related_column = local->column;
+        }
+        const std::string cls = c->target->element_type()->canonical_name();
+        const std::string cast = "dynamic_cast<" + cls + ">(" + cast_operand_spelling(c->operand.get()) + ")";
+        diag(diag_level::warning, c->location, cast + " is copied into a value here and is null when the object is no " + cls + " - test it first with if (auto x = " + cast +
+             "), or use dynamic_cast<" + cls + "&>(" + cast_operand_spelling(c->operand.get()) + ") when it must be one", related_line, related_column);
+    }
+    // the one declaration that takes a call: each by-value class parameter an argument copies into
+    void warn_dynamic_handle_arguments(const function_decl* fn, const std::vector<ctype>& args) {
+        for (size_t i = 0; fn && i < args.size() && i < fn->parameters.size(); ++i) {
+            if (!fn->parameters[i].is_reference) { warn_dynamic_handle_copy(args[i], ctype_from_type_info(fn->parameters[i].type.get())); }
+        }
+    }
     static std::string never_null_fix(const ctype& t) {
         return "a '" + ctype_name(t) + "' is never null; declare 'shared_ptr<" + ctype_name(t) + ">' (or var) for a slot that can be empty";
     }
@@ -5276,6 +5298,7 @@ private:
             report_no_overload(fname, all, args, loc);
             return {};
         }
+        if (viable_count == 1) { warn_dynamic_handle_arguments(only_viable, args); }
         if (nodiscard_viable == viable_count) { nodiscard_hit_ = {std::string(fname), {}}; }
         if (viable_count > 1 || std::find(own.begin(), own.end(), only_viable) == own.end()) { return {}; }
         ctype result = only_viable->is_coroutine ? ctype::make(ctype::coroutine_k) : ctype_from_type_info(only_viable->return_type.get());
@@ -5300,6 +5323,7 @@ private:
             }
         }
         if (viable_count > 0 && nodiscard_viable == viable_count) { nodiscard_hit_ = {std::string(fname), {}}; }
+        if (viable_count == 1) { warn_dynamic_handle_arguments(only_viable, args); }
         call_check out;
         out.checked = true;
         if (viable_count == 0) {
@@ -6160,7 +6184,7 @@ private:
             }
             case node_type::cast_expr: {
                 auto* c = static_cast<const cast_expr*>(e);
-                // dynamic_cast<shared_ptr<T>>(x) / dynamic_pointer_cast<T>(x) as the condition: x is a T where the handle was not null
+                // dynamic_cast<T>(x) as the condition: x is a T where the handle was not null
                 if (c->dynamic && !c->by_reference && sense && c->target && c->target->element_type()) {
                     narrow_named_test(c->operand.get(), c->target->element_type()->type_name, /*kinds=*/false, out);
                 }
@@ -7074,7 +7098,7 @@ private:
         const type_info* named = c->by_reference ? c->target.get() : c->target->element_type().get();
         if (!named || (!enum_type_name(*named) && !find_enum(named->type_name))) { return false; }
         const std::string name(named->type_name);
-        diag(diag_level::error, c->location, (c->by_reference ? "dynamic_cast<" + name + "&>" : "dynamic_cast<shared_ptr<" + name + ">>") +
+        diag(diag_level::error, c->location, "dynamic_cast<" + name + (c->by_reference ? "&>" : ">") +
              " names a class, and '" + name + "' is an enum: cast<" + name + ">(n) converts an int that is one of its values");
         return true;
     }
@@ -7082,7 +7106,7 @@ private:
         const type_info* named = c->by_reference ? c->target.get() : c->target->element_type().get();
         if (!named) { return; }
         const std::string name(named->type_name);
-        const std::string form = c->by_reference ? "dynamic_cast<" + name + "&>" : "dynamic_cast<shared_ptr<" + name + ">>";
+        const std::string form = "dynamic_cast<" + name + (c->by_reference ? "&>" : ">");
         if (operand.tentative || operand.is_unknown() || operand.narrowed) { return; }
         switch (operand.kind) {
             case ctype::int_k: case ctype::float_k: case ctype::bool_k: case ctype::char_k: case ctype::string_k: case ctype::utf8_k:
@@ -8453,7 +8477,10 @@ private:
         }
         if (compound && check_compound_operands(target, base_op, rhs, loc, decl_line, decl_col)) { return; }
         ctype stored = compound ? binary_result(target, base_op, rhs) : rhs;
-        if (assignable(stored, target)) { return; }
+        if (assignable(stored, target)) {
+            if (!compound) { warn_dynamic_handle_copy(rhs, target); }
+            return;
+        }
         if (!compound && target.kind == ctype::object_k && assign_operator_accepts(target.cls, stored)) { return; }
         diag(diag_level::error, loc, "cannot assign '" + ctype_name(stored) + "' to " + what +
              " declared '" + target_display + "'" + assignment_detail(stored, target), decl_line, decl_col);
@@ -10119,6 +10146,8 @@ private:
             diag(diag_level::error, r->location, "cannot return '" + ctype_name(value) + "' from '" +
                  std::string(fn.name) + "' declared to return '" + fn.ret->canonical_name() + "'" + assignment_detail(value, ret),
                  fn.line, fn.column);
+        } else {
+            warn_dynamic_handle_copy(value, ret);
         }
     }
 
@@ -10487,6 +10516,8 @@ private:
                 diag(diag_level::error, decl->location, "cannot initialize '" + std::string(decl->name) +
                      "' declared '" + entry.display + "' with '" + ctype_name(binding_source) + "'" + assignment_detail(binding_source, entry.type));
                 // Recovery keeps the declared type; reference use remains conservative.
+            } else if (has_init && !is_reference_decl) {
+                warn_dynamic_handle_copy(init, entry.type);
             }
         } else if (has_init) {
             // auto with initializer: the initializer's static type, then enforced as that type; a var or unknown
@@ -10842,6 +10873,8 @@ private:
                             diag(diag_level::error, f->location, "cannot initialize field '" +
                                  std::string(f->name) + "' declared '" + declared_variable_type_name(f) +
                                  "' with '" + ctype_name(init) + "'" + assignment_detail(init, ft));
+                        } else {
+                            warn_dynamic_handle_copy(init, ft);
                         }
                     }
                 }

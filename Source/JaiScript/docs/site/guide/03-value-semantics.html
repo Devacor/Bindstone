@@ -107,24 +107,77 @@ string live = "alice";
 print(total([1, 2, 3]), " ", upper("bob"), " ", upper(live), " ", live);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">6 BOB ALICE ALICE</code></pre></div>
 <h2 id="reference-declarations">Reference declarations<a class="hlink" href="#reference-declarations" aria-label="link">&#8203;</a></h2>
-<p><code>auto&amp; r = x;</code> (or <code>Hero&amp; r = x;</code>, <code>var&amp; r = x;</code>) declares an alias. It binds any lvalue a <code>&amp;</code> parameter binds, must have an initializer (<code>reference variable 'r' must be initialized</code>), and stores through it obey the declared type of the storage it names: <code>var&amp; r = hp;</code> over an <code>int hp</code> stores ints. A reference is an alias, not storage, so it cannot be a field or an element.</p>
-<p id="escape-hatch-2-field-and-element-lvalues-as-ref-arguments"><strong>An element reference names an index, not an element.</strong> It is resolved through the container on each use, so it stays valid when the array reallocates. After an <code>insert</code>, an <code>erase</code> below it or a <code>sort</code>, it reads and writes whatever sits at that index. Shrinking the array past the index raises the catchable <code>Reference to a removed array element</code>, and the interrupted store writes nothing. A map entry reference names its key and follows the entry; a key with no entry raises instead of inserting.</p>
+<p><code>auto&amp; r = x;</code> (or <code>Hero&amp; r = x;</code>, <code>var&amp; r = x;</code>) declares an alias. It binds any lvalue a <code>&amp;</code> parameter binds, must have an initializer (<code>reference variable 'r' must be initialized</code>), never rebinds, and stores through it obey the declared type of the storage it names: <code>var&amp; r = hp;</code> over an <code>int hp</code> stores ints. Over a handle, <code>Hero&amp; h = p;</code> names the handle's object, as C++'s <code>Hero&amp; h = *p;</code> does, while <code>auto&amp;</code>, <code>var&amp;</code> and <code>shared_ptr&lt;Hero&gt;&amp;</code> name the handle variable itself. A reference is an alias, not storage, so it cannot be a field or an element (<code>A reference cannot be a field: hold a shared_ptr&lt;Hero&gt; (owning) or a weak_ptr&lt;Hero&gt; (observing)</code>): a class that refers to an object holds a <code>shared_ptr</code> to own it or a <code>weak_ptr</code> to observe it.</p>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Hero { int hp = 10; }
+shared_ptr&lt;Hero&gt; p = new Hero();
+shared_ptr&lt;Hero&gt; keep = p;
+Hero&amp; h = p;                                    // names p's object, as Hero&amp; h = *p
+p = new Hero();
+h.hp = 3;
+print("{} {}", keep.hp, p.hp);
+var&amp; v = p;                                     // var&amp; names the handle variable itself
+p = null;
+print(v == null);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3 10
+true</code></pre></div>
+<p><strong>A reference keeps its type.</strong> It names its slot and sees what a store puts there, as a C++ reference sees an assignment into its object. One declared narrower than its slot (<code>Dog&amp; d = v;</code> over a <code>var</code>, over an <code>Animal</code> slot, or through <code>dynamic_cast&lt;Dog&amp;&gt;(a)</code>) raises on its next use once the slot holds another type: <code>Reference to a 'Dog' now names a 'Cat'</code>. One as wide as its slot, and <code>var&amp;</code> or <code>auto&amp;</code>, takes whatever the slot holds.</p>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Animal { string say() { return "..."; } }
+class Dog : Animal { string say() override { return "woof"; } }
+class Cat : Animal { string say() override { return "meow"; } }
+Animal pet = Dog();
+Dog&amp; dog = dynamic_cast&lt;Dog&amp;&gt;(pet);
+Animal&amp; any = pet;
+pet = Cat();                                    // the slot now holds a Cat
+try { print(dog.say()); } catch (e) { print("caught: {}", e); }
+print(any.say());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Reference to a 'Dog' now names a 'Cat'
+meow</code></pre></div>
+<p id="escape-hatch-2-field-and-element-lvalues-as-ref-arguments"><strong>An element reference names its element and never reseats.</strong> It is resolved through the container on each use, so it stays valid while the array grows and reallocates, and a <code>sort</code> or <code>reverse</code> keeps it on its slot (they assign into the elements). An <code>insert</code> or a <code>remove</code> at or below its index moves its element, and the next use raises the catchable <code>Reference to a moved array element</code>; removing the element itself (<code>pop</code>, a shrinking <code>resize</code>, <code>clear</code>, a <code>remove</code> at it, a <code>remove_if</code> or <code>filter</code> that drops it) raises <code>Reference to a removed array element</code>. A reference to a field of an element's object (<code>auto&amp; hp = heroes[2].hp;</code>, or reached through a reference to the element) follows the same rule. The interrupted store writes nothing. A map entry reference names its entry and follows it while other keys come and go; once its key is erased it raises <code>Reference to a removed map entry</code>, and storing the key again makes another entry, which it does not name. A key with no entry raises instead of inserting.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; arr = [5, 6, 7];
 auto&amp; x = arr[1];
-for (int i = 0; i &lt; 64; ++i) { arr.push(0); }   // reallocation: x still names index 1
+for (int i = 0; i &lt; 64; ++i) { arr.push(0); }   // reallocation: x still names arr[1]
 x = 42;
-arr.insert(0, 99);                              // index 1 now holds what was arr[0]
-x = 1;
+arr.insert(0, 99);                              // x's element moved up to index 2
+try { x = 1; } catch (e) { print("caught: {}", e); }
 print("{} {} {}", arr[0], arr[1], arr[2]);
-arr.resize(1);
-try { x = 2; } catch (e) { print("caught: {}", e); }
+auto&amp; last = arr[arr.size() - 1];
+arr.pop();
+arr.push(3);                                    // another element at last's index
+try { last = 2; } catch (e) { print("caught: {}", e); }
 map&lt;string, int&gt; ages = {"ana": 31};
+int&amp; ana = ages["ana"];
+ages.erase("ana");
+ages["ana"] = 32;                               // the key back is another entry
+try { print(ana); } catch (e) { print("caught: {}", e); }
 try { int&amp; missing = ages["bo"]; } catch (e) { print("caught: {}", e); }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">99 1 42
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Reference to a moved array element
+99 5 42
 caught: Reference to a removed array element
+caught: Reference to a removed map entry
 caught: Key "bo" not found in map</code></pre></div>
 <p><code>const T&amp; r = make();</code> binds a temporary and keeps it alive as long as <code>r</code>, with no copy, as in C++. A reference that is not <code>const</code> binds only an lvalue: <code>Lamp&amp; attic = make();</code> raises <code>Cannot take reference of non-lvalue expression (...)</code>.</p>
 <p><strong>What names storage.</strong> As in C++, an lvalue is a variable, a field, an element, a vector component, a call returning <code>T&amp;</code> (<code>first() = 5</code>), <code>cast&lt;T&amp;&gt;(e)</code>, <code>(a = b)</code>, <code>++x</code>, and a conditional whose arms are both lvalues of one type (<code>(use_a ? a : b) = 9</code>, <code>auto&amp; r = use_a ? a : b;</code>). Anything else is a temporary, and assigning to one or binding a non-const reference to it is an error that says what was written: <code>cannot assign to a literal</code>, <code>cannot assign to x++: it yields the old value</code>, <code>cannot assign to the result of '+': it is a temporary value</code>, <code>cannot assign to a call result: 'count' returns by value</code>, <code>cannot assign to a conditional: its arm '5' names no storage</code>, <code>cannot bind a reference to a conditional of 'int' and 'float': its arms must have one type</code>, and <code>Cannot assign to a member of a temporary</code> for <code>make().x = 1</code> (a handle result names its object, so <code>make_shared&lt;P&gt;().x = 1</code> stores). The checker reports these at load where it sees the target; a call through a <code>var</code> raises the same text, capitalized, when it runs.</p>
+<h2 id="no-pointers">No pointers: what a reference keeps alive<a class="hlink" href="#no-pointers" aria-label="link">&#8203;</a></h2>
+<p>JaiScript has no pointers: an object lives in one place, as a value or behind its handles. A reference serves a call or a loop. To refer to an object for longer, hold a <code>shared_ptr</code> to own it or a <code>weak_ptr</code> to observe it; to refer to a value in a container, keep its index or its key. A reference owns nothing it reaches, so it keeps alive only what C++ would leave dangling:</p>
+<div class="tablewrap"><table><thead><tr><th>A reference bound to</th><th>Keeps alive</th><th>Once its object goes</th></tr></thead><tbody>
+<tr><td>a local or a part of one, when the reference outlives it (a <code>T&amp;</code> return of a local)</td><td>the local, as long as the reference: it shares the local as a <code>[&amp;]</code> capture does</td><td>&mdash;</td></tr>
+<tr><td>a temporary, by <code>const T&amp;</code> (a declaration or a parameter)</td><td>the temporary, as long as the reference</td><td>&mdash;</td></tr>
+<tr><td>an element, or a field of an element's object</td><td>nothing: the array owns it</td><td><code>Reference to a removed array element</code>, or <code>Reference to a moved array element</code> after an insert or remove at or below it</td></tr>
+<tr><td>a map entry</td><td>nothing: the map owns it</td><td><code>Reference to a removed map entry</code>, the key stored again included</td></tr>
+<tr><td>an object reached through a handle (<code>Hero&amp; h = p;</code>, <code>auto&amp; n = p.name;</code>)</td><td>nothing: its handles own it, and it dies with the last</td><td><code>Reference to a destroyed object</code></td></tr>
+</tbody></table></div>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Node { string name = "n"; ~Node() { print("~Node {}", name); } }
+shared_ptr&lt;Node&gt; p = new Node();
+string&amp; name = p.name;
+p = null;                                       // the Node's last owner: it dies here
+try { print(name); } catch (e) { print("caught: {}", e); }
+array&lt;int&gt;&amp; kept() { array&lt;int&gt; local = [1, 2]; return local; }
+auto&amp; k = kept();                               // the local lives as long as k
+k.push(3);
+print(k);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">~Node n
+caught: Reference to a destroyed object
+[1, 2, 3]</code></pre></div>
 <h2 id="escape-hatch-4-range-for-with-auto">Range-for with <code>auto&amp;</code><a class="hlink" href="#escape-hatch-4-range-for-with-auto" aria-label="link">&#8203;</a></h2>
 <p><code>for (auto x : xs)</code> copies each element into <code>x</code>; <code>for (auto&amp; x : xs)</code> names the element. Write <code>auto&amp;</code> whenever the body changes the element or the element is large, and the question of copies never comes up.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto nums = [1, 2, 3];
@@ -157,8 +210,7 @@ print(w.expired());</code></pre></div>
 true</code></pre></div>
 <div class="tablewrap"><table><thead><tr><th>Written</th><th>Does</th></tr></thead><tbody>
 <tr><td><code>sp = new Node();</code> (a handle on the right)</td><td>points <code>sp</code> at another object</td></tr>
-<tr><td><code>sp = Node();</code> (a value on the right)</td><td>assigns into the shared object: every alias sees it</td></tr>
-<tr><td><code>shared_ptr&lt;Node&gt; h = value;</code>, <code>handles.push(value)</code>, <code>table["k"] = value</code></td><td>the handle holds a <strong>copy</strong>, as <code>make_shared&lt;Node&gt;(value)</code> does: a handle never aliases a value slot, and <code>value</code> dies with its scope. A temporary is the handle's object, uncopied</td></tr>
+<tr><td><code>shared_ptr&lt;Node&gt; h = value;</code>, <code>sp = value;</code>, <code>handles.push(value)</code>, <code>table["k"] = value</code>, a <code>shared_ptr&lt;Node&gt;</code> argument, return or field given a <code>Node</code></td><td>a load error, as in C++: a class value never becomes a handle on its own (<code>A Node value does not become a handle: make_shared&lt;Node&gt;(value) copies it into a new one</code>), the same text at run time through a <code>var</code>. <code>make_shared&lt;Node&gt;(value)</code> or <code>new Node(value)</code> copies it into a new handle; <code>Node&amp; n = sp; n = value;</code> assigns into the shared object</td></tr>
 <tr><td><code>shared_from_this()</code>, <code>weak_from_this()</code>, <code>shared_ptr&lt;T&gt; s = this;</code></td><td>the handle of an object reached through one: a method called through a handle, or a constructor <code>new</code> or <code>make_shared</code> runs, so a constructor that registers <code>this</code> registers the object the caller gets. On a class value they raise, since no handle to it exists (<a href="../reference/rules.html#this-into-a-handle">the rule</a>)</td></tr>
 <tr><td><code>sp.reset(h)</code>, <code>sp.reset()</code></td><td>repoints to <code>h</code>'s object or empties <code>sp</code>, never writing through; a value or a primitive argument raises</td></tr>
 <tr><td><code>Node fresh = sp;</code>, <code>array&lt;Node&gt; xs = [sp];</code>, <code>xs.push(sp)</code></td><td>a handle into a value slot copies the object (C++'s <code>*sp</code>); an untyped container or a <code>shared_ptr&lt;Node&gt;</code> element keeps the handle</td></tr>
@@ -272,7 +324,7 @@ caught: Cannot assign to 'table[0]': it is read-only ('table' is const)</code></
 <h2 id="what-each-strategy-costs">Choosing<a class="hlink" href="#what-each-strategy-costs" aria-label="link">&#8203;</a></h2>
 <div class="tablewrap"><table><thead><tr><th>Use</th><th>When</th><th>Cost and limit</th></tr></thead><tbody>
 <tr><td>a value (the default)</td><td>scalars, strings, small classes, anywhere a snapshot is wanted</td><td>a deep copy that grows with the payload; a string copy is O(1) until written</td></tr>
-<tr><td><code>T&amp;</code> / <code>auto&amp;</code></td><td>a call or a loop that reads or changes the caller's object</td><td>no copy; an alias cannot be stored in a field or a container</td></tr>
+<tr><td><code>T&amp;</code> / <code>auto&amp;</code></td><td>a call or a loop that reads or changes the caller's object</td><td>no copy; an alias cannot be stored in a field or a container, and it owns nothing (<a href="#no-pointers">what it keeps alive</a>)</td></tr>
 <tr><td><code>shared_ptr&lt;T&gt;</code></td><td>identity that outlives the call: registries, graphs, objects naming objects</td><td>no copy; every holder sees every change</td></tr>
 </tbody></table></div>
 <p>The engine skips a copy that no code could tell from the original (a by-value parameter or local that is only read), so a read-only helper taking a class by value runs at reference speed; the semantics never change. Measurements are in <a href="../embedding/11-performance.html#value-strategy-costs">Performance</a>.</p>

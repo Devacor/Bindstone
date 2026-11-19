@@ -188,10 +188,10 @@ public:
 			[](folder& f) { f.write("root.jai", "return template(\"page.spider\").to_string();\n"); }, run_root});
 		result.push_back({"dynamic_template", "page.spider", text_page, broken_page,
 			[](folder& f) { f.write("root.jai", "string p = \"page.spider\";\nreturn template(p).to_string();\n"); }, run_root});
-		result.push_back({"scoped_template", "card.spider", text_page, broken_page,
-			[](folder& f) { f.write("root.jai", "map<string, var> m = {\"k\": 1};\nstring p = \"card.spider\";\nreturn scoped_template(p, m).to_string();\n"); }, run_root});
-		result.push_back({"literal_scoped_template", "card.spider", text_page, broken_page,
-			[](folder& f) { f.write("root.jai", "map<string, var> m = {\"k\": 1};\nreturn scoped_template(\"card.spider\", m).to_string();\n"); }, run_root});
+		result.push_back({"untrusted_template", "card.spider", text_page, broken_page,
+			[](folder& f) { f.write("root.jai", "map<string, var> m = {\"k\": 1};\nstring p = \"card.spider\";\nreturn untrusted_template(p, m).to_string();\n"); }, run_root});
+		result.push_back({"literal_untrusted_template", "card.spider", text_page, broken_page,
+			[](folder& f) { f.write("root.jai", "map<string, var> m = {\"k\": 1};\nreturn untrusted_template(\"card.spider\", m).to_string();\n"); }, run_root});
 		result.push_back({"module_splicing", "dep.jai",
 			[number](int v) { return "return " + number(v) + ";" + pad(v); },
 			[](int v) { return "return (;" + pad(v); },
@@ -219,7 +219,7 @@ public:
 		stdlib::register_web(*eng);
 		eng->jaibite_cache(false);
 		eng->add_include_path(a_folder.dir.string());
-		eng->set_scoped_template_dirs({a_folder.dir.string()});
+		eng->set_untrusted_template_dirs({a_folder.dir.string()});
 		eng->file_stamp_source(stamps(a_landing));
 		if (a_seen) { eng->source_file_observer(a_seen->observer()); }
 		return eng;
@@ -621,7 +621,7 @@ public:
 					stdlib::register_web(*eng);
 					eng->jaibite_cache(false);
 					eng->add_include_path(f.dir.string());
-					eng->set_scoped_template_dirs({f.dir.string()});
+					eng->set_untrusted_template_dirs({f.dir.string()});
 					eng->add_global("payload", script_value(payload, eng.get()));
 					return eng;
 				};
@@ -630,8 +630,8 @@ public:
 				check_eq(expected, outcome([&] { return fresh()->execute_file(f.path("includer.jai")).to_string(); }), "a run-time include too" + which);
 				const std::string expected_module = outcome([&] { auto eng = fresh(); eng->execute_file_source(f.path("mod.jai"), text_mode("mod.jai")); return eng->execute("sl_text();").to_string(); });
 				check_eq(expected_module, outcome([&] { auto eng = fresh(); eng->execute("import(\"mod.jai\");"); return eng->execute("sl_text();").to_string(); }), "an import too" + which);
-				const std::string as_bytes = outcome([&] { return fresh()->execute("map<string, var> m = {}; scoped_template_text(payload, m).to_string();").to_string(); });
-				check_eq(as_bytes, outcome([&] { return fresh()->execute("map<string, var> m = {}; string p = \"card.spider\"; scoped_template(p, m).to_string();").to_string(); }),
+				const std::string as_bytes = outcome([&] { return fresh()->execute("map<string, var> m = {}; untrusted_template_text(payload, m).to_string();").to_string(); });
+				check_eq(as_bytes, outcome([&] { return fresh()->execute("map<string, var> m = {}; string p = \"card.spider\"; untrusted_template(p, m).to_string();").to_string(); }),
 					"a template file renders as its bytes do" + which);
 			}
 		});

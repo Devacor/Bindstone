@@ -7932,29 +7932,29 @@
     },
     {
       "owner": "language",
-      "name": "scoped_template",
-      "signature": "scoped_template(path: string, args: map) -> web::html",
+      "name": "untrusted_template",
+      "signature": "untrusted_template(path: string, args: map) -> web::html",
       "provider": "core",
       "effect": "execute",
-      "notes": "Renders an untrusted template file over a copy of args, which is the only name it sees; it calls only built-in methods of built-in values and the string::, array:: and map:: functions, always escapes, and writes at most engine::scoped_template_output_limit bytes. The file is read only from engine::scoped_template_dirs(): a relative path with no .., the first folder in order that holds it, never through a link out.",
+      "notes": "Renders an untrusted template file over a copy of args, which is the only name it sees; it calls only built-in methods of built-in values and the string::, array:: and map:: functions, always escapes, and writes at most engine::untrusted_template_output_limit bytes. The file is read only from engine::untrusted_template_dirs(): a relative path with no .., the first folder in order that holds it, never through a link out.",
       "source": "source/implementation/parser.cpp",
       "form": "function",
-      "availability": "The scoped_template permission (on by default)",
-      "display": "scoped_template(path: string, args: map) -> web::html"
+      "availability": "The untrusted_template permission (on by default)",
+      "display": "untrusted_template(path: string, args: map) -> web::html"
     },
     {
       "owner": "language",
-      "name": "scoped_template_text",
-      "signature": "scoped_template_text(text: string, args: map) -> web::html",
+      "name": "untrusted_template_text",
+      "signature": "untrusted_template_text(text: string, args: map) -> web::html",
       "provider": "core",
       "effect": "execute",
-      "notes": "scoped_template over template text instead of a file.",
+      "notes": "untrusted_template over template text instead of a file.",
       "source": "source/implementation/parser.cpp",
       "form": "function",
-      "availability": "The scoped_template permission (on by default)",
-      "display": "scoped_template_text(text: string, args: map) -> web::html",
+      "availability": "The untrusted_template permission (on by default)",
+      "display": "untrusted_template_text(text: string, args: map) -> web::html",
       "example": {
-        "code": "print(scoped_template_text(\"<b>${args[\\\"name\\\"]}</b>\", {\"name\": \"<i>\"}));",
+        "code": "print(untrusted_template_text(\"<b>${args[\\\"name\\\"]}</b>\", {\"name\": \"<i>\"}));",
         "output": "<b>&lt;i&gt;</b>"
       }
     },
@@ -7964,7 +7964,7 @@
       "signature": "raw(text: var) -> web::html",
       "provider": "core",
       "effect": "copy",
-      "notes": "Inside a template(...) only: the text spliced unescaped. A scoped template refuses it.",
+      "notes": "Inside a template(...) only: the text spliced unescaped. An untrusted template refuses it.",
       "source": "source/implementation/templates.cpp",
       "form": "function",
       "availability": "Inside a template",
@@ -8020,27 +8020,27 @@
     },
     {
       "owner": "reflect",
-      "name": "scoped_template_output_limit",
-      "signature": "scoped_template_output_limit() -> int",
+      "name": "untrusted_template_output_limit",
+      "signature": "untrusted_template_output_limit() -> int",
       "provider": "core",
       "effect": "observe",
       "source": "source/implementation/engine.cpp",
-      "notes": "The bytes one scoped_template / scoped_template_text render may write, as the host set it (default 1048576; 0 = no limit); scripts read it, hosts change it.",
+      "notes": "The bytes one untrusted_template / untrusted_template_text render may write, as the host set it (default 1048576; 0 = no limit); scripts read it, hosts change it.",
       "form": "function",
       "availability": "Every engine",
-      "display": "reflect::scoped_template_output_limit() -> int"
+      "display": "reflect::untrusted_template_output_limit() -> int"
     },
     {
       "owner": "reflect",
-      "name": "scoped_template_dirs",
-      "signature": "scoped_template_dirs() -> array<string>",
+      "name": "untrusted_template_dirs",
+      "signature": "untrusted_template_dirs() -> array<string>",
       "provider": "core",
       "effect": "observe",
       "source": "source/implementation/templates.cpp",
-      "notes": "The folders a scoped_template file is read from, in the order they are tried, as the host set them (default [\"template\"]); scripts read the list, hosts change it.",
+      "notes": "The folders a untrusted_template file is read from, in the order they are tried, as the host set them (default [\"template\"]); scripts read the list, hosts change it.",
       "form": "function",
       "availability": "Every engine",
-      "display": "reflect::scoped_template_dirs() -> array<string>"
+      "display": "reflect::untrusted_template_dirs() -> array<string>"
     }
   ],
   "fields": [
@@ -8104,7 +8104,7 @@
     },
     {
       "owner": "jai::permissions",
-      "name": "scoped_template",
+      "name": "untrusted_template",
       "type": "int permission id",
       "provider": "core",
       "access": "constant",

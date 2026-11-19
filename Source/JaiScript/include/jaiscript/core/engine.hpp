@@ -142,7 +142,7 @@ namespace jai {
     public:
         ~engine();
 
-        // Every permission is an int32_t id (core/permission.hpp): filesystem, scoped_template and source_receivers are enabled
+        // Every permission is an int32_t id (core/permission.hpp): filesystem, untrusted_template and source_receivers are enabled
         // by default, every other one starts disabled. Changes affect the next protected operation, including after a reentrant C++ callback;
         // started work is not cancelled. Grants are per-engine, not shared through script variables. Configure on the engine
         // thread (or while idle), outside parallel regions. Concurrent cross-thread grant changes are not supported.
@@ -485,24 +485,24 @@ namespace jai {
         void skip_unknown_receivers(bool skip) { skip_unknown_receivers_ = skip; }
         bool skip_unknown_receivers() const { return skip_unknown_receivers_; }
 
-        // The most bytes one template() render writes (default 10 MiB, 10485760) and one scoped_template or scoped_template_text
+        // The most bytes one template() render writes (default 10 MiB, 10485760) and one untrusted_template or untrusted_template_text
         // render writes (default 1 MiB, 1048576); a render that would write past its limit raises a catchable error naming the
         // limit. Zero is no limit. Scripts read them (reflect::template_output_limit()) and cannot change them; a change follows
         // the permission rules: idle or on the execution thread, never inside a parallel region, and a render already started
         // keeps the limit it started with.
         void template_output_limit(size_t bytes);
         size_t template_output_limit() const;
-        void scoped_template_output_limit(size_t bytes);
-        size_t scoped_template_output_limit() const;
-        // The folders a scoped_template(path, map) file is read from, under the scoped_template permission alone. The path is
+        void untrusted_template_output_limit(size_t bytes);
+        size_t untrusted_template_output_limit() const;
+        // The folders a untrusted_template(path, map) file is read from, under the untrusted_template permission alone. The path is
         // relative with no .. segment; it is tried in each folder in list order, and the first file that exists and canonically lies
         // inside its folder (links resolved) is the template. A relative folder is relative to the directory of the script that
         // calls; the default is {"template"}, and a folder that does not exist holds nothing. Scripts read the list with
-        // reflect::scoped_template_dirs() and cannot change it; a change follows the permission rules.
-        void add_scoped_template_dir(const std::string& dir);
-        void remove_scoped_template_dir(const std::string& dir);
-        void set_scoped_template_dirs(std::vector<std::string> dirs);
-        const std::vector<std::string>& scoped_template_dirs() const;
+        // reflect::untrusted_template_dirs() and cannot change it; a change follows the permission rules.
+        void add_untrusted_template_dir(const std::string& dir);
+        void remove_untrusted_template_dir(const std::string& dir);
+        void set_untrusted_template_dirs(std::vector<std::string> dirs);
+        const std::vector<std::string>& untrusted_template_dirs() const;
 
         // === PARALLEL EXECUTION (parallel_transform v0; internal/parallel_design.md) ===
         // Worker count the next parallel_transform uses (also the thread_count() builtin).
@@ -1815,8 +1815,8 @@ namespace jai {
                                                      bool for_import = false);
     checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr);   // from the executing file
     namespace detail {
-        // The same ladder without the filesystem permission's gate: a scoped template folder resolves as an import's file does,
-        // under the scoped_template permission (detail/template_library.hpp)
+        // The same ladder without the filesystem permission's gate: an untrusted template folder resolves as an import's file does,
+        // under the untrusted_template permission (detail/template_library.hpp)
         checked_result<std::string> resolve_on_import_ladder(const std::string& path, engine* engine_ptr, const std::string& from_file);
     }
 

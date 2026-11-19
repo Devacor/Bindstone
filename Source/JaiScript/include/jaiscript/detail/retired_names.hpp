@@ -29,6 +29,13 @@ inline constexpr retired_name k_retired_names[] = {
 	{"to_base64", "base64_encode", "JaiScript has no 'to_base64': write base64_encode(to_binary(value))"},
 	{"from_base64", "base64_decode", "JaiScript has no 'from_base64': write from_binary(base64_decode(text))"},
 	{"time::now", "time::engine_elapsed", "JaiScript has no 'time::now': write time::engine_elapsed()"},
+	{"scoped_template", "", "JaiScript has no 'scoped_template': write untrusted_template(path, map)"},
+	{"scoped_template_text", "", "JaiScript has no 'scoped_template_text': write untrusted_template_text(text, map)"},
+	{"reflect::scoped_template_dirs", "reflect::untrusted_template_dirs", "JaiScript has no 'reflect::scoped_template_dirs': write reflect::untrusted_template_dirs()"},
+	{"reflect::scoped_template_output_limit", "reflect::untrusted_template_output_limit",
+	 "JaiScript has no 'reflect::scoped_template_output_limit': write reflect::untrusted_template_output_limit()"},
+	{"jai::permissions::scoped_template", "jai::permissions::untrusted_template",
+	 "JaiScript has no 'jai::permissions::scoped_template': write jai::permissions::untrusted_template"},
 };
 
 inline constexpr const retired_name* find_retired_name(std::string_view name) noexcept {

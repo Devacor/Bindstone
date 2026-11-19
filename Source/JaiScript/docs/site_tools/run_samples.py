@@ -43,7 +43,7 @@ INTRO_SUPPORT_RE = re.compile(r"^\s*(?:with|and|plus|then)\s+`([A-Za-z0-9_./-]+\
 INTRO_SUPPORT_RE2 = re.compile(r"`([A-Za-z0-9_./-]+\.(?:jai|spider))`\s*:\s*$")
 LABEL_FILE_RE = re.compile(r"(?:jaiscript|template)\s*[—–·-]+\s*([A-Za-z0-9_./-]+\.(?:jai|spider))\s*$")
 HOST_LABEL_RE = re.compile(r"host|sketch|cap above|registration|needs the", re.I)
-REF_RE = re.compile(r'\b(?:import|include|template|scoped_template)\s*\(?\s*"([^"]+)"')
+REF_RE = re.compile(r'\b(?:import|include|template|untrusted_template)\s*\(?\s*"([^"]+)"')
 
 
 class Extractor(HTMLParser):

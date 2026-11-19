@@ -65,7 +65,7 @@ public:
             check_false(restricted->execute("jai::permissions::is_enabled(jai::permissions::filesystem)").as_bool());
             check_true(trusted->execute("jai::permissions::is_enabled(jai::permissions::filesystem, jai::permissions::filesystem)").as_bool());
             filesystem_enabled(*restricted, true);
-            check_true(restricted->execute("jai::permissions::is_enabled(jai::permissions::filesystem, jai::permissions::scoped_template)").as_bool());
+            check_true(restricted->execute("jai::permissions::is_enabled(jai::permissions::filesystem, jai::permissions::untrusted_template)").as_bool());
             check_false(restricted->execute("jai::permissions::is_enabled(jai::permissions::filesystem, jai::permissions::network)").as_bool());
         });
 

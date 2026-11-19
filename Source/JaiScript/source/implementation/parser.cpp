@@ -1572,7 +1572,7 @@ JAI_NOINLINE checked_result<expression_ptr> parser::primary_rest() {
 
     if (template_call_ahead()) {
         if (peek().lexeme == "template") { return template_call(); }
-        return scoped_template_call(peek().lexeme == "scoped_template_text");
+        return untrusted_template_call(peek().lexeme == "untrusted_template_text");
     }
 
     // import(...) in expression position: true when a module (re)ran (`if (import(MODULES)) { ... }`)
@@ -1668,11 +1668,11 @@ JAI_NOINLINE checked_result<expression_ptr> parser::primary_rest() {
 bool parser::template_call_ahead() const {
     if (!check(token_type::identifier) || current_ + 1 >= stream_->size() || (*stream_)[current_ + 1].type != token_type::left_paren) { return false; }
     const std::string_view word = peek().lexeme;
-    return word == "template" || word == "scoped_template" || word == "scoped_template_text";
+    return word == "template" || word == "untrusted_template" || word == "untrusted_template_text";
 }
 
 // A name the innermost barriers do not admit: neither declared in the template's own scopes nor passed through every barrier
-// between the use and its declaration. A scoped barrier admits its own names and ends the walk.
+// between the use and its declaration. An untrusted barrier admits its own names and ends the walk.
 bool parser::template_hides(uint64_t symbol_id) const {
     size_t top = function_scope_stack_.size();
     for (size_t b = template_barriers_.size(); b-- > 0;) {
@@ -1681,7 +1681,7 @@ bool parser::template_hides(uint64_t symbol_id) const {
             if (function_scope_stack_[i].symbol_to_slot.count(symbol_id)) { return false; }
         }
         if (std::find(barrier.names.begin(), barrier.names.end(), symbol_id) == barrier.names.end()) { return true; }
-        if (barrier.scoped) { return false; }
+        if (barrier.untrusted) { return false; }
         top = barrier.scope_count;
     }
     return false;
@@ -1691,7 +1691,7 @@ bool parser::template_hides(uint64_t symbol_id) const {
 // trusted template's raw is its builtin.
 void parser::resolve_name(identifier_expr& id) {
     if (!template_barriers_.empty() && template_hides(id.symbol_id)) {
-        if (id.name == "raw" && !template_barriers_.back().scoped) {
+        if (id.name == "raw" && !template_barriers_.back().untrusted) {
             auto [raw_id, raw_view] = symbolizer_->intern_with_view(detail::template_library::k_raw);
             id.name = raw_view;
             id.symbol_id = raw_id;
@@ -1821,13 +1821,13 @@ JAI_NOINLINE checked_result<expression_ptr> parser::template_call() {
     return body;
 }
 
-// scoped_template(path, map) / scoped_template_text(text, map): a literal source is checked here against the scoped rules, and
-// the call renders its text (kept in the call, so the program runs the version it loaded) through template#scoped
-JAI_NOINLINE checked_result<expression_ptr> parser::scoped_template_call(bool text_form) {
+// untrusted_template(path, map) / untrusted_template_text(text, map): a literal source is checked here against the untrusted rules, and
+// the call renders its text (kept in the call, so the program runs the version it loaded) through template#untrusted
+JAI_NOINLINE checked_result<expression_ptr> parser::untrusted_template_call(bool text_form) {
     const token name = advance();
     advance();   // '('
     const source_location at = name.location;
-    const std::string spelling = text_form ? "scoped_template_text(text, map)" : "scoped_template(path, map)";
+    const std::string spelling = text_form ? "untrusted_template_text(text, map)" : "untrusted_template(path, map)";
     std::vector<expression_ptr> arguments;
     if (!check(token_type::right_paren)) {
         do {
@@ -1853,19 +1853,19 @@ JAI_NOINLINE checked_result<expression_ptr> parser::scoped_template_call(bool te
         call.push_back(std::move(arguments[0]));
         call.push_back(literal_text(text_form ? std::string(detail::template_library::k_text_label) : at.filename));
         call.push_back(std::move(arguments[1]));
-        return template_builtin(text_form ? detail::template_library::k_scoped : detail::template_library::k_scoped_file, at, std::move(call));
+        return template_builtin(text_form ? detail::template_library::k_untrusted : detail::template_library::k_untrusted_file, at, std::move(call));
     }
     const std::string source(static_cast<literal_expr*>(arguments[0].get())->value.unchecked_as_string());
     std::string content = source;
     std::string label(detail::template_library::k_text_label);
     if (!text_form) {
-        if (!engine_->is_enabled(permissions::scoped_template)) {   // the render raises the permission error, as include does
+        if (!engine_->is_enabled(permissions::untrusted_template)) {   // the render raises the permission error, as include does
             call.push_back(std::move(arguments[0]));
             call.push_back(literal_text(at.filename));
             call.push_back(std::move(arguments[1]));
-            return template_builtin(detail::template_library::k_scoped_file, at, std::move(call));
+            return template_builtin(detail::template_library::k_untrusted_file, at, std::move(call));
         }
-        const auto found = detail::template_library::resolve_scoped_file(*engine_, source, at.filename);
+        const auto found = detail::template_library::resolve_untrusted_file(*engine_, source, at.filename);
         if (!found.error.empty()) {
             report_error(found.error, name);
             return reported();
@@ -1880,30 +1880,30 @@ JAI_NOINLINE checked_result<expression_ptr> parser::scoped_template_call(bool te
     template_barrier barrier;
     barrier.scope_count = function_scope_stack_.size();
     barrier.names.push_back(symbolizer_->intern("args"));
-    barrier.scoped = true;
+    barrier.untrusted = true;
     auto body = template_text_body(content, label, std::move(barrier));
     if (!body) { return reported(); }
     std::vector<detail::template_library::violation> violations;
-    detail::template_library::scoped_violations(*body.value(), *symbolizer_, violations);
+    detail::template_library::untrusted_violations(*body.value(), *symbolizer_, violations);
     for (const auto& v : violations) { report_error_at(v.message, v.at); }
     if (!violations.empty()) { return reported(); }
     call.push_back(literal_text(content));
     call.push_back(literal_text(label));
     call.push_back(std::move(arguments[1]));
-    return template_builtin(detail::template_library::k_scoped, at, std::move(call));
+    return template_builtin(detail::template_library::k_untrusted, at, std::move(call));
 }
 
-checked_result<expression_ptr> parser::parse_scoped_template_body() {
+checked_result<expression_ptr> parser::parse_untrusted_template_body() {
     template_barrier barrier;
     barrier.names.push_back(symbolizer_->intern("args"));
-    barrier.scoped = true;
+    barrier.untrusted = true;
     template_barriers_.push_back(std::move(barrier));
     auto body = expression();
     if (body && !is_at_end()) { report_error("unexpected text after the template body", peek()); }
     template_barriers_.pop_back();
     if (body && errors_.empty()) {
         std::vector<detail::template_library::violation> violations;
-        detail::template_library::scoped_violations(*body.value(), *symbolizer_, violations);
+        detail::template_library::untrusted_violations(*body.value(), *symbolizer_, violations);
         for (const auto& v : violations) { report_error_at(v.message, v.at); }
     }
     if (!body && errors_.empty()) { report_error(format_error(body, *symbolizer_), peek()); }

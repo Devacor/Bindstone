@@ -47,7 +47,7 @@ public:
     void forge_tests() override {
         custom_test("host_permissions_start_disabled_and_grants_are_engine_local", [this](engine& eng) {
             check_false(eng.is_enabled(app_permission::edit));
-            check_true(eng.is_enabled(jai::permissions::filesystem, jai::permissions::scoped_template));
+            check_true(eng.is_enabled(jai::permissions::filesystem, jai::permissions::untrusted_template));
             check_false(eng.is_enabled(jai::permissions::network));
             auto other = make_engine();
             other->enable(app_permission::edit);
@@ -67,7 +67,7 @@ public:
             eng.enable(app_permission::edit, jai::permissions::network);
             eng.set_strict();
             check_false(eng.is_enabled(jai::permissions::filesystem));
-            check_false(eng.is_enabled(jai::permissions::scoped_template));
+            check_false(eng.is_enabled(jai::permissions::untrusted_template));
             check_false(eng.is_enabled(jai::permissions::source_receivers));
             check_false(eng.is_enabled(jai::permissions::network));
             check_false(eng.is_enabled(app_permission::edit));
@@ -75,10 +75,10 @@ public:
             check_eq(script_int(5), eng.execute("2 + 3").as_int(), "source in memory still runs");
             check_eq(denied(), failure([&]() { eng.execute("edit()"); }));
             check_eq(std::string("Insufficient permission: filesystem."), failure([&]() { eng.execute("import(\"strict_missing.jai\");"); }));
-            check_eq(std::string("Insufficient permission: scoped_template."), failure([&]() { eng.execute("scoped_template_text(\"x\", {});"); }));
-            eng.enable(jai::permissions::scoped_template, app_permission::edit);
+            check_eq(std::string("Insufficient permission: untrusted_template."), failure([&]() { eng.execute("untrusted_template_text(\"x\", {});"); }));
+            eng.enable(jai::permissions::untrusted_template, app_permission::edit);
             check_eq(script_int(42), eng.execute("edit()").as_int());
-            check_eq(std::string("x"), eng.execute("scoped_template_text(\"x\", {}).to_string()").as_string());
+            check_eq(std::string("x"), eng.execute("untrusted_template_text(\"x\", {}).to_string()").as_string());
             check_false(eng.is_enabled(jai::permissions::filesystem), "enable grants only what it names");
             eng.set_strict();
             check_false(eng.is_enabled(app_permission::edit), "a later call withdraws what was granted since");
@@ -195,11 +195,11 @@ public:
 
         custom_test("scripts_ask_by_id_through_jai_permissions", [](engine& eng) {
             eng.enable(app_permission::edit);
-            check_true(eng.execute("jai::permissions::is_enabled(jai::permissions::filesystem, 7, jai::permissions::scoped_template)").as_bool());
+            check_true(eng.execute("jai::permissions::is_enabled(jai::permissions::filesystem, 7, jai::permissions::untrusted_template)").as_bool());
             check_false(eng.execute("jai::permissions::is_enabled(jai::permissions::filesystem, 8)").as_bool());
             check_false(eng.execute("jai::permissions::is_enabled(jai::permissions::network)").as_bool());
             check_eq(script_int(7), eng.execute("jai::permissions::count;").as_int());
-            check_eq(script_int(15), eng.execute("jai::permissions::filesystem + jai::permissions::scoped_template + jai::permissions::network + "
+            check_eq(script_int(15), eng.execute("jai::permissions::filesystem + jai::permissions::untrusted_template + jai::permissions::network + "
                 "jai::permissions::debug + jai::permissions::trusted + jai::permissions::untrusted;").as_int());
             const std::string expects = "jai::permissions::is_enabled expects permission ids";
             check_eq(expects, failure([&]() { eng.execute("jai::permissions::is_enabled(\"app.edit\")"); }));

@@ -97,7 +97,7 @@ visible merely because its C++ type exists (the three-doors rule; see the binder
 
 `jai::permissions::is_enabled(ids...)` requires at least one argument and returns true only if
 **all** supplied permissions are enabled. Each argument is an id that fits an `int32_t`: a
-`jai::permissions` value (`filesystem`, `scoped_template`, `network`, `debug`, `trusted`,
+`jai::permissions` value (`filesystem`, `untrusted_template`, `network`, `debug`, `trusted`,
 `untrusted`) or a host's. Anything else raises.
 
 ```jaiscript

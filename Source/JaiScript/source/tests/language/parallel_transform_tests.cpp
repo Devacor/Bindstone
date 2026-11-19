@@ -3632,10 +3632,10 @@ public:
 				"reflect::construct", "reflect::construct_shared", "reflect::fields", "reflect::function_arguments",
 				"reflect::functions", "reflect::generation", "reflect::get", "reflect::globals", "reflect::has_field",
 				"reflect::has_method", "reflect::instances", "reflect::invoke", "reflect::is_cpp_bound", "reflect::is_instance_of",
-				"reflect::method_arguments", "reflect::methods", "reflect::scoped_template_dirs",
-				"reflect::scoped_template_output_limit", "reflect::set", "reflect::template_output_limit", "reflect::type_name",
+				"reflect::method_arguments", "reflect::methods", "reflect::untrusted_template_dirs",
+				"reflect::untrusted_template_output_limit", "reflect::set", "reflect::template_output_limit", "reflect::type_name",
 				"resolve_path", "sleep", "spider::Response", "spider::catch", "spider::get", "spider::post", "spider::sling",
-				"template#dynamic", "template#html", "template#raw", "template#scoped", "template#scoped_file", "template#splice",
+				"template#dynamic", "template#html", "template#raw", "template#untrusted", "template#untrusted_file", "template#splice",
 				"time::date", "time::date_from_unix", "time::date_now", "time::engine_elapsed", "time::execute_elapsed",
 				"time::local_date", "time::local_now", "time::stopwatch", "time::unix_ms", "time::unix_time",
 				"time::utc_date", "time::utc_now", "to_binary", "to_json"

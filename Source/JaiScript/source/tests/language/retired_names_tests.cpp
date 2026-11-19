@@ -164,6 +164,30 @@ public:
 			check_eq(std::string("mine\n"), run_output("namespace time { string now() { return \"mine\"; } }\nprint(time::now());\n"));
 		});
 
+		test("untrusted_templates_name_what_they_render", [this]() {
+			const std::pair<const char*, const char*> samples[] = {
+				{"var s = scoped_template(\"card.spider\", {});", "JaiScript has no 'scoped_template': write untrusted_template(path, map)"},
+				{"var s = scoped_template_text(\"x\", {});", "JaiScript has no 'scoped_template_text': write untrusted_template_text(text, map)"},
+				{"var d = reflect::scoped_template_dirs();", "JaiScript has no 'reflect::scoped_template_dirs': write reflect::untrusted_template_dirs()"},
+				{"var n = reflect::scoped_template_output_limit();", "JaiScript has no 'reflect::scoped_template_output_limit': write reflect::untrusted_template_output_limit()"},
+				{"var p = jai::permissions::scoped_template;", "JaiScript has no 'jai::permissions::scoped_template': write jai::permissions::untrusted_template"},
+			};
+			for (const auto& [source, text] : samples) {
+				const std::string errors = load_errors(source);
+				check_true(errors.find(text) != std::string::npos, std::string(source) + " -> " + errors);
+			}
+			check_eq(std::string("Hi Ada true true\n"), run_output(R"(
+				print(untrusted_template_text("Hi ${args[\"name\"]}", {"name": "Ada"}), " ",
+				      jai::permissions::is_enabled(jai::permissions::untrusted_template), " ", reflect::untrusted_template_output_limit() > 0);
+			)"));
+			check_true(jai::permissions::untrusted_template != jai::permissions::untrusted, "two permissions");
+			auto e = library_engine();
+			e->disable(permissions::untrusted_template);
+			check_eq(std::string("Insufficient permission: untrusted_template."),
+				e->execute("var m = \"\"; try { untrusted_template_text(\"x\", {}); } catch (error) { m = error; } m;").to_string());
+			check_eq(std::string("mine x\n"), run_output("string scoped_template_text(string t, var m) { return \"mine \" + t; }\nprint(scoped_template_text(\"x\", {}));\n"));
+		});
+
 		test("an_engine_without_the_replacement_reports_the_plain_undeclared_name", [this]() {
 			auto e = make_engine();
 			stdlib::register_all(*e);

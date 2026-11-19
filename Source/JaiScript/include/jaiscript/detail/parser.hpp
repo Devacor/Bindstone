@@ -52,9 +52,9 @@ namespace jai {
         std::vector<issue> issues() const;
         // The token stream as one type (a generic's bound with its arguments in place); the instances it names are requested in `requests`
         checked_result<type_info_ptr> parse_type_text(std::vector<declaration_ptr>& requests);
-        // The token stream as one template body (lexer::tokenize_template) under a scoped_template's rules: the expression, or the
+        // The token stream as one template body (lexer::tokenize_template) under a untrusted_template's rules: the expression, or the
         // listing of what the text breaks (docs/site/guide/19-templates.html)
-        checked_result<expression_ptr> parse_scoped_template_body();
+        checked_result<expression_ptr> parse_untrusted_template_body();
 
     private:
         std::vector<declaration_ptr> recovered_;
@@ -104,20 +104,20 @@ namespace jai {
         int splice_depth_ = 0;
         bool splice_include(const declaration_ptr& decl, std::vector<declaration_ptr>& out);
 
-        // template(path, a, b, ...), scoped_template(path, map), scoped_template_text(text, map) (docs/site/guide/19-templates.html).
+        // template(path, a, b, ...), untrusted_template(path, map), untrusted_template_text(text, map) (docs/site/guide/19-templates.html).
         // A template body sees the names its own text declares, the names passed to it and the program's names: a barrier
         // hides every enclosing scope (function scopes below scope_count, member scopes, block scopes at program level) from a
-        // name it does not admit. A scoped barrier admits `args` and nothing past it.
+        // name it does not admit. An untrusted barrier admits `args` and nothing past it.
         struct template_barrier {
             size_t scope_count = 0;
             std::vector<uint64_t> names;
-            bool scoped = false;
+            bool untrusted = false;
         };
         std::vector<template_barrier> template_barriers_;
         std::vector<std::string> template_chain_;   // the template files being expanded: a call back into one renders through the dynamic form
         bool template_call_ahead() const;
         checked_result<expression_ptr> template_call();
-        checked_result<expression_ptr> scoped_template_call(bool text_form);
+        checked_result<expression_ptr> untrusted_template_call(bool text_form);
         checked_result<expression_ptr> template_text_body(const std::string& content, const std::string& file, template_barrier barrier);
         bool template_hides(uint64_t symbol_id) const;
         void resolve_name(identifier_expr& id);

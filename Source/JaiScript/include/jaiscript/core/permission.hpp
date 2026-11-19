@@ -15,7 +15,7 @@ namespace jai {
 // Ids are the host's to keep unique across its enums; two enums that share an id name one permission.
 enum class permission : std::int32_t {
     filesystem,
-    scoped_template,
+    untrusted_template,
     network,
     debug,
     trusted,
@@ -27,7 +27,7 @@ namespace permissions {
     // enforced by the engine: files and paths, untrusted templates under their own root (detail/template_library.hpp), and
     // jai_spider's requests and the runner's download.start
     inline constexpr permission filesystem = permission::filesystem;
-    inline constexpr permission scoped_template = permission::scoped_template;
+    inline constexpr permission untrusted_template = permission::untrusted_template;
     inline constexpr permission network = permission::network;
     // saved signal receivers that are source text: a script's text connect and connect_source, and a load that arms one
     inline constexpr permission source_receivers = permission::source_receivers;

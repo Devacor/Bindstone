@@ -45,7 +45,7 @@ authorize an operation. Protected operations share `engine::require_permission`.
 | Text | Meaning |
 | --- | --- |
 | `Insufficient permission: filesystem.` | A filesystem operation or location query was refused (`insufficient_permission`). Catchable; an unhandled error reaches the host. |
-| `Insufficient permission: scoped_template.`, `network.`, `debug.`, `trusted.`, `untrusted.` | The other built-in permissions, the same way; the engine itself enforces only filesystem, scoped_template and network. |
+| `Insufficient permission: untrusted_template.`, `network.`, `debug.`, `trusted.`, `untrusted.` | The other built-in permissions, the same way; the engine itself enforces only filesystem, untrusted_template and network. |
 | `Insufficient permission: {name}.` | A binding requires a disabled host permission (`insufficient_permission`): its `register_permission` name, else its id, parked when the guard is made so a denial in a parallel region needs no interning. |
 | `jai::permissions::is_enabled expects at least 1 argument` | The query needs one or more ids. |
 | `jai::permissions::is_enabled expects permission ids` | An argument is not an integer that fits an `int32_t`. |

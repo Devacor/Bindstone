@@ -75,7 +75,7 @@ GUIDE = [
     ("18-random.html", "Random Numbers &amp; Crypto",
      "The random type: a generator you own, seeded streams that replay bit for bit on every platform, copies and save files for rollback, draws in parallel loops; and crypto:: for secrets: secure random bytes, SHA-2, HMAC and PHP-compatible bcrypt passwords."),
     ("19-templates.html", "HTML Templates",
-     "template(path, names...) renders an HTML file with escaped ${...} splices, seeing the names it is given by reference and the program, checked at load and reloaded on edit; scoped_template renders untrusted templates over a copy of a map."),
+     "template(path, names...) renders an HTML file with escaped ${...} splices, seeing the names it is given by reference and the program, checked at load and reloaded on edit; untrusted_template renders untrusted templates over a copy of a map."),
     ("20-terminal-games.html", "A Terminal Game in One File",
      "A real-time game run by the standalone runner: read_key and key_down polling, frame pacing with a stopwatch and sleep, frames drawn with ANSI escape codes, the terminal's size, sound, and saves."),
     ("21-generics.html", "Generics",

@@ -82,7 +82,7 @@ web::html home_page(array<Entry> entries, string name, string flash, int views) 
 A template with a literal path is checked when the module that calls it loads, at the template's own line, and it is part
 of that module: an edit to it applies on the next request, and an edit that does not check is reported in the console
 while the app keeps serving the version that did. A list is `${array::map(entries, entry => template("card.spider", entry))}`.
-`scoped_template(path, map)` renders a template a visitor or a customer wrote: it sees only a copy of the map and calls only
+`untrusted_template(path, map)` renders a template a visitor or a customer wrote: it sees only a copy of the map and calls only
 built-in methods, so it cannot reach the app.
 
 ## Options

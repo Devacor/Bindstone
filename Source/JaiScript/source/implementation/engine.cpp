@@ -441,8 +441,8 @@ static int compute_param_match_cost(
 struct engine::implementation {
     // Engine-thread state. A C++ callback may change grants before returning to
     // script; parallel regions keep them immutable until their workers join.
-    permission_set permissions_ = detail::permission_set_of(permissions::filesystem, permissions::scoped_template, permissions::source_receivers);
-    std::vector<std::string> scoped_template_dirs_{"template"};   // engine::scoped_template_dirs, relative ones from the calling script's directory
+    permission_set permissions_ = detail::permission_set_of(permissions::filesystem, permissions::untrusted_template, permissions::source_receivers);
+    std::vector<std::string> untrusted_template_dirs_{"template"};   // engine::untrusted_template_dirs, relative ones from the calling script's directory
     // Per-engine reference_holder block pool, type-erased (value.cpp owns the type).
     // Before other owning members so it is destroyed LAST - members releasing reference
     // values on teardown returns its blocks to a live pool. The teardown orphans the
@@ -6763,7 +6763,7 @@ checked_result<void> engine::require_permissions(const permission_set& required)
     if (impl->permissions_.covers(required)) { return {}; }
     const std::int32_t missing = *impl->permissions_.first_missing(required);
     static constexpr const char* built_in_denials[] = {
-        "Insufficient permission: filesystem.", "Insufficient permission: scoped_template.", "Insufficient permission: network.",
+        "Insufficient permission: filesystem.", "Insufficient permission: untrusted_template.", "Insufficient permission: network.",
         "Insufficient permission: debug.", "Insufficient permission: trusted.", "Insufficient permission: untrusted.",
         "Insufficient permission: source_receivers.",
     };
@@ -6798,7 +6798,7 @@ void engine::register_permission_builtins() {
     auto& permissions_namespace = script_namespaces()[symbolize("jai::permissions")];
     if (!permissions_namespace) { permissions_namespace = std::make_shared<script_namespace_data>(); }
     const std::pair<const char*, permission> built_ins[] = {
-        {"filesystem", permissions::filesystem}, {"scoped_template", permissions::scoped_template}, {"network", permissions::network},
+        {"filesystem", permissions::filesystem}, {"untrusted_template", permissions::untrusted_template}, {"network", permissions::network},
         {"debug", permissions::debug}, {"trusted", permissions::trusted}, {"untrusted", permissions::untrusted},
         {"source_receivers", permissions::source_receivers},
     };
@@ -6837,7 +6837,7 @@ void engine::register_permission_builtins() {
         }, this);
     };
     reflect_namespace->variables[symbolize("template_output_limit")] = limit_reader("template_output_limit", &detail::execution_limits::template_output_limit);
-    reflect_namespace->variables[symbolize("scoped_template_output_limit")] = limit_reader("scoped_template_output_limit", &detail::execution_limits::scoped_template_output_limit);
+    reflect_namespace->variables[symbolize("untrusted_template_output_limit")] = limit_reader("untrusted_template_output_limit", &detail::execution_limits::untrusted_template_output_limit);
 }
 
 void engine::max_call_depth(backend_type type, size_t depth) {
@@ -6911,34 +6911,34 @@ size_t engine::template_output_limit() const {
     return impl->limits_.template_output_limit;
 }
 
-void engine::add_scoped_template_dir(const std::string& dir) {
+void engine::add_untrusted_template_dir(const std::string& dir) {
     check_permission_mutation();
-    auto& dirs = impl->scoped_template_dirs_;
+    auto& dirs = impl->untrusted_template_dirs_;
     if (std::find(dirs.begin(), dirs.end(), dir) == dirs.end()) { dirs.push_back(dir); }
 }
 
-void engine::remove_scoped_template_dir(const std::string& dir) {
+void engine::remove_untrusted_template_dir(const std::string& dir) {
     check_permission_mutation();
-    auto& dirs = impl->scoped_template_dirs_;
+    auto& dirs = impl->untrusted_template_dirs_;
     dirs.erase(std::remove(dirs.begin(), dirs.end(), dir), dirs.end());
 }
 
-void engine::set_scoped_template_dirs(std::vector<std::string> dirs) {
+void engine::set_untrusted_template_dirs(std::vector<std::string> dirs) {
     check_permission_mutation();
-    impl->scoped_template_dirs_ = std::move(dirs);
+    impl->untrusted_template_dirs_ = std::move(dirs);
 }
 
-const std::vector<std::string>& engine::scoped_template_dirs() const {
-    return impl->scoped_template_dirs_;
+const std::vector<std::string>& engine::untrusted_template_dirs() const {
+    return impl->untrusted_template_dirs_;
 }
 
-void engine::scoped_template_output_limit(size_t bytes) {
+void engine::untrusted_template_output_limit(size_t bytes) {
     check_permission_mutation();
-    impl->limits_.scoped_template_output_limit = bytes;
+    impl->limits_.untrusted_template_output_limit = bytes;
 }
 
-size_t engine::scoped_template_output_limit() const {
-    return impl->limits_.scoped_template_output_limit;
+size_t engine::untrusted_template_output_limit() const {
+    return impl->limits_.untrusted_template_output_limit;
 }
 
 checked_result<script_value> engine::run_template_unit(const std::string& unit, const std::string& source, std::vector<detail::source_stamp>& read, bool& unsettled) {

@@ -20,6 +20,7 @@
 #endif
 #include "implementation/no_interpreter.cpp"
 #include "implementation/properties.cpp"
+#include "implementation/portable_math.cpp"
 #include "implementation/runtime_errors.cpp"
 #include "implementation/conversion_registry.cpp"
 #include "implementation/class_registry.cpp"

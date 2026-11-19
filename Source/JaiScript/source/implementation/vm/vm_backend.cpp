@@ -8279,7 +8279,7 @@ next_frame:
 			JAI_CELL_NEXT;
 		}
 		case opcode::op_c_mov_p: hot.cells[ci.a].bits = hot.cells[ci.b].bits; hot.cells[ci.a].kind = hot.cells[ci.b].kind; hot.dirty->set(ci.a); ++ip; JAI_CELL_NEXT;
-		case opcode::op_c_sin_f: cell_put_float(hot, ci.a, std::sin(cell_float_of_bits(hot.cells[ci.b].bits))); ++ip; JAI_CELL_NEXT;
+		case opcode::op_c_sin_f: cell_put_float(hot, ci.a, detail::portable_math::sin(cell_float_of_bits(hot.cells[ci.b].bits))); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_gdepth: current_call_depth_ += ci.a ? 1 : -1; ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_jtruth: {
 			const uint8_t tk = hot.cells[ci.a].kind;
@@ -8311,7 +8311,7 @@ next_frame:
 		case opcode::op_c_jle_iik: if ((static_cast<script_int>(hot.cells[ci.a].bits) <= hot.consts[ci.b].unchecked_int_payload()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
 		case opcode::op_c_jgt_iik: if ((static_cast<script_int>(hot.cells[ci.a].bits) > hot.consts[ci.b].unchecked_int_payload()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
 		case opcode::op_c_jge_iik: if ((static_cast<script_int>(hot.cells[ci.a].bits) >= hot.consts[ci.b].unchecked_int_payload()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
-		case opcode::op_c_cos_f: cell_put_float(hot, ci.a, std::cos(cell_float_of_bits(hot.cells[ci.b].bits))); ++ip; JAI_CELL_NEXT;
+		case opcode::op_c_cos_f: cell_put_float(hot, ci.a, detail::portable_math::cos(cell_float_of_bits(hot.cells[ci.b].bits))); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_sqrt_f: cell_put_float(hot, ci.a, std::sqrt(cell_float_of_bits(hot.cells[ci.b].bits))); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_mov_k: {
 			const script_value& rc = hot.consts[ci.b];

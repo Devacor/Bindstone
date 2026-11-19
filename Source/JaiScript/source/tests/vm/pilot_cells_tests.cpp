@@ -9,6 +9,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/detail/environment.hpp>
+#include <jaiscript/detail/portable_math.hpp>
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
 #include <jaiscript/detail/type_checker.hpp>
@@ -67,7 +68,7 @@ public:
 
 	static void register_host_math_fixture(engine& a_engine) {
 		// Exercise the host alias optimization explicitly; stdlib no longer adds globals.
-		a_engine.add_function("host_hypot", [](script_float a_x, script_float a_y) { return std::hypot(a_x,a_y); });
+		a_engine.add_function("host_hypot", [](script_float a_x, script_float a_y) { return detail::portable_math::hypot(a_x,a_y); });
 		a_engine.add_function("host_sqrt", [](script_float a_value) { return std::sqrt(a_value); });
 		detail::engine_access::register_math_alias(a_engine, "host_sqrt", "sqrt");
 		a_engine.add_function("host_floor", [](script_float a_value) { return std::floor(a_value); });
@@ -76,11 +77,11 @@ public:
 		detail::engine_access::register_math_alias(a_engine, "host_ceil", "ceil");
 		a_engine.add_function("host_abs", [](script_float a_value) { return std::abs(a_value); });
 		detail::engine_access::register_math_alias(a_engine, "host_abs", "abs");
-		a_engine.add_function("host_sin", [](script_float a_value) { return std::sin(a_value); });
+		a_engine.add_function("host_sin", [](script_float a_value) { return detail::portable_math::sin(a_value); });
 		detail::engine_access::register_math_alias(a_engine, "host_sin", "sin");
-		a_engine.add_function("host_cos", [](script_float a_value) { return std::cos(a_value); });
+		a_engine.add_function("host_cos", [](script_float a_value) { return detail::portable_math::cos(a_value); });
 		detail::engine_access::register_math_alias(a_engine, "host_cos", "cos");
-		a_engine.add_function("host_tan", [](script_float a_value) { return std::tan(a_value); });
+		a_engine.add_function("host_tan", [](script_float a_value) { return detail::portable_math::tan(a_value); });
 		detail::engine_access::register_math_alias(a_engine, "host_tan", "tan");
 		a_engine.add_function("host_degrees", [](script_float a_value) { return a_value * (180.0 / 3.14159265358979323846); });
 		detail::engine_access::register_math_alias(a_engine, "host_degrees", "radians_to_degrees");

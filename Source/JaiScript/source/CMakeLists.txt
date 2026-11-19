@@ -21,6 +21,7 @@ set(JAISCRIPT_SOURCES
     implementation/parallel_transform.cpp
     implementation/parse_errors.cpp
     implementation/parser.cpp
+    implementation/portable_math.cpp
     implementation/properties.cpp
     implementation/records.cpp
     implementation/generics.cpp

@@ -47,7 +47,6 @@
 #include <jaiscript/detail/format_text.hpp>
 #include <jaiscript/detail/regex_library.hpp>
 #include <jaiscript/detail/template_library.hpp>
-#include <jaiscript/detail/retired_names.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -1756,28 +1755,6 @@ private:
         // define anything - keep the signal, drop the teeth.
         diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, loc,
              "use of undeclared identifier '" + std::string(name) + "'");
-    }
-
-    // A library name that has a new spelling, where that spelling exists on this engine: the text says what to write
-    const detail::retired_name* retired_call(std::string_view name) {
-        const detail::retired_name* retired = detail::find_retired_name(name);
-        if (!retired || retired->replacement.empty()) { return retired; }
-        const size_t cut = retired->replacement.rfind("::");
-        if (cut == std::string_view::npos) { return eng_.has_function(std::string(retired->replacement)) ? retired : nullptr; }
-        return namespace_declares(std::string(retired->replacement.substr(0, cut)), retired->replacement.substr(cut + 2)) ? retired : nullptr;
-    }
-    // a called builtin method that has a new spelling, on a receiver that declares no method of the name: the text says what to write
-    bool retired_method_call(const member_expr* m, bool called) {
-        const detail::retired_method* retired = called ? detail::find_retired_method(m->member) : nullptr;
-        if (retired) { diag(diag_level::error, m->location, std::string(retired->text)); }
-        return retired != nullptr;
-    }
-    void undeclared_call(const source_location& loc, std::string_view name) {
-        if (const detail::retired_name* retired = retired_call(name)) {
-            diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, loc, std::string(retired->text));
-            return;
-        }
-        undeclared(loc, name);
     }
 
     // -------------------------------------------------------------- collection
@@ -4895,10 +4872,6 @@ private:
             if (namespace_known(path)) { space = path; next = k + 1; }
         }
         if (space.empty() || namespace_declares(space, parts[next])) { return; }
-        if (const detail::retired_name* retired = retired_call(space + "::" + std::string(parts[next]))) {
-            diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, m->location, std::string(retired->text));
-            return;
-        }
         diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, m->location,
              "no member '" + std::string(parts[next]) + "' in namespace '" + space + "'");
     }
@@ -4916,7 +4889,6 @@ private:
         }
         const auto& ids = eng_.builtin_method_ids(kind);
         if (ids.count(eng_.symbolize(m->member))) { return; }
-        if (retired_method_call(m, true)) { return; }
         if (kind == 1) { map_dot_key(m); return; }
         if (const std::string_view hint = detail::foreign_member_text(ctype_name(recv), m->member); !hint.empty()) {
             diag(diag_level::error, m->location, "no member '" + std::string(m->member) + "' on '" + ctype_name(recv) + "': " + std::string(hint));
@@ -5177,8 +5149,8 @@ private:
         diag(diag_level::error, m->location, detail::method_value_text(m->member, owner, detail::method_value_receiver(m), true));
     }
     // A member of a known int, float, bool or char: the registry (BUILTIN_ARITIES) gives these kinds no methods, so any name is the
-    // run time's text, or a retired method's new spelling when it is called
-    void scalar_member_missing(const ctype& recv, const member_expr* m, bool called) {
+    // run time's text
+    void scalar_member_missing(const ctype& recv, const member_expr* m) {
         script_value_type kind;
         switch (recv.kind) {
             case ctype::int_k: kind = script_value_type::jai_int_type; break;
@@ -5188,7 +5160,6 @@ private:
             default: return;
         }
         if (recv.tentative || recv.diagnostic_only || m->is_static) { return; }
-        if (retired_method_call(m, called)) { return; }
         diag(diag_level::error, m->location, no_member_text(static_cast<engine*>(nullptr), base_type_spelling(kind), m->member));
     }
     // a map's key is read with [] (only an enum's value table reads its keys with a dot, and an enum's name is no map here): the run time's text
@@ -7651,7 +7622,7 @@ private:
             recv.kind == ctype::bool_k) {
             if (!writing && kind_certain(recv) && !m->is_static) {
                 builtin_method_value(recv, m);
-                scalar_member_missing(recv, m, false);
+                scalar_member_missing(recv, m);
             }
             if (writing && recv.kind == ctype::map_k && kind_certain(recv) && !m->is_static) {
                 diag(diag_level::error, m->location, "cannot assign to member '" + std::string(m->member) + "' of a map; store the key as [\"" + std::string(m->member) + "\"]");
@@ -8200,7 +8171,7 @@ private:
             if (!id->global_qualified && report_cdtor_call(id->name, id->location)) { return {}; }
             if (program_or_derived_name(id->name)) { return {}; }
             if (stale_field_context()) { return {}; }
-            undeclared_call(id->location, id->name);
+            undeclared(id->location, id->name);
             return {};
         }
         if (callee->get_type() == node_type::member_expr) {
@@ -8293,7 +8264,7 @@ private:
             }
             seen.copies = proven != 0;   // the library's string, array and map methods
             if (kind_certain(recv) && !m->is_static) {
-                scalar_member_missing(recv, m, true);
+                scalar_member_missing(recv, m);
                 check_builtin_member(recv, m);
                 checkBuiltinArity(recv, m, c);
                 checkBuiltinMethodShapes(recv, m, c, args);
@@ -8403,7 +8374,6 @@ private:
             return {};
         }
         if (hit.certain && !recv.open) {
-            if (!want_static && retired_method_call(m, true)) { return {}; }
             size_t rl = 0, rc = 0;
             if (auto it = classes_.find(recv.cls); it != classes_.end()) {
                 rl = it->second.decl->location.line;

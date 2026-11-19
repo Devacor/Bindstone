@@ -464,6 +464,24 @@ public:
             check_eq(std::string("merge() takes exactly one argument|merge() argument must be a map"), caught.as<std::string>());
         });
 
+        test("merge_result_is_nothing_and_values_keep_their_type", [&]() {
+            auto eng = make_engine();
+            stdlib::register_all(eng);
+            const std::string in_place = "merge changes m in place and returns nothing; map::merge(m, other) returns a merged copy";
+            const auto used = eng->check("map<string, int> m = {\"a\": 1};\nauto c = m.merge({\"b\": 2});");
+            check_true(used.format("").find(in_place) != std::string::npos, used.format(""));
+            std::string raised;
+            try { eng->execute("[[warn_mode]];\nvar m = {\"a\": 1};\nvar c = m.merge({\"b\": 2});"); } catch (const std::exception& error) { raised = error.what(); }
+            check_true(raised.find(in_place) != std::string::npos, "a var receiver raises at run time: " + raised);
+            check_true(eng->check("const map<string, int> k = {\"a\": 1};\nk.merge({\"b\": 2});").has_errors(), "a const map does not merge in place");
+            check_eq(std::string("Cannot store 'float' in map value of type 'int' {\"a\":1}"), eng->execute(R"(
+                map<string, int> ints = {"a": 1};
+                string out = "";
+                try { ints.merge({"z": 3, "b": 2.5}); } catch (e) { out = e + " " + to_json(ints); }
+                out;
+            )").as_string());
+        });
+
         test("map_with_numeric_string_keys", [&]() {
             auto eng = make_engine();
 

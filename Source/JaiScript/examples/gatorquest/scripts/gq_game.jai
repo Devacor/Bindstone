@@ -536,7 +536,7 @@ int run_shots() {
 	string dir = arg_value("out", data_root() + "/shots");
 	string size = arg_value("screen", "150x44");
 	array<string> wh = size.split("x");
-	make_dirs(dir);
+	file::make_directories(dir);
 	sim_init(seed);
 	BOTS = [];
 	player_create(0, "Chomps", 0);
@@ -572,8 +572,8 @@ int run_shots() {
 		if (t % every == 0 || t == ticks) {
 			render_frame(CV);
 			string name = dir + "/shot_t" + to_string(t);
-			write_file(name + ".ans", compose_frame(CV));
-			write_file(name + ".txt", sketch_frame(CV));
+			file::write(name + ".ans", compose_frame(CV));
+			file::write(name + ".txt", sketch_frame(CV));
 			png_write_canvas(name + ".png", 3);
 			shots = shots + 1;
 		}

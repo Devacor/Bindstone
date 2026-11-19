@@ -102,7 +102,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>eng-&gt;throw_on_overflow()</code></td><td>The build&#x27;s integer-overflow policy (checked = default).</td></tr>
 <tr><td><code>jai::debug::listen(*eng, port)</code> / <code>conn-&gt;listening()</code> / <code>conn-&gt;error()</code></td><td>The VS Code (DAP) listener. A taken port does not throw: <code>listening()</code> is false, <code>error()</code> says why.</td></tr>
 <tr><td><code>eng-&gt;add_include_path(dir)</code></td><td>Search root for script <code>include</code>/<code>import</code>; first added wins on collisions.</td></tr>
-<tr><td><code>eng-&gt;confine_paths({dirs})</code></td><td>Opt-in: <code>include</code>, <code>import</code>, <code>resolve_path</code> and <code>file_data</code> open only files under these folders; no <code>.cache</code> is written beside a source outside them. Empty (default) opens any readable path (<a href="../embedding/05-safety-rails.html#confine-paths">Safety Rails</a>).</td></tr>
+<tr><td><code>eng-&gt;confine_paths({dirs})</code></td><td>Opt-in: <code>include</code>, <code>import</code>, <code>resolve_path</code> and <code>file::data</code> open only files under these folders; no <code>.cache</code> is written beside a source outside them. Empty (default) opens any readable path (<a href="../embedding/05-safety-rails.html#confine-paths">Safety Rails</a>).</td></tr>
 <tr><td><code>eng-&gt;reset_import(path)</code> / <code>reset_imports()</code> / <code>is_imported(path)</code> / <code>get_imported_files()</code></td><td>Import-cache management.</td></tr>
 <tr><td><code>eng-&gt;set_import_behavior(mode)</code></td><td><code>file_timestamp</code> (default) / <code>once</code> / <code>always</code>.</td></tr>
 <tr><td><code>eng-&gt;import_recheck_interval(seconds)</code></td><td>A reached <code>import</code> asks the filesystem whether its module changed at most once per window. Default 0.2 s; 0 checks on every reach. Script builtin: <code>import_recheck_interval(s)</code>.</td></tr>
@@ -576,7 +576,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <ul id="runner-builtins">
 <li>the full stdlib, the <code>web::</code> library</li>
 <li>the <a href="../guide/17-web.html#spider"><code>spider::</code> HTTP client</a> (WinHTTP on Windows, sockets elsewhere, the <code>network</code> permission granted)</li>
-<li>file IO (<code>read_file</code>, <code>write_file</code>, <code>file_exists</code>, <code>delete_file</code>, <code>move_file</code>, <code>dir_exists</code>, <code>make_dirs</code>, <code>list_dir</code>, <code>writable_dir</code>, plus <code>download</code>, <code>zip_entries</code> and <code>zip_extract</code>)</li>
+<li>file IO (<code>file::read</code>, <code>file::write</code>, <code>file::exists</code>, <code>file::remove</code>, <code>file::move</code>, <code>file::directory_exists</code>, <code>file::make_directories</code>, <code>file::list_directory</code>, <code>file::ensure_writable_directory</code>, plus <code>download</code>, <code>zip_entries</code> and <code>zip_extract</code>)</li>
 <li>a console-game surface (<a href="../guide/20-terminal-games.html">A Terminal Game in One File</a>: <code>read_key</code>, <code>key_down</code>, <code>term_cols</code>, <code>term_rows</code>, <code>env_var</code>, and sound: <code>load_sound</code>, <code>play_sound</code>, <code>stop_sounds</code>; clocks are the standard library&#x27;s <code>time::</code>)</li>
 <li>two socket classes, <code>net_server</code> and <code>net_channel</code>, and <code>net_host_name</code> and <code>net_local_addresses</code></li>
 </ul>
@@ -629,15 +629,15 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 </ul>
 <div class="tablewrap"><table><thead><tr><th>Files and folders</th><th>Behavior</th></tr></thead><tbody>
 <tr><td>a relative path</td><td>Resolves from the working directory (<code>import</code> and <code>include</code>: from the script&#x27;s folder). A path built from <code>root_script_dir()</code> names the same file from any working directory.</td></tr>
-<tr><td><code>read_file(path) -&gt; string</code></td><td>The file's bytes exactly (binary mode; <code>""</code> for an empty file). Missing or unreadable: <a href="errors.html#err-cannot-read-file"><code>Cannot read file '&lt;path&gt;': &lt;reason&gt;</code></a>.</td></tr>
-<tr><td><code>write_file(path, text) -&gt; bool</code></td><td>Writes the bytes exactly, creating missing folders; <code>false</code> when it cannot.</td></tr>
-<tr><td><code>file_exists(path)</code>, <code>dir_exists(path)</code> <code>-&gt; bool</code></td><td>Whether the path names something, or a folder.</td></tr>
-<tr><td><code>delete_file(path) -&gt; bool</code></td><td><code>false</code> when nothing was removed.</td></tr>
-<tr><td><code>move_file(from, to) -&gt; bool</code></td><td>Replaces <code>to</code>; <code>false</code> when <code>from</code> is not a file. One volume: a single operation, so a reader sees the old file or the new one. Across volumes: copies, then removes the source.</td></tr>
+<tr><td><code>file::read(path) -&gt; string</code></td><td>The file's bytes exactly (binary mode; <code>""</code> for an empty file). Missing or unreadable: <a href="errors.html#err-cannot-read-file"><code>Cannot read file '&lt;path&gt;': &lt;reason&gt;</code></a>.</td></tr>
+<tr><td><code>file::write(path, text) -&gt; bool</code></td><td>Writes the bytes exactly, creating missing folders; <code>false</code> when it cannot.</td></tr>
+<tr><td><code>file::exists(path)</code>, <code>file::directory_exists(path)</code> <code>-&gt; bool</code></td><td>Whether the path names something, or a folder.</td></tr>
+<tr><td><code>file::remove(path) -&gt; bool</code></td><td><code>false</code> when nothing was removed.</td></tr>
+<tr><td><code>file::move(from, to) -&gt; bool</code></td><td>Replaces <code>to</code>; <code>false</code> when <code>from</code> is not a file. One volume: a single operation, so a reader sees the old file or the new one. Across volumes: copies, then removes the source.</td></tr>
 <tr><td>Safe save</td><td>Write <code>save.tmp</code>, then move it over <code>save.txt</code>.</td></tr>
-<tr><td><code>make_dirs(path) -&gt; bool</code></td><td>Creates the folder and its parents; <code>true</code> when the folder exists afterwards.</td></tr>
-<tr><td><code>list_dir(path) -&gt; array&lt;string&gt;</code></td><td>Entry names, sorted; empty for a folder that cannot be read.</td></tr>
-<tr><td><code>writable_dir(path) -&gt; bool</code></td><td>Creates the folder if missing, then writes and removes a probe file: whether it can take a save.</td></tr>
+<tr><td><code>file::make_directories(path) -&gt; bool</code></td><td>Creates the folder and its parents; <code>true</code> when the folder exists afterwards.</td></tr>
+<tr><td><code>file::list_directory(path) -&gt; array&lt;string&gt;</code></td><td>Entry names, sorted; empty for a folder that cannot be read.</td></tr>
+<tr><td><code>file::ensure_writable_directory(path) -&gt; bool</code></td><td>Creates the folder if missing, then writes and removes a probe file: whether it can take a save.</td></tr>
 <tr><td><code>zip_entries(zip) -&gt; array&lt;string&gt;</code>, <code>zip_extract(zip, entry, dest) -&gt; bool</code></td><td>A zip archive's entry names; one entry written to <code>dest</code>, CRC-32 verified.</td></tr>
 <tr><td><code>download()</code></td><td>Asynchronous download, polled from the script&#x27;s loop. A failed transfer leaves no partial file.</td></tr>
 <tr><td><code>start(url, path)</code></td><td>Begins it (http or https); <code>false</code> with <code>error()</code> set when it cannot begin.</td></tr>

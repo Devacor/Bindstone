@@ -884,7 +884,7 @@ namespace jai {
         void set_output_stream(std::shared_ptr<std::ostream> stream);
         void add_include_path(const std::string& path);
         // Confinement (opt-in; empty, the default, lets the ladder open any path the process can read): include, import,
-        // resolve_path and file_data open only files whose canonical path lies under one of these folders. A file the ladder
+        // resolve_path and file::data open only files whose canonical path lies under one of these folders. A file the ladder
         // finds outside them is skipped, and when no rung finds one inside, the reach fails with "Path outside the confined
         // roots: <path as written>". No .cache folder is written beside a source outside them.
         void confine_paths(const std::vector<std::string>& roots);

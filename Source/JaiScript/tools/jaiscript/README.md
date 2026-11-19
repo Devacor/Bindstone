@@ -151,7 +151,7 @@ counts from 0.
 The full JaiScript stdlib is always registered (`jai::stdlib::register_all`): formatted
 `print` / `format` / `to_string` / `reflect::type_of`, math, `to_json` / `from_json`, container
 helpers, the `random` type, `crypto::` (hashes such as `crypto::sha256(s)` and `crypto::sha256_file(path)`, HMAC,
-secure random bytes and password hashing; `crypto::sha256_file` needs the `filesystem` permission and raises `read_file`'s
+secure random bytes and password hashing; `crypto::sha256_file` needs the `filesystem` permission and raises `file::read`'s
 error below), and the opt-in `web::` library (`jai::stdlib::register_web`: `web::html_escape`, `web::url_encode`, `web::form_encode`,
 `web::parse_query`, `web::build_query`, `web::parse_url` and the rest), and the opt-in `spider::` HTTP client
 (`jai::stdlib::register_spider`: `spider::catch(url[, options])`, also spelled `spider::get`, and
@@ -162,33 +162,34 @@ WinHTTP on Windows, sockets elsewhere with HTTPS through OpenSSL when the build 
 (`docs/site/reference/library.html#bare-engine`); the runner opts into everything.) On top, the host binds file IO so scripts can actually save things:
 
 ```
-read_file(path) -> string      write_file(path, text) -> bool   (creates missing folders)
-file_exists(path) -> bool      delete_file(path) -> bool
-move_file(from, to) -> bool    (replaces `to`; false when `from` is not a file)
-dir_exists(path) -> bool       make_dirs(path) -> bool           list_dir(path) -> array<string>
-writable_dir(path) -> bool     (creates the folder if missing, writes and removes a probe)
+file::read(path) -> string                     file::write(path, text) -> bool   (creates missing folders)
+file::exists(path) -> bool                     file::remove(path) -> bool
+file::move(from, to) -> bool                   (replaces `to`; false when `from` is not a file)
+file::directory_exists(path) -> bool           file::make_directories(path) -> bool
+file::list_directory(path) -> array<string>
+file::ensure_writable_directory(path) -> bool  (creates the folder if missing, writes and removes a probe)
 zip_entries(zip) -> array<string>  zip_extract(zip, entry, dest) -> bool   (CRC-32 verified)
 ```
 
-`move_file` is the last step of a safe save: write `save.tmp`, check it, then
-`move_file("save.tmp", "save.txt")`. On one volume the destination is replaced in a single
+`file::move` is the last step of a safe save: write `save.tmp`, check it, then
+`file::move("save.tmp", "save.txt")`. On one volume the destination is replaced in a single
 operation (`MoveFileEx` on Windows, `rename(2)` elsewhere), so a crash leaves the old file or
 the new one, never half of either; across volumes it copies, then removes the source. Every
 function above requires the engine's `filesystem` permission. A file's metadata (size, created and
-modified times) is the engine-core `file_data(path)` builtin, on every engine.
+modified times) is the engine-core `file::data(path)` builtin, on every engine.
 
-`read_file` returns the file's bytes exactly (binary mode: every byte value, NULs and `\r\n` as they
+`file::read` returns the file's bytes exactly (binary mode: every byte value, NULs and `\r\n` as they
 are; `""` for an existing empty file). A file that is missing or cannot be read raises a catchable
 error, `Cannot read file '<path>': <reason>`, the reason one of `not found`, `not a file` (a folder),
-`permission denied`, `cannot be opened` or `read failed`. Ask `file_data(path) != null` (or `file_exists(path)`)
-first when absence is expected, or catch the error; uncaught, it ends the run with the usual trace. `write_file` writes
+`permission denied`, `cannot be opened` or `read failed`. Ask `file::data(path) != null` (or `file::exists(path)`)
+first when absence is expected, or catch the error; uncaught, it ends the run with the usual trace. `file::write` writes
 the bytes exactly and answers `false` when it cannot.
 
 Where things are is not the host's to invent: every engine carries the location builtins
 (`resolve_path`, `current_script_dir`, `root_script_dir`, `executable_dir` with alias
 `bin_dir`, `app_data_dir`, `app_cache_dir`, `working_dir`, `parent_dir`, `file_name` and the
 `_path` twins; the guide's Modules chapter, "Where files are"). Loading walks the import
-ladder through `resolve_path`; saving picks an anchor and asks `writable_dir` whether it can
+ladder through `resolve_path`; saving picks an anchor and asks `file::ensure_writable_directory` whether it can
 take a file. A script dropped onto the executable therefore runs the same from any working
 directory. JaiDoom chooses the folder above `scripts/` when it is writable and
 `app_data_dir("JaiDOOM")` otherwise.

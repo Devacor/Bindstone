@@ -46,6 +46,7 @@
 #include <jaiscript/detail/format_text.hpp>
 #include <jaiscript/detail/regex_library.hpp>
 #include <jaiscript/detail/template_library.hpp>
+#include <jaiscript/detail/retired_names.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -1752,6 +1753,22 @@ private:
         // define anything - keep the signal, drop the teeth.
         diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, loc,
              "use of undeclared identifier '" + std::string(name) + "'");
+    }
+
+    // A library name that has a new spelling, where that spelling exists on this engine: the text says what to write
+    const detail::retired_name* retired_call(std::string_view name) {
+        const detail::retired_name* retired = detail::find_retired_name(name);
+        if (!retired || retired->replacement.empty()) { return retired; }
+        const size_t cut = retired->replacement.rfind("::");
+        if (cut == std::string_view::npos) { return eng_.has_function(std::string(retired->replacement)) ? retired : nullptr; }
+        return namespace_declares(std::string(retired->replacement.substr(0, cut)), retired->replacement.substr(cut + 2)) ? retired : nullptr;
+    }
+    void undeclared_call(const source_location& loc, std::string_view name) {
+        if (const detail::retired_name* retired = retired_call(name)) {
+            diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, loc, std::string(retired->text));
+            return;
+        }
+        undeclared(loc, name);
     }
 
     // -------------------------------------------------------------- collection
@@ -4640,11 +4657,11 @@ private:
     // A host namespace entry with a declared signature (script_namespace_data::signatures): arity and argument kinds are
     // certainties the entry's own run-time check would raise; a unit that declares the namespace, or a script function of
     // the name, keeps the call lenient
-    ctype check_namespace_entry(const member_expr* m, const std::vector<ctype>& args, const source_location& loc, narrow_callee& seen) {
+    ctype check_namespace_entry(const member_expr* m, const std::vector<ctype>& args, const source_location& loc, narrow_callee& seen, const call_expr* c) {
         const std::string path = member_path(m);
-        return path.empty() ? ctype{} : check_namespace_call(path, m->member, args, loc, seen);
+        return path.empty() ? ctype{} : check_namespace_call(path, m->member, args, loc, seen, c);
     }
-    ctype check_namespace_call(const std::string& path, std::string_view member, const std::vector<ctype>& args, const source_location& loc, narrow_callee& seen) {
+    ctype check_namespace_call(const std::string& path, std::string_view member, const std::vector<ctype>& args, const source_location& loc, narrow_callee& seen, const call_expr* c) {
         if (ctype result; check_namespace_function_call(path, member, args, loc, seen, result)) { return result; }
         const std::string qualified = path + "::" + std::string(member);
         if (const std::string_view cls = namespace_class_named(qualified); !cls.empty()) {   // a construction, typed as the bare spelling is
@@ -4664,7 +4681,11 @@ private:
             seen.writeback = w ? w->mask : 0;
         }
         auto sit = space->signatures.find(member_id);
-        if (sit == space->signatures.end()) { return {}; }
+        if (sit == space->signatures.end()) {   // a qualified host registration is held to its bound signatures, as a global host function is
+            if (!eng_.has_function(qualified)) { return {}; }
+            check_host_call(qualified, args, loc, c);
+            return host_result_type(qualified);
+        }
         const host_entry_signature& sig = sit->second;
         if (sig.nodiscard) { nodiscard_hit_ = {qualified, sig.in_place_twin ? std::string(member) : std::string()}; }
         if (type_argument_call_) { type_argument_host_callee_ = qualified; }
@@ -8056,7 +8077,7 @@ private:
             if (!id->global_qualified) {
                 if (const std::string space = enclosing_namespace_member(id->name); !space.empty()) {
                     if (namespace_member_unready(space, id->name, c->location, true) || !namespace_member_settled(space, id->name, c->location)) { return {}; }
-                    return check_namespace_call(space, id->name, args, c->location, seen);
+                    return check_namespace_call(space, id->name, args, c->location, seen, c);
                 }
             }
             if (auto it = functions_.find(id->name); it != functions_.end()) {
@@ -8119,12 +8140,7 @@ private:
             if (!id->global_qualified && report_cdtor_call(id->name, id->location)) { return {}; }
             if (program_or_derived_name(id->name)) { return {}; }
             if (stale_field_context()) { return {}; }
-            if (id->name == "type_of" || id->name == "is_registered_type") {
-                diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, id->location,
-                     std::string(detail::foreign_word_text(id->name == "type_of" ? detail::foreign_word::bare_type_of : detail::foreign_word::bare_is_registered_type)));
-                return {};
-            }
-            undeclared(id->location, id->name);
+            undeclared_call(id->location, id->name);
             return {};
         }
         if (callee->get_type() == node_type::member_expr) {
@@ -8150,7 +8166,7 @@ private:
                 if (ctype t; library_namespace_call(c, m, args, t)) { return t; }
                 if (namespace_path_receiver(m) && !namespace_class_receiver(m)) {
                     check_namespace_member(m);
-                    return check_namespace_entry(m, args, c->location, seen);
+                    return check_namespace_entry(m, args, c->location, seen, c);
                 }
             }
             ctype recv = declared_container_receiver(m->object.get(), infer(m->object.get()));

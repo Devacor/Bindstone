@@ -195,7 +195,7 @@ function run_headless(int frames) -> int {
 		if (len > max_len) { max_len = len; }
 		for (int i = 0; i < len; ++i) { hash = (hash * 31 + frame[i]) & 0xFFFFFFFF; }
 		if (OPT_DUMP != "" && (f == 0 || f == frames - 2 || f == frames - 1)) {
-			write_file(OPT_DUMP + "_" + to_string(f) + ".txt", frame);
+			file::write(OPT_DUMP + "_" + to_string(f) + ".txt", frame);
 			write_bmp(OPT_DUMP + "_" + to_string(f) + ".bmp");
 		}
 	}
@@ -230,7 +230,7 @@ function write_bmp(string path) -> void {
 		}
 		out += row + padding;
 	}
-	write_file(path, out);
+	file::write(path, out);
 }
 
 // the whole reel at its real lengths with a fixed 1/30 s step, every `every`-th frame
@@ -241,7 +241,7 @@ function run_video(string dir) -> int {
 	int h = OPT_H > 0 ? OPT_H : 40;
 	float dt = 1.0 / 30.0;
 	demo_boot(w, h, OPT_SEED, "vm", false, false);
-	make_dirs(dir);
+	file::make_directories(dir);
 	write_cues(dir);
 	float total = 0.0;
 	for (int i = 0; i <= reel.intro_idx; ++i) { total += reel.dur_for(i); }
@@ -253,10 +253,10 @@ function run_video(string dir) -> int {
 		string frame = demo_frame(f * dt, dt, "", 0.0, 0.0, 0.0, 0.0);
 		if (f % OPT_EVERY != 0) { continue; }
 		string n = to_string(written);
-		write_file(dir + "/frame_" + string::repeat("0", 5 - n.size()) + n + ".txt", terminal.present(frame));
+		file::write(dir + "/frame_" + string::repeat("0", 5 - n.size()) + n + ".txt", terminal.present(frame));
 		++written;
 	}
-	write_file(dir + "/reel.txt", `frames ${written}\nfps ${30.0 / OPT_EVERY}\ncols ${w}\nrows ${h}\nseconds ${total}\n`);
+	file::write(dir + "/reel.txt", `frames ${written}\nfps ${30.0 / OPT_EVERY}\ncols ${w}\nrows ${h}\nseconds ${total}\n`);
 	print(`video: ${written} frames at ${30.0 / OPT_EVERY} fps (${total} s) -> ${dir}`);
 	return 0;
 }
@@ -300,7 +300,7 @@ function run_shot(int scene, float at) -> int {
 	var terminal = Terminal();
 	terminal.cube = OPT_CUBE;
 	terminal.ascii = OPT_ASCII;
-	write_file(p + ".txt", terminal.present(fr));
+	file::write(p + ".txt", terminal.present(fr));
 	write_bmp(p + ".bmp");
 	print(format("shot: scene {0} {1} at {2}s -> {3}.txt / {3}.bmp ({4} bytes)", scene + 1, reel.cur.name, at, p, fr.size()));
 	return 0;
@@ -315,10 +315,10 @@ function run_shot(int scene, float at) -> int {
 // the cue files' paths, or [] when they can't be written (then the reel runs silent)
 function write_cues(string dir) -> var {
 	var result = [];
-	if (!make_dirs(dir)) { return result; }
+	if (!file::make_directories(dir)) { return result; }
 	for (int i = 0; i < reel.cues.size(); ++i) {
 		string path = dir + `/cue_${i < 10 ? "0" : ""}${i}.mid`;
-		if (!write_file(path, reel.cues[i].midi())) { return []; }
+		if (!file::write(path, reel.cues[i].midi())) { return []; }
 		result.push(path);
 	}
 	return result;

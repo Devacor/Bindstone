@@ -471,7 +471,7 @@ namespace crypto_detail {
 		return difference == 0;
 	}
 
-	// The file streamed through SHA-256 in 64 KiB chunks into a_hex; null, else why it cannot be read (read_file's reasons)
+	// The file streamed through SHA-256 in 64 KiB chunks into a_hex; null, else why it cannot be read (file::read's reasons)
 	const char* sha256_file_hex(const std::string& a_path, std::string& a_hex) {
 		std::error_code error;
 		const std::filesystem::file_status status = std::filesystem::status(a_path, error);

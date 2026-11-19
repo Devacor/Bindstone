@@ -124,9 +124,9 @@ function music_want(string name) -> void {
 	if (!SND_ON || MUSIC_CUR == name) { return; }
 	if (!MUSIC_READY.has(name)) {
 		var path = audio_cache_dir() + string::to_lower(name) + ".mid";
-		if (!file_exists(path)) {                    // bootstrap (or an earlier run) already transcoded it
+		if (!file::exists(path)) {                    // bootstrap (or an earlier run) already transcoded it
 			var mid = mus_midi_bytes(name);
-			if (mid == "" || !write_file(path, mid)) { path = ""; }
+			if (mid == "" || !file::write(path, mid)) { path = ""; }
 		}
 		MUSIC_READY[name] = path != "" ? load_sound(path) : null;
 	}

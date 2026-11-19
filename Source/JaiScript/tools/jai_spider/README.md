@@ -189,7 +189,7 @@ stored as JSON; a record may also be a `map<string, var>`.
 `sessions.rotate(s)` after a sign-in, `sessions.destroy(s, response)`. The cookie carries a 256-bit random id; the
 data stays in the `spider_sessions` table.
 
-Every file function of the runner (`read_file`, `write_file`, `list_dir`, ...), the full standard library and the
+Every file function of the runner (`file::read`, `file::write`, `file::list_directory`, ...), the full standard library and the
 `web::` library are there too.
 
 ## Workers and request isolation

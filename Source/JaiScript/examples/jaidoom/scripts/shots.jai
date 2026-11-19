@@ -26,7 +26,7 @@ import "fx.jai";
 string OUT_DIR = ".";
 
 function shoot(string name) -> void {
-	write_file(`${OUT_DIR}/${name}.ans`, vid_blit());
+	file::write(`${OUT_DIR}/${name}.ans`, vid_blit());
 	print(`  ${OUT_DIR}/${name}.ans`);
 }
 
@@ -131,7 +131,7 @@ function main() -> int {
 		for (int k = 0; k < PANEL_SPAN; ++k) {
 			stat_note(0.1 + (k % 5) * 0.03, 2.6 + (k % 7) * 0.2, 0.7 + (k % 3) * 0.1, 1.8 + (k % 4) * 0.3, 16.7);
 		}
-		write_file(`${OUT_DIR}/fight_panel.ans`, `${ESC}[1;1H` + vid_blit() + panel_text(2, 2));
+		file::write(`${OUT_DIR}/fight_panel.ans`, `${ESC}[1;1H` + vid_blit() + panel_text(2, 2));
 		print(`  ${OUT_DIR}/fight_panel.ans`);
 	}
 	return 0;

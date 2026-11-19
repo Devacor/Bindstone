@@ -79,11 +79,11 @@ int active_chars() {
 
 int run_menutest(string base_dir, int port) {
 	SAVE_DIR = base_dir + "/menutest";
-	make_dirs(SAVE_DIR + "/chars");
-	array<string> old = list_dir(SAVE_DIR + "/chars");
-	for (int i = 0; i < old.size(); ++i) { delete_file(SAVE_DIR + "/chars/" + old[i]); }
-	if (file_exists(SAVE_DIR + "/servers.txt")) { delete_file(SAVE_DIR + "/servers.txt"); }
-	if (file_exists(SAVE_DIR + "/world.gqw")) { delete_file(SAVE_DIR + "/world.gqw"); }
+	file::make_directories(SAVE_DIR + "/chars");
+	array<string> old = file::list_directory(SAVE_DIR + "/chars");
+	for (int i = 0; i < old.size(); ++i) { file::remove(SAVE_DIR + "/chars/" + old[i]); }
+	if (file::exists(SAVE_DIR + "/servers.txt")) { file::remove(SAVE_DIR + "/servers.txt"); }
+	if (file::exists(SAVE_DIR + "/world.gqw")) { file::remove(SAVE_DIR + "/world.gqw"); }
 	SAVES_ON = true;
 	TITLE_LAST = "";
 	print("menus:");
@@ -178,7 +178,7 @@ int run_menutest(string base_dir, int port) {
 	net_session_bye(TM_SESSION);
 	mt_host_rounds(10);
 	recent_load();
-	check(RECENT_ADDR.size() == 1 && RECENT_NAME[0] == "Visitor" && read_file(SAVE_DIR + "/servers.txt").starts_with("GATORQUEST-SERVERS 1"), "the recent servers live in saves/servers.txt");
+	check(RECENT_ADDR.size() == 1 && RECENT_NAME[0] == "Visitor" && file::read(SAVE_DIR + "/servers.txt").starts_with("GATORQUEST-SERVERS 1"), "the recent servers live in saves/servers.txt");
 
 	mt_join_page("127.0.0.1:" + ps, "", "Colon");
 	title_key("enter");
@@ -201,7 +201,7 @@ int run_menutest(string base_dir, int port) {
 	check(QUIT && PLAY_EXIT == "title", "Leave to title ends the session toward the title");
 	QUIT = false;
 	session_end();
-	check(!net_hosting() && TM_PAGE == "main" && file_exists(SAVE_DIR + "/world.gqw") && file_exists(char_path("Hostess")), "leaving stops hosting and saves the world and the gator");
+	check(!net_hosting() && TM_PAGE == "main" && file::exists(SAVE_DIR + "/world.gqw") && file::exists(char_path("Hostess")), "leaving stops hosting and saves the world and the gator");
 
 	// ---- back at the title: the world reloads without players, the gator comes back
 	bool resumed = load_world_for_session();

@@ -3627,7 +3627,7 @@ public:
 			const std::set<std::string> serial = {
 				"__jai_parallel_range",
 				"app_cache_dir", "app_data_dir", "array::filter", "array::map", "array::sort", "crypto::sha256_file", "extend",
-				"file_data", "from_base64", "from_binary", "from_json", "import_recheck_interval", "map::filter", "parallel_reduce",
+				"file::data", "from_base64", "from_binary", "from_json", "import_recheck_interval", "map::filter", "parallel_reduce",
 				"parallel_transform", "print", "reflect::bases", "reflect::bind", "reflect::call", "reflect::classes",
 				"reflect::construct", "reflect::construct_shared", "reflect::fields", "reflect::function_arguments",
 				"reflect::functions", "reflect::generation", "reflect::get", "reflect::globals", "reflect::has_field",

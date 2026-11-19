@@ -165,7 +165,7 @@ function sound_boot() -> void {
 		SFX_BANK_BYTES += bytes.size();
 		if (!playing) { continue; }
 		string path = HOST_SOUND_DIR + "/" + name + ".wav";
-		if (write_file(path, bytes)) {
+		if (file::write(path, bytes)) {
 			var s = load_sound(path);
 			if (s != null) { SFX_SOUNDS[name] = s; }
 		}

@@ -385,10 +385,16 @@ Both are catchable. The shared resolver is
 
 ## Host file reads
 
-The runner's `read_file(path)` (and the crawler host's) raises one shape for a file it cannot hand back,
+The runner's `file::read(path)` (and the crawler host's) raises one shape for a file it cannot hand back,
 catchable on both backends: `Cannot read file 'saves/world.gqw': not found`, with `not a file` (a folder),
 `permission denied`, `cannot be opened` or `read failed` in place of `not found`. An existing empty file
-reads as `""`; absence is asked with `file_exists(path)` first.
+reads as `""`; absence is asked with `file::exists(path)` first.
+
+## Retired names (load errors, kernel `detail/retired_names.hpp`)
+
+A call of a library function that has a new spelling reports what to write, from the checker's undeclared-call path, so every
+declaration (the script's, an import's, the host's) answers first and keeps the name working. A row names the replacement it
+needs: on an engine without it (a host that did not register `file::read`) the call is the plain undeclared identifier.
 
 ## Foreign keywords (parse errors, kernel `detail/foreign_keyword.hpp`)
 
@@ -434,7 +440,6 @@ Each is recognized only in that position, so a script using one of these words a
 | `std::vector<int>, std::cout` | a type or expression, unless the unit declares `std` | `JaiScript has no 'std::': write array<T> for vector, map<K, V> for map, string for string and print(...) for cout` |
 | `a.push_back(v)`, `a.pop_back()`, `a.emplace_back(v)` on an array | the missing-member error | `...: write a.push(v)`, `...: write a.pop()`, `...: construct the value and push it: a.push(T(args))` |
 | `s.c_str()` on a string | the missing-member error | `...: a string is already its text: pass s itself` |
-| `type_of(x)`, `is_registered_type(x)` | a call of the bare name nothing declares (the checker) | `there is no bare 'type_of': write reflect::type_of(x)` (`'is_registered_type'` alike) |
 
 `let` is not on the list: it is a synonym of `var`.
 

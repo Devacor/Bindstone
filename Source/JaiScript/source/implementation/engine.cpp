@@ -4257,7 +4257,7 @@ void engine::initialize_engine_reference() {
     // Locations (docs/site/guide/10-modules.html "Where files are"): where the running code, the
     // program's root file and the executable are, and the same resolution ladder import walks.
     // Engine-core so a program answers the same on every host; the file IO that USES a path
-    // (read_file, write_file, list_dir) stays the host's to grant. Defined after the impl so
+    // (file::read, file::write, file::list_directory) stays the host's to grant. Defined after the impl so
     // the helpers above this constructor's TU position are visible: see location builtins below.
 	detail::register_math_namespace(*this);
 	detail::register_array_namespace(*this);
@@ -7563,8 +7563,8 @@ void engine::register_location_builtins() {
     add_function("file_name", [](const std::string& path) -> std::string {
         return std::filesystem::path(path).filename().generic_string();
     }, permissions::filesystem);
-    // file_data(path): a file's or folder's metadata, found by the resolve_path ladder; null when nothing is there
-    add_function_with_arity_and_full_types("file_data", guard_function(
+    // file::data(path): a file's or folder's metadata, found by the resolve_path ladder; null when nothing is there
+    add_function_with_arity_and_full_types("file::data", guard_function(
         [this](const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
@@ -7608,7 +7608,7 @@ void engine::register_location_builtins() {
     add_function("app_data_dir", [this](const std::string& app) -> std::string { return app_data_dir(app); }, permissions::filesystem);
     add_function("app_cache_dir", [this](const std::string& app) -> std::string { return app_cache_dir(app); }, permissions::filesystem);
     // the file system, the import settings and the host's directory resolvers are shared
-    for (const char* name : {"resolve_path", "file_data", "import_recheck_interval", "app_data_dir", "app_cache_dir"}) { serial_function(name); }
+    for (const char* name : {"resolve_path", "file::data", "import_recheck_interval", "app_data_dir", "app_cache_dir"}) { serial_function(name); }
 }
 
 std::string engine::format_stack_trace() const {

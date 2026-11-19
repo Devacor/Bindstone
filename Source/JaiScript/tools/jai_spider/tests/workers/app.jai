@@ -16,7 +16,7 @@ routes.get("/touch", (spider::Request req) => {
 });
 routes.get("/sleep/:ms", (spider::Request req) => {
 	int started = time::unix_ms();
-	write_file("started-" + req.param("ms") + ".txt", to_string(started));
+	file::write("started-" + req.param("ms") + ".txt", to_string(started));
 	sleep(req.param("ms").to_int() / 1000.0);
 	return spider::json({"ms": req.param("ms"), "started": started, "ended": time::unix_ms()});
 });

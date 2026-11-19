@@ -231,7 +231,7 @@ function shim_run_smoke() -> int {
 	int frames_hash = 2166136261;
 	for (int i = 0; i < HOST_TICKS; ++i) {
 		var text = gloom_frame(dt, "", 0.0, 0.0, 0.0);
-		if (i == SHIM_DUMP) { write_file("gloom_frame_shim.txt", text); }
+		if (i == SHIM_DUMP) { file::write("gloom_frame_shim.txt", text); }
 		frames_hash = text_hash(frames_hash, crypto::sha256(text));
 	}
 	int total = cast<int>(run.elapsed() * 1000);

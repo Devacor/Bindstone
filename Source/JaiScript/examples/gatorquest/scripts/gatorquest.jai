@@ -245,8 +245,8 @@ int run_prepare() {
 	int themes = 0;
 	for (int theme = 0; theme < THEME_TEMPO.size(); ++theme) {
 		string p = dir + "/theme" + to_string(theme) + ".mid";
-		if (!file_exists(p)) { write_file(p, midi_theme(theme)); }
-		if (file_exists(p)) { themes = themes + 1; }
+		if (!file::exists(p)) { file::write(p, midi_theme(theme)); }
+		if (file::exists(p)) { themes = themes + 1; }
 	}
 	print(`prepare: ${SFX_PATH.size()} sound effects and ${themes} music themes in ${dir} (${took.elapsed() * 1000:.0f} ms)`);
 	return 0;

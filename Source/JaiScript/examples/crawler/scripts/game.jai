@@ -565,11 +565,11 @@ function game_loop() -> void {
 	if (G.victory) {
 		compute_fov();
 		victory_screen();
-		delete_file(SAVE_PATH);
+		file::remove(SAVE_PATH);
 	} else if (!G.quit) {
 		compute_fov();
 		death_screen();
-		delete_file(SAVE_PATH);
+		file::remove(SAVE_PATH);
 	} else if (G.saved) {
 		host_log("Saved. Rest well; the Well keeps your place.");
 	}
@@ -682,14 +682,14 @@ class SaveFile { int version; int seed; int rng; Game game; }
 
 function save_game() -> void {
 	G.boss_co = null;
-	write_file(SAVE_PATH, to_json(SaveFile{SAVE_VERSION, HOST_SEED, RNG.state(), G}));
+	file::write(SAVE_PATH, to_json(SaveFile{SAVE_VERSION, HOST_SEED, RNG.state(), G}));
 }
 
 function load_game() -> bool {
-	if (!file_exists(SAVE_PATH)) { return false; }
+	if (!file::exists(SAVE_PATH)) { return false; }
 	SaveFile save;
 	try {
-		save = from_json(read_file(SAVE_PATH));
+		save = from_json(file::read(SAVE_PATH));
 	} catch (e) {
 		return false;
 	}

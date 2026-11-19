@@ -113,7 +113,7 @@ int 7, float
 <li><strong>A copy agrees with a save and a load.</strong> Copying a script value (a script assignment, <code>script_value::clone()</code>) gives every method coroutine it holds by value whose receiver is an object it holds by value a frame of its own, bound to the copy of that object, and rebinds the lambdas and bound methods bound to such an object the same way. The copy reads the frame as a save does and rebuilds it as a load does, without the bytes: <code>T b = a;</code> and <code>T b = from_binary(to_binary(a));</code> give the same <code>b</code>. A copy also takes what a save cannot write: lambdas, and a coroutine in one element of an array or a map whose object is another element (the save raises <code>its receiver is saved by value elsewhere in the same save</code>). A coroutine a save would refuse for its own state is left in the copy as a handle that raises <code>Cannot resume coroutine 'name': it was not copied with its object: reason</code>.</li>
 </ul>
 <h3 id="saving-game-state-to-a-file">Saving game state to a file<a class="hlink" href="#saving-game-state-to-a-file" aria-label="link">&#8203;</a></h3>
-<p>File access belongs to the host: the standalone runner provides <code>write_file</code>, <code>read_file</code> and <code>file_exists</code>, and an embedding host registers its own. <code>app_data_dir(name)</code> answers the platform&#x27;s per-user data folder.</p>
+<p>File access belongs to the host: the standalone runner provides <code>file::write</code>, <code>file::read</code> and <code>file::exists</code>, and an embedding host registers its own. <code>app_data_dir(name)</code> answers the platform&#x27;s per-user data folder.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Hero { string name = "ada"; int gold = 0; array&lt;string&gt; bag = []; }
 class SaveGame { int version = 1; Hero hero; map&lt;string, bool&gt; flags; }
 
@@ -121,9 +121,9 @@ SaveGame game;
 game.hero.gold = 120;
 game.hero.bag.push("lantern");
 game.flags["met_the_raccoon"] = true;
-write_file("save1.json", to_json(game, 2));
+file::write("save1.json", to_json(game, 2));
 
-SaveGame loaded = from_json(read_file("save1.json"));
+SaveGame loaded = from_json(file::read("save1.json"));
 print(loaded.hero.name, " ", loaded.hero.gold, " ", loaded.hero.bag[0], " ", loaded.flags["met_the_raccoon"]);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ada 120 lantern true</code></pre></div>
 <p>A field added to the class after a save loads with its initializer. A field like <code>version</code> lets a loader convert older files explicitly.</p>

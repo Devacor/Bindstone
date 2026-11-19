@@ -20,11 +20,11 @@ int main(int argc,char**argv){
 		uint64_t frame_hash=14695981039346656037ull;
 		auto e=jai::engine::make();e->set_backend(std::string(argv[3])=="vm"?jai::backend_type::vm:jai::backend_type::interpreter);
 		e->execution_budget(0);e->jaibite_cache(false);jai::stdlib::register_all(*e);
-		e->add_function("read_file",[](const std::string& path){return read(path);});
-		e->add_function("file_exists",[](const std::string& path){return std::filesystem::exists(path);});
-		e->add_function("dir_exists",[](const std::string& path){return std::filesystem::is_directory(path);});
-		e->add_function("writable_dir",[](const std::string& path){return std::filesystem::is_directory(path);});
-		e->add_function("write_file",[](const std::string& path,const std::string& data){std::ofstream out(path,std::ios::binary);out.write(data.data(),data.size());return static_cast<bool>(out);});
+		e->add_function("file::read",[](const std::string& path){return read(path);});
+		e->add_function("file::exists",[](const std::string& path){return std::filesystem::exists(path);});
+		e->add_function("file::directory_exists",[](const std::string& path){return std::filesystem::is_directory(path);});
+		e->add_function("file::ensure_writable_directory",[](const std::string& path){return std::filesystem::is_directory(path);});
+		e->add_function("file::write",[](const std::string& path,const std::string& data){std::ofstream out(path,std::ios::binary);out.write(data.data(),data.size());return static_cast<bool>(out);});
 		e->add_function("load_sound",[eng=e.get()](const std::string&){return jai::script_value(std::monostate{},eng);});
 		e->add_function("play_sound",[eng=e.get()](const std::string&){return jai::script_value(std::monostate{},eng);});
 		e->add_function("stop_sounds",[](){});

@@ -113,7 +113,7 @@ void net_host_leave(int cid, string why) {
 	NET_CID_OF.erase(slot);
 	if (slot >= CHARS.size() || !CHARS[slot].active) { return; }
 	string name = CHARS[slot].name;
-	make_dirs(save_dir() + "/chars");
+	file::make_directories(save_dir() + "/chars");
 	safe_write(char_path(name), char_text(slot));
 	player_leave(slot);
 	announce_all(`${name} has left the swamp (${why}).`, C_CYAN);
@@ -182,7 +182,7 @@ void net_host_stop(string why) {
 	for (int k = 0; k < cids.size(); ++k) {
 		int slot = NET_SLOT_OF[cids[k]];
 		if (slot < CHARS.size() && CHARS[slot].active) {
-			make_dirs(save_dir() + "/chars");
+			file::make_directories(save_dir() + "/chars");
 			safe_write(char_path(CHARS[slot].name), char_text(slot));
 		}
 		net_send(cids[k], "BYE|" + why);

@@ -118,7 +118,7 @@ function frame_mark() -> void { }   // the native host's --time probe
 // a script file's fingerprint for the hot-reload watcher, "" when it is missing
 function file_stamp(string name) -> string {
 	string path = root_script_dir() + "/" + name;
-	return file_exists(path) ? crypto::sha256_file(path) : "";
+	return file::exists(path) ? crypto::sha256_file(path) : "";
 }
 
 function host_log(string line) -> void {
@@ -306,8 +306,8 @@ function shim_dump_view(string base) -> void {
 		}
 		sketch.push(row);
 	}
-	write_file(base + ".bmp", bmp.to_string());
-	write_file(base + ".txt", sketch.join("\n") + "\n");
+	file::write(base + ".bmp", bmp.to_string());
+	file::write(base + ".txt", sketch.join("\n") + "\n");
 }
 
 // the cell-th character of UTF-8 text
@@ -329,10 +329,10 @@ function shim_probe_report() -> void {
 	if (SHIM_DUMP != "") {
 		shim_dump_view(SHIM_DUMP);
 		string path = SHIM_DUMP + ".ans";
-		write_file(path, SHIM_FRAMES.join(""));
+		file::write(path, SHIM_FRAMES.join(""));
 		print(`FRAME_HASH: ${crypto::sha256_file(path)} (${SHIM_FRAMES.size()} frames -> ${path})`);
 		print(`frame build: ${SHIM_FRAME_MS:.0f} ms total, ${SHIM_FRAME_MS / imax(1, SHIM_PROBES):.3f} ms/frame, rows ${VIEW_WORKERS != 0 ? "parallel" : "serial"}`);
-		if (SHIM_ENDING.size() > 0) { write_file(SHIM_DUMP + "_end.ans", SHIM_ENDING.join("")); }
+		if (SHIM_ENDING.size() > 0) { file::write(SHIM_DUMP + "_end.ans", SHIM_ENDING.join("")); }
 	}
 	if (SHIM_BENCH > 0) {
 		time::stopwatch bench;

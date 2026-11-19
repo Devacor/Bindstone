@@ -3,7 +3,7 @@
 // the app into a fresh engine for each request, and calls spider_host_serve once in it; the app hands its handler to
 // spider::spin. A task the app declares with spider::every runs the same way, through spider_host_run_task.
 //
-// The host functions it stands on: parse_cookies, parse_multipart, read_file and write_file;
+// The host functions it stands on: parse_cookies, parse_multipart, file::read and file::write;
 // web::parse_query is the web library's, crypto::random_hex the crypto library's.
 
 namespace spider {
@@ -15,7 +15,7 @@ class Upload {
 	string data;
 
 	int size() { return data.size(); }
-	bool save(string path) { return write_file(path, data); }
+	bool save(string path) { return file::write(path, data); }
 }
 
 class Request {

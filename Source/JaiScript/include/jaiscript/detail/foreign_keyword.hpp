@@ -39,8 +39,6 @@ enum class foreign_word : unsigned char {
 	long_type,
 	short_type,
 	std_namespace,
-	bare_type_of,
-	bare_is_registered_type,
 };
 
 inline constexpr std::string_view foreign_word_text(foreign_word w) noexcept {
@@ -89,10 +87,6 @@ inline constexpr std::string_view foreign_word_text(foreign_word w) noexcept {
 			return "JaiScript has no 'template<...>' prefix: a generic lists its type parameters after its name, class Stack<T> { ... } or T largest<T>(array<T> xs) { ... }";
 		case foreign_word::instanceof_operator:
 			return "JaiScript has no 'instanceof': if (dynamic_cast<T>(x)) tests whether x is a T (the cast is x as a shared_ptr<T>, null when it is not one), and reflect::is_instance_of(x, \"T\") answers true or false";
-		case foreign_word::bare_type_of:
-			return "there is no bare 'type_of': write reflect::type_of(x)";
-		case foreign_word::bare_is_registered_type:
-			return "there is no bare 'is_registered_type': write reflect::is_registered_type(x)";
 		case foreign_word::dynamic_pointer_cast_call:
 			return "JaiScript has no 'dynamic_pointer_cast': dynamic_cast<T>(x) is x as a shared_ptr<T>, null when it is not one";
 		case foreign_word::struct_declaration:

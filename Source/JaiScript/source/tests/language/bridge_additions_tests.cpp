@@ -501,8 +501,6 @@ public:
                 {"class A { } var a = new A(); a instanceof A && print(1);", foreign_word::instanceof_operator},
                 {"namespace n { class A { } } var a = new n::A(); print(a instanceof n::A ? 1 : 2);", foreign_word::instanceof_operator},
                 {"var s = \"x\"; var b = s instanceof string;", foreign_word::instanceof_operator},
-                {"print(type_of(1));", foreign_word::bare_type_of},
-                {"bool b = is_registered_type(1);", foreign_word::bare_is_registered_type},
             };
             for (const auto& s : samples) {
                 const std::string err = error_text(s.source);

@@ -45,9 +45,9 @@ function snd_play(string name) -> void {
 	if (!SND_ON) { return; }
 	if (!SND_READY.has(name)) {
 		var path = audio_cache_dir() + string::to_lower(name) + ".wav";
-		if (!file_exists(path)) {                                        // bootstrap (or an earlier run) already decoded it
+		if (!file::exists(path)) {                                        // bootstrap (or an earlier run) already decoded it
 			var wav = snd_wav_bytes(name);
-			if (wav == "" || !write_file(path, wav)) { path = ""; }
+			if (wav == "" || !file::write(path, wav)) { path = ""; }
 		}
 		SND_READY[name] = path != "" ? load_sound(path) : null;
 	}
@@ -111,7 +111,7 @@ function snd_play_at(string name, float x, float y) -> void {
 		int rn = SPA_PAN == 1 ? g / 2 : g;
 		var wav = snd_wav_stereo(name, ln, rn, 16);
 		var path = wav == "" ? "" : audio_cache_dir() + string::to_lower(key) + ".wav";
-		if (path != "" && !write_file(path, wav)) { path = ""; }
+		if (path != "" && !file::write(path, wav)) { path = ""; }
 		SND_POS_READY[key] = path != "" ? load_sound(path) : null;
 	}
 	var s = SND_POS_READY[key];

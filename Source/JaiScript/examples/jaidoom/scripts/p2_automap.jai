@@ -80,7 +80,7 @@ function main() -> int {
 		}
 		preview += row + "\n";
 	}
-	write_file("p2_preview.txt", preview);
+	file::write("p2_preview.txt", preview);
 	return 0;
 }
 

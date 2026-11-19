@@ -112,7 +112,7 @@ function crawler_main() -> void {
 		Profession calling = PROFESSIONS[RNG.next(PROFESSIONS.size())];
 		start_new_game(species, calling, "Testpilot");
 	} else if (!(HOST_LOAD && load_game())) {
-		bool saved = file_exists(SAVE_PATH);
+		bool saved = file::exists(SAVE_PATH);
 		while (true) {
 			string choice = title_screen(saved);
 			if (choice == "q") { return; }

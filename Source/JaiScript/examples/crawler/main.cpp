@@ -596,14 +596,14 @@ int main(int argc, char** argv) {
 	eng->add_function("term_rows", []() -> jai::script_int { return console_host::rows(); });
 	eng->add_function("host_log", [&console](const std::string& line) { console.log(line); });
 
-	eng->add_function("read_file", [](const std::string& path) -> std::string { return read_file_or_raise(path); });
-	eng->add_function("write_file", [](const std::string& path, const std::string& content) -> bool {
+	eng->add_function("file::read", [](const std::string& path) -> std::string { return read_file_or_raise(path); });
+	eng->add_function("file::write", [](const std::string& path, const std::string& content) -> bool {
 		return spill_file(path, content);
 	});
-	eng->add_function("file_exists", [](const std::string& path) -> bool {
+	eng->add_function("file::exists", [](const std::string& path) -> bool {
 		return std::filesystem::exists(path);
 	});
-	eng->add_function("delete_file", [](const std::string& path) -> bool {
+	eng->add_function("file::remove", [](const std::string& path) -> bool {
 		std::error_code ec;
 		return std::filesystem::remove(path, ec);
 	});

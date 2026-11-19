@@ -612,6 +612,33 @@ print(w.size(), &quot; &quot;, to_json(w.to_string().to_bytes()));</code></pre><
 <p>Expected total bytes when known.</p>
 </div>
 </section>
+<section class="api-group"><h2 id="group-file">file</h2>
+<div class="api-entry" data-provider="core" data-search="file::data(path: string) -&gt; map&lt;string,var&gt; or null filesystem resolved path metadata: path, filename, extension, created, modified and entry flags. every engine"><h3 id="api-3a3647deb328"><code>file::data(path: string) -&gt; map&lt;string,var&gt; or null</code></h3><p><strong>Every engine</strong> &middot; filesystem</p>
+<p>Resolved path metadata: path, filename, extension, created, modified and entry flags.</p>
+</div>
+<div class="api-entry" data-provider="runner" data-search="file::directory_exists(path: string) -&gt; bool filesystem  standalone jaiscript.exe"><h3 id="api-734393dc9c72"><code>file::directory_exists(path: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
+</div>
+<div class="api-entry" data-provider="runner" data-search="file::ensure_writable_directory(path: string) -&gt; bool filesystem creates folder and performs a write/remove probe. standalone jaiscript.exe"><h3 id="api-8613abf24bf0"><code>file::ensure_writable_directory(path: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
+<p>Creates folder and performs a write/remove probe.</p>
+</div>
+<div class="api-entry" data-provider="runner" data-search="file::exists(path: string) -&gt; bool filesystem  standalone jaiscript.exe"><h3 id="api-40619191ef2b"><code>file::exists(path: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
+</div>
+<div class="api-entry" data-provider="runner" data-search="file::list_directory(path: string) -&gt; array&lt;string&gt; filesystem  standalone jaiscript.exe"><h3 id="api-035c55426ee9"><code>file::list_directory(path: string) -&gt; array&lt;string&gt;</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
+</div>
+<div class="api-entry" data-provider="runner" data-search="file::make_directories(path: string) -&gt; bool filesystem  standalone jaiscript.exe"><h3 id="api-c504b75e2140"><code>file::make_directories(path: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
+</div>
+<div class="api-entry" data-provider="runner" data-search="file::move(from: string, to: string) -&gt; bool filesystem replaces destination; may copy across volumes. standalone jaiscript.exe"><h3 id="api-cb27fb329cea"><code>file::move(from: string, to: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
+<p>Replaces destination; may copy across volumes.</p>
+</div>
+<div class="api-entry" data-provider="runner" data-search="file::read(path: string) -&gt; string filesystem missing/unreadable file raises; empty file returns empty string. standalone jaiscript.exe"><h3 id="api-4158e6cdb875"><code>file::read(path: string) -&gt; string</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
+<p>Missing/unreadable file raises; empty file returns empty string.</p>
+</div>
+<div class="api-entry" data-provider="runner" data-search="file::remove(path: string) -&gt; bool filesystem  standalone jaiscript.exe"><h3 id="api-87e573d52c89"><code>file::remove(path: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
+</div>
+<div class="api-entry" data-provider="runner" data-search="file::write(path: string, content: string) -&gt; bool filesystem creates missing parent folders. standalone jaiscript.exe"><h3 id="api-3d08db8bfec4"><code>file::write(path: string, content: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
+<p>Creates missing parent folders.</p>
+</div>
+</section>
 <section class="api-group"><h2 id="group-global">global</h2>
 <div class="api-entry" data-provider="core" data-search="app_cache_dir(application: string) -&gt; string filesystem creates application cache folder. every engine"><h3 id="api-87d9f4cbaef7"><code>app_cache_dir(application: string) -&gt; string</code></h3><p><strong>Every engine</strong> &middot; filesystem</p>
 <p>Creates application cache folder.</p>
@@ -631,10 +658,6 @@ print(w.size(), &quot; &quot;, to_json(w.to_string().to_bytes()));</code></pre><
 </div>
 <div class="api-entry" data-provider="core" data-search="current_script_path() -&gt; string observe  every engine"><h3 id="api-9e3c5b2e5dac"><code>current_script_path() -&gt; string</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
-<div class="api-entry" data-provider="runner" data-search="delete_file(path: string) -&gt; bool filesystem  standalone jaiscript.exe"><h3 id="api-37d5a3333a5b"><code>delete_file(path: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
-</div>
-<div class="api-entry" data-provider="runner" data-search="dir_exists(path: string) -&gt; bool filesystem  standalone jaiscript.exe"><h3 id="api-a917560eb590"><code>dir_exists(path: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
-</div>
 <div class="api-entry" data-provider="runner" data-search="download() -&gt; download construct  standalone jaiscript.exe"><h3 id="api-19233a58dc8d"><code>download() -&gt; download</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; construct</p>
 </div>
 <div class="api-entry" data-provider="runner" data-search="env_var(name: string) -&gt; string observe &quot;&quot; when unset standalone jaiscript.exe"><h3 id="api-37dc8fda946f"><code>env_var(name: string) -&gt; string</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; observe</p>
@@ -646,11 +669,6 @@ print(w.size(), &quot; &quot;, to_json(w.to_string().to_bytes()));</code></pre><
 </div>
 <div class="api-entry" data-provider="core" data-search="extend(object: var, class: class) -&gt; var mutate attaches/re-derives script behavior to a native or script object. every engine"><h3 id="api-ccfef8579b7a"><code>extend(object: var, class: class) -&gt; var</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
 <p>Attaches/re-derives script behavior to a native or script object.</p>
-</div>
-<div class="api-entry" data-provider="core" data-search="file_data(path: string) -&gt; map&lt;string,var&gt; or null filesystem resolved path metadata: path, filename, extension, created, modified and entry flags. every engine"><h3 id="api-c00c61c5bdc3"><code>file_data(path: string) -&gt; map&lt;string,var&gt; or null</code></h3><p><strong>Every engine</strong> &middot; filesystem</p>
-<p>Resolved path metadata: path, filename, extension, created, modified and entry flags.</p>
-</div>
-<div class="api-entry" data-provider="runner" data-search="file_exists(path: string) -&gt; bool filesystem  standalone jaiscript.exe"><h3 id="api-16f4448fc25e"><code>file_exists(path: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="file_name(path: string) -&gt; string observe  every engine"><h3 id="api-ac1a6b423ff4"><code>file_name(path: string) -&gt; string</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(file_name(&quot;assets/maps/e1m1.jai&quot;));</code></pre></div>
@@ -689,20 +707,13 @@ print(p.name, &quot; &quot;, p.age);</code></pre></div>
 <div class="api-entry" data-provider="runner" data-search="key_down(name: string) -&gt; bool input current held key; arrows and named keys or letters; console/platform dependent. standalone jaiscript.exe"><h3 id="api-44a58c408539"><code>key_down(name: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; input</p>
 <p>Current held key; arrows and named keys or letters; console/platform dependent.</p>
 </div>
-<div class="api-entry" data-provider="runner" data-search="list_dir(path: string) -&gt; array&lt;string&gt; filesystem  standalone jaiscript.exe"><h3 id="api-ac8ad6d95fb5"><code>list_dir(path: string) -&gt; array&lt;string&gt;</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
-</div>
 <div class="api-entry" data-provider="runner" data-search="load_sound(path: string) -&gt; sound audio opens a wav, midi or mp3 file (the header decides, else the extension) and preloads it in the background; null for a missing file, an unknown format, or off windows. standalone jaiscript.exe"><h3 id="api-579b6cf87920"><code>load_sound(path: string) -&gt; sound</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; audio</p>
 <p>Opens a WAV, MIDI or MP3 file (the header decides, else the extension) and preloads it in the background; null for a missing file, an unknown format, or off Windows.</p>
-</div>
-<div class="api-entry" data-provider="runner" data-search="make_dirs(path: string) -&gt; bool filesystem  standalone jaiscript.exe"><h3 id="api-dda73883f287"><code>make_dirs(path: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="merge(first: map&lt;k,v&gt;, second: map) -&gt; map&lt;k,v&gt; copy preserves the first input key/value constraints and converts selected second values through normal map-store rules. second entries replace colliding keys. only values retained in the result copy; explicit handles retain identity. inputs do not mutate. register_all() or area registration"><h3 id="api-723e9adc001f"><code>merge(first: map&lt;K,V&gt;, second: map) -&gt; map&lt;K,V&gt;</code></h3><p><strong>register_all() or area registration</strong> &middot; copy</p>
 <p>Preserves the first input key/value constraints and converts selected second values through normal map-store rules. Second entries replace colliding keys. Only values retained in the result copy; explicit handles retain identity. Inputs do not mutate.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(to_json(merge({&quot;a&quot;: 1, &quot;b&quot;: 2}, {&quot;b&quot;: 3})));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;a&quot;:1,&quot;b&quot;:3}</code></pre></div>
-</div>
-<div class="api-entry" data-provider="runner" data-search="move_file(from: string, to: string) -&gt; bool filesystem replaces destination; may copy across volumes. standalone jaiscript.exe"><h3 id="api-dee472e46d06"><code>move_file(from: string, to: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
-<p>Replaces destination; may copy across volumes.</p>
 </div>
 <div class="api-entry" data-provider="runner" data-search="net_channel() -&gt; net_channel construct  standalone jaiscript.exe"><h3 id="api-72916627be92"><code>net_channel() -&gt; net_channel</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; construct</p>
 </div>
@@ -741,9 +752,6 @@ print(p.name, &quot; &quot;, p.age);</code></pre></div>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">random r(42);
 print(r.next_int(1, 6), &quot; &quot;, r.next_int(1, 6), &quot; &quot;, r.next_int(1, 6));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 3 5</code></pre></div>
-</div>
-<div class="api-entry" data-provider="runner" data-search="read_file(path: string) -&gt; string filesystem missing/unreadable file raises; empty file returns empty string. standalone jaiscript.exe"><h3 id="api-191b68a91927"><code>read_file(path: string) -&gt; string</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
-<p>Missing/unreadable file raises; empty file returns empty string.</p>
 </div>
 <div class="api-entry" data-provider="runner" data-search="read_key() -&gt; string input nonblocking; consumes one queued edge; empty string if idle; named arrows and lowercase letters. standalone jaiscript.exe"><h3 id="api-12416cbcb301"><code>read_key() -&gt; string</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; input</p>
 <p>Nonblocking; consumes one queued edge; empty string if idle; named arrows and lowercase letters.</p>
@@ -822,12 +830,6 @@ print(vformat(pattern, &quot;orc&quot;, 7));</code></pre></div>
 <p>Method context only.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="working_dir() -&gt; string observe  every engine"><h3 id="api-e0d948fd29b5"><code>working_dir() -&gt; string</code></h3><p><strong>Every engine</strong> &middot; observe</p>
-</div>
-<div class="api-entry" data-provider="runner" data-search="writable_dir(path: string) -&gt; bool filesystem creates folder and performs a write/remove probe. standalone jaiscript.exe"><h3 id="api-bdbb802ce23e"><code>writable_dir(path: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
-<p>Creates folder and performs a write/remove probe.</p>
-</div>
-<div class="api-entry" data-provider="runner" data-search="write_file(path: string, content: string) -&gt; bool filesystem creates missing parent folders. standalone jaiscript.exe"><h3 id="api-20d8c81da63e"><code>write_file(path: string, content: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
-<p>Creates missing parent folders.</p>
 </div>
 <div class="api-entry" data-provider="runner" data-search="zip_entries(path: string) -&gt; array&lt;string&gt; filesystem  standalone jaiscript.exe"><h3 id="api-c635c85f9b59"><code>zip_entries(path: string) -&gt; array&lt;string&gt;</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
 </div>

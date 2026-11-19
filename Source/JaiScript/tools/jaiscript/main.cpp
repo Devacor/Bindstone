@@ -45,7 +45,7 @@
 #include <thread>
 #include <vector>
 
-#include "file_io.hpp"      // read_file, write_file and the rest of the host file IO
+#include "file_io.hpp"      // file::read, file::write and the rest of the host file IO
 #include "net_socket.hpp"   // the socket primitives net_channel and net_server stand on
 
 #ifdef _WIN32
@@ -266,10 +266,10 @@ void print_usage() {
 		"  spider::sling(content, url[, options]), also spelled spider::post(url, content[, options]);\n"
 		"  each answers a spider::Response; WinHTTP on Windows, sockets elsewhere, HTTPS through OpenSSL\n"
 		"  when the build found it), with the network permission granted,\n"
-		"  plus host file IO: read_file(path),\n"
-		"  write_file(path, text) (creates missing folders), file_exists(path), delete_file(path), download,\n"
-		"  zip_entries(zip), zip_extract(zip, entry, dest), dir_exists(path),\n"
-		"  make_dirs(path), list_dir(path), writable_dir(path). Locations are language builtins:\n"
+		"  plus host file IO: file::read(path),\n"
+		"  file::write(path, text) (creates missing folders), file::exists(path), file::remove(path), download,\n"
+		"  zip_entries(zip), zip_extract(zip, entry, dest), file::directory_exists(path),\n"
+		"  file::make_directories(path), file::list_directory(path), file::ensure_writable_directory(path). Locations are language builtins:\n"
 		"  executable_dir() (alias bin_dir()), root_script_dir() (the script this run started with),\n"
 		"  current_script_dir() (the file whose code is running), the *_path() twins, resolve_path(name)\n"
 		"  (the file import would load for that name), app_data_dir(name) / app_cache_dir(name),\n"
@@ -2090,7 +2090,7 @@ int run_selftest(const console_state& con) {
 		expect(text.find("jai> ") != std::string::npos, "repl: prompt prints when interactive");
 	}
 
-	for (const char* backend : {"interp", "vm"}) {   // read_file's contract and binary data through the real file functions
+	for (const char* backend : {"interp", "vm"}) {   // file::read's contract and binary data through the real file functions
 		options file_opt = opt;
 		file_opt.backend = backend;
 		auto eng = make_runner_engine(file_opt, nullptr);
@@ -2107,21 +2107,21 @@ int run_selftest(const console_state& con) {
 		};
 		auto name = [&](const char* what) { return std::string("files [") + backend + "]: " + what; };
 		const std::string bytes = "array<int> b = []; for (int i = 0; i < 256; ++i) { b.push(i); } b.push(13); b.push(10); b.push(0); b.push(10); ";
-		expect(run(bytes + "write_file(bin_path, string::from_bytes(b)) && read_file(bin_path).to_bytes() == b;") == "true",
+		expect(run(bytes + "file::write(bin_path, string::from_bytes(b)) && file::read(bin_path).to_bytes() == b;") == "true",
 			name("every byte value, NUL and \\r\\n round trip").c_str());
 		std::string disk = slurp_file(bin.string());
 		bool exact = disk.size() == 260 && disk[13] == '\x0D' && disk[256] == '\x0D' && disk[257] == '\x0A' && disk[258] == '\0';
 		for (int i = 0; i < 256 && exact; ++i) { exact = static_cast<unsigned char>(disk[i]) == i; }
 		expect(exact, name("the file on disk holds exactly those bytes").c_str());
-		expect(run("binary::writer w; w.uint32(0xCAFEBABE).text(\"hdr\", 8).float64(-0.5); write_file(bin_path, w.to_string()); "
-			"var r = read_file(bin_path).reader(); to_string(r.uint32()) + \" \" + r.text(8) + \" \" + to_string(r.float64()) + \" \" + to_string(r.at_end());") ==
+		expect(run("binary::writer w; w.uint32(0xCAFEBABE).text(\"hdr\", 8).float64(-0.5); file::write(bin_path, w.to_string()); "
+			"var r = file::read(bin_path).reader(); to_string(r.uint32()) + \" \" + r.text(8) + \" \" + to_string(r.float64()) + \" \" + to_string(r.at_end());") ==
 			"3405691582 hdr -0.5 true", name("a binary::writer file reads back through binary::reader").c_str());
-		expect(run("read_file(empty_path).size();") == "0", name("an empty file reads as \"\"").c_str());
-		expect(run("var m = \"\"; try { read_file(missing_path); } catch (e) { m = e; } m;") == "Cannot read file '" + missing.generic_string() + "': not found",
+		expect(run("file::read(empty_path).size();") == "0", name("an empty file reads as \"\"").c_str());
+		expect(run("var m = \"\"; try { file::read(missing_path); } catch (e) { m = e; } m;") == "Cannot read file '" + missing.generic_string() + "': not found",
 			name("a missing file raises").c_str());
-		expect(run("var m = \"\"; try { read_file(dir_path); } catch (e) { m = e; } m;") == "Cannot read file '" + dir.generic_string() + "': not a file",
+		expect(run("var m = \"\"; try { file::read(dir_path); } catch (e) { m = e; } m;") == "Cannot read file '" + dir.generic_string() + "': not a file",
 			name("a folder raises").c_str());
-		expect(run("file_exists(missing_path) ? read_file(missing_path) : \"fallback\";") == "fallback", name("check first, then read").c_str());
+		expect(run("file::exists(missing_path) ? file::read(missing_path) : \"fallback\";") == "fallback", name("check first, then read").c_str());
 	}
 
 	{   // sound: format by header, then by extension; the play state a script reads (played only where an output device exists)
@@ -2202,9 +2202,9 @@ int run_selftest(const console_state& con) {
 				++guarded_calls;
 				return true;
 			}, jai::permissions::filesystem);
-			expect_permission(eng->execute("read_file(fixture + \"/content.txt\");").as_string() == "unchanged",
+			expect_permission(eng->execute("file::read(fixture + \"/content.txt\");").as_string() == "unchanged",
 				"default file access remains enabled");
-			eng->execute("var saved_read = read_file; var pending = download(); var saved_start = reflect::bind(pending, \"start\");");
+			eng->execute("var saved_read = file::read; var pending = download(); var saved_start = reflect::bind(pending, \"start\");");
 			eng->execute("revoke_filesystem();");
 			expect_permission(revoke_calls == 1 && !eng->is_enabled(jai::permissions::filesystem),
 				"host callback revokes subsequent access");
@@ -2221,24 +2221,24 @@ int run_selftest(const console_state& con) {
 				}
 			};
 			const std::pair<const char*, const char*> denied_calls[] = {
-				{"read_file(fixture + \"/content.txt\")", "read_file"},
-				{"write_file(fixture + \"/content.txt\", \"changed\")", "write_file"},
-				{"file_exists(fixture + \"/content.txt\")", "file_exists"},
-				{"delete_file(fixture + \"/removable.txt\")", "delete_file"},
-				{"move_file(fixture + \"/removable.txt\", fixture + \"/moved.txt\")", "move_file"},
-				{"dir_exists(fixture)", "dir_exists"},
-				{"make_dirs(fixture + \"/created\")", "make_dirs"},
-				{"writable_dir(fixture + \"/probe-created\")", "writable_dir"},
-				{"list_dir(fixture)", "list_dir"},
+				{"file::read(fixture + \"/content.txt\")", "file::read"},
+				{"file::write(fixture + \"/content.txt\", \"changed\")", "file::write"},
+				{"file::exists(fixture + \"/content.txt\")", "file::exists"},
+				{"file::remove(fixture + \"/removable.txt\")", "file::remove"},
+				{"file::move(fixture + \"/removable.txt\", fixture + \"/moved.txt\")", "file::move"},
+				{"file::directory_exists(fixture)", "file::directory_exists"},
+				{"file::make_directories(fixture + \"/created\")", "file::make_directories"},
+				{"file::ensure_writable_directory(fixture + \"/probe-created\")", "file::ensure_writable_directory"},
+				{"file::list_directory(fixture)", "file::list_directory"},
 				{"load_sound(fixture + \"/missing.wav\")", "load_sound"},
 				{"play_sound(fixture + \"/missing.mid\")", "play_sound"},
 				{"crypto::sha256_file(fixture + \"/content.txt\")", "crypto::sha256_file"},
 				{"zip_entries(fixture + \"/missing.zip\")", "zip_entries"},
 				{"zip_extract(fixture + \"/missing.zip\", \"entry\", fixture + \"/extracted.txt\")", "zip_extract"},
 				{"pending.start(\"jaiscript-selftest://never-network\", fixture + \"/download.bin\")", "download.start"},
-				{"saved_read(fixture + \"/content.txt\")", "saved read_file alias"},
+				{"saved_read(fixture + \"/content.txt\")", "saved file::read alias"},
 				{"saved_start(\"jaiscript-selftest://never-network\", fixture + \"/alias.bin\")", "saved download.start alias"},
-				{"reflect::call(\"read_file\", fixture + \"/content.txt\")", "reflected read_file"},
+				{"reflect::call(\"file::read\", fixture + \"/content.txt\")", "reflected file::read"},
 				{"reflect::invoke(pending, \"start\", \"jaiscript-selftest://never-network\", fixture + \"/reflected.bin\")", "reflected download.start"}
 			};
 			for (const auto& [expression, name] : denied_calls) { expect_denied(expression, name); }
@@ -2274,14 +2274,14 @@ int run_selftest(const console_state& con) {
 			eng->enable(jai::permissions::filesystem);
 			expect_permission(eng->execute("saved_read(fixture + \"/content.txt\");").as_string() == "unchanged",
 				"saved callable works after re-enable");
-			expect_permission(eng->execute("write_file(fixture + \"/reenabled.txt\", \"enabled\") && "
-				"file_exists(fixture + \"/reenabled.txt\");").as_bool()
+			expect_permission(eng->execute("file::write(fixture + \"/reenabled.txt\", \"enabled\") && "
+				"file::exists(fixture + \"/reenabled.txt\");").as_bool()
 				&& slurp_file((fixture / "reenabled.txt").string()) == "enabled",
 				"reenabled file operations retain normal behavior");
-			expect_permission(eng->execute("write_file(fixture + \"/save.tmp\", \"new\") && write_file(fixture + \"/save.txt\", \"old\") && "
-				"move_file(fixture + \"/save.tmp\", fixture + \"/save.txt\") && !file_exists(fixture + \"/save.tmp\") && "
-				"read_file(fixture + \"/save.txt\") == \"new\" && !move_file(fixture + \"/save.tmp\", fixture + \"/save.txt\");").as_bool(),
-				"move_file replaces the destination and answers false for a missing source");
+			expect_permission(eng->execute("file::write(fixture + \"/save.tmp\", \"new\") && file::write(fixture + \"/save.txt\", \"old\") && "
+				"file::move(fixture + \"/save.tmp\", fixture + \"/save.txt\") && !file::exists(fixture + \"/save.tmp\") && "
+				"file::read(fixture + \"/save.txt\") == \"new\" && !file::move(fixture + \"/save.tmp\", fixture + \"/save.txt\");").as_bool(),
+				"file::move replaces the destination and answers false for a missing source");
 			expect_permission(eng->execute("load_sound(fixture + \"/missing.wav\") == null && play_sound(fixture + \"/missing.mid\") == null;").as_bool(),
 				"load_sound and play_sound answer null for a missing file");
 			expect_permission(!eng->execute("saved_start(\"jaiscript-selftest://never-network\", "

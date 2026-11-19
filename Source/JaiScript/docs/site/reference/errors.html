@@ -451,11 +451,11 @@ try {
 <tr id="err-failed-to-open-import-file"><td><code>Failed to open import file: creature.jai</code></td><td><code>import</code> of a file that cannot be opened.</td><td>Correct the path, or add the file.</td></tr>
 <tr id="err-failed-to-read-source-file"><td><code>Failed to read source file: &lt;path&gt; (it kept changing while it was read)</code></td><td>A file whose stamp moved during each of four reads: <code>execute_file</code>, an <code>include</code>, the first <code>import</code> of a module, the first load of a template. A module or a template that loaded before raises nothing: it keeps the code it had, and its next check tries again.</td><td>Let the program that is writing the file finish, then load again.</td></tr>
 <tr id="err-dynamic-import-parse-error"><td><code>parse failed: &lt;path&gt;:LINE:COL: error: MESSAGE</code></td><td>A file a dynamic <code>import(expr)</code> reaches does not parse.</td><td>Fix the parse error the message names.</td></tr>
-<tr id="err-path-outside-confined-roots"><td><code>Path outside the confined roots: ../secret/creds.txt</code></td><td><code>include</code>, <code>import</code>, <code>resolve_path</code> or <code>file_data</code> finds its file only outside the host's <code>confine_paths</code> folders.</td><td>Move the file under a confined root, or the host adds its folder.</td></tr>
+<tr id="err-path-outside-confined-roots"><td><code>Path outside the confined roots: ../secret/creds.txt</code></td><td><code>include</code>, <code>import</code>, <code>resolve_path</code> or <code>file::data</code> finds its file only outside the host's <code>confine_paths</code> folders.</td><td>Move the file under a confined root, or the host adds its folder.</td></tr>
 <tr id="err-include-includes-itself"><td><code>include 'part.jai' includes itself or nests too deep</code></td><td>A literal <code>include</code> in a function body reaches a file it is already splicing, or splices over 32 files deep. A parse error at the include's path.</td><td>Break the cycle, or <code>import</code> the shared file.</td></tr>
 <tr id="err-import-takes-paths"><td><code>import(...) takes paths: strings or arrays of strings</code></td><td><code>import(expr)</code> gets neither a string nor an array of strings.</td><td>Pass a string, or an array of them.</td></tr>
 <tr id="err-insufficient-permission-filesystem"><td><code>Insufficient permission: filesystem.</code></td><td><code>include</code>, <code>import</code>, <code>template</code>, <code>scoped_template</code> or a file builtin, with the filesystem permission disabled by the host.</td><td>The host enables <code>jai::permissions::filesystem</code>, or the script leaves files alone.</td></tr>
-<tr id="err-cannot-read-file"><td><code>Cannot read file 'saves/world.gqw': not found</code></td><td>The runner's <code>read_file</code>, or <code>crypto::sha256_file</code>, cannot read the path (<code>not a file</code>, <code>permission denied</code>, <code>cannot be opened</code>, <code>read failed</code> alike).</td><td>Correct the path; check the file exists and is readable.</td></tr>
+<tr id="err-cannot-read-file"><td><code>Cannot read file 'saves/world.gqw': not found</code></td><td>The runner's <code>file::read</code>, or <code>crypto::sha256_file</code>, cannot read the path (<code>not a file</code>, <code>permission denied</code>, <code>cannot be opened</code>, <code>read failed</code> alike).</td><td>Correct the path; check the file exists and is readable.</td></tr>
 </tbody></table></div>
 <h4 id="errors-jai-spider">jai_spider<a class="hlink" href="#errors-jai-spider" aria-label="link">&#8203;</a></h4>
 <div class="tablewrap"><table><thead><tr><th>Text</th><th>When</th><th>Fix</th></tr></thead><tbody>
@@ -769,7 +769,6 @@ try {
 <tr><td><code>function* g()</code></td><td><code>JaiScript has no 'function*': a generator is a coroutine, coroutine name(...) { yield v; }</code></td></tr>
 <tr><td><code>x instanceof T</code></td><td><code>JaiScript has no 'instanceof': if (dynamic_cast&lt;T&gt;(x)) tests whether x is a T (the cast is x as a shared_ptr&lt;T&gt;, null when it is not one), and reflect::is_instance_of(x, "T") answers true or false</code></td></tr>
 <tr><td><code>dynamic_pointer_cast&lt;T&gt;(x)</code></td><td><code>JaiScript has no 'dynamic_pointer_cast': dynamic_cast&lt;T&gt;(x) is x as a shared_ptr&lt;T&gt;, null when it is not one</code></td></tr>
-<tr><td><code>type_of(x)</code>, <code>is_registered_type(x)</code> where nothing declares the name</td><td><code>there is no bare 'type_of': write reflect::type_of(x)</code> (<code>'is_registered_type'</code> alike)</td></tr>
 <tr><td><code>[...a, 3]</code>, <code>f(...args)</code></td><td><code>JaiScript has no spread '...': join arrays with array::concat(a, b) (a.concat(b) appends in place), and pass arguments one by one</code></td></tr>
 <tr><td><code>if (a = b)</code>, <code>while (a = b)</code></td><td><code>assignment used as a condition: write '==' to compare, or '((a = b))' with parentheses of its own to assign</code></td></tr>
 <tr><td><code>if (s)</code>, <code>while (s)</code> on a <code>string</code></td><td><code>a string is not a condition: write !s.empty()</code></td></tr>
@@ -784,6 +783,21 @@ try {
 <tr><td><code>std::vector&lt;int&gt;, std::cout</code></td><td><code>JaiScript has no 'std::': write array&lt;T&gt; for vector, map&lt;K, V&gt; for map, string for string and print(...) for cout</code></td></tr>
 <tr><td><code>a.push_back(v)</code> · <code>a.pop_back()</code> · <code>a.emplace_back(v)</code></td><td><code>no member 'push_back' on 'array&lt;int&gt;': write a.push(v)</code> · <code>...: write a.pop()</code> · <code>...: construct the value and push it: a.push(T(args))</code>; at run time <code>array has no member 'push_back': write a.push(v)</code></td></tr>
 <tr><td><code>s.c_str()</code></td><td><code>no member 'c_str' on 'string': a string is already its text: pass s itself</code></td></tr>
+</tbody></table></div>
+<p id="retired-names">Load errors that name the new spelling of a library function. A call reports one only where nothing declares the name, so a script&#x27;s or a host&#x27;s own <code>read_file</code> keeps working, and only on an engine that has the replacement; elsewhere the call is an ordinary undeclared identifier:</p>
+<div class="tablewrap"><table><thead><tr><th>Written</th><th>Text</th></tr></thead><tbody>
+<tr><td><code>file_data(p)</code></td><td><code>JaiScript has no 'file_data': write file::data(path)</code></td></tr>
+<tr><td><code>read_file(p)</code></td><td><code>JaiScript has no 'read_file': write file::read(path)</code></td></tr>
+<tr><td><code>write_file(p, s)</code></td><td><code>JaiScript has no 'write_file': write file::write(path, text)</code></td></tr>
+<tr><td><code>file_exists(p)</code></td><td><code>JaiScript has no 'file_exists': write file::exists(path)</code></td></tr>
+<tr><td><code>delete_file(p)</code></td><td><code>JaiScript has no 'delete_file': write file::remove(path)</code></td></tr>
+<tr><td><code>move_file(a, b)</code></td><td><code>JaiScript has no 'move_file': write file::move(from, to)</code></td></tr>
+<tr><td><code>dir_exists(p)</code></td><td><code>JaiScript has no 'dir_exists': write file::directory_exists(path)</code></td></tr>
+<tr><td><code>make_dirs(p)</code></td><td><code>JaiScript has no 'make_dirs': write file::make_directories(path)</code></td></tr>
+<tr><td><code>list_dir(p)</code></td><td><code>JaiScript has no 'list_dir': write file::list_directory(path)</code></td></tr>
+<tr><td><code>writable_dir(p)</code></td><td><code>JaiScript has no 'writable_dir': write file::ensure_writable_directory(path)</code></td></tr>
+<tr><td><code>type_of(x)</code></td><td><code>JaiScript has no 'type_of': write reflect::type_of(x)</code></td></tr>
+<tr><td><code>is_registered_type(x)</code></td><td><code>JaiScript has no 'is_registered_type': write reflect::is_registered_type(x)</code></td></tr>
 </tbody></table></div>
 <p>Other parse errors in the same voice:</p>
 <ul>

@@ -62,6 +62,28 @@ public:
             check_true(eng.is_enabled(app_permission::edit, jai::permissions::filesystem));
         });
 
+        custom_test("a_strict_engine_holds_nothing_until_the_host_enables_it", [this](engine& eng) {
+            eng.add_function("edit", []() { return script_int(42); }, app_permission::edit);
+            eng.enable(app_permission::edit, jai::permissions::network);
+            eng.set_strict();
+            check_false(eng.is_enabled(jai::permissions::filesystem));
+            check_false(eng.is_enabled(jai::permissions::scoped_template));
+            check_false(eng.is_enabled(jai::permissions::source_receivers));
+            check_false(eng.is_enabled(jai::permissions::network));
+            check_false(eng.is_enabled(app_permission::edit));
+            check_false(eng.execute("jai::permissions::is_enabled(jai::permissions::filesystem)").as_bool());
+            check_eq(script_int(5), eng.execute("2 + 3").as_int(), "source in memory still runs");
+            check_eq(denied(), failure([&]() { eng.execute("edit()"); }));
+            check_eq(std::string("Insufficient permission: filesystem."), failure([&]() { eng.execute("import(\"strict_missing.jai\");"); }));
+            check_eq(std::string("Insufficient permission: scoped_template."), failure([&]() { eng.execute("scoped_template_text(\"x\", {});"); }));
+            eng.enable(jai::permissions::scoped_template, app_permission::edit);
+            check_eq(script_int(42), eng.execute("edit()").as_int());
+            check_eq(std::string("x"), eng.execute("scoped_template_text(\"x\", {}).to_string()").as_string());
+            check_false(eng.is_enabled(jai::permissions::filesystem), "enable grants only what it names");
+            eng.set_strict();
+            check_false(eng.is_enabled(app_permission::edit), "a later call withdraws what was granted since");
+        });
+
         custom_test("mixed_requirements_are_all_required_and_the_lowest_missing_slot_is_named", [](engine& eng) {
             int calls = 0;
             eng.add_function("publish", [&]() { return script_int(++calls); }, app_permission::publish, jai::permissions::filesystem, app_permission::edit, app_permission::publish);
@@ -237,6 +259,7 @@ public:
             const std::string expected = "Cannot change permissions during a parallel region";
             check_eq(expected, failure([&]() { eng.enable(app_permission::edit); }));
             check_eq(expected, failure([&]() { eng.disable(app_permission::edit, jai::permissions::filesystem); }));
+            check_eq(expected, failure([&]() { eng.set_strict(); }));
             check_eq(expected, failure([&]() { eng.register_permission(app_permission::unnamed, "app.new_in_region"); }));
             check_false(detail::engine_access::get_symbolizer(eng)->find("app.new_in_region").has_value());
             check_false(eng.is_enabled(app_permission::edit));

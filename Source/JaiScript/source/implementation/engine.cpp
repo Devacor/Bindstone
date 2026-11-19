@@ -6503,6 +6503,11 @@ void engine::set_permissions(const permission_set& permissions, bool enabled) {
     else { impl->permissions_.remove(permissions); }
 }
 
+void engine::set_strict() {
+    check_permission_mutation();
+    impl->permissions_ = permission_set{};
+}
+
 void engine::check_permission_mutation() const {
     if (impl->parallel_ && impl->parallel_->active_region) {
         throw runtime_error("Cannot change permissions during a parallel region");

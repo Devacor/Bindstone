@@ -141,14 +141,17 @@ namespace jai {
     public:
         ~engine();
 
-        // Every permission is an int32_t id (core/permission.hpp): filesystem and scoped_template are enabled by default, every
-        // other one starts disabled. Changes affect the next protected operation, including after a reentrant C++ callback;
+        // Every permission is an int32_t id (core/permission.hpp): filesystem, scoped_template and source_receivers are enabled
+        // by default, every other one starts disabled. Changes affect the next protected operation, including after a reentrant C++ callback;
         // started work is not cancelled. Grants are per-engine, not shared through script variables. Configure on the engine
         // thread (or while idle), outside parallel regions. Concurrent cross-thread grant changes are not supported.
         template<detail::permission_enum... Permissions>
         void enable(Permissions... permissions) { set_permissions(detail::permission_set_of(permissions...), true); }
         template<detail::permission_enum... Permissions>
         void disable(Permissions... permissions) { set_permissions(detail::permission_set_of(permissions...), false); }
+        // Withdraws every permission the engine holds, the default ones and the host's own: from here a script reaches only
+        // what a later enable grants
+        void set_strict();
         // True when every one is enabled
         template<detail::permission_enum... Permissions>
         bool is_enabled(Permissions... permissions) const noexcept { return permissions_enabled(detail::permission_set_of(permissions...)); }

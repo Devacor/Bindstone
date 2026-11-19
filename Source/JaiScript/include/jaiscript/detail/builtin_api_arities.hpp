@@ -285,7 +285,7 @@ namespace jai::detail {
 		BuiltinReceiverEffect effect;
 	};
 
-	inline constexpr std::array<BuiltinEffect, 91> BUILTIN_RECEIVER_EFFECTS{{
+	inline constexpr std::array<BuiltinEffect, 90> BUILTIN_RECEIVER_EFFECTS{{
 		{"append", BuiltinReceiverEffect::writes},
 		{"assign", BuiltinReceiverEffect::writes},
 		{"at", BuiltinReceiverEffect::reads},
@@ -354,7 +354,6 @@ namespace jai::detail {
 		{"resize", BuiltinReceiverEffect::writes},
 		{"reverse", BuiltinReceiverEffect::writes},
 		{"rfind", BuiltinReceiverEffect::reads},
-		{"same_as", BuiltinReceiverEffect::reads},
 		{"size", BuiltinReceiverEffect::reads},
 		{"slice", BuiltinReceiverEffect::writes},
 		{"some", BuiltinReceiverEffect::element_callback},

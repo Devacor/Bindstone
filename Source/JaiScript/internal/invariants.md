@@ -162,7 +162,7 @@ shadow index. Any NEW binary/unary/compound handler that dispatches on `raw_stor
 MUST normalize bound operands first via `bound_decoded_temp()` (value.hpp) — copy the
 prologue from `detail::binary_arithmetic` (detail/binary_handlers.hpp) or `vm_backend::handle_add`.
 The failure mode is SILENT: index 14 falls into an erroring `type_mismatch`
-default, or worse a wrong-constant default (`same_as` → false). Raw-index *fast-path guards*
+default, or worse a wrong-constant default (`same_object` → false). Raw-index *fast-path guards*
 (`idx == TYPEID_INT`) are safe as-is — they exclude bound values and fall through.
 
 A compound assignment or `++`/`--` on a bound variable writes through to the C++ variable

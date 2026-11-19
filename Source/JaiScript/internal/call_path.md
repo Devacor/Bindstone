@@ -47,7 +47,7 @@ own).
 | receiver an instance (no coroutine handle) | the rows key on a script class |
 | class identity and method epoch, per row | a reload, an added method or a field-set change bumps the epoch |
 | field shadow (the row's class memo, else `has_field`) | a field named like the method takes the call |
-| the site's own conditions, memoized in `call_site::mic_lean` | an identifier receiver whose name a string builtin may take keeps the variable-first order; `same_as` and `super` calls keep theirs |
+| the site's own conditions, memoized in `call_site::mic_lean` | an identifier receiver whose name a string builtin may take keeps the variable-first order; `super` calls keep theirs |
 | no native methods, no host class with script bases | the host lane answers first on the general path |
 | the dispatcher's compiled body is the declaration's (`body_cache_key`) | a reload that replaced the body recompiles on the general path |
 | the definition environment is the running one | nothing to save or restore |

@@ -623,7 +623,7 @@ anything else (a result of another kind, a string, a class's operator, an access
 `op_member_compound`'s kernel over the value, the receiver and the member read in the general order (`member_compound_general`), so
 its conversions and texts stand. In a block the store site carries the kind (`op_c_mstore`'s `a` under
 `k_cell_member_compound_bit`, its own executor): the field read, the rows and the store are one cell instruction, and a miss re-runs
-the general compound. A name a read resolves ahead of a field (`same_as`, a shared_ptr method) keeps the stack form.
+the general compound. A name a read resolves ahead of a field (a shared_ptr method) keeps the stack form.
 
 A reference slot (`float& ax = a.x`, a `T&` parameter, an element or map entry reference, a boxed local) takes the general form's rows
 on its referent. `lane_ref_place` answers the int or float a plain cell, a field, an untyped element or a map entry holds under its

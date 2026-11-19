@@ -1,6 +1,7 @@
 #pragma once
 
 #include <jaiscript/detail/foreign_keyword.hpp>
+#include <jaiscript/detail/retired_names.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <string>
 #include <string_view>
@@ -77,9 +78,10 @@ inline std::string no_member_text(Engine* eng, std::string_view kind, std::strin
                    "there; give the receiver a typed name (" + std::string(kind) + " x = ...) or cast it (cast<" + std::string(kind) + "&>(x)." + std::string(member) + "(...))";
         }
     }
-    const std::string_view foreign = detail::foreign_member_text(kind, member);
+    std::string_view advice = detail::foreign_member_text(kind, member);
+    if (const detail::retired_method* retired = advice.empty() ? detail::find_retired_method(member) : nullptr) { advice = retired->advice; }
     return std::string(kind.empty() ? std::string_view("object") : kind) + " has no member '" + std::string(member) + "'" +
-           (foreign.empty() ? std::string() : ": " + std::string(foreign));
+           (advice.empty() ? std::string() : ": " + std::string(advice));
 }
 
 // `x.m = v` on an object without m

@@ -283,7 +283,7 @@ call it with a.push() or wrap the call in a lambda`; a builtin name wins over a 
 any declared map is certain). A dot on a class name is the runtime's text too: `C.s` is `'C' is a class;
 use C::s`. The builtin methods' arguments and results, subscripts,
 enum values (existence IS checked: `Direction.zzz` and `Direction::zzz` error), namespaces: lenient. The handle builtins every object answers
-(`use_count`/`cpp_ref_count` → int, `unique`/`same_as` → bool, `reset`) are lenient on any
+(`use_count`/`cpp_ref_count` → int, `unique` → bool, `reset`) are lenient on any
 object receiver; a class method of the same name wins first.
 
 **Enums in a function or block** — an enum declared inside a function or a block is local to

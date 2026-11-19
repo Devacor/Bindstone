@@ -399,7 +399,6 @@ void interpreter::initialize() {
     done_id_ = string_symbolizer_->intern("done");
     advance_id_ = string_symbolizer_->intern("advance");
     result_id_ = string_symbolizer_->intern("result");
-    same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
     to_bool_id_ = string_symbolizer_->intern("to_bool");
     to_string_id_ = string_symbolizer_->intern("to_string");
@@ -3687,12 +3686,12 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
     // (identifier/this - re-evaluable without side effects, so a gate miss can fall to
     // the generic path below), or a bare call of a method of this frame's receiver (the
     // vm's park_sibling_method). Mirrors vm exec_call_method's fast-entry precedence gate
-    // (same_as/super/coroutine/sp-builtin/access/getter-probe/field), skipping the
+    // (super/coroutine/sp-builtin/access/getter-probe/field), skipping the
     // bound-method mint, its this+args re-copies, and the carrier method env.
     {
         member_expr* const member = expr->callee->get_type() == node_type::member_expr ? static_cast<member_expr*>(expr->callee.get()) : nullptr;
         identifier_expr* const sibling = member ? nullptr : sibling_method_callee(expr->callee.get(), member_scope_);
-        if ((member && !member->is_static && member->member_id != same_as_id_ &&
+        if ((member && !member->is_static &&
              (member->object->get_type() == node_type::identifier_expr || member->object->get_type() == node_type::this_expr)) || sibling) {
             const uint64_t member_id = member ? member->member_id : sibling->symbol_id;
             script_value objectValue = make_value();
@@ -4608,7 +4607,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
             }
             // a call on a receiver the call's fast entry does not take (a member chain) enters the method's pin, else meets the
             // call's wall (KEEP BYTE-PARALLEL with vm_backend::exec_probe_member)
-            if (as_callee && expr->member_id != same_as_id_) {
+            if (as_callee) {
                 const detail::parallel_method_pin* pin = parallel_method_pins_ ? parallel_method_pins_->find(cls, expr->member_id) : nullptr;
                 if (!pin) { return detail::parallel_method_not_admitted(expr->member_id); }
                 push_value(pin->resolved ? create_bound_method(objectValue, pin->method_value) : detail::parallel_bound_pin(*pin, objectValue, expr->member_id, engine_));
@@ -4844,15 +4843,6 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
 
     // After refactor: shared_ptr<T> uses same storage as regular objects
     // No unwrapping needed - just access the object_holder directly
-
-    // Built-in same_as() for all values (identity/equality comparison)
-    // same_as_id_ is a per-interpreter member (symbol ids are per-engine; a static here
-    // cached the first engine's id and broke same_as on every later engine).
-    if (expr->member_id == same_as_id_) {
-	    if (!as_callee) { return method_value_error(expr, objectValue, false); }
-        push_value(detail::same_as_method(objectValue, engine_));
-        return {};
-    }
 
     if (!objectValue.is_object()) {
         if (expr->on_caught) [[unlikely]] {   // a thrown scalar read through its catch variable (KEEP BYTE-PARALLEL with vm_backend::member_access_value)

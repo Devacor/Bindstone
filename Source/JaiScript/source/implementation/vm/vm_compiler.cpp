@@ -3145,8 +3145,8 @@ JAI_NOINLINE bool vm_compiler::compile_no_result_expression(const expression_ptr
 		if (assign->target->get_type() == node_type::member_expr && callable_.active) {
 			auto* member = static_cast<member_expr*>(assign->target.get());
 			const bool compound = assign->op.type != token_type::equal;
-			// a compound reads its target: a name the read resolves ahead of a field (same_as, a shared_ptr method) keeps the general form
-			const bool plain_target = !member->is_static && !(compound && (member->place_read || member->member == "same_as" || !builtins_ || builtins_->shared_ptr_methods.count(member->member_id)));
+			// a compound reads its target: a name the read resolves ahead of a field (a shared_ptr method) keeps the general form
+			const bool plain_target = !member->is_static && !(compound && (member->place_read || !builtins_ || builtins_->shared_ptr_methods.count(member->member_id)));
 			uint32_t base_slot = plain_target ? member_base_slot(member) : k_invalid_u32;
 			const uint32_t this_base = !plain_target || base_slot != k_invalid_u32 ? 0 : member_this_base(member);
 			if (this_base) { base_slot = this_base | k_typed_env_bit; }

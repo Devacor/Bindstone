@@ -301,7 +301,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td>Enum values</td><td>Checked for existence: <code>no value 'zzz' in enum 'Direction'</code>.</td></tr>
 <tr><td>Builtin methods</td><td>A method of a known string, array or map: its name, its argument count and each argument&#x27;s shape (a number, text, an array, a map, a function) as the <a href="api.html">API reference</a> states it.</td></tr>
 <tr><td>Bound methods</td><td>A method the binder bound on a known receiver: its argument count and each argument against the C++ signature, unless a script class below the bound class declares the method or the object was extended.</td></tr>
-<tr><td>Unchecked</td><td>Subscripts, and the handle builtins of a <code>shared_ptr</code> (<code>use_count</code>, <code>cpp_ref_count</code>, <code>unique</code>, <code>same_as</code>, <code>reset</code>).</td></tr>
+<tr><td>Unchecked</td><td>Subscripts, and the handle builtins of a <code>shared_ptr</code> (<code>use_count</code>, <code>cpp_ref_count</code>, <code>unique</code>, <code>reset</code>).</td></tr>
 <tr><td>A class method named as a builtin</td><td>Wins. Where the program holds that class or a subclass by <code>shared_ptr</code>, the method warns that the builtin is unreachable on its handles; a class held only by value keeps its <code>reset()</code> unwarned.</td></tr>
 <tr><td>Open classes</td><td>An ancestor the checker cannot resolve opens the whole class: no member diagnostics.</td></tr>
 </tbody></table></div>

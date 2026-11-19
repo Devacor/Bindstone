@@ -20,10 +20,8 @@ namespace jai {
     class class_definition;
 
     // shared_ptr HANDLE builtin method names that a user class method now SHADOWS and
-    // WINS over. same_as is deliberately EXCLUDED: it is a UNIVERSAL
-    // identity primitive available on every value (and excluded from the fast method-call
-    // gate), not a per-class-overridable handle method. weak_ptr's lock/expired never
-    // collide here - they dispatch on weak_ptr VALUES, which are not user class instances.
+    // WINS over. weak_ptr's lock/expired never collide here - they dispatch on weak_ptr
+    // VALUES, which are not user class instances.
     inline constexpr std::array<std::string_view, 4> k_shadowable_handle_method_names = {
         std::string_view{"reset"}, std::string_view{"use_count"},
         std::string_view{"unique"}, std::string_view{"cpp_ref_count"}
@@ -213,10 +211,6 @@ namespace jai {
     void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_method_registries& out);
 
     namespace detail {
-        // v.same_as(other) bound to v: one argument; nulls, scalars and strings compare by value (a bound value decoded),
-        // objects by identity, anything else is false. Both backends mint it.
-        script_value same_as_method(const script_value& self, engine* eng);
-
         // Builtin args are BY-VALUE. A subscript read in argument position mints an
         // owner-pinned element/map-entry reference (transient_read.hpp leaves call args
         // unmarked so ref params can bind), and script/native parameter binding derefs

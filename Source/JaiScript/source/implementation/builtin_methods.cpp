@@ -2418,13 +2418,6 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         weak_storage.reset();
 
         return ctx.make_value();
-    }},
-
-        {symbolizer->intern("same_as"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        if (args.size() != 1) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "same_as() takes exactly 1 argument");
-        }
-        return ctx.make_value(detail::same_object(self, args[0]));
     }}
     };
 
@@ -2512,13 +2505,6 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
         // Not a valid shared_ptr
         return ctx.make_value(false);
-    }},
-
-        {symbolizer->intern("same_as"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        if (args.size() != 1) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "same_as() takes exactly 1 argument");
-        }
-        return ctx.make_value(detail::same_object(self, args[0]));
     }}
     };
 
@@ -2579,19 +2565,5 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
     }
     out.in_place.reset = symbolizer->intern("reset");
 }
-
-namespace detail {
-
-script_value same_as_method(const script_value& self, engine* eng) {
-    script_function same_as = [eng, captured = self](const std::vector<script_value>& args) -> checked_result<script_value> {
-        if (args.size() != 1) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "same_as() takes exactly 1 argument");
-        }
-        return script_value(same_object(captured, args[0]), eng);
-    };
-    return script_value::make_function(std::move(same_as), eng);
-}
-
-} // namespace detail
 
 } // namespace jai

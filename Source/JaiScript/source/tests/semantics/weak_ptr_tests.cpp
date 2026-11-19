@@ -501,8 +501,8 @@ public:
             check_eq(tracker_value.as<int>(), 200);
         });
 
-        // Test same_as() for weak_ptr
-        test("weak_ptr_same_as", [this]() {
+        // same_object() for weak_ptr
+        test("weak_ptr_same_object", [this]() {
             auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
@@ -516,24 +516,24 @@ public:
                 weak_ptr<LifetimeTracker> weak_c = c;
 
                 // weak_a and weak_b reference the same object
-                auto same_ab = weak_a.same_as(weak_b);
+                auto same_ab = same_object(weak_a, weak_b);
                 // weak_a and weak_c reference different objects
-                auto same_ac = weak_a.same_as(weak_c);
+                auto same_ac = same_object(weak_a, weak_c);
 
                 same_ab && !same_ac
             )");
             check_eq(result.as<bool>(), true);
-            // one identity rule (same_object): a weak handle names its owner's object both ways round, an expired handle is
-            // its own object's still, and the method and same_object agree
-            check_eq(std::string("true true true true | false false false false | true false false"), eng->execute(R"(
+            // one identity rule (same_object): a weak handle names its owner's object both ways round, and an expired handle is
+            // its own object's still
+            check_eq(std::string("true true | false false | true false false"), eng->execute(R"(
                 auto s = shared_ptr<LifetimeTracker>(1);
                 weak_ptr<LifetimeTracker> w = s;
-                string out = `${(s.same_as(w))} ${(w.same_as(s))} ${(same_object(s, w))} ${(same_object(w, s))}`;
+                string out = `${(same_object(s, w))} ${(same_object(w, s))}`;
                 weak_ptr<LifetimeTracker> e1 = shared_ptr<LifetimeTracker>(2);
                 weak_ptr<LifetimeTracker> e2 = shared_ptr<LifetimeTracker>(3);
-                out += ` | ${(e1.same_as(e2))} ${(same_object(e1, e2))} ${(e1.same_as(null))} ${(same_object(e1, null))}`;
+                out += ` | ${(same_object(e1, e2))} ${(same_object(e1, null))}`;
                 auto e1_again = e1;
-                out += ` | ${(e1.same_as(e1_again))} ${(s.same_as(e1))} ${(e1.same_as(s))}`;
+                out += ` | ${(same_object(e1, e1_again))} ${(same_object(s, e1))} ${(same_object(e1, s))}`;
                 out;
             )").to_string());
         });
@@ -612,25 +612,25 @@ public:
             });
         });
 
-        test("same_as_is_object_identity_for_handles_and_values", [this]() {
+        test("same_object_is_object_identity_for_handles_and_values", [this]() {
             check_true_rows({
                 {"", R"(
                     auto a = shared_ptr<LifetimeTracker>(42);
                     auto b = a;
                     auto c = shared_ptr<LifetimeTracker>(42);
-                    a.same_as(b) && !a.same_as(c)
+                    same_object(a, b) && !same_object(a, c)
                 )"},
                 {"", R"(
                     auto shared = shared_ptr<LifetimeTracker>(5);
                     weak_ptr<LifetimeTracker> weak = shared;
-                    shared.same_as(weak.lock())
+                    same_object(shared, weak.lock())
                 )"},
                 {"", R"(
                     class Obj { int x = 0; }
                     auto a = Obj();
                     auto b = a;
                     auto c = a;
-                    !a.same_as(b) && a.same_as(a)
+                    !same_object(a, b) && same_object(a, a)
                 )"},
             });
         });

@@ -1155,7 +1155,6 @@ namespace jai::vm {
         uint64_t to_string_id_ = 0;
         uint64_t to_bool_id_ = 0;
         uint64_t eq_method_id_ = 0;
-        uint64_t same_as_id_ = 0;
         uint64_t builtin_push_id_ = 0;   // "push" (the array-push inline fast path)
         uint64_t builtin_has_id_ = 0;    // "has" (the map-has inline)
         uint64_t coroutine_handle_type_id_ = 0;
@@ -2739,7 +2738,7 @@ namespace jai::vm {
         script_value& map_lane_slot(script_map& map, const script_value& key) const;
         void commit_string_scratch(script_value& recv, uint16_t bi_string, uint64_t member_id);
         // The getter-shadow/field-slot probe behind every GET_MEMBER-family site cache
-        // fill (slot UINT32_MAX = negative: same_as / nonpublic chain / sp-builtin name /
+        // fill (slot UINT32_MAX = negative: nonpublic chain / sp-builtin name /
         // custom-getter shadow / no field slot)
         uint32_t member_read_slot_probe(class_definition* cd, member_expr* expr);
         const script_value* site_field(const chunk& code, const script_value& objd, member_expr* expr, size_t site, script_value& host_value);

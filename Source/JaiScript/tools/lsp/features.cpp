@@ -489,7 +489,7 @@ std::vector<completion_item> workspace::completion(unit& u, text_pos pos) {
 		if (kind == "object" || kind == "class") {
 			add_class_members(view, items, recv, kind == "class");
 			if (kind == "object") {
-				for (const char* n : {"use_count", "unique", "same_as", "reset"}) { items.add(n, 2, std::string("shared_ptr builtin ") + n, 8); }
+				for (const char* n : {"use_count", "unique", "reset"}) { items.add(n, 2, std::string("shared_ptr builtin ") + n, 8); }
 			}
 		} else if (kind == "enum") {
 			if (const jai::enum_decl* e = view.find_enum(recv)) {

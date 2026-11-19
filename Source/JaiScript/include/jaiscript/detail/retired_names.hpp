@@ -39,6 +39,26 @@ inline constexpr retired_name k_retired_names[] = {
 	{"crypto::equals", "crypto::constant_time_equals", "JaiScript has no 'crypto::equals': write crypto::constant_time_equals(a, b)"},
 };
 
+// Builtin methods that have a new spelling: a call on a receiver that declares no method of the name (a class's own same_as
+// keeps working). The load reports text; a var receiver at run time gets the no-member text with advice after it, as a foreign
+// member spelling does
+struct retired_method {
+	std::string_view name;
+	std::string_view text;
+	std::string_view advice;
+};
+
+inline constexpr retired_method k_retired_methods[] = {
+	{"same_as", "JaiScript has no 'same_as' method: write same_object(a, b)", "write same_object(a, b)"},
+};
+
+inline constexpr const retired_method* find_retired_method(std::string_view name) noexcept {
+	for (const retired_method& entry : k_retired_methods) {
+		if (entry.name == name) { return &entry; }
+	}
+	return nullptr;
+}
+
 inline constexpr const retired_name* find_retired_name(std::string_view name) noexcept {
 	for (const retired_name& entry : k_retired_names) {
 		if (entry.name == name) { return &entry; }

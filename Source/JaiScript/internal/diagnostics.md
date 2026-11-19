@@ -394,7 +394,10 @@ reads as `""`; absence is asked with `file::exists(path)` first.
 
 A call of a library function that has a new spelling reports what to write, from the checker's undeclared-call path, so every
 declaration (the script's, an import's, the host's) answers first and keeps the name working. A row names the replacement it
-needs: on an engine without it (a host that did not register `file::read`) the call is the plain undeclared identifier.
+needs: on an engine without it (a host that did not register `file::read`) the call is the plain undeclared identifier. A
+retired builtin method (`same_as`) reports from the checker's member-call paths, where the receiver's class declares no method of
+the name; a `var` receiver gets the run time's no-member text with `detail::retired_method::advice` after it
+(`C has no member 'same_as': write same_object(a, b)`), as a foreign member spelling does.
 
 ## Foreign keywords (parse errors, kernel `detail/foreign_keyword.hpp`)
 

@@ -2139,18 +2139,6 @@
       "display": "shared_ptr<T>.unique() -> bool"
     },
     {
-      "owner": "shared_ptr<T>",
-      "name": "same_as",
-      "signature": "same_as(other: var) -> bool",
-      "provider": "core",
-      "effect": "observe",
-      "notes": "True when both handles share one object. same_object(x, y) asks the same question of any two values.",
-      "source": "source/implementation/builtin_methods.cpp",
-      "form": "method",
-      "availability": "Every engine",
-      "display": "shared_ptr<T>.same_as(other: var) -> bool"
-    },
-    {
       "owner": "weak_ptr<T>",
       "name": "lock",
       "signature": "lock() -> shared_ptr<T> or null",
@@ -2185,18 +2173,6 @@
       "form": "method",
       "availability": "Every engine",
       "display": "weak_ptr<T>.reset() -> void"
-    },
-    {
-      "owner": "weak_ptr<T>",
-      "name": "same_as",
-      "signature": "same_as(other: var) -> bool",
-      "provider": "core",
-      "effect": "observe",
-      "notes": "",
-      "source": "source/implementation/builtin_methods.cpp",
-      "form": "method",
-      "availability": "Every engine",
-      "display": "weak_ptr<T>.same_as(other: var) -> bool"
     },
     {
       "owner": "coroutine",

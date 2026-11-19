@@ -196,6 +196,36 @@ public:
 			check_true(load_errors("crypto::constant_time_equals(\"a\");").find("'crypto::constant_time_equals' expects 2 argument(s), got 1") != std::string::npos, "arity");
 		});
 
+		test("identity_is_same_object", [this]() {
+			const char* text = "JaiScript has no 'same_as' method: write same_object(a, b)";
+			for (const char* source : {
+				"class C { }\nshared_ptr<C> a = new C();\nbool b = a.same_as(a);",
+				"class C { }\nC a = C();\nbool b = a.same_as(a);",
+				"bool b = 5.same_as(5);",
+				"array<int> xs = [1];\nbool b = xs.same_as(xs);",
+				"string s = \"x\";\nbool b = s.same_as(s);",
+			}) {
+				const std::string errors = load_errors(source);
+				check_true(errors.find(text) != std::string::npos, std::string(source) + " -> " + errors);
+			}
+			check_eq(std::string("true false true true\n"), run_output(R"(
+				class C { }
+				shared_ptr<C> a = new C();
+				shared_ptr<C> other = new C();
+				weak_ptr<C> w = a;
+				print(same_object(a, a), " ", same_object(a, other), " ", same_object(a, w), " ", same_object(w, a));
+			)"));
+			check_eq(std::string("mine mine\n"), run_output(R"(
+				class C { string same_as(var other) { return "mine"; } }
+				shared_ptr<C> a = new C();
+				C v = C();
+				print(a.same_as(a), " ", v.same_as(v));
+			)"));
+			std::string raised;
+			try { library_engine()->execute("[[warn_mode]];\nclass C { }\nvar a = new C();\na.same_as(a);"); } catch (const std::exception& error) { raised = error.what(); }
+			check_true(raised.find("has no member 'same_as': write same_object(a, b)") != std::string::npos, "a var receiver raises at run time with the advice: " + raised);
+		});
+
 		test("an_engine_without_the_replacement_reports_the_plain_undeclared_name", [this]() {
 			auto e = make_engine();
 			stdlib::register_all(*e);

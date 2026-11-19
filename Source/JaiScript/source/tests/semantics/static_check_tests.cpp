@@ -2181,8 +2181,7 @@ public:
 
         test("an_unknown_method_on_a_typed_container_string_or_scalar_is_a_load_error", [this]() {
             // the builtin registry both backends dispatch through is the member list of a declared array, string, utf8_string or
-            // map (a map's keys are read with [], a stored callable called as m["f"](x)); it gives an int, float, bool or char none,
-            // and same_as answers every value
+            // map (a map's keys are read with [], a stored callable called as m["f"](x)); it gives an int, float, bool or char none
             for (bool proofs : {true, false}) {
                 auto e = make_engine();
                 jai::stdlib::register_all(*e);
@@ -2205,7 +2204,7 @@ public:
                     {"bool b = true;\nvar v = b.size;", "bool has no member 'size'"},
                     {"char c = 'a';\nc.to_upper();", "char has no member 'to_upper'"},
                     {"int twice(int a) { return a * 2; }\ntwice(2).abs();", "int has no member 'abs'"},
-                    {"var f = 5.same_as;", "'same_as' is a method of int; call it with obj.same_as() or wrap the call in a lambda"},
+                    {"var f = 5.same_as;", "int has no member 'same_as'"},
                 };
                 for (const auto& [source, text] : scalars) {
                     check_true(has_diag(e->check(source), dlevel::error, text), source);
@@ -2215,7 +2214,7 @@ public:
                     try { run->execute(std::string("[[warn_mode]];\n") + source); } catch (const std::exception& error) { raised = error.what(); }
                     check_eq(std::string(text), raised, source);
                 }
-                check_eq((size_t)0, error_count(e->check("bool same = 5.same_as(5);\nchar c = 'a';\nbool also = c.same_as('a');\nvar v = 5;\nv.anything();\narray<int> xs = [1];\nxs[0].whatever();")));
+                check_eq((size_t)0, error_count(e->check("var v = 5;\nv.anything();\narray<int> xs = [1];\nxs[0].whatever();")));
                 // the registry's names, maps that may hold callables, dynamic and element receivers stay clean
                 check_eq((size_t)0, error_count(e->check("array<string> a = [\"x\"];\na.push(\"y\");\nint n = a.size();\nstring s = \"ab\";\ns.to_upper();\nvar k = s.find(\"b\");\nmap<string, int> m = {\"k\": 1};\nvar ks = m.keys();\nbool has = m.contains(\"k\");")));
                 check_eq((size_t)0, error_count(e->check("map<string, function> fm = {\"f\": [](int x) { return x; }};\nfm[\"f\"](1);\nenum Dir { n, s }\nint d = Dir.s;\nvar vm = {\"g\": 1};\nvm.anything();\nvar dv = [1];\ndv.whatever();\narray<string> rows = [\"a\"];\nrows[0].whatever();")));

@@ -1055,7 +1055,7 @@ public:
                     { shared_ptr<Unit> gone = new Hero(); dead = gone; }
                     out += "|" + flag(dynamic_cast<Hero>(p) != null) + flag(dynamic_cast<Paladin>(r) != null) + flag(dynamic_cast<Unit>(v) != null) +
                            flag(dynamic_cast<Hero>(none) != null) + flag(dynamic_cast<Hero>(live) != null) + flag(dynamic_cast<Unit>(dead) != null) +
-                           flag(dynamic_cast<Paladin>(party[2]).same_as(party[2]));
+                           flag(same_object(dynamic_cast<Paladin>(party[2]), party[2]));
                     // a namespace's class, and the test by a name given at run time
                     game::Boss boss;
                     out += "|" + flag(dynamic_cast<game::Boss>(boss) != null) + flag(reflect::is_instance_of(boss, "Unit")) + flag(reflect::is_instance_of(boss, "Hero")) +

@@ -891,7 +891,7 @@ namespace jai::vm {
         bool builtin_indexed = false;
         // GET_MEMBER field-read site cache (flat classes tier-1 stage B): per-ip
         // {receiver class, method_epoch, field slot}; slot UINT32_MAX = negative
-        // (same_as / nonpublic chain / sp-builtin name / getter shadow / no slot —
+        // (nonpublic chain / sp-builtin name / getter shadow / no slot —
         // the resolve ladder speaks). Lazily sized to code.size(); main-engine only
         // (same cached_global_env_ gate as the caches above).
         struct member_ic_entry {

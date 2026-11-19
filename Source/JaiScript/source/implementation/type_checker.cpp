@@ -1763,6 +1763,12 @@ private:
         if (cut == std::string_view::npos) { return eng_.has_function(std::string(retired->replacement)) ? retired : nullptr; }
         return namespace_declares(std::string(retired->replacement.substr(0, cut)), retired->replacement.substr(cut + 2)) ? retired : nullptr;
     }
+    // a called builtin method that has a new spelling, on a receiver that declares no method of the name: the text says what to write
+    bool retired_method_call(const member_expr* m, bool called) {
+        const detail::retired_method* retired = called ? detail::find_retired_method(m->member) : nullptr;
+        if (retired) { diag(diag_level::error, m->location, std::string(retired->text)); }
+        return retired != nullptr;
+    }
     void undeclared_call(const source_location& loc, std::string_view name) {
         if (const detail::retired_name* retired = retired_call(name)) {
             diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, loc, std::string(retired->text));
@@ -4860,6 +4866,7 @@ private:
         }
         const auto& ids = eng_.builtin_method_ids(kind);
         if (ids.count(eng_.symbolize(m->member))) { return; }
+        if (retired_method_call(m, true)) { return; }
         if (kind == 1) { map_dot_key(m); return; }
         if (const std::string_view hint = detail::foreign_member_text(ctype_name(recv), m->member); !hint.empty()) {
             diag(diag_level::error, m->location, "no member '" + std::string(m->member) + "' on '" + ctype_name(recv) + "': " + std::string(hint));
@@ -5119,8 +5126,8 @@ private:
         }
         diag(diag_level::error, m->location, detail::method_value_text(m->member, owner, detail::method_value_receiver(m), true));
     }
-    // A member of a known int, float, bool or char: the registry (BUILTIN_ARITIES) gives these kinds no methods and same_as answers
-    // every value, so any other name is the run time's text; same_as read without a call is the method-value text
+    // A member of a known int, float, bool or char: the registry (BUILTIN_ARITIES) gives these kinds no methods, so any name is the
+    // run time's text, or a retired method's new spelling when it is called
     void scalar_member_missing(const ctype& recv, const member_expr* m, bool called) {
         script_value_type kind;
         switch (recv.kind) {
@@ -5131,11 +5138,8 @@ private:
             default: return;
         }
         if (recv.tentative || recv.diagnostic_only || m->is_static) { return; }
-        if (m->member != "same_as") {
-            diag(diag_level::error, m->location, no_member_text(static_cast<engine*>(nullptr), base_type_spelling(kind), m->member));
-        } else if (!called) {
-            diag(diag_level::error, m->location, detail::method_value_text(m->member, base_type_spelling(kind), detail::method_value_receiver(m), true));
-        }
+        if (retired_method_call(m, called)) { return; }
+        diag(diag_level::error, m->location, no_member_text(static_cast<engine*>(nullptr), base_type_spelling(kind), m->member));
     }
     // a map's key is read with [] (only an enum's value table reads its keys with a dot, and an enum's name is no map here): the run time's text
     void map_dot_key(const member_expr* m) {
@@ -5156,11 +5160,11 @@ private:
         return row[b.size()];
     }
 
-    // Handle builtins every object value answers (shared_ptr registry + the universal
-    // same_as): a class method of the same name wins first, so this runs on misses only.
+    // Handle builtins every object value answers (the shared_ptr registry): a class method of the same name wins first, so this
+    // runs on misses only.
     static bool handle_builtin_result(std::string_view member, ctype& out) {
         if (member == "use_count" || member == "cpp_ref_count") { out = ctype::make(ctype::int_k); return true; }
-        if (member == "unique" || member == "same_as") { out = ctype::make(ctype::bool_k); return true; }
+        if (member == "unique") { out = ctype::make(ctype::bool_k); return true; }
         if (member == "reset") { out = {}; return true; }
         return false;
     }
@@ -8342,6 +8346,7 @@ private:
             return {};
         }
         if (hit.certain && !recv.open) {
+            if (!want_static && retired_method_call(m, true)) { return {}; }
             size_t rl = 0, rc = 0;
             if (auto it = classes_.find(recv.cls); it != classes_.end()) {
                 rl = it->second.decl->location.line;

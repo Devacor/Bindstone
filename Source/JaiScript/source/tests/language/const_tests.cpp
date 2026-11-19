@@ -103,7 +103,7 @@ public:
                 print(s.is_valid_utf8(), " ", s.to_bytes().size(), " ", s.find("b"));
                 class C { }
                 const shared_ptr<C> h = new C();
-                print(h.same_as(h), " ", h.cpp_ref_count() > 0);
+                print(same_object(h, h), " ", h.cpp_ref_count() > 0);
                 int sum(array<int>& v) { return v.reduce((a, b) => a + b, 0); }
                 print(sum([5, 6]));
             )JS");

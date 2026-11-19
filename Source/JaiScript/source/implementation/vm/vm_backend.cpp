@@ -262,7 +262,6 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		to_string_id_ = symbolizer_->intern("to_string");
 		to_bool_id_ = symbolizer_->intern("to_bool");
 		eq_method_id_ = symbolizer_->intern("==");
-		same_as_id_ = symbolizer_->intern("same_as");
 		coroutine_handle_type_id_ = symbolizer_->intern("coroutine");
 		next_id_ = symbolizer_->intern("next");
 		handle_reset_id_ = symbolizer_->intern("reset");
@@ -12758,7 +12757,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 			return raise_(make_error_code(runtime_error_code::member_not_found),
 				"{0} has no member '{1}'", detail::coroutine_type_symbol(objectValue, engine_), member_id);
 		}
-		if (holder && holder->is_instance() && member_id != same_as_id_) {
+		if (holder && holder->is_instance()) {
 			auto* inst = holder->unchecked_instance();
 			class_definition* cd = inst->get_class_definition();
 			if (parallel_worker_) [[unlikely]] {
@@ -12843,9 +12842,6 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 			}
 		}
 		if (!user_shadows) { return {}; }
-	}
-	if (member_id == same_as_id_) {
-		return {};
 	}
 	if (!objectValue.is_object()) {
 		if (objectValue.is_null()) {
@@ -15028,12 +15024,6 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		}
 	}
 
-	if (expr->member_id == same_as_id_) {
-		if (!as_callee) { return raise_method_value(expr, objectValue, false); }
-		out = detail::same_as_method(objectValue, engine_);
-		return {};
-	}
-
 	if (!objectValue.is_object()) {
 		if (expr->on_caught) [[unlikely]] {   // a thrown scalar read through its catch variable (KEEP BYTE-PARALLEL with interpreter::member_read_on)
 			if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id, true)) {
@@ -15348,7 +15338,7 @@ class_instance* vm_backend::ordinary_site_instance(const call_site& site, const 
 
 JAI_NOINLINE void vm_backend::ordinary_site_arm(const call_site& site, const script_value& receiver, uint64_t member_id) {
 	site.ord_cd = nullptr;
-	if (!cached_global_env_ || parallel_worker_ || member_id == UINT64_MAX || member_id == same_as_id_) { return; }
+	if (!cached_global_env_ || parallel_worker_ || member_id == UINT64_MAX) { return; }
 	const script_value& objv = receiver.deref();
 	if (objv.raw_storage_index() != script_value::TYPEID_OBJECT) { return; }
 	const auto& holder = objv.unchecked_object_handle();
@@ -15415,7 +15405,7 @@ JAI_FORCEINLINE void* vm_backend::worker_native_self(const frame& f, const call_
 JAI_NOINLINE void vm_backend::fill_host_member_hit(class_definition* cd, const class_instance* inst, uint64_t member_id,
                                                    const script_value& receiver, chunk::member_ic_entry& entry) {
 	entry.host = detail::host_member_hit{};
-	if (entry.slot != UINT32_MAX || member_id == UINT64_MAX || member_id == same_as_id_ ||
+	if (entry.slot != UINT32_MAX || member_id == UINT64_MAX ||
 	    builtins_.shared_ptr_methods.find(member_id) != builtins_.shared_ptr_methods.end()) {
 		return;
 	}
@@ -15423,7 +15413,7 @@ JAI_NOINLINE void vm_backend::fill_host_member_hit(class_definition* cd, const c
 }
 
 uint32_t vm_backend::member_read_slot_probe(class_definition* cd, member_expr* expr) {
-	if (expr->member_id == same_as_id_ || !detail::member_access_allowed(cd, expr->member_id, nullptr) ||   // a site's verdict serves every caller: only a member public through the chain
+	if (!detail::member_access_allowed(cd, expr->member_id, nullptr) ||   // a site's verdict serves every caller: only a member public through the chain
 	    builtins_.shared_ptr_methods.find(expr->member_id) != builtins_.shared_ptr_methods.end()) {
 		return UINT32_MAX;
 	}
@@ -17750,8 +17740,7 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 				return raise_from(detail::in_place_result_error(symbolizer_, member, *twin));
 			}
 		}
-		if (!maybe_string_builtin && member->member_id != same_as_id_ &&
-		    !(member->object && member->object->get_type() == node_type::super_expr)) {
+		if (!maybe_string_builtin && !(member->object && member->object->get_type() == node_type::super_expr)) {
 			script_value& objd = stack_[args_base - 1].deref();
 			const size_t receiver_type = objd.raw_storage_index();
 			if (receiver_type == script_value::TYPEID_OBJECT) {
@@ -17970,10 +17959,9 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 	}
 
 	// Script-class instance methods enter the dispatch loop directly. The gate mirrors
-	// member_access_value's precedence exactly (super/coroutine/builtin/same_as/getter/
+	// member_access_value's precedence exactly (super/coroutine/builtin/getter/
 	// field all bail to the native bound-method path), so behavior is byte-identical.
-	if (member->member_id != same_as_id_ &&
-	    !(member->object && member->object->get_type() == node_type::super_expr)) {
+	if (!(member->object && member->object->get_type() == node_type::super_expr)) {
 		script_value objv = object.deref();
 		// ONE type query, integer compares after (each is_x re-derefs + re-reads the
 		// variant index): OBJECT + SHARED_PTR is exactly is_object()'s answer.
@@ -22083,11 +22071,11 @@ JAI_FORCEINLINE vm_backend::frame* vm_backend::push_lean_method_frame(frame& cal
 }
 
 // the site's own conditions for the lean lane, answered once: no string builtin of the name can take an identifier receiver, and the
-// call is neither same_as nor a super call
+// call is no super call
 bool vm_backend::lean_method_site(const chunk& code, const call_site& site) const {
 	if (site.receiver_symbol != UINT64_MAX && !(code.builtin_indexed && site.bi_string == builtin_method_registries::k_no_builtin)) { return false; }
 	const auto* member = static_cast<const member_expr*>(code.nodes[site.member_node].get());
-	return member->member_id != same_as_id_ && !(member->object && member->object->get_type() == node_type::super_expr);
+	return !(member->object && member->object->get_type() == node_type::super_expr);
 }
 
 // op_call_method's lane: a script instance whose class one of the site's rows holds (the monomorphic row, then the polymorphic ones)

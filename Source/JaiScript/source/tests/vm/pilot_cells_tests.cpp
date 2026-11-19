@@ -3875,7 +3875,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(size_t{2}, count_in(*form, "SET_MEMBER_VALUE"), "each statement ends in the operand store:\n" + *form);
 				check_eq(size_t{0}, count_in(*form, "GET_MEMBER") + count_in(*form, "(MEMBER_"), "no general member instruction:\n" + *form);
 			}
-			check_eq(size_t{0}, count_in(compound, "C_MLOAD") + count_in(compound, "MEMBER_TEMP"), "the compound's read is its store site's:\n" + compound);
+			check_eq(size_t{0}, count_in(compound, "C_MLOAD") + count_in(compound, "MEMBER_TEMP"), "the compound reads through its store site:\n" + compound);
 			check_eq(size_t{2}, count_in(expanded, "C_MLOAD"), "the expansion reads through its load sites:\n" + expanded);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {

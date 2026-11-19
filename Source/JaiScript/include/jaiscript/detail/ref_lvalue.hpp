@@ -326,7 +326,7 @@ namespace jai::detail {
 			}
 			if (holder->container) {
 				if (holder->container_index >= holder->container->size()) {
-					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed array element");
+					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), holder->element_gone_text());
 				}
 				if (holder->container->is_typed()) {
 					// materialized view per touch (no script_value element exists)
@@ -338,7 +338,7 @@ namespace jai::detail {
 			if (holder->owner_instance) {
 				const script_value* field_value = holder->field_cell();
 				if (!field_value) {
-					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed field");
+					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), holder->field_gone_text());
 				}
 				cur = field_value;
 				continue;
@@ -358,6 +358,9 @@ namespace jai::detail {
 				}
 			}
 			if (holder->object_view) {
+				if (holder->owner_gone()) {
+					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a destroyed object");
+				}
 				cur = holder->cell();
 				continue;
 			}
@@ -833,6 +836,9 @@ namespace jai::detail {
 
 	// A field reference stores what the direct field store stores, with its text
 	inline checked_result<script_value> ref_field_store(const auto& holder, const script_value& value, engine* eng) {
+		if (holder.owner_gone()) {
+			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a destroyed object");
+		}
 		const class_definition* owner = holder.owner_instance ? holder.owner_instance->get_class_definition() : nullptr;
 		if (holder.owner_instance && holder.container_element_type &&
 		    holder.container_element_type->base_type == script_value_type::jai_object_type) {
@@ -890,13 +896,19 @@ namespace jai::detail {
 			refLocal.assign_through(std::move(v));
 			return;
 		}
+		if (holder && holder->owner_gone()) { throw runtime_error(holder->field_gone_text()); }
+		if (holder && holder->object_view) {   // the object's own assignment, never a rebind of the reference
+			refLocal.assign_through(std::move(v));
+			return;
+		}
 		if (holder && holder->typed_element()) {
 			if (holder->container_index >= holder->container->size()) {
-				throw runtime_error("Reference to a removed array element");
+				throw runtime_error(holder->element_gone_text());
 			}
 			holder->container->set(holder->container_index, std::move(v));
 			return;
 		}
+		const auto held = holder ? holder->owner_weak.lock() : decltype(holder->owner_weak.lock())();   // the old value may let the object go
 		refLocal.deref() = std::move(v);
 	}
 

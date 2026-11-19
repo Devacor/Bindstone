@@ -86,14 +86,15 @@ public:
 			)"));
 		});
 
-		test("field_reference_keeps_its_owner_through_a_dropped_last_handle", [this]() {
+		test("field_reference_raises_once_its_owners_last_handle_drops", [this]() {
+			// a reference names the field without owning what a handle reached: the object dies with its last handle, at the drop
 			auto eng = make_engine();
 			jai::stdlib::register_all(eng);
-			check_eq(std::string("7|in:Nout:"), run(*eng, R"(
+			check_eq(std::string("Reference to a destroyed object|Nin:out:"), run(*eng, R"(
 				string LOG = "";
 				class Node { int v = 0; ~Node() { LOG = LOG + "N"; } }
 				class Box { shared_ptr<Node> n = null; }
-				function drop_then_write(int& r, Box& b) -> string { b.n = null; LOG = LOG + "in:"; r = 7; return to_string(r); }
+				function drop_then_write(int& r, Box& b) -> string { b.n = null; LOG = LOG + "in:"; try { r = 7; } catch (e) { return e; } return to_string(r); }
 				function f() -> string { Box b = Box(); b.n = new Node(); string s = drop_then_write(b.n.v, b); LOG = LOG + "out:"; return s; }
 				string got = f();
 				got + "|" + LOG;

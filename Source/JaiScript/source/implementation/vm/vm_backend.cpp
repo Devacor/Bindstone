@@ -6160,13 +6160,13 @@ op_status vm_backend::exec_index_assign(frame& f, const vm_instruction& ins) {
 	script_value* target_ptr;
 	if (typed_element) {
 		if (refHolder->container_index >= refHolder->container->size()) {
-			return raise_(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+			return raise_(make_error_code(runtime_error_code::invalid_reference), refHolder->view_state != 0 ? refHolder->element_gone_text() : "Invalid reference in assignment");
 		}
 		target_ptr = const_cast<script_value*>(&refHolder->materialize_typed_element(engine_));
 	} else {
 		target_ptr = refHolder->resolve_target();
 		if (!target_ptr) {
-			return raise_(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+			return raise_(make_error_code(runtime_error_code::invalid_reference), refHolder->owner_gone() ? refHolder->field_gone_text() : "Invalid reference in assignment");
 		}
 	}
 
@@ -6253,7 +6253,7 @@ op_status vm_backend::exec_index_compound(frame& f, const uint32_t compound) {
 	script_value* target_ptr;
 	if (typed_element) {
 		if (refHolder->container_index >= refHolder->container->size()) {
-			return raise_(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+			return raise_(make_error_code(runtime_error_code::invalid_reference), refHolder->view_state != 0 ? refHolder->element_gone_text() : "Invalid reference in assignment");
 		}
 		target_ptr = const_cast<script_value*>(&refHolder->materialize_typed_element(engine_));
 	} else {

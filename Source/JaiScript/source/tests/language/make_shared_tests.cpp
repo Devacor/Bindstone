@@ -44,8 +44,10 @@ public:
 		// var& and shared_ptr<U>& still name the handle variable
 		test("a_class_reference_over_a_handle_names_its_object", [this]() {
 			const std::string u = "class U { int hp = 10; }\nshared_ptr<U> p = new U();\n";
-			check_eq(std::string("10"), outcome(u + "U& r = p;\np = new U();\np.hp = 5;\nr.hp;"));
-			check_eq(std::string("3"), outcome(u + "U& r = p;\np = null;\nr.hp = 3;\nr.hp;"));
+			check_eq(std::string("10"), outcome(u + "U& r = p;\nshared_ptr<U> keep = p;\np = new U();\np.hp = 5;\nr.hp;"));
+			check_eq(std::string("error: Reference to a destroyed object"), outcome(u + "U& r = p;\np = new U();\nr.hp;"));
+			check_eq(std::string("error: Reference to a destroyed object"), outcome(u + "U& r = p;\np = null;\nr.hp = 3;\nr.hp;"));
+			check_eq(std::string("3"), outcome(u + "U& r = p;\nshared_ptr<U> keep = p;\np = null;\nr.hp = 3;\nkeep.hp;"));
 			check_eq(std::string("7"), outcome(u + "U& r = p;\nU t;\nt.hp = 7;\nr = t;\np.hp;"));
 			check_eq(std::string("11"), outcome(u + "void heal(U& a) { p = new U(); a.hp += 1; }\nshared_ptr<U> keep = p;\nheal(p);\nkeep.hp;"));
 			check_eq(std::string("11"), outcome(u + "array<shared_ptr<U>> ps = [p];\nvoid heal(U& a) { ps.clear(); a.hp += 1; }\nheal(ps[0]);\np.hp;"));

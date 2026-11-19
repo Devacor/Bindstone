@@ -510,14 +510,14 @@ namespace detail {
         // The live element and map-entry references into a container (value.cpp's view list): what the container let go of
         // they name no more. An element change: its kind, its index or range, and an in-place filter's keep marks.
         struct element_view_change {
-            enum class kind : uint8_t { scratch_only, removed_from, removed_at, kept, kept_range };
+            enum class kind : uint8_t { scratch_only, removed_from, erased_at, inserted_at, kept, kept_range };
             kind what = kind::scratch_only;
             size_t first = 0;
             size_t end = 0;
             const std::vector<uint8_t>* kept = nullptr;
         };
         static void change_element_views(script_array& node, const element_view_change& change) noexcept;
-        static void remove_map_views(script_map& map) noexcept;
+        static void remove_map_views(script_map& map, const script_value* key = nullptr) noexcept;   // null: every entry
         // Cell reference (Lua-upvalue box): the reference OWNS the boxed value. Escape-marked
         // variables hold one from declaration; ref binding/aliasing shares the handle, and the
         // cell keeps the value alive for as long as any handle exists (escape-legal semantics).
@@ -2224,6 +2224,11 @@ namespace detail {
             uint8_t view_state = view_live;
             static constexpr uint8_t view_live = 0;
             static constexpr uint8_t view_removed = 1;
+            static constexpr uint8_t view_moved = 2;   // an insert or erase at or below its index: the element it named is elsewhere
+            // the text a touch of a gone element view raises (built only on the failing path)
+            const char* element_gone_text() const noexcept {
+                return view_state == view_moved ? "Reference to a moved array element" : "Reference to a removed array element";
+            }
             reference_holder* view_prev = nullptr;
             reference_holder* view_next = nullptr;
             void link_view(void*& head) noexcept;     // value.cpp
@@ -2276,6 +2281,14 @@ namespace detail {
             // The instance is pinned by its shared ownership
             class_instance* owner_instance = nullptr;
             strong_ptr<class_instance> owner_shared;
+            // A bound field or object reference names its object without owning it (bind_view): the object dies when its owners let
+            // it go, and the reference raises from then on. A reference an expression is still evaluating holds it (owner_shared, or
+            // an object view's counted inline value) as the temporary it reads.
+            jai::weaker_ptr<object_holder> owner_weak;
+            bool object_borrowed = false;   // an object view's inline value holds no count of its own (owner_weak keeps the block)
+            bool owner_gone() const noexcept { return owner_weak.owner_identity() != nullptr && owner_weak.expired(); }
+            class_instance* live_owner() const noexcept { return owner_gone() ? nullptr : owner_instance; }
+            const char* field_gone_text() const noexcept { return owner_gone() ? "Reference to a destroyed object" : "Reference to a removed field"; }
             uint64_t field_id = UINT64_MAX;
             // the field's slot as the owner's class assigned it (a slot never moves within a class; a re-class changes the class, a
             // reload bumps its field-shape epoch): field_cell() reads the slot while both match, else finds the field by id and

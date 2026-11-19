@@ -138,10 +138,13 @@ namespace jai {
         static void views_remain(script_array* a_node) noexcept;
         // a typed element reference's scratch holds the element's handle: the node lets go of an element only with it
         void release_element_views() noexcept;
-        // the references into the elements from a_first on, or into element a_index, name nothing from now on
+        // the references into the elements from a_first on name nothing from now on
         void views_removed_from(size_t a_first) noexcept;
-        void views_removed_at(size_t a_index) noexcept;
-        // an in-place filter or slice: the elements a_kept marks 0 (or outside [a_start, a_end)) leave the array
+        // an erase at a_index or an insert there: the element at a_index is gone, and every element above it moves
+        void views_erased_at(size_t a_index) noexcept;
+        void views_inserted_at(size_t a_index) noexcept;
+        // an in-place filter or slice: the elements a_kept marks 0 (or outside [a_start, a_end)) leave the array, and a kept
+        // element with a removed one below it moves
         void views_kept(const std::vector<uint8_t>& a_kept) noexcept;
         void views_kept_range(size_t a_start, size_t a_end) noexcept;
 

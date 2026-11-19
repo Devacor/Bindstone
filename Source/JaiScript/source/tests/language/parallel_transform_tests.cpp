@@ -4254,9 +4254,9 @@ public:
 
 		test("typed_object_live_reference_pins_current_behavior", [this]() {
 			// A field reference minted THROUGH an element (auto& r = ks[3].a) counts as a live
-			// reference into the array: the fork takes the per-element walk, which detaches the
-			// pinned instance - the reference keeps the pre-region value, the element moves on.
-			// A direct element reference re-resolves through container+index: coherent.
+			// reference into the array: the fork takes the per-element walk, and the reference names the
+			// element's field, owning nothing - it reads and writes the element. A direct element reference
+			// re-resolves through container+index: coherent.
 			auto e = make_engine();
 			e->parallel_thread_count(4);
 			auto r = e->execute(R"(
@@ -4272,11 +4272,11 @@ public:
 				return out;
 			)");
 			const auto& vals = r.as_array();
-			check_eq((int64_t)3, vals[0].as_int(), "field ref detached from the element");
+			check_eq((int64_t)1003, vals[0].as_int(), "field ref names the element's field");
 			check_eq((int64_t)1003, vals[1].as_int());
 			check_eq((int64_t)1004, vals[2].as_int(), "element ref stays coherent");
 			check_eq((int64_t)1004, vals[3].as_int());
-			check_eq((int64_t)1003, vals[4].as_int(), "writes through the detached ref never reach the array");
+			check_eq((int64_t)-1, vals[4].as_int(), "a write through the field ref reaches the element");
 		});
 
 		test("typed_object_live_reference_then_released", [this]() {

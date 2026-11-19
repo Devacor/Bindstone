@@ -915,7 +915,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             return ctx.make_value(false);
         }
 
-        if (node.live_elem_refs) [[unlikely]] { node.views_removed_at(static_cast<size_t>(index)); }
+        if (node.live_elem_refs) [[unlikely]] { node.views_erased_at(static_cast<size_t>(index)); }
         node.erase_at(static_cast<size_t>(index));
         if (detail::work_meter work(ctx.get_engine()); work.spend(node.size() - static_cast<size_t>(index))) [[unlikely]] { return work.spent(); }
         return ctx.make_value(true);
@@ -1308,6 +1308,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
         detail::work_meter work(eng);
         if (work.spend(node.size() - static_cast<size_t>(index))) [[unlikely]] { return work.spent(); }
+        if (node.live_elem_refs) [[unlikely]] { node.views_inserted_at(static_cast<size_t>(index)); }
         if (!node.is_typed()) {
             node.values().insert(node.values().begin() + static_cast<std::ptrdiff_t>(index), std::move(converted.value()));
             return ctx.make_value();
@@ -1356,6 +1357,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "clear() takes no arguments");
         }
         auto& mapPtr = self.unchecked_get_map_storage();
+        if (mapPtr->live_entry_refs) [[unlikely]] { script_value::remove_map_views(*mapPtr); }
         mapPtr->clear();
         return ctx.make_value();
     }},
@@ -1438,6 +1440,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         auto& mapPtr = self.unchecked_get_map_storage();
         auto it = mapPtr->find(args[0]);
         if (it != mapPtr->end()) {
+            if (mapPtr->live_entry_refs) [[unlikely]] { script_value::remove_map_views(*mapPtr, &it->first); }
             mapPtr->erase(it);
             return ctx.make_value(true);
         }
@@ -1478,7 +1481,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             const auto& val = call_result.value();
             if (val.is_bool() && val.unchecked_as_bool()) {
                 auto current = storage->find(key);
-                if (current != storage->end()) { storage->erase(current); ++removed_count; }
+                if (current != storage->end()) {
+                    if (storage->live_entry_refs) [[unlikely]] { script_value::remove_map_views(*storage, &current->first); }
+                    storage->erase(current);
+                    ++removed_count;
+                }
             }
         }
         return ctx.make_value(removed_count);

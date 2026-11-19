@@ -473,13 +473,15 @@ public:
 				}
 				array<int> items = [1]; read(items);
 			)", "1|7|Reference to a removed array element");
-			// docs/site/guide/03-value-semantics.html: an element reference names an index, a map entry reference its key
-			expect("an element reference names its index", R"(
-				var a = [10, 20, 30]; auto& x = a[1]; a.insert(0, 99); x = 5;
+			// docs/site/guide/03-value-semantics.html: a reference never reseats. An insert below an element reference moves its
+			// element (the next use raises), a sort keeps it on its slot, a map entry reference follows its entry until it is erased
+			expect("an element reference never reseats", R"(
+				var a = [10, 20, 30]; auto& x = a[1]; a.insert(0, 99); string moved = "";
+				try { x = 5; } catch (err) { moved = err; }
 				var b = [3, 1, 2]; auto& y = b[0]; b.sort(); y = 9;
 				var m = {"a": 1, "b": 2}; auto& e = m["b"]; m["0"] = 0; m.erase("a"); e = 7;
-				`${a}|${b}|${m}`;
-			)", "[99, 5, 20, 30]|[9, 2, 3]|{\"0\": 0, \"b\": 7}");
+				`${a}|${moved}|${b}|${m}`;
+			)", "[99, 10, 20, 30]|Reference to a moved array element|[9, 2, 3]|{\"0\": 0, \"b\": 7}");
 		});
 		test("inline_float_parse_preserves_fallback_and_text_contract", [this]() {
 			expect("complete parse and fallback", R"(

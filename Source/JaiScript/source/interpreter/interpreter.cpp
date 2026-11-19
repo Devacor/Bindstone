@@ -2640,13 +2640,13 @@ checked_result<void> interpreter::store_through_subscript_reference(script_value
     script_value* target_ptr;
     if (typed_element) {
         if (refHolder->container_index >= refHolder->container->size()) {
-            return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+            return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), refHolder->view_state != 0 ? refHolder->element_gone_text() : "Invalid reference in assignment");
         }
         target_ptr = const_cast<script_value*>(&refHolder->materialize_typed_element(engine_));
     } else {
         target_ptr = refHolder->resolve_target();
         if (!target_ptr) {
-            return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+            return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), refHolder->owner_gone() ? refHolder->field_gone_text() : "Invalid reference in assignment");
         }
     }
 
@@ -9236,9 +9236,12 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                     cleanup();
                     return bound.error_value();
                 }
-                // the evaluated argument the call keeps names the same element as the parameter the binder resolved: a view too, as
-                // the vm's argument is the parameter itself
+                // the evaluated argument the call keeps names what the parameter the binder resolved names: a view too, and a value
+                // it read (a handle) lets go, as the vm's argument is the parameter itself
                 script_value::bind_view(arg);
+                if (!arg.is_reference() && call_ctx->values == &args && argv == &args && &arg == &args[i]) {
+                    const_cast<script_value&>(arg) = script_value(std::monostate{}, engine_);
+                }
             } else {
                 // No metadata: external (C++) invocation. Object values are handles, so a
                 // shallow copy aliases the same underlying object - reference semantics hold.

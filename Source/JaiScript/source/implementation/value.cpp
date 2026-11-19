@@ -269,21 +269,35 @@ void script_value::change_element_views(script_array& node, const element_view_c
         }
         if (view->view_state != reference_holder::view_live) { continue; }
         const size_t index = view->container_index;
-        bool gone = false;
+        uint8_t state = reference_holder::view_live;
         switch (change.what) {
             case kind::scratch_only: break;
-            case kind::removed_from: gone = index >= change.first; break;
-            case kind::removed_at: gone = index == change.first; break;
-            case kind::kept: gone = index < change.kept->size() && !(*change.kept)[index]; break;
-            case kind::kept_range: gone = index < change.first || index >= change.end; break;
+            case kind::removed_from:
+                if (index >= change.first) { state = reference_holder::view_removed; }
+                break;
+            case kind::erased_at:
+                state = index == change.first ? reference_holder::view_removed : index > change.first ? reference_holder::view_moved : state;
+                break;
+            case kind::inserted_at:
+                if (index >= change.first) { state = reference_holder::view_moved; }
+                break;
+            case kind::kept:
+                if (index < change.kept->size()) {
+                    state = !(*change.kept)[index] ? reference_holder::view_removed : index > change.first ? reference_holder::view_moved : state;
+                }
+                break;
+            case kind::kept_range:
+                state = index < change.first || index >= change.end ? reference_holder::view_removed
+                      : change.first > 0 ? reference_holder::view_moved : state;
+                break;
         }
-        if (gone) { view->mark_view_gone(reference_holder::view_removed); }
+        if (state != reference_holder::view_live) { view->mark_view_gone(state); }
     }
 }
 
-void script_value::remove_map_views(script_map& map) noexcept {
+void script_value::remove_map_views(script_map& map, const script_value* key) noexcept {
     for (auto* view = static_cast<reference_holder*>(map.view_head); view; view = view->view_next) {
-        view->mark_view_gone(reference_holder::view_removed);
+        if (!key || script_value_key_eq{}(*view->cell(), *key)) { view->mark_view_gone(reference_holder::view_removed); }
     }
 }
 
@@ -320,12 +334,18 @@ void script_array::views_removed_from(size_t a_first) noexcept {
     script_value::change_element_views(*this, {script_value::element_view_change::kind::removed_from, a_first});
 }
 
-void script_array::views_removed_at(size_t a_index) noexcept {
-    script_value::change_element_views(*this, {script_value::element_view_change::kind::removed_at, a_index});
+void script_array::views_erased_at(size_t a_index) noexcept {
+    script_value::change_element_views(*this, {script_value::element_view_change::kind::erased_at, a_index});
+}
+
+void script_array::views_inserted_at(size_t a_index) noexcept {
+    script_value::change_element_views(*this, {script_value::element_view_change::kind::inserted_at, a_index});
 }
 
 void script_array::views_kept(const std::vector<uint8_t>& a_kept) noexcept {
-    script_value::change_element_views(*this, {script_value::element_view_change::kind::kept, 0, 0, &a_kept});
+    size_t first_dropped = 0;
+    while (first_dropped < a_kept.size() && a_kept[first_dropped]) { ++first_dropped; }
+    script_value::change_element_views(*this, {script_value::element_view_change::kind::kept, first_dropped, 0, &a_kept});
 }
 
 void script_array::views_kept_range(size_t a_start, size_t a_end) noexcept {
@@ -357,7 +377,11 @@ script_value::reference_holder::~reference_holder() {
         if (container_map && container_map->live_entry_refs) { --container_map->live_entry_refs; }
         if (elem_root && elem_root->live_elem_refs) { --elem_root->live_elem_refs; }
     }
-    if (owner_instance) { owner_instance->note_field_ref_released(); }
+    if (owner_instance && !owner_gone()) { owner_instance->note_field_ref_released(); }
+    if (object_borrowed) {   // the inline value's handle holds no count: let go of it without one
+        (void)cell()->storage_.get<strong_ptr<object_holder>>().release();
+        object_borrowed = false;
+    }
     if (has_cell || has_map_key || has_elem_scratch || object_view ||
         (property && (property->live_member || property->has_scratch))) {
         cell()->~script_value();
@@ -553,12 +577,13 @@ script_value* script_value::reference_holder::resolve_target() {
         return field_cell();
     }
     if (object_view) {
-        return cell();   // the object itself: stores copy-assign into it (element_copy_assign over its class)
+        return owner_gone() ? nullptr : cell();   // the object itself: stores copy-assign into it (element_copy_assign over its class)
     }
     return nullptr;   // CPP-MEMBER / PROPERTY (no addressable cell); else unreachable: every factory sets a mode
 }
 
 script_value* script_value::reference_holder::field_cell() const {
+    if (owner_gone()) [[unlikely]] { return nullptr; }
     class_instance* inst = owner_instance;
     const class_definition* cd = inst->get_class_definition();
     if (cd && cd == field_class && cd->field_shape_epoch() == field_class_epoch) {
@@ -1474,8 +1499,24 @@ script_value script_value::make_object_view(const script_value& handle, engine* 
 void script_value::bind_view(const script_value& reference) noexcept {
     if (reference.raw_storage_index() != TYPEID_REFERENCE) { return; }
     reference_holder* holder = reference.storage_.get<strong_ptr<reference_holder>>().get();
-    if (!holder || holder->view_linked || (!holder->container && !holder->container_map && !holder->elem_root)) { return; }
+    if (!holder) { return; }
     if (holder->owner && detail::engine_access::parallel_region_active(*holder->owner)) { return; }
+    if (holder->owner_shared) {   // a field reference names its instance from now on, never owns it
+        holder->owner_weak = jai::detail::weak_from_object(static_cast<object_holder*>(static_cast<void*>(holder->owner_shared.get())));
+        holder->owner_shared.reset();
+    }
+    if (holder->object_view && !holder->object_borrowed) {
+        script_value& object = *holder->cell();
+        if (object.raw_storage_index() == TYPEID_OBJECT && object.unchecked_object_handle()) {
+            strong_ptr<object_holder>& handle = object.storage_.get<strong_ptr<object_holder>>();
+            holder->owner_weak = handle;
+            if (handle.use_count() > 1) {   // its owner keeps it: the inline value gives its own count back
+                (void)jai::detail::cb_from_object(handle.get())->drop_strong();
+                holder->object_borrowed = true;
+            }
+        }
+    }
+    if (holder->view_linked || (!holder->container && !holder->container_map && !holder->elem_root)) { return; }
     holder->view_linked = true;
     if (holder->container) {
         ++holder->container->live_elem_refs;
@@ -2446,7 +2487,7 @@ const script_value& script_value::deref_slow() const {
         // each time so it survives reallocation (push), and bounds-check so a shrink
         // (pop/erase/clear) throws instead of reading freed memory (#41).
         if (refHolder->container_index >= refHolder->container->size()) {
-            throw runtime_error("Reference to a removed array element");
+            throw runtime_error(refHolder->element_gone_text());
         }
         if (refHolder->container->is_typed()) {
             return refHolder->materialize_typed_element(refHolder->owner);
@@ -2458,7 +2499,7 @@ const script_value& script_value::deref_slow() const {
         // instance IS the lifetime)
         const script_value* field_value = refHolder->field_cell();
         if (!field_value) {
-            throw runtime_error("Reference to a removed field");
+            throw runtime_error(refHolder->field_gone_text());
         }
         return field_value->deref();
     }
@@ -2474,6 +2515,7 @@ const script_value& script_value::deref_slow() const {
         return refHolder->materialize_component(refHolder->owner);
     }
     if (refHolder->object_view) {
+        if (refHolder->owner_gone()) { throw runtime_error("Reference to a destroyed object"); }
         return *refHolder->cell();
     }
     throw runtime_error("Null reference");   // unreachable: every factory sets a mode
@@ -2506,7 +2548,7 @@ void script_value::assign_through_reference(V&& value) {
         // Vector-element reference: resolve fresh + bounds-check before writing,
         // so a write-through after a reallocation/shrink can't corrupt the heap (#41).
         if (refHolder->container_index >= refHolder->container->size()) {
-            throw runtime_error("Assignment to a removed array element");
+            throw runtime_error(refHolder->view_state == reference_holder::view_moved ? refHolder->element_gone_text() : "Assignment to a removed array element");
         }
         if (refHolder->container->is_typed()) {
             // a host's store converts as a script element store does (a script store arrives converted)
@@ -2520,9 +2562,10 @@ void script_value::assign_through_reference(V&& value) {
         return;
     }
     if (refHolder->owner_instance) {
+        const strong_ptr<object_holder> held = refHolder->owner_shared ? strong_ptr<object_holder>() : refHolder->owner_weak.lock();   // the store's old value may run code that lets the object go
         script_value* field_value = refHolder->field_cell();
         if (!field_value) {
-            throw runtime_error("Reference to a removed field");
+            throw runtime_error(refHolder->field_gone_text());
         }
         *field_value = std::forward<V>(value);
         return;
@@ -2551,6 +2594,8 @@ void script_value::assign_through_reference(V&& value) {
         return;
     }
     if (refHolder->object_view) {
+        if (refHolder->owner_gone()) { throw runtime_error("Reference to a destroyed object"); }
+        const strong_ptr<object_holder> held = refHolder->owner_weak.lock();
         // the object's own assignment, as C++ assigns through a reference: never a rebind of the reference
         auto assigned = detail::class_copy_assign(*refHolder->cell(), value, refHolder->owner);
         if (!assigned) { throw runtime_error("Cannot assign to a reference to an object of another class"); }

@@ -1681,6 +1681,71 @@ public:
                 LOG;
             )"}, "<d>?<d><d>");
         });
+        test("a_reference_never_reseats_and_never_owns_through_a_handle", [this]() {
+            // An insert or erase at or below an element reference's index moves the element it named (C++ invalidates it): the next
+            // use raises rather than naming the element now at that index. Append, reallocation and an in-place sort keep it. An
+            // erased map entry stays gone when its key comes back. A bound reference reached through a handle names its object without
+            // owning it: the object dies with its last owner, and the reference raises
+            const std::pair<std::string, std::string> cases[] = {
+                {R"(
+                array<int> v = [10, 20, 30];
+                int& below = v[2]; int& above = v[0]; int& at = v[1];
+                v.insert(1, 15); LOG = LOG + to_string(above) + "|";
+                try { LOG = LOG + to_string(below); } catch (e) { LOG = LOG + e; } LOG = LOG + "|";
+                array<int> w = [1, 2, 3]; int& w2 = w[2]; int& w1 = w[1];
+                w.remove(1);
+                try { LOG = LOG + to_string(w2); } catch (e) { LOG = LOG + e; } LOG = LOG + "|";
+                try { LOG = LOG + to_string(w1); } catch (e) { LOG = LOG + e; } LOG;
+            )", "10|Reference to a moved array element|Reference to a moved array element|Reference to a removed array element"},
+                {R"(
+                array<int> v = [3, 1, 2]; int& first = v[0];
+                for (int i = 0; i < 64; ++i) { v.push(9); }
+                v.sort(); LOG = LOG + to_string(first) + "|";
+                array<int> f = [1, 2, 3, 4]; int& last = f[3]; int& zero = f[0];
+                f.filter([](int x) { return x != 2; });
+                try { LOG = LOG + to_string(last); } catch (e) { LOG = LOG + e; } LOG = LOG + "|" + to_string(zero); LOG;
+            )", "1|Reference to a moved array element|1"},
+                {R"(
+                map<string, int> m = {"a": 1}; int& e = m["a"];
+                m.erase("a"); m["a"] = 77;
+                try { LOG = LOG + to_string(e); } catch (err) { LOG = LOG + err; } LOG;
+            )", "Reference to a removed map entry"},
+                {R"(
+                class Box { Token t = Token("t"); }
+                shared_ptr<Box> p = new Box();
+                Token& r = p.t;
+                p = null; LOG = LOG + "|";
+                try { LOG = LOG + r.name; } catch (e) { LOG = LOG + e; } LOG;
+            )", "t|Reference to a destroyed object"},
+                {R"(
+                shared_ptr<Token> p = new Token("p");
+                Token& r = p;
+                p = null; LOG = LOG + "|";
+                try { LOG = LOG + r.name; } catch (e) { LOG = LOG + e; } LOG;
+            )", "p|Reference to a destroyed object"},
+                {R"(
+                shared_ptr<Token> p = new Token("p");
+                function f(Token& t) -> void { p = null; LOG = LOG + "|"; try { LOG = LOG + t.name; } catch (e) { LOG = LOG + e; } }
+                f(p); LOG;
+            )", "p|Reference to a destroyed object"},
+                {R"(
+                class Pair { Token t = Token("e"); }
+                array<Pair> xs = [Pair()];
+                string& name = xs[0].t.name;
+                xs.clear(); LOG = LOG + "|";
+                try { LOG = LOG + name; } catch (e) { LOG = LOG + e; } LOG;
+            )", "e|Reference to a destroyed object"},
+                // what keeps an object alive: the local a reference starts from, and a temporary for its full-expression
+                {R"(
+                class Box { Token t = Token("b"); }
+                function f() -> string& { Box local; return local.t.name; }
+                function g() -> void { auto& n = f(); LOG = LOG + n + "|"; }
+                g(); string read = (new Box()).t.name; LOG = LOG + "|" + read; LOG;
+            )", "b|bb|b"},
+            };
+            for (const auto& [program, expected] : cases) { expect_log(program, expected); }
+        });
+
         test("a_reference_never_keeps_an_element_its_container_let_go", [this]() {
             // C++: an element dies when its container removes it, replaces its storage or dies, whatever references name it; the
             // reference is then gone (here it raises at its next use), and a reference into a local keeps that local alive

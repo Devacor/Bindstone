@@ -1478,16 +1478,16 @@ public:
 			)", 6},
 				// The holder pins the instance/vector: dropping the caller's last handle
 				// mid-call must leave the ref writable (Debug 0xDD canary covers dangling)
-				{"tier1_owner_pinned_past_caller_handle_drop", R"(
+				{"tier1_reference_raises_once_its_owner_lets_go", R"(
 				class Box { int v = 5; }
 				var g = Box();
 				var arr = [1, 2, 3];
-				function fldWrite(int& x) { g = null; x = x + 1; return x; }
+				function fldWrite(int& x) { g = null; try { x = x + 1; } catch (e) { return 9; } return x; }
 				function elemWrite(int& x) { arr = null; try { x = x + 1; } catch (e) { return 7; } return x; }
 				var a = fldWrite(g.v);
 				var b = elemWrite(arr[1]);
 				a * 10 + b;
-			)", 67},
+			)", 97},
 				// Chain resolution happens at bind time, after ALL args evaluate: a later
 				// arg that swaps the chain spine changes what binds (identifier precedent)
 				{"tier1_bind_time_ordering_pinned", R"(
@@ -2701,21 +2701,19 @@ public:
 			check_eq(std::string("1"), i_plain, "interp: local dtor at frame pop");
 			check_eq(i_plain, v_plain, "plain dtor-at-pop parity");
 
-			// Ref-pinned owner dropped mid-call: the holder keeps the instance alive, so
-			// the dtor fires at callee-frame pop, after the write and before the caller
-			// resumes - same ordering on both backends
+			// The owner dropped mid-call: a reference parameter names the field without owning the instance, so the dtor fires at
+			// the drop and the write through the reference raises - same ordering on both backends
 			const char* pinned = R"(
 				var log = "";
 				class Box { int v = 5; ~Box() { log = log + "D"; } }
 				var g = Box();
-				function f(int& x) { g = null; log = log + "a"; x = 7; log = log + "b"; return x; }
+				function f(int& x) { g = null; log = log + "a"; try { x = 7; } catch (e) { log = log + "!"; } log = log + "b"; return 1; }
 				var r = f(g.v);
 				log = log + "c";
-				if (r == 7) { log = log + "!"; }
 				log;
 			)";
 			auto [i_pin, v_pin] = run_both_backends(pinned);
-			check_eq(std::string("abDc!"), i_pin, "interp: dtor fires at frame pop, ref write lands");
+			check_eq(std::string("Da!bc"), i_pin, "interp: dtor fires at the drop, the write raises");
 			check_eq(i_pin, v_pin, "pinned dtor ordering parity");
 		});
 
@@ -3942,7 +3940,7 @@ public:
 					return out; }
 				log = log + "|" + rc();
 				class Pinned { var v = 1; int id = 0; ~Pinned() { log = log + "~" + to_string(id); } }
-				function pin_outlives() { var n = new Pinned(); n.id = 1; var& r = n.v; n = null; log = log + "a"; r = 5; log = log + to_string(r); return 0; }
+				function pin_outlives() { var n = new Pinned(); n.id = 1; var& r = n.v; n = null; log = log + "a"; try { r = 5; log = log + to_string(r); } catch (e) { log = log + "!"; } return 0; }
 				void set_v(var& slot, var x) { slot = x; }
 				function pin_param() { var n = new Pinned(); n.id = 2; var m = n; n = null; set_v(m.v, 9); var k = m.v; m = null; log = log + "b" + to_string(k); return 0; }
 				pin_outlives(); log = log + "|"; pin_param(); log = log + "|";

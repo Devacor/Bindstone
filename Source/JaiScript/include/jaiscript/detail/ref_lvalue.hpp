@@ -1042,7 +1042,15 @@ namespace jai::detail {
 		if (!holder || holder->property || holder->component_base) { return; }
 		const type_info* enforced = holder->container_element_type ? holder->container_element_type.get()
 		                          : holder->plain_cell() ? holder->cell()->type_info_raw() : nullptr;
-		if (enforced && !var_slot(enforced) && enforced->base_type == declared->base_type) { return; }
+		if (enforced && !var_slot(enforced) && enforced->base_type == declared->base_type) {
+			// a class reference narrower than its class slot (Dog& over an Animal) is held to its type as one over a var is
+			const bool narrower = declared->base_type == script_value_type::jai_object_type && !declared->type_name.empty() &&
+			                      enforced->type_name != declared->type_name && [&] {
+				auto slot_class = engine_access::get_class_definition(eng, enforced->type_name);
+				return !slot_class || !slot_class->is_subtype_of(declared->type_name);
+			}();
+			if (!narrower) { return; }
+		}
 		type_info* twin = declared->cached_declared_reference_type;
 		ref.set_type_info(twin ? twin : engine_access::get_type_info_declared_reference(*eng, declared));
 	}

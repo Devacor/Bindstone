@@ -21,6 +21,42 @@ public:
 	}
 
 	void forge_tests() override {
+		// A reference declared narrower than its slot (over a var, through a downcast, a derived reference into a base slot) names
+		// the slot and sees what a store puts there, but its type holds: once the slot holds another type its next use raises.
+		// A reference as wide as its slot, or var&/auto&, takes whatever the slot holds
+		test("a_narrower_reference_raises_once_its_slot_holds_another_type", [this]() {
+			auto eng = make_engine();
+			jai::stdlib::register_all(eng);
+			const std::string classes = "[[warn_mode]];\n"
+				"class Animal { string say() { return \"...\"; } }\n"
+				"class Dog : Animal { string say() override { return \"woof\"; } string fetch() { return \"ball\"; } }\n"
+				"class Cat : Animal { string say() override { return \"meow\"; } }\n";
+			check_eq(std::string("Reference to a 'Dog' now names a 'Cat'|Reference to a 'Dog' now names a 'Cat'|Reference to a 'Dog' now names an 'int'|"
+			                     "Reference to an 'int' now names a 'string'|Reference to a 'Dog' now names a 'Cat'"), run(*eng, classes + R"(
+				string log = "";
+				var v = Dog(); Dog& d = v; v = Cat();
+				try { log = log + d.say(); } catch (e) { log = log + e; }
+				Animal a = Dog(); Dog& d2 = dynamic_cast<Dog&>(a); a = Cat();
+				try { log = log + "|" + d2.fetch(); } catch (e) { log = log + "|" + e; }
+				var w = Dog(); Dog& d3 = w; w = 5;
+				try { log = log + "|" + d3.say(); } catch (e) { log = log + "|" + e; }
+				var n = 1; int& i = n; n = "text";
+				try { log = log + "|" + to_string(i + 1); } catch (e) { log = log + "|" + e; }
+				var z = Dog(); Dog& d5 = z; z = Cat();
+				try { d5 = Dog(); } catch (e) { log = log + "|" + e; }
+				log;
+			)"));
+			check_eq(std::string("woof|meow|5|meow|woof|2"), run(*eng, classes + R"(
+				var s = Dog(); Dog& d4 = s; s = Dog();
+				Animal b = Dog(); Animal& r = b; b = Cat();
+				var x = Dog(); var& vr = x; x = 5;
+				var y = Dog(); auto& ar = y; y = Cat();
+				Dog dd; Animal& wide = dd;
+				var n = 1; int& i = n; n = 2;
+				d4.say() + "|" + r.say() + "|" + to_string(vr) + "|" + ar.say() + "|" + wide.say() + "|" + to_string(i);
+			)"));
+		});
+
 		test("element_reference_across_a_reallocating_push", [this]() {
 			auto eng = make_engine();
 			jai::stdlib::register_all(eng);

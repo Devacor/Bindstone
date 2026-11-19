@@ -1535,7 +1535,7 @@ public:
             check_both("var v = 1; cast<int&>(v) = true; reflect::type_of(v) + \":\" + to_string(v)", "int:1", "cast<int&> over a var");
             check_both("var v = 1; int& r = v; r = true; reflect::type_of(v) + \":\" + to_string(v)", "int:1", "int& over a var");
             check_both("var v = 1; int& r = v; var h = 0.5; var c = \"\"; try { r += h; } catch (e) { c = e; } c + \"|\" + reflect::type_of(v) + \":\" + to_string(v)", "Cannot assign float to a variable declared int|int:1", "a float compound through int& over a var is refused where the var alone would take it");
-            check_both("var v = 1; int& r = v; v = 1.5; var c = \"\"; try { r++; } catch (e) { c = e; } c + \"|\" + reflect::type_of(v) + \":\" + to_string(v)", "Cannot assign float to a variable declared int|float:1.5", "++ through int& over a var that now holds a float is refused");
+            check_both("var v = 1; int& r = v; v = 1.5; var c = \"\"; try { r++; } catch (e) { c = e; } c + \"|\" + reflect::type_of(v) + \":\" + to_string(v)", "Reference to an 'int' now names a 'float'|float:1.5", "++ through int& over a var that now holds a float raises: the reference keeps its type");
             check_both("var v = 1; cast<int&>(v) += 1; cast<int&>(v)++; reflect::type_of(v) + \":\" + to_string(v)", "int:3", "compound and ++ through cast<int&>");
             check_both("var a = [1, 2]; int& r = a[0]; r = true; reflect::type_of(a[0]) + \":\" + to_string(a[0])", "int:1", "int& over an untyped element");
             check_both("var v = 1; auto& r = v; r = 2.5; var& q = v; q = \"s\"; reflect::type_of(v)", "string", "auto& and var& keep the var");

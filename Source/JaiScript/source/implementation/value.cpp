@@ -2496,7 +2496,53 @@ std::string script_value::to_string() const {
     }
 }
 
+namespace {
+    // A reference declared narrower than its storage (Dog& over a var, an Animal slot or a dynamic_cast<Dog&>) names the slot,
+    // and its type holds only while the slot holds one: a value of another type raises at the touch
+    bool declared_referent_holds(const type_info& declared, const script_value& target) {
+        const script_value_type want = declared.base_type;
+        if (want == script_value_type::jai_object_type) {
+            if (target.raw_storage_index() != script_value::TYPEID_OBJECT || target.is_null()) { return false; }
+            if (declared.type_name.empty() || target.is_shared_ptr_type()) { return true; }
+            auto instance = const_cast<script_value&>(target).get_class_instance();
+            const class_definition* cls = instance ? instance->get_class_definition() : nullptr;
+            return !cls || cls->is_subtype_of(declared.type_name);
+        }
+        if (want == script_value_type::jai_int_type) { return target.is_int(); }
+        if (want == script_value_type::jai_float_type) { return target.is_float(); }
+        return target.type() == want;
+    }
+
+    std::string referent_type_name(const script_value& target, engine* eng) {
+        if (target.is_null()) { return "null"; }
+        if (target.raw_storage_index() == script_value::TYPEID_OBJECT && !target.is_shared_ptr_type()) {
+            auto instance = const_cast<script_value&>(target).get_class_instance();
+            if (instance && instance->get_class_definition()) { return instance->get_class_definition()->get_name(); }
+        }
+        return detail::slot_source_type_name(target, eng);
+    }
+
+    std::string with_article(const std::string& name) {
+        const char c = name.empty() ? 'x' : static_cast<char>(std::tolower(static_cast<unsigned char>(name[0])));
+        return (c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u' ? "an '" : "a '") + name + "'";
+    }
+
+    [[noreturn]] JAI_NOINLINE void raise_declared_referent(const type_info& declared, const script_value& target, engine* eng) {
+        throw runtime_error("Reference to " + with_article(declared.canonical_name()) + " now names " + with_article(referent_type_name(target, eng)));
+    }
+}
+
 const script_value& script_value::deref_slow() const {
+    const script_value& target = deref_target();
+    if (const type_info* stamped = type_info_raw(); stamped && stamped->declared_referent) [[unlikely]] {
+        if (!declared_referent_holds(*stamped->declared_referent, target)) {
+            raise_declared_referent(*stamped->declared_referent, target, storage_.get<strong_ptr<reference_holder>>()->owner);
+        }
+    }
+    return target;
+}
+
+const script_value& script_value::deref_target() const {
     // Bind a reference to the held strong_ptr (do NOT copy it): copying bumps and
     // then drops the (non-atomic) refcount on every deref, which is pure overhead
     // on this hot path.

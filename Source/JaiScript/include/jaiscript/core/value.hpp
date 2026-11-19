@@ -2006,6 +2006,7 @@ namespace detail {
     private:
         const script_value& deref_slow() const;
         script_value& deref_slow();
+        const script_value& deref_target() const;   // what the holder names, before a declared reference's type is held to it
         template<typename V>
         void assign_through_reference(V&& value);
     public:

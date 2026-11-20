@@ -270,8 +270,10 @@ namespace MV {
 			// Create or resize+upload the device vertex+index buffers from points/vertexIndices
 			// (recreate on byte-size change since updateBuffer can't grow; else honor the dirty flags).
 			void syncDeviceBuffers(Render::Device* a_device, Render::BufferUpdateHint a_hint);
-			// Call when a device buffer is created on a_device, so the device's teardown frees it even while this drawable lives on.
+			// Call when a device buffer or uniform set is created on a_device, so the device's teardown frees it even while this drawable lives on.
 			void trackDeviceBuffers(Render::Device* a_device) { Render::DeviceBindings::track(this, a_device); }
+			// Frees what this drawable made on a_device and forgets the handles; a level that makes more extends it.
+			virtual void releaseDeviceBindings(Render::Device& a_device);
 
 			void addTexturesToShader();
 
@@ -407,8 +409,6 @@ namespace MV {
 			void lazyInitializeShader();
 
 			void forceInitializeShader();
-
-			void releaseDeviceBindings(Render::Device& a_device);
 		};
 
 		template<typename Archive>

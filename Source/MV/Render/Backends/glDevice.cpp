@@ -439,6 +439,11 @@ namespace MV {
 			set.pipeline = a_pipeline;
 			return state->uniformSets.create(std::move(set));
 		}
+		// A set is a CPU-side bag that draw() replays at once, so no draw in flight still reads it.
+		void GLDevice::destroyUniformSet(BoundUniformSet a_handle) {
+			State::GLUniformSet set;
+			state->uniformSets.remove(a_handle, set);
+		}
 		void GLDevice::setUniform(BoundUniformSet a_handle, const std::string &a_name, const float *a_data, uint32_t a_floatCount) {
 			State::GLUniformSet *set = state->uniformSets.get(a_handle);
 			require<ResourceException>(set != nullptr, "GLDevice::setUniform called with a stale/null uniform set");

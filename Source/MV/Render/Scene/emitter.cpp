@@ -494,7 +494,9 @@ namespace MV {
 				cachedPipelineForKey = devicePipeline;
 				cachedBlendMode = blendModePreset;
 				cachedTopologyDrawType = drawType;
+				if (deviceUniformSet.valid()) { dev->destroyUniformSet(deviceUniformSet); }
 				deviceUniformSet = dev->createUniformSet(devicePipeline);
+				trackDeviceBuffers(dev);
 			}
 
 			Render::BoundUniformSet prevRecording = shaderProgram->beginRecording(deviceUniformSet);

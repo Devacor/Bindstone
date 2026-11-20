@@ -285,6 +285,7 @@ namespace MV {
 
 			// Names resolve to binding slots via the pipeline's reflection at build time.
 			virtual BoundUniformSet createUniformSet(BoundPipeline) = 0;
+			virtual void destroyUniformSet(BoundUniformSet) = 0;   // a stale or null handle is a no-op.
 			virtual void setUniform(BoundUniformSet, const std::string& name, const float* data, uint32_t floatCount) = 0; // 1/2/3/4.
 			virtual void setUniformMatrix(BoundUniformSet, const std::string& name, const float* columnMajor16) = 0;       // backend applies ClipSpace correction.
 			virtual void setTexture(BoundUniformSet, const std::string& name, BoundTexture, BoundSampler) = 0;

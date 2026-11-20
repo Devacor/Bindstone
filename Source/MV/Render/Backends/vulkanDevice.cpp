@@ -225,6 +225,7 @@ namespace MV {
 				void              destroyRenderTarget(BoundRenderTarget) override;
 
 				BoundUniformSet createUniformSet(BoundPipeline) override;
+				void destroyUniformSet(BoundUniformSet) override;
 				void setUniform(BoundUniformSet, const std::string& name, const float* data, uint32_t floatCount) override;
 				void setUniformMatrix(BoundUniformSet, const std::string& name, const float* columnMajor16) override;
 				void setTexture(BoundUniformSet, const std::string& name, BoundTexture, BoundSampler) override;
@@ -1255,6 +1256,9 @@ namespace MV {
 			BoundUniformSet VulkanDevice::createUniformSet(BoundPipeline) {
 				require<ResourceException>(false, "VulkanDevice::createUniformSet not implemented yet (Phase 3)");
 				return {};
+			}
+			void VulkanDevice::destroyUniformSet(BoundUniformSet a_handle) {
+				require<ResourceException>(!a_handle.valid(), "VulkanDevice::destroyUniformSet not implemented yet (Phase 3)");
 			}
 			void VulkanDevice::setUniform(BoundUniformSet, const std::string&, const float*, uint32_t) {
 				require<ResourceException>(false, "VulkanDevice::setUniform not implemented yet (Phase 3)");

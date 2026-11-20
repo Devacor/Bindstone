@@ -48,6 +48,7 @@ namespace MV {
 		void Drawable::releaseDeviceBindings(Render::Device& a_device) {
 			if (deviceVertexBuffer.valid()) { a_device.destroyBuffer(deviceVertexBuffer); }
 			if (deviceIndexBuffer.valid()) { a_device.destroyBuffer(deviceIndexBuffer); }
+			if (deviceUniformSet.valid()) { a_device.destroyUniformSet(deviceUniformSet); }
 			deviceVertexBuffer = Render::BoundBuffer();
 			deviceIndexBuffer = Render::BoundBuffer();
 			deviceVertexBufferBytes = 0;
@@ -245,7 +246,9 @@ namespace MV {
 				cachedBlendMode = effectiveBlend;
 				cachedTopologyDrawType = drawType;
 				cachedColorWriteMask = devicePipelineColorWriteMask;
+				if (deviceUniformSet.valid()) { dev->destroyUniformSet(deviceUniformSet); }
 				deviceUniformSet = dev->createUniformSet(devicePipeline); // a uniform set is bound to a pipeline.
+				trackDeviceBuffers(dev);
 			}
 
 			// Re-record uniforms+textures (the set is a name-keyed bag). Save/restore around it: a nested

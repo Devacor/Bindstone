@@ -87,7 +87,9 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
 - **MV Device Bindings** — texture data and a drawn drawable that outlive their renderer (the
   client's script engine keeps scene nodes past `Managers::renderer`) have their device objects
   released by `Draw2D`'s teardown while the device lives (`Render::DeviceBindings`), so their own
-  destruction never reaches the destroyed device; a holder destroyed first frees its own.
+  destruction never reaches the destroyed device; a holder destroyed first frees its own. On the
+  headless device's live count, a drawable and an emitter free the uniform set a pipeline change replaces
+  and the one they hold when they go, and the teardown frees the set of a drawable that outlives it.
 
 ## Benchmarks (measurement, not assertions)
 

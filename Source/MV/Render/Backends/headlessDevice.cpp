@@ -48,6 +48,7 @@ namespace MV {
 		void              HeadlessDevice::destroyRenderTarget(BoundRenderTarget a_handle) { Empty e; renderTargets.remove(a_handle, e); }
 
 		BoundUniformSet HeadlessDevice::createUniformSet(BoundPipeline) { return uniformSets.create({}); }
+		void HeadlessDevice::destroyUniformSet(BoundUniformSet a_handle) { Empty e; uniformSets.remove(a_handle, e); }
 		void HeadlessDevice::setUniform(BoundUniformSet, const std::string&, const float*, uint32_t) {}
 		void HeadlessDevice::setUniformMatrix(BoundUniformSet, const std::string&, const float*) {}
 		void HeadlessDevice::setTexture(BoundUniformSet, const std::string&, BoundTexture, BoundSampler) {}

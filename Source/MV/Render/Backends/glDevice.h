@@ -44,6 +44,7 @@ namespace MV {
 			void              destroyRenderTarget(BoundRenderTarget) override;
 
 			BoundUniformSet createUniformSet(BoundPipeline) override;
+			void destroyUniformSet(BoundUniformSet) override;
 			void setUniform(BoundUniformSet, const std::string& name, const float* data, uint32_t floatCount) override;
 			void setUniformMatrix(BoundUniformSet, const std::string& name, const float* columnMajor16) override;
 			void setTexture(BoundUniformSet, const std::string& name, BoundTexture, BoundSampler) override;

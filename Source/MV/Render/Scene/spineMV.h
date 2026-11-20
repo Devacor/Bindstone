@@ -237,6 +237,7 @@ namespace MV {
 			// One uniform set per render batch (each batch binds its own texture/blend); reused across
 			// frames, grown to the most batches ever seen. Reset to 0 at the top of each frame's draw.
 			std::vector<Render::BoundUniformSet> deviceBatchSets;
+			void releaseDeviceBindings(Render::Device& a_device) override;
 			size_t deviceBatchCursor = 0;
 
 			FileTextureDefinition * loadSpineSlotIntoPoints(spine::Slot* slot);

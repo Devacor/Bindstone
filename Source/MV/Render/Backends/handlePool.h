@@ -72,6 +72,10 @@ namespace MV {
 				}
 			}
 
+			size_t liveCount() const {
+				return slots.size() - freeSlots.size();
+			}
+
 			void clear() {
 				slots.clear();
 				freeSlots.clear();

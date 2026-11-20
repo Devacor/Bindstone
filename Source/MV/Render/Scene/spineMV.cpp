@@ -217,6 +217,10 @@ namespace MV{
 		}
 
 		Spine::~Spine() {
+			// Drawable's destructor would free only its own level; the batch sets are this level's.
+			if (Render::Device* device = Render::DeviceBindings::untrack(static_cast<Drawable*>(this))) {
+				releaseDeviceBindings(*device);
+			}
 			destroying = true;
 			for (auto&& animationTrack : tracks) {
 				animationTrack.second->destroying = true;
@@ -448,6 +452,15 @@ namespace MV{
 			}
 		}
 
+		void Spine::releaseDeviceBindings(Render::Device& a_device) {
+			for (auto&& set : deviceBatchSets) {
+				a_device.destroyUniformSet(set);
+			}
+			deviceBatchSets.clear();
+			deviceBatchCursor = 0;
+			Drawable::releaseDeviceBindings(a_device);
+		}
+
 		size_t Spine::renderSkeletonBatch(size_t a_lastRenderedIndex, FileTextureDefinition* a_texture, spine::BlendMode a_blendMode) {
 			auto structSize = static_cast<GLsizei>(sizeof(points[0]));
 			auto bufferSizeToRender = (points->size()) * structSize;
@@ -480,6 +493,7 @@ namespace MV{
 			Render::BoundPipeline pipeline = ourOwner->renderer().pipelineFor(shaderProgram, spineBlendToBlendMode(a_blendMode), GL_TRIANGLES);
 			if (deviceBatchCursor >= deviceBatchSets.size()) {
 				deviceBatchSets.push_back(dev->createUniformSet(pipeline));
+				trackDeviceBuffers(dev);
 			}
 			Render::BoundUniformSet set = deviceBatchSets[deviceBatchCursor++];
 

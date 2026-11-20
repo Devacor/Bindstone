@@ -212,6 +212,7 @@ ON when JaiScript is the top-level project and OFF when it is added to another p
 | `JAISCRIPT_INTERPRETER` | top-level | `jaiscript_interpreter`, the library plus the tree-walking interpreter, which the suite, the fuzzer, the runner and `jai_spider` link. OFF: they link `jaiscript`, and the interpreter is not compiled at all |
 | `JAISCRIPT_INSTALL` | top-level | The install rules and the `JaiScript` CMake package (`find_package(JaiScript)`) |
 | `JAISCRIPT_ENABLE_DEBUGGER` | ON | Compiles the DAP-over-TCP debug listener. Turn it OFF for shipping or mobile builds and no socket code is compiled in at all |
+| `JAISCRIPT_ENABLE_IMAGE` | ON | Compiles the `image::` module (`stdlib::register_image`: the in-house PNG, JPEG and GIF codecs and the resampler). The option defines `JAISCRIPT_ENABLE_IMAGE` for the library; without that definition the module's translation units (`source/implementation/stdlib/image*.cpp`) are empty, so a host that compiles `source/jaiscript.cpp` or the implementation files itself gets the module only by defining it, and a build without it carries none of the codecs (calling `register_image` is then a link error). A host that links the static library and never calls `register_image` links none of it either way |
 | `JAISCRIPT_ENABLE_BENCHMARKS` | OFF | Adds the performance suites to `jaiscript_tests` (see below) |
 | `JAISCRIPT_NATIVE_ARCH` | OFF | `-march=native` for Release. Faster; the binary stops being portable |
 | `JAISCRIPT_ENABLE_LTO` | OFF | `-flto` for GCC/Clang Release builds |

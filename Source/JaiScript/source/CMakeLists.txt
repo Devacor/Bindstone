@@ -39,6 +39,8 @@ set(JAISCRIPT_SOURCES
     implementation/stdlib/atomic.cpp
     implementation/stdlib/containers.cpp
     implementation/stdlib/crypto.cpp
+    implementation/stdlib/image_pixels.cpp
+    implementation/stdlib/image_png.cpp
     implementation/stdlib/io.cpp
     implementation/stdlib/json.cpp
     implementation/stdlib/random.cpp
@@ -115,6 +117,7 @@ if(JAISCRIPT_EXPERIMENT_VM_NO_GS)
 endif()
 
 option(JAISCRIPT_ENABLE_DEBUGGER "Compile the DAP debug_connector (raw-socket VS Code attach)" ON)
+option(JAISCRIPT_ENABLE_IMAGE "Compile the image:: module (stdlib::register_image: the in-house PNG, JPEG and GIF codecs)" ON)
 
 foreach(jaiscript_target ${jaiscript_library_targets})
     # Include directories
@@ -132,6 +135,12 @@ foreach(jaiscript_target ${jaiscript_library_targets})
     # connector's TU is empty when this is off (constructing one is then a link error by design).
     if(JAISCRIPT_ENABLE_DEBUGGER)
         target_compile_definitions(${jaiscript_target} PUBLIC JAISCRIPT_ENABLE_DEBUGGER)
+    endif()
+
+    # The image:: module (stdlib::register_image). Its translation units are empty when this is off (calling
+    # register_image is then a link error by design), so a one-file build of jaiscript.cpp leaves the codecs out.
+    if(JAISCRIPT_ENABLE_IMAGE)
+        target_compile_definitions(${jaiscript_target} PUBLIC JAISCRIPT_ENABLE_IMAGE)
     endif()
 
     # Platform-specific settings

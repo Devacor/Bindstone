@@ -436,9 +436,15 @@ void vm_backend::debug_statement_boundary(frame& f) {
 	debug_last_frame_ = &f;
 	debug_last_code_ = f.code;
 	debug_last_depth_ = depth;
+	f.debug_env = environment_.get();
+	f.debug_env_epoch = debug_epoch_;
 	const uint32_t at = f.ip < c.debug_innermost.size() ? c.debug_innermost[f.ip] : 0;
-	if (!at) { return; }
 	const bool fresh = f.ip == 0 && !same_frame;
+	if (!at) {
+		// a reused frame entering through an instruction no statement holds (op_bind_captures) enters its first statement from outside
+		if (fresh) { f.debug_prev_code = f.code; f.debug_prev_ip = 0; f.debug_epoch = debug_epoch_; }
+		return;
+	}
 	const bool known = !fresh && f.debug_epoch == debug_epoch_ && f.debug_prev_code == f.code;
 	const uint32_t prev = f.debug_prev_ip;
 	f.debug_prev_code = f.code;
@@ -452,48 +458,121 @@ void vm_backend::debug_statement_boundary(frame& f) {
 		entered[count++] = s;
 		if (!fresh && !known) { break; }
 	}
+	const size_t stop_depth = c.inline_sites.empty() ? depth : statement_depth(f);
 	while (count) {
 		const ast_node* sn = c.debug_spans[entered[--count] - 1].node;
 		if (!debug_hook_ || !debug_hook_->wants_statement(static_cast<uint32_t>(sn->location.line))) { continue; }
-		debug_hook_->on_statement(sn, static_cast<int>(depth));
+		debug_hook_->on_statement(sn, static_cast<int>(stop_depth));
 	}
 }
 
 void vm_backend::debug_stop_at(const ast_node* node) {
 	if (!debug_hook_->wants_statement(static_cast<uint32_t>(node->location.line))) { return; }
-	debug_hook_->on_statement(node, static_cast<int>(call_records_top_ + static_cast<size_t>(current_call_depth_)));
+	debug_hook_->on_statement(node, debug_depth());
 }
 
-std::vector<std::pair<std::string, script_value>> vm_backend::frame_slot_locals(const frame* f) const {
+void vm_backend::debug_settle_statement() {
+	if (frames_.empty()) { return; }
+	frame& f = *frames_.back();
+	debug_last_frame_ = &f;
+	debug_last_code_ = f.code;
+	debug_last_depth_ = call_records_top_ + static_cast<size_t>(current_call_depth_);
+	f.debug_prev_code = f.code;
+	f.debug_prev_ip = static_cast<uint32_t>(f.ip);
+	f.debug_epoch = debug_epoch_;
+	f.debug_env = environment_.get();
+	f.debug_env_epoch = debug_epoch_;
+}
+
+// op_graft_depth already counts a grafted body that makes calls
+size_t vm_backend::statement_depth(const frame& f) const {
+	size_t depth = call_records_top_ + static_cast<size_t>(current_call_depth_);
+	for (const chunk::inline_site& s : f.code->inline_sites) {
+		if (f.ip >= s.begin_ip && f.ip < s.fallback_ip && s.decl && !s.calls) { ++depth; }
+	}
+	return depth;
+}
+
+std::vector<std::pair<std::string, script_value>> vm_backend::frame_slot_locals(const frame* f, const chunk::inline_site* graft) const {
 	std::vector<std::pair<std::string, script_value>> out;
 	if (!f || !has_slots(*f) || !f->code) { return out; }
-	for (const auto& local : f->code->debug_locals) {
-		if (f->ip < local.first_ip || f->ip >= local.end_ip) { continue; }
-		if (const script_value* v = frame_slot(*f, local.slot)) { out.emplace_back(std::string(symbolizer_->get_string(local.symbol)), *v); }
+	const uint32_t owner = graft ? static_cast<uint32_t>(graft - f->code->inline_sites.data()) + 1 : 0;
+	const auto& locals = f->code->debug_locals;
+	for (size_t k = locals.size(); k-- > 0;) {   // an inner declaration of a name comes after an outer one, and hides it
+		const auto& local = locals[k];
+		if (local.graft != owner || f->ip < local.first_ip || f->ip >= local.end_ip) { continue; }
+		std::string name(symbolizer_->get_string(local.symbol));
+		if (std::any_of(out.begin(), out.end(), [&](const auto& seen) { return seen.first == name; })) { continue; }
+		if (const script_value* v = debug_frame_slot(*f, local.slot)) { out.emplace_back(std::move(name), *v); }
 	}
 	detail::fold_lowered_locals(out, engine_);
 	return out;
 }
 
-script_value* vm_backend::debug_local_storage(const std::string& name) {
-	if (frames_.empty()) { return nullptr; }
-	std::vector<const frame*> slot_frames;
-	debug_frame_walk(&slot_frames);
-	const uint64_t id = symbolizer_->intern(name);
-	if (frame* inner = slot_frames.empty() ? nullptr : const_cast<frame*>(slot_frames.front()); inner && has_slots(*inner) && inner->code) {
-		const auto& locals = inner->code->debug_locals;
-		for (size_t k = locals.size(); k-- > 0;) {   // an inner declaration of the name comes after an outer one
-			const auto& local = locals[k];
-			if (local.symbol == id && inner->ip >= local.first_ip && inner->ip < local.end_ip) { return frame_slot(*inner, local.slot); }
+const script_value* vm_backend::debug_frame_slot(const frame& f, size_t slot) const noexcept {
+	if (!f.window_backed) { return static_cast<const call_frame*>(f.locals)->get_local(slot); }
+	if (slot >= f.window_live) { return nullptr; }
+	const value_stack* holder = &stack_;
+	const auto at = std::find(frames_.rbegin(), frames_.rend(), &f);
+	const size_t index = at == frames_.rend() ? frames_.size() : static_cast<size_t>(frames_.rend() - at) - 1;
+	for (const auto& [frames_at, parked] : fiber_stacks_) {
+		if (index < frames_at) { holder = parked; break; }
+	}
+	return f.window_base + slot < holder->count ? &holder->slots[f.window_base + slot] : nullptr;
+}
+
+// A converted closure's captured name `k`: its bound slot once op_bind_captures ran, else the capture's cell
+const script_value* vm_backend::frame_capture(const frame& f, size_t k) const {
+	if (const script_value* bound = has_slots(f) ? debug_frame_slot(f, f.code->code[0].a + k) : nullptr) { return bound; }
+	return &f.captures->cells[k];
+}
+
+std::vector<std::pair<std::string, script_value>> vm_backend::get_frame_locals(size_t frame_index) const {
+	std::vector<debug_frame_ref> refs;
+	debug_frame_walk(&refs);
+	if (frame_index >= refs.size()) { return {}; }
+	const debug_frame_ref& ref = refs[frame_index];
+	auto out = frame_slot_locals(ref.fr, ref.graft);
+	if (ref.graft || !ref.fr) { return out; }
+	const frame& f = *ref.fr;
+	auto absent = [&](std::string_view name) { return std::none_of(out.begin(), out.end(), [&](const auto& seen) { return seen.first == name; }); };
+	if (f.captures && f.code && !f.code->code.empty() && f.code->code[0].op == opcode::op_bind_captures) {
+		const auto& ids = *f.captures->ids;
+		for (size_t k = 0; k < ids.size(); ++k) {
+			const std::string_view name = symbolizer_->get_string(ids[k]);
+			if (name != "this" && absent(name)) { out.emplace_back(std::string(name), *frame_capture(f, k)); }
 		}
 	}
-	frame* top = frames_.back();
-	if (top && top->captures && top->code && !top->code->code.empty() && top->code->code[0].op == opcode::op_bind_captures) {
-		const auto& ids = *top->captures->ids;
+	if (f.locals && f.locals->is_method && f.locals->this_object_ptr && absent("this")) { out.emplace_back("this", *f.locals->this_object_ptr); }
+	// a plain function runs in its caller's environment without owning it: only the top level and a closure or a method name theirs
+	if (f.top_level || f.entry_env) {
+		const environment* env = &f == frames_.back() ? environment_.get()
+		                       : f.debug_env && f.debug_env_epoch == debug_epoch_ ? f.debug_env : f.entry_env.get();
+		environment::append_scope_variables(env, detail::engine_access::get_global_environment(*engine_).get(), out);
+	}
+	return out;
+}
+
+script_value* vm_backend::debug_local_storage(const std::string& name) {
+	if (frames_.empty()) { return nullptr; }
+	std::vector<debug_frame_ref> refs;
+	debug_frame_walk(&refs);
+	if (refs.empty() || !refs.front().fr) { return nullptr; }
+	frame& inner = const_cast<frame&>(*refs.front().fr);
+	const uint64_t id = symbolizer_->intern(name);
+	if (has_slots(inner) && inner.code) {
+		const uint32_t owner = refs.front().graft ? static_cast<uint32_t>(refs.front().graft - inner.code->inline_sites.data()) + 1 : 0;
+		const auto& locals = inner.code->debug_locals;
+		for (size_t k = locals.size(); k-- > 0;) {   // an inner declaration of the name comes after an outer one
+			const auto& local = locals[k];
+			if (local.graft == owner && local.symbol == id && inner.ip >= local.first_ip && inner.ip < local.end_ip) { return const_cast<script_value*>(debug_frame_slot(inner, local.slot)); }
+		}
+	}
+	if (refs.front().graft) { return nullptr; }
+	if (inner.captures && inner.code && !inner.code->code.empty() && inner.code->code[0].op == opcode::op_bind_captures) {
+		const auto& ids = *inner.captures->ids;
 		for (size_t k = 0; k < ids.size(); ++k) {
-			if (ids[k] != id) { continue; }
-			script_value* bound = frame_slot(*top, top->code->code[0].a + k);
-			return bound ? bound : const_cast<script_value*>(&top->captures->cells[k]);
+			if (ids[k] == id) { return const_cast<script_value*>(frame_capture(inner, k)); }
 		}
 	}
 	return nullptr;
@@ -1251,9 +1330,10 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 		vm_coroutine_state* st;
 		fiber_stacks_swap(vm_backend* v, vm_coroutine_state* c) : vm(v), st(c) {
 			flip();
+			vm->fiber_stacks_.emplace_back(vm->frames_.size(), &st->stack_storage);
 			for (try_record& rec : vm->try_records_) { rec.trace_grafts_below = SIZE_MAX; }   // the fiber's frame resumes over other frames
 		}
-		~fiber_stacks_swap() { flip(); st->note_parked(); }
+		~fiber_stacks_swap() { vm->fiber_stacks_.pop_back(); flip(); st->note_parked(); }
 		void flip() {
 			vm->stack_.swap_payload(st->stack_storage);
 			std::swap(vm->try_records_, st->try_storage);
@@ -1540,7 +1620,8 @@ const source_location* location_of(const ast_node* node) { return node ? &node->
 
 // the grafts whose bodies hold ip, innermost first: each one's frame named by its callee at the line node points to, then node moves to
 // its caller's statement (node null: counted only)
-size_t vm_backend::graft_frames_at(const chunk& code, size_t ip, const ast_node** node, std::vector<stack_frame>& out) {
+size_t vm_backend::graft_frames_at(const chunk& code, size_t ip, const ast_node** node, std::vector<stack_frame>& out,
+                                   std::vector<const chunk::inline_site*>* sites) {
 	const chunk::inline_site* held[16];
 	size_t count = 0;
 	for (const chunk::cell_loop& loop : code.cell_loops) {   // a block's door call stands at its copy: the general instruction it copies
@@ -1554,6 +1635,7 @@ size_t vm_backend::graft_frames_at(const chunk& code, size_t ip, const ast_node*
 		for (size_t i = 0; i < count; ++i) {
 			const ast_node* at = *node;
 			out.push_back(trace_frame_at(std::string(held[i]->decl->name), location_of(at)));
+			if (sites) { sites->push_back(held[i]); }
 			*node = held[i]->call_stmt;
 		}
 	}
@@ -1640,22 +1722,24 @@ size_t vm_backend::trace_grafts_through(size_t cut) {
 	return total - above_cut;
 }
 
-// capture_stack_trace's walk, uncapped, with the top level only while a top-level frame is live; slot_frames names the
-// frame whose slots hold each entry's locals (null for an inlined call and the top level)
-std::vector<stack_frame> vm_backend::debug_frame_walk(std::vector<const frame*>* slot_frames) const {
+// capture_stack_trace's walk, uncapped, with the top level only while a top-level frame is live; refs names the frame that runs
+// each entry and, for a grafted callee's, its inline site
+std::vector<stack_frame> vm_backend::debug_frame_walk(std::vector<debug_frame_ref>* refs) const {
 	std::vector<stack_frame> out;
+	std::vector<const chunk::inline_site*> sites;
 	for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
 		const frame* fr = *it;
 		const ast_node* node = frame_statement(*fr);
-		const size_t grafts = graft_frames_at(*fr->code, fr->ip, &node, out);
-		if (slot_frames) { slot_frames->insert(slot_frames->end(), grafts, nullptr); }
+		sites.clear();
+		graft_frames_at(*fr->code, fr->ip, &node, out, &sites);
+		if (refs) { for (const auto* site : sites) { refs->push_back({fr, site}); } }
 		if (fr->top_level) {
 			out.push_back(trace_frame_at("<script>", location_of(node)));
-			if (slot_frames) { slot_frames->push_back(has_slots(*fr) ? fr : nullptr); }
+			if (refs) { refs->push_back({fr, nullptr}); }
 			break;
 		}
 		out.push_back(trace_frame_at(frame_function_name(*fr), location_of(node)));
-		if (slot_frames) { slot_frames->push_back(fr); }
+		if (refs) { refs->push_back({fr, nullptr}); }
 	}
 	return out;
 }
@@ -1664,11 +1748,6 @@ std::vector<stack_frame> vm_backend::debug_frames() const {
 	return debug_frame_walk(nullptr);
 }
 
-std::vector<std::pair<std::string, script_value>> vm_backend::get_frame_locals(size_t frame_index) const {
-	std::vector<const frame*> slot_frames;
-	debug_frame_walk(&slot_frames);
-	return frame_index < slot_frames.size() ? frame_slot_locals(slot_frames[frame_index]) : std::vector<std::pair<std::string, script_value>>{};
-}
 
 // KEEP BYTE-PARALLEL with interpreter::park_nested_failure / absorb_nested_trace
 void vm_backend::park_nested_failure() {

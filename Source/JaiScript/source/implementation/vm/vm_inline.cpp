@@ -1760,8 +1760,15 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	loops_.back().scope_depth = scope_depth_;
 	kill_scopes_.emplace_back();   // the callee's frame: its parameters and its body's locals die where the call would return
 	inlining_off_ = was_off;   // a leaf in an argument grafts inside its parameter's declaration, after this guard (the callee before the arguments)
+	const uint32_t outer_debug_site = graft_debug_site_;
+	const size_t debug_mark = chunk_->debug_locals.size();
+	graft_debug_site_ = site_index + 1;
+	for (const parameter& p : fn->parameters) {   // a parameter renamed to the caller's variable is that variable's slot
+		const auto& renamed = p.slot_index < ctx.renames.size() ? ctx.renames[p.slot_index] : nullptr;
+		if (renamed && renamed->slot_index != SIZE_MAX) { note_debug_local(renamed->slot_index, p.name); }
+	}
 	for (size_t k = 0; k < params.size(); ++k) {
-		if (params[k]) { compile_variable_decl(params[k]); note_kill_decl(params[k].get()); continue; }
+		if (params[k]) { compile_variable_decl(params[k]); note_kill_decl(params[k].get()); note_debug_local(params[k]->slot_index, params[k]->name); continue; }
 		const size_t i = param_arg[k];
 		compile_expression(call->arguments[i]);
 		emit(opcode::op_call_temp, static_cast<uint32_t>(value_temp[i]->slot_index));
@@ -1771,6 +1778,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		callable_.slot_types[static_cast<uint32_t>(d->slot_index)] = d->type.get();
 		emit(opcode::op_decl_var, add_node(d), 1, 1);
 		note_kill_decl(d.get());
+		note_debug_local(d->slot_index, d->name);
 		if (!d->type || d->type->may_own_instance()) { emit(opcode::op_kill_slot, static_cast<uint32_t>(d->graft_temp_slot)); }   // the argument's temp: the parameter holds it now
 	}
 	flush_kills();
@@ -1789,6 +1797,8 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		note_kill_decl(d.get());
 	}
 	close_kill_scope();
+	close_debug_locals(debug_mark);
+	graft_debug_site_ = outer_debug_site;
 	inlining_off_ = true;
 	graft_bodies_.pop_back();
 	current_stmt_ = site.call_stmt;   // the fallback and the rest of the statement are the caller's

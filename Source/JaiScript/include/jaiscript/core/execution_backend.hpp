@@ -234,8 +234,9 @@ public:
     // The call stack a parked debugger shows: innermost first, each frame named and located as an error trace has it,
     // the top level ("<script>") last while a top-level run is in flight
     virtual std::vector<stack_frame> debug_frames() const = 0;
-    // Named slot-based locals of debug_frames()[frame] — params + reached body locals, which the environment's flat map
-    // does not hold. Empty for the top level and an inlined call (its slots belong to its caller's frame).
+    // Every name in scope at debug_frames()[frame]'s statement but the program's: its parameters and reached locals (an inner
+    // declaration hiding an outer one), a closure's captures, `this`, and the block scopes of the top level; an inlined call's
+    // own. A plain function never shows its caller's scopes.
     virtual std::vector<std::pair<std::string, script_value>> get_frame_locals(size_t frame) const = 0;
     // The innermost frame's storage `name` resolves to at the stop: an in-scope slot local (the innermost declaration of the
     // name), or a converted closure's captured name; null leaves the environment chain to the caller
@@ -244,6 +245,9 @@ public:
     virtual int debug_depth() const = 0;
     // A debug sync point (script thread only): pull the controller's transport state into the statement gate
     virtual void sync_debug_hook() = 0;
+    // A stop taken inside a statement rather than at its start (a sleep): the innermost frame's statement counts as entered, so a
+    // step from it goes on to the next one
+    virtual void debug_settle_statement() {}
 
     // Core execution
     virtual script_value execute(const std::vector<declaration_ptr>& declarations) = 0;

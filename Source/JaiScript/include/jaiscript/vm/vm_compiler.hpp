@@ -283,6 +283,7 @@ namespace jai::vm {
         // fallback) and the result slot's name
         const block_stmt* callable_body_ = nullptr;
         std::vector<const block_stmt*> graft_bodies_;   // the grafts being compiled, outermost first: a leaf inside one grafts too (one level), never one of them again
+        uint32_t graft_debug_site_ = 0;   // 1 + the inline site whose grafted body compiles: its locals are its frame's (chunk::debug_local::graft)
         bool inlining_off_ = false;
         size_t graft_nesting_ = 0;       // compile_hoist's own nesting: grafts compiled inside a graft (its body, its parameters)
         size_t graft_tree_nodes_ = 0;    // the nodes cloned for the outermost graft being compiled and every graft inside it

@@ -4661,7 +4661,10 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         // Static-check hook: one place, at the parse-cache entry — covers execute(),
         // hot-reload re-parses (new source = new entry) and registration-epoch changes.
         const auto parsed = cached;
+        const size_t parsed_declarations = cached->declarations.size();
         const check_report& rep = impl->checked_report(*this, cached, scriptContent);
+        // the check made the generic instances the unit names: their bodies' lines are statements a breakpoint binds to
+        if (impl->debugger_ && (cached != parsed || cached->declarations.size() != parsed_declarations)) { impl->debugger_->note_source(sourcePath, &cached->declarations); }
         if (cached != parsed && !cacheFile.empty()) { cacheFresh = impl->cache_holds(*cached, cacheFile, scriptContent); }   // the gather parsed the root again
         for (const auto& s : cached->spliced_stamps) { impl->note_closure_file(s.path, true, s.mtime, s.size); }   // the generics its instances were made from
         // a unit from a file (the root file, an include, an import) lists under its path

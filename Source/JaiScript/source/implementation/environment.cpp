@@ -1309,6 +1309,20 @@ std::unordered_map<std::string_view, script_value> environment::get_local_variab
     return result;
 }
 
+void environment::append_scope_variables(const environment* from, const environment* stop,
+                                         std::vector<std::pair<std::string, script_value>>& out) {
+    for (const environment* env = from; env && env != stop && !env->is_program_scope(); env = env->parent_raw()) {
+        std::vector<std::pair<std::string, script_value>> scope;
+        env->local_ids_.for_each([&](uint64_t id, bool) {
+            const std::string_view name = env->symbolizer_->get_string(id);
+            if (name.empty() || name.starts_with("__") || name == "this") { return; }
+            if (std::any_of(out.begin(), out.end(), [&](const auto& seen) { return seen.first == name; })) { return; }
+            if (auto* cell = env->flat_lookup_.find(id)) { scope.emplace_back(std::string(name), **cell); }
+        });
+        for (auto& entry : scope) { out.push_back(std::move(entry)); }
+    }
+}
+
 std::vector<std::pair<uint64_t, const script_value*>> environment::own_definitions() const {
     std::vector<std::pair<uint64_t, const script_value*>> result(local_storage_.size(), {UINT64_MAX, nullptr});
     local_ids_.for_each([&](uint64_t id, bool) {

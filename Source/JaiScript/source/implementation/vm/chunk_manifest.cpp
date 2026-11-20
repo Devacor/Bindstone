@@ -110,7 +110,10 @@ namespace {
 			for (uint32_t s : ch.reference_slots) { out << " " << s; }
 			if (!ch.debug_locals.empty()) {
 				out << "\n" << pre << "debug_locals";
-				for (const auto& l : ch.debug_locals) { out << " " << id(l.symbol) << "/" << l.slot << "/" << l.first_ip << "-" << u(l.end_ip); }
+				for (const auto& l : ch.debug_locals) {
+					out << " " << id(l.symbol) << "/" << l.slot << "/" << l.first_ip << "-" << u(l.end_ip);
+					if (l.graft) { out << "@" << (l.graft - 1); }
+				}
 			}
 			out << "\n" << pre << "call_sites " << ch.call_sites.size() << "\n";
 			for (size_t i = 0; i < ch.call_sites.size(); ++i) {

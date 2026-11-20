@@ -154,6 +154,11 @@ namespace jai {
         // Get all variables including parent scopes
         std::unordered_map<std::string_view, script_value> get_all_variables() const;
 
+        // The debugger's view of a frame's scopes: each variable of `from` and its parents short of `stop` or a program scope (the
+        // program's, a namespace's), a name `out` already holds (an inner declaration) or the engine's own (__*, this) left out
+        static void append_scope_variables(const environment* from, const environment* stop,
+                                           std::vector<std::pair<std::string, script_value>>& out);
+
         // The program-scope variables `unit` declared (its plain cells, current or shadowed by another unit's), by name id
         std::vector<std::pair<uint64_t, const script_value*>> unit_variables(uint32_t unit) const;
 
@@ -577,6 +582,10 @@ struct call_frame {
         // a debugger names the slot-based locals below from it. Null for frames not pushed
         // by call_function. One pointer store per call — no measurable cost.
         const script_defined_function* function = nullptr;
+        // The environment the caller stood in when it pushed this frame (its block scopes, read by a debugger for the caller's
+        // frame); the caller's call holds it alive while this frame lives
+        const environment* caller_environment = nullptr;
+        bool exiting = false;   // its scope's locals are dying: its statement is done, not waiting on a call
 
         /// O(1) access by slot index - much faster than hash map or linear search
         reverse_destroyed_values locals;

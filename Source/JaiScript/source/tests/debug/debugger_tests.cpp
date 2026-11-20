@@ -1239,8 +1239,8 @@ public:
         });
         test("a_construction_stops_in_each_level_with_its_frames", [this]() {
             // each constructor's activation is a frame with its parameters, the level answering at its argument's or field's line
-            const std::string levels = "hook:2(v) B:12(y) <script>:16() | hook:2(v) A:5(x) B:12(y) <script>:16() | A:7(x) B:12(y) <script>:16() | "
-                                       "hook:2(v) B:11(y) <script>:16() | B:13(y) <script>:16() | ";
+            const std::string levels = "hook:2(v) B:12(this,y) <script>:16() | hook:2(v) A:5(this,x) B:12(this,y) <script>:16() | "
+                                       "A:7(this,x) B:12(this,y) <script>:16() | hook:2(v) B:11(this,y) <script>:16() | B:13(this,y) <script>:16() | ";
             check_eq(levels, construction_stops(jai::backend_type::interpreter), "interpreter");
             check_eq(levels, construction_stops(jai::backend_type::vm), "vm");
         });

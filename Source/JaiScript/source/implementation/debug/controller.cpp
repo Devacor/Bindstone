@@ -374,18 +374,6 @@ std::vector<variable_info> rendered_variables(const std::vector<std::pair<std::s
     return out;
 }
 
-// The scopes between the innermost environment and the program scope, an inner name hiding an outer one
-std::vector<std::pair<std::string, script_value>> block_scope_variables(const environment* env, const environment* program) {
-    std::vector<std::pair<std::string, script_value>> out;
-    std::unordered_set<std::string_view> seen;
-    for (; env && env != program; env = env->get_parent().get()) {
-        for (const auto& [name, value] : env->get_local_variables()) {
-            if (seen.insert(name).second) { out.emplace_back(std::string(name), value); }
-        }
-    }
-    return out;
-}
-
 } // namespace
 
 std::vector<frame_info> controller::list_frames() const {
@@ -405,23 +393,7 @@ std::vector<frame_info> controller::list_frames() const {
 std::vector<variable_info> controller::list_locals(size_t frame) const {
     auto* backend = detail::engine_access::get_execution_backend(*engine_);
     if (!backend) return {};
-    // A frame's slot locals come outermost first; an inner declaration hides an outer one of its name. The top level's block
-    // scopes are environments, reachable only while it is the innermost frame.
-    const auto frames = backend->debug_frames();
-    const bool top_level = frames.empty() || (frame + 1 == frames.size() && frames.back().function == "<script>");
-    if (top_level && frame != 0) return {};
-    auto named = backend->get_frame_locals(frame);
-    for (size_t i = named.size(); i-- > 0;) {
-        const auto hidden = std::find_if(named.begin() + static_cast<std::ptrdiff_t>(i) + 1, named.end(), [&](const auto& later) { return later.first == named[i].first; });
-        if (hidden != named.end()) { named.erase(named.begin() + static_cast<std::ptrdiff_t>(i)); }
-    }
-    if (!top_level) return rendered_variables(named);
-    const auto env = backend->get_current_environment();
-    const auto program = detail::engine_access::get_global_environment(*engine_);
-    for (auto& scoped : block_scope_variables(env.get(), program.get())) {
-        if (std::none_of(named.begin(), named.end(), [&](const auto& n) { return n.first == scoped.first; })) { named.push_back(std::move(scoped)); }
-    }
-    return rendered_variables(named);
+    return rendered_variables(backend->get_frame_locals(frame), false);
 }
 
 // The program's own variables: the engine's internals (__class_*) and what the host registered (add_global) stay out
@@ -632,6 +604,8 @@ bool controller::stops_at(const ast_node* node) noexcept {
         case node_type::case_stmt:
         case node_type::default_stmt:
         case node_type::statement_decl:
+        case node_type::generic_decl:
+        case node_type::generic_instance_decl:
             return false;
         default:
             return true;
@@ -709,6 +683,7 @@ void controller::sleep_for(std::chrono::nanoseconds duration) {
         if (in_command_ || !enabled_.load(std::memory_order_relaxed) || !backend->is_executing()) continue;
         if (!pending_pause_.exchange(0, std::memory_order_relaxed)) continue;
         const auto remaining = until - clock::now();
+        backend->debug_settle_statement();
         const auto frames = backend->debug_frames();
         park({"pause", frames.empty() ? std::string() : frames.front().file,
               frames.empty() ? 0 : static_cast<int>(frames.front().line), backend->debug_depth()}, detaches);

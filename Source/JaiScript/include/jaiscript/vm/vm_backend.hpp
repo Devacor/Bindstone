@@ -151,7 +151,8 @@ namespace jai::vm {
         // decl/load/store operands (no name table baked into release chunks).
         std::vector<std::pair<std::string, script_value>> get_frame_locals(size_t frame) const override;
         script_value* debug_local_storage(const std::string& name) override;
-        int debug_depth() const override { return static_cast<int>(call_records_top_ + static_cast<size_t>(current_call_depth_)); }
+        void debug_settle_statement() override;
+        int debug_depth() const override { return frames_.empty() ? 0 : static_cast<int>(statement_depth(*frames_.back())); }
         // Debug sync point (prepare_for_execution, every 1024 budget ticks, a sleep, an armed
         // session's pending change, park exit via the controller): mirrors
         // debug_controller_ into the plain per-op gate and hands a session-end a fresh budget
@@ -473,6 +474,10 @@ namespace jai::vm {
             const chunk* debug_prev_code = nullptr;
             uint32_t debug_prev_ip = 0;
             uint32_t debug_epoch = 0;
+            // the environment this frame stood in at its last statement under the session debug_env_epoch names: its block scopes
+            // while a frame above it runs
+            const environment* debug_env = nullptr;
+            uint32_t debug_env_epoch = 0;
             struct cell_state* cells = nullptr;        // the record's raw area (null: a frame that never runs cells)
             // a worker's private lookup rows for the chunk env_table_code names (worker_env_cache_slot's), found once by the frame's first
             // lookup; any other chunk (a reused record, a frame that never looked one up) reads through worker_env_cache_slot
@@ -934,6 +939,8 @@ namespace jai::vm {
         // Bumped at every arming: a frame's edge state from an earlier session is stale. The last dispatch's frame
         // tells a new frame at ip 0 from a jump back to ip 0.
         uint32_t debug_epoch_ = 1;
+        // per running coroutine resume, innermost last: frames_.size() when it began, and the parked stack the frames below it keep their windows in
+        std::vector<std::pair<size_t, const value_stack*>> fiber_stacks_;
         const frame* debug_last_frame_ = nullptr;
         const chunk* debug_last_code_ = nullptr;
         size_t debug_last_depth_ = SIZE_MAX;
@@ -1412,11 +1419,20 @@ namespace jai::vm {
 
         void capture_stack_trace();
         size_t trace_grafts_through(size_t cut);
-        static size_t graft_frames_at(const chunk& code, size_t ip, const ast_node** node, std::vector<stack_frame>& out);
+        static size_t graft_frames_at(const chunk& code, size_t ip, const ast_node** node, std::vector<stack_frame>& out,
+                                      std::vector<const chunk::inline_site*>* sites = nullptr);
         static const ast_node* frame_statement(const frame& fr);
         static std::string frame_function_name(const frame& fr);
-        std::vector<stack_frame> debug_frame_walk(std::vector<const frame*>* slot_frames) const;
-        std::vector<std::pair<std::string, script_value>> frame_slot_locals(const frame* f) const;
+        // one entry of debug_frames(): the frame that runs it, and the inline site of a grafted callee's entry (null for the frame's own)
+        struct debug_frame_ref { const frame* fr = nullptr; const chunk::inline_site* graft = nullptr; };
+        std::vector<stack_frame> debug_frame_walk(std::vector<debug_frame_ref>* refs) const;
+        std::vector<std::pair<std::string, script_value>> frame_slot_locals(const frame* f, const chunk::inline_site* graft = nullptr) const;
+        const script_value* frame_capture(const frame& f, size_t k) const;
+        // A slot of any live frame as a parked debugger reads it: a frame below a running coroutine keeps its window in the stack the
+        // coroutine's resume parked (fiber_stacks_)
+        const script_value* debug_frame_slot(const frame& f, size_t slot) const noexcept;
+        // The call depth a statement of f stands at, a grafted callee's body one level below its caller as its own frame would be
+        size_t statement_depth(const frame& f) const;
         void absorb_nested_trace();
         op_status raise_nested_failure(const std::exception& e);
         op_status raise_nested_failure_statement(const std::exception& e);

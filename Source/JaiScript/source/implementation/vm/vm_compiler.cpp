@@ -1453,10 +1453,11 @@ void vm_compiler::drop_debug_span(const ast_node* node) {
 	if (!chunk_->debug_spans.empty() && chunk_->debug_spans.back().node == node) { chunk_->debug_spans.pop_back(); }
 }
 
-// a source name in one of the callable's own slots, live from here to its scope's close (a graft's locals are compiler temps)
+// a source name in one of the callable's own slots, live from here to its scope's close; a grafted body's names live in the temps
+// above the frame and belong to the graft's frame
 void vm_compiler::note_debug_local(size_t slot, std::string_view name) {
-	if (!callable_.active || slot == SIZE_MAX || slot >= chunk_->first_temp_slot || name.empty() || name[0] == '\x01') { return; }
-	chunk_->debug_locals.push_back({ static_cast<uint32_t>(slot), static_cast<uint32_t>(chunk_->code.size()), UINT32_MAX, symbolizer_->intern(name) });
+	if (!callable_.active || slot == SIZE_MAX || (slot >= chunk_->first_temp_slot && !graft_debug_site_) || name.empty() || name[0] == '\x01') { return; }
+	chunk_->debug_locals.push_back({ static_cast<uint32_t>(slot), static_cast<uint32_t>(chunk_->code.size()), UINT32_MAX, symbolizer_->intern(name), graft_debug_site_ });
 }
 
 void vm_compiler::note_debug_locals(const statement* decl) {

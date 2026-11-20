@@ -413,7 +413,11 @@ namespace jai {
         void kill_scope_slot(const statement* decl);
         template <class Decls> void kill_scope_slots(const Decls& decls) {
             if (call_stack_.empty()) { return; }
+            const size_t frame = call_stack_.size() - 1;   // by index: a destructor's call may move call_stack_
+            const bool was_exiting = call_stack_[frame].exiting;
+            call_stack_[frame].exiting = true;
             for (auto decl = decls.rbegin(); decl != decls.rend(); ++decl) { kill_scope_slot(decl->get()); }
+            call_stack_[frame].exiting = was_exiting;
         }
         checked_result<void> visit_parallel_for_stmt(parallel_for_stmt* stmt);
         checked_result<void> visit_return_stmt(return_stmt* stmt);

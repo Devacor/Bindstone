@@ -8935,18 +8935,29 @@ std::vector<std::pair<size_t, std::string_view>> interpreter::frame_scope_slots(
     const ast_node* at = updating != updating_loops_.rend() ? updating->second : frame.current_node;
     for (const auto& p : fn->parameters())
         if (!p.binds_capture) note_scope_slot(p.slot_index, p.name, out);
-    scope_slots_at(fn->body.get(), at, frame_index > 0, out);
+    scope_slots_at(fn->body.get(), at, frame_index > 0 && !frame.exiting, out);
+    if (frame.exiting && at) note_scope_decl(static_cast<const statement*>(at), out);   // its statement ran: its declaration is in scope
     return out;
 }
 
 std::vector<std::pair<std::string, script_value>> interpreter::get_frame_locals(size_t frame_index) const {
     std::vector<std::pair<std::string, script_value>> out;
-    if (frame_index >= call_stack_.size()) return out;   // the top level: the caller reads its environment
-    const call_frame& frame = call_stack_[call_stack_.size() - 1 - frame_index];
-    for (const auto& [slot, name] : frame_scope_slots(frame_index)) {
-        if (const script_value* v = frame.get_local(slot)) out.emplace_back(std::string(name), *v);
+    if (frame_index > call_stack_.size() || (frame_index == call_stack_.size() && execute_depth_ == 0)) return out;
+    if (frame_index < call_stack_.size()) {
+        const call_frame& frame = call_stack_[call_stack_.size() - 1 - frame_index];
+        const auto slots = frame_scope_slots(frame_index);
+        for (auto it = slots.rbegin(); it != slots.rend(); ++it) {   // an inner declaration hides an outer one of its name
+            if (std::any_of(out.begin(), out.end(), [&](const auto& seen) { return seen.first == it->second; })) continue;
+            if (const script_value* v = frame.get_local(it->first)) out.emplace_back(std::string(it->second), *v);
+        }
+        detail::fold_lowered_locals(out, engine_);
+        if (frame.is_method && frame.this_object_ptr) out.emplace_back("this", *frame.this_object_ptr);
     }
-    detail::fold_lowered_locals(out, engine_);
+    // a plain function's scope parents on its caller's chain without seeing it: only a closure or a method names its outer scopes
+    const call_frame* function_frame = frame_index < call_stack_.size() ? &call_stack_[call_stack_.size() - 1 - frame_index] : nullptr;
+    const bool plain = function_frame && function_frame->function && !function_frame->function->closure_env;
+    const environment* env = frame_index == 0 ? environment_.get() : call_stack_[call_stack_.size() - frame_index].caller_environment;
+    environment::append_scope_variables(env, plain ? function_frame->closure_env.get() : get_global_environment().get(), out);
     return out;
 }
 
@@ -9013,6 +9024,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // Set up closure environment for non-local lookups
     auto previousEnv = environment_;
     const detail::member_scope_ctx previousScope = member_scope_;
+    call_stack_[frame_index].caller_environment = previousEnv.get();
     unit_sync_scope unitSync{ this };   // the caller's unit again once this frame is gone
     const unit_stamp caller_unit = frame_index >= 1 && call_stack_[frame_index - 1].function ? call_stack_[frame_index - 1].function->unit : string_symbolizer_->current_unit();   // a by-reference argument resolves under it
     enter_unit(function.unit);
@@ -9115,11 +9127,17 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         detail::shared_cell_release shared_cells{engine_};   // declared first: its check runs after the frame's locals die
         {
             // The locals die while this frame is still the innermost one, as C++ destroys them inside the function: a destructor
-            // they fire traces through it (KEEP BYTE-PARALLEL with the vm). Moved out first, so a destructor reentering
-            // call_function only grows call_stack_ above this frame.
+            // they fire traces through it (KEEP BYTE-PARALLEL with the vm). Each is moved out of its slot first, last declared
+            // first, so a destructor reentering call_function only grows call_stack_ above this frame and a debugger stopped in
+            // it sees the locals still alive (the vm's slot kills).
             const size_t dying_index = call_stack_.size() - 1;
             if ((call_stack_[dying_index].boxed_cells || (function.body && function.body->shares_cells)) && !parallel_worker_) [[unlikely]] {
                 script_value::gather_shared_cells(call_stack_[dying_index].locals.data(), call_stack_[dying_index].locals.size(), shared_cells.cells);
+            }
+            call_stack_[dying_index].exiting = true;
+            for (size_t k = call_stack_[dying_index].locals.size(); k-- > 0;) {
+                script_value dying = std::move(call_stack_[dying_index].locals[k]);
+                call_stack_[dying_index].locals[k] = script_value(std::monostate{}, engine_);
             }
             reverse_destroyed_values dying_locals = std::move(call_stack_[dying_index].locals);
         }
@@ -10044,6 +10062,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
             }
         } frames_guard{this, frame_base, dying_frames};
 
+        if (call_stack_.size() > frame_base) { call_stack_[frame_base].caller_environment = caller_state.env.get(); }
         environment_ = state.saved_environment;
         returnValue_ = std::move(state.saved_return_value);
         hasReturnValue_ = state.saved_has_return;

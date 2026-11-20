@@ -745,6 +745,23 @@ public:
     JAI_PROPERTY((std::string), derivedTag, "");
 };
 
+// Loaded through its implicit name before anything constructs one
+class LoadedBeforeConstruction : public jai::property_owner<LoadedBeforeConstruction, ImplicitRegBase> {
+public:
+    JAI_PROPERTY((int), loadedValue, 4);
+};
+
+// An abstract level: nothing constructs it, and its derived level names it as a base
+class AbstractRegBase : public jai::property_owner<AbstractRegBase, ImplicitRegBase> {
+public:
+    virtual int weight() const = 0;
+};
+class ConcreteOfAbstract : public jai::property_owner<ConcreteOfAbstract, AbstractRegBase> {
+public:
+    int weight() const override { return 12; }
+    JAI_PROPERTY((int), concreteValue, 2);
+};
+
 // property_owner AND an explicit registrar: the explicit name wins the $type, and binding it throws (a property_owner binds
 // under its own serialization name in every other engine)
 class RenamedRegType : public jai::property_owner<RenamedRegType, ImplicitRegBase> {
@@ -874,6 +891,12 @@ public:
             check(std::dynamic_pointer_cast<AnonImplicitDerived>(loaded) != nullptr, "dynamic type lost for anonymous-namespace type");
         });
 
+        test("an_anonymous_namespace_property_owner_binds_itself", [&]() {
+            auto eng = make_engine();
+            jai::bind_registrar(*eng, jai::only<AnonImplicitDerived>());
+            check_eq((int64_t)5, eng->execute("AnonImplicitDerived().anonValue;").as_int());
+        });
+
         test("property_owner_implicit_type_tag_written", [&]() {
             auto eng = make_engine();
             auto derived = std::make_shared<ImplicitRegDerived>();
@@ -908,6 +931,49 @@ public:
             jai::serialization::json_archive_reader r(json, eng.get());
             std::shared_ptr<ImplicitRegBase> out;
             check_throws([&]() { r(out); }, "unrelated $type must be rejected, not mis-cast");
+        });
+
+        test("an_implicit_identity_and_its_base_relation_exist_before_the_first_construction", [&]() {
+            auto eng = make_engine();
+            const auto* entry = jai::serialization::polymorphic_registry::instance().find(std::string("LoadedBeforeConstruction"));
+            check(entry != nullptr && entry->type == std::type_index(typeid(LoadedBeforeConstruction)), "the implicit identity must be registered at program start");
+            check(jai::serialization::polymorphic_registry::instance().is_assignable(std::type_index(typeid(LoadedBeforeConstruction)), std::type_index(typeid(ImplicitRegBase))),
+                "the Derived->Base relation must be registered at program start");
+
+            auto donor = std::make_shared<ImplicitRegDerived>();
+            donor->baseValue = 9;
+            std::shared_ptr<ImplicitRegBase> original = donor;
+            jai::serialization::json_archive_writer w(0, eng.get());
+            w(original);
+            std::string json = w.str();
+            const std::string concrete = "ImplicitRegDerived";
+            const auto pos = json.find(concrete);
+            check(pos != std::string::npos, "expected the concrete $type in: " + json);
+            json.replace(pos, concrete.size(), "LoadedBeforeConstruction");
+
+            jai::serialization::json_archive_reader r(json, eng.get());
+            std::shared_ptr<ImplicitRegBase> loaded;
+            r(loaded);
+            auto loadedDerived = std::dynamic_pointer_cast<LoadedBeforeConstruction>(loaded);
+            check(loadedDerived != nullptr, "the load must construct the type its $type names");
+            check_eq(9, loaded->baseValue.get());
+            check_eq(4, loadedDerived->loadedValue.get());
+            check_eq(4, std::make_shared<LoadedBeforeConstruction>()->loadedValue.get());
+        });
+
+        test("a_property_owner_over_an_abstract_level_round_trips_through_it", [&]() {
+            auto eng = make_engine();
+            auto concrete = std::make_shared<ConcreteOfAbstract>();
+            concrete->concreteValue = 8;
+            std::shared_ptr<AbstractRegBase> original = concrete;
+            auto loaded = roundtrip_json(*eng, original);
+            check(loaded != nullptr, "json round-trip returned null");
+            check_eq(12, loaded->weight());
+            auto loadedConcrete = std::dynamic_pointer_cast<ConcreteOfAbstract>(loaded);
+            check(loadedConcrete != nullptr, "dynamic type lost through the abstract level");
+            check_eq(8, loadedConcrete->concreteValue.get());
+            std::shared_ptr<ImplicitRegBase> asRoot = concrete;
+            check(std::dynamic_pointer_cast<ConcreteOfAbstract>(roundtrip_binary(*eng, asRoot)) != nullptr, "dynamic type lost two levels up");
         });
 
         test("property_owner_implicit_round_trip", [&]() {

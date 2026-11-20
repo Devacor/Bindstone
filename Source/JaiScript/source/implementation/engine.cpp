@@ -4366,6 +4366,7 @@ void engine::initialize_engine_reference() {
     }
     serial_function(std::string(parallel_for_stmt::k_counted_range));
     serial_namespace("reflect");
+    serial_namespace("debug");   // the calling run's frames
     impl->parallel_namespace_entries_ = {"reflect::type_of", "reflect::is_registered_type"};
 }
 

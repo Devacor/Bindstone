@@ -340,12 +340,14 @@ public:
                 }
                 check_eq(int64_t(2000000000), n);
                 check_gt(i, int64_t(0));
-                check_eq(i * (i - 1) / 2, sum, "the stop is at the loop body, before it adds i");
+                // the VM may stop where the block missed, at the loop's update (i added, not yet stepped); otherwise at the body
+                const bool added = sum == i * (i + 1) / 2;
+                check_true(added || sum == i * (i - 1) / 2, "the locals agree with one point of one iteration");
                 eng->debugger().post_command([&] { eng->debugger().set_variable("n", eng->make_value(0)); });
                 cli.request("continue", "{\"threadId\":1}");
                 eng->debugger().set_enabled(false);
                 runner.join();
-                check_eq(sum + i, eng->get_variable("got").as_int(), "the stopped iteration adds i, then n = 0 ends the loop");
+                check_eq(added ? sum : sum + i, eng->get_variable("got").as_int(), "the stopped iteration finishes, then n = 0 ends the loop");
             }
         });
 

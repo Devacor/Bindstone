@@ -8,6 +8,7 @@ uniform sampler2D texture0;
 out vec4 colorResult;
 
 uniform float alphaFilter;
+uniform float alpha;
  
 void main(){
     vec4 premultipliedColor = color;
@@ -17,4 +18,5 @@ void main(){
 
     if ( colorResult.a <= alphaFilter )
         discard;
+    colorResult *= alpha;
 }

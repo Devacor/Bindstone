@@ -12,6 +12,10 @@
 #include "MV/Render/device.h"
 #include "MV/Render/Backends/handlePool.h"
 
+#include <map>
+#include <string>
+#include <vector>
+
 namespace MV {
 	namespace Render {
 
@@ -61,6 +65,14 @@ namespace MV {
 			void onSurfaceResized(int drawableWidthPixels, int drawableHeightPixels) override;
 
 			size_t liveUniformSets() const { return uniformSets.liveCount(); }
+
+			// While on, what each draw saw: its uniform values by name and its index count.
+			struct DrawSeen {
+				std::map<std::string, std::vector<float>> uniforms;
+				uint32_t indexCount = 0;
+			};
+			void recordDraws(bool a_record) { recordingDraws = a_record; seenDraws.clear(); }
+			const std::vector<DrawSeen>& drawsSeen() const { return seenDraws; }
 			size_t liveBuffers() const { return buffers.liveCount(); }
 
 		private:
@@ -72,7 +84,12 @@ namespace MV {
 			HandlePool<BoundShaderModule, Empty> shaderModules;
 			HandlePool<BoundPipeline,     Empty> pipelines;
 			HandlePool<BoundRenderTarget, Empty> renderTargets;
-			HandlePool<BoundUniformSet,   Empty> uniformSets;
+			struct UniformValues {
+				std::map<std::string, std::vector<float>> values;
+			};
+			HandlePool<BoundUniformSet,   UniformValues> uniformSets;
+			std::vector<DrawSeen> seenDraws;
+			bool recordingDraws = false;
 
 			DeviceCaps deviceCaps;
 		};

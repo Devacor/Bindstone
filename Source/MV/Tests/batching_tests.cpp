@@ -163,6 +163,39 @@ namespace mv_tests {
 				check_eq(1u, counted.batches);
 			});
 
+			test("a node's alpha, times its parents', reaches the shader on a lone draw and on a merged one", [] {
+				MV::Draw2D renderer;
+				makeRenderer(renderer);
+				auto& backend = dynamic_cast<MV::Render::HeadlessDevice&>(*renderer.backendDevice());
+				auto root = Node::make(renderer, "root");
+				auto inner = root->make("faded")->alpha(0.5f)->make("inner")->alpha(0.5f);
+				addSprite(inner, 0);
+				auto alphaSeen = [&](size_t a_draw) {
+					auto& uniforms = backend.drawsSeen()[a_draw].uniforms;
+					auto found = uniforms.find("alpha");
+					return found == uniforms.end() || found->second.empty() ? -1.0f : found->second[0];
+				};
+
+				backend.recordDraws(true);
+				auto counted = drawOnce(renderer, root);
+				check_eq(1u, counted.loneDraws);
+				check_eq(static_cast<size_t>(1), backend.drawsSeen().size());
+				check_near(0.25f, alphaSeen(0), 1e-6f);
+
+				addSprite(inner, 1);
+				addSprite(inner, 2);
+				addSprite(root, 3);
+				backend.recordDraws(true);
+				counted = drawOnce(renderer, root);
+				check_eq(1u, counted.batches);
+				check_eq(1u, counted.loneDraws, "the unfaded sprite after them does not join them");
+				check_eq(static_cast<size_t>(2), backend.drawsSeen().size());
+				check_eq(18u, backend.drawsSeen()[0].indexCount, "the three faded sprites share a draw");
+				check_near(0.25f, alphaSeen(0), 1e-6f);
+				check_near(1.0f, alphaSeen(1), 1e-6f);
+				backend.recordDraws(false);
+			});
+
 			test("a drawable's own material callback keeps it out of the queue", [] {
 				MV::Draw2D renderer;
 				makeRenderer(renderer);

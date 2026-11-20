@@ -5,6 +5,8 @@ in vec2 uv;
 
 out vec4 colorResult;
 
+uniform float alpha;
+
 void main(){
 	vec4 colorCopy = color;
 	colorCopy.a = 1.0;
@@ -15,5 +17,5 @@ void main(){
     vec4 white = vec4(1.0, 1.0, 1.0, 1.0);
     vec4 black = vec4(0.0, 0.0, 0.0, 1.0);
 
- 	colorResult = mix(mix(colorCopy, white, uvX), black, uvY) * color.a;
+ 	colorResult = mix(mix(colorCopy, white, uvX), black, uvY) * color.a * alpha;
 }

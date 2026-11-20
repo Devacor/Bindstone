@@ -1383,6 +1383,7 @@ namespace MV {
 	}
 
 	void Material::apply(Shader& shader, const MaterialContext& context) const {
+		shader.set("alpha", context.alpha, false);
 		// Apply default textures
 		for (const auto& [slot, tex] : defaultTextures) {
 			if (tex) {

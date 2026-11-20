@@ -49,9 +49,15 @@ namespace MV {
 		void              HeadlessDevice::destroyRenderTarget(BoundRenderTarget a_handle) { Empty e; renderTargets.remove(a_handle, e); }
 
 		BoundUniformSet HeadlessDevice::createUniformSet(BoundPipeline) { return uniformSets.create({}); }
-		void HeadlessDevice::destroyUniformSet(BoundUniformSet a_handle) { Empty e; uniformSets.remove(a_handle, e); }
-		void HeadlessDevice::setUniform(BoundUniformSet, const std::string&, const float*, uint32_t) {}
-		void HeadlessDevice::setUniformMatrix(BoundUniformSet, const std::string&, const float*) {}
+		void HeadlessDevice::destroyUniformSet(BoundUniformSet a_handle) { UniformValues released; uniformSets.remove(a_handle, released); }
+		void HeadlessDevice::setUniform(BoundUniformSet a_handle, const std::string& a_name, const float* a_data, uint32_t a_floatCount) {
+			if (auto* set = uniformSets.get(a_handle)) {
+				set->values[a_name].assign(a_data, a_data + a_floatCount);
+			}
+		}
+		void HeadlessDevice::setUniformMatrix(BoundUniformSet a_handle, const std::string& a_name, const float* a_columnMajor16) {
+			setUniform(a_handle, a_name, a_columnMajor16, 16);
+		}
 		void HeadlessDevice::setTexture(BoundUniformSet, const std::string&, BoundTexture, BoundSampler) {}
 
 		void HeadlessDevice::beginFrame() {}
@@ -61,7 +67,17 @@ namespace MV {
 		void HeadlessDevice::setScissor(const Rect&) {}
 		void HeadlessDevice::setStencilState(const StencilState&) {}
 		void HeadlessDevice::clearStencil(uint8_t) {}
-		void HeadlessDevice::draw(const DrawItem&) {}
+		void HeadlessDevice::draw(const DrawItem& a_item) {
+			if (!recordingDraws) {
+				return;
+			}
+			DrawSeen seen;
+			if (auto* set = uniformSets.get(a_item.uniforms)) {
+				seen.uniforms = set->values;
+			}
+			seen.indexCount = a_item.indexCount;
+			seenDraws.push_back(std::move(seen));
+		}
 		void HeadlessDevice::endPass() {}
 		void HeadlessDevice::endFrame() {}
 		void HeadlessDevice::onSurfaceResized(int, int) {}

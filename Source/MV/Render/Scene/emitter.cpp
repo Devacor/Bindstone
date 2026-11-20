@@ -472,6 +472,7 @@ namespace MV {
 		void Emitter::recordEmitterUniforms() {
 			auto ourOwner = owner();
 			addTexturesToShader();
+			shaderProgram->set("alpha", ourOwner->worldAlpha(), false);
 			auto emitterSpace = relativeNodePosition->expired() ? ourOwner : relativeNodePosition->lock();
 			shaderProgram->set("transformation", ourOwner->renderer().cameraProjectionMatrix(ourOwner->cameraId()) * emitterSpace->worldTransform());
 			if (userMaterialSettings) {

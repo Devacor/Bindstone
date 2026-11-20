@@ -2749,9 +2749,10 @@ static int RunAssetVerification() {
 // CPU baseline for the particle hot loops (single-threaded, no GL): Particle::update (the per-frame
 // per-particle simulation, incl. the per-particle TransformMatrix) and the vertex-generation loop
 // from loadParticlesToPoints. Establishes a "before" number for perf work. Run: BindstoneClient.exe -emitterbench
-// -spriteshot [count]: a grid of sprites from the shipped atlases, runs of eight to a texture, turned and tinted in
-// a repeating pattern; draws 120 frames, prints the frame summary and writes sprite_shot.bmp.
-static int RunSpriteShot(int a_count) {
+// -spriteshot [count] [scaled]: a grid of sprites from the shipped atlases, runs of eight to a texture, turned and
+// tinted in a repeating pattern (and with scaled, stretched 1.4 x 0.7 before turning); draws 120 frames, prints the
+// frame summary and writes sprite_shot.bmp.
+static int RunSpriteShot(int a_count, bool a_scaled) {
 	Managers managers({ "", "" });
 	if (!managers.renderer.initialize(MV::Size<int>(1600, 900))) {
 		std::cout << "[spriteshot] renderer init failed" << std::endl;
@@ -2771,6 +2772,9 @@ static int RunSpriteShot(int a_count) {
 	for (int i = 0; i < a_count; ++i) {
 		auto node = root->make("sprite" + std::to_string(i))->position(MV::point(18.0f + static_cast<float>(i % columns) * 31.5f, 14.0f + static_cast<float>(i / columns) * 22.0f));
 		node->rotation(MV::AxisAngles(0.0f, 0.0f, static_cast<float>(i % 7) * 13.0f));
+		if (a_scaled) {
+			node->scale(MV::Scale(1.4f, 0.7f, 1.0f));
+		}
 		auto sprite = node->attach<MV::Scene::Sprite>()->bounds(MV::BoxAABB<>(MV::Size<>(28.0f, 20.0f), true));
 		sprite->color(MV::Color(1.0f - static_cast<float>(i % 5) * 0.15f, 1.0f, 1.0f - static_cast<float>(i % 3) * 0.2f, 1.0f));
 		if (!handles.empty()) {
@@ -2961,12 +2965,15 @@ int main(int argc, char *argv[]) {
 		}
 		if (strcmp(argv[i], "-spriteshot") == 0) {
 			int count = 2000;
-			if (i + 1 < argc) {
-				if (int parsed = std::atoi(argv[i + 1]); parsed > 0) {
+			bool scaled = false;
+			for (int argument = i + 1; argument < argc && argument <= i + 2; ++argument) {
+				if (int parsed = std::atoi(argv[argument]); parsed > 0) {
 					count = parsed;
+				} else if (strcmp(argv[argument], "scaled") == 0) {
+					scaled = true;
 				}
 			}
-			return RunSpriteShot(count);
+			return RunSpriteShot(count, scaled);
 		}
 		if (strcmp(argv[i], "-emitterbench") == 0) {
 			RunEmitterBenchmark();

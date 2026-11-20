@@ -124,7 +124,30 @@ namespace mv_tests {
 					expected.expandWith(corner);
 				}
 				check_true(boxIs(world, expected.minPoint.x, expected.minPoint.y, expected.maxPoint.x, expected.maxPoint.y), shown(world) + " around its corners " + shown(expected));
-				check_true(world.width() > 200.0f && world.height() > 100.0f, "wider and taller than the unturned box: " + shown(world));
+				// the scale stretches the square in its own space into a 200 x 100 box, and the turn turns that box
+				const float wide = 200.0f * std::cos(MV::toRadians(30.0f)) + 100.0f * std::sin(MV::toRadians(30.0f));
+				const float tall = 200.0f * std::sin(MV::toRadians(30.0f)) + 100.0f * std::cos(MV::toRadians(30.0f));
+				check_true(std::abs(world.width() - wide) < 0.05f && std::abs(world.height() - tall) < 0.05f, shown(world) + " wanted " + std::to_string(wide) + " x " + std::to_string(tall));
+				auto edge = box->worldFromLocal(MV::point(100.0f, 0.0f)) - box->worldFromLocal(MV::point(0.0f, 0.0f));
+				check_true(std::abs(std::atan2(edge.y, edge.x) - MV::toRadians(30.0f)) < 0.0005f && std::abs(std::sqrt(edge.x * edge.x + edge.y * edge.y) - 200.0f) < 0.05f, "its scaled edge keeps the turn: no shear");
+			});
+
+			test("a scaled, turned parent scales and turns its child's box", [] {
+				SceneHost host;
+				auto root = Node::make(host.renderer, "root");
+				auto parent = root->make("parent")->position(MV::point(400.0f, 300.0f));
+				parent->scale(MV::Scale(2.0f, 2.0f, 1.0f));
+				parent->rotation(MV::AxisAngles(0.0f, 0.0f, 90.0f));
+				auto child = addBox(parent, "child", MV::point(10.0f, 0.0f), MV::size(100.0f, 50.0f));
+				auto world = child->worldBounds(false);
+				check_true(std::abs(world.width() - 100.0f) < 0.05f && std::abs(world.height() - 200.0f) < 0.05f, "twice the size, a quarter turned: " + shown(world));
+				auto origin = child->worldFromLocal(MV::point(0.0f, 0.0f));
+				check_true(std::abs(origin.x - 400.0f) < 0.05f && std::abs(origin.y - 320.0f) < 0.05f, "the child's position is scaled and turned too: " + std::to_string(origin.x) + "," + std::to_string(origin.y));
+
+				child->scale(MV::Scale(1.0f, 0.5f, 1.0f));
+				child->rotation(MV::AxisAngles(0.0f, 0.0f, -90.0f));
+				world = child->worldBounds(false);
+				check_true(std::abs(world.width() - 200.0f) < 0.05f && std::abs(world.height() - 50.0f) < 0.05f, "a child that turns back and halves its height: " + shown(world));
 			});
 
 			test("a turned child of a turned parent adds both turns", [] {

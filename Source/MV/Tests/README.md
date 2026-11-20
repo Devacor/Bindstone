@@ -22,7 +22,8 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
 
 - **MV Matrix** — `affineMultiply` is bit-identical to the generic 4×4 multiply for affine inputs;
   in-place `rotateX/Y/Z` are numerically identical to the old build-identity-then-multiply form;
-  rotate preserves the translation column; `rotateZ(+90°)` maps +X→+Y.
+  rotate preserves the translation column; `rotateZ(+90°)` maps +X→+Y; `scale` on a turned matrix is the
+  rotation times the scale (it scales in the matrix's own space, never shears).
 - **MV Scene Transform** — a `Clipped` override-parent draw does not pollute persistent world
   transforms; dynamic transform changes apply and survive override draws; `worldTransform` equals
   the manual ancestor-chain product; and a **PERF GATE**:

@@ -95,6 +95,25 @@ public:
             check_near(0.0f, p.x, 1e-5f);
             check_near(1.0f, p.y, 1e-5f);
         });
+
+        test("scale on a turned matrix scales in its own space: rotation times scale, no shear", [] {
+            std::mt19937 rng(303);
+            std::uniform_real_distribution<float> s(0.25f, 4.0f), ang(-3.14159f, 3.14159f);
+            for (int i = 0; i < 200; ++i) {
+                const float rx = ang(rng), ry = ang(rng), rz = ang(rng), sx = s(rng), sy = s(rng), sz = s(rng);
+                TransformMatrix turnedThenScaled;
+                turnedThenScaled.setRotationXYZ(rx, ry, rz);
+                turnedThenScaled.scale(sx, sy, sz);
+                TransformMatrix rotation;
+                rotation.setRotationXYZ(rx, ry, rz);
+                TransformMatrix scaling;
+                scaling.scale(sx, sy, sz);
+                Matrix<4, 4> expected = rotation * scaling;
+                for (int k = 0; k < 16; ++k) {
+                    check_near(expected[k], turnedThenScaled[k], 1e-5f);
+                }
+            }
+        });
     }
 };
 

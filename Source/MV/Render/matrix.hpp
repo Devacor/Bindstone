@@ -442,15 +442,16 @@ namespace MV {
 		}
 
 		inline TransformMatrix& scale(const MV::Scale &a_scale) {
-			access(0, 0) *= a_scale.x;
-			access(1, 1) *= a_scale.y;
-			access(2, 2) *= a_scale.z;
-			return *this;
+			return scale(a_scale.x, a_scale.y, a_scale.z);
 		}
+		// Scales in the matrix's own space, before whatever it already turns: each axis column, not the diagonal, so a
+		// turned matrix keeps its turn instead of shearing.
 		inline TransformMatrix& scale(PointPrecision a_x, PointPrecision a_y, PointPrecision a_z = 1.0f) {
-			access(0, 0) *= a_x;
-			access(1, 1) *= a_y;
-			access(2, 2) *= a_z;
+			for (size_t row = 0; row < 3; ++row) {
+				access(0, row) *= a_x;
+				access(1, row) *= a_y;
+				access(2, row) *= a_z;
+			}
 			return *this;
 		}
 

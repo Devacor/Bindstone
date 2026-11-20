@@ -58,7 +58,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <li><strong>Nothing mutates in place.</strong> Every function and method returns a new value; a vector changes only by assignment to it or to a component.</li>
 </ul>
 <h2 id="scalar-math">Scalar math<a class="hlink" href="#scalar-math" aria-label="link">&#8203;</a></h2>
-<p><code>math::</code> holds the standard scalar operations on every engine and the constants <code>math::PI</code>, <code>math::E</code>, <code>math::TAU</code>, <code>math::INF</code> and <code>math::NAN_VALUE</code>. They take ints and floats; a bool or an object needs an explicit numeric conversion. A function is a value too (<code>auto root = math::sqrt;</code>). Random numbers come from a <code>random</code> object (<a href="18-random.html">Random Numbers &amp; Crypto</a>).</p>
+<p><code>math::</code> holds the standard scalar operations on every engine and the constants <code>math::pi</code>, <code>math::e</code>, <code>math::tau</code>, <code>math::inf</code> and <code>math::nan</code>; <code>math::pie</code> is the same number as <code>math::pi</code>, for the hungry. They take ints and floats; a bool or an object needs an explicit numeric conversion. A function is a value too (<code>auto root = math::sqrt;</code>). Random numbers come from a <code>random</code> object (<a href="18-random.html">Random Numbers &amp; Crypto</a>).</p>
 <p>Every <code>math::</code> function gives the same bits on every platform, compiler and backend. The arithmetic operators, <code>math::sqrt</code>, <code>math::fmod</code> and the rounding functions give the results IEEE 754 defines exactly. The transcendental functions, <code>sin</code> <code>cos</code> <code>tan</code> <code>asin</code> <code>acos</code> <code>atan</code> <code>atan2</code> <code>sinh</code> <code>cosh</code> <code>tanh</code> <code>exp</code> <code>exp2</code> <code>log</code> <code>log2</code> <code>log10</code> <code>pow</code> <code>cbrt</code> and <code>hypot</code>, are JaiScript&#x27;s own rather than the C runtime&#x27;s: each result is within 1 ulp of the exact value, and signed zeros, infinities and NaN follow C&#x27;s Annex F (<code>math::pow(x, 0)</code> is 1 for any x, <code>math::pow(-2, 3)</code> is -8, <code>math::sin(-0.0)</code> is -0.0, <code>math::log(0)</code> is -inf). The rotations, angles, eased mixes and color blends are built on them, so a simulation that uses them replays the same on every machine.</p>
 <p><code>math::min</code>, <code>math::max</code> and <code>math::clamp</code> return the winning operand unchanged, so with an int and a float the result&#x27;s type depends on the values:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var a = math::max(1, 0.5);
@@ -197,8 +197,8 @@ vec3 x = vec3(1, 0, 0);
 print(v.dot(x), " ", x.cross(vec3(0, 1, 0)), " ", math::cross(vec2(1, 2), vec2(3, 4)), " ", reflect::type_of(math::dot(ivec2(2, 3), ivec2(4, 5))));
 print(math::normalize(v), " ", v.normalized(), " ", v);            // v is unchanged
 print(math::distance(vec2(0, 0), vec2(3, 4)), " ", vec2(0, 0).distance_to(vec2(3, 4)));
-print(math::round(math::rotate(vec2(2, 0), math::PI / 2)), " ", math::round(x.rotated(vec3(0, 0, 1), math::PI / 2)));
-print(math::radians(90), " ", math::degrees(math::PI), " ", math::degrees(vec2(0, 2).angle()));
+print(math::round(math::rotate(vec2(2, 0), math::pi / 2)), " ", math::round(x.rotated(vec3(0, 0, 1), math::pi / 2)));
+print(math::radians(90), " ", math::degrees(math::pi), " ", math::degrees(vec2(0, 2).angle()));
 print(math::round(vec2(2, 1).rotated_around(vec2(1, 1), math::radians(90))), " ", math::from_angle(0.0, 3));
 try { var w = vec2(3, 4); w.normalize(); } catch (e) { print(e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3.0 (0.0, 0.0, 1.0) -2.0 int

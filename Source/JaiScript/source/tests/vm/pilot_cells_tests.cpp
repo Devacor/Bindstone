@@ -6500,8 +6500,8 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string src = "function r(var v) -> string { return to_string(host_abs(v)) + \":\" + reflect::type_of(host_abs(v)); }\n"
 				"function k(int i) -> string { return to_string(host_abs(i)) + \" \" + to_string(host_abs(i * 1)); }\n"
 				"function x(float f) -> string { float y = host_abs(f) + 0.0; return to_string(y) + \" \" + to_string(host_abs(f * 1.0)); }\n"
-				"r(4) + \"|\" + r(-2.25) + \"|\" + r(-0.0) + \"|\" + r(9007199254740993) + \"|\" + k(-7) + \"|\" + k(-9223372036854775807 - 1) + \"|\" + x(-0.0) + \"|\" + x(-math::INF)"
-				" + \"|\" + x(math::NAN_VALUE) + \"|\" + x(-math::NAN_VALUE) + \"|\" + to_string(host_abs(-3) == 3.0);";
+				"r(4) + \"|\" + r(-2.25) + \"|\" + r(-0.0) + \"|\" + r(9007199254740993) + \"|\" + k(-7) + \"|\" + k(-9223372036854775807 - 1) + \"|\" + x(-0.0) + \"|\" + x(-math::inf)"
+				" + \"|\" + x(math::nan) + \"|\" + x(-math::nan) + \"|\" + to_string(host_abs(-3) == 3.0);";
 			both(src, "", "int, float and edge arguments");
 			both(src, "", "int, float and edge arguments, proofs off", false);
 			check_true(run_on(true, src).rfind("4.0:float|2.25:float|0.0:float|", 0) == 0, "the builtin's numbers: " + run_on(true, src));
@@ -7465,7 +7465,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 					return r;
 				}
 				int count(array<float> xs, float lim) { int c = 0; for (int i = 0; i < xs.size(); ++i) { if (xs[i] < lim || xs[i] != xs[i]) { c += 1; } } return c; }
-				float nan = math::NAN_VALUE;
+				float nan = math::nan;
 				t(1, 2) + t(2, 1) + t(1.5, 1) + t(nan, 1.0) + t(1.0, nan) + t("a", "b") + t("b", "a") + t(1, 1.0) + t(V(1), V(2)) + t(V(2), V(1)) + t(V(3), V(3))
 				+ " " + to_string(count([1.0, 5.0, nan, 2.0, 9.0], 3.0)) + " " + to_string(count([nan, nan], 0.0));
 			)";

@@ -105,7 +105,7 @@ public:
 		test("refused_draws_raise_their_catalogued_texts", [this, caught, es]() {
 			check_eq(std::string("random::next_int range is inverted (max < min)"), caught("random r(1); r.next_int(5, 1);"));
 			check_eq(std::string("random::next_float range is inverted (max < min)"), caught("random r(1); r.next_float(2.0, 1.0);"));
-			check_eq(std::string("random::next_float bounds must be finite"), caught("random r(1); r.next_float(0.0, math::INF);"));
+			check_eq(std::string("random::next_float bounds must be finite"), caught("random r(1); r.next_float(0.0, math::inf);"));
 			check_eq(std::string("true"), caught("random r(1); float x = r.next_float(-1.7e308, 1.7e308); throw to_string(x >= -1.7e308 && x < 1.7e308);"),
 			         "finite bounds a float cannot span draw from the whole range");
 			check_eq(std::string("Out of memory"), caught("random r(1); r.next_bytes(9223372036854775807);"));

@@ -1837,7 +1837,7 @@ public:
                 check_true(message(source).find("error: " + text) != std::string::npos, source + " -> " + message(source));
             };
             rejects("float x = 4.0; print(math::sqroot(x));", "no member 'sqroot' in namespace 'math'");
-            rejects("print(math::pi);", "no member 'pi' in namespace 'math'");
+            rejects("print(math::PI);", "no member 'PI' in namespace 'math'");
             rejects("print(string::to_uper(\"a\"));", "no member 'to_uper' in namespace 'string'");
             rejects("print(reflect::clases());", "no member 'clases' in namespace 'reflect'");
             rejects("namespace a::b { int x = 1; } print(a::b::y);", "no member 'y' in namespace 'a::b'");
@@ -1847,7 +1847,7 @@ public:
                 "float twice(float v) { return math::double_it(v); }\n"
                 "namespace math { float double_it(float v) { return v * 2.0; } }\n"
                 "namespace geo { namespace inner { int k = 3; } class Box { static int n = 1; } }\n"
-                "print(math::sqrt(4.0), math::PI, string::to_lower(\"A\"), geo::inner::k, geo::Box::n, twice(1.0));"));
+                "print(math::sqrt(4.0), math::pi, string::to_lower(\"A\"), geo::inner::k, geo::Box::n, twice(1.0));"));
             auto earlier = make_engine();
             earlier->execute("namespace tools { int k = 7; }");
             check_eq((int64_t)7, earlier->execute("tools::k;").as_int(), "a member an earlier run declared");
@@ -1877,7 +1877,7 @@ public:
             // a class's name is its constructor, a value an int slot refuses; a namespace's members and an enum's value table stay values
             check_true(message("int spd = random;").find("error: cannot initialize 'spd' declared 'int' with 'class random'") != std::string::npos, message("int spd = random;"));
             check_true(message("class C {} int c = C;").find("error: cannot initialize 'c' declared 'int' with 'class C'") != std::string::npos, message("class C {} int c = C;"));
-            check_eq(std::string("loaded"), message("var r = random; var c = r(3); enum E { A } var e = E; namespace math { int twice(int x) { return 2 * x; } } math::twice(math::PI > 3.0 ? 1 : 0);"));
+            check_eq(std::string("loaded"), message("var r = random; var c = r(3); enum E { A } var e = E; namespace math { int twice(int x) { return 2 * x; } } math::twice(math::pi > 3.0 ? 1 : 0);"));
             // an enum's name is its value table, a map<string,int>: a slot that takes that map takes it, any other refuses it at load
             const std::pair<const char*, const char*> tables[] = {
                 {"enum E { A, B } int x = E;", "cannot initialize 'x' declared 'int' with 'enum E': an enum's name is its value table, a map<string,int>; name one of its values (E::A)"},
@@ -4009,7 +4009,7 @@ public:
                 {"var many = [v]; array<math::ivec2> xs = many;", "Cannot store math::vec2 in array<math::ivec2>"},
                 {"math::ivec2 a; math::ivec2& r = a; r = v;", "Cannot assign math::vec2 to 'r' (declared math::ivec2&)"},
                 {"math::vec2 big = math::vec2(1e30, 0.0); cast<math::ivec2>(big);", "Cannot convert float to integer: non-finite or out of range"},
-                {"math::vec3 nan = math::vec3(0.0, math::NAN_VALUE, 0.0); cast<math::ivec3>(nan);", "Cannot convert float to integer: non-finite or out of range"},
+                {"math::vec3 nan = math::vec3(0.0, math::nan, 0.0); cast<math::ivec3>(nan);", "Cannot convert float to integer: non-finite or out of range"},
                 {"void s(int& a) { var t = \"str\"; a = t; } int n = 0; s(n);", "Cannot assign string to 'a' (declared int&)"},
             };
             for (const auto& [src, text] : at_run) {

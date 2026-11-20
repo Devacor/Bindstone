@@ -8034,20 +8034,20 @@
   "fields": [
     {
       "owner": "math",
-      "name": "PI",
+      "name": "pi",
       "type": "float",
       "provider": "core",
       "access": "constant",
-      "notes": "Engine-core math constant; use math::PI.",
+      "notes": "Engine-core math constant; use math::pi.",
       "source": "include/jaiscript/detail/math_namespace.hpp"
     },
     {
       "owner": "math",
-      "name": "E",
+      "name": "e",
       "type": "float",
       "provider": "core",
       "access": "constant",
-      "notes": "Engine-core math constant; use math::E.",
+      "notes": "Engine-core math constant; use math::e.",
       "source": "include/jaiscript/detail/math_namespace.hpp"
     },
     {

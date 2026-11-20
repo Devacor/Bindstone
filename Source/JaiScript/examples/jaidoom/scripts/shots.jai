@@ -49,7 +49,7 @@ function draw_play() -> void {
 // a standable spot with a clear line to monster m, facing it
 function face_monster(int m) -> bool {
 	for (int a = 0; a < 8; ++a) {
-		float ang = a * math::PI / 4.0;
+		float ang = a * math::pi / 4.0;
 		for (int di = 0; di < 3; ++di) {
 			float d = 200.0 + di * 80.0;
 			float px = MO_X[m] + math::cos(ang) * d;

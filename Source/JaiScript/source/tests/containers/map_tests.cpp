@@ -659,7 +659,7 @@ u["ab"] = 1;
 u[utf8_string("ab")] = 2;
 log += " | " + to_string(u.size());
 var f = {};
-f[0.0] = 1; f[-0.0] = 2; f[math::NAN_VALUE] = 3; f[-math::NAN_VALUE] = 4; f[1] = 5; f[1.0] = 6; f[math::vec2(0.0, 1.0)] = 7; f[math::vec2(-0.0, 1.0)] = 8;
+f[0.0] = 1; f[-0.0] = 2; f[math::nan] = 3; f[-math::nan] = 4; f[1] = 5; f[1.0] = 6; f[math::vec2(0.0, 1.0)] = 7; f[math::vec2(-0.0, 1.0)] = 8;
 string fs = "";
 for (auto [k, v] : f) { fs += to_string(v) + ","; }
 log += " | " + to_string(f.size()) + " " + fs;

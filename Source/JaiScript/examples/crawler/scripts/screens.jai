@@ -201,7 +201,7 @@ function shaft_build() -> void {
 			float dy = (y + 0.5 - cy) * 1.1;
 			float r = math::sqrt(dx * dx + dy * dy) + 0.01;
 			SHAFT_DEPTH.push(rim / r);
-			SHAFT_ANGLE.push(math::atan2(dy, dx) / (2.0 * math::PI) + 0.5);
+			SHAFT_ANGLE.push(math::atan2(dy, dx) / (2.0 * math::pi) + 0.5);
 		}
 	}
 	SHAFT_RAMP = [];

@@ -323,8 +323,8 @@ public:
 			expect("namespace members", R"(
 				namespace ns { int x = 1; }
 				string t(function f) { string r = "stored"; try { f(); } catch (e) { r = e; } return r; }
-				t([]() { math::pi = 3.0; }) + "|" + t([]() { ns::y = 3; }) + "|" + t([]() { math::PI = 3.0; });
-			)", "Undefined variable 'math::pi'|Undefined variable 'ns::y'|Cannot assign to 'PI': it is read-only", warn_region);
+				t([]() { math::PI = 3.0; }) + "|" + t([]() { ns::y = 3; }) + "|" + t([]() { math::pi = 3.0; });
+			)", "Undefined variable 'math::PI'|Undefined variable 'ns::y'|Cannot assign to 'pi': it is read-only", warn_region);
 			expect("vector constructors", R"(
 				string t(function f) { string r = "built"; try { f(); } catch (e) { r = e; } return r; }
 				t([]() { math::vec3(5); }) + "|" + t([]() { math::vec3(math::vec2(1, 2)); }) + "|" + t([]() { math::vec4(math::vec2(1, 2), 3); }) + "|" +
@@ -357,7 +357,7 @@ public:
 			expect("nan text", R"(
 				float inf = 1e308 * 10.0;
 				float q = inf - inf;
-				to_string(q) + "|" + to_string(-q) + "|" + to_string(math::sqrt(-1.0)) + "|" + to_string(0.0 * inf) + "|" + to_string(math::NAN_VALUE) + "|" +
+				to_string(q) + "|" + to_string(-q) + "|" + to_string(math::sqrt(-1.0)) + "|" + to_string(0.0 * inf) + "|" + to_string(math::nan) + "|" +
 					format("{:.2f}", q) + "|" + format("{:e}", -q) + "|" + to_string(math::vec2(q, 1.0)) + "|" + to_string(inf) + "|" + to_string(-inf);
 			)", "nan|nan|nan|nan|nan|nan|nan|(nan, 1.0)|inf|-inf");
 		});
@@ -773,13 +773,13 @@ public:
 				try { var result = a <=> b; } catch (e) { failure = e; } failure;
 			)", "cmp");
 			expect("float sort NaN group", R"(
-				array<float> a = [math::NAN_VALUE, 2.0, -1.0]; a.sort();
-				to_string(a[0]) + "|" + to_string(a[1]) + "|" + to_string(math::is_nan(a[2])) + "|" + to_string(math::NAN_VALUE <=> math::NAN_VALUE);
+				array<float> a = [math::nan, 2.0, -1.0]; a.sort();
+				to_string(a[0]) + "|" + to_string(a[1]) + "|" + to_string(math::is_nan(a[2])) + "|" + to_string(math::nan <=> math::nan);
 			)", "-1.0|2.0|true|0");
 		});
 		test("api_consistency_math_namespace_is_the_standard_api", [this]() {
 			every_config("math namespace", "true|0.0|1.0|1.0|0.0|3|4.0", [](engine& e) {
-				const bool noGlobals = !e.has_function("sqrt") && !e.has_function("floor") && !e.has_variable("PI");
+				const bool noGlobals = !e.has_function("sqrt") && !e.has_function("floor") && !e.has_variable("pi");
 				return std::string(noGlobals ? "true|" : "false|") + e.execute(R"(
 					to_string(math::acos(1)) + "|" + to_string(math::exp(0)) + "|" + to_string(math::hypot(0,1)) + "|" + to_string(math::trunc(0.5)) + "|" + to_string(math::itrunc(3.7)) + "|" + to_string(math::sqrt(16));
 				)").to_string();
@@ -3614,7 +3614,7 @@ private:
 				string plain = `${(oe == 5)} ${(5 == oe)}`;
 				string strict = `${(S(1) == 1)} ${(1 == S(1))} ${t([]() { return S(1) < 1; })} ${t([]() { return 1 < S(1); })}`;
 				string nulls = `${(m == nul)} ${(m != nul)}`;
-				class N { int k = 0; float operator<=>(int x) { return math::NAN_VALUE; } }
+				class N { int k = 0; float operator<=>(int x) { return math::nan; } }
 				N nn;
 				nulls += ` ${(5 <=> nn)} ${(5 < nn)} ${(nn == 5)}`;   // the reversed <=> orders like the builtin one: NaN last
 				array<var> prices = [Money(300), 100, Money(200)];
@@ -3927,7 +3927,7 @@ private:
 			// groups NaNs after numbers; a map keeps its total key order (a NaN key is found again)
 			expect("nan", R"(
 				function t(function fn) -> string { string r = ""; try { r = `${fn()}`; } catch (e) { r = e; } return r; }
-				float n = math::NAN_VALUE; float one = 1.0; var vn = math::NAN_VALUE; int i = 1;
+				float n = math::nan; float one = 1.0; var vn = math::nan; int i = 1;
 				string typed = `${(n == n)}${(n != n)}${(n < one)}${(n <= one)}${(n > one)}${(n >= one)}${(one < n)}${(n == one)}`;
 				string dyn = `${(vn == vn)}${(vn != vn)}${(vn < 1)}${(vn >= 1)}${(1 > vn)}`;
 				string mixed = `${(n == i)}${(i < n)}${(n != i)}${(i >= n)}`;
@@ -3942,11 +3942,11 @@ private:
 				int k = 0;
 				for (float x = 0.0; !(x >= n) && k < 3; x += 1.0) { k += 1; }
 				br += to_string(k);
-				string sp = t([]() { float z = math::NAN_VALUE; return z <=> 1.0; }) + "/" + t([]() { var z = math::NAN_VALUE; return 1 <=> z; });
-				array<float> fa = [math::NAN_VALUE, 1.0]; array<float> fb = fa; var va = [math::NAN_VALUE];
+				string sp = t([]() { float z = math::nan; return z <=> 1.0; }) + "/" + t([]() { var z = math::nan; return 1 <=> z; });
+				array<float> fa = [math::nan, 1.0]; array<float> fb = fa; var va = [math::nan];
 				string arr = `${(fa == fb)}${(fa != fb)}${(va == va)}`;
-				map<float, int> m = {}; m[math::NAN_VALUE] = 7; m[math::NAN_VALUE] = 8;
-				string mk = `${m[math::NAN_VALUE]} ${m.size()}`;
+				map<float, int> m = {}; m[math::nan] = 7; m[math::nan] = 8;
+				string mk = `${m[math::nan]} ${m.size()}`;
 				typed + "|" + dyn + "|" + mixed + "|" + br + "|" + sp + "|" + arr + "|" + mk;
 			)", "falsetruefalsefalsefalsefalsefalsefalse|falsetruefalsefalsefalse|falsefalsetruefalse|bde3|"
 			    "1/-1|falsetruefalse|8 1", warn_region);
@@ -4361,10 +4361,10 @@ private:
 			)", "{\"$char\":122}|{\"$map\":[[1,\"a\"],[2,\"b\"]]}|{\"s\":{\"$char\":99}}|char:z|sword,bow|2|0|x2|map|map|map", warn_region);
 			// a float no JSON number spells is {"$float": "inf" | "-inf" | "nan"}: a value, a map key and a vector component alike
 			expect("json float tags", R"(
-				map<float, int> m = {}; m[-math::INF] = 3; m[math::NAN_VALUE] = 4; m[1.0] = 1;
+				map<float, int> m = {}; m[-math::inf] = 3; m[math::nan] = 4; m[1.0] = 1;
 				var back = from_json(to_json(m));
-				var v = from_json(to_json(math::vec2(math::INF, 1.0)));
-				`${to_json([math::INF, -math::INF, math::NAN_VALUE])}|${to_json(m)}|${back.size()} ${back[math::NAN_VALUE]} ${back[-math::INF]}|${reflect::type_of(v)} ${v.x}|${reflect::type_of(from_json("{\"$float\": \"big\"}"))}`;
+				var v = from_json(to_json(math::vec2(math::inf, 1.0)));
+				`${to_json([math::inf, -math::inf, math::nan])}|${to_json(m)}|${back.size()} ${back[math::nan]} ${back[-math::inf]}|${reflect::type_of(v)} ${v.x}|${reflect::type_of(from_json("{\"$float\": \"big\"}"))}`;
 			)", "[{\"$float\":\"inf\"},{\"$float\":\"-inf\"},{\"$float\":\"nan\"}]|{\"$map\":[[{\"$float\":\"-inf\"},3],[1.0,1],[{\"$float\":\"nan\"},4]]}|3 4 3|math::vec2 inf|map", warn_region);
 		});
 	}
@@ -4579,7 +4579,7 @@ private:
 			expect("signed zero", R"(
 				var m = {}; m[0.0] = 1; m[-0.0] = 2;
 				map<float, int> t = {}; t[-0.0] = 5; t[0.0] += 1;
-				float nan = math::INF - math::INF; var n = {}; n[nan] = 1; n[nan] = 2;
+				float nan = math::inf - math::inf; var n = {}; n[nan] = 1; n[nan] = 2;
 				var pz = {}; pz[0.0] = 1; var nz = {}; nz[-0.0] = 1;
 				`${m.size()}${m[0.0]}${m[-0.0]}|${t.size()}${t[0.0]}|${n.size()}|${m.has(-0.0)}${(pz == nz)}`;
 			)", "122|16|1|truetrue", warn_region);

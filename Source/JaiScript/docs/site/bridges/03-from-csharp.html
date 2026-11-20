@@ -233,7 +233,7 @@ private:
     float radius;
 public:
     Circle(float r) : super("round") { radius = r; }
-    float area() override { return math::PI * radius * radius; }
+    float area() override { return math::pi * radius * radius; }
     string name() override { return "circle"; }
 }
 class Rect : Shape {

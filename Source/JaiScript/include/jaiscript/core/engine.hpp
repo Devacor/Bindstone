@@ -385,7 +385,7 @@ namespace jai {
         // Whether a host function ("name") or a bound method ("Class.method") was registered with jai::nodiscard.
         bool is_nodiscard_function(const std::string& callable) const;
         // The typed result a host function ("name") or a bound method ("Class.method") declared for a call with type arguments
-        // (jai::returns<jai::T> 1, jai::returns<jai::array_of<jai::T>> 2, jai::returns<jai::shared_ptr_of<jai::T>> 3); 0 for none.
+        // (jai::returns<jai::type_arg> 1, jai::returns<jai::array_of<jai::type_arg>> 2, jai::returns<jai::shared_ptr_of<jai::type_arg>> 3); 0 for none.
         uint8_t type_argument_result(const std::string& callable) const;
 
         // Global registration
@@ -920,7 +920,7 @@ namespace jai {
         friend class caught_error_scope;
         // [[nodiscard]] for a host function ("name") or a bound method ("Class.method"): what jai::nodiscard records.
         void nodiscard_function(const std::string& callable);
-        // What jai::returns<jai::T> and its siblings record
+        // What jai::returns<jai::type_arg> and its siblings record
         void type_result_function(const std::string& callable, uint8_t shape);
         // Generics (detail/generics.hpp): the definitions the program declares under a qualified name ("Stack", "wire::decode",
         // "Request::json"), null when none; what an instance was made from; and a unit's check with the instances it needs

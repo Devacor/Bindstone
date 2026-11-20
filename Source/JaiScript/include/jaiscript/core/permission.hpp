@@ -104,10 +104,10 @@ inline constexpr serial_option serial{};
 inline constexpr exclude_execution_time_option exclude_execution_time{};
 
 // What a call with type arguments answers, in terms of its type arguments (docs/site/embedding/17-host-api.html "Type
-// arguments"): jai::returns<jai::T> is the first type argument itself, jai::returns<jai::array_of<jai::T>> an array of it,
-// jai::returns<jai::shared_ptr_of<jai::T>> a shared_ptr to it. The checker types the call so (auto rows = db.query<User>(...)
+// arguments"): jai::returns<jai::type_arg> is the first type argument itself, jai::returns<jai::array_of<jai::type_arg>> an array of it,
+// jai::returns<jai::shared_ptr_of<jai::type_arg>> a shared_ptr to it. The checker types the call so (auto rows = db.query<User>(...)
 // is an array<User>); the host returns a value of that type.
-struct T {};   // the call's first type argument
+struct type_arg {};   // the call's first type argument
 template<typename Element>
 struct array_of {};
 template<typename Pointee>
@@ -125,22 +125,22 @@ namespace detail {
         static constexpr std::uint8_t value = 0;
     };
     template<>
-    struct type_result_shape<T> {
+    struct type_result_shape<type_arg> {
         static constexpr std::uint8_t value = 1;
     };
     template<>
-    struct type_result_shape<array_of<T>> {
+    struct type_result_shape<array_of<type_arg>> {
         static constexpr std::uint8_t value = 2;
     };
     template<>
-    struct type_result_shape<shared_ptr_of<T>> {
+    struct type_result_shape<shared_ptr_of<type_arg>> {
         static constexpr std::uint8_t value = 3;
     };
 
     template<typename Shape>
     constexpr type_result_option make_type_result() {
         static_assert(type_result_shape<Shape>::value != 0,
-            "jai::returns<Shape>: Shape is jai::T, jai::array_of<jai::T> or jai::shared_ptr_of<jai::T>");
+            "jai::returns<Shape>: Shape is jai::type_arg, jai::array_of<jai::type_arg> or jai::shared_ptr_of<jai::type_arg>");
         return type_result_option{type_result_shape<Shape>::value};
     }
 }

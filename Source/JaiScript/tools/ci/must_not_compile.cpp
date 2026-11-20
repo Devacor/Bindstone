@@ -25,10 +25,10 @@
 // must_not_compile 21: declares exactly one jai_auto_bind, and not a template
 // must_not_compile 22: a class with no context declares static void jai_auto_bind(jai::dynamic_binder<T>&), without a context
 // must_not_compile 23: a class with a context C declares static void jai_auto_bind(jai::dynamic_binder<T>&, const C&)
-// must_not_compile 24: JAI_METHOD: an option is jai::nodiscard, jai::serial, a typed result (jai::returns<jai::T>) or a permission enum
+// must_not_compile 24: JAI_METHOD: an option is jai::nodiscard, jai::serial, a typed result (jai::returns<jai::type_arg>) or a permission enum
 // must_not_compile 25: a && member cannot be called on a script receiver
 // must_not_compile 26: default arguments
-// must_not_compile 27: jai::returns<Shape>: Shape is jai::T, jai::array_of<jai::T> or jai::shared_ptr_of<jai::T>
+// must_not_compile 27: jai::returns<Shape>: Shape is jai::type_arg, jai::array_of<jai::type_arg> or jai::shared_ptr_of<jai::type_arg>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/properties.hpp>
 #include <jaiscript/properties/property_serialization.hpp>

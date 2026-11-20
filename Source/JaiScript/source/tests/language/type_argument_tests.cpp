@@ -42,7 +42,7 @@ public:
 			auto made = make_record(*e, t, record_field_list{{"handle", script_value(handle, e)}}, "one_record");
 			if (!made) { throw std::runtime_error(e->format_error(made)); }
 			return std::move(made.value());
-		}, returns<T>);
+		}, returns<type_arg>);
 		eng.add_function("some_records", [e](const script_type& t) {
 			script_value rows = script_value::make_array(t.info(), e);
 			for (const char* handle : {"rex", "kit"}) {
@@ -51,12 +51,12 @@ public:
 				rows.unchecked_get_array_storage()->push(std::move(made.value()));
 			}
 			return rows;
-		}, returns<array_of<T>>);
+		}, returns<array_of<type_arg>>);
 		eng.add_function("first_record", [e](const script_type& t) {
 			auto made = make_shared_record(*e, t, record_field_list{{"handle", script_value(std::string("rex"), e)}}, "first_record");
 			if (!made) { throw std::runtime_error(e->format_error(made)); }
 			return std::move(made.value());
-		}, returns<shared_ptr_of<T>>);
+		}, returns<shared_ptr_of<type_arg>>);
 		dynamic_binder<type_argument_probe::store>(eng, "ProbeStore")
 			.constructor<>()
 			.method("fetch", [e](type_argument_probe::store& self, const script_type& t, const std::string& sql) {
@@ -70,7 +70,7 @@ public:
 				if (!made) { throw std::runtime_error(e->format_error(made)); }
 				rows.unchecked_get_array_storage()->push(std::move(made.value()));
 				return rows;
-			}, returns<array_of<T>>)
+			}, returns<array_of<type_arg>>)
 			.build();
 		eng.constant_argument("ProbeStore.fetch", 0, "a constant, please");
 	}
@@ -312,14 +312,14 @@ public:
 			auto made = make_record(*e, t, fields, "record_from");
 			if (!made) { throw std::runtime_error(e->format_error(made)); }
 			return std::move(made.value());
-		}, returns<T>);
+		}, returns<type_arg>);
 		eng.add_function("shared_record_from", [e](const script_type& t, const script_value& fields) {
 			record_field_list list;
 			for (const auto& [key, value] : fields.deref().as_map()) { list.emplace_back(key.as_string(), value); }
 			auto made = make_shared_record(*e, t, list, "shared_record_from");
 			if (!made) { throw std::runtime_error(e->format_error(made)); }
 			return std::move(made.value());
-		}, returns<shared_ptr_of<T>>);
+		}, returns<shared_ptr_of<type_arg>>);
 		eng.add_function("fields_text", [e](const script_value& record) {
 			auto fields = record_fields(*e, record, "fields_text");
 			if (!fields) { throw std::runtime_error(e->format_error(fields)); }

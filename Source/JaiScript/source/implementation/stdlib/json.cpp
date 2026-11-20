@@ -684,7 +684,7 @@ namespace stdlib {
 			auto built = detail::json_to_type(*eng, parse_json_text(eng, json), type.info(), "from_json");
 			if (!built) { throw runtime_error(eng->format_error(built)); }
 			return std::move(built.value());
-		}, serial, returns<T>);
+		}, serial, returns<type_arg>);
         
         eng_ref.add_variadic_function("to_binary", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {

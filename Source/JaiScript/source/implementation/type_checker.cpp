@@ -382,7 +382,7 @@ public:
     bool host_function_result(const std::string& name, script_value_type& out) const { note(name); return engine_access::host_function_result(engine_, name, out); }
     bool host_nodiscard(const std::string& callable) const { note(callable); return engine_.is_nodiscard_function(callable); }
     uint8_t type_argument_result(const std::string& callable) const { note(callable); return engine_.type_argument_result(callable); }
-    // array<T> and shared_ptr<T> as the engine interns them (a typed host result: jai::returns<jai::array_of<jai::T>>)
+    // array<T> and shared_ptr<T> as the engine interns them (a typed host result: jai::returns<jai::array_of<jai::type_arg>>)
     const type_info* array_type_of(const type_info* element) const { return engine_access::get_type_info_array(engine_, const_cast<type_info*>(element)); }
     const type_info* shared_type_of(const type_info* pointee) const { return engine_access::get_type_info_shared_ptr(engine_, const_cast<type_info*>(pointee)); }
     std::vector<std::string> registered_class_names() const { return engine_.registered_class_names(); }
@@ -4611,7 +4611,7 @@ private:
         type_argument_script_callee_ = std::string(fname);
         return true;
     }
-    // A host registration's typed result (core/permission.hpp jai::returns<jai::T> and its siblings): the first type
+    // A host registration's typed result (core/permission.hpp jai::returns<jai::type_arg> and its siblings): the first type
     // argument T, array<T> or shared_ptr<T>
     ctype type_argument_result(const call_expr* c, uint8_t shape) {
         const type_info* t = static_cast<const cast_expr*>(c->arguments[0].get())->target.get();

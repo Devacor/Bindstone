@@ -1478,11 +1478,11 @@ public:
 			e->add_function("echo_as", [raw](const script_type& t, script_int n) {
 				(void)t;
 				return script_value(n, raw);
-			}, returns<T>);
+			}, returns<type_arg>);
 			check_eq(static_cast<uint8_t>(1), e->type_argument_result("echo_as"));
-			check_eq(static_cast<uint8_t>(1), returns<T>.shape);
-			check_eq(static_cast<uint8_t>(2), returns<array_of<T>>.shape);
-			check_eq(static_cast<uint8_t>(3), returns<shared_ptr_of<T>>.shape);
+			check_eq(static_cast<uint8_t>(1), returns<type_arg>.shape);
+			check_eq(static_cast<uint8_t>(2), returns<array_of<type_arg>>.shape);
+			check_eq(static_cast<uint8_t>(3), returns<shared_ptr_of<type_arg>>.shape);
 			check_eq((int64_t)5, e->execute("int n = echo_as<int>(5); n;").as_int());
 		});
 	}

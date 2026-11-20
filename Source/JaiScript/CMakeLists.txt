@@ -112,6 +112,12 @@ else()
     # MSVC's /fp:precise never contracts, so every build computes the same bits
     add_compile_options(-ffp-contract=off)
 
+    if(APPLE)
+        # Apple's linker folds functions of identical code even when their catch clauses differ, and one function's
+        # handlers then serve both: an exception the other would catch passes through it
+        add_link_options(LINKER:-no_deduplicate)
+    endif()
+
     if(MINGW AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         # COFF's /bigobj twin: Debug template-heavy TUs overflow the 2^16 section limit
         add_compile_options(-Wa,-mbig-obj)

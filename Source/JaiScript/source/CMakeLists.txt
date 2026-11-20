@@ -39,6 +39,7 @@ set(JAISCRIPT_SOURCES
     implementation/stdlib/atomic.cpp
     implementation/stdlib/containers.cpp
     implementation/stdlib/crypto.cpp
+    implementation/stdlib/image.cpp
     implementation/stdlib/image_pixels.cpp
     implementation/stdlib/image_png.cpp
     implementation/stdlib/io.cpp

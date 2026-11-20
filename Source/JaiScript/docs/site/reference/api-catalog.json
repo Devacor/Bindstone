@@ -8061,6 +8061,102 @@
       "form": "function",
       "availability": "Every engine",
       "display": "reflect::untrusted_template_dirs() -> array<string>"
+    },
+    {
+      "owner": "image",
+      "name": "load",
+      "signature": "load(bytes: string or array<uint8>) -> image",
+      "provider": "stdlib",
+      "effect": "construct",
+      "notes": "The whole image as 8-bit RGBA, turned upright by its EXIF orientation. The argument is the file's bytes, never a path: a file is image::load(file::read(path)).",
+      "source": "include/jaiscript/stdlib/image.hpp",
+      "form": "function",
+      "availability": "register_image()",
+      "display": "image::load(bytes: string or array<uint8>) -> image"
+    },
+    {
+      "owner": "image",
+      "name": "data",
+      "signature": "data(bytes: string or array<uint8>) -> map<string, var>",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "format, width and height from the header alone, no pixel decoded; the size is the upright one image::load gives.",
+      "source": "include/jaiscript/stdlib/image.hpp",
+      "form": "function",
+      "availability": "register_image()",
+      "display": "image::data(bytes: string or array<uint8>) -> map<string, var>"
+    },
+    {
+      "owner": "image",
+      "name": "fit",
+      "signature": "fit(width: int, height: int) -> void",
+      "provider": "stdlib",
+      "effect": "mutate",
+      "notes": "Scales to fit inside the box with the shape kept; never enlarges. Returns nothing; image::fit returns a copy.",
+      "source": "include/jaiscript/stdlib/image.hpp",
+      "form": "method",
+      "availability": "register_image()",
+      "display": "image.fit(width: int, height: int) -> void"
+    },
+    {
+      "owner": "image",
+      "name": "crop_fill",
+      "signature": "crop_fill(width: int, height: int) -> void",
+      "provider": "stdlib",
+      "effect": "mutate",
+      "notes": "Exactly width x height: the centred part with that shape, scaled (enlarged when smaller). Returns nothing; image::crop_fill returns a copy.",
+      "source": "include/jaiscript/stdlib/image.hpp",
+      "form": "method",
+      "availability": "register_image()",
+      "display": "image.crop_fill(width: int, height: int) -> void"
+    },
+    {
+      "owner": "image",
+      "name": "crop",
+      "signature": "crop(x: int, y: int, width: int, height: int) -> void",
+      "provider": "stdlib",
+      "effect": "mutate",
+      "notes": "The rectangle, which must lie inside the image. Returns nothing; image::crop returns a copy.",
+      "source": "include/jaiscript/stdlib/image.hpp",
+      "form": "method",
+      "availability": "register_image()",
+      "display": "image.crop(x: int, y: int, width: int, height: int) -> void"
+    },
+    {
+      "owner": "image",
+      "name": "fit",
+      "signature": "fit(img: image, width: int, height: int) -> image",
+      "provider": "stdlib",
+      "effect": "copy",
+      "notes": "img.fit as a new image; img is unchanged.",
+      "source": "include/jaiscript/stdlib/image.hpp",
+      "form": "namespace",
+      "availability": "register_image()",
+      "display": "image::fit(img: image, width: int, height: int) -> image"
+    },
+    {
+      "owner": "image",
+      "name": "crop_fill",
+      "signature": "crop_fill(img: image, width: int, height: int) -> image",
+      "provider": "stdlib",
+      "effect": "copy",
+      "notes": "img.crop_fill as a new image; img is unchanged.",
+      "source": "include/jaiscript/stdlib/image.hpp",
+      "form": "namespace",
+      "availability": "register_image()",
+      "display": "image::crop_fill(img: image, width: int, height: int) -> image"
+    },
+    {
+      "owner": "image",
+      "name": "crop",
+      "signature": "crop(img: image, x: int, y: int, width: int, height: int) -> image",
+      "provider": "stdlib",
+      "effect": "copy",
+      "notes": "img.crop as a new image; img is unchanged.",
+      "source": "include/jaiscript/stdlib/image.hpp",
+      "form": "namespace",
+      "availability": "register_image()",
+      "display": "image::crop(img: image, x: int, y: int, width: int, height: int) -> image"
     }
   ],
   "fields": [
@@ -8841,6 +8937,30 @@
       "access": "read/write",
       "notes": "The generator's state as 64 hex digits; storing it resumes the stream exactly.",
       "source": "include/jaiscript/stdlib/random.hpp"
+    },
+    {
+      "owner": "image",
+      "name": "width",
+      "type": "int",
+      "provider": "stdlib",
+      "access": "read-only",
+      "notes": "Pixels across, after the EXIF orientation."
+    },
+    {
+      "owner": "image",
+      "name": "height",
+      "type": "int",
+      "provider": "stdlib",
+      "access": "read-only",
+      "notes": "Pixels down, after the EXIF orientation."
+    },
+    {
+      "owner": "image",
+      "name": "format",
+      "type": "string",
+      "provider": "stdlib",
+      "access": "read-only",
+      "notes": "The source file's format: \"jpeg\", \"png\" or \"gif\"; \"\" for an empty image."
     }
   ]
 }

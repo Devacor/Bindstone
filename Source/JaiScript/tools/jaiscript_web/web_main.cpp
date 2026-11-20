@@ -319,6 +319,9 @@ web_session& new_session(const char* a_args, double a_budget, bool a_blocking_sl
 	}
 	jai::stdlib::register_all(eng);
 	jai::stdlib::register_web(eng);
+#ifdef JAISCRIPT_ENABLE_IMAGE
+	jai::stdlib::register_image(*eng);
+#endif
 	jai_runner::register_file_io(*eng);
 	register_page_sound(*eng);
 	register_page_console(*eng);

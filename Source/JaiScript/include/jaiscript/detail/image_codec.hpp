@@ -157,11 +157,19 @@ namespace image_codec {
 	// a_source turned as EXIF orientation a_orientation (1 to 8) says
 	status orient(const bitmap& a_source, uint8_t a_orientation, bitmap& a_result);
 
-	// a_source resampled to a_width x a_height (each at least 1, their product within k_hard_max_pixels)
+	// a_source resampled to a_width x a_height (each at least 1, their product within k_hard_max_pixels): Catmull-Rom over
+	// premultiplied alpha, its kernel stretched by the scale for a reduction, in fixed point so every platform gives the same
+	// bytes; the identity size is an exact copy
 	status resize(const bitmap& a_source, uint32_t a_width, uint32_t a_height, const work_hook& a_work, bitmap& a_result);
 
 	// The rectangle, which the caller has checked lies inside a_source
 	status crop(const bitmap& a_source, uint32_t a_x, uint32_t a_y, uint32_t a_width, uint32_t a_height, bitmap& a_result);
+
+	// The size a_width x a_height takes scaled to fit inside the box with its shape kept, never larger than it is
+	void fit_size(uint32_t a_width, uint32_t a_height, uint64_t a_box_width, uint64_t a_box_height, uint32_t& a_fit_width, uint32_t& a_fit_height);
+
+	// a_source scaled to cover a_width x a_height and centre-cropped to exactly that, enlarged when it is smaller
+	status crop_fill(const bitmap& a_source, uint32_t a_width, uint32_t a_height, const work_hook& a_work, bitmap& a_result);
 
 	status encode_png(const bitmap& a_bitmap, const work_hook& a_work, std::vector<uint8_t>& a_bytes);
 	// a_quality 1 to 100

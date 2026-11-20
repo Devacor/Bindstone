@@ -153,7 +153,9 @@ The full JaiScript stdlib is always registered (`jai::stdlib::register_all`): fo
 helpers, the `random` type, `crypto::` (hashes such as `crypto::sha256(s)` and `crypto::sha256_file(path)`, HMAC,
 secure random bytes and password hashing; `crypto::sha256_file` needs the `filesystem` permission and raises `file::read`'s
 error below), and the opt-in `web::` library (`jai::stdlib::register_web`: `web::html_escape`, `web::url_encode`, `web::form_encode`,
-`web::parse_query`, `web::build_query`, `web::parse_url` and the rest), and the opt-in `spider::` HTTP client
+`web::parse_query`, `web::build_query`, `web::parse_url` and the rest), the opt-in `image::` module
+(`jai::stdlib::register_image`: `image::load`, `image::data` and the `image` class, in a build with `JAISCRIPT_ENABLE_IMAGE` on),
+and the opt-in `spider::` HTTP client
 (`jai::stdlib::register_spider`: `spider::catch(url[, options])`, also spelled `spider::get`, and
 `spider::sling(content, url[, options])`, also spelled `spider::post(url, content[, options])`, each answering a
 `spider::response`) with the `network` permission granted and the transport of `tools/jaiscript/http_transport.hpp`:

@@ -1,11 +1,18 @@
 #ifdef JAISCRIPT_ENABLE_IMAGE
 
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
+#include <jaiscript/core/engine.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/detail/image_codec.hpp>
 #include "stdlib/image_fixtures.hpp"
 #include "stdlib/image_test_support.hpp"
 #include "fuzz/image_mutation.hpp"
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -340,8 +347,8 @@ public:
 			png_parts damaged;
 			damaged.corrupt_data_byte = 0;
 			check_eq(std::string("PNG compressed data is invalid"), outcome(png_file(1, 1, 8, 2, 0, row, damaged)));
-			check_eq(std::string("Image data is not a JPEG, PNG or GIF"), outcome(bytes {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}));
-			check_eq(std::string("Image data is not a JPEG, PNG or GIF"), outcome(bytes {}));
+			check_eq(std::string("Image data is not a JPEG, PNG or GIF (read a file with image::load(file::read(path)))"), outcome(bytes {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}));
+			check_eq(std::string("Image data is not a JPEG, PNG or GIF (read a file with image::load(file::read(path)))"), outcome(bytes {}));
 		});
 
 		test("png_every_prefix_is_refused", [this]() {
@@ -417,9 +424,323 @@ private:
 	}
 };
 
+
+// The resampler, orientation and cropping, on bitmaps the tests draw
+class image_pixels_tests : public suite {
+public:
+	image_pixels_tests() : suite("Image Pixels") {}
+
+	static codec::bitmap drawn(uint32_t a_width, uint32_t a_height, uint8_t (*a_pixel)(uint32_t, uint32_t, int)) {
+		codec::bitmap result;
+		result.width = a_width;
+		result.height = a_height;
+		for (uint32_t y = 0; y < a_height; ++y) {
+			for (uint32_t x = 0; x < a_width; ++x) {
+				for (int channel = 0; channel < 4; ++channel) { result.rgba.push_back(a_pixel(x, y, channel)); }
+			}
+		}
+		return result;
+	}
+	static codec::bitmap resized(const codec::bitmap& a_source, uint32_t a_width, uint32_t a_height) {
+		codec::bitmap result;
+		const codec::status outcome = codec::resize(a_source, a_width, a_height, codec::work_hook {}, result);
+		return outcome == codec::status::ok ? result : codec::bitmap {};
+	}
+	static const uint8_t* at(const codec::bitmap& a_bitmap, uint32_t a_x, uint32_t a_y) { return a_bitmap.rgba.data() + (size_t {a_y} * a_bitmap.width + a_x) * 4; }
+
+	void forge_tests() override {
+		test("the_identity_size_is_an_exact_copy", [this]() {
+			// colours behind a zero alpha survive too: nothing is resampled
+			const codec::bitmap noise = drawn(17, 9, [](uint32_t x, uint32_t y, int c) { return static_cast<uint8_t>((x * 73 + y * 151 + c * 29) * 2654435761u >> 24); });
+			check_true(resized(noise, 17, 9).rgba == noise.rgba);
+		});
+
+		test("a_flat_image_stays_flat_at_every_size", [this]() {
+			const codec::bitmap flat = drawn(23, 11, [](uint32_t, uint32_t, int c) { return static_cast<uint8_t>(c == 3 ? 200 : 40 + 60 * c); });
+			for (auto [width, height] : std::vector<std::pair<uint32_t, uint32_t>> {{1, 1}, {5, 3}, {22, 11}, {23, 40}, {100, 7}, {7, 100}, {2, 33}}) {
+				const codec::bitmap out = resized(flat, width, height);
+				check_eq(size_t {width} * height * 4, out.rgba.size());
+				for (size_t i = 0; i < out.rgba.size(); i += 4) {
+					check_true(out.rgba[i] == 40 && out.rgba[i + 1] == 100 && out.rgba[i + 2] == 160 && out.rgba[i + 3] == 200, std::to_string(width) + "x" + std::to_string(height));
+				}
+			}
+		});
+
+		test("a_reduction_averages_what_it_drops", [this]() {
+			// a one-pixel checkerboard is grey at an eighth of its size: nearest-neighbour or plain bilinear would alias it to stripes
+			const codec::bitmap board = drawn(64, 64, [](uint32_t x, uint32_t y, int c) { return static_cast<uint8_t>(c == 3 ? 255 : ((x + y) & 1) * 255); });
+			for (uint32_t size : {8u, 7u, 3u}) {
+				const codec::bitmap out = resized(board, size, size);
+				for (size_t i = 0; i < out.rgba.size(); i += 4) { check_true(out.rgba[i] >= 119 && out.rgba[i] <= 136, std::to_string(out.rgba[i])); }
+			}
+			// and a ramp stays a ramp, in order and in range
+			const codec::bitmap ramp = drawn(256, 4, [](uint32_t x, uint32_t, int c) { return static_cast<uint8_t>(c == 3 ? 255 : x); });
+			const codec::bitmap small = resized(ramp, 37, 2);
+			for (uint32_t x = 1; x < 37; ++x) { check_true(at(small, x, 0)[0] > at(small, x - 1, 0)[0]); }
+			check_le(int {at(small, 0, 0)[0]}, 8);
+			check_ge(int {at(small, 36, 0)[0]}, 247);
+		});
+
+		test("alpha_is_premultiplied_so_hidden_colour_never_bleeds", [this]() {
+			// opaque red beside fully transparent green: no green may reach a visible pixel at any size
+			const codec::bitmap half = drawn(20, 6, [](uint32_t x, uint32_t, int c) { return static_cast<uint8_t>(x < 10 ? (c == 0 || c == 3 ? 255 : 0) : (c == 1 ? 255 : 0)); });
+			for (auto [width, height] : std::vector<std::pair<uint32_t, uint32_t>> {{7, 3}, {3, 2}, {41, 13}}) {
+				const codec::bitmap out = resized(half, width, height);
+				for (size_t i = 0; i < out.rgba.size(); i += 4) {
+					if (out.rgba[i + 3] == 0) {
+						check_true(out.rgba[i] == 0 && out.rgba[i + 1] == 0 && out.rgba[i + 2] == 0, "a transparent pixel is zero");
+						continue;
+					}
+					check_eq(0, int {out.rgba[i + 1]}, "green in a visible pixel");
+					check_eq(255, int {out.rgba[i]}, "the red keeps its colour as its alpha falls");
+				}
+			}
+		});
+
+		test("enlarging_a_hard_edge_stays_in_range_and_mirrors", [this]() {
+			const codec::bitmap edge = drawn(6, 5, [](uint32_t x, uint32_t y, int c) { return static_cast<uint8_t>(c == 3 ? (y == 2 ? 128 : 255) : x < 3 ? 250 : 5); });
+			const codec::bitmap big = resized(edge, 31, 17);
+			const codec::bitmap mirrored = drawn(6, 5, [](uint32_t x, uint32_t y, int c) { return static_cast<uint8_t>(c == 3 ? (y == 2 ? 128 : 255) : 5 - x < 3 ? 250 : 5); });
+			const codec::bitmap big_mirrored = resized(mirrored, 31, 17);
+			for (uint32_t y = 0; y < 17; ++y) {
+				for (uint32_t x = 0; x < 31; ++x) {
+					check_true(std::memcmp(at(big, x, y), at(big_mirrored, 30 - x, y), 4) == 0, "mirror at " + std::to_string(x) + ", " + std::to_string(y));
+				}
+			}
+		});
+
+		test("the_budget_stops_a_resize", [this]() {
+			const codec::bitmap flat = drawn(300, 200, [](uint32_t, uint32_t, int) { return uint8_t {9}; });
+			size_t spent = 0;
+			codec::work_hook counting {[](void* a_context, size_t a_units) { *static_cast<size_t*>(a_context) += a_units; return false; }, &spent};
+			codec::bitmap out;
+			check_true(codec::resize(flat, 100, 70, counting, out) == codec::status::ok);
+			check_gt(spent, size_t {300 * 200 / 16});
+			codec::work_hook gone {[](void*, size_t) { return true; }, nullptr};
+			check_true(codec::resize(flat, 100, 70, gone, out) == codec::status::budget);
+		});
+
+		test("fit_size_keeps_the_shape_and_never_enlarges", [this]() {
+			auto fit = [](uint32_t a_width, uint32_t a_height, uint64_t a_box_width, uint64_t a_box_height) {
+				uint32_t width = 0, height = 0;
+				codec::fit_size(a_width, a_height, a_box_width, a_box_height, width, height);
+				return std::to_string(width) + "x" + std::to_string(height);
+			};
+			check_eq(std::string("1200x900"), fit(4000, 3000, 1200, 1200));
+			check_eq(std::string("900x1200"), fit(3000, 4000, 1200, 1200));
+			check_eq(std::string("100x50"), fit(100, 50, 1200, 1200));
+			check_eq(std::string("100x50"), fit(100, 50, 100, 50));
+			check_eq(std::string("50x25"), fit(100, 50, 50, 1000));
+			check_eq(std::string("20x10"), fit(100, 50, 1000, 10));
+			check_eq(std::string("1x1"), fit(10000, 1, 1, 1));
+			check_eq(std::string("1x1"), fit(1, 10000, 7, 1));
+			check_eq(std::string("7x1"), fit(10000, 3, 7, 1));
+			check_eq(std::string("100x50"), fit(100, 50, ~uint64_t {0}, ~uint64_t {0}));
+			check_eq(std::string("65535x1"), fit(0x7fffffffu, 3, 65535, ~uint64_t {0}));
+		});
+
+		test("crop_fill_covers_and_centres", [this]() {
+			// a 9 x 3 image with its columns numbered: a square takes the middle three
+			const codec::bitmap columns = drawn(9, 3, [](uint32_t x, uint32_t, int c) { return static_cast<uint8_t>(c == 3 ? 255 : x * 20); });
+			codec::bitmap square;
+			check_true(codec::crop_fill(columns, 3, 3, codec::work_hook {}, square) == codec::status::ok);
+			check_eq(uint32_t {3}, square.width);
+			check_eq(uint32_t {3}, square.height);
+			check_eq(60, int {at(square, 0, 0)[0]});
+			check_eq(100, int {at(square, 2, 2)[0]});
+			// enlarged when the target is bigger than the source
+			codec::bitmap wide;
+			check_true(codec::crop_fill(columns, 40, 20, codec::work_hook {}, wide) == codec::status::ok);
+			check_eq(size_t {40 * 20 * 4}, wide.rgba.size());
+		});
+
+		test("orient_turns_all_eight_ways", [this]() {
+			// a 3 x 2 image whose red channel numbers its pixels: each orientation shows the stored pixels in this order
+			const codec::bitmap numbered = drawn(3, 2, [](uint32_t x, uint32_t y, int c) { return static_cast<uint8_t>(c == 0 ? y * 3 + x : 255); });
+			const char* expected[9] = {"", "3x2 0 1 2 3 4 5", "3x2 2 1 0 5 4 3", "3x2 5 4 3 2 1 0", "3x2 3 4 5 0 1 2",
+			                           "2x3 0 3 1 4 2 5", "2x3 3 0 4 1 5 2", "2x3 5 2 4 1 3 0", "2x3 2 5 1 4 0 3"};
+			for (uint8_t orientation = 1; orientation <= 8; ++orientation) {
+				codec::bitmap turned;
+				check_true(codec::orient(numbered, orientation, turned) == codec::status::ok);
+				std::string shown = std::to_string(turned.width) + "x" + std::to_string(turned.height);
+				for (size_t i = 0; i < turned.rgba.size(); i += 4) { shown += " " + std::to_string(turned.rgba[i]); }
+				check_eq(std::string(expected[orientation]), shown, "orientation " + std::to_string(orientation));
+			}
+		});
+	}
+};
+
+// The script's image:: module, on the backend the run names
+class image_module_tests : public suite {
+public:
+	image_module_tests() : suite("Image") {}
+
+	static const image_fixtures::fixture& fixture_named(const std::string& a_name) {
+		for (const image_fixtures::fixture& each : image_fixtures::k_fixtures) {
+			if (a_name == each.name) { return each; }
+		}
+		throw std::runtime_error("no fixture " + a_name);
+	}
+
+	// An engine with image:: and the fixtures: fixture(name) as a string, fixture_bytes(name) as an array<uint8>
+	std::shared_ptr<engine> image_engine(const stdlib::image_limits& a_limits = {}) {
+		auto e = make_engine();
+		stdlib::register_all(*e);
+		stdlib::register_image(*e, a_limits);
+		e->add_function("fixture", [](const std::string& a_name) -> std::string {
+			const image_fixtures::fixture& each = fixture_named(a_name);
+			return std::string(reinterpret_cast<const char*>(each.bytes), each.size);
+		});
+		e->add_function("fixture_bytes", [](const std::string& a_name) -> std::vector<uint8_t> {
+			const image_fixtures::fixture& each = fixture_named(a_name);
+			return std::vector<uint8_t>(each.bytes, each.bytes + each.size);
+		});
+		return e;
+	}
+
+	static std::string run(const std::shared_ptr<engine>& a_engine, const std::string& a_source) { return a_engine->execute(a_source).to_string(); }
+	// The message a statement raises, caught by the script
+	static std::string caught(const std::shared_ptr<engine>& a_engine, const std::string& a_statement) {
+		return a_engine->execute("string m = \"no error\"; try { " + a_statement + " } catch (e) { m = e.message; } m;").to_string();
+	}
+
+	void forge_tests() override {
+		test("load_and_data_read_bytes_and_arrays", [this]() {
+			auto e = image_engine();
+			check_eq(std::string("64 48 png"), run(e, "image img = image::load(fixture(\"png_rgb_photo_64x48\")); `${img.width} ${img.height} ${img.format}`;"));
+			check_eq(std::string("17 33 png"), run(e, "auto img = image::load(fixture_bytes(\"png_rgba_17x33\")); `${img.width} ${img.height} ${img.format}`;"));
+			check_eq(std::string("png 64 48"), run(e, "var d = image::data(fixture(\"png_rgb_photo_64x48\")); `${d[\"format\"]} ${d[\"width\"]} ${d[\"height\"]}`;"));
+			check_eq(std::string("3"), run(e, "image::data(fixture_bytes(\"png_grey2_13x5\")).size();"));
+			check_eq(std::string("0 0 "), run(e, "image empty; `${empty.width} ${empty.height} ${empty.format}`;"));
+		});
+
+		test("a_string_is_always_bytes_and_a_file_comes_through_file_read", [this]() {
+			namespace fs = std::filesystem;
+			const fs::path dir = test_temp_directory() / "jai_image_files";
+			std::error_code error;
+			fs::remove_all(dir, error);
+			fs::create_directories(dir);
+			const image_fixtures::fixture& photo = fixture_named("png_rgb_photo_64x48");
+			std::ofstream(dir / "photo.png", std::ios::binary).write(reinterpret_cast<const char*>(photo.bytes), static_cast<std::streamsize>(photo.size));
+			const std::string base = dir.generic_string();
+			auto e = image_engine();
+			// the host's file::read, as the runner and jai_spider bind it
+			e->add_function("file::read", [](const std::string& a_path) -> std::string {
+				std::ifstream in(a_path, std::ios::binary);
+				return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+			});
+			check_eq(std::string("64 48 png"), run(e, "image img = image::load(file::read(\"" + base + "/photo.png\")); `${img.width} ${img.height} ${img.format}`;"));
+			check_eq(std::string("64 48"), run(e, "var d = image::data(file::read(\"" + base + "/photo.png\")); `${d[\"width\"]} ${d[\"height\"]}`;"));
+			// a string is the image's bytes whatever it holds: a path is just text that is no image
+			const std::string not_an_image = "Image data is not a JPEG, PNG or GIF (read a file with image::load(file::read(path)))";
+			check_eq(not_an_image, caught(e, "image::load(\"" + base + "/photo.png\");"));
+			check_eq(not_an_image, caught(e, "image::data(\"/etc/passwd\");"));
+			check_eq(not_an_image, caught(e, "image::load(\"\");"));
+			check_eq(std::string("image::load expects a string or an array<uint8>"), caught(e, "image::load(7);"));
+			check_eq(std::string("image::data expects a string or an array<uint8>"), caught(e, "array<int> a = [137]; image::data(a);"));
+			stdlib::image_limits small;
+			small.max_input_bytes = 1000;
+			auto limited = image_engine(small);
+			check_eq(std::string("Image input is larger than the input size limit"), caught(limited, "image::load(fixture(\"png_rgb_photo_64x48\"));"));
+			// the module touches no file, so it needs no filesystem permission
+			e->disable(permissions::filesystem);
+			check_eq(std::string("64"), run(e, "image::load(fixture(\"png_rgb_photo_64x48\")).width;"));
+			fs::remove_all(dir, error);
+		});
+
+		test("the_pixel_limit_refuses_a_header_before_decoding", [this]() {
+			stdlib::image_limits small;
+			small.max_pixels = 1000;
+			auto e = image_engine(small);
+			check_eq(std::string("Image has more pixels than the pixel limit"), caught(e, "image::load(fixture(\"png_rgb_photo_64x48\"));"));
+			check_eq(std::string("Image has more pixels than the pixel limit"), caught(e, "image::data(fixture(\"png_rgb_photo_64x48\"));"));
+			check_eq(std::string("561"), run(e, "auto img = image::load(fixture(\"png_rgba_17x33\")); img.width * img.height;"));
+			check_eq(std::string("Image has more pixels than the pixel limit"), caught(e, "auto img = image::load(fixture(\"png_rgba_17x33\")); img.crop_fill(40, 26);"));
+			check_eq(std::string("40 25"), run(e, "auto img = image::load(fixture(\"png_rgba_17x33\")); img.crop_fill(40, 25); `${img.width} ${img.height}`;"));
+		});
+
+		test("fit_and_crop_fill_change_the_image_and_their_twins_copy", [this]() {
+			auto e = image_engine();
+			e->execute("image photo = image::load(fixture(\"png_rgb_photo_64x48\"));");
+			check_eq(std::string("32 24"), run(e, "image a = photo; a.fit(32, 32); `${a.width} ${a.height}`;"));
+			check_eq(std::string("64 48"), run(e, "image a = photo; a.fit(1000, 1000); `${a.width} ${a.height}`;"));
+			check_eq(std::string("10 10 64 48"), run(e, "image a = image::crop_fill(photo, 10, 10); `${a.width} ${a.height} ${photo.width} ${photo.height}`;"));
+			check_eq(std::string("200 100 png"), run(e, "image a = photo; a.crop_fill(200, 100); `${a.width} ${a.height} ${a.format}`;"));
+			check_eq(std::string("16 12 64 48"), run(e, "image a = image::fit(photo, 16, 100); `${a.width} ${a.height} ${photo.width} ${photo.height}`;"));
+			check_eq(std::string("3 4 64 48"), run(e, "image a = photo; a.crop(60, 44, 3, 4); `${a.width} ${a.height} ${photo.width} ${photo.height}`;"));
+			check_eq(std::string("5 6"), run(e, "image a = image::crop(photo, 0, 0, 5, 6); `${a.width} ${a.height}`;"));
+			check_eq(std::string("image::fit expects a width and a height of at least 1"), caught(e, "photo.fit(0, 10);"));
+			check_eq(std::string("image::fit expects a width and a height of at least 1"), caught(e, "image::fit(photo, 10, -1);"));
+			check_eq(std::string("image::crop_fill expects a width and a height of at least 1"), caught(e, "photo.crop_fill(10, 0);"));
+			check_eq(std::string("Image has more pixels than the pixel limit"), caught(e, "photo.crop_fill(100000, 100000);"));
+			check_eq(std::string("Image has more pixels than the pixel limit"), caught(e, "photo.crop_fill(4611686018427387904, 2);"));
+			check_eq(std::string("image: the image is empty (image::load makes one)"), caught(e, "image empty; empty.fit(1, 1);"));
+			check_eq(std::string("image: the image is empty (image::load makes one)"), caught(e, "image empty; image::crop(empty, 0, 0, 1, 1);"));
+		});
+
+		test("crop_is_bounds_checked", [this]() {
+			auto e = image_engine();
+			e->execute("image photo = image::load(fixture(\"png_rgb_photo_64x48\"));");
+			check_eq(std::string("image::crop: the rectangle at (60, 44) of 5 x 4 is not inside the 64 x 48 image"), caught(e, "photo.crop(60, 44, 5, 4);"));
+			check_eq(std::string("image::crop: the rectangle at (-1, 0) of 5 x 4 is not inside the 64 x 48 image"), caught(e, "image::crop(photo, -1, 0, 5, 4);"));
+			check_eq(std::string("image::crop: the rectangle at (0, 0) of 0 x 4 is not inside the 64 x 48 image"), caught(e, "photo.crop(0, 0, 0, 4);"));
+			check_eq(std::string("image::crop: the rectangle at (64, 0) of 1 x 1 is not inside the 64 x 48 image"), caught(e, "photo.crop(64, 0, 1, 1);"));
+			check_eq(std::string("image::crop: the rectangle at (1, 1) of 9223372036854775807 x 1 is not inside the 64 x 48 image"), caught(e, "photo.crop(1, 1, 9223372036854775807, 1);"));
+			check_eq(std::string("64 48"), run(e, "`${photo.width} ${photo.height}`;"));
+		});
+
+		test("the_budget_and_the_memory_cap_stop_a_decode", [this]() {
+			auto e = image_engine();
+			e->execute("string big = fixture(\"png_rgb_photo_64x48\");");
+			e->memory_cap(5000);
+			check_true(caught(e, "image::load(big);").find("memory") != std::string::npos, "a decode past the memory cap is refused");
+			e->memory_cap(0);
+			e->execute("image photo = image::load(big);");
+			e->execution_step_budget(1);
+			std::string raised = "returned normally";
+			try { e->execute("photo.crop_fill(3000, 3000);"); } catch (const std::exception& a_error) { raised = a_error.what(); }
+			check_true(raised.find("Script execution budget exceeded") != std::string::npos, raised);
+			e->execution_step_budget(0);
+			check_eq(std::string("64"), run(e, "photo.width;"));
+		});
+
+		test("mutated_files_raise_catalogued_errors_through_the_script", [this]() {
+			auto e = image_engine();
+			const auto pool = image_mutation::fixtures_of("png");
+			e->add_function("mutated", [pool](script_int a_seed) -> std::vector<uint8_t> { return image_mutation::mutated_case("png", pool, static_cast<uint64_t>(a_seed)); });
+			e->add_function("catalogued", [](const std::string& a_text) -> bool {
+				for (size_t i = 0; i < static_cast<size_t>(codec::status::status_count); ++i) {
+					if (a_text == codec::status_text(static_cast<codec::status>(i))) { return true; }
+				}
+				return false;
+			});
+			const std::string outcome = run(e, R"(
+				int images = 0;
+				int errors = 0;
+				string strange = "";
+				for (int seed = 0; seed < 400; ++seed) {
+					try {
+						image img = image::load(mutated(seed));
+						if (img.width > 0 && img.height > 0) { images += 1; }
+						img.fit(7, 7);
+					} catch (e) {
+						if (catalogued(e.message)) { errors += 1; } else { strange = e.message; }
+					}
+				}
+				`${images + errors} ${strange}`;
+			)");
+			check_eq(std::string("400 "), outcome);
+		});
+	}
+};
+
 } // namespace jai::foundry::tests
 
 using image_codec_tests = jai::foundry::tests::image_codec_tests;
 FOUNDRY_REGISTER(image_codec_tests)
+using image_pixels_tests = jai::foundry::tests::image_pixels_tests;
+FOUNDRY_REGISTER(image_pixels_tests)
+using image_module_tests = jai::foundry::tests::image_module_tests;
+FOUNDRY_REGISTER(image_module_tests)
 
 #endif

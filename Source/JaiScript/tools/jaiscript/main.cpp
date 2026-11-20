@@ -1330,6 +1330,9 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 	eng->set_output_stream(std::shared_ptr<std::ostream>(engine_out ? engine_out : &g_watched_out, [](std::ostream*) {}));
 	jai::stdlib::register_all(eng);
 	jai::stdlib::register_web(eng);
+#ifdef JAISCRIPT_ENABLE_IMAGE
+	jai::stdlib::register_image(*eng);
+#endif
 
 	// Host file IO — a runner without it can't save anything (same shapes as the example games).
 	register_file_io(*eng);

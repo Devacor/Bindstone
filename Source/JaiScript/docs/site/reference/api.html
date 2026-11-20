@@ -845,6 +845,32 @@ print(vformat(pattern, &quot;orc&quot;, 7));</code></pre></div>
 <p>Checks CRC-32.</p>
 </div>
 </section>
+<section class="api-group"><h2 id="group-image">image</h2>
+<div class="api-entry" data-provider="stdlib" data-search="image::data(bytes: string or array&lt;uint8&gt;) -&gt; map&lt;string, var&gt; observe format, width and height from the header alone, no pixel decoded; the size is the upright one image::load gives. register_image()"><h3 id="api-38a9630aed65"><code>image::data(bytes: string or array&lt;uint8&gt;) -&gt; map&lt;string, var&gt;</code></h3><p><strong>register_image()</strong> &middot; observe</p>
+<p>format, width and height from the header alone, no pixel decoded; the size is the upright one image::load gives.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="image::load(bytes: string or array&lt;uint8&gt;) -&gt; image construct the whole image as 8-bit rgba, turned upright by its exif orientation. the argument is the file&#x27;s bytes, never a path: a file is image::load(file::read(path)). register_image()"><h3 id="api-03ccab2da6e4"><code>image::load(bytes: string or array&lt;uint8&gt;) -&gt; image</code></h3><p><strong>register_image()</strong> &middot; construct</p>
+<p>The whole image as 8-bit RGBA, turned upright by its EXIF orientation. The argument is the file&#x27;s bytes, never a path: a file is image::load(file::read(path)).</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="image.crop(x: int, y: int, width: int, height: int) -&gt; void mutate the rectangle, which must lie inside the image. returns nothing; image::crop returns a copy. register_image()"><h3 id="api-c8163dc21342"><code>image.crop(x: int, y: int, width: int, height: int) -&gt; void</code></h3><p><strong>register_image()</strong> &middot; mutate</p>
+<p>The rectangle, which must lie inside the image. Returns nothing; image::crop returns a copy.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="image.crop_fill(width: int, height: int) -&gt; void mutate exactly width x height: the centred part with that shape, scaled (enlarged when smaller). returns nothing; image::crop_fill returns a copy. register_image()"><h3 id="api-1f36efd1a9b7"><code>image.crop_fill(width: int, height: int) -&gt; void</code></h3><p><strong>register_image()</strong> &middot; mutate</p>
+<p>Exactly width x height: the centred part with that shape, scaled (enlarged when smaller). Returns nothing; image::crop_fill returns a copy.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="image.fit(width: int, height: int) -&gt; void mutate scales to fit inside the box with the shape kept; never enlarges. returns nothing; image::fit returns a copy. register_image()"><h3 id="api-ac0e03d4cf73"><code>image.fit(width: int, height: int) -&gt; void</code></h3><p><strong>register_image()</strong> &middot; mutate</p>
+<p>Scales to fit inside the box with the shape kept; never enlarges. Returns nothing; image::fit returns a copy.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="image::crop(img: image, x: int, y: int, width: int, height: int) -&gt; image copy img.crop as a new image; img is unchanged. register_image()"><h3 id="api-526479b894c4"><code>image::crop(img: image, x: int, y: int, width: int, height: int) -&gt; image</code></h3><p><strong>register_image()</strong> &middot; copy</p>
+<p>img.crop as a new image; img is unchanged.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="image::crop_fill(img: image, width: int, height: int) -&gt; image copy img.crop_fill as a new image; img is unchanged. register_image()"><h3 id="api-70f1ee4b727b"><code>image::crop_fill(img: image, width: int, height: int) -&gt; image</code></h3><p><strong>register_image()</strong> &middot; copy</p>
+<p>img.crop_fill as a new image; img is unchanged.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="image::fit(img: image, width: int, height: int) -&gt; image copy img.fit as a new image; img is unchanged. register_image()"><h3 id="api-d87fe5d1dd71"><code>image::fit(img: image, width: int, height: int) -&gt; image</code></h3><p><strong>register_image()</strong> &middot; copy</p>
+<p>img.fit as a new image; img is unchanged.</p>
+</div>
+</section>
 <section class="api-group"><h2 id="group-jai-permissions">jai::permissions</h2>
 <div class="api-entry" data-provider="core" data-search="jai::permissions::is_enabled(permissions: int...) -&gt; bool observe at least one permission id; scripts query grants, hosts change them. every engine"><h3 id="api-612eb7636c65"><code>jai::permissions::is_enabled(permissions: int...) -&gt; bool</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>At least one permission id; scripts query grants, hosts change them.</p>
@@ -2155,6 +2181,9 @@ print(u.to_string());</code></pre></div>
 <tr><td><code>args</code></td><td>array&lt;string&gt;</td><td>read/write / runner</td><td>Arguments following --, not the executable flags.</td></tr>
 <tr><td><code>skip_flush</code></td><td>print token</td><td>constant / stdlib</td><td></td></tr>
 <tr><td><code>skip_newline</code></td><td>print token</td><td>constant / stdlib</td><td></td></tr>
+<tr><td><code>image.format</code></td><td>string</td><td>read-only / stdlib</td><td>The source file&#x27;s format: &quot;jpeg&quot;, &quot;png&quot; or &quot;gif&quot;; &quot;&quot; for an empty image.</td></tr>
+<tr><td><code>image.height</code></td><td>int</td><td>read-only / stdlib</td><td>Pixels down, after the EXIF orientation.</td></tr>
+<tr><td><code>image.width</code></td><td>int</td><td>read-only / stdlib</td><td>Pixels across, after the EXIF orientation.</td></tr>
 <tr><td><code>jai::force</code></td><td>import directive</td><td>constant / core</td><td>Trailing argument to import(paths, jai::force).</td></tr>
 <tr><td><code>jai::permissions.count</code></td><td>int</td><td>constant / core</td><td>The first id of a host&#x27;s own permissions.</td></tr>
 <tr><td><code>jai::permissions.debug</code></td><td>int permission id</td><td>constant / core</td><td>A convention the engine enforces nothing with.</td></tr>

@@ -153,6 +153,25 @@ theme=dark; Path=/; Secure; SameSite=Strict</code></pre></div>
 <li><strong>Before anything is sent:</strong> an unknown or wrong-kind option (<code>spider::catch: unknown option &#x27;retries&#x27; (method, headers, timeout, type, redirects)</code>); a header name that is not a token, or a value holding a line break or NUL; a header the transport writes itself (<code>Host</code>, <code>Content-Length</code>, <code>Transfer-Encoding</code>, <code>Connection</code>); a URL that is not absolute http or https; a host that installed no transport; <code>Insufficient permission: network.</code> without the permission.</li>
 <li><strong>During the call:</strong> <code>spider::catch: http://example.org/slow: timed out after 5 s</code>, <code>more than 5 redirects</code>, <code>a redirect from https to http (http://example.org/) is refused</code>, or the transport&#x27;s own reason (<code>cannot connect to 127.0.0.1:1</code>: no connection, an unresolved host, a certificate that did not verify, an answer cut short).</li>
 </ul>
+<h2 id="images">Part 3: Images with <code>image::</code><a class="hlink" href="#images" aria-label="link">&#8203;</a></h2>
+<p>An upload&#x27;s bytes become a picture a page can show: <code>image::data</code> reads the format and size from the header alone, so a check costs almost nothing, and <code>image::load</code> decodes the whole file into an <code>image</code> to scale, crop and save. The host opts in with <code>jai::stdlib::register_image</code>; the runner does. The codecs are JaiScript&#x27;s own, written from the file formats&#x27; specifications.</p>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// a 64 x 48 PNG, as the body of an upload holds it
+string upload = base64_decode(&quot;iVBORw0KGgoAAAANSUhEUgAAAEAAAAAwCAIAAAAuKetIAAAAQ0lEQVR42u3PQQkAAAgEsItjRCMaywp+hcEKLNP1WgQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQErhaJouDxNuBloAAAAABJRU5ErkJggg==&quot;);
+var info = image::data(upload);
+print(&quot;{} {} x {}&quot;, info[&quot;format&quot;], info[&quot;width&quot;], info[&quot;height&quot;]);
+image photo = image::load(upload);
+image thumb = image::fit(photo, 32, 32);   // a new image
+photo.crop_fill(20, 20);                   // photo itself changes
+print(&quot;{} x {}, {} x {}&quot;, thumb.width, thumb.height, photo.width, photo.height);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">png 64 x 48
+32 x 24, 20 x 20</code></pre></div>
+<p>The dot methods change the image they are called on and return nothing, as a string&#x27;s or an array&#x27;s do; the <code>image::</code> function of the same name returns a changed copy and leaves its argument alone. A copy of an image is cheap: copies share their pixels until one of them changes.</p>
+<ul>
+<li><code>fit(w, h)</code> scales the image to fit inside <code>w</code> by <code>h</code>, keeping its shape, and never enlarges it: an image that already fits is unchanged.</li>
+<li><code>crop_fill(w, h)</code> scales the image to cover <code>w</code> by <code>h</code> and cuts away what falls outside, about the centre, so the result is exactly that size, enlarged when the image is smaller (an avatar).</li>
+<li><code>crop(x, y, w, h)</code> keeps the rectangle, which must lie inside the image.</li>
+</ul>
+<p>The argument is always the image&#x27;s bytes, a string or an <code>array&lt;uint8&gt;</code>, never a path: a file on disk is <code>image::load(file::read(path))</code>. The limits and the resampling: <a href="../reference/library.html#images">Images</a>.</p>
 <nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/16-parallel.html"><span>&larr; previous</span>Parallel Loops</a><a class="next" rel="next" href="../guide/18-random.html"><span>next &rarr;</span>Random Numbers &amp; Crypto</a></nav></article>
 </main>
 </div>

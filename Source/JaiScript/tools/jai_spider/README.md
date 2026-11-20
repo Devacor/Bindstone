@@ -16,7 +16,7 @@ it with `SQLITE_OMIT_LOAD_EXTENSION`, `SQLITE_DQS=0` and `SQLITE_THREADSAFE=1`. 
 
 ```
 jai_spider examples/guestbook/app.jai
-/\(o.o)/\  jai_spider 0.5.4-beta
+/\(o.o)/\  jai_spider 0.6.0-beta
 jai_spider: spinning examples/guestbook/app.jai on http://127.0.0.1:8080/ (files from .../guestbook/public)
 jai_spider: 8 workers, a fresh engine for each request (the first build took 23.5 ms); edits apply on the next request; Ctrl+C stops
 GET / 200 1.21 ms

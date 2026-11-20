@@ -53,7 +53,7 @@ namespace jai {
     
     // Version string
     inline const std::string& version() {
-        static const std::string version_string = "0.5.4-beta";
+        static const std::string version_string = "0.6.0-beta";
         return version_string;
     }
     

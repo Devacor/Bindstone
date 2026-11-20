@@ -17,7 +17,7 @@ import sys
 
 SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
 
-VERSION = "0.5 beta"
+VERSION = "0.6 beta"
 REPO = "https://github.com/Devacor/jaiscript"
 SITE_URL = "https://jaiscript.com/"
 NOT_FOUND = "404.html"   # Apache serves it for any missing path, so its chrome links from the site root

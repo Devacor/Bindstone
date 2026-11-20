@@ -46,7 +46,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d[i].open=false;}())</script>
 <main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="index.html">Docs</a><span class="sep" aria-hidden="true">/</span>Stability</nav>
 <article class="chapter"><h1 id="stability">Stability<a class="hlink" href="#stability" aria-label="link">&#8203;</a></h1>
-<p>JaiScript 0.5 is a beta: the language and its contract are complete, and the version stays 0.x until 1.0. This page
+<p>JaiScript 0.6 is a beta: the language and its contract are complete, and the version stays 0.x until 1.0. This page
 sorts the language and the embedding API into what is settled and what a release may still change.</p>
 <ul>
 <li><strong>A settled rule is the contract.</strong> Where the implementation departs from one, the implementation is
@@ -58,8 +58,8 @@ anything this page does not mention.</li>
 <p>A version is <code>0.minor.patch</code> (0.5.2). On this page a <em>release</em> that may change something is a minor
 release: 0.5 to 0.6.</p>
 <ul>
-<li><strong>Within one minor version</strong> (0.5.2 to 0.5.3) the CMake package declares the releases compatible:
-<code>find_package(JaiScript 0.5)</code> accepts any 0.5.z and refuses 0.6.</li>
+<li><strong>Within one minor version</strong> (0.6.0 to 0.6.1) the CMake package declares the releases compatible:
+<code>find_package(JaiScript 0.6)</code> accepts any 0.6.z and refuses 0.7.</li>
 <li><strong>Each release is a tag</strong> in the <a href="https://github.com/Devacor/jaiscript">repository</a>
 (<code>v0.5.2</code>). The repository keeps no changelog file; the history between two tags is the record of what
 changed.</li>
@@ -128,7 +128,7 @@ source it was parsed from. <a href="embedding/04-jaibite.html">jaibite</a></li>
 </main>
 </div>
 <footer class="site-footer">
-<p>JaiScript 0.5 beta &middot; <a href="https://github.com/Devacor/jaiscript/blob/main/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/jaiscript">source</a> &middot; <a href="https://github.com/Devacor/jaiscript/issues">report a docs bug</a></p>
+<p>JaiScript 0.6 beta &middot; <a href="https://github.com/Devacor/jaiscript/blob/main/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/jaiscript">source</a> &middot; <a href="https://github.com/Devacor/jaiscript/issues">report a docs bug</a></p>
 <p class="foot-note">every standalone script sample on this site runs on both backends, and the output shown is what they print</p>
 </footer>
 <script src="assets/search-index.js"></script>

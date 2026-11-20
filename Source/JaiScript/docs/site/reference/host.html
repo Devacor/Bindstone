@@ -603,6 +603,8 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>--load-report</code> / <code>--load-report=json</code></td><td>When the top level of the file or <code>-e</code> sources ends, prints on stderr where loading spent its time, as a table or one line of JSON. Standard output does not change. Not with <code>--watch</code>: <a href="../embedding/11-performance.html#finding-load-time">Finding where load time goes</a>.</td></tr>
 <tr><td><code>--debug</code> / <code>--debug-port=N</code></td><td>Starts the DAP debug listener on localhost (VS Code attaches) and names the bound port on stderr. Without either, nothing listens.</td></tr>
 <tr><td>Debug port</td><td><code>--debug-port=N</code> tries port N first. Default 52477, probing upward in steps of 10.</td></tr>
+<tr><td><code>--break=FILE:LINE</code></td><td>Each time the script reaches LINE of FILE (<code>"FILE:LINE if CONDITION"</code>: while the condition holds), prints the call stack and every frame&#x27;s locals on stderr and runs on. Repeatable; a file or <code>-e</code> run without <code>--debug</code> (<a href="../embedding/12-debugging.html#try-it-the-example-hosts">Debugging</a>).</td></tr>
+<tr><td><code>--dump-on-error</code></td><td>An error no script catch takes prints the call stack and every frame&#x27;s locals on stderr where it is raised, before the error itself.</td></tr>
 <tr><td><code>--pause</code> / <code>--no-pause</code></td><td>Force or suppress the &quot;press Enter to close&quot; hold after a file run.</td></tr>
 <tr><td><code>--version</code> / <code>--help</code></td><td></td></tr>
 <tr><td><code>--benchmark-main=N</code></td><td>Runs the file once as a warm-up, then calls its <code>main()</code> N times.</td></tr>

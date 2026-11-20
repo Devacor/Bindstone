@@ -1,9 +1,13 @@
 # JaiScript Debugger — Design
 
-The controller stops on both backends with breakpoints, pause and step over/into/out; `list_frames` returns the
-call stack (innermost first, the top level last), `list_locals(frame)` each frame's locals and `list_globals` the
-program scope; the connector answers `evaluate` empty and does not handle `setVariable`. Not built:
-`setVariable`/`evaluate`, conditional breakpoints and logpoints, value history, expandable structured values.
+The controller stops on both backends with breakpoints (conditions, hit conditions, logpoints), exception breakpoints
+(thrown, uncaught), pause and step over/into/out; `list_frames` returns the call stack (innermost first, the top level
+last), `list_locals(frame)` every name in scope at each frame's statement, `list_globals` the program scope, and
+`list_children` a value's parts; `evaluate` runs an expression in any frame (a watch only reads, the console changes
+state) and `set_variable` stores through the script's own rules. The connector speaks all of it over DAP. Scripts read
+`debug::stack()` and `debug::locals([frame])`; the runner prints stops (`--break`) and uncaught errors
+(`--dump-on-error`) through the same `controller::dump()`. Not built: value history (ruling 6), expanding a host (C++)
+object.
 
 `jai::debug::listen(engine&, port = default_port, host)` builds a connector, attaches it and returns it
 (`connector.hpp`); `jai::debug::default_port` is 52472. Incoming DAP breakpoint paths normalize on the script
@@ -168,11 +172,13 @@ per-expression stepping**, to keep the detached hot path free.
 | `setBreakpoints` | Store per-file line set as an atomically-published snapshot (see Concurrency contract). **Resolve at hit time, not set time** — the hook compares `current_node->location` / `stmt_nodes[ip]->location` (path,line) against the snapshot. VM function bodies compile to their own chunks lazily on first call (`chunk_for_body`), so pre-scanning `stmt_nodes` at set time misses any not-yet-called function; hit-time compare needs no pre-index (the `ast_node*` carries its location either way). Snap a line with no statement to the next statement's line and report it back. |
 | `stackTrace` | `controller::list_frames` over the backend's `debug_frames()`: the error-trace walk (`call_stack_` in the interpreter, `frames_` plus graft frames in the VM, the same names and lines), uncapped, with `<script>` last only while a top-level run is in flight; frame 0 carries the stop location. `startFrame`/`levels` page it. VS Code opens/focuses the top frame's `source.path` automatically — this is what makes stepping auto-open the right `.jai` file across `include`s. |
 | `scopes` | "Locals" for the frame and "Globals" (the program scope). |
-| `variables` | Locals: `controller::list_locals(frame)`, the backend's `get_frame_locals(frame)` for a function frame (an inlined graft frame has none: its slots are its caller's), and for the top level, while it is the innermost frame, the environments between the current one and the program scope. Globals: `list_globals`, the program scope's own variables. Callables are hidden and values render with `to_string()`. Variables are flat (`variablesReference` 0 on each). **Handles are generation-scoped** (generation mod 2048 over a 20-bit payload: 1 = Globals, frame i is id i+1 and Locals i+2; see Concurrency contract) — never store a raw `environment*`/`call_frame*` across an unpark. |
-| `setVariable` | `controller::set_variable` writes through `add_global` and skips the typed-local ladder; DAP `setVariable` is unsupported. A full edit would route through `enforce_type_compatibility` (object fields self-enforce through `class_instance::enforce_field_write`). |
+| `variables` | `controller::list_children(reference, start, count)`. Locals: the backend's `get_frame_locals(frame)`, every name in scope at the frame's statement (see "Frame scopes"). Globals: `list_globals`, the program scope's own variables (callables hidden). A value with parts gets a reference: a class object's fields (`detail::shown_fields`, value_text's order), an array's elements, a map's entries (indexed, paged by start/count), a handle's or a live weak_ptr's object; each child carries an `evaluateName` from its root (`p.items[2]`, `m["k"]`, `::g`). References live in the controller's table (`expandables_`), cleared at every park entry and exit, so they are stop-scoped; the connector wraps each as generation (mod 2048) over a 20-bit payload, so a stale handle is refused on the transport thread. Rows render the structural display text (no `to_string()` runs). |
+| `setVariable` | `controller::set_variable(reference, name, value)`: the child's evaluate_name (a local's name, `::name` for a global, the field/element/entry path) becomes `target = (value);` run as a console evaluation in the reference's frame, so the store is the script's own (declared types, `enforce_field_write`, element and map rules) with its own error text. |
 | `continue` | `resume()`: clear step mode, set `resume_requested_` and notify (under the controller mutex). |
 | `next` / `stepIn` / `stepOut` | Set step mode with base depth = current stack depth; unpark. Hook stops when: In = next statement, any depth; Over = depth ≤ base; Out = depth < base. |
-| `evaluate` | Answered with an empty result so watch and hover do not error. A full evaluate would run the expression in the selected frame's env on the parked thread: `context:"watch"`/`"hover"` re-run on *every* stop, so they are read-only by convention; `context:"repl"` allows full mutation. |
+| `evaluate` | `controller::evaluate(text, frame, mode)` on the parked thread (see "Evaluation"); `context:"repl"` is the console, every other context a watch. |
+| `setBreakpoints` options | `condition`, `hitCondition`, `logMessage` ride in the breakpoint record (`breakpoint_record::rich`) through the same snapshot handoff; at sync they bind to their statement lines (`hot_rich_bps_`). `should_stop` consults them only on a bloom-and-table hit: the condition and the log message's `{expr}`s evaluate as watches, hits count per (file, line). |
+| `setExceptionBreakpoints`, `exceptionInfo` | Filters `thrown` and `uncaught`. The backends call `controller::on_exception(text, caught, depth)` where an error is first noticed (its trace not yet captured): the VM in `handle_op_error`/`handle_throw_unwind`, the interpreter at its trace-capture sites. `caught` is any running try (the interpreter's `try_depth_`; the VM's try records, a coroutine resumer's included). The stop's reason is `exception`, its text the message. |
 | `pause` | Arm a one-shot "stop at next statement" flag the hook checks. |
 
 ## Breakpoint resolution notes
@@ -257,11 +263,10 @@ or VS Code hangs in "starting":
 - **Disconnect:** respond, then `detach()`, then return the listener to `accept` for reconnection.
 - **Request routing — answer-anytime vs park-only.** Closures drain only while parked, so a
   park-only request sent while running would hang VS Code's REPL/views. The connector classifies:
-  *answer-anytime on the transport thread* — `initialize`, `threads`, `setBreakpoints`, `pause`,
-  `evaluate` (empty), `disconnect`; *park-only via `post_command`* — `stackTrace`, `scopes`,
-  `variables`. A park-only request received when not paused gets an immediate DAP error ("not
-  stopped"), never a silent queue. An unknown request (`setVariable` among them) gets
-  "unsupported request".
+  *answer-anytime on the transport thread* — `initialize`, `threads`, `setBreakpoints`, `setExceptionBreakpoints`,
+  `exceptionInfo`, `pause`, `disconnect`; *park-only via `post_command`* — `stackTrace`, `scopes`, `variables`,
+  `setVariable`, `evaluate`. A park-only request received when not paused gets an immediate DAP error ("not stopped"),
+  never a silent queue. An unknown request gets "unsupported request". Logpoint output goes out as `output` events.
 - **Framing:** a byte-buffer layer that handles partial reads, multiple messages per `recv`, and the
   `\r\n\r\n` header terminator; a send-all helper handling short writes and `EINTR`/`WSAEWOULDBLOCK`.
 
@@ -299,12 +304,9 @@ The DAP connector (`jai::debug::debug_connector`, gated by `JAISCRIPT_ENABLE_DEB
    (see "Debugger performance"), and the SAME park (the
    script thread blocks in the hook inside `run_dispatch`; suspended fibers stay suspended
    — no fiber-level suspension machinery). A stopped frame's locals are
-   named **lazily**: `get_frame_locals` scans the frame's chunk (the `frames_` entry the
-   trace walk maps it to, exact even for native-entry frames) for decl/load/store/incdec
-   operands PLUS the fused side tables (`fused_binary_protos`, `counted_for_protos`,
-   `compound_fused_protos`, `iter_protos`, `destructure_protos`) and maps symbol→name through
-   the interner. No name table baked into release chunks. Known delta from the interpreter: a
-   parameter the body never references is invisible in the vm Locals view.
+   named **lazily**: `get_frame_locals` reads the frame's chunk (the `frames_` entry the
+   trace walk maps it to, exact even for native-entry frames) through `chunk::debug_locals` (slot, live ip range,
+   symbol) and maps symbol→name through the interner (see "Frame scopes").
 
    **Where a stop lands (both backends, one sequence).** A stop is one execution of a statement
    that does work of its own: `debug::controller::stops_at` excludes blocks and `case`/`default`
@@ -326,6 +328,57 @@ The DAP connector (`jai::debug::debug_connector`, gated by `JAISCRIPT_ENABLE_DEB
    `engine::wire_backend` re-wires the controller across backend swaps, so
    `debugger()`-before-`set_backend(vm)` works in either order.
 
+## Frame scopes
+
+`get_frame_locals(k)` is the one answer both backends give for what frame k sees, and `debug_local_storage(name, k)`
+is where each of those names is stored (copy-out and `set_variable`):
+
+- **Slot locals**: the interpreter walks the function body to the frame's current node (`frame_scope_slots`; a frame
+  whose scope is dying, `call_frame::exiting`, counts its statement as run, so a destructor's caller shows the locals
+  still alive); the VM reads `chunk::debug_locals` at the frame's ip. An inner declaration hides an outer one.
+- **Inlined callees**: a graft's parameters and body locals are recorded with `debug_local::graft` = 1 + the inline site
+  (a reference parameter renamed to the caller's variable is that variable's slot); the walk gives each graft an entry
+  (`debug_frame_ref`) whose locals are its own. Inlining runs only while no session is armed (the guard refuses), so a
+  graft frame appears when a pause lands inside one; its statements stand one level deeper (`statement_depth`), so
+  stepping is as if nothing were inlined.
+- **Captures, `this`, block scopes**: the VM lists a converted closure's captures (`frame::captures`), the interpreter
+  its capture environment; `this` comes from the frame. The top level's block scopes, and a closure's or a method's outer
+  scopes, come from the frame's environment up to the program (or a namespace) scope: the innermost frame's current one;
+  an outer frame's the one it stood in when it called out (interpreter: `call_frame::caller_environment`, one pointer
+  store per call; VM: `frame::debug_env`, recorded at each statement boundary while armed, epoch-checked). A plain
+  function never shows its caller's scopes.
+- **Coroutines (VM)**: a resume swaps the value stack; the frames below it keep their windows in the parked stack, so
+  `debug_frame_slot` finds a frame's window through `fiber_stacks_` (one push/pop per resume).
+
+## Evaluation
+
+`controller::evaluate(text, frame, mode)` runs `text` as its own unit (`engine::debug_evaluate`, labeled
+`debug::evaluation_source`) with the frame's names as instance variables: its locals, `this` as `__jai_this` (each `this`
+token renamed through the lexer) and the fields it names bare. The run is a nested execute on the parked thread;
+`begin_debug_evaluation`/`end_debug_evaluation` save and restore what a nested execute resets (the exception in flight,
+the trace, the nested failure, the budget) so an evaluation at an exception stop or one that fails leaves the stop as it
+was. While one runs: no breakpoint fires and no step is taken (`evaluating_`), and its own deadline holds although a
+session is armed (`!debug_evaluations_.empty()` in the backends' armed-budget test); a timeout is reported as
+`The evaluation ran past its budget of N ms`.
+
+- **Watch (read-only)**: refused before running when the parsed text holds an assignment, `++`/`--`, a lambda, a
+  throw/yield/include/import, a statement, or a call of anything but a builtin the catalog marks as only reading
+  (`detail::isObservingBuiltin`, generated from api-catalog.json effects). Script code reached anyway (an operator, a
+  getter, a constructor) is refused at its first statement: `on_statement` returns false for any statement not from
+  the evaluation's own source, and the backend raises `debug::watch_runs_script_text` there, before it runs.
+- **Console**: anything; afterwards each instance variable whose value changed (bitwise) is written back to the frame's
+  storage through `detail::variable_store` with the variable's name (the script's own text on refusal), a bare field
+  through a `__jai_this.name = value` evaluation.
+
+## Without a session
+
+- `debug::stack()` and `debug::locals([frame])` (engine-core) read `debug_frames()` / `get_frame_locals()` when called.
+- `controller::set_on_uncaught_error(cb)` and `controller::dump()`: the exception hook's condition is the controller's
+  `wants_exceptions()`, read only on the raise path, so an uncaught-error report needs no armed session and costs
+  nothing until an error.
+- The runner's `--break` arms a session whose `on_stopped` prints `dump()` and resumes on the spot; `--dump-on-error`
+  sets the uncaught-error callback.
+
 ## Portability
 
 Targets: Linux, Windows, macOS, plus Android/iOS *shipping* builds (no on-device script
@@ -343,13 +396,11 @@ then empty, so it ships zero debug/socket code.
   policy. Multiple `execute`/`include` reentries per frame are expected — each stop carries file+line
   and VS Code auto-opens the top frame's file, so line-by-line stepping follows across files. Engines
   may live off the main thread; those sharp edges are the host's to manage (ruling 4).
-- **DAP-context split** (for a full `evaluate`). watch/hover read-only-by-convention; repl allows
-  mutation. See table.
+- **DAP-context split**: watch/hover only read, the console may mutate (see "Evaluation").
 - **Lazy interner reverse lookup.** No baked slot→name table; locals are reconstructed at stop time.
-- **Watch side effects → document, no forced read-only.** VS Code re-runs every Watch/hover
-  expression on *every* stop, and JaiScript can't prove an expression is side-effect-free, so a
-  watch like `self.take_damage(10)` would fire on each step. Like gdb/DevTools, the answer is
-  "don't put state-changing expressions in a watch", not a forced read-only mode.
+- **Watch side effects are refused, not documented away.** VS Code re-runs every Watch/hover expression on every stop;
+  a watch is admitted only for what reads (static refusal), and any script code it reaches is refused at its first
+  statement (dynamic refusal), so `self.take_damage(10)` in a watch never runs.
 - **Multi-engine → one `debug_connector` per engine (per thread ideal).**
   `engine->set_debug_connector(std::make_shared<jai::debug::debug_connector>(port))` — normally one
   connector (one port) per engine. Connectors *can* be shared across engines/threads, but then

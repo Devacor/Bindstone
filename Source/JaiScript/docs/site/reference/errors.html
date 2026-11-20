@@ -530,6 +530,12 @@ try {
 <div class="tablewrap"><table><thead><tr><th>Text</th><th>When</th><th>Fix</th></tr></thead><tbody>
 <tr id="err-sleep-expects-number"><td><code>sleep expects a number of seconds</code></td><td><code>sleep</code> gets neither an int nor a float.</td><td>Pass seconds as a number.</td></tr>
 </tbody></table></div>
+<h4 id="errors-debugging">Debugging<a class="hlink" href="#errors-debugging" aria-label="link">&#8203;</a></h4>
+<div class="tablewrap"><table><thead><tr><th>Text</th><th>When</th><th>Fix</th></tr></thead><tbody>
+<tr id="err-debug-locals-frame-type"><td><code>'debug::locals' takes the frame to read as an int (0, the default: the caller's)</code></td><td><code>debug::locals</code> with more than one argument or one that is not an int.</td><td>Pass a frame index, as <code>debug::stack()</code> lists the frames.</td></tr>
+<tr id="err-debug-locals-no-frame"><td><code>'debug::locals' has no frame 9: debug::stack() lists the frames</code></td><td>A frame index below 0 or past the stack.</td><td>Read <code>debug::stack().size()</code> first.</td></tr>
+<tr id="err-watch-runs-script"><td><code>A watch only reads: '+' would run script code (evaluate it in the Debug Console)</code></td><td>A debugger&#x27;s watch, hover or breakpoint condition reached script code (an operator a class defines, a getter, a constructor); raised at its first statement, so it runs nothing.</td><td>Evaluate it in the Debug Console, which may run code.</td></tr>
+</tbody></table></div>
 <h4 id="errors-parallel-bodies">Parallel bodies<a class="hlink" href="#errors-parallel-bodies" aria-label="link">&#8203;</a></h4>
 <div class="tablewrap"><table><thead><tr><th>Text</th><th>When</th><th>Fix</th></tr></thead><tbody>
 <tr id="err-parallel-body-refused"><td><code>parallel_for: TEXT at LINE:COL</code></td><td>A body is refused before the loop runs. <code>parallel_transform:</code> and <code>parallel_reduce:</code> lead those builtins' texts.</td><td>Change the code at LINE:COL as TEXT says, or loop serially.</td></tr>
@@ -737,6 +743,16 @@ try {
 <tr id="err-signal-receiver-no-object"><td><code>Signal receiver 'panel' names an object the archive does not hold ({"$ref": 2})</code></td><td>A saved method receiver whose object was not saved in the same payload.</td><td>Save the object with the signal, or skip unknown receivers.</td></tr>
 <tr id="err-signal-receiver-no-method"><td><code>Signal receiver 'panel' names no method 'on_wave' on 'Panel'</code></td><td>A saved method receiver whose object&#x27;s class has no method of that name.</td><td>Keep the method, or skip unknown receivers.</td></tr>
 <tr id="err-signal-receiver-source-disabled"><td><code>Signal receiver 'log' is source, and the engine's source receivers are disabled</code></td><td>A saved <code>connect_source</code> or text receiver loaded into an engine with <code>jai::permissions::source_receivers</code> off.</td><td>Load it into an engine that trusts the payload, or skip unknown receivers to load the rest.</td></tr>
+</tbody></table></div>
+<h4 id="host-errors-debugger">The debugger<a class="hlink" href="#host-errors-debugger" aria-label="link">&#8203;</a></h4>
+<p>What <code>controller::evaluate</code>, <code>set_variable</code> and a breakpoint&#x27;s options answer (over DAP: the
+reply&#x27;s message), beside the script&#x27;s own errors an evaluation raises.</p>
+<div class="tablewrap"><table><thead><tr><th>Text</th><th>When</th><th>Fix</th></tr></thead><tbody>
+<tr id="err-watch-changes-state"><td><code>A watch only reads: an assignment changes state (evaluate it in the Debug Console)</code></td><td>A watch, hover or condition holds an assignment, an increment or decrement, a lambda, a throw, a statement, or a call of anything but a builtin that only reads (<code>a call of 'push'</code>).</td><td>Evaluate it in the Debug Console.</td></tr>
+<tr id="err-evaluation-budget"><td><code>The evaluation ran past its budget of 1000 ms</code></td><td>An evaluation ran longer than <code>controller::set_evaluation_budget</code> allows (one second by default).</td><td>Raise the budget, or evaluate less.</td></tr>
+<tr id="err-hit-condition"><td><code>A hit condition is a count with an optional ==, &gt;=, &gt;, &lt;=, &lt; or %: 'often'</code></td><td>A breakpoint&#x27;s hit count is not a count; the breakpoint stops and prints this.</td><td>Write <code>5</code>, <code>&gt;= 5</code> or <code>% 5</code>.</td></tr>
+<tr id="err-cannot-be-assigned"><td><code>'this' cannot be assigned</code></td><td>Set Value on <code>this</code>, or on a part no expression reaches (a map entry whose key is an object).</td><td>Set a field or an element instead.</td></tr>
+<tr id="err-variable-from-before"><td><code>This variable is from before the script last ran</code></td><td>Set Value with a reference from an earlier stop.</td><td>Read the variable again at this stop.</td></tr>
 </tbody></table></div>
 <h4 id="host-errors-saved-programs">Saved programs<a class="hlink" href="#host-errors-saved-programs" aria-label="link">&#8203;</a></h4>
 <p>A malformed <code>.jaibite</code> is refused before anything runs; every text starts <code>jaibite: </code>.</p>

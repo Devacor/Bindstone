@@ -150,7 +150,7 @@ out of range
 error: Division by zero
 something else: a float</code></pre></div>
 <div class="tablewrap"><table><thead><tr><th>Clause</th><th>Takes</th></tr></thead><tbody><tr><td><code>catch (Class e)</code></td><td>an instance of the class or a subclass</td></tr><tr><td><code>catch (int e)</code>, <code>catch (string e)</code>, <code>catch (array&lt;int&gt; e)</code>, ...</td><td>that builtin kind and no other: an <code>int</code> is not a <code>float</code></td></tr><tr><td><code>catch (error e)</code></td><td>a run-time error the engine raised (a bad index, a division by zero, a failed <code>cast</code>, a type mismatch); nothing a script throws</td></tr><tr><td><code>catch (e)</code>, <code>catch (var e)</code>, <code>catch (auto e)</code>, <code>catch</code></td><td>everything; it comes last (<code>a catch with no type catches everything: it is the last handler of its try</code>)</td></tr></tbody></table></div>
-<ul><li><code>e</code> names the thrown value itself; no copy is made, where C++ copies. <code>&amp;</code> changes nothing, and <code>const</code> makes it read-only.</li><li>With no clause for it, an error goes on to the next <code>try</code> out, from the place that raised it.</li><li>A bare <code>throw;</code> in a handler re-throws the same value; with no active exception it raises the catchable <code>Bare throw with no active exception thrown.</code></li><li><code>throw</code> is an expression: <code>x &gt; 0 ? x : throw "negative"</code>.</li><li>There is no <code>finally</code>: a destructor runs when its scope ends, a throw included.</li><li>An uncaught throw reaches the C++ host as an exception with the script stack trace attached. A bound C++ function, method, operator or accessor that throws surfaces as a catchable script error with the exception's text.</li></ul>
+<ul><li><code>e</code> names the thrown value itself; no copy is made, where C++ copies. <code>&amp;</code> changes nothing, and <code>const</code> makes it read-only.</li><li>With no clause for it, an error goes on to the next <code>try</code> out, from the place that raised it.</li><li>A bare <code>throw;</code> in a handler re-throws the same value, or the same run-time error, with the place and stack it was raised with (an outer handler's <code>e.line</code> and <code>e.stack</code> name the original throw); with no active exception it raises the catchable <code>Bare throw with no active exception thrown.</code></li><li><code>throw</code> is an expression: <code>x &gt; 0 ? x : throw "negative"</code>.</li><li>There is no <code>finally</code>: a destructor runs when its scope ends, a throw included.</li><li>An uncaught throw reaches the C++ host as an exception with the script stack trace attached. A bound C++ function, method, operator or accessor that throws surfaces as a catchable script error with the exception's text.</li></ul>
 <h3 id="what-a-catch-can-see">What the caught value carries<a class="hlink" href="#what-a-catch-can-see" aria-label="link">&#8203;</a></h3>
 <p>A run-time error is an <code>error</code>: <code>reflect::type_of(e)</code> is <code>"error"</code>, <code>e.kind</code> is its family (<code>error_kind::bounds</code>; the <a href="../reference/errors.html#error-kinds">reference</a> lists them), and <code>e</code> behaves as its message string everywhere: printed, compared (<code>e == "text"</code>), joined (<code>e + "..."</code>), stored in a <code>string</code>, or under the string methods. The same text is the host's <code>what()</code> when the error escapes.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int pick(array&lt;int&gt; xs, int i) {
@@ -179,6 +179,32 @@ rethrown</code></pre></div>
 &lt;script&gt;:2:9: error: cannot initialize 'n' declared 'int' with 'string'
         int n = "seven";
             ^</code></pre></div>
+<h3 id="debug-stack-locals">Where am I: debug::stack and debug::locals<a class="hlink" href="#debug-stack-locals" aria-label="link">&#8203;</a></h3>
+<p><code>debug::stack()</code> is the running code's call stack, innermost first, each frame a string as an uncaught
+error's trace names it, <code>"function (file:line)"</code>. <code>debug::locals()</code> is the calling frame's locals as
+a <code>map&lt;string, var&gt;</code>, name to a copy of the value; <code>debug::locals(1)</code> reads the frame below it,
+as <code>debug::stack()</code> lists them. A frame's locals are what is in scope at its statement: the parameters, the
+locals declared so far, a closure's captures, <code>this</code>. Both print their contents as they stand, and both cost
+only when called.</p>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Tile { int x = 0; array&lt;string&gt; tags = ["floor"]; }
+function area(int w, int h) -&gt; int {
+    Tile corner;
+    int a = w * h;
+    print(debug::locals());
+    print(debug::locals(1));
+    for (auto frame : debug::stack()) { print("  in ", frame.substr(0, frame.find(" ("))); }
+    return a;
+}
+function room(string name) -&gt; int { return area(3, 4); }
+int size = room("hall");</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{"a": 12, "corner": Tile{x: 0, tags: ["floor"]}, "h": 4, "w": 3}
+{"name": "hall"}
+  in area
+  in room
+  in &lt;script&gt;</code></pre></div>
+<p>A frame past the stack raises <code>'debug::locals' has no frame 9: debug::stack() lists the frames</code>. For a
+stopped script with everything in view, attach a debugger (<a href="../embedding/12-debugging.html">Debugging</a>); for a
+log of where an uncaught error was raised, run with <code>jaiscript --dump-on-error</code>.</p>
 <h2 id="terminal-errors-execution-budget-memory-cap-are-uncatchable-by-design">Terminal errors: the execution budget and the memory cap<a class="hlink" href="#terminal-errors-execution-budget-memory-cap-are-uncatchable-by-design" aria-label="link">&#8203;</a></h2>
 <p>Every <code>execute()</code> and every coroutine <code>next()</code> has a wall-clock budget, <strong>5.0 seconds by default</strong> (<code>engine::execution_budget(seconds)</code>; <code>0</code> disables it). An overrun is <strong>terminal</strong>: every <code>catch</code>, typed or not, is skipped all the way out to the host, so a runaway script cannot swallow its own stop.</p>
 <div class="codeblock cb-jai" data-budget="1" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">try {

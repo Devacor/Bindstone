@@ -399,6 +399,7 @@ namespace jai {
         // statement visitors
         error_propagator debug_refusal();   // a watch evaluation reached script code
         size_t try_depth_ = 0;   // try blocks running: an error raised inside one has a handler that may take it
+        std::vector<const caught_error_scope*> handled_errors_;   // the catch bodies running that bound their error, innermost last
         // An error noticed where it was raised (its trace not taken yet): an armed session's exception breakpoints see it. KEEP
         // BYTE-PARALLEL with vm_backend::debug_raised
         template <class Text> void debug_raised(Text&& text, bool caught);   // interpreter.cpp

@@ -1545,6 +1545,8 @@ namespace jai {
         // The handler that bound `caught` is done and its variable let go: the thrown value dies, as C++ destroys the exception
         // object when its handler exits, unless a copy of the error (a capture, a stored e) still holds it
         void end_caught_error(const script_value& caught) noexcept;
+        // The stack a caught value's handler bound (a bare rethrow raises it again with its place); empty for one with none
+        std::vector<stack_frame> caught_error_trace(const script_value& caught) const;
         // A suspended coroutine's frame dropped whole: its values die last slot first, and a handler it was suspended in lets go
         // of its thrown value as the slot of its catch variable dies
         void release_suspended_values(script_value* values, size_t count) noexcept;
@@ -1848,6 +1850,7 @@ namespace jai {
             }
         }
         void dismiss() noexcept { engine_ = nullptr; caught_.reset(); }
+        const script_value* caught() const noexcept { return engine_ && caught_ ? &*caught_ : nullptr; }
     private:
         engine* engine_ = nullptr;
         std::optional<script_value> caught_;

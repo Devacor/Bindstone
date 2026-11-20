@@ -4255,6 +4255,33 @@ void engine::initialize_engine_reference() {
         return script_value(detail::same_object(args[0], args[1]), engine_weak);
     });
 
+    // debug::stack() and debug::locals([frame]) (docs/site/guide/05-control-flow.html): the running code's call stack, innermost first,
+    // each frame as a trace line names it, and a frame's locals (0, the default: the caller's) as name -> a copy of the value.
+    // Engine-core; they read the backend only when called.
+    add_function("debug::stack", [engine_weak]() -> std::vector<std::string> {
+        std::vector<std::string> out;
+        engine_weak->backend()->debug_settle_frames();
+        for (const auto& f : engine_weak->backend()->debug_frames()) { out.push_back(debug::controller::frame_text(f.function, f.file, f.line)); }
+        return out;
+    });
+    add_variadic_function("debug::locals", [engine_weak](const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() > 1 || (args.size() == 1 && !args[0].deref().is_int())) {
+            throw runtime_error("'debug::locals' takes the frame to read as an int (0, the default: the caller's)");
+        }
+        const script_int frame = args.empty() ? 0 : args[0].deref().as_int();
+        execution_backend* be = engine_weak->backend();
+        be->debug_settle_frames();
+        if (frame < 0 || static_cast<size_t>(frame) >= be->debug_frames().size()) {
+            throw runtime_error("'debug::locals' has no frame " + std::to_string(frame) + ": debug::stack() lists the frames");
+        }
+        script_value out = script_value::make_map(engine_weak->get_type_info_string(), nullptr, engine_weak);
+        auto& entries = const_cast<script_map&>(out.as_map());
+        for (const auto& [name, value] : be->get_frame_locals(static_cast<size_t>(frame))) {
+            entries[script_value(name, engine_weak)] = clone_for_assignment(value);
+        }
+        return out;
+    });
+
     // Locations (docs/site/guide/10-modules.html "Where files are"): where the running code, the
     // program's root file and the executable are, and the same resolution ladder import walks.
     // Engine-core so a program answers the same on every host; the file IO that USES a path
@@ -7863,6 +7890,12 @@ script_value engine::make_caught_error(const script_value& thrown_in, bool by_th
     table.erase(node);
     table.emplace(node, std::move(info));
     return caught;
+}
+
+std::vector<stack_frame> engine::caught_error_trace(const script_value& caught) const {
+    const void* node = impl->caught_errors_.empty() ? nullptr : caught_node(caught.deref());
+    const auto it = node ? impl->caught_errors_.find(node) : impl->caught_errors_.end();
+    return it == impl->caught_errors_.end() ? std::vector<stack_frame>{} : it->second.trace;
 }
 
 void engine::end_caught_error(const script_value& caught) noexcept {

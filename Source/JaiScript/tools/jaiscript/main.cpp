@@ -14,6 +14,7 @@
 #include <jaiscript/signals/signal_property.hpp>
 #include <jaiscript/signals/signal_impl.hpp>
 #include <jaiscript/properties/property_serialization.hpp>   // property_manager::load template bodies
+#include <jaiscript/debug/controller.hpp>
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 #include <jaiscript/debug/connector.hpp>
 #include "fetch.hpp"   // download, zip_entries, zip_extract (runner host API)
@@ -144,6 +145,8 @@ struct options {
 	bool local_alias = true;               // engine::local_alias (--no-local-alias: every by-value local declaration clones)
 	bool type_proofs = true;               // engine::type_proofs (--no-proofs: no proofs, typed ops or cell blocks; the general form)
 	int debug_port = 0;                    // --debug-port=N, which implies --debug; 0 = default base (see attach_debugger)
+	std::vector<std::string> breaks;       // --break=<file:line[ if condition]>: print the stack and locals there and go on
+	bool dump_on_error = false;            // --dump-on-error: an uncaught error prints the stack and every frame's locals
 	int pause_mode = -1;                   // -1 auto (solo console), 0 never, 1 always
 	bool selftest = false;
 	std::string disasm;                    // --disasm=<file>: every chunk the VM compiles, disassembled with its regions' IR, in compile order
@@ -247,6 +250,11 @@ void print_usage() {
 		"  --no-local-alias      copy every by-value local declaration (the read-only local elision off)\n"
 		"  --no-proofs           run without type proofs and the typed instructions they enable (the general form)\n"
 		"  --debug-port=N        --debug, with N the first port the listener tries (default 52477, probing +10)\n"
+		"  --break=FILE:LINE     each time the script reaches LINE of FILE, print the call stack and every frame's\n"
+		"                        locals on stderr and run on; \"FILE:LINE if CONDITION\" prints only while the\n"
+		"                        condition holds (repeatable; a file run without --debug)\n"
+		"  --dump-on-error       an error no script catch takes prints the call stack and every frame's locals on\n"
+		"                        stderr where it is raised, before the error itself\n"
 		"  --pause / --no-pause  force / suppress the \"press Enter to close\" hold after a file\n"
 		"                        run (auto: pauses only when the console window is exclusively\n"
 		"                        ours, i.e. drag-drop or double-click launch)\n"
@@ -357,6 +365,12 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		else if (a == "--time") { opt.time_runs = true; }
 		else if (a == "--warnings") { opt.warnings = true; }
 		else if (a == "--debug") { opt.debug = true; }
+		else if (a == "--dump-on-error") { opt.dump_on_error = true; }
+		else if (is_flag("--break")) {
+			std::string where;
+			if (!text_of("--break", where)) { return 2; }
+			opt.breaks.push_back(where);
+		}
 		else if (a == "--no-param-alias") { opt.param_alias = false; }
 		else if (a == "--no-local-alias") { opt.local_alias = false; }
 		else if (a == "--no-proofs") { opt.type_proofs = false; }
@@ -403,6 +417,10 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 			std::fprintf(stderr, "%s\n", con.red("unexpected extra argument: " + a + " (script args go after --)").c_str());
 			return 2;
 		}
+	}
+	if ((!opt.breaks.empty() || opt.dump_on_error) && (opt.watch || (opt.script.empty() && opt.sources.empty()) || (opt.debug && !opt.breaks.empty()))) {
+		std::fprintf(stderr, "%s\n", con.red("--break and --dump-on-error need a file or -e and no --watch, and --break runs without --debug").c_str());
+		return 2;
 	}
 	if (!opt.sources.empty() && (!opt.script.empty() || opt.watch)) {
 		std::fprintf(stderr, "%s\n", con.red("-e runs its source instead of a script file (no file, no --watch)").c_str());
@@ -1345,6 +1363,44 @@ int attach_debugger(jai::engine& eng, int requested_port) {
 }
 #endif
 
+// --break and --dump-on-error: the controller with no transport, its stops and its uncaught errors printed on stderr. A stop
+// resumes as soon as it is printed, so the script runs on.
+bool wire_headless_debugging(const options& opt, jai::engine& eng) {
+	if (opt.breaks.empty() && !opt.dump_on_error) { return true; }
+	jai::debug::controller& dbg = eng.debugger();
+	std::map<std::string, std::vector<jai::debug::breakpoint>> by_file;
+	for (const std::string& where : opt.breaks) {
+		const size_t cut = where.find(" if ");
+		const std::string place = where.substr(0, cut);
+		const size_t colon = place.rfind(':');
+		auto line = colon == std::string::npos ? std::nullopt : number_in_range(place.substr(colon + 1), 1, INT_MAX);
+		if (!line) {
+			std::fprintf(stderr, "invalid value for --break: '%s' (FILE:LINE, or \"FILE:LINE if CONDITION\")\n", where.c_str());
+			return false;
+		}
+		jai::debug::breakpoint bp;
+		bp.line = *line;
+		if (cut != std::string::npos) { bp.condition = where.substr(cut + 4); }
+		by_file[place.substr(0, colon)].push_back(bp);
+	}
+	for (const auto& [file, bps] : by_file) { dbg.set_source_breakpoints(file, bps); }
+	if (!opt.breaks.empty()) {
+		dbg.set_on_stopped([&dbg](const jai::debug::stop_info& at) {
+			std::fprintf(stderr, "break at %s:%d\n%s", at.file.c_str(), at.line, dbg.dump().c_str());
+			std::fflush(stderr);
+			dbg.resume();
+		});
+		dbg.set_enabled(true);
+	}
+	if (opt.dump_on_error) {
+		dbg.set_on_uncaught_error([&dbg](const std::string& message) {
+			std::fprintf(stderr, "uncaught error: %s\n%s", message.c_str(), dbg.dump().c_str());
+			std::fflush(stderr);
+		});
+	}
+	return true;
+}
+
 int wire_debugger(const options& opt, jai::engine& eng, const console_state& con, std::ostream& out) {
 	if (!opt.debug) { return 0; }
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
@@ -1478,6 +1534,7 @@ int run_file_mode(const options& opt, const console_state& con) {
 	std::ostringstream debug_note;
 	wire_debugger(opt, *eng, con, debug_note);
 	if (!debug_note.str().empty()) { std::fputs(debug_note.str().c_str(), stderr); }
+	if (!wire_headless_debugging(opt, *eng)) { return 2; }
 
 	if (opt.benchmark_main > 0) { std::cout << "JAI_BENCHMARK_PHASE warmup\n"; }
 	run_result r = opt.sources.empty() ? run_file_in_engine(*eng, opt.script, opt.warnings) : run_sources_in_engine(*eng, opt.sources, opt.warnings);

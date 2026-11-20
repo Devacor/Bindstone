@@ -19717,6 +19717,15 @@ op_status vm_backend::exec_throw(frame& f, const vm_instruction& ins) {
 		if (!current_exception_) {
 			return raise_(make_error_code(runtime_error_code::invalid_operation), detail::bare_throw_text);
 		}
+		// the stack the innermost running handler bound: the error goes on from where it was raised
+		for (size_t r = try_records_.size(); r-- > 0;) {
+			const auto& scope = try_records_[r].caught_scope;
+			if (!scope || !scope->caught()) { continue; }
+			if (debug::controller* dbg = debug_controller_.load(std::memory_order_relaxed); dbg && dbg->wants_exceptions()) { debug_raised(current_exception_->what()); }
+			captured_trace_ = engine_->caught_error_trace(*scope->caught());
+			trace_captured_ = !captured_trace_.empty();
+			break;
+		}
 	}
 	is_unwinding_ = true;
 	return {};

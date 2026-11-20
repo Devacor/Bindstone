@@ -586,6 +586,24 @@ print(w.size(), &quot; &quot;, to_json(w.to_string().to_bytes()));</code></pre><
 <p>The 64 raw digest bytes.</p>
 </div>
 </section>
+<section class="api-group"><h2 id="group-debug">debug</h2>
+<div class="api-entry" data-provider="core" data-search="debug::locals(frame: int = 0) -&gt; map&lt;string, var&gt; observe a frame&#x27;s locals as name -&gt; a copy of the value: 0 is the caller&#x27;s, 1 its caller&#x27;s, as debug::stack() lists them. every engine"><h3 id="api-3b9635f2225f"><code>debug::locals(frame: int = 0) -&gt; map&lt;string, var&gt;</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>A frame&#x27;s locals as name -&gt; a copy of the value: 0 is the caller&#x27;s, 1 its caller&#x27;s, as debug::stack() lists them.</p>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function f(int n) -&gt; int {
+    array&lt;int&gt; xs = [n, n * 2];
+    print(debug::locals());
+    return 0;
+}
+f(3);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;n&quot;: 3, &quot;xs&quot;: [3, 6]}</code></pre></div>
+</div>
+<div class="api-entry" data-provider="core" data-search="debug::stack() -&gt; array&lt;string&gt; observe the running code&#x27;s call stack, innermost first; each frame as an uncaught error&#x27;s trace names it, &quot;function (file:line)&quot;. every engine"><h3 id="api-1abdd887b634"><code>debug::stack() -&gt; array&lt;string&gt;</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>The running code&#x27;s call stack, innermost first; each frame as an uncaught error&#x27;s trace names it, &quot;function (file:line)&quot;.</p>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function where() -&gt; int { return debug::stack().size(); }
+print(where(), &quot; &quot;, debug::stack().size());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2 1</code></pre></div>
+</div>
+</section>
 <section class="api-group"><h2 id="group-download">download</h2>
 <div class="api-entry" data-provider="runner" data-search="download.cancel() -&gt; void mutate  standalone jaiscript.exe"><h3 id="api-17b1cc565cb5"><code>download.cancel() -&gt; void</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; mutate</p>
 </div>

@@ -5998,7 +5998,12 @@ checked_result<void> interpreter::visit_throw_expr_t(throw_expr* expr, const rep
         if (!current_exception_) {
             return checked_result<void>(make_error_code(runtime_error_code::invalid_operation), detail::bare_throw_text);
         }
-        // Keep the existing active_exception_value_
+        // Keep the existing active_exception_value_, and the stack its handler bound: the error goes on from where it was raised
+        if (!handled_errors_.empty() && handled_errors_.back()->caught()) {
+            debug_raised([&] { return std::string(current_exception_->what()); }, try_depth_ > 0);
+            captured_trace_ = engine_->caught_error_trace(*handled_errors_.back()->caught());
+            trace_captured_ = !captured_trace_.empty();
+        }
     }
 
     is_unwinding_ = true;
@@ -7262,8 +7267,12 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         // of the block. A catch resume skips the bind - the restored frame holds it.
         bool catch_env_pushed = false;
         std::optional<caught_error_scope> caught_scope;   // the thrown value dies as the handler exits (KEEP BYTE-PARALLEL with the vm's try record)
+        struct handled_scope { std::vector<const caught_error_scope*>& stack; size_t depth; ~handled_scope() { stack.resize(depth); } } handled{handled_errors_, handled_errors_.size()};
         if (stmt->catch_var_id != UINT64_MAX && resuming_catch && stmt->catch_slot_index != SIZE_MAX && !call_stack_.empty()) {
-            if (const script_value* held = call_stack_.back().get_local(stmt->catch_slot_index)) { caught_scope.emplace(engine_, *held); }
+            if (const script_value* held = call_stack_.back().get_local(stmt->catch_slot_index)) {
+                caught_scope.emplace(engine_, *held);
+                handled_errors_.push_back(&*caught_scope);
+            }
         }
         if (stmt->catch_var_id != UINT64_MAX && !resuming_catch) {
             const bool by_throw = current_exception_ && current_exception_->thrown;
@@ -7273,6 +7282,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
                                                              current_exception_ ? detail::engine_access::exception_kind(*current_exception_) : error_kind::other);
             captured_trace_.clear();
             caught_scope.emplace(engine_, caught);
+            handled_errors_.push_back(&*caught_scope);
             if (stmt->catch_slot_index != SIZE_MAX && !call_stack_.empty()) {
                 call_stack_.back().set_local(stmt->catch_slot_index, std::move(caught));
             } else {

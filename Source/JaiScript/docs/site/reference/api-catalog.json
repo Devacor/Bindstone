@@ -2275,6 +2275,38 @@
       }
     },
     {
+      "owner": "debug",
+      "name": "stack",
+      "signature": "debug::stack() -> array<string>",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "The running code's call stack, innermost first; each frame as an uncaught error's trace names it, \"function (file:line)\".",
+      "source": "source/implementation/engine.cpp",
+      "form": "function",
+      "availability": "Every engine",
+      "display": "debug::stack() -> array<string>",
+      "example": {
+        "code": "function where() -> int { return debug::stack().size(); }\nprint(where(), \" \", debug::stack().size());",
+        "output": "2 1"
+      }
+    },
+    {
+      "owner": "debug",
+      "name": "locals",
+      "signature": "debug::locals(frame: int = 0) -> map<string, var>",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "A frame's locals as name -> a copy of the value: 0 is the caller's, 1 its caller's, as debug::stack() lists them.",
+      "source": "source/implementation/engine.cpp",
+      "form": "function",
+      "availability": "Every engine",
+      "display": "debug::locals(frame: int = 0) -> map<string, var>",
+      "example": {
+        "code": "function f(int n) -> int {\n    array<int> xs = [n, n * 2];\n    print(debug::locals());\n    return 0;\n}\nf(3);",
+        "output": "{\"n\": 3, \"xs\": [3, 6]}"
+      }
+    },
+    {
       "owner": "global",
       "name": "extend",
       "signature": "extend(object: var, class: class) -> var",

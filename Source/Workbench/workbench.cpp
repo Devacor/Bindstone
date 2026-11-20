@@ -2149,6 +2149,7 @@ namespace Workbench {
 	int App::runFrames(int a_frameCount, const std::string& a_screenshotPath) {
 		managers.timer.start();
 		managers.timer.delta("workbenchTick");
+		std::vector<MV::FrameReport> frames;
 		for (int frame = 0; frame < a_frameCount && !done; ++frame) {
 			guarded("update", [this]() { update(managers.timer.delta("workbenchTick")); });
 			guarded("input", [this]() { handleInput(); });
@@ -2163,7 +2164,9 @@ namespace Workbench {
 					render();
 				}
 			});
+			frames.push_back(managers.renderer.lastFrame());
 		}
+		std::cout << MV::summarizeFrames(frames, 10) << std::endl;
 		std::cout << "Workbench smoke completed (" << a_frameCount << " frames, " << errorCount << " errors)" << std::endl;
 		return errorCount == 0 ? 0 : 1;
 	}

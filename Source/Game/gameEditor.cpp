@@ -171,6 +171,7 @@ int GameEditor::runGameFrames(int a_frameLimit, const std::string& a_capturePath
 	game.returnFromBackground();
 	managers.timer.start();
 	managers.timer.delta("tick");
+	frameReports.clear();
 	int frame = 0;
 	for (; (a_frameLimit < 0 || frame < a_frameLimit) && game.update(managers.timer.delta("tick")); ++frame) {
 		game.handleInput();
@@ -185,6 +186,7 @@ int GameEditor::runGameFrames(int a_frameLimit, const std::string& a_capturePath
 		} else {
 			game.render();
 		}
+		frameReports.push_back(managers.renderer.lastFrame());
 		std::this_thread::yield();
 	}
 	return frame;
@@ -438,6 +440,7 @@ void GameEditor::dumpSlicedSprites() {
 int GameEditor::runFrames(int a_frameCount, const std::string& a_capturePath) {
 	int frames = runGameFrames(a_frameCount, a_capturePath);
 	dumpSlicedSprites();
+	std::cout << MV::summarizeFrames(frameReports, 10) << std::endl;
 	std::cout << "Game frames completed (" << frames << "/" << a_frameCount << ")" << std::endl;
 	return frames == a_frameCount ? 0 : 1;
 }

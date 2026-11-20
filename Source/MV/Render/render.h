@@ -28,6 +28,7 @@
 #include "MV/Render/points.h"
 #include "MV/Render/matrix.hpp"
 #include "MV/Render/device.h"   // RHI seam; Shader/Draw2D hold Render::Device + Bound* handles.
+#include "MV/Render/batchingDevice.h"
 #include "MV/Utility/generalUtility.h"
 #include <jaiscript/signals/signal_decl.hpp>
 
@@ -468,6 +469,14 @@ namespace MV {
 	// brackets its children with push()/pop(): draw the mask shape incrementing the stencil, test
 	// children == depth, then decrement and restore the enclosing level. reset() each frame so a
 	// throw mid-clip can't poison later frames.
+	struct FrameReport {
+		Render::DrawStatistics draws;
+		double drawSeconds = 0.0;    // clearScreen to the frame's last draw, before the swap
+		double frameSeconds = 0.0;   // clearScreen to the swap's return
+	};
+	// One line for a run of frames: means and medians of the draw counts and times, skipping the first a_warmup frames.
+	std::string summarizeFrames(const std::vector<FrameReport>& a_frames, size_t a_warmup);
+
 	class StencilStack {
 	public:
 		StencilStack(Draw2D& a_renderer) : renderer(a_renderer) {}
@@ -552,6 +561,7 @@ namespace MV {
 			// (which requires a device) works without a GL context. Headless == "a device that does nothing".
 			backend = Render::Device::makeHeadless();
 			backend->initialize(Render::SwapchainDesc{});
+			batchedDevice = std::make_unique<Render::BatchingDevice>(*backend);
 			return *this;
 		}
 
@@ -603,9 +613,19 @@ namespace MV {
 			return isHeadless;
 		}
 
-		// The active RHI backend; owned here, borrowed by the texture system and scene draw path. Null until initialize().
+		// The device everything draws through: the batching layer over the backend. Null until initialize().
 		Render::Device* device() const {
+			return batchedDevice.get();
+		}
+		Render::BatchingDevice* batches() const {
+			return batchedDevice.get();
+		}
+		// The backend under the batching layer, for tests and diagnostics.
+		Render::Device* backendDevice() const {
 			return backend.get();
+		}
+		const FrameReport& lastFrame() const {
+			return lastFrameReport;
 		}
 
 		// Clip-stencil nesting tracker; the Stencil component drives it via push/pop. See StencilStack.
@@ -674,7 +694,10 @@ namespace MV {
 
 		bool isHeadless = false;
 		std::unique_ptr<Render::Device> backend;
+		std::unique_ptr<Render::BatchingDevice> batchedDevice;
 		StencilStack stencilStack{ *this };
+		double frameStartSeconds = 0.0;
+		FrameReport lastFrameReport;
 
 		static bool firstInitializationSDL;
 		static bool firstInitializationOpenGL;

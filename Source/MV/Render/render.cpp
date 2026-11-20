@@ -8,6 +8,10 @@
 #include "MV/Utility/stringUtility.h"
 #include "MV/Utility/stopwatch.h"
 
+#include <chrono>
+#include <iomanip>
+#include <sstream>
+
 namespace MV {
 	const std::string DEFAULT_ID = "default";
 	const std::string PREMULTIPLY_ID = "premultiply";
@@ -646,6 +650,7 @@ namespace MV {
 		// Free pipelines + drain backend resources while the GL context is still current.
 		clearPipelineCache();
 		SharedTextures::resetWhite();
+		Render::DeviceBindings::release(batchedDevice.get());
 		Render::DeviceBindings::release(backend.get());
 		if (backend) { backend->shutdown(); }
 	}
@@ -672,6 +677,7 @@ namespace MV {
 		Render::SwapchainDesc swapDesc;
 		swapDesc.sdlWindow = sdlWindow.window;
 		backend->initialize(swapDesc);
+		if (!batchedDevice) { batchedDevice = std::make_unique<Render::BatchingDevice>(*backend); }
 
 		initializeExtensions();
 		summarizeDisplayMode();
@@ -844,21 +850,62 @@ namespace MV {
 		return false;
 	}
 
+	namespace {
+		double steadySeconds() {
+			return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+		}
+
+		template <typename Value>
+		std::pair<double, double> meanAndMedian(std::vector<Value> a_values) {
+			if (a_values.empty()) {
+				return { 0.0, 0.0 };
+			}
+			std::sort(a_values.begin(), a_values.end());
+			double total = 0.0;
+			for (auto value : a_values) {
+				total += static_cast<double>(value);
+			}
+			return { total / static_cast<double>(a_values.size()), static_cast<double>(a_values[a_values.size() / 2]) };
+		}
+	}
+
+	std::string summarizeFrames(const std::vector<FrameReport>& a_frames, size_t a_warmup) {
+		std::vector<uint32_t> draws;
+		std::vector<double> drawMilliseconds;
+		std::vector<double> frameMilliseconds;
+		for (size_t i = a_warmup; i < a_frames.size(); ++i) {
+			draws.push_back(a_frames[i].draws.draws);
+			drawMilliseconds.push_back(a_frames[i].drawSeconds * 1000.0);
+			frameMilliseconds.push_back(a_frames[i].frameSeconds * 1000.0);
+		}
+		auto [drawsMean, drawsMedian] = meanAndMedian(draws);
+		auto [drawMean, drawMedian] = meanAndMedian(drawMilliseconds);
+		auto [frameMean, frameMedian] = meanAndMedian(frameMilliseconds);
+		std::ostringstream result;
+		result << std::fixed << std::setprecision(1) << "[frames] " << draws.size() << " frames: draw calls mean " << drawsMean << " median " << drawsMedian
+			<< std::setprecision(3) << ", draw ms mean " << drawMean << " median " << drawMedian << ", frame ms mean " << frameMean << " median " << frameMedian;
+		return result.str();
+	}
+
 	void Draw2D::clearScreen(){
 		updateCameraProjectionMatrices();
 		sdlWindow.refreshContext();
 		// The clear is the frame's first render-pass boundary. The GL backend issues glClear; the headless backend is inert.
-		if (backend) {
+		frameStartSeconds = steadySeconds();
+		if (batchedDevice) {
 			const float clear[4] = { clearBackgroundColor.R, clearBackgroundColor.G, clearBackgroundColor.B, clearBackgroundColor.A };
-			backend->beginDefaultPass(clear);
+			batchedDevice->beginDefaultPass(clear);
 		}
 	}
 
 	void Draw2D::updateScreen(){
 		// Present is the frame's end boundary (GL backend swaps; headless is inert).
-		if (backend) {
-			backend->endPass();
-			backend->endFrame();
+		if (batchedDevice) {
+			batchedDevice->endPass();
+			lastFrameReport.drawSeconds = steadySeconds() - frameStartSeconds;
+			batchedDevice->endFrame();
+			lastFrameReport.frameSeconds = steadySeconds() - frameStartSeconds;
+			lastFrameReport.draws = batchedDevice->lastFrame();
 		} else {
 			sdlWindow.updateScreen();
 		}
@@ -1093,8 +1140,8 @@ namespace MV {
 	}
 
 	void Draw2D::clearPipelineCache() {
-		if (backend) {
-			for (auto& kv : pipelineCache) { backend->destroyPipeline(kv.second); }
+		if (batchedDevice) {
+			for (auto& kv : pipelineCache) { batchedDevice->destroyPipeline(kv.second); }
 		}
 		pipelineCache.clear();
 	}

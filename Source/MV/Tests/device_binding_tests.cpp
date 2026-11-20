@@ -156,7 +156,7 @@ namespace mv_tests {
 		}
 
 		static MV::Render::HeadlessDevice& headlessDevice(MV::Draw2D& a_renderer) {
-			return dynamic_cast<MV::Render::HeadlessDevice&>(*a_renderer.device());
+			return dynamic_cast<MV::Render::HeadlessDevice&>(*a_renderer.backendDevice());
 		}
 
 		// A material callback keeps a sprite on its own uniform set, drawn on its own.

@@ -77,6 +77,7 @@ private:
 	}
 
 	int runGameFrames(int a_frameLimit, const std::string& a_capturePath);
+	std::vector<MV::FrameReport> frameReports;
 	void captureScreenshot(const std::string& a_path);
 
 	void updateFps(double a_dt) {

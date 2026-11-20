@@ -2749,6 +2749,63 @@ static int RunAssetVerification() {
 // CPU baseline for the particle hot loops (single-threaded, no GL): Particle::update (the per-frame
 // per-particle simulation, incl. the per-particle TransformMatrix) and the vertex-generation loop
 // from loadParticlesToPoints. Establishes a "before" number for perf work. Run: BindstoneClient.exe -emitterbench
+// -spriteshot [count]: a grid of sprites from the shipped atlases, runs of eight to a texture, turned and tinted in
+// a repeating pattern; draws 120 frames, prints the frame summary and writes sprite_shot.bmp.
+static int RunSpriteShot(int a_count) {
+	Managers managers({ "", "" });
+	if (!managers.renderer.initialize(MV::Size<int>(1600, 900))) {
+		std::cout << "[spriteshot] renderer init failed" << std::endl;
+		return 1;
+	}
+	managers.textures.assemblePacks("Assets/Atlases", &managers.renderer);
+	std::vector<std::shared_ptr<MV::TextureHandle>> handles;
+	for (const char* packName : { "UI", "Building", "Particles", "Lillypads" }) {
+		if (auto pack = managers.textures.pack(packName)) {
+			for (auto&& id : pack->handleIds()) {
+				handles.push_back(pack->handle(id));
+			}
+		}
+	}
+	auto root = MV::Scene::Node::make(managers.renderer, "sprites");
+	const int columns = 50;
+	for (int i = 0; i < a_count; ++i) {
+		auto node = root->make("sprite" + std::to_string(i))->position(MV::point(18.0f + static_cast<float>(i % columns) * 31.5f, 14.0f + static_cast<float>(i / columns) * 22.0f));
+		node->rotation(MV::AxisAngles(0.0f, 0.0f, static_cast<float>(i % 7) * 13.0f));
+		auto sprite = node->attach<MV::Scene::Sprite>()->bounds(MV::BoxAABB<>(MV::Size<>(28.0f, 20.0f), true));
+		sprite->color(MV::Color(1.0f - static_cast<float>(i % 5) * 0.15f, 1.0f, 1.0f - static_cast<float>(i % 3) * 0.2f, 1.0f));
+		if (!handles.empty()) {
+			sprite->texture(handles[static_cast<size_t>(i / 8) % handles.size()]);
+		}
+	}
+	const int frameCount = 120;
+	std::vector<MV::FrameReport> frames;
+	for (int frame = 0; frame < frameCount; ++frame) {
+		SDL_Event event;
+		while (SDL_PollEvent(&event)) {
+			managers.renderer.handleEvent(event);
+		}
+		managers.renderer.clearScreen();
+		root->draw();
+		if (frame == frameCount - 1) {
+			auto size = managers.renderer.window().drawableSize();
+			SDL_Surface* surface = SDL_CreateRGBSurface(0, size.width, size.height, 32, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
+			std::vector<uint8_t> pixels(static_cast<size_t>(size.width) * size.height * 4);
+			glReadPixels(0, 0, size.width, size.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+			auto* target = static_cast<uint8_t*>(surface->pixels);
+			for (int y = 0; y < size.height; ++y) {
+				std::memcpy(target + static_cast<size_t>(y) * surface->pitch, pixels.data() + static_cast<size_t>(size.height - 1 - y) * size.width * 4, static_cast<size_t>(size.width) * 4);
+			}
+			SDL_SaveBMP(surface, "sprite_shot.bmp");
+			SDL_FreeSurface(surface);
+		}
+		managers.renderer.updateScreen();
+		frames.push_back(managers.renderer.lastFrame());
+	}
+	std::cout << MV::summarizeFrames(frames, 10) << std::endl;
+	std::cout << "Sprite shot: " << a_count << " sprites, " << handles.size() << " textures" << std::endl;
+	return 0;
+}
+
 static void RunEmitterBenchmark() {
 	using namespace MV;
 	std::cout << "\n=== Emitter CPU baseline (single-thread; Particle::update + vertex gen, no GL) ===\n";
@@ -2900,6 +2957,15 @@ int main(int argc, char *argv[]) {
 		if (strcmp(argv[i], "-fixmainui") == 0) {
 			RunLoginUiRepair("Assets/Interface/Main/view.scene");
 			return 0;
+		}
+		if (strcmp(argv[i], "-spriteshot") == 0) {
+			int count = 2000;
+			if (i + 1 < argc) {
+				if (int parsed = std::atoi(argv[i + 1]); parsed > 0) {
+					count = parsed;
+				}
+			}
+			return RunSpriteShot(count);
 		}
 		if (strcmp(argv[i], "-emitterbench") == 0) {
 			RunEmitterBenchmark();

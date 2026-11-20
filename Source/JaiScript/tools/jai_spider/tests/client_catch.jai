@@ -1,5 +1,5 @@
 // spider::catch, the idiomatic name of spider::get, against a live jai_spider: `jaiscript client_catch.jai http://127.0.0.1:PORT`
-string base = ARGS[0];
+string base = args[0];
 spider::Response caught = spider::catch(base + "/client/echo?by=catch");
 spider::Response got = spider::get(base + "/client/echo?by=catch");
 string refused = "";

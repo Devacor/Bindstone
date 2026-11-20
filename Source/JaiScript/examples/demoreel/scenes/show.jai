@@ -625,7 +625,7 @@ class Deck {
 		if (live_at < 0.0 && lt >= 2.88) {
 			live_at = lt;
 			if (!live_was_live) {
-				import(SCENES_DIR + "/live/spin_tweaked.jai");
+				import(scenes_dir + "/live/spin_tweaked.jai");
 				++LIVE_RELOADS;
 			}
 		}

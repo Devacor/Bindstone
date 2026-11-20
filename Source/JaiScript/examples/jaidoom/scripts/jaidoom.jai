@@ -1545,37 +1545,37 @@ function main() -> int {
 	bool want_shareware = true;
 	bool want_audio = true;
 	var demopath = "";
-	for (int i = 0; i < ARGS.size(); ++i) {
-		if (ARGS[i] == "selftest") { test = true; }
-		else if (ARGS[i] == "bootstrap") { bootstrap = true; }
-		else if (ARGS[i] == "--no-shareware") { want_shareware = false; }
-		else if (ARGS[i] == "--no-audio") { want_audio = false; }
-		else if (ARGS[i] == "--mute") { MUTE = true; }
-		else if (ARGS[i] == "uncapped") { UNCAPPED = true; SMOOTH = true; }
-		else if (ARGS[i] == "--truecolor") { HOST_TRUECOLOR = true; }
-		else if (ARGS[i] == "--256color") { HOST_TRUECOLOR = false; }
-		else if (ARGS[i] == "--pix" && i + 1 < ARGS.size()) {
-			PIX_MODE = ARGS[i + 1];
+	for (int i = 0; i < args.size(); ++i) {
+		if (args[i] == "selftest") { test = true; }
+		else if (args[i] == "bootstrap") { bootstrap = true; }
+		else if (args[i] == "--no-shareware") { want_shareware = false; }
+		else if (args[i] == "--no-audio") { want_audio = false; }
+		else if (args[i] == "--mute") { MUTE = true; }
+		else if (args[i] == "uncapped") { UNCAPPED = true; SMOOTH = true; }
+		else if (args[i] == "--truecolor") { HOST_TRUECOLOR = true; }
+		else if (args[i] == "--256color") { HOST_TRUECOLOR = false; }
+		else if (args[i] == "--pix" && i + 1 < args.size()) {
+			PIX_MODE = args[i + 1];
 			i = i + 1;
 			if (PIX_MODE != "half" && PIX_MODE != "sext") { print(`unknown --pix mode: ${PIX_MODE} (half|sext)`); return 2; }
 		}
-		else if (ARGS[i] == "flowtest") { flow = true; }
-		else if (ARGS[i] == "freedoom2") { path = "freedoom2"; }
-		else if (ARGS[i] == "record" && i + 1 < ARGS.size()) { DEMO_ARM = ARGS[i + 1]; i = i + 1; }
-		else if (ARGS[i] == "playdemo" && i + 1 < ARGS.size()) { demopath = ARGS[i + 1]; i = i + 1; }
-		else if (ARGS[i] == "host") {
+		else if (args[i] == "flowtest") { flow = true; }
+		else if (args[i] == "freedoom2") { path = "freedoom2"; }
+		else if (args[i] == "record" && i + 1 < args.size()) { DEMO_ARM = args[i + 1]; i = i + 1; }
+		else if (args[i] == "playdemo" && i + 1 < args.size()) { demopath = args[i + 1]; i = i + 1; }
+		else if (args[i] == "host") {
 			NP_QUEUE_MODE = "host";
-			if (i + 1 < ARGS.size() && ARGS[i + 1].to_int(0) > 0) { NP_QUEUE_PORT = ARGS[i + 1].to_int(28666); i = i + 1; }
+			if (i + 1 < args.size() && args[i + 1].to_int(0) > 0) { NP_QUEUE_PORT = args[i + 1].to_int(28666); i = i + 1; }
 		}
-		else if (ARGS[i] == "join" && i + 1 < ARGS.size()) {
+		else if (args[i] == "join" && i + 1 < args.size()) {
 			NP_QUEUE_MODE = "join";
-			NP_QUEUE_HOST = ARGS[i + 1];
+			NP_QUEUE_HOST = args[i + 1];
 			i = i + 1;
-			if (i + 1 < ARGS.size() && ARGS[i + 1].to_int(0) > 0) { NP_QUEUE_PORT = ARGS[i + 1].to_int(28666); i = i + 1; }
+			if (i + 1 < args.size() && args[i + 1].to_int(0) > 0) { NP_QUEUE_PORT = args[i + 1].to_int(28666); i = i + 1; }
 		}
-		else if (ARGS[i] == "coop") { NP_QUEUE_COOP = true; }
-		else if (ARGS[i].ends_with(".wad")) { if (path_given) { extra_wads.push(ARGS[i]); } else { path = ARGS[i]; path_given = true; } }
-		else if (ARGS[i].starts_with("E") || ARGS[i].starts_with("MAP")) { mapname = ARGS[i]; }
+		else if (args[i] == "coop") { NP_QUEUE_COOP = true; }
+		else if (args[i].ends_with(".wad")) { if (path_given) { extra_wads.push(args[i]); } else { path = args[i]; path_given = true; } }
+		else if (args[i].starts_with("E") || args[i].starts_with("MAP")) { mapname = args[i]; }
 	}
 	path = wad_path(path);
 	if (bootstrap) { return boot_run(false, want_shareware, want_audio) ? 0 : 1; }   // headless: play.bat/bootstrap.sh, CI

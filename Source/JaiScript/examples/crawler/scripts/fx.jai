@@ -626,7 +626,7 @@ function fx_apply_shake() -> void {
 float RELOAD_SWEEP = -1.0;
 
 function reload_done(string why, int files, float ms) -> void {
-	string timing = HOST_INTERACTIVE ? ` in ${ms:.1f} ms` : "";
+	string timing = host_interactive ? ` in ${ms:.1f} ms` : "";
 	log_ink(INK_MAGIC, `Reloaded ${files} scripts${timing} (${why}).`);
 	log_ink(INK_DIM, `  Kept: floor ${G.floor}, turn ${G.turn}, ${G.monsters.size()} monsters, ${G.player.inventory.size()} items, HP ${G.player.hp}/${G.player.total_max_hp()}.`);
 	fx_banner("RELOADED", "YOUR RUN KEPT", INK_MAGIC);

@@ -324,7 +324,7 @@ web_session& new_session(const char* a_args, double a_budget, bool a_blocking_sl
 	register_page_console(*eng);
 	jai::script_value args = jai::script_value::make_array(nullptr, eng.get());
 	for (const auto& arg : split_lines(a_args)) { args.as_array().emplace_back(arg, eng.get()); }
-	eng->add_global("ARGS", std::move(args));
+	eng->add_global("args", std::move(args));
 	session.eng = std::move(eng);
 	return session;
 }
@@ -376,7 +376,7 @@ void begin_run(const char* a_args, double a_budget, const std::function<jai::scr
 extern "C" {
 
 // Worker build: runs a script file to its end under an execution budget (seconds; 0 is unlimited); args holds the script's
-// ARGS, one per line. With warnings set, a clean load first lists the checker's warnings, as the runner's --warnings does.
+// args, one per line. With warnings set, a clean load first lists the checker's warnings, as the runner's --warnings does.
 // Returns the exit code.
 EMSCRIPTEN_KEEPALIVE int jaiweb_run_file(const char* a_path, const char* a_args, double a_budget, int a_warnings) {
 	return run_to_end(a_args, a_budget, [a_path, a_warnings](jai::engine& eng) {

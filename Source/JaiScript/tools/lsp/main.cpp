@@ -4,7 +4,7 @@
 //   jaiscript_lsp [--host=runner|stdlib|bare] [--include=<dir>]... [--max-message=<bytes>] [--log]
 //
 // --host picks the registration surface scripts are checked against: `runner` (default) is the
-// jaiscript runner's (stdlib, file IO, console, networking, ARGS), `stdlib` is
+// jaiscript runner's (stdlib, file IO, console, networking, args), `stdlib` is
 // jai::stdlib::register_all alone, `bare` is a fresh engine.
 
 #include "server.hpp"

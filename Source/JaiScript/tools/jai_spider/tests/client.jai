@@ -1,6 +1,6 @@
 // The spider:: client against a live jai_spider serving tests/app: `jaiscript client.jai http://127.0.0.1:PORT`.
 // Prints "ok <check>" or "FAIL <check>: <detail>" per check, then "client: N passed, M failed".
-string base = ARGS[0];
+string base = args[0];
 int passed = 0;
 int failed = 0;
 

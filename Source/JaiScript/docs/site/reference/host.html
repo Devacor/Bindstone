@@ -583,7 +583,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <div class="tablewrap"><table><thead><tr><th>Invocation</th><th>What happens</th></tr></thead><tbody><tr><td><code>jaiscript file.jai [-- args...]</code></td><td>Runs the file as a suspendable run (each <code>sleep</code> returns to the runner, which waits on the engine&#x27;s clock and resumes it), then exits.</td></tr>
 <tr><td>Exit code</td><td>The script&#x27;s trailing int expression if any; 1 on a script error; 2 on a usage error (unknown flag, missing or malformed value).</td></tr>
 <tr><td>Exit code outside 0 to 255</td><td>Its low byte, on every platform: <code>300</code> exits 44, <code>-1</code> exits 255.</td></tr>
-<tr><td><code>--</code></td><td>Everything after it is the global <code>ARGS</code>.</td></tr>
+<tr><td><code>--</code></td><td>Everything after it is the global <code>args</code>.</td></tr>
 <tr><td>A <code>.jai</code> dropped onto the executable</td><td>Runs the same and pauses before closing.</td></tr>
 <tr><td><code>jaiscript -e "source" [-e ...] [-- args...]</code></td><td>Runs the source text as a file run runs a file&#x27;s text, then exits. Combines with the flags below.</td></tr>
 <tr><td>Several <code>-e</code></td><td>Run in order in one engine: declarations carry over, the first error stops the run.</td></tr>

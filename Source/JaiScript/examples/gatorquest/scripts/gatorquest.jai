@@ -51,15 +51,15 @@ import "gq_predtest.jai";
 import "gq_menutest.jai";
 
 string arg_value(string key, string def) {
-	for (int i = 0; i + 1 < ARGS.size(); ++i) {
-		if (ARGS[i] == key) { return ARGS[i + 1]; }
+	for (int i = 0; i + 1 < args.size(); ++i) {
+		if (args[i] == key) { return args[i + 1]; }
 	}
 	return def;
 }
 
 bool arg_flag(string key) {
-	for (int i = 0; i < ARGS.size(); ++i) {
-		if (ARGS[i] == key) { return true; }
+	for (int i = 0; i < args.size(); ++i) {
+		if (args[i] == key) { return true; }
 	}
 	return false;
 }

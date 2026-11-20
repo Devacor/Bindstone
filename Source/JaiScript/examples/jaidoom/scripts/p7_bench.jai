@@ -53,8 +53,8 @@ function main() -> int {
 	// knobs: `-- 200x140` sets the vid size, `-- serial` / `-- parallel` pins the blit path
 	int bw = 120;
 	int bh = 78;
-	for (int a = 0; a < ARGS.size(); ++a) {
-		var arg = ARGS[a];
+	for (int a = 0; a < args.size(); ++a) {
+		var arg = args[a];
 		if (arg == "serial") { BLIT_WORKERS = 0; }
 		else if (arg == "parallel") { BLIT_WORKERS = 1; }
 		else {

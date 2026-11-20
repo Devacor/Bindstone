@@ -100,19 +100,19 @@ function watch_scripts() -> bool {
 
 function crawler_main() -> void {
 	setup_screen();
-	RNG = seeded_rng(HOST_SEED);
+	RNG = seeded_rng(host_seed);
 	G = Game();
 	PILOT_CO = null;   // a second run in the same engine (the REPL) starts a fresh pilot
-	G.smoke = HOST_SMOKE;
-	G.autopilot = HOST_SMOKE;
+	G.smoke = host_smoke;
+	G.autopilot = host_smoke;
 
 	if (G.autopilot) {
 		// the pilot's kin and profession come from the seed; from there it presses keys like you
 		Species species = SPECIES[RNG.next(SPECIES.size())];
 		Profession calling = PROFESSIONS[RNG.next(PROFESSIONS.size())];
 		start_new_game(species, calling, "Testpilot");
-	} else if (!(HOST_LOAD && load_game())) {
-		bool saved = file::exists(SAVE_PATH);
+	} else if (!(host_load && load_game())) {
+		bool saved = file::exists(save_path);
 		while (true) {
 			string choice = title_screen(saved);
 			if (choice == "q") { return; }
@@ -131,5 +131,5 @@ function crawler_main() -> void {
 	game_loop();
 
 	if (G.smoke) { print_run_summary("SMOKE RESULT"); }
-	else if (HOST_SCRIPTED) { print_run_summary("SCRIPTED RESULT"); }
+	else if (host_scripted) { print_run_summary("SCRIPTED RESULT"); }
 }

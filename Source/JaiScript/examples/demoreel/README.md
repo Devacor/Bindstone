@@ -85,7 +85,7 @@ falling back to `demoreel_scenes/` copied next to the binary.
 ### No build: the standalone runner
 
 `demoreel.jai` is a pure-script shim that recreates the C++ host contract (the
-`ESC` global, `itrunc`/`ifloor`, and a bit-exact script port of the seeded
+`esc` global, `itrunc`/`ifloor`, and a bit-exact script port of the seeded
 xorshift64* `seeded_rng` — checked-int64-safe via 16-bit-limb multiplies) and pumps the
 reel on the standalone runner — drag-drop it onto `jaiscript.exe` or:
 

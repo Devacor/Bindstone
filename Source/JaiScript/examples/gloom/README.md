@@ -150,7 +150,7 @@ jitter.
 `gloom.jai` is a drag-drop shim for the standalone `jaiscript.exe` runner: it
 supplies the host API of reference/README.md section 2 in pure script (a bit-exact
 xorshift64\* `seeded_rng` under checked overflow, `host_log`/`itrunc`/`ifloor`/`utf8`/
-`ESC`, the `HOST_*` globals) on top of the runner's console IO, then loads
+`esc`, the `host_*` globals) on top of the runner's console IO, then loads
 `scripts/` and runs the host pump. Flags go after `--`:
 
 ```bash

@@ -627,19 +627,19 @@ int main(int argc, char** argv) {
 		.method("set_state", &crawler_rng::set_state)
 		.build();
 
-	eng->add_global("HOST_SEED", eng->make_value(opt.seed));
-	eng->add_global("HOST_SMOKE", eng->make_value(opt.smoke));
-	eng->add_global("HOST_TURNS", eng->make_value(opt.turns));
-	eng->add_global("HOST_RELOAD_EVERY", eng->make_value(opt.reload_every));
-	eng->add_global("HOST_ANIM", eng->make_value(opt.anim));
-	eng->add_global("HOST_GOD", eng->make_value(opt.god));
-	eng->add_global("HOST_LOAD", eng->make_value(opt.load));
-	eng->add_global("HOST_SCRIPTED", eng->make_value(console.input_was_scripted));
-	eng->add_global("HOST_INTERACTIVE", eng->make_value(!console.quiet && !console.input_was_scripted));
-	eng->add_global("HOST_TRUECOLOR", eng->make_value(truecolor));
-	eng->add_global("HOST_ASCII", eng->make_value(opt.ascii));
-	eng->add_global("SAVE_PATH", eng->make_value(opt.save_path));
-	eng->add_global("HOST_BACKEND", eng->make_value(opt.backend));
+	eng->add_global("host_seed", eng->make_value(opt.seed));
+	eng->add_global("host_smoke", eng->make_value(opt.smoke));
+	eng->add_global("host_turns", eng->make_value(opt.turns));
+	eng->add_global("host_reload_every", eng->make_value(opt.reload_every));
+	eng->add_global("host_anim", eng->make_value(opt.anim));
+	eng->add_global("host_god", eng->make_value(opt.god));
+	eng->add_global("host_load", eng->make_value(opt.load));
+	eng->add_global("host_scripted", eng->make_value(console.input_was_scripted));
+	eng->add_global("host_interactive", eng->make_value(!console.quiet && !console.input_was_scripted));
+	eng->add_global("host_truecolor", eng->make_value(truecolor));
+	eng->add_global("host_ascii", eng->make_value(opt.ascii));
+	eng->add_global("save_path", eng->make_value(opt.save_path));
+	eng->add_global("host_backend", eng->make_value(opt.backend));
 
 	if (opt.debug) {
 #ifdef JAISCRIPT_ENABLE_DEBUGGER

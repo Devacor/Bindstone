@@ -33,7 +33,7 @@ int main(int argc,char**argv){
 			trace<<phase<<'\t'<<tic<<'\t'<<state<<'\t'<<frame.size()<<'\t'<<std::hex<<std::setw(16)<<std::setfill('0')<<frame_hash<<std::dec<<'\n';
 			if(tic==1&&phase==0){std::ofstream raw(trace_path.string()+".frame1",std::ios::binary);raw.write(frame.data(),frame.size());}
 		});
-		auto args=jai::script_value::make_array(nullptr,e.get());args.as_array().emplace_back((script.parent_path().parent_path()/"demo.json").generic_string(),e.get());args.as_array().emplace_back("120x78",e.get());e->add_global("ARGS",std::move(args));
+		auto args=jai::script_value::make_array(nullptr,e.get());args.as_array().emplace_back((script.parent_path().parent_path()/"demo.json").generic_string(),e.get());args.as_array().emplace_back("120x78",e.get());e->add_global("args",std::move(args));
 		auto text=read(script);std::string marker="frame_bytes = frame.size();";auto pos=text.find(marker);
 		if(pos==std::string::npos){throw std::runtime_error("checkpoint marker absent");}
 		auto instrument=marker+"\n host_checkpoint(GAME_TIC, demo_state_hash(), frame);";

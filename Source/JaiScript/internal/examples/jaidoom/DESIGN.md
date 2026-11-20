@@ -43,7 +43,7 @@ partition by luma vs cell mean, glyph by bright bitmask, doom-cli's algorithm) -
 with escape elision (emit fg/bg only on change — GLOOM's improvement over doom-cli's
 full-SGR-per-cell). Light diminishing goes through COLORMAP (authentic banding), palette
 flashes switch PLAYPAL banks (all 14 banks pre-interned at boot). Render resolution = terminal
-subpixel grid (`term_cols()`/`term_rows()`, or a width set by ARGS);
+subpixel grid (`term_cols()`/`term_rows()`, or a width set by args);
 projection is width-parameterized exactly like every source port.
 
 ## Module map (scripts/)

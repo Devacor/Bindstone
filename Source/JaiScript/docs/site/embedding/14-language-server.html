@@ -95,7 +95,7 @@ changes included; every other file from disk, re-read when it changes.</p>
 <div class="tablewrap"><table>
 <thead><tr><th><code>--host=</code></th><th>registrations</th></tr></thead>
 <tbody>
-<tr><td><code>runner</code> (default)</td><td>the <code>jaiscript</code> runner's exact surface: the standard library, file IO, the console and audio functions, <code>net_server</code>/<code>net_channel</code>, <code>download</code>, <code>ARGS</code></td></tr>
+<tr><td><code>runner</code> (default)</td><td>the <code>jaiscript</code> runner's exact surface: the standard library, file IO, the console and audio functions, <code>net_server</code>/<code>net_channel</code>, <code>download</code>, <code>args</code></td></tr>
 <tr><td><code>stdlib</code></td><td><code>jai::stdlib::register_all</code> alone</td></tr>
 <tr><td><code>bare</code></td><td>a fresh engine: the language and the core builtins (<code>print</code>, <code>format_value</code>, <code>math::</code>, <code>binary::</code>, <code>extend</code>, <code>same_object</code>, <code>parallel_transform</code>, the file-location functions, <code>jai::permissions::is_enabled</code>), without the standard library's <code>to_string</code>, <code>reflect::type_of</code>, <code>to_json</code>, <code>time::</code> or the rest of <code>reflect::</code></td></tr>
 </tbody></table></div>

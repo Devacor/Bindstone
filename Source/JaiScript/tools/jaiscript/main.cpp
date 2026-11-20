@@ -151,7 +151,7 @@ struct options {
 	std::string coverage;                  // --coverage=<file>: the vm's execution-coverage census at exit (a build with JAISCRIPT_VM_COVERAGE)
 	std::string load_report;               // --load-report[=json]: where the load spent its time, on stderr ("table" or "json"); empty = off
 	int benchmark_main = 0;               // file execution warms main; then call it N more times
-	std::vector<std::string> script_args;  // everything after `--`, exposed as global ARGS
+	std::vector<std::string> script_args;  // everything after `--`, exposed as the global `args`
 };
 
 void print_usage() {
@@ -205,7 +205,7 @@ void print_usage() {
 		"\n"
 		"usage:\n"
 		"  jaiscript                          interactive REPL (persistent engine; :help inside)\n"
-		"  jaiscript file.jai [-- args...]    run a script and exit; the args are the global ARGS, an\n"
+		"  jaiscript file.jai [-- args...]    run a script and exit; they are the global `args`, an\n"
 		"                                     array of strings (drag-drop a .jai onto the exe works\n"
 		"                                     too - the window pauses so you can read output)\n"
 		"  jaiscript -e \"source\" [-e ...]     run the source text and exit, like a file: several -e run\n"
@@ -287,7 +287,7 @@ void print_usage() {
 		"  port: listen/send(id,bytes)/broadcast/pump/kick/client_count; per-client signals\n"
 		"  on_client_connect(id)/on_client_packet(id,bytes)/on_client_disconnect(id,reason)),\n"
 		"  net_host_name() and net_local_addresses() (this machine's IPv4 addresses).\n"
-		"  Args after `--` are the global ARGS (array of strings). include/import resolve\n"
+		"  Args after `--` are the global `args` (array of strings). include/import resolve\n"
 		"  relative to the script's folder.\n"
 		"\n"
 		"debugging: --debug stands up a DAP listener (localhost only, costs nothing until a session\n"
@@ -1325,7 +1325,7 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 	auto& arg_storage = args.as_array();
 	arg_storage.reserve(opt.script_args.size());
 	for (const auto& s : opt.script_args) { arg_storage.emplace_back(s, eng.get()); }
-	eng->add_global("ARGS", std::move(args));
+	eng->add_global("args", std::move(args));
 	return eng;
 }
 

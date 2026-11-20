@@ -8068,7 +8068,7 @@
     },
     {
       "owner": "global",
-      "name": "ARGS",
+      "name": "args",
       "type": "array<string>",
       "provider": "runner",
       "access": "read/write",

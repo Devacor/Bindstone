@@ -22,7 +22,7 @@ platform: an int outside that range exits with its low byte (`300` exits 44, `-1
 on Windows as on POSIX, so keep a result meant as an exit code in that range.
 
 - `include`/`import` resolve relative to the script's own directory.
-- Everything after `--` is the global `ARGS` (array of strings).
+- Everything after `--` is the global `args` (array of strings).
 - **Drag-drop a `.jai` file onto the exe works** — and when the console window is
   exclusively ours (drag-drop / double-click launch) the runner pauses on
   "press Enter to close" so the output is readable. `--pause` / `--no-pause` override.
@@ -216,7 +216,7 @@ addresses (loopback left out), which is what a player hosting a game tells the o
 reads `COLORTERM` (`truecolor` or `24bit`), and on Windows `WT_SESSION` (Windows Terminal), to
 choose between 24-bit colour and the 256-colour palette.
 
-The strings after `--` are the global `ARGS`.
+The strings after `--` are the global `args`.
 
 ## Ctrl+C
 

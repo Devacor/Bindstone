@@ -70,7 +70,7 @@
           ],
           "default": "runner",
           "enumDescriptions": [
-            "The jaiscript runner's registrations: the standard library, file IO, console, networking, ARGS.",
+            "The jaiscript runner's registrations: the standard library, file IO, console, networking, args.",
             "The standard library alone (jai::stdlib::register_all).",
             "A fresh engine: only what every engine has."
           ],

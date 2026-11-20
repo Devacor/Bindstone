@@ -76,9 +76,9 @@ function main() -> int {
 	int tics = 30;
 	int every = 0;
 	bool panel = false;
-	for (int i = 0; i < ARGS.size(); ++i) {
-		string a = ARGS[i];
-		string next = i + 1 < ARGS.size() ? ARGS[i + 1] : "";
+	for (int i = 0; i < args.size(); ++i) {
+		string a = args[i];
+		string next = i + 1 < args.size() ? args[i + 1] : "";
 		if (a == "out") { OUT_DIR = next; i += 1; }
 		else if (a == "fight") { target = next.to_int(-1); i += 1; }
 		else if (a == "tics") { tics = next.to_int(tics); i += 1; }

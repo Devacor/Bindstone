@@ -21,19 +21,19 @@
 
 import "host_capture.jai";
 
-var HOST_SEED = 1337;
-var HOST_SMOKE = false;
-var HOST_TURNS = 250;
-var HOST_RELOAD_EVERY = 0;
-var HOST_ANIM = false;      // anim: a headless run builds the animations' in-between frames (a dump keeps them)
-var HOST_GOD = false;
-var HOST_LOAD = false;
-var HOST_SCRIPTED = false;
-var HOST_INTERACTIVE = false;
-var HOST_TRUECOLOR = true;
-var HOST_ASCII = false;
-var HOST_BACKEND = "vm";
-var SAVE_PATH = parent_dir(root_script_dir()) + "/crawler_save.json";
+var host_seed = 1337;
+var host_smoke = false;
+var host_turns = 250;
+var host_reload_every = 0;
+var host_anim = false;      // anim: a headless run builds the animations' in-between frames (a dump keeps them)
+var host_god = false;
+var host_load = false;
+var host_scripted = false;
+var host_interactive = false;
+var host_truecolor = true;
+var host_ascii = false;
+var host_backend = "vm";
+var save_path = parent_dir(root_script_dir()) + "/crawler_save.json";
 var SHIM_QUIET = false;
 var SHIM_INPUT = "";
 var SHIM_COLORS = "";
@@ -54,18 +54,18 @@ function shim_flag_name(string a) -> string {
 
 {
 	int i = 0;
-	while (i < ARGS.size()) {
-		string flag = shim_flag_name(ARGS[i]);
-		string value = i + 1 < ARGS.size() ? ARGS[i + 1] : "";
+	while (i < args.size()) {
+		string flag = shim_flag_name(args[i]);
+		string value = i + 1 < args.size() ? args[i + 1] : "";
 		int taken = 2;
-		if (flag == "seed") { HOST_SEED = value.to_int(HOST_SEED); }
-		else if (flag == "turns" || flag == "frames") { HOST_TURNS = value.to_int(HOST_TURNS); }
-		else if (flag == "reload-every") { HOST_RELOAD_EVERY = value.to_int(0); }
+		if (flag == "seed") { host_seed = value.to_int(host_seed); }
+		else if (flag == "turns" || flag == "frames") { host_turns = value.to_int(host_turns); }
+		else if (flag == "reload-every") { host_reload_every = value.to_int(0); }
 		else if (flag == "input") { SHIM_INPUT = value; }
-		else if (flag == "save") { SAVE_PATH = value; }
-		else if (flag == "backend") { HOST_BACKEND = value; }
+		else if (flag == "save") { save_path = value; }
+		else if (flag == "backend") { host_backend = value; }
 		else if (flag == "colors") { SHIM_COLORS = value; }
-		else if (flag == "dump") { SHIM_DUMP = value; HOST_SMOKE = true; }
+		else if (flag == "dump") { SHIM_DUMP = value; host_smoke = true; }
 		else if (flag == "shots") { SHIM_SHOT_EVERY = value.to_int(0); }
 		else if (flag == "view") { SHIM_VIEW_ROWS = value.to_int(20); }
 		else if (flag == "layout") { SHIM_LAYOUT = value == "single" ? 1 : 2; }
@@ -76,26 +76,26 @@ function shim_flag_name(string a) -> string {
 				SHIM_SCREEN_ROWS = value.substr(x + 1, value.size() - x - 1).to_int(0);
 			}
 		}
-		else if (flag == "bench") { SHIM_BENCH = value.to_int(200); HOST_SMOKE = true; }
+		else if (flag == "bench") { SHIM_BENCH = value.to_int(200); host_smoke = true; }
 		else {
 			taken = 1;
-			if (flag == "smoke") { HOST_SMOKE = true; }
+			if (flag == "smoke") { host_smoke = true; }
 			else if (flag == "quiet") { SHIM_QUIET = true; }
 			else if (flag == "dev") { }   // hot reload is always on; accepted for muscle memory
-			else if (flag == "god") { HOST_GOD = true; }
-			else if (flag == "load") { HOST_LOAD = true; }
-			else if (flag == "ascii") { HOST_ASCII = true; }
-			else if (flag == "anim") { HOST_ANIM = true; }
-			else { print(`crawler shim: unknown arg '${ARGS[i]}'`); }
+			else if (flag == "god") { host_god = true; }
+			else if (flag == "load") { host_load = true; }
+			else if (flag == "ascii") { host_ascii = true; }
+			else if (flag == "anim") { host_anim = true; }
+			else { print(`crawler shim: unknown arg '${args[i]}'`); }
 		}
 		i += taken;
 	}
 }
-if (HOST_SMOKE) { SHIM_QUIET = true; }
-if (SHIM_INPUT != "") { HOST_SCRIPTED = true; }
-HOST_INTERACTIVE = !SHIM_QUIET && !HOST_SCRIPTED;
+if (host_smoke) { SHIM_QUIET = true; }
+if (SHIM_INPUT != "") { host_scripted = true; }
+host_interactive = !SHIM_QUIET && !host_scripted;
 // COLORTERM=truecolor|24bit says 24-bit, as does any Windows console; elsewhere the 256-colour cube
-HOST_TRUECOLOR = SHIM_COLORS != "" ? SHIM_COLORS == "24" : env_var("COLORTERM") == "truecolor" || env_var("COLORTERM") == "24bit" || app_data_dir("x").find(":") == 1;
+host_truecolor = SHIM_COLORS != "" ? SHIM_COLORS == "24" : env_var("COLORTERM") == "truecolor" || env_var("COLORTERM") == "24bit" || app_data_dir("x").find(":") == 1;
 
 // ---- the console ----
 string SHIM_ENTER = "\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H";
@@ -107,7 +107,7 @@ array<string> SHIM_ENDING = [];   // with dump: the death or victory pages a smo
 function draw(string frame) -> void {
 	if (SHIM_QUIET) {
 		if (SHIM_DUMP == "") { return; }
-		if (HOST_ANIM && G != null && !G.over) { SHIM_FRAMES.push(frame); } else { SHIM_ENDING.push(frame); }
+		if (host_anim && G != null && !G.over) { SHIM_FRAMES.push(frame); } else { SHIM_ENDING.push(frame); }
 		return;
 	}
 	print("\x1b[H" + frame + "\x1b[0m", skip_newline);
@@ -162,7 +162,7 @@ function console_key() -> string {
 }
 
 function read_key() -> string {
-	if (HOST_SCRIPTED) { return scripted_key(); }
+	if (host_scripted) { return scripted_key(); }
 	while (true) {
 		string k = console_key();
 		if (k != "") { return k; }
@@ -172,7 +172,7 @@ function read_key() -> string {
 }
 
 function poll_key(float seconds) -> string {
-	if (HOST_SCRIPTED) { return scripted_key(); }
+	if (host_scripted) { return scripted_key(); }
 	time::stopwatch waited;
 	waited.start();
 	while (true) {

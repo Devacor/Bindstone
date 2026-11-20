@@ -1,6 +1,6 @@
 // demoreel.jai — drag-drop shim: runs the demoreel on the standalone jaiscript
 // runner with zero C++ beyond the runner itself. Recreates the C++ host contract
-// (demoreel_host.cpp) in script: the ESC global, the itrunc/ifloor casts, host_log
+// (demoreel_host.cpp) in script: the esc global, the itrunc/ifloor casts, host_log
 // and the xorshift64* seeded_rng class, bit-exact under checked int64 (16-bit-limb
 // multiplies, masked logical shifts). Then it imports the scene files in the host's
 // load order and pumps demo_frame at 30 fps.
@@ -30,7 +30,7 @@
 
 // ---------------------------------------------------------------- host API ---
 
-string ESC = to_string(to_char(27));
+string esc = to_string(to_char(27));
 var RUNNER_BACKEND = "vm";   // HUD label only; the reel never branches on it
 
 function itrunc(float v) -> int { return math::itrunc(v); }
@@ -88,10 +88,10 @@ class seeded_rng {
 
 // ------------------------------------------------------------------ scenes ---
 // the jai adapter's kSceneFiles order: base classes before derived, main.jai last
-// (it reads ESC at import time, so the host API above must already exist).
+// (it reads esc at import time, so the host API above must already exist).
 
 // where the scene files live: EIGHT imports a module from there while it runs
-var SCENES_DIR = current_script_dir() + "/scenes";
+var scenes_dir = current_script_dir() + "/scenes";
 import "scenes/util.jai";
 import "scenes/music.jai";
 import "scenes/reel.jai";
@@ -136,9 +136,9 @@ var OPT_VIDEO = "";
 var OPT_EVERY = 2;
 var OPT_WORKERS = -1;       // -1 = the run's default
 
-for (int i = 0; i + 1 < ARGS.size(); i += 2) {
-	string k = ARGS[i];
-	string v = ARGS[i + 1];
+for (int i = 0; i + 1 < args.size(); i += 2) {
+	string k = args[i];
+	string v = args[i + 1];
 	if (k == "frames" || k == "turns") { OPT_FRAMES = v.to_int(); }
 	else if (k == "seed") { OPT_SEED = v.to_int(); }
 	else if (k == "fps") { OPT_FPS = v.to_int() * 1.0; }
@@ -331,7 +331,7 @@ function write_cues(string dir) -> var {
 // terminals without the block glyphs. Only the interactive reel presents through here; the headless modes
 // hash the reel's own frames.
 
-string CSI = ESC + "[";
+string CSI = esc + "[";
 
 function cube_axis(int v) -> int {
 	if (v < 48) { return 0; }
@@ -426,7 +426,7 @@ function run_interactive() -> int {
 	var terminal = Terminal();
 	terminal.cube = OPT_CUBE;
 	terminal.ascii = OPT_ASCII;
-	print(ESC + "[?1049h" + ESC + "[?25l" + ESC + "[2J" + ESC + "[H", skip_newline);
+	print(esc + "[?1049h" + esc + "[?25l" + esc + "[2J" + esc + "[H", skip_newline);
 	time::stopwatch show;
 	time::stopwatch pace;
 	float fps_ema = OPT_FPS;
@@ -453,7 +453,7 @@ function run_interactive() -> int {
 			playing = want;
 		}
 		sim_ms = pace.delta() * 1000;
-		print(ESC + "[H" + terminal.present(frame) + ESC + "[0m", skip_newline);
+		print(esc + "[H" + terminal.present(frame) + esc + "[0m", skip_newline);
 		draw_ms = pace.delta() * 1000;
 
 
@@ -461,7 +461,7 @@ function run_interactive() -> int {
 		if (used < budget_ms) { sleep((budget_ms - used) / 1000.0); }
 	}
 	stop_sounds();
-	print(ESC + "[0m" + ESC + "[?1049l" + ESC + "[?25h", skip_newline);
+	print(esc + "[0m" + esc + "[?1049l" + esc + "[?25h", skip_newline);
 	return 0;
 }
 

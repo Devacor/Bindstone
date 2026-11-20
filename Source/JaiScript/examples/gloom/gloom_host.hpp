@@ -57,7 +57,7 @@ struct host_services {
 double now_seconds();
 uint64_t fnv1a(uint64_t hash, const std::string& bytes);
 std::string utf8_encode(int64_t codepoint);
-// 0 half (1x2), 1 quad (2x2), 2 sext (2x3) pixels per cell — bind as HOST_PIX
+// 0 half (1x2), 1 quad (2x2), 2 sext (2x3) pixels per cell — bind as host_pix
 inline int64_t pix_mode_index(const std::string& pix) {
 	return pix == "half" ? 0 : (pix == "sext" ? 2 : 1);
 }

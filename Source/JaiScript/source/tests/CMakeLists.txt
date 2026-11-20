@@ -169,6 +169,7 @@ endif()
 if(JAISCRIPT_ENABLE_IMAGE)
     add_executable(jaiscript_image_fuzz
         fuzz/image_fuzz_main.cpp
+        ${PROJECT_SOURCE_DIR}/source/implementation/stdlib/image_jpeg.cpp
         ${PROJECT_SOURCE_DIR}/source/implementation/stdlib/image_pixels.cpp
         ${PROJECT_SOURCE_DIR}/source/implementation/stdlib/image_png.cpp
     )

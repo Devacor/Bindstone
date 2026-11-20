@@ -34,6 +34,29 @@ namespace image_test {
 		return a_bytes.size() > 64 ? text + "..." : text;
 	}
 
+	// How far a decode is from its reference, channel by channel
+	struct difference {
+		int largest = 0;
+		double mean = 0;
+		std::string describe() const { return "largest " + std::to_string(largest) + ", mean " + std::to_string(mean); }
+	};
+
+	inline difference compare(const image_codec::bitmap& a_pixels, const image_codec::bitmap& a_reference) {
+		difference result;
+		if (a_pixels.width != a_reference.width || a_pixels.height != a_reference.height || a_pixels.rgba.size() != a_reference.rgba.size()) {
+			result.largest = 256;
+			return result;
+		}
+		uint64_t total = 0;
+		for (size_t i = 0; i < a_pixels.rgba.size(); ++i) {
+			const int gap = a_pixels.rgba[i] > a_reference.rgba[i] ? a_pixels.rgba[i] - a_reference.rgba[i] : a_reference.rgba[i] - a_pixels.rgba[i];
+			result.largest = gap > result.largest ? gap : result.largest;
+			total += static_cast<uint64_t>(gap);
+		}
+		result.mean = a_pixels.rgba.empty() ? 0 : static_cast<double>(total) / static_cast<double>(a_pixels.rgba.size());
+		return result;
+	}
+
 	inline void put_32(bytes& a_out, uint32_t a_value) {
 		for (int shift = 24; shift >= 0; shift -= 8) { a_out.push_back(static_cast<uint8_t>(a_value >> shift)); }
 	}

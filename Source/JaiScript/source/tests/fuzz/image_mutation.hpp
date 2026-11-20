@@ -160,16 +160,50 @@ namespace image_mutation {
 		return image_test::png_file(width, height, static_cast<uint8_t>(depth), static_cast<uint8_t>(colour), interlaced ? 1 : 0, raw, parts);
 	}
 
+	// Edits to the entropy-coded bytes after a JPEG's scan headers alone, none of them an FF, so the marker structure stands and
+	// the Huffman and coefficient decoding see the damage
+	inline void mutate_jpeg_data(std::vector<uint8_t>& bytes, generator& random, size_t edits) {
+		std::vector<std::pair<size_t, size_t>> spans;
+		size_t at = 2;
+		while (at + 4 <= bytes.size() && bytes[at] == 0xff) {
+			const size_t length = (size_t {bytes[at + 2]} << 8) | bytes[at + 3];
+			if (bytes[at + 1] != 0xda) {
+				at += 2 + length;
+				continue;
+			}
+			size_t end = at + 2 + length;
+			const size_t begin = end;
+			while (end + 1 < bytes.size() && !(bytes[end] == 0xff && bytes[end + 1] != 0x00 && (bytes[end + 1] < 0xd0 || bytes[end + 1] > 0xd7))) { ++end; }
+			if (end > begin) { spans.push_back({begin, end}); }
+			at = end;
+		}
+		if (spans.empty()) { return; }
+		for (size_t edit = 0; edit < edits; ++edit) {
+			const std::pair<size_t, size_t> span = spans[random.below(spans.size())];
+			const size_t where = span.first + random.below(span.second - span.first);
+			if (bytes[where] == 0xff || (where > 0 && bytes[where - 1] == 0xff)) { continue; }
+			uint8_t value = random.below(2) == 0 ? static_cast<uint8_t>(bytes[where] ^ (1u << random.below(8))) : static_cast<uint8_t>(random.next());
+			if (value == 0xff) { value = 0xfe; }
+			bytes[where] = value;
+		}
+	}
+
 	// The bytes of case a_seed of a format: a fixture with one to four edits. A chunk CRC would stop nearly every edit to a
-	// PNG at the door, so two PNG cases in three have their CRCs repaired, and one of those starts from a generated file.
+	// PNG at the door, so two PNG cases in three have their CRCs repaired, and one of those starts from a generated file; one
+	// JPEG case in three damages only the image data.
 	inline std::vector<uint8_t> mutated_case(const char* a_format, const std::vector<const image_fixtures::fixture*>& a_pool, uint64_t a_seed) {
 		generator random {a_seed * 0x2545f4914f6cdd1dull + 0x1b873593};
 		const bool png = std::strcmp(a_format, "png") == 0;
-		const size_t kind = png ? static_cast<size_t>(a_seed % 3) : 2;
+		const bool jpeg = std::strcmp(a_format, "jpeg") == 0;
+		const size_t kind = png || jpeg ? static_cast<size_t>(a_seed % 3) : 2;
 		std::vector<uint8_t> bytes;
-		if (kind == 0) {
+		if (kind == 0 && png) {
 			bytes = generated_png(random);
 			mutate(bytes, a_pool, random, random.below(3));
+		} else if (kind == 0 && jpeg) {
+			const image_fixtures::fixture& base = *a_pool[random.below(a_pool.size())];
+			bytes.assign(base.bytes, base.bytes + base.size);
+			mutate_jpeg_data(bytes, random, 1 + random.below(12));
 		} else {
 			const image_fixtures::fixture& base = *a_pool[random.below(a_pool.size())];
 			bytes.assign(base.bytes, base.bytes + base.size);

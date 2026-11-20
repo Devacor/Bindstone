@@ -21,6 +21,13 @@ namespace jai::foundry::tests {
 using namespace jai::image_test;
 namespace codec = jai::image_codec;
 
+inline const image_fixtures::fixture& fixture_named(const std::string& a_name) {
+	for (const image_fixtures::fixture& each : image_fixtures::k_fixtures) {
+		if (a_name == each.name) { return each; }
+	}
+	throw std::runtime_error("no fixture " + a_name);
+}
+
 class image_codec_tests : public suite {
 public:
 	image_codec_tests() : suite("Image Codec") {}
@@ -351,6 +358,171 @@ public:
 			check_eq(std::string("Image data is not a JPEG, PNG or GIF (read a file with image::load(file::read(path)))"), outcome(bytes {}));
 		});
 
+		test("jpeg_fixtures_decode_within_three_of_the_reference", [this]() {
+			// Windows' decoder is the reference: its inverse DCT rounds differently, so a channel may differ by 2 (3 in the photograph)
+			size_t seen = 0;
+			for (const image_fixtures::fixture& each : image_fixtures::k_fixtures) {
+				if (std::strcmp(each.format, "jpeg") != 0) { continue; }
+				++seen;
+				codec::header header;
+				check_eq(std::string(""), std::string(codec::status_text(codec::read_header(each.bytes, each.size, codec::limits {}, header))), each.name);
+				check_eq(each.width, header.width, each.name);
+				check_eq(each.height, header.height, each.name);
+				codec::header decoded;
+				codec::bitmap pixels;
+				check_eq(std::string(""), std::string(codec::status_text(codec::decode(each.bytes, each.size, codec::limits {}, codec::work_hook {}, decoded, pixels))), each.name);
+				codec::header reference_header;
+				codec::bitmap reference;
+				check_true(codec::decode(each.reference, each.reference_size, codec::limits {}, codec::work_hook {}, reference_header, reference) == codec::status::ok, each.name);
+				const difference measured = compare(pixels, reference);
+				check_le(measured.largest, 3, std::string(each.name) + ": " + measured.describe());
+				check_true(measured.mean < 0.1, std::string(each.name) + ": " + measured.describe());
+			}
+			check_ge(seen, size_t {27});
+		});
+
+		test("jpeg_exif_orientation_is_read_in_either_byte_order", [this]() {
+			for (auto [name, orientation] : std::vector<std::pair<std::string, int>> {{"jpeg_exif_orientation_3_9x5", 3}, {"jpeg_exif_orientation_6_9x5", 6}, {"jpeg_exif_orientation_8_9x5", 8}, {"jpeg_wic_photo_64x48", 1}}) {
+				const image_fixtures::fixture& each = fixture_named(name);
+				codec::header header;
+				check_true(codec::read_header(each.bytes, each.size, codec::limits {}, header) == codec::status::ok, name);
+				check_eq(orientation, int {header.orientation}, name);
+				check_eq(orientation >= 5 ? each.height : each.width, header.oriented_width(), name);
+				codec::header decoded;
+				codec::bitmap pixels;
+				check_true(codec::decode(each.bytes, each.size, codec::limits {}, codec::work_hook {}, decoded, pixels) == codec::status::ok, name);
+				check_eq(orientation, int {decoded.orientation}, name);
+				// the decoder hands back the stored pixels; image::load turns them
+				check_eq(each.width, pixels.width, name);
+			}
+		});
+
+		test("jpeg_refuses_hostile_files", [this]() {
+			const image_fixtures::fixture& base = fixture_named("jpeg_444_photo_33x17");
+			const bytes good(base.bytes, base.bytes + base.size);
+			check_eq(std::string("ok"), outcome(good));
+			// where the segments are, by marker
+			auto find = [&](const bytes& a_file, uint8_t a_marker) {
+				size_t at = 2;
+				while (at + 4 <= a_file.size() && a_file[at] == 0xff) {
+					if (a_file[at + 1] == a_marker) { return at; }
+					at += 2 + ((size_t {a_file[at + 2]} << 8) | a_file[at + 3]);
+				}
+				return size_t {0};
+			};
+			const size_t frame = find(good, 0xc0);
+			const size_t tables = find(good, 0xc4);
+			const size_t quantization = find(good, 0xdb);
+			const size_t scan = find(good, 0xda);
+			check_true(frame && tables && quantization && scan, "the fixture's layout");
+			auto changed = [&](size_t a_at, std::initializer_list<uint8_t> a_bytes) {
+				bytes file = good;
+				size_t at = a_at;
+				for (uint8_t b : a_bytes) { file[at++] = b; }
+				return file;
+			};
+			// dimensions of 0 (a DNL height) and past the pixel limit, decided by the frame header alone
+			check_eq(std::string("JPEG frame header is invalid"), outcome(changed(frame + 5, {0, 0})));
+			check_eq(std::string("JPEG frame header is invalid"), outcome(changed(frame + 7, {0, 0})));
+			check_eq(std::string("Image has more pixels than the pixel limit"), outcome(changed(frame + 5, {0xff, 0xff, 0xff, 0xff})));
+			codec::header header;
+			const bytes bomb = changed(frame + 5, {0xff, 0xff, 0xff, 0xff});
+			check_true(codec::read_header(bomb.data(), bomb.size(), codec::limits {}, header) == codec::status::too_many_pixels);
+			// 12-bit samples, arithmetic coding, lossless and hierarchical processes, CMYK
+			check_eq(std::string("JPEG coding process is not supported (only 8-bit baseline and progressive Huffman are)"), outcome(changed(frame + 4, {12})));
+			check_eq(std::string("JPEG arithmetic coding is not supported"), outcome(changed(frame + 1, {0xc9})));
+			check_eq(std::string("JPEG arithmetic coding is not supported"), outcome(changed(frame + 1, {0xca})));
+			check_eq(std::string("JPEG coding process is not supported (only 8-bit baseline and progressive Huffman are)"), outcome(changed(frame + 1, {0xc3})));
+			check_eq(std::string("JPEG coding process is not supported (only 8-bit baseline and progressive Huffman are)"), outcome(changed(frame + 1, {0xc5})));
+			check_eq(std::string("JPEG CMYK images are not supported"), outcome(changed(frame + 9, {4})));
+			// sampling factors of 0 or 5, an unknown quantization table, two components with one id
+			check_eq(std::string("JPEG frame header is invalid"), outcome(changed(frame + 11, {0x01})));
+			check_eq(std::string("JPEG frame header is invalid"), outcome(changed(frame + 11, {0x51})));
+			check_eq(std::string("JPEG frame header is invalid"), outcome(changed(frame + 12, {4})));
+			check_eq(std::string("JPEG frame header is invalid"), outcome(changed(frame + 13, {1})));
+			// samples that do not divide the frame's (3 against 2)
+			check_eq(std::string("JPEG coding process is not supported (only 8-bit baseline and progressive Huffman are)"), outcome(changed(frame + 11, {0x31, 0, 2, 0x21})));
+			// a scan naming a component twice, or one the frame lacks, or a table never defined
+			check_eq(std::string("JPEG scan header is invalid"), outcome(changed(scan + 7, {1})));
+			check_eq(std::string("JPEG scan header is invalid"), outcome(changed(scan + 5, {9})));
+			check_eq(std::string("JPEG scan uses a table that was never defined"), outcome(changed(scan + 6, {0x11})));
+			check_eq(std::string("JPEG scan uses a table that was never defined"), outcome(changed(frame + 12, {3})));
+			// missing tables altogether
+			bytes no_huffman = good;
+			no_huffman[tables + 1] = 0xfe;
+			check_eq(std::string("JPEG scan uses a table that was never defined"), outcome(no_huffman));
+			bytes no_quantization = good;
+			no_quantization[quantization + 1] = 0xfe;
+			check_eq(std::string("JPEG scan uses a table that was never defined"), outcome(no_quantization));
+			// an over-subscribed Huffman table: three codes of length 1
+			check_eq(std::string("JPEG Huffman table is invalid"), outcome(changed(tables + 5, {3})));
+			// a table class past 1, and a DC category past 11
+			check_eq(std::string("JPEG Huffman table is invalid"), outcome(changed(tables + 4, {0x20})));
+			check_eq(std::string("JPEG Huffman table is invalid"), outcome(changed(tables + 21, {12})));
+			// a quantization table with precision 2, or one cut short
+			check_eq(std::string("JPEG quantization table is invalid"), outcome(changed(quantization + 4, {0x20})));
+			check_eq(std::string("JPEG quantization table is invalid"), outcome(changed(quantization + 2, {0, 40})));
+			// a segment length of 1, one past the end of the file, a scan before the frame
+			check_eq(std::string("JPEG marker segment is invalid"), outcome(changed(quantization + 2, {0, 1})));
+			check_eq(std::string("JPEG is truncated"), outcome(changed(quantization + 2, {0xff, 0xf0})));
+			bytes scan_first(good.begin(), good.begin() + 2);
+			scan_first.insert(scan_first.end(), good.begin() + scan, good.end());
+			check_eq(std::string("JPEG marker segment is invalid"), outcome(scan_first));
+			// no frame at all, and a second start of image
+			const bytes bare = {0xff, 0xd8, 0xff, 0xd9};
+			check_eq(std::string("JPEG has no image"), outcome(bare));
+			check_eq(std::string("JPEG marker segment is invalid"), outcome(bytes {0xff, 0xd8, 0xff, 0xd8, 0xff, 0xd9}));
+			// image data cut short, or ending at a marker early
+			bytes cut(good.begin(), good.begin() + static_cast<long>(scan + 40));
+			check_eq(std::string("JPEG is truncated"), outcome(cut));
+			bytes early(good.begin(), good.begin() + static_cast<long>(scan + 40));
+			early.insert(early.end(), {0xff, 0xd9});
+			check_eq(std::string("JPEG image data is invalid"), outcome(early));
+			// the end marker alone missing after a whole scan is no loss: the image decodes
+			check_eq(std::string("ok"), outcome(bytes(good.begin(), good.end() - 2)));
+		});
+
+		test("jpeg_restart_markers_must_come_in_order", [this]() {
+			const image_fixtures::fixture& base = fixture_named("jpeg_420_scans_redefined_29x23");
+			const bytes good(base.bytes, base.bytes + base.size);
+			check_eq(std::string("ok"), outcome(good));
+			std::vector<size_t> markers;
+			for (size_t i = 0; i + 1 < good.size(); ++i) {
+				if (good[i] == 0xff && good[i + 1] >= 0xd0 && good[i + 1] <= 0xd7) { markers.push_back(i + 1); }
+			}
+			check_ge(markers.size(), size_t {2});
+			bytes swapped = good;
+			std::swap(swapped[markers[0]], swapped[markers[1]]);
+			check_eq(std::string("JPEG restart markers are out of order"), outcome(swapped));
+			bytes skipped = good;
+			skipped[markers[0]] = 0xd3;
+			check_eq(std::string("JPEG restart markers are out of order"), outcome(skipped));
+			bytes not_restart = good;
+			not_restart[markers[1]] = 0xd9;
+			check_ne(std::string("ok"), outcome(not_restart));
+		});
+
+		test("jpeg_prefixes_are_refused_until_the_scans_are_whole", [this]() {
+			for (const char* name : {"jpeg_wic_photo_64x48", "jpeg_420_restart_35x29", "jpeg_wic_grey_17x33", "jpeg_progressive_approximation_40x30"}) {
+				const image_fixtures::fixture& each = fixture_named(name);
+				const bool progressive = std::strstr(name, "progressive") != nullptr;
+				size_t images = 0;
+				for (size_t length = 0; length + 2 < each.size; ++length) {
+					codec::bitmap pixels;
+					codec::header header;
+					const codec::status result = codec::decode(each.bytes, length, codec::limits {}, codec::work_hook {}, header, pixels);
+					if (result == codec::status::ok) {
+						++images;
+						check_true(progressive, std::string(name) + " cut to " + std::to_string(length) + " bytes decoded");
+					} else {
+						check_ne(std::string(""), std::string(codec::status_text(result)), name);
+					}
+				}
+				// a progressive file cut between its scans is a coarser picture, as a browser shows it
+				if (progressive) { check_gt(images, size_t {0}, name); }
+			}
+		});
+
 		test("png_every_prefix_is_refused", [this]() {
 			for (const image_fixtures::fixture& each : image_fixtures::k_fixtures) {
 				if (std::strcmp(each.format, "png") != 0 || each.size > 1300) { continue; }
@@ -575,13 +747,6 @@ class image_module_tests : public suite {
 public:
 	image_module_tests() : suite("Image") {}
 
-	static const image_fixtures::fixture& fixture_named(const std::string& a_name) {
-		for (const image_fixtures::fixture& each : image_fixtures::k_fixtures) {
-			if (a_name == each.name) { return each; }
-		}
-		throw std::runtime_error("no fixture " + a_name);
-	}
-
 	// An engine with image:: and the fixtures: fixture(name) as a string, fixture_bytes(name) as an array<uint8>
 	std::shared_ptr<engine> image_engine(const stdlib::image_limits& a_limits = {}) {
 		auto e = make_engine();
@@ -611,6 +776,10 @@ public:
 			check_eq(std::string("17 33 png"), run(e, "auto img = image::load(fixture_bytes(\"png_rgba_17x33\")); `${img.width} ${img.height} ${img.format}`;"));
 			check_eq(std::string("png 64 48"), run(e, "var d = image::data(fixture(\"png_rgb_photo_64x48\")); `${d[\"format\"]} ${d[\"width\"]} ${d[\"height\"]}`;"));
 			check_eq(std::string("3"), run(e, "image::data(fixture_bytes(\"png_grey2_13x5\")).size();"));
+			// a JPEG stored on its side loads upright, and its data says so
+			check_eq(std::string("5 9 jpeg"), run(e, "image img = image::load(fixture(\"jpeg_exif_orientation_6_9x5\")); `${img.width} ${img.height} ${img.format}`;"));
+			check_eq(std::string("jpeg 5 9"), run(e, "var d = image::data(fixture(\"jpeg_exif_orientation_8_9x5\")); `${d[\"format\"]} ${d[\"width\"]} ${d[\"height\"]}`;"));
+			check_eq(std::string("9 5"), run(e, "image img = image::load(fixture(\"jpeg_exif_orientation_3_9x5\")); `${img.width} ${img.height}`;"));
 			check_eq(std::string("0 0 "), run(e, "image empty; `${empty.width} ${empty.height} ${empty.format}`;"));
 		});
 

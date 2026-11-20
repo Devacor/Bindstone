@@ -42,6 +42,7 @@ namespace image_codec {
 		jpeg_bad_frame,
 		jpeg_arithmetic,
 		jpeg_unsupported,
+		jpeg_cmyk,
 		jpeg_bad_quantization_table,
 		jpeg_bad_huffman_table,
 		jpeg_missing_table,

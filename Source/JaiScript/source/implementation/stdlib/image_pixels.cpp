@@ -29,6 +29,7 @@ namespace image_codec {
 			case status::jpeg_bad_frame: return "JPEG frame header is invalid";
 			case status::jpeg_arithmetic: return "JPEG arithmetic coding is not supported";
 			case status::jpeg_unsupported: return "JPEG coding process is not supported (only 8-bit baseline and progressive Huffman are)";
+			case status::jpeg_cmyk: return "JPEG CMYK images are not supported";
 			case status::jpeg_bad_quantization_table: return "JPEG quantization table is invalid";
 			case status::jpeg_bad_huffman_table: return "JPEG Huffman table is invalid";
 			case status::jpeg_missing_table: return "JPEG scan uses a table that was never defined";
@@ -66,6 +67,7 @@ namespace image_codec {
 		if (a_size > a_limits.max_input_bytes) { return status::input_too_large; }
 		switch (sniff(a_data, a_size)) {
 			case format::png: return read_png_header(a_data, a_size, a_limits, a_header);
+			case format::jpeg: return read_jpeg_header(a_data, a_size, a_limits, a_header);
 			default: return status::not_an_image;
 		}
 	}
@@ -74,6 +76,7 @@ namespace image_codec {
 		if (a_size > a_limits.max_input_bytes) { return status::input_too_large; }
 		switch (sniff(a_data, a_size)) {
 			case format::png: return decode_png(a_data, a_size, a_limits, a_work, a_header, a_bitmap);
+			case format::jpeg: return decode_jpeg(a_data, a_size, a_limits, a_work, a_header, a_bitmap);
 			default: return status::not_an_image;
 		}
 	}

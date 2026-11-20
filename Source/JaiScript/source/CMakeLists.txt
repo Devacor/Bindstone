@@ -40,6 +40,7 @@ set(JAISCRIPT_SOURCES
     implementation/stdlib/containers.cpp
     implementation/stdlib/crypto.cpp
     implementation/stdlib/image.cpp
+    implementation/stdlib/image_jpeg.cpp
     implementation/stdlib/image_pixels.cpp
     implementation/stdlib/image_png.cpp
     implementation/stdlib/io.cpp

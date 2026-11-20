@@ -66,6 +66,7 @@
 #include "implementation/stdlib/crypto.cpp"
 #include "implementation/stdlib/atomic.cpp"
 #include "implementation/stdlib/image.cpp"
+#include "implementation/stdlib/image_jpeg.cpp"
 #include "implementation/stdlib/image_pixels.cpp"
 #include "implementation/stdlib/image_png.cpp"
 #include "implementation/stdlib/stdlib.cpp"

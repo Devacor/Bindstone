@@ -12,8 +12,12 @@ Language support for [JaiScript](../../), an embedded scripting language for C++
   enums after `::`, builtin container and string methods, host functions), signature help, rename
   (refused with the reason when it cannot be proven complete), document and workspace symbols.
 - **Syntax highlighting** - TextMate grammar for `.jai` files.
-- **Attach debugging** - breakpoints, stepping, call stack and variables over the Debug Adapter
-  Protocol. The DAP server lives inside the C++ host (`jai::debug::debug_connector`, a raw TCP port); this
+- **Attach debugging** - over the Debug Adapter Protocol: breakpoints with conditions, hit counts and
+  logpoints, exception breakpoints (thrown or uncaught errors), stepping into and out of functions,
+  lambdas, signal receivers and coroutine resumes, the whole call stack, every frame's locals with
+  objects, arrays, maps and handles expanding to any depth, editing a variable, and Watch, hover and
+  Debug Console expressions in the selected frame (a watch only reads; the console may change state).
+  The DAP server lives inside the C++ host (`jai::debug::debug_connector`, a raw TCP port); this
   extension points VS Code's DAP client straight at that socket, with nothing to spawn.
 
 The full guide is the docs page `docs/site/embedding/14-language-server.html` (and

@@ -441,7 +441,11 @@ public:
             eval_buf.clear();
             send_dap(cli, R"({"seq":21,"type":"request","command":"evaluate","arguments":{"expression":"x + 1"}})");
             check_true(wait_for(cli, eval_buf, "\"command\":\"evaluate\""));
-            check_true(eval_buf.find("\"success\":false") != std::string::npos, eval_buf);
+            check_true(eval_buf.find("\"result\":\"2\",\"type\":\"int\"") != std::string::npos, eval_buf);
+            eval_buf.clear();
+            send_dap(cli, R"({"seq":22,"type":"request","command":"evaluate","arguments":{"expression":"x = 5","context":"watch"}})");
+            check_true(wait_for(cli, eval_buf, "\"command\":\"evaluate\""));
+            check_true(eval_buf.find("\"success\":false") != std::string::npos, "a watch never assigns: " + eval_buf);
 
             // --- next (step over) advances to line 3 ---
             std::string next_buf;

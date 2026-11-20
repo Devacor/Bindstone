@@ -659,6 +659,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
 
         // Check if we're unwinding due to an uncaught exception
         if (is_unwinding_) {
+            debug_raised([&] { return current_exception_ ? std::string(current_exception_->what()) : std::string(); }, try_depth_ > 0);
             if (!trace_captured_) capture_stack_trace();
             // Stop executing further declarations
             break;
@@ -7185,6 +7186,8 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
     checked_result<void> try_result;
     if (!resuming_catch) {
         const size_t try_stack_mark = valueStack_.size();
+        ++try_depth_;
+        struct try_depth_scope { size_t& depth; ~try_depth_scope() { --depth; } } in_try{try_depth_};
         try {
             try_result = dispatch_stmt(stmt->try_block.get());
         } catch (const std::exception& e) {
@@ -7244,6 +7247,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
 
     if (caught_error) {
         // the stack at the error, for the caught value (a callee's frame exit captured it already)
+        if (!resuming_catch) { debug_raised([&] { return current_exception_ ? std::string(current_exception_->what()) : std::string(); }, true); }
         if (!resuming_catch && !trace_captured_) { capture_stack_trace(); }
         // Reset unwinding flag
         is_unwinding_ = false; trace_captured_ = false;
@@ -7829,7 +7833,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
                 return detail::inline_redefinition(*string_symbolizer_, var_decl->name_id, var_decl);
             }
             if (debug_hook_ && debug_hook_->wants_statement(static_cast<uint32_t>(var_decl->location.line))) [[unlikely]] {
-                debug_hook_->on_statement(var_decl, static_cast<int>(call_stack_.size()));
+                (void)debug_hook_->on_statement(var_decl, static_cast<int>(call_stack_.size()));
             }
             JAISCRIPT_TRY(visit_variable_decl(var_decl));
             if (is_unwinding_) {
@@ -8961,13 +8965,54 @@ std::vector<std::pair<std::string, script_value>> interpreter::get_frame_locals(
     return out;
 }
 
-script_value* interpreter::debug_local_storage(const std::string& name) {
-    if (call_stack_.empty()) return nullptr;
-    const auto slots = frame_scope_slots(0);
-    for (auto it = slots.rbegin(); it != slots.rend(); ++it) {
-        if (it->second == name) return call_stack_.back().get_local(it->first);
+script_value* interpreter::debug_local_storage(const std::string& name, size_t frame_index) {
+    if (frame_index > call_stack_.size()) return nullptr;
+    call_frame* function_frame = frame_index < call_stack_.size() ? &call_stack_[call_stack_.size() - 1 - frame_index] : nullptr;
+    if (function_frame) {
+        const auto slots = frame_scope_slots(frame_index);
+        for (auto it = slots.rbegin(); it != slots.rend(); ++it) {
+            if (it->second == name) return function_frame->get_local(it->first);
+        }
     }
-    return nullptr;
+    const bool plain = function_frame && function_frame->function && !function_frame->function->closure_env;
+    const environment* env = frame_index == 0 ? environment_.get() : call_stack_[call_stack_.size() - frame_index].caller_environment;
+    return environment::find_scope_variable(env, plain ? function_frame->closure_env.get() : get_global_environment().get(), string_symbolizer_->intern(name));
+}
+
+// KEEP BYTE-PARALLEL with vm_backend::begin_debug_evaluation / end_debug_evaluation
+void interpreter::begin_debug_evaluation(std::chrono::nanoseconds budget) {
+    debug_evaluation_save saved;
+    saved.exception = current_exception_;
+    saved.exception_value = active_exception_value_;
+    saved.trace = captured_trace_;
+    saved.run_error = run_error_;
+    saved.nested = nested_failure_;
+    saved.catch_var = current_catch_var_id_;
+    saved.unwinding = is_unwinding_;
+    saved.trace_captured = trace_captured_;
+    saved.terminal = limits_->terminal_error;
+    saved.budget_active = budget_active_;
+    saved.budget = execution_budget_;
+    saved.deadline = execution_deadline_;
+    debug_evaluations_.push_back(std::move(saved));
+    execution_budget_ = budget;   // the evaluation's execute arms it
+}
+
+void interpreter::end_debug_evaluation() {
+    debug_evaluation_save saved = std::move(debug_evaluations_.back());
+    debug_evaluations_.pop_back();
+    current_exception_ = std::move(saved.exception);
+    active_exception_value_ = std::move(saved.exception_value);
+    captured_trace_ = std::move(saved.trace);
+    run_error_ = std::move(saved.run_error);
+    nested_failure_ = std::move(saved.nested);
+    current_catch_var_id_ = saved.catch_var;
+    is_unwinding_ = saved.unwinding;
+    trace_captured_ = saved.trace_captured;
+    limits_->terminal_error = saved.terminal;
+    budget_active_ = saved.budget_active;
+    execution_budget_ = saved.budget;
+    execution_deadline_ = saved.deadline;
 }
 
 // Function call implementation - returns checked_result for consistent error handling
@@ -9123,6 +9168,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // Helper lambda to cleanup and restore state
     auto cleanup = [&](bool clear_this = true) {
         // capture before pop_back: deeper frames are still present
+        if (is_unwinding_) { debug_raised([&] { return current_exception_ ? std::string(current_exception_->what()) : std::string(); }, try_depth_ > 0); }
         if (is_unwinding_ && !trace_captured_) capture_stack_trace();
         detail::shared_cell_release shared_cells{engine_};   // declared first: its check runs after the frame's locals die
         {
@@ -9455,6 +9501,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         constructor_prologue_hook* hook = std::exchange(pending_prologue_, nullptr);
         auto ran = run_constructor_prologue(*hook, frame_index, function);
         if (!ran) {
+            debug_raised([&] { return format_error(ran, *string_symbolizer_); }, try_depth_ > 0);
             if (!trace_captured_) capture_stack_trace();
             cleanup();
             return ran.error_value();
@@ -9474,6 +9521,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
 
         // Check for error codes - propagate errors
         if (!result && result.error() != std::error_code()) {
+            debug_raised([&] { return format_error(result, *string_symbolizer_); }, try_depth_ > 0);
             if (!trace_captured_) capture_stack_trace();
             cleanup();
             // Propagate the error with static message - nice formatting at API boundary
@@ -10614,14 +10662,27 @@ std::string interpreter::format_stack_trace() const {
     return out;
 }
 
+template <class Text> void interpreter::debug_raised(Text&& text, bool caught) {
+    debug::controller* dbg = debugger_.load(std::memory_order_relaxed);
+    if (!dbg || trace_captured_ || !dbg->wants_exceptions()) [[likely]] { return; }
+    dbg->on_exception(std::string(text()), caught, static_cast<int>(call_stack_.size()));
+}
+
+// KEEP BYTE-PARALLEL with the vm's statement boundary refusal
+JAI_NOINLINE error_propagator interpreter::debug_refusal() {
+    const std::string_view function = call_stack_.empty() || call_stack_.back().function_name.empty() ? std::string_view("<script>") : call_stack_.back().function_name;
+    return error_propagator{ make_error_code(runtime_error_code::unsupported_operation), debug::watch_runs_script_text, string_symbolizer_->intern(function) };
+}
+
 checked_result<void> interpreter::dispatch_stmt(statement* stmt) {
     if (stack_mark_.low()) [[unlikely]] { return detail::raise_nesting_depth(); }
     if (!call_stack_.empty()) call_stack_.back().current_node = stmt;
     else top_level_node_ = stmt;
     if (debug_hook_) [[unlikely]] {
         if (stmt == debug_quiet_node_) debug_quiet_node_ = nullptr;
-        else if (debug_hook_->wants_statement(static_cast<uint32_t>(stmt->location.line)))
-            debug_hook_->on_statement(stmt, static_cast<int>(call_stack_.size()));
+        else if (debug_hook_->wants_statement(static_cast<uint32_t>(stmt->location.line)) &&
+                 !debug_hook_->on_statement(stmt, static_cast<int>(call_stack_.size())))
+            return debug_refusal();
     }
     switch (stmt->get_type()) {
         case node_type::expression_stmt:
@@ -10670,8 +10731,9 @@ checked_result<void> interpreter::dispatch_decl(declaration* decl) {
         // after the resume is a join hang for anyone driving the controller).
         if (decl == debug_quiet_node_) debug_quiet_node_ = nullptr;
         else if (decl->get_type() != node_type::statement_decl &&
-            debug_hook_->wants_statement(static_cast<uint32_t>(decl->location.line)))
-            debug_hook_->on_statement(decl, static_cast<int>(call_stack_.size()));
+            debug_hook_->wants_statement(static_cast<uint32_t>(decl->location.line)) &&
+            !debug_hook_->on_statement(decl, static_cast<int>(call_stack_.size())))
+            return debug_refusal();
     }
     switch (decl->get_type()) {
         case node_type::variable_decl:

@@ -150,8 +150,11 @@ namespace jai::vm {
         // Named slot locals of a parked frame, reconstructed lazily from the chunk's
         // decl/load/store operands (no name table baked into release chunks).
         std::vector<std::pair<std::string, script_value>> get_frame_locals(size_t frame) const override;
-        script_value* debug_local_storage(const std::string& name) override;
+        script_value* debug_local_storage(const std::string& name, size_t frame) override;
+        void begin_debug_evaluation(std::chrono::nanoseconds budget) override;
+        void end_debug_evaluation() override;
         void debug_settle_statement() override;
+        void debug_settle_frames() override;
         int debug_depth() const override { return frames_.empty() ? 0 : static_cast<int>(statement_depth(*frames_.back())); }
         // Debug sync point (prepare_for_execution, every 1024 budget ticks, a sleep, an armed
         // session's pending change, park exit via the controller): mirrors
@@ -940,7 +943,12 @@ namespace jai::vm {
         // tells a new frame at ip 0 from a jump back to ip 0.
         uint32_t debug_epoch_ = 1;
         // per running coroutine resume, innermost last: frames_.size() when it began, and the parked stack the frames below it keep their windows in
-        std::vector<std::pair<size_t, const value_stack*>> fiber_stacks_;
+        struct try_record;
+        struct fiber_activation { size_t frames_at; const value_stack* stack; const std::vector<try_record>* tries; };
+        std::vector<fiber_activation> fiber_stacks_;
+        // An error noticed where it was raised (its trace not taken yet): an armed session's exception breakpoints see it, caught
+        // when a try is running anywhere on the stack. KEEP BYTE-PARALLEL with interpreter::debug_raised
+        void debug_raised(const std::string& text);
         const frame* debug_last_frame_ = nullptr;
         const chunk* debug_last_code_ = nullptr;
         size_t debug_last_depth_ = SIZE_MAX;
@@ -1123,6 +1131,22 @@ namespace jai::vm {
         std::chrono::steady_clock::time_point execution_deadline_{};
         uint32_t budget_tick_ = 0;
         bool budget_active_ = false;
+        // the run state a debugger's evaluation saved (begin_debug_evaluation), innermost last: while one runs its deadline holds
+        struct debug_evaluation_save {
+            std::optional<script_exception> exception;
+            std::optional<script_value> exception_value;
+            std::vector<stack_frame> trace;
+            std::optional<error_propagator> run_error;
+            detail::nested_failure nested;
+            uint64_t catch_var = 0;
+            bool unwinding = false;
+            bool trace_captured = false;
+            bool terminal = false;
+            bool budget_active = false;
+            std::chrono::nanoseconds budget{};
+            std::chrono::steady_clock::time_point deadline{};
+        };
+        std::vector<debug_evaluation_save> debug_evaluations_;
         int current_call_depth_ = 0;
 
         // Execution-limit state (terminal-error latch). Engine-less fallback storage;
@@ -1201,7 +1225,7 @@ namespace jai::vm {
         error_propagator execution_limit_failure();
         // Statement-boundary edge detection + hook fire; out of line so run_dispatch's
         // Debug frame stays flat (JAI_MAX_CALL_DEPTH path). Called only when armed.
-        void debug_statement_boundary(frame& f);
+        bool debug_statement_boundary(frame& f);   // false: a watch evaluation reached script code (op_status failed, pending_error_ set)
         void debug_stop_at(const ast_node* node);   // a statement the backend runs outside any chunk (a namespace's class)
 
         // the compiled body of a function object, cached per (body, unit): the unit is the function's own
@@ -1431,6 +1455,11 @@ namespace jai::vm {
         // A slot of any live frame as a parked debugger reads it: a frame below a running coroutine keeps its window in the stack the
         // coroutine's resume parked (fiber_stacks_)
         const script_value* debug_frame_slot(const frame& f, size_t slot) const noexcept;
+        // f's ip as the general form numbers it: a block's copy instruction stands for the one it copies
+        static size_t debug_ip(const frame& f) noexcept;
+        // The environment a live frame stands in: the innermost one's current, a caller's the one its callee's push saved (the
+        // callee's own when the push left it untouched), else what the session saw at its last statement
+        const environment* debug_frame_environment(const frame& f) const;
         // The call depth a statement of f stands at, a grafted callee's body one level below its caller as its own frame would be
         size_t statement_depth(const frame& f) const;
         void absorb_nested_trace();

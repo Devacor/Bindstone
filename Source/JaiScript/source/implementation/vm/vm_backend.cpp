@@ -376,7 +376,7 @@ bool vm_backend::execution_budget_exhausted() {
 // An armed debug session suspends the wall-clock deadline (a parked script must not be killed by the act of debugging);
 // sync_debug_hook re-arms fresh on session end.
 bool vm_backend::budget_spent_now() {
-	if (!detail::budget_clock_spent(*limits_, budget_active_ && !debug_hook_, execution_deadline_)) [[likely]] { return false; }
+	if (!detail::budget_clock_spent(*limits_, budget_active_ && (!debug_hook_ || !debug_evaluations_.empty()), execution_deadline_)) [[likely]] { return false; }
 	// a spent budget stays spent and the next poll checks again (budget_tick_ re-armed): a block's inner back edge that finds it misses onto
 	// the general form, whose poll raises (the interpreter, which has no blocks, takes no re-arm)
 	budget_tick_ = 1023;
@@ -384,7 +384,7 @@ bool vm_backend::budget_spent_now() {
 }
 
 bool vm_backend::budget_overrun_at_return() {
-	return detail::budget_overrun_at_return(*limits_, budget_active_ && !debug_hook_, execution_deadline_);
+	return detail::budget_overrun_at_return(*limits_, budget_active_ && (!debug_hook_ || !debug_evaluations_.empty()), execution_deadline_);
 }
 
 void vm_backend::sync_debug_hook() {
@@ -428,7 +428,7 @@ void build_debug_index(const chunk& c) {
 // range starts nothing; instructions outside every span (trampolines, cell copies, the halt) neither stop nor move the
 // previous instruction. A new frame enters from outside everything; a frame whose edge state predates this session stops
 // at its innermost statement only.
-void vm_backend::debug_statement_boundary(frame& f) {
+bool vm_backend::debug_statement_boundary(frame& f) {
 	const chunk& c = *f.code;
 	if (c.debug_innermost.size() != c.code.size()) { build_debug_index(c); }
 	const size_t depth = call_records_top_ + static_cast<size_t>(current_call_depth_);
@@ -443,7 +443,7 @@ void vm_backend::debug_statement_boundary(frame& f) {
 	if (!at) {
 		// a reused frame entering through an instruction no statement holds (op_bind_captures) enters its first statement from outside
 		if (fresh) { f.debug_prev_code = f.code; f.debug_prev_ip = 0; f.debug_epoch = debug_epoch_; }
-		return;
+		return true;
 	}
 	const bool known = !fresh && f.debug_epoch == debug_epoch_ && f.debug_prev_code == f.code;
 	const uint32_t prev = f.debug_prev_ip;
@@ -462,13 +462,34 @@ void vm_backend::debug_statement_boundary(frame& f) {
 	while (count) {
 		const ast_node* sn = c.debug_spans[entered[--count] - 1].node;
 		if (!debug_hook_ || !debug_hook_->wants_statement(static_cast<uint32_t>(sn->location.line))) { continue; }
-		debug_hook_->on_statement(sn, static_cast<int>(stop_depth));
+		if (!debug_hook_->on_statement(sn, static_cast<int>(stop_depth))) {   // KEEP BYTE-PARALLEL with interpreter::debug_refusal
+			pending_error_ = error_propagator{ make_error_code(runtime_error_code::unsupported_operation), debug::watch_runs_script_text,
+			                                   symbolizer_->intern(f.top_level ? std::string("<script>") : frame_function_name(f)) };
+			return false;
+		}
 	}
+	return true;
 }
 
 void vm_backend::debug_stop_at(const ast_node* node) {
 	if (!debug_hook_->wants_statement(static_cast<uint32_t>(node->location.line))) { return; }
-	debug_hook_->on_statement(node, debug_depth());
+	(void)debug_hook_->on_statement(node, debug_depth());
+}
+
+size_t vm_backend::debug_ip(const frame& f) noexcept {
+	for (const chunk::cell_loop& loop : f.code->cell_loops) {
+		if (f.ip >= loop.copy_head && f.ip - loop.copy_head < loop.origin.size()) { return loop.origin[f.ip - loop.copy_head]; }
+	}
+	return f.ip;
+}
+
+void vm_backend::debug_settle_frames() {
+	for (size_t i = 0; i < frames_.size(); ++i) {
+		frame* f = frames_[i];
+		if (!f->cells || f->cells->loop >= f->code->cell_loops.size()) { continue; }
+		materialize_raw_window(*f);
+		cells_writeback(*f, f->code->cell_loops[f->cells->loop]);
+	}
 }
 
 void vm_backend::debug_settle_statement() {
@@ -497,10 +518,11 @@ std::vector<std::pair<std::string, script_value>> vm_backend::frame_slot_locals(
 	std::vector<std::pair<std::string, script_value>> out;
 	if (!f || !has_slots(*f) || !f->code) { return out; }
 	const uint32_t owner = graft ? static_cast<uint32_t>(graft - f->code->inline_sites.data()) + 1 : 0;
+	const size_t ip = debug_ip(*f);
 	const auto& locals = f->code->debug_locals;
 	for (size_t k = locals.size(); k-- > 0;) {   // an inner declaration of a name comes after an outer one, and hides it
 		const auto& local = locals[k];
-		if (local.graft != owner || f->ip < local.first_ip || f->ip >= local.end_ip) { continue; }
+		if (local.graft != owner || ip < local.first_ip || ip >= local.end_ip) { continue; }
 		std::string name(symbolizer_->get_string(local.symbol));
 		if (std::any_of(out.begin(), out.end(), [&](const auto& seen) { return seen.first == name; })) { continue; }
 		if (const script_value* v = debug_frame_slot(*f, local.slot)) { out.emplace_back(std::move(name), *v); }
@@ -515,8 +537,8 @@ const script_value* vm_backend::debug_frame_slot(const frame& f, size_t slot) co
 	const value_stack* holder = &stack_;
 	const auto at = std::find(frames_.rbegin(), frames_.rend(), &f);
 	const size_t index = at == frames_.rend() ? frames_.size() : static_cast<size_t>(frames_.rend() - at) - 1;
-	for (const auto& [frames_at, parked] : fiber_stacks_) {
-		if (index < frames_at) { holder = parked; break; }
+	for (const fiber_activation& fiber : fiber_stacks_) {
+		if (index < fiber.frames_at) { holder = fiber.stack; break; }
 	}
 	return f.window_base + slot < holder->count ? &holder->slots[f.window_base + slot] : nullptr;
 }
@@ -546,36 +568,87 @@ std::vector<std::pair<std::string, script_value>> vm_backend::get_frame_locals(s
 	if (f.locals && f.locals->is_method && f.locals->this_object_ptr && absent("this")) { out.emplace_back("this", *f.locals->this_object_ptr); }
 	// a plain function runs in its caller's environment without owning it: only the top level and a closure or a method name theirs
 	if (f.top_level || f.entry_env) {
-		const environment* env = &f == frames_.back() ? environment_.get()
-		                       : f.debug_env && f.debug_env_epoch == debug_epoch_ ? f.debug_env : f.entry_env.get();
-		environment::append_scope_variables(env, detail::engine_access::get_global_environment(*engine_).get(), out);
+		environment::append_scope_variables(debug_frame_environment(f), detail::engine_access::get_global_environment(*engine_).get(), out);
 	}
 	return out;
 }
 
-script_value* vm_backend::debug_local_storage(const std::string& name) {
-	if (frames_.empty()) { return nullptr; }
+script_value* vm_backend::debug_local_storage(const std::string& name, size_t frame_index) {
 	std::vector<debug_frame_ref> refs;
 	debug_frame_walk(&refs);
-	if (refs.empty() || !refs.front().fr) { return nullptr; }
-	frame& inner = const_cast<frame&>(*refs.front().fr);
+	if (frame_index >= refs.size() || !refs[frame_index].fr) { return nullptr; }
+	const debug_frame_ref& ref = refs[frame_index];
+	frame& inner = const_cast<frame&>(*ref.fr);
 	const uint64_t id = symbolizer_->intern(name);
 	if (has_slots(inner) && inner.code) {
-		const uint32_t owner = refs.front().graft ? static_cast<uint32_t>(refs.front().graft - inner.code->inline_sites.data()) + 1 : 0;
+		const uint32_t owner = ref.graft ? static_cast<uint32_t>(ref.graft - inner.code->inline_sites.data()) + 1 : 0;
+		const size_t ip = debug_ip(inner);
 		const auto& locals = inner.code->debug_locals;
 		for (size_t k = locals.size(); k-- > 0;) {   // an inner declaration of the name comes after an outer one
 			const auto& local = locals[k];
-			if (local.graft == owner && local.symbol == id && inner.ip >= local.first_ip && inner.ip < local.end_ip) { return const_cast<script_value*>(debug_frame_slot(inner, local.slot)); }
+			if (local.graft == owner && local.symbol == id && ip >= local.first_ip && ip < local.end_ip) { return const_cast<script_value*>(debug_frame_slot(inner, local.slot)); }
 		}
 	}
-	if (refs.front().graft) { return nullptr; }
+	if (ref.graft) { return nullptr; }
 	if (inner.captures && inner.code && !inner.code->code.empty() && inner.code->code[0].op == opcode::op_bind_captures) {
 		const auto& ids = *inner.captures->ids;
 		for (size_t k = 0; k < ids.size(); ++k) {
 			if (ids[k] == id) { return const_cast<script_value*>(frame_capture(inner, k)); }
 		}
 	}
-	return nullptr;
+	if (!inner.top_level && !inner.entry_env) { return nullptr; }
+	return environment::find_scope_variable(debug_frame_environment(inner), detail::engine_access::get_global_environment(*engine_).get(), id);
+}
+
+const environment* vm_backend::debug_frame_environment(const frame& f) const {
+	for (size_t i = frames_.size(); i-- > 0;) {
+		if (frames_[i] != &f) { continue; }
+		if (i + 1 == frames_.size()) { return environment_.get(); }
+		const frame* above = frames_[i + 1];
+		for (size_t r = 0; r < call_records_top_; ++r) {
+			const call_record& rec = *call_records_[r];
+			if (&rec.f != above) { continue; }
+			return rec.env_untouched ? debug_frame_environment(*above) : rec.prev_env.get();
+		}
+		break;
+	}
+	return f.debug_env && f.debug_env_epoch == debug_epoch_ ? f.debug_env : f.entry_env.get();
+}
+
+// KEEP BYTE-PARALLEL with interpreter::begin_debug_evaluation / end_debug_evaluation
+void vm_backend::begin_debug_evaluation(std::chrono::nanoseconds budget) {
+	debug_evaluation_save saved;
+	saved.exception = current_exception_;
+	saved.exception_value = active_exception_value_;
+	saved.trace = captured_trace_;
+	saved.run_error = run_error_;
+	saved.nested = nested_failure_;
+	saved.catch_var = current_catch_var_id_;
+	saved.unwinding = is_unwinding_;
+	saved.trace_captured = trace_captured_;
+	saved.terminal = limits_->terminal_error;
+	saved.budget_active = budget_active_;
+	saved.budget = execution_budget_;
+	saved.deadline = execution_deadline_;
+	debug_evaluations_.push_back(std::move(saved));
+	execution_budget_ = budget;   // the evaluation's execute arms it
+}
+
+void vm_backend::end_debug_evaluation() {
+	debug_evaluation_save saved = std::move(debug_evaluations_.back());
+	debug_evaluations_.pop_back();
+	current_exception_ = std::move(saved.exception);
+	active_exception_value_ = std::move(saved.exception_value);
+	captured_trace_ = std::move(saved.trace);
+	run_error_ = std::move(saved.run_error);
+	nested_failure_ = std::move(saved.nested);
+	current_catch_var_id_ = saved.catch_var;
+	is_unwinding_ = saved.unwinding;
+	trace_captured_ = saved.trace_captured;
+	limits_->terminal_error = saved.terminal;
+	budget_active_ = saved.budget_active;
+	execution_budget_ = saved.budget;
+	execution_deadline_ = saved.deadline;
 }
 
 JAI_NOINLINE bool vm_backend::execution_limit_exhausted_slow() {
@@ -1330,7 +1403,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 		vm_coroutine_state* st;
 		fiber_stacks_swap(vm_backend* v, vm_coroutine_state* c) : vm(v), st(c) {
 			flip();
-			vm->fiber_stacks_.emplace_back(vm->frames_.size(), &st->stack_storage);
+			vm->fiber_stacks_.push_back({vm->frames_.size(), &st->stack_storage, &st->try_storage});
 			for (try_record& rec : vm->try_records_) { rec.trace_grafts_below = SIZE_MAX; }   // the fiber's frame resumes over other frames
 		}
 		~fiber_stacks_swap() { vm->fiber_stacks_.pop_back(); flip(); st->note_parked(); }
@@ -19889,8 +19962,17 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 	return false;
 }
 
+void vm_backend::debug_raised(const std::string& text) {
+	bool caught = !try_records_.empty();
+	for (const fiber_activation& fiber : fiber_stacks_) { caught = caught || !fiber.tries->empty(); }
+	debug_controller_.load(std::memory_order_relaxed)->on_exception(text, caught, debug_depth());
+}
+
 bool vm_backend::handle_op_error(frame*& fp, size_t records_base) {
 	if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; }   // a block run that ended in another frame (a raw call's callee, a raw return's caller) raised there
+	if (!trace_captured_) [[unlikely]] {
+		if (debug::controller* dbg = debug_controller_.load(std::memory_order_relaxed); dbg && dbg->wants_exceptions()) { debug_raised(format_error(pending_error_, *symbolizer_)); }
+	}
 	error_propagator failure = pending_error_;
 	for (;;) {
 		if (unwind_to_handler(*fp, &failure)) {
@@ -19909,6 +19991,11 @@ bool vm_backend::handle_op_error(frame*& fp, size_t records_base) {
 }
 
 bool vm_backend::handle_throw_unwind(frame*& fp, size_t records_base) {
+	if (is_unwinding_ && !trace_captured_) [[unlikely]] {
+		if (debug::controller* dbg = debug_controller_.load(std::memory_order_relaxed); dbg && dbg->wants_exceptions()) {
+			debug_raised(current_exception_ ? std::string(current_exception_->what()) : std::string());
+		}
+	}
 	for (;;) {
 		if (unwind_to_handler(*fp, nullptr)) {
 			return true;
@@ -20975,7 +21062,7 @@ op_status vm_backend::run_dispatch_loop(frame*& fp, const size_t records_base) {
 		// so the halt case IS the end-of-chunk exit (Debug asserts the invariant)
 		assert(f.ip < f.code->code.size());
 		if constexpr (Hooked) {
-			if (debug_hook_) { debug_statement_boundary(f); }
+			if (debug_hook_ && !debug_statement_boundary(f)) [[unlikely]] { VM_TRY_OP(op_status::failed); }
 		} else if (debug_hook_) [[unlikely]] {
 			return run_dispatch_loop<true>(fp, records_base);   // a session armed mid-run: its statements from here on
 		}

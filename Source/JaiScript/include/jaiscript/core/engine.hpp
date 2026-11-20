@@ -1748,6 +1748,9 @@ namespace jai {
         // the parse cache on (source_path, content). Not public — attributing raw content
         // to a path is debugger plumbing, a sharp edge for callers. Reached via execute()
         // ("<script>"), execute_file() (the file path), and include/import (resolved path).
+        // The debugger's evaluation (debug::controller::evaluate): `text` runs as its own unit labeled debug::evaluation_source with
+        // `scope` as instance variables, and each one's value after the run comes back in `scope`
+        script_value debug_evaluate(const std::string& text, instance_variables& scope);
         script_value execute_source(const std::string& script_content,
                                     const instance_variables& instanceVars,
                                     const std::string& source_path,

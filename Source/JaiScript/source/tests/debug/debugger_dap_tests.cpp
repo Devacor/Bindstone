@@ -535,6 +535,406 @@ public:
     }
 };
 
+// A script under a DAP session that a test drives stop by stop
+struct live_session {
+    std::shared_ptr<jai::engine> eng;
+    std::shared_ptr<jai::debug::debug_connector> conn;
+    std::unique_ptr<dap::client> cli;
+    std::thread runner;
+    std::atomic<bool> done{false};
+    std::string error;
+    std::vector<std::string> output;
+
+    live_session(jai::backend_type type, const std::string& file, const std::string& source,
+                 const std::vector<std::string>& breakpoints, const std::string& exception_filters = "",
+                 const std::function<void(jai::engine&)>& setup = {}) {
+        eng = make_default_engine();
+        eng->set_backend(type);
+        jai::stdlib::register_all(eng);
+        eng->jaibite_cache(false);
+        if (setup) setup(*eng);
+        const std::string path = write_audit_file(file, source);
+        conn = std::make_shared<jai::debug::debug_connector>(0);
+        eng->set_debug_connector(conn);
+        cli = std::make_unique<dap::client>(conn->port());
+        cli->on_event([this](const dap::json& event) {
+            if (event["event"].str() == "output") output.push_back(event["body"]["output"].str());
+        });
+        cli->request("initialize");
+        cli->request("attach");
+        cli->request("setBreakpoints", "{\"source\":{\"path\":" + dap::quote(path) + "},\"breakpoints\":[" + join(breakpoints) + "]}");
+        if (!exception_filters.empty()) cli->request("setExceptionBreakpoints", "{\"filters\":[" + exception_filters + "]}");
+        cli->request("configurationDone");
+        runner = std::thread([this, path] {
+            try { eng->execute_file(path); } catch (const std::exception& e) { error = e.what(); }
+            done = true;
+        });
+    }
+    ~live_session() { finish(); }
+
+    static std::string join(const std::vector<std::string>& items) {
+        std::string out;
+        for (const auto& item : items) out += (out.empty() ? "" : ",") + item;
+        return out;
+    }
+
+    // The next stop's event, or none once the script ends
+    std::optional<dap::json> stop() { return cli->wait_event("stopped", [this] { return done.load(); }); }
+    void resume(const std::string& how = "continue") { cli->request(how, "{\"threadId\":1}"); }
+    void finish() {
+        if (!runner.joinable()) return;
+        eng->debugger().set_enabled(false);
+        runner.join();
+    }
+
+    int frame_id(size_t index) {
+        const dap::json trace = cli->request("stackTrace", "{\"threadId\":1}");
+        return trace["body"]["stackFrames"][index]["id"].as_int();
+    }
+    int locals_ref(size_t frame = 0) {
+        const dap::json scopes = cli->request("scopes", "{\"frameId\":" + std::to_string(frame_id(frame)) + "}");
+        return scopes["body"]["scopes"][0]["variablesReference"].as_int();
+    }
+    int globals_ref() {
+        const dap::json scopes = cli->request("scopes", "{\"frameId\":" + std::to_string(frame_id(0)) + "}");
+        return scopes["body"]["scopes"][1]["variablesReference"].as_int();
+    }
+    dap::json variables(int reference, const std::string& paging = "") {
+        return cli->request("variables", "{\"variablesReference\":" + std::to_string(reference) + paging + "}");
+    }
+    // The variable `name` of a variables reply
+    static dap::json find(const dap::json& reply, const std::string& name) {
+        for (const auto& v : reply["body"]["variables"].items) if (v["name"].str() == name) return v;
+        return dap::json{};
+    }
+    // "name=value" for each child, in order
+    std::string listing(int reference, const std::string& paging = "") {
+        std::string out;
+        const dap::json reply = variables(reference, paging);
+        if (!reply["success"].flag) return "<" + reply["message"].str() + ">";
+        for (const auto& v : reply["body"]["variables"].items) {
+            out += (out.empty() ? "" : ", ") + v["name"].str() + "=" + v["value"].str();
+        }
+        return out;
+    }
+    dap::json evaluate(const std::string& expression, const std::string& context = "watch", int frame = -1) {
+        return cli->request("evaluate", "{\"expression\":" + dap::quote(expression) + ",\"context\":\"" + context + "\""
+            + (frame >= 0 ? ",\"frameId\":" + std::to_string(frame) : std::string()) + "}");
+    }
+    // An evaluation's result text, or "error: why"
+    std::string value_of(const std::string& expression, const std::string& context = "watch", int frame = -1) {
+        const dap::json reply = evaluate(expression, context, frame);
+        return reply["success"].flag ? reply["body"]["result"].str() : "error: " + reply["message"].str();
+    }
+    std::string set(int reference, const std::string& name, const std::string& value) {
+        const dap::json reply = cli->request("setVariable", "{\"variablesReference\":" + std::to_string(reference) + ",\"name\":" + dap::quote(name)
+            + ",\"value\":" + dap::quote(value) + "}");
+        return reply["success"].flag ? reply["body"]["value"].str() : "error: " + reply["message"].str();
+    }
+};
+
+class debugger_dap_feature_tests : public suite {
+public:
+    debugger_dap_feature_tests() : suite("Debugger DAP Features") {}
+
+    static constexpr jai::backend_type k_backends[] = {jai::backend_type::interpreter, jai::backend_type::vm};
+    static const char* backend_name(jai::backend_type type) { return type == jai::backend_type::vm ? "vm" : "interpreter"; }
+
+    void forge_tests() override {
+        test("structured_values_expand_to_any_depth_and_page", [this]() {
+            for (const auto type : k_backends) {
+                live_session s(type, "expand.jai",
+                    "class Item { string label = \"gem\"; int weight = 3; }\n"                  // 1
+                    "class Bag { array<Item> items; map<string, int> counts; shared_ptr<Item> best; shared_ptr<Item> none; }\n"   // 2
+                    "function fill() -> int {\n"                                               // 3
+                    "    Bag bag;\n"                                                           // 4
+                    "    bag.items.push(Item());\n"                                            // 5
+                    "    bag.counts[\"gem\"] = 2;\n"                                           // 6
+                    "    bag.best = make_shared<Item>();\n"                                    // 7
+                    "    array<int> big;\n"                                                    // 8
+                    "    for (int i = 0; i < 250; ++i) { big.push(i * 2); }\n"                 // 9
+                    "    return bag.items.size() + big.size();\n"                              // 10
+                    "}\n"                                                                      // 11
+                    "int got = fill();\n",                                                     // 12
+                    {"{\"line\":10}"});
+                check_true(s.stop().has_value(), backend_name(type));
+                const dap::json locals = s.variables(s.locals_ref());
+                const dap::json bag = live_session::find(locals, "bag");
+                check_gt(bag["variablesReference"].as_int(), 0, "a class value expands");
+                check_eq(4, bag["namedVariables"].as_int());
+                check_eq(std::string("bag"), bag["evaluateName"].str());
+                check_eq(std::string("items=[Item{label: \"gem\", weight: 3}], counts={\"gem\": 2}, best=Item{label: \"gem\", weight: 3}, none=null"),
+                         s.listing(bag["variablesReference"].as_int()), backend_name(type));
+                const dap::json fields = s.variables(bag["variablesReference"].as_int());
+                const dap::json items = live_session::find(fields, "items");
+                check_eq(1, items["indexedVariables"].as_int());
+                check_eq(std::string("bag.items"), items["evaluateName"].str());
+                const dap::json first = live_session::find(s.variables(items["variablesReference"].as_int()), "[0]");
+                check_eq(std::string("bag.items[0]"), first["evaluateName"].str());
+                check_eq(std::string("label=\"gem\", weight=3"), s.listing(first["variablesReference"].as_int()));
+                const dap::json counts = live_session::find(fields, "counts");
+                check_eq(std::string("\"gem\"=2"), s.listing(counts["variablesReference"].as_int()));
+                check_eq(std::string("bag.counts[\"gem\"]"), live_session::find(s.variables(counts["variablesReference"].as_int()), "\"gem\"")["evaluateName"].str());
+                const dap::json best = live_session::find(fields, "best");
+                check_eq(std::string("label=\"gem\", weight=3"), s.listing(best["variablesReference"].as_int()), "a handle lists its object's fields");
+                check_eq(0, live_session::find(fields, "none")["variablesReference"].as_int(), "a null handle is a leaf");
+                const dap::json big = live_session::find(locals, "big");
+                check_eq(250, big["indexedVariables"].as_int());
+                check_eq(std::string("[100]=200, [101]=202, [102]=204"), s.listing(big["variablesReference"].as_int(), ",\"start\":100,\"count\":3"));
+                const int stale = bag["variablesReference"].as_int();
+                s.resume();
+                s.finish();
+                check_true(s.error.empty(), s.error);
+                (void)stale;
+            }
+        });
+
+        test("set_variable_stores_through_the_scripts_own_rules", [this]() {
+            for (const auto type : k_backends) {
+                live_session s(type, "setvar.jai",
+                    "class Hero { int hp = 10; string name = \"ann\"; }\n"                     // 1
+                    "int global_score = 1;\n"                                                  // 2
+                    "function play(int n) -> int {\n"                                          // 3
+                    "    Hero h;\n"                                                            // 4
+                    "    array<int> xs = [1, 2, 3];\n"                                         // 5
+                    "    map<string, int> m = {\"a\": 1};\n"                                   // 6
+                    "    int total = n;\n"                                                     // 7
+                    "    return total + h.hp + xs[1] + m[\"a\"] + global_score;\n"             // 8
+                    "}\n"                                                                      // 9
+                    "int got = play(5);\n",                                                    // 10
+                    {"{\"line\":8}"});
+                check_true(s.stop().has_value(), backend_name(type));
+                const int locals = s.locals_ref();
+                check_eq(std::string("40"), s.set(locals, "total", "40"), backend_name(type));
+                check_eq(std::string("error: Cannot assign string to 'total' (declared int)"), s.set(locals, "total", "\"text\""), backend_name(type));
+                check_eq(std::string("7"), s.set(locals, "n", "3 + 4"));
+                const dap::json all = s.variables(locals);
+                const int hero = live_session::find(all, "h")["variablesReference"].as_int();
+                check_eq(std::string("100"), s.set(hero, "hp", "100"));
+                check_eq(std::string("error: Cannot assign string to field 'hp' of Hero (declared int)"), s.set(hero, "hp", "\"lots\""), "a field keeps its type");
+                const int xs = live_session::find(all, "xs")["variablesReference"].as_int();
+                check_eq(std::string("20"), s.set(xs, "[1]", "20"));
+                const int m = live_session::find(all, "m")["variablesReference"].as_int();
+                check_eq(std::string("1000"), s.set(m, "\"a\"", "1000"));
+                check_eq(std::string("2"), s.set(s.globals_ref(), "global_score", "2"));
+                check_eq(std::string("40"), s.value_of("total"));
+                s.resume();
+                s.finish();
+                check_true(s.error.empty(), s.error);
+                check_eq(int64_t(40 + 100 + 20 + 1000 + 2), s.eng->get_variable("got").as_int(), backend_name(type));
+            }
+        });
+
+        test("evaluate_reads_in_a_watch_and_changes_state_in_the_console", [this]() {
+            for (const auto type : k_backends) {
+                live_session s(type, "eval.jai",
+                    "class Point {\n"                                                          // 1
+                    "    int x = 1;\n"                                                         // 2
+                    "    int y = 2;\n"                                                         // 3
+                    "    Point operator+(Point o) { return Point{x + o.x, y + o.y}; }\n"       // 4
+                    "    int sum() { return x + y; }\n"                                        // 5
+                    "    void grow() {\n"                                                      // 6
+                    "        x += 10;\n"                                                       // 7
+                    "    }\n"                                                                  // 8
+                    "}\n"                                                                      // 9
+                    "int counter = 0;\n"                                                       // 10
+                    "function bump() -> int { counter += 1; return counter; }\n"               // 11
+                    "function outer(int depth) -> int {\n"                                     // 12
+                    "    array<int> xs = [3, 1, 2];\n"                                         // 13
+                    "    Point p;\n"                                                           // 14
+                    "    p.grow();\n"                                                          // 15
+                    "    int local = depth * 2;\n"                                             // 16
+                    "    return local + xs.size() + p.x;\n"                                    // 17
+                    "}\n"                                                                      // 18
+                    "int got = outer(4);\n",                                                   // 19
+                    {"{\"line\":7}", "{\"line\":17}"});
+                const char* name = backend_name(type);
+                check_true(s.stop().has_value(), name);
+                // in the method: this and its fields, bare
+                check_eq(std::string("1"), s.value_of("x"), name);
+                check_eq(std::string("3"), s.value_of("this.x + y"), name);
+                check_eq(std::string("4"), s.value_of("depth", "watch", s.frame_id(1)), "the selected frame's names");
+                s.resume();
+                check_true(s.stop().has_value(), name);
+                check_eq(std::string("8"), s.value_of("local"), name);
+                check_eq(std::string("3"), s.value_of("xs.size()"), name);
+                check_eq(std::string("[1, 2, 3]"), s.value_of("array::sort(xs)"), name);
+                check_eq(std::string("true"), s.value_of("local > 4 && xs[0] == 3"), name);
+                check_eq(std::string("error: A watch only reads: an assignment changes state (evaluate it in the Debug Console)"), s.value_of("local = 9"), name);
+                check_eq(std::string("error: A watch only reads: an increment changes state (evaluate it in the Debug Console)"), s.value_of("++local"), name);
+                check_eq(std::string("error: A watch only reads: a call of 'push' changes state (evaluate it in the Debug Console)"), s.value_of("xs.push(4)"), name);
+                check_eq(std::string("error: A watch only reads: a call of 'bump' changes state (evaluate it in the Debug Console)"), s.value_of("bump()"), name);
+                check_eq(std::string("error: A watch only reads: '+' would run script code (evaluate it in the Debug Console)"), s.value_of("p + p"), name);
+                check_eq(std::string("0"), s.value_of("counter"), "nothing a refused watch reached ran");
+                check_eq(std::string("8"), s.value_of("local"), name);
+                // the console changes state, through the variable's own rules
+                check_eq(std::string("1"), s.value_of("bump()", "repl"), name);
+                check_eq(std::string("1"), s.value_of("counter"), name);
+                check_eq(std::string("100"), s.value_of("local = 100", "repl"), name);
+                check_eq(std::string("100"), s.value_of("local"), name);
+                check_eq(std::string("4"), s.value_of("xs.push(9); xs.size()", "repl"), name);
+                check_eq(std::string("13"), s.value_of("p.sum()", "repl"), name);
+                check_true(s.value_of("local = \"no\"", "repl").starts_with("error: "), "a typed local keeps its type");
+                check_true(s.value_of("missing_name").starts_with("error: "), name);
+                check_true(s.value_of("throw \"boom\"", "repl").starts_with("error: "), name);
+                check_eq(std::string("error: The evaluation ran past its budget of 1000 ms"), s.value_of("while (true) { }", "repl"), name);
+                check_eq(std::string("100"), s.value_of("local"), "a failed evaluation leaves the stop as it was");
+                s.resume();
+                s.finish();
+                check_true(s.error.empty(), s.error);
+                check_eq(int64_t(100 + 4 + 11), s.eng->get_variable("got").as_int(), name);
+                check_eq(int64_t(1), s.eng->get_variable("counter").as_int(), name);
+            }
+        });
+
+        test("conditions_hit_counts_and_logpoints", [this]() {
+            for (const auto type : k_backends) {
+                live_session s(type, "conditional.jai",
+                    "int total = 0;\n"                                                         // 1
+                    "for (int i = 0; i < 10; ++i) {\n"                                         // 2
+                    "    total += i;\n"                                                        // 3
+                    "    int twice = i * 2;\n"                                                 // 4
+                    "    print(twice);\n"                                                      // 5
+                    "}\n",                                                                     // 6
+                    {"{\"line\":3,\"condition\":\"i == 4\"}", "{\"line\":4,\"hitCondition\":\"% 4\"}",
+                     "{\"line\":5,\"logMessage\":\"i={i} twice={twice} {{literal}}\"}"});
+                const char* name = backend_name(type);
+                std::vector<std::string> stops;
+                while (auto stopped = s.stop()) {
+                    stops.push_back(std::to_string(s.cli->request("stackTrace", "{\"threadId\":1}")["body"]["stackFrames"][0]["line"].as_int())
+                                    + ":" + s.value_of("i"));
+                    s.resume();
+                }
+                s.finish();
+                check_true(s.error.empty(), s.error);
+                check_eq(std::string("4:3,3:4,4:7"), live_session::join(stops), name);
+                check_eq(size_t(10), s.output.size(), name);
+                if (s.output.size() == 10) {
+                    check_eq(std::string("i=0 twice=0 {literal}\n"), s.output[0], name);
+                    check_eq(std::string("i=9 twice=18 {literal}\n"), s.output[9], name);
+                }
+            }
+        });
+
+        test("exception_breakpoints_stop_where_an_error_is_raised", [this]() {
+            const std::string source =
+                "function risky(int n) -> int {\n"                                             // 1
+                "    array<int> xs = [1, 2];\n"                                                // 2
+                "    return xs[n];\n"                                                          // 3
+                "}\n"                                                                          // 4
+                "function thrower(int code) {\n"                                               // 5
+                "    int local_code = code * 2;\n"                                             // 6
+                "    throw \"code \" + to_string(local_code);\n"                               // 7
+                "}\n"                                                                          // 8
+                "int caught = 0;\n"                                                            // 9
+                "try { risky(5); } catch (e) { caught += 1; }\n"                               // 10
+                "try { thrower(21); } catch (e) { caught += 1; }\n"                            // 11
+                "risky(7);\n";                                                                 // 12
+            for (const auto type : k_backends) {
+                const char* name = backend_name(type);
+                std::string seen;
+                {
+                    live_session s(type, "throws.jai", source, {}, "\"thrown\"");
+                    while (auto stopped = s.stop()) {
+                        const dap::json trace = s.cli->request("stackTrace", "{\"threadId\":1}");
+                        const dap::json& top = trace["body"]["stackFrames"][0];
+                        seen += (*stopped)["body"]["reason"].str() + " " + top["name"].str() + ":" + std::to_string(top["line"].as_int())
+                              + " [" + (*stopped)["body"]["text"].str() + "] " + s.listing(s.locals_ref()) + "\n";
+                        const dap::json info = s.cli->request("exceptionInfo", "{\"threadId\":1}");
+                        check_eq((*stopped)["body"]["text"].str(), info["body"]["description"].str());
+                        s.resume();
+                    }
+                    s.finish();
+                    check_true(s.error.find("Array index 7 out of bounds") != std::string::npos, s.error);
+                    check_eq(int64_t(2), s.eng->get_variable("caught").as_int(), name);
+                }
+                check_eq(std::string(
+                    "exception risky:3 [Array index 5 out of bounds for array of size 2] n=5, xs=[1, 2]\n"
+                    "exception thrower:7 [code 42] code=21, local_code=42\n"
+                    "exception risky:3 [Array index 7 out of bounds for array of size 2] n=7, xs=[1, 2]\n"), seen, name);
+                seen.clear();
+                {
+                    live_session s(type, "throws.jai", source, {}, "\"uncaught\"");
+                    while (auto stopped = s.stop()) {
+                        const dap::json trace = s.cli->request("stackTrace", "{\"threadId\":1}");
+                        seen += trace["body"]["stackFrames"][0]["name"].str() + ":" + std::to_string(trace["body"]["stackFrames"][0]["line"].as_int()) + "\n";
+                        s.resume();
+                    }
+                }
+                check_eq(std::string("risky:3\n"), seen, std::string(name) + ": only the error no catch takes");
+            }
+        });
+
+        test("stepping_into_and_out_of_a_signal_receiver", [this]() {
+            for (const auto type : k_backends) {
+                std::string seen;
+                live_session s(type, "receiver.jai",
+                    "var door = AuditDoor();\n"                                                // 1
+                    "door.on_open.connect(\"watch\", [=](int w) -> void {\n"                 // 2
+                    "    int wide = w * 2;\n"                                                  // 3
+                    "    print(wide);\n"                                                       // 4
+                    "});\n"                                                                    // 5
+                    "door.open(4);\n"                                                          // 6
+                    "int after = 1;\n",                                                        // 7
+                    {"{\"line\":6}"}, "", [](jai::engine& eng) {
+                        jai::dynamic_binder<audit_door>(eng, "AuditDoor").constructor<>().method("open", &audit_door::open).property("on_open", &audit_door::on_open);
+                    });
+                for (const char* action : {"stepIn", "next", "stepOut", "continue"}) {
+                    if (!s.stop()) break;
+                    const dap::json trace = s.cli->request("stackTrace", "{\"threadId\":1}");
+                    seen += trace["body"]["stackFrames"][0]["name"].str() + ":" + std::to_string(trace["body"]["stackFrames"][0]["line"].as_int()) + " ";
+                    s.resume(action);
+                }
+                s.finish();
+                check_true(s.error.empty(), s.error);
+                check_eq(std::string("<script>:6 <lambda>:3 <lambda>:4 <script>:7 "), seen, backend_name(type));
+            }
+        });
+
+        test("stepping_into_and_out_of_lambdas_receivers_and_coroutines", [this]() {
+            for (const auto type : k_backends) {
+                const char* name = backend_name(type);
+                std::string seen;
+                live_session s(type, "steps.jai",
+                    "coroutine int ticks() {\n"                                                // 1
+                    "    yield 1;\n"                                                           // 2
+                    "    yield 2;\n"                                                           // 3
+                    "}\n"                                                                      // 4
+                    "function run() -> int {\n"                                                // 5
+                    "    auto twice = [](int v) -> int {\n"                                    // 6
+                    "        int doubled = v * 2;\n"                                           // 7
+                    "        return doubled;\n"                                                // 8
+                    "    };\n"                                                                 // 9
+                    "    int a = twice(3);\n"                                                  // 10
+                    "    auto t = ticks();\n"                                                  // 11
+                    "    int b = t.next();\n"                                                  // 12
+                    "    int c = t.next();\n"                                                  // 13
+                    "    return a + b + c;\n"                                                  // 14
+                    "}\n"                                                                      // 15
+                    "int got = run();\n",                                                      // 16
+                    {"{\"line\":10}"});
+                const std::vector<std::string> actions = {"stepIn", "stepOut", "next", "next", "stepIn", "stepOut", "continue"};
+                for (const auto& action : actions) {
+                    if (!s.stop()) break;
+                    const dap::json trace = s.cli->request("stackTrace", "{\"threadId\":1}");
+                    seen += trace["body"]["stackFrames"][0]["name"].str() + ":" + std::to_string(trace["body"]["stackFrames"][0]["line"].as_int()) + " ";
+                    s.resume(action);
+                }
+                s.finish();
+                check_true(s.error.empty(), s.error);
+                // out of a callee lands on the caller's next statement; into a resume lands on the statement the coroutine resumes at
+                check_eq(std::string("run:10 <lambda>:7 run:11 run:12 run:13 ticks:3 run:14 "), seen, name);
+            }
+        });
+    }
+};
+
+} // namespace jai::foundry::tests
+
+using debugger_dap_feature_tests = jai::foundry::tests::debugger_dap_feature_tests;
+FOUNDRY_REGISTER(debugger_dap_feature_tests)
+
+namespace jai::foundry::tests {
 } // namespace jai::foundry::tests
 
 using debugger_dap_tests = jai::foundry::tests::debugger_dap_tests;

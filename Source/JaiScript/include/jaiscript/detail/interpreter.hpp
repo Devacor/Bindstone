@@ -195,8 +195,8 @@ namespace jai {
         std::chrono::steady_clock::time_point execution_deadline() const override { return budget_active_ ? execution_deadline_ : std::chrono::steady_clock::time_point{}; }
         // An armed debug session suspends the wall-clock deadline (a paused script must not be killed by the act of
         // debugging); sync_debug_hook re-arms a fresh deadline when the session ends.
-        bool budget_spent_now() override { return detail::budget_clock_spent(*limits_, budget_active_ && !debug_hook_, execution_deadline_); }
-        bool budget_overrun_at_return() override { return detail::budget_overrun_at_return(*limits_, budget_active_ && !debug_hook_, execution_deadline_); }
+        bool budget_spent_now() override { return detail::budget_clock_spent(*limits_, budget_active_ && (!debug_hook_ || !debug_evaluations_.empty()), execution_deadline_); }
+        bool budget_overrun_at_return() override { return detail::budget_overrun_at_return(*limits_, budget_active_ && (!debug_hook_ || !debug_evaluations_.empty()), execution_deadline_); }
 
         void arm_execution_deadline() {
             budget_tick_ = 0;
@@ -397,6 +397,11 @@ namespace jai {
         }
 
         // statement visitors
+        error_propagator debug_refusal();   // a watch evaluation reached script code
+        size_t try_depth_ = 0;   // try blocks running: an error raised inside one has a handler that may take it
+        // An error noticed where it was raised (its trace not taken yet): an armed session's exception breakpoints see it. KEEP
+        // BYTE-PARALLEL with vm_backend::debug_raised
+        template <class Text> void debug_raised(Text&& text, bool caught);   // interpreter.cpp
         checked_result<void> visit_expression_stmt(expression_stmt* stmt);
         checked_result<void> visit_block_stmt(block_stmt* stmt);
         checked_result<void> visit_if_stmt(if_stmt* stmt);
@@ -466,7 +471,9 @@ namespace jai {
         // Debugger: named slot-locals (params + reached body decls) of a call frame, reconstructed
         // from the frame's function AST. Empty at global scope / for foreign frames.
         std::vector<std::pair<std::string, script_value>> get_frame_locals(size_t frame) const override;
-        script_value* debug_local_storage(const std::string& name) override;
+        script_value* debug_local_storage(const std::string& name, size_t frame) override;
+        void begin_debug_evaluation(std::chrono::nanoseconds budget) override;
+        void end_debug_evaluation() override;
         std::vector<std::pair<size_t, std::string_view>> frame_scope_slots(size_t frame_index) const;
         int debug_depth() const override { return static_cast<int>(call_stack_.size()); }
         // Debug sync point (out of line: needs the controller type). Refreshes
@@ -795,6 +802,22 @@ namespace jai {
         std::chrono::steady_clock::time_point execution_deadline_{};
         uint32_t budget_tick_ = 0;
         bool budget_active_ = false;
+        // the run state a debugger's evaluation saved (begin_debug_evaluation), innermost last: while one runs its deadline holds
+        struct debug_evaluation_save {
+            std::optional<script_exception> exception;
+            std::optional<script_value> exception_value;
+            std::vector<stack_trace_entry> trace;
+            std::optional<error_propagator> run_error;
+            detail::nested_failure nested;
+            uint64_t catch_var = 0;
+            bool unwinding = false;
+            bool trace_captured = false;
+            bool terminal = false;
+            bool budget_active = false;
+            std::chrono::nanoseconds budget{};
+            std::chrono::steady_clock::time_point deadline{};
+        };
+        std::vector<debug_evaluation_save> debug_evaluations_;
 
         // Execution-limit state (terminal-error latch). Engine-less fallback storage;
         // prepare_for_execution repoints limits_ at the engine's per-engine instance so
@@ -1022,7 +1045,7 @@ namespace jai {
             if (debugger_.load(std::memory_order_relaxed) || debug_hook_) [[unlikely]] {
                 sync_debug_hook();
             }
-            return detail::budget_clock_spent(*limits_, budget_active_ && !debug_hook_, execution_deadline_);
+            return detail::budget_clock_spent(*limits_, budget_active_ && (!debug_hook_ || !debug_evaluations_.empty()), execution_deadline_);
         }
 
         // Combined limit check at loop back-edges / call entry: the budget tick plus a

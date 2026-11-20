@@ -158,6 +158,8 @@ namespace jai {
         // program's, a namespace's), a name `out` already holds (an inner declaration) or the engine's own (__*, this) left out
         static void append_scope_variables(const environment* from, const environment* stop,
                                            std::vector<std::pair<std::string, script_value>>& out);
+        // The storage of `id` in the scopes append_scope_variables walks (null when none of them declares it)
+        static script_value* find_scope_variable(const environment* from, const environment* stop, uint64_t id);
 
         // The program-scope variables `unit` declared (its plain cells, current or shadowed by another unit's), by name id
         std::vector<std::pair<uint64_t, const script_value*>> unit_variables(uint32_t unit) const;

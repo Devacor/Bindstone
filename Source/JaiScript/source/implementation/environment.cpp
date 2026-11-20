@@ -1323,6 +1323,13 @@ void environment::append_scope_variables(const environment* from, const environm
     }
 }
 
+script_value* environment::find_scope_variable(const environment* from, const environment* stop, uint64_t id) {
+    for (const environment* env = from; env && env != stop && !env->is_program_scope(); env = env->parent_raw()) {
+        if (auto* cell = env->flat_lookup_.find(id); cell && env->local_ids_.contains(id)) { return *cell; }
+    }
+    return nullptr;
+}
+
 std::vector<std::pair<uint64_t, const script_value*>> environment::own_definitions() const {
     std::vector<std::pair<uint64_t, const script_value*>> result(local_storage_.size(), {UINT64_MAX, nullptr});
     local_ids_.for_each([&](uint64_t id, bool) {

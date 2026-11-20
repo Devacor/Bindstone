@@ -1248,7 +1248,7 @@ public:
             const std::string interp = scoped_locals(jai::backend_type::interpreter);
             check_eq(interp, scoped_locals(jai::backend_type::vm), "the vm's locals table answers as the interpreter's scopes do");
             check_eq(std::string("f:9(v=2,x=3) <script>:15() globals(g,) v=2 x=3 g=5 set v=20 | "
-                                    "take:4(t=Token{n: \"tk\"}) f:12(v=1,x=3) <script>:15() globals(g,) t.n=\"tk\":string t.m=error: 't' has no field 'm' | "
+                                    "take:4(t=Token{n: \"tk\"}) f:12(v=1,x=3) <script>:15() globals(g,) t.n=\"tk\":string t.m=error: Token has no member 'm' | "
                                     "f:13(s=\"tk\",v=1,x=3) <script>:15() globals(g,) set v=7 nope=error: No variable 'nope' is in scope at this stop | "
                                     "r=7 g=21 nope=error"), interp);
         });

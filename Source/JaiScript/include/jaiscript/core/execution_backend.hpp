@@ -238,9 +238,9 @@ public:
     // declaration hiding an outer one), a closure's captures, `this`, and the block scopes of the top level; an inlined call's
     // own. A plain function never shows its caller's scopes.
     virtual std::vector<std::pair<std::string, script_value>> get_frame_locals(size_t frame) const = 0;
-    // The innermost frame's storage `name` resolves to at the stop: an in-scope slot local (the innermost declaration of the
-    // name), or a converted closure's captured name; null leaves the environment chain to the caller
-    virtual script_value* debug_local_storage(const std::string& name) = 0;
+    // The storage `name` resolves to among debug_frames()[frame]'s own names (get_frame_locals' names but `this`): the innermost
+    // declaration of a slot local, a closure's captured name, a block scope's variable; null for the program's names
+    virtual script_value* debug_local_storage(const std::string& name, size_t frame) = 0;
     // The call depth the statement hook reports for a stop here (the step-over/out base)
     virtual int debug_depth() const = 0;
     // A debug sync point (script thread only): pull the controller's transport state into the statement gate
@@ -248,6 +248,13 @@ public:
     // A stop taken inside a statement rather than at its start (a sleep): the innermost frame's statement counts as entered, so a
     // step from it goes on to the next one
     virtual void debug_settle_statement() {}
+    // Before frames are read while no session is armed (debug::locals, an uncaught error's dump): every value a frame holds
+    // outside its slots (the VM's cells) goes back to them, and it keeps running as it was
+    virtual void debug_settle_frames() {}
+    // The debugger evaluates on the parked thread through a nested execute, which resets the run's exception in flight: begin saves
+    // it and the budget (the evaluation's own deadline holds while a session is armed), end restores both, whatever the evaluation did
+    virtual void begin_debug_evaluation(std::chrono::nanoseconds budget) = 0;
+    virtual void end_debug_evaluation() = 0;
 
     // Core execution
     virtual script_value execute(const std::vector<declaration_ptr>& declarations) = 0;

@@ -867,6 +867,7 @@ struct engine::implementation {
 
     // Step-debugger controller, lazily created on first engine::debugger() call.
     std::unique_ptr<debug::controller> debugger_;
+    instance_variables* evaluation_scope_ = nullptr;   // debug_evaluate's names: each one's value after the run is written back
     // Optional debug transport (e.g. a DAP socket server). Stopped before teardown.
     std::shared_ptr<debug::transport> debug_transport_;
 
@@ -4573,6 +4574,13 @@ held_value engine::execute(const std::string& scriptContent, const instance_vari
     return hold(execute_source(scriptContent, instanceVars, "<script>"));
 }
 
+script_value engine::debug_evaluate(const std::string& text, instance_variables& scope) {
+    const instance_variables names = scope;
+    struct scope_guard { instance_variables*& slot; instance_variables* saved; ~scope_guard() { slot = saved; } } guard{impl->evaluation_scope_, impl->evaluation_scope_};
+    impl->evaluation_scope_ = &scope;
+    return execute_source(text, names, std::string(debug::evaluation_source));
+}
+
 script_value engine::execute_file_source(const std::string& resolvedPath, const std::string& content) {
     detail::load_phase_scope reporting(impl->collector(), detail::load_collector::k_no_file, load_phase::other);
     std::error_code ec;
@@ -4734,6 +4742,13 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
         }
 
         script_value result = textual ? be->execute_textual(declarations, compiled_slot) : be->execute(declarations, compiled_slot);
+        if (impl->evaluation_scope_ && hasInstanceVars && !be->is_unwinding()) {
+            if (const auto scope = be->get_current_environment()) {
+                for (auto& [name, value] : *impl->evaluation_scope_) {
+                    if (const script_value* now = scope->get_own_value_ptr(impl->string_symbolizer_.intern(name))) { value = *now; }
+                }
+            }
+        }
 
         if (be->is_unwinding()) {
             if (be->is_executing()) { be->park_nested_failure(); }

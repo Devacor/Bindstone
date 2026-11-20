@@ -123,6 +123,7 @@ namespace jai::detail {
         JAI_FORCEINLINE static const uint64_t* const_epoch_counter(const engine& a_engine) { return a_engine.const_epoch_counter(); }
         JAI_FORCEINLINE static const uint64_t* definition_epoch_counter(const engine& a_engine) { return a_engine.definition_epoch_counter(); }
         JAI_FORCEINLINE static bool is_const_global(const engine& a_engine, const std::string& name) { return a_engine.is_const_global(name); }
+        static script_value debug_evaluate(engine& a_engine, const std::string& text, instance_variables& scope) { return a_engine.debug_evaluate(text, scope); }
         JAI_FORCEINLINE static bool is_type_name(const engine& a_engine, const std::string& name) { return a_engine.is_type_name(name); }
         JAI_FORCEINLINE static std::shared_ptr<environment> get_global_environment(const engine& a_engine) { return a_engine.get_global_environment(); }
         JAI_FORCEINLINE static std::shared_ptr<environment> get_global_environment(const engine* a_engine) { if (a_engine) { return a_engine->get_global_environment(); } return nullptr; }

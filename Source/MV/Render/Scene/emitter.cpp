@@ -499,7 +499,7 @@ namespace MV {
 				trackDeviceBuffers(dev);
 			}
 
-			Render::BoundUniformSet prevRecording = shaderProgram->beginRecording(deviceUniformSet);
+			auto prevRecording = shaderProgram->beginRecording(deviceUniformSet);
 			recordEmitterUniforms();
 			shaderProgram->endRecording(prevRecording);
 

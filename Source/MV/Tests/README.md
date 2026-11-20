@@ -80,6 +80,12 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
   pipeline waits for a worker leaves the emitter updating and destructible (the old pipeline froze
   and its destructor spun forever); the emitter dies at once with a pipeline in flight; a stage
   that throws still finishes its pipeline and the next update starts a new one.
+- **MV Batching** — through `Draw2D`'s batching layer on the headless device: drawables of one material that
+  sit next to each other share one draw; another material, a drawable's own material callback, a material
+  with an undeclared apply function, a uniform the shader reads that differs, and a stencil each split the run
+  where they stand, never reordering it; a run shorter than the minimum, and a draw nothing joins, draw alone from
+  the drawable's own buffers, and a drawable that drew alone skips the queue until the next probing frame; with
+  batching off every drawable draws on its own.
 - **MV Bounds** — a node's box takes in its children where their transforms put them and follows them;
   a box mapped to world or screen space and back is the box around all its mapped corners (a 100 x 100
   square turned 45 degrees is 141.4 across, a scaled and turned box, a turned child of a turned parent, a

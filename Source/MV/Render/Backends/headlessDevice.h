@@ -38,6 +38,7 @@ namespace MV {
 			BoundShaderModule createShaderModule(const ShaderModuleDesc&) override;
 			BoundPipeline     createPipeline(const PipelineDesc&) override;
 			void              destroyPipeline(BoundPipeline) override;
+			bool              readsUniform(BoundPipeline, const std::string& name) override;
 			BoundRenderTarget createRenderTarget(const RenderTargetDesc&) override;
 			void              destroyRenderTarget(BoundRenderTarget) override;
 
@@ -60,6 +61,7 @@ namespace MV {
 			void onSurfaceResized(int drawableWidthPixels, int drawableHeightPixels) override;
 
 			size_t liveUniformSets() const { return uniformSets.liveCount(); }
+			size_t liveBuffers() const { return buffers.liveCount(); }
 
 		private:
 			// No native object; only the handle's {index, generation} identity matters.

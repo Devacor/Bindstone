@@ -2790,6 +2790,7 @@ static int RunSpriteShot(int a_count) {
 			auto size = managers.renderer.window().drawableSize();
 			SDL_Surface* surface = SDL_CreateRGBSurface(0, size.width, size.height, 32, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
 			std::vector<uint8_t> pixels(static_cast<size_t>(size.width) * size.height * 4);
+			managers.renderer.flushDraws();
 			glReadPixels(0, 0, size.width, size.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
 			auto* target = static_cast<uint8_t*>(surface->pixels);
 			for (int y = 0; y < size.height; ++y) {

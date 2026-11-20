@@ -25,6 +25,8 @@
 #include <memory>
 #include <unordered_map>
 #include <fstream>
+#include <map>
+#include <optional>
 #include "MV/Render/points.h"
 #include "MV/Render/matrix.hpp"
 #include "MV/Render/device.h"   // RHI seam; Shader/Draw2D hold Render::Device + Bound* handles.
@@ -95,6 +97,7 @@ namespace MV {
 	extern const std::string PREMULTIPLY_ID;
 	extern const std::string COLOR_PICKER_ID;
 	extern const std::string ALPHA_FILTER_ID;
+	extern const std::string DEFAULT_VERTEX_SHADER_FILE;
 
 #if SDL_BYTEORDER == SDL_BIG_ENDIAN
 	const Uint32 SDL_RMASK = 0xff000000;
@@ -342,31 +345,23 @@ namespace MV {
 		bool set(const std::string& a_variableName, const std::shared_ptr<TextureHandle>& a_value, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
 
 		inline bool set(std::string a_variableName, PointPrecision a_value, bool a_errorIfNotPresent = true) {
-			if (recording()) {
-				renderDevice->setUniform(recordingUniformSet, a_variableName, &a_value, 1);
-				return true;
-			}
-			return false;
+			return recordUniform(a_variableName, &a_value, 1);
 		}
 
 		inline bool setVec2(const std::string& a_variableName, const Point<PointPrecision>& a_point, bool a_errorIfNotPresent = true) {
-			if (recording()) {
-				renderDevice->setUniform(recordingUniformSet, a_variableName, &a_point.x, 2);
-				return true;
-			}
-			return false;
+			return recordUniform(a_variableName, &a_point.x, 2);
 		}
 		inline bool setVec3(const std::string& a_variableName, const Point<PointPrecision>& a_point, bool a_errorIfNotPresent = true) {
-			if (recording()) {
-				renderDevice->setUniform(recordingUniformSet, a_variableName, &a_point.x, 3);
-				return true;
-			}
-			return false;
+			return recordUniform(a_variableName, &a_point.x, 3);
 		}
 
 		inline bool set(const std::string& a_variableName, const TransformMatrix& a_matrix, bool a_errorIfNotPresent = true) {
-			if (recording()) {
-				renderDevice->setUniformMatrix(recordingUniformSet, a_variableName, &((a_matrix.getMatrixArray())[0]));
+			if (recordingTarget.record) {
+				recordingTarget.record->setUniformMatrix(a_variableName, &((a_matrix.getMatrixArray())[0]));
+				return true;
+			}
+			if (recordingTarget.set.valid()) {
+				renderDevice->setUniformMatrix(recordingTarget.set, a_variableName, &((a_matrix.getMatrixArray())[0]));
 				return true;
 			}
 			return false;
@@ -381,16 +376,34 @@ namespace MV {
 			vertexModule   = renderDevice->createShaderModule(vs);
 			fragmentModule = renderDevice->createShaderModule(fs);
 		}
-		// While a uniform set is open, set(...) records into it instead of issuing GL. Re-entrant:
+		// Where set(...) records: a device uniform set, or a record a batched draw compares with its neighbours'.
+		struct RecordingTarget {
+			Render::BoundUniformSet set;
+			Render::UniformRecord* record = nullptr;
+		};
+		// While a target is open, set(...) records into it instead of issuing GL. Re-entrant:
 		// returns the previous target so a nested draw (e.g. mid-draw atlas FBO refill on this same
 		// shared Shader) can restore it and not clobber the outer draw's set.
-		Render::BoundUniformSet beginRecording(Render::BoundUniformSet a_set) {
-			Render::BoundUniformSet prev = recordingUniformSet;
-			recordingUniformSet = a_set;
-			return prev;
+		RecordingTarget beginRecording(Render::BoundUniformSet a_set) {
+			RecordingTarget result = recordingTarget;
+			recordingTarget = { a_set, nullptr };
+			return result;
 		}
-		void endRecording(Render::BoundUniformSet a_restore = Render::BoundUniformSet{}) { recordingUniformSet = a_restore; }
-		bool recording() const { return recordingUniformSet.valid(); }
+		RecordingTarget beginRecording(Render::UniformRecord& a_record) {
+			RecordingTarget result = recordingTarget;
+			recordingTarget = { Render::BoundUniformSet{}, &a_record };
+			return result;
+		}
+		void endRecording(RecordingTarget a_restore = RecordingTarget{}) { recordingTarget = a_restore; }
+		bool recording() const { return recordingTarget.record || recordingTarget.set.valid(); }
+
+		// Its vertex stage only multiplies the position by `transformation`, so a draw may hand it vertices already in
+		// clip space with an identity `transformation`, and share that draw with its neighbours.
+		bool batchable() const { return vertexStageOnlyTransforms; }
+		Shader& batchable(bool a_batchable) {
+			vertexStageOnlyTransforms = a_batchable;
+			return *this;
+		}
 
 		Render::Device* device() const { return renderDevice; }
 		Render::BoundShaderModule vertexShaderModule() const { return vertexModule; }
@@ -401,16 +414,40 @@ namespace MV {
 		Render::BoundTexture getDefaultBoundTexture() const;
 		Render::BoundSampler getDefaultBoundSampler() const;
 
+		bool recordUniform(const std::string& a_variableName, const float* a_data, uint32_t a_floatCount) {
+			if (recordingTarget.record) {
+				recordingTarget.record->setUniform(a_variableName, a_data, a_floatCount);
+				return true;
+			}
+			if (recordingTarget.set.valid()) {
+				renderDevice->setUniform(recordingTarget.set, a_variableName, a_data, a_floatCount);
+				return true;
+			}
+			return false;
+		}
+		bool recordTexture(const std::string& a_variableName, Render::BoundTexture a_texture, Render::BoundSampler a_sampler) {
+			if (recordingTarget.record) {
+				recordingTarget.record->setTexture(a_variableName, a_texture, a_sampler);
+				return true;
+			}
+			if (recordingTarget.set.valid()) {
+				renderDevice->setTexture(recordingTarget.set, a_variableName, a_texture, a_sampler);
+				return true;
+			}
+			return false;
+		}
+
 		std::string stringId;
 		std::string vertexShaderFile;
 		std::string fragmentShaderFile;
 		GLuint programId;
 
-		// recordingUniformSet valid => set() records into it. Device-only: no legacy GL path.
+		// An open recordingTarget => set() records into it. Device-only: no legacy GL path.
 		Render::Device*           renderDevice = nullptr;
 		Render::BoundShaderModule vertexModule;
 		Render::BoundShaderModule fragmentModule;
-		Render::BoundUniformSet   recordingUniformSet;
+		RecordingTarget           recordingTarget;
+		bool                      vertexStageOnlyTransforms = false;
 	};
 
 	struct MaterialContext {
@@ -447,6 +484,20 @@ namespace MV {
 		BlendMode blend() const { 
 			return blendMode; 
 		}
+
+		// Whether drawables using this material may share one draw. True says its apply reads from the context only
+		// worldTransform and cameraId, and only to set `transformation` to the camera's projection times worldTransform,
+		// so a batched draw can bake that transform into the vertices; everything else it sets is the same for every
+		// drawable. Undeclared, a material with an apply function draws on its own and one without batches, though a
+		// draw whose uniforms carry no `transformation` never joins another.
+		Material& batchable(bool a_batchable) {
+			declaredBatchable = a_batchable;
+			return *this;
+		}
+
+		bool batchable() const {
+			return declaredBatchable.value_or(!applyFunction);
+		}
 		
 		void apply(Shader& shader, const MaterialContext& context) const;
 		
@@ -460,6 +511,7 @@ namespace MV {
 		ApplyFunction applyFunction;
 		std::map<size_t, std::shared_ptr<TextureHandle>> defaultTextures;
 		BlendMode blendMode = BLEND_DEFAULT;
+		std::optional<bool> declaredBatchable;
 	};
 
 	//If attempting to make multiple instances of Draw2D bear in mind it modifies global state in the
@@ -627,6 +679,12 @@ namespace MV {
 		const FrameReport& lastFrame() const {
 			return lastFrameReport;
 		}
+		// Issues the queued draws: before reading pixels back or issuing GL outside the device.
+		void flushDraws() {
+			if (batchedDevice) {
+				batchedDevice->flush();
+			}
+		}
 
 		// Clip-stencil nesting tracker; the Stencil component drives it via push/pop. See StencilStack.
 		StencilStack& stencil() { return stencilStack; }
@@ -639,6 +697,8 @@ namespace MV {
 		
 		std::shared_ptr<Material> defaultMaterial() const;
 		std::shared_ptr<Material> defaultMaterial(const std::string& a_id);
+		// The material of a drawable that names none: its shader and blend, its own textures, no apply function.
+		const std::shared_ptr<Material>& shaderMaterial(const std::shared_ptr<Shader>& a_shader, BlendMode a_blend);
 
 		void checkGlError(std::string a_location = "[not supplied location]") {
 			GLenum error = glGetError();
@@ -691,6 +751,7 @@ namespace MV {
 		
 		std::unordered_map<std::string, std::shared_ptr<Material>> materials;
 		std::shared_ptr<Material> defaultMaterialPtr = nullptr;
+		std::map<std::pair<std::string, BlendMode>, std::shared_ptr<Material>> shaderMaterials;
 
 		bool isHeadless = false;
 		std::unique_ptr<Render::Device> backend;

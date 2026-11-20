@@ -298,6 +298,12 @@ namespace MV {
 
 			virtual void defaultDrawImplementation();
 
+			// Whether this draw may join Draw2D's queue of mergeable draws rather than drawing on its own.
+			bool drawsInBatches(Draw2D& a_renderer) const;
+			void queueBatchedDraw(Draw2D& a_renderer, BlendMode a_blend);
+			// The pipeline for the draw's state and a uniform set bound to it, made again only when that state changes.
+			void prepareDeviceUniformSet(Render::Device& a_device, Draw2D& a_renderer, BlendMode a_blend);
+
 			virtual void refreshBounds();
 
 			template<class Archive>
@@ -373,6 +379,10 @@ namespace MV {
 			GLenum                  cachedTopologyDrawType = 0; // 0 == no pipeline resolved yet.
 			uint8_t                 devicePipelineColorWriteMask = 0xF; // Stencil sets 0 to draw its mask without color.
 			uint8_t                 cachedColorWriteMask = 0xF;
+			const Material*         cachedShaderMaterial = nullptr;   // Draw2D::shaderMaterial for the two below.
+			const Shader*           cachedShaderMaterialShader = nullptr;
+			BlendMode               cachedShaderMaterialBlend = BLEND_DEFAULT;
+			bool                    queuedDrawWentAlone = false;   // the queue sets it when it draws this drawable's draw
 			bool                    dirtyIndexBuffer = true;
 
 			JAI_DELETED_PROPERTY((std::shared_ptr<TextureHandle>), ourTexture);

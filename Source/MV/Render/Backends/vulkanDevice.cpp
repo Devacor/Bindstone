@@ -221,6 +221,7 @@ namespace MV {
 				BoundShaderModule createShaderModule(const ShaderModuleDesc&) override;
 				BoundPipeline     createPipeline(const PipelineDesc&) override;
 				void              destroyPipeline(BoundPipeline) override;
+				bool              readsUniform(BoundPipeline, const std::string& name) override;
 				BoundRenderTarget createRenderTarget(const RenderTargetDesc&) override;
 				void              destroyRenderTarget(BoundRenderTarget) override;
 
@@ -1245,6 +1246,10 @@ namespace MV {
 			}
 			void VulkanDevice::destroyPipeline(BoundPipeline) {
 				require<ResourceException>(false, "VulkanDevice::destroyPipeline not implemented yet (Phase 3)");
+			}
+			bool VulkanDevice::readsUniform(BoundPipeline, const std::string&) {
+				require<ResourceException>(false, "VulkanDevice::readsUniform not implemented yet (Phase 3)");
+				return true;
 			}
 			BoundRenderTarget VulkanDevice::createRenderTarget(const RenderTargetDesc&) {
 				require<ResourceException>(false, "VulkanDevice::createRenderTarget not implemented yet (Phase 3)");

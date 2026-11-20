@@ -44,6 +44,7 @@ namespace MV {
 		BoundShaderModule HeadlessDevice::createShaderModule(const ShaderModuleDesc&) { return shaderModules.create({}); }
 		BoundPipeline     HeadlessDevice::createPipeline(const PipelineDesc&) { return pipelines.create({}); }
 		void              HeadlessDevice::destroyPipeline(BoundPipeline a_handle) { Empty e; pipelines.remove(a_handle, e); }
+		bool              HeadlessDevice::readsUniform(BoundPipeline, const std::string&) { return true; }
 		BoundRenderTarget HeadlessDevice::createRenderTarget(const RenderTargetDesc&) { return renderTargets.create({}); }
 		void              HeadlessDevice::destroyRenderTarget(BoundRenderTarget a_handle) { Empty e; renderTargets.remove(a_handle, e); }
 

@@ -17,6 +17,7 @@ namespace MV {
 	const std::string PREMULTIPLY_ID = "premultiply";
 	const std::string COLOR_PICKER_ID = "colorPicker";
 	const std::string ALPHA_FILTER_ID = "alphaFilter";
+	const std::string DEFAULT_VERTEX_SHADER_FILE = "Shaders/default.vert";
 
 	bool RUNNING_IN_HEADLESS = false;
 
@@ -177,6 +178,7 @@ namespace MV {
 
 	void glExtensionFramebufferObject::startUsingFramebuffer(std::weak_ptr<Framebuffer> a_framebuffer, bool a_push){
 		require<ResourceException>(renderer->headless() || (initialized && !a_framebuffer.expired()), "StartUsingFramebuffer failed because the extension could not be loaded");
+		renderer->flushDraws();
 
 		savedClearColor = renderer->backgroundColor();
 		auto sharedFramebuffer = a_framebuffer.lock();
@@ -229,6 +231,7 @@ namespace MV {
 
 	void glExtensionFramebufferObject::stopUsingFramebuffer(){
 		require<ResourceException>(renderer->headless() || initialized, "StopUsingFramebuffer failed because the extension could not be loaded");
+		renderer->flushDraws();
 		activeFramebuffers.pop_back();
 		if(!activeFramebuffers.empty()){
 			startUsingFramebuffer(activeFramebuffers.back(), false);
@@ -652,6 +655,7 @@ namespace MV {
 		SharedTextures::resetWhite();
 		Render::DeviceBindings::release(batchedDevice.get());
 		Render::DeviceBindings::release(backend.get());
+		if (batchedDevice) { batchedDevice->releaseStreams(); }
 		if (backend) { backend->shutdown(); }
 	}
 
@@ -871,18 +875,28 @@ namespace MV {
 
 	std::string summarizeFrames(const std::vector<FrameReport>& a_frames, size_t a_warmup) {
 		std::vector<uint32_t> draws;
+		std::vector<uint32_t> queued;
+		std::vector<uint32_t> batches;
+		std::vector<uint32_t> lone;
 		std::vector<double> drawMilliseconds;
 		std::vector<double> frameMilliseconds;
 		for (size_t i = a_warmup; i < a_frames.size(); ++i) {
 			draws.push_back(a_frames[i].draws.draws);
+			queued.push_back(a_frames[i].draws.queuedDraws);
+			batches.push_back(a_frames[i].draws.batches);
+			lone.push_back(a_frames[i].draws.loneDraws);
 			drawMilliseconds.push_back(a_frames[i].drawSeconds * 1000.0);
 			frameMilliseconds.push_back(a_frames[i].frameSeconds * 1000.0);
 		}
 		auto [drawsMean, drawsMedian] = meanAndMedian(draws);
+		const double queuedMean = meanAndMedian(queued).first;
+		const double batchesMean = meanAndMedian(batches).first;
+		const double loneMean = meanAndMedian(lone).first;
 		auto [drawMean, drawMedian] = meanAndMedian(drawMilliseconds);
 		auto [frameMean, frameMedian] = meanAndMedian(frameMilliseconds);
 		std::ostringstream result;
 		result << std::fixed << std::setprecision(1) << "[frames] " << draws.size() << " frames: draw calls mean " << drawsMean << " median " << drawsMedian
+			<< " (queued draws mean " << queuedMean << ": " << batchesMean << " merged, " << loneMean << " alone)"
 			<< std::setprecision(3) << ", draw ms mean " << drawMean << " median " << drawMedian << ", frame ms mean " << frameMean << " median " << frameMedian;
 		return result.str();
 	}
@@ -1185,10 +1199,10 @@ namespace MV {
 	}
 
 	void Draw2D::loadDefaultShaders() {
-		loadShader(MV::DEFAULT_ID, "Shaders/default.vert", "Shaders/default.frag");
-		loadShader(MV::PREMULTIPLY_ID, "Shaders/default.vert", "Shaders/premultiply.frag");
-		loadShader(MV::ALPHA_FILTER_ID, "Shaders/default.vert", "Shaders/alphaFilter.frag");
-		loadShader(MV::COLOR_PICKER_ID, "Shaders/default.vert", "Shaders/colorPicker.frag");
+		loadShader(MV::DEFAULT_ID, DEFAULT_VERTEX_SHADER_FILE, "Shaders/default.frag");
+		loadShader(MV::PREMULTIPLY_ID, DEFAULT_VERTEX_SHADER_FILE, "Shaders/premultiply.frag");
+		loadShader(MV::ALPHA_FILTER_ID, DEFAULT_VERTEX_SHADER_FILE, "Shaders/alphaFilter.frag");
+		loadShader(MV::COLOR_PICKER_ID, DEFAULT_VERTEX_SHADER_FILE, "Shaders/colorPicker.frag");
 	}
 
 	std::shared_ptr<Shader> Draw2D::loadShader(const std::string &a_id, const std::string &a_vertexShaderFilename, const std::string &a_fragmentShaderFilename) {
@@ -1209,6 +1223,7 @@ namespace MV {
                 throw;
             }
             auto shader = std::make_shared<Shader>(a_id, programId, a_vertexShaderFilename, a_fragmentShaderFilename);
+            shader->batchable(a_vertexShaderFilename == DEFAULT_VERTEX_SHADER_FILE);
             if (device()) {
                 shader->initializeDeviceModules(device(), vertexShaderCode, fragmentShaderCode);
             }
@@ -1247,6 +1262,7 @@ namespace MV {
 	}
 
 	void Draw2D::resetViewport() {
+		flushDraws();
 		if (!headless()) {
 			
 			glViewport(0, 0, sdlWindow.drawableSize().width, sdlWindow.drawableSize().height);
@@ -1332,8 +1348,7 @@ namespace MV {
 		if (recording()) {
 			// Raw GL names have no BoundTexture; only the default (0) maps (the 2D path uses the TextureDefinition overload).
 			if (a_texture == 0) {
-				renderDevice->setTexture(recordingUniformSet, a_variableName, getDefaultBoundTexture(), getDefaultBoundSampler());
-				return true;
+				return recordTexture(a_variableName, getDefaultBoundTexture(), getDefaultBoundSampler());
 			}
 		}
 		return false;
@@ -1350,8 +1365,7 @@ namespace MV {
 			Render::BoundTexture bt = a_texture ? a_texture->boundTexture() : Render::BoundTexture{};
 			Render::BoundSampler bs = a_texture ? a_texture->boundSampler() : Render::BoundSampler{};
 			if (!bt.valid()) { bt = getDefaultBoundTexture(); bs = getDefaultBoundSampler(); }
-			renderDevice->setTexture(recordingUniformSet, a_variableName, bt, bs);
-			return true;
+			return recordTexture(a_variableName, bt, bs);
 		}
 		return false;
 	}
@@ -1363,8 +1377,7 @@ namespace MV {
 			Render::BoundTexture bt = def ? def->boundTexture() : Render::BoundTexture{};
 			Render::BoundSampler bs = def ? def->boundSampler() : Render::BoundSampler{};
 			if (!bt.valid()) { bt = getDefaultBoundTexture(); bs = getDefaultBoundSampler(); }
-			renderDevice->setTexture(recordingUniformSet, a_variableName, bt, bs);
-			return true;
+			return recordTexture(a_variableName, bt, bs);
 		}
 		return false;
 	}
@@ -1416,6 +1429,15 @@ namespace MV {
 
 	std::shared_ptr<Material> Draw2D::defaultMaterial() const {
 		return defaultMaterialPtr;
+	}
+
+	const std::shared_ptr<Material>& Draw2D::shaderMaterial(const std::shared_ptr<Shader>& a_shader, BlendMode a_blend) {
+		auto& result = shaderMaterials[{ a_shader->id(), a_blend }];
+		if (!result) {
+			result = std::make_shared<Material>("shader:" + a_shader->id(), a_shader->id());
+			result->blend(a_blend);
+		}
+		return result;
 	}
 
 	std::shared_ptr<Material> Draw2D::defaultMaterial(const std::string& a_id) {

@@ -7,6 +7,7 @@
 #include "MV/Render/Backends/handlePool.h"
 #include "MV/Render/render.h" // GL + SDL headers, plus MV::require / ResourceException.
 
+#include <cstring>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -250,6 +251,18 @@ namespace MV {
 			glBindBuffer(b->target, b->name);
 			glBufferSubData(b->target, static_cast<GLintptr>(a_offset), static_cast<GLsizeiptr>(a_bytes), a_data);
 		}
+		void GLDevice::appendStreamBuffer(BoundBuffer a_handle, const void *a_data, size_t a_bytes, size_t a_offset, bool a_startsOver) {
+			State::GLBuffer *b = state->buffers.get(a_handle);
+			require<ResourceException>(b != nullptr, "GLDevice::appendStreamBuffer called with a stale/null buffer handle");
+			glBindBuffer(b->target, b->name);
+			const GLbitfield access = GL_MAP_WRITE_BIT | (a_startsOver ? GL_MAP_INVALIDATE_BUFFER_BIT : (GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_INVALIDATE_RANGE_BIT));
+			if (void *mapped = glMapBufferRange(b->target, static_cast<GLintptr>(a_offset), static_cast<GLsizeiptr>(a_bytes), access)) {
+				std::memcpy(mapped, a_data, a_bytes);
+				glUnmapBuffer(b->target);
+			} else {
+				glBufferSubData(b->target, static_cast<GLintptr>(a_offset), static_cast<GLsizeiptr>(a_bytes), a_data);
+			}
+		}
 		void GLDevice::destroyBuffer(BoundBuffer a_handle) {
 			State::GLBuffer b;
 			if (state->buffers.remove(a_handle, b) && b.name) { glDeleteBuffers(1, &b.name); }
@@ -400,6 +413,11 @@ namespace MV {
 		void GLDevice::destroyPipeline(BoundPipeline a_handle) {
 			State::GLPipeline pipe;
 			if (state->pipelines.remove(a_handle, pipe) && pipe.program) { glDeleteProgram(pipe.program); }
+		}
+
+		bool GLDevice::readsUniform(BoundPipeline a_handle, const std::string &a_name) {
+			State::GLPipeline *pipe = state->pipelines.get(a_handle);
+			return pipe != nullptr && pipe->location(a_name) >= 0;
 		}
 
 		BoundRenderTarget GLDevice::createRenderTarget(const RenderTargetDesc &a_desc) {

@@ -497,7 +497,7 @@ namespace MV{
 			}
 			Render::BoundUniformSet set = deviceBatchSets[deviceBatchCursor++];
 
-			Render::BoundUniformSet prevRecording = shaderProgram->beginRecording(set);
+			auto prevRecording = shaderProgram->beginRecording(set);
 			shaderProgram->set("texture0", a_texture, 0);
 			shaderProgram->set("transformation", TransformMatrix(ourOwner->renderer().cameraProjectionMatrix(ourOwner->cameraId()) * ourOwner->worldTransform()));
 			shaderProgram->endRecording(prevRecording);

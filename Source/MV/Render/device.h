@@ -10,7 +10,7 @@
 //     (distinct from the scene-graph's logical MV::TextureHandle).
 //   - No heavy MV includes; matrices cross as const float* (16, column-major).
 //   - Imperative GL state (blend/depth/cull/layout/topology) is immutable in Vk/Metal,
-//     so it lives in a BoundPipeline; batching is a renderer layer above this. The stencil
+//     so it lives in a BoundPipeline; batching is a layer above this (BatchingDevice). The stencil
 //     TEST is the exception: it's dynamic (setStencilState) so a 2D clip mask can span the
 //     draws of many components (the scene-graph's Stencil). Color-write-off for a stencil
 //     mask is a pipeline property (Metal bakes it), not dynamic.
@@ -226,12 +226,12 @@ namespace MV {
 			bool flipViewportY = false;
 		};
 
-		// In the batched 2D path the renderer-layer DrawList concatenates many
-		// drawables into one shared Stream vertexBuffer+indexBuffer and emits ONE
-		// DrawItem per flushed batch, spanning [firstIndex, firstIndex+indexCount)
-		// with baseVertex into the shared vertex buffer. Vertices are pre-transformed
-		// to world space on the CPU so the whole batch shares `uniforms`
-		// (camera*projection). Spine sub-range draws use firstIndex/indexCount too.
+		// In the batched 2D path BatchingDevice concatenates many drawables into one
+		// shared Stream vertexBuffer+indexBuffer and emits ONE DrawItem per flushed
+		// batch, spanning [firstIndex, firstIndex+indexCount) with baseVertex into the
+		// shared vertex buffer. Vertices are pre-transformed to clip space on the CPU
+		// so the whole batch shares `uniforms` (an identity transformation). Spine
+		// sub-range draws use firstIndex/indexCount too.
 		struct DrawItem {
 			BoundPipeline   pipeline;                       // shader + blend + depth/stencil + topology + vertexLayout.
 			BoundBuffer     vertexBuffer;
@@ -265,6 +265,10 @@ namespace MV {
 			virtual BoundBuffer createBuffer(BufferUsage, BufferUpdateHint, const void* data, size_t bytes) = 0;
 			virtual void        updateBuffer(BoundBuffer, const void* data, size_t bytes, size_t offset = 0) = 0; // honors caller dirty flag.
 			virtual void        destroyBuffer(BoundBuffer) = 0;
+			// Writes a range of a Stream buffer that no draw reads: past every range written since the last write that
+			// started over. Starting over leaves the earlier contents to the draws still reading them, so the backend
+			// neither waits for those draws nor copies the buffer.
+			virtual void        appendStreamBuffer(BoundBuffer a_buffer, const void* a_data, size_t a_bytes, size_t a_offset, bool /*a_startsOver*/) { updateBuffer(a_buffer, a_data, a_bytes, a_offset); }
 
 			virtual BoundTexture createTexture(const TextureDesc&, const void* initialPixels = nullptr) = 0;
 			virtual void         updateTexture(BoundTexture, int mip, const Rect&, const void* pixels) = 0;
@@ -280,6 +284,8 @@ namespace MV {
 			virtual BoundShaderModule createShaderModule(const ShaderModuleDesc&) = 0;
 			virtual BoundPipeline     createPipeline(const PipelineDesc&) = 0;      // backend caches by content hash.
 			virtual void              destroyPipeline(BoundPipeline) = 0;
+			// Whether a pipeline's shaders read a uniform or texture of this name; a value it never reads cannot change a pixel.
+			virtual bool              readsUniform(BoundPipeline, const std::string& name) = 0;
 			virtual BoundRenderTarget createRenderTarget(const RenderTargetDesc&) = 0;
 			virtual void              destroyRenderTarget(BoundRenderTarget) = 0;
 

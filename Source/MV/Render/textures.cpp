@@ -537,6 +537,10 @@ namespace MV {
 
 	void TextureDefinition::save(const std::string &a_fileName) {
 		if (RUNNING_IN_HEADLESS) { return; }
+		// the read below is GL outside the device: draws still queued into this texture land first
+		if (auto* batches = dynamic_cast<Render::BatchingDevice*>(renderDevice())) {
+			batches->flush();
+		}
 
 		if (!loaded()) {
 			load();

@@ -5,6 +5,7 @@
 
 #include "MV/Utility/log.h"
 
+
 #include <jaiscript/core/dynamic_binder.hpp>
 
 namespace MV {
@@ -235,25 +236,19 @@ namespace MV {
 			if (vertexIndices->empty()) { return; }
 			require<ResourceException>(shaderProgram, "No shader program for Drawable!");
 
+			const BlendMode effectiveBlend = materialInstance ? materialInstance->blend() : blendModePreset;
+			if (drawsInBatches(ourRenderer) && (!queuedDrawWentAlone || ourRenderer.batches()->probing())) {
+				queueBatchedDraw(ourRenderer, effectiveBlend);
+				return;
+			}
+
 			Render::Device* dev = ourRenderer.device();
 			syncDeviceBuffers(dev, Render::BufferUpdateHint::Dynamic);
-
-			const BlendMode effectiveBlend = materialInstance ? materialInstance->blend() : blendModePreset;
-			if (devicePipeline != cachedPipelineForKey || cachedBlendMode != effectiveBlend
-			    || cachedTopologyDrawType != drawType || cachedColorWriteMask != devicePipelineColorWriteMask || !deviceUniformSet.valid()) {
-				devicePipeline = ourRenderer.pipelineFor(shaderProgram, effectiveBlend, drawType, devicePipelineColorWriteMask);
-				cachedPipelineForKey = devicePipeline;
-				cachedBlendMode = effectiveBlend;
-				cachedTopologyDrawType = drawType;
-				cachedColorWriteMask = devicePipelineColorWriteMask;
-				if (deviceUniformSet.valid()) { dev->destroyUniformSet(deviceUniformSet); }
-				deviceUniformSet = dev->createUniformSet(devicePipeline); // a uniform set is bound to a pipeline.
-				trackDeviceBuffers(dev);
-			}
+			prepareDeviceUniformSet(*dev, ourRenderer, effectiveBlend);
 
 			// Re-record uniforms+textures (the set is a name-keyed bag). Save/restore around it: a nested
 			// draw (mid-draw atlas FBO refill on this same shared Shader) must not clobber the outer set.
-			Render::BoundUniformSet prevRecording = shaderProgram->beginRecording(deviceUniformSet);
+			auto prevRecording = shaderProgram->beginRecording(deviceUniformSet);
 			applyMaterialPass(ourRenderer);
 			shaderProgram->endRecording(prevRecording);
 
@@ -267,6 +262,50 @@ namespace MV {
 			item.baseVertex = 0;
 			item.uniforms = deviceUniformSet;
 			dev->draw(item);
+		}
+
+		void Drawable::prepareDeviceUniformSet(Render::Device& a_device, Draw2D& a_renderer, BlendMode a_blend) {
+			if (devicePipeline != cachedPipelineForKey || cachedBlendMode != a_blend
+			    || cachedTopologyDrawType != drawType || cachedColorWriteMask != devicePipelineColorWriteMask || !deviceUniformSet.valid()) {
+				devicePipeline = a_renderer.pipelineFor(shaderProgram, a_blend, drawType, devicePipelineColorWriteMask);
+				cachedPipelineForKey = devicePipeline;
+				cachedBlendMode = a_blend;
+				cachedTopologyDrawType = drawType;
+				cachedColorWriteMask = devicePipelineColorWriteMask;
+				if (deviceUniformSet.valid()) { a_device.destroyUniformSet(deviceUniformSet); }
+				deviceUniformSet = a_device.createUniformSet(devicePipeline); // a uniform set is bound to a pipeline.
+				trackDeviceBuffers(&a_device);
+			}
+		}
+
+		bool Drawable::drawsInBatches(Draw2D& a_renderer) const {
+			auto* batches = a_renderer.batches();
+			return batches && batches->batching() && drawType == GL_TRIANGLES && shaderProgram->batchable() && !userMaterialSettings
+				&& (!materialInstance || materialInstance->batchable());
+		}
+
+		// The draw's material is the one it names or its shader's. The queue gets its own buffers and uniform set as
+		// well as its vertices, so a draw nothing joins draws as it would unbatched.
+		void Drawable::queueBatchedDraw(Draw2D& a_renderer, BlendMode a_blend) {
+			auto& batches = *a_renderer.batches();
+			syncDeviceBuffers(&batches, Render::BufferUpdateHint::Dynamic);
+			prepareDeviceUniformSet(batches, a_renderer, a_blend);
+			if (!materialInstance && (cachedShaderMaterialShader != shaderProgram.get() || cachedShaderMaterialBlend != a_blend)) {
+				cachedShaderMaterial = a_renderer.shaderMaterial(shaderProgram, a_blend).get();
+				cachedShaderMaterialShader = shaderProgram.get();
+				cachedShaderMaterialBlend = a_blend;
+			}
+			const Material* drawMaterial = materialInstance ? materialInstance.get() : cachedShaderMaterial;
+
+			Render::UniformRecord& uniforms = batches.openRecord();
+			SCOPE_EXIT{ batches.closeRecord(); };
+			auto previousRecording = shaderProgram->beginRecording(uniforms);
+			applyMaterialPass(a_renderer);
+			shaderProgram->endRecording(previousRecording);
+
+			const Render::BatchingDevice::OwnDraw own{ deviceVertexBuffer, deviceIndexBuffer, static_cast<uint32_t>(vertexIndices->size()), deviceUniformSet, &queuedDrawWentAlone };
+			batches.queue(drawMaterial, devicePipeline, uniforms, own, points->data(), static_cast<uint32_t>(sizeof(DrawPoint)),
+				static_cast<uint32_t>(points->size()), vertexIndices->data(), static_cast<uint32_t>(vertexIndices->size()));
 		}
 
 		void Drawable::refreshBounds() {

@@ -28,6 +28,7 @@ namespace MV {
 			BoundBuffer createBuffer(BufferUsage, BufferUpdateHint, const void* data, size_t bytes) override;
 			void        updateBuffer(BoundBuffer, const void* data, size_t bytes, size_t offset) override;
 			void        destroyBuffer(BoundBuffer) override;
+			void        appendStreamBuffer(BoundBuffer, const void* data, size_t bytes, size_t offset, bool startsOver) override;
 
 			BoundTexture createTexture(const TextureDesc&, const void* initialPixels) override;
 			void         updateTexture(BoundTexture, int mip, const Rect&, const void* pixels) override;
@@ -40,6 +41,7 @@ namespace MV {
 			BoundShaderModule createShaderModule(const ShaderModuleDesc&) override;
 			BoundPipeline     createPipeline(const PipelineDesc&) override;
 			void              destroyPipeline(BoundPipeline) override;
+			bool              readsUniform(BoundPipeline, const std::string& name) override;
 			BoundRenderTarget createRenderTarget(const RenderTargetDesc&) override;
 			void              destroyRenderTarget(BoundRenderTarget) override;
 

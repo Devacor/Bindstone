@@ -701,18 +701,11 @@ namespace MV {
 			std::vector<Point<>> localFromWorld(std::vector<Point<>> a_world);
 			std::vector<Point<>> localFromScreen(const std::vector<Point<int>> &a_screen);
 
-			BoxAABB<> worldFromLocal(const BoxAABB<>& a_local){
-				return BoxAABB<>(draw2d.worldFromLocal(a_local.minPoint, ourCameraId, worldTransform()), draw2d.worldFromLocal(a_local.maxPoint, ourCameraId, worldTransform()));
-			}
-			BoxAABB<int> screenFromLocal(const BoxAABB<>& a_local){
-				return BoxAABB<int>(draw2d.screenFromLocal(a_local.minPoint, ourCameraId, worldTransform()), draw2d.screenFromLocal(a_local.maxPoint, ourCameraId, worldTransform()));
-			}
-			BoxAABB<> localFromScreen(const BoxAABB<int> &a_screen){
-				return BoxAABB<>(draw2d.localFromScreen(a_screen.minPoint, ourCameraId, worldTransform()), draw2d.localFromScreen(a_screen.maxPoint, ourCameraId, worldTransform()));
-			}
-			BoxAABB<> localFromWorld(const BoxAABB<> &a_world){
-				return BoxAABB<>(draw2d.localFromWorld(a_world.minPoint, ourCameraId, worldTransform()), draw2d.localFromWorld(a_world.maxPoint, ourCameraId, worldTransform()));
-			}
+			// A box maps to the box around all of its mapped corners, so a turned box comes back whole.
+			BoxAABB<> worldFromLocal(const BoxAABB<>& a_local);
+			BoxAABB<int> screenFromLocal(const BoxAABB<>& a_local);
+			BoxAABB<> localFromScreen(const BoxAABB<int>& a_screen);
+			BoxAABB<> localFromWorld(const BoxAABB<>& a_world);
 
 			bool operator<(const Node &a_rhs) {
 				return depth() < a_rhs.depth();

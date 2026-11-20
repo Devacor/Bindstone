@@ -80,6 +80,10 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
   pipeline waits for a worker leaves the emitter updating and destructible (the old pipeline froze
   and its destructor spun forever); the emitter dies at once with a pipeline in flight; a stage
   that throws still finishes its pipeline and the next update starts a new one.
+- **MV Bounds** — a node's box takes in its children where their transforms put them and follows them;
+  a box mapped to world or screen space and back is the box around all its mapped corners (a 100 x 100
+  square turned 45 degrees is 141.4 across, a scaled and turned box, a turned child of a turned parent, a
+  flipped node, `localFromWorld`/`localFromScreen`).
 - **MV Device Bindings** — texture data and a drawn drawable that outlive their renderer (the
   client's script engine keeps scene nodes past `Managers::renderer`) have their device objects
   released by `Draw2D`'s teardown while the device lives (`Render::DeviceBindings`), so their own

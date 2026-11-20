@@ -708,7 +708,7 @@ namespace Workbench {
 						(*corner)->owner()->translate(worldDelta);
 					}
 					auto current = readLocal();
-					writeLocal(MV::BoxAABB<>(component->owner()->localFromWorld(a_handle->owner()->worldPosition()), current.size()));
+					writeLocal(MV::BoxAABB<>(pressBounds.minPoint + localMove(pressBodyAt, a_handle->owner()->worldPosition()), current.size()));
 				});
 				body->onRelease.connect("release", [this](std::shared_ptr<MV::Scene::Clickable>, const MV::Point<MV::PointPrecision>&) { endBoundsGesture(); });
 			}
@@ -747,17 +747,28 @@ namespace Workbench {
 			a_corner->onRelease.connect("release", [this](std::shared_ptr<MV::Scene::Clickable>, const MV::Point<MV::PointPrecision>&) { endBoundsGesture(); });
 		}
 
+		// The handles frame the component's box in world space, which a turned owner makes larger than the box itself,
+		// so a drag moves the box's corners by how far the handles moved in the component's own space.
 		void applyHandleBounds() {
-			auto box = MV::BoxAABB<>(topLeft->worldBounds().bottomRightPoint(), bottomRight->worldBounds().topLeftPoint());
-			writeLocal(component->owner()->localFromWorld(box));
+			MV::BoxAABB<> local(pressBounds.minPoint + localMove(pressTopLeftAt, topLeft->worldBounds().bottomRightPoint()));
+			local.expandWith(pressBounds.maxPoint + localMove(pressBottomRightAt, bottomRight->worldBounds().topLeftPoint()));
+			writeLocal(local);
 			auto rectBox = MV::round<MV::PointPrecision>(component->worldBounds());
 			body->bounds(rectBox.size());
 			body->owner()->worldPosition(rectBox.minPoint);
 		}
 
+		MV::Point<> localMove(const MV::Point<>& a_fromWorld, const MV::Point<>& a_toWorld) const {
+			auto owner = component->owner();
+			return owner->localFromWorld(a_toWorld) - owner->localFromWorld(a_fromWorld);
+		}
+
 		void beginGesture() {
 			dragging = true;
 			pressBounds = readLocal();
+			pressBodyAt = body->owner()->worldPosition();
+			pressTopLeftAt = topLeft->worldBounds().bottomRightPoint();
+			pressBottomRightAt = bottomRight->worldBounds().topLeftPoint();
 			paintedCells.clear();
 			lastPaintCell = MV::Point<int>(-1, -1);
 			layer.pressed();
@@ -844,6 +855,9 @@ namespace Workbench {
 
 		MV::BoxAABB<> lastFrame;
 		MV::BoxAABB<> pressBounds;
+		MV::Point<> pressBodyAt;
+		MV::Point<> pressTopLeftAt;
+		MV::Point<> pressBottomRightAt;
 		std::vector<std::pair<MV::Point<int>, bool>> paintedCells;
 		MV::Point<int> lastPaintCell{ -1, -1 };
 	};

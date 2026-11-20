@@ -727,12 +727,6 @@ namespace MV {
 		}
 
 		namespace {
-			BoxAABB<int> orderedCorners(const BoxAABB<int>& a_box) {
-				return BoxAABB<int>(
-					Point<int>(std::min(a_box.minPoint.x, a_box.maxPoint.x), std::min(a_box.minPoint.y, a_box.maxPoint.y)),
-					Point<int>(std::max(a_box.minPoint.x, a_box.maxPoint.x), std::max(a_box.minPoint.y, a_box.maxPoint.y)));
-			}
-
 			BoxAABB<int> sharedArea(const BoxAABB<int>& a_first, const BoxAABB<int>& a_second) {
 				const Point<int> low(std::max(a_first.minPoint.x, a_second.minPoint.x), std::max(a_first.minPoint.y, a_second.minPoint.y));
 				const Point<int> high(std::min(a_first.maxPoint.x, a_second.maxPoint.x), std::min(a_first.maxPoint.y, a_second.maxPoint.y));
@@ -746,7 +740,7 @@ namespace MV {
 						break;
 					}
 					a_box = sharedArea(a_box, std::visit([](const auto& a_component) {
-						return orderedCorners(a_component->owner()->screenFromLocal(a_component->bounds()));
+						return a_component->owner()->screenFromLocal(a_component->bounds());
 					}, clipping));
 				}
 				return a_box;
@@ -754,7 +748,7 @@ namespace MV {
 		}
 
 		BoxAABB<int> Node::visibleScreenBounds(const BoxAABB<>& a_local) {
-			return cutToEach(orderedCorners(screenFromLocal(a_local)), componentsInParents<Clipped, Stencil>(false, false));
+			return cutToEach(screenFromLocal(a_local), componentsInParents<Clipped, Stencil>(false, false));
 		}
 
 		BoxAABB<int> Node::visibleScreenBounds(bool a_includeChildren /*= true*/) {
@@ -763,7 +757,7 @@ namespace MV {
 				auto children = childBounds();
 				if (!children.empty()) {
 					// a Clipped or Stencil here cuts this node's children, not its own components
-					auto showing = cutToEach(orderedCorners(screenFromLocal(children)), components<Clipped, Stencil>(false));
+					auto showing = cutToEach(screenFromLocal(children), components<Clipped, Stencil>(false));
 					showing = cutToEach(showing, componentsInParents<Clipped, Stencil>(false, false));
 					if (!showing.empty()) {
 						result = result.empty() ? showing : result.expandWith(showing);
@@ -774,7 +768,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::clippedAwayBy(const BoxAABB<>& a_local) {
-			auto showing = orderedCorners(screenFromLocal(a_local));
+			auto showing = screenFromLocal(a_local);
 			if (showing.width() <= 0 || showing.height() <= 0) {
 				return nullptr;
 			}
@@ -1277,6 +1271,48 @@ namespace MV {
 			}
 			dirtyLocalBounds = true;
 			markParentBoundsDirty();
+		}
+
+		namespace {
+			// A box with depth has eight corners; a flat one four, and a turn out of its plane keeps it a plane.
+			template <typename Result, typename Source, typename Mapping>
+			BoxAABB<Result> boxAroundMappedCorners(const BoxAABB<Source>& a_box, Mapping&& a_map) {
+				const auto& low = a_box.minPoint;
+				const auto& high = a_box.maxPoint;
+				BoxAABB<Result> result(a_map(low));
+				const bool flat = low.z == high.z;
+				for (auto z : { low.z, high.z }) {
+					for (auto y : { low.y, high.y }) {
+						for (auto x : { low.x, high.x }) {
+							result.expandWith(a_map(Point<Source>(x, y, z)));
+						}
+					}
+					if (flat) {
+						break;
+					}
+				}
+				return result;
+			}
+		}
+
+		BoxAABB<> Node::worldFromLocal(const BoxAABB<>& a_local) {
+			const TransformMatrix& transform = worldTransform();
+			return boxAroundMappedCorners<PointPrecision>(a_local, [&](const Point<>& a_corner) { return draw2d.worldFromLocal(a_corner, ourCameraId, transform); });
+		}
+
+		BoxAABB<int> Node::screenFromLocal(const BoxAABB<>& a_local) {
+			const TransformMatrix& transform = worldTransform();
+			return boxAroundMappedCorners<int>(a_local, [&](const Point<>& a_corner) { return draw2d.screenFromLocal(a_corner, ourCameraId, transform); });
+		}
+
+		BoxAABB<> Node::localFromScreen(const BoxAABB<int>& a_screen) {
+			const TransformMatrix& transform = worldTransform();
+			return boxAroundMappedCorners<PointPrecision>(a_screen, [&](const Point<int>& a_corner) { return draw2d.localFromScreen(a_corner, ourCameraId, transform); });
+		}
+
+		BoxAABB<> Node::localFromWorld(const BoxAABB<>& a_world) {
+			const TransformMatrix& transform = worldTransform();
+			return boxAroundMappedCorners<PointPrecision>(a_world, [&](const Point<>& a_corner) { return draw2d.localFromWorld(a_corner, ourCameraId, transform); });
 		}
 
 		Point<> Node::localFromScreen(const Point<int> &a_screen) {

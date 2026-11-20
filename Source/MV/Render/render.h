@@ -485,11 +485,11 @@ namespace MV {
 			return blendMode; 
 		}
 
-		// Whether drawables using this material may share one draw. True says its apply reads from the context only
-		// worldTransform and cameraId, and only to set `transformation` to the camera's projection times worldTransform,
-		// so a batched draw can bake that transform into the vertices; everything else it sets is the same for every
-		// drawable. Undeclared, a material with an apply function draws on its own and one without batches, though a
-		// draw whose uniforms carry no `transformation` never joins another.
+		// Whether drawables using this material may share one draw. apply sets the standard `transformation` (the
+		// camera's projection times worldTransform) and `alpha` before the apply function runs; true says that function
+		// sets nothing from the drawable's context beyond those, so a batched draw can bake the transform into the
+		// vertices; everything else it sets is the same for every drawable. Undeclared, a material with an apply
+		// function draws on its own and one without batches.
 		Material& batchable(bool a_batchable) {
 			declaredBatchable = a_batchable;
 			return *this;
@@ -499,6 +499,7 @@ namespace MV {
 			return declaredBatchable.value_or(!applyFunction);
 		}
 		
+		// The standard `alpha` and `transformation`, the default textures, then the apply function, which may override them.
 		void apply(Shader& shader, const MaterialContext& context) const;
 		
 		const std::string& id() const { return ourId; }

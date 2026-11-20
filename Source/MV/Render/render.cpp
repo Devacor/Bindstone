@@ -1384,14 +1384,13 @@ namespace MV {
 
 	void Material::apply(Shader& shader, const MaterialContext& context) const {
 		shader.set("alpha", context.alpha, false);
-		// Apply default textures
+		shader.set("transformation", context.renderer.cameraProjectionMatrix(context.cameraId) * context.worldTransform);
 		for (const auto& [slot, tex] : defaultTextures) {
 			if (tex) {
 				shader.set("texture" + std::to_string(slot), tex, static_cast<int>(slot), false);
 			}
 		}
 
-		// Call user-defined apply function
 		if (applyFunction) {
 			applyFunction(shader, context);
 		}

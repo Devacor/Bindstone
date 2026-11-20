@@ -11,6 +11,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 using namespace jai::foundry;
 using MV::Scene::Node;
@@ -29,6 +30,12 @@ namespace mv_tests {
 
 		static std::shared_ptr<MV::Scene::Sprite> addSprite(const std::shared_ptr<Node>& a_parent, int a_index) {
 			return a_parent->make("sprite" + std::to_string(a_index))->position(MV::point(static_cast<float>(a_index) * 10.0f, 0.0f))->attach<MV::Scene::Sprite>()->bounds(MV::BoxAABB<>(MV::Size<>(8.0f, 8.0f)));
+		}
+
+		static std::vector<float> transformationSeen(const MV::Render::HeadlessDevice& a_device, size_t a_draw) {
+			auto& uniforms = a_device.drawsSeen()[a_draw].uniforms;
+			auto found = uniforms.find("transformation");
+			return found == uniforms.end() ? std::vector<float>() : found->second;
 		}
 
 		static MV::Render::DrawStatistics drawOnce(MV::Draw2D& a_renderer, const std::shared_ptr<Node>& a_root) {
@@ -102,14 +109,10 @@ namespace mv_tests {
 			test("a named material batches unless its apply function goes undeclared", [] {
 				MV::Draw2D renderer;
 				makeRenderer(renderer);
-				auto standardTransformation = [](MV::Shader& a_shader, const MV::MaterialContext& a_context) {
-					a_shader.set("transformation", a_context.renderer.cameraProjectionMatrix(a_context.cameraId) * a_context.worldTransform);
-				};
-				check_true(renderer.loadMaterial("bare", MV::PREMULTIPLY_ID)->batchable(), "a material without an apply function batches");
 				auto plain = renderer.loadMaterial("plain", MV::PREMULTIPLY_ID);
-				plain->setApply(standardTransformation).batchable(true);
+				check_true(plain->batchable(), "a material without an apply function batches");
 				auto custom = renderer.loadMaterial("custom", MV::PREMULTIPLY_ID);
-				custom->setApply(standardTransformation);
+				custom->setApply([](MV::Shader&, const MV::MaterialContext&) {});
 				check_true(!custom->batchable(), "one with an apply function draws on its own until it says otherwise");
 
 				auto root = Node::make(renderer, "root");
@@ -193,6 +196,34 @@ namespace mv_tests {
 				check_eq(18u, backend.drawsSeen()[0].indexCount, "the three faded sprites share a draw");
 				check_near(0.25f, alphaSeen(0), 1e-6f);
 				check_near(1.0f, alphaSeen(1), 1e-6f);
+				backend.recordDraws(false);
+			});
+
+			test("a bare material draws with the standard transformation, alone and merged", [] {
+				MV::Draw2D renderer;
+				makeRenderer(renderer);
+				auto& backend = dynamic_cast<MV::Render::HeadlessDevice&>(*renderer.backendDevice());
+				auto bare = renderer.loadMaterial("bare", MV::PREMULTIPLY_ID);
+				auto root = Node::make(renderer, "root");
+				auto lone = addSprite(root, 0);
+				lone->material(bare);
+
+				backend.recordDraws(true);
+				check_eq(1u, drawOnce(renderer, root).loneDraws);
+				const auto expected = renderer.cameraProjectionMatrix(lone->owner()->cameraId()) * lone->owner()->worldTransform();
+				auto transformation = transformationSeen(backend, 0);
+				check_eq(static_cast<size_t>(16), transformation.size());
+				for (size_t i = 0; i < 16 && i < transformation.size(); ++i) {
+					check_near(expected[i], transformation[i], 1e-6f);
+				}
+
+				addSprite(root, 1)->material(bare);
+				addSprite(root, 2)->material(bare);
+				backend.recordDraws(true);
+				auto counted = drawOnce(renderer, root);
+				check_eq(1u, counted.batches, "three sprites of one bare material merge");
+				auto merged = transformationSeen(backend, 0);
+				check_true(merged.size() == 16 && merged[0] == 1.0f && merged[5] == 1.0f && merged[12] == 0.0f, "the merged draw's vertices arrive in clip space");
 				backend.recordDraws(false);
 			});
 

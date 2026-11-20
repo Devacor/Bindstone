@@ -996,6 +996,16 @@ public:
 			spaced->execute("namespace wire {\n" + generic + "}\n");
 			check_eq(std::string("5|abab"), spaced->execute("to_string(wire::twice(2)) + \"|\" + wire::twice(\"ab\");").as_string());
 			check_eq(std::string("5|abab"), spaced->execute("namespace wire { string probe() { return to_string(twice(2)) + \"|\" + twice(\"ab\"); } }\nwire::probe();").as_string());
+			// and from another file of the import closure, in either order: by its qualified name, by its bare name in a third
+			// file's block of the namespace, and in the generic's own file
+			write_unit(directory, "wire_plain.jai", "namespace wire {\n" + plain + "}\n");
+			write_unit(directory, "wire_generic.jai", "namespace wire {\n" + generic + "string inside() { return to_string(twice(2)) + \"|\" + twice(\"ab\"); }\n}\n");
+			const std::string wire_calls = "namespace wire { string probe() { return to_string(twice(2)) + \"|\" + twice(\"ab\"); } }\n"
+				"to_string(wire::twice(2)) + \"|\" + wire::twice(\"ab\") + \"|\" + wire::probe() + \"|\" + wire::inside();\n";
+			const std::string wire_root = write_unit(directory, "wire_root.jai", "import \"wire_plain.jai\";\nimport \"wire_generic.jai\";\n" + wire_calls);
+			const std::string wire_other = write_unit(directory, "wire_other.jai", "import \"wire_generic.jai\";\nimport \"wire_plain.jai\";\n" + wire_calls);
+			check_eq(std::string("5|abab|5|abab|5|abab"), stdlib_engine()->execute_file(wire_root).as_string());
+			check_eq(std::string("5|abab|5|abab|5|abab"), stdlib_engine()->execute_file(wire_other).as_string());
 			// a method, static or not, of a class this unit declares or an earlier one did
 			const std::string tool = "class Tool {\n\tint twice(int x) { return x + x + 1; }\n\tT twice<T>(T x) { return x + x; }\n"
 				"\tstatic int make(int x) { return x + 1; }\n\tstatic T make<T>(T x) { return x; }\n}\n";

@@ -169,7 +169,7 @@ namespace MV {
 			}
 		}
 
-		void Node::draw(const TransformMatrix &a_overrideParentMatrix) {
+		void Node::draw(const TransformMatrix &a_overrideParentMatrix, PointPrecision a_overrideParentAlpha) {
 			if (allowDraw) {
 				require<ResourceException>(renderer().device(), "Node::draw requires a render device.");
 				// Only usingTemporaryMatrix needs resetting on exit. We deliberately do NOT
@@ -184,6 +184,7 @@ namespace MV {
 				// override parent and local are both affine, so this is bit-identical to the
 				// generic (*= localTransform()) product it replaces, with ~44% fewer flops.
 				temporaryWorldMatrixTransform = affineMultiply(temporaryWorldMatrixTransform, localMatrixTransform);
+				temporaryWorldAlpha = a_overrideParentAlpha * nodeAlpha;
 				bool allowChildrenToDraw = true;
 				for (size_t i = 0; i < childComponents->size();++i) {
 					if ((*childComponents)[i]->ownerIsAlive()) {
@@ -191,7 +192,7 @@ namespace MV {
 					}
 				}
 				if (allowChildrenToDraw) {
-					drawChildren(worldTransform());
+					drawChildren(worldTransform(), temporaryWorldAlpha);
 				}
 				for (size_t i = 0; i < childComponents->size(); ++i) {
 					if ((*childComponents)[i]->ownerIsAlive()) {
@@ -201,10 +202,10 @@ namespace MV {
 			}
 		}
 
-		void Node::drawChildren(const TransformMatrix &a_overrideParentMatrix) {
+		void Node::drawChildren(const TransformMatrix &a_overrideParentMatrix, PointPrecision a_overrideParentAlpha) {
 			if (allowDraw) {
 				for (size_t i = 0; i < childNodes->size(); ++i) {
-					childNodes[i]->draw(a_overrideParentMatrix);
+					childNodes[i]->draw(a_overrideParentMatrix, a_overrideParentAlpha);
 				}
 			}
 		}

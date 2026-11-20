@@ -175,8 +175,11 @@ namespace MV {
 			void update(double a_delta = 0.0f, bool a_force = false);
 			void drawUpdate(double a_delta = 0.0f);
 
-			void draw(const TransformMatrix &a_overrideParentMatrix);
-			void drawChildren(const TransformMatrix &a_overrideParentMatrix);
+			// Draws into a capture (a Clipped's texture) relative to the node that captures: a_overrideParentMatrix and
+			// a_overrideParentAlpha stand in for everything above, so the capture holds this subtree's own transform and
+			// alpha, and the composite of it applies the capturing node's once.
+			void draw(const TransformMatrix &a_overrideParentMatrix, PointPrecision a_overrideParentAlpha = 1.0f);
+			void drawChildren(const TransformMatrix &a_overrideParentMatrix, PointPrecision a_overrideParentAlpha = 1.0f);
 
 			std::string getUniqueId(const std::string &original) const;
 
@@ -639,7 +642,7 @@ namespace MV {
 			std::shared_ptr<Node> alpha(PointPrecision a_alpha);
 
 			PointPrecision worldAlpha() const{
-				return parentAccumulatedAlpha;
+				return usingTemporaryMatrix ? temporaryWorldAlpha : parentAccumulatedAlpha;
 			}
 
 			TransformMatrix localTransform(){
@@ -998,8 +1001,9 @@ namespace MV {
 			TransformMatrix localMatrixTransform;
 			TransformMatrix worldMatrixTransform;
 
-			bool usingTemporaryMatrix = false;
+			bool usingTemporaryMatrix = false;   // drawing into a capture: the two below stand in for the world's
 			TransformMatrix temporaryWorldMatrixTransform;
+			PointPrecision temporaryWorldAlpha = 1.0f;
 
 			Node* myParent = nullptr;
 

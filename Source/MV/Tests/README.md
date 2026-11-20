@@ -87,7 +87,9 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
   where they stand, never reordering it; a run shorter than the minimum, and a draw nothing joins, draw alone from
   the drawable's own buffers, and a drawable that drew alone skips the queue until the next probing frame; a
   node's alpha times its parents' reaches the shader on a lone and a merged draw (the headless device records what
-  each draw saw); a bare Material draws with the standard transformation, alone and merged; with batching off
+  each draw saw); a child under a faded Clipped (or under a faded parent of one) ends at the alpha it has without
+  clipping, the capture holding alpha relative to the Clipped and the composite applying the Clipped's once; a bare
+  Material draws with the standard transformation, alone and merged; with batching off
   every drawable draws on its own.
 - **MV Bounds** — a node's box takes in its children where their transforms put them and follows them;
   a box mapped to world or screen space and back is the box around all its mapped corners (a 100 x 100

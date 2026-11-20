@@ -8,6 +8,7 @@
 #include "MV/Render/Scene/node.h"
 #include "MV/Render/Scene/sprite.h"
 #include "MV/Render/Scene/stencil.h"
+#include "MV/Render/Scene/clipped.h"
 
 #include <memory>
 #include <string>
@@ -197,6 +198,46 @@ namespace mv_tests {
 				check_near(0.25f, alphaSeen(0), 1e-6f);
 				check_near(1.0f, alphaSeen(1), 1e-6f);
 				backend.recordDraws(false);
+			});
+
+			test("a child under a faded Clipped ends up at the alpha it has without clipping", [] {
+				// headless, a Clipped skips its capture, so the test draws the capture as refreshTexture does
+				auto overallAlpha = [](float a_aboveClipped, float a_clipped, float a_child) {
+					MV::Draw2D renderer;
+					makeRenderer(renderer);
+					auto& backend = dynamic_cast<MV::Render::HeadlessDevice&>(*renderer.backendDevice());
+					auto root = Node::make(renderer, "root");
+					auto clipping = root->make("above")->alpha(a_aboveClipped)->make("clipping")->alpha(a_clipped);
+					clipping->attach<MV::Scene::Clipped>()->bounds(MV::BoxAABB<>(MV::Size<>(40.0f, 40.0f)));
+					clipping->make("child")->alpha(a_child)->attach<MV::Scene::Sprite>()->bounds(MV::BoxAABB<>(MV::Size<>(8.0f, 8.0f)));
+
+					backend.recordDraws(true);
+					root->draw();
+					renderer.flushDraws();
+					clipping->drawChildren(MV::TransformMatrix());
+					renderer.flushDraws();
+					auto& draws = backend.drawsSeen();
+					float result = draws.size() == 2 ? 1.0f : -1.0f;
+					for (auto&& seen : draws) {
+						auto found = seen.uniforms.find("alpha");
+						result *= found == seen.uniforms.end() || found->second.empty() ? -1.0f : found->second[0];
+					}
+					backend.recordDraws(false);
+					return result;
+				};
+				check_near(0.5f, overallAlpha(1.0f, 0.5f, 1.0f), 1e-6f);
+				check_near(0.25f, overallAlpha(0.5f, 0.5f, 1.0f), 1e-6f);
+				check_near(0.125f, overallAlpha(0.5f, 0.5f, 0.5f), 1e-6f);
+			});
+
+			test("a capture draw leaves the node's own world alpha as it was", [] {
+				MV::Draw2D renderer;
+				makeRenderer(renderer);
+				auto root = Node::make(renderer, "root");
+				auto clipping = root->make("clipping")->alpha(0.5f);
+				auto child = clipping->make("child")->alpha(0.5f);
+				clipping->drawChildren(MV::TransformMatrix());
+				check_near(0.25f, child->worldAlpha(), 1e-6f);
 			});
 
 			test("a bare material draws with the standard transformation, alone and merged", [] {

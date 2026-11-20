@@ -1425,16 +1425,23 @@ private:
             return find_sclass(owner) || engine_class(owner) ? class_generics(owner, m->member) : std::vector<generic_definition_ptr>{};
         }
         if (!generic_method_names_.count(m->member) && !eng_.names_generic_method(std::string(m->member))) { return {}; }
+        const std::string_view cls = receiver_class(m, receiver_unknown);
+        return cls.empty() ? std::vector<generic_definition_ptr>{} : class_generics(cls, m->member);
+    }
+    // The class a method call's receiver has as the load knows it: its own type, a reference's declared class (Base& b), a
+    // global another unit declares with a class; empty when the load knows none (`unknown` when it knows nothing of it)
+    std::string_view receiver_class(const member_expr* m, bool& unknown) {
+        unknown = false;
         const ctype recv = infer(m->object.get());
-        if ((recv.kind == ctype::object_k || recv.kind == ctype::class_ref_k) && !recv.cls.empty()) { return class_generics(recv.cls, m->member); }
-        if (recv.is_unknown()) {   // a reference's declared class (Base& b), a global another unit declares with a class
-            if (const ctype held = referent_receiver(m->object.get()); held.kind == ctype::object_k && !held.cls.empty()) { return class_generics(held.cls, m->member); }
+        if ((recv.kind == ctype::object_k || recv.kind == ctype::class_ref_k) && !recv.cls.empty()) { return recv.cls; }
+        if (recv.is_unknown()) {
+            if (const ctype held = referent_receiver(m->object.get()); held.kind == ctype::object_k && !held.cls.empty()) { return held.cls; }
             if (m->object->get_type() == node_type::identifier_expr) {
                 const std::string_view declared = declared_global_class(static_cast<const identifier_expr*>(m->object.get()));
-                if (!declared.empty()) { return class_generics(declared, m->member); }
+                if (!declared.empty()) { return declared; }
             }
         }
-        receiver_unknown = recv.is_unknown();
+        unknown = recv.is_unknown();
         return {};
     }
 
@@ -1781,38 +1788,78 @@ private:
         const size_t least = g.required_values(), most = g.values.size();
         return (least == most ? std::to_string(most) : std::to_string(least) + " to " + std::to_string(most)) + (most == 1 ? " argument" : " arguments");
     }
-    // whether the ordinary declarations a call's callee names include one that takes these arguments
+    // The script methods a class holds under a name, its own or the nearest base's that declares one: a class the load
+    // models by its model, a class an earlier unit declared by the declarations the engine holds of it
+    std::vector<const function_decl*> class_methods_named(std::string_view cls, std::string_view member, bool want_static, int depth = 0) {
+        if (depth > 32 || cls.empty()) { return {}; }
+        if (const sclass* c = find_sclass(cls)) {
+            if (auto held = (want_static ? c->static_methods : c->methods).find(member); held != (want_static ? c->static_methods : c->methods).end()) { return held->second; }
+            if (!want_static) {   // an object and a method's bare name reach a static too
+                if (auto held = c->static_methods.find(member); held != c->static_methods.end()) { return held->second; }
+            }
+            for (auto base : c->decl->base_classes) {
+                auto found = class_methods_named(base, member, want_static, depth + 1);
+                if (!found.empty()) { return found; }
+            }
+            return {};
+        }
+        const auto def = engine_class(cls);
+        if (!def) { return {}; }
+        std::vector<const function_decl*> found;
+        const uint64_t id = eng_.symbolize(member);
+        const auto take = [&](const std::unordered_map<uint64_t, std::vector<std::shared_ptr<function_decl>>>& table) {
+            if (const auto held = table.find(id); held != table.end()) { for (const auto& fn : held->second) { if (fn) { found.push_back(fn.get()); } } }
+        };
+        take(want_static ? def->script_static_method_overloads() : def->script_method_overloads());
+        if (found.empty() && !want_static) { take(def->script_static_method_overloads()); }
+        for (const auto& parent : def->get_parent_classes()) {
+            if (!found.empty()) { break; }
+            found = class_methods_named(parent->get_name(), member, want_static, depth + 1);
+        }
+        return found;
+    }
+    // A namespace's functions of a name: every declaration a call of space::member may reach, typed or not
+    std::vector<const function_decl*> namespace_functions_named(const std::string& space, std::string_view member) {
+        namespace_overloads fns = namespace_function_overloads(space, member);
+        fns.typed.insert(fns.typed.end(), fns.untyped.begin(), fns.untyped.end());
+        return std::move(fns.typed);
+    }
+    // Whether the ordinary declarations a call's callee names include one that takes these arguments, by the lookup an
+    // ordinary call of that spelling takes (a method of the class, a function of an enclosing namespace, a program-scope
+    // function). The declarations are this unit's and those the rest of the program holds under the name: another unit of
+    // the closure's, an earlier run's.
     bool ordinary_callee_fits(call_expr* c, const std::vector<ctype>& args) {
-        const std::vector<const function_decl*>* overloads = nullptr;
+        std::vector<const function_decl*> overloads;
         expression* callee = c->callee.get();
         if (callee->get_type() == node_type::identifier_expr) {
             auto* id = static_cast<identifier_expr*>(callee);
-            if (class_ctx_ && !id->global_qualified) {
-                const member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
-                if (hit.found && hit.methods) { overloads = hit.methods; }
+            if (class_ctx_ && !id->global_qualified) { overloads = class_methods_named(class_ctx_name_, id->name, /*want_static=*/false); }
+            if (overloads.empty() && !id->global_qualified) {
+                if (const std::string space = enclosing_namespace_member(id->name); !space.empty()) { overloads = namespace_functions_named(space, id->name); }
             }
-            if (!overloads && !id->global_qualified) {
-                if (const std::string space = enclosing_namespace_member(id->name); !space.empty()) {
-                    if (auto held = namespace_fns_.find(space + "::" + std::string(id->name)); held != namespace_fns_.end()) { overloads = &held->second; }
-                }
-            }
-            if (!overloads) {
-                if (auto held = functions_.find(id->name); held != functions_.end()) { overloads = &held->second; }
+            if (overloads.empty()) {
+                static const std::vector<const function_decl*> none;
+                const auto own = functions_.find(id->name);
+                const std::vector<const function_decl*>& declared = own != functions_.end() ? own->second : none;
+                overloads = declared;
+                const auto& foreign = foreign_overloads(id->name, declared);
+                overloads.insert(overloads.end(), foreign.begin(), foreign.end());
             }
         } else if (callee->get_type() == node_type::member_expr) {
             auto* m = static_cast<member_expr*>(callee);
             if (m->is_static) {
-                if (auto held = namespace_fns_.find(qualified_spelling(m)); held != namespace_fns_.end()) { overloads = &held->second; }
-            } else {
-                const ctype recv = infer(m->object.get());
-                if (recv.kind == ctype::object_k && !recv.cls.empty()) {
-                    const member_hit hit = lookup_member(recv.cls, m->member, /*want_static=*/false);
-                    if (hit.found && hit.methods) { overloads = hit.methods; }
+                const std::string qualified = qualified_spelling(m);
+                if (qualified.size() > m->member.size() + 2) {
+                    const std::string owner = qualified.substr(0, qualified.size() - m->member.size() - 2);
+                    overloads = find_sclass(owner) || engine_class(owner) ? class_methods_named(owner, m->member, /*want_static=*/true)
+                                                                          : namespace_functions_named(owner, m->member);
                 }
+            } else {
+                bool unknown = false;
+                overloads = class_methods_named(receiver_class(m, unknown), m->member, /*want_static=*/false);
             }
         }
-        if (!overloads) { return false; }
-        return std::any_of(overloads->begin(), overloads->end(), [&](const function_decl* fn) { return script_fn_viable(fn, args, overloads->size() > 1); });
+        return std::any_of(overloads.begin(), overloads.end(), [&](const function_decl* fn) { return script_fn_viable(fn, args, overloads.size() > 1); });
     }
 
     // C++ [basic.scope]: a block, a parameter list or one unit's top level declares a name once; a later run of the program

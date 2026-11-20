@@ -890,6 +890,49 @@ public:
 			check_true(contains(failure(*e, "class Dup<T> {}\nclass Dup<U> {}\n"), "generic 'Dup<U>' is declared again: line 1 declares it with the same parameters"));
 		});
 
+		test("an_ordinary_function_another_unit_declares_wins_over_a_generic_too", [this]() {
+			const std::string plain = "int twice(int x) { return x + x + 1; }\n";
+			const std::string generic = "T twice<T>(T x) { return x + x; }\n";
+			const std::string calls = "to_string(twice(2)) + \"|\" + twice(\"ab\");";
+			check_eq(std::string("5|abab"), stdlib_engine()->execute(plain + generic + calls).as_string(), "one unit: the rule the others mirror");
+			// from earlier executes, declared in either order
+			auto e = stdlib_engine();
+			e->execute(plain);
+			e->execute(generic);
+			check_eq(std::string("5|abab"), e->execute(calls).as_string());
+			auto later = stdlib_engine();
+			later->execute(generic);
+			later->execute(plain);
+			check_eq(std::string("5|abab"), later->execute(calls).as_string());
+			// from imports, in either order
+			const auto directory = unit_directory("ordinary_units");
+			write_unit(directory, "plain.jai", plain);
+			write_unit(directory, "generic.jai", generic);
+			const std::string root = write_unit(directory, "root.jai", "import \"plain.jai\";\nimport \"generic.jai\";\n" + calls + "\n");
+			const std::string other = write_unit(directory, "other.jai", "import \"generic.jai\";\nimport \"plain.jai\";\n" + calls + "\n");
+			check_eq(std::string("5|abab"), stdlib_engine()->execute_file(root).as_string());
+			check_eq(std::string("5|abab"), stdlib_engine()->execute_file(other).as_string());
+			// a namespace's: one unit, from inside it (above the function and below it) and by its qualified name
+			check_eq(std::string("5|abab|5|abab|5|abab"), stdlib_engine()->execute(
+				"namespace wire {\nstring above() { return to_string(twice(2)) + \"|\" + twice(\"ab\"); }\n" + plain + generic +
+				"string below() { return to_string(twice(2)) + \"|\" + twice(\"ab\"); }\n}\n"
+				"wire::above() + \"|\" + wire::below() + \"|\" + to_string(wire::twice(2)) + \"|\" + wire::twice(\"ab\");").as_string());
+			// and from earlier executes
+			auto spaced = stdlib_engine();
+			spaced->execute("namespace wire {\n" + plain + "}\n");
+			spaced->execute("namespace wire {\n" + generic + "}\n");
+			check_eq(std::string("5|abab"), spaced->execute("to_string(wire::twice(2)) + \"|\" + wire::twice(\"ab\");").as_string());
+			check_eq(std::string("5|abab"), spaced->execute("namespace wire { string probe() { return to_string(twice(2)) + \"|\" + twice(\"ab\"); } }\nwire::probe();").as_string());
+			// a method, static or not, of a class this unit declares or an earlier one did
+			const std::string tool = "class Tool {\n\tint twice(int x) { return x + x + 1; }\n\tT twice<T>(T x) { return x + x; }\n"
+				"\tstatic int make(int x) { return x + 1; }\n\tstatic T make<T>(T x) { return x; }\n}\n";
+			const std::string uses = "Tool t;\nto_string(t.twice(2)) + \"|\" + t.twice(\"ab\") + \"|\" + to_string(Tool::make(2)) + \"|\" + Tool::make(\"s\");";
+			check_eq(std::string("5|abab|3|s"), stdlib_engine()->execute(tool + uses).as_string());
+			auto held = stdlib_engine();
+			held->execute(tool);
+			check_eq(std::string("5|abab|3|s"), held->execute(uses).as_string());
+		});
+
 		// ---- generics of one name that take the same type arguments: two instances of that name, one overload set
 
 		const std::string shows =

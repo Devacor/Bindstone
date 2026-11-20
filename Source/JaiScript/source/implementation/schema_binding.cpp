@@ -372,9 +372,6 @@ void ensure_signal_view_type_registered(engine& a_engine) {
 	builder.method("connect_source", [](signal_script_ops& self, const std::string& id, const script_value& lambda) {
 		if (!self.valid() || self.connect_source_fn == nullptr || !self.connect_source_fn(self.source.get(), id, lambda)) { throw runtime_error("Signal view is not backed by a live signal"); }
 	}, serial);
-	builder.method("connect_source", [](signal_script_ops& self, const std::string& id, const script_value& lambda) {
-		if (!self.valid() || self.connect_source_fn == nullptr || !self.connect_source_fn(self.source.get(), id, lambda)) { throw runtime_error("Signal view is not backed by a live signal"); }
-	}, serial);
 	builder.method("disconnect", [](signal_script_ops& self, const std::string& id) {
 		if (self.disconnect_fn != nullptr) { self.disconnect_fn(self.source.get(), id); }
 	}, serial);

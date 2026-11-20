@@ -70,6 +70,15 @@ jobs:
         with:
           arch: x64
 
+      # The image's own LLVM is first on PATH and can be older than the MSVC STL accepts; Visual Studio's Clang matches its STL
+      - name: Visual Studio's Clang
+        if: matrix.name == 'windows-clang'
+        run: |
+          llvm="$(cygpath -u "$VCINSTALLDIR")Tools/Llvm/x64/bin"
+          test -f "$llvm/clang-cl.exe" || { echo "::error::Visual Studio's C++ Clang tools are not installed ($llvm)"; exit 1; }
+          cygpath -w "$llvm" >> "$GITHUB_PATH"
+          "$llvm/clang-cl.exe" --version
+
       - name: Compiler cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:

@@ -525,8 +525,8 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td>Schedule</td><td>A period after the server starts, then a period after each run starts; never two runs of one task at once.</td></tr>
 <tr><td>Reload</td><td>Each build reads the declarations again; a task keeps its schedule while its place and period stay.</td></tr>
 </tbody></table></div>
-<h3 id="spider-request"><code>spider::Request</code><a class="hlink" href="#spider-request" aria-label="link">&#8203;</a></h3>
-<p>A script class in <code>lib/spider.jai</code>: <a href="../embedding/19-jai-spider.html#request-response">Request and Response</a>.</p>
+<h3 id="spider-request"><code>spider::request</code><a class="hlink" href="#spider-request" aria-label="link">&#8203;</a></h3>
+<p>A script class in <code>lib/spider.jai</code>: <a href="../embedding/19-jai-spider.html#request-response">Request and response</a>.</p>
 <div class="tablewrap"><table><thead><tr><th>Member</th><th>What it holds</th></tr></thead><tbody>
 <tr><td><code>method</code>, <code>query_string</code>, <code>version</code></td><td>From the request line.</td></tr>
 <tr><td><code>path</code></td><td>The path, percent-decoded and without the query.</td></tr>
@@ -537,14 +537,14 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>headers</code>, <code>header(name)</code></td><td>Names lowercased; <code>header("Content-Type")</code> reads any spelling.</td></tr>
 <tr><td><code>body</code></td><td>The raw body.</td></tr>
 <tr><td><code>form()</code></td><td>The body's urlencoded or multipart fields.</td></tr>
-<tr><td><code>files()</code></td><td>The body's uploads as <code>map&lt;string, spider::Upload&gt;</code> (<code>filename</code>, <code>content_type</code>, <code>data</code>, <code>size()</code>, <code>save(path)</code>).</td></tr>
+<tr><td><code>files()</code></td><td>The body's uploads as <code>map&lt;string, spider::upload&gt;</code> (<code>filename</code>, <code>content_type</code>, <code>data</code>, <code>size()</code>, <code>save(path)</code>).</td></tr>
 <tr><td><code>json()</code></td><td><code>from_json</code> of the body.</td></tr>
 <tr><td><code>remote_addr</code></td><td>The peer's address.</td></tr>
 </tbody></table></div>
 <h3 id="spider-helpers">Response helpers<a class="hlink" href="#spider-helpers" aria-label="link">&#8203;</a></h3>
-<p><code>spider::Response</code> members: <a href="../guide/17-web.html#spider-response">spider::Response</a>. What a handler may return: <a href="../embedding/19-jai-spider.html#first-app">A first app</a>.</p>
+<p><code>spider::response</code> members: <a href="../guide/17-web.html#spider-response">spider::response</a>. What a handler may return: <a href="../embedding/19-jai-spider.html#first-app">A first app</a>.</p>
 <div class="tablewrap"><table><thead><tr><th>Helper</th><th>What it answers</th></tr></thead><tbody>
-<tr><td><code>spider::Response(status, body)</code></td><td>Both optional: 200 and an empty body.</td></tr>
+<tr><td><code>spider::response(status, body)</code></td><td>Both optional: 200 and an empty body.</td></tr>
 <tr><td><code>spider::html(text)</code>, <code>spider::plain_text(text)</code>, <code>spider::json(value)</code></td><td>A body with its Content-Type. Each takes an optional status; <code>spider::html</code> takes a <code>web::html</code> too.</td></tr>
 <tr><td><code>spider::redirect(url)</code></td><td>303 See Other by default, the answer to a form post.</td></tr>
 <tr><td><code>spider::file(path, content_type)</code></td><td>A file streamed from disk, relative to the app's folder, typed by its extension unless one is given.</td></tr>
@@ -555,7 +555,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <p>What the server answers when a request or a handler fails: <a href="../embedding/19-jai-spider.html#model">Errors and limits</a>.</p>
 <div class="tablewrap"><table><thead><tr><th>Failure</th><th>Answer</th></tr></thead><tbody>
 <tr><td>A run-time error or an uncaught throw in a handler</td><td>500. The error and its trace are logged; the page shows them under <code>--dev</code> only.</td></tr>
-<tr><td>A Response with a status outside 200 to 599</td><td>500, logged: <code>Response status 101 is not a final HTTP status (200 to 599)</code></td></tr>
+<tr><td>A response with a status outside 200 to 599</td><td>500, logged: <code>Response status 101 is not a final HTTP status (200 to 599)</code></td></tr>
 <tr><td>A header name that is not a token, or a header value holding a line break or NUL</td><td>500, logged: <code>Response header &#x27;N&#x27; is not a header name, or its value holds a line break or NUL</code></td></tr>
 <tr><td>A cookie line holding a line break or NUL</td><td>500, logged: <code>Response cookie &#x27;L&#x27; holds a line break or NUL</code></td></tr>
 <tr><td>An app that never called <code>spider::spin</code></td><td>500 naming the missing call.</td></tr>

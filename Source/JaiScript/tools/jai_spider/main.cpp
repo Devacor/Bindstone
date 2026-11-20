@@ -1,10 +1,10 @@
 // jai_spider - a web application host for JaiScript. `jai_spider app.jai` serves the app over HTTP/1.1: one network
 // thread moves the bytes and hands each request to a pool of workers, and each request runs in an engine of its own,
 // built from the app before the request arrived and destroyed after it, so no request sees what another left behind.
-// A saved edit applies to the next request, SQLite is a Database away, spider::every runs background tasks, and files
+// A saved edit applies to the next request, SQLite is a database away, spider::every runs background tasks, and files
 // under --root are served as they are. The host is a consumer of the library: sockets and HTTP (http_server.hpp), the
 // text forms of HTTP (http_text.hpp), SQLite (database.hpp), the console (console.hpp) and the app's sources
-// (sources.hpp) live here, Request and Router are script (lib/spider.jai), Response is the library's spider::Response.
+// (sources.hpp) live here, request and router are script (lib/spider.jai), a response is the library's spider::response.
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/core/load_report.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
@@ -90,8 +90,8 @@ void print_usage() {
 		"  jai_spider app.jai [options]\n"
 		"\n"
 		"The app hands its handler to spider::spin(handler) (spider::serve is the same call): a function of a\n"
-		"spider::Request, or a spider::Router (lib/spider.jai has Request, Router and the html/json/redirect/\n"
-		"file helpers; spider::Response is the library's). Each request runs in a fresh engine of its own, so\n"
+		"spider::request, or a spider::router (lib/spider.jai has request, router and the html/json/redirect/\n"
+		"file helpers; spider::response is the library's). Each request runs in a fresh engine of its own, so\n"
 		"state lives in the database or the session, never in script globals. A saved edit applies to the next\n"
 		"request; an edit that does not check is reported here and the app keeps serving the code it had.\n"
 		"spider::every(seconds, fn) runs fn in the background; spider::catch / sling / get / post reach other servers.\n"
@@ -284,7 +284,7 @@ jai::script_value script_map_of(jai::engine* eng, std::vector<std::pair<std::str
 	return result;
 }
 
-// The HTTP text forms the standard library leaves to a web host (lib/spider.jai builds Request on them)
+// The HTTP text forms the standard library leaves to a web host (lib/spider.jai builds spider::request on them)
 void register_http_text(jai::engine& eng) {
 	eng.add_function("parse_cookies", [](const std::string& header) { return spider_host::parse_cookies(header); });
 	jai::engine* engine_pointer = &eng;

@@ -3635,7 +3635,7 @@ public:
 				"reflect::has_method", "reflect::instances", "reflect::invoke", "reflect::is_cpp_bound", "reflect::is_instance_of",
 				"reflect::method_arguments", "reflect::methods", "reflect::untrusted_template_dirs",
 				"reflect::untrusted_template_output_limit", "reflect::set", "reflect::template_output_limit", "reflect::type_name",
-				"resolve_path", "sleep", "spider::Response", "spider::catch", "spider::get", "spider::post", "spider::sling",
+				"resolve_path", "sleep", "spider::catch", "spider::get", "spider::post", "spider::response", "spider::sling",
 				"template#dynamic", "template#html", "template#raw", "template#untrusted", "template#untrusted_file", "template#splice",
 				"time::date", "time::date_from_unix", "time::date_now", "time::engine_elapsed", "time::execute_elapsed",
 				"time::local_date", "time::local_now", "time::stopwatch", "time::unix_ms", "time::unix_time",

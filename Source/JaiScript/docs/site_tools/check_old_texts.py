@@ -76,6 +76,11 @@ OLD_TEXTS = [
     r"\[object\]",
     r"\[function\]",
     r"catch takes one name and no type",
+    # jai_spider and the spider:: client name their classes in snake_case (spider::request, database)
+    r"spider::(?:Response|Request|Router|Route|Upload|Session|SessionStore|Task)\b",
+    r"\bResponse\.(?:header|set_cookie):",
+    r"\bDatabase(?:\.[a-z_]+| [a-z_]+ =)",
+    r"\bSqlFragment\b",
 ]
 
 

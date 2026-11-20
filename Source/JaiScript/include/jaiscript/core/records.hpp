@@ -19,7 +19,7 @@ class engine;
 using record_field_list = std::vector<std::pair<std::string, script_value>>;
 
 // Records: a script class instance built from named values, and an instance's fields read back as named values
-// (docs/site/embedding/17-host-api.html "Records"). `who` leads every error text ("Database.query: ...").
+// (docs/site/embedding/17-host-api.html "Records"). `who` leads every error text ("database.query: ...").
 //
 // make_record constructs the class T `type` names with T() (a class whose constructors all take arguments is refused), then
 // stores each named value in the field of that name by the rules a script store follows. A name the class has no field for

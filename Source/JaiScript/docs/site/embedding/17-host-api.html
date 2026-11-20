@@ -364,7 +364,7 @@ sink <code>eng-&gt;set_script_error_handler(...)</code> installs; the default wr
 <h2 id="constant-arguments">Constant arguments<a class="hlink" href="#constant-arguments" aria-label="link">&#8203;</a></h2>
 <p>Some arguments must never come from data: SQL text, a shell command. <code>engine::constant_argument(callable, index,
 refusal)</code> declares that argument <code>index</code> of a host function (<code>"run_sql"</code>) or bound method
-(<code>"Database.query"</code>) takes only the program's own constants: a string literal, a <code>const</code> variable
+(<code>"database.query"</code>) takes only the program's own constants: a string literal, a <code>const</code> variable
 initialized with a constant, a ternary whose arms are constants, a <code>+</code> of constants, or an array literal of
 them. A template string with a splice is not one, nor is anything read, computed or passed in.</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">jai::engine* raw = eng.get();
@@ -420,7 +420,7 @@ eng-&gt;add_function("load", [raw](const jai::script_type&amp; type, const std::
 <ul>
 <li><strong>A script callee takes them only as a generic.</strong> A script function, method or class that declares type parameters is a <a href="../guide/21-generics.html">generic</a>: the load folds the type arguments into its instance&#x27;s name and passes nothing at run time. A call with type arguments the checker resolves to any other script function, method, constructor or local lambda fails the load: <code>'f' takes no type arguments: a type argument goes to a host function</code>.</li>
 <li><strong>Host templates and script generics share a naming.</strong> A host template instance (<code>Point&lt;int&gt;</code>, bound with its template binder) and a script generic&#x27;s instance (<code>Stack&lt;int&gt;</code>) are both classes named <code>Name&lt;args&gt;</code> by <code>jai::template_instance_name</code>, each argument in its canonical spelling. A host template keeps its name: a script generic class of that name fails the load (<code>'Point' is a host template: a generic cannot take its name</code>). A <code>jai::script_type</code> naming an instance (<code>load&lt;Stack&lt;Pet&gt;&gt;("x")</code>) is a class like any other to <code>make_record</code>.</li>
-<li><strong>Constant arguments count the value arguments.</strong> <code>constant_argument("Database.query", 0, ...)</code> names the SQL text of <code>db.query(sql)</code> and of <code>db.query&lt;User&gt;(sql)</code> alike; the host's own index is its C++ parameter's, after the types.</li>
+<li><strong>Constant arguments count the value arguments.</strong> <code>constant_argument("database.query", 0, ...)</code> names the SQL text of <code>db.query(sql)</code> and of <code>db.query&lt;User&gt;(sql)</code> alike; the host's own index is its C++ parameter's, after the types.</li>
 <li><strong>Overloads.</strong> A typed form binds beside an untyped one of the same name: the <code>jai::script_type</code> parameter takes only a type value, so <code>query(sql, id)</code> and <code>query&lt;User&gt;(sql)</code> each find theirs.</li>
 </ul>
 <h2 id="records">Records<a class="hlink" href="#records" aria-label="link">&#8203;</a></h2>
@@ -527,12 +527,12 @@ off the slow cores.</p>
 asks the system never to throttle it to save power (EcoQoS on Windows, user-initiated QoS on Apple platforms).</p>
 <h2 id="http-transport">The HTTP transport<a class="hlink" href="#http-transport" aria-label="link">&#8203;</a></h2>
 <p>The <a href="../guide/17-web.html#spider"><code>spider::</code> client</a> (<code>spider::catch</code>,
-<code>sling</code>, <code>get</code>, <code>post</code>, <code>spider::Response</code>) is opt-in and sends nothing by
+<code>sling</code>, <code>get</code>, <code>post</code>, <code>spider::response</code>) is opt-in and sends nothing by
 itself: the host supplies the HTTP stack. Three calls make a working client:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/stdlib/spider.hpp&gt;
 #include &lt;jaiscript/net/http_socket_transport.hpp&gt;   // or your own jai::http_transport
 
-jai::stdlib::register_spider(*eng);                  // the functions and spider::Response
+jai::stdlib::register_spider(*eng);                  // the functions and spider::response
 eng-&gt;http_transport(std::make_shared&lt;jai::net::http_socket_transport&gt;());
 eng-&gt;enable(jai::permissions::network);                           // off by default: the host grants it</code></pre></div>
 <p>Without a transport a call raises <code>spider::catch: no HTTP transport installed: the host provides one with

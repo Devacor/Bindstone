@@ -551,7 +551,7 @@ namespace jai::detail {
 		"root_script_path",
 		"same_object",
 		"shared_from_this",
-		"spider::Response",
+		"spider::response",
 		"string::append",
 		"string::from_bytes",
 		"string::from_code",

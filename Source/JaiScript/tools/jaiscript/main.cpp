@@ -272,7 +272,7 @@ void print_usage() {
 		"  library (html_escape, url_encode, form_encode, parse_query, build_query, parse_url, ...),\n"
 		"  the spider:: HTTP client (spider::catch(url[, options]), also spelled spider::get;\n"
 		"  spider::sling(content, url[, options]), also spelled spider::post(url, content[, options]);\n"
-		"  each answers a spider::Response; WinHTTP on Windows, sockets elsewhere, HTTPS through OpenSSL\n"
+		"  each answers a spider::response; WinHTTP on Windows, sockets elsewhere, HTTPS through OpenSSL\n"
 		"  when the build found it), with the network permission granted,\n"
 		"  plus host file IO: file::read(path),\n"
 		"  file::write(path, text) (creates missing folders), file::exists(path), file::remove(path), download,\n"

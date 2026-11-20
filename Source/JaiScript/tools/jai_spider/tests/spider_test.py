@@ -200,7 +200,7 @@ class Suite:
 		r = self.request("GET", "/null")
 		self.check("a null answer is 204", r.status == 204 and r.body == b"")
 		r = self.request("GET", "/status/418")
-		self.check("Response(status, body) keeps its status", r.status == 418 and r.text() == "custom status")
+		self.check("spider::response(status, body) keeps its status", r.status == 418 and r.text() == "custom status")
 
 	def parsing(self):
 		r = self.request("GET", "/echo?a=1&b=two%20words&c=x+y&empty&d=%26%3D", headers={"x-test-agent": "probe"})
@@ -328,7 +328,7 @@ class Suite:
 		self.check("an array field round-trips as JSON text", r.json()["tags"] == ["pup", "artist", "edited"], r.text())
 		r = self.request("GET", "/member-errors/wrong-type")
 		self.check("a column that does not fit its field raises naming both types",
-			r.status == 500 and b"Database.query: field &#39;handle&#39; of &#39;WrongMember&#39; is int, not string" in r.body, r.text()[:200])
+			r.status == 500 and b"database.query: field &#39;handle&#39; of &#39;WrongMember&#39; is int, not string" in r.body, r.text()[:200])
 		r = self.request("GET", "/member-errors/run-time-table?t=items")
 		self.check("a table name the program does not spell is refused",
 			r.status == 500 and b"a table name must be a constant; a value never names a table" in r.body, r.text()[:200])
@@ -380,7 +380,7 @@ class Suite:
 		self.check("the rejected edit is listed once, however many engines are built from the last good code", listed == 1, str(listed) + " listings")
 		copies = list((self.app_dir / ".cache").glob("jai_spider-last-good-*"))
 		self.check("the last good code is copied under the app's .cache folder", len(copies) == 1 and any(copies[0].rglob("greeting.jai")), str(copies))
-		self.write_module("greeting.jai", 'string greeting() { Database d = open_database(":memory:"); string who = "x"; return d.value("SELECT \'" + who + "\'"); }\n')
+		self.write_module("greeting.jai", 'string greeting() { database d = open_database(":memory:"); string who = "x"; return d.value("SELECT \'" + who + "\'"); }\n')
 		r = self.request("GET", "/greeting")
 		self.check("an edit that builds SQL text is rejected at load", r.text() == "version two, edited" and self.wait_for_log("argument 1 of 'value' is not a constant: SQL text must be a constant; pass values as parameters (?)"), self.server.log_text()[-400:])
 		self.write_module("greeting.jai", 'string greeting() { return "version three after the fix"; }\n')

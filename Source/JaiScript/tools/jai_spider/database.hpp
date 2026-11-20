@@ -1,10 +1,10 @@
 #pragma once
-// Database: SQLite for scripts, injection-proof by construction. The SQL text of every statement is one of the program's
+// database: SQLite for scripts, injection-proof by construction. The SQL text of every statement is one of the program's
 // own constants (engine::constant_argument: a literal, a const holding one, a ternary or + of them): the checker refuses
 // any other text at load, and at run time a text the program does not spell is refused before SQLite sees it. Values
 // only ever bind as parameters. There is no escape or quote function, and no way to splice a value into the text.
 //
-//   Database db = open_database("app.db");          // relative to the app's folder; ":memory:" for a scratch one
+//   database db = open_database("app.db");          // relative to the app's folder; ":memory:" for a scratch one
 //   db.execute(sql, a, b, ...) -> int               // rows changed; a text of several statements (no parameters) runs them all
 //   db.query(sql, a, b, ...) -> array<map<string, var>>
 //   db.query_one(sql, ...) -> map<string, var> or null
@@ -176,7 +176,7 @@ public:
 	}
 
 	jai::script_int execute(const std::string& sql, const std::vector<jai::script_value>& params) {
-		admit(sql, "Database.execute");
+		admit(sql, "database.execute");
 		sqlite3* handle = open_handle();
 		if (!params.empty() || !template_for(sql).slots.empty()) {
 			bound_statement use(*this, sql, params);
@@ -205,7 +205,7 @@ public:
 	}
 
 	jai::script_value query(const std::string& sql, const std::vector<jai::script_value>& params) {
-		admit(sql, "Database.query");
+		admit(sql, "database.query");
 		bound_statement use(*this, sql, params);
 		jai::script_value rows = jai::script_value::make_array(nullptr, eng_);
 		auto& out = rows.as_array();
@@ -214,32 +214,32 @@ public:
 	}
 
 	jai::script_value query_one(const std::string& sql, const std::vector<jai::script_value>& params) {
-		admit(sql, "Database.query_one");
+		admit(sql, "database.query_one");
 		bound_statement use(*this, sql, params);
 		if (!step_row(use.statement)) { return jai::script_value(std::monostate{}, eng_); }
 		return row_of(use.statement);
 	}
 
 	jai::script_value query(const jai::script_type& type, const std::string& sql, const std::vector<jai::script_value>& params) {
-		admit(sql, "Database.query");
+		admit(sql, "database.query");
 		bound_statement use(*this, sql, params);
 		jai::script_value rows = jai::script_value::make_array(type.info(), eng_);
-		while (step_row(use.statement)) { rows.unchecked_get_array_storage()->push(record_of(type, use.statement, false, "Database.query")); }
+		while (step_row(use.statement)) { rows.unchecked_get_array_storage()->push(record_of(type, use.statement, false, "database.query")); }
 		return rows;
 	}
 
 	jai::script_value query_one(const jai::script_type& type, const std::string& sql, const std::vector<jai::script_value>& params) {
-		admit(sql, "Database.query_one");
+		admit(sql, "database.query_one");
 		bound_statement use(*this, sql, params);
 		if (!step_row(use.statement)) { return jai::script_value(std::monostate{}, eng_); }
-		return record_of(type, use.statement, true, "Database.query_one");
+		return record_of(type, use.statement, true, "database.query_one");
 	}
 
 	// INSERT INTO "table" (the record's fields that are columns) VALUES (?, ...); an INTEGER PRIMARY KEY holding 0 or null is
 	// left out, so SQLite assigns it
 	jai::script_int insert(const std::string& table, const jai::script_value& record) {
-		const auto& columns = table_columns(table, "Database.insert");
-		const jai::record_field_list fields = fields_of(record, "Database.insert");
+		const auto& columns = table_columns(table, "database.insert");
+		const jai::record_field_list fields = fields_of(record, "database.insert");
 		std::string names, slots;
 		std::vector<const jai::script_value*> values;
 		for (const auto& column : columns) {
@@ -259,8 +259,8 @@ public:
 
 	// UPDATE "table" SET (every other column the record has) WHERE (the primary key's columns) = the record's
 	jai::script_int update(const std::string& table, const jai::script_value& record) {
-		const auto& columns = table_columns(table, "Database.update");
-		const jai::record_field_list fields = fields_of(record, "Database.update");
+		const auto& columns = table_columns(table, "database.update");
+		const jai::record_field_list fields = fields_of(record, "database.update");
 		std::vector<const sqlite_connection::table_column*> key;
 		for (const auto& column : columns) {
 			if (column.primary_key > 0) { key.push_back(&column); }
@@ -289,7 +289,7 @@ public:
 	}
 
 	jai::script_value value(const std::string& sql, const std::vector<jai::script_value>& params) {
-		admit(sql, "Database.value");
+		admit(sql, "database.value");
 		bound_statement use(*this, sql, params);
 		if (!step_row(use.statement) || sqlite3_column_count(use.statement) == 0) { return jai::script_value(std::monostate{}, eng_); }
 		return column_value(use.statement, 0);
@@ -672,10 +672,10 @@ void bind_typed_database_method(Binder& binder, const char* name, Body body, Opt
 }
 
 inline void register_database(jai::engine& eng, const std::filesystem::path& app_dir) {
-	jai::dynamic_binder<sql_fragment>(eng, "SqlFragment")
+	jai::dynamic_binder<sql_fragment>(eng, "sql_fragment")
 		.method("text", [](const sql_fragment& self) { return self.get_text(); })
 		.build();
-	auto binder = jai::dynamic_binder<database>(eng, "Database");
+	auto binder = jai::dynamic_binder<database>(eng, "database");
 	binder.constructor<>();
 	constexpr auto counts = std::make_index_sequence<17>{};
 	bind_database_method(binder, "execute", [](database& self, const std::string& sql, const std::vector<jai::script_value>& params) {
@@ -708,10 +708,10 @@ inline void register_database(jai::engine& eng, const std::filesystem::path& app
 	binder.method("is_open", [](const database& self) { return self.is_open(); });
 	binder.method("close", [](database& self) { self.close(); });
 	binder.build();
-	for (const char* method : {"Database.execute", "Database.query", "Database.query_one", "Database.value"}) {
+	for (const char* method : {"database.execute", "database.query", "database.query_one", "database.value"}) {
 		eng.constant_argument(method, 0, k_sql_refusal);
 	}
-	for (const char* method : {"Database.insert", "Database.update"}) {
+	for (const char* method : {"database.insert", "database.update"}) {
 		eng.constant_argument(method, 0, k_table_refusal);
 	}
 	eng.constant_argument("sql_choose", 1, "sql_choose's choices must be constants: an array literal of strings, or a const of one");

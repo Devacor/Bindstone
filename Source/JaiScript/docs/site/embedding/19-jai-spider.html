@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>jai_spider: a Web Application Host — JaiScript Embedding</title>
-<meta name="description" content="jai_spider serves a JaiScript program over HTTP/1.1: the handler the app hands to spider::spin, run on a pool of workers in a fresh engine for every request, Request and a Router in script, spider::Response shared with the spider:: client, SQLite bound as a class, cookie sessions, background tasks, static files, and edits that apply on the next request.">
+<meta name="description" content="jai_spider serves a JaiScript program over HTTP/1.1: the handler the app hands to spider::spin, run on a pool of workers in a fresh engine for every request, spider::request and spider::router in script, spider::response shared with the spider:: client, SQLite bound as a class, cookie sessions, background tasks, static files, and edits that apply on the next request.">
 <meta name="theme-color" content="#0b0d13" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="JaiScript docs">
 <meta property="og:title" content="jai_spider: a Web Application Host — JaiScript Embedding">
-<meta property="og:description" content="jai_spider serves a JaiScript program over HTTP/1.1: the handler the app hands to spider::spin, run on a pool of workers in a fresh engine for every request, Request and a Router in script, spider::Response shared with the spider:: client, SQLite bound as a class, cookie sessions, background tasks, static files, and edits that apply on the next request.">
+<meta property="og:description" content="jai_spider serves a JaiScript program over HTTP/1.1: the handler the app hands to spider::spin, run on a pool of workers in a fresh engine for every request, spider::request and spider::router in script, spider::response shared with the spider:: client, SQLite bound as a class, cookie sessions, background tasks, static files, and edits that apply on the next request.">
 <meta property="og:image" content="https://jaiscript.com/assets/og-card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -78,31 +78,31 @@ written as <code>\xNN</code>.</p>
 <h2 id="first-app">A first app<a class="hlink" href="#first-app" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai" data-host="jai_spider"><span class="cb-label">jaiscript &mdash; app.jai (under jai_spider)</span><pre><code class="lang-jai">import "spider.jai";
 
-Database db = open_database("notes.db");        // relative to the app's folder
+database db = open_database("notes.db");        // relative to the app's folder
 db.execute("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, text TEXT NOT NULL)");
 
-spider::Router routes = spider::Router();
-routes.get("/", (spider::Request req) =&gt; {
+spider::router routes = spider::router();
+routes.get("/", (spider::request req) =&gt; {
     int count = db.value("SELECT COUNT(*) FROM notes");   // what outlasts a request lives in the database
     return spider::html(`&lt;h1&gt;${count} notes&lt;/h1&gt;`);
 });
-routes.get("/notes", (spider::Request req) =&gt; db.query("SELECT id, text FROM notes"));   // a value answers JSON
-routes.post("/notes", (spider::Request req) =&gt; {
+routes.get("/notes", (spider::request req) =&gt; db.query("SELECT id, text FROM notes"));   // a value answers JSON
+routes.post("/notes", (spider::request req) =&gt; {
     db.execute("INSERT INTO notes (text) VALUES (?)", req.form()["text"]);
     return spider::redirect("/notes");
 });
-routes.get("/notes/:id", (spider::Request req) =&gt; {
+routes.get("/notes/:id", (spider::request req) =&gt; {
     var note = db.query_one("SELECT id, text FROM notes WHERE id = ?", req.param("id"));
     return note == null ? spider::not_found() : spider::json(note);
 });
 
 spider::spin(routes);</code></pre></div>
 <p><code>spider::spin(handler[, options])</code> (also named <code>spider::serve</code>) takes a
-<code>spider::Router</code> or any function of a <code>spider::Request</code>. The options are <code>budget</code>
+<code>spider::router</code> or any function of a <code>spider::request</code>. The options are <code>budget</code>
 (seconds a request may run) and <code>max_body</code> (bytes), which override the command line from the next request
 on; any other key raises.</p>
 <div class="tablewrap"><table><thead><tr><th>A handler returns</th><th>The client gets</th></tr></thead><tbody>
-<tr><td>a <code>spider::Response</code></td><td>that response</td></tr>
+<tr><td>a <code>spider::response</code></td><td>that response</td></tr>
 <tr><td>a string or a <code>web::html</code></td><td>an HTML page</td></tr>
 <tr><td><code>null</code></td><td>204 No Content</td></tr>
 <tr><td>any other value</td><td>the value as JSON</td></tr>
@@ -112,20 +112,27 @@ the <a href="../guide/17-web.html"><code>web::</code> library</a>, and <code>par
 <code>parse_multipart</code>, <code>http_date</code> and <code>content_type_for</code>. A page is usually a
 <a href="../guide/19-templates.html">template</a>, whose splices escape every value; a handler may return the
 <code>web::html</code> it produces.</p>
-<h2 id="request-response">Request and Response<a class="hlink" href="#request-response" aria-label="link">&#8203;</a></h2>
-<p><code>spider::Request</code> is a script class in <code>lib/spider.jai</code>; its source is the reference.</p>
-<div class="tablewrap"><table><thead><tr><th>spider::Request</th><th>What it holds</th></tr></thead><tbody>
+<p>The classes are named in snake_case like the rest of the language: <code>spider::request</code>,
+<code>spider::response</code>, <code>spider::router</code>, <code>spider::upload</code>, <code>spider::session</code>,
+<code>spider::session_store</code> and, outside the namespace, <code>database</code>. A variable may share a class's name
+where the type is written with its namespace (<code>spider::session session = sessions.load(req);</code>). Inside
+<code>namespace spider</code> a bare name is the class, so a variable there cannot take a class's name, and a variable
+named <code>database</code> hides the class's constructor call <code>database()</code> in its scope. The samples here
+keep to <code>req</code>, <code>r</code>, <code>s</code> and <code>db</code>.</p>
+<h2 id="request-response">Request and response<a class="hlink" href="#request-response" aria-label="link">&#8203;</a></h2>
+<p><code>spider::request</code> is a script class in <code>lib/spider.jai</code>; its source is the reference.</p>
+<div class="tablewrap"><table><thead><tr><th>spider::request</th><th>What it holds</th></tr></thead><tbody>
 <tr><td><code>method</code>, <code>path</code></td><td>the request line; <code>path</code> percent-decoded and without the query</td></tr>
 <tr><td><code>query</code>, <code>params</code></td><td><code>map&lt;string, string&gt;</code>: the parsed query, the route's captures</td></tr>
 <tr><td><code>header(name)</code>, <code>cookie(name)</code></td><td>one header, in any spelling; one cookie, "" when absent</td></tr>
 <tr><td><code>body</code>, <code>form()</code>, <code>json()</code></td><td>the raw body; its urlencoded or multipart fields; <code>from_json</code> of it</td></tr>
 </tbody></table></div>
-<p>Every member, uploads included: <a href="../reference/host.html#spider-request"><code>spider::Request</code></a>.</p>
-<p><code>spider::Response</code> (<a href="../guide/17-web.html#spider-response">its members</a>) is the class a handler
+<p>Every member, uploads included: <a href="../reference/host.html#spider-request"><code>spider::request</code></a>.</p>
+<p><code>spider::response</code> (<a href="../guide/17-web.html#spider-response">its members</a>) is the class a handler
 answers with and a client call returns. <code>lib/spider.jai</code> adds the helpers that build the usual answers:</p>
 <p><code>spider::html(text)</code>, <code>spider::plain_text(text)</code> and <code>spider::json(value)</code> answer a body with its Content-Type, <code>spider::redirect(url)</code> a 303, <code>spider::not_found(text)</code> a 404 and <code>spider::file(path, content_type)</code> a file from disk. Each one's arguments and defaults: <a href="../reference/host.html#spider-helpers">response helpers</a>.</p>
 <h2 id="routing">Routing<a class="hlink" href="#routing" aria-label="link">&#8203;</a></h2>
-<p><code>spider::Router</code> has <code>get</code>, <code>post</code>, <code>put</code>, <code>patch</code>,
+<p><code>spider::router</code> has <code>get</code>, <code>post</code>, <code>put</code>, <code>patch</code>,
 <code>delete</code>, <code>any</code> and <code>add(method, pattern, handler)</code>. Routes match in the order they were
 added.</p>
 <div class="tablewrap"><table><thead><tr><th>Case</th><th>Result</th></tr></thead><tbody>
@@ -138,7 +145,7 @@ added.</p>
 </tbody></table></div>
 <h2 id="sqlite">SQLite, injection-proof by construction<a class="hlink" href="#sqlite" aria-label="link">&#8203;</a></h2>
 <p><code>open_database(path)</code> opens or creates a database file (relative to the app's folder;
-<code>":memory:"</code> for a scratch one) and returns a <code>Database</code>. Copies share its connection, which
+<code>":memory:"</code> for a scratch one) and returns a <code>database</code>. Copies share its connection, which
 closes with the last of them. Files open in WAL mode.</p>
 <p><code>execute</code>, <code>query</code>, <code>query_one</code> and <code>value</code> take the SQL text first and
 the values after it, and the text is a <a href="17-host-api.html#constant-arguments">constant argument</a>. Text built
@@ -206,7 +213,7 @@ matches; the checker knows both, so <code>fans[0].handel</code> is a load error.
 and each column stored in the field of its name (<a href="17-host-api.html#records">records</a>): an INTEGER
 <code>0</code>/<code>1</code> fills a <code>bool</code>, an INTEGER a <code>float</code>, a TEXT holding JSON an array, map or
 class field. A column the class lacks is skipped, so <code>SELECT *</code> keeps working after a migration adds one; a
-field no column names keeps its initializer. A column that does not fit raises <code>Database.query: field 'handle' of
+field no column names keeps its initializer. A column that does not fit raises <code>database.query: field 'handle' of
 'User' is int, not string</code> (<code>... and cannot be null</code> for a NULL).</li>
 <li><strong><code>insert(table, record)</code></strong> writes the record's fields that are columns of the table and
 answers the new rowid. An <code>INTEGER PRIMARY KEY</code> field holding <code>0</code> or <code>null</code> is left out,
@@ -228,28 +235,28 @@ carries only a 256-bit random id (<a href="../guide/18-random.html#crypto"><code
 the data stays on the server as JSON.</p>
 <div class="codeblock cb-jai" data-host="jai_spider"><span class="cb-label">jaiscript (under jai_spider)</span><pre><code class="lang-jai">import "session.jai";
 
-spider::SessionStore sessions = spider::SessionStore(db);
+spider::session_store sessions = spider::session_store(db);
 
-routes.post("/sign-in", (spider::Request req) =&gt; {
-    spider::Session s = sessions.load(req);      // the visitor's session, or a new empty one
+routes.post("/sign-in", (spider::request req) =&gt; {
+    spider::session s = sessions.load(req);      // the visitor's session, or a new empty one
     sessions.rotate(s);                          // a fresh id once the visitor signs in
     s.set("user", req.form()["name"]);
     s.set("flash", "Welcome back.");
-    spider::Response r = spider::redirect("/");
+    spider::response r = spider::redirect("/");
     sessions.save(s, r);                         // the row and the cookie, when the session changed
     return r;
 });</code></pre></div>
-<p><code>spider::Session</code> has <code>get(key, fallback)</code>, <code>has</code>, <code>set</code>,
+<p><code>spider::session</code> has <code>get(key, fallback)</code>, <code>has</code>, <code>set</code>,
 <code>erase</code> and <code>take</code> (read once, for a message shown after a redirect).
-<code>spider::SessionStore</code> has <code>load</code>, <code>save</code>, <code>rotate</code>, <code>destroy</code> and
+<code>spider::session_store</code> has <code>load</code>, <code>save</code>, <code>rotate</code>, <code>destroy</code> and
 <code>purge_expired</code>, and the fields <code>cookie_name</code>, <code>max_age</code> and
 <code>secure_cookie</code> (set it behind an HTTPS proxy).</p>
 <h2 id="client">Reaching other servers<a class="hlink" href="#client" aria-label="link">&#8203;</a></h2>
 <p>jai_spider installs the <a href="../guide/17-web.html#spider"><code>spider::</code> client</a> and grants the
 <code>network</code> permission. <code>spider::catch(url)</code> fetches and <code>spider::sling(content, url)</code>
-sends; both return a <code>spider::Response</code>, which a handler can return as it came:</p>
-<div class="codeblock cb-jai" data-host="jai_spider"><span class="cb-label">jaiscript (under jai_spider)</span><pre><code class="lang-jai">routes.get("/weather/:city", (spider::Request req) =&gt; {
-    spider::Response upstream = spider::catch("https://weather.example/v1/now?city=" + web::url_encode(req.param("city")), {"timeout": 5});
+sends; both return a <code>spider::response</code>, which a handler can return as it came:</p>
+<div class="codeblock cb-jai" data-host="jai_spider"><span class="cb-label">jaiscript (under jai_spider)</span><pre><code class="lang-jai">routes.get("/weather/:city", (spider::request req) =&gt; {
+    spider::response upstream = spider::catch("https://weather.example/v1/now?city=" + web::url_encode(req.param("city")), {"timeout": 5});
     if (!upstream.ok()) { return spider::json({"error": "the weather service answered " + to_string(upstream.status)}, 502); }
     return upstream;                              // the upstream answer, passed through as it came
 });</code></pre></div>
@@ -291,7 +298,7 @@ requests are answered in the order they came; requests on different connections 
 </ul>
 <div class="codeblock cb-jai" data-host="jai_spider"><span class="cb-label">jaiscript (under jai_spider)</span><pre><code class="lang-jai">int visits = 0;                                  // 0 when each request's engine starts
 
-routes.get("/visits", (spider::Request req) =&gt; {
+routes.get("/visits", (spider::request req) =&gt; {
     visits += 1;                                 // 1, every time: the next request has an engine of its own
     db.execute("UPDATE stats SET visits = visits + 1");
     return spider::json({"global": visits, "stored": db.value("SELECT visits FROM stats")});

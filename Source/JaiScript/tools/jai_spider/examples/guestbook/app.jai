@@ -8,10 +8,10 @@ import "spider.jai";
 import "session.jai";
 import "views.jai";
 
-Database db = open_database("guestbook.db");
+database db = open_database("guestbook.db");
 db.execute("CREATE TABLE IF NOT EXISTS entries (id INTEGER PRIMARY KEY, name TEXT NOT NULL, message TEXT NOT NULL, created INTEGER NOT NULL)");
 db.execute("CREATE TABLE IF NOT EXISTS counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL)");
-spider::SessionStore sessions = spider::SessionStore(db);
+spider::session_store sessions = spider::session_store(db);
 
 spider::every(3600, () => sessions.purge_expired());   // hourly, in the background
 
@@ -25,23 +25,23 @@ class Entry {
 const string NEWEST = "SELECT * FROM entries ORDER BY id DESC LIMIT 50";
 const string ENTRY = "SELECT * FROM entries WHERE id = ?";
 
-spider::Router routes = spider::Router();
+spider::router routes = spider::router();
 
-routes.get("/", (spider::Request req) => {
+routes.get("/", (spider::request req) => {
 	db.execute("INSERT INTO counters (name, value) VALUES ('views', 1) ON CONFLICT(name) DO UPDATE SET value = value + 1");
 	int views = db.value("SELECT value FROM counters WHERE name = 'views'");
-	spider::Session s = sessions.load(req);
+	spider::session s = sessions.load(req);
 	array<Entry> entries = db.query<Entry>(NEWEST);
-	spider::Response r = spider::html(home_page(entries, s.get("name", ""), s.take("flash", ""), views));
+	spider::response r = spider::html(home_page(entries, s.get("name", ""), s.take("flash", ""), views));
 	sessions.save(s, r);
 	return r;
 });
 
-routes.post("/sign", (spider::Request req) => {
+routes.post("/sign", (spider::request req) => {
 	map<string, string> form = req.form();
 	string name = string::trim(form.get("name", ""));
 	string message = string::trim(form.get("message", ""));
-	spider::Session s = sessions.load(req);
+	spider::session s = sessions.load(req);
 	if (name == "" || message == "") {
 		s.set("flash", "A name and a message, please.");
 	} else if (name.size() > 80 || message.size() > 2000) {
@@ -51,20 +51,20 @@ routes.post("/sign", (spider::Request req) => {
 		s.set("name", name);
 		s.set("flash", "Thanks for signing, " + name + ".");
 	}
-	spider::Response r = spider::redirect("/");
+	spider::response r = spider::redirect("/");
 	sessions.save(s, r);
 	return r;
 });
 
-routes.get("/entries/:id", (spider::Request req) => {
+routes.get("/entries/:id", (spider::request req) => {
 	shared_ptr<Entry> entry = db.query_one<Entry>(ENTRY, req.param("id"));
 	if (entry == null) { return spider::not_found("No entry " + req.param("id")); }
 	return spider::html(entry_page(entry));
 });
 
-routes.get("/api/entries", (spider::Request req) => db.query("SELECT id, name, message, created FROM entries ORDER BY id DESC"));
+routes.get("/api/entries", (spider::request req) => db.query("SELECT id, name, message, created FROM entries ORDER BY id DESC"));
 
-routes.post("/api/entries", (spider::Request req) => {
+routes.post("/api/entries", (spider::request req) => {
 	var body = null;
 	try {
 		body = req.json();

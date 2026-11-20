@@ -103,7 +103,7 @@ try { web::parse_url(&quot;http://example.org:99999/&quot;); } catch (e) { print
 https://[::1]:8443/posts/8?page=2&amp;sort=old#comments
 web::parse_url: &#x27;http://example.org:99999/&#x27; has a malformed host or port</code></pre></div>
 <h2 id="spider">Part 2: HTTP with <code>spider::</code><a class="hlink" href="#spider" aria-label="link">&#8203;</a></h2>
-<p>Each call runs one request to its whole answer and returns a <code>spider::Response</code>. It blocks the script until then, inside a coroutine too, and a parallel body cannot call it. The two sending calls take their arguments in opposite orders:</p>
+<p>Each call runs one request to its whole answer and returns a <code>spider::response</code>. It blocks the script until then, inside a coroutine too, and a parallel body cannot call it. The two sending calls take their arguments in opposite orders:</p>
 <div class="tablewrap"><table><thead><tr><th>Call</th><th>Argument order</th><th>Default method</th></tr></thead><tbody>
 <tr><td><code>spider::catch(url[, options])</code></td><td>URL</td><td>GET</td></tr>
 <tr><td><code>spider::get(url[, options])</code></td><td>the same call, plain name</td><td>GET</td></tr>
@@ -111,15 +111,15 @@ web::parse_url: &#x27;http://example.org:99999/&#x27; has a malformed host or po
 <tr><td><code>spider::post(url, content[, options])</code></td><td><strong>URL, then content</strong></td><td>POST</td></tr>
 </tbody></table></div>
 <p>This sample reaches the network, so it is shown without output:</p>
-<div class="codeblock cb-jai" data-host="network"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">spider::Response page = spider::catch(&quot;https://api.example.org/scores?game=snapjaw&quot;);
+<div class="codeblock cb-jai" data-host="network"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">spider::response page = spider::catch(&quot;https://api.example.org/scores?game=snapjaw&quot;);
 if (page.ok()) { print(&quot;top score: &quot;, page.json()[0][&quot;points&quot;]); }
-spider::Response saved = spider::sling({&quot;player&quot;: &quot;ada&quot;, &quot;points&quot;: 420}, &quot;https://api.example.org/scores&quot;);
+spider::response saved = spider::sling({&quot;player&quot;: &quot;ada&quot;, &quot;points&quot;: 420}, &quot;https://api.example.org/scores&quot;);
 print(saved.status, &quot; &quot;, saved.header(&quot;Location&quot;));
-spider::Response gone = spider::catch(&quot;https://api.example.org/scores/7&quot;,
+spider::response gone = spider::catch(&quot;https://api.example.org/scores/7&quot;,
     {&quot;method&quot;: &quot;DELETE&quot;, &quot;headers&quot;: {&quot;Authorization&quot;: &quot;Bearer &quot; + token}, &quot;timeout&quot;: 5});</code></pre></div>
 <p>Text content is sent as it is (<code>text/plain; charset=utf-8</code>); any other value (a map, an array, a number, a bool, null) is sent as <code>to_json</code> writes it (<code>application/json</code>). The options map takes:</p>
 <p><code>method</code>, <code>headers</code>, <code>timeout</code> (seconds, default 30), <code>type</code> and <code>redirects</code> (default 5). Their values: <a href="../reference/library.html#web-options">request options</a>.</p>
-<h3 id="spider-response"><code>spider::Response</code><a class="hlink" href="#spider-response" aria-label="link">&#8203;</a></h3>
+<h3 id="spider-response"><code>spider::response</code><a class="hlink" href="#spider-response" aria-label="link">&#8203;</a></h3>
 <p>An HTTP answer: what a client call returns, and what a <code>jai_spider</code> handler builds to answer a request. An error status is an answer, not an error: <code>ok()</code> tells them apart. A response is a value: assigning one copies its headers and cookies.</p>
 <div class="tablewrap"><table><thead><tr><th>Member</th><th>What it is</th></tr></thead><tbody>
 <tr><td><code>status</code>, <code>ok()</code></td><td>the status code (<code>int</code>); true for 2xx</td></tr>
@@ -127,9 +127,9 @@ spider::Response gone = spider::catch(&quot;https://api.example.org/scores/7&quo
 <tr><td><code>header(name)</code></td><td>a header by any spelling of its name, "" when absent</td></tr>
 <tr><td><code>set_cookie(name, value[, options])</code></td><td>adds a Set-Cookie line, the value percent-encoded</td></tr>
 </tbody></table></div>
-<p>Every member and cookie option: <a href="../reference/library.html#web-response">spider::Response members</a>.</p>
+<p>Every member and cookie option: <a href="../reference/library.html#web-response">spider::response members</a>.</p>
 <h3 id="spider-security">Cookies and sessions: what is and is not protected<a class="hlink" href="#spider-security" aria-label="link">&#8203;</a></h3>
-<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">spider::Response r = spider::Response(200, &quot;hi&quot;);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">spider::response r = spider::response(200, &quot;hi&quot;);
 r.set_cookie(&quot;session&quot;, &quot;abc 1&quot;, {&quot;max_age&quot;: 3600});
 r.set_cookie(&quot;theme&quot;, &quot;dark&quot;, {&quot;secure&quot;: true, &quot;http_only&quot;: false, &quot;same_site&quot;: &quot;Strict&quot;});
 for (auto line : r.cookies) { print(line); }</code></pre></div>

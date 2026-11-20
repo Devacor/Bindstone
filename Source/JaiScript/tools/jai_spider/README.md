@@ -31,20 +31,20 @@ GET / 200 1.87 ms
 ```cpp
 import "spider.jai";
 
-Database db = open_database("notes.db");       // relative to the app's folder
+database db = open_database("notes.db");       // relative to the app's folder
 db.execute("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, text TEXT NOT NULL)");
 
-spider::Router routes = spider::Router();
-routes.get("/", (spider::Request req) => {
+spider::router routes = spider::router();
+routes.get("/", (spider::request req) => {
 	int count = db.value("SELECT COUNT(*) FROM notes");   // what outlasts a request lives in the database
 	return spider::html(`<h1>${count} notes</h1>`);
 });
-routes.get("/notes", (spider::Request req) => db.query("SELECT id, text FROM notes"));   // a value answers JSON
-routes.post("/notes", (spider::Request req) => {
+routes.get("/notes", (spider::request req) => db.query("SELECT id, text FROM notes"));   // a value answers JSON
+routes.post("/notes", (spider::request req) => {
 	db.execute("INSERT INTO notes (text) VALUES (?)", req.form()["text"]);
 	return spider::redirect("/notes");
 });
-routes.get("/notes/:id", (spider::Request req) => {
+routes.get("/notes/:id", (spider::request req) => {
 	var note = db.query_one("SELECT id, text FROM notes WHERE id = ?", req.param("id"));
 	return note == null ? spider::not_found() : spider::json(note);
 });
@@ -52,9 +52,9 @@ routes.get("/notes/:id", (spider::Request req) => {
 spider::spin(routes);
 ```
 
-`spider::spin(handler[, options])` (also spelled `spider::serve`) hands the server a `spider::Router` or any function
-of a `spider::Request`; it answers every request that is not a file under the static root. A handler may answer a
-`spider::Response`, a string or a `web::html` (an HTML page), `null` (204) or any other value (JSON). Options: `budget` (seconds a
+`spider::spin(handler[, options])` (also spelled `spider::serve`) hands the server a `spider::router` or any function
+of a `spider::request`; it answers every request that is not a file under the static root. A handler may answer a
+`spider::response`, a string or a `web::html` (an HTML page), `null` (204) or any other value (JSON). Options: `budget` (seconds a
 request may run, over `--budget`) and `max_body` (bytes, over `--max-body`).
 
 ## Pages from templates
@@ -115,18 +115,18 @@ of the 512 connections.
 
 ## The script surface (`lib/spider.jai`, all under `spider::`)
 
-**Request**: `method`, `path` (decoded), `target` (as sent), `query_string`, `query` (`map<string, string>`),
+**`spider::request`**: `method`, `path` (decoded), `target` (as sent), `query_string`, `query` (`map<string, string>`),
 `headers` (names lowercased), `cookies`, `params` (route captures), `body`, `remote_addr`; `header(name)` in any
 spelling, `cookie(name)`, `param(name)`, `form()` (urlencoded or multipart fields), `files()`
-(`map<string, spider::Upload>`: `filename`, `content_type`, `data`, `size()`, `save(path)`), `json()`.
+(`map<string, spider::upload>`: `filename`, `content_type`, `data`, `size()`, `save(path)`), `json()`.
 
-**Response** (the library's `spider::Response`, the same class the client returns): `status`, `headers`, `cookies`,
-`body`; `spider::Response(status, body)`, `header(name, value)`, `set_cookie(name, value, options)` (`max_age`,
+**`spider::response`** (the library's, the same class the client returns): `status`, `headers`, `cookies`,
+`body`; `spider::response(status, body)`, `header(name, value)`, `set_cookie(name, value, options)` (`max_age`,
 `expires`, `path`, `domain`, `secure`, `http_only` (true), `same_site` ("Lax")), `clear_cookie(name)`. Helpers:
 `spider::html(text, status)`, `spider::plain_text(text, status)`, `spider::json(value, status)`,
 `spider::redirect(url, status = 303)`, `spider::file(path, content_type)`, `spider::not_found(text)`.
 
-**Router**: `get`, `post`, `put`, `patch`, `delete`, `any`, `add(method, ...)`; patterns `/posts/:id` and
+**`spider::router`**: `get`, `post`, `put`, `patch`, `delete`, `any`, `add(method, ...)`; patterns `/posts/:id` and
 `/files/*rest`; `before(filter)` runs ahead of every route (null continues, anything else answers); a HEAD request
 takes the GET route; a path that only other methods match answers 405 with `Allow`.
 
@@ -142,10 +142,10 @@ its answer arrives; the other workers serve on. One transport serves the whole p
 `to_string()`). The host adds `parse_cookies`, `parse_multipart`, `http_date(unix_seconds)` and
 `content_type_for(path)`; session ids are `crypto::random_hex(32)`, the system's secure random source.
 
-**Database** (SQLite 3.37 or newer: the system's, else the pinned 3.54.1 amalgamation fetched at configure time), injection-proof by construction:
+**`database`** (SQLite 3.37 or newer: the system's, else the pinned 3.54.1 amalgamation fetched at configure time), injection-proof by construction:
 
 ```cpp
-Database db = open_database("app.db");          // ":memory:" for a scratch database
+database db = open_database("app.db");          // ":memory:" for a scratch database
 const string FIND = "SELECT * FROM posts WHERE id = ?";
 db.query_one(FIND, id)                          // one row or null
 db.query(sql, a, b, ...)                        // array<map<string, var>>: int, float, string, null
@@ -184,9 +184,9 @@ table_info`, read again after a schema change), so every identifier comes from t
 binds. An `INTEGER PRIMARY KEY` holding 0 or null is left for SQLite to assign; an array, map or class field is
 stored as JSON; a record may also be a `map<string, var>`.
 
-**Sessions** (`lib/session.jai`): `spider::SessionStore sessions = spider::SessionStore(db);`, then
-`spider::Session s = sessions.load(req)`, `s.get/set/erase/take`, `sessions.save(s, response)`,
-`sessions.rotate(s)` after a sign-in, `sessions.destroy(s, response)`. The cookie carries a 256-bit random id; the
+**Sessions** (`lib/session.jai`): `spider::session_store sessions = spider::session_store(db);`, then
+`spider::session s = sessions.load(req)`, `s.get/set/erase/take`, `sessions.save(s, r)` with the `spider::response r` being sent,
+`sessions.rotate(s)` after a sign-in, `sessions.destroy(s, r)`. The cookie carries a 256-bit random id; the
 data stays in the `spider_sessions` table.
 
 Every file function of the runner (`file::read`, `file::write`, `file::list_directory`, ...), the full standard library and the
@@ -279,9 +279,9 @@ http_server.hpp     HTTP/1.1 over the runner's sockets (../jaiscript/net_socket.
 http_text.hpp       percent-decoding, cookies, multipart, dates, content types
 console.hpp         the console every thread and every engine's print writes through, a line at a time
 sources.hpp         the files each build read, by stamp; the last good build's texts
-database.hpp        the Database binding
-lib/spider.jai      Request, Upload, the response helpers, Router, spin, every
-lib/session.jai     SessionStore and Session
+database.hpp        the database and sql_fragment bindings
+lib/spider.jai      request, upload, the response helpers, router, spin, every
+lib/session.jai     session_store and session
 examples/guestbook  a guestbook: .spider templates, a form, a session, SQLite, a task, a JSON API, a stylesheet
 tests/              spider_test.py, the apps it drives (app/, workers/) and the client checks (tools/ci/gates.sh spider)
 ```

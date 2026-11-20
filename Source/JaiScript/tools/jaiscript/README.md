@@ -156,7 +156,7 @@ error below), and the opt-in `web::` library (`jai::stdlib::register_web`: `web:
 `web::parse_query`, `web::build_query`, `web::parse_url` and the rest), and the opt-in `spider::` HTTP client
 (`jai::stdlib::register_spider`: `spider::catch(url[, options])`, also spelled `spider::get`, and
 `spider::sling(content, url[, options])`, also spelled `spider::post(url, content[, options])`, each answering a
-`spider::Response`) with the `network` permission granted and the transport of `tools/jaiscript/http_transport.hpp`:
+`spider::response`) with the `network` permission granted and the transport of `tools/jaiscript/http_transport.hpp`:
 WinHTTP on Windows, sockets elsewhere with HTTPS through OpenSSL when the build found it (plain HTTP otherwise);
 `JAISCRIPT_HTTP_TRANSPORT=socket` picks the socket transport on Windows. (A bare engine has far less, listed in the reference's "What a bare engine has"
 (`docs/site/reference/library.html#bare-engine`); the runner opts into everything.) On top, the host binds file IO so scripts can actually save things:

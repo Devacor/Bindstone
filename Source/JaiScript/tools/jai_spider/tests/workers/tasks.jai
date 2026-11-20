@@ -2,11 +2,11 @@
 // one that fails every time, and one that returns false on its second run.
 import "spider.jai";
 
-Database db = open_database("tasks.db");
+database db = open_database("tasks.db");
 db.execute("CREATE TABLE IF NOT EXISTS runs (id INTEGER PRIMARY KEY, started INTEGER NOT NULL, ended INTEGER)");
 
-spider::Router routes = spider::Router();
-routes.get("/runs", (spider::Request req) => db.query("SELECT started, ended FROM runs ORDER BY id"));
+spider::router routes = spider::router();
+routes.get("/runs", (spider::request req) => db.query("SELECT started, ended FROM runs ORDER BY id"));
 
 spider::every(0.2, () => {
 	db.execute("INSERT INTO runs (started) VALUES (?)", time::unix_ms());
@@ -17,7 +17,7 @@ spider::every(0.2, () => {
 spider::every(1, () => { throw "thrown by a task"; });
 
 db.execute("CREATE TABLE IF NOT EXISTS stopper (id INTEGER PRIMARY KEY)");
-routes.get("/stopper", (spider::Request req) => db.query("SELECT id FROM stopper"));
+routes.get("/stopper", (spider::request req) => db.query("SELECT id FROM stopper"));
 // returns false on its second run: a stopped task is never run again
 spider::every(0.2, () => {
 	db.execute("INSERT INTO stopper DEFAULT VALUES");

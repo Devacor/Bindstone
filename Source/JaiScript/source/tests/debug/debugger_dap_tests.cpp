@@ -306,17 +306,23 @@ public:
                 check_true(cli.connected());
                 cli.request("initialize");
                 std::atomic<bool> done{false};
+                eng->execution_budget(60.0);   // a pause that never lands leaves a loop the budget ends once the session does
+                std::string error;
                 std::thread runner([&] {
-                    eng->execute(
-                        "function spin(int n) -> int {\n"
-                        "    int sum = 0;\n"
-                        "    for (int i = 0; i < n; ++i) {\n"
-                        "        sum += i;\n"
-                        "    }\n"
-                        "    return sum;\n"
-                        "}\n"
-                        "started();\n"
-                        "int got = spin(2000000000);\n");
+                    try {
+                        eng->execute(
+                            "function spin(int n) -> int {\n"
+                            "    int sum = 0;\n"
+                            "    for (int i = 0; i < n; ++i) {\n"
+                            "        sum += i;\n"
+                            "    }\n"
+                            "    return sum;\n"
+                            "}\n"
+                            "started();\n"
+                            "int got = spin(2000000000);\n");
+                    } catch (const std::exception& e) {
+                        error = e.what();
+                    }
                     done = true;
                 });
                 struct joined { jai::engine& eng; std::thread& thread; ~joined() { eng.debugger().set_enabled(false); if (thread.joinable()) thread.join(); } } join{*eng, runner};
@@ -347,7 +353,8 @@ public:
                 cli.request("continue", "{\"threadId\":1}");
                 eng->debugger().set_enabled(false);
                 runner.join();
-                check_eq(added ? sum : sum + i, eng->get_variable("got").as_int(), "the stopped iteration finishes, then n = 0 ends the loop");
+                check_true(error.empty(), error);
+                if (error.empty()) { check_eq(added ? sum : sum + i, eng->get_variable("got").as_int(), "the stopped iteration finishes, then n = 0 ends the loop"); }
             }
         });
 

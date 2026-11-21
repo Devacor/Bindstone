@@ -354,7 +354,7 @@ robin has 12 arrows</code></pre></div>
 <p>The record, its loads and the property a binding keeps out of it: <a href="08-serialization.html#binding-records">a class you cannot edit</a>. <a href="08-serialization.html#four-ways">Four ways a class serializes</a> sets the intrusive and non-intrusive routes side by side, and <a href="08-serialization.html">Serialization</a> covers versioning, hooks, <code>$ref</code> aliasing and custom archives.</p>
 
 <h2 id="hot-reload-with-state-intact">Hot reload with state intact<a class="hlink" href="#hot-reload-with-state-intact" aria-label="link">&#8203;</a></h2>
-<p>A script class can derive a bound C++ class with no extra registration; <code>super(...)</code> calls the bound constructor. The C++ half of such an object is the same live object across reloads:</p>
+<p>A script class can derive a bound C++ class with no extra registration, unless its binding is <a href="17-host-api.html#final-host">final</a>; <code>super(...)</code> calls the bound constructor. The C++ half of such an object is the same live object across reloads:</p>
 <div class="codeblock cb-jai" data-host="Spawner registration" data-sample="binder-smart"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">class SmartSpawner : Spawner {
     int aggression = 1;
     SmartSpawner() : super() {}

@@ -5546,6 +5546,13 @@ uint64_t engine::registration_fingerprint() const {
         hash ^= 0xFEu; hash *= 1099511628211ull;  // plain-function separator
         hash ^= static_cast<unsigned char>(kind); hash *= 1099511628211ull;
     }
+    // The classes bound final, whose derivations a bite checked clean before they were marked never met: folded in after the rest
+    // under their own separator, so engines that mark none hash as before
+    for (const auto& [name, def] : impl->class_registry_.cpp_classes_) {
+        if (!def || !def->is_final()) { continue; }
+        for (unsigned char c : name) { hash ^= c; hash *= 1099511628211ull; }
+        hash ^= 0xFDu; hash *= 1099511628211ull;   // final-class separator
+    }
     return hash;
 }
 

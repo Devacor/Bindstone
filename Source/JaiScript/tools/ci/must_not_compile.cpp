@@ -29,6 +29,7 @@
 // must_not_compile 25: a && member cannot be called on a script receiver
 // must_not_compile 26: default arguments
 // must_not_compile 27: jai::returns<Shape>: Shape is jai::type_arg, jai::array_of<jai::type_arg> or jai::shared_ptr_of<jai::type_arg>
+// must_not_compile 28: is made for script classes to derive from it, so it cannot be final
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/properties.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
@@ -228,6 +229,8 @@ class DefaultedMethod : public jai::property_owner<DefaultedMethod> {
 public:
 	JAI_METHOD(void, spawn, (int64_t a_count = 1)) { (void)a_count; }
 };
+#elif JAI_MUST_NOT_COMPILE == 28
+class Extensible : public jai::script_extensible {};
 #endif
 
 // a JAI_METHOD of every shape a script reaches, in a property_owner and in a plain class a registrar binds
@@ -321,6 +324,9 @@ inline std::string exercise(jai::engine& a_engine) {
 	return jai::to_json(a_engine, RvalueMethod{});
 #elif JAI_MUST_NOT_COMPILE == 27
 	a_engine.add_function("typed", [](const jai::script_type&) { return 0; }, jai::returns<int>);
+	return {};
+#elif JAI_MUST_NOT_COMPILE == 28
+	jai::dynamic_binder<Extensible>(a_engine, "Extensible").final().build();
 	return {};
 #elif JAI_MUST_NOT_COMPILE == 19
 	constexpr auto text = jai::overload<>(&Overloaded::text);

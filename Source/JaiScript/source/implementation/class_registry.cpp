@@ -1494,6 +1494,10 @@ checked_result<void> define_script_class(class_decl* decl, const class_declarati
                     "Base class '{0}' not found", base_name_id);
             }
 
+            if (base_class_def && base_class_def->is_final()) {
+                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), "{0}",
+                    symbols->intern(detail::final_base_text(decl->name, base_class_def->get_name())));
+            }
             if (base_class_def) {
                 parent_defs.push_back(base_class_def);
                 auto script_class = std::dynamic_pointer_cast<script_class_definition>(base_class_def);

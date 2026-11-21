@@ -429,6 +429,20 @@ eng-&gt;add_function("load", [raw](const jai::script_type&amp; type, const std::
 <li><strong>Constant arguments count the value arguments.</strong> <code>constant_argument("database.query", 0, ...)</code> names the SQL text of <code>db.query(sql)</code> and of <code>db.query&lt;User&gt;(sql)</code> alike; the host's own index is its C++ parameter's, after the types.</li>
 <li><strong>Overloads.</strong> A typed form binds beside an untyped one of the same name: the <code>jai::script_type</code> parameter takes only a type value, so <code>query(sql, id)</code> and <code>query&lt;User&gt;(sql)</code> each find theirs.</li>
 </ul>
+<h2 id="final-host">A class no script derives from<a class="hlink" href="#final-host" aria-label="link">&#8203;</a></h2>
+<p>A binder's <code>.final()</code> marks the class final, as C++'s <code>final</code> does: a script class that names it as a base fails the load at its declaration, and so does the declaration when it runs where the load did not check it (a <code>[[warn_mode]]</code> region), on every backend. The library's <code>image</code> is bound this way.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">jai::dynamic_binder&lt;Texture&gt;(*eng, "Texture")
+    .final()
+    .constructor&lt;&gt;()
+    .property("width", &amp;Texture::width)
+    .build();</code></pre></div>
+<div class="codeblock cb-jai" data-host="Texture"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">class Tiled { Texture texture; int tiles = 4; }   // loads: a field of the final class
+class Glowing : Texture { }                       // Class 'Glowing' cannot derive from 'Texture': 'Texture' is final; give 'Glowing' a field of type 'Texture' instead</code></pre></div>
+<ul>
+<li><strong>Every class declaration.</strong> A namespace's class reads <code>'art::Glowing'</code>, and a generic class is checked as each of its instances is, so <code>class Glowing&lt;T&gt; : Texture</code> fails where <code>Glowing&lt;int&gt;</code> is asked for. The derivation is the class's one error: its methods' <code>override</code> markers are not checked beside it.</li>
+<li><strong>Not with <code>jai::script_extensible</code>.</strong> A class that derives <code>jai::script_extensible</code> itself exists for script classes to extend (<a href="13-script-extensible.html">Script-extensible objects</a>), so <code>.final()</code> on it does not compile: <code>a class that derives jai::script_extensible is made for script classes to derive from it, so it cannot be final</code>. A <code>property_owner</code> carries that slot for every class and may be final.</li>
+<li><strong>Saved programs.</strong> Finality is part of the <a href="04-jaibite.html#registration-fingerprint">registration fingerprint</a>, so a <code>.jaibite</code> checked clean against a class that was not yet final is checked again.</li>
+</ul>
 <h2 id="records">Records<a class="hlink" href="#records" aria-label="link">&#8203;</a></h2>
 <p><code>jaiscript/core/records.hpp</code> builds script class instances from named values and reads them back, by the rules a script store follows; a database row, a JSON document or a form are the usual sources. <code>who</code> leads every error text.</p>
 <div class="tablewrap"><table><thead><tr><th>Call</th><th>Answers</th></tr></thead><tbody>

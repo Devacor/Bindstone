@@ -1073,6 +1073,29 @@ public:
 	}
 
 	void forge_tests() override {
+		// image is final: a script class holds one as a field rather than derive from it
+		test("image_is_final", [this]() {
+			const std::pair<const char*, const char*> refused[] = {
+				{"class Framed : image { int border = 1; }", "Class 'Framed' cannot derive from 'image': 'image' is final; give 'Framed' a field of type 'image' instead"},
+				{"class Framed : image { void fit(int w, int h) { } }", "Class 'Framed' cannot derive from 'image': 'image' is final; give 'Framed' a field of type 'image' instead"},
+				{"namespace art { class Framed : image { } }", "Class 'art::Framed' cannot derive from 'image': 'image' is final; give 'art::Framed' a field of type 'image' instead"},
+				{"class Framed<T> : image { T tag; }\nFramed<int> f;", "Class 'Framed<int>' cannot derive from 'image': 'image' is final; give 'Framed<int>' a field of type 'image' instead"},
+			};
+			for (const auto& [code, text] : refused) {
+				auto e = image_engine();
+				std::string got = "(no error)";
+				try { e->execute(code); } catch (const std::exception& error) { got = error.what(); }
+				check(got.find(text) != std::string::npos, std::string(code) + " -> " + got);
+				check_eq((size_t)1, e->last_check_diagnostics().error_count(), std::string(code) + ": one error");
+			}
+			auto e = image_engine();
+			std::string got = "(no error)";
+			try { e->execute("[[warn_mode]];\nclass Framed : image { }"); } catch (const std::exception& error) { got = error.what(); }
+			check_eq(std::string("Class 'Framed' cannot derive from 'image': 'image' is final; give 'Framed' a field of type 'image' instead"), got, "the declaration's run");
+			check_eq(std::string("64 1"), run(e, "class Framed { image picture; int border = 1; }\nFramed f;\nf.picture = image::load(fixture(\"png_rgb_photo_64x48\"));\n`${f.picture.width} ${f.border}`;"),
+			         "a field of type image");
+		});
+
 		test("load_and_data_read_bytes_and_arrays", [this]() {
 			auto e = image_engine();
 			check_eq(std::string("64 48 png"), run(e, "image img = image::load(fixture(\"png_rgb_photo_64x48\")); `${img.width} ${img.height} ${img.format}`;"));

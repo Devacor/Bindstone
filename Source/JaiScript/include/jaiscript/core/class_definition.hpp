@@ -1108,6 +1108,10 @@ public:
     // the declared result (dynamic_binder::strict_signatures)
     bool strict_signatures() const { return strict_signatures_; }
     void set_strict_signatures(bool v) { strict_signatures_ = v; }
+    // A host class no script class derives from (dynamic_binder::final): the checker refuses the derivation at load, and the class
+    // declaration when it runs, on both backends
+    bool is_final() const { return final_; }
+    void set_final(bool v) { final_ = v; }
     // A host class's direct call lane for a bound method (the vm's exec_call_method): the same body on the receiver's
     // C++ object, reached without minting a bound method. It declines (false) any argument shape it does not take,
     // and the ordinary call runs instead; what it throws raises as the ordinary call's would.
@@ -1358,6 +1362,7 @@ private:
     bool auto_registered_ = false;
     bool cpp_backed_ = false;
     bool strict_signatures_ = false;
+    bool final_ = false;
     std::unordered_map<uint64_t, native_entry> native_methods_;
     std::unordered_set<uint64_t> native_lane_names_;   // names a binding without a lane withdrew
     std::unordered_map<uint64_t, std::shared_ptr<native_overload_set>> native_overload_sets_;

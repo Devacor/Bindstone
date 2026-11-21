@@ -192,7 +192,9 @@ namespace image_detail {
 		codec::limits limits;
 		limits.max_pixels = a_limits.max_pixels;
 		limits.max_input_bytes = a_limits.max_input_bytes;
+		// final: a script class holds an image as a field rather than derive from it
 		dynamic_binder<script_image>(eng_ref, "image")
+			.final()
 			.property("width", [](const script_image& a_image) -> script_int { return a_image.width(); }, nullptr)
 			.property("height", [](const script_image& a_image) -> script_int { return a_image.height(); }, nullptr)
 			.property("format", [](const script_image& a_image) -> std::string { return codec::format_name(a_image.source); }, nullptr)

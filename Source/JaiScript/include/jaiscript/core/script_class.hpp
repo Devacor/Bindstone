@@ -46,6 +46,11 @@ namespace detail {
     inline std::string override_without_base_text(std::string_view name) {
         return "Method '" + std::string(name) + "' marked as override but no base class method found";
     }
+    // A class bound final (dynamic_binder::final) has no derived class: the class declaration's text and the checker's
+    inline std::string final_base_text(std::string_view cls, std::string_view base) {
+        return "Class '" + std::string(cls) + "' cannot derive from '" + std::string(base) + "': '" + std::string(base) + "' is final; give '" +
+               std::string(cls) + "' a field of type '" + std::string(base) + "' instead";
+    }
 }
 
 // Forward declarations - class_definition is available since we're included after it's defined

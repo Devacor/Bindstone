@@ -2811,6 +2811,7 @@ private:
     // A method redefining a base class method says 'override', and an 'override' redefines one (the run time raises both when
     // the class declaration runs)
     void report_override_markers(const class_decl* cd, const std::vector<const function_decl*>& fns) {
+        if (!final_base(cd).empty()) { return; }   // the derivation is the class's one error
         for (const function_decl* fn : fns) {
             if (fn->is_static || fn->name == cd->name || (fn->name.size() > 1 && fn->name[0] == '~')) { continue; }
             const base_method base = cd->base_classes.empty() ? base_method{} : find_base_method(cd, fn->name, fn->is_override);
@@ -11764,6 +11765,18 @@ private:
              "' in methods means the member; spell ::" + std::string(name) + " for the global");
     }
 
+    // The first base of cd that is bound final (dynamic_binder::final): empty when none is
+    std::string_view final_base(const class_decl* cd) {
+        for (std::string_view base : cd->base_classes) {
+            if (auto def = engine_class(base); def && def->is_final()) { return base; }
+        }
+        return {};
+    }
+    // A derivation from a final class is the declaration's one error, in the run time's words
+    void check_final_bases(const class_decl* cd) {
+        if (const std::string_view base = final_base(cd); !base.empty()) { diag(diag_level::error, cd->location, detail::final_base_text(cd->name, base)); }
+    }
+
     // A base class no unit, include, extern or host can bring is the definition's error, reported at load in the run time's
     // words so a module that would stop half-defined applies nothing
     void check_class_bases(const class_decl* cd) {
@@ -11874,6 +11887,7 @@ private:
         }
         for (const std::string_view base : cd->base_classes) { refuse_bare_generic_class(base, cd->location); }
         check_class_bases(cd);
+        check_final_bases(cd);
         report_value_cycle(cd);
         check_member_names(cd);
         auto it = classes_.find(cd->name);

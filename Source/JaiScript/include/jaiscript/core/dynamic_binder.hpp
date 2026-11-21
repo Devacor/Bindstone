@@ -814,6 +814,15 @@ public:
         return *this;
     }
 
+    // No script class derives from this one (C++'s final): a class declaration that names it as a base fails the load
+    dynamic_binder& final() {
+        // a property_owner carries the slot whether or not anything extends it; a class that derives the slot itself asks for extension
+        static_assert(!std::is_base_of_v<script_extensible, T> || auto_bind_concepts::is_property_owner<T>,
+                      "a class that derives jai::script_extensible is made for script classes to derive from it, so it cannot be final");
+        class_def_->set_final(true);
+        return *this;
+    }
+
     // The direct lane a bound method's C++ signature allows (class_definition::native_lane): the vm calls the method it bound with the
     // ordinary call's conversions, reading the receiver and the arguments in place: a bool, an int in the parameter's range, a number
     // for a floating parameter, a string, any value for a script_value parameter, and a bound object (T&, const T&, T, shared_ptr<T>)

@@ -4,6 +4,7 @@
 #include <jaiscript/stdlib/stdlib.hpp>
 #include "../case_table.hpp"
 
+#include <optional>
 #include <sstream>
 #include <string>
 
@@ -593,6 +594,90 @@ public:
                 )");
             }
             check_eq(std::string("2sn1"), log, "a host object's C++ destructor runs in reverse construction order without any script destructor");
+        });
+
+        test("a_receivers_destructor_runs_at_teardown_whatever_holds_it", [this]() {
+            // a program-scope value that holds an object (a bound method its receiver, a closure its capture, a method coroutine its
+            // receiver) dies at teardown in its turn, so the object's destructor runs once while the engine still runs script;
+            // TYPE is the class, as itself and as an instance of a generic class
+            struct holder { const char* what; const char* program; const char* held; };
+            static const holder holders[] = {
+                {"nothing", "TYPE kept; kept.name = \"kept\";", ""},
+                {"the instance", "TYPE kept; kept.name = \"kept\";", "kept"},
+                {"a closure over it", "TYPE kept; kept.name = \"kept\"; auto f = kept.getter();", "f"},
+                {"a bound method", "TYPE kept; kept.name = \"kept\"; auto f = reflect::bind(kept, \"get\");", "f"},
+                {"a bound method in a var", "TYPE kept; kept.name = \"kept\"; var f = reflect::bind(kept, \"get\");", "f"},
+                {"a bound method in a variable made before its receiver", "var f = null; TYPE kept; kept.name = \"kept\"; f = reflect::bind(kept, \"get\");", "f"},
+                {"a bound method in a function slot", "TYPE kept; kept.name = \"kept\"; function f = reflect::bind(kept, \"get\");", "f"},
+                {"a bound method in a typed function slot", "TYPE kept; kept.name = \"kept\"; function<int()> f = reflect::bind(kept, \"get\");", "f"},
+                {"a bound method the object makes of itself", "TYPE kept; kept.name = \"kept\"; auto f = kept.bound();", "f"},
+                {"a bound method that alone holds its receiver", "TYPE make() { TYPE made; made.name = \"kept\"; return made; } auto f = reflect::bind(make(), \"get\");", "f"},
+                {"a bound method of a handle", "auto kept = new TYPE(); kept.name = \"kept\"; auto f = reflect::bind(kept, \"get\");", "f"},
+                {"a reference to a bound method", "TYPE kept; kept.name = \"kept\"; auto bound = reflect::bind(kept, \"get\"); auto& f = bound;", "f"},
+                {"an array of bound methods", "TYPE kept; kept.name = \"kept\"; array<var> f = [reflect::bind(kept, \"get\"), reflect::bind(kept, \"get\")];", "f"},
+                {"a map of bound methods", "TYPE kept; kept.name = \"kept\"; map<string, var> f = {\"a\": reflect::bind(kept, \"get\")};", "f"},
+                {"a lambda that captured a bound method", "TYPE kept; kept.name = \"kept\"; auto bound = reflect::bind(kept, \"get\"); auto f = [bound]() { return bound(); };", "f"},
+                {"a field of another object", "class Keeper { var f = null; } TYPE kept; kept.name = \"kept\"; Keeper f; f.f = reflect::bind(kept, \"get\");", "f"},
+                {"a static", "class Keeper { static var f = null; } TYPE kept; kept.name = \"kept\"; Keeper::f = reflect::bind(kept, \"get\");", ""},
+                {"a typed static", "TYPE kept; kept.name = \"kept\"; class Keeper { static function<int()> f = reflect::bind(kept, \"get\"); }", ""},
+                {"a namespace variable", "namespace keep { var f = null; } TYPE kept; kept.name = \"kept\"; keep::f = reflect::bind(kept, \"get\");", ""},
+                {"a bound method called through its variable", "TYPE kept; kept.name = \"kept\"; auto f = reflect::bind(kept, \"get\"); f(); f();", "f"},
+                {"a bound method a function called through its parameter", "int call(function f) { return f(); } TYPE kept; kept.name = \"kept\"; call(reflect::bind(kept, \"get\"));", ""},
+                {"a bound method a function called through its var parameter", "int call(var f) { return f(); } TYPE kept; kept.name = \"kept\"; call(reflect::bind(kept, \"get\"));", ""},
+                {"a method coroutine, never started", "TYPE kept; kept.name = \"kept\"; auto f = kept.drain();", "f"},
+                {"a method coroutine, suspended", "TYPE kept; kept.name = \"kept\"; auto f = kept.drain(); f.next();", "f"},
+                {"a method coroutine, finished", "TYPE kept; kept.name = \"kept\"; auto f = kept.drain(); f.next(); f.next(); f.next();", "f"},
+            };
+            std::string wrong;
+            for (const char* declared : {"class Tracked { int v = 4; string name; ~Tracked() { note_end(name); } int get() { return v; } function getter() { return [this]() { return v; }; } "
+                                         "function bound() { return reflect::bind(this, \"get\"); } coroutine int drain() { yield v; yield v; return v; } }",
+                                         "class Tracked<T> { T v; string name; ~Tracked() { note_end(name); } T get() { return v; } function getter() { return [this]() { return v; }; } "
+                                         "function bound() { return reflect::bind(this, \"get\"); } coroutine T drain() { yield v; yield v; return v; } }"}) {
+                const std::string type = std::string_view(declared).find("<T>") != std::string_view::npos ? "Tracked<int>" : "Tracked";
+                for (const holder& h : holders) {
+                    for (const bool host_holds : {false, true}) {
+                        if (host_holds && !*h.held) { continue; }
+                        std::string program = h.program;
+                        for (size_t at = program.find("TYPE"); at != std::string::npos; at = program.find("TYPE", at)) { program.replace(at, 4, type); }
+                        std::string log;
+                        std::optional<held_value> held;
+                        {
+                            auto e = make_engine();
+                            jai::stdlib::register_all(*e);
+                            e->add_function("note_end", [&log](const std::string& text) { log += text + ";"; });
+                            e->execute(declared);
+                            e->execute(program);
+                            if (!log.empty()) { wrong += type + ", " + h.what + ": died while the program held it\n"; }
+                            if (host_holds) { held.emplace(e->get_variable(h.held)); }
+                        }
+                        if (log != "kept;") { wrong += type + ", " + h.what + (host_holds ? ", which the host holds too" : "") + ": the destructor log is '" + log + "'\n"; }
+                    }
+                }
+            }
+            check_eq(std::string(), wrong, "the object's destructor runs once at teardown");
+        });
+
+        test("a_called_bound_method_holds_its_receiver_no_longer_than_its_value", [this]() {
+            // the call of a bound method through a name keeps nothing of it: the receiver dies with the last value that binds it
+            const std::string res = R"(
+                class Res { string name = ""; Res(string n) { name = n; } ~Res() { LOG = LOG + name; } int get() { return 1; } }
+                int call(function f) { return f(); }
+                int call_var(var f) { return f(); }
+            )";
+            const std::pair<std::string, std::string> cases[] = {
+                {"function scope() -> void { Res r = Res(QrQ); call(reflect::bind(r, QgetQ)); } scope(); LOG = LOG + Q|Q; LOG;", "r|"},
+                {"function scope() -> void { Res r = Res(QrQ); call_var(reflect::bind(r, QgetQ)); } scope(); LOG = LOG + Q|Q; LOG;", "r|"},
+                {"function scope() -> void { Res r = Res(QrQ); auto f = reflect::bind(r, QgetQ); f(); } scope(); LOG = LOG + Q|Q; LOG;", "r|"},
+                {"function scope() -> void { auto r = new Res(QrQ); auto f = reflect::bind(r, QgetQ); f(); f(); } scope(); LOG = LOG + Q|Q; LOG;", "r|"},
+                {"function scope(string n) -> void { Res r = Res(n); call(reflect::bind(r, QgetQ)); } scope(QaQ); LOG = LOG + Q|Q; scope(QbQ); LOG = LOG + Q|Q; LOG;", "a|b|"},
+                {"var g = reflect::bind(new Res(QrQ), QgetQ); g(); g = null; LOG = LOG + Q|Q; LOG;", "r|"},
+                {"function scope() -> void { for (int i = 0; i < 3; ++i) { auto f = reflect::bind(Res(to_string(i)), QgetQ); f(); LOG = LOG + Q,Q; } } scope(); LOG;", ",0,1,2"},
+            };
+            check_each(cases, [&](const auto& c) {
+                std::string program = c.first;
+                for (char& ch : program) { if (ch == 'Q') { ch = '"'; } }
+                expect_log(res + program, c.second);
+            });
         });
 
         test("a_destructor_at_teardown_sees_the_functions_a_run_sees", [this]() {

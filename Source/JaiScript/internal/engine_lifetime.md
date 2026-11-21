@@ -56,6 +56,23 @@ If a later change makes a release consult the engine (an engine-owned release qu
 be leaked when the token is expired: hold it behind a pointer the receiver's destructor does not free once
 `engine_gone()`.
 
+## Coroutine handles
+
+A host owns a coroutine through its `shared_ptr<coroutine_handle>`, which can outlive the engine, and a suspended
+coroutine's backend state reaches the engine as it dies (`release_suspended_values`). So the engine keeps every live
+handle on an intrusive list (`engine::register_coroutine`, the handle's constructor and destructor; no lock: a worker
+cannot mint or drop a handle, and a host thread drops one only while the engine is idle). `~engine` calls
+`retire_coroutines()` after the program scope's reverse release and before the backend goes: each handle still alive,
+the last made first, gives up its backend state, receiver, arguments and values while script destructors still run, and
+names no engine afterwards. A retired handle is `failed` (`completed` stays), so every resume reaches
+`resume_refusal`, which answers `Value outlived its engine.` before the engine argument is read. Retiring also ends a
+coroutine held by a field of its own receiver, so that cycle's destructors run at teardown.
+
+A program-scope function value that owns an object dies in the reverse release with the objects, arrays and maps
+(`environment::dies_at_teardown`): a lambda (its captures) and a bound method (its receiver). A declared function stays
+for the destructors that call it. No VM call-site cache pins a bound method (`park_callee`): its receiver dies with the
+last value that binds it.
+
 ## Not covered
 
 A `script_value` the host holds directly is the host's to drop before the engine. Releasing one afterwards is safe for

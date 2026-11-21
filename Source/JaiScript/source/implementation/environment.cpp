@@ -571,8 +571,12 @@ bool environment::dies_at_teardown(const script_value& cell) {
     switch (value.raw_storage_index()) {
     case script_value::TYPEID_OBJECT: case script_value::TYPEID_ARRAY: case script_value::TYPEID_MAP: return true;
     case script_value::TYPEID_FUNCTION: {
-        const auto* thunk = value.unchecked_as_function().target<script_callable_thunk>();
-        return thunk && thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn && thunk->payload.fn->name == "<lambda>";
+        const script_function& function = value.unchecked_as_function();
+        if (function.target<bound_method_fn>()) { return true; }
+        const auto* thunk = function.target<script_callable_thunk>();
+        if (!thunk) { return false; }
+        if (thunk->payload.kind == script_callable::kind_type::function) { return thunk->payload.fn && thunk->payload.fn->name == "<lambda>"; }
+        return thunk->payload.this_obj().has_value();
     }
     default: return false;
     }

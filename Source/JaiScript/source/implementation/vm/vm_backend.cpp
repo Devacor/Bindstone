@@ -12775,18 +12775,21 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 				}
 			} else if (!thunk && !calleeVal.unchecked_as_function().target<script_static_method_dispatch>()) {   // a static method enters in-loop (invoke_callee)
 				// a host callable takes the arguments as they are (invoke_callee's opaque path): held by its payload, cached
-				// on the same identity the script callee's cache keys on
+				// on the same identity the script callee's cache keys on. A bound method owns its receiver, which must die with
+				// the last value that binds it: no cache pins one
 				pc.pin = *calleeVal.get_storage().get_if<script_value::TYPEID_FUNCTION>();
 				parked_direct = true;
-				if (parallel_worker_) {
-					if (worker_chunk_env_cache::call_ic* ic = worker_call_ic(f, site)) { *ic = { &calleeVal.unchecked_as_function(), nullptr, pc.pin, 0, true }; }
-				} else if (cached_global_env_) {
-					retire_site_callee(site);
-					site.ic_pin = pc.pin;
-					site.ic_identity = &calleeVal.unchecked_as_function();
-					site.ic_fn = nullptr;
-					site.ic_native = true;
-					clear_host_site(site);
+				if (!calleeVal.unchecked_as_function().target<bound_method_fn>()) {
+					if (parallel_worker_) {
+						if (worker_chunk_env_cache::call_ic* ic = worker_call_ic(f, site)) { *ic = { &calleeVal.unchecked_as_function(), nullptr, pc.pin, 0, true }; }
+					} else if (cached_global_env_) {
+						retire_site_callee(site);
+						site.ic_pin = pc.pin;
+						site.ic_identity = &calleeVal.unchecked_as_function();
+						site.ic_fn = nullptr;
+						site.ic_native = true;
+						clear_host_site(site);
+					}
 				}
 			}
 		}

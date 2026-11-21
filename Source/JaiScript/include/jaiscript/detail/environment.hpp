@@ -303,17 +303,17 @@ namespace jai {
             }
         }
 
-        // Engine teardown: every variable that may own an instance (an object, an array, a map) dies, the last defined first
-        // (C++ statics at exit); functions stay callable for the destructors that run
+        // Engine teardown: every variable that may own an instance (dies_at_teardown) dies, the last defined first (C++ statics
+        // at exit); declared functions stay callable for the destructors that run
         void release_values_in_reverse() {
             for (size_t i = local_storage_.size(); i-- > 0;) {
                 script_value& cell = local_storage_[i];
                 if (dies_at_teardown(cell)) { script_value dying = std::move(cell); }
             }
         }
-        // A program-scope value that may own an instance: an object, an array, a map, a lambda (its captures), a property
-        // reference (its receiver's handle), or a reference naming one of those; a declared function stays for the destructors
-        // that call it
+        // A program-scope value that may own an instance: an object, an array, a map, a lambda (its captures), a bound method
+        // (its receiver), a property reference (its receiver's handle), or a reference naming one of those; a declared function
+        // stays for the destructors that call it
         static bool dies_at_teardown(const script_value& cell);
         script_value* own_cell(size_t slot) noexcept { return slot < local_storage_.size() ? &local_storage_[slot] : nullptr; }
 

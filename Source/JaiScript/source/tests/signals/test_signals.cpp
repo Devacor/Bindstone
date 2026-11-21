@@ -1363,6 +1363,30 @@ public:
             check_eq(atDeath, noted, "releasing the receivers and their captures runs no script");
         });
 
+        // An emitter the program owns dies at teardown in its turn, and its receivers with it: what they bind or capture is destroyed
+        // while the engine still runs script
+        test("a_script_owned_emitters_receivers_release_what_they_hold_at_teardown", [this]() {
+            std::string log;
+            {
+                auto eng = jai::foundry::make_engine();
+                jai::stdlib::register_all(*eng);
+                bind_signal_type<void(int)>(*eng, "SignalInt");
+                dynamic_binder<emit_board>(*eng, "EmitBoard").constructor<>().property("onTicked", &emit_board::onTicked).build();
+                eng->add_function("note_end", [&log](const std::string& name) { log += name + ";"; });
+                eng->execute(R"(
+                    class Ear { string name; int heard = 0; Ear(string n) { name = n; } ~Ear() { note_end(name); } void hear(int v) { heard += v; } }
+                    Ear bound = Ear("bound");
+                    auto captured = new Ear("captured");
+                    var board = EmitBoard();
+                    board.onTicked.connect("method", reflect::bind(bound, "hear"));
+                    board.onTicked.connect("lambda", [captured](var v) { captured.hear(v); });
+                    board.onTicked.connect("owned", reflect::bind(new Ear("owned"), "hear"));
+                )");
+                check_eq(std::string(), log);
+            }
+            check_eq(std::string("owned;captured;bound;"), log);
+        });
+
         // Receivers the host holds past both the engine and the emitter release without reaching the engine
         test("script_receivers_held_past_their_engine_and_emitter_release_quietly", [this]() {
             int noted = 0;

@@ -91,7 +91,13 @@ namespace jai {
         bool less_settled_ = true;
         bool less_may_be_provisional_ = false;
         bool less_in_pass_ = false;   // parse() answers the sites once the pass has its declarations; any other entry answers each as it is met
-        std::vector<std::string_view> generic_type_parameters_;   // of the generic whose text is being parsed: types there
+        struct type_parameter_name {
+            std::string_view name;      // T
+            std::string_view generic;   // the generic that declares it: Stack
+        };
+        std::vector<type_parameter_name> generic_type_parameters_;   // of the generic whose text is being parsed: types there
+        // the generic that declares `a_name` as a type parameter of the text being parsed; empty when none does
+        std::string_view type_parameter_generic(std::string_view a_name) const;
         std::vector<less_site>* generic_text_readings_ = nullptr;  // every site reading taken in that text, for its tokens to carry
         bool less_site_reading(const jai::expression& a_head);
         bool names_type_parameter(const jai::expression& a_head) const;

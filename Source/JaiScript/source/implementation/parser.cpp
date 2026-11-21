@@ -2536,6 +2536,11 @@ JAI_NOINLINE checked_result<type_info_ptr> parser::named_type() {
         const bool host_template = check(token_type::less) && is_registered_template_type(type_name);
         bool split = false;
         if (host_template || (check(token_type::less) && !pushed_back_token_ && type_arguments_end(current_, split, true) != SIZE_MAX)) {
+            // an instance would spell its argument there, and type arguments go on a generic's name only
+            if (const std::string_view generic = type_parameter_generic(type_name); !generic.empty()) {
+                report_error(detail::no_type_arguments_text(type_name, detail::plain_type_kind::type_parameter, generic), previous());
+                return make_error_code(parse_error_code::syntax_error);
+            }
             return instance_type(type_name, host_template);
         }
 
@@ -3322,7 +3327,14 @@ static const identifier_expr* less_head_root(const jai::expression& a_head) {
 bool parser::names_type_parameter(const jai::expression& a_head) const {
     if (generic_type_parameters_.empty()) { return false; }
     const identifier_expr* root = less_head_root(a_head);
-    return root && std::find(generic_type_parameters_.begin(), generic_type_parameters_.end(), root->name) != generic_type_parameters_.end();
+    return root && !type_parameter_generic(root->name).empty();
+}
+
+std::string_view parser::type_parameter_generic(std::string_view a_name) const {
+    for (size_t i = generic_type_parameters_.size(); i-- > 0;) {   // a generic method's own parameter hides its class's
+        if (generic_type_parameters_[i].name == a_name) { return generic_type_parameters_[i].generic; }
+    }
+    return {};
 }
 
 // The reading of the site at the current '<': the one this pass was given, else type arguments (every generic use parses under
@@ -3670,10 +3682,10 @@ declaration_ptr parser::parse_generic_text(const std::vector<token>& text, detai
     stream_ = &text; current_ = 0; pushed_back_token_.reset();
     const size_t errors_before = errors_.size();
     std::vector<less_site> readings;
-    const std::vector<std::string_view> saved_parameters = generic_type_parameters_;   // a generic class's stay types in its generic methods
+    const std::vector<type_parameter_name> saved_parameters = generic_type_parameters_;   // a generic class's stay types in its generic methods
     std::vector<less_site>* const saved_readings = generic_text_readings_;
     if (definition) {
-        for (const auto& parameter : definition->parameters) { generic_type_parameters_.push_back(parameter.name); }
+        for (const auto& parameter : definition->parameters) { generic_type_parameters_.push_back({parameter.name, definition->name}); }
         generic_text_readings_ = &readings;
     }
     auto parsed = declaration();
@@ -3742,6 +3754,15 @@ checked_result<declaration_ptr> parser::generic_declaration(const generic_site& 
         current_ = end;
         return make_error_code(parse_error_code::syntax_error);
     }
+    for (const auto& parameter : definition->parameters) {   // a bound is a type's text: a parameter there takes no type arguments either
+        for (size_t i = 0; i + 1 < parameter.bound.size(); ++i) {
+            const token& named = parameter.bound[i];
+            if (named.type != token_type::identifier || parameter.bound[i + 1].type != token_type::less || (i > 0 && parameter.bound[i - 1].type == token_type::colon_colon)) { continue; }
+            const bool own = std::any_of(definition->parameters.begin(), definition->parameters.end(), [&](const detail::generic_parameter& p) { return p.name == named.lexeme; });
+            const std::string_view generic = own ? definition->name : type_parameter_generic(named.lexeme);
+            if (!generic.empty()) { return refuse(detail::no_type_arguments_text(named.lexeme, detail::plain_type_kind::type_parameter, generic), named); }
+        }
+    }
     if (site.kind == detail::generic_kind::method) {
         for (size_t i = site.begin; i < end && tokens[i].type != token_type::left_brace; ++i) {
             if (i >= site.name_at && i < list_end) { continue; }
@@ -3804,6 +3825,13 @@ checked_result<declaration_ptr> parser::generic_declaration(const generic_site& 
 // callee<T1, T2>(args) is callee(T1, T2, args): each type argument a type value (cast_expr::type_value), which a host takes
 // as a jai::script_type and the checker folds into the name when the callee is a generic (callee<T1, T2>)
 JAI_NOINLINE checked_result<expression_ptr> parser::type_argument_call(expression_ptr callee) {
+    if (callee->get_type() == node_type::identifier_expr) {
+        const std::string_view name = static_cast<const identifier_expr&>(*callee).name;
+        if (const std::string_view generic = type_parameter_generic(name); !generic.empty()) {
+            report_error_at(detail::no_type_arguments_text(name, detail::plain_type_kind::type_parameter, generic), callee->location);
+            return make_error_code(parse_error_code::syntax_error);
+        }
+    }
     const token open = advance();   // '<'
     std::vector<type_info_ptr> types;
     std::vector<source_location> places;

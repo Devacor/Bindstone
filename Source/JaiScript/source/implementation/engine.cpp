@@ -1603,15 +1603,46 @@ struct engine::implementation {
         for (size_t i = 0; i < definition.parameters.size(); ++i) { parameters += (i ? ", " : "") + std::string(definition.parameters[i].name); }
         return text + "write it as one outside the class: " + std::string(member) + "<" + parameters + ">(" + std::string(definition.name) + "<" + parameters + "> self)";
     }
+    // The request of the unit's own text that `request` was asked for through, by its chain of askers; itself when the
+    // unit's text asked for it
+    static generic_instance_decl& request_root(const generic_request_index& requests, generic_instance_decl& request) {
+        generic_instance_decl* root = &request;
+        for (size_t levels = 0; !root->within.empty() && levels <= detail::k_generic_depth_limit; ++levels) {
+            const auto outer = requests.find(root->asker());
+            if (outer == requests.end() || outer->second == root) { break; }
+            root = outer->second;
+        }
+        return *root;
+    }
     // One instance: the definition's text with the request's arguments, parsed as program text; its declarations, stamped, come
     // back in `made` behind the requests that text makes itself. What keeps it from being made stays on the request, for the
-    // check to report.
+    // check to report. Instantiation is limited in everything that grows (docs/site/guide/21-generics.html "Limits and what
+    // is not here"): how deep it nests, how long an instance's name is, how many instances `root`, the unit's own use, sets
+    // off. The request that passes a limit says so, and nothing more is made for that use (expand_generics).
     void instantiate_generic(engine& self, const std::vector<declaration_ptr>& decls, const generic_request_index& requests,
-                             generic_instance_decl& request, std::vector<declaration_ptr>& made, std::vector<closure_stamp>& files) {
+                             generic_instance_decl& request, generic_instance_decl& root, std::vector<declaration_ptr>& made, std::vector<closure_stamp>& files) {
         const auto fail = [&](std::string message, bool unresolved = false) {
             request.failures.push_back({request.location, std::move(message)});
             request.unresolved = unresolved;
         };
+        const auto outgrown = [&](const std::string& limit, const char* and_so_on) {
+            std::vector<std::string_view> askers;
+            for (detail::generic_instance_id outer = request.asker(); !outer.name.empty() && askers.size() <= detail::k_generic_depth_limit;) {
+                askers.push_back(outer.name);
+                const auto held = requests.find(outer);
+                if (held == requests.end()) { break; }
+                outer = held->second->asker();
+            }
+            bool more = false;
+            const std::string chain = detail::instance_chain_text(askers, request.name, more);
+            fail("generic instantiation " + limit + ": " + chain + (more ? and_so_on : ""));
+            root.overgrown = true;
+        };
+        // a name a level of a multiplying chain made: no text is made from it, whatever it names
+        if (request.name.size() > detail::k_generic_name_limit) {
+            outgrown("names an instance of more than " + std::to_string(detail::k_generic_name_limit) + " characters", ", and so on, each name longer than the last");
+            return;
+        }
         const std::string generic(request.generic);
         detail::generic_definition_ptr definition = std::move(request.definition);
         request.definition.reset();
@@ -1666,6 +1697,11 @@ struct engine::implementation {
             std::string text = "generic instantiation nests more than " + std::to_string(detail::k_generic_depth_limit) + " deep: '" + std::string(chain.back()) + "'";
             for (size_t i = chain.size() - 1; i-- > 0 && chain.size() - i <= 3;) { text += " needs '" + std::string(chain[i]) + "'"; }
             fail(text + ", and so on without end");
+            root.overgrown = true;
+            return;
+        }
+        if (++root.set_off > detail::k_generic_instance_limit) {
+            outgrown("makes more than " + std::to_string(detail::k_generic_instance_limit) + " instances from one use", ", and so on");
             return;
         }
         for (const auto& argument : request.arguments) {
@@ -1812,15 +1848,20 @@ struct engine::implementation {
         std::vector<detail::generic_definition_ptr> declared;
         collect_generics(decls, declared);
         bool added = false;
+        generic_request_index requests;   // the unit's requests, read once a generic it declares has instances
+        bool indexed = false;
         for (const auto& definition : declared) {
             const std::string generic = definition->qualified_name();
             const auto made = instances_of_.find(generic);
             if (made == instances_of_.end()) { continue; }
             const uint64_t asked = detail::generic_instance_stamp(*definition);
+            if (!indexed) {
+                requests = index_requests(decls);
+                indexed = true;
+            }
             for (const std::string& name : made->second) {
                 if (given_up(name, asked)) { continue; }
-                if (std::any_of(decls.begin(), decls.end(), [&](const declaration_ptr& d) {
-                        return d && d->get_type() == node_type::generic_instance_decl && static_cast<const generic_instance_decl&>(*d).id() == detail::generic_instance_id{name, asked}; })) { continue; }
+                if (requests.count(detail::generic_instance_id{name, asked}) != 0) { continue; }
                 const std::vector<uint64_t> stamps = detail::declared_instance_stamps(self, name);
                 const bool held = std::any_of(stamps.begin(), stamps.end(), [&](uint64_t stamp) {
                     if (stamp == definition->stamp) { return false; }
@@ -1836,6 +1877,7 @@ struct engine::implementation {
                 request->arguments = generic_instances_[name].arguments;
                 request->definition = definition;
                 request->remade = true;
+                requests.emplace(request->id(), request.get());
                 decls.push_back(std::move(request));   // behind the unit's own requests: an instance the unit's text names is the unit's
                 added = true;
             }
@@ -1907,11 +1949,13 @@ struct engine::implementation {
                 if (request->expanded) { note_loaded_instance(decls, *request); }
                 continue;
             }
+            generic_instance_decl& root = request_root(requests, *request);
+            if (root.overgrown) { continue; }   // an instance of that use passed a limit: its one error stands, and nothing more is made for it
             request->failures.clear();
             request->bounds.clear();
             request->unresolved = false;
             std::vector<declaration_ptr> made;
-            instantiate_generic(self, decls, requests, *request, made, files);
+            instantiate_generic(self, decls, requests, *request, root, made, files);
             decls.insert(decls.begin() + static_cast<std::ptrdiff_t>(i) + 1, made.begin(), made.end());
             changed = true;
         }

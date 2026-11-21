@@ -844,6 +844,32 @@ def run_robustness(exe, checks):
     finally:
         server.kill()
 
+    # generic chains that grow faster than their depth counts: the check returns with the load's error, as the text is typed
+    server = RawServer(exe)
+    try:
+        server.initialize()
+        growing = (
+            ("an instance that doubles per level", "class Pair<A, B> { A a; B b; }\nclass Grow<T> { Grow<Pair<T, T>> next; }\nGrow<int> g;\n",
+             b"generic instantiation names an instance of more than 4096 characters"),
+            ("a function that doubles its argument", "class Two<A, B> { A a; B b; }\nvoid grow<T>(T x, int n) { if (n > 0) { Two<T, T> p; grow(p, n - 1); } }\ngrow(1, 3);\n",
+             b"needs 'grow<Two<int, int>>'"),
+            ("a class chain that branches", "class L<T> { } class R<T> { }\nclass Tree<T> { Tree<L<T>> a; Tree<R<T>> b; }\nTree<int> t;\n",
+             b"generic instantiation nests more than 64 deep"),
+            ("a function chain that branches", "class Lf<T> { } class Rt<T> { }\nvoid walk<T>(int n) { if (n > 0) { walk<Lf<T>>(n - 1); walk<Rt<T>>(n - 1); } }\nwalk<int>(2);\n",
+             b"generic instantiation makes more than 4096 instances from one use"),
+            ("type arguments on a type parameter", "class List<T> { void f() { List<T<T>> r; } }\nList<int> l;\n",
+             b"takes no type arguments: it is a type parameter of"),
+        )
+        for at, (name, text, expected) in enumerate(growing):
+            uri = uri_of(FIXTURES / ("growing_%d_unsaved.jai" % at))
+            server.send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+                "uri": uri, "languageId": "jaiscript", "version": 1, "text": text}}})
+            reply = server.reply_with(expected)
+            checks.check(reply is not None and reply.get("method") == "textDocument/publishDiagnostics", name + ": the diagnostic is the load's error", str(reply)[:200])
+            checks.check(server.ping(200 + at), name + ": the next request is answered")
+    finally:
+        server.kill()
+
     for args in (["--max-message=1000"], ["--max-message=lots"], ["--host=nope"]):
         proc = subprocess.run([str(exe), *args], stdin=subprocess.DEVNULL, capture_output=True, timeout=HANG_GUARD)
         checks.check(proc.returncode == 2, "a bad %s is a usage error" % args[0], "exit %s" % proc.returncode)

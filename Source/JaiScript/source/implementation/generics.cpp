@@ -182,11 +182,28 @@ bool builtin_type_name(std::string_view name) {
 	       math_type_from_name(name) != script_value_type::jai_null_type;
 }
 
-std::string no_type_arguments_text(std::string_view name, plain_type_kind kind) {
+std::string no_type_arguments_text(std::string_view name, plain_type_kind kind, std::string_view generic) {
+	if (kind == plain_type_kind::type_parameter) { return "'" + std::string(name) + "' takes no type arguments: it is a type parameter of '" + std::string(generic) + "'"; }
 	const char* is = kind == plain_type_kind::host_class ? "it is a host class, not a host template"
 	               : kind == plain_type_kind::enumeration ? "it is an enum"
 	               : kind == plain_type_kind::builtin ? "it is a builtin type" : "it is not a generic class";
 	return "'" + std::string(name) + "' takes no type arguments: " + is;
+}
+
+std::string shown_instance_name(std::string_view name) {
+	constexpr size_t k_longest = 80, k_end = 36;
+	if (name.size() <= k_longest) { return std::string(name); }
+	return std::string(name.substr(0, k_end)) + " ... " + std::string(name.substr(name.size() - k_end));
+}
+
+std::string instance_chain_text(const std::vector<std::string_view>& askers, std::string_view request, bool& more) {
+	constexpr size_t k_links = 3;
+	std::string text;
+	for (size_t i = 0; i < k_links && i <= askers.size(); ++i) {
+		text += (i ? " needs '" : "'") + shown_instance_name(i < askers.size() ? askers[askers.size() - 1 - i] : request) + "'";
+	}
+	more = askers.size() + 1 > k_links;
+	return text;
 }
 
 bool same_generic_signature(const generic_definition& a, const generic_definition& b) {

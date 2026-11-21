@@ -7,12 +7,7 @@
 #include <jaiscript/detail/ast_serializer.hpp>
 #include <jaiscript/detail/generics.hpp>
 #include "../case_table.hpp"
-#include <chrono>
-#include <condition_variable>
-#include <cstdio>
-#include <cstdlib>
-#include <mutex>
-#include <thread>
+#include "../input_deadline.hpp"
 
 using namespace jai::foundry;
 
@@ -321,7 +316,7 @@ public:
                 {"class C { @ m() { return 1; } }", true}, {"void f() { int a = 1; @ }\nprint(1);", true},
                 {"print(@{});", false}, {"if (@ x = 1) { }", false},
             };
-            parse_deadline deadline;
+            input_deadline deadline("a parse");
             auto eng = make_engine();
             std::string failures;
             size_t parsed = 0;
@@ -331,7 +326,7 @@ public:
                         const std::string code = spelled(program, head) + ending;
                         std::string spaced_head = head;
                         spaced_head.insert(spaced_head.rfind(">>") + 1, " ");
-                        deadline.parsing(code);
+                        deadline.taking(code);
                         const std::vector<std::string> reported = parse_messages(code, *eng);
                         const std::vector<std::string> expected = parse_messages(spelled(program, spaced_head) + ending, *eng);
                         ++parsed;
@@ -355,9 +350,9 @@ public:
                 {"string<int>>", stray}, {"array<int>>", stray}, {"print(1);\nweak_ptr<int>>", stray},
                 {";array<int>>", after_a_lone_semicolon}, {";shared_ptr<float>>", after_a_lone_semicolon},
             };
-            parse_deadline deadline;
+            input_deadline deadline("a parse");
             for (const auto& [code, expected] : cases) {
-                deadline.parsing(code);
+                deadline.taking(code);
                 check_true(parse_messages(code) == expected, code);
             }
             // the load error is the same text on both backends
@@ -372,7 +367,7 @@ public:
                 return std::string("<no error>");
             };
             for (const auto& [code, expected] : cases) {
-                deadline.parsing(code);
+                deadline.taking(code);
                 const std::string interpreted = load_error(backend_type::interpreter, code);
                 check_eq(interpreted, load_error(backend_type::vm, code), code);
                 check_true(interpreted.find("error: expected variable name") != std::string::npos, interpreted);
@@ -384,10 +379,10 @@ public:
         // a generic method whose parameter list runs past the class's '}' ends its text after it: the member loop is then outside
         // the class, where no member boundary is left to find
         test("a_member_that_reads_past_its_class_does_not_stop_the_recovery", [this]() {
-            parse_deadline deadline;
+            input_deadline deadline("a parse");
             for (const char* code : {"class C { T f<T>(T x } ) { } ) }", "class C { T f<T>(T x } ) { } ) ) int y; }\nprint(1);",
                                      "class C { T f<T>(T x } ) { } > }", "class C { class D { T f<T>(T x } } ) { } ) } }"}) {
-                deadline.parsing(code);
+                deadline.taking(code);
                 check_true(!parse_messages(code).empty(), code);
             }
         });
@@ -429,7 +424,7 @@ public:
                 "print ( tests . size ( ) , Color :: red == Color :: green , twice ( 1 ) ) ;",
             };
             const std::vector<std::string> placed = {"<", ">", ">>", "(", ")", "{", "}", ";", ","};
-            parse_deadline deadline;
+            input_deadline deadline("a parse");
             size_t parsed = 0;
             for (const std::string& program : programs) {
                 std::vector<std::string> words;
@@ -445,7 +440,7 @@ public:
                         if (i == at) { for (const std::string& word : put) { code += word + ' '; } }
                         if (i < words.size() && (i < at || i >= at + dropped)) { code += words[i] + ' '; }
                     }
-                    deadline.parsing(code);
+                    deadline.taking(code);
                     ++parsed;
                     return parse_messages(code, *eng);
                 };
@@ -464,45 +459,6 @@ public:
     }
 
 private:
-    // Ends the run when a parse in its scope does not return, naming it: a failure, not a hang. Each parse here takes
-    // milliseconds, and one that loops on its errors grows by hundreds of megabytes a second, so it gets seconds
-    class parse_deadline {
-    public:
-        parse_deadline() : watch_([this]() {
-            std::unique_lock<std::mutex> lock(mutex_);
-            for (size_t watched = parses_; !done_; watched = parses_) {
-                if (!moved_.wait_for(lock, std::chrono::seconds(k_seconds), [&]() { return done_ || parses_ != watched; })) {
-                    std::fprintf(stderr, "\na parse did not return within %d s: %s\n", k_seconds, code_.c_str());
-                    std::abort();
-                }
-            }
-        }) {}
-        ~parse_deadline() {
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                done_ = true;
-            }
-            moved_.notify_one();
-            watch_.join();
-        }
-        void parsing(const std::string& code) {
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                code_ = code;
-                ++parses_;
-            }
-            moved_.notify_one();
-        }
-    private:
-        static constexpr int k_seconds = 10;
-        std::mutex mutex_;
-        std::condition_variable moved_;
-        bool done_ = false;
-        size_t parses_ = 0;
-        std::string code_;
-        std::thread watch_;
-    };
-
     static std::string spelled(std::string program, const std::string& head) {
         for (size_t at = program.find('@'); at != std::string::npos; at = program.find('@', at + head.size())) { program.replace(at, 1, head); }
         return program;

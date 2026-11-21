@@ -27,6 +27,11 @@ namespace jai::detail {
 
 	// instantiation nests at most this deep (class A<T> { A<array<T>> next; } is an error, never a hang)
 	inline constexpr size_t k_generic_depth_limit = 64;
+	// an instance's name is at most this long: a chain whose instances multiply per level (Grow<Pair<T, T>>) ends in a few levels
+	inline constexpr size_t k_generic_name_limit = 4096;
+	// one use in a unit's own text makes at most this many instances, those its instances' text names counted: a chain that
+	// branches per level (Tree<L<T>> beside Tree<R<T>>) ends before its count does the damage
+	inline constexpr size_t k_generic_instance_limit = 4096;
 
 	// A type parameter: its name and, for `T : Base`, the bound's tokens
 	struct generic_parameter {
@@ -120,12 +125,19 @@ namespace jai::detail {
 	};
 
 	// What a name that takes no type arguments is: Name<Args> on it fails the load once, wherever a type can stand
-	enum class plain_type_kind : uint8_t { none, script_class, host_class, enumeration, builtin };
+	enum class plain_type_kind : uint8_t { none, script_class, host_class, enumeration, builtin, type_parameter };
 	// int, float, string, bool, char, var, utf8_string, double and the math types (math::vec2)
 	bool builtin_type_name(std::string_view name);
 	// "'Hero' takes no type arguments: it is not a generic class", and for a host class "it is a host class, not a host
-	// template", for an enum "it is an enum", for a builtin "it is a builtin type"
-	std::string no_type_arguments_text(std::string_view name, plain_type_kind kind);
+	// template", for an enum "it is an enum", for a builtin "it is a builtin type", for a generic's type parameter "it is a
+	// type parameter of 'Stack'" (`generic` names it)
+	std::string no_type_arguments_text(std::string_view name, plain_type_kind kind, std::string_view generic = {});
+
+	// an instance's name as a note or a chain of instances shows it: one longer than 80 characters keeps its two ends
+	std::string shown_instance_name(std::string_view name);
+	// "'A<int>' needs 'A<array<int>>' needs 'A<array<array<int>>>'": the first links of the chain that asked for `request`, from
+	// the unit's own use (`askers` runs outward from the request's asker); `more` when the chain goes on past them
+	std::string instance_chain_text(const std::vector<std::string_view>& askers, std::string_view request, bool& more);
 
 	// Two declarations of one generic: the same kind, as many type parameters, and value parameters of the same types (a type
 	// parameter matching the one at its place: largest<T>(array<T>) and largest<U>(array<U>) are one declaration)

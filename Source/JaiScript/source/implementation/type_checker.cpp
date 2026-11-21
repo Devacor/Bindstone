@@ -1177,6 +1177,7 @@ private:
     // every method named `name` a class derived from `cls` declares (a call through a `cls` receiver may reach any)
     std::vector<const function_decl*> overrides_of(std::string_view cls, std::string_view name) {
         std::vector<const function_decl*> out;
+        if (cls.empty()) { return out; }   // no method call: no class is asked
         for (const auto* table : {&classes_, &program_sclasses_}) {
             for (const auto& [cname, sc] : *table) {
                 if (cname == cls || class_relation(cname, cls) != 1) { continue; }
@@ -1304,18 +1305,12 @@ private:
         }
     }
 
-    // an instance's name in a note: one longer than 80 characters keeps its two ends
-    static std::string note_name(std::string_view name) {
-        constexpr size_t k_longest = 80, k_end = 36;
-        if (name.size() <= k_longest) { return std::string(name); }
-        return std::string(name.substr(0, k_end)) + " ... " + std::string(name.substr(name.size() - k_end));
-    }
     // "in Stack<int>, instantiated at app.jai:12:5", then the instance that asked for that one, outward
     std::vector<std::string> instance_notes(const generic_instance_decl* instance) const {
         std::vector<std::string> notes;
         size_t levels = 0;
         for (; instance && levels <= k_generic_depth_limit; ++levels) {
-            if (levels < 4) { notes.push_back("in " + note_name(instance->name) + ", instantiated at " + instance->location.to_string()); }
+            if (levels < 4) { notes.push_back("in " + shown_instance_name(instance->name) + ", instantiated at " + instance->location.to_string()); }
             instance = instance->within.empty() ? nullptr : instance_request(instance->asker());
         }
         if (levels > 4) { notes.push_back("and " + std::to_string(levels - 4) + " more instantiations around these"); }
@@ -2713,7 +2708,7 @@ private:
             if (inserted) {   // an earlier overload of the same name and table that differs only by reference
                 for (const function_decl* earlier : fns) {
                     if (earlier == fn) { break; }
-                    if (made_by_declaration_again(earlier) || earlier->name != fn->name || earlier->is_static != fn->is_static ||
+                    if (earlier->name != fn->name || earlier->is_static != fn->is_static || made_by_declaration_again(earlier) ||
                         !detail::differs_only_by_reference(fn->parameters, earlier->parameters)) { continue; }
                     diag(diag_level::error, fn->location,
                          detail::reference_only_overload_text(fn->name, fn->parameters, earlier->parameters, earlier->location.line),
@@ -9527,22 +9522,20 @@ private:
         bool quiet = lw_quiet_level(cls, 0);
         if (quiet) {
             auto derives = [&](const class_decl* cd) { return lw_derives(cd, cls, 0); };
-            std::unordered_set<std::string_view> modeled;
             for (const auto& [name, c] : classes_) {
-                modeled.insert(name);
-                if (quiet && name != cls && derives(c.decl) && !lw_quiet_class(name)) { quiet = false; }
+                if (name != cls && derives(c.decl) && !lw_quiet_class(name)) { quiet = false; break; }
             }
+            std::unordered_set<std::string_view> asked;   // the program's classes the unit does not model, each asked once
             if (quiet && program_classes_) {
                 for (const auto& [name, cd] : *program_classes_) {
-                    if (!cd || modeled.count(cd->name)) { continue; }
-                    modeled.insert(cd->name);
+                    if (!cd || classes_.count(cd->name) || !asked.insert(cd->name).second) { continue; }
                     if (cd->name != cls && derives(cd.get()) && !lw_quiet_class(cd->name)) { quiet = false; break; }
                 }
             }
             if (quiet) {
                 if (auto def = engine_class(cls)) {
                     for (const auto& name : eng_.registered_class_names()) {
-                        if (modeled.count(name)) { continue; }
+                        if (classes_.count(name) || asked.count(name)) { continue; }
                         auto other = engine_class(name);
                         if (other && other.get() != def.get() && other->derives_from(def.get())) { quiet = false; break; }
                     }

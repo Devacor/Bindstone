@@ -1267,6 +1267,11 @@ namespace jai {
         // again from that declaration (engine.cpp note_remade_instances). One the declaration cannot make is dropped with a
         // warning; one the unit's own text comes to name is the unit's from then on. Never serialized.
         bool remade = false;
+        // What a request of the unit's own text has set off (engine.cpp instantiate_generic): the instances made for it, those
+        // its instances' text names counted, and that one of them passed a limit (detail::k_generic_depth_limit, its name's,
+        // this count's), after which nothing more is made for it. Never serialized.
+        uint32_t set_off = 0;
+        bool overgrown = false;
 
         generic_instance_decl(const source_location& loc, std::string_view n, uint64_t nid)
             : declaration(loc, node_type::generic_instance_decl), name(n), name_id(nid) {}

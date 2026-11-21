@@ -224,10 +224,23 @@ namespace jai {
         mutable bool this_field = false;   // a bare name in a method the checker resolved to a field of the class chain (declared, no user accessor): the method graft's `recv.name`
         mutable bool program_name = false;   // a bare name in a method the checker resolved past every member of the class chain: the method graft's program-scope read
         type_info* declared_ref = nullptr;
+        // a clone the VM's graft compiles where the program wrote another expression (a call's result temp, a spilled operand's temp,
+        // a reference parameter's variable): that expression, which a text naming this operand reads (detail::written_operand)
+        const expression* stands_for = nullptr;
 
         identifier_expr(const source_location& loc, std::string_view n, uint64_t sym_id)
             : expression(loc, node_type::identifier_expr), name(n), symbol_id(sym_id), slot_index(SIZE_MAX) {}
     };
+
+    namespace detail {
+        // The operand as the program wrote it: what an error text names, whatever a compiler put in its place
+        inline const expression* written_operand(const expression* e) {
+            while (e && e->get_type() == node_type::identifier_expr && static_cast<const identifier_expr*>(e)->stands_for) {
+                e = static_cast<const identifier_expr*>(e)->stands_for;
+            }
+            return e;
+        }
+    }
     
     // Binary expression
     class binary_expr : public expression {

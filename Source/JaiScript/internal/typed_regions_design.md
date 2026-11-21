@@ -298,7 +298,9 @@ argument (a fused binary, an element read, a math call or a unary over a slot) l
 own ahead of the call. The callee probe, the pushes and the call run the general executors verbatim over three
 copy instructions at the call's place, the callee runs in the dispatcher with the caller parked on the call's copy,
 and the landing after the return lands the result by the declared-type rule into a scalar declaration or a
-no-result store, or drops a statement's. The call is the effect point: a slot argument's cell is flushed ahead of
+no-result store, or drops a statement's. A callee that is a slot the block holds (a scalar local, a graft's result called in its
+turn) has its cell written back ahead of the probe, which reads the slot as the general form does and raises its not-callable
+error. The call is the effect point: a slot argument's cell is flushed ahead of
 the call so a by-reference parameter binds the current value and its kind is checked after it (a local that
 escaped is the slot's from then on), the environment values are re-read, the container sites re-resolved, and any
 change misses at the consumer with the result on the stack; a callee that raises into the caller's handler flushes
@@ -560,7 +562,10 @@ with its slots offset, every `return e` a declaration of the result temp from `e
 conversion with the callee's text, `Cannot return string from 'f' (declared -> int)`) and a jump to the graft's join, a jump over
 the fallback, and the fallback: the real call declared into the same temp as whatever it returns, which a rebind or a reload of
 the callee, or an armed debugger, takes. After the join the statement runs once, with the call and the spilled operands replaced by
-their temps; it keeps every proof the checker stamped on it. The first call the statement runs is the one hoisted; when it is a
+their temps; it keeps every proof the checker stamped on it. A temp in an operand's place, and the caller's variable a clone reads in a
+reference parameter's, records the expression the program wrote there (`identifier_expr::stands_for`), and a text that names an
+operand reads that expression (`detail::written_operand`): a called result is a computed callee, a called local keeps its name, and a
+null reached through a reference parameter is the parameter's. The first call the statement runs is the one hoisted; when it is a
 leaf, the statement is scanned again for the next, so `tile_solid(tile_at(x, y))` hoists the inner leaf and then the outer, and
 `f(a) + g(b)` both. A call under a conditional operand (a ternary's arm, the right side of `&&` or `||`), or after a call that is
 no leaf (a method, a host function, a large function), stays a call: it would run behind a path or an effect the graft cannot

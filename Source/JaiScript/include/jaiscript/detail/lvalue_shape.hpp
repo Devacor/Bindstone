@@ -7,6 +7,7 @@
 // the parse-time passes classify without the runtime kernel's headers.
 
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/slot_site.hpp>
 #include <string>
 
 namespace jai::detail {
@@ -175,10 +176,12 @@ namespace jai::detail {
 	}
 
 	inline std::string target_spelling(const expression* e) {
+		e = written_operand(e);
 		if (!e) { return "..."; }
 		switch (e->get_type()) {
 			case node_type::identifier_expr: {
 				const auto* id = static_cast<const identifier_expr*>(e);
+				if (unspellable_name(id->name)) { return "..."; }   // a compiler's own value: no source spells it
 				return (id->global_qualified ? "::" : "") + std::string(id->name);
 			}
 			case node_type::this_expr:

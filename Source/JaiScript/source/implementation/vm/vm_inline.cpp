@@ -237,12 +237,21 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c);
 std::shared_ptr<identifier_expr> copy_identifier(const identifier_expr* r, const source_location& loc, inline_context& c) {
 	auto n = c.make<identifier_expr>(loc, r->name, r->symbol_id);
 	n->slot_index = r->slot_index; n->global_qualified = r->global_qualified; n->names_value_decl = r->names_value_decl; n->names_known_value = r->names_known_value;
-	n->this_field = r->this_field; n->program_name = r->program_name;
+	n->this_field = r->this_field; n->program_name = r->program_name; n->stands_for = r->stands_for;
 	return n;
 }
 
-std::shared_ptr<identifier_expr> clone_identifier(const identifier_expr* id, inline_context& c) {
-	if (id->slot_index != SIZE_MAX && id->slot_index < c.renames.size() && c.renames[id->slot_index]) { return copy_identifier(c.renames[id->slot_index].get(), id->location, c); }
+// a clone in the place of `written`: a text that names the operand reads what the program wrote there (detail::written_operand).
+// The chunk keeps `written` alive as it keeps its statements: the caller's tree, a graft's callee (inline_site::decl) or an earlier clone
+std::shared_ptr<identifier_expr> stand_in(const identifier_expr* r, const expression_ptr& written, inline_context& c) {
+	auto n = copy_identifier(r, written->location, c);
+	n->stands_for = written.get();
+	return n;
+}
+
+std::shared_ptr<identifier_expr> clone_identifier(const expression_ptr& e, inline_context& c) {
+	auto* id = static_cast<const identifier_expr*>(e.get());
+	if (id->slot_index != SIZE_MAX && id->slot_index < c.renames.size() && c.renames[id->slot_index]) { return stand_in(c.renames[id->slot_index].get(), e, c); }
 	auto n = copy_identifier(id, id->location, c);
 	n->slot_index = id->slot_index == SIZE_MAX ? SIZE_MAX : id->slot_index + c.slot_offset;
 	return n;
@@ -547,7 +556,7 @@ void walk_decls(const std::vector<declaration_ptr>& decls, site_walk& w) {
 // typed as the original.
 expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 	if (!c.ok || !e) return nullptr;
-	for (const auto& s : c.spills) { if (s.first == e.get()) { return copy_identifier(s.second.get(), e->location, c); } }
+	for (const auto& s : c.spills) { if (s.first == e.get()) { return stand_in(s.second.get(), e, c); } }
 	switch (e->get_type()) {
 	case node_type::literal_expr: ++c.nodes; return e;   // immutable: shared as it is
 	case node_type::identifier_expr: {
@@ -571,11 +580,11 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 			return n;
 		}
 		if (id->slot_index == SIZE_MAX) { c.reads_env = true; }
-		return clone_identifier(id, c);
+		return clone_identifier(e, c);
 	}
 	case node_type::this_expr:
 		if (static_cast<const this_expr*>(e.get())->into_handle) { c.fail("a this stored into a handle"); return nullptr; }
-		if (c.receiver) { return copy_identifier(c.receiver.get(), e->location, c); }
+		if (c.receiver) { return stand_in(c.receiver.get(), e, c); }
 		if (c.receiver_this) { return c.make<this_expr>(e->location); }
 		if (c.caller_this) { ++c.nodes; return e; }
 		c.fail("an expression the graft does not take"); return nullptr;
@@ -666,7 +675,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 	}
 	case node_type::call_expr: {
 		auto* ce = static_cast<const call_expr*>(e.get());
-		if (c.replace && ce == c.replace) { ++c.nodes; return c.result ? copy_identifier(c.result.get(), e->location, c) : nullptr; }   // the statement: the call is its temp (null: a void call alone)
+		if (c.replace && ce == c.replace) { ++c.nodes; return c.result ? stand_in(c.result.get(), e, c) : nullptr; }   // the statement: the call is its temp (null: a void call alone)
 		if (!c.replace && !math_call(ce) && !size_call(ce) && !reading_builtin_call(ce, c)) {
 			if (!alias_call(ce, c.lc.eng) && !nested_call(ce, &c.lc)) { c.calls = true; }   // any other call stays a call, made from the grafted body
 			// the alias makes the real call when its name binds anything else, a nested leaf when its guard fails, a kept call always: that

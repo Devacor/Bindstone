@@ -156,7 +156,7 @@ One conversion table (`detail/typed_slot.hpp`), one text kernel
 
 | site | text | slot-less shape (worker / unnamed site) |
 |---|---|---|
-| by-value parameter | `Cannot pass string to parameter 'n' of 'fib' (declared int)` (`of lambda` for lambdas); a `T&` parameter spells its reference: `Cannot pass float to parameter 'x' of 'inc' (declared int&)` | `Cannot pass string to an int parameter` |
+| by-value parameter | `Cannot pass string to parameter 'n' of 'fib' (declared int)` (`of lambda` for lambdas); a `T&` parameter spells its reference: `Cannot pass float to parameter 'x' of 'inc' (declared int&)` | `Cannot pass string to an int parameter` (also `operator++(int)`'s marker, a parameter no source names: `detail::unspellable_name`) |
 | typed return | `Cannot return string from 'f' (declared -> int)` | `Cannot return string from a function declared -> int` |
 | coroutine yield (a yield takes the declared type like a return; a bare `yield;` hands out nothing) | `Cannot yield string from 'g' (declared -> int)` | `Cannot yield string from a coroutine declared -> int` |
 | `=` / compound | `Cannot assign string to 'x' (declared int)`; a store through a reference variable names it: `int& ry = y; ry = s` reads `Cannot assign string to 'ry' (declared int&)` | `Cannot assign string to a variable declared int` |

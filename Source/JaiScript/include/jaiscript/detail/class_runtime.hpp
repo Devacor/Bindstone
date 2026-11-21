@@ -2517,7 +2517,7 @@ inline std::string_view slot_rejection_message_unnamed(slot_kind kind, std::stri
 }
 
 inline bool slot_site_named(const slot_site& site) {
-    return site.kind == slot_kind::return_value || site.kind == slot_kind::yield_value ? !site.owner.empty() : !site.name.empty();
+    return site.kind == slot_kind::return_value || site.kind == slot_kind::yield_value ? !site.owner.empty() : !site.name.empty() && !unspellable_name(site.name);
 }
 
 inline error_propagator typed_slot_rejection(const script_value& source, const type_info& target, const slot_site& site, engine* eng) {

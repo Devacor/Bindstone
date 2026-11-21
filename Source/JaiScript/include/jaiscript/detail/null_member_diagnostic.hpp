@@ -2,6 +2,7 @@
 
 #include <jaiscript/detail/foreign_keyword.hpp>
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/slot_site.hpp>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -9,11 +10,15 @@
 namespace jai {
 
 // The symbol naming a member-access receiver: `obj.frob()` -> obj, `game().creature(id).dot()` ->
-// creature. Zero when the receiver has no name (a literal, an index, a ternary).
+// creature. Zero when the receiver has no name (a literal, an index, a ternary, a compiler's own value).
 inline uint64_t null_member_receiver_symbol(const expression* receiver) {
+    receiver = detail::written_operand(receiver);
     if (!receiver) { return 0; }
     switch (receiver->get_type()) {
-        case node_type::identifier_expr: return static_cast<const identifier_expr*>(receiver)->symbol_id;
+        case node_type::identifier_expr: {
+            const auto* id = static_cast<const identifier_expr*>(receiver);
+            return detail::unspellable_name(id->name) ? 0 : id->symbol_id;
+        }
         case node_type::member_expr: return static_cast<const member_expr*>(receiver)->member_id;
         case node_type::call_expr: return null_member_receiver_symbol(static_cast<const call_expr*>(receiver)->callee.get());
         default: return 0;
@@ -23,6 +28,7 @@ inline uint64_t null_member_receiver_symbol(const expression* receiver) {
 // {0} = the member, {1} = the receiver symbol (only used by the shapes that have one);
 // as_callee = the member is being called (internal/diagnostics.md family A)
 inline std::string_view null_member_message(const expression* receiver, bool as_callee = false) {
+    receiver = detail::written_operand(receiver);
     if (null_member_receiver_symbol(receiver) == 0) {
         return as_callee ? "Cannot call '{0}' on null" : "Cannot access '{0}' on null";
     }
@@ -42,6 +48,7 @@ inline constexpr std::string_view scalar_member_message = "{0} has no member '{1
 // The class name when the receiver is that shape, else empty.
 template <class Engine>
 inline std::string_view class_named_by_dot_receiver(const expression* receiver, const script_value& value, Engine* eng) {
+    receiver = detail::written_operand(receiver);
     if (!eng || !receiver || receiver->get_type() != node_type::identifier_expr || !value.is_function()) { return {}; }
     const auto* id = static_cast<const identifier_expr*>(receiver);
     return detail::engine_access::get_class_definition(*eng, std::string(id->name)) ? id->name : std::string_view{};
@@ -94,9 +101,13 @@ inline std::string non_object_member_store_text(std::string_view cls, std::strin
 
 // The spelling null_member_receiver_symbol names: `obj` for obj.m, `creature` for game().creature(id).m
 inline std::string_view null_member_receiver_name(const expression* receiver) {
+    receiver = detail::written_operand(receiver);
     if (!receiver) { return {}; }
     switch (receiver->get_type()) {
-        case node_type::identifier_expr: return static_cast<const identifier_expr*>(receiver)->name;
+        case node_type::identifier_expr: {
+            const std::string_view name = static_cast<const identifier_expr*>(receiver)->name;
+            return detail::unspellable_name(name) ? std::string_view{} : name;
+        }
         case node_type::member_expr: return static_cast<const member_expr*>(receiver)->member;
         case node_type::call_expr: return null_member_receiver_name(static_cast<const call_expr*>(receiver)->callee.get());
         default: return {};
@@ -105,6 +116,7 @@ inline std::string_view null_member_receiver_name(const expression* receiver) {
 
 // `x.m = v` through a null receiver: the read's shapes (null_member_message) with the store's verb
 inline std::string null_member_store_text(const expression* receiver, std::string_view member) {
+    receiver = detail::written_operand(receiver);
     std::string out = "Cannot assign to '" + std::string(member) + "' on null";
     const std::string_view name = null_member_receiver_name(receiver);
     if (name.empty()) { return out; }
@@ -121,11 +133,15 @@ inline std::pair<std::string_view, uint64_t> class_dot_member_error(Symbolizer& 
 }
 
 // The name a call site can attribute to its callee: an identifier's symbol, a member's
-// member id, 0 for a computed callee (fs[0](x), pick()(x))
+// member id, 0 for a computed callee (fs[0](x), pick()(x)) and for a compiler's own value
 inline uint64_t callee_name_symbol(const expression* callee) {
+    callee = detail::written_operand(callee);
     if (!callee) { return 0; }
     switch (callee->get_type()) {
-        case node_type::identifier_expr: return static_cast<const identifier_expr*>(callee)->symbol_id;
+        case node_type::identifier_expr: {
+            const auto* id = static_cast<const identifier_expr*>(callee);
+            return detail::unspellable_name(id->name) ? 0 : id->symbol_id;
+        }
         case node_type::member_expr: {
             const uint64_t id = static_cast<const member_expr*>(callee)->member_id;
             return id == UINT64_MAX ? 0 : id;

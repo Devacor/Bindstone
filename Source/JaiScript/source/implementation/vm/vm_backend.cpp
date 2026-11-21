@@ -8765,6 +8765,12 @@ op_status vm_backend::exec_c_probe(frame& f, const vm_instruction& ins) {
 		// the callee and the verbatim environment pushes read the environment: written values go back first
 		for (const uint32_t k : loop.env_cells) { if (f.cells->dirty.test(k)) { env_flush_one(f, loop, k); f.cells->dirty.clear(k); } }
 	}
+	if (cc.callee_cell != k_invalid_u32 && f.cells->dirty.test(cc.callee_cell)) [[unlikely]] {
+		// the callee is a slot whose value the block holds: the general probe reads the slot (a scalar there is its not-callable error)
+		materialize_raw_window(f);
+		if (f.cells->cells[cc.callee_cell].kind != 0) { cell_flush_one(f, loop, cc.callee_cell); }
+		f.cells->dirty.clear(cc.callee_cell);
+	}
 	bool observed = false;   // the resolution ran a getter (a property reference or a bare C++ property): an effect point
 	const op_status st = exec_probe_callee(f, f.code->code[cc.probe_ip], &observed);
 	if (st == op_status::failed) [[unlikely]] { cells_flush(f, loop); f.ip = cc.probe_ip; return st; }
@@ -12736,8 +12742,11 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 			return {};
 		}
 		uint64_t name_id = site.callee.symbol != k_invalid_u32 ? f.code->symbols[site.callee.symbol] : 0;
-		if (name_id == 0 && site.call_node != k_invalid_u32) {
-			name_id = callee_name_symbol(static_cast<call_expr*>(f.code->nodes[site.call_node].get())->callee.get());
+		if (site.call_node != k_invalid_u32) {
+			// a compiler's value in the callee's place is named as the program wrote the callee, never by the slot it reads
+			const expression* written = static_cast<call_expr*>(f.code->nodes[site.call_node].get())->callee.get();
+			const auto* named = written->get_type() == node_type::identifier_expr ? static_cast<const identifier_expr*>(written) : nullptr;
+			if (name_id == 0 || (named && (named->stands_for || detail::unspellable_name(named->name)))) { name_id = callee_name_symbol(written); }
 		}
 		return raise_not_callable(name_id, calleeVal);
 	}

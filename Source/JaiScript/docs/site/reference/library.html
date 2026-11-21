@@ -318,7 +318,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>reflect::fields</code> of a C++-bound class</td><td>The host&#x27;s property schema; <code>kind</code> tells a plain field from a <code>"signal"</code> or <code>"observable"</code> member.</td></tr>
 <tr><td><code>reflect::methods(v)</code></td><td>One map <strong>per overload</strong>: <code>name</code>, <code>arity</code>, <code>static</code>, <code>access</code>, <code>from</code>, <code>params</code> (an array of <code>{name, type, default}</code> maps), sorted by name then arity. Property accessors and constructors are not listed.</td></tr>
 <tr><td><code>reflect::has_field(v, "name")</code>, <code>reflect::has_method(v, "name")</code></td><td>Bool; both walk the inheritance chain.</td></tr>
-<tr><td><code>reflect::method_arguments(v, "name")</code>, <code>reflect::function_arguments("name")</code></td><td>One <code>params</code> array per overload; empty for a host-registered function.</td></tr>
+<tr><td><code>reflect::method_arguments(v, "name")</code>, <code>reflect::function_arguments("name")</code></td><td>One <code>params</code> array per overload; empty for a host-registered function. The <code>int</code> of <code>operator++(int)</code> has an empty <code>name</code>.</td></tr>
 </tbody></table></div>
 <h3 id="reflection-act">Read, write, call, construct<a class="hlink" href="#reflection-act" aria-label="link">&#8203;</a></h3>
 <p>Taught in <a href="../guide/12-reflection.html#act-read-write-call-construct">Act: read, write, call, construct</a>. <code>get</code>, <code>set</code>, <code>invoke</code>, <code>bind</code> and <code>construct</code> reach private members and private constructors.</p>

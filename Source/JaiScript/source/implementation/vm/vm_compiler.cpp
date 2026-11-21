@@ -2460,6 +2460,7 @@ JAI_NOINLINE bool vm_compiler::compile_switch_branches(switch_stmt* stmt) {
 		subject_temp = std::make_shared<identifier_expr>(stmt->condition->location, std::string_view("\x01inl"), inline_symbol_);
 		subject_temp->slot_index = landed.slot;
 		subject_temp->names_value_decl = true;
+		subject_temp->stands_for = stmt->condition.get();
 		callable_.slot_types.erase(landed.slot);
 		chunk_->nodes.push_back(subject_temp);
 	}
@@ -5527,7 +5528,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					}
 				}
 				std::vector<ir_op> seq;   // one operation per instruction from the probe to the call
-				ir_op probe_op; probe_op.kind = ir::probe; probe_op.a = static_cast<uint32_t>(calls.size()); seq.push_back(probe_op);   // the probe runs first, at its own place: its resolution may run a getter, which no argument value may precede
+				ir_op probe_op; probe_op.kind = ir::probe; probe_op.a = static_cast<uint32_t>(calls.size());
+				// a callee that is a compiler value (a graft's result called in its turn) stays live to its probe, which reads it from its slot
+				if (const uint32_t callee_slot = c.call_sites[st.a].callee.slot; callee_slot < static_cast<uint32_t>(c.local_count)) {
+					if (const int k = find_cell(callee_slot); k >= 0 && cells[k].temp) { probe_op.reads[probe_op.nreads++] = callee_slot; }
+				}
+				seq.push_back(probe_op);   // the probe runs first, at its own place: its resolution may run a getter, which no argument value may precede
 				ir_op call_op; call_op.kind = ir::call; call_op.a = static_cast<uint32_t>(calls.size());
 				// argument evaluation stays in source order: a verbatim environment load or a reference-slot load runs the general
 				// instruction at C_ARGS and may run a getter (a reference to a property), so it is an effect barrier; a computed
@@ -6283,7 +6289,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				}
 				break;
 			}
-			case ir::probe: { const chunk::cell_loop::cell_call& cc = loop.calls[op.a]; append(vm_instruction{opcode::op_c_probe, op.a, loop_index, cc.probe_ip}, cc.probe_ip); break; }   // the callee resolved at its own place
+			case ir::probe: {   // the callee resolved at its own place; a slot callee is the cell the loop holds for it here (its latest definition), if any
+				chunk::cell_loop::cell_call& cc = loop.calls[op.a];
+				const uint32_t callee_slot = c.call_sites[code[cc.probe_ip].a].callee.slot;
+				cc.callee_cell = callee_slot < current.size() ? current[callee_slot] : k_invalid_u32;
+				append(vm_instruction{opcode::op_c_probe, op.a, loop_index, cc.probe_ip}, cc.probe_ip);
+				break;
+			}
 			case ir::skip: break;
 			case ir::dispatch: {
 				const chunk::switch_table& t = c.switch_tables[op.a];

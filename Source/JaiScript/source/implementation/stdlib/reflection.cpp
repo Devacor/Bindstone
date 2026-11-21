@@ -317,8 +317,8 @@ inline std::string declared_param_type_name(const parameter& p) {
 inline script_value params_array_for(engine* eng, const std::vector<parameter>& params) {
     auto arr = script_value::make_array(nullptr, eng);
     for (const auto& p : params) {
-        arr.as_array().push_back(make_param_entry(
-            eng, p.name, declared_param_type_name(p), p.default_value != nullptr));
+        arr.as_array().push_back(make_param_entry(   // operator++(int)'s marker has no name
+            eng, detail::unspellable_name(p.name) ? std::string() : p.name, declared_param_type_name(p), p.default_value != nullptr));
     }
     return arr;
 }
@@ -853,7 +853,7 @@ void register_reflection_functions(engine& eng_ref) {
         for (auto& [name_view, value] : detail::engine_access::get_global_environment(*eng)->get_all_variables()) {
             if (!value.is_function()) { continue; }
             std::string name{name_view};
-            if (name.find('#') != std::string::npos) { continue; }   // a builtin a desugaring calls (template#html): no script names it
+            if (name.find('#') != std::string::npos || name == parallel_for_stmt::k_counted_range) { continue; }   // a builtin a desugaring calls (template#html, a counted parallel_for's range): no script names it
             if (detail::engine_access::get_class_definition(*eng, name)) { continue; }   // constructors: classes() owns them
             names.insert(std::move(name));
         }

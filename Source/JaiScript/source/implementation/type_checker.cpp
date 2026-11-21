@@ -2666,6 +2666,21 @@ private:
         }
     }
 
+    // A class's generic-method instances are its methods: two generic methods that make one instance of one signature define it
+    // twice, as two functions do. Each instance stands in a declaration of its own, so they meet here, in declaration order.
+    void report_method_instance_redefinitions() {
+        std::map<std::string_view, std::vector<const function_decl*>> by_class;
+        for (const auto& [name, instance] : method_instances_) {
+            for (const function_decl* fn : instance.fns) { by_class[instance.owner].push_back(fn); }
+        }
+        for (auto& [owner, fns] : by_class) {
+            std::sort(fns.begin(), fns.end(), [](const function_decl* a, const function_decl* b) {
+                return std::tie(a->location.line, a->location.column, a->name) < std::tie(b->location.line, b->location.column, b->name);
+            });
+            report_redefinitions(fns, /*by_name=*/false);
+        }
+    }
+
     void warn_duplicate_top_level_functions() {
         std::vector<const function_decl*> fns;
         std::map<std::string, std::vector<const function_decl*>> namespace_fns;
@@ -2677,6 +2692,7 @@ private:
         }
         for (const auto& [path, members] : namespace_fns) { report_redefinitions(members, /*by_name=*/false); }
         report_redefinitions(fns, /*by_name=*/true);
+        report_method_instance_redefinitions();
         if (!program_functions_) { return; }
         std::unordered_set<std::string> warned;
         for (const function_decl* fn : fns) {

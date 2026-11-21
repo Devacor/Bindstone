@@ -8,7 +8,7 @@
 #include <cstdint>
 
 namespace jai::detail {
-    inline constexpr uint32_t k_jaibite_checker_revision = 0x7d874e;
+    inline constexpr uint32_t k_jaibite_checker_revision = 0xeef403;
 }
 
 #endif // __JAISCRIPT_DETAIL_JAIBITE_CHECKER_REVISION_HPP__

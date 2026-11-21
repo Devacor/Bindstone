@@ -184,6 +184,17 @@ public:
 			check_eq(std::vector<std::string>{"'show<int>' is already defined with parameters (int)"},
 				errors_of("namespace n {\nstring show<T>(T x) { return \"a\"; }\n" + by_int + "}\nn::show<int>(1);\n"));
 			check_eq(std::vector<std::string>{again, "'show<int>' is already defined"}, errors_of(twice + by_int + "show<int>(1);\n"));
+			// and two generic methods, as two methods written by hand are
+			check_eq(std::vector<std::string>{"'A::show<int>' is already defined with parameters (int)"},
+				errors_of("class A {\nstring show<T>(T x) { return \"a\"; }\n" + by_int + "}\nA a;\na.show<int>(1);\n"));
+			check_eq(std::vector<std::string>{"'A::show<int>' is already defined with parameters (int)"},
+				errors_of("class A {\nstatic string show<T>(T x) { return \"a\"; }\nstatic " + by_int + "}\nA::show<int>(1);\n"));
+			check_eq(std::vector<std::string>{"'K<int>::show<int>' is already defined with parameters (int)"},
+				errors_of("class K<W> {\nstring show<T>(T x) { return \"a\"; }\n" + by_int + "}\nK<int> k;\nk.show<int>(1);\n"));
+			check_eq(std::vector<std::string>{"generic 'A::show<U>' is declared again: line 1 declares it with the same parameters", "'A::show<int>' is already defined with parameters (int)"},
+				errors_of("class A { " + twice + by_int + "}\nA a;\na.show<int>(1);\n"));
+			check_eq(std::string("a|c"), stdlib_engine()->execute("class A {\nstring show<T>(T x) { return \"a\"; }\n" + by_int + "}\nA a;\na.show<string>(\"s\") + \"|\" + a.show<bool>(1);\n").as_string(),
+				"other type arguments make two instances of other signatures");
 		});
 
 		test("template_typename_is_a_foreign_spelling", [this]() {

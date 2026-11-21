@@ -1412,6 +1412,10 @@ namespace jai::vm {
                                              unit_stamp caller_unit,   // a by-reference argument resolves under the caller's unit
                                              size_t first_param = 0, bool later_taken = false,   // a resumed bind (the arguments after a user-code conversion taken)
                                              const statement* callee_body = nullptr);   // a method's body (a function's is alias_fn's): a temporary may bind a reference parameter it never writes through
+        // A default argument or a conversion threw while a frame's parameters were binding: nothing more binds, and the frame is entered
+        // at its closing op_halt, where it leaves as a throw out of its body does with no instruction of the body run. The stack is
+        // taken here, while the frame stands at its start
+        JAI_NOINLINE void binding_threw(frame& callee);
         // Ref-param bind against the caller's variable storage: shares an existing
         // reference holder (cells alias), or boxes the value on demand (cell) when the
         // variable predates its escape mark

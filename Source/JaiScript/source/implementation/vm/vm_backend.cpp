@@ -1459,6 +1459,11 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	auto prev_env = environment_;
 	environment_ = state.current_env ? state.current_env : state.entry_env;
 
+	// the frame stands while its parameters bind, as a function's does: a default's raise names the coroutine
+	state.f.unit = handle.get_function()->unit;
+	enter_frame(state.f);
+	enter_unit(state.f.unit);
+
 	// First resume: bind parameters into the fiber frame's window now that the fiber
 	// stack is live (defaults run their chunks here; conversions may re-enter script)
 	if (!state.started) {
@@ -1470,6 +1475,8 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 			if (i >= args.size()) {
 				auto default_chunk = i < body_chunk->param_default_chunks.size() ? body_chunk->param_default_chunks[i] : nullptr;
 				if (!default_chunk) {
+					frames_.pop_back();
+					sync_unit();
 					environment_ = prev_env;
 					active_coroutine_ = prev_active;
 					handle.set_status(coroutine_handle::status::failed);
@@ -1491,19 +1498,20 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 					if (stack_.size() > df.stack_base) {
 						stack_.truncate(df.stack_base);
 					}
+					frames_.pop_back();
+					sync_unit();
 					environment_ = prev_env;
 					active_coroutine_ = prev_active;
 					handle.set_status(coroutine_handle::status::failed);
 					return dr.error_value();
 				}
 				if (is_unwinding_) {
-					// Uncaught throw inside the default expression: bind null over a
-					// possibly partial stack; the unwinding propagates to the resumer
+					// Uncaught throw inside the default expression: the stack may hold partial values
 					if (stack_.size() > df.stack_base) {
 						stack_.truncate(df.stack_base);
 					}
-					frame_slot_set(state.f, param.slot_index, make_null());
-					continue;
+					binding_threw(state.f);   // the unwinding propagates to the resumer
+					break;
 				}
 				script_value default_val = std::move(stack_.back());
 				stack_.pop_back();
@@ -1512,6 +1520,8 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 						return try_convert_for_parameter(v, param.type, detail::slot_site{detail::slot_kind::parameter, param.name, function->name, false});
 					});
 					if (!bound) {
+						frames_.pop_back();
+						sync_unit();
 						environment_ = prev_env;
 						active_coroutine_ = prev_active;
 						handle.set_status(coroutine_handle::status::failed);
@@ -1519,6 +1529,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 					}
 					default_val = std::move(bound.value());
 				}
+				if (is_unwinding_) [[unlikely]] { binding_threw(state.f); break; }
 				if (param.declared_var()) { detail::var_parameter_stamp(default_val, param.type, engine_); }
 				if (param.ref_escaping && !default_val.is_reference()) {
 					default_val = script_value::make_cell_reference(std::move(default_val), engine_);
@@ -1529,11 +1540,14 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 			auto converted_result = try_convert_for_parameter(args[i], param.type,
 				detail::slot_site{detail::slot_kind::parameter, param.name, function->name, param.is_reference});
 			if (!converted_result) {
+				frames_.pop_back();
+				sync_unit();
 				environment_ = prev_env;
 				active_coroutine_ = prev_active;
 				handle.set_status(coroutine_handle::status::failed);
 				return converted_result.error_value();
 			}
+			if (is_unwinding_) [[unlikely]] { binding_threw(state.f); break; }   // a converting constructor threw
 			script_value converted_arg = std::move(converted_result.value());
 			// Probe through reference wrappers for the shared_ptr marker (KEEP
 			// BYTE-PARALLEL with bind_parameters / interpreter::call_function)
@@ -1566,10 +1580,6 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 		}
 		state.started = true;
 	}
-
-	state.f.unit = handle.get_function()->unit;
-	enter_frame(state.f);
-	enter_unit(state.f.unit);
 
 	const bool prev_yielding = yielding_;
 	yielding_ = false;
@@ -13880,7 +13890,7 @@ op_status vm_backend::tail_splice_frame(call_record& rec, const script_defined_f
 	}
 	stack_.truncate(window_base + window_extent);
 	rec.direct_pin = std::move(pin);
-	rec.f.ip = 0;
+	rec.f.ip = tf.ip;   // the body's start, or its end when the binding threw
 	rec.f.unit = function.unit;
 	rec.f.window_live = tf.window_live;
 	switch_to_ = &rec.f;
@@ -23085,7 +23095,7 @@ op_status vm_backend::fall_off_script_frame(frame*& fp) {
 		return {};
 	}
 	script_value result = rec.ctor_frame ? rec.locals.get_this() : implicit_result_for_record(rec);   // conversion skipped: fall-off parity
-	if (rec.ctor_frame) [[unlikely]] { detail::construction_completed(result); }
+	if (rec.ctor_frame && !is_unwinding_) [[unlikely]] { detail::construction_completed(result); }   // a constructor whose parameters' binding threw constructed nothing
 	if (rec.ctor_result_stamp && result.type() == script_value_type::jai_object_type) [[unlikely]] {
 		result.set_type_info(rec.ctor_result_stamp);
 	}
@@ -23567,6 +23577,12 @@ checked_result<script_value> vm_backend::host_reference_argument(const std::vect
 	return passed.is_reference() && passed.get_reference_holder() ? passed : make_null();
 }
 
+void vm_backend::binding_threw(frame& callee) {
+	if (!trace_captured_) { capture_stack_trace(); }
+	assert(callee.code->code.back().op == opcode::op_halt);
+	callee.ip = callee.code->code.size() - 1;
+}
+
 template <class ArgsT>
 op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
                                                  const ArgsT& args,
@@ -23616,13 +23632,12 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 					return raise_from(dr);
 				}
 				if (is_unwinding_) {
-					// Uncaught throw inside the default expression: the stack may hold
-					// partial values; bind null and let the frame unwind before its first op
+					// Uncaught throw inside the default expression: the stack may hold partial values
 					if (stack_.size() > df.stack_base) {
 						stack_.truncate(df.stack_base);
 					}
-					frame_slot_set(callee, param.slot_index, make_null());
-					continue;
+					binding_threw(callee);
+					return {};
 				}
 				script_value default_val = std::move(stack_.back());
 				stack_.pop_back();
@@ -23633,6 +23648,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 					if (!bound) {
 						return raise_from(bound);
 					}
+					if (is_unwinding_) [[unlikely]] { binding_threw(callee); return {}; }
 					default_val = std::move(bound.value());
 				}
 				if (!detail::default_binds_reference(param, default_val)) {
@@ -23854,6 +23870,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				if (!converted_result) {
 					return raise_from(converted_result);
 				}
+				if (is_unwinding_) [[unlikely]] { binding_threw(callee); return {}; }   // a converting constructor or a to_T() threw
 				converted_arg = std::move(converted_result.value());
 			}
 
@@ -23902,7 +23919,8 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 	}
 	// A T& parameter binds a T, judged on the bound lvalue so a non-lvalue argument keeps its own text (KEEP BYTE-PARALLEL with
 	// the interpreter's call_function)
-	for (size_t i = 0; i < parameters.size() && !is_unwinding_; ++i) {
+	for (size_t i = 0; i < parameters.size(); ++i) {
+		if (is_unwinding_) [[unlikely]] { binding_threw(callee); return {}; }   // a copy the binding made threw (a copy constructor), or the parameter before's conversion here
 		const parameter& param = parameters[i];
 		if (!param.is_reference) {
 			if (param.declared_var()) {
@@ -23922,6 +23940,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				auto converted = try_convert_for_parameter(bound->deref(), param.type,
 					detail::slot_site{detail::slot_kind::parameter, param.name, body_chunk.function_name, false}, nullptr);
 				if (converted) {
+					if (is_unwinding_) [[unlikely]] { binding_threw(callee); return {}; }   // the last parameter's has no loop head after it
 					frame_slot_set(callee, param.slot_index, script_value::make_cell_reference(std::move(converted.value()), engine_));
 					continue;
 				}

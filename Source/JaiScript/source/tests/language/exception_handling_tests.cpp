@@ -1326,6 +1326,136 @@ public:
             });
         });
 
+        // A default argument or an argument's conversion that raises is the call's error: nothing more binds, no instruction of the
+        // callee runs (the VM ran its first one on a null parameter), and nothing is reported as lost
+        test("an_error_raised_while_parameters_bind_runs_nothing_of_the_callee", [this]() {
+            const char* prelude = R"jai(
+                int counter = 0;
+                int f() { throw "T"; }
+                class Err { string m; Err(string a) { m = a; } }
+                int ft() { throw Err("typed"); }
+                class Tag { string n; Tag(string a) { n = a; print("+", n); } ~Tag() { print("~", n); } }
+                Tag mk(string n) { return Tag(n); }
+                int bump() { ++counter; return counter; }
+                var xs = [1, 2];
+                int zero = 0;
+                class Money { int v = 0; Money(int a) { if (a < 0) { throw "conv"; } v = a; ++counter; } }
+                class Copied { int v = 0; Copied() { } Copied(const Copied& o) { throw "copy"; } }
+                int d_ret(int a = f()) { return a; }
+                int d_decl(int a = f()) { int b = a; return b; }
+                int d_add(int a = f()) { return a + 1; }
+                void d_inc(int a = f()) { ++counter; }
+                void d_compound(int a = f()) { counter += 1; }
+                void d_idx(int a = xs[99]) { ++counter; }
+                void d_div(int a = 1 / zero) { ++counter; }
+                void d_host(int a = host_raise()) { ++counter; }
+                void d_two(Tag t = mk("first"), int a = f()) { ++counter; }
+                void d_later(int a = f(), int b = bump()) { ++counter; }
+                void d_typed(int a = ft()) { ++counter; }
+                class C {
+                    void m(int a = f()) { ++counter; }
+                    int ret(int a = f()) { return a; }
+                    static void s(int a = f()) { ++counter; }
+                }
+                class K { int v = bump(); K(int a = f()) { ++counter; } ~K() { print("~K"); } }
+                T gen<T>(T a = f()) { ++counter; return a; }
+                coroutine int co(int a = f()) { ++counter; yield a; }
+                int tail(int n, int a = f()) { ++counter; return n; }
+                int tail_caller() { return tail(1); }
+                int leaf(int a = f()) { return a + 1; }
+                int leaf_caller() { return leaf() + 1; }
+                void c_inc(Money m) { ++counter; }
+                int c_read(Money m) { return m.v; }
+                void c_two(Money a, Money b) { ++counter; }
+                void c_copy(Copied c) { ++counter; }
+                void c_cref(const Money& m) { ++counter; }
+                int c_tail(int n, Money m) { if (n == 0) { return 0; } ++counter; return c_tail(n - 1, -1); }
+                coroutine int c_co(Money m) { ++counter; yield 1; }
+                void run(function body) {
+                    counter = 0;
+                    try { body(); print("no throw ", counter); }
+                    catch (Err e) { print("Err ", e.m, " ", counter); }
+                    catch (e) { print(e, " ", counter); }
+                }
+            )jai";
+            const std::pair<const char*, const char*> cases[] = {
+                {"run([]() { d_ret(); });", "T 0"},
+                {"run([]() { d_decl(); });", "T 0"},
+                {"run([]() { d_add(); });", "T 0"},
+                {"run([]() { d_inc(); });", "T 0"},
+                {"run([]() { d_compound(); });", "T 0"},
+                {"run([]() { d_idx(); });", "Array index 99 out of bounds for array of size 2 0"},
+                {"run([]() { d_div(); });", "Division by zero 0"},
+                {"run([]() { d_host(); });", "host boom 0"},
+                {"run([]() { d_two(); });", "+first\n~first\nT 0"},
+                {"run([]() { d_later(); });", "T 0"},
+                {"run([]() { d_typed(); });", "Err typed 0"},
+                {"run([]() { C c; c.m(); });", "T 0"},
+                {"run([]() { C c; print(c.ret()); });", "T 0"},
+                {"run([]() { C::s(); });", "T 0"},
+                {"run([]() { K k; });", "T 0"},
+                {"run([]() { var k = K(); });", "T 0"},
+                {"run([]() { var k = make_shared<K>(); });", "T 0"},
+                {"run([]() { var l = [](int a = f()) { ++counter; }; l(); });", "T 0"},
+                {"run([]() { int z = 3; var l = [z](int a = f()) { ++counter; return z; }; l(); });", "T 0"},
+                {"run([]() { gen<int>(); });", "T 0"},
+                {"run([]() { auto c = co(); print(\"made\"); c.next(); });", "made\nT 0"},
+                {"run([]() { for (int v : co()) { print(v); } });", "T 0"},
+                {"run([]() { function g = d_inc; g(); });", "T 0"},
+                {"run([]() { var g = d_inc; g(); });", "T 0"},
+                {"run([]() { tail_caller(); });", "T 0"},
+                {"run([]() { leaf_caller(); });", "T 0"},
+                {"run([]() { for (int i = 0; i < 3; ++i) { d_inc(); } });", "T 0"},
+                {"run([]() { var g = [](int a = leaf()) { ++counter; }; g(); });", "T 0"},
+                {"run([]() { c_inc(-1); });", "conv 0"},
+                {"run([]() { print(c_read(-1)); });", "conv 0"},
+                {"run([]() { c_two(-1, 5); });", "conv 0"},
+                {"run([]() { c_two(5, -1); });", "conv 1"},
+                {"run([]() { Copied c; c_copy(c); });", "copy 0"},
+                {"run([]() { c_cref(-1); });", "conv 0"},
+                {"run([]() { c_tail(3, 1); });", "conv 2"},
+                {"run([]() { auto c = c_co(-1); c.next(); });", "conv 0"},
+                {"try { d_inc(); } catch (e) { print(e, \" \", counter); }", "T 0"},
+                {"try { C c; c.m(); } catch (e) { print(e, \" \", counter); }", "T 0"},
+                {"try { c_inc(-1); } catch (e) { print(e, \" \", counter); }", "conv 0"},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                engine->add_function("host_raise", []() -> int { throw std::runtime_error("host boom"); });
+                std::string reported;
+                engine->set_script_error_handler([&](const std::string& text) { reported += text; });
+                check_eq(std::string(c.second), printed_output(*engine, std::string(prelude) + c.first));
+                check_eq(std::string(), reported);
+            });
+        });
+
+        // Uncaught, such an error keeps the callee's frame, standing at its first statement, on every backend
+        test("an_error_raised_while_parameters_bind_keeps_the_callee_frame", [this]() {
+            const char* prelude =
+                "int f() { throw \"T\"; }\n"
+                "int rt() { var xs = [1]; return xs[9]; }\n"
+                "class Money { Money(int a) { throw \"conv\"; } }\n";
+            const std::tuple<const char*, const char*, const char*> cases[] = {
+                {"int g(\n  int a = f()\n) {\n  int b = a;\n  return b;\n}\ng();\n", "T", "f:1|g:7|<script>:10"},
+                {"int g(\n  int a = throw \"D\"\n) {\n  return a;\n}\ng();\n", "D", "g:7|<script>:9"},
+                {"int g(\n  int a = rt()\n) {\n  return a;\n}\ng();\n", "Array index 9 out of bounds for array of size 1", "rt:2|g:7|<script>:9"},
+                {"int g(\n  int a = 1,\n  int b = f()\n) {\n  return a;\n}\nvoid h() {\n  g();\n}\nh();\n", "T", "f:1|g:8|h:11|<script>:13"},
+                {"class C {\n  int m(\n    int a = f()\n  ) {\n    return a;\n  }\n}\nC c;\nc.m();\n", "T", "f:1|m:8|<script>:12"},
+                {"class C {\n  static int s(\n    int a = f()\n  ) {\n    return a;\n  }\n}\nC::s();\n", "T", "f:1|s:8|<script>:11"},
+                {"class K {\n  K(\n    int a = f()\n  ) {\n    print(a);\n  }\n}\nK k;\n", "T", "f:1|K:0|<script>:11"},
+                {"var l = [](\n  int a = f()\n) {\n  return a;\n};\nl();\n", "T", "f:1|<lambda>:7|<script>:9"},
+                {"coroutine int co(\n  int a = f()\n) {\n  yield a;\n}\nauto c = co();\nc.next();\n", "T", "f:1|co:7|<script>:10"},
+                {"coroutine int co(\n  int a = throw \"D\"\n) {\n  yield a;\n}\nauto c = co();\nc.next();\n", "D", "co:7|<script>:10"},
+                {"void g(\n  Money m\n) {\n  print(1);\n}\ng(5);\n", "conv", "Money:3|g:7|<script>:9"},
+                {"int t(int n,\n  int a = f()\n) {\n  return n;\n}\nint tc() {\n  return t(1);\n}\ntc();\n", "T", "f:1|t:7|tc:10|<script>:12"},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                check_eq(std::string(std::get<1>(c)), failure_text(*engine, (std::string(prelude) + std::get<0>(c)).c_str()));
+                check_eq(std::string(std::get<2>(c)), trace_shape(*engine));
+            });
+        });
+
         // Regression: caught typed-return conversion error left the callee frame/env and
         // hasReturnValue_ live - catch body truncated, post-try statements skipped. The
         // literal typed mismatch is a strict load error (a strongly-typed value never reaches

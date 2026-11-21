@@ -9263,11 +9263,18 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
 
     std::vector<script_value> held_args;
     const std::vector<script_value>* argv = &args;
+    // while its parameters bind, the frame stands at its first statement, as the vm's stands at its first instruction (a constructor's
+    // prologue comes first, and names nothing)
+    if (function.body && !function.body->declarations.empty() &&
+        !(pending_prologue_ && pending_prologue_->frame == frame_index && pending_prologue_->body == function.body.get())) {
+        call_stack_[frame_index].current_node = function.body->declarations.front().get();
+    }
     // A native exception unwinding through this activation (a C++ callable, a removed-element reference, a bare rethrow
     // with nothing to rethrow) pops the frame first and converts at the caller's call boundary (internal/EXCEPTION_DESIGN.md)
     size_t last_body_idx = 0;
     try {
     for (size_t i = 0; i < function.parameters().size(); ++i) {
+        if (is_unwinding_) { break; }   // a default or a conversion threw: nothing more binds (KEEP BYTE-PARALLEL with vm_backend::bind_parameters)
         const auto& param = function.parameters()[i];
 
         if (i >= args.size()) {
@@ -9534,10 +9541,10 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     }
 
     // a constructor's activation runs its prologue (bases, then fields) in this frame, the parameters bound, ahead of its body
-    bool run_body = true;
+    bool run_body = !is_unwinding_;   // the binding threw: neither the prologue nor a statement of the body runs
     if (pending_prologue_ && pending_prologue_->frame == frame_index && pending_prologue_->body == function.body.get()) [[unlikely]] {
         constructor_prologue_hook* hook = std::exchange(pending_prologue_, nullptr);
-        auto ran = run_constructor_prologue(*hook, frame_index, function);
+        auto ran = run_body ? run_constructor_prologue(*hook, frame_index, function) : checked_result<void>{};
         if (!ran) {
             debug_raised([&] { return format_error(ran, *string_symbolizer_); }, try_depth_ > 0);
             if (!trace_captured_) capture_stack_trace();

@@ -660,6 +660,77 @@ public:
 			check_true(codec::encode_jpeg(big, 80, gone, file) == codec::status::budget);
 		});
 
+		test("deflate_round_trips_through_inflate", [this]() {
+			image_mutation::generator random {7};
+			std::vector<bytes> inputs;
+			inputs.push_back(bytes(1, 'x'));
+			inputs.push_back(bytes(300000, 0));
+			bytes noise(70000);
+			for (uint8_t& b : noise) { b = static_cast<uint8_t>(random.next()); }
+			inputs.push_back(noise);
+			// repeats at every distance up to the window's end, and text-like runs over several blocks
+			bytes far(90000);
+			for (size_t i = 0; i < far.size(); ++i) { far[i] = i < 32768 ? static_cast<uint8_t>(random.next()) : far[i - 32768 + (i % 3)]; }
+			inputs.push_back(far);
+			bytes words;
+			const char* vocabulary[] = {"jaw ", "snap ", "latex ", "mask ", "pour ", "ship "};
+			while (words.size() < 400000) {
+				const char* word = vocabulary[random.below(6)];
+				words.insert(words.end(), word, word + std::strlen(word));
+			}
+			inputs.push_back(words);
+			for (const bytes& input : inputs) {
+				bytes stream;
+				check_true(codec::deflate_zlib(input.data(), input.size(), codec::work_hook {}, stream));
+				check_eq(std::string("ok"), inflate_outcome(stream, input), "size " + std::to_string(input.size()));
+			}
+			bytes zeros;
+			check_true(codec::deflate_zlib(inputs[1].data(), inputs[1].size(), codec::work_hook {}, zeros));
+			check_lt(zeros.size(), size_t {2000}, "300 kB of zeros");
+			bytes stored;
+			check_true(codec::deflate_zlib(noise.data(), noise.size(), codec::work_hook {}, stored));
+			check_lt(stored.size(), noise.size() + 64, "noise is stored, not inflated by coding");
+			codec::work_hook gone {[](void*, size_t) { return true; }, nullptr};
+			check_false(codec::deflate_zlib(words.data(), words.size(), gone, stored));
+		});
+
+		test("png_encoder_is_lossless_and_picks_the_smallest_colour_type", [this]() {
+			size_t seen = 0;
+			for (const image_fixtures::fixture& each : image_fixtures::k_fixtures) {
+				codec::header header;
+				codec::bitmap source;
+				check_true(codec::decode(each.bytes, each.size, codec::limits {}, codec::work_hook {}, header, source) == codec::status::ok, each.name);
+				bytes file;
+				check_true(codec::encode_png(source, codec::work_hook {}, file) == codec::status::ok, each.name);
+				codec::bitmap back;
+				check_true(codec::decode(file.data(), file.size(), codec::limits {}, codec::work_hook {}, header, back) == codec::status::ok, each.name);
+				check_true(back.width == source.width && back.height == source.height && back.rgba == source.rgba, std::string(each.name) + " round trip");
+				bool opaque = true, grey = true;
+				for (size_t i = 0; i < source.rgba.size(); i += 4) {
+					opaque = opaque && source.rgba[i + 3] == 255;
+					grey = grey && source.rgba[i] == source.rgba[i + 1] && source.rgba[i + 1] == source.rgba[i + 2];
+				}
+				check_eq(int {grey ? (opaque ? 0 : 4) : (opaque ? 2 : 6)}, int {file[25]}, each.name);
+				check_eq(8, int {file[24]}, each.name);
+				// IHDR, IDAT, IEND and nothing else
+				size_t at = 8;
+				while (at + 8 <= file.size()) {
+					const std::string type(file.begin() + static_cast<long>(at) + 4, file.begin() + static_cast<long>(at) + 8);
+					check_true(type == "IHDR" || type == "IDAT" || type == "IEND", std::string(each.name) + " has " + type);
+					at += 12 + ((size_t {file[at]} << 24) | (size_t {file[at + 1]} << 16) | (size_t {file[at + 2]} << 8) | file[at + 3]);
+				}
+				++seen;
+			}
+			check_ge(seen, size_t {50});
+			codec::bitmap big;
+			big.width = 300;
+			big.height = 200;
+			big.rgba.assign(300 * 200 * 4, 90);
+			bytes file;
+			codec::work_hook gone {[](void*, size_t) { return true; }, nullptr};
+			check_true(codec::encode_png(big, gone, file) == codec::status::budget);
+		});
+
 		test("png_every_prefix_is_refused", [this]() {
 			for (const image_fixtures::fixture& each : image_fixtures::k_fixtures) {
 				if (std::strcmp(each.format, "png") != 0 || each.size > 1300) { continue; }
@@ -990,7 +1061,11 @@ public:
 			check_eq(std::string("true 64 48 jpeg"), run(e, "string bytes = photo.encode(\"jpeg\", 80); image back = image::load(bytes); `${bytes.starts_with(\"\\xFF\\xD8\\xFF\")} ${back.width} ${back.height} ${back.format}`;"));
 			check_eq(std::string("true"), run(e, "photo.encode(\"jpeg\", 10).size() < photo.encode(\"jpeg\").size();"));
 			check_eq(std::string("32 24 png"), run(e, "image small = image::fit(photo, 32, 32); image again = image::load(small.encode(\"jpeg\")); `${again.width} ${again.height} ${photo.format}`;"));
-			check_eq(std::string("image::encode expects the format \"jpeg\""), caught(e, "photo.encode(\"gif\");"));
+			check_eq(std::string("image::encode expects the format \"jpeg\" or \"png\""), caught(e, "photo.encode(\"gif\");"));
+			check_eq(std::string("image::encode expects the format \"jpeg\" or \"png\""), caught(e, "photo.encode(\"JPEG\");"));
+			check_eq(std::string("true 64 48 png"), run(e, "string bytes = photo.encode(\"png\"); image back = image::load(bytes); `${bytes.starts_with(\"\\x89PNG\")} ${back.width} ${back.height} ${back.format}`;"));
+			check_eq(std::string("true"), run(e, "photo.encode(\"png\") == photo.encode(\"png\", 1);"));
+			check_eq(std::string("image::encode expects a quality of 1 to 100"), caught(e, "photo.encode(\"png\", 0);"));
 			check_eq(std::string("image::encode expects a quality of 1 to 100"), caught(e, "photo.encode(\"jpeg\", 0);"));
 			check_eq(std::string("image::encode expects a quality of 1 to 100"), caught(e, "photo.encode(\"jpeg\", 101);"));
 			check_eq(std::string("image: the image is empty (image::load makes one)"), caught(e, "image empty; empty.encode(\"jpeg\");"));

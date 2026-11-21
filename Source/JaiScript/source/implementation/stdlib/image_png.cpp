@@ -4,9 +4,10 @@
 #include <array>
 #include <cstring>
 #include <new>
+#include <utility>
 #include <stdexcept>
 
-// PNG (ISO/IEC 15948) over zlib (RFC 1950) and deflate (RFC 1951), written from those specifications.
+// PNG (ISO/IEC 15948) over zlib (RFC 1950) and deflate (RFC 1951), written from those specifications: the decoder and the encoder.
 
 namespace jai {
 namespace image_codec {
@@ -644,6 +645,386 @@ namespace png_detail {
 		return status::ok;
 	}
 
+	// The writer's half: deflate with LZ77 over hash chains and lazy matching, in blocks of dynamic Huffman codes (or stored,
+	// when that is smaller), and PNG around it
+
+	// Deflate's bits, least significant first
+	class bit_writer {
+	public:
+		explicit bit_writer(std::vector<uint8_t>& a_out) : out_(a_out) {}
+		void put(uint32_t a_bits, unsigned a_count) {
+			buffer_ |= uint64_t {a_bits & ((uint32_t {1} << a_count) - 1)} << count_;
+			count_ += a_count;
+			while (count_ >= 8) {
+				out_.push_back(static_cast<uint8_t>(buffer_));
+				buffer_ >>= 8;
+				count_ -= 8;
+			}
+		}
+		// a Huffman code, most significant bit first
+		void code(uint32_t a_code, unsigned a_length) {
+			uint32_t reversed = 0;
+			for (unsigned i = 0; i < a_length; ++i) { reversed |= ((a_code >> i) & 1u) << (a_length - 1 - i); }
+			put(reversed, a_length);
+		}
+		void align() {
+			if (count_ > 0) { put(0, 8 - count_); }
+		}
+
+	private:
+		std::vector<uint8_t>& out_;
+		uint64_t buffer_ = 0;
+		unsigned count_ = 0;
+	};
+
+	// Canonical codes for a set of lengths (RFC 1951 3.2.2)
+	void canonical_codes(const uint8_t* a_lengths, unsigned a_count, uint16_t* a_codes) {
+		unsigned counts[16] = {};
+		for (unsigned i = 0; i < a_count; ++i) { ++counts[a_lengths[i]]; }
+		counts[0] = 0;
+		uint32_t next[16] = {};
+		uint32_t code = 0;
+		for (unsigned length = 1; length < 16; ++length) {
+			code = (code + counts[length - 1]) << 1;
+			next[length] = code;
+		}
+		for (unsigned i = 0; i < a_count; ++i) { a_codes[i] = a_lengths[i] ? static_cast<uint16_t>(next[a_lengths[i]]++) : uint16_t {0}; }
+	}
+
+	// One token: a literal byte (distance 0), or a match of length 3 to 258 at distance 1 to 32768
+	struct token {
+		uint16_t value;
+		uint16_t distance;
+	};
+
+	inline unsigned length_symbol(unsigned a_length) {
+		unsigned symbol = 0;
+		while (symbol + 1 < 29 && k_length_base[symbol + 1] <= a_length) { ++symbol; }
+		return symbol;
+	}
+	inline unsigned distance_symbol(unsigned a_distance) {
+		unsigned symbol = 0;
+		while (symbol + 1 < 30 && k_distance_base[symbol + 1] <= a_distance) { ++symbol; }
+		return symbol;
+	}
+
+	class deflater {
+	public:
+		static constexpr size_t k_window = 32768;
+		static constexpr unsigned k_hash_bits = 15;
+		static constexpr unsigned k_chain = 96;
+		static constexpr unsigned k_nice = 160;
+		static constexpr size_t k_block_tokens = 1u << 15;
+
+		deflater(const uint8_t* a_data, size_t a_size, const work_hook& a_work, std::vector<uint8_t>& a_out)
+			: data_(a_data), size_(a_size), work_(a_work), bits_(a_out), head_(size_t {1} << k_hash_bits, -1), previous_(k_window, -1) {}
+
+		bool run() {
+			tokens_.reserve(k_block_tokens + 2);
+			size_t at = 0;
+			size_t block_start = 0;
+			size_t charged = 0;
+			while (at < size_) {
+				size_t length = 0;
+				size_t distance = 0;
+				longest_match(at, length, distance);
+				// lazy: a longer match one byte on makes this byte a literal
+				while (length >= 3 && length < k_nice && at + 1 < size_) {
+					insert(at);
+					size_t next_length = 0;
+					size_t next_distance = 0;
+					longest_match(at + 1, next_length, next_distance);
+					if (next_length <= length) {
+						break;
+					}
+					tokens_.push_back({data_[at], 0});
+					++at;
+					length = next_length;
+					distance = next_distance;
+				}
+				if (length >= 3) {
+					tokens_.push_back({static_cast<uint16_t>(length), static_cast<uint16_t>(distance)});
+					insert(at);
+					for (size_t i = 1; i < length; ++i) { insert(at + i); }
+					at += length;
+				} else {
+					tokens_.push_back({data_[at], 0});
+					insert(at);
+					++at;
+				}
+				if (tokens_.size() >= k_block_tokens) {
+					block(block_start, at, false);
+					block_start = at;
+				}
+				if (at - charged >= (size_t {1} << 16)) {
+					if (work_.exhausted((at - charged) / 4)) { return false; }
+					charged = at;
+				}
+			}
+			block(block_start, at, true);
+			bits_.align();
+			return true;
+		}
+
+	private:
+		unsigned hash(size_t a_at) const {
+			return ((uint32_t {data_[a_at]} << 10) ^ (uint32_t {data_[a_at + 1]} << 5) ^ data_[a_at + 2]) & ((1u << k_hash_bits) - 1);
+		}
+		void insert(size_t a_at) {
+			if (a_at + 3 > size_ || a_at == last_inserted_) { return; }
+			last_inserted_ = a_at;
+			const unsigned slot = hash(a_at);
+			previous_[a_at % k_window] = head_[slot];
+			head_[slot] = static_cast<int64_t>(a_at);
+		}
+		void longest_match(size_t a_at, size_t& a_length, size_t& a_distance) const {
+			a_length = 0;
+			if (a_at + 3 > size_) { return; }
+			const size_t most = size_ - a_at < 258 ? size_ - a_at : 258;
+			int64_t candidate = head_[hash(a_at)];
+			for (unsigned chain = 0; chain < k_chain && candidate >= 0; ++chain) {
+				const size_t from = static_cast<size_t>(candidate);
+				if (from >= a_at || a_at - from > k_window) { break; }
+				if (data_[from + a_length] == data_[a_at + a_length] || a_length == 0) {
+					size_t length = 0;
+					while (length < most && data_[from + length] == data_[a_at + length]) { ++length; }
+					if (length > a_length) {
+						a_length = length;
+						a_distance = a_at - from;
+						if (length >= most) { break; }
+					}
+				}
+				const int64_t next = previous_[from % k_window];
+				// a slot the window has since reused points forward, past the chain's end
+				if (next >= candidate) { break; }
+				candidate = next;
+			}
+			if (a_length < 3) { a_length = 0; }
+		}
+
+		void block(size_t a_start, size_t a_end, bool a_last) {
+			uint32_t literals[286] = {};
+			uint32_t distances[30] = {};
+			for (const token& each : tokens_) {
+				if (each.distance == 0) {
+					++literals[each.value];
+				} else {
+					++literals[257 + length_symbol(each.value)];
+					++distances[distance_symbol(each.distance)];
+				}
+			}
+			literals[256] = 1;
+			uint8_t lengths[286 + 30] = {};
+			code_lengths(literals, 286, 15, false, lengths);
+			code_lengths(distances, 30, 15, false, lengths + 286);
+			unsigned literal_count = 286;
+			while (literal_count > 257 && lengths[literal_count - 1] == 0) { --literal_count; }
+			unsigned distance_count = 30;
+			while (distance_count > 1 && lengths[286 + distance_count - 1] == 0) { --distance_count; }
+			// the lengths run-length coded with symbols 16, 17 and 18
+			uint8_t all[286 + 30];
+			std::memcpy(all, lengths, literal_count);
+			std::memcpy(all + literal_count, lengths + 286, distance_count);
+			const unsigned total = literal_count + distance_count;
+			std::vector<std::pair<uint8_t, uint8_t>> runs;
+			for (unsigned i = 0; i < total;) {
+				unsigned repeat = 1;
+				while (i + repeat < total && all[i + repeat] == all[i]) { ++repeat; }
+				if (all[i] == 0 && repeat >= 3) {
+					const unsigned take = repeat > 138 ? 138 : repeat;
+					runs.push_back(take >= 11 ? std::pair<uint8_t, uint8_t> {18, static_cast<uint8_t>(take - 11)} : std::pair<uint8_t, uint8_t> {17, static_cast<uint8_t>(take - 3)});
+					i += take;
+				} else if (all[i] != 0 && repeat >= 4) {
+					runs.push_back({all[i], 0});
+					const unsigned take = repeat - 1 > 6 ? 6 : repeat - 1;
+					runs.push_back({16, static_cast<uint8_t>(take - 3)});
+					i += 1 + take;
+				} else {
+					runs.push_back({all[i], 0});
+					++i;
+				}
+			}
+			uint32_t length_frequency[19] = {};
+			for (const auto& run : runs) { ++length_frequency[run.first]; }
+			// the code-length code must be complete: a second symbol when the runs use one
+			unsigned used = 0;
+			for (uint32_t each : length_frequency) { used += each ? 1 : 0; }
+			if (used == 1) { ++length_frequency[length_frequency[0] ? 1 : 0]; }
+			uint8_t length_lengths[19];
+			code_lengths(length_frequency, 19, 7, false, length_lengths);
+			unsigned length_count = 19;
+			while (length_count > 4 && length_lengths[k_code_length_order[length_count - 1]] == 0) { --length_count; }
+
+			// its size coded, against its size stored
+			uint64_t coded_bits = 3 + 5 + 5 + 4 + 3 * uint64_t {length_count};
+			for (const auto& run : runs) { coded_bits += length_lengths[run.first] + (run.first == 16 ? 2 : run.first == 17 ? 3 : run.first == 18 ? 7 : 0); }
+			for (const token& each : tokens_) {
+				if (each.distance == 0) {
+					coded_bits += lengths[each.value];
+				} else {
+					const unsigned length = length_symbol(each.value);
+					const unsigned distance = distance_symbol(each.distance);
+					coded_bits += lengths[257 + length] + k_length_extra[length] + lengths[286 + distance] + k_distance_extra[distance];
+				}
+			}
+			coded_bits += lengths[256];
+			const size_t raw = a_end - a_start;
+			const uint64_t stored_bits = (raw + 5 * ((raw + 65534) / 65535 + (raw == 0 ? 1 : 0))) * 8 + 8;
+			if (stored_bits < coded_bits) {
+				stored(a_start, a_end, a_last);
+				tokens_.clear();
+				return;
+			}
+			uint16_t codes[286 + 30];
+			canonical_codes(lengths, 286, codes);
+			canonical_codes(lengths + 286, 30, codes + 286);
+			uint16_t length_codes[19];
+			canonical_codes(length_lengths, 19, length_codes);
+			bits_.put(a_last ? 1 : 0, 1);
+			bits_.put(2, 2);
+			bits_.put(literal_count - 257, 5);
+			bits_.put(distance_count - 1, 5);
+			bits_.put(length_count - 4, 4);
+			for (unsigned i = 0; i < length_count; ++i) { bits_.put(length_lengths[k_code_length_order[i]], 3); }
+			for (const auto& run : runs) {
+				bits_.code(length_codes[run.first], length_lengths[run.first]);
+				if (run.first == 16) { bits_.put(run.second, 2); }
+				if (run.first == 17) { bits_.put(run.second, 3); }
+				if (run.first == 18) { bits_.put(run.second, 7); }
+			}
+			for (const token& each : tokens_) {
+				if (each.distance == 0) {
+					bits_.code(codes[each.value], lengths[each.value]);
+					continue;
+				}
+				const unsigned length = length_symbol(each.value);
+				bits_.code(codes[257 + length], lengths[257 + length]);
+				bits_.put(each.value - k_length_base[length], k_length_extra[length]);
+				const unsigned distance = distance_symbol(each.distance);
+				bits_.code(codes[286 + distance], lengths[286 + distance]);
+				bits_.put(each.distance - k_distance_base[distance], k_distance_extra[distance]);
+			}
+			bits_.code(codes[256], lengths[256]);
+			tokens_.clear();
+		}
+
+		void stored(size_t a_start, size_t a_end, bool a_last) {
+			size_t at = a_start;
+			do {
+				const size_t length = a_end - at < 65535 ? a_end - at : 65535;
+				const bool last = a_last && at + length == a_end;
+				bits_.put(last ? 1 : 0, 1);
+				bits_.put(0, 2);
+				bits_.align();
+				bits_.put(static_cast<uint32_t>(length), 16);
+				bits_.put(static_cast<uint32_t>(~length) & 0xffffu, 16);
+				for (size_t i = 0; i < length; ++i) { bits_.put(data_[at + i], 8); }
+				at += length;
+			} while (at < a_end);
+		}
+
+		const uint8_t* data_;
+		size_t size_;
+		const work_hook& work_;
+		bit_writer bits_;
+		std::vector<int64_t> head_;
+		std::vector<int64_t> previous_;
+		std::vector<token> tokens_;
+		size_t last_inserted_ = SIZE_MAX;
+	};
+
+	inline void put_big_32(std::vector<uint8_t>& a_out, uint32_t a_value) {
+		for (int shift = 24; shift >= 0; shift -= 8) { a_out.push_back(static_cast<uint8_t>(a_value >> shift)); }
+	}
+
+	void put_chunk(std::vector<uint8_t>& a_out, const char* a_type, const uint8_t* a_data, size_t a_size) {
+		put_big_32(a_out, static_cast<uint32_t>(a_size));
+		const size_t start = a_out.size();
+		a_out.insert(a_out.end(), a_type, a_type + 4);
+		a_out.insert(a_out.end(), a_data, a_data + a_size);
+		put_big_32(a_out, crc32(a_out.data() + start, a_size + 4));
+	}
+
+	// Each row's filter: the one whose bytes, read as signed, sum smallest in magnitude (the heuristic the PNG specification
+	// suggests), then the rows deflated
+	status encode(const bitmap& a_bitmap, const work_hook& a_work, std::vector<uint8_t>& a_bytes) {
+		const uint32_t width = a_bitmap.width;
+		const uint32_t height = a_bitmap.height;
+		const uint8_t* pixels = a_bitmap.rgba.data();
+		const size_t count = size_t {width} * height;
+		bool opaque = true;
+		bool grey = true;
+		for (size_t i = 0; i < count && (opaque || grey); ++i) {
+			opaque = opaque && pixels[4 * i + 3] == 255;
+			grey = grey && pixels[4 * i] == pixels[4 * i + 1] && pixels[4 * i + 1] == pixels[4 * i + 2];
+		}
+		const uint8_t colour = grey ? (opaque ? 0 : 4) : (opaque ? 2 : 6);
+		const size_t channels = grey ? (opaque ? 1 : 2) : (opaque ? 3 : 4);
+		const size_t row_bytes = size_t {width} * channels;
+		std::vector<uint8_t> raw(height * (1 + row_bytes));
+		std::vector<uint8_t> current(row_bytes);
+		std::vector<uint8_t> previous(row_bytes, 0);
+		std::vector<uint8_t> trial(row_bytes);
+		for (uint32_t y = 0; y < height; ++y) {
+			const uint8_t* in = pixels + size_t {y} * width * 4;
+			for (size_t x = 0; x < width; ++x) {
+				uint8_t* out = current.data() + x * channels;
+				if (grey) {
+					out[0] = in[4 * x];
+					if (!opaque) { out[1] = in[4 * x + 3]; }
+				} else {
+					std::memcpy(out, in + 4 * x, channels);
+				}
+			}
+			uint8_t* row = raw.data() + size_t {y} * (1 + row_bytes);
+			uint64_t best = UINT64_MAX;
+			for (uint8_t filter = 0; filter <= 4; ++filter) {
+				uint64_t cost = 0;
+				for (size_t i = 0; i < row_bytes; ++i) {
+					const unsigned left = i >= channels ? current[i - channels] : 0u;
+					const unsigned up = y > 0 ? previous[i] : 0u;
+					const unsigned up_left = y > 0 && i >= channels ? previous[i - channels] : 0u;
+					unsigned predicted = 0;
+					switch (filter) {
+						case 1: predicted = left; break;
+						case 2: predicted = up; break;
+						case 3: predicted = (left + up) >> 1; break;
+						case 4: predicted = paeth(static_cast<uint8_t>(left), static_cast<uint8_t>(up), static_cast<uint8_t>(up_left)); break;
+						default: break;
+					}
+					trial[i] = static_cast<uint8_t>(current[i] - predicted);
+					cost += trial[i] < 128 ? trial[i] : 256 - trial[i];
+				}
+				if (cost < best) {
+					best = cost;
+					row[0] = filter;
+					std::memcpy(row + 1, trial.data(), row_bytes);
+				}
+			}
+			std::swap(previous, current);
+			if (a_work.exhausted(row_bytes * 5 / 16 + 1)) { return status::budget; }
+		}
+		std::vector<uint8_t> stream;
+		if (!deflate_zlib(raw.data(), raw.size(), a_work, stream)) { return status::budget; }
+		std::vector<uint8_t>& out = a_bytes;
+		out.assign(k_signature, k_signature + 8);
+		uint8_t header_data[13];
+		for (int i = 0; i < 4; ++i) {
+			header_data[i] = static_cast<uint8_t>(width >> (24 - 8 * i));
+			header_data[4 + i] = static_cast<uint8_t>(height >> (24 - 8 * i));
+		}
+		header_data[8] = 8;
+		header_data[9] = colour;
+		header_data[10] = header_data[11] = header_data[12] = 0;
+		put_chunk(out, "IHDR", header_data, 13);
+		for (size_t at = 0; at < stream.size(); at += size_t {1} << 16) {
+			const size_t length = stream.size() - at < (size_t {1} << 16) ? stream.size() - at : size_t {1} << 16;
+			put_chunk(out, "IDAT", stream.data() + at, length);
+		}
+		put_chunk(out, "IEND", nullptr, 0);
+		return status::ok;
+	}
+
 } // namespace png_detail
 
 	uint32_t crc32(const uint8_t* a_data, size_t a_size, uint32_t a_crc) {
@@ -687,6 +1068,24 @@ namespace png_detail {
 		}
 		if (stored != adler32(a_out, a_out_size)) { return inflate_status::bad_checksum; }
 		return inflate_status::ok;
+	}
+
+	bool deflate_zlib(const uint8_t* a_data, size_t a_size, const work_hook& a_work, std::vector<uint8_t>& a_out) {
+		a_out.assign({0x78, 0x9c});
+		png_detail::deflater squeeze(a_data, a_size, a_work, a_out);
+		if (!squeeze.run()) { return false; }
+		png_detail::put_big_32(a_out, adler32(a_data, a_size));
+		return true;
+	}
+
+	status encode_png(const bitmap& a_bitmap, const work_hook& a_work, std::vector<uint8_t>& a_bytes) {
+		try {
+			return png_detail::encode(a_bitmap, a_work, a_bytes);
+		} catch (const std::bad_alloc&) {
+			return status::out_of_memory;
+		} catch (const std::length_error&) {
+			return status::out_of_memory;
+		}
 	}
 
 	status read_png_header(const uint8_t* a_data, size_t a_size, const limits& a_limits, header& a_header) {

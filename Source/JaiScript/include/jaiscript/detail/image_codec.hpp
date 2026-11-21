@@ -173,6 +173,8 @@ namespace image_codec {
 	// a_source scaled to cover a_width x a_height and centre-cropped to exactly that, enlarged when it is smaller
 	status crop_fill(const bitmap& a_source, uint32_t a_width, uint32_t a_height, const work_hook& a_work, bitmap& a_result);
 
+	// 8-bit PNG, greyscale when every pixel is grey and RGB when every pixel is opaque (with alpha otherwise), each row under the
+	// filter whose bytes sum smallest, deflated; no chunk but IHDR, IDAT and IEND, so no metadata
 	status encode_png(const bitmap& a_bitmap, const work_hook& a_work, std::vector<uint8_t>& a_bytes);
 	// Baseline JPEG at a_quality 1 to 100 (the Annex K tables scaled as the reference encoder scales them), Huffman tables built
 	// for the image, chroma 4:2:0 below quality 90 and 4:4:4 from it, one component when every pixel is grey, alpha composited
@@ -210,7 +212,8 @@ namespace image_codec {
 	};
 	// An RFC 1950 stream inflated into exactly a_out_size bytes: more or fewer is a failure
 	inflate_status inflate_zlib(const uint8_t* a_data, size_t a_size, uint8_t* a_out, size_t a_out_size, const work_hook& a_work);
-	// a_data as an RFC 1950 stream; false when the budget is gone
+	// a_data as an RFC 1950 stream: LZ77 over hash chains with lazy matching, in dynamic Huffman blocks or stored ones where
+	// those are smaller; false when the budget is gone
 	bool deflate_zlib(const uint8_t* a_data, size_t a_size, const work_hook& a_work, std::vector<uint8_t>& a_out);
 
 } // namespace image_codec

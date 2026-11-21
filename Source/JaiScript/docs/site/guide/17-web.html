@@ -173,7 +173,7 @@ jpeg 32 x 24</code></pre></div>
 <li><code>fit(w, h)</code> scales the image to fit inside <code>w</code> by <code>h</code>, keeping its shape, and never enlarges it: an image that already fits is unchanged.</li>
 <li><code>crop_fill(w, h)</code> scales the image to cover <code>w</code> by <code>h</code> and cuts away what falls outside, about the centre, so the result is exactly that size, enlarged when the image is smaller (an avatar).</li>
 <li><code>crop(x, y, w, h)</code> keeps the rectangle, which must lie inside the image.</li>
-<li><code>encode(&quot;jpeg&quot;, quality)</code> returns the image as the bytes of a file, quality 1 to 100 (90 when left out). Nothing but the pixels is written, so a photo&#x27;s EXIF data (its camera, time and GPS position) is gone.</li>
+<li><code>encode(&quot;jpeg&quot;, quality)</code> or <code>encode(&quot;png&quot;)</code> returns the image as the bytes of a file, a JPEG&#x27;s quality 1 to 100 (90 when left out). Nothing but the pixels is written, so a photo&#x27;s EXIF data (its camera, time and GPS position) is gone.</li>
 </ul>
 <p>The argument is always the image&#x27;s bytes, a string or an <code>array&lt;uint8&gt;</code>, never a path: a file on disk is <code>image::load(file::read(path))</code>. The limits and the resampling: <a href="../reference/library.html#images">Images</a>.</p>
 <nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/16-parallel.html"><span>&larr; previous</span>Parallel Loops</a><a class="next" rel="next" href="../guide/18-random.html"><span>next &rarr;</span>Random Numbers &amp; Crypto</a></nav></article>

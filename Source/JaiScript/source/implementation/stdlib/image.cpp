@@ -150,11 +150,14 @@ namespace image_detail {
 	// a_image as a file of a_format: its bytes, as a string
 	std::string encode(engine* a_engine, const script_image& a_image, const std::string& a_format, script_int a_quality) {
 		const codec::bitmap& source = pixels_of(a_image);
-		if (a_format != "jpeg") { throw runtime_error("image::encode expects the format \"jpeg\""); }
+		const bool jpeg = a_format == "jpeg";
+		if (!jpeg && a_format != "png") { throw runtime_error("image::encode expects the format \"jpeg\" or \"png\""); }
 		if (a_quality < 1 || a_quality > 100) { throw runtime_error("image::encode expects a quality of 1 to 100"); }
 		budget work(a_engine);
 		std::vector<uint8_t> bytes;
-		if (const codec::status outcome = codec::encode_jpeg(source, static_cast<int>(a_quality), work.hook(), bytes); outcome != codec::status::ok) { raise(work, outcome); }
+		// PNG is lossless: a quality is checked and has nothing to change
+		const codec::status outcome = jpeg ? codec::encode_jpeg(source, static_cast<int>(a_quality), work.hook(), bytes) : codec::encode_png(source, work.hook(), bytes);
+		if (outcome != codec::status::ok) { raise(work, outcome); }
 		detail::execution_limits& limits = detail::engine_access::execution_limits(*a_engine);
 		if (!limits.memory_charge_items(bytes.size(), 1)) [[unlikely]] { detail::throw_memory_cap(limits); }
 		return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());

@@ -8164,7 +8164,7 @@
       "signature": "encode(format: string[, quality: int]) -> string",
       "provider": "stdlib",
       "effect": "observe",
-      "notes": "The image as a file's bytes: \"jpeg\" is baseline at quality 1 to 100 (90 by default), 4:2:0 below 90 and 4:4:4 from it. No metadata is written.",
+      "notes": "The image as a file's bytes: \"jpeg\" is baseline at quality 1 to 100 (90 by default), 4:2:0 below 90 and 4:4:4 from it; \"png\" is lossless 8-bit, grey, RGB or RGBA as the pixels need. No metadata is written.",
       "source": "include/jaiscript/stdlib/image.hpp",
       "form": "method",
       "availability": "register_image()",

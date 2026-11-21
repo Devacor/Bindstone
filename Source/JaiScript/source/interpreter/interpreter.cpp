@@ -607,6 +607,8 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
                 self->returnValue_ = std::move(saved_return);
                 self->hasReturnValue_ = saved_has_return;
                 self->member_scope_ = saved_member_scope;
+            } else {
+                self->top_level_node_ = nullptr;   // the run's statements are its caller's to free: an error raised after it stands in none
             }
             --self->execute_depth_;
         }

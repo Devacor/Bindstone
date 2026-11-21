@@ -8,6 +8,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 
 using namespace jai::foundry;
 
@@ -465,6 +466,30 @@ public:
                 check_eq(c.second, trace_shape(*engine));
             });
             for (const char* file : {"trace_declaring.jai", "trace_again.jai", "trace_nested.jai"}) { std::filesystem::remove(dir / file); }
+        });
+
+        // An error raised when no run is in flight (a function the host calls, a destructor at teardown) stands in no top-level
+        // statement: its script frame names none, and reads nothing of a run whose jaibite the host has since dropped
+        test("an_error_outside_a_run_names_no_statement_of_an_earlier_one", [this]() {
+            for (const bool dropped : {false, true}) {
+                auto engine = make_engine();
+                std::optional<jai::jaibite> bite;
+                bite.emplace(engine->jaibite("int risky(int x) { return 10 / x; }" + std::string(1, char(10)) + "int last = 1;" + std::string(1, char(10)) + "last;"));
+                check_eq(int64_t(1), bite->execute().as_int());
+                if (dropped) { bite.reset(); }
+                auto result = engine->get_variable("risky").as_function()({engine->make_value(int64_t{0})});
+                check_false(bool(result), "the call fails");
+                const auto trace = engine->last_stack_trace();
+                check_false(trace.empty());
+                check_eq(std::string("<script>"), trace.back().function);
+                check_eq(size_t(0), trace.back().line, "the script frame stands at no statement");
+            }
+            auto engine = make_engine();
+            std::optional<jai::jaibite> bite;
+            bite.emplace(engine->jaibite("class Late { int n = 0; ~Late() { int z = 0; n = 1 / z; } } Late keep; 1;"));
+            check_eq(int64_t(1), bite->execute().as_int());
+            bite.reset();
+            engine.reset();   // the destructor raises at teardown, after the bite's statements are gone
         });
 
         test("top_level_throw_captures_script_frame", [this]() {

@@ -10,6 +10,7 @@
 #include <jaiscript/detail/type_name_key.hpp>
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/serialization/convenience.hpp>
+#include "../case_table.hpp"
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
@@ -1911,6 +1912,72 @@ public:
 			check_true(contains(failure(*e, "class Holder { int n = 1; }\nHolder h;\nauto x = h.n{};"), "expected ';' after expression"));
 			check_true(contains(failure(*e, "namespace shop { class Solo<T> { T v; } }\nauto x = shop::Solo{};"),
 				"'shop::Solo' is a generic class: name its type arguments (shop::Solo<T>)"));
+		});
+
+		// v < n, n > (v) is two comparisons after every variable a declaration introduces, at program scope as in a function
+		test("less_than_compares_after_every_declared_variable", [this]() {
+			const std::string prelude =
+				"bool both(bool a, bool b) { return a && b; }\n"
+				"int n = 2;\n"
+				"int get() { return 1; }\n"
+				"array<int> xs = [1, 5];\n"
+				"map<string, int> m = {\"a\": 1};\n";
+			const std::vector<std::pair<std::string, std::string>> statements = {
+				{"for (int i = 0; i < 3; i += 1) { if (both(i < n, n > (i))) { print(i); } }", "0\n1"},
+				{"for (auto v : xs) { print(both(v < n, n > (v))); }", "true\nfalse"},
+				{"for (int v : xs) { print(both(v < n, n > (v))); }", "true\nfalse"},
+				{"for (const v : xs) { print(both(v < n, n > (v))); }", "true\nfalse"},
+				{"for (auto& v : xs) { print(both(v < n, n > (v))); }", "true\nfalse"},
+				{"for (auto [k, w] : m) { print(both(w < n, n > (w))); }", "true"},
+				{"for (auto [k, w] : m) { print(both(k < \"b\", \"b\" > (k))); }", "true"},
+				{"if (auto d = get(); both(d < n, n > (d))) { print(d); }", "1"},
+				{"if (auto d = get(); d > 0) { print(both(d < n, n > (d))); } else { print(d); }", "true"},
+				{"if (int d = get()) { print(both(d < n, n > (d))); }", "true"},
+				{"if (int d = 0) { print(d); } else { print(both(d < n, n > (d))); }", "true"},
+				{"while (auto d = get()) { print(both(d < n, n > (d))); break; }", "true"},
+				{"try { throw 3; } catch (e) { print(both(e < n, n > (e))); }", "false"},
+				{"try { throw 1; } catch (var e) { print(both(e < n, n > (e))); }", "true"},
+				{"try { throw 1; } catch (auto e) { print(both(e < n, n > (e))); }", "true"},
+				{"try { throw 1; } catch (int e) { print(both(e < n, n > (e))); }", "true"},
+				{"{ int v = 1; print(both(v < n, n > (v))); }", "true"},
+				{"{ int v = 1; { print(both(v < n, n > (v))); } }", "true"},
+				{"{ const int v = 1; print(both(v < n, n > (v))); }", "true"},
+				{"{ auto [p, q] = [1, 5]; print(both(p < n, n > (p))); print(both(q < n, n > (q))); }", "true\nfalse"},
+				{"auto [p, q] = [1, 5]; print(both(p < n, n > (p)));", "true"},
+				{"if (true) { int v = 1; print(both(v < n, n > (v))); }", "true"},
+				{"switch (1) { case 1: { int v = 1; print(both(v < n, n > (v))); } }", "true"},
+				{"int k = 0; do { int v = 1; print(both(v < n, n > (v))); k += 1; } while (k < 1);", "true"},
+				{"{ int v = 1; auto f = [&]() { return both(v < n, n > (v)); }; print(f()); }", "true"},
+			};
+			std::vector<std::pair<std::string, std::string>> cases;
+			for (const auto& [statement, printed] : statements) {
+				cases.push_back({statement, printed});
+				cases.push_back({"void go() { " + statement + " }\ngo();", printed});
+			}
+			check_outputs(cases, prelude, true);
+		});
+
+		// the variable counts in its scope: after it, the name is the generic the program declared
+		test("a_declared_variable_stops_comparing_where_its_scope_ends", [this]() {
+			const std::string prelude =
+				"class Box { int held = 7; }\n"
+				"T pick<T>(T a) { return a; }\n"
+				"Box b;\n"
+				"array<int> xs = [1];\n";
+			const std::vector<std::pair<std::string, std::string>> statements = {
+				{"for (int pick = 0; pick < 1; pick += 1) { } print(pick<Box>(b).held);", "7"},
+				{"for (auto pick : xs) { } print(pick<Box>(b).held);", "7"},
+				{"{ int pick = 1; } print(pick<Box>(b).held);", "7"},
+				{"if (int pick = 1) { } print(pick<Box>(b).held);", "7"},
+				{"try { throw 1; } catch (pick) { } print(pick<Box>(b).held);", "7"},
+				{"{ auto [pick, other] = [1, 2]; } print(pick<Box>(b).held);", "7"},
+			};
+			std::vector<std::pair<std::string, std::string>> cases;
+			for (const auto& [statement, printed] : statements) {
+				cases.push_back({statement, printed});
+				cases.push_back({"void go() { " + statement + " }\ngo();", printed});
+			}
+			check_outputs(cases, prelude, true);
 		});
 
 		test("the_typed_result_options_are_spelled_returns_of_a_shape", [this]() {

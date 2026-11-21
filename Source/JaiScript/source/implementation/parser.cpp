@@ -745,7 +745,7 @@ bool detail::run_ast_marking_passes(const std::vector<declaration_ptr>& declarat
 }
 
 parser::parser(const std::vector<token>& tokens, string_symbolizer* symbolizer, engine* eng, const std::unordered_set<std::string>& registeredTemplateTypes, const std::string& filename)
-    : stream_(&tokens), filename_(filename), current_(0), registered_template_types_(registeredTemplateTypes), symbolizer_(symbolizer), engine_(eng) {
+    : stream_(&tokens), filename_(filename), registered_template_types_(registeredTemplateTypes), symbolizer_(symbolizer), engine_(eng) {
     if (!symbolizer_) {
         throw std::invalid_argument("parser requires a valid string_symbolizer");
     }
@@ -1120,7 +1120,11 @@ checked_result<std::vector<declaration_ptr>> parser::parse() {
                 flush_generic_uses(declarations);
                 if (decl) {
                     check_reload_hook(*decl, reload_hook_seen);
-                    if (decl->get_type() == node_type::variable_decl) { unit_variables_.insert(static_cast<const variable_decl&>(*decl).name_id); }
+                    if (decl->get_type() == node_type::variable_decl) {
+                        unit_variables_.insert(static_cast<const variable_decl&>(*decl).name_id);
+                    } else if (decl->get_type() == node_type::destructuring_decl) {
+                        for (const auto& name : static_cast<const destructuring_decl&>(*decl).names) { unit_variables_.insert(name.second); }
+                    }
                     declarations.push_back(std::move(decl));
                 }
             }
@@ -1350,9 +1354,12 @@ void parser::synchronize_class_member(size_t class_open_index) {
         if ((*stream_)[i].type == token_type::left_brace) { ++depth; }
         else if ((*stream_)[i].type == token_type::right_brace) { --depth; }
     }
+    if (depth <= 0) {   // the member read past the class's own '}': no member boundary is left, and a recovery reads on
+        synchronize();
+        return;
+    }
     const size_t entry = current_;
     while (!is_at_end()) {
-        if (depth <= 0) { return; }
         if (depth == 1) {
             if (check(token_type::right_brace)) { return; }
             if (current_ > entry &&
@@ -3499,12 +3506,15 @@ declaration_ptr parser::parse_generic_text(const std::vector<token>& text) {
     std::vector<generic_use> saved_uses = std::move(generic_uses_);
     std::vector<std::string> saved_namespace = std::move(current_namespace_path_);
     std::vector<function_scope> saved_scopes = std::move(function_scope_stack_);
+    std::vector<uint64_t> saved_block_variables = std::move(program_block_variables_);
+    std::vector<size_t> saved_block_marks = std::move(program_block_marks_);
     std::vector<template_barrier> saved_barriers = std::move(template_barriers_);
     const jump_targets saved_jumps = jumps_;
     const int saved_nesting = nesting_depth_;
     const size_t saved_boundary = slot_lookup_boundary_;
     const bool saved_flags[] = {in_switch_case_, in_coroutine_, in_constructor_, returns_reference_, coroutine_body_pending_};
     generic_uses_.clear(); current_namespace_path_.clear(); function_scope_stack_.clear(); template_barriers_.clear();
+    program_block_variables_.clear(); program_block_marks_.clear();
     jumps_ = {}; nesting_depth_ = 0; slot_lookup_boundary_ = 0;
     in_switch_case_ = in_coroutine_ = in_constructor_ = returns_reference_ = coroutine_body_pending_ = false;
     stream_ = &text; current_ = 0; pushed_back_token_.reset();
@@ -3515,6 +3525,8 @@ declaration_ptr parser::parse_generic_text(const std::vector<token>& text) {
     generic_uses_ = std::move(saved_uses);
     current_namespace_path_ = std::move(saved_namespace);
     function_scope_stack_ = std::move(saved_scopes);
+    program_block_variables_ = std::move(saved_block_variables);
+    program_block_marks_ = std::move(saved_block_marks);
     template_barriers_ = std::move(saved_barriers);
     jumps_ = saved_jumps; nesting_depth_ = saved_nesting; slot_lookup_boundary_ = saved_boundary;
     in_switch_case_ = saved_flags[0]; in_coroutine_ = saved_flags[1]; in_constructor_ = saved_flags[2];
@@ -5051,7 +5063,7 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::unterminated_declaration(bo
 
     auto declared = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), initializer);
     declared->default_initialized = is_const && !spelled_initializer;
-    if (in_function_scope() && declared->name_id != UINT64_MAX) {
+    if (declared->name_id != UINT64_MAX) {
         declared->slot_index = allocate_slot(declared->name_id);
     }
     if (is_const && !finish_const(declared, const_at, false)) { return make_error_code(parse_error_code::syntax_error); }
@@ -5415,7 +5427,7 @@ checked_result<statement_ptr> parser::for_statement() {
                 auto binding = std::make_shared<variable_decl>(names[i].location, binding_type, names[i].lexeme,
                                                                get_symbol_id(names[i]), half);
                 binding->is_const = is_const;
-                if (in_function_scope()) { binding->slot_index = allocate_slot(binding->name_id); }
+                binding->slot_index = allocate_slot(binding->name_id);
                 bindings.push_back(std::move(binding));
             }
             JAISCRIPT_TRY_ASSIGN(statement_ptr body, statement());
@@ -5445,7 +5457,7 @@ checked_result<statement_ptr> parser::for_statement() {
                 block_scope_guard loop_var_scope(*this);
                 uint64_t var_id = get_symbol_id(varName);
                 size_t var_slot = SIZE_MAX;
-                if (in_function_scope() && var_id != UINT64_MAX) {
+                if (var_id != UINT64_MAX) {
                     var_slot = allocate_slot(var_id);
                 }
 
@@ -5571,7 +5583,7 @@ checked_result<statement_ptr> parser::try_statement() {
             catch_var = var_name.lexeme;
             JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after catch variable"));
             catch_var_id = get_symbol_id(var_name);
-            if (in_function_scope() && catch_var_id != UINT64_MAX) {
+            if (catch_var_id != UINT64_MAX) {
                 catch_slot = allocate_slot(catch_var_id);
             }
         }
@@ -5635,7 +5647,7 @@ checked_result<statement_ptr> parser::try_statement() {
             reference.id = symbolizer_->intern(reference.canonical_name());
             auto declared = std::make_shared<variable_decl>(name.location, store_type_info(std::move(reference)), name.lexeme, get_symbol_id(name),
                                                             hidden_identifier(caught_id, caught_name, name.location));
-            if (in_function_scope() && declared->name_id != UINT64_MAX) { declared->slot_index = allocate_slot(declared->name_id); }
+            if (declared->name_id != UINT64_MAX) { declared->slot_index = allocate_slot(declared->name_id); }
             return declared;
         };
         if (typed_clause()) {
@@ -5666,7 +5678,7 @@ checked_result<statement_ptr> parser::try_statement() {
             std::shared_ptr<variable_decl> declared;
             if (type) {
                 declared = std::make_shared<variable_decl>(var_name.location, type, var_name.lexeme, get_symbol_id(var_name), value_of_caught(var_name.location));
-                if (in_function_scope() && declared->name_id != UINT64_MAX) { declared->slot_index = allocate_slot(declared->name_id); }
+                if (declared->name_id != UINT64_MAX) { declared->slot_index = allocate_slot(declared->name_id); }
             } else {
                 declared = name_of_caught(var_name);
             }
@@ -6913,7 +6925,7 @@ checked_result<declaration_ptr> parser::destructuring_declaration() {
         JAISCRIPT_TRY_ASSIGN(token name_tok, consume_name("expected variable name in destructuring", "variable"));
         auto [sym_id, sym_view] = symbolizer_->intern_with_view(name_tok.lexeme);
         decl->names.push_back({sym_view, sym_id});
-        decl->slot_indices.push_back(in_function_scope() ? allocate_slot(sym_id) : SIZE_MAX);
+        decl->slot_indices.push_back(allocate_slot(sym_id));
     } while (match(token_type::comma));
     JAISCRIPT_TRY(expect(token_type::right_bracket, "expected ']' after destructuring names"));
     JAISCRIPT_TRY(expect(token_type::equal, "expected '=' after destructuring pattern"));
@@ -6940,7 +6952,7 @@ checked_result<declaration_ptr> parser::const_declaration() {
         JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after variable declaration"));
         auto var = std::make_shared<variable_decl>(name.location, type_info_ptr{}, name.lexeme, get_symbol_id(name), init);
         var->default_initialized = !init;
-        if (in_function_scope() && var->name_id != UINT64_MAX) { var->slot_index = allocate_slot(var->name_id); }
+        if (var->name_id != UINT64_MAX) { var->slot_index = allocate_slot(var->name_id); }
         decl = var;
     } else if (check(token_type::inline_keyword) || check(token_type::extern_keyword) || check(token_type::static_keyword)) {
         report_error("write '" + std::string(peek().lexeme) + " const', not 'const " + std::string(peek().lexeme) + "'", peek());
@@ -7392,8 +7404,7 @@ checked_result<declaration_ptr> parser::variable_declaration() {
     decl->function_spelling = function_spelling;
     decl->default_initialized = default_initialized;
 
-    // If we're inside a function, assign a slot for this local variable
-    if (in_function_scope() && decl->name_id != UINT64_MAX) {
+    if (decl->name_id != UINT64_MAX) {
         decl->slot_index = allocate_slot(decl->name_id);
     }
 

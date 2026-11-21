@@ -7,6 +7,12 @@
 #include <jaiscript/detail/ast_serializer.hpp>
 #include <jaiscript/detail/generics.hpp>
 #include "../case_table.hpp"
+#include <chrono>
+#include <condition_variable>
+#include <cstdio>
+#include <cstdlib>
+#include <mutex>
+#include <thread>
 
 using namespace jai::foundry;
 
@@ -297,9 +303,228 @@ public:
                 check(e.find("13:") == std::string::npos, "no error at the class close: " + e);
             }
         });
+
+        // '>>' after one open '<' closes it and leaves a '>' nothing opened: the parse reads it as it reads '> >'
+        test("a_shift_that_closes_one_type_argument_list_leaves_a_stray_greater", [this]() {
+            const std::vector<std::string> heads = {
+                "string<int>>", "int<int>>", "bool<int>>", "float<T>>", "char<int>>", "array<int>>", "map<string, int>>",
+                "weak_ptr<int>>", "shared_ptr<float>>", "function<void()>>", "coroutine<int>>", "array<array<int>>>",
+            };
+            // where each head stands, and whether the '>' left over is an error there (after a type named as a value it compares)
+            const std::vector<std::pair<std::string, bool>> programs = {
+                {"@", true}, {"@ y;", true}, {"@ y; print(1);", true}, {";@", true}, {";@ y;", true}, {"int x = 1;\n@ y;\nprint(2);", true},
+                {"print(1);\n@", true}, {"print(1); @ y = 2; print(3);", true}, {"void f() { @ y; }", true}, {"void f() { int a; @ x; }", true},
+                {"void f() { @ }", true}, {"class C { @ x; }", true}, {"class C { int a; @ x; int b; }", true}, {"class C { @ }", true},
+                {"{ @ }", true}, {"{ @ y; }", true}, {"if (true) { @ x; }", true}, {"namespace n { @ x; }", true}, {"void f(@ x) { }", true},
+                {"@ f() { return 1; }", true}, {"for (@ x : xs) { }", true}, {"for (@ x = 1; ; ) { }", true}, {"var v = @();", true},
+                {"var v = @;", true}, {"cast<@>(1);", true}, {"auto g = [](@ x) { };", true}, {"try { } catch (@ e) { }", true},
+                {"class C { @ m() { return 1; } }", true}, {"void f() { int a = 1; @ }\nprint(1);", true},
+                {"print(@{});", false}, {"if (@ x = 1) { }", false},
+            };
+            parse_deadline deadline;
+            auto eng = make_engine();
+            std::string failures;
+            size_t parsed = 0;
+            for (const auto& [program, stray] : programs) {
+                for (const std::string& head : heads) {
+                    for (const char* ending : {"", "\n"}) {
+                        const std::string code = spelled(program, head) + ending;
+                        std::string spaced_head = head;
+                        spaced_head.insert(spaced_head.rfind(">>") + 1, " ");
+                        deadline.parsing(code);
+                        const std::vector<std::string> reported = parse_messages(code, *eng);
+                        const std::vector<std::string> expected = parse_messages(spelled(program, spaced_head) + ending, *eng);
+                        ++parsed;
+                        if (stray && reported.empty()) { failures += code + "\n  parsed without an error\n"; }
+                        else if (reported != expected) {
+                            failures += code + "\n  reported '" + (reported.empty() ? std::string("<none>") : reported.front()) + "' (" +
+                                        std::to_string(reported.size()) + "), spelled '> >' it reports '" +
+                                        (expected.empty() ? std::string("<none>") : expected.front()) + "' (" + std::to_string(expected.size()) + ")\n";
+                        }
+                    }
+                }
+            }
+            check_eq(programs.size() * heads.size() * 2, parsed);
+            check_true(failures.empty(), failures);
+        });
+
+        test("a_stray_greater_at_the_end_of_the_file_is_reported_once", [this]() {
+            const std::vector<std::string> stray = {"expected variable name"};
+            const std::vector<std::string> after_a_lone_semicolon = {"expected expression", "expected variable name"};
+            const std::vector<std::pair<std::string, std::vector<std::string>>> cases = {
+                {"string<int>>", stray}, {"array<int>>", stray}, {"print(1);\nweak_ptr<int>>", stray},
+                {";array<int>>", after_a_lone_semicolon}, {";shared_ptr<float>>", after_a_lone_semicolon},
+            };
+            parse_deadline deadline;
+            for (const auto& [code, expected] : cases) {
+                deadline.parsing(code);
+                check_true(parse_messages(code) == expected, code);
+            }
+            // the load error is the same text on both backends
+            const auto load_error = [](backend_type backend, const std::string& code) {
+                auto e = make_default_engine();
+                e->set_backend(backend);
+                try {
+                    e->execute(code);
+                } catch (const std::exception& error) {
+                    return std::string(error.what());
+                }
+                return std::string("<no error>");
+            };
+            for (const auto& [code, expected] : cases) {
+                deadline.parsing(code);
+                const std::string interpreted = load_error(backend_type::interpreter, code);
+                check_eq(interpreted, load_error(backend_type::vm, code), code);
+                check_true(interpreted.find("error: expected variable name") != std::string::npos, interpreted);
+            }
+            check_eq(std::string("parse failed:\n<script>:1:11: error: expected variable name\n    string<int>>\n              ^"),
+                     load_error(backend_type::vm, "string<int>>"));
+        });
+
+        // a generic method whose parameter list runs past the class's '}' ends its text after it: the member loop is then outside
+        // the class, where no member boundary is left to find
+        test("a_member_that_reads_past_its_class_does_not_stop_the_recovery", [this]() {
+            parse_deadline deadline;
+            for (const char* code : {"class C { T f<T>(T x } ) { } ) }", "class C { T f<T>(T x } ) { } ) ) int y; }\nprint(1);",
+                                     "class C { T f<T>(T x } ) { } > }", "class C { class D { T f<T>(T x } } ) { } ) } }"}) {
+                deadline.parsing(code);
+                check_true(!parse_messages(code).empty(), code);
+            }
+        });
+
+        // every program one token away from these (a token dropped, doubled, replaced by a bracket or a separator, or one of those
+        // put before it) parses to an end: a recovery reads on from wherever an error leaves it
+        test("every_one_token_edit_of_a_generic_program_parses_to_an_end", [this]() {
+            const std::vector<std::string> programs = {
+                "class Box < T > { T item ; array < T > rest ; map < string , array < T >> index ; Box ( T first ) { item = first ; } "
+                "T get ( ) { return item ; } U as < U > ( U other ) { return other ; } }",
+
+                "T largest < T > ( array < T > xs ) { T best = xs [ 0 ] ; for ( auto x : xs ) { if ( best < x ) { best = x ; } } return best ; } "
+                "Box < int > b = Box < int > ( 1 ) ; array < array < int >> grid = [ [ 1 ] ] ; "
+                "print ( largest < int > ( grid [ 0 ] ) , b . as < string > ( \"s\" ) ) ;",
+
+                "namespace shop { class Item { int price = 1 ; } T twice < T > ( T v ) { return v ; } } "
+                "shared_ptr < shop :: Item > held = make_shared < shop :: Item > ( ) ; weak_ptr < shop :: Item > seen = held ; "
+                "function < int ( int , array < int > ) > apply = [ ] ( int a , array < int > xs ) -> int { return a + cast < int > ( xs . size ( ) ) ; } ;",
+
+                "map < string , shared_ptr < shop :: Item >> stock = { \"a\" : held } ; "
+                "for ( auto [ k , v ] : stock ) { if ( auto n = v . price ; n < 2 && 2 > ( n ) ) { print ( k ) ; } } "
+                "try { throw shop :: twice < int > ( 3 ) ; } catch ( int e ) { print ( e < 4 , 4 > ( e ) ) ; }",
+
+                "class Base { int id = 0 ; } class Node < T : Base > : Base { T value ; shared_ptr < Node < T >> next ; static int count = 0 ; "
+                "[ [ nodiscard ] ] int depth ( ) { int d = 0 ; do { d += 1 ; } while ( d < 3 ) ; return d ; } }",
+
+                "coroutine int steps ( int n ) { for ( int i = 0 ; i < n ; i += 1 ) { yield i ; } } Node < Base > root ; "
+                "switch ( root . depth ( ) ) { case 3 : { print ( dynamic_cast < Base & > ( root ) . id ) ; break ; } default : { } } "
+                "const array < map < string , int >> rows = [ { \"n\" : 1 } ] ; int total = 0 ; "
+                "for ( const auto & row : rows ) { total += row [ \"n\" ] ; } print ( total >> 1 , total > 0 ) ;",
+
+                "class Pair < A , B > { A first ; B second ; Pair < B , A > swapped ( ) { Pair < B , A > result ; result . first = second ; "
+                "result . second = first ; return result ; } bool operator < ( Pair < A , B > other ) { return first < other . first ; } }",
+
+                "enum Color { red , green } Pair < int , string > p = Pair < int , string > { } ; auto q = p . swapped ( ) ; bool less = p < p ; "
+                "int n = less ? 1 : 2 ; auto pick = [ & ] ( Pair < string , int > it ) { return it . second < n ; } ; "
+                "auto twice = ( int x ) => x < n ? x : n ; while ( n > 0 ) { n -= 1 ; if ( pick ( q ) ) { continue ; } } "
+                "array < function < bool ( Pair < string , int > ) >> tests = [ pick ] ; "
+                "print ( tests . size ( ) , Color :: red == Color :: green , twice ( 1 ) ) ;",
+            };
+            const std::vector<std::string> placed = {"<", ">", ">>", "(", ")", "{", "}", ";", ","};
+            parse_deadline deadline;
+            size_t parsed = 0;
+            for (const std::string& program : programs) {
+                std::vector<std::string> words;
+                for (size_t at = 0; at < program.size();) {
+                    const size_t end = std::min(program.find(' ', at), program.size());
+                    words.push_back(program.substr(at, end - at));
+                    at = end + 1;
+                }
+                auto eng = make_engine();
+                const auto parse_edit = [&](size_t at, size_t dropped, const std::vector<std::string>& put) {
+                    std::string code;
+                    for (size_t i = 0; i <= words.size(); ++i) {
+                        if (i == at) { for (const std::string& word : put) { code += word + ' '; } }
+                        if (i < words.size() && (i < at || i >= at + dropped)) { code += words[i] + ' '; }
+                    }
+                    deadline.parsing(code);
+                    ++parsed;
+                    return parse_messages(code, *eng);
+                };
+                check_true(parse_edit(0, 0, {}).empty(), "the program itself parses: " + program);
+                for (size_t at = 0; at < words.size(); ++at) {
+                    parse_edit(at, 1, {});
+                    parse_edit(at, 0, {words[at]});
+                    for (const std::string& word : placed) {
+                        parse_edit(at, 1, {word});
+                        parse_edit(at, 0, {word});
+                    }
+                }
+            }
+            check_true(parsed > 15000, std::to_string(parsed));
+        });
     }
 
 private:
+    // Ends the run when a parse in its scope does not return, naming it: a failure, not a hang. Each parse here takes
+    // milliseconds, and one that loops on its errors grows by hundreds of megabytes a second, so it gets seconds
+    class parse_deadline {
+    public:
+        parse_deadline() : watch_([this]() {
+            std::unique_lock<std::mutex> lock(mutex_);
+            for (size_t watched = parses_; !done_; watched = parses_) {
+                if (!moved_.wait_for(lock, std::chrono::seconds(k_seconds), [&]() { return done_ || parses_ != watched; })) {
+                    std::fprintf(stderr, "\na parse did not return within %d s: %s\n", k_seconds, code_.c_str());
+                    std::abort();
+                }
+            }
+        }) {}
+        ~parse_deadline() {
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                done_ = true;
+            }
+            moved_.notify_one();
+            watch_.join();
+        }
+        void parsing(const std::string& code) {
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                code_ = code;
+                ++parses_;
+            }
+            moved_.notify_one();
+        }
+    private:
+        static constexpr int k_seconds = 10;
+        std::mutex mutex_;
+        std::condition_variable moved_;
+        bool done_ = false;
+        size_t parses_ = 0;
+        std::string code_;
+        std::thread watch_;
+    };
+
+    static std::string spelled(std::string program, const std::string& head) {
+        for (size_t at = program.find('@'); at != std::string::npos; at = program.find('@', at + head.size())) { program.replace(at, 1, head); }
+        return program;
+    }
+
+    std::vector<std::string> parse_messages(const std::string& code) {
+        auto eng = make_engine();
+        return parse_messages(code, *eng);
+    }
+
+    std::vector<std::string> parse_messages(const std::string& code, engine& eng) {
+        auto* symbolizer = detail::engine_access::get_symbolizer(eng);
+        lexer lex(code, symbolizer, "test.jai");
+        auto tokens = lex.tokenize();
+        std::unordered_set<std::string> empty_types;
+        parser p(tokens, symbolizer, &eng, empty_types, "test.jai");
+        auto ast = p.parse();
+        std::vector<std::string> result;
+        for (const auto& issue : p.issues()) { result.push_back(issue.message); }
+        return result;
+    }
+
     std::vector<std::string> collect_parse_errors(const std::string& code) {
         auto eng = make_engine();
         auto* symbolizer = detail::engine_access::get_symbolizer(*eng);

@@ -72,7 +72,33 @@ namespace jai {
         // hot_reload_migrate at a unit's top level is the unit's reload hook: one, declared void hot_reload_migrate(map<string, var> previous)
         void check_reload_hook(const jai::declaration& d, bool& seen);
         std::string filename_;
-        size_t current_ = 0;
+        // a '>>' that closed one type argument list leaves its second '>' here, read before the token at current_
+        std::optional<token> pushed_back_token_;
+        mutable token last_advanced_;  // Storage for advance() when consuming pushed_back_token_
+        // The index of the next token. The pushed-back '>' stands before one index only, the one after its '>>': a write that
+        // moves the index drops it, so a lookahead that rewinds reads its tokens again and never finds that '>' before them
+        class token_cursor {
+        public:
+            explicit token_cursor(std::optional<token>& pushed_back) : pushed_back_(pushed_back) {}
+            token_cursor(const token_cursor&) = delete;
+            token_cursor& operator=(const token_cursor&) = delete;
+            operator size_t() const { return index_; }
+            token_cursor& operator=(size_t index) {
+                if (index != index_) {
+                    index_ = index;
+                    pushed_back_.reset();
+                }
+                return *this;
+            }
+            token_cursor& operator+=(size_t count) { return *this = index_ + count; }
+            token_cursor& operator-=(size_t count) { return *this = index_ - count; }
+            size_t operator++(int) { const size_t before = index_; *this = index_ + 1; return before; }
+            size_t operator--(int) { const size_t before = index_; *this = index_ - 1; return before; }
+        private:
+            size_t index_ = 0;
+            std::optional<token>& pushed_back_;
+        };
+        token_cursor current_{pushed_back_token_};
         size_t foreign_stop_ = SIZE_MAX;   // the error count at which a foreign construct ended the parse
         struct parse_diagnostic {
             source_location at;
@@ -90,9 +116,6 @@ namespace jai {
         expression_ptr bound_conditional(expression_ptr value);
         expression_ptr reference_binding(expression_ptr value);
 
-        // token buffer for handling >> splitting in generic contexts
-        std::optional<token> pushed_back_token_;
-        mutable token last_advanced_;  // Storage for advance() when consuming pushed_back_token_
         // A literal include inside a function body is spliced here at parse time (internal/global_shadowing.md): the included
         // declarations become the function's own, so they see its parameters and locals and it sees theirs; the files read
         // (the engine stamps them: a change re-parses the includer), the chain being spliced (a cycle guard) and its depth
@@ -442,13 +465,22 @@ namespace jai {
         }
 
         void begin_block_scope() {
-            if (function_scope_stack_.empty()) return;
+            if (function_scope_stack_.empty()) {
+                program_block_marks_.push_back(program_block_variables_.size());
+                return;
+            }
             auto& scope = function_scope_stack_.back();
             scope.block_marks.push_back(scope.shadow_undo.size());
         }
 
         void end_block_scope() {
-            if (function_scope_stack_.empty()) return;
+            if (function_scope_stack_.empty()) {
+                if (!program_block_marks_.empty()) {
+                    program_block_variables_.resize(program_block_marks_.back());
+                    program_block_marks_.pop_back();
+                }
+                return;
+            }
             auto& scope = function_scope_stack_.back();
             if (scope.block_marks.empty()) return;
             const size_t mark = scope.block_marks.back();
@@ -473,9 +505,13 @@ namespace jai {
             block_scope_guard& operator=(const block_scope_guard&) = delete;
         };
 
-        // Allocate a slot for a variable, returns the slot index
+        // Declares a variable in the scope being parsed: its slot in a function. At program scope it has none (SIZE_MAX), and a
+        // block's variable is kept by name until the block closes
         size_t allocate_slot(uint64_t symbol_id) {
-            if (function_scope_stack_.empty()) return SIZE_MAX;  // Not in a function
+            if (function_scope_stack_.empty()) {
+                if (!program_block_marks_.empty()) { program_block_variables_.push_back(symbol_id); }
+                return SIZE_MAX;
+            }
             auto& scope = function_scope_stack_.back();
             size_t slot = scope.next_slot++;
             if (!scope.block_marks.empty()) {
@@ -505,7 +541,8 @@ namespace jai {
             return resolve_outer_use(symbol_id, function_scope_stack_.size());
         }
         // The name is a variable the parse has seen declared: a local variable or a parameter of a function being parsed (its
-        // own or one around it), or a program-scope variable the unit declares above. A variable never takes type arguments.
+        // own or one around it), a variable of a block open at program scope, or a program-scope variable the unit declares
+        // above. A variable never takes type arguments.
         bool names_variable(const jai::expression& e) const {
             if (e.get_type() != node_type::identifier_expr) { return false; }
             const uint64_t symbol_id = static_cast<const identifier_expr&>(e).symbol_id;
@@ -514,9 +551,13 @@ namespace jai {
             for (const auto& scope : function_scope_stack_) {
                 if (scope.symbol_to_slot.count(symbol_id)) { return true; }
             }
-            return false;
+            return std::find(program_block_variables_.begin(), program_block_variables_.end(), symbol_id) != program_block_variables_.end();
         }
         std::unordered_set<uint64_t> unit_variables_;   // the program-scope variables declared so far, by name
+        // the variables of the blocks open at program scope (a braced block's, a loop's, a condition's, a catch's), by name, and
+        // for each open block where its variables start
+        std::vector<uint64_t> program_block_variables_;
+        std::vector<size_t> program_block_marks_;
         // Capture lists are parsed in the enclosing scope, before the lambda's own opens
         size_t lookup_capture_slot(uint64_t symbol_id) {
             return resolve_outer_use(symbol_id, function_scope_stack_.size() + 1);

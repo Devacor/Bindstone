@@ -36,10 +36,13 @@ public:
 
 	static bool contains(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
 	// the warnings of the engine's last check, as their texts
-	static std::vector<std::string> warnings(engine& eng) {
+	static std::vector<std::string> warnings(engine& eng) { return diagnostics(eng, check_diagnostic::level::warning); }
+	// and its errors
+	static std::vector<std::string> errors(engine& eng) { return diagnostics(eng, check_diagnostic::level::error); }
+	static std::vector<std::string> diagnostics(engine& eng, check_diagnostic::level severity) {
 		std::vector<std::string> texts;
 		for (const auto& d : eng.last_check_diagnostics().diagnostics) {
-			if (d.severity == check_diagnostic::level::warning) { texts.push_back(d.message); }
+			if (d.severity == severity) { texts.push_back(d.message); }
 		}
 		return texts;
 	}
@@ -147,6 +150,40 @@ public:
 			// the same count is the declared-again error it was, and functions still overload by their parameters
 			check_true(contains(failure(*e, "class Dup<T> { T a; }\nclass Dup<U> { U a; }"), "generic 'Dup<U>' is declared again: line 1 declares it with the same parameters"));
 			check_eq(std::string("1|2"), e->execute("string count<T>(T a) { return \"1\"; } string count<A, B>(A a, B b) { return \"2\"; } count(1) + \"|\" + count(1, 2);").as_string());
+		});
+
+		test("a_generic_declared_again_is_one_error_and_its_instances_none", [this]() {
+			const auto errors_of = [this](const std::string& code) {
+				auto e = stdlib_engine();
+				(void)failure(*e, code);
+				return errors(*e);
+			};
+			const std::string twice = "string show<T>(T x) { return \"a\"; }\nstring show<U>(U x) { return \"b\"; }\n";
+			const std::string again = "generic 'show<U>' is declared again: line 1 declares it with the same parameters";
+			// the instance the second declaration makes is that declaration's mistake, not a definition of 'show<int>' of its own
+			check_eq(std::vector<std::string>{again}, errors_of(twice + "show(1);\n"));
+			check_eq(std::vector<std::string>{again}, errors_of(twice + "show<int>(1) + show(\"s\");\n"));
+			check_eq(std::vector<std::string>{"generic 'n::show<U>' is declared again: line 2 declares it with the same parameters"},
+				errors_of("namespace n {\n" + twice + "}\nn::show(1);\n"));
+			auto lax = stdlib_engine();
+			(void)failure(*lax, "[[warn_mode]];\n" + twice + "show(1);\n");
+			check_eq(std::vector<std::string>{"generic 'show<U>' is declared again: line 2 declares it with the same parameters"}, errors(*lax));
+			check_true(warnings(*lax).empty(), warnings(*lax).empty() ? std::string() : warnings(*lax).front());
+			// a class's, a namespace class's and a method's were one error already
+			check_eq(std::vector<std::string>{"generic 'Box<U>' is declared again: line 1 declares it with the same parameters"},
+				errors_of("class Box<T> { T v; }\nclass Box<U> { U v; }\nBox<int> b;\nb.v;\n"));
+			check_eq(std::vector<std::string>{"generic 'n::Box<U>' is declared again: line 1 declares it with the same parameters"},
+				errors_of("namespace n { class Box<T> { T v; }\nclass Box<U> { U v; } }\nn::Box<int> b;\nb.v;\n"));
+			check_eq(std::vector<std::string>{"generic 'A::show<U>' is declared again: line 1 declares it with the same parameters"},
+				errors_of("class A { " + twice + "}\nA a;\na.show(1);\n"));
+			check_eq(std::vector<std::string>{"generic 'A::show<U>' is declared again: line 1 declares it with the same parameters"},
+				errors_of("class A { static string show<T>(T x) { return \"a\"; }\nstatic string show<U>(U x) { return \"b\"; }\n}\nA::show(1);\n"));
+			// two generics that make one instance of one signature are the redefinition they are, beside the one declared again
+			const std::string by_int = "string show<V>(int x) { return \"c\"; }\n";
+			check_eq(std::vector<std::string>{"'show<int>' is already defined"}, errors_of("string show<T>(T x) { return \"a\"; }\n" + by_int + "show<int>(1);\n"));
+			check_eq(std::vector<std::string>{"'show<int>' is already defined with parameters (int)"},
+				errors_of("namespace n {\nstring show<T>(T x) { return \"a\"; }\n" + by_int + "}\nn::show<int>(1);\n"));
+			check_eq(std::vector<std::string>{again, "'show<int>' is already defined"}, errors_of(twice + by_int + "show<int>(1);\n"));
 		});
 
 		test("template_typename_is_a_foreign_spelling", [this]() {

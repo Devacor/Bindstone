@@ -1238,8 +1238,7 @@ private:
                 }
             }
         }
-        const auto declared = generics_.find(qualified);
-        if (declared == generics_.end()) { return; }
+        if (!generics_.count(qualified)) { return; }
         const auto counted = [](size_t count) { return std::to_string(count) + (count == 1 ? " type parameter" : " type parameters"); };
         // one name, one class: a class and a generic class of a name in one unit are an error at the second of them
         if (const class_decl* plain = g.kind == generic_kind::class_type ? unit_plain_class(qualified) : nullptr) {
@@ -1250,20 +1249,40 @@ private:
                  (generic_second ? "with " + counted(g.parameters.size()) : "without type parameters") + " here: a class and a generic class cannot share a name",
                  first.line, first.column, /*always_error=*/true);
         }
+        const generic_definition* earlier = clashing_declaration(g);
+        if (!earlier) { return; }
+        if (!same_generic_signature(*earlier, g)) {
+            diag(diag_level::error, g.location, "generic class '" + qualified + "' is declared with " + counted(earlier->parameters.size()) + " on line " +
+                 std::to_string(earlier->location.line) + " and with " + counted(g.parameters.size()) + " here: a generic class cannot be overloaded by its parameter count",
+                 earlier->location.line, earlier->location.column, /*always_error=*/true);
+            return;
+        }
+        diag(diag_level::error, g.location, "generic '" + generic_spelling(g) + "' is declared again: line " + std::to_string(earlier->location.line) +
+             " declares it with the same parameters", earlier->location.line, earlier->location.column, /*always_error=*/true);
+    }
+    // The unit's earlier generic that `g` clashes with: one of its signature (`g` declares it again), or for a generic class one of
+    // another parameter count, as a class's name is one class (functions overload by their parameters, a generic class by nothing)
+    const generic_definition* clashing_declaration(const generic_definition& g) const {
+        const auto declared = generics_.find(g.qualified_name());
+        if (declared == generics_.end()) { return nullptr; }
         for (const auto& earlier : declared->second) {
             if (earlier.get() == &g) { break; }
-            // a class's name is one class: functions overload by their parameters, a generic class by nothing
-            if (g.kind == generic_kind::class_type && earlier->kind == generic_kind::class_type && earlier->parameters.size() != g.parameters.size()) {
-                diag(diag_level::error, g.location, "generic class '" + qualified + "' is declared with " + counted(earlier->parameters.size()) + " on line " +
-                     std::to_string(earlier->location.line) + " and with " + counted(g.parameters.size()) + " here: a generic class cannot be overloaded by its parameter count",
-                     earlier->location.line, earlier->location.column, /*always_error=*/true);
-                break;
-            }
-            if (!same_generic_signature(*earlier, g)) { continue; }
-            diag(diag_level::error, g.location, "generic '" + generic_spelling(g) + "' is declared again: line " + std::to_string(earlier->location.line) +
-                 " declares it with the same parameters", earlier->location.line, earlier->location.column, /*always_error=*/true);
-            break;
+            if (g.kind == generic_kind::class_type && earlier->kind == generic_kind::class_type && earlier->parameters.size() != g.parameters.size()) { return earlier.get(); }
+            if (same_generic_signature(*earlier, g)) { return earlier.get(); }
         }
+        return nullptr;
+    }
+    // An instance of a generic the unit declares again is that declaration's one error, never a definition of the instance's
+    // name beside the first declaration's
+    bool made_by_declaration_again(const function_decl* fn) const {
+        if (fn->instance_stamp == 0) { return false; }
+        const generic_instance_decl* request = instance_request(*fn);
+        const auto declared = request ? generics_.find(std::string(request->generic)) : generics_.end();
+        if (declared == generics_.end()) { return false; }
+        for (const auto& g : declared->second) {
+            if (g->stamp == fn->instance_stamp) { return clashing_declaration(*g) != nullptr; }
+        }
+        return false;
     }
 
     // A generic method's instances: each a method of the class the declaration names, checked as that class's own
@@ -2549,13 +2568,14 @@ private:
         std::unordered_map<std::string, const function_decl*> first_seen;
         std::unordered_map<std::string_view, const function_decl*> first_name;
         for (const function_decl* fn : fns) {
+            if (made_by_declaration_again(fn)) { continue; }
             const std::string sig = parameter_signature(fn);
             const std::string key = std::string(fn->name) + (fn->is_static ? "#static" : "") + sig;
             auto [it, inserted] = first_seen.emplace(key, fn);
             if (inserted) {   // an earlier overload of the same name and table that differs only by reference
                 for (const function_decl* earlier : fns) {
                     if (earlier == fn) { break; }
-                    if (earlier->name != fn->name || earlier->is_static != fn->is_static ||
+                    if (made_by_declaration_again(earlier) || earlier->name != fn->name || earlier->is_static != fn->is_static ||
                         !detail::differs_only_by_reference(fn->parameters, earlier->parameters)) { continue; }
                     diag(diag_level::error, fn->location,
                          detail::reference_only_overload_text(fn->name, fn->parameters, earlier->parameters, earlier->location.line),

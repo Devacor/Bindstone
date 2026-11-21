@@ -2594,6 +2594,187 @@ public:
             check_eq(std::string("No constructor of 'H' takes (int)"), v[3].as<std::string>(), "a private field: not an aggregate");
             check_eq(std::string("No constructor of 'Derived' takes (int, int)"), v[4].as<std::string>(), "a base with a constructor: not an aggregate");
         });
+
+        // a call that ends without a value yields null whatever it was called on: only a constructor's call yields its object
+        auto nulls = [this](const script_value& r, size_t count, const std::string& what) {
+            const auto& v = r.as_array();
+            check_eq(count, v.size(), what + " (count)");
+            for (size_t i = 0; i < v.size(); ++i) { check_true(v[i].is_null(), what + ": result " + std::to_string(i) + " is " + v[i].to_string()); }
+        };
+
+        test("a_method_that_ends_without_a_value_yields_null", [this, nulls]() {
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            nulls(e->execute(R"(
+                class C {
+                    int n = 1;
+                    void m() {}
+                    void early() { return; }
+                    var v() {}
+                    auto a() {}
+                    function f() {}
+                    void g<T>(T x) {}
+                    void operator()(int k) { n = k; }
+                }
+                class D : C { void m() override {} }
+                class Box<T> { T held; void put(T x) { held = x; } }
+                var through(C& c) { return c.m(); }
+                C c; var any = c; D d; Box<int> box;
+                shared_ptr<C> p = make_shared<C>(); shared_ptr<C> pd = make_shared<D>(); weak_ptr<C> w = p; var made = new C();
+                var kept = c.m();
+                return [kept, c.m(), any.m(), c.early(), c.v(), c.a(), c.f(), c.g<int>(1), c.g("s"), box.put(3), p.m(), pd.m(), w.lock().m(),
+                        made.m(), through(d), c(4), true ? c.m() : c.m(), false ? c.m() : c.m()];
+            )"), 18, "a typed, var, generic, handle and base receiver");
+            check_true(e->execute("c.m()").is_null(), "the host reads null from a program that ends in the call");
+            check_eq((int64_t)4, e->execute("c.n").as_int(), "operator() ran on its object");
+        });
+
+        test("a_method_that_returns_nothing_yields_null_inside_a_class", [this, nulls]() {
+            auto e = make_engine();
+            nulls(e->execute(R"(
+                class Other { int o = 1; void m() {} }
+                class C {
+                    int n = 1;
+                    void m() {}
+                    array<var> inside() { return [m(), this.m()]; }
+                    array<var> beside_a_lambda(Other x) { var bump = [&]() { n += 1; }; bump(); return [m(), x.m()]; }
+                    array<var> in_a_try(Other x) { try { return [m(), x.m()]; } catch (e) { return [e]; } }
+                    array<var> in_a_loop(Other x) { array<var> out; for (int i = 0; i < 2; ++i) { out.push(x.m()); } return out; }
+                }
+                class D : C { void m() override {} array<var> up() { return [super::m(), m()]; } }
+                C c; D d; Other o;
+                array<var> all = c.inside();
+                all.concat(c.beside_a_lambda(o)); all.concat(c.in_a_try(o)); all.concat(c.in_a_loop(o)); all.concat(d.up());
+                return all;
+            )"), 10, "bare, through this and super, and on another object");
+        });
+
+        test("a_path_of_a_method_that_reaches_its_end_yields_null", [this, nulls]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                [[warn_mode]]
+                class Part { int p = 2; }
+                class C {
+                    int n = 1;
+                    var pick(bool p) { if (p) { return 1; } }
+                    auto deduced(bool p) { if (p) { return 1; } }
+                    var down(int d) { if (d > 0) { return down(d - 1); } }
+                    var guarded() { try { n += 1; } catch (e) { } }
+                    Part part() { }
+                    shared_ptr<Part> handle() { }
+                    array<int> list() { }
+                }
+                var pick(bool p) { if (p) { return 1; } }
+                C c;
+                return [[pick(true), c.pick(true), c.deduced(true)],
+                        [pick(false), c.pick(false), c.deduced(false), c.down(3), c.guarded(), c.part(), c.handle(), c.list()]];
+            )");
+            const auto& v = r.as_array();
+            for (const script_value& returned : v[0].as_array()) { check_eq((int64_t)1, returned.as_int(), "the returning path"); }
+            nulls(v[1], 8, "as a function's does");
+        });
+
+        test("a_function_or_lambda_called_in_a_method_yields_null_when_it_returns_nothing", [this, nulls]() {
+            auto e = make_engine();
+            nulls(e->execute(R"(
+                void nothing() {}
+                var call(function f) { return f(); }
+                class C {
+                    int n = 1;
+                    auto later() { return nothing(); }
+                    array<var> run() {
+                        var free = nothing;
+                        return [later(), free(), call(nothing), call([]() { }), call([&]() { n = 2; }), call([this]() { n = 3; }), call(() => nothing())];
+                    }
+                    function plain() { return []() { }; }
+                    function capturing() { return [this]() { n = 4; }; }
+                }
+                C c;
+                array<var> all = c.run();
+                all.concat([c.later(), call(c.plain()), call(c.capturing())]);
+                return all;
+            )"), 10, "a deduced method returning the call, a function value and a lambda");
+            check_eq((int64_t)4, e->execute("c.n").as_int(), "each lambda ran");
+        });
+
+        test("a_method_that_returns_nothing_yields_null_through_a_bound_value_and_a_callback", [this, nulls]() {
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            nulls(e->execute(R"(
+                class C { int n = 1; void m() {} void take(int x) {} var fold(var sum, int x) {} }
+                C c; array<int> xs = [1, 2];
+                var bound = reflect::bind(c, "m");
+                var take = reflect::bind(c, "take");
+                array<var> all = [bound(), reflect::invoke(c, "m"), reflect::invoke(c, "take", 1), xs.reduce(reflect::bind(c, "fold"), 0)];
+                all.concat(array::map(xs, (int x) => c.take(x))); all.concat(array::map(xs, take));
+                all.concat(parallel_transform(xs, (int x) => c.take(x)));
+                return all;
+            )"), 10, "reflect::bind, reflect::invoke and a builtin that reads its callback's result");
+            auto called = e->get_variable("bound").as_function()({});
+            check_true(called && called.value().is_null(), "the host calls the bound method");
+        });
+
+        test("a_method_that_returns_nothing_reads_as_null_in_an_error", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                namespace shop { class Till { int n = 1; void ring() {} int total() { return rung; } } }
+                shop::Till till;
+                var rung = till.ring();
+                var any = till;
+                array<var> out;
+                try { out.push(`${till.total()}`); } catch (e) { out.push(e); }
+                try { out.push(`${any.ring().n}`); } catch (e) { out.push(e); }
+                try { rung.n = 5; out.push(`${till.n}`); } catch (e) { out.push(e); }
+                return out;
+            )");
+            const auto& v = r.as_array();
+            check_eq(std::string("Cannot return null from 'total' (declared -> int)"), v[0].as<std::string>(), "a typed return of the result");
+            check_eq(std::string("Cannot access 'n' on null ('ring(...)' returned null)"), v[1].as<std::string>(), "a member read on the result");
+            check_eq(std::string("Cannot assign to 'n' on null ('rung' is null)"), v[2].as<std::string>(), "a member store through the result");
+        });
+
+        test("a_constructor_call_yields_its_object_and_an_operator_what_it_returns", [this, ints, nulls]() {
+            struct Host { int id = 5; };
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            dynamic_binder<Host>(*e, "Host").constructor<>().property("id", &Host::id).build();
+            ints(e->execute(R"(
+                class P { int a = 1; P() { a = 2; } P(int v) { a = v; if (v > 5) { return; } a = v + 1; } }
+                class Q : P { int b = 0; Q() : super(7) { b = 1; } Q(int x) : this() { b = x; } }
+                class R : P { int r = 3; }
+                class Plain { int x = 4; }
+                class Over : Host { int extra = 6; Over() : super() {} }
+                P p; P copy = p; var make = P; shared_ptr<P> h = make_shared<P>(4); var n = new Q(6); Q q; array<P> ps = [P(), P(1)];
+                return [p.a, P(3).a, P(9).a, q.a, q.b, Q(5).a, Q(5).b, R().a, R().r, h.a, n.a, n.b, make(2).a, Plain().x, Plain{9}.x, ps[1].a,
+                        copy.a, reflect::construct("P", 8).a, reflect::construct_shared("Q").b, Over().id, Over().extra];
+            )"), {2, 4, 9, 7, 1, 7, 5, 2, 3, 5, 7, 6, 3, 4, 9, 2, 2, 8, 1, 5, 6}, "every construction, one ended by a bare return included");
+            ints(e->execute(R"(
+                class Tally {
+                    int n = 0;
+                    Tally& operator+=(int k) { n += k; return this; }
+                    Tally& operator++() { n += 1; return this; }
+                    Tally operator++(int) { Tally old = this; n += 1; return old; }
+                    Tally& operator=(int k) { n = k; return this; }
+                    Tally& self() { return this; }
+                }
+                Tally t; t += 5; ++t; Tally before = t++; array<Tally> all = [t]; all[0] += 10;
+                return [t.n, before.n, all[0].n, (t += 1).n, (++t).n, (t = 3).n, t.self().n];
+            )"), {7, 6, 17, 8, 9, 3, 3}, "an operator or a method that returns this");
+            auto r = e->execute(R"(
+                class Quiet {
+                    int n = 0;
+                    void operator+=(int k) { n += k; }
+                    void operator++() { n += 1; }
+                    void operator=(int k) { n = k; }
+                }
+                Quiet s; s += 5; ++s; array<Quiet> some = [s]; some[0] += 10;
+                var added = (s += 1); var stepped = ++s; var assigned = (s = 2);
+                return [[added, stepped], [s.n, some[0].n, assigned.n]];
+            )");
+            const auto& v = r.as_array();
+            nulls(v[0], 2, "an in-place operator that returns nothing");
+            ints(v[1], {2, 16, 2}, "it changed its object, and an assignment yields its target");
+        });
     }
 };
 

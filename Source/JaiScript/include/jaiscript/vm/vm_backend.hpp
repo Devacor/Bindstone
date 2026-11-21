@@ -1438,8 +1438,6 @@ namespace jai::vm {
         // returns); boxing demotes active counted-for fast states
         script_value share_env_ref(script_value& storage);
         void clear_this_on_frame_exit(const std::shared_ptr<environment>& entry_env);
-        script_value implicit_this_result(call_frame& locals);
-        script_value implicit_result_for_record(call_record& rec);
         checked_result<script_value> convert_return_value(script_value result, const type_info_ptr& return_type,
                                                           std::string_view callee = {});
         checked_result<script_value> convert_return_at_site(script_value result, const type_info_ptr& return_type,

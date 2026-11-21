@@ -9644,28 +9644,6 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         } else {
             result = std::move(returnValue_.value());
         }
-    } else {
-        // Check if this is a constructor (method with no explicit return)
-        // Constructors implicitly return 'this'
-        if (active_coroutine_ && active_coroutine_->get_function() &&
-            active_coroutine_->get_function()->body == function.body) {
-            // Coroutine body activation ran off the end: completes with null (vm
-            // run_fiber parity) - the implicit-'this' method rule must not apply.
-            result = make_value();
-        } else if (call_stack_[frame_index].is_method) {
-            result = call_stack_[frame_index].get_this();
-        } else {
-            // Check environment for method context (for closures inside methods)
-            auto function_env = environment_;
-            if (function_env->is_method_env()) {
-                result = function_env->get_this_object();
-            } else if (function_env->get_parent() && function_env->get_parent()->is_method_env()) {
-                result = function_env->get_parent()->get_this_object();
-            } else {
-                // Regular function with no return statement returns null
-                result = make_value();
-            }
-        }
     }
 
     // Cleanup and return success

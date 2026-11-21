@@ -20039,13 +20039,12 @@ bool vm_backend::handle_throw_unwind(frame*& fp, size_t records_base) {
 		if (is_unwinding_ && !trace_captured_) {
 			capture_stack_trace();
 		}
-		// An unwinding callee "completes" with its implicit this-return, conversion
-		// skipped — the native path's cleanup + exec_call result push, frame by frame
+		// An unwinding callee "completes" with null, conversion skipped — the native path's
+		// cleanup + exec_call result push, frame by frame
 		call_record& rec = *call_records_[call_records_top_ - 1];
-		script_value result = implicit_result_for_record(rec);
 		pop_script_frame_core(rec);
 		fp = rec.caller;
-		stack_.push_back(std::move(result));
+		stack_.push_back(make_null());
 	}
 }
 
@@ -22642,8 +22641,8 @@ op_status vm_backend::push_static_method_frame(frame& caller, const script_value
 
 // Mirrors make_bound_method's keep-alive fix-up: a NON-OWNING method result (the C++
 // chaining idiom surfacing through a script method) gets anchored to the receiver so a
-// temporary receiver survives the expression. No-op for owning results and implicit
-// this-returns, so only return_from_script_frame applies it.
+// temporary receiver survives the expression. No-op for owning results and a fall-off's
+// null, so only return_from_script_frame applies it.
 void vm_backend::anchor_method_result(script_value& result, script_value& receiver) {
 	if (!receiver.is_object() || !result.is_non_owning_object()) {
 		return;
@@ -23088,13 +23087,12 @@ op_status vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) 
 op_status vm_backend::fall_off_script_frame(frame*& fp) {
 	call_record& rec = *call_records_[call_records_top_ - 1];
 	if (pops_lean(rec)) {
-		script_value result = implicit_result_for_record(rec);
 		pop_lean_frame(rec);
 		fp = rec.caller;
-		land_call_result(*fp, std::move(result));
+		land_call_result(*fp, make_null());
 		return {};
 	}
-	script_value result = rec.ctor_frame ? rec.locals.get_this() : implicit_result_for_record(rec);   // conversion skipped: fall-off parity
+	script_value result = rec.ctor_frame ? rec.locals.get_this() : make_null();   // conversion skipped: fall-off parity
 	if (rec.ctor_frame && !is_unwinding_) [[unlikely]] { detail::construction_completed(result); }   // a constructor whose parameters' binding threw constructed nothing
 	if (rec.ctor_result_stamp && result.type() == script_value_type::jai_object_type) [[unlikely]] {
 		result.set_type_info(rec.ctor_result_stamp);
@@ -23166,32 +23164,6 @@ void vm_backend::clear_this_on_frame_exit(const std::shared_ptr<environment>& en
 	if (entry_env && entry_env->is_method_env()) {
 		entry_env->clear_this_reference();
 	}
-}
-
-// Record-aware implicit result: lazy frames apply the single-level rule against their
-// effective env (prev_env / closure_env); eager frames keep the two-level native walk
-script_value vm_backend::implicit_result_for_record(call_record& rec) {
-	if (rec.env_lazy) {
-		if (environment_->is_method_env()) {
-			return environment_->get_this_object();
-		}
-		return make_null();
-	}
-	return implicit_this_result(rec.locals);
-}
-
-script_value vm_backend::implicit_this_result(call_frame& locals) {
-	if (locals.is_method) {
-		return locals.get_this();
-	}
-	auto function_env = environment_;
-	if (function_env->is_method_env()) {
-		return function_env->get_this_object();
-	}
-	if (function_env->get_parent() && function_env->get_parent()->is_method_env()) {
-		return function_env->get_parent()->get_this_object();
-	}
-	return make_null();
 }
 
 // Return-site conversion, one routine for every door (op_return_convert inside try
@@ -24123,10 +24095,6 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 
 	if (has_return_value_) {
 		result = std::move(return_value_.value());   // converted at the return door (entry_return_finish)
-	} else if (locals.is_method) {
-		result = std::move(*locals.this_object_ptr);   // the frame's receiver dies with the frame: the result takes it
-	} else {
-		result = implicit_this_result(locals);
 	}
 
 	cleanup();
@@ -24376,10 +24344,6 @@ checked_result<script_value> vm_backend::run_callback(callback_session& s, const
 	script_value result = make_null();
 	if (has_return_value_) {
 		result = std::move(return_value_.value());
-	} else if (!s.lazy || locals.is_method) {
-		result = implicit_this_result(locals);
-	} else if (environment_->is_method_env()) {
-		result = environment_->get_this_object();
 	}
 	cleanup();
 	return result;

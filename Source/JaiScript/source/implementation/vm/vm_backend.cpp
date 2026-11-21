@@ -12274,6 +12274,11 @@ op_status vm_backend::exec_destructure(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
+// the name a call's site gives its callee: the call as written (callee_name_symbol), 0 for a computed callee
+static uint64_t written_callee_name(const chunk& code, const call_site& site) {
+	return site.call_node != k_invalid_u32 ? callee_name_symbol(static_cast<const call_expr*>(code.nodes[site.call_node].get())->callee.get()) : 0;
+}
+
 // Callee-first probe (callee-before-args IS the language,
 // matching C++17): resolve the identifier callee exactly where op_load did (same
 // resolution ladder via fused_ident_value, same errors) and park it in the pending
@@ -12879,7 +12884,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 				stack_.back() = std::move(call_operator);
 				return {};
 			}
-			return raise_not_callable(0, stack_.back());
+			return raise_not_callable(ins.a != k_invalid_u32 ? written_callee_name(*f.code, f.code->call_sites[ins.a]) : 0, stack_.back());
 		}
 		return {};
 	}
@@ -13925,9 +13930,7 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 	if (!callee.is_function()) {
 		script_value call_operator = call_operator_of(callee);
 		if (!call_operator.is_function()) {
-			const uint64_t name_id = site.call_node != k_invalid_u32
-				? callee_name_symbol(static_cast<call_expr*>(f.code->nodes[site.call_node].get())->callee.get()) : 0;
-			return raise_not_callable(name_id, callee);
+			return raise_not_callable(written_callee_name(*f.code, site), callee);
 		}
 		callee = std::move(call_operator);
 	}

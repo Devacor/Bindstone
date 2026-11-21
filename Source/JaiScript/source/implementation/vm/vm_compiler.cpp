@@ -9317,7 +9317,7 @@ JAI_NOINLINE void vm_compiler::compile_call(const std::shared_ptr<call_expr>& ex
 		// Computed callees (index/call/static-member results) take the loaded value's
 		// callable check at the same observation point
 		if (call_args_need_probe(*expr)) {
-			emit(opcode::op_probe_member, k_invalid_u32, 1);
+			probe_ip = emit(opcode::op_probe_member, k_invalid_u32, 1);
 		}
 	}
 	site_lease site(pending_sites_);
@@ -9362,6 +9362,7 @@ JAI_NOINLINE void vm_compiler::compile_call(const std::shared_ptr<call_expr>& ex
 		emit(sleep_call ? opcode::op_sleep : expr->literal_format_call() ? opcode::op_format_call : opcode::op_call_from_scratch, static_cast<uint32_t>(expr->arguments.size()),
 		     static_cast<uint32_t>(chunk_->call_sites.size() - 1), tail_site ? 1u : 0u);
 	} else {
+		if (probe_ip != SIZE_MAX) { chunk_->code[probe_ip].a = static_cast<uint32_t>(chunk_->call_sites.size() - 1); }   // the check names its callee as the call does
 		emit(opcode::op_call, static_cast<uint32_t>(expr->arguments.size()),
 		     static_cast<uint32_t>(chunk_->call_sites.size() - 1));
 	}

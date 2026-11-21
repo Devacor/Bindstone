@@ -129,6 +129,74 @@ public:
 			});
 		});
 
+		// E::v, C::s and ns::x name their callee whatever the arguments are: the VM's check ahead of an argument that runs code named none
+		test("a_qualified_callee_keeps_its_name", [this]() {
+			const std::string scoped = prelude() +
+				"enum Lvl { low, mid, high }\n"
+				"class Cfg { static int max = 3; static var hook = null; static string label = \"l\"; }\n"
+				"namespace cfg { int lo = 1; var hooks = [1]; namespace inner { float deep = 2.5; } }\n"
+				"using cfg::lo, Lvl::low;\n";
+			check_cases(scoped, {
+				{"return Lvl::high(1);", "Cannot call 'high': it is an int, not a function"},
+				{"return Lvl::high(add(1, 2));", "Cannot call 'high': it is an int, not a function"},
+				{"return Lvl::high(gint);", "Cannot call 'high': it is an int, not a function"},
+				{"return Lvl::low(add(1, 2)) + 1;", "Cannot call 'low': it is an int, not a function"},
+				{"int n = 0; for (int i = 0; i < 2; ++i) { n += Lvl::mid(add(i, 1)); } return n;", "Cannot call 'mid': it is an int, not a function"},
+				{"return Cfg::max(3);", "Cannot call 'max': it is an int, not a function"},
+				{"return Cfg::max(add(1, 2));", "Cannot call 'max': it is an int, not a function"},
+				{"return Cfg::hook(add(1, 2));", "Cannot call 'hook': it is null, not a function"},
+				{"return Cfg::label(add(1, 2));", "Cannot call 'label': it is a string, not a function"},
+				{"return cfg::lo(1);", "Cannot call 'lo': it is an int, not a function"},
+				{"return cfg::lo(add(1, 2));", "Cannot call 'lo': it is an int, not a function"},
+				{"return cfg::hooks(add(1, 2));", "Cannot call 'hooks': it is an array, not a function"},
+				{"return cfg::inner::deep(gint);", "Cannot call 'deep': it is a float, not a function"},
+				{"return lo(add(1, 2));", "Cannot call 'lo': it is an int, not a function"},
+				{"return low(add(1, 2));", "Cannot call 'low': it is an int, not a function"},
+				{"return ::gint(add(1, 2));", "Cannot call 'gint': it is an int, not a function"},
+				{"auto l = (int x) => Lvl::high(add(x, 1)); return l(1);", "Cannot call 'high': it is an int, not a function"},
+				{"auto l = function(int x) { return Cfg::max(add(x, 1)); }; return l(1);", "Cannot call 'max': it is an int, not a function"},
+				{"auto l = (int x) => cfg::lo(add(x, 1)); return l(1);", "Cannot call 'lo': it is an int, not a function"},
+			});
+			const std::string in_class = scoped +
+				"class S {\n"
+				"    Lvl cur = Lvl::mid;\n"
+				"    int by_enum() { return Lvl::high(cur); }\n"
+				"    int by_static() { return Cfg::max(cur); }\n"
+				"    int by_namespace() { return cfg::lo(cur); }\n"
+				"    int by_using() { return lo(cur); }\n"
+				"    static int from_static() { return Lvl::low(add(1, 2)); }\n"
+				"}\n"
+				"class D : Cfg { int inherited() { return max(add(1, 2)); } int qualified() { return Cfg::max(add(1, 2)); } }\n";
+			check_cases(in_class, {
+				{"return S().by_enum();", "Cannot call 'high': it is an int, not a function"},
+				{"return S().by_static();", "Cannot call 'max': it is an int, not a function"},
+				{"return S().by_namespace();", "Cannot call 'lo': it is an int, not a function"},
+				{"return S().by_using();", "Cannot call 'lo': it is an int, not a function"},
+				{"return S::from_static();", "Cannot call 'low': it is an int, not a function"},
+				{"return D().inherited();", "Cannot call 'max': it is an int, not a function"},
+				{"return D().qualified();", "Cannot call 'max': it is an int, not a function"},
+			});
+			const std::pair<const char*, const char*> at_program_scope[] = {
+				{"Lvl::high(add(1, 2));", "Cannot call 'high': it is an int, not a function"},
+				{"Cfg::max(add(1, 2));", "Cannot call 'max': it is an int, not a function"},
+				{"cfg::lo(add(1, 2));", "Cannot call 'lo': it is an int, not a function"},
+				{"lo(add(1, 2));", "Cannot call 'lo': it is an int, not a function"},
+				{"for (int i = 0; i < 2; ++i) { Lvl::high(i); }", "Cannot call 'high': it is an int, not a function"},
+				{"var r = cfg::inner::deep(gint) + 1;", "Cannot call 'deep': it is a float, not a function"},
+			};
+			std::string failures;
+			for (const auto& c : at_program_scope) {
+				for (const backend which : {backend::interpreter, backend::vm, backend::vm_reference}) {
+					const std::string got = first_line(which, scoped + c.first + "\n");
+					if (got != c.second) {
+						failures += std::string(c.first) + (which == backend::interpreter ? " (interpreter)" : which == backend::vm ? " (vm)" : " (vm-reference)") +
+						            "\n  expected: " + c.second + "\n  got:      " + got + "\n";
+					}
+				}
+			}
+			check_true(failures.empty(), failures);
+		});
+
 		// a block holds a scalar local and a compiler value in cells: the callee probe reads the slot, which takes the cell's value first
 		test("a_callee_a_loop_holds_reads_as_its_value", [this]() {
 			check_cases(prelude(), {

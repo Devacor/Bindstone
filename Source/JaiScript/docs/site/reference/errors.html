@@ -151,8 +151,8 @@ try {
 </tbody></table></div>
 <h4 id="errors-not-a-function">Not a function<a class="hlink" href="#errors-not-a-function" aria-label="link">&#8203;</a></h4>
 <div class="tablewrap"><table><thead><tr><th>Text</th><th>When</th><th>Fix</th></tr></thead><tbody>
-<tr id="err-cannot-call-non-function-variable"><td><code>Cannot call 'x': it is an int, not a function</code></td><td>Called variable holds a non-function.</td><td>Call a function, or rename the variable hiding it.</td></tr>
-<tr id="err-cannot-call-null-variable"><td><code>Cannot call 'f': it is null, not a function</code></td><td>Called variable holds null.</td><td>Assign a function or lambda first.</td></tr>
+<tr id="err-cannot-call-non-function-variable"><td><code>Cannot call 'x': it is an int, not a function</code></td><td>Called variable, member or qualified name (<code>E::v</code>, <code>C::s</code>, <code>ns::x</code>) holds a non-function.</td><td>Call a function, or rename the variable hiding it.</td></tr>
+<tr id="err-cannot-call-null-variable"><td><code>Cannot call 'f': it is null, not a function</code></td><td>Called variable, member or qualified name holds null.</td><td>Assign a function or lambda first.</td></tr>
 <tr id="err-cannot-call-non-function-value"><td><code>Cannot call a value of type int: it is not a function</code></td><td>Computed callee (an element, a call result) is not a function.</td><td>Call only functions.</td></tr>
 <tr id="err-cannot-call-null-value"><td><code>Cannot call null: it is not a function</code></td><td>Computed callee is null.</td><td>Null-check first.</td></tr>
 </tbody></table></div>

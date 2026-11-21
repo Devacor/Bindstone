@@ -536,7 +536,7 @@ body, not a coroutine, not a method) compiles at its call site as the callee's b
 budget, 512 nodes for the body and the statement together) and made of the forms the graft takes: declarations, expression
 statements, blocks, ifs, returns, C-style `for` and `while` loops with `break` and `continue` inside them; literals, identifiers,
 arithmetic, assignments, members, elements, ternaries, casts and math intrinsics. A `return` inside the callee's own loop, a switch,
-a try, a lambda, `this` or a reference declaration in the body leaves the call a call. A call the body makes stays a call made from
+a try, a lambda, `this`, a reference declaration or a node a const rule guards (internal/const.md 9.2) in the body leaves the call a call. A call the body makes stays a call made from
 the grafted body (a door call inside a block, which lands a plain-name call wherever it lands a value): the criterion is the node budget,
 not the absence of calls. `op_graft_depth` brackets such a body (`op_c_gdepth` in a block), so its calls run one level below the grafted
 frame as the callee's own frame would put them (the call-depth cap, a host callback's depth); a raise out of the bracket leaves the level

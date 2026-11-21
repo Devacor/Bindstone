@@ -19,6 +19,7 @@
 #include "fuzz_return_band.hpp"
 #include "fuzz_less_than_band.hpp"
 #include "fuzz_store_band.hpp"
+#include "fuzz_const_band.hpp"
 #include "fuzz_block_band.hpp"
 #include "fuzz_local_alias_band.hpp"
 
@@ -448,6 +449,9 @@ namespace jai::fuzz {
 			less_than_band ltband(seed_);   // '<' after a name in the shapes a comparison and a call with type arguments share: under the call-arguments band's switch
 			const bool less_than_roll = ltband.roll();
 			if (call_args_ == band_mode::always || (call_args_ == band_mode::sometimes && less_than_roll)) { p.segments.push_back(ltband.emit()); p.labels.push_back("less-than"); }
+			const_guard_band cgband(seed_);   // a run-time const guard in a callee a graft takes: under the call-arguments band's switch
+			const bool const_guard_roll = cgband.roll();
+			if (call_args_ == band_mode::always || (call_args_ == band_mode::sometimes && const_guard_roll)) { p.segments.push_back(cgband.emit()); p.labels.push_back("const-guard"); }
 			local_alias_band lband(seed_);
 			const bool local_alias_roll = lband.roll();
 			if (local_alias_ == band_mode::always || (local_alias_ == band_mode::sometimes && local_alias_roll)) { p.segments.push_back(lband.emit()); p.labels.push_back("local-alias"); }

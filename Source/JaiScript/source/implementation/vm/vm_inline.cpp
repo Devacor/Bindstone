@@ -556,6 +556,8 @@ void walk_decls(const std::vector<declaration_ptr>& decls, site_walk& w) {
 // typed as the original.
 expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 	if (!c.ok || !e) return nullptr;
+	// a const guard runs where its node is reached (internal/const.md), on the node the checker stamped: a body that holds one keeps its call
+	if (detail::const_site_of(e.get())) { c.fail("a node a const rule guards"); return nullptr; }
 	for (const auto& s : c.spills) { if (s.first == e.get()) { return stand_in(s.second.get(), e, c); } }
 	switch (e->get_type()) {
 	case node_type::literal_expr: ++c.nodes; return e;   // immutable: shared as it is
@@ -637,7 +639,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		if (!c.ok) return nullptr;
 		auto n = c.make<assignment_expr>(a->location, t, a->op, v);
 		n->static_store_proof = a->static_store_proof; n->static_operand_class = a->static_operand_class;
-		n->postfix_old_result = a->postfix_old_result; n->incdec_desugar = a->incdec_desugar;
+		n->postfix_old_result = a->postfix_old_result; n->incdec_desugar = a->incdec_desugar; n->yields_reference = a->yields_reference;
 		if (c.stamps && a->target->get_type() == node_type::identifier_expr) {
 			const script_value_type tk = stamp_kind(a->target.get(), c), vk = stamp_kind(a->value.get(), c);
 			if (a->op.type != token_type::equal && n->static_operand_class == operand_class_unknown) { n->static_operand_class = kind_class(tk, vk); }
@@ -655,6 +657,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		auto n = c.make<member_expr>(m->location, o, m->member, m->member_id, m->is_arrow, m->is_static);
 		n->on_caught = m->on_caught;
 		n->null_safe = m->null_safe; n->getter_id = m->getter_id; n->enum_constant = m->enum_constant; n->call_result_discarded = m->call_result_discarded;
+		n->place_read = m->place_read;   // where a reference binds the read (an argument, a cast<T&> operand) it hands back the place
 		return n;
 	}
 	case node_type::ternary_expr: {
@@ -671,6 +674,9 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		made->dynamic = k->dynamic;
 		made->type_value = k->type_value;
 		made->truth_read = k->truth_read;
+		made->implicit_ref = k->implicit_ref;
+		made->binding_ref = k->binding_ref;
+		made->return_of = k->return_of;
 		return made;
 	}
 	case node_type::call_expr: {
@@ -769,6 +775,7 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 	}
 	case node_type::return_stmt: {
 		auto* r = static_cast<const return_stmt*>(s.get());
+		if (detail::const_site_of(r)) { c.fail("a node a const rule guards"); return nullptr; }
 		if (c.loop_depth > 0) { c.fail("a return inside a loop"); return nullptr; }
 		std::vector<declaration_ptr> ds;
 		if (!c.result) {
@@ -848,6 +855,7 @@ std::vector<declaration_ptr> clone_body(const std::vector<declaration_ptr>& decl
 		switch (d->get_type()) {
 		case node_type::variable_decl: {
 			auto* v = static_cast<const variable_decl*>(d.get());
+			if (detail::const_site_of(v)) { c.fail("a node a const rule guards"); return out; }
 			if (v->slot_index == SIZE_MAX || v->is_static || v->ref_escaping || v->function_spelling) { c.fail("a declaration the graft does not take"); return out; }
 			if (v->type && v->type->is_reference()) { c.fail("a reference declaration"); return out; }
 			if (c.in_loop && v->initializer && !landable(v->initializer.get(), &c.lc)) { c.fail("a declaration the block cannot land"); return out; }   // a declaration the block cannot land: the call stays

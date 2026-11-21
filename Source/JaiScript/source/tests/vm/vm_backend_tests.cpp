@@ -3657,6 +3657,37 @@ public:
 			check_eq(i1, v1, "opaque callee parity");
 		});
 
+		// A member a reference binds (an argument, a cast<T&> operand) over a computed base reads as its place, and a conditional's arm
+		// where a reference may bind reads as a value whose storage replaces it: a grafted body's copy of the read lost both, so the
+		// callee's reference parameter was refused, wrote a temporary, or raised over an arm that names no storage
+		test("a_grafted_body_keeps_the_place_a_reference_binds", [this]() {
+			const std::string prelude =
+				"var gpts = [math::vec2(1.0, 2.0), math::vec2(3.0, 4.0)];\n"
+				"class P { int raw = 4; int _get_twice() { return raw * 2; } }\n"
+				"P gp;\nint ga = 1;\nint gb = 2;\n"
+				"void bumpf(float& f) { f += 10.0; }\n"
+				"void seti(int& r) { r = 77; }\n"
+				"int readi(const int& r) { return r + 1; }\n";
+			const std::pair<const char*, const char*> cases[] = {
+				{"void leaf(int i) { bumpf(gpts[i + 1].x); }\nstring run() { leaf(0); return `${gpts[0].x} ${gpts[1].x}`; }\nrun();", "1.0 13.0"},
+				{"void leaf(int i) { bumpf(cast<float&>(gpts[i + 1].y)); }\nstring run() { leaf(0); return `${gpts[0].y} ${gpts[1].y}`; }\nrun();", "2.0 14.0"},
+				{"void leaf(bool c) { seti(c ? ga : gb); }\nstring run() { leaf(false); return `${ga} ${gb}`; }\nrun();", "1 77"},
+				{"int leaf(bool c) { return readi(c ? ga : gp.twice); }\nstring run() { return `${leaf(false)} ${leaf(true)}`; }\nrun();", "9 2"},
+			};
+			std::string failures;
+			for (const auto& c : cases) {
+				for (int mode = 0; mode < 3; ++mode) {
+					auto e = mode == 0 ? interp_engine() : vm_engine();
+					if (mode == 2) { e->vm_reference_mode(true); }
+					jai::stdlib::register_all(*e);
+					std::string got;
+					try { got = e->execute(prelude + c.first).as_string(); } catch (const std::exception& error) { got = error.what(); }
+					if (got != c.second) { failures += std::string(c.first) + (mode == 0 ? " (interpreter)" : mode == 1 ? " (vm)" : " (vm-reference)") + "\n  expected: " + c.second + "\n  got:      " + got + "\n"; }
+				}
+			}
+			check_true(failures.empty(), failures);
+		});
+
 		test("an_inlined_untyped_result_outlives_the_graft_block", [this]() {
 			// fuzz seeds 1564 and 1848: an inlined call of a function without a declared result keeps its result in a var slot; a
 			// program with a class makes var slots candidates for scope-exit kills, and the graft's block exit killed the result

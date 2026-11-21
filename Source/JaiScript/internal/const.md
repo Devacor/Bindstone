@@ -397,7 +397,8 @@ demotes them, and the backends never depend on the diagnostics.
   VM compiles `const_raises` into `op_error` with the text and `const_runtime` into `op_const_guard` ahead of the node
   (`vm_compiler::emit_const_guard`). Code without a const pays nothing: the interpreter tests one byte per assignment,
   unary, call, cast, declaration, return and range-for visit, the VM emits nothing. Grafting and hoisting step aside for a
-  guarded call, and the counted-for fast paths for a guarded initializer or update.
+  guarded call and for a callee whose body holds a guarded node (the verdict stays on the node the checker stamped, which the
+  callee's own chunk compiles), and the counted-for fast paths for a guarded initializer or update.
 - **`const_runtime`** walks the path's values without running code (`detail::const_path_crosses_handle`): the root's
   storage, then each field and each element by a literal or a variable index. A handle on the way lets the write run; none
   raises. A call additionally asks whether the dispatched class's method writes its receiver (`receiver_write_analysis`

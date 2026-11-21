@@ -237,6 +237,7 @@ drop a</code></pre></div>
 <tr><td>A temporary a statement makes and consumes</td><td>By the end of the statement, after any member chain read through it. One in a condition dies before the branch runs.</td></tr>
 <tr><td>A temporary bound to a <code>const T&amp;</code></td><td>With the reference's scope.</td></tr>
 <tr><td>A program-scope variable (namespace variables and statics included)</td><td>When the engine is destroyed, last constructed first.</td></tr>
+<tr><td>A suspended coroutine's locals, and the arguments of one never started</td><td>When its last handle goes. A coroutine still alive when the engine is destroyed (C++ owns its handle, or a field of its own receiver holds it) ends then, after the program-scope variables, the last made first.</td></tr>
 </tbody></table></div>
 <ul>
 <li>A dying object runs its destructor body, then its members die, last declared first, then its base's destructor and the base's members.</li>

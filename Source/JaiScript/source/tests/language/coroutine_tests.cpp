@@ -714,6 +714,138 @@ public:
             }
         });
 
+        // A handle C++ owns through its shared_ptr (embedding/09-coroutine-hosting.html) can outlive its engine: the engine's
+        // destruction ends the coroutine while it still runs script, and the handle afterwards refuses a resume and drops safely.
+        // One test per shape, so a crash names the shape
+        struct outliving_shape { const char* name; const char* declarations; const char* make; int steps; const char* dies_at_teardown; };
+        static const outliving_shape outliving_shapes[] = {
+            {"never_started", "coroutine int count(Tracked held) { yield 1; return 2; }", "auto co = count(Tracked(\"argument\"));", 0, "argument;"},
+            {"suspended", "coroutine int count(int n) { Tracked t = Tracked(\"local\"); yield n; yield n; return n; }", "auto co = count(3);", 1, "local;"},
+            {"finished", "coroutine int count(int n) { Tracked t = Tracked(\"local\"); yield n; return n; }", "auto co = count(3);", 2, ""},
+            {"failed", "coroutine int count(int n) { Tracked t = Tracked(\"local\"); yield n; throw \"stop\"; }", "auto co = count(3); co.next(); try { co.next(); } catch (e) {}", 0, ""},
+            {"suspended_generic", "coroutine T count<T>(T n) { Tracked t = Tracked(\"local\"); yield n; yield n; return n; }", "auto co = count<int>(3);", 1, "local;"},
+            {"suspended_holding_generic_instances",
+             "class Box<T> { T v; } coroutine T count<T>(T n) { Box<T> held; held.v = n; Box<array<Tracked>> more; more.v.push(Tracked(\"first\")); more.v.push(Tracked(\"second\")); yield held.v; return n; }",
+             "auto co = count<string>(\"s\");", 1, "second;first;"},
+            {"suspended_method", "class Owner { string name = \"owner\"; ~Owner() { note_end(name); } coroutine int drain() { Tracked t = Tracked(\"local\"); yield 1; yield 2; return 3; } }",
+             "Owner owner; auto co = owner.drain();", 1, "local;owner;"},
+            {"suspended_in_a_loop_over_instances",
+             "coroutine int count(int n) { array<Tracked> items = [Tracked(\"a\"), Tracked(\"b\")]; for (auto& item : items) { Tracked body = Tracked(\"body\"); yield n; } return n; }",
+             "auto co = count(3);", 1, "body;b;a;"},
+            {"suspended_in_a_catch", "coroutine int count(int n) { try { throw \"thrown\"; } catch (e) { Tracked t = Tracked(\"handler\"); yield n; } return n; }", "auto co = count(3);", 1, "handler;"},
+            {"suspended_sharing_a_local_with_a_lambda",
+             "coroutine int count(int n) { Tracked t = Tracked(\"shared\"); auto read = [&]() { return t.name; }; yield read().size(); return n; }", "auto co = count(3);", 1, "shared;"},
+            {"suspended_holding_a_suspended_coroutine",
+             "coroutine int inner() { Tracked t = Tracked(\"inner\"); yield 1; return 2; } coroutine int count(int n) { Tracked t = Tracked(\"outer\"); auto held = inner(); held.next(); yield n; return n; }",
+             "auto co = count(3);", 1, "inner;outer;"},
+        };
+        for (const outliving_shape& shape : outliving_shapes) {
+            test(std::string("a_native_handle_dropped_after_its_engine__") + shape.name, [this, shape]() {
+                std::string log;
+                std::shared_ptr<coroutine_handle> handle;
+                {
+                    auto e = make_engine();
+                    stdlib::register_all(*e);
+                    e->add_function("note_end", [&log](const std::string& text) { log += text + ";"; });
+                    e->execute("class Tracked { string name; Tracked(string n) { name = n; } ~Tracked() { note_end(name); } }");
+                    e->execute(shape.declarations);
+                    e->execute(shape.make);
+                    handle = std::static_pointer_cast<coroutine_handle>(e->get_variable("co").get_object_holder()->host_object());
+                    for (int i = 0; i < shape.steps; ++i) { check_true(static_cast<bool>(handle->next(e.get())), "a step before the engine goes"); }
+                    log.clear();
+                }
+                check_eq(std::string(shape.dies_at_teardown), log, "what the coroutine held died with the engine, once");
+                check_true(handle->done(), "the coroutine ended with its engine");
+                check_true(handle->get_status() == (std::string_view(shape.name) == "finished" ? coroutine_handle::status::completed : coroutine_handle::status::failed));
+                for (const script_int count : {script_int(1), script_int(3)}) {
+                    const checked_result<script_value> resumed = handle->next(nullptr, count);
+                    check_false(static_cast<bool>(resumed), "a resume after the engine is refused");
+                    check_eq(std::string("Value outlived its engine."), std::string(resumed.message()));
+                }
+                handle.reset();
+                check_eq(std::string(shape.dies_at_teardown), log, "the drop destroys nothing more");
+            });
+        }
+
+        test("a_handle_the_host_owns_is_retired_after_the_programs_variables", [this]() {
+            // the program's own variables die first, last constructed first; a coroutine C++ still owns ends after them, the last made first
+            std::string log;
+            std::vector<std::shared_ptr<coroutine_handle>> handles;
+            {
+                auto e = make_engine();
+                stdlib::register_all(*e);
+                e->add_function("note_end", [&log](const std::string& text) { log += text + ";"; });
+                e->execute(R"(
+                    class Tracked { string name; Tracked(string n) { name = n; } ~Tracked() { note_end(name); } }
+                    coroutine int count(string name) { Tracked t = Tracked(name); yield 1; return 2; }
+                    Tracked before = Tracked("before");
+                    auto first = count("first");
+                    auto second = count("second");
+                    auto unowned = count("unowned");
+                    Tracked after = Tracked("after");
+                    first.next(); second.next(); unowned.next();
+                )");
+                for (const char* name : {"first", "second"}) {
+                    handles.push_back(std::static_pointer_cast<coroutine_handle>(e->get_variable(name).get_object_holder()->host_object()));
+                }
+            }
+            check_eq(std::string("after;unowned;before;second;first;"), log);
+            handles.clear();
+            check_eq(std::string("after;unowned;before;second;first;"), log);
+        });
+
+        test("a_destructor_at_teardown_that_resumes_a_retired_coroutine_is_refused", [this]() {
+            // a coroutine's local, dying as the engine retires the coroutine, resumes one the engine retired before it
+            std::string log;
+            std::string reported;
+            std::shared_ptr<coroutine_handle> early;
+            std::shared_ptr<coroutine_handle> late;
+            {
+                auto e = make_engine();
+                stdlib::register_all(*e);
+                e->add_function("note_end", [&log](const std::string& text) { log += text + ";"; });
+                e->set_script_error_handler([&reported](const std::string& message) { reported += message; });
+                e->execute(R"(
+                    coroutine int steps() { yield 1; yield 2; return 3; }
+                    class Slot { var target = null; }
+                    class Resumer { var slot = null; ~Resumer() { note_end("resumer"); slot.target.next(); note_end("resumed"); } }
+                    coroutine int holder(var slot) { Resumer r; r.slot = slot; yield 1; return 2; }
+                    auto slot = new Slot();
+                    auto late = holder(slot);
+                    late.next();
+                    auto early = steps();
+                    early.next();
+                    slot.target = early;
+                )");
+                early = std::static_pointer_cast<coroutine_handle>(e->get_variable("early").get_object_holder()->host_object());
+                late = std::static_pointer_cast<coroutine_handle>(e->get_variable("late").get_object_holder()->host_object());
+            }
+            check_eq(std::string("resumer;"), log, "the destructor ran as far as the resume");
+            check_true(reported.find("Value outlived its engine.") != std::string::npos, "the refusal reaches the script error handler: " + reported);
+            early.reset();
+            late.reset();
+        });
+
+        test("a_suspended_coroutine_in_a_field_of_its_receiver_dies_at_teardown", [this]() {
+            // the handle keeps its receiver and the receiver's field keeps the handle: the engine's destruction ends the coroutine,
+            // so the receiver's destructor runs then
+            std::string log;
+            {
+                auto e = make_engine();
+                stdlib::register_all(*e);
+                e->add_function("note_end", [&log](const std::string& text) { log += text + ";"; });
+                e->execute(R"(
+                    class Tracked { string name; Tracked(string n) { name = n; } ~Tracked() { note_end(name); } }
+                    class Game { var co = null; ~Game() { note_end("game"); } coroutine int brain() { Tracked t = Tracked("local"); yield 1; yield 2; return 3; } }
+                    Game g;
+                    g.co = g.brain();
+                    g.co.next();
+                )");
+                log.clear();
+            }
+            check_eq(std::string("local;game;"), log);
+        });
+
         test("method_coroutine_hot_reload_matches_free_precedent", [this]() {
             auto engine = make_engine();
             engine->execute(R"(

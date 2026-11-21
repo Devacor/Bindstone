@@ -2,6 +2,7 @@
 #include <jaiscript/core/engine_time.hpp>
 #include <jaiscript/core/http_transport.hpp>
 #include <jaiscript/core/execution_backend.hpp>
+#include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/lexer.hpp>
@@ -774,6 +775,7 @@ struct engine::implementation {
     std::unordered_map<type_key, type_info*, type_key_hash> type_infos_;
     std::mutex held_lock;   // the held values' registry (held_value): touched only when a host constructs, copies, moves or drops one
     held_value* held_head = nullptr;
+    coroutine_handle* coroutine_head = nullptr;   // live coroutines, the last made first (engine::register_coroutine)
 
     // Secondary index for O(1) lookup by type ID (stores pointers into type_infos_)
     std::unordered_map<uint64_t, type_info*> type_id_index_;
@@ -3994,6 +3996,7 @@ engine::~engine() {
         if (impl->backend && impl->global_environment_) {
             release_program_scope_in_reverse();
         }
+        retire_coroutines();
         impl->format_literal_rows_.clear();
         impl->tearing_down = true;
         impl->backend.reset();
@@ -4011,6 +4014,7 @@ engine::~engine() {
         script_value::release_deferred_cell_cycles(this);
         // a destructor that ran during teardown may have held a value
         release_held_values();
+        retire_coroutines();
     }
 }
 
@@ -4520,6 +4524,30 @@ void engine::release_held_values() noexcept {
             static_cast<script_value&>(*held) = script_value::outlived();
         }
         // released outside the lock: a destructor it runs may hold or drop values of its own
+    }
+}
+
+void engine::register_coroutine(coroutine_handle* a_coroutine) noexcept {
+    a_coroutine->previous_ = nullptr;
+    a_coroutine->next_ = impl->coroutine_head;
+    if (impl->coroutine_head) { impl->coroutine_head->previous_ = a_coroutine; }
+    impl->coroutine_head = a_coroutine;
+}
+
+void engine::unregister_coroutine(coroutine_handle* a_coroutine) noexcept {
+    if (a_coroutine->previous_) { a_coroutine->previous_->next_ = a_coroutine->next_; } else if (impl->coroutine_head == a_coroutine) { impl->coroutine_head = a_coroutine->next_; }
+    if (a_coroutine->next_) { a_coroutine->next_->previous_ = a_coroutine->previous_; }
+    a_coroutine->previous_ = a_coroutine->next_ = nullptr;
+}
+
+// A coroutine still alive here is one the host owns or one a cycle keeps (a field of its own receiver): its frame, receiver and
+// arguments die now, the last made first, and the handle names no engine afterwards. A destructor this runs may make or drop others
+void engine::retire_coroutines() noexcept {
+    while (coroutine_handle* coroutine = impl->coroutine_head) {
+        unregister_coroutine(coroutine);
+        // what it lets go may hold the last reference to it
+        const std::shared_ptr<coroutine_handle> alive = coroutine->weak_from_this().lock();
+        coroutine->retire();
     }
 }
 

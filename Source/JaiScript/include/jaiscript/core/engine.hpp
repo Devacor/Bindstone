@@ -38,6 +38,7 @@ namespace jai {
     class class_definition;
     class class_instance;
     class class_registry;
+    class coroutine_handle;
     class execution_backend;
     class engine_time;
     class http_transport;
@@ -1712,6 +1713,10 @@ namespace jai {
         void register_held(held_value* held);
         void unregister_held(held_value* held) noexcept;
         void release_held_values() noexcept;
+        // Every live coroutine, the last made first: teardown retires the ones still alive while the engine runs their destructors
+        void register_coroutine(coroutine_handle* a_coroutine) noexcept;
+        void unregister_coroutine(coroutine_handle* a_coroutine) noexcept;
+        void retire_coroutines() noexcept;
         void release_program_scope_in_reverse() noexcept;
         // declared ahead of impl: alive through the whole teardown, expired once the engine is gone
         std::shared_ptr<const void> lifetime_ = std::make_shared<char>('\0');

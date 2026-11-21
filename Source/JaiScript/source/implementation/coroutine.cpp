@@ -5,6 +5,7 @@
 #include "../../include/jaiscript/core/function_binder.hpp"
 #include "../../include/jaiscript/detail/class_runtime.hpp"
 #include "../../include/jaiscript/detail/coroutine_snapshot.hpp"
+#include <utility>
 
 namespace jai {
 
@@ -41,6 +42,25 @@ coroutine_handle::coroutine_handle(engine* eng)
     , yield_value_(std::monostate{}, eng)
     , result_(std::monostate{}, eng)
     , receiver_(std::monostate{}, eng) {
+    if (engine_) { detail::engine_access::register_coroutine(*engine_, this); }
+}
+
+coroutine_handle::~coroutine_handle() {
+    if (engine_) { detail::engine_access::unregister_coroutine(*engine_, this); }
+}
+
+// Members die in the order the destructor takes them: the suspended frame first, then the receiver and the arguments. The
+// coroutine is over: done() is true, so every resume path reaches resume_refusal
+void coroutine_handle::retire() noexcept {
+    engine_ = nullptr;
+    if (status_ != status::completed) { status_ = status::failed; }
+    backend_state_.reset();
+    { script_value dying = std::exchange(receiver_, script_value::outlived()); }
+    closure_env_.reset();
+    { std::vector<script_value> dying = std::move(initial_args_); }
+    function_.reset();
+    { script_value dying = std::exchange(result_, script_value::outlived()); }
+    { script_value dying = std::exchange(yield_value_, script_value::outlived()); }
 }
 
 void coroutine_handle::set_function(std::shared_ptr<function_decl> func,
@@ -88,6 +108,10 @@ JAI_NOINLINE checked_result<script_value> result_argument_count_error() {
     return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "result() takes no arguments");
 }
 
+JAI_NOINLINE checked_result<script_value> outlived_error() {
+    return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Value outlived its engine.");
+}
+
 JAI_NOINLINE checked_result<script_value> result_unfinished_error() {
     return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation),
         "Coroutine has not finished: result() is available once done() is true");
@@ -98,6 +122,7 @@ JAI_NOINLINE checked_result<script_value> result_unfinished_error() {
 checked_result<script_value> coroutine_handle::next(engine* eng, script_int a_count) {
     if (a_count < 1) { return next_count_range_error(); }
     if (a_count == 1) { return resume_once(eng); }
+    if (!engine_) { return resume_refusal(); }
     execution_backend* backend = detail::engine_access::get_execution_backend(*eng);
     if (backend->is_executing() || backend->is_unwinding()) { return resume_steps(*backend, a_count); }
     struct step_request { coroutine_handle* self; script_int count; } request{this, a_count};
@@ -134,7 +159,10 @@ checked_result<script_value> coroutine_handle::advance_from_script(engine* eng, 
     if (status_ == status::running || uncopied_) { return resume_refusal(); }
     detail::host_reference out = detail::host_reference_argument(eng, a_args, 0, 0);
     if (!out.target.is_reference() && !out.slot.frame) { return advance_non_lvalue_error(); }
-    if (done()) { return script_value(false, eng); }
+    if (done()) {
+        if (!engine_) { return resume_refusal(); }
+        return script_value(false, eng);
+    }
     checked_result<script_value> resumed = resume_once(eng);
     if (!resumed || detail::engine_access::get_execution_backend(*eng)->is_unwinding()) { return resumed; }
     if (status_ != status::suspended) { return script_value(false, eng); }
@@ -151,6 +179,7 @@ void coroutine_handle::complete(const script_value& a_returned) {
 
 checked_result<script_value> coroutine_handle::result_from_script(size_t a_argCount) const {
     if (a_argCount != 0) { return result_argument_count_error(); }
+    if (!engine_) { return outlived_error(); }
     if (!done()) { return result_unfinished_error(); }
     return result_.clone_element();
 }
@@ -164,6 +193,7 @@ void coroutine_handle::mark_uncopied(std::string a_name, std::string a_reason) {
 }
 
 checked_result<script_value> coroutine_handle::resume_refusal() const {
+    if (!engine_) { return outlived_error(); }
     if (uncopied_) {
         return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed), "{0}", uncopied_->resume_text);
     }

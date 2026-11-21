@@ -25,9 +25,13 @@ public:
     enum class status { created, running, suspended, completed, failed };
 
     coroutine_handle(engine* eng);
+    ~coroutine_handle();
+    coroutine_handle(const coroutine_handle&) = delete;
+    coroutine_handle& operator=(const coroutine_handle&) = delete;
 
     // Advances a_count yields (each step runs to the next yield, the last step's value is returned); a step past the
-    // end raises "Cannot resume a completed coroutine" after the earlier steps ran
+    // end raises "Cannot resume a completed coroutine" after the earlier steps ran. Once its engine is destroyed the
+    // coroutine is done and every resume returns the error "Value outlived its engine." without reading eng
     checked_result<script_value> next(engine* eng, script_int a_count = 1);
     // h.next() / h.next(count) as script calls it: both backends dispatch the builtin method here
     checked_result<script_value> next_from_script(engine* eng, const script_value* a_args, size_t a_argCount);
@@ -91,12 +95,19 @@ public:
 
 private:
     friend class interpreter;
+    friend class engine;
+
+    // The engine's teardown: everything the coroutine holds dies while the engine still runs destructors, and the handle names
+    // no engine afterwards; a resume is refused with "Value outlived its engine."
+    void retire() noexcept;
 
     checked_result<script_value> resume_once(engine* eng);
     checked_result<script_value> resume_steps(execution_backend& a_backend, script_int a_count);
     checked_result<script_value> resume_refusal() const;
 
     engine* engine_ = nullptr;
+    coroutine_handle* previous_ = nullptr;   // the engine's registry of live coroutines (engine::register_coroutine)
+    coroutine_handle* next_ = nullptr;
     status status_ = status::created;
     bool continues_host_entry_ = false;
     uint32_t yield_site_ = UINT32_MAX;

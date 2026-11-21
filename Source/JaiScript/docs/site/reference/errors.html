@@ -743,7 +743,7 @@ try {
 </tbody></table></div>
 <h4 id="host-errors-values-and-engines">Values and engines<a class="hlink" href="#host-errors-values-and-engines" aria-label="link">&#8203;</a></h4>
 <div class="tablewrap"><table><thead><tr><th>Text</th><th>When</th><th>Fix</th></tr></thead><tbody>
-<tr id="err-value-outlived-engine"><td><code>Value outlived its engine.</code></td><td>A <code>held_value</code> read after its engine was destroyed.</td><td>Drop held values before their engine, or copy the data out first.</td></tr>
+<tr id="err-value-outlived-engine"><td><code>Value outlived its engine.</code></td><td>A <code>held_value</code> read, or a coroutine handle resumed, after its engine was destroyed.</td><td>Drop held values and coroutine handles before their engine, or copy the data out first.</td></tr>
 <tr id="err-foreign-engine-value"><td><code>Cannot pass an object from another engine: values cross engines by copy (numbers, strings, math values and arrays and maps of them).</code></td><td>A value handed to another engine holds something only its own engine can name (an object, a function, a pointer).</td><td>Pass plain data, or rebuild the object in the receiving engine.</td></tr>
 </tbody></table></div>
 <h4 id="host-errors-archives">Archives<a class="hlink" href="#host-errors-archives" aria-label="link">&#8203;</a></h4>

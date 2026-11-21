@@ -142,7 +142,7 @@ auto ga = make(1);
 auto gb = make(2);
 print("{} {} {} {}", ga.next(), gb.next(), ga.next(), gb.next());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 2 10 20</code></pre></div>
-<p>So a field holding a handle of its own instance&#x27;s method is a strong cycle, broken by reassigning or nulling the field. A <code>static</code> coroutine&#x27;s handle carries no receiver.</p>
+<p>So a field holding a handle of its own instance&#x27;s method is a strong cycle, broken by reassigning or nulling the field; one left standing ends with the engine, whose destruction ends every coroutine still alive (<a href="../guide/07-classes.html#when-it-dies">When an object dies</a>). A <code>static</code> coroutine&#x27;s handle carries no receiver.</p>
 <h2 id="a-behaviour-in-a-field">A behaviour in a field<a class="hlink" href="#a-behaviour-in-a-field" aria-label="link">&#8203;</a></h2>
 <p>A game object keeps its behaviour as a handle in a field and advances it once a frame. The field is <code>auto</code> from the call that makes the handle (a field initializer can make it), or a <code>coroutine&lt;Y&gt;</code> that starts null when the behaviour starts later. There is no <code>yield from</code>: one coroutine runs another (a free function, a method of the same or another object) with a range-for that yields what it yields:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine string wait(int frames) {

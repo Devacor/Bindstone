@@ -114,6 +114,7 @@ C++ next -&gt; -1</code></pre></div>
 <li><code>next(engine*)</code> returns <code>checked_result&lt;script_value&gt;</code>: test it before reading the value. <code>next(engine*, n)</code> is the script&#x27;s <code>next(n)</code>.</li>
 <li><code>get_status()</code> is one of <code>created</code>, <code>running</code>, <code>suspended</code>, <code>completed</code>, <code>failed</code>; <code>done()</code> is true for the last two.</li>
 <li>The <code>shared_ptr</code> keeps the coroutine alive, and with it a method coroutine&#x27;s receiver. This is how C++ owns a behavior.</li>
+<li>The handle may outlive its engine. Destroying the engine ends the coroutine while script still runs: its locals, arguments and receiver are destroyed then, after the program&#x27;s variables. Afterwards <code>done()</code> is true, <code>next</code> returns the error <code>Value outlived its engine.</code> without reading its engine argument, and dropping the handle is safe.</li>
 </ul>
 <nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/08-serialization.html"><span>&larr; previous</span>Serialization</a><a class="next" rel="next" href="../embedding/10-signals-properties.html"><span>next &rarr;</span>Signals &amp; Observable Properties</a></nav></article>
 </main>

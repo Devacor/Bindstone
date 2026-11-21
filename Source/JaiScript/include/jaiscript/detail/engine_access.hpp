@@ -267,6 +267,8 @@ namespace jai::detail {
         JAI_FORCEINLINE static std::optional<script_value> caught_error_member(engine& a_engine, const script_value& receiver, uint64_t member_id, bool catch_variable = false) { return a_engine.caught_error_member(receiver, member_id, catch_variable); }
         JAI_FORCEINLINE static void end_caught_error(engine& a_engine, const script_value& caught) noexcept { return a_engine.end_caught_error(caught); }
         JAI_FORCEINLINE static void release_suspended_values(engine& a_engine, script_value* values, size_t count) noexcept { return a_engine.release_suspended_values(values, count); }
+        JAI_FORCEINLINE static void register_coroutine(engine& a_engine, coroutine_handle* a_coroutine) noexcept { a_engine.register_coroutine(a_coroutine); }
+        JAI_FORCEINLINE static void unregister_coroutine(engine& a_engine, coroutine_handle* a_coroutine) noexcept { a_engine.unregister_coroutine(a_coroutine); }
         JAI_FORCEINLINE static script_value execute_import(engine& a_engine, const std::string& resolved_path) { return a_engine.execute_import(resolved_path); }
         JAI_FORCEINLINE static script_value execute_unheld(engine& a_engine, script_source source) { return a_engine.execute_unheld(source); }
         JAI_FORCEINLINE static script_value execute_unheld(engine& a_engine, jai::jaibite& bite) { return a_engine.execute_unheld(bite); }

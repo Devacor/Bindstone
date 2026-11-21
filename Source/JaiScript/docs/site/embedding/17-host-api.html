@@ -281,10 +281,13 @@ error naming the extraction that works. <code>unchecked_array_node()</code> requ
 <tr><td>a borrow: a <code>script_value</code> C++ receives as an argument, reads out of a container, or copies from a held value</td><td>for the call, like a C++ reference parameter</td></tr>
 <tr><td>a <code>jai::held_value</code>: what <code>execute</code>, <code>execute_file</code>, <code>get_variable</code> and <code>eng-&gt;hold(v)</code> return</td><td>until its engine is destroyed. It never keeps the engine alive.</td></tr>
 <tr><td>a held value after its engine is gone</td><td><code>valid()</code> is false, <code>get_engine()</code> is null, every read throws <code>jai::runtime_error</code> <code>Value outlived its engine.</code>; copying, assigning and destroying it are safe</td></tr>
+<tr><td>a <code>jai::coroutine_handle</code> C++ owns after its engine is gone</td><td><code>done()</code> is true and <code>next</code> returns the error <code>Value outlived its engine.</code>; dropping it is safe</td></tr>
 </tbody></table></div>
 <ul>
 <li><strong>Teardown.</strong> A destroyed engine first releases every held payload while it can still run script, so a
-held instance's destructor runs then.</li>
+held instance's destructor runs then. The program's variables die next, last constructed first, and then every coroutine
+still alive ends, the last made first: its locals, arguments and receiver are destroyed while script still runs
+(<a href="../embedding/09-coroutine-hosting.html#driving-from-c-pattern-2-the-native-handle">Driving from C++ with the native handle</a>).</li>
 <li><strong>Threads.</strong> Another thread may copy, read, assign or drop a value only while the engine is idle, with
 the hand-off synchronized as for any C++ object. Debug builds assert when an object dies on another thread while its
 engine runs.</li>

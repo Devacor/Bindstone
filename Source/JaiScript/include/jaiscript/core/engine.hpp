@@ -1040,7 +1040,7 @@ namespace jai {
         // The running parallel region's number (0 outside one): what a chunk makes carries it (class_instance::region_tag)
         uint32_t parallel_region_serial() const;
         // The scalar result every registration of `name` declares by its C++ return type (int, float, bool, char,
-        // string); false when a registration returns anything else or registrations disagree
+        // string; jai_invalid_type for void); false when a registration returns anything else or registrations disagree
         bool host_function_result(const std::string& name, script_value_type& out) const;
         // the indexes and refusals registered for a callable (empty for most): what the checker asks at a call
         std::vector<std::pair<size_t, const std::string*>> constant_argument_indexes(const std::string& callable) const;
@@ -1691,7 +1691,8 @@ namespace jai {
         template <typename R>
         static constexpr script_value_type host_result_kind() {
             using D = std::decay_t<R>;
-            if constexpr (std::is_same_v<D, int> || std::is_same_v<D, int64_t> || std::is_same_v<D, script_int>) { return script_value_type::jai_int_type; }
+            if constexpr (std::is_void_v<D>) { return script_value_type::jai_invalid_type; }
+            else if constexpr (std::is_same_v<D, int> || std::is_same_v<D, int64_t> || std::is_same_v<D, script_int>) { return script_value_type::jai_int_type; }
             else if constexpr (std::is_same_v<D, float> || std::is_same_v<D, double>) { return script_value_type::jai_float_type; }
             else if constexpr (std::is_same_v<D, bool>) { return script_value_type::jai_bool_type; }
             else if constexpr (std::is_same_v<D, char> || std::is_same_v<D, script_char>) { return script_value_type::jai_char_type; }

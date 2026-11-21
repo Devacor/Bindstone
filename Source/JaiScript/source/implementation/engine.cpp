@@ -2087,7 +2087,7 @@ struct engine::implementation {
     std::string program_check_listing_;
     std::vector<check_diagnostic> program_check_diags_;
     std::string program_parse_failures_;
-    // Host functions' declared scalar results (engine::host_function_result): jai_null_type = unknown or disagreeing
+    // Host functions' declared scalar results (engine::host_function_result): jai_invalid_type = void, jai_null_type = unknown or disagreeing
     std::unordered_map<std::string, script_value_type> host_results_;
     // Constant arguments (engine::constant_argument): the rules in registration order (stable addresses), indexed by the key
     // a call spells ("name", ".member"), and the program's const texts by name

@@ -35,6 +35,11 @@ struct probe_object {
     int64_t doubled() const { return value * 2; }
 };
 
+// Bound methods whose C++ result is void, one beside a copying static of its name (image's fit and image::fit)
+struct void_probe {
+    int64_t value = 1;
+};
+
 // A getter-only property beside writable ones (member pointer, lambda pair)
 struct read_only_probe {
     int64_t value = 0;
@@ -3786,6 +3791,170 @@ public:
                     try { p->execute(src); } catch (const std::exception& ex) { got = ex.what(); }
                     check_true(got.find(text) != std::string::npos, std::string(src) + " -> " + got);
                 }
+            }
+        });
+
+        // Nothing to use (guide/06-functions.html#returning-nothing): a call the load resolves to a callee declared to return nothing
+        // (a script function, method or namespace function declared void, a signature returning void, a host function or bound
+        // method whose C++ result is void) fails the load wherever its result is used; a statement, a for's update and a
+        // conditional's arms discard it, and a callee the load cannot resolve keeps the run time's null
+        test("a_used_result_of_a_callee_that_returns_nothing_fails_the_load", [this]() {
+            auto e = make_engine();
+            const std::string decls = "void f() { }\n"
+                                      "class C { int n = 1; void bump() { n++; } static void reset_all() { } void scale(int by) { n *= by; } "
+                                      "static C scale(C c, int by) { C d = c; d.scale(by); return d; } void note(int by) { } static void note(C c, int by) { } "
+                                      "void tally(int by) { } static int tally(C c, int by) { return by; } }\n"
+                                      "namespace ns { void v() { } }\n"
+                                      "void over(int a) { }\nint over(int a, int b) { return a + b; }\n"
+                                      "void gen<T>(T a) { }\n"
+                                      "class G { void g<T>(T a) { } }\nclass B<T> { void m() { } }\nG gm = G();\nB<int> bi;\n"
+                                      "function<void()> sig = f;\n"
+                                      "C c = C();\nbool flag = true;\n";
+            const std::string f_used = "the result of 'f' is used, but 'f' returns nothing: call it as a statement";
+            const std::pair<const char*, std::string> used[] = {
+                {"var x = f();", f_used},
+                {"auto x = f();", f_used},
+                {"int x = f();", f_used},
+                {"print(f());", f_used},
+                {"var y = 1;\ny = f();", f_used},
+                {"int g() { return f(); }", f_used},
+                {"int k(bool ok) { if (ok) { return f(); } return 1; }", f_used},
+                {"C g() { return f(); }", f_used},
+                // var declares a value; a deduced body (auto, or a lambda with no result type) whose returns all return nothing is a
+                // callee that returns nothing, which names a builtin's copying twin when the nothing came from one
+                {"var g() { return f(); }", f_used},
+                {"array<int> xs = [2, 1];\nvar sorted(array<int> a) { return a.sort(); }\nprint(sorted(xs));", "sort changes a in place and returns nothing; array::sort(a) returns a sorted copy"},
+                {"auto k() { return f(); }\nprint(k());", "the result of 'k' is used, but 'k' returns nothing: call it as a statement"},
+                {"auto k() { print(1); }\nvar x = k();", "the result of 'k' is used, but 'k' returns nothing: call it as a statement"},
+                {"auto k = () => f();\nvar x = k();", "the result of 'k' is used, but 'k' returns nothing: call it as a statement"},
+                {"array<int> xs = [1, 2];\nauto dbl = () => xs.map(x => x * 2);\nprint(dbl());", "the result of 'dbl' is used, but 'dbl' returns nothing: map changes xs in place and returns nothing; array::map(xs, f) returns a mapped copy"},
+                {"array<int> xs = [1, 2];\nauto dbl(array<int> a) { return a.map(x => x * 2); }\nprint(dbl(xs));", "the result of 'dbl' is used, but 'dbl' returns nothing: map changes a in place and returns nothing; array::map(a, f) returns a mapped copy"},
+                {"array<int> xs = [2, 1];\nauto sorted = (array<int> a) => a.sort();\nvar r = sorted(xs);", "the result of 'sorted' is used, but 'sorted' returns nothing: sort changes a in place and returns nothing; array::sort(a) returns a sorted copy"},
+                {"array<int> xs = [2, 1];\nauto s2 = () => { return xs.sort(); };\nprint(s2());", "the result of 's2' is used, but 's2' returns nothing: sort changes xs in place and returns nothing; array::sort(xs) returns a sorted copy"},
+                {"array<int> xs = [2, 1];\nauto s3 = [&]() { return xs.sort(); };\nvar r = s3();", "the result of 's3' is used, but 's3' returns nothing: sort changes xs in place and returns nothing; array::sort(xs) returns a sorted copy"},
+                {"class S { array<int> xs = [2, 1]; auto sorted() { return xs.sort(); } }\nS s;\nprint(s.sorted());", "sort changes xs in place and returns nothing; array::sort(xs) returns a sorted copy"},
+                // a deduced method's returned in-place builtin is the error at the return, used or not, whatever the receiver
+                {"class Stk { array<int> items; auto push(int x) { return items.push(x); } }\nStk st;\nst.push(1);", "push changes items in place and returns nothing"},
+                {"class Sorter { array<int> xs = [2, 1]; auto sorted() { return xs.sort(); } }\nvar srt = Sorter();\nprint(srt.sorted());", "sort changes xs in place and returns nothing; array::sort(xs) returns a sorted copy"},
+                {"auto k() { return f(); }\nauto k2() { return k(); }\nvar x = k2();", "the result of 'k2' is used, but 'k2' returns nothing: call it as a statement"},
+                {"auto gk<T>(T a) { return f(); }\nvar x = gk(1);", "the result of 'gk<int>' is used, but 'gk<int>' returns nothing: call it as a statement"},
+                {"array<int> xs = [1];\nauto k() { return xs.map(x => x); }\nauto m = array::map([1], x => k());", "the lambda returns nothing, but array::map needs a value from it"},
+                // a deduced body with a return that gives a value declares one: its return of nothing is the use
+                {"auto pick(bool p) { if (p) { return f(); } return 3; }", f_used},
+                {"auto pk = [](bool p) { if (p) { return f(); } return 3; };", f_used},
+                {"array<int> xs = [2, 1];\nauto pick(bool p) { if (p) { return xs.sort(); } return xs; }", "sort changes xs in place and returns nothing; array::sort(xs) returns a sorted copy"},
+                {"array<int> ys = [];\nint p(int x) { return ys.push(x); }", "push changes ys in place and returns nothing"},
+                {"function<int(int)> h2 = [](int x) { return f(); };", "'lambda' declared to return 'int' returns no value here"},
+                {"bool b = f() == null;", f_used},
+                {"string s = `${f()}`;", f_used},
+                {"var q = flag ? f() : 1;", f_used},
+                {"var x = C::reset_all();", "the result of 'C.reset_all' is used, but 'C.reset_all' returns nothing: call it as a statement"},
+                {"var x = ns::v();", "the result of 'ns::v' is used, but 'ns::v' returns nothing: call it as a statement"},
+                {"var x = over(1);", "the result of 'over' is used, but 'over' returns nothing: call it as a statement"},
+                {"var x = gen<int>(1);", "the result of 'gen<int>' is used, but 'gen<int>' returns nothing: call it as a statement"},
+                {"var x = gen(1);", "the result of 'gen<int>' is used, but 'gen<int>' returns nothing: call it as a statement"},
+                {"var x = sig();", "the result of 'sig' is used, but 'sig' returns nothing: call it as a statement"},
+                // an arrow whose one expression is a call that returns nothing returns nothing: a builtin that reads its callback's
+                // result, or a signature that returns a value, cannot take it
+                {"var m = array::map([1, 2], x => f());", "the lambda returns nothing, but array::map needs a value from it"},
+                {"array<int> xs = [1];\narray<int> ys = [];\nvar m = array::map(xs, x => ys.push(x));", "the lambda returns nothing, but array::map needs a value from it"},
+                {"array<int> xs = [1];\narray<int> ys = [];\nxs.filter(x => ys.push(x));", "the lambda returns nothing, but filter needs a bool from it"},
+                {"array<int> xs = [2, 1];\nxs.sort([](int a, int b) { f(); });", "the lambda returns nothing, but sort needs a bool from it"},
+                {"array<int> xs = [1];\nbool any = xs.some(x => flag ? f() : ns::v());", "the lambda returns nothing, but some needs a bool from it"},
+                {"map<string, int> m = {};\nauto kept = map::filter(m, (k, v) => f());", "the lambda returns nothing, but map::filter needs a bool from it"},
+                {"void take(int x) { }\nvar m = array::map([1], take);", "'take' returns nothing, but array::map needs a value from it"},
+                {"var r = [1, 2].reduce((a, b) => f(), 0);", "the lambda returns nothing, but reduce needs a value from it"},
+                {"array<int> xs = [1];\nvar m = array::map(xs, [](int x) { return f(); });", "the lambda returns nothing, but array::map needs a value from it"},
+                {"var t = parallel_transform([1, 2], x => f());", "the lambda returns nothing, but parallel_transform needs a value from it"},
+                {"var t = parallel_reduce([1, 2], 0, (a, b) => f(), (a, b) => a + b);", "the lambda returns nothing, but parallel_reduce needs a value from it"},
+                {"function<int(int)> h = x => f();", "'lambda' declared to return 'int' returns no value here"},
+            };
+            for (const auto& [stmt, text] : used) {
+                auto r = e->check(decls + stmt + "\nprint(1);");
+                check_eq((size_t)1, error_count(r), std::string(stmt) + "\n" + r.format());
+                check_true(has_diag(r, dlevel::error, text), std::string(stmt) + "\n" + r.format());
+            }
+            const char* kept[] = {"f();", "c.bump();", "C::reset_all();", "ns::v();", "gen<int>(1);", "sig();", "c.scale(2);", "flag ? f() : c.bump();",
+                                  "for (int i = 0; i < 1; f()) { i++; }", "void w() { f(); return; }", "int s = over(1, 2);", "C d = C::scale(c, 2);",
+                                  "var d = c;\nvar r = d.bump();", "function h = f;\nvar r = h();", "auto l = [&]() { f(); };\nl();",
+                                  "[1, 2].for_each(x => f());", "array<int> ys = [];\n[1, 2].for_each(x => ys.push(x));", "[1, 2].for_each(x => flag ? f() : c.bump());",
+                                  "function<void(int)> sink = x => f();\nsink(1);", "auto l = x => c.bump();\nl(1);", "var ys = [];\nvar m = array::map([1], x => ys.push(x));",
+                                  "array<int> ys = [];\nvar m = array::map([1], x => ys.size());", "var g = f;\nvar m = array::map([1], x => g());",
+                                  // a body that declares no value returns a call that returns nothing, as C++ does
+                                  "void g() { return f(); }", "void h(bool ok) { if (!ok) { return f(); } print(1); }", "auto lam = () => { return f(); };\nlam();",
+                                  "auto g() { return f(); }", "array<int> ys = [];\nvoid add(int x) { return ys.push(x); }",
+                                  // a lambda assigned again, or a receiver the arrow does not type, stays the run time's
+                                  "auto k2 = () => f();\nk2 = () => 3;\nvar x = k2();", "auto sorted = a => a.sort();\nvar r = sorted([2, 1]);",
+                                  "array<array<int>> ls = [[2, 1]];\nls.for_each(l => l.sort());", "auto k() { return f(); }\nk();\nauto lk = () => f();\nlk();",
+                                  // a body every path of which throws never returns: its call has no result to miss
+                                  // a method dispatches on the object: an override may give a value, so no use of a method's result is checked
+                                  "var x = c.bump();", "class D { void t() { } void u() { var r = t(); } }", "var x = gm.g<int>(1);", "var x = bi.m();", "var d = c.scale(2);", "var x = c.note(2);", "var x = c.tally(2);",
+                                  "class P1 { auto m() { print(\"m\"); } }\nclass Q1 : P1 { auto m() override { return 4; } }\nvoid use1(P1& p) { var r = p.m(); print(r); }",
+                                  "class P2 { void m() { } }\nclass Q2 : P2 { int m() override { return 4; } }\nvoid use2(P2& p) { print(p.m()); }",
+                                  "class P3 { auto m() { return f(); } }\nP3 p3;\nvar r = p3.m();", "class P4 { void push(int x) { return xs.push(x); } array<int> xs; }",
+                                  "class P5 { void m() { } void n() { var r = this.m(); } }",
+                                  "auto boom() { throw \"x\"; }\nvar x = boom();", "auto bl = () => { throw \"x\"; };\nprint(bl());",
+                                  // a name something may rebind is no known callee: assigned, passed where a reference may take it
+                                  "void set(var& slot) { slot = () => 5; }\nauto cb = () => f();\nset(cb);\nprint(cb());",
+                                  "void set2(function<var()>& slot) { slot = () => 5; }\nauto cb = () => f();\nset2(cb);\nprint(cb());",
+                                  "class Hold { void swap_in(var& s) { s = () => 6; } }\nHold hd;\nauto cb = () => f();\nhd.swap_in(cb);\nprint(cb());",
+                                  "auto g9() { f(); }\ng9 = () => 5;\nprint(g9());", "void g10() { }\ng10 = () => 5;\nprint(g10());",
+                                  "void g11() { }\nvoid set3(var& s) { s = () => 5; }\nset3(g11);\nprint(g11());",
+                                  "auto cb = () => f();\nauto rebind = [&]() { cb = () => 5; };\nrebind();\nprint(cb());",
+                                  "class K { array<int> xs; void add(int x) { return xs.push(x); } }", "void w2() { return flag ? f() : c.bump(); }",
+                                  // a parallel_reduce step that takes its accumulator by reference folds in place
+                                  "class Acc { int n = 0; }\nvoid fold(Acc& a, int x) { a.n += x; }\nAcc merge(Acc a, Acc b) { a.n += b.n; return a; }\nAcc t = parallel_reduce([1, 2], Acc(), fold, merge);",
+                                  "class Acc { int n = 0; }\nAcc t = parallel_reduce([1, 2], Acc(), [](Acc& a, int x) { a.n += x; }, [](Acc a, Acc b) -> Acc { a.n += b.n; return a; });"};
+            for (const char* stmt : kept) {
+                auto r = e->check(decls + stmt + "\nprint(1);");
+                check_eq((size_t)0, error_count(r), std::string(stmt) + "\n" + r.format());
+            }
+            check_eq((size_t)0, error_count(e->check(decls + "f()")), "the program's last expression is its result");
+            auto w = e->check("[[warn_mode]]; " + decls + "var x = f();\nprint(1);");
+            check_eq((size_t)0, error_count(w), w.format());
+            check_true(has_diag(w, dlevel::warning, f_used), w.format());
+
+            auto host = make_engine();
+            host->add_function("ping", []() { });
+            host->add_function("ping_count", []() -> script_int { return 1; });
+            host->add_function("tools::ping", []() { });
+            host->add_function("apply_one", [](std::function<script_int(script_int)> fn) -> script_int { return fn(1); });
+            dynamic_binder<void_probe>(*host, "VoidProbe").constructor<>()
+                .method("poke", [](void_probe& self) { self.value++; })
+                .method("grow", [](void_probe& self, script_int k) { self.value *= k; })
+                .static_method("grow", [](const void_probe& p, script_int k) -> void_probe { void_probe q = p; q.value *= k; return q; })
+                .method("shrink", [](void_probe& self, script_int k) { self.value -= k; })
+                .static_method("shrink", [](void_probe& p, script_int k) { p.value -= k; })
+                .method("tally", [](void_probe& self, script_int k) { self.value += k; })
+                .static_method("tally", [](const void_probe& p, script_int k) -> script_int { return p.value + k; })
+                .build();
+            const std::string probe = "VoidProbe p = VoidProbe();\n";
+            const std::pair<const char*, const char*> host_used[] = {
+                {"var x = ping();", "the result of 'ping' is used, but 'ping' returns nothing: call it as a statement"},
+                {"print(tools::ping());", "the result of 'tools::ping' is used, but 'tools::ping' returns nothing: call it as a statement"},
+                {"void f() { }\nvar r = apply_one(x => f());", "'lambda' declared to return 'int' returns no value here"},
+            };
+            for (const auto& [stmt, text] : host_used) {
+                auto r = host->check(probe + stmt + "\nprint(1);");
+                check_eq((size_t)1, error_count(r), std::string(stmt) + "\n" + r.format());
+                check_true(has_diag(r, dlevel::error, text), std::string(stmt) + "\n" + r.format());
+            }
+            // a script class may derive a bound class and override its methods: no use of a bound method's result is checked
+            for (const char* stmt : {"var x = p.poke();", "VoidProbe q = p.grow(2);", "var x = p.shrink(2);", "var x = p.tally(2);"}) {
+                auto hm = host->check(probe + stmt + "\nprint(1);");
+                check_eq((size_t)0, error_count(hm), std::string(stmt) + "\n" + hm.format());
+            }
+            const std::string host_kept = probe + "ping();\ntools::ping();\nint n = ping_count();\np.poke();\np.grow(2);\nVoidProbe q = VoidProbe::grow(p, 3);\nprint(1);";
+            auto hk = host->check(host_kept);
+            check_eq((size_t)0, error_count(hk), hk.format());
+
+            for (bool use_vm : {false, true}) {
+                auto p = make_engine();
+                p->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
+                std::string got;
+                try { p->execute("void f() { }\nvar x = f();"); } catch (const std::exception& ex) { got = ex.what(); }
+                check_true(got.find("2:11: error: " + f_used) != std::string::npos, got);
+                check_eq(std::string("null"), p->execute("void f() { }\nvar g = f;\nvar x = g();\nx == null ? \"null\" : \"value\";").to_string(), "a callee the load cannot resolve");
             }
         });
 

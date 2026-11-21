@@ -40,7 +40,7 @@ namespace jai::detail {
     // BUMP THIS on any change to what a parse produces: the serialized bytes and the parse-time semantics baked into the
     // AST (slot assignment, node and token numbers, capture plans). A stale sidecar is reparsed and rewritten (the version
     // check feeds the corrupt-file fallback), so a bump is always safe and a missed one leaves stale caches.
-    inline constexpr uint32_t k_jaibite_version = 72;
+    inline constexpr uint32_t k_jaibite_version = 73;
     // Header flags (u32):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -683,6 +683,7 @@ namespace jai::detail {
         JAI_NOINLINE void write_return_stmt(const ast_node* n) {
             auto* s = static_cast<const return_stmt*>(n);
             node(s->value.get());
+            flag(s->value_discarded);
         }
 
         JAI_NOINLINE void write_try_stmt(const ast_node* n) {
@@ -1498,7 +1499,10 @@ namespace jai::detail {
         }
 
         JAI_NOINLINE ast_node_ptr read_return_stmt(const source_location& loc) {
-            return std::make_shared<return_stmt>(loc, expr_opt());
+            auto r = std::make_shared<return_stmt>(loc, expr_opt());
+            r->value_discarded = flag();
+            if (r->value_discarded) { mark_result_discarded(r->value.get()); }   // as the parser marks it
+            return r;
         }
 
         JAI_NOINLINE ast_node_ptr read_statement_decl(const source_location& loc) {

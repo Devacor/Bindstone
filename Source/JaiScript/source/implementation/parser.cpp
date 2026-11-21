@@ -3674,11 +3674,11 @@ declaration_ptr parser::parse_generic_text(const std::vector<token>& text, detai
     const jump_targets saved_jumps = jumps_;
     const int saved_nesting = nesting_depth_;
     const size_t saved_boundary = slot_lookup_boundary_;
-    const bool saved_flags[] = {in_switch_case_, in_coroutine_, in_constructor_, returns_reference_, coroutine_body_pending_};
+    const bool saved_flags[] = {in_switch_case_, in_coroutine_, in_constructor_, returns_reference_, coroutine_body_pending_, returns_value_};
     generic_uses_.clear(); current_namespace_path_.clear(); function_scope_stack_.clear(); template_barriers_.clear();
     program_block_variables_.clear(); program_block_marks_.clear();
     jumps_ = {}; nesting_depth_ = 0; slot_lookup_boundary_ = 0;
-    in_switch_case_ = in_coroutine_ = in_constructor_ = returns_reference_ = coroutine_body_pending_ = false;
+    in_switch_case_ = in_coroutine_ = in_constructor_ = returns_reference_ = coroutine_body_pending_ = returns_value_ = false;
     stream_ = &text; current_ = 0; pushed_back_token_.reset();
     const size_t errors_before = errors_.size();
     std::vector<less_site> readings;
@@ -3708,7 +3708,7 @@ declaration_ptr parser::parse_generic_text(const std::vector<token>& text, detai
     template_barriers_ = std::move(saved_barriers);
     jumps_ = saved_jumps; nesting_depth_ = saved_nesting; slot_lookup_boundary_ = saved_boundary;
     in_switch_case_ = saved_flags[0]; in_coroutine_ = saved_flags[1]; in_constructor_ = saved_flags[2];
-    returns_reference_ = saved_flags[3]; coroutine_body_pending_ = saved_flags[4];
+    returns_reference_ = saved_flags[3]; coroutine_body_pending_ = saved_flags[4]; returns_value_ = saved_flags[5];
     paren_close_.erase(&text);
     if (!parsed) {
         if (errors_.size() == errors_before) { report_error_at(format_error(parsed, *symbolizer_), text.front().location); }
@@ -4835,6 +4835,8 @@ checked_result<expression_ptr> parser::finish_lambda_body(std::shared_ptr<lambda
     in_constructor_ = false;
     coroutine_scope ref_return_scope{returns_reference_, returns_reference_};
     returns_reference_ = lambda->return_type && lambda->return_type->base_type == script_value_type::jai_reference_type;
+    coroutine_scope value_return_scope{returns_value_, returns_value_};
+    returns_value_ = declares_a_value(lambda->return_type.get());
     if (expression_body && !check(token_type::left_brace)) { return lambda_expression_body(std::move(lambda)); }
     if (check(token_type::identifier) && peek().lexeme == "mutable") {
         report_foreign(detail::foreign_word::mutable_lambda, peek());
@@ -4868,6 +4870,7 @@ JAI_NOINLINE checked_result<expression_ptr> parser::lambda_expression_body(std::
     }
     std::vector<declaration_ptr> body;
     auto ret = std::make_shared<return_stmt>(at, returns_reference_ ? reference_binding(value.value()) : value.value());
+    discard_returned_call(*ret);
     body.push_back(std::make_shared<statement_decl>(at, ret));
     lambda->body = std::make_shared<block_stmt>(at, std::move(body));
     lambda->local_count = exit_function_scope();
@@ -5736,7 +5739,23 @@ checked_result<statement_ptr> parser::return_statement() {
 
     JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after return value"));
 
-    return std::make_shared<return_stmt>(returnToken.location, value);
+    auto ret = std::make_shared<return_stmt>(returnToken.location, value);
+    discard_returned_call(*ret);
+    return ret;
+}
+
+// A body that declares no value to return returns a call that returns nothing as C++ does (`return f();` in a void function)
+void parser::discard_returned_call(return_stmt& a_return) const {
+    if (!a_return.value || returns_value_ || in_coroutine_) { return; }
+    a_return.value_discarded = true;
+    mark_result_discarded(a_return.value.get());
+}
+
+// A declared result that is a value: not void or auto (a deduced body returns whatever its returns give); var declares one
+bool parser::declares_a_value(const type_info* a_type) {
+    if (!a_type) { return false; }
+    if (a_type->base_type == script_value_type::jai_null_type && a_type->type_name == "void") { return false; }
+    return a_type->type_name != "auto";
 }
 
 checked_result<statement_ptr> parser::break_statement() {
@@ -6344,6 +6363,8 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
 
                     struct ref_return_restore { bool& flag; bool saved; ~ref_return_restore() { flag = saved; } } ref_return_scope{returns_reference_, returns_reference_};
                     returns_reference_ = func->return_type && func->return_type->base_type == script_value_type::jai_reference_type;
+                    ref_return_restore value_return_scope{returns_value_, returns_value_};
+                    returns_value_ = declares_a_value(func->return_type.get());
 
                     // Enter function scope for slot-based local variable tracking
                     enter_function_scope();
@@ -7432,6 +7453,8 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
 
     coroutine_scope ref_return_scope{returns_reference_, returns_reference_};
     returns_reference_ = func->return_type && func->return_type->base_type == script_value_type::jai_reference_type;
+    coroutine_scope value_return_scope{returns_value_, returns_value_};
+    returns_value_ = declares_a_value(func->return_type.get());
 
     // Enter function scope for slot-based local variable tracking
     const bool nested_function = in_function_scope();

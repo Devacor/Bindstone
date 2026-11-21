@@ -77,6 +77,20 @@ namespace jai {
         }
         return std::nullopt;
     }
+    // The builtins that read their callback's result, and what they read: a predicate's bool, a comparator's order, a mapped or
+    // folded value. A callback that returns nothing hands them null; every other builtin drops its callback's result (for_each)
+    struct callback_result_read { std::string_view name; std::string_view wants; };
+    inline constexpr std::array<callback_result_read, 9> k_array_callback_reads = {{
+        {"every", "a bool"}, {"filter", "a bool"}, {"find", "a bool"}, {"find_index", "a bool"}, {"map", "a value"}, {"reduce", "a value"},
+        {"remove_if", "a bool"}, {"some", "a bool"}, {"sort", "a bool"}
+    }};
+    inline constexpr std::array<callback_result_read, 2> k_map_callback_reads = {{ {"filter", "a bool"}, {"remove_if", "a bool"} }};
+    // What the builtin `a_name` of a receiver kind (0 array, 1 map) reads from its callback, or nullopt when it reads nothing
+    inline std::optional<std::string_view> callback_result_wanted(int a_kind, std::string_view a_name) noexcept {
+        if (a_kind == 0) { for (const auto& r : k_array_callback_reads) { if (r.name == a_name) { return r.wants; } } }
+        if (a_kind == 1) { for (const auto& r : k_map_callback_reads) { if (r.name == a_name) { return r.wants; } } }
+        return std::nullopt;
+    }
     // a name some receiver kind's in-place builtin answers to (an array's, a map's, a string's; a handle's reset): the compile-time gate
     inline bool is_in_place_method_name(std::string_view a_name) noexcept {
         for (const auto& m : k_array_in_place_methods) { if (m.name == a_name) { return true; } }

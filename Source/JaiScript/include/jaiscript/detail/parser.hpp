@@ -422,6 +422,8 @@ namespace jai {
         // be one expression, its value returned
         checked_result<expression_ptr> finish_lambda_body(std::shared_ptr<lambda_expr> lambda, bool expression_body);
         checked_result<expression_ptr> lambda_expression_body(std::shared_ptr<lambda_expr> lambda);
+        void discard_returned_call(return_stmt& a_return) const;
+        static bool declares_a_value(const type_info* a_type);
         // (params) => expr, (params) => { body }, name => expr: a function expression, closing over its scope by reference
         bool arrow_function_ahead() const;
         // the ')' that closes each '(' of a token stream, found once per stream: nested groups each ask arrow_function_ahead, which
@@ -466,6 +468,7 @@ namespace jai {
         bool postfix_marker_ahead_ = false;
         std::string_view enclosing_class_;   // the class whose body is being parsed (empty: none): what `this` names   // the next parameter list is operator++'s or operator--'s: a lone (int) is C++'s postfix marker
         bool returns_reference_ = false;   // the body being parsed returns T&: its return operand binds as a reference
+        bool returns_value_ = false;       // the body being parsed declares a value to return (return_stmt::value_discarded)
         // Armed by a coroutine head; parse_function_body consumes it for exactly the next
         // body, so nested functions and lambdas never inherit yield permission
         bool coroutine_body_pending_ = false;

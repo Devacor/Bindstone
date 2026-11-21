@@ -260,6 +260,14 @@ public:
                 Button b;
                 name(1) + "|" + to_string(steps[1](steps[0](1))) + "|" + to_string(apply(e => e.hp, Hero())) + "|" + reflect::type_of(h) + "|" + to_string(h.next()) + "|" + b.label(1);
             )"},
+                {"returning_nothing", R"(
+                var xs = [1, 2]; var ys = [];
+                xs.for_each(x => ys.push(x));
+                var m = array::map(xs, x => ys.push(x));
+                void add(var x) { return ys.push(x); }
+                add(3);
+                to_json(ys) + "|" + to_json(m);
+            )"},
                 {"arithmetic_strings", R"(
                 int a = 7; int b = 3;
                 float f = 2.5 * 4.0 + a;
@@ -525,7 +533,7 @@ public:
             // the format version sits right after the 4-byte magic
             using namespace jaibite_test_detail;
             auto bytes = fresh_engine(false, {})->jaibite("[[warn_mode]];\nextern int q;\nvar v = 1;").save_bytes();
-            check_eq((int)72, (int)bytes[4], "jaibite format version");
+            check_eq((int)73, (int)bytes[4], "jaibite format version");
             {   // import(...) round-trips: literal paths, a group, computed arguments and jai::force
                 const auto dir = jai::foundry::test_temp_directory();
                 { std::ofstream(dir / "jb_imp_a.jai") << "int JB_A = 3;\n"; }

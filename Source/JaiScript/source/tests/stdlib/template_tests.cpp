@@ -116,6 +116,10 @@ public:
 			const std::string plain = failure(eng, f, "array<int> rows = [1]; template(\"call.spider\", rows[0]);");
 			check(plain.find("template() argument 2 is not a plain variable name") != std::string::npos && plain.find("(auto entry = rows[0];)") != std::string::npos,
 				"an argument that is not a name fails the load with the local to write: " + plain);
+			f.write("void.spider", "<p>\n${note()}</p>");
+			const std::string nothing = failure(eng, f, "void note() { } template(\"void.spider\");");
+			check(nothing.find("void.spider:2:8: error: the result of 'note' is used, but 'note' returns nothing: call it as a statement") != std::string::npos,
+				"a splice of a call that returns nothing names the template's line: " + nothing);
 			check_eq(std::string("<no error>"), failure(eng, f, "var r = 1; string s = \"\";"));
 		});
 

@@ -366,6 +366,9 @@ namespace jai {
         mutable std::shared_ptr<const detail::regex::compiled> regex_constant;
         // callee<T, ...>(args): the leading arguments that are type values (cast_expr::type_value), which only a host takes
         uint8_t type_argument_count = 0;
+        // the call stands where its result is discarded (mark_result_discarded): a callee that returns nothing is called here and
+        // used nowhere else
+        bool result_discarded = false;
 
         call_expr(const source_location& loc, expression_ptr c, std::vector<expression_ptr> args)
             : expression(loc, node_type::call_expr), callee(c), arguments(std::move(args)) {}
@@ -798,6 +801,9 @@ namespace jai {
         // value binds as a reference instead of evaluating to a copy. Stamped by the
         // parser's ref_escape_marker pass (innermost function, coroutines excluded).
         bool binds_reference = false;
+        // The enclosing function or lambda declares no value to return (void, auto, or no type spelled; an arrow's expression
+        // is such a return): a call here that returns nothing is a return of nothing, never a use of its result (mark_result_discarded)
+        bool value_discarded = false;
         // the VM's graft: a return that jumps to the inlined body's join (synthesized by the compiler, never parsed or serialized)
         bool inline_exit = false;
         mutable uint8_t static_return_proof = proof_none;
@@ -1301,6 +1307,7 @@ namespace jai {
                 continue;
             }
             if (e->get_type() != node_type::call_expr) { return; }
+            static_cast<call_expr*>(e)->result_discarded = true;
             expression* callee = static_cast<call_expr*>(e)->callee.get();
             if (callee && callee->get_type() == node_type::member_expr) {
                 static_cast<member_expr*>(callee)->call_result_discarded = true;

@@ -768,6 +768,21 @@ private:
     struct nodiscard_callee { std::string name; std::string twin; };
     nodiscard_callee nodiscard_hit_;
     std::unordered_map<const call_expr*, nodiscard_callee> nodiscard_calls_;
+    // A callee declared to return nothing (docs/site/guide/06-functions.html#returning-nothing) that resolving the call being
+    // inferred found: its name as the error quotes it ('f', 'C.m', or the callee), and for a method beside a copying static of
+    // its name the twin text (detail::in_place_result_text) and the call's member
+    // reason: for a callee whose deduced result is nothing because it returns a builtin in-place call, that call's text (it names
+    // the copying twin)
+    struct void_callee { std::string shown; std::string twin; const member_expr* member = nullptr; std::string reason; bool typed_slot = false; };
+    void_callee void_hit_;
+    // the calls in a place that discards the result (a statement, a return in a body that declares no value) whose callee returns
+    // nothing: the error a use of the result gives, and the reason a body that returns the call passes on
+    struct nothing_call { std::string used; std::string reason; };
+    std::unordered_map<const call_expr*, nothing_call> nothing_calls_;
+    // the bodies with a deduced result (an auto function or method, a lambda with no result type) whose returns all return nothing,
+    // with the reason they pass on: callees that return nothing
+    std::unordered_map<const lambda_expr*, std::string> nothing_lambdas_;
+    std::unordered_map<const function_decl*, std::string> nothing_functions_;
     // A call with type arguments (call_expr::type_argument_count) being resolved: the script function it resolved to (an error:
     // only a host takes a type argument), else the host callable whose registration may type its result
     bool type_argument_call_ = false;
@@ -795,6 +810,11 @@ private:
     // names an assignment expression or a reference declaration targets, and each variable declaration's binary::layout(...)
     // initializer (null for any other initializer): a layout variable declared once and never assigned is statically known
     std::unordered_set<std::string_view> assigned_names_;
+    // the names a call may rebind: an identifier or a namespace path passed as an argument to anything but the library's own
+    // value-taking forms (array::, map::, parallel_transform, parallel_reduce), and a namespace path assigned (a name is a known
+    // callee only while nothing can rebind it)
+    std::unordered_set<std::string_view> passed_names_;
+    std::unordered_set<std::string> rebindable_paths_;
     std::unordered_map<std::string_view, std::vector<const expression*>> layout_inits_;
     std::unordered_set<std::string> extra_globals_;
     const std::unordered_set<std::string>* program_names_ = nullptr;   // the program's names, consulted beside extra_globals_ (never copied per check)
@@ -943,6 +963,7 @@ private:
         std::string display;              // declared-type text for messages
         size_t line = 0, column = 0;
         const lambda_expr* lambda = nullptr;   // a frame-slot local declared with a lambda literal (its calls' graft declaration)
+        const lambda_expr* declared_lambda = nullptr;   // any local declared with a lambda literal, which a call through it runs unless it is assigned
         const enum_decl* enum_def = nullptr;   // an enum declared in a function or block: local to that scope
         bool is_const = false;            // const T x / const T& p / a const reference (auto& over a const) (internal/const.md)
         ctype referent;                   // the class (or typed container) a reference or an auto range-for variable holds: member diagnostics only
@@ -1064,6 +1085,9 @@ private:
         const type_info* returned = nullptr;
         bool returned_mixed = false;
         bool returns_nothing = false;
+        bool gives_value = false;   // a return gave a value
+        bool dispatched = false;    // a non-static method with a deduced result: its calls dispatch, so its return is checked instead
+        std::vector<const call_expr*> nothing_returns;   // returns of calls that return nothing (an error once another return gives a value)
         const std::string* file = nullptr;   // the file the body is written in (a declaration from another one was spliced by an include)
     };
     std::vector<fn_ctx> fn_stack_;
@@ -4604,6 +4628,7 @@ private:
     // (for diagnostics: the slot's callable is whatever was stored, so no proof rests on it)
     ctype check_signature_call(const std::string& shown, const type_info* signature, const call_expr* c, const std::vector<ctype>& args) {
         const size_t taken = signature->type_params.size() - 1;
+        if (declared_void(signature->type_params[0].get())) { void_hit_ = {shown, {}, nullptr, {}, /*typed_slot=*/true}; }
         const ctype result_type = ctype_from_type_info(signature->type_params[0].get());
         ctype result = result_type;
         result.tentative = !result.is_unknown();
@@ -4985,6 +5010,11 @@ private:
         if (eng_.host_nodiscard(callable)) { nodiscard_hit_ = {callable, {}}; }
         if (type_argument_call_) { type_argument_host_callee_ = callable; }
     }
+    // a host function every registration of which returns void in C++ (engine::host_function_result)
+    void note_host_void(const std::string& callable) {
+        script_value_type k;
+        if (eng_.host_function_result(callable, k) && k == script_value_type::jai_invalid_type) { void_hit_ = {"'" + callable + "'"}; }
+    }
     // a script callee of a call with type arguments: the call's one error, in place of the overload verdict
     bool script_callee_takes_type_arguments(std::string_view fname) {
         if (!type_argument_call_) { return false; }
@@ -5002,6 +5032,27 @@ private:
             default: return {};
         }
     }
+
+    // A call whose result is used, of a callee declared to return nothing: the builtin methods' text where the method has a copying twin
+    // A call through a name something may rebind: a bare name (a function, a host function, a lambda variable) or a namespace path
+    bool callee_rebindable(const call_expr* c) const {
+        if (!c->callee) { return false; }
+        if (c->callee->get_type() == node_type::identifier_expr) {
+            const auto* id = static_cast<const identifier_expr*>(c->callee.get());
+            if (class_ctx_ && void_hit_.shown != "'" + std::string(id->name) + "'" && void_hit_.shown.find("::") == std::string::npos) { return false; }   // a method by its bare name
+            return rebindable(id->name) || rebindable_paths_.count(void_hit_.shown.size() > 2 ? void_hit_.shown.substr(1, void_hit_.shown.size() - 2) : std::string());
+        }
+        if (c->callee->get_type() == node_type::member_expr && static_cast<const member_expr*>(c->callee.get())->is_static) {
+            const std::string path = qualified_spelling(static_cast<const member_expr*>(c->callee.get()));
+            return !path.empty() && rebindable_paths_.count(path);
+        }
+        return false;
+    }
+    static std::string void_result_text(const void_callee& hit) {
+        if (hit.member) { return detail::in_place_result_text(hit.member->member, detail::method_value_receiver(hit.member), hit.twin); }
+        return "the result of " + hit.shown + " is used, but " + hit.shown + " returns nothing: " + (hit.reason.empty() ? std::string("call it as a statement") : hit.reason);
+    }
+    JAI_NOINLINE void report_void_result(const call_expr* c, const void_callee& hit) { diag(diag_level::error, c->location, void_result_text(hit)); }
 
     // An expression statement drops its value: a call to a [[nodiscard]] callee there (or in either arm of a ternary there) fails the load
     void check_discarded(const expression* e) {
@@ -5179,6 +5230,9 @@ private:
         return path.empty() ? ctype{} : check_namespace_call(path, m->member, args, loc, seen, c);
     }
     ctype check_namespace_call(const std::string& path, std::string_view member, const std::vector<ctype>& args, const source_location& loc, narrow_callee& seen, const call_expr* c) {
+        if (c && c->arguments.size() >= 2 && (path == "array" || path == "map") && library_namespace(path)) {
+            if (const auto wants = callback_result_wanted(path == "array" ? 0 : 1, member)) { callback_result_read(path + "::" + std::string(member), *wants, c->arguments[1].get()); }
+        }
         if (ctype result; check_namespace_function_call(path, member, args, loc, seen, result)) { return result; }
         const std::string qualified = path + "::" + std::string(member);
         if (const std::string_view cls = namespace_class_named(qualified); !cls.empty()) {   // a construction, typed as the bare spelling is
@@ -5201,6 +5255,7 @@ private:
         if (sit == space->signatures.end()) {   // a qualified host registration is held to its bound signatures, as a global host function is
             if (!eng_.has_function(qualified)) { return {}; }
             check_host_call(qualified, args, loc, c);
+            note_host_void(qualified);
             return host_result_type(qualified);
         }
         const host_entry_signature& sig = sit->second;
@@ -5570,7 +5625,6 @@ private:
 
     // A call that uses the result of a builtin that changes its known receiver in place and returns nothing (detail/in_place_result.hpp)
     void in_place_result_used(const ctype& a_receiver, const member_expr* a_member, const call_expr* a_call) {
-        if (a_member->call_result_discarded) { return; }
         std::optional<std::string_view> twin;
         switch (a_receiver.kind) {
             case ctype::array_k: twin = in_place_method_twin(0, a_member->member); break;
@@ -5580,7 +5634,77 @@ private:
             default: break;
         }
         if (!twin) { return; }
-        diag(diag_level::error, a_call->location, detail::in_place_result_text(a_member->member, detail::method_value_receiver(a_member), *twin));
+        std::string text = detail::in_place_result_text(a_member->member, detail::method_value_receiver(a_member), *twin);
+        if (a_member->call_result_discarded) {
+            nothing_calls_[a_call] = {text, text};
+            return;
+        }
+        diag(diag_level::error, a_call->location, text);
+    }
+
+    // A returned expression all of whose calls return nothing (either arm of a conditional): a return of nothing, its calls in out
+    bool calls_nothing(const expression* e, std::vector<const call_expr*>* out = nullptr) const {
+        if (!e) { return false; }
+        if (e->get_type() == node_type::ternary_expr) {
+            const auto* t = static_cast<const ternary_expr*>(e);
+            return calls_nothing(t->then_expression.get(), out) && calls_nothing(t->else_expression.get(), out);
+        }
+        if (e->get_type() != node_type::call_expr || !nothing_calls_.count(static_cast<const call_expr*>(e))) { return false; }
+        if (out) { out->push_back(static_cast<const call_expr*>(e)); }
+        return true;
+    }
+    // A body with a deduced result has walked its returns: one that gives a value makes each return of nothing the use it is
+    // (C++ deduces no result from both); none makes the body a callee that returns nothing, passing on the first reason, unless
+    // the body never returns (every path throws: its call has no result to use or to miss)
+    bool close_deduced_body(const fn_ctx& done, const statement* body, std::string& reason) {
+        if (done.gives_value) {
+            for (const call_expr* c : done.nothing_returns) {
+                if (auto it = nothing_calls_.find(c); it != nothing_calls_.end()) { diag(diag_level::error, c->location, it->second.used); }
+            }
+            return false;
+        }
+        if (!body || !(return_flow().analyze(body).paths & (return_flow::normal | return_flow::maybe_normal | return_flow::returns | return_flow::bare_return))) {
+            return false;
+        }
+        for (const call_expr* c : done.nothing_returns) {
+            if (auto it = nothing_calls_.find(c); it != nothing_calls_.end() && !it->second.reason.empty()) { reason = it->second.reason; break; }
+        }
+        return !has_includes_;
+    }
+
+    // A callback whose first parameter is a reference: a lambda's, or that of every overload of a script function the name declares
+    bool callback_takes_first_by_reference(const expression* callback) const {
+        if (!callback) { return false; }
+        if (callback->get_type() == node_type::lambda_expr) {
+            const auto* l = static_cast<const lambda_expr*>(callback);
+            return !l->parameters.empty() && l->parameters[0].is_reference;
+        }
+        if (callback->get_type() != node_type::identifier_expr) { return false; }
+        auto it = functions_.find(static_cast<const identifier_expr*>(callback)->name);
+        if (it == functions_.end() || it->second.empty()) { return false; }
+        return std::all_of(it->second.begin(), it->second.end(), [](const function_decl* fn) { return !fn->parameters.empty() && fn->parameters[0].is_reference; });
+    }
+
+    // A builtin that reads its callback's result (detail::callback_result_wanted), handed a callback that returns nothing: a lambda
+    // whose returns give no value, a function or lambda declared void
+    void callback_result_read(std::string_view builtin, std::string_view wants, const expression* callback) {
+        if (!callback) { return; }
+        std::string shown;
+        if (callback->get_type() == node_type::lambda_expr) {
+            const auto* l = static_cast<const lambda_expr*>(callback);
+            if (nothing_lambdas_.count(l) || declared_void(l->return_type.get())) { shown = "the lambda"; }
+        } else if (callback->get_type() == node_type::identifier_expr) {
+            const auto* id = static_cast<const identifier_expr*>(callback);
+            bool nothing = declared_void(callback_declared_return(callback));
+            if (rebindable(id->name)) { return; }
+            if (auto it = functions_.find(id->name); !nothing && it != functions_.end() && !it->second.empty()) {
+                nothing = std::all_of(it->second.begin(), it->second.end(), [&](const function_decl* fn) { return returns_nothing(fn); });
+            }
+            if (!nothing) { nothing = lambda_variable_returns_nothing(id) != nullptr; }
+            if (nothing) { shown = "'" + std::string(id->name) + "'"; }
+        }
+        if (shown.empty()) { return; }
+        diag(diag_level::error, callback->location, shown + " returns nothing, but " + std::string(builtin) + " needs " + std::string(wants) + " from it");
     }
 
     // The return type a callback argument declares: a lambda's spelled one, or the one overload of a named script function
@@ -5879,7 +6003,7 @@ private:
     // a method call on a host class that opted into strict signatures: the arity and argument kinds its overloads accept, and
     // the result they agree on; other host classes stay lenient
     ctype check_strict_host_method(std::string_view cls, std::string_view member, const std::vector<ctype>& args, const source_location& loc,
-                                   const call_expr* c = nullptr) {
+                                   const call_expr* c = nullptr, const member_expr* m = nullptr) {
         auto def = engine_class(cls);
         if (!def || !def->is_cpp_class() || def->extended_ever()) { return {}; }
         const auto& table = def->cpp_method_overload_table();
@@ -6010,10 +6134,14 @@ private:
         const function_decl* only_viable = nullptr;
         int viable_count = 0;
         int nodiscard_viable = 0;
+        int void_viable = 0;
+        std::string reason;
         for (const auto* fn : all) {
             if (!script_fn_viable(fn, args, rivals)) { continue; }
             ++viable_count;
             nodiscard_viable += fn->is_nodiscard;
+            void_viable += returns_nothing(fn);
+            if (returns_nothing(fn) && reason.empty()) { reason = nothing_reason(fn); }
             only_viable = fn;
         }
         if (viable_count == 0) {
@@ -6022,11 +6150,42 @@ private:
         }
         if (viable_count == 1) { warn_dynamic_handle_arguments(only_viable, args); }
         if (nodiscard_viable == viable_count) { nodiscard_hit_ = {std::string(fname), {}}; }
+        if (void_viable == viable_count) { void_hit_ = {"'" + std::string(fname) + "'", {}, nullptr, reason}; }
         if (viable_count > 1 || std::find(own.begin(), own.end(), only_viable) == own.end()) { return {}; }
         ctype result = only_viable->is_coroutine ? ctype::make(ctype::coroutine_k) : ctype_from_type_info(only_viable->return_type.get());
         if (only_viable->is_coroutine) { result.yields = only_viable->return_type.get(); }
         return result;
     }
+
+    // A function declared void: its call has no value (a coroutine's call is the coroutine)
+    bool returns_nothing(const function_decl* fn) const {
+        return !fn->is_coroutine && (declared_void(fn->return_type.get()) || (!fn->return_type && nothing_functions_.count(fn)));
+    }
+    // the reason a deduced body that returns nothing passes on (empty for a void declaration or a plain call)
+    std::string nothing_reason(const function_decl* fn) const {
+        auto it = fn->return_type ? nothing_functions_.end() : nothing_functions_.find(fn);
+        return it == nothing_functions_.end() ? std::string() : it->second;
+    }
+    // The library's forms that take their arguments as values: what they are passed cannot be rebound through them
+    static bool value_taking_library_call(const call_expr* c) {
+        if (!c->callee) { return false; }
+        if (c->callee->get_type() == node_type::identifier_expr) {
+            const std::string_view name = static_cast<const identifier_expr*>(c->callee.get())->name;
+            return name == "parallel_transform" || name == "parallel_reduce";
+        }
+        return static_path(static_cast<const member_expr*>(c->callee->get_type() == node_type::member_expr ? c->callee.get() : nullptr), "array") ||
+               static_path(static_cast<const member_expr*>(c->callee->get_type() == node_type::member_expr ? c->callee.get() : nullptr), "map");
+    }
+    // A name something may rebind (rebinding_names): assigned, passed where a reference may take it, bound by a reference
+    bool rebindable(std::string_view name) const { return assigned_names_.count(name) || passed_names_.count(name); }
+    // A local declared from a lambda literal and never rebound (rebindable), whose body returns nothing: its reason
+    const std::string* lambda_variable_returns_nothing(const identifier_expr* id) {
+        const var_entry* local = find_local(id->name);
+        if (!local || !local->declared_lambda || rebindable(id->name)) { return nullptr; }
+        auto it = nothing_lambdas_.find(local->declared_lambda);
+        return it == nothing_lambdas_.end() ? nullptr : &it->second;
+    }
+    static bool declared_void(const type_info* t) { return t && t->base_type == script_value_type::jai_null_type && t->type_name == "void"; }
 
     // args already inferred by the caller; foreign = the overloads belong to another unit's source; scored = the runtime picks
     // among them by type (methods); a program's free functions of one name are redefinitions, the last one taking the call
@@ -6037,14 +6196,19 @@ private:
         const function_decl* only_viable = nullptr;
         int viable_count = 0;
         int nodiscard_viable = 0;
+        int void_viable = 0;
+        std::string reason;
         for (const auto* fn : overloads) {
             if (script_fn_viable(fn, args, scored && arity_rivals(overloads, args.size()))) {
                 ++viable_count;
                 nodiscard_viable += fn->is_nodiscard;
+                void_viable += returns_nothing(fn);
+                if (returns_nothing(fn) && reason.empty()) { reason = nothing_reason(fn); }
                 only_viable = fn;
             }
         }
         if (viable_count > 0 && nodiscard_viable == viable_count) { nodiscard_hit_ = {std::string(fname), {}}; }
+        if (viable_count > 0 && void_viable == viable_count) { void_hit_ = {"'" + std::string(fname) + "'", {}, nullptr, reason}; }
         if (viable_count == 1) { warn_dynamic_handle_arguments(only_viable, args); }
         call_check out;
         out.checked = true;
@@ -8294,6 +8458,7 @@ private:
         const std::vector<const function_decl*>* ov = nullptr;   // the statically resolved same-script overload set
         ov_class_ = {};
         nodiscard_hit_ = {};
+        void_hit_ = {};
         // a call in the callee's receiver resolves its own type arguments: the enclosing call's state comes back after it
         const bool outer_type_argument_call = type_argument_call_;
         std::string outer_script_callee = std::move(type_argument_script_callee_), outer_host_callee = std::move(type_argument_host_callee_);
@@ -8334,6 +8499,14 @@ private:
         t = check_call(c, args, ov, std::move(t));
         if (!nodiscard_hit_.name.empty() && collect_diagnostics_) { nodiscard_calls_[c] = std::move(nodiscard_hit_); }
         nodiscard_hit_ = {};
+        if (!void_hit_.shown.empty() && !void_hit_.typed_slot && callee_rebindable(c)) { void_hit_ = {}; }
+        if (!void_hit_.shown.empty() && !c->result_discarded) {
+            report_void_result(c, void_hit_);
+            t = {};   // the one error: no null to initialize, pass or compare
+        } else if (!void_hit_.shown.empty()) {
+            nothing_calls_[c] = {void_result_text(void_hit_), void_hit_.reason};
+        }
+        void_hit_ = {};
         call_results_[c] = t;
         return t;
     }
@@ -8357,6 +8530,7 @@ private:
                 auto pit = program_functions_->find(std::string(name));
                 if (pit != program_functions_->end() && pit->second.size() == 1 && pit->second.begin()->second.size() == 1) { program_ov.push_back(pit->second.begin()->second[0].get()); }
                 if (program_ov.size() == 1 && program_ov[0]->is_nodiscard) { nodiscard_hit_ = {std::string(name), {}}; }
+                if (program_ov.size() == 1 && returns_nothing(program_ov[0])) { void_hit_ = {"'" + std::string(name) + "'", {}, nullptr, nothing_reason(program_ov[0])}; }
             }
             // the proof pass alone types the call by that declaration's scalar return (the consumers guard it; a graft re-checks the
             // callee's declared return per definition epoch, call_expr::k_proof_function)
@@ -8600,6 +8774,7 @@ private:
                 if (scope_index == 0) { note_global_use(id->name); }
                 if (local->lambda && script_callee_takes_type_arguments(id->name)) { return {}; }
                 if (!local->dynamic && signature_slot(local->type)) { return check_signature_call("'" + std::string(id->name) + "'", local->type.ti, c, args); }
+                if (const std::string* reason = lambda_variable_returns_nothing(id)) { void_hit_ = {"'" + std::string(id->name) + "'", {}, nullptr, *reason}; }
                 return {};   // a callable local without a signature
             }
             if (class_ctx_ && !id->global_qualified) {
@@ -8612,6 +8787,11 @@ private:
                         ctype r = check_script_overloads(id->name, *hit.methods, args, c->location, hit.foreign).result;
                         hidden_function_probe_ = false;
                         if (!nodiscard_hit_.name.empty()) { nodiscard_hit_.name = std::string(class_ctx_name_) + "." + nodiscard_hit_.name; }
+                        if (!void_hit_.shown.empty()) {
+                            const bool statics = std::all_of(hit.methods->begin(), hit.methods->end(), [](const function_decl* fn) { return fn->is_static; });
+                            if (statics) { void_hit_.shown = "'" + std::string(class_ctx_name_) + "." + std::string(method_spelling(id->name)) + "'"; }
+                            else { void_hit_ = {}; }
+                        }
                         if (!hit.provable) { r.tentative = true; }
                         return r;
                     }
@@ -8672,8 +8852,16 @@ private:
                     return ctype::make(ctype::null_k);
                 }
                 check_host_call(name, args, c->location, c);
+                note_host_void(name);
                 check_held_script_call(id->name, args, c->location);
                 if (name == "parallel_reduce") { check_reduce_callbacks(c); }
+                // the engine's parallel forms read their callbacks' results as array::map and reduce do, but a step that takes its
+                // accumulator by reference folds in place (void step(T& acc, x))
+                if (name == "parallel_transform" && c->arguments.size() >= 2) { callback_result_read(name, "a value", c->arguments[1].get()); }
+                if (name == "parallel_reduce") {
+                    if (c->arguments.size() >= 3 && !callback_takes_first_by_reference(c->arguments[2].get())) { callback_result_read(name, "a value", c->arguments[2].get()); }
+                    if (c->arguments.size() >= 4) { callback_result_read(name, "a value", c->arguments[3].get()); }
+                }
                 if (name == "format") { check_format_text(c, args); }
                 if (name == "print" || name == "format") {
                     check_format_arguments(c, name, args);
@@ -8787,6 +8975,11 @@ private:
                 checkBuiltinMethodShapes(recv, m, c, args);
                 in_place_result_used(recv, m, c);
                 call_result_mutation(m, c);
+                if (recv.kind == ctype::array_k || recv.kind == ctype::map_k) {
+                    if (const auto wants = callback_result_wanted(recv.kind == ctype::array_k ? 0 : 1, m->member); wants && !c->arguments.empty()) {
+                        callback_result_read(m->member, *wants, c->arguments[0].get());
+                    }
+                }
             }
             stamp(c->builtin_receiver, proven, uint8_t(0));
             stamp(c->builtin_receiver_open, uint8_t(!proven && (recv.kind == ctype::unknown || recv.kind == ctype::string_k || recv.kind == ctype::array_k || recv.kind == ctype::map_k)), uint8_t(0));
@@ -8852,6 +9045,11 @@ private:
         }
     }
 
+    // A method's name as a call spells it: a generic method's instance declares its class in full (C::g<int>), which a call omits
+    static std::string_view method_spelling(std::string_view name) {
+        const size_t scope = name.substr(0, name.find('<')).rfind("::");
+        return scope == std::string_view::npos ? name : name.substr(scope + 2);
+    }
     // recv.m(args) on a class or a class used as a value; ov (null for a reference's referent: diagnostics only) takes the overloads
     // a proof may rest on
     ctype class_member_call(call_expr* c, member_expr* m, const ctype& recv, const std::vector<ctype>& args,
@@ -8865,6 +9063,11 @@ private:
                 if (hit.provable && ov) { *ov = hit.methods; ov_class_ = recv.cls; }
                 ctype result = check_script_overloads(m->member, *hit.methods, args, c->location, hit.foreign).result;
                 if (!nodiscard_hit_.name.empty()) { nodiscard_hit_.name = std::string(recv.cls) + "." + nodiscard_hit_.name; }
+                // a method dispatches on the object, so only a static's result is known (an override may give a value)
+                if (!void_hit_.shown.empty()) {
+                    if (want_static) { void_hit_.shown = "'" + std::string(recv.cls) + "." + std::string(method_spelling(m->member)) + "'"; }
+                    else { void_hit_ = {}; }
+                }
                 if (!hit.provable) { result.tentative = true; }
                 return result;
             }
@@ -8873,7 +9076,7 @@ private:
             }
             note_host_nodiscard(std::string(recv.cls) + "." + std::string(m->member));
             if (type_argument_call_ && (find_sclass(recv.cls) || eng_.find_script_class(std::string(recv.cls)))) { type_argument_host_callee_.clear(); }   // a script class's field: no host method
-            if (!want_static) { return check_strict_host_method(recv.cls, m->member, args, c->location, c); }
+            if (!want_static) { return check_strict_host_method(recv.cls, m->member, args, c->location, c, m); }
             check_host_static_arity(recv.cls, m->member, args.size(), c->location);
             return {};
         }
@@ -10869,7 +11072,21 @@ private:
         const ctype value = r->value ? infer_expecting(r->value.get(), declared) : ctype::make(ctype::null_k);
         // the return proof has a reader with no run-time guard (parallel_transform's rewrite): a narrowed read stays out of it
         narrow_derived_ = narrow_reads_ != reads;
-        check_return_value(r, value, proof);
+        std::vector<const call_expr*> calls;
+        const bool nothing = r->value_discarded && calls_nothing(r->value.get(), &calls);   // `return f();` in a body that declares no value
+        if (r->value && !nothing && !fn_stack_.empty()) { fn_stack_.back().gives_value = true; }
+        if (nothing && !fn_stack_.empty() && fn_stack_.back().dispatched) {
+            // a returned builtin in-place call is the use main reports, its twin named; a script function's nothing loads
+            for (const call_expr* call : calls) {
+                if (auto it = nothing_calls_.find(call); it != nothing_calls_.end() && !it->second.reason.empty() && it->second.used == it->second.reason) {
+                    diag(diag_level::error, call->location, it->second.used);
+                }
+            }
+        } else if (nothing && !fn_stack_.empty() && !fn_stack_.back().ret) {
+            auto& returns = fn_stack_.back().nothing_returns;
+            returns.insert(returns.end(), calls.begin(), calls.end());
+        }
+        check_return_value(r, nothing ? ctype::make(ctype::null_k) : value, proof, nothing);
         if (narrow_derived_) { proof = proof_none; }
         narrow_derived_ = false;
     }
@@ -10885,36 +11102,37 @@ private:
              fn.ret->canonical_name() + "'" + assignment_detail(value, declared), fn.line, fn.column);
     }
 
-    JAI_NOINLINE void check_return_value(return_stmt* r, ctype value, uint8_t& proof) {
+    JAI_NOINLINE void check_return_value(return_stmt* r, ctype value, uint8_t& proof, bool nothing = false) {
+        const bool valued = r->value && !nothing;   // an arrow returning a call that returns nothing returns no value
         if (r->binds_reference) { report_mixed_reference_conditional(r->value.get()); }
         if (fn_stack_.empty()) { return; }
         const fn_ctx& fn = fn_stack_.back();
-        if (r->value && value.const_key && (r->binds_reference || handle_type(fn.ret))) {
+        if (valued && value.const_key && (r->binds_reference || handle_type(fn.ret))) {
             map_key_alias(r->location, r->value.get());
         }
         if (!fn.is_coroutine && !fn.ret) {
             fn_ctx& open = fn_stack_.back();
-            const uint8_t k = !r->value || r->binds_reference || value.tentative || narrow_derived_ ? 0
+            const uint8_t k = !valued || r->binds_reference || value.tentative || narrow_derived_ ? 0
                             : value.kind == ctype::int_k ? (enum_value(value) ? 0 : 1) : value.kind == ctype::float_k ? 2 : value.kind == ctype::bool_k ? 3 : 0;
             if (k == 0 || (open.inferred_return != 0 && open.inferred_return != k)) { open.inferred_mixed = true; }
             else { open.inferred_return = k; }
             open.returns_seen = true;
-            if (!r->value || r->binds_reference || !names_a_value(value)) { open.returns_values = false; }
+            if (!valued || r->binds_reference || !names_a_value(value)) { open.returns_values = false; }
             if (generics_live_) {
-                const type_info* yields = r->value && !r->binds_reference && !narrow_derived_ ? deduction_type(value) : nullptr;
-                if (!r->value) { open.returns_nothing = true; }
+                const type_info* yields = valued && !r->binds_reference && !narrow_derived_ ? deduction_type(value) : nullptr;
+                if (!valued) { open.returns_nothing = true; }
                 else if (!yields || (open.returned && open.returned->canonical_name() != yields->canonical_name())) { open.returned_mixed = true; }
                 else { open.returned = yields; }
             }
         }
-        if (fn.is_coroutine && r->value) { check_coroutine_value(value, r->location, "return"); }
+        if (fn.is_coroutine && valued) { check_coroutine_value(value, r->location, "return"); }
         if (fn.is_coroutine || !fn.ret) { return; }   // coroutine returns/yields + auto: lenient
-        if (!r->value && requires_return_value(fn.ret)) {
+        if (!valued && requires_return_value(fn.ret)) {
             diag(diag_level::error, r->location, "'" + std::string(fn.name) + "' declared to return '" +
                  fn.ret->canonical_name() + "' returns no value here", fn.line, fn.column);
             return;
         }
-        if (fn.ret->base_type == script_value_type::jai_reference_type && r->value) {
+        if (fn.ret->base_type == script_value_type::jai_reference_type && valued) {
             const type_info* referent = fn.ret->element_type().get();
             if (referent && !reference_type_compatible(narrow_declared_view(value), ctype_from_type_info(referent))) {
                 diag(diag_level::error, r->location, "cannot return reference to '" + ctype_name(value) +
@@ -10924,15 +11142,15 @@ private:
         }
         ctype ret = ctype_from_type_info(fn.ret);
         if (ret.is_unknown()) { return; }
-        if (r->value && !r->binds_reference && ret.kind != ctype::null_k && same_type(ret, value)) { proof = proof_same_type; }
+        if (valued && !r->binds_reference && ret.kind != ctype::null_k && same_type(ret, value)) { proof = proof_same_type; }
         if (ret.kind == ctype::null_k) {
-            if (r->value && value.kind != ctype::null_k && !value.is_unknown()) {
+            if (valued && value.kind != ctype::null_k && !value.is_unknown()) {
                 diag(diag_level::error, r->location, "cannot return a value from '" + std::string(fn.name) +
                      "' declared 'void'", fn.line, fn.column);
             }
             return;
         }
-        if (!r->value) {
+        if (!valued) {
             // a nullable result (a handle, a container) returns null here: warning severity, like falling off the end
             diag(diag_level::warning, r->location, "'" + std::string(fn.name) + "' declared to return '" +
                  fn.ret->canonical_name() + "' returns no value here (returns null)", fn.line, fn.column);
@@ -11352,6 +11570,9 @@ private:
         if (has_init && decl->slot_index != SIZE_MAX && decl->initializer->get_type() == node_type::lambda_expr && !is_reference_decl) {
             entry.lambda = static_cast<const lambda_expr*>(decl->initializer.get());
         }
+        if (has_init && decl->initializer->get_type() == node_type::lambda_expr && !is_reference_decl) {
+            entry.declared_lambda = static_cast<const lambda_expr*>(decl->initializer.get());
+        }
         if (decl->is_const && has_init && decl->initializer->get_type() == node_type::member_expr) {   // a const structured binding's value half
             auto* half = static_cast<const member_expr*>(decl->initializer.get());
             const var_entry* pair = half->member == "second" && half->object && half->object->get_type() == node_type::identifier_expr
@@ -11412,6 +11633,7 @@ private:
         const cdtor_ctx enclosing_cdtor = cdtor_ctx_;
         cdtor_ctx_ = is_ctor ? cdtor_ctx::construction
                    : (class_ctx_ && !fn->is_static && fn->name.size() > 1 && fn->name[0] == '~') ? cdtor_ctx::destruction : cdtor_ctx::none;
+        ctx.dispatched = class_ctx_ && !fn->is_static && !fn->return_type && !is_ctor;
         fn_stack_.push_back(std::move(ctx));
         mode_guard enclosing(mode_stack_, scoped_region_mode(), /*scoped=*/true, /*always=*/true);
         check_spelled_type(fn->return_type.get(), fn->location);
@@ -11436,6 +11658,10 @@ private:
         check_falls_off_end(fn);
         lw_close_region(&fn->parameters, nullptr, fn->body.get());
         if (!fn->return_type && !fn->is_coroutine && fn_stack_.back().returns_seen && fn_stack_.back().returns_values) { auto_value_returns_.insert(fn); }
+        if (!fn->return_type && !fn->is_coroutine && fn->body && !is_ctor && !(fn->name.size() > 1 && fn->name[0] == '~') && !fn_stack_.back().dispatched) {
+            std::string reason;
+            if (close_deduced_body(fn_stack_.back(), fn->body.get(), reason)) { nothing_functions_[fn] = reason; } else { nothing_functions_.erase(fn); }
+        }
         fn_stack_.pop_back();
         scopes_.pop_back();
         capture_stack_.swap(saved_captures);
@@ -11800,6 +12026,10 @@ private:
             stamp(l->inferred_return_kind, kind, uint8_t(0));
             if (kind) { lambda_results_[l] = ctype::make(kind == 1 ? ctype::int_k : kind == 2 ? ctype::float_k : ctype::bool_k); }
             else { lambda_results_.erase(l); }
+            std::string reason;
+            const bool deduced = !l->return_type || l->contextual_return;
+            if (deduced && (l->contextual_return ? !done.gives_value && !has_includes_ : close_deduced_body(done, l->body.get(), reason))) { nothing_lambdas_[l] = reason; }
+            else { nothing_lambdas_.erase(l); }
             if (generics_live_) {   // no return of a value at all is a lambda that returns nothing
                 const bool unknown = l->return_type || done.returned_mixed || has_includes_ || (done.returned && done.returns_nothing);
                 if (unknown) { lambda_return_types_.erase(l); }
@@ -12006,6 +12236,8 @@ void static_checker::collect_names_expr(const expression* e) {
             auto* a = static_cast<const assignment_expr*>(e);
             if (a->target && a->target->get_type() == node_type::identifier_expr) {
                 assigned_names_.insert(static_cast<const identifier_expr*>(a->target.get())->name);
+            } else if (a->target && a->target->get_type() == node_type::member_expr && static_cast<const member_expr*>(a->target.get())->is_static) {
+                rebindable_paths_.insert(qualified_spelling(static_cast<const member_expr*>(a->target.get())));
             }
             collect_names_expr(a->target.get());
             collect_names_expr(a->value.get());
@@ -12016,8 +12248,13 @@ void static_checker::collect_names_expr(const expression* e) {
             collect_names_expr(c->callee.get());
             const bool is_extend = c->callee->get_type() == node_type::identifier_expr &&
                                    static_cast<const identifier_expr*>(c->callee.get())->name == "extend";
+            const bool takes_values = value_taking_library_call(c);
             for (const auto& arg : c->arguments) {
                 collect_names_expr(arg.get());
+                if (arg && !takes_values && arg->get_type() == node_type::identifier_expr) { passed_names_.insert(static_cast<const identifier_expr*>(arg.get())->name); }
+                if (arg && !takes_values && arg->get_type() == node_type::member_expr && static_cast<const member_expr*>(arg.get())->is_static) {
+                    rebindable_paths_.insert(qualified_spelling(static_cast<const member_expr*>(arg.get())));
+                }
                 if (!is_extend || !arg) { continue; }
                 if (arg->get_type() == node_type::identifier_expr) {
                     extended_names_.insert(static_cast<const identifier_expr*>(arg.get())->name);

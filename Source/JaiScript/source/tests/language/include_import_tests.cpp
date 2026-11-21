@@ -662,30 +662,28 @@ public:
             f.read(magic, 4);
             return f.gcount() == 4 && magic[0] == 'J' && magic[1] == 'B' && magic[2] == 'I' && magic[3] == 'T';
         };
-        // the sibling's recorded source identity rewritten to the file's current text: a load then proves the parse was
-        // skipped, since that text need not parse
+        // the sibling's recorded source identity rewritten to the file's current text, under a fresh integrity value: a load
+        // then proves the parse was skipped, since that text need not parse
         auto relabel_cache = [](const std::string& src, const std::string& cache) {
             std::ifstream in(src);
             std::stringstream text;
             text << in.rdbuf();
             const auto id = jai::detail::jaibite_identity_of(text.str());
-            std::fstream f(cache, std::ios::in | std::ios::out | std::ios::binary);
-            f.seekp(20);
-            for (uint64_t v : {id.size, id.hash}) {
-                for (int i = 0; i < 8; ++i) { f.put(char(uint8_t(v >> (8 * i)))); }
+            std::vector<uint8_t> bytes;
+            {
+                std::ifstream f(cache, std::ios::binary);
+                bytes.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
             }
-        };
-        auto relabel_sibling = [sibling_of](const std::string& src) {
-            std::ifstream in(src);
-            std::stringstream text;
-            text << in.rdbuf();
-            const auto id = jai::detail::jaibite_identity_of(text.str());
-            std::fstream f(sibling_of(src), std::ios::in | std::ios::out | std::ios::binary);
-            f.seekp(20);
+            if (bytes.size() < jai::detail::k_jaibite_header_size) { return; }
+            size_t at = jai::detail::k_jaibite_source_at;
             for (uint64_t v : {id.size, id.hash}) {
-                for (int i = 0; i < 8; ++i) { f.put(char(uint8_t(v >> (8 * i)))); }
+                for (int i = 0; i < 8; ++i) { bytes[at++] = uint8_t(v >> (8 * i)); }
             }
+            jai::detail::jaibite_seal(bytes.data(), bytes.size());
+            std::ofstream f(cache, std::ios::binary | std::ios::trunc);
+            f.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
         };
+        auto relabel_sibling = [sibling_of, relabel_cache](const std::string& src) { relabel_cache(src, sibling_of(src)); };
 
         test("jaibite_cache_creates_sibling_on_file_loads", [=, this]() {
             for (bool use_vm : {false, true}) {

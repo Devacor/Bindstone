@@ -881,7 +881,8 @@ public:
             auto bytes = unstamped_bite_bytes(*e, "int bad = \"s\";");
             auto stamp = [&bytes](uint32_t flags) {
                 std::vector<uint8_t> stamped = bytes;
-                for (int i = 0; i < 4; ++i) { stamped[8 + i] = static_cast<uint8_t>(flags >> (8 * i)); }
+                for (int i = 0; i < 4; ++i) { stamped[jai::detail::k_jaibite_flags_at + i] = static_cast<uint8_t>(flags >> (8 * i)); }
+                jai::detail::jaibite_seal(stamped.data(), stamped.size());
                 return stamped;
             };
             const uint32_t revision = jai::detail::jaibite_checker_revision();
@@ -908,14 +909,21 @@ public:
             check_eq((uint64_t)1, walks_of_a_load(), "the first load checks the file and caches it");
             check_eq((uint64_t)0, walks_of_a_load(), "a cache this revision stamped is trusted");
             {
-                std::fstream cache(dir / ".cache" / "revision_stamp.jai.jaibite", std::ios::in | std::ios::out | std::ios::binary);
-                check_true(cache.is_open(), "the cache sits beside the file");
-                cache.seekg(8);
-                const uint32_t written = static_cast<uint8_t>(cache.get());   // the low byte: the stamp bit beside the bite's other flags
+                const auto path = dir / ".cache" / "revision_stamp.jai.jaibite";
+                std::vector<uint8_t> cache;
+                {
+                    std::ifstream in(path, std::ios::binary);
+                    check_true(in.is_open(), "the cache sits beside the file");
+                    cache.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+                }
+                check_true(cache.size() >= jai::detail::k_jaibite_header_size, "the cache holds a header");
+                const uint32_t written = cache[jai::detail::k_jaibite_flags_at];   // the low byte: the stamp bit beside the bite's other flags
                 check_true((written & jai::detail::k_jaibite_flag_checked_clean) != 0, "the cache was stamped");
                 const uint32_t flags = written | ((revision ^ 1u) << 8);
-                cache.seekp(8);
-                for (int i = 0; i < 4; ++i) { cache.put(static_cast<char>(flags >> (8 * i))); }
+                for (int i = 0; i < 4; ++i) { cache[jai::detail::k_jaibite_flags_at + i] = static_cast<uint8_t>(flags >> (8 * i)); }
+                jai::detail::jaibite_seal(cache.data(), cache.size());
+                std::ofstream out(path, std::ios::binary | std::ios::trunc);
+                out.write(reinterpret_cast<const char*>(cache.data()), static_cast<std::streamsize>(cache.size()));
             }
             check_eq((uint64_t)1, walks_of_a_load(), "a cache another revision stamped is checked again");
             check_eq((uint64_t)0, walks_of_a_load(), "and that clean check stamped it under this revision");

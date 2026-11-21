@@ -3588,8 +3588,9 @@ struct engine::implementation {
             if (!detail::read_jaibite_header(bytes.data(), bytes.size(), savedFingerprint, recorded) ||
                 recorded != *identity || savedFingerprint != self.registration_fingerprint()) {
                 if (!report) { return nullptr; }
-                if (bytes.size() < detail::k_jaibite_header_size || std::memcmp(bytes.data(), detail::k_jaibite_magic, 4) != 0) { return missed("corrupt"); }
+                if (bytes.size() < 8 || std::memcmp(bytes.data(), detail::k_jaibite_magic, 4) != 0) { return missed("corrupt"); }
                 if (std::memcmp(bytes.data() + 4, &detail::k_jaibite_version, 4) != 0) { return missed("format version"); }
+                if (bytes.size() < detail::k_jaibite_header_size) { return missed("corrupt"); }
                 return missed(recorded != *identity ? "different source" : "fingerprint");
             }
             uint32_t flags = 0;

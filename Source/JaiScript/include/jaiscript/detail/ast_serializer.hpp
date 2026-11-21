@@ -10,10 +10,11 @@
 // a loaded bite recompiles lazily through the normal path. Fixed-width fields and floats
 // are written little-endian on every host; the source hash reads its words in host order.
 //
-// Format: "JBIT" magic, u32 version, u32 flags, u64 registration fingerprint, u64 source
-// size + 1 and u64 source hash (0, 0 = no source), string table (count + length-prefixed strings), the context section when
-// flag bit 1 says so (jaibite_context: namespace query count + each query's table index and u8 answer, outside name count +
-// table indices, u64 key, '<' query count + each query's table index and u8 answer, u8 settled), declaration count, node tree.
+// Format: "JBIT" magic, u32 version, u64 integrity value of every byte after it (jaibite_integrity_of), u32 flags, u64
+// registration fingerprint, u64 source size + 1 and u64 source hash (0, 0 = no source), string table (count + length-prefixed
+// strings), the context section when flag bit 1 says so (jaibite_context: namespace query count + each query's table index and
+// u8 answer, outside name count + table indices, u64 key, '<' query count + each query's table index and u8 answer, u8
+// settled), declaration count, node tree.
 // Node encoding: u8 node_type tag (0xFF = null pointer), source_location, fields.
 // Runtime AST patches (identifier slot_index -> SIZE_MAX, outer_slot_plan, cached
 // getter_id) are serialized faithfully: patched state is self-consistent in memory on
@@ -28,6 +29,7 @@
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <array>
+#include <bit>
 #include <cstring>
 #include <unordered_map>
 #include <unordered_set>
@@ -38,7 +40,7 @@ namespace jai::detail {
     // BUMP THIS on any change to what a parse produces: the serialized bytes and the parse-time semantics baked into the
     // AST (slot assignment, node and token numbers, capture plans). A stale sidecar is reparsed and rewritten (the version
     // check feeds the corrupt-file fallback), so a bump is always safe and a missed one leaves stale caches.
-    inline constexpr uint32_t k_jaibite_version = 70;
+    inline constexpr uint32_t k_jaibite_version = 71;
     // Header flags (u32):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -79,15 +81,60 @@ namespace jai::detail {
         h ^= h >> 30; h *= 0x94D049BB133111EBull; h ^= h >> 31;
         return { uint64_t(n) + 1, h };
     }
-    inline constexpr size_t k_jaibite_header_size = 36;   // magic, version, flags, fingerprint, source size, source hash
-    // The header of a current-version bite, read without touching the body; false = not one
+    inline constexpr size_t k_jaibite_header_size = 44;   // magic, version, integrity value, flags, fingerprint, source size, source hash
+    inline constexpr size_t k_jaibite_integrity_at = 8;
+    inline constexpr size_t k_jaibite_sealed_from = 16;   // the integrity value covers every byte from here to the end
+    inline constexpr size_t k_jaibite_flags_at = 16;
+    inline constexpr size_t k_jaibite_fingerprint_at = 20;
+    inline constexpr size_t k_jaibite_source_at = 28;     // the source identity: size + 1, then hash
+    // A bite's integrity value: 64 bits over the bytes after its field (the magic and the version before it are compared for
+    // equality), eight bytes a step read little-endian, so every host computes one value. It is for damage, not for an
+    // attacker. Each step is a bijection of the running state for a fixed word and of the word for a fixed state, and the
+    // closing mix is a bijection of the state: two byte strings of one length that differ inside a single word (any one bit,
+    // any one byte) never share a value. Any other difference shares one with probability 2^-64.
+    inline uint64_t jaibite_integrity_of(const uint8_t* data, size_t size) noexcept {
+        uint64_t h = 0x6A09E667F3BCC908ull ^ (uint64_t(size) * 0xFF51AFD7ED558CCDull);
+        const auto step = [&h](uint64_t w) { h = (h ^ w) * 0xBF58476D1CE4E5B9ull; h ^= h >> 29; };
+        size_t i = 0;
+        for (; i + 8 <= size; i += 8) {
+            uint64_t w;
+            std::memcpy(&w, data + i, 8);
+            if constexpr (std::endian::native != std::endian::little) {
+                w = (w >> 56) | ((w >> 40) & 0xFF00ull) | ((w >> 24) & 0xFF0000ull) | ((w >> 8) & 0xFF000000ull) |
+                    ((w << 8) & 0xFF00000000ull) | ((w << 24) & 0xFF0000000000ull) | ((w << 40) & 0xFF000000000000ull) | (w << 56);
+            }
+            step(w);
+        }
+        uint64_t tail = 0;
+        for (size_t k = 0; i + k < size; ++k) { tail |= uint64_t(data[i + k]) << (8 * k); }
+        step(tail);
+        h ^= h >> 33; h *= 0xFF51AFD7ED558CCDull; h ^= h >> 33; h *= 0xC4CEB9FE1A85EC53ull; h ^= h >> 33;
+        return h;
+    }
+    inline uint64_t jaibite_recorded_integrity(const uint8_t* data) noexcept {
+        uint64_t x = 0;
+        for (int i = 0; i < 8; ++i) x |= uint64_t(data[k_jaibite_integrity_at + i]) << (i * 8);
+        return x;
+    }
+    // Writes the integrity value of a bite's bytes as they stand: what a save ends with, and how a test that edits a bite
+    // gets past the value to the loader's own checks
+    inline void jaibite_seal(uint8_t* data, size_t size) noexcept {
+        if (size < k_jaibite_sealed_from) { return; }
+        const uint64_t value = jaibite_integrity_of(data + k_jaibite_sealed_from, size - k_jaibite_sealed_from);
+        for (int i = 0; i < 8; ++i) data[k_jaibite_integrity_at + i] = uint8_t(value >> (i * 8));
+    }
+    // size is at least k_jaibite_sealed_from
+    inline bool jaibite_intact(const uint8_t* data, size_t size) noexcept {
+        return jaibite_recorded_integrity(data) == jaibite_integrity_of(data + k_jaibite_sealed_from, size - k_jaibite_sealed_from);
+    }
+    // The header of a current-version bite, read without touching the body (whose integrity only a load checks); false = not one
     inline bool read_jaibite_header(const uint8_t* data, size_t size, uint64_t& fingerprint, jaibite_source_identity& source) {
         if (size < k_jaibite_header_size || std::memcmp(data, k_jaibite_magic, 4) != 0) return false;
         const auto u64 = [data](size_t at) { uint64_t x = 0; for (int i = 0; i < 8; ++i) x |= uint64_t(data[at + i]) << (i * 8); return x; };
         const uint32_t version = uint32_t(data[4]) | uint32_t(data[5]) << 8 | uint32_t(data[6]) << 16 | uint32_t(data[7]) << 24;
         if (version != k_jaibite_version) return false;
-        fingerprint = u64(12);
-        source = { u64(20), u64(28) };
+        fingerprint = u64(k_jaibite_fingerprint_at);
+        source = { u64(k_jaibite_source_at), u64(k_jaibite_source_at + 8) };
         return true;
     }
     // Locations naming the unit's own file serialize as this marker and read back as the
@@ -141,9 +188,10 @@ namespace jai::detail {
             }
 
             std::vector<uint8_t> out;
-            out.reserve(24 + body_.size() + table_.size() * 8);
+            out.reserve(k_jaibite_header_size + 16 + body_.size() + table_.size() * 8);
             out.insert(out.end(), k_jaibite_magic, k_jaibite_magic + 4);
             fixed_u32(out, k_jaibite_version);
+            fixed_u64(out, 0);   // the integrity value, sealed below
             fixed_u32(out, flags);
             fixed_u64(out, fingerprint);
             fixed_u64(out, source.size);
@@ -170,6 +218,7 @@ namespace jai::detail {
                 out.push_back(context->less_settled ? 1 : 0);
             }
             out.insert(out.end(), body_.begin(), body_.end());
+            jaibite_seal(out.data(), out.size());
             return out;
         }
 
@@ -899,7 +948,7 @@ namespace jai::detail {
     class ast_reader {
     public:
         ast_reader(const uint8_t* data, size_t size, engine* eng, const ast_frame_context* context = nullptr, std::string own_path = {})
-            : data_(data), size_(size), eng_(eng), symbols_(engine_access::get_symbolizer(*eng)), own_path_(std::move(own_path)) {
+            : data_(data), size_(size), eng_(eng), symbols_(engine_access::get_symbolizer(*eng)), untrusted_(context == nullptr), own_path_(std::move(own_path)) {
             if (context) {
                 remap_from_ = context->remap_from;
                 remap_shift_ = context->remap_shift;
@@ -907,7 +956,7 @@ namespace jai::detail {
                 // The copied body's own frame is known; its captured parent is
                 // not part of this trusted subtree. Never used for file loading.
                 frames_[0].local_count = SIZE_MAX;
-                enter_frame(context->parameters);
+                enter_frame(context->parameters, frame_kind::function);
                 frames_[current_frame_].local_count = context->local_count;
                 frames_[current_frame_].supplied = true;
             }
@@ -917,13 +966,16 @@ namespace jai::detail {
         size_t frame_count() const noexcept { return frames_.size(); }
 
         std::vector<declaration_ptr> deserialize(uint64_t& fingerprint_out, uint32_t* flags_out = nullptr, jaibite_context* context_out = nullptr) {
-            if (size_ < k_jaibite_header_size) jaibite_fail("truncated header");
+            if (size_ < 8) jaibite_fail("truncated header");
             if (std::memcmp(data_, k_jaibite_magic, 4) != 0) jaibite_fail("not a jaibite file (bad magic)");
             pos_ = 4;
             uint32_t version = fixed_u32();
             if (version != k_jaibite_version)
                 jaibite_fail("unsupported format version " + std::to_string(version) +
                              " (expected " + std::to_string(k_jaibite_version) + ")");
+            if (size_ < k_jaibite_header_size) jaibite_fail("truncated header");
+            if (!jaibite_intact(data_, size_)) jaibite_fail("corrupt data");
+            pos_ = k_jaibite_sealed_from;
             uint32_t flags = fixed_u32();
             if (flags_out) *flags_out = flags;
             fingerprint_out = fixed_u64();
@@ -967,7 +1019,7 @@ namespace jai::detail {
                         if (answer != k_less_variable && answer != k_less_declared && answer != k_less_nothing) jaibite_fail("corrupt '<' answer");
                         context.less_answers.push_back(static_cast<char>(answer));
                     }
-                    context.less_settled = u8() != 0;
+                    context.less_settled = flag();
                 }
                 if (context_out) *context_out = std::move(context);
             }
@@ -983,6 +1035,7 @@ namespace jai::detail {
         }
 
     private:
+        enum class frame_kind : uint8_t { program, function, lambda, parallel };
         struct frame_record {
             size_t parent = 0;
             size_t local_count = 0;
@@ -990,6 +1043,8 @@ namespace jai::detail {
             bool allows_parent_slots = true;
             bool supplied = false;   // the copier's context frame, whose count the caller knows
             size_t slots_read = 0;   // the slots the frame's own syntax names
+            frame_kind kind = frame_kind::program;
+            bool yields = false;     // a yield stands in the frame's own code
         };
         struct slot_record {
             size_t index;
@@ -1005,11 +1060,23 @@ namespace jai::detail {
             if (declares) { frames_[current_frame_].declared.insert(symbol); }
         }
 
-        void enter_frame(const std::vector<parameter>& params, bool allows_parent_slots = true) {
+        void enter_frame(const std::vector<parameter>& params, frame_kind kind) {
             const size_t parent = current_frame_;
             current_frame_ = frames_.size();
-            frames_.push_back({parent, 0, {}, allows_parent_slots});
+            // a named function captures nothing: of a file's frames only a lambda's names a slot of the function around it
+            frames_.push_back({parent, 0, {}, untrusted_ ? kind == frame_kind::lambda : kind != frame_kind::parallel});
+            frames_.back().kind = kind;
             for (const auto& p : params) { track_slot(p.slot_index, p.symbol_id, false, true); }
+        }
+
+        // As the parser admits it: in a coroutine function's own code (a parallel_for body there included), never in a lambda's,
+        // a plain function's or the program's. The copier's context frame is a body whose function the caller knows.
+        void note_yield() {
+            size_t frame = current_frame_;
+            while (frames_[frame].kind == frame_kind::parallel && !frames_[frame].supplied) { frame = frames_[frame].parent; }
+            if (frames_[frame].supplied || !untrusted_) { return; }
+            if (frames_[frame].kind != frame_kind::function) jaibite_fail("invalid program: 'yield' outside a coroutine function");
+            frames_[frame].yields = true;
         }
 
         // What a break and a continue may leave from the body being read: a loop gives both, a switch a break, a parallel_for
@@ -1049,7 +1116,7 @@ namespace jai::detail {
             for (const auto& slot : slots_) {
                 size_t frame = slot.frame;
                 if (slot.identifier && frames_[frame].declared.find(slot.symbol) == frames_[frame].declared.end()) {
-                    // A parallel body crosses the parser's slot lookup boundary:
+                    // A parallel body crosses the parser's slot lookup boundary and a named function captures nothing:
                     // foreign names use environments, never the caller's slots.
                     if (!frames_[frame].allows_parent_slots) {
                         return checked_result<void>(make_error_code(runtime_error_code::invalid_operation),
@@ -1103,7 +1170,13 @@ namespace jai::detail {
             double d; std::memcpy(&d, &bits, 8);
             return d;
         }
-        bool flag() { return u8() != 0; }
+        // as the writer puts them: a flag is 0 or 1, and a byte of flags has no bit the writer does not know
+        bool flag() { return flags(1) != 0; }
+        uint8_t flags(uint8_t known) {
+            const uint8_t result = u8();
+            if (result & ~known) jaibite_fail("corrupt flag");
+            return result;
+        }
 
         const std::string& str() {
             uint64_t idx = varint();
@@ -1124,6 +1197,24 @@ namespace jai::detail {
             if (v == 0) return sentinel;
             return interned(v - 1).first;
         }
+        uint64_t name_index() {
+            const uint64_t index = varint();
+            if (index >= table_.size()) jaibite_fail("corrupt string index");
+            return index;
+        }
+        // The symbol written beside a name is that name's own table entry, as the writer makes the two, or absent: a backend
+        // that keys a class, a variable or a member by the symbol and reports it by the name reads one string either way
+        uint64_t symbol_beside(uint64_t name, uint64_t sentinel) {
+            const uint64_t v = varint();
+            if (v == 0) return sentinel;
+            if (v - 1 != name && untrusted_) jaibite_fail("invalid program: a symbol that does not spell its name");
+            return interned(v - 1).first;
+        }
+        // a symbol a backend looks up as it stands: the empty symbol is no key of an environment
+        uint64_t symbol_req(uint64_t value) {
+            if (value == UINT64_MAX && untrusted_) jaibite_fail("invalid program: a name without its symbol");
+            return value;
+        }
         size_t slot_val() {
             uint64_t v = varint();
             if (v == 0) { return SIZE_MAX; }
@@ -1141,7 +1232,7 @@ namespace jai::detail {
         }
 
         type_info_ptr type() {
-            if (!u8()) return type_info_ptr(nullptr);
+            if (!flag()) return type_info_ptr(nullptr);
             uint8_t bt = u8();
             if (bt > uint8_t(k_last_script_value_type)) jaibite_fail("corrupt type_info");
             if (stack_.low()) jaibite_fail("type nesting too deep");
@@ -1210,8 +1301,9 @@ namespace jai::detail {
             if (tt > uint8_t(k_last_token_type)) jaibite_fail("corrupt token type");
             token t;
             t.type = static_cast<token_type>(tt);
-            t.lexeme = view();
-            t.symbol_id = symbol(0);
+            const uint64_t lexeme = name_index();
+            t.lexeme = interned(lexeme).second;
+            t.symbol_id = symbol_beside(lexeme, 0);
             t.location = location();
             switch (t.type) {
                 case token_type::integer_literal: t.int_value = zigzag(); break;
@@ -1232,12 +1324,12 @@ namespace jai::detail {
             std::vector<parameter> params;
             for (uint64_t i = 0; i < n; ++i) {
                 type_info_ptr t = type();
-                std::string name = str();
+                const uint64_t name_at = name_index();
                 bool is_ref = flag();
                 bool is_const = flag();
-                parameter p(t, name, is_ref, is_const);
+                parameter p(t, table_[size_t(name_at)], is_ref, is_const);
                 p.untyped = flag();
-                p.symbol_id = symbol(UINT64_MAX);
+                p.symbol_id = symbol_req(symbol_beside(name_at, UINT64_MAX));
                 p.slot_index = slot_val();
                 p.default_value = expr_opt();
                 params.push_back(std::move(p));
@@ -1245,12 +1337,19 @@ namespace jai::detail {
             return params;
         }
 
+        // The parser gives a function's parameters its first slots in order, and a call fills them by position
+        void check_parameter_slots(const std::vector<parameter>& params) const {
+            for (size_t i = 0; untrusted_ && i < params.size(); ++i) {
+                if (params[i].slot_index != i) jaibite_fail("invalid program: a parameter's slot does not match its position");
+            }
+        }
+
         void outer_slot_plan(std::vector<std::pair<uint64_t, size_t>>& plan, bool& built) {
             built = flag();
             uint64_t n = varint();
             check_count(n);
             for (uint64_t i = 0; i < n; ++i) {
-                uint64_t sym = symbol(UINT64_MAX);
+                uint64_t sym = symbol_req(symbol(UINT64_MAX));
                 size_t s = slot_val();
                 plan.emplace_back(sym, s);
                 track_slot(s, sym);
@@ -1412,8 +1511,9 @@ namespace jai::detail {
         }
 
         JAI_NOINLINE ast_node_ptr read_identifier_expr(const source_location& loc) {
-            std::string_view name = view();
-            uint64_t sym = symbol(UINT64_MAX);
+            const uint64_t name_at = name_index();
+            std::string_view name = interned(name_at).second;
+            uint64_t sym = symbol_req(symbol_beside(name_at, UINT64_MAX));
             auto e = std::make_shared<identifier_expr>(loc, name, sym);
             e->slot_index = slot_val();
             e->global_qualified = flag();
@@ -1450,7 +1550,7 @@ namespace jai::detail {
         JAI_NOINLINE ast_node_ptr read_assignment_expr(const source_location& loc) {
             auto e = assignment_head(loc, expr_req());
             e->value = expr_req();
-            { const uint8_t fl = u8(); e->postfix_old_result = (fl & 1) != 0; e->incdec_desugar = (fl & 2) != 0; e->bare_condition = (fl & 8) != 0; e->yields_reference = (fl & 4) != 0; }
+            { const uint8_t fl = flags(15); e->postfix_old_result = (fl & 1) != 0; e->incdec_desugar = (fl & 2) != 0; e->bare_condition = (fl & 8) != 0; e->yields_reference = (fl & 4) != 0; }
             return e;
         }
 
@@ -1462,14 +1562,30 @@ namespace jai::detail {
             auto callee = expr_req();
             auto e = std::make_shared<call_expr>(loc, callee, expr_list());
             e->type_argument_count = u8();
+            if (e->type_argument_count > e->arguments.size()) jaibite_fail("invalid program: a call's type arguments");
+            for (size_t i = 0; untrusted_ && i < e->type_argument_count; ++i) {
+                const expression* argument = e->arguments[i].get();
+                if (argument->get_type() != node_type::cast_expr || !static_cast<const cast_expr*>(argument)->type_value) {
+                    jaibite_fail("invalid program: a call's type arguments");
+                }
+            }
             return e;
         }
 
         JAI_NOINLINE ast_node_ptr read_member_expr(const source_location& loc) {
             auto obj = expr_req();
-            std::string_view member = view();
-            uint64_t member_id = symbol(UINT64_MAX);
-            uint64_t getter_id = symbol(UINT64_MAX);
+            const uint64_t member_at = name_index();
+            std::string_view member = interned(member_at).second;
+            uint64_t member_id = symbol_req(symbol_beside(member_at, UINT64_MAX));
+            uint64_t getter_id = UINT64_MAX;
+            if (const uint64_t getter = varint(); getter != 0) {   // the cached "_get_" + member
+                if (getter - 1 >= table_.size()) jaibite_fail("corrupt string index");
+                const std::string_view spelled = table_[size_t(getter - 1)];
+                if (untrusted_ && (!spelled.starts_with("_get_") || spelled.substr(5) != member)) {
+                    jaibite_fail("invalid program: a symbol that does not spell its name");
+                }
+                getter_id = interned(getter - 1).first;
+            }
             bool arrow = flag();
             bool is_static = flag();
             auto e = std::make_shared<member_expr>(loc, obj, member, member_id, arrow, is_static);
@@ -1487,18 +1603,20 @@ namespace jai::detail {
             uint64_t nc = varint();
             check_count(nc);
             for (uint64_t i = 0; i < nc; ++i) {
-                std::string_view cname = view();
+                const uint64_t name_at = name_index();
+                std::string_view cname = interned(name_at).second;
                 bool by_ref = flag();
                 lambda_expr::capture c(cname, by_ref);
-                c.symbol_id = symbol(UINT64_MAX);
+                c.symbol_id = symbol_req(symbol_beside(name_at, UINT64_MAX));
                 c.outer_slot = slot_val();
                 track_slot(c.outer_slot, c.symbol_id);
                 c.initializer = expr_opt();
                 e->captures.push_back(std::move(c));
             }
             e->parameters = parameters();
+            check_parameter_slots(e->parameters);
             e->return_type = type();
-            enter_frame(e->parameters);
+            enter_frame(e->parameters, frame_kind::lambda);
             {
                 auto body = function_body();
                 e->body = block_req();
@@ -1511,14 +1629,14 @@ namespace jai::detail {
             uint64_t nchain = varint();
             check_count(nchain);
             for (uint64_t i = 0; i < nchain; ++i) {
-                uint64_t sym = symbol(UINT64_MAX);
+                uint64_t sym = symbol_req(symbol(UINT64_MAX));
                 size_t s = slot_val();
                 e->chained_outer_slots.emplace_back(sym, s);
                 track_slot(s, sym);
             }
             uint64_t nnames = varint();
             check_count(nnames);
-            for (uint64_t i = 0; i < nnames; ++i) e->chained_outer_names.push_back(symbol(UINT64_MAX));
+            for (uint64_t i = 0; i < nnames; ++i) e->chained_outer_names.push_back(symbol_req(symbol(UINT64_MAX)));
             e->saved_source = view();
             return e;
         }
@@ -1557,7 +1675,7 @@ namespace jai::detail {
 
         JAI_NOINLINE ast_node_ptr read_this_expr(const source_location& loc) {
             auto e = std::make_shared<this_expr>(loc);
-            e->into_handle = u8() != 0;
+            e->into_handle = flag();
             return e;
         }
 
@@ -1572,13 +1690,14 @@ namespace jai::detail {
         }
 
         JAI_NOINLINE ast_node_ptr read_yield_expr(const source_location& loc) {
+            note_yield();
             auto e = std::make_shared<yield_expr>(loc, expr_opt());
             return e;
         }
 
         JAI_NOINLINE ast_node_ptr read_cast_expr(const source_location& loc) {
             auto target = type();
-            const uint8_t cast_flags = u8();
+            const uint8_t cast_flags = flags(63);
             auto e = std::make_shared<cast_expr>(loc, target, (cast_flags & 1) != 0, expr_req());
             e->implicit_ref = (cast_flags & 2) != 0;
             e->binding_ref = (cast_flags & 4) != 0;
@@ -1625,8 +1744,9 @@ namespace jai::detail {
 
         JAI_NOINLINE ast_node_ptr read_range_for_stmt(const source_location& loc) {
             auto et = type();
-            std::string_view vname = view();
-            uint64_t vid = symbol(UINT64_MAX);
+            const uint64_t name_at = name_index();
+            std::string_view vname = interned(name_at).second;
+            uint64_t vid = symbol_beside(name_at, UINT64_MAX);
             size_t vslot = slot_val();
             bool is_ref = flag();
             bool is_const = flag();
@@ -1647,7 +1767,7 @@ namespace jai::detail {
             check_count(frame_capture_count);
             std::vector<std::pair<uint64_t, size_t>> frame_captures;
             for (uint64_t i = 0; i < frame_capture_count; ++i) {
-                const uint64_t sym = symbol(UINT64_MAX);
+                const uint64_t sym = symbol_req(symbol(UINT64_MAX));
                 const size_t slot = size_t(varint());
                 track_slot(slot, sym);
                 frame_captures.emplace_back(sym, slot);
@@ -1660,7 +1780,7 @@ namespace jai::detail {
                     jaibite_fail("invalid program: parallel parameter slot does not match its position");
                 }
             }
-            enter_frame(params, false);
+            enter_frame(params, frame_kind::parallel);
             auto body = [&] { auto scope = parallel_body(); return block_req(); }();
             leave_frame(locals);
             auto s = std::make_shared<parallel_for_stmt>(loc, std::move(params[0]), cont, body);
@@ -1673,8 +1793,9 @@ namespace jai::detail {
 
         JAI_NOINLINE ast_node_ptr read_try_stmt(const source_location& loc) {
             auto try_blk = block_req();
-            std::string catch_var = str();
-            uint64_t catch_id = symbol(UINT64_MAX);
+            const uint64_t catch_at = name_index();
+            std::string catch_var = table_[size_t(catch_at)];
+            uint64_t catch_id = symbol_beside(catch_at, UINT64_MAX);
             size_t catch_slot = slot_val();
             auto catch_blk = block_req();
             auto s = std::make_shared<try_stmt>(loc, try_blk, catch_blk, catch_var);
@@ -1736,8 +1857,9 @@ namespace jai::detail {
 
         JAI_NOINLINE ast_node_ptr read_variable_decl(const source_location& loc) {
             auto t = type();
-            std::string_view name = view();
-            uint64_t nid = symbol(UINT64_MAX);
+            const uint64_t name_at = name_index();
+            std::string_view name = interned(name_at).second;
+            uint64_t nid = symbol_req(symbol_beside(name_at, UINT64_MAX));
             auto init = expr_opt();
             if (!init && t && t->base_type == script_value_type::jai_reference_type) jaibite_fail("a reference declaration without an initializer");
             auto d = std::make_shared<variable_decl>(loc, t, name, nid, init);
@@ -1752,12 +1874,14 @@ namespace jai::detail {
         }
 
         JAI_NOINLINE ast_node_ptr read_function_decl(const source_location& loc) {
-            std::string_view name = view();
-            uint64_t nid = symbol(UINT64_MAX);
+            const uint64_t name_at = name_index();
+            std::string_view name = interned(name_at).second;
+            uint64_t nid = symbol_beside(name_at, UINT64_MAX);
             auto d = std::make_shared<function_decl>(loc, name, nid);
             d->parameters = parameters();
+            check_parameter_slots(d->parameters);
             d->return_type = type();
-            enter_frame(d->parameters);
+            enter_frame(d->parameters, frame_kind::function);
             {
                 auto body = function_body();
                 d->body = block_req();
@@ -1781,6 +1905,7 @@ namespace jai::detail {
             d->is_override = flag();
             d->is_static = flag();
             d->is_coroutine = flag();
+            if (frames_[body_frame].yields && !d->is_coroutine) jaibite_fail("invalid program: 'yield' outside a coroutine function");
             d->is_nodiscard = flag();
             d->local_count = size_t(varint());
             frames_[body_frame].local_count = d->local_count;
@@ -1796,10 +1921,11 @@ namespace jai::detail {
         }
 
         JAI_NOINLINE ast_node_ptr read_class_decl(const source_location& loc) {
-            std::string_view name = view();
-            uint64_t nid = symbol(UINT64_MAX);
+            const uint64_t name_at = name_index();
+            std::string_view name = interned(name_at).second;
+            uint64_t nid = symbol_req(symbol_beside(name_at, UINT64_MAX));
             auto d = std::make_shared<class_decl>(loc, name, nid);
-            d->nocopy = u8() != 0;
+            d->nocopy = flag();
             uint64_t nb = varint();
             check_count(nb);
             for (uint64_t i = 0; i < nb; ++i) d->base_classes.push_back(view());
@@ -1823,8 +1949,9 @@ namespace jai::detail {
         }
 
         JAI_NOINLINE ast_node_ptr read_namespace_decl(const source_location& loc) {
-            std::string_view name = view();
-            uint64_t nid = symbol(UINT64_MAX);
+            const uint64_t name_at = name_index();
+            std::string_view name = interned(name_at).second;
+            uint64_t nid = symbol_req(symbol_beside(name_at, UINT64_MAX));
             auto d = std::make_shared<namespace_decl>(loc, name, nid);
             uint64_t n = varint();
             check_count(n);
@@ -1870,8 +1997,9 @@ namespace jai::detail {
         }
 
         JAI_NOINLINE ast_node_ptr read_extern_decl(const source_location& loc) {
-            std::string_view name = view();
-            uint64_t nid = symbol(UINT64_MAX);
+            const uint64_t name_at = name_index();
+            std::string_view name = interned(name_at).second;
+            uint64_t nid = symbol_req(symbol_beside(name_at, UINT64_MAX));
             bool is_function = flag();
             bool is_const = flag();
             const auto written_at = static_cast<uint32_t>(varint());
@@ -1971,14 +2099,16 @@ namespace jai::detail {
         }
 
         JAI_NOINLINE ast_node_ptr read_enum_decl(const source_location& loc) {
-            std::string_view name = view();
-            uint64_t nid = symbol(UINT64_MAX);
+            const uint64_t name_at = name_index();
+            std::string_view name = interned(name_at).second;
+            uint64_t nid = symbol_req(symbol_beside(name_at, UINT64_MAX));
             auto d = std::make_shared<enum_decl>(loc, name, nid);
             uint64_t n = varint();
             check_count(n);
             for (uint64_t i = 0; i < n; ++i) {
-                std::string_view vname = view();
-                uint64_t vid = symbol(UINT64_MAX);
+                const uint64_t value_at = name_index();
+                std::string_view vname = interned(value_at).second;
+                uint64_t vid = symbol_req(symbol_beside(value_at, UINT64_MAX));
                 d->values.emplace_back(vname, vid);
                 d->numbers.push_back(zigzag());
             }
@@ -1990,8 +2120,9 @@ namespace jai::detail {
             uint64_t n = varint();
             check_count(n);
             for (uint64_t i = 0; i < n; ++i) {
-                std::string_view nm = view();
-                uint64_t id = symbol(UINT64_MAX);
+                const uint64_t name_at = name_index();
+                std::string_view nm = interned(name_at).second;
+                uint64_t id = symbol_req(symbol_beside(name_at, UINT64_MAX));
                 names.emplace_back(nm, id);
             }
             uint64_t ns = varint();
@@ -2025,6 +2156,9 @@ namespace jai::detail {
         size_t pos_ = 0;
         engine* eng_;
         string_symbolizer* symbols_;
+        // Bytes from a file or a host: the copier's own round trip of a live tree (a context) carries what a run made of it,
+        // which the checks on a name's symbol and a yield's function do not describe
+        bool untrusted_ = true;
         std::vector<std::string> table_;
         std::vector<std::pair<uint64_t, std::string_view>> interned_;  // lazy per-table-entry target ids
         std::vector<frame_record> frames_{frame_record{}};

@@ -1276,6 +1276,9 @@ struct engine::implementation {
     // shape is the definition declared again (note_remade_instances), one of another shape an overload beside it
     std::unordered_map<uint64_t, detail::generic_definition_ptr> instance_shapes_;
     std::unordered_set<std::string> generic_method_names_;   // the bare names of the generic methods ever declared
+    // The definitions a file stopped declaring while instances of them were made, by qualified name, until the name is a
+    // generic's again: a unit that uses such an instance and is not run again still checks with it (place_dropped_generics)
+    std::unordered_map<std::string, std::vector<detail::generic_definition_ptr>> dropped_generics_;
     void note_instance(const std::string& name, const std::string& generic, const std::vector<type_info_ptr>& arguments) {
         const auto [held, fresh] = generic_instances_.try_emplace(name);
         if (fresh) { instances_of_[generic].push_back(name); }
@@ -1330,13 +1333,17 @@ struct engine::implementation {
                     const bool kept = std::any_of(declared.begin(), declared.end(), [&](const detail::generic_definition_ptr& d) {
                         return d->qualified_name() == name && same_generic_shape(*d, *g);
                     });
-                    if (!kept) { ++script_cache_epoch; }
+                    if (!kept) {
+                        ++script_cache_epoch;
+                        if (instances_of_.count(name) != 0) { dropped_generics_[name].push_back(g); }
+                    }
                     return !kept;
                 });
             }
         }
         for (const auto& definition : declared) {
             if (definition->kind == detail::generic_kind::method) { generic_method_names_.emplace(definition->name); }
+            dropped_generics_.erase(definition->qualified_name());
             auto& held = generics_[definition->qualified_name()];
             // a class's name is one generic class, whatever file or parameter list declared it before; a function's or a method's
             // is one per shape and file
@@ -2551,17 +2558,146 @@ struct engine::implementation {
         slot.source.assign(source);
     }
 
+    // ---- A reload and the instances the loaded units use (docs/site/embedding/07-hot-reload.html "Callers in other files")
+    // A unit that is not run again keeps the instances it declared, and the reloading text makes each again as it runs: one it
+    // cannot make would keep its earlier declaration beside code that took the new text. So a unit that names an instance of
+    // a generic the reload declares otherwise is checked from its own text before anything runs, each instance made from the
+    // declarations the reload brings.
+    // `files`: every file the reload reads (its modules and what they import). What each declares now is pooled; what it
+    // declared when it last ran is its loaded entry's. The names: the generics those files declare otherwise than they ran,
+    // or no longer declare, and the classes they declare anew (one takes a generic class's name).
+    std::unordered_set<std::string> generics_a_reload_moves(const std::unordered_set<std::string>& files) const {
+        std::unordered_set<std::string> result;
+        std::unordered_map<std::string, std::pair<std::vector<uint64_t>, std::vector<uint64_t>>> stamps;   // by name: as the files ran, as they are pooled
+        std::unordered_set<std::string> ran_classes;
+        for (const std::string& file : files) {
+            const auto loaded = loaded_units_.find(loaded_unit_of(file));
+            if (loaded == loaded_units_.end() || !loaded->second.entry) { continue; }
+            std::vector<detail::generic_definition_ptr> declared;
+            collect_generics(loaded->second.entry->declarations, declared);
+            for (const auto& g : declared) { if (g->location.filename == file) { stamps[g->qualified_name()].first.push_back(g->stamp); } }
+            std::vector<const class_decl*> plain;
+            collect_plain_classes(loaded->second.entry->declarations, plain);
+            for (const class_decl* c : plain) { ran_classes.emplace(c->name); }
+        }
+        const auto theirs = [&](const source_location& at) { return files.count(std::string(at.filename)) != 0; };
+        for (const auto& [name, held] : generics_) {
+            for (const auto& g : held) { if (theirs(g->location)) { stamps[name].second.push_back(g->stamp); } }
+        }
+        for (auto& [name, both] : stamps) {
+            std::sort(both.first.begin(), both.first.end());
+            std::sort(both.second.begin(), both.second.end());
+            if (both.first != both.second) { result.insert(name); }
+        }
+        for (const auto& [name, declared] : program_classes_) {
+            if (declared && declared->instance_stamp == 0 && theirs(declared->location) && !ran_classes.count(name)) { result.insert(name); }
+        }
+        return result;
+    }
+    // the unit's own text names an instance of one of those generics
+    static bool names_instance_of(const std::vector<declaration_ptr>& decls, const std::unordered_set<std::string>& generics) {
+        const generic_request_index requests = index_requests(decls);
+        for (const auto& [id, request] : requests) {
+            if (!remade_root(requests, request) && generics.count(std::string(request->generic)) != 0) { return true; }
+        }
+        return false;
+    }
+    // A function or a class a file drops stays for the units that use it, and so does an instance of a generic it drops
+    // (dropped_generics_): while such a unit is checked from its text the definition stands in the pool again, unless the
+    // name went to something of its kind (a generic, a class for a generic class's, a function for a generic function's; a
+    // generic method stands while the class the program holds still declares it). `placed` takes what was added.
+    void place_dropped_generics(engine& self, const std::vector<declaration_ptr>& decls, std::vector<detail::generic_definition_ptr>& placed) {
+        if (dropped_generics_.empty()) { return; }
+        const generic_request_index requests = index_requests(decls);
+        for (const auto& [id, request] : requests) {
+            if (remade_root(requests, request)) { continue; }
+            const std::string name(request->generic);
+            const auto dropped = dropped_generics_.find(name);
+            if (dropped == dropped_generics_.end()) { continue; }
+            if (const auto held = generics_.find(name); held != generics_.end() && !held->second.empty()) { continue; }
+            for (const auto& g : dropped->second) {
+                bool taken = false;
+                switch (g->kind) {
+                    case detail::generic_kind::class_type:
+                        taken = plain_type_named(self, {}, name) != detail::plain_type_kind::none;
+                        break;
+                    case detail::generic_kind::function: {
+                        const auto functions = program_functions_.find(name);
+                        taken = functions != program_functions_.end() &&
+                                std::any_of(functions->second.begin(), functions->second.end(), [](const auto& unit) { return !unit.second.empty(); });
+                        break;
+                    }
+                    case detail::generic_kind::method: {   // an instance's own generic method comes with the instance
+                        const auto owner = program_classes_.find(g->owner);
+                        taken = g->owner.find('<') != std::string::npos || owner == program_classes_.end() || !owner->second ||
+                                std::none_of(owner->second->members.begin(), owner->second->members.end(), [&](const auto& member) {
+                                    return member.declaration && member.declaration->get_type() == node_type::generic_decl &&
+                                           static_cast<const generic_decl&>(*member.declaration).definition->stamp == g->stamp;
+                                });
+                        break;
+                    }
+                }
+                if (taken) { continue; }
+                generics_[name].push_back(g);
+                placed.push_back(g);
+            }
+        }
+    }
+    struct standing_generics {   // the dropped definitions the checked units use, in the pool until the dependents are checked
+        implementation& impl;
+        std::vector<detail::generic_definition_ptr> placed;
+        void place(engine& self, const std::vector<declaration_ptr>& decls) {
+            const size_t before = placed.size();
+            impl.place_dropped_generics(self, decls, placed);
+            if (placed.size() != before) { impl.index_pooled_namespace_generics(); }
+        }
+        ~standing_generics() {
+            if (placed.empty()) { return; }
+            for (const auto& g : placed) { std::erase(impl.generics_[g->qualified_name()], g); }
+            impl.index_pooled_namespace_generics();
+        }
+    };
+    // A loaded unit read again from its text and checked as a run of it would be. Nothing of the parse is kept; a text that no
+    // longer reads (a file spliced into it changed) gives no verdict.
+    check_report check_unit_text(engine& self, const loaded_unit& loaded) {
+        try {
+            lexer lex(loaded.source, &string_symbolizer_, loaded.entry->source_path);
+            auto tokens = lex.tokenize();
+            parser reader(tokens, &string_symbolizer_, &self, registeredTemplateTypes);
+            reader.source_text(loaded.source);
+            auto parsed = reader.parse();
+            if (!parsed) { return {}; }
+            std::vector<declaration_ptr> declarations = std::move(parsed.value());
+            const std::shared_ptr<function_decl> hook = take_reload_hook(declarations);
+            std::vector<declaration_ptr> hooked;
+            detail::check_options o = program_check_options(detail::check_options::proofs_t::leave);
+            o.reload_dependent = true;
+            std::vector<closure_stamp> files;
+            bool changed = false;
+            return check_expanding(self, declarations, [&]() -> const std::vector<declaration_ptr>& {
+                if (!hook) { return declarations; }
+                hooked = declarations;
+                hooked.push_back(hook);
+                return hooked;
+            }, o, files, changed);
+        } catch (...) {
+            return {};
+        }
+    }
+
     // A reload's dependents: every loaded unit but the re-running ones, checked again (never run again) against the program as
-    // the reload would leave it, its new declarations pooled. A gating diagnostic the unit's own last check did not raise is the
-    // reload's; the listing names the unit's file and line, the files that failed land in failing_files (unstamped) and the
-    // units, each with the entry that was judged, in failing_units.
-    std::string reload_dependents_listing(engine& self, const std::unordered_set<uint32_t>& rerunning, std::vector<closure_stamp>& failing_files,
-                                          std::vector<judged_unit>& failing_units) {
+    // the reload would leave it, its new declarations pooled (`files`: every file the reload reads). A gating diagnostic the
+    // unit's own last check did not raise is the reload's; the listing names the unit's file and line, the files that failed
+    // land in failing_files (unstamped) and the units, each with the entry that was judged, in failing_units.
+    std::string reload_dependents_listing(engine& self, const std::unordered_set<uint32_t>& rerunning, const std::unordered_set<std::string>& files,
+                                          std::vector<closure_stamp>& failing_files, std::vector<judged_unit>& failing_units) {
         std::vector<uint32_t> units;
         for (const auto& [unit, loaded] : loaded_units_) {
             if (!rerunning.count(unit) && loaded.entry->checked) { units.push_back(unit); }
         }
         std::sort(units.begin(), units.end());
+        const std::unordered_set<std::string> moved = instances_of_.empty() ? std::unordered_set<std::string>{} : generics_a_reload_moves(files);
+        standing_generics dropped{*this, {}};
         std::string listing;
         for (const uint32_t unit : units) {
             const loaded_unit& loaded = loaded_units_[unit];
@@ -2573,13 +2709,18 @@ struct engine::implementation {
             const check_report recheck = detail::run_static_check(self, checked_declarations(entry), nullptr, o);
             detail::set_aggregate_view(entry.lowering, lowered);
             check_report broken;
-            for (const auto& d : recheck.diagnostics) {
-                if (d.severity != check_diagnostic::level::error) { continue; }
-                const auto& before = entry.check_result.diagnostics;
-                const bool known = std::any_of(before.begin(), before.end(), [&](const check_diagnostic& b) {
-                    return b.line == d.line && b.column == d.column && b.message == d.message;
-                });
-                if (!known) { broken.diagnostics.push_back(d); }
+            const auto raise = [&](const check_diagnostic& d) {
+                if (d.severity != check_diagnostic::level::error) { return; }
+                const auto same = [&](const check_diagnostic& b) { return b.line == d.line && b.column == d.column && b.message == d.message; };
+                const auto& known = entry.check_result.diagnostics;
+                if (std::any_of(known.begin(), known.end(), same)) { return; }
+                if (std::any_of(broken.diagnostics.begin(), broken.diagnostics.end(), [&](const check_diagnostic& b) { return same(b) && b.file == d.file; })) { return; }
+                broken.diagnostics.push_back(d);
+            };
+            for (const auto& d : recheck.diagnostics) { raise(d); }
+            if (!moved.empty() && names_instance_of(entry.declarations, moved)) {
+                dropped.place(self, entry.declarations);
+                for (const auto& d : check_unit_text(self, loaded).diagnostics) { raise(d); }
             }
             if (broken.diagnostics.empty()) { continue; }
             listing += broken.format(loaded.source, entry.source_path);
@@ -2613,10 +2754,11 @@ struct engine::implementation {
         std::unordered_map<std::string, uint64_t> unit_keys;
         std::unordered_map<std::string, std::vector<declaration_ptr>> unit_declarations;
         std::unordered_map<std::string, std::vector<detail::generic_definition_ptr>> generics;
+        std::unordered_map<std::string, std::vector<detail::generic_definition_ptr>> dropped_generics;
     };
     program_pools save_program_pools() const {
         return {program_names_, program_classes_, program_enums_, program_functions_, program_globals_, program_name_units_, pooled_unit_keys_,
-                pooled_unit_declarations_, generics_};
+                pooled_unit_declarations_, generics_, dropped_generics_};
     }
     void restore_program_pools(program_pools&& saved) {
         ++program_union_epoch_;
@@ -2631,6 +2773,7 @@ struct engine::implementation {
         program_functions_ = std::move(saved.functions);
         program_globals_ = std::move(saved.globals);
         generics_ = std::move(saved.generics);
+        dropped_generics_ = std::move(saved.dropped_generics);
         index_pooled_namespace_generics();
     }
 
@@ -8429,8 +8572,13 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         }
         if (!v.failed && rerun) {
             std::unordered_set<uint32_t> rerunning;
-            for (const auto& m : group) { rerunning.insert(I.loaded_unit_of(m.resolved)); }
-            const std::string listing = I.reload_dependents_listing(*this, rerunning, v.involved, v.units);
+            std::unordered_set<std::string> reads;   // the group's files and what their checks gathered: what each declares now is pooled
+            for (size_t k = 0; k < group.size(); ++k) {
+                rerunning.insert(I.loaded_unit_of(group[k].resolved));
+                reads.insert(group[k].resolved);
+                if (entries[k]) { for (const auto& gathered : entries[k]->closure_stamps) { reads.insert(gathered.path); } }
+            }
+            const std::string listing = I.reload_dependents_listing(*this, rerunning, reads, v.involved, v.units);
             if (!listing.empty()) {
                 for (size_t k = 0; k < originals; ++k) { record_failure(group[k]); }
                 v.failures = "static check failed:\n" + listing;

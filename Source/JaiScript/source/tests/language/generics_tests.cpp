@@ -14,6 +14,8 @@
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
+#include <functional>
+#include <iterator>
 #include <mutex>
 #include <thread>
 #include <fstream>
@@ -1417,6 +1419,384 @@ public:
 			check_true(contains(broken, "int has no member 'nope'") && contains(broken, "in tagged<int>, instantiated at"));
 			check_eq(2, runs);
 			check_eq((int64_t)16, e->execute("user_value();").as_int());
+		});
+
+		// ---- a reload and the instances the loaded units use (docs/site/embedding/07-hot-reload.html "Callers in other files")
+
+		test("the_host_reloads_a_generics_file_while_it_holds_instances", [this]() {
+			const auto directory = unit_directory("host_reload");
+			const auto lib_text = [](const std::string& size, const std::string& extra_field, const std::string& twice_body) {
+				return "class Box<T> {\n\tT item;\n" + extra_field + "\tint size() { return " + size + "; }\n\tfunction sizer() { return [this]() { return size(); }; }\n}\n"
+				       "T twice<T>(T x) { return " + twice_body + "; }\n";
+			};
+			const std::string lib = write_unit(directory, "lib.jai", lib_text("1", "", "x + x"));
+			write_unit(directory, "game.jai",
+				"import \"lib.jai\";\nBox<int> box;\nBox<string> words;\n"
+				"int tick(int frame) { import(\"lib.jai\"); return twice<int>(frame) * 100 + box.size() * 10 + words.size(); }\n");
+			auto e = stdlib_engine();
+			e->add_include_path(directory.string());
+			e->import_recheck_interval(0);
+			e->hot_reload_reporting(true);
+			e->execute_file((directory / "game.jai").string());
+			held_value tick = e->get_variable("tick");
+			e->execute("auto sizer = box.sizer(); auto bound = reflect::bind(box, \"size\");");
+			held_value sizer = e->get_variable("sizer");
+			held_value bound = e->get_variable("bound");
+			// the host's call of a function value: its result, or the failure its checked_result carries
+			const auto call = [&](const held_value& fn, const std::vector<script_value>& args = {}) {
+				auto result = fn.as_function()(args);
+				return result ? result.value().to_string() : "ERR: " + e->format_error(result);
+			};
+			const auto frame = [&] { return call(tick, {e->make_value(script_int(1))}); };
+			const auto held = [&] { return call(sizer) + "|" + call(bound) + "|" + e->execute("to_string(words.size());").as_string(); };
+			const auto report_rows = [&] {
+				std::string rows;
+				for (const auto& row : e->hot_reload_reports()) { rows += row.class_name + "." + row.field_name + " x" + std::to_string(row.count) + ";"; }
+				return rows;
+			};
+			auto stamp = std::filesystem::last_write_time(lib);
+			const auto edit = [&](const std::string& text) {
+				write_unit(directory, "lib.jai", text);
+				std::filesystem::last_write_time(lib, stamp += std::chrono::seconds(3));
+			};
+			const auto bytes_of = [](const std::filesystem::path& path) {
+				std::ifstream in(path, std::ios::binary);
+				return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+			};
+			check_eq(std::string("211"), frame());
+			check_eq(std::string("1|1|1"), held());
+			// an edit every instance can be made from: new bodies and a new field
+			const std::string added = "\tint added = 9;\n";
+			edit(lib_text("5", added, "x + x + x"));
+			check_eq(std::string("355"), frame());
+			check_eq(std::string("5|5|5"), held(), "the closure and the bound method the host holds call the new body");
+			check_eq((int64_t)9, e->execute("box.added;").as_int());
+			const std::string rows = report_rows();
+			check_true(contains(rows, "Box<int>.added x1;") && contains(rows, "Box<string>.added x1;"), "the reload report names each instance: " + rows);
+			const std::string cache = bytes_of(jaibite_cache_beside(lib));
+			// An edit one of the root unit's instances cannot be made from rejects the reload, as a function its caller no longer
+			// fits does: the error is the instance's, nothing is applied, and every instance and function keeps the code it had
+			struct broken_edit {
+				std::string what, text;
+				std::vector<std::string> says;
+			};
+			const std::string sizer_text = "\tfunction sizer() { return [this]() { return size(); }; }\n";
+			const std::vector<broken_edit> broken = {
+				{"a syntax error in the generic", "class Box<T> {\n\tT item;\n\tint size() { return 5 +; }\n}\nT twice<T>(T x) { return x; }\n", {"lib.jai:3:"}},
+				{"a body that does not check for one instance", "class Box<T> {\n\tT item;\n" + added + "\tint size() { return item.size(); }\n" + sizer_text + "}\nT twice<T>(T x) { return x; }\n",
+					{"lib.jai:4:27: error: int has no member 'size'", "    in Box<int>, instantiated at ", "game.jai:2:4"}},
+				{"another parameter count", "class Box<K, V> {\n\tK item;\n" + added + "\tint size() { return 7; }\n" + sizer_text + "}\nT twice<T>(T x) { return x; }\n",
+					{"game.jai:2:4: error: 'Box' takes 2 type arguments, not 1", "game.jai:3:4: error: 'Box' takes 2 type arguments, not 1"}},
+				{"a bound the instances do not meet", "class Limit { int n = 0; }\nclass Box<T : Limit> {\n\tT item;\n" + added + "\tint size() { return 7; }\n" + sizer_text + "}\nT twice<T>(T x) { return x; }\n",
+					{"game.jai:2:4: error: Box<int>: 'int' does not derive from 'Limit', which T requires", "game.jai:3:4: error: Box<string>: 'string' does not derive from 'Limit', which T requires"}},
+				{"a class of the generic's name", "class Box {\n\tint item;\n" + added + "\tint size() { return 7; }\n" + sizer_text + "}\nT twice<T>(T x) { return x; }\n",
+					{"game.jai:2:4: error: 'Box' takes no type arguments: it is not a generic class"}},
+				{"a function body that does not check for its instance", lib_text("7", added, "x.size()"),
+					{"lib.jai:7:28: error: int has no member 'size'", "    in twice<int>, instantiated at ", "game.jai:4:65"}},
+				{"a function of the generic function's name", "class Box<T> {\n\tT item;\n" + added + "\tint size() { return 7; }\n" + sizer_text + "}\nstring twice(string x) { return x; }\n",
+					{"game.jai:4:65: error: 'twice' takes no type arguments: a type argument goes to a host function"}},
+				{"another type parameter count for the function", "class Box<T> {\n\tT item;\n" + added + "\tint size() { return 7; }\n" + sizer_text + "}\nT twice<T, U>(T x) { return x; }\n",
+					{"game.jai:4:65: error: cannot deduce U for 'twice': no parameter names it; write twice<int, U>(...)"}},
+			};
+			for (const auto& [what, text, says] : broken) {
+				edit(text);
+				const std::string rejected = frame();
+				check_true(rejected.rfind("ERR: ", 0) == 0, what + ": the frame reports the rejected reload: " + rejected);
+				for (const auto& part : says) { check_true(contains(rejected, part), what + ": " + part + " in: " + rejected); }
+				check_eq(std::string("355"), frame(), what + ": the next frame runs the code it had");
+				check_eq(std::string("5|5|5"), held(), what + ": what the host holds, and the other instance, are as they were");
+				check_eq((int64_t)9, e->execute("box.added;").as_int(), what);
+				check_eq(rows, report_rows(), what + ": a rejected reload migrates nothing");
+				check_eq(cache, bytes_of(jaibite_cache_beside(lib)), what + ": no cache holds the rejected text");
+			}
+			// the same shape with a plain function: the root's caller no longer fits, and the reload is refused
+			{
+				const auto plain_directory = unit_directory("host_reload_plain");
+				const std::string plain_lib = write_unit(plain_directory, "plain_lib.jai", "int size_of(int x) { return x; }\n");
+				const std::string plain_game = write_unit(plain_directory, "plain_game.jai", "import \"plain_lib.jai\";\nint plain_tick(int frame) { import(\"plain_lib.jai\"); return size_of(frame); }\n");
+				auto p = stdlib_engine();
+				p->add_include_path(plain_directory.string());
+				p->import_recheck_interval(0);
+				p->execute_file(plain_game);
+				held_value plain_tick = p->get_variable("plain_tick");
+				const auto plain_frame = [&] {
+					auto result = plain_tick.as_function()({p->make_value(script_int(3))});
+					return result ? result.value().to_string() : "ERR: " + p->format_error(result);
+				};
+				check_eq(std::string("3"), plain_frame());
+				auto plain_stamp = std::filesystem::last_write_time(plain_lib);
+				write_unit(plain_directory, "plain_lib.jai", "int size_of(string x) { return 9; }\n");
+				std::filesystem::last_write_time(plain_lib, plain_stamp += std::chrono::seconds(3));
+				const std::string plain_rejected = plain_frame();
+				check_true(plain_rejected.rfind("ERR: ", 0) == 0 && contains(plain_rejected, "plain_game.jai:2:74: error: argument 1 of 'size_of': cannot pass 'int' to 'x' declared 'string'"), plain_rejected);
+				check_eq(std::string("3"), plain_frame());
+			}
+			// the fix applies
+			edit(lib_text("2", added, "x"));
+			check_eq(std::string("122"), frame());
+			check_eq(std::string("2|2|2"), held());
+			// The host runs the generic's file itself: no caller is checked on that route (a function's are not either), so the
+			// instance the text cannot make keeps its earlier declaration, with the warning
+			edit("class Box<T> {\n\tT item;\n" + added + "\tint size() { return item.size(); }\n" + sizer_text + "}\nT twice<T>(T x) { return x + x; }\n");
+			e->execute_file(lib);
+			check_eq(std::vector<std::string>{"'Box<int>' keeps its earlier declaration: this declaration of 'Box' cannot make it: int has no member 'size' (" + lib + ":4:27)"}, warnings(*e));
+			check_eq(std::string("2|2|0"), held(), "Box<int> keeps its declaration, Box<string> is the new text");
+			check_eq(std::string("220"), frame());
+		});
+
+		test("a_reload_gives_an_instances_users_the_verdict_it_gives_a_functions_callers", [this]() {
+			// reload: 'r' the units that use it no longer fit the new text; 'a' they fit; 'd' the new text drops the name
+			struct shape {
+				std::string name, v1, user, v2;
+				char reload;
+				bool keeps;       // declared again by any other route, the instance keeps its earlier declaration with a warning
+				bool plain;
+				std::string says;
+			};
+			const std::string limit = "class Limit { int n = 0; }\n";
+			const std::string box_v1 = limit + "class Box<T> {\n\tT item;\n\tint size() { return 1; }\n}\n";
+			const std::string box_user = "Box<int> box;\nBox<string> words;\nint use() { return box.size() * 10 + words.size(); }\n";
+			const std::string fn_v1 = limit + "T twice<T>(T x) { return x; }\n";
+			const std::string fn_user = "int use() { return twice<int>(4); }\n";
+			const std::string method_v1 = limit + "class Tool {\n\tint level = 1;\n\tT scaled<T>(T x) { return x; }\n}\n";
+			const std::string method_user = "Tool tool;\nint use() { return tool.scaled<int>(4); }\n";
+			const std::string plain_v1 = "int size_of(int x) { return 1; }\nclass Plain {\n\tint item;\n\tint size() { return 1; }\n}\n";
+			const std::string plain_user = "Plain p;\nint use() { return size_of(3) + p.size(); }\n";
+			const auto tool = [&](const std::string& member) { return limit + "class Tool {\n\tint level = 1;\n" + member + "}\n"; };
+			const std::vector<shape> shapes = {
+				{"a function, edited", plain_v1, plain_user, "int size_of(int x) { return 2; }\nclass Plain {\n\tint item;\n\tint size() { return 2; }\n}\n", 'a', false, true, ""},
+				{"a function, another parameter type", plain_v1, plain_user, "int size_of(string x) { return 2; }\nclass Plain {\n\tint item;\n\tint size() { return 1; }\n}\n", 'r', false, true,
+					"error: argument 1 of 'size_of': cannot pass 'int' to 'x' declared 'string'"},
+				{"a function, another parameter count", plain_v1, plain_user, "int size_of(int x, int y) { return 2; }\nclass Plain {\n\tint item;\n\tint size() { return 1; }\n}\n", 'r', false, true,
+					"error: 'size_of' expects 2 argument(s), got 1"},
+				{"a class, its method gone", plain_v1, plain_user, "int size_of(int x) { return 1; }\nclass Plain {\n\tint item;\n}\n", 'r', false, true, "error: no member 'size' in class 'Plain'"},
+				{"a function and a class, dropped", plain_v1, plain_user, "int unrelated() { return 2; }\n", 'd', false, true, ""},
+				{"a generic class, edited", box_v1, box_user, limit + "class Box<T> {\n\tT item;\n\tint size() { return 2; }\n}\n", 'a', false, false, ""},
+				{"a generic class, a body that does not check for int", box_v1, box_user, limit + "class Box<T> {\n\tT item;\n\tint size() { return item.size() + 2; }\n}\n", 'r', true, false,
+					"lib.jai:4:27: error: int has no member 'size'\n    in Box<int>, instantiated at "},
+				{"a generic class, a bound its arguments do not meet", box_v1, box_user, limit + "class Box<T : Limit> {\n\tT item;\n\tint size() { return 2; }\n}\n", 'r', true, false,
+					"error: Box<int>: 'int' does not derive from 'Limit', which T requires"},
+				{"a generic class, another parameter count", box_v1, box_user, limit + "class Box<K, V> {\n\tK item;\n\tint size() { return 2; }\n}\n", 'r', true, false,
+					"error: 'Box' takes 2 type arguments, not 1"},
+				{"a generic class, a class of its name", box_v1, box_user, limit + "class Box {\n\tint item;\n\tint size() { return 2; }\n}\n", 'r', true, false,
+					"error: 'Box' takes no type arguments: it is not a generic class"},
+				{"a generic class, dropped", box_v1, box_user, limit, 'd', false, false, "error: unknown type 'Box<int>': no generic class 'Box' is declared"},
+				{"a generic function, edited", fn_v1, fn_user, limit + "T twice<T>(T x) { return x + x; }\n", 'a', false, false, ""},
+				{"a generic function, a body that does not check for int", fn_v1, fn_user, limit + "T twice<T>(T x) { return x.size(); }\n", 'r', true, false,
+					"lib.jai:2:28: error: int has no member 'size'\n    in twice<int>, instantiated at "},
+				{"a generic function, a bound its argument does not meet", fn_v1, fn_user, limit + "T twice<T : Limit>(T x) { return x; }\n", 'r', true, false,
+					"error: twice<int>: 'int' does not derive from 'Limit', which T requires"},
+				{"a generic function, another type parameter count", fn_v1, fn_user, limit + "T twice<T, U>(T x) { return x + x; }\n", 'r', false, false,
+					"error: cannot deduce U for 'twice': no parameter names it; write twice<int, U>(...)"},
+				{"a generic function, another value parameter count", fn_v1, fn_user, limit + "T twice<T>(T x, T y) { return x + y; }\n", 'r', false, false, "error: 'twice<T>' takes 2 arguments, not 1"},
+				{"a generic function, a function of its name", fn_v1, fn_user, limit + "string twice(string x) { return x; }\n", 'r', false, false,
+					"error: 'twice' takes no type arguments: a type argument goes to a host function"},
+				{"a generic function, dropped", fn_v1, fn_user, limit, 'd', false, false, "error: use of undeclared identifier 'twice'"},
+				{"a generic method, edited", method_v1, method_user, tool("\tT scaled<T>(T x) { return x + x; }\n"), 'a', false, false, ""},
+				{"a generic method, a body that does not check for int", method_v1, method_user, tool("\tT scaled<T>(T x) { return x.size(); }\n"), 'r', true, false,
+					"lib.jai:4:30: error: int has no member 'size'\n    in Tool::scaled<int>, instantiated at "},
+				{"a generic method, a bound its argument does not meet", method_v1, method_user, tool("\tT scaled<T : Limit>(T x) { return x; }\n"), 'r', true, false,
+					"error: Tool::scaled<int>: 'int' does not derive from 'Limit', which T requires"},
+				{"a generic method, another type parameter count", method_v1, method_user, tool("\tT scaled<T, U>(T x) { return x + x; }\n"), 'r', false, false,
+					"error: cannot deduce U for 'scaled': no parameter names it; write scaled<int, U>(...)"},
+				{"a generic method, another value parameter count", method_v1, method_user, tool("\tT scaled<T>(T x, T y) { return x + y; }\n"), 'r', false, false,
+					"error: 'Tool::scaled<T>' takes 2 arguments, not 1"},
+				{"a generic method, a method of its name", method_v1, method_user, tool("\tstring scaled(string x) { return x; }\n"), 'r', false, false,
+					"error: 'scaled' takes no type arguments: a type argument goes to a host function"},
+				{"a generic method, gone from its class", method_v1, method_user, tool(""), 'r', false, false, "error: no member 'scaled' in class 'Tool'"},
+				{"a generic method, dropped with its class", method_v1, method_user, limit, 'd', false, false, "error: no member 'scaled' in class 'Tool'"},
+			};
+			// How the new text arrives. A reload checks the units it does not run again; no other route does.
+			enum class route { root_file, module, executed_string, module_run_again, execute_file, execute_file_source, later_execute, another_file, strings_only };
+			const std::vector<std::pair<route, std::string>> routes = {
+				{route::root_file, "a reload, the root file uses it"}, {route::module, "a reload, another module uses it"}, {route::executed_string, "a reload, an executed string uses it"},
+				{route::module_run_again, "a reload that runs the module that uses it again"}, {route::execute_file, "execute_file of the file again"},
+				{route::execute_file_source, "execute_file_source of the file"}, {route::later_execute, "a later execute of the text"},
+				{route::another_file, "another file with the text, imported"}, {route::strings_only, "strings only"},
+			};
+			const auto outcome = [](engine& eng, const std::string& code) {
+				try {
+					return eng.execute(code).to_string();
+				} catch (const std::exception& error) {
+					return "ERR: " + std::string(error.what());
+				}
+			};
+			int made = 0;
+			for (const auto& s : shapes) {
+				for (const auto& [how, route_name] : routes) {
+					const std::string what = s.name + ", " + route_name;
+					const auto directory = unit_directory("verdict_" + std::to_string(made++));
+					auto e = make_engine();
+					e->add_include_path(directory.string());
+					e->import_recheck_interval(0);
+					const std::string lib = write_unit(directory, "lib.jai", s.v1);
+					auto stamp = std::filesystem::last_write_time(lib);
+					const auto edit = [&] {
+						write_unit(directory, "lib.jai", s.v2);
+						std::filesystem::last_write_time(lib, stamp += std::chrono::seconds(3));
+					};
+					std::string verdict;
+					const auto run = [&](const std::function<void()>& host_call) {
+						try {
+							host_call();
+						} catch (const std::exception& error) {
+							verdict = "ERR: " + std::string(error.what());
+						}
+					};
+					switch (how) {
+						case route::root_file:
+							e->execute_file(write_unit(directory, "root.jai", "import \"lib.jai\";\n" + s.user + "int tick() { import(\"lib.jai\"); return use(); }\n"));
+							break;
+						case route::module: case route::module_run_again:
+							write_unit(directory, "user.jai", "import \"lib.jai\";\n" + s.user);
+							e->execute("import \"user.jai\";");
+							break;
+						case route::executed_string:
+							e->execute("import \"lib.jai\";");
+							e->execute(s.user);
+							break;
+						case route::strings_only:
+							e->execute(s.v1);
+							e->execute(s.user);
+							break;
+						default:
+							e->execute_file(write_unit(directory, "root.jai", "import \"lib.jai\";\n" + s.user));
+							break;
+					}
+					const std::string before = outcome(*e, "use();");
+					check_true(before.rfind("ERR", 0) != 0, what + ": " + before);
+					switch (how) {
+						case route::root_file: edit(); verdict = outcome(*e, "tick();"); break;
+						case route::module: case route::executed_string: edit(); verdict = outcome(*e, "import(\"lib.jai\");"); break;
+						case route::module_run_again: edit(); verdict = outcome(*e, "import(\"user.jai\");"); break;
+						case route::execute_file: edit(); run([&] { e->execute_file(lib); }); break;
+						case route::execute_file_source: run([&] { e->execute_file_source(lib, s.v2); }); break;
+						case route::another_file: write_unit(directory, "other.jai", s.v2); verdict = outcome(*e, "import \"other.jai\";"); break;
+						default: verdict = outcome(*e, s.v2); break;
+					}
+					std::string warned;
+					for (const auto& d : e->last_check_diagnostics().diagnostics) { if (d.severity == check_diagnostic::level::warning) { warned += d.message + "\n"; } }
+					const std::string after = outcome(*e, "use();");
+					const bool rejected = verdict.rfind("ERR: static check failed:", 0) == 0;
+					const bool reloads = how == route::root_file || how == route::module || how == route::executed_string || how == route::module_run_again;
+					// a unit run again makes its instances from the text: one of a generic the text dropped is no longer found
+					const bool rejects = reloads && (s.reload == 'r' || (s.reload == 'd' && !s.plain && how == route::module_run_again));
+					check_eq(rejects, rejected, what + ": " + verdict);
+					if (rejects) {
+						check_true(contains(verdict, s.says), what + ": " + s.says + " in: " + verdict);
+						check_eq(before, after, what + ": the code it had keeps running");
+					} else {
+						check_true(verdict.rfind("ERR", 0) != 0, what + ": " + verdict);
+						check_eq(s.keeps, contains(warned, "keeps its earlier declaration: this declaration of"), what + ": " + warned);
+					}
+					if (reloads && s.reload == 'a') { check_true(before != after, what + ": the edit applies: " + after); }
+					if (reloads && s.reload == 'd' && !rejects) { check_eq(before, after, what + ": what the text drops stays for the unit that uses it"); }
+				}
+			}
+		});
+
+		test("a_reload_checks_the_instances_of_every_file_it_reads_before_any_runs", [this]() {
+			// root.jai names Box<int>; user.jai, a module, names Box<string> and imports the generic's file. An edit Box<int>
+			// cannot be made from reaches the reload at user.jai's import: the module would run again and bring lib.jai with it
+			const auto directory = unit_directory("reload_nested");
+			const std::string lib = write_unit(directory, "lib.jai", "class Box<T> {\n\tT item;\n\tint size() { return 1; }\n}\n");
+			write_unit(directory, "user.jai", "import \"lib.jai\";\nuser_ran();\nBox<string> words;\nint user_value() { return words.size(); }\n");
+			const std::string root = write_unit(directory, "root.jai", "import \"user.jai\";\nBox<int> box;\nint root_value() { return box.size() * 10 + user_value(); }\n");
+			auto e = stdlib_engine();
+			e->add_include_path(directory.string());
+			e->import_recheck_interval(0);
+			int runs = 0;
+			e->add_function("user_ran", [&runs]() { ++runs; });
+			e->execute_file(root);
+			check_eq((int64_t)11, e->execute("root_value();").as_int());
+			auto stamp = std::filesystem::last_write_time(lib);
+			write_unit(directory, "lib.jai", "class Box<T> {\n\tT item;\n\tint size() { return item.size() + 5; }\n}\n");
+			std::filesystem::last_write_time(lib, stamp += std::chrono::seconds(3));
+			const std::string rejected = failure(*e, "import(\"user.jai\");");
+			check_true(contains(rejected, "lib.jai:3:27: error: int has no member 'size'\n    in Box<int>, instantiated at ") && contains(rejected, "root.jai:2:4"), rejected);
+			check_eq(1, runs, "the module did not run again");
+			check_eq((int64_t)11, e->execute("root_value();").as_int());
+			// the fix: every instance is made again
+			write_unit(directory, "lib.jai", "class Box<T> {\n\tT item;\n\tint size() { return 7; }\n}\n");
+			std::filesystem::last_write_time(lib, stamp += std::chrono::seconds(3));
+			check_true(e->execute("import(\"user.jai\");").as_bool());
+			check_eq(2, runs);
+			check_eq((int64_t)77, e->execute("root_value();").as_int());
+		});
+
+		test("a_reload_whose_file_takes_a_generic_classs_name_checks_the_instances_too", [this]() {
+			const auto directory = unit_directory("reload_takes_name");
+			write_unit(directory, "lib.jai", "class Box<T> {\n\tT item;\n\tint size() { return 1; }\n}\nclass Plain {\n\tint size() { return 0; }\n}\n");
+			const std::string other = write_unit(directory, "other.jai", "int other_value() { return 1; }\n");
+			const std::string root = write_unit(directory, "root.jai",
+				"import \"lib.jai\";\nimport \"other.jai\";\nBox<int> box;\nPlain plain;\nint root_value() { return box.size() * 10 + other_value() + plain.size(); }\n"
+				"int tick() { import(\"other.jai\"); return root_value(); }\n");
+			auto e = stdlib_engine();
+			e->add_include_path(directory.string());
+			e->import_recheck_interval(0);
+			e->execute_file(root);
+			check_eq((int64_t)11, e->execute("root_value();").as_int());
+			auto stamp = std::filesystem::last_write_time(other);
+			const auto edit = [&](const std::string& text) {
+				write_unit(directory, "other.jai", text);
+				std::filesystem::last_write_time(other, stamp += std::chrono::seconds(3));
+			};
+			// another module's edit declares a class of the generic's name, then a generic class of it: the later declaration is
+			// the one the root's instance has to be made from
+			edit("class Box {\n\tint plain = 1;\n}\nclass Plain {\n\tint other = 1;\n}\nint other_value() { return 5; }\n");
+			const std::string taken = failure(*e, "tick();");
+			check_true(contains(taken, "root.jai:3:4: error: 'Box' takes no type arguments: it is not a generic class"), taken);
+			check_true(contains(taken, "error: no member 'size' in class 'Plain'"), "the class written by hand beside it: " + taken);
+			check_eq((int64_t)11, e->execute("root_value();").as_int());
+			edit("class Box<T> {\n\tT item;\n\tint size() { return item.size(); }\n}\nint other_value() { return 5; }\n");
+			const std::string replaced = failure(*e, "tick();");
+			check_true(contains(replaced, "other.jai:3:27: error: int has no member 'size'\n    in Box<int>, instantiated at ") && contains(replaced, "root.jai:3:4"), replaced);
+			check_eq((int64_t)11, e->execute("root_value();").as_int());
+			edit("class Box<T> {\n\tT item;\n\tint size() { return 7; }\n}\nint other_value() { return 5; }\n");
+			check_eq((int64_t)75, e->execute("tick();").as_int());
+			check_eq((int64_t)75, e->execute("root_value();").as_int());
+		});
+
+		test("a_reload_keeps_with_a_warning_only_an_instance_no_loaded_unit_names", [this]() {
+			const auto directory = unit_directory("reload_unnamed");
+			const std::string lib = write_unit(directory, "lib.jai", "class Box<T> {\n\tT item;\n\tint size() { return 1; }\n}\nclass Crate<T> {\n\tT item;\n\tint weight() { return 3; }\n}\n"
+				"namespace shop { class Shelf<T> {\n\tT item;\n\tint rows() { return 4; }\n} }\nT same<T>(T x) { return x; }\n");
+			auto e = stdlib_engine();
+			e->add_include_path(directory.string());
+			e->import_recheck_interval(0);
+			e->execute("import \"lib.jai\";");
+			// scratch.jai made Box<float> and no longer names it: no loaded unit does, as no loaded unit calls a function once the
+			// text that called it is gone
+			const std::string scratch = write_unit(directory, "scratch.jai", "Box<float> ratio;\nratio.size();\n");
+			check_eq((int64_t)1, e->execute_file(scratch).as_int());
+			write_unit(directory, "scratch.jai", "int nothing = 0;\n");
+			e->execute_file(scratch);
+			e->execute("Box<string> words; Crate<int> crate; shop::Shelf<int> shelf; int use() { return words.size() * 100 + crate.weight() * 10 + shelf.rows() + same<int>(0); }");
+			check_eq((int64_t)134, e->execute("use();").as_int());
+			auto stamp = std::filesystem::last_write_time(lib);
+			const auto edit = [&](const std::string& text) {
+				write_unit(directory, "lib.jai", text);
+				std::filesystem::last_write_time(lib, stamp += std::chrono::seconds(3));
+			};
+			// Box's new body checks for string and not for float; Crate, shop::Shelf and same are dropped, and stay for the unit
+			// that uses them as a class or a function the text drops does
+			edit("class Box<T> {\n\tT item;\n\tint size() { return item.size() + 2; }\n}\n");
+			check_true(e->execute("import(\"lib.jai\");").as_bool());
+			check_eq(std::vector<std::string>{"'Box<float>' keeps its earlier declaration: this declaration of 'Box' cannot make it: float has no member 'size' (" + lib + ":3:27)"}, warnings(*e));
+			check_eq((int64_t)234, e->execute("use();").as_int());
+			check_eq((int64_t)1, e->execute("ratio.size();").as_int(), "the instance no unit names keeps its earlier declaration");
+			// a later reload: what the file dropped still stands for the unit that uses it
+			edit("class Box<T> {\n\tT item;\n\tint size() { return 9; }\n}\n");
+			check_true(e->execute("import(\"lib.jai\");").as_bool());
+			check_true(warnings(*e).empty());
+			check_eq(std::string("934|9"), e->execute("to_string(use()) + \"|\" + to_string(ratio.size());").as_string());
+			// the first edit again, while a loaded unit names Box<float>: rejected, the dropped generics' instances no part of it
+			e->execute("Box<float> named; int named_size() { return named.size(); }");
+			edit("class Box<T> {\n\tT item;\n\tint size() { return item.size() + 4; }\n}\n");
+			const std::string rejected = failure(*e, "import(\"lib.jai\");");
+			check_true(contains(rejected, "lib.jai:3:27: error: float has no member 'size'\n    in Box<float>, instantiated at <script>:1:4"), rejected);
+			check_false(contains(rejected, "Crate") || contains(rejected, "Shelf") || contains(rejected, "same"), rejected);
+			check_eq(std::string("934|9"), e->execute("to_string(use()) + \"|\" + to_string(named_size());").as_string());
 		});
 
 		test("a_unit_that_instantiates_another_files_generic_keeps_no_jaibite_cache", [this]() {

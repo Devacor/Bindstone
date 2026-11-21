@@ -57,6 +57,30 @@ namespace image_test {
 		return result;
 	}
 
+	// The peak signal-to-noise ratio of the colour channels, in dB (99 for identical pixels)
+	inline double psnr(const image_codec::bitmap& a_reference, const image_codec::bitmap& a_pixels) {
+		if (a_reference.rgba.size() != a_pixels.rgba.size() || a_pixels.rgba.empty()) { return 0; }
+		double squares = 0;
+		size_t count = 0;
+		for (size_t i = 0; i < a_pixels.rgba.size(); i += 4) {
+			for (size_t c = 0; c < 3; ++c, ++count) {
+				const double gap = static_cast<double>(a_pixels.rgba[i + c]) - static_cast<double>(a_reference.rgba[i + c]);
+				squares += gap * gap;
+			}
+		}
+		if (squares == 0) { return 99; }
+		const double mean = squares / static_cast<double>(count);
+		// 10 log10(255^2 / mean), without <cmath>: log10 by halving to [1, 2) and a series for the rest
+		double ratio = 255.0 * 255.0 / mean;
+		double tens = 0;
+		while (ratio >= 10) { ratio /= 10; tens += 1; }
+		while (ratio < 1) { ratio *= 10; tens -= 1; }
+		const double y = (ratio - 1) / (ratio + 1);
+		double term = y, sum = 0;
+		for (int k = 1; k < 60; k += 2) { sum += term / k; term *= y * y; }
+		return 10 * (tens + 2 * sum / 2.302585092994046);
+	}
+
 	inline void put_32(bytes& a_out, uint32_t a_value) {
 		for (int shift = 24; shift >= 0; shift -= 8) { a_out.push_back(static_cast<uint8_t>(a_value >> shift)); }
 	}

@@ -8,6 +8,8 @@
 #include "stdlib/image_fixtures.hpp"
 #include "stdlib/image_test_support.hpp"
 #include "fuzz/image_mutation.hpp"
+#include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -523,6 +525,141 @@ public:
 			}
 		});
 
+		test("code_lengths_are_optimal_prefix_codes_within_the_limit", [this]() {
+			// Kraft's sum in units of 2^-24: at most one, and below one when a code point is held back
+			auto kraft = [](const std::vector<uint8_t>& a_lengths) {
+				uint64_t sum = 0;
+				for (uint8_t each : a_lengths) { sum += each ? uint64_t {1} << (24 - each) : 0; }
+				return sum;
+			};
+			std::vector<uint32_t> fibonacci(40);
+			fibonacci[0] = fibonacci[1] = 1;
+			for (size_t i = 2; i < fibonacci.size(); ++i) { fibonacci[i] = fibonacci[i - 1] + fibonacci[i - 2]; }
+			for (const bool reserve : {false, true}) {
+				std::vector<uint8_t> lengths(fibonacci.size());
+				codec::code_lengths(fibonacci.data(), static_cast<unsigned>(fibonacci.size()), 16, reserve, lengths.data());
+				for (uint8_t each : lengths) { check_true(each >= 1 && each <= 16, "a length past the limit"); }
+				check_true(reserve ? kraft(lengths) < (uint64_t {1} << 24) : kraft(lengths) == (uint64_t {1} << 24), "a complete code");
+				// the most frequent symbol gets the shortest code
+				check_le(int {lengths.back()}, int {lengths.front()});
+			}
+			std::vector<uint32_t> flat(256, 7);
+			std::vector<uint8_t> lengths(256);
+			codec::code_lengths(flat.data(), 256, 16, true, lengths.data());
+			check_true(kraft(lengths) < (uint64_t {1} << 24), "256 symbols and a held-back point");
+			std::vector<uint32_t> nineteen(19, 0);
+			for (size_t i = 0; i < 19; ++i) { nineteen[i] = static_cast<uint32_t>(1u << (i % 16)); }
+			std::vector<uint8_t> short_lengths(19);
+			codec::code_lengths(nineteen.data(), 19, 7, false, short_lengths.data());
+			for (uint8_t each : short_lengths) { check_true(each >= 1 && each <= 7, "a code-length code past 7"); }
+			check_eq(uint64_t {1} << 24, kraft(short_lengths));
+			std::vector<uint32_t> lone = {0, 0, 9, 0};
+			std::vector<uint8_t> lone_lengths(4);
+			codec::code_lengths(lone.data(), 4, 15, false, lone_lengths.data());
+			check_true(lone_lengths == std::vector<uint8_t> {0, 0, 1, 0});
+			std::vector<uint32_t> none = {0, 0};
+			std::vector<uint8_t> none_lengths = {5, 5};
+			codec::code_lengths(none.data(), 2, 15, false, none_lengths.data());
+			check_true(none_lengths == std::vector<uint8_t> {0, 0});
+		});
+
+		test("jpeg_encoder_round_trips_within_its_loss", [this]() {
+			const image_fixtures::fixture& photo = fixture_named("png_rgb_photo_64x48");
+			codec::header header;
+			codec::bitmap source;
+			check_true(codec::decode(photo.bytes, photo.size, codec::limits {}, codec::work_hook {}, header, source) == codec::status::ok);
+			// a photograph-like image: what each quality keeps (Windows' decoder reads these files to within a fraction of a dB)
+			const std::vector<std::pair<int, double>> qualities = {{10, 26.5}, {50, 34.0}, {75, 36.0}, {90, 39.0}, {100, 49.0}};
+			size_t previous = 0;
+			for (auto [quality, least] : qualities) {
+				bytes file;
+				check_true(codec::encode_jpeg(source, quality, codec::work_hook {}, file) == codec::status::ok);
+				codec::header decoded_header;
+				codec::bitmap decoded;
+				check_true(codec::decode(file.data(), file.size(), codec::limits {}, codec::work_hook {}, decoded_header, decoded) == codec::status::ok, "quality " + std::to_string(quality));
+				check_true(decoded_header.kind == codec::format::jpeg && decoded.width == 64 && decoded.height == 48);
+				check_ge(psnr(source, decoded), least, "quality " + std::to_string(quality));
+				check_gt(file.size(), previous, "a higher quality is a larger file");
+				previous = file.size();
+			}
+		});
+
+		test("jpeg_encoder_writes_jfif_and_nothing_else", [this]() {
+			auto segments = [](const bytes& a_file) {
+				std::string seen;
+				size_t at = 2;
+				while (at + 4 <= a_file.size() && a_file[at] == 0xff && a_file[at + 1] != 0xda) {
+					char name[8];
+					std::snprintf(name, sizeof(name), "%02x ", a_file[at + 1]);
+					seen += name;
+					at += 2 + ((size_t {a_file[at + 2]} << 8) | a_file[at + 3]);
+				}
+				return seen + "da";
+			};
+			auto sampling = [](const bytes& a_file) {
+				for (size_t at = 2; at + 12 < a_file.size(); ++at) {
+					if (a_file[at] == 0xff && a_file[at + 1] == 0xc0) { return std::to_string(a_file[at + 9]) + " " + std::to_string(a_file[at + 11]); }
+				}
+				return std::string("none");
+			};
+			// a file with EXIF goes in; none comes out
+			const image_fixtures::fixture& turned = fixture_named("jpeg_exif_orientation_6_9x5");
+			codec::header header;
+			codec::bitmap pixels;
+			check_true(codec::decode(turned.bytes, turned.size, codec::limits {}, codec::work_hook {}, header, pixels) == codec::status::ok);
+			for (int quality : {89, 90}) {
+				bytes file;
+				check_true(codec::encode_jpeg(pixels, quality, codec::work_hook {}, file) == codec::status::ok);
+				check_eq(std::string("e0 db c0 c4 da"), segments(file));
+				check_true(file[0] == 0xff && file[1] == 0xd8 && file[file.size() - 2] == 0xff && file[file.size() - 1] == 0xd9);
+				check_true(std::search(file.begin(), file.end(), std::begin("Exif"), std::begin("Exif") + 4) == file.end(), "no EXIF");
+				// three components, 4:2:0 below quality 90 and 4:4:4 from it
+				check_eq(std::string(quality < 90 ? "3 34" : "3 17"), sampling(file));
+			}
+			// a grey image is one component
+			const image_fixtures::fixture& grey = fixture_named("png_grey8_17x33");
+			check_true(codec::decode(grey.bytes, grey.size, codec::limits {}, codec::work_hook {}, header, pixels) == codec::status::ok);
+			bytes file;
+			check_true(codec::encode_jpeg(pixels, 75, codec::work_hook {}, file) == codec::status::ok);
+			check_eq(std::string("1 17"), sampling(file));
+		});
+
+		test("jpeg_encoder_flattens_alpha_and_takes_any_size", [this]() {
+			codec::bitmap clear;
+			clear.width = 5;
+			clear.height = 3;
+			clear.rgba.assign(5 * 3 * 4, 0);
+			for (size_t i = 0; i < clear.rgba.size(); i += 4) { clear.rgba[i] = 200; }
+			bytes file;
+			check_true(codec::encode_jpeg(clear, 95, codec::work_hook {}, file) == codec::status::ok);
+			codec::header header;
+			codec::bitmap back;
+			check_true(codec::decode(file.data(), file.size(), codec::limits {}, codec::work_hook {}, header, back) == codec::status::ok);
+			for (size_t i = 0; i < back.rgba.size(); i += 4) { check_true(back.rgba[i] >= 250 && back.rgba[i + 1] >= 250 && back.rgba[i + 2] >= 250, "transparent is white"); }
+			for (auto [width, height] : std::vector<std::pair<uint32_t, uint32_t>> {{1, 1}, {3, 5}, {17, 33}, {16, 16}, {33, 1}}) {
+				codec::bitmap odd;
+				odd.width = width;
+				odd.height = height;
+				for (uint32_t i = 0; i < width * height; ++i) { odd.rgba.insert(odd.rgba.end(), {static_cast<uint8_t>(i * 37), static_cast<uint8_t>(i * 11), static_cast<uint8_t>(255 - i), 255}); }
+				for (int quality : {40, 95}) {
+					check_true(codec::encode_jpeg(odd, quality, codec::work_hook {}, file) == codec::status::ok);
+					check_true(codec::decode(file.data(), file.size(), codec::limits {}, codec::work_hook {}, header, back) == codec::status::ok);
+					check_true(back.width == width && back.height == height, std::to_string(width) + "x" + std::to_string(height));
+				}
+			}
+			codec::bitmap wide;
+			wide.width = 65536;
+			wide.height = 1;
+			wide.rgba.assign(65536 * 4, 255);
+			check_eq(std::string("JPEG cannot hold an image wider or taller than 65535 pixels"), std::string(codec::status_text(codec::encode_jpeg(wide, 80, codec::work_hook {}, file))));
+			codec::work_hook gone {[](void*, size_t) { return true; }, nullptr};
+			codec::bitmap big;
+			big.width = 300;
+			big.height = 200;
+			big.rgba.assign(300 * 200 * 4, 90);
+			check_true(codec::encode_jpeg(big, 80, gone, file) == codec::status::budget);
+		});
+
 		test("png_every_prefix_is_refused", [this]() {
 			for (const image_fixtures::fixture& each : image_fixtures::k_fixtures) {
 				if (std::strcmp(each.format, "png") != 0 || each.size > 1300) { continue; }
@@ -845,6 +982,18 @@ public:
 			check_eq(std::string("Image has more pixels than the pixel limit"), caught(e, "photo.crop_fill(4611686018427387904, 2);"));
 			check_eq(std::string("image: the image is empty (image::load makes one)"), caught(e, "image empty; empty.fit(1, 1);"));
 			check_eq(std::string("image: the image is empty (image::load makes one)"), caught(e, "image empty; image::crop(empty, 0, 0, 1, 1);"));
+		});
+
+		test("encode_writes_a_jpeg_the_module_reads_back", [this]() {
+			auto e = image_engine();
+			e->execute("image photo = image::load(fixture(\"png_rgb_photo_64x48\"));");
+			check_eq(std::string("true 64 48 jpeg"), run(e, "string bytes = photo.encode(\"jpeg\", 80); image back = image::load(bytes); `${bytes.starts_with(\"\\xFF\\xD8\\xFF\")} ${back.width} ${back.height} ${back.format}`;"));
+			check_eq(std::string("true"), run(e, "photo.encode(\"jpeg\", 10).size() < photo.encode(\"jpeg\").size();"));
+			check_eq(std::string("32 24 png"), run(e, "image small = image::fit(photo, 32, 32); image again = image::load(small.encode(\"jpeg\")); `${again.width} ${again.height} ${photo.format}`;"));
+			check_eq(std::string("image::encode expects the format \"jpeg\""), caught(e, "photo.encode(\"gif\");"));
+			check_eq(std::string("image::encode expects a quality of 1 to 100"), caught(e, "photo.encode(\"jpeg\", 0);"));
+			check_eq(std::string("image::encode expects a quality of 1 to 100"), caught(e, "photo.encode(\"jpeg\", 101);"));
+			check_eq(std::string("image: the image is empty (image::load makes one)"), caught(e, "image empty; empty.encode(\"jpeg\");"));
 		});
 
 		test("crop_is_bounds_checked", [this]() {

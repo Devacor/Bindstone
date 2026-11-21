@@ -43,6 +43,7 @@ namespace image_codec {
 		jpeg_arithmetic,
 		jpeg_unsupported,
 		jpeg_cmyk,
+		jpeg_too_large,
 		jpeg_bad_quantization_table,
 		jpeg_bad_huffman_table,
 		jpeg_missing_table,
@@ -173,8 +174,14 @@ namespace image_codec {
 	status crop_fill(const bitmap& a_source, uint32_t a_width, uint32_t a_height, const work_hook& a_work, bitmap& a_result);
 
 	status encode_png(const bitmap& a_bitmap, const work_hook& a_work, std::vector<uint8_t>& a_bytes);
-	// a_quality 1 to 100
+	// Baseline JPEG at a_quality 1 to 100 (the Annex K tables scaled as the reference encoder scales them), Huffman tables built
+	// for the image, chroma 4:2:0 below quality 90 and 4:4:4 from it, one component when every pixel is grey, alpha composited
+	// over white, and no segment but JFIF's: no metadata is ever written
 	status encode_jpeg(const bitmap& a_bitmap, int a_quality, const work_hook& a_work, std::vector<uint8_t>& a_bytes);
+
+	// Huffman code lengths for a_count (at most 288) symbol frequencies, none longer than a_longest, by T.81 K.2's procedure; a
+	// symbol of frequency 0 gets 0, a lone symbol 1. With a_reserve one more code point is held back, so no code is all ones.
+	void code_lengths(const uint32_t* a_frequency, unsigned a_count, unsigned a_longest, bool a_reserve, uint8_t* a_lengths);
 
 	status read_png_header(const uint8_t* a_data, size_t a_size, const limits& a_limits, header& a_header);
 	status decode_png(const uint8_t* a_data, size_t a_size, const limits& a_limits, const work_hook& a_work, header& a_header, bitmap& a_bitmap);

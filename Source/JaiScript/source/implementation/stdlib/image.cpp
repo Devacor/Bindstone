@@ -101,6 +101,7 @@ namespace image_detail {
 	}
 
 	inline constexpr const char* k_empty = "image: the image is empty (image::load makes one)";
+	inline constexpr script_int k_default_quality = 90;
 
 	const codec::bitmap& pixels_of(const script_image& a_image) {
 		if (!a_image.pixels || a_image.pixels->rgba.empty()) { throw runtime_error(k_empty); }
@@ -146,6 +147,19 @@ namespace image_detail {
 		return with_pixels(a_image, std::move(result));
 	}
 
+	// a_image as a file of a_format: its bytes, as a string
+	std::string encode(engine* a_engine, const script_image& a_image, const std::string& a_format, script_int a_quality) {
+		const codec::bitmap& source = pixels_of(a_image);
+		if (a_format != "jpeg") { throw runtime_error("image::encode expects the format \"jpeg\""); }
+		if (a_quality < 1 || a_quality > 100) { throw runtime_error("image::encode expects a quality of 1 to 100"); }
+		budget work(a_engine);
+		std::vector<uint8_t> bytes;
+		if (const codec::status outcome = codec::encode_jpeg(source, static_cast<int>(a_quality), work.hook(), bytes); outcome != codec::status::ok) { raise(work, outcome); }
+		detail::execution_limits& limits = detail::engine_access::execution_limits(*a_engine);
+		if (!limits.memory_charge_items(bytes.size(), 1)) [[unlikely]] { detail::throw_memory_cap(limits); }
+		return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+	}
+
 	[[noreturn]] JAI_NOINLINE void outside(const char* a_who, script_int a_x, script_int a_y, script_int a_width, script_int a_height, const codec::bitmap& a_source) {
 		throw runtime_error(std::string(a_who) + ": the rectangle at (" + std::to_string(a_x) + ", " + std::to_string(a_y) + ") of " + std::to_string(a_width) + " x " +
 		                    std::to_string(a_height) + " is not inside the " + std::to_string(a_source.width) + " x " + std::to_string(a_source.height) + " image");
@@ -189,6 +203,8 @@ namespace image_detail {
 			.method("crop", [eng](script_image& a_image, script_int a_x, script_int a_y, script_int a_width, script_int a_height) {
 				a_image = crop(eng, a_image, a_x, a_y, a_width, a_height, "image::crop");
 			})
+			.method("encode", [eng](const script_image& a_image, const std::string& a_format) -> std::string { return encode(eng, a_image, a_format, k_default_quality); })
+			.method("encode", [eng](const script_image& a_image, const std::string& a_format, script_int a_quality) -> std::string { return encode(eng, a_image, a_format, a_quality); })
 			.static_method("fit", [eng](const script_image& a_image, script_int a_width, script_int a_height) -> script_image {
 				return fit(eng, a_image, a_width, a_height, "image::fit expects a width and a height of at least 1");
 			})

@@ -7,7 +7,7 @@
 #include <stdexcept>
 
 // JPEG (ITU-T T.81) with JFIF, the Adobe APP14 transform flag and EXIF orientation, written from those specifications:
-// baseline, extended and progressive Huffman coding of 8-bit samples.
+// baseline, extended and progressive Huffman decoding of 8-bit samples, and a baseline encoder.
 
 namespace jai {
 namespace image_codec {
@@ -803,12 +803,367 @@ namespace jpeg_detail {
 		return status::ok;
 	}
 
+	// The writer's half: baseline JPEG with the quality-scaled tables of T.81 Annex K.1 and Huffman tables built per image (K.2)
+
+	inline constexpr uint8_t k_luma_table[64] = {16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55, 14, 13, 16, 24, 40, 57, 69, 56, 14, 17, 22, 29, 51, 87, 80, 62,
+	                                             18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92, 49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99};
+	inline constexpr uint8_t k_chroma_table[64] = {17, 18, 24, 47, 99, 99, 99, 99, 18, 21, 26, 66, 99, 99, 99, 99, 24, 26, 56, 99, 99, 99, 99, 99, 47, 66, 99, 99, 99, 99, 99, 99,
+	                                               99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99};
+	// At this quality and above the chroma keeps every sample (4:4:4); below it, one sample a 2 x 2 square (4:2:0)
+	inline constexpr int k_full_chroma_quality = 90;
+
+	// A table of Annex K.1 scaled as quality 1 to 100 scales it (50 is the table itself), natural order, each 1 to 255
+	void scaled_table(const uint8_t (&a_table)[64], int a_quality, uint16_t (&a_out)[64]) {
+		const int scale = a_quality < 50 ? 5000 / a_quality : 200 - 2 * a_quality;
+		for (int i = 0; i < 64; ++i) {
+			const int value = (a_table[i] * scale + 50) / 100;
+			a_out[i] = static_cast<uint16_t>(value < 1 ? 1 : value > 255 ? 255 : value);
+		}
+	}
+
+	// The forward DCT of 8 x 8 level-shifted samples (the transpose of the inverse's terms) and each coefficient divided by its
+	// quantizer, rounded to nearest, in zig-zag order
+	void forward_transform(const int32_t (&a_samples)[64], const uint16_t (&a_quantization)[64], int16_t (&a_out)[64]) {
+		int32_t middle[64];
+		for (int y = 0; y < 8; ++y) {
+			for (int u = 0; u < 8; ++u) {
+				int32_t sum = 0;
+				for (int x = 0; x < 8; ++x) { sum += k_cosine[x][u] * a_samples[y * 8 + x]; }
+				middle[y * 8 + u] = (sum + (1 << 5)) >> 6;
+			}
+		}
+		for (int k = 0; k < 64; ++k) {
+			const int at = k_zigzag[k];
+			const int v = at >> 3;
+			const int u = at & 7;
+			int64_t sum = 0;
+			for (int y = 0; y < 8; ++y) { sum += int64_t {k_cosine[y][v]} * middle[y * 8 + u]; }
+			// the sum carries 2^20; the quotient rounds half away from zero, as the reference encoder does
+			const int64_t divisor = int64_t {a_quantization[at]} << 20;
+			const int64_t quotient = sum >= 0 ? (sum + divisor / 2) / divisor : -((-sum + divisor / 2) / divisor);
+			a_out[k] = static_cast<int16_t>(quotient);
+		}
+	}
+
+	inline unsigned bit_length(uint32_t a_value) {
+		unsigned length = 0;
+		while (a_value) {
+			++length;
+			a_value >>= 1;
+		}
+		return length;
+	}
+
+	// The code of every symbol a table holds, from its counts per length and its values, as T.81 C.2 assigns them
+	struct huffman_code {
+		uint8_t counts[16] = {};
+		uint8_t values[256] = {};
+		unsigned total = 0;
+		uint16_t code[256] = {};
+		uint8_t length[256] = {};
+
+		// Optimal lengths for these symbol frequencies, held to 16 bits, no code all ones (T.81 K.2)
+		void build(const uint32_t (&a_frequency)[256]) {
+			uint8_t lengths[256];
+			code_lengths(a_frequency, 256, 16, true, lengths);
+			total = 0;
+			for (unsigned bits = 1; bits <= 16; ++bits) {
+				counts[bits - 1] = 0;
+				for (unsigned symbol = 0; symbol < 256; ++symbol) {
+					if (lengths[symbol] != bits) { continue; }
+					values[total++] = static_cast<uint8_t>(symbol);
+					++counts[bits - 1];
+				}
+			}
+			assign();
+		}
+
+		void assign() {
+			uint32_t next_code = 0;
+			unsigned index = 0;
+			for (unsigned bits = 1; bits <= 16; ++bits) {
+				for (unsigned i = 0; i < counts[bits - 1]; ++i, ++index) {
+					code[values[index]] = static_cast<uint16_t>(next_code++);
+					length[values[index]] = static_cast<uint8_t>(bits);
+				}
+				next_code <<= 1;
+			}
+		}
+	};
+
+	class bit_sink {
+	public:
+		explicit bit_sink(std::vector<uint8_t>& a_out) : out_(a_out) {}
+		void put(uint32_t a_bits, unsigned a_count) {
+			if (a_count == 0) { return; }
+			buffer_ = (buffer_ << a_count) | (a_bits & ((uint32_t {1} << a_count) - 1));
+			count_ += a_count;
+			while (count_ >= 8) {
+				const uint8_t byte = static_cast<uint8_t>(buffer_ >> (count_ - 8));
+				out_.push_back(byte);
+				// a data byte of FF is stuffed with 00, so it is never read as a marker
+				if (byte == 0xff) { out_.push_back(0); }
+				count_ -= 8;
+			}
+		}
+		// to a byte boundary with one bits, as T.81 F.1.2.3 pads
+		void flush() {
+			if (count_ > 0) { put(0x7f, 8 - count_); }
+		}
+
+	private:
+		std::vector<uint8_t>& out_;
+		uint64_t buffer_ = 0;
+		unsigned count_ = 0;
+	};
+
+	// The quantized coefficients of every block of one component, in the order the scan visits them, and the symbol counts
+	struct encoded_component {
+		uint32_t blocks_across = 0;
+		uint32_t blocks_down = 0;
+		unsigned h = 1;
+		unsigned v = 1;
+		unsigned table = 0;
+		std::vector<int16_t> blocks;
+	};
+
+	void count_symbols(const int16_t* a_block, int32_t& a_prediction, uint32_t (&a_dc)[256], uint32_t (&a_ac)[256]) {
+		const int32_t difference = a_block[0] - a_prediction;
+		a_prediction = a_block[0];
+		++a_dc[bit_length(static_cast<uint32_t>(difference < 0 ? -difference : difference))];
+		unsigned run = 0;
+		for (int k = 1; k < 64; ++k) {
+			const int32_t value = a_block[k];
+			if (value == 0) {
+				++run;
+				continue;
+			}
+			while (run > 15) {
+				++a_ac[0xf0];
+				run -= 16;
+			}
+			++a_ac[(run << 4) | bit_length(static_cast<uint32_t>(value < 0 ? -value : value))];
+			run = 0;
+		}
+		if (run > 0) { ++a_ac[0x00]; }
+	}
+
+	void write_block(bit_sink& a_bits, const int16_t* a_block, int32_t& a_prediction, const huffman_code& a_dc, const huffman_code& a_ac) {
+		const int32_t difference = a_block[0] - a_prediction;
+		a_prediction = a_block[0];
+		const unsigned category = bit_length(static_cast<uint32_t>(difference < 0 ? -difference : difference));
+		a_bits.put(a_dc.code[category], a_dc.length[category]);
+		a_bits.put(static_cast<uint32_t>(difference < 0 ? difference - 1 : difference), category);
+		unsigned run = 0;
+		for (int k = 1; k < 64; ++k) {
+			const int32_t value = a_block[k];
+			if (value == 0) {
+				++run;
+				continue;
+			}
+			while (run > 15) {
+				a_bits.put(a_ac.code[0xf0], a_ac.length[0xf0]);
+				run -= 16;
+			}
+			const unsigned size = bit_length(static_cast<uint32_t>(value < 0 ? -value : value));
+			const unsigned symbol = (run << 4) | size;
+			a_bits.put(a_ac.code[symbol], a_ac.length[symbol]);
+			a_bits.put(static_cast<uint32_t>(value < 0 ? value - 1 : value), size);
+			run = 0;
+		}
+		if (run > 0) { a_bits.put(a_ac.code[0x00], a_ac.length[0x00]); }
+	}
+
+	void put_16(std::vector<uint8_t>& a_out, uint32_t a_value) {
+		a_out.push_back(static_cast<uint8_t>(a_value >> 8));
+		a_out.push_back(static_cast<uint8_t>(a_value));
+	}
+
+	void put_tables(std::vector<uint8_t>& a_out, unsigned a_kind_slot, const huffman_code& a_code) {
+		a_out.push_back(static_cast<uint8_t>(a_kind_slot));
+		a_out.insert(a_out.end(), a_code.counts, a_code.counts + 16);
+		a_out.insert(a_out.end(), a_code.values, a_code.values + a_code.total);
+	}
+
+	status encode(const bitmap& a_bitmap, int a_quality, const work_hook& a_work, std::vector<uint8_t>& a_bytes) {
+		const uint32_t width = a_bitmap.width;
+		const uint32_t height = a_bitmap.height;
+		const uint8_t* pixels = a_bitmap.rgba.data();
+		const size_t count = size_t {width} * height;
+		// JPEG has no alpha: each pixel is composited over white first
+		auto flattened = [&](size_t a_pixel, int a_channel) {
+			const int32_t alpha = pixels[4 * a_pixel + 3];
+			return (pixels[4 * a_pixel + a_channel] * alpha + 255 * (255 - alpha) + 127) / 255;
+		};
+		bool grey = true;
+		for (size_t i = 0; i < count && grey; ++i) { grey = pixels[4 * i] == pixels[4 * i + 1] && pixels[4 * i + 1] == pixels[4 * i + 2]; }
+		const bool subsampled = !grey && a_quality < k_full_chroma_quality;
+		const unsigned components = grey ? 1 : 3;
+		const unsigned h_max = subsampled ? 2 : 1;
+		const uint32_t mcus_across = (width + 8 * h_max - 1) / (8 * h_max);
+		const uint32_t mcus_down = (height + 8 * h_max - 1) / (8 * h_max);
+		uint16_t tables[2][64];
+		scaled_table(k_luma_table, a_quality, tables[0]);
+		scaled_table(k_chroma_table, a_quality, tables[1]);
+		// the planes at full size (Y, Cb, Cr), the frame's edge pixels repeated out to whole MCUs
+		const uint32_t padded_width = mcus_across * 8 * h_max;
+		const uint32_t padded_height = mcus_down * 8 * h_max;
+		std::vector<uint8_t> planes[3];
+		for (unsigned c = 0; c < components; ++c) { planes[c].resize(size_t {padded_width} * padded_height); }
+		for (uint32_t y = 0; y < padded_height; ++y) {
+			const uint32_t from_y = y < height ? y : height - 1;
+			for (uint32_t x = 0; x < padded_width; ++x) {
+				const size_t pixel = size_t {from_y} * width + (x < width ? x : width - 1);
+				const size_t at = size_t {y} * padded_width + x;
+				const int32_t red = flattened(pixel, 0);
+				if (grey) {
+					planes[0][at] = static_cast<uint8_t>(red);
+					continue;
+				}
+				const int32_t green = flattened(pixel, 1);
+				const int32_t blue = flattened(pixel, 2);
+				// JFIF's full-range BT.601 matrix in 16-bit fixed point; Cb and Cr centred on 128
+				planes[0][at] = clamp_8((19595 * red + 38470 * green + 7471 * blue + 32768) >> 16);
+				planes[1][at] = clamp_8((-11059 * red - 21709 * green + 32768 * blue + (128 << 16) + 32768) >> 16);
+				planes[2][at] = clamp_8((32768 * red - 27439 * green - 5329 * blue + (128 << 16) + 32768) >> 16);
+			}
+			if (a_work.exhausted(padded_width / 16 + 1)) { return status::budget; }
+		}
+		encoded_component parts[3];
+		for (unsigned c = 0; c < components; ++c) {
+			encoded_component& part = parts[c];
+			part.h = c == 0 ? h_max : 1;
+			part.v = part.h;
+			part.table = c == 0 ? 0 : 1;
+			part.blocks_across = mcus_across * part.h;
+			part.blocks_down = mcus_down * part.v;
+			part.blocks.resize(size_t {part.blocks_across} * part.blocks_down * 64);
+			const unsigned step = h_max / part.h;
+			for (uint32_t row = 0; row < part.blocks_down; ++row) {
+				for (uint32_t column = 0; column < part.blocks_across; ++column) {
+					int32_t samples[64];
+					for (int y = 0; y < 8; ++y) {
+						for (int x = 0; x < 8; ++x) {
+							// a subsampled chroma sample is the mean of the 2 x 2 pixels it covers
+							const size_t top = (size_t {row} * 8 + y) * step;
+							const size_t left = (size_t {column} * 8 + x) * step;
+							int32_t sum = 0;
+							for (unsigned dy = 0; dy < step; ++dy) {
+								for (unsigned dx = 0; dx < step; ++dx) { sum += planes[c][(top + dy) * padded_width + left + dx]; }
+							}
+							const int32_t area = static_cast<int32_t>(step * step);
+							samples[y * 8 + x] = (sum + area / 2) / area - 128;
+						}
+					}
+					int16_t coefficients[64];
+					forward_transform(samples, tables[part.table], coefficients);
+					std::memcpy(part.blocks.data() + (size_t {row} * part.blocks_across + column) * 64, coefficients, sizeof(coefficients));
+				}
+				if (a_work.exhausted(part.blocks_across * 8 + 1)) { return status::budget; }
+			}
+			planes[c] = std::vector<uint8_t>();
+		}
+		// the MCUs in scan order, once to count the symbols and once to write them
+		auto each_block = [&](auto&& a_visit) {
+			for (uint32_t my = 0; my < mcus_down; ++my) {
+				for (uint32_t mx = 0; mx < mcus_across; ++mx) {
+					for (unsigned c = 0; c < components; ++c) {
+						const encoded_component& part = parts[c];
+						for (unsigned y = 0; y < part.v; ++y) {
+							for (unsigned x = 0; x < part.h; ++x) {
+								a_visit(c, part.blocks.data() + ((size_t {my} * part.v + y) * part.blocks_across + size_t {mx} * part.h + x) * 64);
+							}
+						}
+					}
+				}
+			}
+		};
+		uint32_t dc_counts[2][256] = {};
+		uint32_t ac_counts[2][256] = {};
+		int32_t predictions[3] = {0, 0, 0};
+		each_block([&](unsigned a_component, const int16_t* a_block) {
+			const unsigned table = parts[a_component].table;
+			count_symbols(a_block, predictions[a_component], dc_counts[table], ac_counts[table]);
+		});
+		const unsigned table_count = grey ? 1 : 2;
+		huffman_code dc_codes[2];
+		huffman_code ac_codes[2];
+		for (unsigned t = 0; t < table_count; ++t) {
+			dc_codes[t].build(dc_counts[t]);
+			ac_codes[t].build(ac_counts[t]);
+		}
+
+		std::vector<uint8_t>& out = a_bytes;
+		out.clear();
+		out.insert(out.end(), {0xff, 0xd8});
+		// JFIF 1.01, square pixels, no thumbnail; and no other segment, so no EXIF (camera, place, time) is ever written
+		out.insert(out.end(), {0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00});
+		out.insert(out.end(), {0xff, 0xdb});
+		put_16(out, 2 + 65 * table_count);
+		for (unsigned t = 0; t < table_count; ++t) {
+			out.push_back(static_cast<uint8_t>(t));
+			for (int k = 0; k < 64; ++k) { out.push_back(static_cast<uint8_t>(tables[t][k_zigzag[k]])); }
+		}
+		out.insert(out.end(), {0xff, 0xc0});
+		put_16(out, 8 + 3 * components);
+		out.push_back(8);
+		put_16(out, height);
+		put_16(out, width);
+		out.push_back(static_cast<uint8_t>(components));
+		for (unsigned c = 0; c < components; ++c) {
+			out.push_back(static_cast<uint8_t>(c + 1));
+			out.push_back(static_cast<uint8_t>((parts[c].h << 4) | parts[c].v));
+			out.push_back(static_cast<uint8_t>(parts[c].table));
+		}
+		size_t length_at = out.size() + 2;
+		out.insert(out.end(), {0xff, 0xc4, 0x00, 0x00});
+		for (unsigned t = 0; t < table_count; ++t) {
+			put_tables(out, t, dc_codes[t]);
+			put_tables(out, 0x10 | t, ac_codes[t]);
+		}
+		const size_t tables_length = out.size() - length_at;
+		out[length_at] = static_cast<uint8_t>(tables_length >> 8);
+		out[length_at + 1] = static_cast<uint8_t>(tables_length);
+		out.insert(out.end(), {0xff, 0xda});
+		put_16(out, 6 + 2 * components);
+		out.push_back(static_cast<uint8_t>(components));
+		for (unsigned c = 0; c < components; ++c) {
+			out.push_back(static_cast<uint8_t>(c + 1));
+			out.push_back(static_cast<uint8_t>((parts[c].table << 4) | parts[c].table));
+		}
+		out.insert(out.end(), {0x00, 0x3f, 0x00});
+		bit_sink bits(out);
+		predictions[0] = predictions[1] = predictions[2] = 0;
+		size_t written = 0;
+		bool spent = false;
+		each_block([&](unsigned a_component, const int16_t* a_block) {
+			const unsigned table = parts[a_component].table;
+			write_block(bits, a_block, predictions[a_component], dc_codes[table], ac_codes[table]);
+			if (++written % 1024 == 0 && !spent) { spent = a_work.exhausted(1024); }
+		});
+		if (spent) { return status::budget; }
+		bits.flush();
+		out.insert(out.end(), {0xff, 0xd9});
+		return status::ok;
+	}
+
 } // namespace jpeg_detail
 
 	status read_jpeg_header(const uint8_t* a_data, size_t a_size, const limits& a_limits, header& a_header) {
 		const work_hook none;
 		jpeg_detail::decoder reader(a_data, a_size, a_limits, none);
 		return reader.run(true, a_header);
+	}
+
+	status encode_jpeg(const bitmap& a_bitmap, int a_quality, const work_hook& a_work, std::vector<uint8_t>& a_bytes) {
+		if (a_bitmap.width > 65535 || a_bitmap.height > 65535) { return status::jpeg_too_large; }
+		try {
+			return jpeg_detail::encode(a_bitmap, a_quality < 1 ? 1 : a_quality > 100 ? 100 : a_quality, a_work, a_bytes);
+		} catch (const std::bad_alloc&) {
+			return status::out_of_memory;
+		} catch (const std::length_error&) {
+			return status::out_of_memory;
+		}
 	}
 
 	status decode_jpeg(const uint8_t* a_data, size_t a_size, const limits& a_limits, const work_hook& a_work, header& a_header, bitmap& a_bitmap) {

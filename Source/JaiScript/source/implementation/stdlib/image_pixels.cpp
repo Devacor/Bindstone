@@ -30,6 +30,7 @@ namespace image_codec {
 			case status::jpeg_arithmetic: return "JPEG arithmetic coding is not supported";
 			case status::jpeg_unsupported: return "JPEG coding process is not supported (only 8-bit baseline and progressive Huffman are)";
 			case status::jpeg_cmyk: return "JPEG CMYK images are not supported";
+			case status::jpeg_too_large: return "JPEG cannot hold an image wider or taller than 65535 pixels";
 			case status::jpeg_bad_quantization_table: return "JPEG quantization table is invalid";
 			case status::jpeg_bad_huffman_table: return "JPEG Huffman table is invalid";
 			case status::jpeg_missing_table: return "JPEG scan uses a table that was never defined";
@@ -151,6 +152,84 @@ namespace resample_detail {
 	}
 
 } // namespace resample_detail
+
+	void code_lengths(const uint32_t* a_frequency, unsigned a_count, unsigned a_longest, bool a_reserve, uint8_t* a_lengths) {
+		// the reserved code point is one more symbol, of the least frequency, which sorts last and is dropped at the end
+		const unsigned symbols = a_count + (a_reserve ? 1 : 0);
+		std::vector<uint64_t> frequency(symbols);
+		std::vector<unsigned> size(symbols, 0);
+		std::vector<int> next(symbols, -1);
+		unsigned used = 0;
+		for (unsigned i = 0; i < a_count; ++i) {
+			frequency[i] = a_frequency[i];
+			used += a_frequency[i] ? 1 : 0;
+		}
+		if (a_reserve) { frequency[a_count] = 1; }
+		for (unsigned i = 0; i < a_count; ++i) { a_lengths[i] = 0; }
+		if (used == 0) { return; }
+		if (used == 1 && !a_reserve) {
+			for (unsigned i = 0; i < a_count; ++i) {
+				if (a_frequency[i]) { a_lengths[i] = 1; }
+			}
+			return;
+		}
+		// T.81 K.2: merge the two least frequent (the later symbol on a tie), each member of a merged set one bit deeper
+		for (;;) {
+			int first = -1;
+			for (unsigned i = 0; i < symbols; ++i) {
+				if (frequency[i] && (first < 0 || frequency[i] <= frequency[static_cast<size_t>(first)])) { first = static_cast<int>(i); }
+			}
+			int second = -1;
+			for (unsigned i = 0; i < symbols; ++i) {
+				if (frequency[i] && static_cast<int>(i) != first && (second < 0 || frequency[i] <= frequency[static_cast<size_t>(second)])) { second = static_cast<int>(i); }
+			}
+			if (second < 0) { break; }
+			frequency[static_cast<size_t>(first)] += frequency[static_cast<size_t>(second)];
+			frequency[static_cast<size_t>(second)] = 0;
+			for (int at = first;; at = next[static_cast<size_t>(at)]) {
+				++size[static_cast<size_t>(at)];
+				if (next[static_cast<size_t>(at)] < 0) {
+					next[static_cast<size_t>(at)] = second;
+					break;
+				}
+			}
+			for (int at = second; at >= 0; at = next[static_cast<size_t>(at)]) { ++size[static_cast<size_t>(at)]; }
+		}
+		// the count of codes per length, then the longest moved up the tree two at a time until none is past a_longest
+		std::vector<unsigned> counts(symbols + 2, 0);
+		unsigned deepest = 0;
+		for (unsigned i = 0; i < symbols; ++i) {
+			if (size[i]) {
+				++counts[size[i]];
+				deepest = size[i] > deepest ? size[i] : deepest;
+			}
+		}
+		for (unsigned i = deepest; i > a_longest; --i) {
+			while (counts[i] > 0) {
+				unsigned j = i - 2;
+				while (counts[j] == 0) { --j; }
+				counts[i] -= 2;
+				++counts[i - 1];
+				counts[j + 1] += 2;
+				--counts[j];
+			}
+		}
+		if (a_reserve) {
+			unsigned longest = a_longest;
+			while (counts[longest] == 0) { --longest; }
+			--counts[longest];
+		}
+		// the lengths handed out in order of the merged depth, a tie by symbol
+		unsigned length = 1;
+		for (unsigned depth = 1; depth <= deepest; ++depth) {
+			for (unsigned i = 0; i < a_count; ++i) {
+				if (size[i] != depth) { continue; }
+				while (length <= a_longest && counts[length] == 0) { ++length; }
+				a_lengths[i] = static_cast<uint8_t>(length);
+				--counts[length];
+			}
+		}
+	}
 
 	status orient(const bitmap& a_source, uint8_t a_orientation, bitmap& a_result) {
 		try {

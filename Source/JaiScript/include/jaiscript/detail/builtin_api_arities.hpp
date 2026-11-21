@@ -601,7 +601,7 @@ namespace jai::detail {
 		"working_dir",
 	}};
 
-	inline constexpr std::array<std::string_view, 105> BUILTIN_OBSERVING_METHODS{{
+	inline constexpr std::array<std::string_view, 106> BUILTIN_OBSERVING_METHODS{{
 		"[]",
 		"add_days",
 		"add_hours",
@@ -629,6 +629,7 @@ namespace jai::detail {
 		"elapsed",
 		"emit",
 		"empty",
+		"encode",
 		"end",
 		"ends_with",
 		"error",

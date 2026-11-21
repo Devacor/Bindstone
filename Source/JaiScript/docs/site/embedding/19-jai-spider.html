@@ -229,6 +229,15 @@ from there, quoted, and every value binds.</li>
 primary key, which update needs</code>, <code>SQLite error: the record has no field 'id' for the primary key of
 'users'</code>, <code>SQLite error: the record has no column of 'users' to update besides its primary key</code>.</li>
 </ul>
+<h2 id="images">Uploaded images<a class="hlink" href="#images" aria-label="link">&#8203;</a></h2>
+<p>The host registers <a href="../reference/library.html#images"><code>image::</code></a> in a build with <code>JAISCRIPT_ENABLE_IMAGE</code> on, so a route can check an upload, scale it and store the result: <code>image::data</code> reads a file&#x27;s format and size from its header alone, <code>image::load</code> decodes it upright, <code>fit</code> and <code>crop_fill</code> scale it and <code>encode</code> writes a JPEG or PNG with no metadata, so a phone photo&#x27;s GPS position never reaches the site. The argument is always the image&#x27;s bytes, never a path, so an upload goes in as it came; a file on disk is <code>image::load(file::read(path))</code>.</p>
+<div class="codeblock cb-jai" data-host="jai_spider"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">routes.post(&quot;/avatar/:id&quot;, (spider::request req) =&gt; {
+    int id = req.param(&quot;id&quot;).to_int();   // a number, so the file name below is never a path a stranger wrote
+    image picture = image::load(req.files()[&quot;picture&quot;].data);
+    picture.crop_fill(256, 256);
+    file::write(&quot;public/avatars/&quot; + to_string(id) + &quot;.jpg&quot;, picture.encode(&quot;jpeg&quot;, 85));
+    return spider::redirect(&quot;/profile&quot;);
+});</code></pre></div>
 <h2 id="sessions">Sessions<a class="hlink" href="#sessions" aria-label="link">&#8203;</a></h2>
 <p><code>lib/session.jai</code> keeps sessions in a table of the app's database (<code>spider_sessions</code>). The cookie
 carries only a 256-bit random id (<a href="../guide/18-random.html#crypto"><code>crypto::random_hex(32)</code></a>);

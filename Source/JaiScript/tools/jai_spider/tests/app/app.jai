@@ -34,6 +34,18 @@ routes.post("/echo/files", (spider::request req) => {
 	out["files"] = files;
 	return spider::json(out);
 });
+// an avatar upload: the file's bytes scaled and saved as a PNG
+routes.post("/image/avatar", (spider::request req) => {
+	try {
+		image picture = image::load(req.files()["picture"].data);
+		picture.crop_fill(16, 16);
+		string saved = picture.encode("png");
+		map<string, var> made = image::data(saved);
+		return spider::json({"source": picture.format, "format": made["format"], "width": made["width"], "height": made["height"]});
+	} catch (e) {
+		return spider::response(422, e.message);
+	}
+});
 routes.get("/cookies", (spider::request req) => {
 	spider::response r = spider::json(req.cookies);
 	r.set_cookie("flavor", "oat meal", {"max_age": 60});

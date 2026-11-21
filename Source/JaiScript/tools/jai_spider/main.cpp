@@ -720,6 +720,9 @@ private:
 		}
 		jai::stdlib::register_all(eng);
 		jai::stdlib::register_web(eng);
+#ifdef JAISCRIPT_ENABLE_IMAGE
+		jai::stdlib::register_image(*eng);
+#endif
 		jai_runner::register_http_client(*eng);
 		jai_runner::register_file_io(*eng);
 		register_http_text(*eng);

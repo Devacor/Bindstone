@@ -16,6 +16,7 @@ spider:: client (tests/client.jai, tests/client_catch.jai) calls the same server
 methods, content kinds, options, the redirect policy, timeouts and errors.
 """
 import argparse
+import base64
 import http.client
 import json
 import os
@@ -227,6 +228,14 @@ class Suite:
 		got = r.json() if r.status == 200 else {}
 		self.check("multipart fields land in form()", got.get("fields") == {"title": "Hello there"}, r.text())
 		self.check("multipart files land in files()", got.get("files") == {"upload": {"filename": "notes.txt", "size": 18, "type": "text/plain", "data": "line one\r\nline two"}}, r.text())
+		# an image upload through the image:: module: scaled, encoded and read back, and an upload that is no image refused
+		def upload(data):
+			return ("--" + boundary + "\r\nContent-Disposition: form-data; name=\"picture\"; filename=\"a.png\"\r\nContent-Type: image/png\r\n\r\n").encode("latin-1") + data + ("\r\n--" + boundary + "--\r\n").encode("latin-1")
+		picture = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAEAAAAAwCAIAAAAuKetIAAAAQ0lEQVR42u3PQQkAAAgEsItjRCMaywp+hcEKLNP1WgQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQErhaJouDxNuBloAAAAABJRU5ErkJggg==")
+		r = self.request("POST", "/image/avatar", upload(picture), {"Content-Type": "multipart/form-data; boundary=" + boundary})
+		self.check("an uploaded PNG is scaled to an avatar and saved", r.status == 200 and r.json() == {"source": "png", "format": "png", "width": 16, "height": 16}, r.text())
+		r = self.request("POST", "/image/avatar", upload(b"/etc/passwd"), {"Content-Type": "multipart/form-data; boundary=" + boundary})
+		self.check("an upload reading /etc/passwd is no image, and no file is read", r.status == 422 and r.text() == "Image data is not a JPEG, PNG or GIF (read a file with image::load(file::read(path)))", r.text())
 		r = self.request("POST", "/echo/body", "x" * 1000)
 		self.check("a Content-Length body arrives whole", r.json() == {"method": "POST", "body": "x" * 1000, "length": 1000})
 		chunked = b"POST /echo/body HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n5;ext=1\r\nhello\r\n6\r\n world\r\n0\r\nX-Trailer: 1\r\n\r\n"

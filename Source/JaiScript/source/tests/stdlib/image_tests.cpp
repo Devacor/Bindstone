@@ -16,6 +16,7 @@
 #include <iterator>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace jai::foundry::tests {
@@ -23,11 +24,12 @@ namespace jai::foundry::tests {
 using namespace jai::image_test;
 namespace codec = jai::image_codec;
 
-inline const image_fixtures::fixture& fixture_named(const std::string& a_name) {
+// a view, not a reference: the fixture outlives any temporary name passed in
+inline const image_fixtures::fixture& fixture_named(std::string_view a_name) {
 	for (const image_fixtures::fixture& each : image_fixtures::k_fixtures) {
 		if (a_name == each.name) { return each; }
 	}
-	throw std::runtime_error("no fixture " + a_name);
+	throw std::runtime_error("no fixture " + std::string(a_name));
 }
 
 class image_codec_tests : public suite {
@@ -731,6 +733,99 @@ public:
 			check_true(codec::encode_png(big, gone, file) == codec::status::budget);
 		});
 
+		test("gif_fixtures_decode_to_the_reference_pixels", [this]() {
+			size_t seen = 0;
+			for (const image_fixtures::fixture& each : image_fixtures::k_fixtures) {
+				if (std::strcmp(each.format, "gif") != 0) { continue; }
+				++seen;
+				codec::header header;
+				check_true(codec::read_header(each.bytes, each.size, codec::limits {}, header) == codec::status::ok, each.name);
+				check_true(header.kind == codec::format::gif && header.width == each.width && header.height == each.height, each.name);
+				codec::header decoded;
+				codec::bitmap pixels;
+				check_eq(std::string(""), std::string(codec::status_text(codec::decode(each.bytes, each.size, codec::limits {}, codec::work_hook {}, decoded, pixels))), each.name);
+				check_eq(each.width, pixels.width, each.name);
+				check_eq(each.height, pixels.height, each.name);
+				check_eq(each.rgba_hash, fnv(pixels.rgba), each.name);
+			}
+			check_ge(seen, size_t {12});
+		});
+
+		test("gif_refuses_hostile_files", [this]() {
+			// a 2 x 2 file built by hand: a two-colour global table, then codes 4 (clear), 0, 1, 1, 0, 5 (end) at 3 bits
+			auto file = [](std::initializer_list<uint8_t> a_screen, std::initializer_list<uint8_t> a_frame, std::initializer_list<uint8_t> a_data) {
+				bytes out = {'G', 'I', 'F', '8', '9', 'a'};
+				out.insert(out.end(), a_screen);
+				out.insert(out.end(), {10, 20, 30, 200, 210, 220});
+				out.push_back(0x2c);
+				out.insert(out.end(), a_frame);
+				out.insert(out.end(), a_data);
+				out.push_back(0x3b);
+				return out;
+			};
+			const std::initializer_list<uint8_t> screen = {2, 0, 2, 0, 0x80, 0, 0};
+			const std::initializer_list<uint8_t> frame = {0, 0, 0, 0, 2, 0, 2, 0, 0};
+			// 4 0 1 1 at 3 bits, then 0 and 5 at 4 (the table has reached 8 entries), least significant bit first
+			const std::initializer_list<uint8_t> data = {2, 3, 0x44, 0x02, 0x05, 0};
+			check_eq(std::string("ok"), outcome(file(screen, frame, data)));
+			codec::bitmap pixels;
+			check_true(decode_bytes(file(screen, frame, data), pixels) == codec::status::ok);
+			check_true(pixels.rgba == bytes {10, 20, 30, 255, 200, 210, 220, 255, 200, 210, 220, 255, 10, 20, 30, 255}, hex(pixels.rgba));
+			// a screen of 0, and one past the pixel limit, decided before anything else
+			check_eq(std::string("GIF header is invalid"), outcome(file({0, 0, 2, 0, 0x80, 0, 0}, frame, data)));
+			check_eq(std::string("Image has more pixels than the pixel limit"), outcome(file({0xff, 0xff, 0xff, 0xff, 0x80, 0, 0}, frame, data)));
+			// a frame of 0, a frame with no colour table, a block that is neither extension, image nor trailer, no image at all
+			check_eq(std::string("GIF frame is invalid"), outcome(file(screen, {0, 0, 0, 0, 0, 0, 2, 0, 0}, data)));
+			check_eq(std::string("GIF frame is invalid"), outcome(file({2, 0, 2, 0, 0x00, 0, 0}, frame, data)));
+			bytes stray = file(screen, frame, data);
+			stray[19] = 0x77;
+			check_eq(std::string("GIF frame is invalid"), outcome(stray));
+			bytes trailer_only = file(screen, frame, data);
+			trailer_only[19] = 0x3b;
+			check_eq(std::string("GIF has no image"), outcome(trailer_only));
+			// minimum code sizes of 1 and 9, a first code that is no single index, a code past the table, an early end code
+			check_eq(std::string("GIF image data is invalid"), outcome(file(screen, frame, {1, 3, 0x44, 0x02, 0x05, 0})));
+			check_eq(std::string("GIF image data is invalid"), outcome(file(screen, frame, {9, 3, 0x44, 0x02, 0x05, 0})));
+			// 4 then 7 (no table entry yet: the first code after a clear must be an index)
+			check_eq(std::string("GIF image data is invalid"), outcome(file(screen, frame, {2, 2, 0x3c, 0x00, 0})));
+			// 4 0 then 7: one past the next free code (6)
+			check_eq(std::string("GIF image data is invalid"), outcome(file(screen, frame, {2, 2, 0xc4, 0x01, 0})));
+			// 4 0 5: the end before the fourth pixel
+			check_eq(std::string("GIF is truncated"), outcome(file(screen, frame, {2, 2, 0x44, 0x01, 0})));
+			// the data cut inside its sub-blocks
+			bytes cut = file(screen, frame, data);
+			cut.resize(cut.size() - 4);
+			check_eq(std::string("GIF is truncated"), outcome(cut));
+			// a sub-block length past the end of the file
+			bytes long_block = file(screen, frame, data);
+			long_block[30] = 200;
+			check_eq(std::string("GIF is truncated"), outcome(long_block));
+			check_eq(std::string("GIF is truncated"), outcome(bytes {'G', 'I', 'F', '8', '9', 'a', 2, 0}));
+			// once every pixel is decoded, a file that stops short of its trailer is whole
+			bytes no_trailer = file(screen, frame, data);
+			no_trailer.pop_back();
+			check_eq(std::string("ok"), outcome(no_trailer));
+		});
+
+		test("gif_lzw_survives_every_cut_and_a_full_table", [this]() {
+			for (const char* name : {"gif_table_full_no_clear_90x80", "gif_interlaced_13x11", "gif_wic_photo_24x24"}) {
+				const image_fixtures::fixture& each = fixture_named(name);
+				codec::header header;
+				codec::bitmap whole;
+				check_true(codec::decode(each.bytes, each.size, codec::limits {}, codec::work_hook {}, header, whole) == codec::status::ok, name);
+				// a cut file is refused, unless the cut falls after its last pixel's code: then it is the whole picture
+				for (size_t length = 0; length + 1 < each.size; length += length < 400 ? 1 : 37) {
+					codec::bitmap pixels;
+					const codec::status result = codec::decode(each.bytes, length, codec::limits {}, codec::work_hook {}, header, pixels);
+					if (result == codec::status::ok) {
+						check_true(pixels.rgba == whole.rgba, std::string(name) + " cut to " + std::to_string(length) + " decoded other pixels");
+					} else {
+						check_ne(std::string(""), std::string(codec::status_text(result)), name);
+					}
+				}
+			}
+		});
+
 		test("png_every_prefix_is_refused", [this]() {
 			for (const image_fixtures::fixture& each : image_fixtures::k_fixtures) {
 				if (std::strcmp(each.format, "png") != 0 || each.size > 1300) { continue; }
@@ -1071,6 +1166,12 @@ public:
 			check_eq(std::string("image: the image is empty (image::load makes one)"), caught(e, "image empty; empty.encode(\"jpeg\");"));
 		});
 
+		test("a_gif_loads_its_first_frame", [this]() {
+			auto e = image_engine();
+			check_eq(std::string("7 5 gif"), run(e, "image img = image::load(fixture(\"gif87a_two_frames_7x5\")); `${img.width} ${img.height} ${img.format}`;"));
+			check_eq(std::string("gif 20 15"), run(e, "var d = image::data(fixture_bytes(\"gif_frame_offset_transparent_20x15\")); `${d[\"format\"]} ${d[\"width\"]} ${d[\"height\"]}`;"));
+		});
+
 		test("crop_is_bounds_checked", [this]() {
 			auto e = image_engine();
 			e->execute("image photo = image::load(fixture(\"png_rgb_photo_64x48\"));");
@@ -1099,8 +1200,13 @@ public:
 
 		test("mutated_files_raise_catalogued_errors_through_the_script", [this]() {
 			auto e = image_engine();
-			const auto pool = image_mutation::fixtures_of("png");
-			e->add_function("mutated", [pool](script_int a_seed) -> std::vector<uint8_t> { return image_mutation::mutated_case("png", pool, static_cast<uint64_t>(a_seed)); });
+			// 300 cases of each format: seed / 300 picks the format
+			std::vector<std::vector<const image_fixtures::fixture*>> pools;
+			for (const char* format : image_mutation::k_formats) { pools.push_back(image_mutation::fixtures_of(format)); }
+			e->add_function("mutated", [pools](script_int a_seed) -> std::vector<uint8_t> {
+				const size_t format = static_cast<size_t>(a_seed / 300) % pools.size();
+				return image_mutation::mutated_case(image_mutation::k_formats[format], pools[format], static_cast<uint64_t>(a_seed));
+			});
 			e->add_function("catalogued", [](const std::string& a_text) -> bool {
 				for (size_t i = 0; i < static_cast<size_t>(codec::status::status_count); ++i) {
 					if (a_text == codec::status_text(static_cast<codec::status>(i))) { return true; }
@@ -1111,7 +1217,7 @@ public:
 				int images = 0;
 				int errors = 0;
 				string strange = "";
-				for (int seed = 0; seed < 400; ++seed) {
+				for (int seed = 0; seed < 900; ++seed) {
 					try {
 						image img = image::load(mutated(seed));
 						if (img.width > 0 && img.height > 0) { images += 1; }
@@ -1122,7 +1228,7 @@ public:
 				}
 				`${images + errors} ${strange}`;
 			)");
-			check_eq(std::string("400 "), outcome);
+			check_eq(std::string("900 "), outcome);
 		});
 	}
 };

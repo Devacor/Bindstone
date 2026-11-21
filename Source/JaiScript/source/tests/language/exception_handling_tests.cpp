@@ -1188,6 +1188,144 @@ public:
             check_eq(std::string("argfail"), got);
         });
 
+        // An error a throw's operand raises is the error that propagates: its value, its type for a typed clause, and nothing
+        // reported as lost on the way (the interpreter threw null in its place)
+        test("an_error_raised_by_a_throw_operand_propagates_unchanged", [this]() {
+            const char* prelude = R"jai(
+                int f() { throw "in f"; }
+                bool fb() { throw "in fb"; }
+                var fv() { throw "in fv"; }
+                int id(int a) { return a; }
+                class Err { string m; Err(string a) { m = a; } }
+                int typed() { throw Err("typed"); }
+                class Thrower {
+                    int m() { throw "in m"; }
+                    Thrower operator+(Thrower o) { throw "in +"; }
+                    int operator[](int i) { throw "in []"; }
+                    int operator()(int i) { throw "in ()"; }
+                    string to_string() { throw "in to_string"; }
+                }
+                class CtorThrows { CtorThrows() { throw "in ctor"; } }
+                class Noisy { string n; Noisy(string a) { n = a; } ~Noisy() { print("~", n); } }
+                var xs = [1, 2, 3];
+                int zero = 0;
+                Thrower t;
+            )jai";
+            const std::pair<const char*, const char*> cases[] = {
+                {"try { throw f(); } catch (e) { print(e); }", "in f"},
+                {"try { throw throw \"a\"; } catch (e) { print(e); }", "a"},
+                {"try { throw throw throw \"deep\"; } catch (e) { print(e); }", "deep"},
+                {"try { throw f() + 1; } catch (e) { print(e); }", "in f"},
+                {"try { throw -f(); } catch (e) { print(e); }", "in f"},
+                {"try { throw !fb(); } catch (e) { print(e); }", "in fb"},
+                {"try { throw fb() && true; } catch (e) { print(e); }", "in fb"},
+                {"try { throw false || fb(); } catch (e) { print(e); }", "in fb"},
+                {"try { throw fv() ?? 3; } catch (e) { print(e); }", "in fv"},
+                {"try { throw (zero == 0 ? f() : 2); } catch (e) { print(e); }", "in f"},
+                {"try { throw id(f()); } catch (e) { print(e); }", "in f"},
+                {"try { throw [f()]; } catch (e) { print(e); }", "in f"},
+                {"try { throw {\"k\": f()}; } catch (e) { print(e); }", "in f"},
+                {"try { throw `x${f()}`; } catch (e) { print(e); }", "in f"},
+                {"try { throw cast<float>(f()); } catch (e) { print(e); }", "in f"},
+                {"var l = []() { throw \"in lambda\"; }; try { throw l(); } catch (e) { print(e); }", "in lambda"},
+                {"try { throw t.m(); } catch (e) { print(e); }", "in m"},
+                {"try { throw t + t; } catch (e) { print(e); }", "in +"},
+                {"try { throw t[1]; } catch (e) { print(e); }", "in []"},
+                {"try { throw t(1); } catch (e) { print(e); }", "in ()"},
+                {"try { throw t; } catch (e) { print(e); }", "in to_string"},
+                {"try { throw CtorThrows(); } catch (e) { print(e); }", "in ctor"},
+                {"try { throw typed(); } catch (Err e) { print(\"Err \", e.m); } catch (e) { print(\"untyped \", e); }", "Err typed"},
+                {"try { throw typed(); } catch (int e) { print(\"int\"); } catch (string e) { print(\"string\"); } catch (e) { print(\"any \", e.m); }", "any typed"},
+                {"try { throw xs[99]; } catch (e) { print(e); }", "Array index 99 out of bounds for array of size 3"},
+                {"try { throw 1 / zero; } catch (e) { print(e); }", "Division by zero"},
+                {"[[warn_mode]] try { throw undefined_name; } catch (e) { print(e); }", "Undefined variable 'undefined_name'"},
+                {"void g() { Noisy a(\"a\"); throw f(); } try { g(); } catch (e) { print(e); }", "~a\nin f"},
+                {"void g() { try { f(); } catch (e) { Noisy b(\"b\"); throw fb(); } } try { g(); } catch (e) { print(e); }", "~b\nin fb"},
+                {"void g() { try { throw f(); } catch (int e) { print(\"int\"); } } try { g(); } catch (e) { print(e); }", "in f"},
+                {"void g() { try { f(); } catch (e) { throw e + fv(); } } try { g(); } catch (e) { print(e); }", "in fv"},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                std::string reported;
+                engine->set_script_error_handler([&](const std::string& text) { reported += text; });
+                check_eq(std::string(c.second), printed_output(*engine, std::string(prelude) + c.first));
+                check_eq(std::string(), reported);
+            });
+        });
+
+        // Uncaught, the operand's error leaves execute as raised: its text, its raise site, its stack
+        test("an_uncaught_error_of_a_throw_operand_keeps_its_raise_site", [this]() {
+            const std::tuple<const char*, const char*, const char*> cases[] = {
+                {"int f() { throw \"in f\"; }\nthrow f();\n", "in f", "f:1|<script>:2"},
+                {"int f() { throw \"in f\"; }\nvoid g() {\n    throw f() + 1;\n}\ng();\n", "in f", "f:1|g:3|<script>:5"},
+                {"\nthrow throw \"a\";\n", "a", "<script>:2"},
+                {"var xs = [1];\nvoid g() {\n    throw xs[9];\n}\ng();\n", "Array index 9 out of bounds for array of size 1", "g:3|<script>:5"},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                check_eq(std::string(std::get<1>(c)), failure_text(*engine, std::get<0>(c)));
+                check_eq(std::string(std::get<2>(c)), trace_shape(*engine));
+            });
+            auto engine = make_engine();
+            check_eq(std::string("1|3"), engine->execute(
+                "int f() { throw \"in f\"; }\n"
+                "void g() { throw f(); }\n"
+                "var shape = \"\"; try { g(); } catch (e) { shape = `${e.line}|${e.stack.size()}`; }\n"
+                "shape\n").as_string());
+        });
+
+        // What reads an operand stops when the operand raises: no constructor runs on a null argument, no loop reads its
+        // condition after its initializer or update failed, no case is compared, and the operand's error is the one caught
+        test("a_raising_operand_stops_the_statement_that_reads_it", [this]() {
+            const char* prelude = R"jai(
+                int f() { throw "T"; }
+                var fv() { throw "TV"; }
+                bool side(string s) { print("side ", s); return true; }
+                class Loose { var a; var b; Loose(var x, var y) { a = x; b = y; print("Loose ran"); } }
+                class Typed { string n; Typed(string a) { n = a; print("Typed ran"); } }
+                class Agg { int a = 0; int b = 0; }
+                var xs = [1, 2];
+                int zero = 0;
+            )jai";
+            const std::pair<const char*, const char*> cases[] = {
+                {"try { var l = Loose(f(), 1); } catch (e) { print(e); }", "T"},
+                {"try { Loose l(f(), 1); } catch (e) { print(e); }", "T"},
+                {"try { var l = make_shared<Loose>(f(), 1); } catch (e) { print(e); }", "T"},
+                {"try { Typed t(fv()); } catch (e) { print(e); }", "TV"},
+                {"try { var t = make_shared<Typed>(fv()); } catch (e) { print(e); }", "TV"},
+                {"try { var w = weak_ptr<Typed>(fv()); } catch (e) { print(e); }", "TV"},
+                {"try { Agg a{f(), 1}; } catch (e) { print(e); }", "T"},
+                {"try { var a = Agg{1, f()}; } catch (e) { print(e); }", "T"},
+                {"try { auto [a, b] = fv(); } catch (e) { print(e); }", "TV"},
+                {"try { for (int i = f(); i < 3; ++i) { print(\"body\"); } } catch (e) { print(e); }", "T"},
+                {"try { for (var i = fv(); side(\"cond\"); ) { print(\"body\"); } } catch (e) { print(e); }", "TV"},
+                {"try { for (int i = 0; side(\"cond\"); i += f()) { print(\"body\"); } } catch (e) { print(e); }", "side cond\nbody\nT"},
+                {"try { for (int i = 0; side(\"cond\"); i += 1 / zero) { print(\"body\"); } } catch (e) { print(e); }", "side cond\nbody\nDivision by zero"},
+                {"try { for (int i = 0; side(\"cond\"); i = xs[9]) { print(\"body\"); } } catch (e) { print(e); }",
+                 "side cond\nbody\nArray index 9 out of bounds for array of size 2"},
+                {"[[warn_mode]] try { switch (f()) { default: nosuch; } } catch (e) { print(e); }", "T"},
+                {"[[warn_mode]] try { switch (f()) { case nosuch: break; } } catch (e) { print(e); }", "T"},
+                {"try { switch (zero) { case f(): print(\"matched\"); break; default: print(\"default\"); } } catch (e) { print(e); }", "T"},
+                {"try { parallel_for (auto& x : fv()) { x = 1; } } catch (e) { print(e); }", "TV"},
+                {"try { var v = include(fv()); } catch (e) { print(e); }", "TV"},
+                {"coroutine int g() { int x = yield f(); print(\"resumed\"); yield x; } try { auto c = g(); print(c.next()); } catch (e) { print(e); }", "T"},
+                {"coroutine int g() { yield f(); print(\"resumed\"); yield 2; } try { auto c = g(); print(c.next()); } catch (e) { print(e); }", "T"},
+                {"coroutine int g() { try { int x = yield f(); yield x; } catch (e) { print(\"in g \", e); yield 5; } yield 6; } auto c = g(); print(c.next(), c.next(), c.done());",
+                 "in g T\n56false"},
+                {"class Money { Money(int a) { throw \"conv\"; } } coroutine Money g() { var v = 5; try { var x = yield v; print(\"resumed\"); } catch (e) { print(\"in g \", e); } } "
+                 "auto c = g(); print(c.next()); print(c.done());", "in g conv\nnull\ntrue"},
+                {"bool lt(int i) { print(\"cond \", i); return i < 2; } coroutine int g() { for (int i = 0; lt(i); i = (yield i) ?? i + 1) { print(\"body \", i); } } "
+                 "for (int v : g()) { print(\"got \", v); }", "cond 0\nbody 0\ngot 0\ncond 1\nbody 1\ngot 1\ncond 2"},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                std::string reported;
+                engine->set_script_error_handler([&](const std::string& text) { reported += text; });
+                check_eq(std::string(c.second), printed_output(*engine, std::string(prelude) + c.first));
+                check_eq(std::string(), reported);
+            });
+        });
+
         // Regression: caught typed-return conversion error left the callee frame/env and
         // hasReturnValue_ live - catch body truncated, post-try statements skipped. The
         // literal typed mismatch is a strict load error (a strongly-typed value never reaches

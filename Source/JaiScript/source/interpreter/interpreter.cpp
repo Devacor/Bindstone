@@ -5404,6 +5404,10 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
             // One argument - create weak_ptr from object
             JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[0].get(), rs, 0), expr, rp_new_weak, 0, {});
             script_value obj = pop_value();
+            if (is_unwinding_) {
+                push_value(make_value());
+                return {};
+            }
 
             // Handle null objects
             if (obj.is_null()) {
@@ -5541,6 +5545,10 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
         for (size_t ai = args.size(); ai < expr->arguments.size(); ++ai) {
             JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_new_shared, ai, args);
             args.push_back(pop_value());
+            if (is_unwinding_) {
+                push_value(make_value());
+                return {};
+            }
             if (auto taken = capture_call_argument(engine_, expr->arg_captures, ai, args.back(), [&] {
                     auto ctor = environment_->get(innerTypeName, *string_symbolizer_);
                     return ctor ? detail::callee_binding(ctor.value(), ai, false, expr->arguments.size()) : detail::arg_binding::opaque;
@@ -5581,6 +5589,10 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
     for (size_t ai = args.size(); ai < expr->arguments.size(); ++ai) {
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_new_class, ai, args);
         args.push_back(pop_value());
+        if (is_unwinding_) {   // an argument threw: no constructor runs
+            push_value(make_value());
+            return {};
+        }
         if (auto taken = capture_call_argument(engine_, expr->arg_captures, ai, args.back(), [&] {
                 auto ctor = environment_->get(className, *string_symbolizer_);
                 return ctor ? detail::callee_binding(ctor.value(), ai, false, expr->arguments.size()) : detail::arg_binding::opaque;
@@ -5979,6 +5991,7 @@ checked_result<void> interpreter::visit_throw_expr_t(throw_expr* expr, const rep
     if (expr->value) {
         // Evaluate the expression to throw
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_operand, 0, {});
+        if (is_unwinding_) { return {}; }   // the operand threw: that throw propagates
         script_value val = pop_value();
 
         // the message is the value's display text, a class's own to_string() for an instance (engine::text_of, print's rule)
@@ -6024,11 +6037,12 @@ checked_result<void> interpreter::visit_yield_expr_t(yield_expr* expr, const rep
     script_value value = make_value();
     if (expr->value) {
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_operand, 0, {});
+        if (is_unwinding_) { return {}; }   // the operand threw: nothing is yielded, the throw leaves the coroutine
         value = pop_value();
-        if (!is_unwinding_) { detail::materialize_return_value(value, detail::yield_operand_is_lvalue(expr->value.get())); }   // KEEP BYTE-PARALLEL with the vm's op_yield
+        detail::materialize_return_value(value, detail::yield_operand_is_lvalue(expr->value.get()));   // KEEP BYTE-PARALLEL with the vm's op_yield
         // A yield hands out the declared type like a return (the return's table and identity lanes, the yield's text).
         // KEEP BYTE-PARALLEL with the vm's exec_yield_convert.
-        if (!is_unwinding_ && !call_stack_.empty()) {
+        if (!call_stack_.empty()) {
             if (const script_defined_function* fn = call_stack_.back().function) {
                 const auto conv = detail::return_conv_of(*fn);
                 if (conv != detail::return_conv::none && conv != detail::return_conv::ref) {
@@ -6037,7 +6051,10 @@ checked_result<void> interpreter::visit_yield_expr_t(yield_expr* expr, const rep
                         auto converted = try_convert_for_parameter(value, fn->return_type,
                             detail::slot_site{detail::slot_kind::yield_value, {}, fn->name}, detail::uniquely_held(value) ? &value : nullptr);
                         if (!converted) { return converted.error_value(); }
-                        if (is_unwinding_) [[unlikely]] { return {}; }
+                        if (is_unwinding_) [[unlikely]] {   // the conversion threw: the yield's consumer pops a placeholder
+                            push_value(make_value());
+                            return {};
+                        }
                         value = std::move(converted.value());
                     }
                 }
@@ -6272,7 +6289,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
         if (stmt->initializer) {
             if (debug_hook_) [[unlikely]] { debug_quiet_node_ = stmt->initializer.get(); }
             auto result = dispatch_decl(stmt->initializer.get());
-            if (!result) {
+            if (!result || is_unwinding_) {   // a throw out of the initializer: no condition, body or update runs
                 end_scope(loop_env);
                 environment_ = previous;
                 return result;
@@ -6288,7 +6305,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
         }
     } else if (resume_phase == rp_init && stmt->initializer) {
         auto result = dispatch_decl_resuming(stmt->initializer.get());
-        if (!result) {
+        if (!result || is_unwinding_) {
             environment_ = previous;
             return result;
         }
@@ -6375,7 +6392,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
     // finish the update before this iteration's condition
     if (replay_update || resume_phase == rp_body_done) {
         eval_update();
-        if (park_loop_env || error) {
+        if (park_loop_env || error || is_unwinding_) {
             environment_ = previous;
             return error ? *error : checked_result<void>{};
         }
@@ -6449,6 +6466,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
         }
 
         eval_update();
+        if (error || park_loop_env || is_unwinding_) break;   // the update failed, threw or suspended: the condition is not read after it
     }
 
     // Release the loop environment to destroy all loop variables (only if we created it).
@@ -6476,9 +6494,11 @@ checked_result<void> interpreter::visit_parallel_for_stmt(parallel_for_stmt* stm
     containers.reserve(stmt->arity());
     JAISCRIPT_TRY(dispatch_expr(stmt->container.get()));
     containers.push_back(pop_value());
+    if (is_unwinding_) { return {}; }   // a container threw: no region runs
     for (const auto& extra : stmt->extra_containers) {
         JAISCRIPT_TRY(dispatch_expr(extra.get()));
         containers.push_back(pop_value());
+        if (is_unwinding_) { return {}; }
     }
     const std::function<const script_value*(size_t)> read_frame_slot = [this](size_t slot) -> const script_value* {
         return call_stack_.empty() ? nullptr : call_stack_.back().get_local(slot);
@@ -7380,6 +7400,7 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
             return cond_result.error_value();
         }
         switch_value = pop_value();
+        if (is_unwinding_) { return {}; }   // the condition threw: no case value is read, no body entered
         resume_phase = rp_none;
     }
 
@@ -7418,6 +7439,11 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
                     return result;
                 }
                 script_value case_value = pop_value();
+                if (is_unwinding_) {   // the case value threw: it is compared with nothing
+                    in_switch_ = old_in_switch;
+                    should_fallthrough_ = old_should_fallthrough;
+                    return {};
+                }
 
                 // A case matches when the language's == holds (KEEP BYTE-PARALLEL with vm_backend::exec_case_eq)
                 auto equal = language_equal(switch_value, case_value);
@@ -7910,6 +7936,7 @@ checked_result<void> interpreter::include_into_value_stack(expression* path_expr
     if (path_expr_node) {
         // Evaluate the expression to get the path
         JAISCRIPT_TRY(dispatch_expr(path_expr_node));
+        if (is_unwinding_) { return {}; }   // the path threw: nothing is included
         script_value path_value = pop_value();
 
         // Convert to string
@@ -10415,6 +10442,7 @@ template<bool Replaying>
 checked_result<void> interpreter::visit_destructuring_decl_t(destructuring_decl* decl) {
     JAISCRIPT_TRY_ROOT(decl, decl->initializer.get());
     script_value source = pop_value();
+    if (is_unwinding_) { return {}; }   // a raising initializer wins over the array check
 
     if (!source.is_array()) {
         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),

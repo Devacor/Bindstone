@@ -1,4 +1,6 @@
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/detail/less_than.hpp>
+#include <jaiscript/core/script_type.hpp>
 #include <jaiscript/core/engine_time.hpp>
 #include <jaiscript/core/http_transport.hpp>
 #include <jaiscript/core/execution_backend.hpp>
@@ -1104,6 +1106,47 @@ struct engine::implementation {
         mutable detail::aggregate_lowering_state lowering;
     };
     uint64_t script_cache_epoch = 0;
+    engine* self_ = nullptr;
+    // '<' after a name (internal/less_than_by_name.md). A unit parsed before the files it names are pooled is provisional; the
+    // parses and the freshness checks made once they are pooled settle (reparse_if_moved)
+    bool settle_parses_ = false;
+    std::string less_answers_now(const std::vector<declaration_ptr>& decls, const std::vector<std::string>& queries) {
+        return detail::less_than_answers(*self_, decls, queries, program_check_options(detail::check_options::proofs_t::leave));
+    }
+    // a site of the unit would read otherwise than its parse read it
+    bool less_moved(const std::vector<declaration_ptr>& decls, detail::jaibite_context& context) {
+        if (context.less_queries.empty()) { return false; }
+        const bool settled = context.less_settled || settle_parses_;
+        std::string now = less_answers_now(decls, context.less_queries);
+        if (!detail::less_readings_equal(context.less_answers, context.less_settled, now, settled)) { return true; }
+        if (settled != context.less_settled) {
+            context.less_answers = std::move(now);
+            context.less_settled = true;
+        }
+        return false;
+    }
+    static const char* less_named(char answer, bool past) {
+        switch (answer) {
+            case detail::k_less_variable: return past ? "named a variable" : "names a variable";
+            case detail::k_less_declared: return past ? "named a function or a type" : "names a function or a type";
+            default: return past ? "named nothing declared" : "names nothing declared";
+        }
+    }
+    // A bite's parse read '<' after a name by what the name named; here it names something that reads otherwise, and the bite
+    // carries no text to parse again
+    void refuse_less_answers(detail::jaibite_context& context, const std::vector<declaration_ptr>& decls) {
+        if (context.less_queries.empty()) { return; }
+        const std::string now = less_answers_now(decls, context.less_queries);
+        check_report report;
+        for (size_t i = 0; i < context.less_queries.size() && i < now.size() && i < context.less_answers.size(); ++i) {
+            if (detail::less_opens(context.less_answers[i], context.less_settled) == detail::less_opens(now[i], true)) { continue; }
+            report.diagnostics.push_back({check_diagnostic::level::error, 0, 0, "the bite was parsed where '" + detail::less_query::parse(context.less_queries[i]).head + "' " +
+                                          less_named(context.less_answers[i], true) + "; here it " + less_named(now[i], false) + ", so '<' after it reads otherwise: save it again from source"});
+        }
+        if (report.diagnostics.empty()) { return; }
+        last_check_ = report;
+        throw static_check_error("static check failed:\n" + report.format());
+    }
     uint64_t layout_generation_ = 0;
     uint64_t script_cache_clock = 0;
     static constexpr size_t script_cache_max = 64;
@@ -1354,7 +1397,8 @@ struct engine::implementation {
             if (earlier == held.end()) {
                 held.push_back(definition);
             } else if (*earlier != definition) {
-                if ((*earlier)->stamp != definition->stamp) { ++script_cache_epoch; }   // a parse that made instances from the old text makes them again
+                // a parse that made instances from the old text makes them again; where no instance of the generic was ever made, none did
+                if ((*earlier)->stamp != definition->stamp && instances_of_.count(definition->qualified_name()) != 0) { ++script_cache_epoch; }
                 *earlier = definition;
             }
         }
@@ -2098,6 +2142,7 @@ struct engine::implementation {
             }();
             parser prs(tokens, &string_symbolizer_, &self, registeredTemplateTypes);
             prs.source_text(content);
+            prs.less_provisional(!settle_parses_);
             auto parse_result = [&] {
                 detail::load_phase_scope timed(report, load_phase::parse);
                 return prs.parse();
@@ -2157,6 +2202,8 @@ struct engine::implementation {
     // program is pooled, and pools what the new parse declares (the classes a unit declares do not depend on the answer, so one
     // pass over a program settles it). True when the entry was replaced; throws parse_error.
     bool reparse_if_moved(engine& self, std::shared_ptr<script_cache_entry>& held, const std::string& source) {
+        struct settling { bool& slot; bool saved; ~settling() { slot = saved; } } settle{settle_parses_, settle_parses_};
+        settle_parses_ = true;
         if (!parse_moved(*held)) { return false; }
         const std::string path = held->source_path;
         detail::load_collector* report = collector();
@@ -2892,6 +2939,7 @@ struct engine::implementation {
     // A cached parse no longer stands for its text: an include it spliced changed, or a namespace class or enum it asked about is answered otherwise
     bool parse_moved(script_cache_entry& entry) {
         for (const auto& s : entry.spliced_stamps) { uint64_t mtime = 0, size = 0; if (!stat_mtime_size(s.path, mtime, size) || mtime != s.mtime || size != s.size) return true; }
+        if (less_moved(entry.declarations, entry.context)) { return true; }
         if (entry.context.namespace_queries.empty()) { return false; }
         const size_t classes = namespace_class_count();
         if (classes == entry.namespace_classes) { return false; }
@@ -2974,6 +3022,9 @@ struct engine::implementation {
         entry.context.namespace_queries = prs.namespace_queries();
         entry.context.namespace_answers = namespace_answers(entry.context.namespace_queries);
         entry.namespace_classes = namespace_class_count();
+        entry.context.less_queries = prs.less_queries();
+        entry.context.less_answers = prs.less_answers();
+        entry.context.less_settled = prs.less_settled();
     }
     static uint64_t mix_key(uint64_t h, uint64_t x) {
         h ^= x + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2);
@@ -2983,7 +3034,8 @@ struct engine::implementation {
     // A unit as the program pools hold it: its text and the namespace answers its parse rests on
     uint64_t unit_key(script_cache_entry& entry, std::string_view source) {
         const auto& id = identity_of(entry, source);
-        return mix_key(mix_key(id.size, id.hash), detail::jaibite_identity_of(entry.context.namespace_answers).hash);
+        const uint64_t key = mix_key(mix_key(id.size, id.hash), detail::jaibite_identity_of(entry.context.namespace_answers).hash);
+        return entry.context.less_queries.empty() ? key : mix_key(key, detail::jaibite_identity_of(entry.context.less_answers).hash + entry.context.less_settled);
     }
     // The unit that ran a declaration the engine holds, by its key; 0 when no unit that ran is it (the host's)
     uint64_t ran_unit_key(uint32_t unit) {
@@ -3549,6 +3601,7 @@ struct engine::implementation {
                 if (namespace_answers(context.namespace_queries) != context.namespace_answers) {
                     return missed("namespace classes");   // a namespace class the parse asked about is answered otherwise here: the text parses otherwise
                 }
+                if (less_moved(declarations, context)) { return missed("names after '<'"); }   // a head names another kind of thing here
                 // jaibite carries structure, not the parser-pass flags (ref-escape,
                 // value-decl naming, transient reads) — re-derive
                 // them exactly like the parse tail does
@@ -3996,6 +4049,7 @@ checked_result<void> host_reference_store(engine* eng, const host_slot& slot, sc
 }
 
 engine::engine() : impl(std::make_unique<implementation>()) {
+    impl->self_ = this;
     assert(detail::object_ref::layout_holds() && "object_ref reads a shared_ptr as (stored pointer, control block)");
     impl->global_environment_->bind_engine(this);
     impl->global_environment_->explain_undefined([this](uint64_t id) { return detail::undeclared_instance_text(*this, id); });
@@ -5048,6 +5102,9 @@ jai::jaibite engine::jaibite(const std::string& scriptContent) {
     bite.reload_hook_ = std::move(hook);
     bite.context_.namespace_queries = parser.namespace_queries();
     bite.context_.namespace_answers = impl->namespace_answers(bite.context_.namespace_queries);
+    bite.context_.less_queries = parser.less_queries();
+    bite.context_.less_answers = parser.less_answers();
+    bite.context_.less_settled = parser.less_settled();
     check_bite(bite, &scriptContent);
     return bite;
 }
@@ -5190,6 +5247,7 @@ jai::jaibite engine::jaibite_load_bytes(const uint8_t* data, size_t size, const 
     if (const std::string answers = impl->namespace_answers(context.namespace_queries); answers != context.namespace_answers) {
         impl->refuse_namespace_answers(context, answers);
     }
+    impl->refuse_less_answers(context, declarations);
     auto hook = impl->take_reload_hook(declarations);
     jai::jaibite bite(weak_from_this(), std::move(declarations));
     bite.reload_hook_ = std::move(hook);
@@ -5382,6 +5440,7 @@ check_report engine::check(const std::string& scriptContent) {
         auto tokens = lexer.tokenize();
         parser parser(tokens, &impl->string_symbolizer_, this, impl->registeredTemplateTypes);
         parser.source_text(scriptContent);
+        parser.less_provisional(true);
         auto parse_result = parser.parse();
         if (!parse_result) {
             implementation::refuse_unsettled(parser);
@@ -5826,6 +5885,31 @@ check_report engine::check_expanding(std::vector<declaration_ptr>& declarations,
 
 void engine::register_generics(const std::vector<declaration_ptr>& declarations, const std::string& file) { impl->register_generics(declarations, file); }
 
+std::string engine::less_than_answers(const std::vector<declaration_ptr>& declarations, const std::vector<std::string>& queries) {
+    return impl->less_answers_now(declarations, queries);
+}
+
+bool engine::type_argument_method(const std::string& name) const {
+    for (const auto& [callable, shape] : impl->type_result_callables_) {
+        const size_t dot = callable.rfind('.');
+        if (dot != std::string::npos && callable.compare(dot + 1, std::string::npos, name) == 0) { return true; }
+    }
+    const auto id = impl->string_symbolizer_.find(name);
+    if (!id) { return false; }
+    for (const auto& [class_name, cls] : impl->classes) {
+        if (!cls || !cls->is_cpp_class()) { continue; }
+        const auto& table = cls->cpp_method_overload_table();
+        const auto held = table.find(*id);
+        if (held == table.end()) { continue; }
+        for (const auto& [arity, entries] : held->second) {
+            for (const auto& entry : entries) {
+                for (const auto& parameter : entry.param_types) { if (parameter.cpp_type == std::type_index(typeid(script_type))) { return true; } }
+            }
+        }
+    }
+    return false;
+}
+
 void engine::serial_namespace(const std::string& space) { impl->serial_namespaces_.insert(space); }
 
 bool engine::host_function_serial(const std::string& name) const {
@@ -6214,7 +6298,10 @@ bool engine::namespace_class_known(std::string_view query) const {
     return impl->namespace_class_known(query);
 }
 
-void engine::pool_program_classes(const detail::program_class_map& classes, const detail::program_enum_map& enums, const std::unordered_set<std::string>& names) {
+void engine::pool_program_classes(const detail::program_class_map& classes, const detail::program_enum_map& enums, const std::unordered_set<std::string>& names,
+                                  const detail::program_function_map& functions, const detail::program_global_map& globals) {
+    impl->program_functions_ = functions;
+    impl->program_globals_ = globals;
     impl->program_classes_ = classes;
     impl->program_enums_ = enums;
     impl->program_names_ = names;

@@ -218,6 +218,7 @@ uint64_t generic_stamp(const std::vector<token>& tokens) {
 		stamp_mix(hash, literal);
 		stamp_mix(hash, static_cast<uint64_t>(t.location.line));
 		stamp_mix(hash, static_cast<uint64_t>(t.location.column));
+		if (t.less_reading != 0) { stamp_mix(hash, 0x3Cull + t.less_reading); }   // a '<' read another way is another text
 	}
 	return hash == 0 ? 1 : hash;   // 0 marks a declaration written by hand
 }

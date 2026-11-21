@@ -932,6 +932,11 @@ namespace jai {
         std::vector<declaration_ptr> carried_declarations(const std::vector<declaration_ptr>& declarations) const;
         bool declares_generics() const;
         bool names_generic_method(const std::string& name) const;   // some class declares a generic method of that bare name
+        // '<' after a name (detail/less_than.hpp): what each query's head names, over a unit's declarations, the pooled program
+        // and the engine; and whether the host binds a method of that bare name that takes a type argument (a jai::script_type
+        // parameter, or a result declared from one)
+        std::string less_than_answers(const std::vector<declaration_ptr>& declarations, const std::vector<std::string>& queries);
+        bool type_argument_method(const std::string& name) const;
         check_report check_expanding(std::vector<declaration_ptr>& declarations, detail::check_options options, const std::vector<std::string>* extra_globals = nullptr);
         // a unit's generics, for the units checked after it (a run and a pooled closure unit declare theirs themselves)
         void register_generics(const std::vector<declaration_ptr>& declarations, const std::string& file);
@@ -1242,7 +1247,8 @@ namespace jai {
         // a unit of the program declares
         bool namespace_class_known(std::string_view query) const;
         // A tool that keeps its own program tables (tools/lsp) hands a program's classes over before it parses one of its units
-        void pool_program_classes(const detail::program_class_map& classes, const detail::program_enum_map& enums, const std::unordered_set<std::string>& names);
+        void pool_program_classes(const detail::program_class_map& classes, const detail::program_enum_map& enums, const std::unordered_set<std::string>& names,
+                                  const detail::program_function_map& functions = {}, const detail::program_global_map& globals = {});
         // Names an enum declaration defined (both backends note them): `E::v` reads the value through the enum's variable
         // marks the enum's types (type_info::is_enum) and returns the int type its values are stamped with
         type_info* note_enum(uint64_t name_id, std::string_view name, const std::vector<int64_t>& numbers);

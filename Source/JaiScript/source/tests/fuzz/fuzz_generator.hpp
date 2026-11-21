@@ -17,6 +17,7 @@
 #include "fuzz_regex_band.hpp"
 #include "fuzz_callargs_band.hpp"
 #include "fuzz_return_band.hpp"
+#include "fuzz_less_than_band.hpp"
 #include "fuzz_store_band.hpp"
 #include "fuzz_block_band.hpp"
 #include "fuzz_local_alias_band.hpp"
@@ -444,6 +445,9 @@ namespace jai::fuzz {
 			early_return_band erband(seed_);   // calls whose callee returns early: under the call-arguments band's switch
 			const bool early_return_roll = erband.roll();
 			if (call_args_ == band_mode::always || (call_args_ == band_mode::sometimes && early_return_roll)) { p.segments.push_back(erband.emit()); p.labels.push_back("early-return"); }
+			less_than_band ltband(seed_);   // '<' after a name in the shapes a comparison and a call with type arguments share: under the call-arguments band's switch
+			const bool less_than_roll = ltband.roll();
+			if (call_args_ == band_mode::always || (call_args_ == band_mode::sometimes && less_than_roll)) { p.segments.push_back(ltband.emit()); p.labels.push_back("less-than"); }
 			local_alias_band lband(seed_);
 			const bool local_alias_roll = lband.roll();
 			if (local_alias_ == band_mode::always || (local_alias_ == band_mode::sometimes && local_alias_roll)) { p.segments.push_back(lband.emit()); p.labels.push_back("local-alias"); }

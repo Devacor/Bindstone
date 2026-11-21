@@ -66,6 +66,8 @@ namespace jai::detail {
         JAI_FORCEINLINE static std::vector<declaration_ptr> carried_declarations(const engine& a_engine, const std::vector<declaration_ptr>& a_declarations) { return a_engine.carried_declarations(a_declarations); }
         JAI_FORCEINLINE static bool declares_generics(const engine& a_engine) { return a_engine.declares_generics(); }
         JAI_FORCEINLINE static bool names_generic_method(const engine& a_engine, const std::string& a_name) { return a_engine.names_generic_method(a_name); }
+        JAI_FORCEINLINE static std::string less_than_answers(engine& a_engine, const std::vector<declaration_ptr>& a_declarations, const std::vector<std::string>& a_queries) { return a_engine.less_than_answers(a_declarations, a_queries); }
+        JAI_FORCEINLINE static bool type_argument_method(const engine& a_engine, const std::string& a_name) { return a_engine.type_argument_method(a_name); }
         JAI_FORCEINLINE static check_report check_expanding(engine& a_engine, std::vector<declaration_ptr>& a_declarations, check_options a_options, const std::vector<std::string>* a_extra = nullptr) { return a_engine.check_expanding(a_declarations, std::move(a_options), a_extra); }
         JAI_FORCEINLINE static void register_generics(engine& a_engine, const std::vector<declaration_ptr>& a_declarations, const std::string& a_file) { a_engine.register_generics(a_declarations, a_file); }
         JAI_FORCEINLINE static detail::execution_limits& execution_limits(engine& a_engine) noexcept { return a_engine.execution_limits(); }
@@ -138,7 +140,10 @@ namespace jai::detail {
         JAI_FORCEINLINE static std::string backend_exception_text(const engine& a_engine) { return a_engine.backend_exception_text(); }
         JAI_FORCEINLINE static std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& script_namespaces(engine& a_engine) { return a_engine.script_namespaces(); }
         JAI_FORCEINLINE static bool namespace_class_known(const engine& a_engine, std::string_view a_query) { return a_engine.namespace_class_known(a_query); }
-        JAI_FORCEINLINE static void pool_program_classes(engine& a_engine, const program_class_map& a_classes, const program_enum_map& a_enums, const std::unordered_set<std::string>& a_names) { a_engine.pool_program_classes(a_classes, a_enums, a_names); }
+        JAI_FORCEINLINE static void pool_program_classes(engine& a_engine, const program_class_map& a_classes, const program_enum_map& a_enums, const std::unordered_set<std::string>& a_names,
+                                                         const program_function_map& a_functions = {}, const program_global_map& a_globals = {}) {
+            a_engine.pool_program_classes(a_classes, a_enums, a_names, a_functions, a_globals);
+        }
         JAI_FORCEINLINE static type_info* note_enum(engine& a_engine, uint64_t name_id, std::string_view name, const std::vector<int64_t>& numbers) { return a_engine.note_enum(name_id, name, numbers); }
         JAI_FORCEINLINE static bool is_enum_name(const engine& a_engine, uint64_t name_id) { return a_engine.is_enum_name(name_id); }
         JAI_FORCEINLINE static string_symbolizer* get_symbolizer(engine& a_engine) { return a_engine.get_symbolizer(); }

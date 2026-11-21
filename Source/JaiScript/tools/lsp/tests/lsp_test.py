@@ -332,6 +332,12 @@ def run_fixtures(exe, update, checks):
         ask("hover.namespace_field_other_file", "textDocument/hover", shelf_uri, shelf_text, "stocked.price", 1, 8)
         ask("definition.namespace_fn_other_file", "textDocument/definition", shelf_uri, shelf_text, "tax(", 1, 0)
 
+        # '<' after a name another file declares: a variable compares and a generic takes type arguments, as the runner reads them
+        compared = FIXTURES / "less_than" / "use.jai"
+        compared_uri = client.open(compared)
+        client.settle()
+        results["diagnostics.less_than.use"] = client.wait_diagnostics(compared_uri)["diagnostics"]
+
         # an edit that breaks and then fixes the syntax: the error appears at the edited line and goes away
         pos = at(main_text, "int hp = h.hp;", 1, 0)
         version = client.change(main_uri, pos, pos, "int broken = ;\n\t")

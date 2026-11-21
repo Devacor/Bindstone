@@ -13,7 +13,7 @@
 // Format: "JBIT" magic, u32 version, u32 flags, u64 registration fingerprint, u64 source
 // size + 1 and u64 source hash (0, 0 = no source), string table (count + length-prefixed strings), the context section when
 // flag bit 1 says so (jaibite_context: namespace query count + each query's table index and u8 answer, outside name count +
-// table indices, u64 key), declaration count, node tree.
+// table indices, u64 key, '<' query count + each query's table index and u8 answer, u8 settled), declaration count, node tree.
 // Node encoding: u8 node_type tag (0xFF = null pointer), source_location, fields.
 // Runtime AST patches (identifier slot_index -> SIZE_MAX, outer_slot_plan, cached
 // getter_id) are serialized faithfully: patched state is self-consistent in memory on
@@ -21,6 +21,7 @@
 
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/generics.hpp>
+#include <jaiscript/detail/less_than.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/map_entry_binding.hpp>
 #include <jaiscript/detail/native_stack.hpp>
@@ -37,7 +38,7 @@ namespace jai::detail {
     // BUMP THIS on any change to what a parse produces: the serialized bytes and the parse-time semantics baked into the
     // AST (slot assignment, node and token numbers, capture plans). A stale sidecar is reparsed and rewritten (the version
     // check feeds the corrupt-file fallback), so a bump is always safe and a missed one leaves stale caches.
-    inline constexpr uint32_t k_jaibite_version = 68;
+    inline constexpr uint32_t k_jaibite_version = 70;
     // Header flags (u32):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -131,11 +132,12 @@ namespace jai::detail {
                                        uint32_t flags = 0, jaibite_source_identity source = {}, const jaibite_context* context = nullptr) {
             varint(decls.size());
             for (const auto& d : decls) node(d.get());
-            std::vector<uint64_t> namespace_queries, outside;
+            std::vector<uint64_t> namespace_queries, outside, less_queries;
             if (context && !context->empty()) {
                 flags |= k_jaibite_flag_context;
                 for (const auto& q : context->namespace_queries) { namespace_queries.push_back(table_index(q)); }
                 for (const auto& n : context->outside) { outside.push_back(table_index(n)); }
+                for (const auto& q : context->less_queries) { less_queries.push_back(table_index(q)); }
             }
 
             std::vector<uint8_t> out;
@@ -160,6 +162,12 @@ namespace jai::detail {
                 append_varint(out, outside.size());
                 for (uint64_t i : outside) { append_varint(out, i); }
                 fixed_u64(out, context->outside_key);
+                append_varint(out, less_queries.size());
+                for (size_t i = 0; i < less_queries.size(); ++i) {
+                    append_varint(out, less_queries[i]);
+                    out.push_back(static_cast<uint8_t>(i < context->less_answers.size() ? context->less_answers[i] : k_less_nothing));
+                }
+                out.push_back(context->less_settled ? 1 : 0);
             }
             out.insert(out.end(), body_.begin(), body_.end());
             return out;
@@ -252,6 +260,7 @@ namespace jai::detail {
                 case token_type::char_literal: u8(uint8_t(t.char_value)); break;
                 case token_type::string_literal: str(t.string_value); break;
                 case token_type::plus: flag(t.joins_text); break;
+                case token_type::less: u8(t.less_reading); break;
                 default: break;
             }
         }
@@ -809,6 +818,12 @@ namespace jai::detail {
                 flag(v.is_reference);
                 flag(v.has_default);
             }
+            varint(g.member_variables.size());
+            for (const auto name : g.member_variables) str(name);
+            varint(g.member_functions.size());
+            for (const auto name : g.member_functions) str(name);
+            varint(g.bases.size());
+            for (const auto& name : g.bases) str(name);
             location(g.location);
         }
 
@@ -941,6 +956,19 @@ namespace jai::detail {
                 names(context.namespace_queries, &context.namespace_answers);
                 names(context.outside, nullptr);
                 context.outside_key = fixed_u64();
+                {
+                    const uint64_t count = varint();
+                    check_count(count);
+                    for (uint64_t i = 0; i < count; ++i) {
+                        const uint64_t index = varint();
+                        if (index >= table_.size()) jaibite_fail("context name out of range");
+                        context.less_queries.emplace_back(table_[size_t(index)]);
+                        const uint8_t answer = u8();
+                        if (answer != k_less_variable && answer != k_less_declared && answer != k_less_nothing) jaibite_fail("corrupt '<' answer");
+                        context.less_answers.push_back(static_cast<char>(answer));
+                    }
+                    context.less_settled = u8() != 0;
+                }
                 if (context_out) *context_out = std::move(context);
             }
 
@@ -1192,6 +1220,7 @@ namespace jai::detail {
                 case token_type::char_literal: t.char_value = script_char(u8()); break;
                 case token_type::string_literal: t.string_value = str(); break;
                 case token_type::plus: t.joins_text = flag(); break;
+                case token_type::less: t.less_reading = u8(); if (t.less_reading > 2) jaibite_fail("corrupt '<' reading"); break;
                 default: break;
             }
             return t;
@@ -1896,6 +1925,14 @@ namespace jai::detail {
                 v.has_default = flag();
                 g->values.push_back(std::move(v));
             }
+            const auto member_names = [this](auto& out) {
+                const uint64_t count = varint();
+                check_count(count);
+                for (uint64_t i = 0; i < count; ++i) { out.emplace_back(view()); }
+            };
+            member_names(g->member_variables);
+            member_names(g->member_functions);
+            member_names(g->bases);
             g->location = location();
             return std::make_shared<generic_decl>(loc, std::move(g));
         }

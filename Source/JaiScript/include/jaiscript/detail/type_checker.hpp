@@ -152,7 +152,12 @@ namespace jai {
         std::string namespace_answers;
         std::vector<std::string> outside;
         uint64_t outside_key = 0;
-        bool empty() const { return namespace_queries.empty() && outside.empty(); }
+        // '<' after a name (detail/less_than.hpp): each query the parse's sites asked, what answered it, and whether the parse
+        // was settled (made with the files the unit names pooled, or naming none)
+        std::vector<std::string> less_queries;
+        std::string less_answers;
+        bool less_settled = true;
+        bool empty() const { return namespace_queries.empty() && outside.empty() && less_queries.empty(); }
     };
         // One checker walk does two independent jobs: diagnostics (off -> the report stays
         // empty) and the proof pass (stamp = derive and write proofs onto the AST, clear =
@@ -213,6 +218,9 @@ namespace jai {
         check_report run_static_check(engine& eng, const std::vector<declaration_ptr>& decls,
                                       const std::vector<std::string>* extra_globals = nullptr,
                                       check_options opts = {});
+        // What each '<' query's head names by the checker's own lookup over `decls`, the program's pools in `opts` and the engine:
+        // one answer per query (detail/less_than.hpp)
+        std::string less_than_answers(engine& eng, const std::vector<declaration_ptr>& decls, const std::vector<std::string>& queries, check_options opts);
 
     } // namespace detail
 

@@ -127,25 +127,25 @@ public:
 			check_eq((int64_t)11, e->execute("int g1 = 1; int g2 = 2; int g3 = 3; int g4 = 2; int f() { return pair(g1 < g2, g3 > (g4)); } f();").as_int());
 			// a run holding a type's keyword is still read as type arguments, as after a local
 			check_true(contains(failure(*e, "int l = 1; l<int>(2);"), "Cannot call 'l': it is an int, not a function"));
-			// a variable declared below the use is not known yet: the guiding error
-			check_true(contains(failure(*e, "int h() { return pair(z1 < z2, z3 > (z4)); } int z1 = 1; int z2 = 2; int z3 = 3; int z4 = 2; h();"),
-				"reads as a call with type arguments, which 'z1' does not take; if this is a comparison, write (z1 < z2)"));
+			// a variable declared below the use is a variable all the same
+			check_eq((int64_t)11, e->execute("int h() { return pair(z1 < z2, z3 > (z4)); } int z1 = 1; int z2 = 2; int z3 = 3; int z4 = 2; h();").as_int());
 		});
 
 		test("a_comparison_read_as_type_arguments_says_what_to_write", [this]() {
 			auto e = make_engine();
 			bind_probe(*e);
 			e->execute("int two(bool x, bool y) { return (x ? 1 : 0) + (y ? 10 : 0); }");
-			// a program-scope name may be a generic or a host function, so its '<' opens type arguments (C#'s rule); a name that
-			// takes none and a type that is none is most likely a comparison, and the error says how to write one
-			// (a variable the unit declares above is known to be one; these are another unit's, which the parse does not see)
+			// another unit's variables compare, as the unit's own do
 			e->execute("int a = 1; int b = 2; int c = 3; int d = 2;");
-			const std::string read = failure(*e, "two(a < b, c > (d));");
-			check_true(contains(read, "unknown type 'b': 'a<b, c>(...)' reads as a call with type arguments, which 'a' does not take; if this is a comparison, write (a < b)"), read);
-			check_false(contains(read, "unknown type 'c'"), "the call's one error");
+			check_eq((int64_t)11, e->execute("two(a < b, c > (d));").as_int());
 			check_eq((int64_t)11, e->execute("two((a < b), c > (d));").as_int());
-			const std::string member = failure(*e, "class P { int n = 1; } P p; int b = 2; int c = 3; int d = 2; two(p.n < b, c > (d));");
-			check_true(contains(member, "unknown type 'b': 'p.n<b, c>(...)' reads as a call with type arguments, which 'p.n' does not take; if this is a comparison, write (p.n < b)"), member);
+			// after a member the member's name decides: a field compares, unless some class declares a generic method of its name.
+			// There '<' opens type arguments; the field takes none and a type argument names no type, so a comparison was most
+			// likely meant, and the call's one error says how to write it
+			check_eq((int64_t)11, e->execute("class P { int n = 1; } P p; two(p.n < b, c > (d));").as_int());
+			const std::string member = failure(*e, "class Q { T n<T>(T x) { return x; } } class P2 { int n = 1; } P2 p2; two(p2.n < b, c > (d));");
+			check_true(contains(member, "unknown type 'b': 'p2.n<b, c>(...)' reads as a call with type arguments, which 'p2.n' does not take; if this is a comparison, write (p2.n < b)"), member);
+			check_false(contains(member, "unknown type 'c'"), "the call's one error");
 			// a callee that takes type arguments keeps the declaration's error
 			const std::string host = failure(*e, "type_name_of<Nope>();");
 			check_true(contains(host, "unknown type 'Nope'") && !contains(host, "comparison"), host);

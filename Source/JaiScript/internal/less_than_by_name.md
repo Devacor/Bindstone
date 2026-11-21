@@ -38,7 +38,7 @@ Lookup order for a bare head `x` at a site in class `C` (when in one) inside nam
    global environment: a function value is a function, any other value a variable; host functions, classes, templates,
    enums).
 
-Inside a template body's barrier the lookup starts at step 3 (`parser::template_hides`). `::x` is step 3 alone.
+A name a template body's barrier hides its scopes from (`parser::template_hides`) and `::x` are step 3 alone.
 A qualified head `A::B::x` resolves `A::B` as a namespace (relative to `N` innermost first, then absolute), else a class,
 else an enum, and reads `x` there: a namespace's variable, a static field or an enum value compares.
 Inside a generic's text a type parameter is a type, so a head that is one, or begins with one (`T::x`), reads as type
@@ -69,21 +69,23 @@ only from the parse an entry holds (`pool_unit`), and `register_generics` replac
 
 **Sites.** `parser::postfix_operator_ahead` is the one place an expression's `<` is judged
 (`type_arguments_ahead`). At a site that steps 1 and 2 leave open it records a `less_site`: the `<` token's place (file,
-line, column, byte offset), the head's form and spelling, the enclosing class's qualified name, the namespace path, the
-template barrier, and the reading it took. A site reached twice (lookahead, a rewind) is one site.
+line, column, byte offset), the head's form and spelling, the enclosing class's qualified name, the namespace path, and the
+reading it took. A site reached twice (lookahead, a rewind) is one site.
 
-**Lookup kernel.** `detail::less_than_lookup(engine, unit_declarations, site) -> variable | declared | nothing`
-(`detail/less_than.hpp`, `implementation/less_than.cpp`) is the only implementation of section 1's step 3. It reads the
-unit's tree, the engine's pools (`program_classes_`, `program_globals_`, `program_functions_`, `program_enums_`,
-`generics_`, `program_names_`) and the engine's own tables, through `detail::engine_access`. The parser, the engine's
-freshness check and the language server all call it.
+**Lookup kernel.** `detail::less_than_answers(engine, unit_declarations, queries, options)` answers each query with
+`variable`, `declared` or `nothing` (`detail/less_than.hpp` has the query and the answers). It is the static checker itself:
+`static_checker::less_answers` runs the checker's collection pass over the unit and asks its own tables and helpers
+(`find_sclass`, `generics_named`, `generic_class_named`, `engine_class`, the namespace and program tables, the pools in
+`check_options`), so a head resolves as an identifier there resolves in a check. The parser, the engine's freshness check
+(`implementation::less_moved`) and the language server all call it through `engine::less_than_answers`.
 
 **The parse loop.** `parser::parse()` runs a pass, then asks the kernel about every recorded site with the pass's full
 tree (so a field or a variable declared below its use is found), and compares the answers with the readings taken. When
 all agree the pass stands. Otherwise it parses the same tokens again with the readings fixed by site, and repeats until
 they agree (two passes when the first parsed; a third only when the first failed and its recovered declarations missed
-one). A pass that fails with sites still open is retried on what its recovered declarations answer; when no reading
-changes, its errors are the parse's.
+one). A pass that fails is answered over its recovered declarations. A provisional pass that fails with no reading to change
+is parsed once more with every site nothing declares comparing; when that parses, the unit is gathered with it and settles
+as usual, and when it fails too the first pass's errors are the parse's.
 What a unit declares does not depend on a reading (a site lies inside one expression), so the answers of one pass hold for
 the next.
 
@@ -120,9 +122,9 @@ history.
 A generic's text is parsed once where it is declared (`parser::generic_declaration`, `parse_generic_text`) and once per
 instance (`implementation::instantiate_generic`, a parser over `generic_instance_tokens`). Its sites are settled where it
 is declared, in the unit's own loop, with the generic's class as the enclosing class and its type parameters as types.
-Each settled `<` of the definition's tokens carries its reading (`token::less_reading`), `generic_instance_tokens` copies
-tokens whole, and an instance's parse obeys a carried reading and records no site: every instance reads a site as its
-generic does, whatever its arguments. `generic_stamp` covers the carried readings, so a reading that moves makes the
+Every site reading taken in the text, a held variable's included, rides its `<` in the definition's tokens
+(`token::less_reading`), `generic_instance_tokens` copies tokens whole, and an instance's parse obeys a carried reading and
+records no site: every instance reads a site as its generic does, whatever its arguments. `generic_stamp` covers the carried readings, so a reading that moves makes the
 instances again, as an edit to the text does.
 A generic class's definition keeps the names of its member variables, its other members and its bases
 (`generic_definition`), filled from the declaration's parse: the kernel reads a base `Base<Args>` and a qualified
@@ -159,9 +161,20 @@ and bare names today).
 ## 9. Other parses
 
 The debugger's watch text, `engine::jaibite`, `engine::check` and a template's body go through `parser::parse` or the
-expression entry and get the loop and the kernel; none is provisional. The parallel chunk skeletons have no site.
+expression entry and get the loop and the kernel. `engine::check` parses provisionally, as `acquire_entry` does, and
+settles in its gather; a parser nobody asked is settled, `engine::jaibite`'s among them: a bite is checked against what the
+engine holds, with no gather. A reload's parse of a loaded unit it does not run again
+(`implementation::check_unit_text`) is such a parser, made while the pools hold the reload's declarations: it reads each
+site as the unit's settled parse would there, and a caller whose site no longer reads as a comparison refuses the reload
+as a caller that no longer fits does. The parallel chunk skeletons have no site.
 
-## 10. Tests
+## 10. Diagnostics
+
+The head of a site that compares is marked (`identifier_expr::less_compared`, `member_expr::less_compared`). An error the
+checker reports at such a head adds what a call would have needed: `use of undeclared identifier 'mke' (no generic 'mke' is
+declared: '<' after a name that takes no type arguments compares)`, and the same clause on a method read as a value.
+
+## 11. Tests
 
 `source/tests/language/less_than_tests.cpp`, both backends. Each row is the form in each context; expected output is the
 comparison's value unless the row says a call.
@@ -174,7 +187,7 @@ class body and generic function body; namespace function; `{` and `::` followers
 |---|---|---|---|
 | local, parameter, capture, loop/catch/condition variable | above | all C | with and without |
 | field | above, below the method | all C | with and without |
-| inherited field | base above, below, in an import, in an import cycle, host class | call args, chain, lambda | with and without |
+| inherited field | base above, in an import, in an import cycle, host class, a generic's instance | call args, chain, lambda | with and without |
 | static field, bare and `Cfg::min` | above, below, import | call args, chain | with and without |
 | enum value `Lvl::low`, namespace `ns::E::low` | above, below, import | call args, chain | - |
 | namespace variable, bare inside and `ns::v` outside | above, below, another block of the namespace, import | call args, chain, lambda | with and without |

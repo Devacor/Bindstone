@@ -113,6 +113,10 @@ struct unit {
 	std::vector<std::string> imports;             // resolved literal top-level import/include targets
 	std::vector<std::string> namespace_queries;   // the namespace classes the parse asked about (parser::namespace_queries)
 	std::string namespace_answers;                // and how the program pooled then answered each
+	std::vector<std::string> less_queries;        // what the parse's '<' sites asked (parser::less_queries), how each was answered,
+	std::string less_answers;                     // and whether the parse was made with its program pooled
+	bool less_settled = true;
+	bool settling = false;                        // the parse under way is made with the unit's program pooled
 	uint64_t surface = 0;                         // hash of what other units' checks read from this one
 	uint64_t disk_stamp = 0;
 	double disk_checked_at = -1.0e9;              // seconds (steady clock) of the last stat
@@ -137,6 +141,8 @@ struct program {
 	std::unordered_set<std::string> names;
 	jai::detail::program_class_map classes;
 	jai::detail::program_enum_map enums;
+	jai::detail::program_function_map functions;   // by kind: '<' after a name asks whether another unit's name is a variable
+	jai::detail::program_global_map globals;
 };
 
 struct location {
@@ -234,6 +240,7 @@ private:
 	uint64_t pooled_program_ = 0;                 // the signature of the program whose classes the engine's parser reads
 	void pool_classes(const program& prog);
 	std::string namespace_answers(const unit& u) const;
+	bool less_moved(unit& u);
 	void set_imports(const std::string& path, const std::vector<std::string>& imports);
 	std::vector<std::string> roots_of(const std::string& path);
 	void analyze(unit& u, bool want_model);

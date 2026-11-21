@@ -1,6 +1,7 @@
 #include "analysis_internal.hpp"
 #include "semantic.hpp"
 
+#include <jaiscript/detail/less_than.hpp>
 #include <jaiscript/detail/parser.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 
@@ -331,7 +332,11 @@ void workspace::parse(unit& u, bool publish) {
 	u.salvaged.clear();
 	try {
 		jai::parser prs(tokens, jai::detail::engine_access::get_symbolizer(eng), &eng, registered, u.path);
+		prs.less_provisional(!u.settling);
 		auto result = prs.parse();
+		u.less_queries = prs.less_queries();
+		u.less_answers = prs.less_answers();
+		u.less_settled = prs.less_settled();
 		u.namespace_queries = prs.namespace_queries();
 		u.namespace_answers = namespace_answers(u);
 		if (result) {
@@ -523,6 +528,8 @@ const program& workspace::program_of(const std::string& path) {
 		prog.names.clear();
 		prog.classes.clear();
 		prog.enums.clear();
+		prog.functions.clear();
+		prog.globals.clear();
 		for (const auto& p : closure) {
 			unit* u = find(p);
 			if (!u) { continue; }
@@ -531,6 +538,8 @@ const program& workspace::program_of(const std::string& path) {
 			jai::detail::collect_unit_classes(decls, prog.classes);
 			jai::detail::engine_access::register_generics(*engine_, decls, u->path);   // every unit instantiates what the program declares
 			jai::detail::collect_unit_enums(decls, p, prog.enums);
+			jai::detail::collect_unit_functions(decls, p, prog.functions);
+			jai::detail::collect_unit_globals(decls, p, prog.globals);
 			prog.names.insert(u->salvaged.begin(), u->salvaged.end());
 		}
 	}
@@ -552,7 +561,7 @@ std::vector<std::string> workspace::program_units(const std::string& path) {
 // asks the engine, which answers from the program handed to it here
 void workspace::pool_classes(const program& prog) {
 	if (pooled_program_ == prog.signature) { return; }
-	jai::detail::engine_access::pool_program_classes(*engine_, prog.classes, prog.enums, prog.names);
+	jai::detail::engine_access::pool_program_classes(*engine_, prog.classes, prog.enums, prog.names, prog.functions, prog.globals);
 	pooled_program_ = prog.signature;
 }
 
@@ -562,12 +571,24 @@ std::string workspace::namespace_answers(const unit& u) const {
 	return result;
 }
 
+// A '<' site of the unit reads otherwise now that its program is pooled (internal/less_than_by_name.md)
+bool workspace::less_moved(unit& u) {
+	if (u.less_queries.empty()) { return false; }
+	std::string now = jai::detail::engine_access::less_than_answers(*engine_, u.decls, u.less_queries);
+	if (!jai::detail::less_readings_equal(u.less_answers, u.less_settled, now, true)) { return true; }
+	u.less_answers = std::move(now);
+	u.less_settled = true;
+	return false;
+}
+
 void workspace::analyze(unit& u, bool want_model) {
 	const program* program_now = &program_of(u.path);
 	if (u.checked_epoch != u.epoch || u.checked_program != program_now->signature) {
 		pool_classes(*program_now);
-		if (namespace_answers(u) != u.namespace_answers) {   // parsed before its program's classes were known
+		if (namespace_answers(u) != u.namespace_answers || less_moved(u)) {   // parsed before its program's classes and names were known
+			u.settling = true;
 			parse(u);
+			u.settling = false;
 			program_now = &program_of(u.path);
 			pool_classes(*program_now);
 		}

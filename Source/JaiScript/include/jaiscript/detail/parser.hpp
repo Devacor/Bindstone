@@ -12,6 +12,8 @@
 #include <vector>
 #include <memory>
 #include <optional>
+#include <compare>
+#include <map>
 #include <set>
 #include <unordered_set>
 #include <algorithm>
@@ -42,6 +44,12 @@ namespace jai {
         // "Name::" (some nested namespace is named so); the parse holds wherever the engine answers them alike (engine.cpp
         // namespace_answers)
         std::vector<std::string> namespace_queries() const { return {namespace_queries_.begin(), namespace_queries_.end()}; }
+        // '<' after a name (internal/less_than_by_name.md): the queries this parse's sites asked, what answered each, and whether
+        // the parse is settled. A unit parsed before the files it names are pooled asks to be provisional: it is, when it names one.
+        const std::vector<std::string>& less_queries() const { return less_queries_; }
+        const std::string& less_answers() const { return less_answers_; }
+        bool less_settled() const { return less_settled_; }
+        void less_provisional(bool a_on) { less_may_be_provisional_ = a_on; }
         // after a failed parse: the top-level declarations that parsed around the errors (a tool checks what it can)
         std::vector<declaration_ptr>& recovered_declarations() { return recovered_; }
         // each error as its place and its text (an instance's parse reports them in its generic's file)
@@ -58,7 +66,35 @@ namespace jai {
 
     private:
         std::vector<declaration_ptr> recovered_;
+        const std::vector<token>* tokens_;   // the program's tokens as given: a pass that parses them again starts here
         const std::vector<token>* stream_;   // the token stream being parsed: the program's, or a spliced include's while its declarations are read
+        // One pass over the tokens; parse() runs another, in a parser of its own, when a '<' site's reading was not the one its
+        // head's lookup gives
+        checked_result<std::vector<declaration_ptr>> parse_pass();
+        void adopt_pass(parser& a_pass);
+        struct less_place {
+            std::string file;
+            uint32_t line = 0;
+            uint32_t column = 0;
+            friend auto operator<=>(const less_place&, const less_place&) = default;
+        };
+        struct less_site {
+            less_place at;
+            uint32_t query = 0;   // its index in less_queries_
+            bool opens = true;    // the reading this pass took
+        };
+        std::vector<less_site> less_sites_;
+        std::map<less_place, size_t> less_site_index_;
+        std::map<less_place, bool> less_fixed_;   // the readings this pass is given
+        std::vector<std::string> less_queries_;
+        std::string less_answers_;
+        bool less_settled_ = true;
+        bool less_may_be_provisional_ = false;
+        bool less_in_pass_ = false;   // parse() answers the sites once the pass has its declarations; any other entry answers each as it is met
+        std::vector<std::string_view> generic_type_parameters_;   // of the generic whose text is being parsed: types there
+        std::vector<less_site>* generic_text_readings_ = nullptr;  // every site reading taken in that text, for its tokens to carry
+        bool less_site_reading(const jai::expression& a_head);
+        bool names_type_parameter(const jai::expression& a_head) const;
         std::vector<token> namespace_stream_;   // the program's stream with its namespaces' bare class and enum names qualified
         std::vector<token> using_stream_;    // the program's stream after its using declarations rewrote it
         std::set<std::string> namespace_queries_;
@@ -270,8 +306,8 @@ namespace jai {
         checked_result<expression_ptr> ternary_rest(expression_ptr condition);
         checked_result<expression_ptr> coalesce_rest(expression_ptr left);
         checked_result<expression_ptr> unary_operator();
-        bool postfix_operator_ahead(const expression_ptr& expr) const;
-        bool type_arguments_ahead(bool local) const;
+        bool postfix_operator_ahead(const expression_ptr& expr);
+        bool type_arguments_ahead(jai::expression& head);
         checked_result<expression_ptr> type_argument_call(expression_ptr callee);
         checked_result<expression_ptr> generic_instance_reference(expression_ptr callee, std::vector<type_info_ptr> arguments, const token& at);
 
@@ -298,7 +334,7 @@ namespace jai {
         bool generic_parameters(detail::generic_definition& definition, size_t open, size_t& list_end);
         bool generic_extent(detail::generic_kind kind, size_t list_end, size_t& end);
         bool reserved_parameter_names(const detail::generic_definition& definition);
-        declaration_ptr parse_generic_text(const std::vector<token>& text);
+        declaration_ptr parse_generic_text(const std::vector<token>& text, detail::generic_definition* definition = nullptr);
         size_t attributes_end(size_t at) const;   // past the [[attribute]] groups at `at`
         // The instances this parse's text names since its last top-level declaration began: each becomes a generic_instance_decl
         // ahead of that declaration
@@ -540,13 +576,14 @@ namespace jai {
         size_t lookup_slot(uint64_t symbol_id) {
             return resolve_outer_use(symbol_id, function_scope_stack_.size());
         }
-        // The name is a variable the parse has seen declared: a local variable or a parameter of a function being parsed (its
-        // own or one around it), a variable of a block open at program scope, or a program-scope variable the unit declares
-        // above. A variable never takes type arguments.
+        // The name is a variable the parse holds and nothing nearer can take: a local variable or a parameter of a function being
+        // parsed (its own or one around it), a variable of a block open at program scope, or, outside every class and namespace, a
+        // program-scope variable the unit declares above. '<' after it compares; every other head is asked by name.
         bool names_variable(const jai::expression& e) const {
             if (e.get_type() != node_type::identifier_expr) { return false; }
             const uint64_t symbol_id = static_cast<const identifier_expr&>(e).symbol_id;
-            if (unit_variables_.count(symbol_id)) { return true; }
+            // a program-scope variable is the nearest declaration only outside a class and a namespace, whose member may take the name
+            if (unit_variables_.count(symbol_id) && enclosing_class_.empty() && current_namespace_path_.empty()) { return true; }
             if (static_cast<const identifier_expr&>(e).global_qualified) { return false; }
             for (const auto& scope : function_scope_stack_) {
                 if (scope.symbol_to_slot.count(symbol_id)) { return true; }

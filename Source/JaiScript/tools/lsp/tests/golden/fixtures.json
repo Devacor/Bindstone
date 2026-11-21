@@ -33,6 +33,7 @@
   "array",
   "auto",
   "blue",
+  "bool",
   "class",
   "dynamic_cast",
   "enum",
@@ -56,6 +57,7 @@
   "run",
   "s",
   "shade",
+  "static",
   "string",
   "this",
   "to_string",
@@ -292,6 +294,7 @@
    "source": "jaiscript"
   }
  ],
+ "diagnostics.less_than.use": [],
  "diagnostics.main": [],
  "diagnostics.namespace.shelf": [],
  "highlight.local_sum": [

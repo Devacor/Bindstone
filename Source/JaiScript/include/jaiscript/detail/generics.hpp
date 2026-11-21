@@ -58,6 +58,11 @@ namespace jai::detail {
 		uint32_t list_end = 0;
 		uint64_t stamp = 0;          // what an instance's definition is compared by: the tokens and where they stand
 		std::vector<generic_value_parameter> values;   // a function's or a method's parameters
+		// a class's members by name (its fields and statics; its methods) and its bases without their type arguments: what a
+		// '<' after a name reads through where a class derives from an instance (detail/less_than.hpp)
+		std::vector<std::string_view> member_variables;   // symbolizer storage
+		std::vector<std::string_view> member_functions;
+		std::vector<std::string> bases;
 		source_location location;    // the name's
 		// the stamp its file's text was loaded with (the engine sets it at every load of that text); unset = the host
 		// supplied the text, and the engine never read the file

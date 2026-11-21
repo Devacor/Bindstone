@@ -11,6 +11,8 @@
 #include "../../include/jaiscript/detail/expr_children.hpp"
 #include "../../include/jaiscript/detail/program_slots.hpp"
 #include "../../include/jaiscript/detail/template_library.hpp"
+#include "../../include/jaiscript/detail/less_than.hpp"
+#include "../../include/jaiscript/detail/type_checker.hpp"
 #include <algorithm>
 #include <iterator>
 #include <map>
@@ -18,6 +20,12 @@
 #include <optional>
 
 namespace jai {
+
+namespace {
+    constexpr uint32_t k_paren_unknown = 0xFFFFFFFFu;
+    constexpr uint32_t k_paren_unclosed = 0xFFFFFFFEu;
+}
+
 
 namespace {
 
@@ -745,7 +753,7 @@ bool detail::run_ast_marking_passes(const std::vector<declaration_ptr>& declarat
 }
 
 parser::parser(const std::vector<token>& tokens, string_symbolizer* symbolizer, engine* eng, const std::unordered_set<std::string>& registeredTemplateTypes, const std::string& filename)
-    : stream_(&tokens), filename_(filename), registered_template_types_(registeredTemplateTypes), symbolizer_(symbolizer), engine_(eng) {
+    : tokens_(&tokens), stream_(&tokens), filename_(filename), registered_template_types_(registeredTemplateTypes), symbolizer_(symbolizer), engine_(eng) {
     if (!symbolizer_) {
         throw std::invalid_argument("parser requires a valid string_symbolizer");
     }
@@ -1096,8 +1104,84 @@ void parser::check_reload_hook(const jai::declaration& d, bool& seen) {
     }
 }
 
+static bool names_literal_unit(const std::vector<declaration_ptr>& a_declarations) {
+    for (const auto& d : a_declarations) {
+        if (!d) { continue; }
+        if (d->get_type() == node_type::import_decl && !static_cast<const import_decl&>(*d).path_expr) { return true; }
+        if (d->get_type() == node_type::include_decl && !static_cast<const include_decl&>(*d).path_expr) { return true; }
+    }
+    std::vector<std::string> nested;
+    detail::collect_unit_imports(a_declarations, nested);
+    return !nested.empty();
+}
+
+void parser::adopt_pass(parser& a_pass) {
+    errors_ = std::move(a_pass.errors_);
+    recovered_ = std::move(a_pass.recovered_);
+    spliced_files_ = std::move(a_pass.spliced_files_);
+    unsettled_file_ = std::move(a_pass.unsettled_file_);
+    namespace_queries_ = std::move(a_pass.namespace_queries_);
+    foreign_stop_ = a_pass.foreign_stop_;
+    less_sites_ = std::move(a_pass.less_sites_);
+    less_site_index_ = std::move(a_pass.less_site_index_);
+    less_queries_ = std::move(a_pass.less_queries_);
+}
+
+// internal/less_than_by_name.md: a pass records each '<' site with the reading it took; the lookup answers every site over the
+// pass's own declarations, and a reading that was not the answer's is fixed for a pass that parses the tokens again
 checked_result<std::vector<declaration_ptr>> parser::parse() {
+    using parsed = checked_result<std::vector<declaration_ptr>>;
+    std::optional<parsed> result;
+    result.emplace(parse_pass());
+    if (less_sites_.empty()) { return std::move(*result); }
+    std::optional<parsed> first_failure;
+    std::vector<parse_diagnostic> first_errors;
+    std::vector<declaration_ptr> first_recovered;
+    bool forced = false;   // a provisional parse failed: every site nothing declares compares
+    for (int pass = 0; pass < 4; ++pass) {
+        const bool parsed_whole = static_cast<bool>(*result);
+        const std::vector<declaration_ptr>& unit = parsed_whole ? result->value() : recovered_;
+        less_settled_ = forced || !less_may_be_provisional_ || (parsed_whole && !names_literal_unit(unit));
+        less_answers_ = detail::engine_access::less_than_answers(*engine_, unit, less_queries_);
+        const auto readings = [&](std::map<less_place, bool>& a_fixed) {
+            bool moved = false;
+            for (const less_site& site : less_sites_) {
+                const bool want = detail::less_opens(less_answers_[site.query], less_settled_);
+                a_fixed[site.at] = want;
+                moved = moved || want != site.opens;
+            }
+            return moved;
+        };
+        std::map<less_place, bool> fixed;
+        bool moved = readings(fixed);
+        if (!moved && !parsed_whole && !less_settled_) {
+            forced = true;
+            less_settled_ = true;
+            moved = readings(fixed);
+        }
+        if (!moved) { break; }
+        if (!parsed_whole && !first_failure) {
+            first_errors = errors_;
+            first_recovered = recovered_;
+            first_failure.emplace(std::move(*result));
+        }
+        parser again(*tokens_, symbolizer_, engine_, registered_template_types_, filename_);
+        again.source_ = source_;
+        again.less_fixed_ = std::move(fixed);
+        result.emplace(again.parse_pass());
+        adopt_pass(again);
+    }
+    if (!*result && forced && first_failure) {
+        errors_ = std::move(first_errors);
+        recovered_ = std::move(first_recovered);
+        return std::move(*first_failure);
+    }
+    return std::move(*result);
+}
+
+checked_result<std::vector<declaration_ptr>> parser::parse_pass() {
     stack_.arm();
+    less_in_pass_ = true;
     paren_close_.clear();
     std::vector<declaration_ptr> declarations;
     bool reload_hook_seen = false;
@@ -3168,45 +3252,111 @@ checked_result<expression_ptr> parser::postfix() {
     return postfix_rest(std::move(operand.value()), chain_start, chain_starts_clean);
 }
 
-bool parser::postfix_operator_ahead(const expression_ptr& expr) const {
+bool parser::postfix_operator_ahead(const expression_ptr& expr) {
     switch (peek().type) {
         case token_type::left_paren: case token_type::left_brace: case token_type::dot: case token_type::question_dot:
         case token_type::arrow: case token_type::colon_colon: case token_type::left_bracket: case token_type::plus_plus:
         case token_type::minus_minus:
             return true;
         case token_type::less:   // f<T>(...), a.m<T>(...), ns::f<T>(...)
-            return expr && (expr->get_type() == node_type::identifier_expr || expr->get_type() == node_type::member_expr) && type_arguments_ahead(names_variable(*expr));
+            return expr && (expr->get_type() == node_type::identifier_expr || expr->get_type() == node_type::member_expr) && type_arguments_ahead(*expr);
         default:
             return false;
     }
 }
 
-// C#'s rule: '<' opens type arguments only when the type-shaped run it starts closes on a '>' that a '(' , a '{' or a '::' follows
-// ('>>' closes two), or that nothing a '>' compares with follows (an instance named as a value, which type_argument_call
-// refuses); anything else keeps '<' a comparison, so (a < b) > (c) needs its parentheses. After a local variable or a parameter
-// (`local`), which is neither a generic nor a host function, '<' compares wherever it can: only a run that holds a type's
-// keyword (l<int>(2), which no comparison spells) is read as type arguments, for the checker to refuse.
-bool parser::type_arguments_ahead(bool local) const {
+// internal/less_than_by_name.md. '<' after a head can open type arguments only when the type-shaped run it starts closes on a
+// '>' that a '(', a '{' or a '::' follows ('>>' closes two): a site. A run that holds a type's keyword (l<int>(2)) and a '>'
+// before an empty '()' are spelled by no comparison and open them whatever the head; a '(...)' that '=>' follows is a lambda,
+// which only a comparison takes. Otherwise the head decides: a variable the parse holds compares, and any other head is asked
+// by name (less_site_reading). A '>' that nothing a comparison continues with follows names an instance as a value, which
+// type_argument_call refuses.
+bool parser::type_arguments_ahead(jai::expression& head) {
     if (pushed_back_token_ || peek().type != token_type::less) { return false; }
     bool split = false;
     const size_t end = type_arguments_end(current_, split);
-    if (end == SIZE_MAX || split || end >= stream_->size()) { return false; }
-    if (local) {
-        bool keyword = false;
-        for (size_t i = current_ + 1; i + 1 < end && !keyword; ++i) {
-            const token_type t = (*stream_)[i].type;
-            keyword = t != token_type::identifier && t != token_type::colon_colon && t != token_type::comma && t != token_type::less && t != token_type::greater &&
-                      t != token_type::right_shift;
-        }
-        if (!keyword) { return false; }
+    const std::vector<token>& tokens = *stream_;
+    if (end == SIZE_MAX || split || end >= tokens.size()) { return false; }
+    bool keyword = false;
+    for (size_t i = current_ + 1; i + 1 < end && !keyword; ++i) {
+        const token_type t = tokens[i].type;
+        keyword = t != token_type::identifier && t != token_type::colon_colon && t != token_type::comma && t != token_type::less && t != token_type::greater &&
+                  t != token_type::right_shift;
     }
-    switch ((*stream_)[end].type) {
-        case token_type::left_paren: case token_type::left_brace: case token_type::colon_colon: case token_type::semicolon:
-        case token_type::comma: case token_type::right_paren: case token_type::right_bracket: case token_type::eof:
-            return true;
+    const bool held = names_variable(head);
+    switch (tokens[end].type) {
+        case token_type::left_paren: case token_type::left_brace: case token_type::colon_colon:
+            break;
+        case token_type::semicolon: case token_type::comma: case token_type::right_paren: case token_type::right_bracket: case token_type::eof:
+            return !held || keyword;
         default:
             return false;
     }
+    if (keyword) { return true; }
+    if (tokens[end].type == token_type::left_paren) {
+        const uint32_t close = paren_close(end);
+        if (close != k_paren_unclosed && close + 1 < tokens.size() && tokens[close + 1].type == token_type::fat_arrow) { return false; }
+        if (close == end + 1) { return true; }
+    }
+    const uint8_t carried = tokens[current_].less_reading;
+    const bool opens = carried != 0 ? carried == 2 : !held && (names_type_parameter(head) || less_site_reading(head));
+    if (!opens && !held) {
+        if (head.get_type() == node_type::identifier_expr) { static_cast<identifier_expr&>(head).less_compared = true; }
+        else { static_cast<member_expr&>(head).less_compared = true; }
+    }
+    if (carried != 0) { return opens; }
+    if (generic_text_readings_) {
+        const source_location& at = tokens[current_].location;
+        generic_text_readings_->push_back({{{}, static_cast<uint32_t>(at.line), static_cast<uint32_t>(at.column)}, 0, opens});
+    }
+    return opens;
+}
+
+// the name a head begins with: x, the A of A::B::x
+static const identifier_expr* less_head_root(const jai::expression& a_head) {
+    const jai::expression* e = &a_head;
+    while (e->get_type() == node_type::member_expr && static_cast<const member_expr*>(e)->is_static) { e = static_cast<const member_expr*>(e)->object.get(); }
+    return e && e->get_type() == node_type::identifier_expr ? static_cast<const identifier_expr*>(e) : nullptr;
+}
+
+bool parser::names_type_parameter(const jai::expression& a_head) const {
+    if (generic_type_parameters_.empty()) { return false; }
+    const identifier_expr* root = less_head_root(a_head);
+    return root && std::find(generic_type_parameters_.begin(), generic_type_parameters_.end(), root->name) != generic_type_parameters_.end();
+}
+
+// The reading of the site at the current '<': the one this pass was given, else type arguments (every generic use parses under
+// it) until the pass's declarations answer. The site is recorded once, with what it asks.
+bool parser::less_site_reading(const jai::expression& a_head) {
+    const source_location& at = (*stream_)[current_].location;
+    less_place place{std::string(at.filename), static_cast<uint32_t>(at.line), static_cast<uint32_t>(at.column)};
+    if (const auto seen = less_site_index_.find(place); seen != less_site_index_.end()) { return less_sites_[seen->second].opens; }
+    detail::less_query query;
+    query.cls = std::string(enclosing_class_);
+    for (const std::string& part : current_namespace_path_) { query.space += (query.space.empty() ? "" : "::") + part; }
+    const identifier_expr* root = less_head_root(a_head);
+    if (a_head.get_type() == node_type::identifier_expr) {
+        query.form = root->global_qualified ? detail::less_head::global : detail::less_head::bare;
+        query.head = std::string(root->name);
+    } else if (root && static_cast<const member_expr&>(a_head).is_static) {
+        query.form = detail::less_head::qualified;
+        for (const jai::expression* e = &a_head; e != root; e = static_cast<const member_expr*>(e)->object.get()) {
+            query.head.insert(0, "::" + std::string(static_cast<const member_expr*>(e)->member));
+        }
+        query.head.insert(0, root->name);
+    } else {
+        query.form = detail::less_head::member;
+        query.head = std::string(static_cast<const member_expr&>(a_head).member);
+    }
+    const std::string text = query.text();
+    size_t asked = static_cast<size_t>(std::find(less_queries_.begin(), less_queries_.end(), text) - less_queries_.begin());
+    if (asked == less_queries_.size()) { less_queries_.push_back(text); }
+    const auto fixed = less_fixed_.find(place);
+    bool opens = fixed == less_fixed_.end() || fixed->second;
+    if (!less_in_pass_) { opens = detail::less_opens(detail::engine_access::less_than_answers(*engine_, {}, {text})[0], true); }
+    less_site_index_.emplace(place, less_sites_.size());
+    less_sites_.push_back({std::move(place), static_cast<uint32_t>(asked), opens});
+    return opens;
 }
 
 size_t parser::type_arguments_end(size_t open, bool& split, bool placeholders) const {
@@ -3499,7 +3649,7 @@ bool parser::reserved_parameter_names(const detail::generic_definition& definiti
 
 // A generic's text (detail::generic_instance_tokens: program-scope text, in its namespace or its class) parsed here, in place of
 // the stream; null when it reports an error
-declaration_ptr parser::parse_generic_text(const std::vector<token>& text) {
+declaration_ptr parser::parse_generic_text(const std::vector<token>& text, detail::generic_definition* definition) {
     const std::vector<token>* saved_stream = stream_;
     const size_t saved_current = current_;
     const std::optional<token> saved_pushed_back = pushed_back_token_;
@@ -3519,7 +3669,23 @@ declaration_ptr parser::parse_generic_text(const std::vector<token>& text) {
     in_switch_case_ = in_coroutine_ = in_constructor_ = returns_reference_ = coroutine_body_pending_ = false;
     stream_ = &text; current_ = 0; pushed_back_token_.reset();
     const size_t errors_before = errors_.size();
+    std::vector<less_site> readings;
+    const std::vector<std::string_view> saved_parameters = generic_type_parameters_;   // a generic class's stay types in its generic methods
+    std::vector<less_site>* const saved_readings = generic_text_readings_;
+    if (definition) {
+        for (const auto& parameter : definition->parameters) { generic_type_parameters_.push_back(parameter.name); }
+        generic_text_readings_ = &readings;
+    }
     auto parsed = declaration();
+    generic_type_parameters_ = saved_parameters;
+    generic_text_readings_ = saved_readings;
+    if (definition) {   // each site's reading rides its '<': an instance's parse reads the text as its declaration did
+        for (const less_site& site : readings) {
+            for (token& t : definition->tokens) {
+                if (t.type == token_type::less && t.location.line == site.at.line && t.location.column == site.at.column) { t.less_reading = site.opens ? 2 : 1; }
+            }
+        }
+    }
     if (parsed && errors_.size() == errors_before && !is_at_end()) { report_error("unexpected text after the generic's declaration", peek()); }
     stream_ = saved_stream; current_ = saved_current; pushed_back_token_ = saved_pushed_back;
     generic_uses_ = std::move(saved_uses);
@@ -3589,14 +3755,34 @@ checked_result<declaration_ptr> parser::generic_declaration(const generic_site& 
     detail::own_token_text(*definition, *symbolizer_);
     definition->name_token = static_cast<uint32_t>(site.name_at - site.begin);
     definition->list_end = static_cast<uint32_t>(list_end - site.begin);
-    definition->stamp = detail::generic_stamp(definition->tokens);
     if (!reserved_parameter_names(*definition)) {
         current_ = end;
         return make_error_code(parse_error_code::syntax_error);
     }
-    const declaration_ptr parsed = parse_generic_text(detail::generic_instance_tokens(*definition, {}, definition->name, *symbolizer_));
+    const declaration_ptr parsed = parse_generic_text(detail::generic_instance_tokens(*definition, {}, definition->name, *symbolizer_), definition.get());
+    definition->stamp = detail::generic_stamp(definition->tokens);
     current_ = end;
     if (!parsed) { return make_error_code(parse_error_code::syntax_error); }
+    if (is_class) {
+        const jai::declaration* d = parsed.get();
+        while (d && d->get_type() == node_type::namespace_decl && !static_cast<const namespace_decl*>(d)->declarations.empty()) {
+            d = static_cast<const namespace_decl*>(d)->declarations.front().get();
+        }
+        if (d && d->get_type() == node_type::class_decl) {
+            const auto& declared = static_cast<const class_decl&>(*d);
+            for (const auto& member : declared.members) {
+                if (!member.declaration) { continue; }
+                if (member.declaration->get_type() == node_type::variable_decl) {
+                    definition->member_variables.push_back(static_cast<const variable_decl&>(*member.declaration).name);
+                } else if (member.declaration->get_type() == node_type::function_decl) {
+                    definition->member_functions.push_back(static_cast<const function_decl&>(*member.declaration).name);
+                } else if (member.declaration->get_type() == node_type::generic_decl) {
+                    definition->member_functions.push_back(static_cast<const generic_decl&>(*member.declaration).definition->name);
+                }
+            }
+            for (const std::string_view base : declared.base_classes) { definition->bases.emplace_back(base.substr(0, base.find('<'))); }
+        }
+    }
     if (!is_class) {
         const jai::declaration* d = parsed.get();
         while (d && d->get_type() == node_type::namespace_decl && !static_cast<const namespace_decl*>(d)->declarations.empty()) {
@@ -4535,11 +4721,6 @@ JAI_NOINLINE checked_result<void> parser::lambda_signature(lambda_expr& lambda) 
         }
     }
     return {};
-}
-
-namespace {
-    constexpr uint32_t k_paren_unknown = 0xFFFFFFFFu;
-    constexpr uint32_t k_paren_unclosed = 0xFFFFFFFEu;
 }
 
 bool parser::arrow_function_ahead() const {

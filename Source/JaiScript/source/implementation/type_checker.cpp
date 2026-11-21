@@ -12,6 +12,7 @@
 #include <jaiscript/detail/type_checker.hpp>
 #include <jaiscript/detail/foreign_keyword.hpp>
 #include <jaiscript/detail/generics.hpp>
+#include <jaiscript/detail/less_than.hpp>
 #include <filesystem>
 #include <jaiscript/detail/inline_variable.hpp>
 #include <jaiscript/detail/ast.hpp>
@@ -527,7 +528,140 @@ public:
         return report;
     }
 
+    // internal/less_than_by_name.md: what each site's head names, by the lookup a bare or a qualified name takes in this walk
+    std::string less_answers(const std::vector<std::string>& queries) {
+        stack_.arm();
+        std::string answers;
+        try {
+            collect_top_level();
+            for (const auto& query : queries) { answers.push_back(less_answer(less_query::parse(query))); }
+        } catch (const nesting_exhausted&) {
+            answers.resize(queries.size(), k_less_nothing);
+        }
+        return answers;
+    }
+
 private:
+    char less_answer(const less_query& q) {
+        switch (q.form) {
+            case less_head::member:
+                return generic_method_names_.count(q.head) || eng_.names_generic_method(q.head) ||
+                       engine_access::type_argument_method(eng_.asking(q.head), q.head) ? k_less_declared : k_less_nothing;
+            case less_head::qualified:
+                return less_qualified(q);
+            case less_head::bare:
+                if (const char kind = less_class_member(q.cls, q.head, 0)) { return kind; }
+                for (std::string space = q.space; !space.empty();) {
+                    if (const char kind = less_namespace_member(space, q.head)) { return kind; }
+                    const size_t cut = space.rfind("::");
+                    if (cut == std::string::npos) { break; }
+                    space.resize(cut);
+                }
+                return less_program_name(q.head);
+            default:
+                return less_program_name(q.head);
+        }
+    }
+    static bool less_listed(const std::vector<std::string_view>& names, std::string_view name) {
+        return std::find(names.begin(), names.end(), name) != names.end();
+    }
+    // A member of a registered class: a field, a static or a property is a variable, a method is not
+    char less_engine_member(const class_definition& def, std::string_view name, int depth) {
+        const uint64_t id = eng_.symbolize(name);
+        const uint64_t getter = eng_.symbolize("_get_" + std::string(name));
+        if (def.is_static_field(id) || def.has_static_field(id) || def.find_field_declaring_class(id) != nullptr ||
+            def.method_ptr(getter) != nullptr || def.has_static_method(getter)) { return k_less_variable; }
+        if (def.method_ptr(id) != nullptr || def.has_static_method(id)) { return k_less_declared; }
+        if (depth > 32) { return 0; }
+        for (const auto& parent : def.get_parent_classes()) {
+            if (parent) { if (const char kind = less_engine_member(*parent, name, depth + 1)) { return kind; } }
+        }
+        return 0;
+    }
+    // A class's member of that name, its own before each base's; 0 when the class or the member is not known
+    char less_class_member(std::string_view cls, std::string_view name, int depth) {
+        if (cls.empty() || depth > 32) { return 0; }
+        if (!generics_named(std::string(cls) + "::" + std::string(name)).empty()) { return k_less_declared; }
+        if (const sclass* c = find_sclass(cls)) {
+            if (c->fields.count(name) || c->static_fields.count(name)) { return k_less_variable; }
+            if (c->methods.count(name) || c->static_methods.count(name)) { return k_less_declared; }
+            for (auto base : c->decl->base_classes) {
+                if (const char kind = less_class_member(base, name, depth + 1)) { return kind; }
+            }
+            return 0;
+        }
+        // a generic class, or an instance the unit has not made yet: the members its declaration lists
+        const std::string_view generic = cls.substr(0, cls.find('<'));
+        if (const generic_definition_ptr g = generic_class_named(generic)) {
+            if (less_listed(g->member_variables, name)) { return k_less_variable; }
+            if (less_listed(g->member_functions, name)) { return k_less_declared; }
+            for (const std::string& base : g->bases) {
+                if (const char kind = less_class_member(base, name, depth + 1)) { return kind; }
+            }
+            return 0;
+        }
+        if (auto def = engine_class(cls)) { return less_engine_member(*def, name, 0); }
+        return 0;
+    }
+    template <typename Pool>
+    static bool less_pooled(const Pool* pool, const std::string& name) {
+        if (!pool) { return false; }
+        const auto held = pool->find(name);
+        return held != pool->end() && !held->second.empty();
+    }
+    char less_namespace_member(const std::string& space, std::string_view name) {
+        const std::string qualified = space + "::" + std::string(name);
+        if (namespace_vars_.count(qualified)) { return k_less_variable; }
+        if (namespace_fns_.count(qualified) || !generics_named(qualified).empty() || classes_.count(qualified) || enums_.count(qualified)) { return k_less_declared; }
+        if (less_pooled(program_globals_, qualified)) { return k_less_variable; }
+        if (less_pooled(program_functions_, qualified) || less_pooled(program_enums_, qualified) || (program_classes_ && program_classes_->count(qualified))) { return k_less_declared; }
+        if (namespace_members_.count(qualified + "::") || extra_global(qualified + "::")) { return k_less_declared; }   // a nested namespace
+        if (engine_class(qualified) || eng_.is_enum_name(qualified) || eng_.has_function(qualified)) { return k_less_declared; }
+        if (eng_.has_variable(qualified)) { return k_less_variable; }
+        eng_.note(qualified);
+        if (const script_namespace_data* ns = eng_.find_namespace(space)) {
+            const uint64_t id = eng_.symbolize(name);
+            if (ns->functions.count(id) || ns->classes.count(id) || ns->enums.count(id) || ns->signatures.count(id)) { return k_less_declared; }
+            if (ns->variables.count(id) || (ns->scope && ns->scope->get_own_value_ptr(id) != nullptr)) { return k_less_variable; }
+        }
+        if (namespace_members_.count(qualified) || extra_global(qualified)) { return k_less_variable; }   // an extern, a destructured name
+        return 0;
+    }
+    // A program-scope name: this unit's, then the pooled program's, then what the engine holds
+    char less_program_name(std::string_view name) {
+        const std::string spelled(name);
+        if (global_var_names_.count(name)) { return k_less_variable; }
+        if (functions_.count(name) || classes_.count(name) || enums_.count(name) || generics_.count(spelled) || namespace_members_.count(spelled + "::")) { return k_less_declared; }
+        if (less_pooled(program_globals_, spelled)) { return k_less_variable; }
+        if (less_pooled(program_functions_, spelled) || less_pooled(program_enums_, spelled) || (program_classes_ && program_classes_->count(spelled))) { return k_less_declared; }
+        if (const auto* held = eng_.find_generics(spelled); held && !held->empty()) { return k_less_declared; }
+        if (builtin_type_name(name) || engine_access::get_registered_template_types(eng_.asking(name)).count(spelled) || engine_class(name) ||
+            eng_.is_enum_name(spelled) || eng_.has_function(spelled) || extra_global(spelled + "::") || eng_.find_namespace(spelled)) { return k_less_declared; }
+        if (eng_.has_variable(spelled) || extra_global(spelled)) { return k_less_variable; }
+        return k_less_nothing;
+    }
+    // A::B::x: A::B as a namespace, a class or an enum, found from the enclosing namespace outward, and x in it
+    char less_qualified(const less_query& q) {
+        const size_t cut = q.head.rfind("::");
+        if (cut == std::string::npos) { return less_program_name(q.head); }
+        const std::string prefix = q.head.substr(0, cut);
+        const std::string_view name = std::string_view(q.head).substr(cut + 2);
+        std::vector<std::string> owners;
+        for (std::string space = q.space; !space.empty();) {
+            owners.push_back(space + "::" + prefix);
+            const size_t up = space.rfind("::");
+            if (up == std::string::npos) { break; }
+            space.resize(up);
+        }
+        owners.push_back(prefix);
+        for (const std::string& owner : owners) {
+            if (const char kind = less_class_member(owner, name, 0)) { return kind; }
+            if (enums_.count(owner) || less_pooled(program_enums_, owner) || eng_.is_enum_name(owner)) { return k_less_variable; }
+            if (const char kind = less_namespace_member(owner, name)) { return kind; }
+        }
+        return k_less_nothing;
+    }
+
     // -------------------------------------------------------------- tables
 
     struct sclass {
@@ -2071,12 +2205,16 @@ private:
              "'" + ns + "' is a namespace, not a value; name one of its members (" + ns + "::name)");
     }
 
-    void undeclared(const source_location& loc, std::string_view name) {
+    void undeclared(const source_location& loc, std::string_view name, bool less_site = false) {
         if (instance_requests_.count(name)) { return; }   // an instance that could not be made: its request says why
         // Literal imports are covered by the program closure's names; a dynamic path can
         // define anything - keep the signal, drop the teeth.
         diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, loc,
-             "use of undeclared identifier '" + std::string(name) + "'");
+             "use of undeclared identifier '" + std::string(name) + "'" + (less_site ? " (" + no_generic_text(name) + ")" : std::string()));
+    }
+    // what a diagnostic at the head of a '<' site that compares adds: a call with type arguments was perhaps meant
+    static std::string no_generic_text(std::string_view name) {
+        return "no generic '" + std::string(name) + "' is declared: '<' after a name that takes no type arguments compares";
     }
 
     // -------------------------------------------------------------- collection
@@ -5501,7 +5639,7 @@ private:
             if (kind == 1) { map_dot_key(m); }
             return;
         }
-        diag(diag_level::error, m->location, detail::method_value_text(m->member, owner, detail::method_value_receiver(m), true));
+        diag(diag_level::error, m->location, detail::method_value_text(m->member, owner, detail::method_value_receiver(m), true) + (m->less_compared ? " (" + no_generic_text(m->member) + ")" : std::string()));
     }
     // A member of a known int, float, bool or char: the registry (BUILTIN_ARITIES) gives these kinds no methods, so any name is the
     // run time's text
@@ -7851,7 +7989,7 @@ private:
         if (program_or_derived_name(id->name)) { return {}; }
         if (stale_field_context()) { return {}; }   // bare old-shape field in a redefined class's method
         if (refuse_bare_generic_class(id->name, id->location)) { return {}; }   // a generic class's name and nothing else's
-        undeclared(id->location, id->name);
+        undeclared(id->location, id->name, id->less_compared);
         return {};
     }
 
@@ -8036,7 +8174,7 @@ private:
             if (typed_field_out && hit.field && (hit.field->type || hit.field->function_spelling)) { *typed_field_out = hit.field; }
             if (hit.methods) {
                 if (!writing && !want_static) {   // a method is called or bound, never read bare
-                    diag(diag_level::error, m->location, detail::method_value_text(m->member, cls, detail::method_value_receiver(m), false));
+                    diag(diag_level::error, m->location, detail::method_value_text(m->member, cls, detail::method_value_receiver(m), false) + (m->less_compared ? " (" + no_generic_text(m->member) + ")" : std::string()));
                 }
                 ctype named = ctype::make(ctype::function_k);
                 if (want_static && hit.provable) { named.fns = hit.methods; }
@@ -8555,7 +8693,7 @@ private:
             if (!id->global_qualified && report_cdtor_call(id->name, id->location)) { return {}; }
             if (program_or_derived_name(id->name)) { return {}; }
             if (stale_field_context()) { return {}; }
-            undeclared(id->location, id->name);
+            undeclared(id->location, id->name, id->less_compared);
             return {};
         }
         if (callee->get_type() == node_type::member_expr) {
@@ -8884,7 +9022,7 @@ private:
             if (eng_.has_function(name) || engine_knows_name(name) || program_or_derived_name(id->name) || stale_field_context()) {
                 return done(rhs);
             }
-            undeclared(id->location, id->name);
+            undeclared(id->location, id->name, id->less_compared);
             return done(rhs);
         }
         if (target->get_type() == node_type::member_expr) {
@@ -11965,6 +12103,14 @@ void collect_unit_imports(const std::vector<declaration_ptr>& decls, std::vector
 check_report run_static_check(engine& eng, const std::vector<declaration_ptr>& decls,
                               const std::vector<std::string>* extra_globals, check_options opts) {
     return static_checker(eng, decls, extra_globals, opts).run();
+}
+
+std::string less_than_answers(engine& eng, const std::vector<declaration_ptr>& decls, const std::vector<std::string>& queries, check_options opts) {
+    opts.diagnostics = false;
+    opts.proofs = check_options::proofs_t::leave;
+    opts.outside = nullptr;
+    opts.generic_requests = nullptr;
+    return static_checker(eng, decls, nullptr, opts).less_answers(queries);
 }
 
 // KEEP-PARALLEL with static_checker::collect_scope_decls (same categories, flat spelling).

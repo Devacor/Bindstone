@@ -204,6 +204,7 @@ namespace jai {
         // the member scope are all skipped (the escape hatch for deliberately shadowed
         // globals). Parser never assigns a slot when set.
         bool global_qualified = false;
+        bool less_compared = false;   // the head of a '<' site that compares (detail/less_than.hpp): a diagnostic at it says no generic has the name
         // Parser resolution: false when this name statically resolves to a REFERENCE
         // declaration (ref param / auto& decl / auto& loop var). Simple stores consult it
         // when the storage holds a cell: value-decl names write the cell like the variable
@@ -378,6 +379,7 @@ namespace jai {
         bool is_arrow;  // true for ->, false for .
         bool is_static; // true for ::, false for . or ->
         bool null_safe = false;  // true for ?. null-safe member access
+        bool less_compared = false;   // as identifier_expr::less_compared
 
         // math:: intrinsic resolution cache (static access `math::<fn>`): 255 = not yet
         // resolved, 254 = resolved-not-an-intrinsic, else detail::math_fn. Name-based,

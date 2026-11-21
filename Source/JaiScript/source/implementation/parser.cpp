@@ -1740,7 +1740,7 @@ JAI_NOINLINE checked_result<expression_ptr> parser::primary_rest() {
 
     // Check if a keyword is being used as a namespace identifier (e.g., string::length)
     // This must come before identifier handling
-    if (peek().type != token_type::identifier && peek().type != token_type::eof) {
+    if (is_keyword_word(peek().type)) {
         // Check if this token is followed by ::
         size_t lookAhead = current_ + 1;
         if (lookAhead < stream_->size() && (*stream_)[lookAhead].type == token_type::colon_colon) {
@@ -3971,18 +3971,15 @@ JAI_NOINLINE checked_result<expression_ptr> parser::brace_construction(expressio
     return make_error_code(parse_error_code::syntax_error);
 }
 
-// Static member access or namespace member access; keywords are member names too (namespace members)
+// Static member access or namespace member access; keywords are member names too (namespace members). No other token is a
+// name: a literal's lexeme dies with the lexer, and a node keeps its name's text
 JAI_NOINLINE checked_result<expression_ptr> parser::static_member_access(expression_ptr expr) {
-    token name = peek();
-    if (name.type == token_type::identifier ||
-        (name.type != token_type::eof && name.type != token_type::left_paren &&
-         name.type != token_type::right_paren && name.type != token_type::semicolon)) {
-        advance();
-        uint64_t member_id = get_symbol_id(name);
-        return std::make_shared<member_expr>(name.location, expr, name.lexeme, member_id, false, true);
+    if (!check(token_type::identifier) && !is_keyword_word(peek().type)) {
+        report_error("expected member name after '::'", peek());
+        return make_error_code(parse_error_code::syntax_error);
     }
-    report_error("expected member name after '::'", name);
-    return make_error_code(parse_error_code::syntax_error);
+    const token name = advance();
+    return std::make_shared<member_expr>(name.location, expr, name.lexeme, get_symbol_id(name), false, true);
 }
 
 JAI_NOINLINE checked_result<expression_ptr> parser::subscript(expression_ptr expr) {
@@ -6563,33 +6560,19 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
     source_location start_loc = peek().location;
 
     // Parse first namespace name
-    token first_name = advance();
-    if (first_name.type == token_type::eof ||
-        first_name.type == token_type::left_brace ||
-        first_name.type == token_type::right_brace ||
-        first_name.type == token_type::left_paren ||
-        first_name.type == token_type::right_paren ||
-        first_name.type == token_type::semicolon ||
-        first_name.type == token_type::colon_colon) {
-        report_error("expected namespace name", first_name);
-    return make_error_code(parse_error_code::syntax_error);
+    if (!check(token_type::identifier) && !is_keyword_word(peek().type)) {
+        report_error("expected namespace name", peek());
+        return make_error_code(parse_error_code::syntax_error);
     }
-    namespace_path.emplace_back(first_name.lexeme);
+    namespace_path.emplace_back(advance().lexeme);
 
     // Check for :: (nested namespace syntax like C++17)
     while (match(token_type::colon_colon)) {
-        token next_name = advance();
-        if (next_name.type == token_type::eof ||
-            next_name.type == token_type::left_brace ||
-            next_name.type == token_type::right_brace ||
-            next_name.type == token_type::left_paren ||
-            next_name.type == token_type::right_paren ||
-            next_name.type == token_type::semicolon ||
-            next_name.type == token_type::colon_colon) {
-            report_error("expected namespace name after '::'", next_name);
-    return make_error_code(parse_error_code::syntax_error);
+        if (!check(token_type::identifier) && !is_keyword_word(peek().type)) {
+            report_error("expected namespace name after '::'", peek());
+            return make_error_code(parse_error_code::syntax_error);
         }
-        namespace_path.emplace_back(next_name.lexeme);
+        namespace_path.emplace_back(advance().lexeme);
     }
 
     JAISCRIPT_TRY(expect(token_type::left_brace, "expected '{' before namespace body"));

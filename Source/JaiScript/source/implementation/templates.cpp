@@ -53,8 +53,7 @@ namespace {
 	};
 
 	struct untrusted_program {
-		std::shared_ptr<std::vector<token>> tokens;   // the body's identifiers view the symbolizer; the tokens own nothing the tree needs
-		expression_ptr body;
+		expression_ptr body;   // its names view the symbolizer: the tree needs nothing of the tokens it was parsed from
 	};
 
 	// each stamp here is the one the engine's loader gave the text it stands for (detail/source_loading.hpp)
@@ -985,9 +984,9 @@ namespace {
 		string_symbolizer* symbols = engine_access::get_symbolizer(*a_lib.eng);
 		auto program = std::make_shared<untrusted_program>();
 		lexer lex(a_content, symbols, a_label);
-		program->tokens = std::make_shared<std::vector<token>>(lex.tokenize_template(a_lib.joiner, a_lib.splice));
+		const std::vector<token> tokens = lex.tokenize_template(a_lib.joiner, a_lib.splice);
 		static const std::unordered_set<std::string> no_template_types;
-		parser prs(*program->tokens, symbols, a_lib.eng, no_template_types, a_label);
+		parser prs(tokens, symbols, a_lib.eng, no_template_types, a_label);
 		prs.source_text(a_content);
 		auto body = prs.parse_untrusted_template_body();
 		if (!body) {

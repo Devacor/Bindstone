@@ -264,8 +264,8 @@ variableDeclaration = "const" (type "&"? IDENTIFIER | IDENTIFIER) ("=" expressio
 
 destructuringDeclaration = "const"? ("auto" | "var") "[" IDENTIFIER ("," IDENTIFIER)* "]" "=" expression ";"
 
-// Namespaces (nested C++17 style supported)
-namespaceDeclaration = "namespace" NAME ("::" NAME)* "{" declaration* "}"
+// Namespaces (nested C++17 style supported); a namespace's name is an IDENTIFIER or any keyword, as a MEMBER_NAME is
+namespaceDeclaration = "namespace" MEMBER_NAME ("::" MEMBER_NAME)* "{" declaration* "}"
 
 // Enums (plain value lists; values are namespaced: Color::red)
 enumDeclaration = "enum" IDENTIFIER "{" DECLARED_NAME ("," DECLARED_NAME)* "}"

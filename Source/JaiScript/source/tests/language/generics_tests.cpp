@@ -1781,7 +1781,7 @@ public:
 					"error: 'Box' takes 2 type arguments, not 1"},
 				{"a generic class, a class of its name", box_v1, box_user, limit + "class Box {\n\tint item;\n\tint size() { return 2; }\n}\n", 'r', true, false,
 					"error: 'Box' takes no type arguments: it is not a generic class"},
-				{"a generic class, dropped", box_v1, box_user, limit, 'd', false, false, "error: unknown type 'Box<int>': no generic class 'Box' is declared"},
+				{"a generic class, dropped", box_v1, box_user, limit, 'd', false, false, ""},
 				{"a generic function, edited", fn_v1, fn_user, limit + "T twice<T>(T x) { return x + x; }\n", 'a', false, false, ""},
 				{"a generic function, a body that does not check for int", fn_v1, fn_user, limit + "T twice<T>(T x) { return x.size(); }\n", 'r', true, false,
 					"lib.jai:2:28: error: int has no member 'size'\n    in twice<int>, instantiated at "},
@@ -1792,7 +1792,7 @@ public:
 				{"a generic function, another value parameter count", fn_v1, fn_user, limit + "T twice<T>(T x, T y) { return x + y; }\n", 'r', false, false, "error: 'twice<T>' takes 2 arguments, not 1"},
 				{"a generic function, a function of its name", fn_v1, fn_user, limit + "string twice(string x) { return x; }\n", 'r', false, false,
 					"error: 'twice' takes no type arguments: it is not a generic function"},
-				{"a generic function, dropped", fn_v1, fn_user, limit, 'd', false, false, "error: use of undeclared identifier 'twice'"},
+				{"a generic function, dropped", fn_v1, fn_user, limit, 'd', false, false, ""},
 				{"a generic method, edited", method_v1, method_user, tool("\tT scaled<T>(T x) { return x + x; }\n"), 'a', false, false, ""},
 				{"a generic method, a body that does not check for int", method_v1, method_user, tool("\tT scaled<T>(T x) { return x.size(); }\n"), 'r', true, false,
 					"lib.jai:4:30: error: int has no member 'size'\n    in Tool::scaled<int>, instantiated at "},
@@ -1805,7 +1805,7 @@ public:
 				{"a generic method, a method of its name", method_v1, method_user, tool("\tstring scaled(string x) { return x; }\n"), 'r', false, false,
 					"error: 'scaled' takes no type arguments: it is not a generic method"},
 				{"a generic method, gone from its class", method_v1, method_user, tool(""), 'r', false, false, "error: no member 'scaled' in class 'Tool'"},
-				{"a generic method, dropped with its class", method_v1, method_user, limit, 'd', false, false, "error: no member 'scaled' in class 'Tool'"},
+				{"a generic method, dropped with its class", method_v1, method_user, limit, 'd', false, false, ""},
 			};
 			// How the new text arrives. A reload checks the units it does not run again; no other route does.
 			enum class route { root_file, module, executed_string, module_run_again, execute_file, execute_file_source, later_execute, another_file, strings_only };
@@ -1880,8 +1880,8 @@ public:
 					const std::string after = outcome(*e, "use();");
 					const bool rejected = verdict.rfind("ERR: static check failed:", 0) == 0;
 					const bool reloads = how == route::root_file || how == route::module || how == route::executed_string || how == route::module_run_again;
-					// a unit run again makes its instances from the text: one of a generic the text dropped is no longer found
-					const bool rejects = reloads && (s.reload == 'r' || (s.reload == 'd' && !s.plain && how == route::module_run_again));
+					// what the text drops stays for every unit, one that runs again too, as a function or a class it drops does
+					const bool rejects = reloads && s.reload == 'r';
 					check_eq(rejects, rejected, what + ": " + verdict);
 					if (rejects) {
 						check_true(contains(verdict, s.says), what + ": " + s.says + " in: " + verdict);

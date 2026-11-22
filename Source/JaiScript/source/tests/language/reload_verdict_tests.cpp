@@ -186,6 +186,78 @@ public:
 				check_eq(std::string("12"), p.run("tick();"), c.name + ": and waits again");
 			}
 		});
+
+		test("a_generic_a_file_drops_stays_as_a_function_or_a_class_it_drops_does", [this]() {
+			struct dropped {
+				std::string name;
+				std::string before;
+				std::string use;
+				std::string fresh;   // a use of it no unit made before the drop (another instance, for a generic)
+			};
+			const std::vector<dropped> kinds = {
+				{"a plain function", "int twice(int x) { return x + x; }\n", "twice(4)", "twice(5)"},
+				{"a generic function", "T twice<T>(T x) { return x + x; }\n", "twice<int>(4)", "twice<float>(2.5)"},
+				{"a generic function called by deduction", "T twice<T>(T x) { return x + x; }\n", "twice(4)", "twice(\"ab\").size()"},
+				{"a plain class", "class Box { int item = 3; int size() { return 8; } }\n", "Box().size()", "Box().item"},
+				{"a generic class", "class Box<T> { T item; int size() { return 8; } }\n", "Box<int>().size()", "Box<string>().size()"},
+				{"a generic function in a namespace", "namespace n { T twice<T>(T x) { return x + x; } }\n", "n::twice<int>(4)", "n::twice<float>(2.5)"},
+			};
+			for (const bool module_user : {false, true}) {
+				for (const dropped& k : kinds) {
+					const std::string who = k.name + (module_user ? ", used by a module" : ", used by the root file");
+					program p("e_" + std::to_string(&k - kinds.data()) + (module_user ? "m" : "r"));
+					p.write("lib.jai", k.before);
+					if (module_user) {
+						p.write("user.jai", "import \"lib.jai\";\nvar use() { return " + k.use + "; }\n");
+						p.write("root.jai", "import \"user.jai\";\nvar tick() { import(\"lib.jai\", \"user.jai\"); return use(); }\n");
+					} else {
+						p.write("root.jai", "import \"lib.jai\";\nvar use() { return " + k.use + "; }\nvar tick() { import(\"lib.jai\"); return use(); }\n");
+					}
+					check_eq(std::string("null"), p.run_file("root.jai"), who);
+					const std::string value = p.run("tick();");
+					check_true(!failed(value), who + ": before the drop: " + value);
+					p.write("lib.jai", "int other() { return 1; }\n");
+					check_eq(value, p.run("tick();"), who + ": the reload that drops it is accepted and its users run as they did");
+					check_eq(value, p.run("tick();"), who + ": at every reach");
+					check_eq(std::string("1"), p.run("other();"), who + ": the file's new text is applied");
+					check_eq(value, p.run("var later() { return " + k.use + "; }\nlater();"), who + ": a later text uses it");
+					const std::string newer = p.run("var newer() { return " + k.fresh + "; }\nnewer();");
+					check_true(!failed(newer), who + ": and makes of it what no unit made before: " + newer);
+					if (module_user) {
+						p.write("user.jai", "import \"lib.jai\";\nvar use() { return " + k.use + "; }\nint edited() { return 1; }\n");
+						check_eq(value, p.run("tick();"), who + ": its user's own edit reloads");
+						check_eq(std::string("1"), p.run("edited();"), who);
+					}
+					// the name declared again is the declaration from there on
+					p.write("lib.jai", k.before + "int other() { return 2; }\n");
+					check_eq(value, p.run("tick();"), who + ": declared again");
+					check_eq(std::string("2"), p.run("other();"), who);
+				}
+			}
+			// a name the file gives to something else is declared again, not dropped: what cannot be made from that rejects the reload
+			struct renamed {
+				std::string name;
+				std::string before, after;
+				std::string use;
+			};
+			const std::vector<renamed> renames = {
+				{"a generic function declared with other parameters", "T twice<T>(T x) { return x + x; }\n", "T twice<T>(T x, T y) { return x + y; }\n", "twice<int>(4)"},
+				{"a generic function's name given to a plain function of another type", "T twice<T>(T x) { return x + x; }\n", "string twice(string x) { return x; }\n", "twice<int>(4)"},
+				{"a generic class's name given to a plain class", "class Box<T> { T item; int size() { return 8; } }\n", "class Box { int size() { return 9; } }\n", "Box<int>().size()"},
+				{"a generic class declared with another count of parameters", "class Box<T> { T item; int size() { return 8; } }\n", "class Box<K, V> { K item; int size() { return 9; } }\n", "Box<int>().size()"},
+			};
+			for (const renamed& r : renames) {
+				program p("e_renamed_" + std::to_string(&r - renames.data()));
+				p.write("lib.jai", r.before);
+				p.write("root.jai", "import \"lib.jai\";\nvar use() { return " + r.use + "; }\nvar tick() { import(\"lib.jai\"); return use(); }\n");
+				check_eq(std::string("null"), p.run_file("root.jai"), r.name);
+				const std::string value = p.run("tick();");
+				p.write("lib.jai", r.after);
+				const std::string rejected = p.run("tick();");
+				check_true(failed(rejected) && has(rejected, "root.jai:2:"), r.name + ": the reload is rejected at the caller: " + rejected);
+				check_eq(value, p.run("tick();"), r.name + ": and the old code runs");
+			}
+		});
 	}
 };
 

@@ -1321,9 +1321,48 @@ struct engine::implementation {
     // shape is the definition declared again (note_remade_instances), one of another shape an overload beside it
     std::unordered_map<uint64_t, detail::generic_definition_ptr> instance_shapes_;
     std::unordered_set<std::string> generic_method_names_;   // the bare names of the generic methods ever declared
-    // The definitions a file stopped declaring while instances of them were made, by qualified name, until the name is a
-    // generic's again: a unit that uses such an instance and is not run again still checks with it (place_dropped_generics)
+    // The definitions a file dropped altogether while instances of them were made, by qualified name: each stays in generics_,
+    // as a function or a class a file drops stays, for every unit, until something of its kind takes the name (a generic, a
+    // class for a generic class's, a function for a generic function's). A unit that makes an instance from one depends on
+    // the file under the stamp of the text that dropped it.
     std::unordered_map<std::string, std::vector<detail::generic_definition_ptr>> dropped_generics_;
+    std::unordered_map<std::string, detail::text_stamp> pooled_text_stamps_;   // each file's text as it was last pooled
+    static void collect_plain_functions(const std::vector<declaration_ptr>& decls, const std::string& space, std::vector<std::string>& out) {
+        for (const auto& d : decls) {
+            if (!d) { continue; }
+            if (d->get_type() == node_type::function_decl) {
+                const auto* f = static_cast<const function_decl*>(d.get());
+                if (f->instance_stamp == 0) { out.push_back(space.empty() ? std::string(f->name) : space + "::" + std::string(f->name)); }
+            } else if (d->get_type() == node_type::namespace_decl) {
+                const auto* n = static_cast<const namespace_decl*>(d.get());
+                collect_plain_functions(n->declarations, space.empty() ? std::string(n->name) : space + "::" + std::string(n->name), out);
+            }
+        }
+    }
+    static void collect_enum_names(const std::vector<declaration_ptr>& decls, const std::string& space, std::vector<std::string>& out) {
+        for (const auto& d : decls) {
+            if (!d) { continue; }
+            if (d->get_type() == node_type::enum_decl) {
+                const auto* e = static_cast<const enum_decl*>(d.get());
+                out.push_back(space.empty() ? std::string(e->name) : space + "::" + std::string(e->name));
+            } else if (d->get_type() == node_type::namespace_decl) {
+                const auto* n = static_cast<const namespace_decl*>(d.get());
+                collect_enum_names(n->declarations, space.empty() ? std::string(n->name) : space + "::" + std::string(n->name), out);
+            }
+        }
+    }
+    // a dropped definition leaves the pool: something of its kind took its name
+    void evict_dropped(const std::string& name, detail::generic_kind kind) {
+        const auto dropped = dropped_generics_.find(name);
+        if (dropped == dropped_generics_.end()) { return; }
+        auto& held = generics_[name];
+        std::erase_if(dropped->second, [&](const detail::generic_definition_ptr& g) {
+            if (g->kind != kind) { return false; }
+            if (std::erase(held, g) != 0) { ++script_cache_epoch; }
+            return true;
+        });
+        if (dropped->second.empty()) { dropped_generics_.erase(dropped); }
+    }
     void note_instance(const std::string& name, const std::string& generic, const std::vector<type_info_ptr>& arguments) {
         const auto [held, fresh] = generic_instances_.try_emplace(name);
         if (fresh) { instances_of_[generic].push_back(name); }
@@ -1369,26 +1408,68 @@ struct engine::implementation {
             const auto held = generics_.find(std::string(c->name));
             if (held == generics_.end()) { continue; }
             if (std::erase_if(held->second, [](const detail::generic_definition_ptr& g) { return g->kind == detail::generic_kind::class_type; }) != 0) { ++script_cache_epoch; }
+            if (const auto dropped = dropped_generics_.find(std::string(c->name)); dropped != dropped_generics_.end()) {
+                std::erase_if(dropped->second, [](const detail::generic_definition_ptr& g) { return g->kind == detail::generic_kind::class_type; });
+            }
+        }
+        if (!dropped_generics_.empty()) {
+            // a function declared under a dropped generic function's name takes the name, an enum a dropped generic class's; a
+            // class declared again leaves none of the generic methods its dropped text declared
+            std::vector<std::string> functions;
+            collect_plain_functions(decls, {}, functions);
+            for (const std::string& name : functions) { evict_dropped(name, detail::generic_kind::function); }
+            std::vector<std::string> enums;
+            collect_enum_names(decls, {}, enums);
+            for (const std::string& name : enums) { evict_dropped(name, detail::generic_kind::class_type); }
+            for (const class_decl* c : plain) {
+                std::vector<std::string> methods;
+                for (const auto& [name, held] : dropped_generics_) {
+                    if (std::any_of(held.begin(), held.end(), [&](const detail::generic_definition_ptr& g) { return g->kind == detail::generic_kind::method && g->owner == c->name; })) { methods.push_back(name); }
+                }
+                for (const std::string& name : methods) { evict_dropped(name, detail::generic_kind::method); }
+            }
         }
         const bool named_file = !file.empty() && file != "<script>";
         if (named_file) {   // what the file no longer declares
+            const auto loaded_under = pooled_text_stamps_.find(file);
             for (auto& [name, held] : generics_) {
                 std::erase_if(held, [&](const detail::generic_definition_ptr& g) {
                     if (g->location.filename != file) { return false; }
                     const bool kept = std::any_of(declared.begin(), declared.end(), [&](const detail::generic_definition_ptr& d) {
                         return d->qualified_name() == name && same_generic_shape(*d, *g);
                     });
-                    if (!kept) {
-                        ++script_cache_epoch;
-                        if (instances_of_.count(name) != 0) { dropped_generics_[name].push_back(g); }
+                    if (kept) { return false; }
+                    // dropped altogether, with instances made: it stays, as a function or a class the file drops does. A name the
+                    // text declares another way (a generic of another shape, a class or a function of the name, a method's class
+                    // without it) is declared again, and what cannot be made from that is the reload's to refuse.
+                    const bool standing = std::any_of(dropped_generics_[name].begin(), dropped_generics_[name].end(), [&](const detail::generic_definition_ptr& d) { return d == g; });
+                    const bool renamed = std::any_of(declared.begin(), declared.end(), [&](const detail::generic_definition_ptr& d) { return d->qualified_name() == name; }) ||
+                                         (g->kind == detail::generic_kind::class_type && unit_declares_class(decls, name)) ||
+                                         (g->kind == detail::generic_kind::function && unit_declares_function(decls, name)) ||
+                                         (g->kind == detail::generic_kind::method && unit_declares_class(decls, g->owner));
+                    if (!renamed && (standing || instances_of_.count(name) != 0)) {
+                        if (!standing) { dropped_generics_[name].push_back(g); }
+                        if (loaded_under != pooled_text_stamps_.end()) {
+                            g->file_stamped = loaded_under->second.stamped;
+                            g->file_mtime = loaded_under->second.stamped ? loaded_under->second.mtime : 0;
+                            g->file_size = loaded_under->second.stamped ? loaded_under->second.size : 0;
+                        }
+                        return false;
                     }
-                    return !kept;
+                    ++script_cache_epoch;
+                    std::erase(dropped_generics_[name], g);
+                    return true;
                 });
             }
+            std::erase_if(dropped_generics_, [](const auto& entry) { return entry.second.empty(); });
         }
         for (const auto& definition : declared) {
             if (definition->kind == detail::generic_kind::method) { generic_method_names_.emplace(definition->name); }
-            dropped_generics_.erase(definition->qualified_name());
+            if (const auto dropped = dropped_generics_.find(definition->qualified_name()); dropped != dropped_generics_.end()) {   // the name is a generic's again
+                auto& standing = generics_[definition->qualified_name()];
+                for (const auto& g : dropped->second) { if (std::erase(standing, g) != 0) { ++script_cache_epoch; } }
+                dropped_generics_.erase(dropped);
+            }
             auto& held = generics_[definition->qualified_name()];
             // a class's name is one generic class, whatever file or parameter list declared it before; a function's or a method's
             // is one per shape and file
@@ -1460,6 +1541,11 @@ struct engine::implementation {
         if (unit_declares_class(decls, name) || program_classes_.count(name) != 0 || self.get_class_registry().find_script_class(name) != nullptr) { return detail::plain_type_kind::script_class; }
         const auto held = self.get_class_definition(name);
         return held ? (held->is_cpp_class() ? detail::plain_type_kind::host_class : detail::plain_type_kind::script_class) : detail::plain_type_kind::none;
+    }
+    static bool unit_declares_function(const std::vector<declaration_ptr>& decls, const std::string& qualified) {
+        std::vector<std::string> functions;
+        collect_plain_functions(decls, {}, functions);
+        return std::find(functions.begin(), functions.end(), qualified) != functions.end();
     }
     static bool unit_declares_class(const std::vector<declaration_ptr>& decls, std::string_view name) {
         for (const auto& d : decls) {
@@ -2097,6 +2183,7 @@ struct engine::implementation {
     // it (null: the host supplied the text)
     void note_text_stamp(script_cache_entry& entry, const detail::text_stamp* loaded_under) {
         entry.loaded_under = loaded_under ? *loaded_under : detail::text_stamp{};
+        if (!entry.source_path.empty() && entry.source_path != "<script>") { pooled_text_stamps_[entry.source_path] = entry.loaded_under; }
         if (!entry.generics_gathered) {
             entry.generics_gathered = true;
             collect_generics(entry.declarations, entry.generics);

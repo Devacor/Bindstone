@@ -3597,6 +3597,10 @@ bool parser::generic_parameters(detail::generic_definition& definition, size_t o
                 return fail("expected a class after ':': '" + std::string(parameter.name) + " : Base' bounds " + std::string(parameter.name) + " by a class",
                             parameter.bound.empty() ? colon : parameter.bound.front());
             }
+            if (parameter.bound.size() == 1 && parameter.bound.front().lexeme == parameter.name) {
+                return fail("'" + std::string(parameter.name) + "' is bounded by itself in '" + generic + "': a bound names the class " + std::string(parameter.name) +
+                            " must be or derive from (" + std::string(parameter.name) + " : Base)", parameter.bound.front());
+            }
         }
         definition.parameters.push_back(std::move(parameter));
         if (closed) { list_end = i; return true; }

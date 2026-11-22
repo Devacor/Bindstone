@@ -1471,9 +1471,9 @@ private:
         {
             instance_scope scope(instance_ctx_, asker);
             for (const auto& bound : request->bounds) {
-                if (class_is_or_derives(bound.argument, bound.requires_)) { continue; }
+                if (class_is_or_derives(handle_class(bound.argument), bound.requires_)) { continue; }
                 bounded = false;
-                std::string text = std::string(request->name) + ": '" + bound.argument + "' does not derive from '" + bound.requires_ + "', which " + bound.parameter + " requires";
+                std::string text = bound_failure_text(*request, bound);
                 if (request->remade && remade_failures_) { note_remade_failure(*request, request->location, text); }
                 diag(diag_level::error, request->location, std::move(text), 0, 0, /*always_error=*/true);
             }
@@ -3078,6 +3078,26 @@ private:
     }
 
     // cls is base or derives from it, through the modeled chain and registered ancestors
+    // The class a type argument names for a bound: a shared_ptr's, as dynamic_cast<T> reads a handle; any other type as it is
+    static std::string_view handle_class(std::string_view argument) {
+        constexpr std::string_view handle = "shared_ptr<";
+        if (argument.size() > handle.size() && argument.substr(0, handle.size()) == handle && argument.back() == '>') {
+            return argument.substr(handle.size(), argument.size() - handle.size() - 1);
+        }
+        return argument;
+    }
+    JAI_NOINLINE std::string bound_failure_text(const generic_instance_decl& request, const generic_instance_decl::bound& bound) {
+        std::string text = std::string(request.name) + ": ";
+        const bool declared = classes_.count(bound.requires_) != 0 || (program_classes_ && program_classes_->count(bound.requires_) != 0) || engine_class(bound.requires_);
+        if (!declared) {
+            return text + "the bound of " + bound.parameter + ", '" + bound.requires_ + "', is no declared class: declare it, or bound " + bound.parameter +
+                   " by a class that is (" + bound.parameter + " : Base)";
+        }
+        text += "'" + bound.argument + "' does not derive from '" + bound.requires_ + "', which " + bound.parameter + " requires";
+        if (bound.argument.starts_with("weak_ptr<")) { text += ": a weak_ptr names no object until it is locked; pass w.lock()"; }
+        return text;
+    }
+
     bool class_is_or_derives(std::string_view cls, std::string_view base, int depth = 0) {
         if (cls == base) { return true; }
         if (depth > 32) { return false; }

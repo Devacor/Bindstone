@@ -249,8 +249,9 @@ Pool&lt;Orc&gt; orcs;
 goblins.spawn();
 goblins.spawn();
 orcs.spawn();
-print(Pool&lt;Goblin&gt;::made, &quot; &quot;, Pool&lt;Orc&gt;::made, &quot; &quot;, id_of(Goblin()));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2 1 0</code></pre></div>
+print(Pool&lt;Goblin&gt;::made, &quot; &quot;, Pool&lt;Orc&gt;::made, &quot; &quot;, id_of(Goblin()), &quot; &quot;, id_of(goblins.live[0]));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2 1 0 0</code></pre></div>
+<p>A handle meets a bound its class meets, as <code>dynamic_cast&lt;T&gt;</code> reads one: <code>id_of(goblins.live[0])</code> and <code>id_of(new Goblin())</code> are <code>id_of&lt;shared_ptr&lt;Goblin&gt;&gt;</code>, <code>T</code> is the handle, and the body reaches <code>e.id</code> through it as code does anywhere; <code>Pool&lt;shared_ptr&lt;Goblin&gt;&gt;</code> is an instance too. A <code>weak_ptr</code> meets no bound, since it names no object until it is locked: <code>id_of(w)</code> fails with <code>&#x27;weak_ptr&lt;Goblin&gt;&#x27; does not derive from &#x27;Entity&#x27;, which T requires: a weak_ptr names no object until it is locked; pass w.lock()</code>.</p>
 <p>The bound is checked where the instance is asked for, before its body:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Entity { int id = 0; }
 class Pool&lt;T : Entity&gt; { array&lt;shared_ptr&lt;T&gt;&gt; live; }
@@ -260,6 +261,7 @@ Pool&lt;int&gt; numbers;</code></pre></div>
 &lt;script&gt;:4:5: error: Pool&lt;int&gt;: &#x27;int&#x27; does not derive from &#x27;Entity&#x27;, which T requires
     Pool&lt;int&gt; numbers;
         ^</code></pre></div>
+<p>A bound that names no declared class is the same error at each instance asked for, with what is wrong: <code>A&lt;int&gt;: the bound of T, &#x27;Nope&#x27;, is no declared class: declare it, or bound T by a class that is (T : Base)</code>. A parameter bounded by itself, <code>T : T</code>, is an error where the generic is declared, used or not: <code>&#x27;T&#x27; is bounded by itself in &#x27;A&#x27;: a bound names the class T must be or derive from (T : Base)</code>.</p>
 <h2 id="generic-methods">Generic methods<a class="hlink" href="#generic-methods" aria-label="link">&#8203;</a></h2>
 <p>A method lists type parameters like a function. Its instance is a real method of the class: it reads <code>this</code>, the class&#x27;s private members and its other methods, and <code>static</code> works as for any method. A generic class may declare generic methods of its own.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class CartForm { string sku; int count = 0; }

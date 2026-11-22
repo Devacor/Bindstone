@@ -23,6 +23,12 @@
 
 namespace jai::foundry::tests {
 
+struct generic_bound_host_base {
+	virtual ~generic_bound_host_base() = default;
+	int64_t n = 0;
+};
+struct generic_bound_host : generic_bound_host_base {};
+
 class generics_tests : public suite {
 public:
 	generics_tests() : suite("Generics") {}
@@ -1225,13 +1231,63 @@ public:
 			check_eq((int64_t)0, e->execute("ident(Goblin()) + ident<Entity>(Entity());").as_int());
 			check_true(e->execute("sorted(Num(), Num());").as_bool());   // the bound names the parameter: Comparable<Num>
 			check_true(contains(failure(*e, "Pool<int> p;"), "<script>:1:5: error: Pool<int>: 'int' does not derive from 'Entity', which T requires"));
-			check_true(contains(failure(*e, "Pool<shared_ptr<Goblin>> p;"), "Pool<shared_ptr<Goblin>>: 'shared_ptr<Goblin>' does not derive from 'Entity', which T requires"));
 			check_true(contains(failure(*e, "ident(5);"), "<script>:1:8: error: ident<int>: 'int' does not derive from 'Entity', which T requires"));
 			check_true(contains(failure(*e, "sorted(Goblin(), Goblin());"), "sorted<Goblin>: 'Goblin' does not derive from 'Comparable<Goblin>', which T requires"));
 			// the error is the use's: the body the argument would break is not reported beside it
 			const std::string only = failure(*e, "class Named<T : Entity> { T v; string name() { return v.nope; } }\nNamed<int> n;\n");
 			check_true(contains(only, "Named<int>: 'int' does not derive from 'Entity', which T requires") && !contains(only, "nope"));
 			check_true(contains(failure(*e, "class Bad<T : int> {}"), "expected a class after ':': 'T : Base' bounds T by a class"));
+		});
+
+		test("a_handle_meets_a_bound_its_class_meets", [this]() {
+			auto e = stdlib_engine();
+			dynamic_binder<generic_bound_host_base>(*e, "BoundHostBase").constructor<>().property("n", &generic_bound_host_base::n).build();
+			dynamic_binder<generic_bound_host>(*e, "BoundHost").constructor<>().base_class<generic_bound_host_base>().build();
+			e->execute(R"(
+				class Entity { int id = 4; }
+				class Goblin : Entity { int gold = 3; }
+				class Rock { int id = 1; }
+				int ident<T : Entity>(T e) { return e.id; }
+				class Hold<T : Entity> { array<T> items; int first() { return items[0].id; } }
+				namespace zoo { class Pen<T : Entity> { T held; } }
+				class Mine : BoundHostBase { int own = 1; }
+				int host_n<T : BoundHostBase>(T h) { return h.n; }
+				shared_ptr<Goblin> g = new Goblin();
+			)");
+			check_eq((int64_t)16, e->execute("ident(g) + ident(new Goblin()) + ident<shared_ptr<Goblin>>(g) + ident(make_shared<Goblin>());").as_int());
+			check_eq((int64_t)4, e->execute("Goblin v; Goblin& r = v; ident(r);").as_int());   // a reference deduces its class
+			check_eq((int64_t)4, e->execute("Hold<shared_ptr<Goblin>> h; h.items.push(g); h.first();").as_int());
+			check_eq((int64_t)3, e->execute("zoo::Pen<shared_ptr<Goblin>> p; p.held = g; p.held.gold;").as_int());
+			check_eq((int64_t)0, e->execute("shared_ptr<BoundHost> bh = new BoundHost(); host_n(bh) + host_n(new Mine());").as_int());
+			check_eq(std::string("reflected"), e->execute("reflect::type_of(Hold<shared_ptr<Goblin>>()) == \"Hold<shared_ptr<Goblin>>\" ? \"reflected\" : \"no\";").as_string());
+			// a handle to a class the bound refuses is refused as the class is; a weak_ptr names no object until it is locked
+			check_true(contains(failure(*e, "shared_ptr<Rock> k = new Rock(); ident(k);"), "ident<shared_ptr<Rock>>: 'shared_ptr<Rock>' does not derive from 'Entity', which T requires"));
+			check_true(contains(failure(*e, "Hold<shared_ptr<Rock>> h;"), "Hold<shared_ptr<Rock>>: 'shared_ptr<Rock>' does not derive from 'Entity', which T requires"));
+			const std::string weak = "'weak_ptr<Goblin>' does not derive from 'Entity', which T requires: a weak_ptr names no object until it is locked; pass w.lock()";
+			check_true(contains(failure(*e, "weak_ptr<Goblin> w = g; ident(w);"), "ident<weak_ptr<Goblin>>: " + weak));
+			check_true(contains(failure(*e, "Hold<weak_ptr<Goblin>> h;"), "Hold<weak_ptr<Goblin>>: " + weak));
+			check_eq((int64_t)4, e->execute("weak_ptr<Goblin> w = g; ident<shared_ptr<Goblin>>(w.lock());").as_int());
+		});
+
+		test("a_bound_that_names_no_class_says_so_where_the_instance_is_asked_for", [this]() {
+			auto e = stdlib_engine();
+			e->execute("class Real { int n = 0; } class A<T : Nope> { T v; } int f<T : Nope>(T x) { return 1; } namespace ns { class B<U : Gone> { U v; } } 1;");
+			const std::string a = failure(*e, "A<int> a;");
+			check_true(contains(a, "<script>:1:2: error: A<int>: the bound of T, 'Nope', is no declared class: declare it, or bound T by a class that is (T : Base)"), a);
+			check_true(contains(failure(*e, "A<Real> a;"), "A<Real>: the bound of T, 'Nope', is no declared class"));
+			check_true(contains(failure(*e, "f(Real());"), "f<Real>: the bound of T, 'Nope', is no declared class: declare it, or bound T by a class that is (T : Base)"));
+			check_true(contains(failure(*e, "ns::B<Real> b;"), "ns::B<Real>: the bound of U, 'Gone', is no declared class: declare it, or bound U by a class that is (U : Base)"));
+			check_eq((int64_t)2, e->execute("class Nope { int n = 2; } class Kin : Nope {} A<Kin> k; k.v.n;").as_int());   // declared later, it bounds
+		});
+
+		test("a_parameter_bounded_by_itself_fails_where_the_generic_is_declared", [this]() {
+			auto e = make_engine();
+			check_true(contains(failure(*e, "class A<T : T> { T v; }\n1;"), "<script>:1:13: error: 'T' is bounded by itself in 'A': a bound names the class T must be or derive from (T : Base)"));
+			check_true(contains(failure(*e, "int f<T : T>(T x) { return 1; }"), "'T' is bounded by itself in 'f': a bound names the class T must be or derive from (T : Base)"));
+			check_true(contains(failure(*e, "class C { static void m<U : U>() {} }"), "'U' is bounded by itself in 'm': a bound names the class U must be or derive from (U : Base)"));
+			check_true(contains(failure(*e, "namespace n { class P<K, V : V> { K k; } }"), "'V' is bounded by itself in 'P'"));
+			// a bound that names another parameter is no bound by itself
+			check_eq((int64_t)3, e->execute("class Base { int n = 3; } class Sub : Base {} class Two<T, U : T> { U u; } Two<Base, Sub> t; t.u.n;").as_int());
 		});
 
 		// ---- generic methods

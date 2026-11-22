@@ -476,7 +476,8 @@ public:
                                        "void f() { try { } catch (TplBox<bool> e) { } }", "extern TplBox<bool> held;", "var v = 1; cast<TplBox<bool>>(v);",
                                        "var v = 1; dynamic_cast<TplBox<bool>>(v);", "void f() { auto p = new TplBox<bool>(); }",
                                        "void f() { auto p = make_shared<TplBox<bool>>(); }", "void f() { auto b = TplBox<bool>(); }",
-                                       "void f() { auto b = TplBox<bool>{}; }", "void f() { auto xs = array<TplBox<bool>>(); }"}) {
+                                       "void f() { auto b = TplBox<bool>{}; }", "void f() { auto xs = array<TplBox<bool>>(); }",
+                                       "class Plain : TplBox<bool> { int more = 1; }", "class V<T> : TplBox<T> { T more; } V<bool> v;"}) {
                 check_true(message(source).find("error: " + unbound) != std::string::npos, std::string(source) + " -> " + message(source));
             }
             check_true(message("TplBox<TplBox<bool>> nested;").find("error: 'TplBox<TplBox<bool>>' is not bound: the host binds TplBox<int>, TplBox<int32>, TplBox<string>") != std::string::npos,
@@ -490,6 +491,8 @@ public:
                 check_eq(unbound, message("[[warn_mode]]; var c = \"\"; try { " + std::string(construction) + " } catch (e) { c = e; } c"), construction);
             }
             check_eq("reflect::construct: " + unbound, message("var c = \"\"; try { reflect::construct(\"TplBox<\" + \"bool>\"); } catch (e) { c = e; } c"));
+            check_true(message("[[warn_mode]]; class Based : TplBox<bool> { int more = 1; }").find(unbound) != std::string::npos,
+                       message("[[warn_mode]]; class Based : TplBox<bool> { int more = 1; }"));
             check_eq(std::string("No constructor found for class 'Nope'"), message("[[warn_mode]]; var c = \"\"; try { auto p = new Nope(); } catch (e) { c = e; } c"));
 
             auto many = make_engine();

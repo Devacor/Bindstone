@@ -1394,6 +1394,14 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
 
 namespace {
 
+// A base no class names: an unbound spelling of a host template lists the bound instances, as every other use of it does
+JAI_NOINLINE checked_result<void> base_class_not_found(engine* eng, string_symbolizer* symbols, std::string_view base_name, uint64_t base_name_id) {
+    if (const std::string unbound = eng ? detail::unbound_instantiation_text(*eng, base_name) : std::string(); !unbound.empty()) {
+        return checked_result<void>(make_error_code(runtime_error_code::class_not_found), "{0}", symbols->intern(unbound));
+    }
+    return checked_result<void>(make_error_code(runtime_error_code::class_not_found), "Base class '{0}' not found", base_name_id);
+}
+
 checked_result<void> define_script_class(class_decl* decl, const class_declaration_host& host) {
     engine* eng = host.eng;
     string_symbolizer* symbols = host.symbols;
@@ -1483,15 +1491,13 @@ checked_result<void> define_script_class(class_decl* decl, const class_declarati
                     return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
                         "Constructor found for '{0}' but no class definition available", base_name_id);
                 } else {
-                    return checked_result<void>(make_error_code(runtime_error_code::class_not_found),
-                        "Base class '{0}' not found", base_name_id);
+                    return base_class_not_found(eng, symbols, base_name, base_name_id);
                 }
             } else if (env->contains(base_name_id)) {
                 return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
                     "Script class inheriting from C++ class '{0}' requires engine integration", base_name_id);
             } else {
-                return checked_result<void>(make_error_code(runtime_error_code::class_not_found),
-                    "Base class '{0}' not found", base_name_id);
+                return base_class_not_found(eng, symbols, base_name, base_name_id);
             }
 
             if (base_class_def && base_class_def->is_final()) {

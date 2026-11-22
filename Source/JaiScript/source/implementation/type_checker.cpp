@@ -11875,7 +11875,8 @@ private:
         for (std::string_view base : cd->base_classes) {
             if (find_sclass(base) || engine_class(base) || base.find("::") != std::string_view::npos || global_var_names_.count(base) ||
                 engine_knows_name(std::string(base))) { continue; }
-            diag(diag_level::error, cd->location, "Base class '" + std::string(base) + "' not found");
+            const std::string unbound = eng_.unbound_instantiation_text(base);
+            diag(diag_level::error, cd->location, unbound.empty() ? "Base class '" + std::string(base) + "' not found" : unbound);
             return;
         }
         report_diamond(cd);

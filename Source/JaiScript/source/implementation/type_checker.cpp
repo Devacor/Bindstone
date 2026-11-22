@@ -1112,7 +1112,7 @@ private:
         // result (lambda_return_types_); mixed for two types or one the load cannot name
         const type_info* returned = nullptr;
         bool returned_mixed = false;
-        // the same with the results declarations state read (ctype::declared_result): a deduction reads it on its second pass
+        // the same with the results declarations state read (ctype::declared_result): what a deduction reads
         const type_info* stated = nullptr;
         bool stated_mixed = false;
         bool returns_nothing = false;
@@ -1737,18 +1737,16 @@ private:
 
     // ---- deduction (docs/site/guide/21-generics.html "Deduction")
 
-    // The one type a lambda's returns yield where it declares none; on a call's second pass, the one they yield with declared
-    // results read
+    // The one type a lambda's returns yield where it declares none: what the load is certain of, else the one its returns give
+    // with the results declarations state read
     const type_info* lambda_yield(const lambda_expr* l) const {
         if (const auto yields = lambda_return_types_.find(l); yields != lambda_return_types_.end()) { return yields->second; }
-        if (deducing_from_declared_results_) {
-            if (const auto states = lambda_stated_return_types_.find(l); states != lambda_stated_return_types_.end()) { return states->second; }
-        }
-        return nullptr;
+        const auto states = lambda_stated_return_types_.find(l);
+        return states == lambda_stated_return_types_.end() ? nullptr : states->second;
     }
     // What a value argument's load-time type is, as a type an instance can be made with; null when the load does not know it.
-    // declared_results: a result a declaration states counts (a call's second pass, deducing_from_declared_results_)
-    const type_info* deduction_type(const ctype& arg) { return deduction_type(arg, deducing_from_declared_results_); }
+    // declared_results: a result a declaration states counts (ctype::declared_result), as it does for every call's deduction
+    const type_info* deduction_type(const ctype& arg) { return deduction_type(arg, true); }
     const type_info* deduction_type(const ctype& arg, bool declared_results) {
         const type_info* t = arg.ti;
         while (t && t->base_type == script_value_type::jai_reference_type && !t->type_params.empty()) { t = t->type_params[0].get(); }
@@ -2101,35 +2099,23 @@ private:
         std::vector<std::vector<type_info_ptr>> fitting_types;
         std::string deduction_error;
         bool counted = false;
-        const auto find_fitting = [&]() {
-            for (const auto& g : candidates) {
-                const bool counts = is_class ? g->parameters.size() == given : g->parameters.size() >= given;
-                if (!counts || (!is_class && (values < g->required_values() || values > g->values.size()))) { continue; }
-                counted = true;
-                std::vector<type_info_ptr> types;
-                for (size_t i = 0; i < given; ++i) { types.push_back(static_cast<const cast_expr*>(c->arguments[i].get())->target); }
-                if (types.size() < g->parameters.size()) {
-                    const std::vector<ctype> value_args(args.begin() + static_cast<std::ptrdiff_t>(given), args.end());
-                    std::string error;
-                    if (!deduce_type_arguments(c, *g, value_args, types, error)) {
-                        if (deduction_error.empty()) { deduction_error = std::move(error); }
-                        continue;
-                    }
+        for (const auto& g : candidates) {
+            const bool counts = is_class ? g->parameters.size() == given : g->parameters.size() >= given;
+            if (!counts || (!is_class && (values < g->required_values() || values > g->values.size()))) { continue; }
+            counted = true;
+            std::vector<type_info_ptr> types;
+            for (size_t i = 0; i < given; ++i) { types.push_back(static_cast<const cast_expr*>(c->arguments[i].get())->target); }
+            if (types.size() < g->parameters.size()) {
+                const std::vector<ctype> value_args(args.begin() + static_cast<std::ptrdiff_t>(given), args.end());
+                std::string error;
+                if (!deduce_type_arguments(c, *g, value_args, types, error)) {
+                    if (deduction_error.empty()) { deduction_error = std::move(error); }
+                    continue;
                 }
-                fitting.push_back(g);
-                fitting_types.push_back(std::move(types));
             }
-        };
-        // What the load is certain of comes first: a call that finds its type arguments there keeps exactly what it found. One
-        // that finds none reads the results builtins and host functions declare (a call inside an argument judges itself)
-        const bool enclosing = std::exchange(deducing_from_declared_results_, false);
-        find_fitting();
-        if (fitting.empty() && counted) {
-            deducing_from_declared_results_ = true;
-            deduction_error.clear();
-            find_fitting();
+            fitting.push_back(g);
+            fitting_types.push_back(std::move(types));
         }
-        deducing_from_declared_results_ = enclosing;
         if (fitting.empty() && counted) {
             diag(diag_level::error, c->location, deduction_error);
             return generic_call::pending;
@@ -2728,6 +2714,8 @@ private:
         return a_type;
     }
     static bool kind_certain(const ctype& a_type) { return !a_type.tentative || a_type.declared_slot; }
+    // a kind the program states: a certain one, or a result a declaration gives
+    static bool kind_stated(const ctype& a_type) { return kind_certain(a_type) || a_type.declared_result; }
     // a store to it: the declared type the right side must fit, unknown when no spelled declaration is in sight
     ctype check_namespace_variable_store(const std::string& path, std::string_view member, const ctype& rhs, bool compound, token_type base_op,
                                          const source_location& loc) {
@@ -4456,6 +4444,14 @@ private:
     }
 
     ctype container_value_type(const ctype& container) {
+        // a string's element is what its subscript gives: a char, and a utf8_string's a utf8_string
+        if ((container.kind == ctype::string_k || container.kind == ctype::utf8_k) && kind_stated(container)) {
+            ctype character = ctype::make(container.kind == ctype::string_k ? ctype::char_k : ctype::utf8_k);
+            character.tentative = true;
+            character.declared_result = true;
+            character.declared_slot = container.declared_slot;
+            return character;
+        }
         if (!container.ti) { return {}; }
         const type_info* element = container.kind == ctype::array_k
             ? container.ti->element_type().get()
@@ -5402,6 +5398,28 @@ private:
         return !path.empty() && path.find("::") != std::string::npos && !namespace_known(path) && !namespace_class_named(path).empty();
     }
 
+    // A value a host registered in its namespace (math::pi): script cannot assign it, so its kind is the one it was registered with
+    ctype host_namespace_value_type(const std::string& path, std::string_view member) {
+        const std::string qualified = path + "::" + std::string(member);
+        if (namespaces_.count(std::string_view(path)) || (program_globals_ && program_globals_->count(qualified))) { return {}; }
+        script_namespace_data* space = eng_.find_namespace(path);
+        if (!space) { return {}; }
+        eng_.note(qualified);
+        const auto found = space->variables.find(eng_.symbolize(member));
+        if (found == space->variables.end()) { return {}; }
+        const script_value& value = found->second.deref();
+        ctype t;
+        if (value.is_int()) { t = ctype::make(ctype::int_k); }
+        else if (value.is_float()) { t = ctype::make(ctype::float_k); }
+        else if (value.is_bool()) { t = ctype::make(ctype::bool_k); }
+        else if (value.is_string()) { t = ctype::make(ctype::string_k); }
+        else if (value.is_char()) { t = ctype::make(ctype::char_k); }
+        else { return {}; }
+        t.tentative = true;
+        t.declared_result = true;
+        return t;
+    }
+
     // What a read of the namespace member `path::member` gives: a function (its declarations, when the unit makes every one a
     // call could reach), else the declared type of a variable
     ctype namespace_member_read(const std::string& path, std::string_view member) {
@@ -5410,7 +5428,8 @@ private:
             if (const std::string_view cls = namespace_class_named(path + "::" + std::string(member)); !cls.empty()) {
                 return read_through_declared_slot(ctype{ctype::class_ref_k, cls});
             }
-            return namespace_variable_type(path, member);
+            const ctype declared = namespace_variable_type(path, member);
+            return declared.is_unknown() ? host_namespace_value_type(path, member) : declared;
         }
         ctype named = ctype::make(ctype::function_k);
         if (fns.only_own() && fns.typed.size() == fns.own->size() && !find_sclass(path) && !known_class(path)) { named.fns = fns.own; }
@@ -9456,7 +9475,7 @@ private:
                 }
             }
             if (recv.declared_slot && !m->is_static) { return read_through_declared_slot(builtin_result(recv, m, args)); }
-            return !recv.tentative && !m->is_static ? builtin_result(recv, m, args) : ctype{};   // builtin container/string methods etc.
+            return kind_stated(recv) && !m->is_static ? builtin_result(recv, m, args) : ctype{};   // builtin container/string methods etc.
         }
         if (const ctype held = infer(callee); signature_slot(held)) { return check_signature_call("the callee", held.ti, c, args); }
         return {};
@@ -12408,9 +12427,6 @@ private:
     std::unordered_map<const lambda_expr*, ctype> lambda_results_;   // an undeclared lambda whose returns are one certain scalar kind
     std::unordered_map<const lambda_expr*, const type_info*> lambda_return_types_;   // and the one type they yield, void for none (fn_ctx::returned)
     std::unordered_map<const lambda_expr*, const type_info*> lambda_stated_return_types_;   // the one type they yield with declared results read (fn_ctx::stated)
-    // A generic call whose type arguments nothing the load is certain of names is deduced again with the results declarations
-    // state (ctype::declared_result): deduction_type reads those only then, so every call that deduced without them is unchanged
-    bool deducing_from_declared_results_ = false;
 
     // An init-capture, or an explicit by-value capture of a program-scope name, holds a copy taken at creation:
     // the call reads that copy, never the name, so the body is not grafted at the call site

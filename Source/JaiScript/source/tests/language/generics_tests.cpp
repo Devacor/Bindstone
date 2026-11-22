@@ -1147,13 +1147,20 @@ public:
 			check_true(contains(refusal("either(s.find(\"l\"), s.substr(1));"), "cannot deduce T for 'either': it is int from argument 1 and string from argument 2"));
 			check_true(contains(refusal("apply(1, (int k) => { if (k > 0) { return s.find(\"l\"); } return \"none\"; });"),
 				"cannot deduce U for 'apply': argument 2 is a function, which says nothing of a type; write apply<int, U>(...)"));
-			// a call that finds its type arguments in what the load is certain of keeps them: a declared result beside it converts
-			// as any argument does
-			check_eq(std::string("float int string 2.0"), text(
-				"of(either(s.find(\"l\"), 2.5)) + \" \" + of(either(xs.contains(1), 1)) + \" \" + of(either(s.substr(1), \"x\")) + \" \" + to_string(either(s.find(\"l\"), 2.5));"));
-			check_eq(std::string("5"), text("T first<T>(T a, int n) { return a; } U first<U>(string a, U n) { return n; } to_string(first(s.substr(1), 5));"));
-			// what no declaration states is still not known: a var's method, a builtin's open result, a builtin called on a builtin's result
-			for (const char* unknown : {"var v = s; id(v.substr(1));", "id(s.split(\",\"));", "id(s.substr(1).size());"}) {
+			// a declared result is a type like any other: beside another type it is the two-types error, and it picks among generics
+			check_true(contains(refusal("either(s.find(\"l\"), 2.5);"), "cannot deduce T for 'either': it is int from argument 1 and float from argument 2"));
+			check_true(contains(refusal("either(xs.contains(1), 1);"), "cannot deduce T for 'either': it is bool from argument 1 and int from argument 2"));
+			check_true(contains(refusal("T first<T>(T a, int n) { return a; } U first<U>(string a, U n) { return n; } first(s.substr(1), 5);"),
+				"call to 'first' is ambiguous: the generics 'first<T>'"));
+			check_eq(std::string("string 2.0"), text("of(either(s.substr(1), \"x\")) + \" \" + to_string(either<float>(s.find(\"l\"), 2.5));"));
+			// the text functions, a string's element, a host namespace's value and a builtin on a declared result
+			check_eq(std::string("string string string char utf8_string float float int int int"), text(
+				"int n = 5; of(to_string(n)) + \" \" + of(format(\"{}\", n)) + \" \" + of(vformat(\"{}\", n)) + \" \" + of(s[1]) + \" \" + of(u[1]) + \" \" + of(math::pi) + \" \" + "
+				"of(math::tau * 2.0) + \" \" + of(s.substr(1).size()) + \" \" + of(to_string(n).size()) + \" \" + of(names.back().size());"));
+			// so a line that can never succeed is the load's error, in the slot's own text
+			check_true(contains(refusal("if (false) { array<int> q = to_string(5); }"), "cannot initialize 'q' declared 'array<int>' with 'string': expected 'array<int>', got 'string'"));
+			// what no declaration states is still not known: a var's method and element, a builtin's open result
+			for (const char* unknown : {"var v = s; id(v.substr(1));", "var v = s; id(v[1]);", "id(s.split(\",\"));"}) {
 				check_true(contains(refusal(unknown), "cannot deduce T for 'id': argument 1's type is not known at load; write id<T>(...)"), unknown);
 			}
 		});

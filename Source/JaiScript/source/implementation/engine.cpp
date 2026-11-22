@@ -3633,7 +3633,9 @@ struct engine::implementation {
                 if (auto f = ns.functions.find(*member); f != ns.functions.end()) {
                     for (const auto& decl : f->second) { fold(mix_key(0xF1, decl ? ran_unit_key(decl->unit.id) : 0)); }
                 }
-                if (auto v = ns.variables.find(*member); v != ns.variables.end()) { fold(mix_key(0xB1, value_signature(v->second))); }
+                if (auto v = ns.variables.find(*member); v != ns.variables.end()) {   // its kind too: the checker types a host's value by it
+                    fold(mix_key(0xB1, mix_key(value_signature(v->second), uint64_t(v->second.deref().raw_storage_index()))));
+                }
                 if (auto c = ns.classes.find(*member); c != ns.classes.end() && c->second) { fold(mix_key(0xC2, ran_unit_key(c->second->unit().id))); }
                 if (auto h = ns.signatures.find(*member); h != ns.signatures.end()) {
                     const host_entry_signature& sig = h->second;

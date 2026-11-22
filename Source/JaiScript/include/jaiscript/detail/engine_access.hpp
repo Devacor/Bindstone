@@ -59,6 +59,7 @@ namespace jai::detail {
         JAI_FORCEINLINE static uint64_t host_function_writeback(const engine& a_engine, const std::string& name) { return a_engine.host_function_writeback(name); }
         JAI_FORCEINLINE static uint32_t parallel_region_serial(const engine& a_engine) { return a_engine.parallel_region_serial(); }
         JAI_FORCEINLINE static bool host_function_result(const engine& a_engine, const std::string& name, script_value_type& out) { return a_engine.host_function_result(name, out); }
+        JAI_FORCEINLINE static void stage_host_result(engine& a_engine, script_value_type kind) { a_engine.stage_host_result(kind); }
         JAI_FORCEINLINE static std::vector<std::pair<size_t, const std::string*>> constant_argument_indexes(const engine& a_engine, const std::string& callable) { return a_engine.constant_argument_indexes(callable); }
         JAI_FORCEINLINE static bool has_constant_arguments(const engine& a_engine) { return a_engine.has_constant_arguments(); }
         JAI_FORCEINLINE static const std::unordered_map<std::string, std::vector<std::string>>& constant_texts_by_name(const engine& a_engine) { return a_engine.constant_texts_by_name(); }

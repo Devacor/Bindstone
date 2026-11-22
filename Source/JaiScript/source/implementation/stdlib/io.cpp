@@ -317,7 +317,12 @@ namespace stdlib {
         constexpr engine::host_direct_invoke format_literal = [](const void* target, const script_value* args, size_t argc) -> checked_result<script_value> {
             return format_values(static_cast<engine*>(const_cast<void*>(target)), args, argc, true);
         };
-        eng_ref.add_variadic_function("format", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        // format, vformat and to_string give a string whatever they are passed: the registration states it, as a typed binding's does
+        const auto add_text_function = [&eng_ref](const std::string& name, script_function fn) {
+            detail::engine_access::stage_host_result(eng_ref, script_value_type::jai_string_type);
+            eng_ref.add_variadic_function(name, std::move(fn));
+        };
+        add_text_function("format", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
             return format_values(eng, args.data(), args.size(), false);
         });
         eng_ref.add_host_direct("format", engine::host_direct_any_arity, [](const void* target, const script_value* args, size_t argc) -> checked_result<script_value> {
@@ -326,7 +331,7 @@ namespace stdlib {
         detail::engine_access::add_format_literal(eng_ref, "format", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
             return format_values(eng, args.data(), args.size(), true);
         }, format_literal, eng);
-        eng_ref.add_variadic_function("vformat", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        add_text_function("vformat", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
             return format_values(eng, args.data(), args.size(), true);
         });
         eng_ref.add_host_direct("vformat", engine::host_direct_any_arity, format_literal, eng);
@@ -341,7 +346,7 @@ namespace stdlib {
             if (detail::engine_access::backend_unwinding(*e)) { return script_value(std::monostate{}, e); }
             return script_value(std::move(text.value()), e);
         };
-        eng_ref.add_variadic_function("to_string", [eng, to_string_of](const std::vector<script_value>& args) -> checked_result<script_value> {
+        add_text_function("to_string", [eng, to_string_of](const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 1) {
                 throw runtime_error("to_string expects exactly 1 argument, got " + std::to_string(args.size()));
             }

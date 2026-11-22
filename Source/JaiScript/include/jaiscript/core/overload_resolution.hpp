@@ -638,6 +638,7 @@ inline checked_result<const std::shared_ptr<function_decl>*> class_definition::r
 
 inline error_propagator class_definition::method_overload_miss(std::error_code ec, uint64_t name_id, const script_value* args, size_t argc) const {
     auto it = method_overloads_.find(name_id);
+    if (engine* eng = get_engine()) { name_id = detail::listed_member_id(*detail::engine_access::get_symbolizer(*eng), name_id); }   // the method as the class lists it
     if (ec == make_error_code(runtime_error_code::ambiguous_call) && it != method_overloads_.end()) {
         const auto verdict = score_declarations(it->second, args, argc, get_engine());
         if (verdict.rival) { return detail::ambiguous_call(name_id, (*verdict.best)->parameters, (*verdict.rival)->parameters, args, argc, get_engine()); }

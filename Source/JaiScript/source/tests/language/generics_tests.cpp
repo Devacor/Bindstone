@@ -1518,6 +1518,58 @@ public:
 			check_true(contains(denied, "Cannot access private member 'hid<int>' of class 'Plain'"), denied);
 		});
 
+		test("a_text_about_a_call_names_a_generic_methods_instance_as_its_class_lists_it", [this]() {
+			// An instance is declared under its class's name (Tool::scaled<int>) and named as a plain method is, bare: by the
+			// errors a call raises, by the frames of a stack trace and by the load's texts about a call
+			const std::string prelude = R"(
+				class Tool {
+					int level = 1;
+					T scaled<T>(T x) { return x * level; }
+					T loose<T>(var x) { return x; }
+					T bump<T>(T x) { level += 1; return x; }
+					T boom<T>(T x) { throw "bang"; return x; }
+					T half<T>(T x) { return 10 / x; }
+					static T made<T>(T x) { return x; }
+				}
+				class Sub : Tool {}
+				class Pair<A, B> { A a; T conv<T>(T x) { throw "deep"; return x; } }
+				namespace kit { class Box { T keep<T>(T x) { throw "inside"; return x; } } }
+			)";
+			struct row { std::string statement, says, trace; };
+			const std::vector<row> rows = {
+				{"shared_ptr<Tool> p; p.scaled<int>(4);", "Cannot call 'scaled<int>' on null ('p' is null)", ""},
+				{"shared_ptr<Sub> p; p.scaled<int>(4);", "Cannot call 'scaled<int>' on null ('p' is null)", ""},
+				{"shared_ptr<Pair<string, int>> p; p.conv<int>(1);", "Cannot call 'conv<int>' on null ('p' is null)", ""},
+				{"Tool t; var a = \"x\"; t.scaled<int>(a);", "Cannot pass string to parameter 'x' of 'scaled<int>' (declared int)", "at scaled<int> ("},
+				{"var a = \"x\"; Tool::made<int>(a);", "Cannot pass string to parameter 'x' of 'made<int>' (declared int)", "at made<int> ("},
+				{"Tool t; t.loose<int>(\"s\");", "Cannot return string from 'loose<int>' (declared -> int)", "at loose<int> ("},
+				{"Tool t; t.scaled<int>(1); var f = reflect::bind(t, \"scaled<int>\"); f(1, 2);", "'scaled<int>' expects 1 argument, got 2", ""},
+				{"Tool t; t.scaled<int>(1); reflect::invoke(t, \"scaled<int>\", \"x\");", "Cannot pass string to parameter 'x' of 'scaled<int>' (declared int)", "at scaled<int> ("},
+				{"Tool t; array<int> out = [0, 0, 0, 0]; parallel_for (auto& x : out) { x = t.bump<int>(x); }", "method 'bump<int>' of 'Tool' writes its object", ""},
+				{"Tool t; t.boom<int>(1);", "bang", "at boom<int> ("},
+				{"int go(int z) { Tool t; return t.half<int>(z); } go(0);", "ivision by zero", "at half<int> ("},
+				{"Pair<string, int> p; p.conv<int>(1);", "deep", "at conv<int> ("},
+				{"kit::Box b; b.keep<int>(1);", "inside", "at keep<int> ("},
+				// the load's texts about a call
+				{"Tool t; t.scaled<int>(\"x\");", "argument 1 of 'scaled<int>': cannot pass 'string' to 'x' declared 'int'", ""},
+				{"Tool::made<int>(\"x\");", "argument 1 of 'made<int>': cannot pass 'string' to 'x' declared 'int'", ""},
+				{"const Tool t; t.bump<int>(1);", "cannot call 'bump<int>' on 't': 't' is const and 'bump<int>' writes its receiver", ""},
+				{"class R { T back<T>(T x) { return \"s\"; } } R r; r.back<int>(1);", "cannot return 'string' from 'back<int>' declared to return 'int'", ""},
+			};
+			for (const row& r : rows) {
+				auto e = stdlib_engine();
+				e->execute(prelude);
+				const std::string got = failure(*e, r.statement);
+				check_true(contains(got, r.says), r.statement + " | " + got);
+				const std::string trace = r.trace.empty() ? std::string() : e->format_stack_trace();
+				check_true(contains(trace, r.trace), r.statement + " | " + trace);
+				for (const char* declared : {"Tool::", "Pair<string, int>::", "kit::", "Box::", "R::"}) {   // no text quotes the declared name, no frame leads with it
+					check_true(!contains(got, std::string("'") + declared), r.statement + " | " + got);
+					check_true(!contains(trace, std::string("at ") + declared), r.statement + " | " + trace);
+				}
+			}
+		});
+
 		test("the_receivers_class_picks_a_generic_methods_instance", [this]() {
 			auto e = stdlib_engine();
 			e->execute(R"(

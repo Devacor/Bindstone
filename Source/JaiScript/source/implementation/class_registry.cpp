@@ -1244,6 +1244,7 @@ namespace {
                 return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), "{0}", symbols.intern(e.what()));
             }
             if (instance.access != access_level::public_access) { def.set_nonpublic_member(name_id, instance.access); }
+            symbols.intern(std::string(member_display_name(instance.ast->name)));   // the name its texts show (listed_member_id)
         }
         return {};
     }

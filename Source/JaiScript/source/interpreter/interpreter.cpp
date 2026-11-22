@@ -3961,7 +3961,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                 }
                 if (direct_ast) {
                     script_defined_function script_func(
-                        direct_ast->name,
+                        direct_ast->shown_name(),
                         shared_parameters_for(direct_ast),
                         direct_ast->return_type,
                         direct_ast->body,
@@ -4882,7 +4882,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
             }
         }
         if (objectValue.is_null()) {
-            return checked_result<void>(make_error_code(runtime_error_code::member_access_on_null), null_member_message(expr->object.get(), as_callee), expr->member_id, null_member_receiver_symbol(expr->object.get()));
+            return checked_result<void>(make_error_code(runtime_error_code::member_access_on_null), null_member_message(expr->object.get(), as_callee), detail::listed_member_id(*string_symbolizer_, expr->member_id), null_member_receiver_symbol(expr->object.get()));
         }
         if (const std::string_view cls = class_named_by_dot_receiver(expr->object.get(), objectValue, engine_); !cls.empty()) {
             const auto [text, symbol] = class_dot_member_error(*string_symbolizer_, parallel_worker_, cls, expr->member);
@@ -8128,7 +8128,7 @@ checked_result<script_value> interpreter::execute_method_ast(std::shared_ptr<fun
     // Create a script_defined_function with the method environment (parameter storage
     // shared from the node - no per-call vector copy)
     script_defined_function script_func(
-        ast->name,
+        ast->shown_name(),
         shared_parameters_for(ast.get()),
         ast->return_type,
         ast->body,
@@ -9936,7 +9936,7 @@ bool interpreter::pause_coroutine_at(coroutine_handle& a_handle, const std::vect
     // the function object a first resume makes (resume_coroutine)
     std::vector<parameter> value_params = function->parameters;
     for (auto& p : value_params) { p.is_reference = false; }
-    state.function.emplace(function->name, value_params, function->return_type, function->body, a_handle.get_closure_env(), function->local_count);
+    state.function.emplace(function->shown_name(), value_params, function->return_type, function->body, a_handle.get_closure_env(), function->local_count);
     state.function->unit = function->unit;
     coroutine_pause pause{&a_handle, &a_sites[a_site], &a_frame};
     pending_pause_ = &pause;
@@ -10069,7 +10069,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         // Owned by the coroutine state, not this stack: the saved frames point at it
         // across every later resume (return-site conversion, debugger locals)
         state.function.emplace(
-            function->name,
+            function->shown_name(),
             value_params,
             function->return_type,
             function->body,

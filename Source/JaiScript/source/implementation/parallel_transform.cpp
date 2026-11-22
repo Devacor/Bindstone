@@ -1689,14 +1689,14 @@ namespace {
 				}
 			}
 			if (!decl) {
-				return unpinnable("method '" + std::string(name) + "' on class '" + cls->get_name() +
+				return unpinnable("method '" + std::string(member_display_name(name)) + "' on class '" + cls->get_name() +
 				                  "' is not admitted in a parallel body (only single-overload methods of the element's class or its bases)");
 			}
 			if (decl->is_coroutine) {
 				return fail(site, "coroutine method '" + std::string(name) + "' is not allowed in a parallel body");
 			}
 			if (!decl->body) {
-				return unpinnable("method '" + std::string(name) + "' has no body known at admission time");
+				return unpinnable("method '" + std::string(member_display_name(name)) + "' has no body known at admission time");
 			}
 			// The pinned worker dispatch bypasses the getter-precedence probe and the
 			// access-context check — the barrier proves both moot instead
@@ -1705,7 +1705,7 @@ namespace {
 				                  cls->get_name() + "' — not admitted in a parallel body");
 			}
 			if (cls->defines_method(sym->get_getter_id_with_view(name_id).first)) {
-				return unpinnable("method '" + std::string(name) + "' is shadowed by a property getter on class '" +
+				return unpinnable("method '" + std::string(member_display_name(name)) + "' is shadowed by a property getter on class '" +
 				                  cls->get_name() + "' — not admitted in a parallel body");
 			}
 			if (cls->chain_has_nonpublic()) {
@@ -2787,7 +2787,7 @@ namespace {
 						return true;
 					}
 					if (!parallel_readonly_method(m->member) || callback_find) {
-						return fail(m, "method '" + std::string(m->member) + "' may mutate captured state '" +
+						return fail(m, "method '" + std::string(member_display_name(m->member)) + "' may mutate captured state '" +
 						               std::string(root->name) + "'");
 					}
 					if (m->object->get_type() == node_type::identifier_expr) {
@@ -2810,7 +2810,7 @@ namespace {
 					note_method_argument_conversions(receiver_class(m->object.get()), m->member_id, call);
 					if (chain_root_is_element(m->object) && !parallel_readonly_method(m->member)) { adm.element_mutated = true; }
 					if (proof_mode && !chain_root_is_element(m->object) && (!parallel_readonly_method(m->member) || builtin_runs_script(m->member, proof_chain_type(m->object.get())))) {
-						if (global_rooted(m->object.get())) { return fail(m, "method '" + std::string(m->member) + "' may mutate program state"); }
+						if (global_rooted(m->object.get())) { return fail(m, "method '" + std::string(member_display_name(m->member)) + "' may mutate program state"); }
 						check_local_write(m->object.get(), false);
 						note_death(proof_chain_type(m->object.get()));   // a removed element dies
 					}
@@ -2845,7 +2845,7 @@ namespace {
 			if (method_class && !callee->global_qualified && method_class->defines_method(callee->symbol_id)) {
 				const script_value* bound = method_class->method_ptr(callee->symbol_id);
 				if (!bound || !bound->is_function() || !bound->as_function().target<script_method_dispatch>()) {
-					return fail(callee, "method '" + callee_name + "' must be called as 'this." + callee_name +
+					return fail(callee, "method '" + std::string(member_display_name(callee_name)) + "' must be called as 'this." + std::string(member_display_name(callee_name)) +
 					               "()' in a parallel body (a bare call of a C++ base method)");
 				}
 				collect_element_method(callee->symbol_id, callee->name, callee, call);
@@ -4946,10 +4946,10 @@ script_value* parallel_script_field(class_instance& inst, uint64_t member_id) {
 	return inst.find_field_value(member_id);
 }
 
-JAI_NOINLINE checked_result<void> parallel_method_not_admitted(uint64_t name_id) {
+JAI_NOINLINE checked_result<void> parallel_method_not_admitted(uint64_t name_id, const string_symbolizer* symbols) {
 	return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
 		"method '{0}' was not admitted in this parallel body (admitted: single-overload public methods of the element's class or its "
-		"bases touching only element, local, or captured-read state)", name_id);
+		"bases touching only element, local, or captured-read state)", symbols ? listed_member_id(*symbols, name_id) : name_id);
 }
 
 std::optional<script_value> parallel_chunk_binding(engine& eng, uint64_t name_id) {
@@ -5083,11 +5083,12 @@ std::optional<checked_result<script_value>> parallel_borrow_field(const script_v
 checked_result<void> parallel_borrow_call(const script_value& borrow, uint64_t name_id, const parallel_method_pin_table* pins) {
 	const class_definition* cd = borrow.parallel_object_borrow()->source->get_class_definition();
 	const parallel_method_pin* pin = pins && cd ? pins->find(cd, name_id) : nullptr;
-	if (!pin) { return parallel_method_not_admitted(name_id); }
+	const auto listed = [&] { return cd && cd->get_engine() ? listed_member_id(*engine_access::get_symbolizer(*cd->get_engine()), name_id) : name_id; };
+	if (!pin) { return parallel_method_not_admitted(listed()); }
 	if (pin->resolved || !parallel_borrow_view(borrow)) {
 		return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
 			"method '{0}' cannot run on a shared object in a parallel body (an object reached through a host call takes only its "
-			"C++ class's const methods)", name_id);
+			"C++ class's const methods)", listed());
 	}
 	return {};
 }
@@ -5981,13 +5982,13 @@ struct region_run {
 					method_of_object = true;
 					detail::receiver_write_analysis analysis(detail::runtime_receiver_view(&eng, engine_access::get_symbolizer(eng)));
 					if (analysis.analyze_methods(cd->get_name(), call.name).writes) {
-						return usage("method '" + std::string(call.name) + "' of '" + cd->get_name() + "' writes its object, and captured '" +
+						return usage("method '" + std::string(member_display_name(call.name)) + "' of '" + cd->get_name() + "' writes its object, and captured '" +
 						             std::string(cap->entry->name) + "' is read-only (write a local copy, or the element)" + at());
 					}
 				}
 			}
 			if (!method_of_object && !parallel_readonly_method(call.name)) {
-				return usage("method '" + std::string(call.name) + "' may mutate captured state '" + std::string(cap->entry->name) + "'" + at());
+				return usage("method '" + std::string(member_display_name(call.name)) + "' may mutate captured state '" + std::string(cap->entry->name) + "'" + at());
 			}
 		}
 		return {};
@@ -6188,7 +6189,7 @@ struct region_run {
 			const script_method_dispatch* src = shared_method.is_function()
 				? shared_method.as_function().target<script_method_dispatch>() : nullptr;
 			if (!src) {
-				return usage("method '" + std::string(am.name) + "' has no script dispatcher (internal)");
+				return usage("method '" + std::string(member_display_name(am.name)) + "' has no script dispatcher (internal)");
 			}
 			script_method_dispatch wd;
 			wd.eng = src->eng;

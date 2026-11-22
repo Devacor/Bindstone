@@ -3960,7 +3960,7 @@ private:
                 if (i >= fn->parameters.size() || !fn->parameters[i].is_reference || fn->parameters[i].is_const || fn->is_coroutine) { continue; }
                 const ref_param_write w = ref_writes(fn, i);
                 if (!w.writes) { continue; }
-                const std::string text = detail::const_argument_text(c->arguments[i].get(), h.root, fn->parameters[i].name, fn->name, w.line);
+                const std::string text = detail::const_argument_text(c->arguments[i].get(), h.root, fn->parameters[i].name, fn->shown_name(), w.line);
                 stamp_const(c->const_check, const_raises, [&] { return text; });
                 diag(diag_level::error, c->arguments[i]->location, "'" + std::string(fn->name) + "' writes through parameter '" + fn->parameters[i].name +
                      "' (line " + std::to_string(w.line) + "); '" + h.root + "' is const", h.line, h.column);
@@ -6653,6 +6653,7 @@ private:
                             const std::vector<ctype>& args, const source_location& loc, bool foreign = false) {
         const declared_at declared = (overloads.empty() || foreign) ? declared_at{} : declared_at{overloads[0]->location};
         const std::string hint = hidden_function_hint(fname, args);
+        if (!overloads.empty() && overloads[0]->method_instance) { fname = member_display_name(fname); }   // function_decl::shown_name
         if (overloads.size() == 1) {
             const function_decl* fn = overloads[0];
             auto [min_a, max_a] = arity_range(fn);
@@ -12105,7 +12106,7 @@ private:
         std::vector<capture_ctx> saved_captures;
         saved_captures.swap(capture_stack_);
         scopes_.emplace_back();
-        fn_ctx ctx{fn->return_type.get(), fn->is_coroutine, fn->name,
+        fn_ctx ctx{fn->return_type.get(), fn->is_coroutine, fn->shown_name(),
                    fn->location.line, fn->location.column};
         ctx.sees_fields = class_ctx_ != nullptr;
         ctx.is_static_method = fn->is_static;

@@ -363,7 +363,7 @@ namespace jai::detail {
     // An instance's script field a worker reads and stores in place (a C++ property goes through its pinned accessor)
     script_value* parallel_script_field(class_instance& inst, uint64_t member_id);
     // A worker's call of a method no region pin admits, on any receiver shape
-    checked_result<void> parallel_method_not_admitted(uint64_t name_id);
+    checked_result<void> parallel_method_not_admitted(uint64_t name_id, const string_symbolizer* symbols = nullptr);
     // What the calling chunk's method sandbox binds name_id to (the worker's own constructor of a class the region admitted), null
     // when it binds none; nullopt off a parallel chunk
     std::optional<script_value> parallel_chunk_binding(engine& eng, uint64_t name_id);

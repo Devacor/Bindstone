@@ -12,6 +12,7 @@
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/slot_site.hpp>
 #include <jaiscript/detail/arity_diagnostic.hpp>
+#include <jaiscript/detail/member_display_name.hpp>
 #include <jaiscript/detail/host_member.hpp>
 #include <jaiscript/detail/object_borrow.hpp>
 #include <jaiscript/detail/uniquely_held.hpp>
@@ -2487,6 +2488,17 @@ inline std::string argument_type_list(const script_value* args, size_t argc, eng
     return out + ")";
 }
 
+// The id of a member's name as its class lists it (detail::member_display_name): its own unless it is a generic method's
+// instance, whose bare name its class interned when it took the instance. A frozen symbolizer that never saw the bare name
+// keeps the declared one
+inline uint64_t listed_member_id(const string_symbolizer& symbols, uint64_t member_id) {
+    const std::string_view name = symbols.get_string(member_id);
+    const std::string_view bare = member_display_name(name);
+    if (bare.size() == name.size()) { return member_id; }
+    if (const auto known = symbols.find(bare)) { return *known; }
+    return symbols.frozen() ? member_id : symbols.intern(std::string(bare));
+}
+
 // No overload / constructor takes these arguments: {0} = the callee, {1} = the argument list,
 // composed only while the symbolizer is unfrozen (a parallel worker gets the list-free shape)
 inline error_propagator overload_miss(std::error_code ec, uint64_t name_id, const script_value* args, size_t argc,
@@ -2823,16 +2835,10 @@ inline bool member_access_allowed(const class_definition* cls, uint64_t member_i
     return !declarer || declarer == ctx || (ctx && ctx->derives_from(declarer));
 }
 
-// The member as its class lists it (detail::member_display_name): a generic method's instance by its bare name
 JAI_NOINLINE inline checked_result<void> member_access_denied(const class_definition* declarer, uint64_t member_id) {
-    uint64_t shown = member_id;
-    if (engine* eng = declarer->get_engine()) {
-        string_symbolizer* symbols = engine_access::get_symbolizer(*eng);
-        const std::string_view name = symbols->get_string(member_id);
-        if (const std::string_view bare = member_display_name(name); bare.size() != name.size()) { shown = symbols->intern(std::string(bare)); }
-    }
+    engine* eng = declarer->get_engine();
     return checked_result<void>(make_error_code(runtime_error_code::access_violation),
-        "Cannot access private member '{0}' of class '{1}'", shown, declarer->get_type_id());
+        "Cannot access private member '{0}' of class '{1}'", eng ? listed_member_id(*engine_access::get_symbolizer(*eng), member_id) : member_id, declarer->get_type_id());
 }
 
 inline checked_result<void> enforce_member_access(const class_definition* cls, uint64_t member_id,

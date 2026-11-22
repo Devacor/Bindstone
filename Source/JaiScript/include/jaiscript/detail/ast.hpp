@@ -1059,6 +1059,8 @@ namespace jai {
         uint64_t instance_stamp = 0;
         std::string_view instance_name;
         bool method_instance = false;   // the instance of a generic method: a member its class takes after its own declaration
+        // The name a text about a call gives the function: a generic method's instance as its class lists it
+        std::string_view shown_name() const { return method_instance ? detail::member_display_name(name) : std::string_view(name); }
         bool instance_remade = false;   // class_decl::instance_remade
 
         // Enclosing-frame slot locals a nested COROUTINE body references, as

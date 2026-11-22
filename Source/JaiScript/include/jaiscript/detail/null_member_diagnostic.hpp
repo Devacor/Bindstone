@@ -3,6 +3,7 @@
 #include <jaiscript/detail/foreign_keyword.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/slot_site.hpp>
+#include <jaiscript/detail/member_display_name.hpp>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -85,7 +86,7 @@ inline std::string no_member_text(Engine* eng, std::string_view kind, std::strin
         }
     }
     const std::string_view advice = detail::foreign_member_text(kind, member);
-    return std::string(kind.empty() ? std::string_view("object") : kind) + " has no member '" + std::string(member) + "'" +
+    return std::string(kind.empty() ? std::string_view("object") : kind) + " has no member '" + std::string(detail::member_display_name(member)) + "'" +
            (advice.empty() ? std::string() : ": " + std::string(advice));
 }
 

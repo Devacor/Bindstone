@@ -874,7 +874,7 @@ public:
 				const std::string where = others.empty() ? "no generic in the engine" : "another generic in the engine";
 				auto kept_out = meet(method, others + "class Tool { int level = 1; int scaled(int x) { return x + 50; } }", "");
 				check_eq(std::string("loaded"), kept_out->at_load, where);
-				check_eq(std::string("Tool has no member 'Tool::scaled<int>'"), kept_out->at_run, where + ": the bite's call finds no such method");
+				check_eq(std::string("Tool has no member 'scaled<int>'"), kept_out->at_run, where + ": the bite's call finds no such method");
 				check_eq(std::string("before;"), kept_out->ran, where);
 				check_eq(std::string("54"), kept_out->eng->execute("Tool t; t.scaled(4);").to_string(), where + ": the engine's method is the one it declared");
 			}

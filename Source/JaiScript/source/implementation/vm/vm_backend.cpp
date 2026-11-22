@@ -1131,7 +1131,7 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 			const size_t argc = handle.get_args().size();
 			if (argc != function->parameters.size() && !arity_accepts(function->parameters, argc)) {
 				handle.set_status(coroutine_handle::status::failed);
-				return detail::arity_error(function->name, function->parameters.size(), argc, arity_count_ids_, *symbolizer_);
+				return detail::arity_error(function->shown_name(), function->parameters.size(), argc, arity_count_ids_, *symbolizer_);
 			}
 		}
 
@@ -1151,10 +1151,10 @@ static int load_report_row_of(detail::load_collector* a_report, const block_stmt
 }
 
 void vm_backend::open_fiber(coroutine_handle& handle, vm_coroutine_state& state, const std::shared_ptr<function_decl>& function) {
-	auto body_chunk = chunk_for_body(function->name, function->parameters, function->body, function->local_count, function->unit);
+	auto body_chunk = chunk_for_body(function->shown_name(), function->parameters, function->body, function->local_count, function->unit);
 	state.body_chunk = body_chunk;
 	state.locals = call_frame{};
-	state.locals.function_name = function->name;
+	state.locals.function_name = function->shown_name();
 
 	auto closure_env = handle.get_closure_env();
 	state.entry_env = std::make_shared<environment>(closure_env ? closure_env : environment_, symbolizer_);
@@ -1518,7 +1518,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 				stack_.pop_back();
 				{   // a coroutine binds every parameter by value, a reference one's default too (the interpreter's value_params)
 					auto bound = detail::default_argument_value(default_val, param, [&](const script_value& v) {
-						return try_convert_for_parameter(v, param.type, detail::slot_site{detail::slot_kind::parameter, param.name, function->name, false});
+						return try_convert_for_parameter(v, param.type, detail::slot_site{detail::slot_kind::parameter, param.name, function->shown_name(), false});
 					});
 					if (!bound) {
 						binding_failed();
@@ -1540,7 +1540,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 				continue;
 			}
 			auto converted_result = try_convert_for_parameter(args[i], param.type,
-				detail::slot_site{detail::slot_kind::parameter, param.name, function->name, param.is_reference});
+				detail::slot_site{detail::slot_kind::parameter, param.name, function->shown_name(), param.is_reference});
 			if (!converted_result) {
 				binding_failed();
 				frames_.pop_back();
@@ -1720,7 +1720,7 @@ size_t vm_backend::graft_frames_at(const chunk& code, size_t ip, const ast_node*
 	if (node) {
 		for (size_t i = 0; i < count; ++i) {
 			const ast_node* at = *node;
-			out.push_back(trace_frame_at(std::string(held[i]->decl->name), location_of(at)));
+			out.push_back(trace_frame_at(std::string(held[i]->decl->shown_name()), location_of(at)));
 			if (sites) { sites->push_back(held[i]); }
 			*node = held[i]->call_stmt;
 		}
@@ -12632,7 +12632,7 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 	if (site.mic_cd && park_sibling_method(f, site)) { return {}; }
 	if (parallel_worker_) [[unlikely]] {
 		if (const int sibling = worker_park_sibling(f, site); sibling > 0) { return {}; }
-		else if (sibling < 0) { return raise_from(detail::parallel_method_not_admitted(f.code->symbols[site.callee.symbol])); }
+		else if (sibling < 0) { return raise_from(detail::parallel_method_not_admitted(f.code->symbols[site.callee.symbol], symbolizer_)); }
 	}
 	std::optional<script_value> scratch;
 	const script_value* resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3, observed, true);
@@ -12980,7 +12980,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 				// Worker verdict (parallel-method-admission rule): a pinned method answers, any other raises the call op's text (KEEP
 				// BYTE-PARALLEL with interpreter::member_read_on)
 				if (parallel_method_pins_ && cd && parallel_method_pins_->find(cd, member_id)) { return {}; }
-				return raise_from(detail::parallel_method_not_admitted(member_id));
+				return raise_from(detail::parallel_method_not_admitted(member_id, symbolizer_));
 			}
 			if (cached_global_env_ && cd) {
 				const uint64_t epoch = cd->method_epoch();
@@ -13061,7 +13061,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 	}
 	if (!objectValue.is_object()) {
 		if (objectValue.is_null()) {
-			return raise_(make_error_code(runtime_error_code::member_access_on_null), null_member_message(member->object.get(), true), member_id, null_member_receiver_symbol(member->object.get()));
+			return raise_(make_error_code(runtime_error_code::member_access_on_null), null_member_message(member->object.get(), true), detail::listed_member_id(*symbolizer_, member_id), null_member_receiver_symbol(member->object.get()));
 		}
 		if (const std::string_view cls = class_named_by_dot_receiver(member->object.get(), objectValue, engine_); !cls.empty()) {
 			const auto [text, symbol] = class_dot_member_error(*symbolizer_, parallel_worker_, cls, member->member);
@@ -15259,7 +15259,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 			}
 		}
 		if (objectValue.is_null()) {
-			return raise_(make_error_code(runtime_error_code::member_access_on_null), null_member_message(expr->object.get(), as_callee), expr->member_id, null_member_receiver_symbol(expr->object.get()));
+			return raise_(make_error_code(runtime_error_code::member_access_on_null), null_member_message(expr->object.get(), as_callee), detail::listed_member_id(*symbolizer_, expr->member_id), null_member_receiver_symbol(expr->object.get()));
 		}
 		if (const std::string_view cls = class_named_by_dot_receiver(expr->object.get(), objectValue, engine_); !cls.empty()) {
 			const auto [text, symbol] = class_dot_member_error(*symbolizer_, parallel_worker_, cls, expr->member);
@@ -18220,7 +18220,7 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 					return {};
 				}
 				if (!(parallel_method_pins_ && cd && parallel_method_pins_->find(cd, member->member_id))) {
-					return raise_from(detail::parallel_method_not_admitted(member->member_id));
+					return raise_from(detail::parallel_method_not_admitted(member->member_id, symbolizer_));
 				}
 			}
 			// Coroutine next()/done() dispatch directly: the native branch mints a fresh
@@ -19060,7 +19060,7 @@ checked_result<script_value> vm_backend::execute_method_ast(const std::shared_pt
 	}
 
 	script_defined_function script_func(
-		ast->name,
+		ast->shown_name(),
 		shared_parameters_for(ast.get()),
 		ast->return_type,
 		ast->body,
@@ -22111,7 +22111,7 @@ void vm_backend::release_deep_call_storage() {
 }
 
 void vm_backend::precompile_parallel_method(const function_decl& decl) {
-	chunk_for_body(decl.name, decl.parameters, decl.body, decl.local_count, decl.unit);
+	chunk_for_body(decl.shown_name(), decl.parameters, decl.body, decl.local_count, decl.unit);
 }
 
 void vm_backend::precompile_parallel_expression(const expression_ptr& expr) {
@@ -22548,7 +22548,7 @@ template <class DispatchT>
 JAI_FORCEINLINE chunk* vm_backend::method_body_chunk(const DispatchT& dispatch, const function_decl& ast, const class_definition* member_class) {
 	if (dispatch.body_cache_key == ast.body.get()) { return static_cast<chunk*>(dispatch.body_cache.get()); }
 	compiler_.member_class(member_class);
-	auto compiled = chunk_for_body(ast.name, ast.parameters, ast.body, ast.local_count, ast.unit);
+	auto compiled = chunk_for_body(ast.shown_name(), ast.parameters, ast.body, ast.local_count, ast.unit);
 	compiler_.member_class(nullptr);
 	dispatch.body_cache = compiled;
 	dispatch.body_cache_key = ast.body.get();
@@ -22561,7 +22561,7 @@ JAI_FORCEINLINE chunk* vm_backend::method_body_chunk(const DispatchT& dispatch, 
 JAI_FORCEINLINE vm_backend::call_record& vm_backend::open_method_record(frame& caller, const script_method_dispatch& dispatch, const std::shared_ptr<function_decl>& ast,
                                                                        const chunk& body, bool anchor) {
 	call_record& rec = take_call_record();
-	init_call_record(rec, caller, ast->return_type, static_cast<uint8_t>(detail::return_conv_of(*ast)), ast->name, body);
+	init_call_record(rec, caller, ast->return_type, static_cast<uint8_t>(detail::return_conv_of(*ast)), ast->shown_name(), body);
 	pin_method_decl(rec, ast);
 	rec.method_result_anchor = anchor;
 	rec.locals.scope_static = dispatch.cls.get();
@@ -22664,7 +22664,7 @@ op_status vm_backend::push_static_method_frame(frame& caller, const script_value
 	VM_TRY(pass_call_limits());
 	chunk* body_chunk = method_body_chunk(dispatch, *ast, nullptr);
 	call_record& rec = take_call_record();
-	init_call_record(rec, caller, ast->return_type, static_cast<uint8_t>(detail::return_conv_of(*ast)), ast->name, *body_chunk);
+	init_call_record(rec, caller, ast->return_type, static_cast<uint8_t>(detail::return_conv_of(*ast)), ast->shown_name(), *body_chunk);
 	pin_method_decl(rec, ast);
 	rec.method_result_anchor = false;   // no receiver to anchor a result to
 	rec.locals.scope_static = dispatch.cls.get();
@@ -23164,7 +23164,7 @@ const script_defined_function& vm_backend::method_function_for(const std::shared
 	method_function_entry& entry = method_functions_[ast.get()];
 	if (!entry.fn) {
 		entry.pin = ast;
-		entry.fn = std::make_unique<script_defined_function>(ast->name, shared_parameters_for(ast.get()), ast->return_type, ast->body,
+		entry.fn = std::make_unique<script_defined_function>(ast->shown_name(), shared_parameters_for(ast.get()), ast->return_type, ast->body,
 		                                                     nullptr, ast->local_count);
 		entry.fn->unit = ast->unit;
 	}

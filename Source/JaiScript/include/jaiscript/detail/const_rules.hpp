@@ -15,6 +15,7 @@
 #include <jaiscript/detail/ref_param_writes.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
 #include <jaiscript/detail/arg_capture.hpp>
+#include <jaiscript/detail/member_display_name.hpp>
 #include <functional>
 #include <optional>
 #include <string>
@@ -47,6 +48,7 @@ namespace jai::detail {
 		return "cannot assign to '" + spelled + "': '" + std::string(root) + "' is const";
 	}
 	inline std::string const_call_text(const expression* receiver, std::string_view root, std::string_view method, bool builtin, size_t line) {
+		method = member_display_name(method);
 		std::string out = "Cannot call '" + std::string(method) + "' on '" + const_spelled(receiver) + "': '" + std::string(root) + "' is const and '" +
 		                  std::string(method) + (builtin ? "' changes it" : "' writes its receiver");
 		if (line != 0) { out += " (line " + std::to_string(line) + ")"; }

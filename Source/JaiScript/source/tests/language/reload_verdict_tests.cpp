@@ -754,6 +754,52 @@ public:
 			const std::string from_text = p.run("Box<float> late; late.size();");
 			check_true(failed(from_text) && has(from_text, "lib.jai:3:") && has(from_text, "in Box<float>, instantiated at <script>:1:"), from_text);
 		});
+
+		test("an_unapplied_edit_of_a_generics_file_reaches_nothing_until_an_import_does", [this]() {
+			// A generic's file changed on disk and no import has looked at it yet. Text the host runs meanwhile names instances
+			// of the declarations the engine runs: held ones, new ones, a string run before the edit and again after it, a file
+			// run again and a file loaded for the first time. The edit arrives with the import that reaches it, or is rejected there.
+			for (const bool fits : {true, false}) {
+				const std::string which = fits ? " (another body)" : " (a body Box<int> cannot take)";
+				program p(fits ? "pend_fits" : "pend_breaks");
+				const auto lib = [](const std::string& tag, const std::string& twice) {
+					return "class Box<T> {\n\tT item;\n\tint tag() { return " + tag + "; }\n}\nT twice<T>(T x) { return " + twice + "; }\nint plain() { return " + tag + "; }\n";
+				};
+				p.write("lib.jai", lib("1", "x"));
+				p.write("root.jai", "import \"lib.jai\";\nBox<int> b;\nint use() { return b.tag() + twice(1) + plain(); }\n");
+				p.write("other.jai", "Box<int> o;\nint other() { Box<float> g; return o.tag() + g.tag() + twice(2); }\n");
+				check_eq(std::string("null"), p.run_file("root.jai"), which);
+				check_eq(std::string("null"), p.run_file("other.jai"), which);
+				check_eq(std::string("3|4"), p.run("to_string(use()) + \"|\" + to_string(other());"), which);
+				check_eq(std::string("4"), p.run("Box<int> c2; c2.tag() + twice(3);"), "before the edit" + which);
+				check_eq(std::string("1"), p.run("Box<float> f; f.tag();"), "before the edit" + which);
+				p.write("lib.jai", fits ? lib("2", "x + x") : "class Box<T> {\n\tT item;\n\tint tag() { return item.size(); }\n}\nT twice<T>(T x) { return x.none(); }\nint plain() { return 2; }\n");
+				const std::vector<std::pair<std::string, std::string>> meanwhile = {
+					{"use();", "3"},
+					{"Box<int> c; c.tag();", "1"},                   // an instance the engine holds
+					{"Box<string> s; s.tag();", "1"},                // one it makes now
+					{"twice(5);", "5"},
+					{"twice(\"ab\");", "ab"},
+					{"plain();", "1"},
+					{"Box<int> c2; c2.tag() + twice(3);", "4"},      // a string that ran before the edit
+					{"Box<float> f; f.tag();", "1"},
+					{"other();", "4"},
+				};
+				for (const auto& [code, answer] : meanwhile) { check_eq(answer, p.run(code), "the edit on disk, " + code + which); }
+				check_eq(std::string("null"), p.run_file("other.jai"), "a file run again with its text" + which);
+				p.write("third.jai", "int third() { Box<int> t; Box<char> ch; return t.tag() + ch.tag() + twice(4); }\n");
+				check_eq(std::string("null"), p.run_file("third.jai"), "a file's first load" + which);
+				check_eq(std::string("4|6|3"), p.run("to_string(other()) + \"|\" + to_string(third()) + \"|\" + to_string(use());"), which);
+				const std::string reached = p.run("import \"lib.jai\"; use();");
+				if (fits) {
+					check_eq(std::string("6"), reached, "the import applies it");
+					check_eq(std::string("6|2"), p.run("Box<string> late; to_string(use()) + \"|\" + to_string(late.tag());"));
+				} else {
+					check_true(failed(reached) && has(reached, "lib.jai:3:") && has(reached, "int has no member 'size'"), "the import rejects it: " + reached);
+					check_eq(std::string("3|1"), p.run("Box<string> late; to_string(use()) + \"|\" + to_string(late.tag());"), "and the code that ran runs on");
+				}
+			}
+		});
 	}
 };
 

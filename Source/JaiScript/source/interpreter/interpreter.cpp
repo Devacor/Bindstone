@@ -9002,6 +9002,7 @@ std::vector<std::pair<size_t, std::string_view>> interpreter::frame_scope_slots(
 }
 
 std::vector<std::pair<std::string, script_value>> interpreter::get_frame_locals(size_t frame_index) const {
+    frame_index = debug_stack_position(frame_index);
     std::vector<std::pair<std::string, script_value>> out;
     if (frame_index > call_stack_.size() || (frame_index == call_stack_.size() && execute_depth_ == 0)) return out;
     if (frame_index < call_stack_.size()) {
@@ -9023,6 +9024,7 @@ std::vector<std::pair<std::string, script_value>> interpreter::get_frame_locals(
 }
 
 script_value* interpreter::debug_local_storage(const std::string& name, size_t frame_index) {
+    frame_index = debug_stack_position(frame_index);
     if (frame_index > call_stack_.size()) return nullptr;
     call_frame* function_frame = frame_index < call_stack_.size() ? &call_stack_[call_stack_.size() - 1 - frame_index] : nullptr;
     if (function_frame) {
@@ -9288,10 +9290,11 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
 
     std::vector<script_value> held_args;
     const std::vector<script_value>* argv = &args;
-    // while its parameters bind, the frame stands at its first statement, as the vm's stands at its first instruction (a constructor's
-    // prologue comes first, and names nothing)
-    if (function.body && !function.body->declarations.empty() &&
-        !(pending_prologue_ && pending_prologue_->frame == frame_index && pending_prologue_->body == function.body.get())) {
+    // while its parameters bind, the frame stands at its first statement, as the vm's stands at its first instruction; a constructor's
+    // prologue comes first, standing at the constructor
+    if (pending_prologue_ && pending_prologue_->frame == frame_index && pending_prologue_->body == function.body.get()) {
+        call_stack_[frame_index].current_node = pending_prologue_->ctor;
+    } else if (function.body && !function.body->declarations.empty()) {
         call_stack_[frame_index].current_node = function.body->declarations.front().get();
     }
     // A native exception unwinding through this activation (a C++ callable, a removed-element reference, a bare rethrow
@@ -10660,16 +10663,30 @@ void interpreter::capture_stack_trace() {
     trace_captured_ = true;
 }
 
+// a frame stands at its statement, else at its body's entry (KEEP BYTE-PARALLEL with vm_backend::frame_place)
 stack_frame interpreter::call_frame_trace(const call_frame& frame) {
-    return trace_frame_at(frame.function_name.empty() ? std::string("<anonymous>") : std::string(frame.function_name),
-                          frame.current_node ? &frame.current_node->location : nullptr);
+    const source_location* at = frame.current_node ? &frame.current_node->location
+                              : frame.function ? detail::body_entry_location(frame.function->body.get()) : nullptr;
+    return trace_frame_at(frame.function_name.empty() ? std::string("<anonymous>") : std::string(frame.function_name), at);
+}
+
+// The call_stack_ position (from the top) of the debugger's frame `frame_index`: a `?.` chain's lambda is no frame of its list
+size_t interpreter::debug_stack_position(size_t frame_index) const {
+    size_t visible = 0;
+    for (size_t position = 0; position < call_stack_.size(); ++position) {
+        if (detail::null_chain_frame(call_stack_[call_stack_.size() - 1 - position].current_node)) { continue; }
+        if (visible++ == frame_index) { return position; }
+    }
+    return call_stack_.size() + (frame_index - visible);
 }
 
 // capture_stack_trace's walk, uncapped, with the top level only while a top-level run is in flight
 std::vector<stack_frame> interpreter::debug_frames() const {
     std::vector<stack_frame> out;
     out.reserve(call_stack_.size() + 1);
-    for (auto it = call_stack_.rbegin(); it != call_stack_.rend(); ++it) { out.push_back(call_frame_trace(*it)); }
+    for (auto it = call_stack_.rbegin(); it != call_stack_.rend(); ++it) {
+        if (!detail::null_chain_frame(it->current_node)) { out.push_back(call_frame_trace(*it)); }
+    }
     if (execute_depth_ > 0) { out.push_back(trace_frame_at("<script>", top_level_node_ ? &top_level_node_->location : nullptr)); }
     return out;
 }

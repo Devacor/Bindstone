@@ -1429,7 +1429,7 @@ public:
             });
         });
 
-        // Uncaught, such an error keeps the callee's frame, standing at its first statement, on every backend
+        // Uncaught, such an error keeps the callee's frame, standing at its first statement (a constructor's at the constructor), on every backend
         test("an_error_raised_while_parameters_bind_keeps_the_callee_frame", [this]() {
             const char* prelude =
                 "int f() { throw \"T\"; }\n"
@@ -1442,7 +1442,7 @@ public:
                 {"int g(\n  int a = 1,\n  int b = f()\n) {\n  return a;\n}\nvoid h() {\n  g();\n}\nh();\n", "T", "f:1|g:8|h:11|<script>:13"},
                 {"class C {\n  int m(\n    int a = f()\n  ) {\n    return a;\n  }\n}\nC c;\nc.m();\n", "T", "f:1|m:8|<script>:12"},
                 {"class C {\n  static int s(\n    int a = f()\n  ) {\n    return a;\n  }\n}\nC::s();\n", "T", "f:1|s:8|<script>:11"},
-                {"class K {\n  K(\n    int a = f()\n  ) {\n    print(a);\n  }\n}\nK k;\n", "T", "f:1|K:0|<script>:11"},
+                {"class K {\n  K(\n    int a = f()\n  ) {\n    print(a);\n  }\n}\nK k;\n", "T", "f:1|K:5|<script>:11"},
                 {"var l = [](\n  int a = f()\n) {\n  return a;\n};\nl();\n", "T", "f:1|<lambda>:7|<script>:9"},
                 {"coroutine int co(\n  int a = f()\n) {\n  yield a;\n}\nauto c = co();\nc.next();\n", "T", "f:1|co:7|<script>:10"},
                 {"coroutine int co(\n  int a = throw \"D\"\n) {\n  yield a;\n}\nauto c = co();\nc.next();\n", "D", "co:7|<script>:10"},
@@ -1472,7 +1472,11 @@ public:
                 {"class C {\n  static int s(\n    int a = xs[9]\n  ) {\n    return a;\n  }\n}\nC::s();\n", index_text, "s:8|<script>:11"},
                 {"var l = [](\n  int a = xs[9]\n) {\n  return a;\n};\nl();\n", index_text, "<lambda>:7|<script>:9"},
                 {"coroutine int co(\n  int a = xs[9]\n) {\n  yield a;\n}\nauto c = co();\nc.next();\n", index_text, "co:7|<script>:10"},
-                {"Money m(text);\n", "Cannot pass string to parameter 'a' of 'Money' (declared int)", "Money:0|<script>:4"},
+                {"Money m(text);\n", "Cannot pass string to parameter 'a' of 'Money' (declared int)", "Money:3|<script>:4"},
+                {"class Q {\n  Q() {\n  }\n}\nclass R : Q {\n  R(int a) {\n    print(a);\n  }\n}\nR r(text);\n",
+                 "Cannot pass string to parameter 'a' of 'R' (declared int)", "R:9|<script>:13"},
+                {"class Q {\n  Q(int a) {\n  }\n}\nclass R : Q {\n  R(int a)\n    : Q(\n      a) {\n    print(a);\n  }\n}\nR r(text);\n",
+                 "Cannot pass string to parameter 'a' of 'R' (declared int)", "R:9|<script>:15"},
                 {"int t(int n,\n  int a = xs[9]\n) {\n  return n;\n}\nint tc() {\n  return t(1);\n}\ntc();\n", index_text, "t:7|tc:10|<script>:12"},
             };
             check_each(cases, [&](const auto& c) {

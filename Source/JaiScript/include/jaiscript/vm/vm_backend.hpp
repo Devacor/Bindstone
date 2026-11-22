@@ -1455,6 +1455,7 @@ namespace jai::vm {
         static size_t graft_frames_at(const chunk& code, size_t ip, const ast_node** node, std::vector<stack_frame>& out,
                                       std::vector<const chunk::inline_site*>* sites = nullptr);
         static const ast_node* frame_statement(const frame& fr);
+        static const source_location* frame_place(const frame& fr, const ast_node* node);
         static std::string frame_function_name(const frame& fr);
         // one entry of debug_frames(): the frame that runs it, and the inline site of a grafted callee's entry (null for the frame's own)
         struct debug_frame_ref { const frame* fr = nullptr; const chunk::inline_site* graft = nullptr; };

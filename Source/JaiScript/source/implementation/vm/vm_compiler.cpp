@@ -1334,6 +1334,7 @@ JAI_NOINLINE std::shared_ptr<chunk> vm_compiler::compile_level_initializers_code
 // constructor frame answering as the base); the level's own fields follow, each value stored into this's field
 JAI_NOINLINE void vm_compiler::compile_constructor_prologue(const constructor_prologue& prologue) {
 	name_slots_ = &prologue.name_slots;
+	current_stmt_ = prologue.origin.get();   // the frame stands at the constructor from its entry, while its parameters bind too
 	if (prologue.evaluates) { emit(opcode::op_ctor_scope, static_cast<uint32_t>(prologue.name_slots.size())); }
 	const uint32_t first_step = static_cast<uint32_t>(chunk_->ctor_steps.size());
 	for (const auto& step : prologue.steps) { chunk_->ctor_steps.push_back(step); }

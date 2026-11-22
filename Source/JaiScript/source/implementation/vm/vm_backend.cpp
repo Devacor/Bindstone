@@ -1732,6 +1732,12 @@ const ast_node* vm_backend::frame_statement(const frame& fr) {
 	return fr.ip < fr.code->stmt_nodes.size() ? fr.code->stmt_nodes[fr.ip] : nullptr;
 }
 
+// Where a trace places a frame: its statement, else its body's entry (KEEP BYTE-PARALLEL with interpreter::call_frame_trace)
+const source_location* vm_backend::frame_place(const frame& fr, const ast_node* node) {
+	if (node) { return &node->location; }
+	return fr.top_level ? nullptr : detail::body_entry_location(fr.code->owner_body.get());
+}
+
 std::string vm_backend::frame_function_name(const frame& fr) {
 	return fr.code->function_name.empty() ? std::string("<anonymous>") : fr.code->function_name;
 }
@@ -1756,7 +1762,7 @@ void vm_backend::capture_stack_trace() {
 			return;
 		}
 		graft_frames_at(*fr->code, fr->ip, &node, captured_trace_);   // inlined callees: their frames as the interpreter has them, innermost first, each caller's line its call's
-		if (!detail::null_chain_frame(node)) { captured_trace_.push_back(trace_frame_at(frame_function_name(*fr), location_of(node))); }
+		if (!detail::null_chain_frame(node)) { captured_trace_.push_back(trace_frame_at(frame_function_name(*fr), frame_place(*fr, node))); }
 	}
 	captured_trace_.push_back(trace_frame_at("<script>", location_of(top_node)));
 	cap_stack_trace(captured_trace_);
@@ -1839,7 +1845,8 @@ std::vector<stack_frame> vm_backend::debug_frame_walk(std::vector<debug_frame_re
 			if (refs) { refs->push_back({fr, nullptr}); }
 			break;
 		}
-		out.push_back(trace_frame_at(frame_function_name(*fr), location_of(node)));
+		if (detail::null_chain_frame(node)) { continue; }   // a `?.` chain's lambda: as in a trace, no frame of its own
+		out.push_back(trace_frame_at(frame_function_name(*fr), frame_place(*fr, node)));
 		if (refs) { refs->push_back({fr, nullptr}); }
 	}
 	return out;
@@ -19444,6 +19451,7 @@ chunk* vm_backend::constructor_chunk(const std::shared_ptr<script_class_definiti
 	compiler_.member_class(level.get());
 	compiler_.constructor_prologue_for(&prologue);
 	auto code = compiler_.compile_callable(ctor->name, ctor->parameters, ctor->body, ctor->local_count);
+	code->nodes.push_back(ctor);   // the prologue stands at the declaration: the chunk keeps it, appended so no operand's node moves
 	compiler_.constructor_prologue_for(nullptr);
 	compiler_.member_class(nullptr);
 	note_compiled(*code);

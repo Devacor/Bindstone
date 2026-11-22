@@ -194,7 +194,9 @@ normally runs one precompiled unit; under <code>--debug</code> it loads each sce
 <h2 id="without-a-debugger">Without a debugger<a class="hlink" href="#without-a-debugger" aria-label="link">&#8203;</a></h2>
 <p>The <a href="06-static-checking.html">strict checker</a> reports typed mistakes and undeclared names before anything
 runs. At run time a caught error carries <code>e.message</code>, <code>e.line</code>, <code>e.column</code> and
-<code>e.stack</code> (each frame <code>file:line</code>, innermost first, the innermost 64 kept):</p>
+<code>e.stack</code> (each frame <code>file:line</code>, innermost first, the innermost 64 kept). A frame stands at the statement
+it runs; one whose parameters are still binding stands at its first statement, and a constructor's, ahead of its body, at the
+constructor or at the initializer it evaluates:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function load_level(int n) {
     array&lt;int&gt; sizes = [8, 16];
     return sizes[n];
@@ -252,7 +254,7 @@ dbg.post_command([&amp;] {                    // the closure runs on the parked 
     // dbg.set_variable("x", eng-&gt;make_value(41));
     auto row = dbg.evaluate("x + 1");     // {name, value text, kind, reference, ...}; a watch only reads
     dbg.evaluate("x = 41", 0, jai::debug::evaluation_mode::console);   // the console may change state
-    auto frames = dbg.list_frames();      // {name, file, line}, innermost first
+    auto frames = dbg.list_frames();      // {name, file, line}, innermost first, the frames e.stack lists
     auto locals = dbg.list_locals(0);     // the locals of frames[0]
     auto globals = dbg.list_globals();
     auto parts = dbg.list_children(locals[0].reference);   // a value's fields, elements or entries

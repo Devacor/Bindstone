@@ -1354,6 +1354,13 @@ namespace jai {
             const expression* value = static_cast<const return_stmt*>(statement)->value.get();
             return value && value->get_type() == node_type::ternary_expr && static_cast<const ternary_expr*>(value)->null_chain == ternary_expr::chain_lambda_test;
         }
+
+        // Where a frame standing ahead of every statement (a constructor's prologue, a binding that raised there) is placed: at its
+        // body's first statement, as a function's frame stands there from its entry
+        inline const source_location* body_entry_location(const block_stmt* body) noexcept {
+            if (!body) { return nullptr; }
+            return body->declarations.empty() || !body->declarations.front() ? &body->location : &body->declarations.front()->location;
+        }
     }
 
 } // namespace jai

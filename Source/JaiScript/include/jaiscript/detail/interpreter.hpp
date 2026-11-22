@@ -738,6 +738,7 @@ namespace jai {
         const ast_node* top_level_node_ = nullptr;
         void capture_stack_trace();
         static stack_frame call_frame_trace(const call_frame& frame);
+        size_t debug_stack_position(size_t frame_index) const;
         // A construction level's initializer-list argument or field initializer under evaluation: a frame of the trace named for
         // its class, above the `depth` call frames below it (the vm runs that code in the level's own frame)
         struct construction_trace_frame {

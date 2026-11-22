@@ -284,6 +284,45 @@ public:
 			}
 			check_eq(size_t(576), loads, "every pair on every route in both formats by both loads");
 		});
+
+		test("a_weak_fields_ref_to_another_class_is_refused_by_a_typed_load_and_kept_out_by_an_untyped_one", [this]() {
+			// Where the weak_ptr<T> slot rule meets the load rule: a $ref that names an object of another class. A typed load
+			// refuses it whether or not the holder is written with a $type, with the text every member its field cannot take
+			// gets; an untyped load keeps the field's constructed value (a weak field is constructed null: lock() on it raises,
+			// where a $ref to no object loads an empty pointer), as for any saved value the field cannot take.
+			auto e = make_engine();
+			stdlib::register_all(*e);
+			e->execute("class Kin { int id = 1; } class Heir : Kin { int extra = 5; } class Stranger { int n = 2; }"
+			           " class Keeper { shared_ptr<Kin> own; shared_ptr<Stranger> other; shared_ptr<Heir> kid; weak_ptr<Kin> w; }"
+			           " string seen(Keeper k) { try { auto reached = k.w.lock();"
+			           " return reached == null ? \"empty\" : reflect::type_of(reached) + \" \" + to_string(reached.id); } catch (e) { return \"null\"; } }");
+			const auto members = [](int target) {
+				return std::string("{\"own\":{\"$id\":1,\"$type\":\"Kin\",\"$val\":{\"id\":1}},\"other\":{\"$id\":2,\"$type\":\"Stranger\",\"$val\":{\"n\":2}},"
+				                   "\"kid\":{\"$id\":3,\"$type\":\"Heir\",\"$val\":{\"id\":7,\"extra\":5}},\"w\":{\"$ref\":") + std::to_string(target) + "}}";
+			};
+			const std::string refusal = "from_json: field 'w' of 'Keeper' is weak_ptr<Kin>, not weak_ptr<shared_ptr<Stranger>>";
+			struct row {
+				const char* what;
+				int target;
+				std::string typed;     // what a typed load answers, tagged or not
+				std::string untyped;   // what an untyped load of the tagged form answers
+			};
+			const std::vector<row> rows = {
+				{"its own class", 1, "Kin 1", "Kin 1"},
+				{"a derived class", 3, "Heir 7", "Heir 7"},
+				{"another class", 2, "ERR: " + refusal, "null"},
+				{"no object", 9, "empty", "empty"},
+			};
+			for (const auto& r : rows) {
+				const std::string plain = members(r.target);
+				const std::string tagged = "{\"$type\":\"Keeper\",\"$val\":" + plain + "}";
+				check_eq(r.typed, outcome(*e, "seen(from_json<Keeper>(" + quoted(tagged) + "));"), std::string("typed, tagged, a $ref to ") + r.what);
+				check_eq(r.typed, outcome(*e, "seen(from_json<Keeper>(" + quoted(plain) + "));"), std::string("typed, untagged, a $ref to ") + r.what);
+				check_eq(r.untyped, outcome(*e, "Keeper k = from_json(" + quoted(tagged) + "); seen(k);"), std::string("untyped, a $ref to ") + r.what);
+			}
+			// the rest of a refused document is not kept either: the typed load raises, it does not answer a holder without w
+			check_true(outcome(*e, "from_json<Keeper>(" + quoted(members(2)) + ").own.id;").rfind("ERR: ", 0) == 0);
+		});
 	}
 };
 

@@ -2038,6 +2038,26 @@ bool coroutine_slot_admits(const script_value& value, const type_info& target);
 // coroutine<Y> as reflect::type_of and the slot texts name a handle: Y is its coroutine's declared type, var when it declares none
 std::string coroutine_type_name(const script_value& value);
 
+// The object a weak pointer still reaches, as a value its class can be read from; null once the pointer has expired
+inline script_value weak_handle_target(const script_value& v, engine* eng) {
+    script_value target(std::monostate{}, eng);
+    if (auto reached = v.get_weak_ptr().lock()) { target.set_object_holder(std::move(reached)); }
+    return target;
+}
+
+// Does a weak_ptr<T> slot take this weak pointer: the object it reaches is a T or of a class derived from T, the rule a
+// shared_ptr<T> slot holds a var's handle to (the load already held a typed source to its declared class). A pointer under the
+// slot's own tag was judged when it took the tag; a var-declared slot takes any; an expired pointer reaches no object and
+// stores as the empty pointer it is; an object whose class the engine cannot resolve stays lenient
+inline bool weak_handle_admits(const script_value& v, const type_info_ptr& declared, engine* eng) {
+    if (v.get_type_info().get() == declared.get() || declared->dynamic_pointee) { return true; }
+    const type_info* expected = declared->element_type().get();
+    if (!expected || expected->type_name.empty() || expected->base_type == script_value_type::jai_any_type) { return true; }
+    const script_value target = weak_handle_target(v, eng);
+    const auto view = resolve_slot_class(target, eng);
+    return !view.def || view.def->get_name() == expected->type_name || view.def->is_subtype_of(expected->type_name);
+}
+
 // weak_ptr<T> slot taking a shared_ptr handle (C++: weak = shared): the pointee class must be
 // T or derive from it, then the handle downgrades to a weak one. false = not this row.
 inline bool weak_slot_takes_shared(const script_value& value, const type_info_ptr& target_type, engine* eng) {
@@ -2193,6 +2213,11 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
         case script_value_type::jai_shared_ptr_type:
         case script_value_type::jai_weak_ptr_type:
             if (ri == script_value::TYPEID_NULL) return typed_null();
+            // a weak pointer to another class is no weak_ptr<T>: every site's rejection takes it, as it takes the shared
+            // handle its own rows refuse
+            if (ri == script_value::TYPEID_WEAK_PTR && target == script_value_type::jai_weak_ptr_type && !weak_handle_admits(v, target_type, eng)) [[unlikely]] {
+                return slot_conversion::of(verdict::reject);
+            }
             return slot_conversion::of(verdict::handle_target);
         case script_value_type::jai_function_type:
             // a callable slot resets to null and takes a callable again (a std::function's rule)
@@ -2277,6 +2302,13 @@ inline bool shared_handle_admits(const script_value& v, const type_info_ptr& dec
     }
     auto judged_def = engine_access::get_class_definition(eng, *judged);
     return !judged_def || judged_def->is_subtype_of(expected->type_name);
+}
+
+// A store that enforces only on a change of kind still sends a handle to the table when its tag is not the slot's own: the
+// handle's class may not be the slot's (a shared handle's rows, a weak pointer's admission), and the slot's tag is what it keeps
+inline bool handle_store_is_judged(const type_info& slot_type, const script_value& value) noexcept {
+    return (slot_type.base_type == script_value_type::jai_shared_ptr_type || slot_type.base_type == script_value_type::jai_weak_ptr_type) &&
+           value.get_type_info().get() != &slot_type;
 }
 
 // A typed shared_ptr<T> variable keeps its own static type whatever handle it takes (a var-declared holder keeps the source's)
@@ -2536,13 +2568,23 @@ inline bool slot_site_named(const slot_site& site) {
     return site.kind == slot_kind::return_value || site.kind == slot_kind::yield_value ? !site.owner.empty() : !site.name.empty() && !unspellable_name(site.name);
 }
 
+// The source a rejection names: a weak pointer a weak_ptr<T> slot refuses is the class it points at, as the shared handle the
+// slot refuses is
+inline std::string slot_rejection_source_name(const script_value& source, const type_info& target, engine* eng) {
+    const script_value& v = source.is_reference() ? source.deref() : source;
+    if (target.base_type == script_value_type::jai_weak_ptr_type && v.raw_storage_index() == script_value::TYPEID_WEAK_PTR) {
+        if (const auto view = resolve_slot_class(weak_handle_target(v, eng), eng); view.def) { return view.def->get_name(); }
+    }
+    return slot_source_type_name(source, eng);
+}
+
 inline error_propagator typed_slot_rejection(const script_value& source, const type_info& target, const slot_site& site, engine* eng) {
     const std::error_code ec = make_error_code(runtime_error_code::type_mismatch);
     string_symbolizer* symbols = eng ? engine_access::get_symbolizer(*eng) : nullptr;
     if (!symbols) {
         return {ec, slot_rejection_message_unnamed(site.kind, target.canonical_name()), 0, target.id};
     }
-    const uint64_t source_id = symbols->intern(slot_source_type_name(source, eng));
+    const uint64_t source_id = symbols->intern(slot_rejection_source_name(source, target, eng));
     if (slot_site_named(site) && !symbols->frozen()) {
         return {ec, slot_rejection_message(site.kind), source_id, symbols->intern(slot_description(site, target))};
     }
@@ -2566,6 +2608,7 @@ inline checked_result<script_value> weak_declaration_value(const type_info_ptr& 
         return script_value::make_empty_weak_ptr(declared, eng);
     }
     if (value.is_weak_ptr()) {
+        if (!weak_handle_admits(value.is_reference() ? value.deref() : value, declared, eng)) { return typed_slot_rejection(value, *declared, site, eng); }
         value.set_type_info(declared);
         return value;
     }
@@ -2616,7 +2659,7 @@ inline error_propagator incdec_mismatch(bool increment, const script_value& targ
 
 // The same text as one string (host-side throws)
 inline std::string typed_slot_rejection_text(const script_value& source, const type_info& target, const slot_site& site, engine* eng) {
-    const std::string src = slot_source_type_name(source, eng);
+    const std::string src = slot_rejection_source_name(source, target, eng);
     if (slot_site_named(site)) {
         return format_error_message(slot_rejection_message(site.kind), src, slot_description(site, target));
     }

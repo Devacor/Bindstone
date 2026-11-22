@@ -10242,6 +10242,10 @@ bool weak_element_takes_shared(const script_value& v, const type_info_ptr& eleme
     return weak_slot_takes_shared(v, element_type, eng);
 }
 
+bool weak_element_admits(const script_value& v, const type_info_ptr& element_type, engine* eng) {
+    return v.raw_storage_index() != script_value::TYPEID_WEAK_PTR || weak_handle_admits(v, element_type, eng);
+}
+
 checked_result<script_value> weak_element_from_shared(const script_value& v, engine* eng) {
     return script_value::make_weak_ptr(v, eng);
 }

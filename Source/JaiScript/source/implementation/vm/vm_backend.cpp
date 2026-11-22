@@ -3100,7 +3100,7 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 		case script_value::TYPEID_UTF8_STRING: if (target_base_type == script_value_type::jai_utf8_string_type) return arg; break;
 		case script_value::TYPEID_BOOL: if (target_base_type == script_value_type::jai_bool_type) return arg; break;
 		case script_value::TYPEID_CHAR: if (target_base_type == script_value_type::jai_char_type) return arg; break;
-		case script_value::TYPEID_WEAK_PTR: if (target_base_type == script_value_type::jai_weak_ptr_type) return arg; break;
+		case script_value::TYPEID_WEAK_PTR: if (target_base_type == script_value_type::jai_weak_ptr_type && detail::weak_handle_admits(derefed_arg, target_type, engine_)) return arg; break;
 		default: break;
 	}
 
@@ -3517,7 +3517,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			                  slot_type->base_type == script_value_type::jai_object_type ||
 			                  slot_type->base_type == script_value_type::jai_array_type ||
 			                  slot_type->base_type == script_value_type::jai_map_type ||
-			                  (slot_type->base_type == script_value_type::jai_shared_ptr_type && value.get_type_info().get() != slot_type.get()))) {
+			                  detail::handle_store_is_judged(*slot_type, value))) {
 				if (!detail::var_slot(slot_type.get())) {   // a var slot's table is the identity
 					auto enforced = enforce_type_compatibility(std::move(value), slot_type, sym);
 					if (!enforced) {
@@ -13234,7 +13234,7 @@ op_status vm_backend::call_parked_script(frame& f, const vm_instruction& ins, co
 			if (&f == &rec.f && static_cast<chunk*>(fn.backend_body_cache.get()) == f.code &&
 			    rec.env_untouched &&
 			    (conv == return_conv::none ||
-			     (conv >= return_conv::prim_int && conv <= return_conv::prim_weak)) &&
+			     (conv >= return_conv::prim_int && conv <= return_conv::prim_shared)) &&
 			    try_records_.size() == rec.try_base &&
 			    pending_callees_.size() == rec.pending_base) {
 				if (execution_limit_exhausted()) [[unlikely]] {
@@ -16826,7 +16826,7 @@ op_status vm_backend::store_namespace_cell(const detail::namespace_store_target&
 	                  slot_type->base_type == script_value_type::jai_object_type ||
 	                  slot_type->base_type == script_value_type::jai_array_type ||
 	                  slot_type->base_type == script_value_type::jai_map_type ||
-	                  (slot_type->base_type == script_value_type::jai_shared_ptr_type && incoming.get_type_info().get() != slot_type.get()))) {
+	                  detail::handle_store_is_judged(*slot_type, incoming))) {
 		auto enforced = enforce_type_compatibility(std::move(incoming), slot_type, member->member);
 		if (!enforced) {
 			return raise_from(enforced);
@@ -23001,9 +23001,6 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32
 			break;
 		case return_conv::prim_shared:
 			deref_only = detail::shared_handle_binds_in_place(result, rec.return_type);
-			break;
-		case return_conv::prim_weak:
-			deref_only = result.raw_storage_index() == script_value::TYPEID_WEAK_PTR;
 			break;
 		default:   // ref / check: full route
 			break;

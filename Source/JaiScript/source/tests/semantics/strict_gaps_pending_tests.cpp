@@ -148,8 +148,8 @@ private:
 			         eng->execute("[[warn_mode]]; string s = \"s\"; var c = \"\"; try { int& r = s; } catch (e) { c = e; } c;").as_string());   // a reference must reference: the binding raises
 			check_eq(std::string("Cannot initialize 'f' (declared function) with int"),
 			         eng->execute("[[warn_mode]]; var c = \"\"; try { function f = 42; } catch (e) { c = e; } c;").as_string());   // a function slot takes a callable or null (std::function's rule)
-			check_eq(script_int{1}, eng->execute(
-				"[[warn_mode]]; class A {} class B {} shared_ptr<B> owner = new B(); weak_ptr<B> wb = owner; weak_ptr<A> wa = wb; 1;").as_int());
+			check_eq(std::string("Cannot initialize 'wa' (declared weak_ptr<A>) with B"), eng->execute(
+				"[[warn_mode]]; class A {} class B {} shared_ptr<B> owner = new B(); weak_ptr<B> wb = owner; var c = \"\"; try { weak_ptr<A> wa = wb; } catch (e) { c = e; } c;").as_string());   // a weak_ptr<T> takes a pointer to a T, as a shared_ptr<T> does
 		});
 
 		test("rules_456_valid_runtime_boundaries", [this]() {

@@ -3306,7 +3306,7 @@ checked_result<script_value> interpreter::store_namespace_cell(const detail::nam
                       slot_type->base_type == script_value_type::jai_object_type ||
                       slot_type->base_type == script_value_type::jai_array_type ||
                       slot_type->base_type == script_value_type::jai_map_type ||
-                      (slot_type->base_type == script_value_type::jai_shared_ptr_type && incoming.get_type_info().get() != slot_type.get()))) {
+                      detail::handle_store_is_judged(*slot_type, incoming))) {
         auto enforced = enforce_type_compatibility(std::move(incoming), slot_type, member->member);
         if (!enforced) {
             return enforced.error_value();
@@ -9699,7 +9699,7 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
         case script_value::TYPEID_STRING: if (target_base_type == script_value_type::jai_string_type) return arg; break;
         case script_value::TYPEID_BOOL: if (target_base_type == script_value_type::jai_bool_type) return arg; break;
         case script_value::TYPEID_CHAR: if (target_base_type == script_value_type::jai_char_type) return arg; break;
-        case script_value::TYPEID_WEAK_PTR: if (target_base_type == script_value_type::jai_weak_ptr_type) return arg; break;
+        case script_value::TYPEID_WEAK_PTR: if (target_base_type == script_value_type::jai_weak_ptr_type && detail::weak_handle_admits(derefed_arg, target_type, engine_)) return arg; break;
         default: break;
     }
 

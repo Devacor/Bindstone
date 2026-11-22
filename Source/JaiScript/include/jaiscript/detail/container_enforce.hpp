@@ -36,6 +36,8 @@ namespace jai::detail {
 	bool shared_element_admits(const script_value& v, const type_info_ptr& element_type, engine* eng);
 	// a shared handle into a weak_ptr<T> element: the declaration's row (C++: weak = shared), the handle downgrades
 	bool weak_element_takes_shared(const script_value& v, const type_info_ptr& element_type, engine* eng);
+	// a weak pointer into a weak_ptr<T> element: one to T or a subclass (detail::weak_handle_admits)
+	bool weak_element_admits(const script_value& v, const type_info_ptr& element_type, engine* eng);
 	checked_result<script_value> weak_element_from_shared(const script_value& v, engine* eng);
 	// The class a tag names for the subclass walk: a handle tag's pointee, else the tag itself
 	inline uint64_t class_tag_id(const type_info& t) {
@@ -48,6 +50,10 @@ namespace jai::detail {
 	// The source spelling of every element and key text: the payload's type, never a var tag
 	inline std::string container_value_type_name(const script_value& val) {
 		const script_value& v = val.is_reference() ? val.deref() : val;
+		// a weak pointer is spelled by the object it still reaches: its tag names its handle's type, or nothing
+		if (v.raw_storage_index() == script_value::TYPEID_WEAK_PTR) {
+			if (auto reached = v.get_weak_ptr().lock(); reached && !reached->type_name().empty()) { return "weak_ptr<" + std::string(reached->type_name()) + ">"; }
+		}
 		auto info = v.get_type_info();
 		if (info && (info->base_type == script_value_type::jai_shared_ptr_type || info->base_type == script_value_type::jai_weak_ptr_type)) {
 			return info->canonical_name();
@@ -127,6 +133,7 @@ namespace jai::detail {
 			if (target_type == script_value_type::jai_shared_ptr_type && !element_type->type_name.empty()) {
 				return shared_element_admits(actual_element, element_type, eng);
 			}
+			if (target_type == script_value_type::jai_weak_ptr_type) { return weak_element_admits(actual_element, element_type, eng); }
 			return true;
 		}
 		// A live instance stores into a shared_ptr<T> element the way it

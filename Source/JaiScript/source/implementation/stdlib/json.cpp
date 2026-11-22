@@ -100,12 +100,9 @@ namespace stdlib {
         const std::string_view typed_who = detail::engine_access::typed_load_who(*eng);
         if (const script_value* stored = inst.find_script_field_value(member_id)) {
             const type_info_ptr declared = def.get_field_declared_type(member_id);
-            // a saved null is a handle field's empty handle, as `= null` makes it (an expired weak handle saves as null); a class
-            // value field holds no null and keeps its constructed object
-            const bool null_decided = declared && (declared->base_type == script_value_type::jai_weak_ptr_type ||
-                                                   declared->base_type == script_value_type::jai_shared_ptr_type ||
-                                                   declared->base_type == script_value_type::jai_object_type);
-            if (declared && declared->base_type != script_value_type::jai_any_type && (!v.is_null() || null_decided)) {
+            // a saved null goes the way any saved value does: a handle or a function field takes it as `= null` stores it (an
+            // expired weak handle saves as null), and a field of any other declared type holds no null
+            if (declared && declared->base_type != script_value_type::jai_any_type) {
                 auto converted = detail::field_store_convert_no_script(v, declared, eng);
                 if (!converted) {
                     if (!typed_who.empty()) {
@@ -117,8 +114,6 @@ namespace stdlib {
                 }
                 record_load_retype(eng, def, member_id, field_migration_outcome::converted, v, &*converted);
                 inst.set_field(member_id, *converted);
-            } else if (declared && declared->base_type != script_value_type::jai_any_type && !typed_who.empty()) {
-                detail::store_typed_member(*eng, inst, def, member_id, v, typed_who);   // a null where no handle is declared
             } else {
                 inst.set_field(member_id, v);
             }

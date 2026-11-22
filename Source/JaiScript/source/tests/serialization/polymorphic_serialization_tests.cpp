@@ -2252,6 +2252,67 @@ public:
             check(rows.find("Watchkin.mood:string->kept") != std::string::npos, "the script field's retype is recorded: " + rows);
         });
 
+        // A saved null is a value like any other: a handle, a function or a var field takes it, a bool field converts it as `=`
+        // does, and a field of any other declared type keeps its constructed value, recorded as a retype (JSON and binary)
+        test("a_saved_null_never_lands_in_a_field_declared_with_another_type", [&]() {
+            const char* reader_classes = R"(
+                enum Mode { low, high }
+                class Inner { int v = 1; }
+                class Outer {
+                    int n = 3; float f = 1.5; string s = "d"; bool b = true; char c = 'k'; utf8_string u = "u"; Mode m = Mode::high;
+                    array<int> xs = [7]; map<string, int> ks = {"z": 9}; array<string> ss = ["q"]; array<Inner> inners; map<string, Inner> named;
+                    Inner inner; shared_ptr<Inner> h = new Inner(); weak_ptr<Inner> w; function cb; var any = 4; math::vec2 v2 = math::vec2(1.0, 2.0);
+                    array<float> fs = [0.5]; array<array<int>> grid = [[1]];
+                }
+                string shape(var o) {
+                    string out = "";
+                    for (auto name : ["n", "f", "s", "b", "c", "u", "m", "xs", "ks", "ss", "inners", "named", "inner", "h", "w", "cb", "any", "v2", "fs", "grid"]) {
+                        var value = reflect::get(o, name);
+                        out += name + "=" + (value == null ? "null" : to_json(value)) + " ";
+                    }
+                    return out;
+                }
+            )";
+            // what a class of the same name with untyped fields saved: nulls where the reader declares types
+            const char* writer_classes = "class Outer { var n; var f; var s; var b; var c; var u; var m; var xs; var ks; var ss; var inners; var named; var inner; var h; var w; var any; var v2; var fs; var grid; }";
+            const std::string kept = "n=3 f=1.5 s=\"d\" b=false c={\"$char\":107} u=\"u\" m=1 xs=[7] ks={\"z\":9} ss=[\"q\"] inners=[] named={} "
+                                     "inner={\"$type\":\"Inner\",\"$val\":{\"v\":1}} h=null w=null cb=null any=null v2={\"$type\":\"math::vec2\",\"$val\":{\"x\":1.0,\"y\":2.0}} fs=[0.5] grid=[[1]] ";
+            for (const bool binary : {false, true}) {
+                const std::string format = binary ? "binary" : "JSON";
+                auto writer = jai::foundry::make_engine();
+                jai::stdlib::register_all(*writer);
+                writer->execute(writer_classes);
+                auto eng = jai::foundry::make_engine();
+                jai::stdlib::register_all(*eng);
+                eng->execute(reader_classes);
+                eng->hot_reload_reporting(true);
+                std::string saved = writer->execute(binary ? "to_binary(Outer());" : "to_json(Outer());").as_string();
+                eng->add_function("saved", [&saved]() { return saved; });
+                const std::string load = binary ? "from_binary(saved())" : "from_json(saved())";
+                check_eq(kept, eng->execute("shape(" + load + ");").as_string(), format + ": every field of the save is null");
+                std::string rows;
+                for (const auto& report : eng->hot_reload_reports()) {
+                    if (report.outcome == field_migration_outcome::reset) { rows += report.field_name + " "; }
+                }
+                check_eq(std::string("n f s c u m xs ks ss inners named inner v2 fs grid "), rows, format + ": each field that kept its constructed value is recorded");
+                check_eq((script_int)4, eng->execute("var o = " + load + "; o.n + 1;").as_int(), format + ": the field still holds an int");
+                // a null inside a container the field declares: the container does not fit, and the field keeps its constructed one
+                saved = writer->execute(std::string("Outer o; o.xs = [1, null, 3]; o.ks = {\"a\": null}; o.ss = [null]; o.fs = [null, 2.5]; o.grid = [[1, null], null]; o.inners = [null]; o.named = {\"k\": null}; ") +
+                                        (binary ? "to_binary(o);" : "to_json(o);")).as_string();
+                check_eq(kept, eng->execute("shape(" + load + ");").as_string(), format + ": a null among a typed container's elements");
+                // what a float cannot spell in JSON is written so it loads again: no null stands in for it
+                check_eq(std::string("nan inf -inf nan"), eng->execute(std::string("Outer z; z.f = math::nan; z.fs = [math::inf, -math::inf, math::nan]; var back = ") +
+                                                                     (binary ? "from_binary(to_binary(z))" : "from_json(to_json(z))") +
+                                                                     "; to_string(back.f) + \" \" + to_string(back.fs[0]) + \" \" + to_string(back.fs[1]) + \" \" + to_string(back.fs[2]);").as_string(),
+                         format + ": a NaN and the infinities round-trip");
+            }
+            // hand-written JSON, the same nulls
+            auto eng = jai::foundry::make_engine();
+            jai::stdlib::register_all(*eng);
+            eng->execute(reader_classes);
+            check_eq(kept, eng->execute(R"(shape(from_json("{\"$type\":\"Outer\",\"$val\":{\"n\":null,\"f\":null,\"s\":null,\"b\":null,\"c\":null,\"u\":null,\"m\":null,\"xs\":null,\"ks\":null,\"ss\":null,\"inners\":null,\"named\":null,\"inner\":null,\"h\":null,\"w\":null,\"cb\":null,\"any\":null,\"v2\":null,\"fs\":null,\"grid\":null}}"));)").as_string());
+        });
+
         // The load contract's oracle: whatever the constructors, accessors, setters and observers do, a load restores
         // every saved value, so saving what was loaded writes the same bytes (each class shape, alone and in one archive,
         // JSON and binary, script values and the C++ archive)

@@ -300,7 +300,7 @@ public:
 				return std::string("{\"own\":{\"$id\":1,\"$type\":\"Kin\",\"$val\":{\"id\":1}},\"other\":{\"$id\":2,\"$type\":\"Stranger\",\"$val\":{\"n\":2}},"
 				                   "\"kid\":{\"$id\":3,\"$type\":\"Heir\",\"$val\":{\"id\":7,\"extra\":5}},\"w\":{\"$ref\":") + std::to_string(target) + "}}";
 			};
-			const std::string refusal = "from_json: field 'w' of 'Keeper' is weak_ptr<Kin>, not weak_ptr<shared_ptr<Stranger>>";
+			const std::string refusal = "from_json: field 'w' of 'Keeper' is weak_ptr<Kin>, not weak_ptr<Stranger>";
 			struct row {
 				const char* what;
 				int target;
@@ -319,6 +319,19 @@ public:
 				check_eq(r.typed, outcome(*e, "seen(from_json<Keeper>(" + quoted(tagged) + "));"), std::string("typed, tagged, a $ref to ") + r.what);
 				check_eq(r.typed, outcome(*e, "seen(from_json<Keeper>(" + quoted(plain) + "));"), std::string("typed, untagged, a $ref to ") + r.what);
 				check_eq(r.untyped, outcome(*e, "Keeper k = from_json(" + quoted(tagged) + "); seen(k);"), std::string("untyped, a $ref to ") + r.what);
+			}
+			// What the refusal calls its source: a weak reference is the weak_ptr of the class it reaches, wherever it stands,
+			// and a handle is its class, tagged or not
+			const std::string stranger = "\"other\":{\"$id\":1,\"$type\":\"Stranger\",\"$val\":{\"n\":2}}";
+			const std::vector<std::pair<std::string, std::string>> named = {
+				{"{" + stranger + ",\"own\":{\"$ref\":1}}", "from_json: field 'own' of 'Keeper' is shared_ptr<Kin>, not weak_ptr<Stranger>"},
+				{"{" + stranger + ",\"own\":{\"$id\":1}}", "from_json: field 'own' of 'Keeper' is shared_ptr<Kin>, not Stranger"},
+				{"{\"own\":{\"$id\":1,\"$type\":\"Stranger\",\"$val\":{\"n\":2}}}", "from_json: field 'own' of 'Keeper' is shared_ptr<Kin>, not Stranger"},
+				{"{\"w\":{\"$id\":2,\"$type\":\"Stranger\",\"$val\":{\"n\":2}}}", "from_json: field 'w' of 'Keeper' is weak_ptr<Kin>, not Stranger"},
+			};
+			for (const auto& [plain, says] : named) {
+				check_eq("ERR: " + says, outcome(*e, "from_json<Keeper>(" + quoted(plain) + ");"), "untagged: " + plain);
+				check_eq("ERR: " + says, outcome(*e, "from_json<Keeper>(" + quoted("{\"$type\":\"Keeper\",\"$val\":" + plain + "}") + ");"), "tagged: " + plain);
 			}
 			// the rest of a refused document is not kept either: the typed load raises, it does not answer a holder without w
 			check_true(outcome(*e, "from_json<Keeper>(" + quoted(members(2)) + ").own.id;").rfind("ERR: ", 0) == 0);

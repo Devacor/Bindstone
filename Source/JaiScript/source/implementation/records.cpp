@@ -9,6 +9,7 @@
 #include <jaiscript/detail/type_value.hpp>
 #include <jaiscript/detail/engine_access.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
+#include <jaiscript/detail/container_enforce.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
@@ -59,6 +60,7 @@ namespace records_detail {
 			case script_value::TYPEID_UTF8_STRING: return "utf8_string";
 			default: break;
 		}
+		if (v.raw_storage_index() == script_value::TYPEID_WEAK_PTR) { return detail::weak_pointer_spelling(v); }
 		if (v.is_object()) {
 			if (auto instance = const_cast<script_value&>(v).get_class_instance(); instance && instance->get_class_definition()) {
 				return instance->get_class_definition()->get_name();

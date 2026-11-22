@@ -47,13 +47,24 @@ namespace jai::detail {
 	// engine.cpp: the instance's own class tag, for a copy stored under a var tag (null = none)
 	type_info_ptr object_element_own_tag(const script_value& v, engine* eng);
 
+	// A weak pointer as a text names it: the weak_ptr<T> of the class of the object it still reaches. Its own tag names the
+	// handle it was made from (a loaded $ref's reads weak_ptr<shared_ptr<T>>, a type no script writes), so an expired pointer
+	// is read through that handle to its class, and one with no class to name is a bare weak_ptr
+	inline std::string weak_pointer_spelling(const script_value& v) {
+		if (auto reached = v.get_weak_ptr().lock(); reached && !reached->type_name().empty()) { return "weak_ptr<" + std::string(reached->type_name()) + ">"; }
+		const type_info_ptr& tag = v.get_type_info();
+		const type_info* pointee = tag && tag->base_type == script_value_type::jai_weak_ptr_type ? tag->element_type().get() : nullptr;
+		while (pointee && (pointee->base_type == script_value_type::jai_shared_ptr_type || pointee->base_type == script_value_type::jai_weak_ptr_type)) {
+			pointee = pointee->element_type().get();
+		}
+		const bool named = pointee && !pointee->type_name.empty() && pointee->base_type != script_value_type::jai_any_type;
+		return named ? "weak_ptr<" + std::string(pointee->type_name) + ">" : std::string("weak_ptr");
+	}
+
 	// The source spelling of every element and key text: the payload's type, never a var tag
 	inline std::string container_value_type_name(const script_value& val) {
 		const script_value& v = val.is_reference() ? val.deref() : val;
-		// a weak pointer is spelled by the object it still reaches: its tag names its handle's type, or nothing
-		if (v.raw_storage_index() == script_value::TYPEID_WEAK_PTR) {
-			if (auto reached = v.get_weak_ptr().lock(); reached && !reached->type_name().empty()) { return "weak_ptr<" + std::string(reached->type_name()) + ">"; }
-		}
+		if (v.raw_storage_index() == script_value::TYPEID_WEAK_PTR) { return weak_pointer_spelling(v); }
 		auto info = v.get_type_info();
 		if (info && (info->base_type == script_value_type::jai_shared_ptr_type || info->base_type == script_value_type::jai_weak_ptr_type)) {
 			return info->canonical_name();

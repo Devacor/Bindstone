@@ -1169,6 +1169,7 @@ checked_result<std::vector<declaration_ptr>> parser::parse() {
         parser again(*tokens_, symbolizer_, engine_, registered_template_types_, filename_);
         again.source_ = source_;
         again.less_fixed_ = std::move(fixed);
+        again.inherited_check_mode_ = inherited_check_mode_;
         result.emplace(again.parse_pass());
         adopt_pass(again);
     }
@@ -1224,12 +1225,14 @@ checked_result<std::vector<declaration_ptr>> parser::parse_pass() {
     }
 
     // a generic declared under the file's own [[warn_mode]] / [[strict_mode]] checks its instances under it, wherever they are made
+    uint8_t file_mode = inherited_check_mode_;
     for (const auto& d : declarations) {
         if (!d || d->get_type() == node_type::generic_instance_decl) { continue; }
-        if (d->check_mode_attr != check_mode_attr_none) {
-            for (detail::generic_definition* g : file_generics_) { if (g->check_mode == check_mode_attr_none) { g->check_mode = d->check_mode_attr; } }
-        }
+        if (d->check_mode_attr != check_mode_attr_none) { file_mode = d->check_mode_attr; }
         break;
+    }
+    if (file_mode != check_mode_attr_none) {
+        for (detail::generic_definition* g : file_generics_) { if (g->check_mode == check_mode_attr_none) { g->check_mode = file_mode; } }
     }
 
     // Escape-mark + transient-read passes (shared with jaibite loads, which must
@@ -3745,6 +3748,7 @@ declaration_ptr parser::parse_generic_text(const std::vector<token>& text, detai
     const size_t saved_current = current_;
     const std::optional<token> saved_pushed_back = pushed_back_token_;
     std::vector<generic_use> saved_uses = std::move(generic_uses_);
+    const size_t saved_generics = file_generics_.size();
     std::vector<std::string> saved_namespace = std::move(current_namespace_path_);
     std::vector<function_scope> saved_scopes = std::move(function_scope_stack_);
     std::vector<uint64_t> saved_block_variables = std::move(program_block_variables_);
@@ -3789,6 +3793,7 @@ declaration_ptr parser::parse_generic_text(const std::vector<token>& text, detai
     in_switch_case_ = saved_flags[0]; in_coroutine_ = saved_flags[1]; in_constructor_ = saved_flags[2];
     returns_reference_ = saved_flags[3]; coroutine_body_pending_ = saved_flags[4]; returns_value_ = saved_flags[5];
     paren_close_.erase(&text);
+    file_generics_.resize(saved_generics);   // the caller drops the text's parse, and with it every generic the text declares
     if (!parsed) {
         if (errors_.size() == errors_before) { report_error_at(format_error(parsed, *symbolizer_), text.front().location); }
         return nullptr;

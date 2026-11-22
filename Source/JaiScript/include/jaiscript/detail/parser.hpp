@@ -63,6 +63,8 @@ namespace jai {
         // The token stream as one template body (lexer::tokenize_template) under a untrusted_template's rules: the expression, or the
         // listing of what the text breaks (docs/site/guide/19-templates.html)
         checked_result<expression_ptr> parse_untrusted_template_body();
+        // The region the parsed text's generics check their instances in when the text names none (a generic class's instance: its class's)
+        void inherit_check_mode(uint8_t a_mode) { inherited_check_mode_ = a_mode; }
 
     private:
         std::vector<declaration_ptr> recovered_;
@@ -301,7 +303,8 @@ namespace jai {
         checked_result<expression_ptr> expression();
         checked_result<expression_ptr> null_chain_rest(size_t chain_start, const std::vector<size_t>& links, expression_ptr expr);
         static void mark_null_chain(jai::expression* rewritten);
-        std::vector<detail::generic_definition*> file_generics_;   // the generics this parse declares (their check mode)
+        std::vector<detail::generic_definition*> file_generics_;   // the generics of the declarations this parse keeps (their check mode)
+        uint8_t inherited_check_mode_ = check_mode_attr_none;
         // an operand and every operator after it that binds at least min_precedence (= is 0, * / % the tightest)
         checked_result<expression_ptr> operator_expression(int min_precedence);
         checked_result<expression_ptr> unary();

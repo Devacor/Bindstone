@@ -78,6 +78,38 @@ public:
             cleanup_temp_file(generics);
         });
 
+        // A generic class's generic method is parsed once to check the class's text and that parse is dropped: the file's leading
+        // [[warn_mode]] reaches only the generics the file keeps (under the address sanitizer the dropped one was written after free)
+        test("warn_mode_reaches_only_the_generics_a_file_keeps", [this]() {
+            const std::string source =
+                "[[warn_mode]];\n"
+                "class WGen<T> { T v; U conv<U>(U seed) { if (seed < 0) { return undeclared_cv; } return seed; } int unused() { return undeclared_g; } }\n"
+                "class P { U id<U>(U x) { if (false) { return undeclared_p; } return x; } }\n"
+                "namespace wn { class NGen<T> { V pass<V>(V x) { return x; } } }\n"
+                "WGen<int> w; w.v = 4; P p; wn::NGen<string> g;\n"
+                "w.conv<int>(3) + w.v + p.id<int>(10) + g.pass<int>(100);\n";
+            for (int run = 0; run < 3; ++run) {
+                auto eng = make_engine();
+                check_eq((int64_t)117, eng->execute(source).as_int());
+                check_false(eng->last_check_diagnostics().has_errors(), "the undeclared names are warnings");
+            }
+        });
+
+        // The generic methods a generic class's instance declares are the class's region's: an imported warn file's generic method
+        // warns when a strict file makes its instance, as the class's own members do
+        test("a_generic_classs_generic_method_checks_in_the_class_region", [=, this]() {
+            auto generics = create_temp_file("warn_region_methods.jai",
+                "[[warn_mode]];\nclass MBox<T> { T item; U conv<U>(U x) { if (false) { return undeclared_mm; } return x; } }\n");
+            auto eng = make_engine();
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
+            std::string loaded = "loaded";
+            try { check_eq((int64_t)5, eng->execute("import \"warn_region_methods.jai\"; MBox<int> b; b.conv<int>(5);").as_int()); }
+            catch (const std::exception& e) { loaded = e.what(); }
+            check_eq(std::string("loaded"), loaded);
+            check_false(eng->last_check_diagnostics().has_errors(), "the method instance's undeclared name is a warning");
+            cleanup_temp_file(generics);
+        });
+
         // A file a function includes lists its warning under its own name and line, not the including file's
         test("an_include_in_a_function_lists_its_warning_under_its_file", [=, this]() {
             auto included = create_temp_file("warn_region_include.jai", "[[warn_mode]];\nfunction k() { return undeclared_inc; }\n");

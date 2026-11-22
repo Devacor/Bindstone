@@ -1767,6 +1767,7 @@ struct engine::implementation {
         }
         const std::vector<token> text = detail::generic_instance_tokens(*definition, request.arguments, simple, string_symbolizer_, &host);
         parser reader(text, &string_symbolizer_, &self, registeredTemplateTypes, file);
+        reader.inherit_check_mode(definition->check_mode);
         auto parsed = reader.parse();
         refuse_unsettled(reader);
         for (const auto& spliced : reader.spliced_files()) { files.push_back(spliced); }

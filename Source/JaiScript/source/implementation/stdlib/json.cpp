@@ -95,6 +95,9 @@ namespace stdlib {
     bool store_saved_member(engine* eng, const script_value& instance, class_instance& inst, class_definition& def,
                             const detail::engine_access::load_field& field, script_value&& v) {
         const uint64_t member_id = field.id;
+        // a typed load keeps no constructed value in place of a saved one: what the archive's conversions do not take is
+        // stored by the record's rule, as the member of an object written without a $type is, or refused
+        const std::string_view typed_who = detail::engine_access::typed_load_who(*eng);
         if (const script_value* stored = inst.find_script_field_value(member_id)) {
             const type_info_ptr declared = def.get_field_declared_type(member_id);
             // a saved null is a handle field's empty handle, as `= null` makes it (an expired weak handle saves as null); a class
@@ -105,11 +108,17 @@ namespace stdlib {
             if (declared && declared->base_type != script_value_type::jai_any_type && (!v.is_null() || null_decided)) {
                 auto converted = detail::field_store_convert_no_script(v, declared, eng);
                 if (!converted) {
+                    if (!typed_who.empty()) {
+                        detail::store_typed_member(*eng, inst, def, member_id, v, typed_who);
+                        return !detail::engine_access::backend_unwinding(*eng);
+                    }
                     record_load_retype(eng, def, member_id, field_migration_outcome::reset, v, stored);
                     return true;
                 }
                 record_load_retype(eng, def, member_id, field_migration_outcome::converted, v, &*converted);
                 inst.set_field(member_id, *converted);
+            } else if (declared && declared->base_type != script_value_type::jai_any_type && !typed_who.empty()) {
+                detail::store_typed_member(*eng, inst, def, member_id, v, typed_who);   // a null where no handle is declared
             } else {
                 inst.set_field(member_id, v);
             }
@@ -132,6 +141,7 @@ namespace stdlib {
             if (written.error() == make_error_code(runtime_error_code::cpp_exception) && fits) {
                 throw runtime_error(eng->format_error(written));
             }
+            if (!typed_who.empty()) { detail::throw_typed_member_refusal(*eng, def, member_id, kind.get(), v, typed_who); }
             record_load_retype(eng, def, member_id, field_migration_outcome::reset, v, current.is_null() ? nullptr : &current);
         }
         return !detail::engine_access::backend_unwinding(*eng);
@@ -184,6 +194,13 @@ namespace stdlib {
 			*slot = &member;
 		}
 		return true;
+	}
+
+	const std::string* unread_instance_record(const script_map& map) {
+		archive_record_keys keys;
+		if (!read_archive_record_keys(map, keys) || keys.id || keys.ref || !keys.type || !keys.val) { return nullptr; }
+		if (!keys.type->is_string() || !keys.val->is_map() || (keys.version && !keys.version->is_int())) { return nullptr; }
+		return keys.type->text_bytes();
 	}
 
 	// A handle: {"$id": N} or {"$ref": N}, and at its object's first reference the object's "$type" beside its "$val". The
@@ -804,10 +821,12 @@ namespace stdlib {
         }, serial);
         
 		eng_ref.add_function("from_json", [eng](const std::string& json) -> script_value {
+			detail::engine_access::load_rule rule(eng, {});
 			return parse_json_text(eng, json);
 		}, serial);
 		// from_json<T>(text): the document as a T, a class built from an object by jai::make_record's rules
 		eng_ref.add_function("from_json", [eng](const script_type& type, const std::string& json) -> script_value {
+			detail::engine_access::load_rule rule(eng, "from_json");
 			auto built = detail::json_to_type(*eng, parse_json_text(eng, json), type.info(), "from_json", "the JSON");
 			if (!built) { throw runtime_error(eng->format_error(built)); }
 			return std::move(built.value());
@@ -836,10 +855,12 @@ namespace stdlib {
                 throw runtime_error("from_binary expects a string argument");
             }
 
+			detail::engine_access::load_rule rule(eng, {});
 			return parse_binary_bytes(eng, args[0].as<script_string>());
         }, serial);
 		// from_binary<T>(bytes): the archive's value as a T, by from_json<T>'s rules
 		eng_ref.add_function("from_binary", [eng](const script_type& type, const std::string& bytes) -> script_value {
+			detail::engine_access::load_rule rule(eng, "from_binary");
 			auto built = detail::json_to_type(*eng, parse_binary_bytes(eng, bytes), type.info(), "from_binary", "the data");
 			if (!built) { throw runtime_error(eng->format_error(built)); }
 			return std::move(built.value());

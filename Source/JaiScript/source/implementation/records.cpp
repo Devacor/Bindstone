@@ -41,8 +41,14 @@ namespace records_detail {
 	}
 
 	// a value's type as a script spells it: a class by name, a typed container by its element types
+	// An archive record the load left a map ({"$type": name, "$val": {...}} naming no class of the program): the name it gives
+	const std::string* unread_record_type(const script_value& v) {
+		return v.is_map() ? stdlib::unread_instance_record(v.as_map()) : nullptr;
+	}
+
 	std::string value_type_text(const script_value& a_value) {
 		const script_value& v = a_value.deref();
+		if (const std::string* named = unread_record_type(v)) { return *named; }
 		switch (v.raw_storage_index()) {
 			case script_value::TYPEID_NULL: return "null";
 			case script_value::TYPEID_BOOL: return "bool";
@@ -82,8 +88,15 @@ namespace records_detail {
 		}
 	}
 
-	// The text a JSON field holds, read as from_json reads it
-	script_value parse_json(engine& eng, const std::string& text) { return stdlib::parse_json_text(&eng, text); }
+	// The text a JSON field holds, read as from_json<T> reads it: its archive records by the record's rule
+	script_value parse_json(engine& eng, const std::string& text, std::string_view who) {
+		detail::engine_access::load_rule rule(&eng, who);
+		return stdlib::parse_json_text(&eng, text);
+	}
+
+	JAI_NOINLINE R failed(engine& eng, const std::string& text) {
+		return R(make_error_code(runtime_error_code::type_mismatch), "{0}", detail::engine_access::park_error_text(eng, text));
+	}
 
 	bool script_class_type(const type_info* t) {
 		return t && t->base_type == script_value_type::jai_object_type && !t->is_enum && !t->type_name.empty();
@@ -113,13 +126,16 @@ namespace records_detail {
 		if (const std::string* text = v.text_bytes()) {
 			std::optional<script_value> parsed;
 			try {
-				parsed.emplace(parse_json(eng, *text));
+				parsed.emplace(parse_json(eng, *text, who));
+			} catch (const stdlib::typed_load_refusal& refusal) {
+				return failed(eng, refusal.what());
 			} catch (const std::exception& e) {
 				return refused(eng, who, "text for '" + t->canonical_name() + "' is not JSON: " + e.what());
 			}
 			return widen(eng, *parsed, declared, who);
 		}
 		if (detail::native_stack_low()) [[unlikely]] { return detail::raise_native_stack(); }
+		if (unread_record_type(v)) { return v; }   // it names another type: the store refuses it as that type
 		if (script_class_type(t) && v.is_map()) { return build(eng, declared, v, who, false); }
 		if (t->base_type == script_value_type::jai_shared_ptr_type && v.is_map() && script_class_type(t->element_type().get())) {
 			return build(eng, t->element_type(), v, who, true);
@@ -146,6 +162,22 @@ namespace records_detail {
 			return out;
 		}
 		return v;
+	}
+
+	// One named value into a record's field, by the record's rule: widened, then stored as a script store would, or refused
+	R store_field(engine& eng, class_instance& instance, const std::string& class_name, const record_field& field, const script_value& given, std::string_view who) {
+		R widened = widen(eng, given, field.type, who);
+		if (!widened) { return widened; }
+		const bool null_given = widened.value().deref().is_null();
+		const std::string given_type = value_type_text(widened.value());
+		auto stored = instance.enforce_field_write(field.id, std::move(widened.value()));
+		if (!stored) {
+			const std::string declared_type = field.type ? field.type->spelling() : std::string("var");
+			if (null_given) { return refused(eng, who, "field '" + std::string(field.name) + "' of '" + class_name + "' is " + declared_type + " and cannot be null"); }
+			return refused(eng, who, "field '" + std::string(field.name) + "' of '" + class_name + "' is " + declared_type + ", not " + given_type);
+		}
+		instance.set_field_unchecked(field.id, stored.value());
+		return script_value(std::monostate{}, &eng);
 	}
 
 	R build(engine& eng, const type_info_ptr& type, const script_value& fields, std::string_view who, bool shared) {
@@ -176,17 +208,8 @@ namespace records_detail {
 		for (const record_field& field : declared) {
 			auto found = given.find(script_value(std::string(field.name), &eng));
 			if (found == given.end()) { continue; }
-			R widened = widen(eng, found->second, field.type, who);
-			if (!widened) { return widened; }
-			const bool null_given = widened.value().deref().is_null();
-			const std::string given_type = value_type_text(widened.value());
-			auto stored = instance->enforce_field_write(field.id, std::move(widened.value()));
-			if (!stored) {
-				const std::string declared_type = field.type ? field.type->spelling() : std::string("var");
-				if (null_given) { return refused(eng, who, "field '" + std::string(field.name) + "' of '" + name + "' is " + declared_type + " and cannot be null"); }
-				return refused(eng, who, "field '" + std::string(field.name) + "' of '" + name + "' is " + declared_type + ", not " + given_type);
-			}
-			instance->set_field_unchecked(field.id, stored.value());
+			R stored = store_field(eng, *instance, name, field, found->second, who);
+			if (!stored) { return stored; }
 		}
 		if (shared) {   // make_shared<T>()'s answer: the handle spelling marks the object, as reflect::construct_shared does
 			type_info* pointee = record.get_type_info().get();
@@ -265,7 +288,9 @@ namespace detail {
 	}
 
 	checked_result<script_value> json_to_type(engine& eng, const script_value& value, const type_info_ptr& type, std::string_view who, std::string_view document) {
-		if (records_detail::script_class_type(type.get()) && value.is_map()) { return records_detail::build(eng, type, value, who, false); }
+		if (records_detail::script_class_type(type.get()) && value.is_map() && !records_detail::unread_record_type(value)) {
+			return records_detail::build(eng, type, value, who, false);
+		}
 		auto widened = records_detail::widen(eng, value, type, who);
 		if (!widened) { return widened; }
 		const std::string spelled = type ? type->canonical_name() : std::string();
@@ -276,6 +301,17 @@ namespace detail {
 		script_value out = std::move(stored.value());
 		if (type && type->base_type != script_value_type::jai_any_type) { out.set_type_info(type); }
 		return out;
+	}
+
+	void store_typed_member(engine& eng, class_instance& instance, const class_definition& def, uint64_t field_id, const script_value& value, std::string_view who) {
+		const records_detail::record_field field{field_id, engine_access::get_symbolizer(eng)->get_string(field_id), def.get_field_declared_type(field_id)};
+		auto stored = records_detail::store_field(eng, instance, def.get_name(), field, value, who);
+		if (!stored) { throw stdlib::typed_load_refusal(eng.format_error(stored)); }
+	}
+
+	void throw_typed_member_refusal(engine& eng, const class_definition& def, uint64_t field_id, const type_info* declared, const script_value& value, std::string_view who) {
+		throw stdlib::typed_load_refusal(std::string(who) + ": field '" + std::string(engine_access::get_symbolizer(eng)->get_string(field_id)) + "' of '" + def.get_name() + "' is " +
+		                                 (declared ? declared->spelling() : std::string("var")) + ", not " + records_detail::value_type_text(value));
 	}
 
 	void register_type_library(engine& eng) {

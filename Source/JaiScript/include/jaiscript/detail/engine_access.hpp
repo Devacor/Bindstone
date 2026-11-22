@@ -22,6 +22,7 @@ namespace jai::detail {
         using map_key_ids = engine::map_key_ids;
         using construction_access_waiver = engine::construction_access_waiver;
         using load_session = engine::load_session;
+        using load_rule = engine::load_rule;
         using load_field = engine::load_field;
         template<typename F> JAI_FORCEINLINE static script_function guard_function(engine& a_engine, F&& function, const permission_set& required) { return a_engine.guard_function(std::forward<F>(function), required); }
         JAI_FORCEINLINE static script_value execute_include_source(engine& a_engine, const std::string& resolved_path, const loaded_source& content, std::string_view scope = {}) { return a_engine.execute_include_source(resolved_path, content, scope); }
@@ -292,6 +293,7 @@ namespace jai::detail {
         JAI_FORCEINLINE static bool take_construction_access_waiver(engine& a_engine) noexcept { return a_engine.take_construction_access_waiver(); }
         JAI_FORCEINLINE static const std::vector<load_field>& load_field_order(engine& a_engine, const class_definition& cls) { return a_engine.load_field_order(cls); }
         JAI_FORCEINLINE static void defer_post_load(engine& a_engine, const script_value& self, script_int version) { return a_engine.defer_post_load(self, version); }
+        JAI_FORCEINLINE static std::string_view typed_load_who(const engine& a_engine) noexcept { return a_engine.typed_load_who(); }
         JAI_FORCEINLINE static void note_program_scope_cell(engine& a_engine, environment* scope, size_t slot) { return a_engine.note_program_scope_cell(scope, slot); }
         JAI_FORCEINLINE static void note_static_field(engine& a_engine, class_definition* cls, uint64_t id) { return a_engine.note_static_field(cls, id); }
         template<typename T> JAI_FORCEINLINE static param_type_info map_cpp_type_to_param_info() { return engine::map_cpp_type_to_param_info<T>(); }

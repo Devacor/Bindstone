@@ -1622,6 +1622,21 @@ namespace jai {
             engine* eng;
             bool completed = false;
         };
+        // The rule a load stores a saved member by, stated by each load entry for as long as it runs. An archive load
+        // (from_json(text), from_binary, a C++ archive read) converts a value that no longer fits its field as hot reload's
+        // retype does, or keeps the constructed value; a typed load (from_json<T>, jai::make_record) refuses it in the
+        // name of its caller, who. An empty who is the archive's rule.
+        class load_rule {
+        public:
+            load_rule(engine* a_engine, std::string_view a_typed_who) : eng(a_engine), outer(std::exchange(a_engine->typed_load_who_, a_typed_who)) {}
+            ~load_rule() { eng->typed_load_who_ = outer; }
+            load_rule(const load_rule&) = delete;
+            load_rule& operator=(const load_rule&) = delete;
+        private:
+            engine* eng;
+            std::string_view outer;
+        };
+        std::string_view typed_load_who() const noexcept { return typed_load_who_; }
         // A class's properties in the order a load restores them (its declaration order, base first), kept for the
         // load in progress
         struct load_field {
@@ -1753,6 +1768,7 @@ namespace jai {
         void name_permission(std::int32_t id, std::string_view name);
         std::unique_ptr<std::mutex> parallel_compile_mutex_ = std::make_unique<std::mutex>();
         int load_depth_ = 0;
+        std::string_view typed_load_who_;
         std::vector<std::pair<script_value, script_int>> deferred_post_loads_;
         std::unordered_map<const class_definition*, std::vector<load_field>> load_field_orders_;
 

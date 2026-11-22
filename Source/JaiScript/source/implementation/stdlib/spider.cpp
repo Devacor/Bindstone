@@ -512,6 +512,7 @@ namespace spider_detail {
 			.property("url", &response_record::url)
 			.method("ok", [](const response_record& a_self) { return a_self.status >= 200 && a_self.status < 300; })
 			.method("json", [eng](const response_record& a_self) -> script_value {
+				detail::engine_access::load_rule rule(eng, {});
 				detail::engine_access::load_session session(eng);
 				serialization::json_archive_reader reader(a_self.body, eng);
 				script_value result = load_archive_value(eng, reader.read_value(), true);

@@ -7942,6 +7942,7 @@ void engine::swap_run_entry_state(detail::run_entry_state& s) noexcept {
     m.string_symbolizer_.set_current_unit(s.unit);
     s.unit = unit;
     swap(load_depth_, s.load_depth);
+    swap(typed_load_who_, s.typed_load_who);
     swap(deferred_post_loads_, s.deferred_post_loads);
     detail::execution_limits& l = m.limits_;
     swap(l.terminal_error, s.terminal_error);

@@ -20,6 +20,7 @@
 #include "../case_table.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 
@@ -54,6 +55,14 @@ void bind_read_only_probe(jai::engine& e) {
                   [](read_only_probe& s, int64_t v) { s.lam_backing = v; })
         .property("ro", [](const read_only_probe& s) -> int64_t { return s.value + 100; }, nullptr)
         .build();
+}
+
+// A host class a script calls: its operator() binds as the method "()"
+struct call_probe {
+    int64_t operator()(int64_t a_value) const { return a_value + 1; }
+};
+void bind_call_probe(jai::engine& e) {
+    dynamic_binder<call_probe>(e, "CallProbe").constructor<>().method("()", &call_probe::operator()).build();
 }
 
 size_t error_count(const check_report& r) { return r.error_count(); }
@@ -4554,6 +4563,240 @@ public:
             check_eq(std::string("VALUE 8"), outcome(*e, "doubled(4)"), "the refused reload left the old code running");
             write_unit(dir, "main.jai", "import \"lib.jai\";\nint doubled(int v) { return twice(`${v}`).size(); }\n");
             check_eq(std::string("VALUE 2"), outcome(*e, run));
+            std::filesystem::remove_all(dir);
+        });
+
+        // A use that can never succeed (docs/site/guide/13-strict-checking.html): a call of a name declared with a type no call
+        // takes, in every place the load knows the one thing the name is
+        test("a_call_of_a_name_declared_with_a_type_no_call_takes_is_a_load_error", []() {
+            struct declared {
+                std::string type, init, what;
+            };
+            const std::vector<declared> types = {
+                {"int", "5", "an int"}, {"float", "1.5", "a float"}, {"bool", "true", "a bool"}, {"char", "'k'", "a char"},
+                {"string", "\"s\"", "a string"}, {"utf8_string", "\"u\"", "a utf8_string"}, {"array<int>", "[1]", "an array<int>"},
+                {"map<string, int>", "{\"k\": 1}", "a map<string,int>"}, {"math::vec2", "math::vec2(1.0, 2.0)", "a math::vec2"},
+                {"Mode", "Mode::high", "a Mode"},
+            };
+            // where the name is declared: the program's text (line 1 declares the enum every row may name), the place of the name's
+            // declaration as the error spells it, and the name the error shows
+            struct place {
+                std::string name;
+                std::string lib;       // another unit's text, empty for a one-file program
+                std::string root;      // ${decl}: TYPE limit = INIT;   ${type}: TYPE
+                std::string shown;
+                std::string where;     // ${col}: the column of `limit` in its declaration
+                size_t before;         // the characters ahead of the type on the declaration's line
+            };
+            const std::vector<place> places = {
+                {"the program scope of the unit", "", "enum Mode { low, high }\n${decl}\nvar use() { return limit(); }\n1;", "limit", "2:${col}", 0},
+                {"the program scope, called through ::", "", "enum Mode { low, high }\n${decl}\nclass K { var use() { return ::limit(); } }\n1;", "limit", "2:${col}", 0},
+                {"a local", "", "enum Mode { low, high }\nvar use() {\n${decl}\nreturn limit();\n}\n1;", "limit", "3:${col}", 0},
+                {"a local of a method", "", "enum Mode { low, high }\nclass K { var use() {\n${decl}\nreturn limit();\n} }\n1;", "limit", "3:${col}", 0},
+                {"a parameter (its place is its function's)", "", "enum Mode { low, high }\nvar use(${type} limit) { return limit(); }\n1;", "limit", "2:5", 0},
+                {"a parameter of a method", "", "enum Mode { low, high }\nclass K { var use(${type} limit) { return limit(); } }\n1;", "limit", "2:15", 0},
+                {"a lambda's parameter", "", "enum Mode { low, high }\nvar use() {\nvar f = (${type} limit) => limit();\nreturn 1;\n}\n1;", "limit", "3:9", 0},
+                {"a local a lambda captures", "", "enum Mode { low, high }\nvar use() {\n${decl}\nvar f = [=]() { return limit(); };\nreturn 1;\n}\n1;", "limit", "3:${col}", 0},
+                {"a namespace's variable, qualified in a method", "", "enum Mode { low, high }\nnamespace n { ${decl} }\nclass K { var use() { return n::limit(); } }\n1;", "n::limit", "2:${col}", 14},
+                {"a static, qualified in a method of a derived class", "", "enum Mode { low, high }\nclass C { static ${decl} }\nclass D : C { var use() { return C::limit(); } }\n1;", "C::limit", "2:${col}", 17},
+                {"a namespace's variable, qualified", "", "enum Mode { low, high }\nnamespace n { ${decl} }\nvar use() { return n::limit(); }\n1;", "n::limit", "2:${col}", 14},
+                {"a namespace's variable, bare in the namespace", "", "enum Mode { low, high }\nnamespace n { ${decl}\nvar use() { return limit(); } }\n1;", "n::limit", "2:${col}", 14},
+                {"a static, qualified", "", "enum Mode { low, high }\nclass C { static ${decl} }\nvar use() { return C::limit(); }\n1;", "C::limit", "2:${col}", 17},
+                {"the program scope of exactly one other unit", "enum Mode { low, high }\n${decl}\n", "import \"lib.jai\";\nvar use() { return limit(); }\n1;", "limit", "lib.jai:2:${col}", 0},
+                {"a namespace's variable of exactly one other unit", "enum Mode { low, high }\nnamespace n { ${decl} }\n", "import \"lib.jai\";\nvar use() { return n::limit(); }\n1;", "n::limit", "lib.jai:2:${col}", 14},
+                {"a static of another unit's class", "enum Mode { low, high }\nclass C { static ${decl} }\n", "import \"lib.jai\";\nvar use() { return C::limit(); }\n1;", "C::limit", "lib.jai:2:${col}", 17},
+            };
+            const auto fill = [](std::string text, const declared& d) {
+                const std::string decl = d.type + " limit = " + d.init + ";";
+                for (size_t at = text.find("${decl}"); at != std::string::npos; at = text.find("${decl}")) { text.replace(at, 7, decl); }
+                for (size_t at = text.find("${type}"); at != std::string::npos; at = text.find("${type}")) { text.replace(at, 7, d.type); }
+                return text;
+            };
+            std::string failures;
+            int made = 0;
+            for (const place& where : places) {
+                for (const declared& d : types) {
+                    const auto dir = closure_dir("never_" + std::to_string(made++));
+                    auto e = program_engine(dir);
+                    stdlib::register_all(*e);
+                    if (!where.lib.empty()) { write_unit(dir, "lib.jai", fill(where.lib, d)); }
+                    std::string at = where.where;
+                    if (const size_t col = at.find("${col}"); col != std::string::npos) { at.replace(col, 6, std::to_string(where.before + d.type.size() + 2)); }
+                    if (at.rfind("lib.jai", 0) == 0) { at = (dir / "lib.jai").string() + at.substr(7); }
+                    const std::string expected = "error: '" + where.shown + "' is " + d.what + " (declared at " + at + "), not a function";
+                    const std::string got = outcome(*e, fill(where.root, d));
+                    if (got.find(expected) == std::string::npos) { failures += where.name + ", " + d.type + ": wanted [" + expected + "] got [" + got + "]\n"; }
+                    std::filesystem::remove_all(dir);
+                }
+            }
+            check_true(failures.empty(), failures);
+        });
+
+        test("a_call_of_an_enum_or_a_member_of_a_function_is_a_load_error", []() {
+            struct row {
+                std::string name, lib, root, expected;
+            };
+            const std::vector<row> rows = {
+                {"an enum's value", "", "enum Mode { low, high }\nvar use() { return Mode::high(); }\n1;", "<script>:2:26: error: 'Mode::high' is a value of the enum 'Mode' (declared at 1:6), not a function"},
+                {"an enum's value, in a method", "", "enum Mode { low, high }\nclass K { var use() { return Mode::high(); } }\n1;", "<script>:2:36: error: 'Mode::high' is a value of the enum 'Mode' (declared at 1:6), not a function"},
+                {"an enum's name", "", "enum Mode { low, high }\nvar use() { return Mode(); }\n1;", "<script>:2:20: error: 'Mode' is an enum (declared at 1:6), not a function"},
+                {"an enum a function declares", "", "var use() {\nenum Mode { low, high }\nreturn Mode();\n}\n1;", "error: 'Mode' is an enum (declared at 2:6), not a function"},
+                {"another unit's enum's value", "enum Mode { low, high }\n", "import \"lib.jai\";\nvar use() { return Mode::high(); }\n1;", "error: 'Mode::high' is a value of the enum 'Mode' (declared at ${lib}:1:6), not a function"},
+                {"another unit's enum's name", "enum Mode { low, high }\n", "import \"lib.jai\";\nvar use() { return Mode(); }\n1;", "error: 'Mode' is an enum (declared at ${lib}:1:6), not a function"},
+                {"a variable declared auto from a literal", "", "auto limit = 5;\nvar use() { return limit(); }\n1;", "<script>:2:20: error: 'limit' is an int (declared at 1:6), not a function"},
+                {"a loop's variable", "", "var use() {\nfor (int i = 0; i < 1; i += 1) { i(); }\nreturn 1;\n}\n1;", "error: 'i' is an int (declared at 2:10), not a function"},
+                {"a range-for variable", "", "var use() {\nfor (string word : [\"a\"]) { word(); }\nreturn 1;\n}\n1;", "error: 'word' is a string (declared at 2:1), not a function"},
+                {"a const", "", "const int limit = 5;\nvar use() { return limit(); }\n1;", "error: 'limit' is an int (declared at 1:11), not a function"},
+                {"a function's member", "", "int limit() { return 5; }\nvar use() { return limit.n; }\n1;", "<script>:2:26: error: 'limit' is a function (declared at 1:5): it has no member 'n'"},
+                {"a function's member, stored", "", "int limit() { return 5; }\nvar use() { limit.n = 3; return 1; }\n1;", "error: 'limit' is a function (declared at 1:5): it has no member 'n'"},
+                {"a function's member, called", "", "int limit() { return 5; }\nvar use() { return limit.size(); }\n1;", "error: 'limit' is a function (declared at 1:5): it has no member 'size'"},
+                {"a function's member through ?.", "", "int limit() { return 5; }\nvar use() { return limit?.n; }\n1;", "error: 'limit' is a function (declared at 1:5): it has no member 'n'"},
+                {"a function's subscript", "", "int limit() { return 5; }\nvar use() { return limit[0]; }\n1;", "<script>:2:20: error: 'limit' is a function (declared at 1:5): it cannot be subscripted"},
+                {"a function's subscript, stored", "", "int limit() { return 5; }\nvar use() { limit[0] = 3; return 1; }\n1;", "error: 'limit' is a function (declared at 1:5): it cannot be subscripted"},
+                {"a local in a unit with an include the load cannot read", "", "string part = \"missing\" + \".jai\";\nvar use() { int limit = 5; include(part); return limit(); }\n1;", "error: 'limit' is an int (declared at 2:17), not a function"},
+                {"a namespace's variable through using", "", "namespace cfg { int lo = 1; }\nusing cfg::lo;\nvar use() { return lo(); }\n1;", "<script>:3:20: error: 'cfg::lo' is an int (declared at 1:21), not a function"},
+                {"a using name over a function of the unit declared above it", "", "namespace cfg { int lo = 1; }\nint lo() { return 3; }\nusing cfg::lo;\nvar use() { return lo(); }\n1;", "<script>:4:20: error: 'cfg::lo' is an int (declared at 1:21), not a function"},
+                {"a namespace's variable a later block declares", "", "namespace n { var use() { return v(); } }\nnamespace n { int v = 5; }\n1;", "<script>:1:34: error: 'n::v' is an int (declared at 2:19), not a function"},
+                {"a namespace's variable through using, in a method", "", "namespace cfg { int lo = 1; }\nusing cfg::lo;\nclass K { var use() { return lo(); } }\n1;", "<script>:3:30: error: 'cfg::lo' is an int (declared at 1:21), not a function"},
+                {"an enum's value through using", "", "enum Mode { low, high }\nusing Mode::low;\nvar use() { return low(); }\n1;", "error: 'Mode::low' is a value of the enum 'Mode' (declared at 1:6), not a function"},
+                {"a static in a static method", "", "class C { static int count = 5; static var use() { return C::count(); } }\n1;", "error: 'C::count' is an int (declared at 1:22), not a function"},
+                {"another unit's function's member", "int limit() { return 5; }\n", "import \"lib.jai\";\nvar use() { return limit.n; }\n1;", "error: 'limit' is a function (declared at ${lib}:1:5): it has no member 'n'"},
+                {"another unit's function's subscript", "int limit() { return 5; }\n", "import \"lib.jai\";\nvar use() { return limit[0]; }\n1;", "error: 'limit' is a function (declared at ${lib}:1:5): it cannot be subscripted"},
+                {"arithmetic on another unit's function, as on the unit's own", "int limit() { return 5; }\n", "import \"lib.jai\";\nvar use() { return limit + 1; }\n1;", "error: cannot apply '+' to 'function' and 'int'"},
+                {"a unary minus on another unit's function", "int limit() { return 5; }\n", "import \"lib.jai\";\nvar use() { return -limit; }\n1;", "error: Unary minus requires numeric operand"},
+                {"another unit's function into an int", "int limit() { return 5; }\n", "import \"lib.jai\";\nvar use() { int x = limit; return x; }\n1;", "error: cannot initialize 'x' declared 'int' with 'function'"},
+            };
+            std::string failures;
+            int made = 0;
+            for (const row& r : rows) {
+                const auto dir = closure_dir("never_other_" + std::to_string(made++));
+                auto e = program_engine(dir);
+                stdlib::register_all(*e);
+                if (!r.lib.empty()) { write_unit(dir, "lib.jai", r.lib); }
+                std::string expected = r.expected;
+                if (const size_t at = expected.find("${lib}"); at != std::string::npos) { expected.replace(at, 6, (dir / "lib.jai").string()); }
+                const std::string got = outcome(*e, r.root);
+                if (got.find(expected) == std::string::npos) { failures += r.name + ": wanted [" + expected + "] got [" + got + "]\n"; }
+                std::filesystem::remove_all(dir);
+            }
+            check_true(failures.empty(), failures);
+        });
+
+        test("a_use_that_may_succeed_when_the_line_runs_still_loads", []() {
+            // every row loads and answers 1: something may answer the name another way, or its type takes a call
+            struct row {
+                std::string name, lib, other, root;
+            };
+            const std::vector<row> rows = {
+                {"a var", "", "", "var limit = 5;\nvar use() { return limit(); }\n1;"},
+                {"an untyped parameter", "", "", "var use(limit) { return limit(); }\n1;"},
+                {"a lambda's untyped parameter", "", "", "var use() { var apply = x => x(); return apply(() => 1); }\n1;"},
+                {"a function variable", "", "", "function limit = () => 5;\nvar use() { return limit(); }\n1;"},
+                {"a function variable with a signature", "", "", "function<int()> limit = () => 5;\nvar use() { return limit(); }\n1;"},
+                {"a function variable's member", "", "", "function limit = () => 5;\nvar use() { return limit.n; }\n1;"},
+                {"a class with operator()", "", "", "class Fn { int operator()(int x) { return x + 1; } }\nFn limit;\nvar use() { return limit(2); }\n1;"},
+                {"a subclass of a class with operator()", "", "", "class Fn { int operator()(int x) { return x + 1; } }\nclass G : Fn { }\nG limit;\nvar use() { return limit(2); }\n1;"},
+                {"a handle", "", "", "class Fn { int operator()(int x) { return x + 1; } }\nshared_ptr<Fn> limit = new Fn();\nvar use() { return limit(2); }\n1;"},
+                {"a value of a host class", "", "", "RoProbe limit;\nvar use() { return limit(); }\n1;"},
+                {"a value of a host class with a call operator", "", "", "CallProbe limit;\nvar use() { return limit(2); }\n1;"},
+                {"a coroutine handle", "", "", "coroutine int waves() { yield 1; return 9; }\nvar use() { coroutine<int> limit = waves(); return limit(); }\n1;"},
+                {"a weak_ptr", "", "", "class Fn { int operator()(int x) { return x + 1; } }\nvar use() { shared_ptr<Fn> held = new Fn(); weak_ptr<Fn> limit = held; return limit(2); }\n1;"},
+                {"a name the host registers a function under", "", "", "int host_limit = 5;\nvar use() { return host_limit(); }\n1;"},
+                {"a variable and a function of one name in the unit", "", "", "int limit = 5;\nint limit() { return 3; }\nvar use() { return limit(); }\n1;"},
+                {"an enum and a function of one name in the unit", "", "", "enum Mode { low, high }\nint Mode() { return 3; }\nvar use() { return Mode(); }\n1;"},
+                {"a namespace's variable and function of one name", "", "", "namespace n { int v = 5; }\nnamespace n { int v() { return 3; } }\nvar use() { return n::v(); }\n1;"},
+                {"a name two units declare, a variable and a function", "int limit = 5;\n", "int limit() { return 3; }\n", "import \"lib.jai\";\nimport \"other.jai\";\nvar use() { return limit(); }\n1;"},
+                {"a name two units declare as variables", "int limit = 5;\n", "var limit = 6;\n", "import \"lib.jai\";\nimport \"other.jai\";\nvar use() { return limit(); }\n1;"},
+                {"the unit's variable beside another unit's function", "int limit() { return 3; }\n", "", "int limit = 5;\nimport \"lib.jai\";\nvar use() { return limit(); }\n1;"},
+                {"a unit with an include the load cannot read", "", "", "int limit = 5;\nstring part = \"missing\" + \".jai\";\nvar use() { include(part); return limit(); }\n1;"},
+                {"an enum's value in such a unit", "", "", "enum Mode { low, high }\nstring part = \"missing\" + \".jai\";\nvar use() { include(part); return Mode::high(); }\n1;"},
+                {"a static in such a unit", "", "", "class C { static int count = 5; }\nstring part = \"missing\" + \".jai\";\nvar use() { include(part); return C::count(); }\n1;"},
+                {"a function's member in such a unit", "", "", "int area(int w) { return w; }\nstring part = \"missing\" + \".jai\";\nvar use() { include(part); return area.w; }\n1;"},
+                {"a name a using declaration takes below the call", "", "", "namespace cfg { int lo = 1; }\nint lo() { return 3; }\nvar use() { return lo(); }\nusing cfg::lo;\n1;"},
+                {"a field, bare in its class", "", "", "class B { int limit = 5; var use() { return limit(); } }\n1;"},
+                {"a field through an object", "", "", "class B { int limit = 5; }\nvar use() { B b; return b.limit(); }\n1;"},
+                {"a field through this", "", "", "class B { int limit = 5; var use() { return this.limit(); } }\n1;"},
+                {"a static, bare in its class", "", "", "class B { static int count = 5; var use() { return count(); } }\n1;"},
+                {"a program-scope variable, bare in a method", "", "", "int limit = 5;\nclass B { var use() { return limit(); } }\n1;"},
+                {"an enum's name, bare in a method", "", "", "enum Mode { low, high }\nclass B { var use() { return Mode(); } }\n1;"},
+                {"a namespace's variable, bare in a method of the namespace's class", "", "", "namespace n { int v = 5; class B { var use() { return v(); } } }\n1;"},
+                {"a function's member, bare in a method", "", "", "int limit() { return 5; }\nclass B { var use() { return limit.n; } }\n1;"},
+                {"another unit's variable, bare in a method", "int limit = 5;\n", "", "import \"lib.jai\";\nclass B { var use() { return limit(); } }\n1;"},
+                {"a namespace's enum's value", "", "", "namespace n { enum Mode { low, high } }\nvar use() { return n::Mode::high(); }\n1;"},
+                {"a namespace's function's member", "", "", "namespace n { int f() { return 5; } }\nvar use() { return n::f.x; }\n1;"},
+                {"a static method's member", "", "", "class C { static int s() { return 2; } }\nvar use() { return C::s.x; }\n1;"},
+                {"a call in a [[warn_mode]] region", "", "", "int limit = 5;\nvar use() { [[warn_mode]] return limit(); }\n1;"},
+                {"a reference parameter", "", "", "var use(int& limit) { return limit(); }\n1;"},
+                {"a generic's parameter behind a test of its type", "", "", "var force<T>(T v) { if (reflect::type_of(v) == \"function\") { return v(); } return v; }\nvar use() { return force<int>(5); }\n1;"},
+                {"a namespace's variable a later block declares, bare in a method", "", "", "namespace n { class B { var use() { return v(); } } }\nnamespace n { int v = 5; }\n1;"},
+                {"a namespace's variable beside a function a third block declares", "", "", "namespace n { var use() { return v(); } }\nnamespace n { int v = 5; }\nnamespace n { int v() { return 3; } }\n1;"},
+                {"a reference local", "", "", "int x = 5;\nvar use() { int& limit = x; return limit(); }\n1;"},
+                {"a range-for reference", "", "", "var use() { array<int> all = [1]; for (int& each : all) { each(); } return 1; }\n1;"},
+                {"a namespace's enum, bare in the namespace", "", "", "namespace n { enum Mode { low, high } var use() { return Mode(); } }\n1;"},
+                {"an enum's value where a namespace of the name declares a function", "enum Mode { low, high }\n", "", "import \"lib.jai\";\nnamespace Mode { int high() { return 3; } }\nvar use() { return Mode::high(); }\n1;"},
+            };
+            std::string failures;
+            int made = 0;
+            for (const row& r : rows) {
+                const auto dir = closure_dir("never_loads_" + std::to_string(made++));
+                auto e = program_engine(dir);
+                stdlib::register_all(*e);
+                bind_read_only_probe(*e);
+                bind_call_probe(*e);
+                e->add_function("host_limit", []() -> int64_t { return 7; });
+                if (!r.lib.empty()) { write_unit(dir, "lib.jai", r.lib); }
+                if (!r.other.empty()) { write_unit(dir, "other.jai", r.other); }
+                const std::string got = outcome(*e, r.root);
+                if (got != "VALUE 1") { failures += r.name + ": " + got + "\n"; }
+                std::filesystem::remove_all(dir);
+            }
+            check_true(failures.empty(), failures);
+            // what the cases that load do when the line runs: each succeeds through the other answer
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            bind_call_probe(*e);
+            check_eq(std::string("VALUE 3"), outcome(*e, "CallProbe probe;\nvar call_it() { return probe(2); }\ncall_it();"), "a host class's call operator answers the call");
+            check_eq(std::string("VALUE 9"), outcome(*e, "class B { int limit = 5; var use() { return limit(); } }\nclass D : B { var limit = 7; D() { limit = () => 9; } }\nD().use();"),
+                     "a derived class declares the field again as a var");
+            check_eq(std::string("VALUE 8"), outcome(*e, "int top = 5;\nclass P { var use() { return top(); } }\nclass Q : P { int top() { return 8; } }\nQ().use();"),
+                     "a derived class's method answers a bare name before the program's variable");
+            check_eq(std::string("VALUE 3"), outcome(*e, "int both = 5;\nint both() { return 3; }\nboth();"), "the function declared after the variable takes the name");
+            check_eq(std::string("VALUE 5"), outcome(*e, "var force<T>(T v) { if (reflect::type_of(v) == \"function\") { return v(); } return v; }\nforce<int>(5);"),
+                     "a generic's instance never reaches the call its type test guards");
+            check_eq(std::string("VALUE 9"), outcome(*e, "var held = 5;\nvar through(int& r) { held = () => 9; return r(); }\nthrough(held);"),
+                     "an int& bound to a var names whatever the var holds when the call runs");
+            check_eq(std::string("VALUE 9"), outcome(*e, "int area(int w) { return w; }\nclass S { var use() { return area.w; } }\nclass W { var w = 9; }\nclass T : S { var area = W(); }\nT().use();"),
+                     "a derived class's field answers a bare name before the program's function");
+        });
+
+        test("a_reload_that_changes_what_a_name_is_is_rejected_for_the_use_that_no_longer_fits", []() {
+            const auto dir = closure_dir("never_reload");
+            int tick = 0;
+            const auto write = [&](const std::string& file, const std::string& text) {
+                write_unit(dir, file, text);
+                std::error_code ec;
+                std::filesystem::last_write_time(dir / file, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick + 5000), ec);
+            };
+            for (const bool to_variable : {true, false}) {
+                const std::string how = to_variable ? "a function that becomes a variable" : "a variable that becomes a function";
+                auto e = program_engine(dir);
+                stdlib::register_all(*e);
+                e->import_recheck_interval(0);
+                write("lib.jai", to_variable ? "int limit() { return 5; }\n" : "int limit = 5;\n");
+                write("root.jai", std::string("import \"lib.jai\";\nint use() { return ") + (to_variable ? "limit() + 1" : "limit + 1") + "; }\nint tick() { import(\"lib.jai\"); return use(); }\n");
+                e->execute_file((dir / "root.jai").string());
+                check_eq(std::string("VALUE 6"), outcome(*e, "tick();"), how + ": before the edit");
+                write("lib.jai", to_variable ? "int limit = 5;\n" : "int limit() { return 5; }\n");
+                const std::string rejected = outcome(*e, "tick();");
+                const std::string expected = (dir / "root.jai").string() + (to_variable
+                    ? ":2:20: error: 'limit' is an int (declared at " + (dir / "lib.jai").string() + ":1:5), not a function"
+                    : ":2:26: error: cannot apply '+' to 'function' and 'int'");
+                check_true(rejected.find("ERROR static check failed:") == 0 && rejected.find(expected) != std::string::npos, how + ": the reload is rejected at the caller: " + rejected);
+                check_eq(std::string("VALUE 6"), outcome(*e, "tick();"), how + ": the code the program had keeps running");
+                check_eq(std::string("VALUE 6"), outcome(*e, "use();"), how);
+                write("lib.jai", to_variable ? "int limit() { return 7; }\n" : "int limit = 7;\n");
+                check_eq(std::string("VALUE 8"), outcome(*e, "tick();"), how + ": an edit the caller fits reloads");
+            }
             std::filesystem::remove_all(dir);
         });
 

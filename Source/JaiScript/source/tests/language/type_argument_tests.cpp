@@ -126,7 +126,7 @@ public:
 			// inside a function of the unit, the variable declared above it is known too
 			check_eq((int64_t)11, e->execute("int g1 = 1; int g2 = 2; int g3 = 3; int g4 = 2; int f() { return pair(g1 < g2, g3 > (g4)); } f();").as_int());
 			// a run holding a type's keyword is still read as type arguments, as after a local
-			check_true(contains(failure(*e, "int l = 1; l<int>(2);"), "Cannot call 'l': it is an int, not a function"));
+			check_true(contains(failure(*e, "int l = 1; l<int>(2);"), "'l' is an int (declared at 1:5), not a function"));
 			// a variable declared below the use is a variable all the same
 			check_eq((int64_t)11, e->execute("int h() { return pair(z1 < z2, z3 > (z4)); } int z1 = 1; int z2 = 2; int z3 = 3; int z4 = 2; h();").as_int());
 		});

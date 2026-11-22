@@ -163,6 +163,9 @@ namespace jai {
 
         // The program-scope variables `unit` declared (its plain cells, current or shadowed by another unit's), by name id
         std::vector<std::pair<uint64_t, const script_value*>> unit_variables(uint32_t unit) const;
+        // The units whose variable declarations made a program-scope name's cells (the current one and those another unit's
+        // declaration shadowed); empty for a name no unit's variable declaration made (the host's, a function, a class)
+        std::vector<uint32_t> declaring_units(uint64_t id) const;
 
         // Reset environment for reuse (optimization helper)
         void reset(std::shared_ptr<environment> new_parent);

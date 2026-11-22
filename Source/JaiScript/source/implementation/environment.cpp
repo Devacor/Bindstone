@@ -896,6 +896,16 @@ std::vector<std::pair<uint64_t, const script_value*>> environment::unit_variable
     return out;
 }
 
+std::vector<uint32_t> environment::declaring_units(uint64_t id) const {
+    std::vector<uint32_t> out;
+    if (parent_ || !root_) { return out; }
+    if (const auto owner = root_->unit_of.find(id); owner != root_->unit_of.end() && owner->second.id != 0) { out.push_back(owner->second.id); }
+    if (const auto earlier = root_->versions.find(id); earlier != root_->versions.end()) {
+        for (const auto& v : earlier->second) { if (v.unit.id != 0 && v.cell) { out.push_back(v.unit.id); } }
+    }
+    return out;
+}
+
 script_value* environment::same_unit_cell(uint64_t id) {
     if (parent_ || !local_ids_.contains(id)) { return nullptr; }
     const unit_stamp unit = symbolizer_->current_unit();

@@ -393,6 +393,13 @@ public:
         return result;
     }
     std::string unit_label(uint32_t unit) const { return engine_access::unit_label(engine_, unit); }
+    // the units whose variable declarations made the program-scope cells the engine holds under a name (environment::declaring_units)
+    std::vector<uint32_t> variable_units(const std::string& name) const {
+        note(name);
+        const auto id = engine_access::get_symbolizer(engine_)->find(name);
+        const auto env = engine_access::get_global_environment(engine_);
+        return id && env ? env->declaring_units(*id) : std::vector<uint32_t>{};
+    }
     bool host_function_result(const std::string& name, script_value_type& out) const { note(name); return engine_access::host_function_result(engine_, name, out); }
     bool host_nodiscard(const std::string& callable) const { note(callable); return engine_.is_nodiscard_function(callable); }
     uint8_t type_argument_result(const std::string& callable) const { note(callable); return engine_.type_argument_result(callable); }
@@ -2465,7 +2472,7 @@ private:
         }
         if (find_sclass(name) || eng_.is_type_name(key)) { return nullptr; }
         const auto held = eng_.held_function_declarations(name);
-        if (held.empty()) { return eng_.has_variable(key) || eng_.has_function(key) ? nullptr : fn; }
+        if (held.empty()) { return eng_.has_function(key) || !engine_variable_only_from(key, *unit_path) ? nullptr : fn; }
         const std::string normal = std::filesystem::path(*unit_path).lexically_normal().string();
         for (const auto& h : held) {
             if (!h || eng_.unit_label(h->unit.id) != normal) { return nullptr; }
@@ -5397,6 +5404,7 @@ private:
             if (const sclass* sc = find_sclass(cls)) { check_ctor_call(cls, *sc, args, loc); }
             return read_through_declared_slot(object_of(cls));
         }
+        if (namespace_variable_called(path, qualified, member, c && c->callee ? c->callee->location : loc)) { return {}; }
         if (namespaces_.count(std::string_view(path))) { return {}; }
         script_namespace_data* space = eng_.find_namespace(path);
         if (!space) { return {}; }
@@ -7550,6 +7558,7 @@ private:
 
     JAI_NOINLINE ctype binary_type(binary_expr* b, ctype& l, ctype& r) {
         if (b->op.type == token_type::left_bracket) {
+            function_subscripted(b, l);
             // the proven element kind rides the node's class (int_int / float_float) for the compiler's temps
             const ctype cont = declared_container_receiver(b->left.get(), l);
             const ctype el = container_value_type(cont);
@@ -8318,6 +8327,7 @@ private:
             return {};
         }
         report_use_before_declaration(id->name, id->location, false, [&] { return eng_.has_variable(name); });
+        if (!bare_name_reaches_members(id) && program_function(id->name)) { note_global_use(id->name); return ctype::make(ctype::function_k); }
         if (const variable_decl* g = program_global(name)) { note_global_use(id->name); return program_global_type(g); }   // the proof pass alone types a global another unit declares
         if (extra_global(name)) { note_global_use(id->name); return program_scope_read_type(name); }
         if (eng_.is_type_name(name) || eng_.find_script_class(name)) {
@@ -8431,6 +8441,7 @@ private:
         }
         ctype recv = infer(m->object.get());
         if (recv_out) { *recv_out = recv; }
+        if (function_member(m, recv)) { return {}; }
         if (recv.kind == ctype::math_k) {
             // a component (x / width, y / height, z / depth): an int or a float for diagnostics, never a proof source (the
             // VM's component rows are a later phase); anything else is the runtime's no-member text, statically
@@ -8956,6 +8967,201 @@ private:
         return namespace_member_held(space, name) || !named_outside_namespace(space, name);
     }
 
+    // -------------------------------------------------------------- uses that can never succeed
+    // (docs/site/guide/13-strict-checking.html "A use that can never succeed"): a call of a name declared with a type no call
+    // takes, and a member or a subscript of a declared function. Each is refused only where the load knows the one thing
+    // the name is: whatever may answer it another way when the line runs (a function or a class of the name anywhere in the
+    // program or the engine, a member of the object a method runs on, a file the load cannot read) leaves it to the run.
+    static std::string with_article(std::string_view noun) {
+        const bool vowel = !noun.empty() && noun.substr(0, 4) != "utf8" && std::string_view("aeiouAEIOU").find(noun.front()) != std::string_view::npos;
+        return (vowel ? "an " : "a ") + std::string(noun);
+    }
+    static std::string declaration_place(const source_location& declared, const source_location& use) {
+        const std::string at = std::to_string(declared.line) + ":" + std::to_string(declared.column);
+        return declared.filename.empty() || declared.filename == use.filename ? at : declared.filename + ":" + at;
+    }
+    // a declared type no call takes: a number, text, a bool, an array, a map, a math value (an enum's value is an int)
+    static bool never_called(const ctype& t) {
+        if (t.tentative || t.diagnostic_only) { return false; }
+        switch (t.kind) {
+            case ctype::int_k: case ctype::float_k: case ctype::bool_k: case ctype::char_k: case ctype::string_k: case ctype::utf8_k:
+            case ctype::array_k: case ctype::map_k: case ctype::math_k: return true;
+            default: return false;
+        }
+    }
+    bool never_called(const variable_decl* g) {
+        return g && g->type && !g->type->is_reference() && !g->function_spelling && never_called(ctype_from_type_info(g->type.get()));
+    }
+    void never_a_function(const source_location& at, std::string_view shown, std::string_view what, const std::string& where) {
+        diag(diag_level::error, at, "'" + std::string(shown) + "' is " + with_article(what) + " (declared at " + where + "), not a function");
+    }
+    // the engine's variable of the name, if it holds one, was declared by `declarer`'s earlier run alone: what its new text replaces
+    bool engine_variable_only_from(const std::string& name, const std::string& declarer) {
+        if (!eng_.has_variable(name) || !eng_.held_function_declarations(name).empty()) { return true; }
+        const std::vector<uint32_t> units = eng_.variable_units(name);
+        if (units.empty()) { return false; }   // the host's
+        const std::string normal = std::filesystem::path(declarer).lexically_normal().string();
+        for (const uint32_t unit : units) { if (eng_.unit_label(unit) != normal) { return false; } }
+        return true;
+    }
+    // Something a call of a program-scope name may reach besides the one variable or enum the load found: a function, a generic
+    // or a class of the name in this unit, in another unit of the program or in the engine. `declarer` is the unit whose
+    // earlier run the pooled text replaces (null: none): a function the engine holds from that run is no second answer.
+    bool callable_elsewhere(const std::string& name, const std::string* declarer) {
+        if (has_dynamic_includes_ || functions_.count(std::string_view(name)) || find_sclass(name) || eng_.is_type_name(name) || eng_.find_script_class(name)) { return true; }
+        if (generics_live_ && !generics_named(name).empty()) { return true; }
+        if (program_functions_) {
+            if (const auto pooled = program_functions_->find(name); pooled != program_functions_->end()) {
+                for (const auto& [path, decls] : pooled->second) { if (!decls.empty()) { return true; } }
+            }
+        }
+        const auto held = eng_.held_function_declarations(name);
+        if (held.empty()) { return eng_.has_function(name); }
+        if (!declarer) { return true; }
+        const std::string normal = std::filesystem::path(*declarer).lexically_normal().string();
+        for (const auto& h : held) { if (!h || eng_.unit_label(h->unit.id) != normal) { return true; } }
+        return false;
+    }
+    // how many variable declarations the program's units make under a program-scope name
+    size_t program_variable_declarations(const std::string& name) {
+        if (!program_globals_) { return 0; }
+        eng_.note(name);
+        const auto pooled = program_globals_->find(name);
+        size_t declarations = 0;
+        if (pooled != program_globals_->end()) { for (const auto& [path, decls] : pooled->second) { declarations += decls.size(); } }
+        return declarations;
+    }
+    // The one variable exactly one other unit of the program declares under a program-scope or namespace name, with a spelled
+    // type, and the unit that declares it; null when anything else may answer the name
+    const variable_decl* program_variable(const std::string& name, const std::string*& declarer) {
+        if (!collect_diagnostics_ || has_dynamic_includes_ || !program_globals_ || instance_names_.count(name) || extra_globals_.count(name)) { return nullptr; }
+        eng_.note(name);
+        const auto pooled = program_globals_->find(name);
+        if (pooled == program_globals_->end()) { return nullptr; }
+        const variable_decl* g = nullptr;
+        size_t declarations = 0;
+        for (const auto& [path, decls] : pooled->second) {
+            declarations += decls.size();
+            if (!decls.empty()) { g = decls.front().get(); declarer = &path; }
+        }
+        if (declarations != 1 || !g || g->is_static) { return nullptr; }
+        if (callable_elsewhere(name, declarer) || !engine_variable_only_from(name, *declarer)) { return nullptr; }
+        return g;
+    }
+    // the enum exactly one other unit of the program declares under a name, and that unit
+    const enum_decl* program_enum(const std::string& name, const std::string*& declarer) {
+        if (!collect_diagnostics_ || has_dynamic_includes_ || !program_enums_) { return nullptr; }
+        eng_.note(name);
+        const auto pooled = program_enums_->find(name);
+        if (pooled == program_enums_->end() || pooled->second.size() != 1 || !pooled->second.begin()->second) { return nullptr; }
+        declarer = &pooled->second.begin()->first;
+        return pooled->second.begin()->second.get();
+    }
+    // a bare name inside a method reaches the members of the object the method runs on before the program's names, and a
+    // class derived from this one may declare any of them
+    bool bare_name_reaches_members(const identifier_expr* id) const { return class_ctx_ && !id->global_qualified; }
+    // a call of a variable declared with a type no call takes, or of an enum a function declares
+    void uncallable_variable(const var_entry& v, size_t scope_index, const identifier_expr* id) {
+        // a reference names whatever it was bound to, and a var it borrows may hold a function by the time the call runs
+        if (v.dynamic || v.is_reference || v.shared_name || v.namespace_function || v.placeholders) { return; }
+        if (const auto space = std::find(namespace_scopes_.begin(), namespace_scopes_.end(), scope_index); space != namespace_scopes_.end()) {
+            if (bare_name_reaches_members(id) || v.enum_def) { return; }
+            const std::string path(namespace_walk_names_[static_cast<size_t>(space - namespace_scopes_.begin())]);
+            namespace_variable_called(path, path + "::" + std::string(id->name), id->name, id->location);
+            return;
+        }
+        if (scope_index != 0 && instance_ctx_) { return; }   // a generic's local: its type may be a type argument, and an instance may never reach the line
+        std::string what;
+        if (v.enum_def) { what = "enum"; }
+        else if (never_called(v.type)) { what = !v.display.empty() && v.display.rfind("auto", 0) != 0 ? v.display : ctype_name(v.type); }
+        else { return; }
+        if (scope_index == 0) {   // the unit's program scope: a local hides every other answer, and here each of them counts
+            const std::string name(id->name);
+            if (bare_name_reaches_members(id) || callable_elsewhere(name, nullptr) || program_variable_declarations(name) > 1) { return; }
+        }
+        never_a_function(id->location, id->name, what, std::to_string(v.line) + ":" + std::to_string(v.column));
+    }
+    // a call of a namespace's variable, the unit's own or the one exactly one other unit declares
+    bool namespace_variable_called(const std::string& path, const std::string& qualified, std::string_view member, const source_location& loc) {
+        if (bare_member_reach_) { return false; }
+        const variable_decl* g = nullptr;
+        const std::string* declarer = nullptr;
+        if (const auto own = namespace_vars_.find(qualified); own != namespace_vars_.end()) {
+            g = own->second;
+            if (!g || callable_elsewhere(qualified, nullptr) || program_variable_declarations(qualified) > 1) { return false; }
+        } else {
+            g = program_variable(qualified, declarer);
+        }
+        if (!never_called(g)) { return false; }
+        if (script_namespace_data* space = eng_.find_namespace(path)) {   // a function the engine's namespace holds under the name answers the call
+            const uint64_t member_id = eng_.symbolize(member);
+            if (space->functions.count(member_id) || space->signatures.count(member_id)) { return false; }
+            if (const auto held = space->variables.find(member_id); held != space->variables.end() && held->second.is_function()) { return false; }
+        }
+        never_a_function(loc, qualified, g->type->spelling(), declaration_place(g->location, loc));
+        return true;
+    }
+    // Enum::value(...): a value of an enum is an int. The enum is the unit's own, which the receiver's type names, or the one
+    // exactly one other unit declares, which a receiver nothing in this unit declares names; a namespace's enum stays the run's
+    bool enum_value_called(const member_expr* m, const ctype& recv) {
+        if (has_dynamic_includes_ || instance_ctx_ || !m->is_static || !m->object || m->object->get_type() != node_type::identifier_expr) { return false; }
+        const auto* id = static_cast<const identifier_expr*>(m->object.get());
+        const std::string name(id->name);
+        const std::string* declarer = nullptr;
+        const enum_decl* named = nullptr;
+        if (recv.kind == ctype::enum_ref_k) {
+            if (recv.tentative || recv.cls != id->name) { return false; }
+            named = find_enum(recv.cls);
+        } else if (recv.is_unknown() && !find_local(id->name) && !functions_.count(id->name) && !enums_.count(id->name)) {
+            named = program_enum(name, declarer);
+        }
+        if (!named) { return false; }
+        if (namespaces_.count(id->name) || eng_.find_namespace(name) || find_sclass(id->name) || eng_.is_type_name(name) || eng_.find_script_class(name) ||
+            (program_classes_ && program_classes_->count(name))) { return false; }
+        const std::string qualified = name + "::" + std::string(m->member);
+        if ((program_functions_ && program_functions_->count(qualified)) || (program_globals_ && program_globals_->count(qualified))) { return false; }
+        if (std::none_of(named->values.begin(), named->values.end(), [&](const auto& value) { return value.first == m->member; })) { return false; }
+        never_a_function(m->location, qualified, "value of the enum '" + name + "'", declaration_place(named->location, m->location));
+        return true;
+    }
+    // Class::name(...): a static field declared with a type no call takes
+    void static_field_called(const member_expr* m, const ctype& recv, const member_hit& hit) {
+        if (has_dynamic_includes_ || instance_ctx_ || !hit.certain || hit.unresolved || !hit.field || !hit.field->is_static || chain_open(recv.cls) || chain_has_user_accessor(recv.cls, m->member)) { return; }
+        if (!never_called(hit.field)) { return; }
+        never_a_function(m->location, std::string(recv.cls) + "::" + std::string(m->member), hit.field->type->spelling(), declaration_place(hit.field->location, m->location));
+    }
+    // The declared function a bare name names when nothing nearer answers the name: the unit's own, which no other unit adds
+    // an overload to, else the one exactly one other unit declares
+    const function_decl* named_function(const expression* e) {
+        if (!e || has_dynamic_includes_ || e->get_type() != node_type::identifier_expr) { return nullptr; }
+        const auto* id = static_cast<const identifier_expr*>(e);
+        size_t scope_index = 0;
+        if (callable_variable(id, &scope_index) || bare_name_reaches_members(id)) { return nullptr; }
+        if (!id->global_qualified && !enclosing_namespace_member(id->name).empty()) { return nullptr; }
+        if (const auto own = functions_.find(id->name); own != functions_.end()) {
+            return !own->second.empty() && foreign_overloads(id->name, own->second).empty() ? own->second.front() : nullptr;
+        }
+        return program_function(id->name);
+    }
+    // name.member where the name is a declared function; true when it was reported
+    bool function_member(const member_expr* m, const ctype& recv) {
+        if (recv.kind != ctype::function_k || m->is_static) { return false; }
+        const function_decl* fn = named_function(m->object.get());
+        if (!fn) { return false; }
+        diag(diag_level::error, m->location, "'" + std::string(fn->name) + "' is a function (declared at " + declaration_place(fn->location, m->location) +
+             "): it has no member '" + std::string(m->member) + "'");
+        return true;
+    }
+    // name[key] where the name is a declared function
+    void function_subscripted(const binary_expr* b, const ctype& left) {
+        if (left.kind != ctype::function_k) { return; }
+        const function_decl* fn = named_function(b->left.get());
+        if (!fn) { return; }
+        const source_location& at = b->left->location;
+        diag(diag_level::error, at, "'" + std::string(fn->name) + "' is a function (declared at " + declaration_place(fn->location, at) + "): it cannot be subscripted");
+    }
+    bool bare_member_reach_ = false;   // the namespace member a call names was written bare inside a method (bare_name_reaches_members)
+
     ctype infer_call_impl(call_expr* c, const std::vector<ctype>& args, const std::vector<const function_decl*>*& ov, narrow_callee& seen) {
         expression* callee = c->callee.get();
         if (callee->get_type() == node_type::identifier_expr) {
@@ -8968,6 +9174,7 @@ private:
                 if (local->lambda && script_callee_takes_type_arguments(id->name, "lambda")) { return {}; }
                 if (!local->dynamic && signature_slot(local->type)) { return check_signature_call("'" + std::string(id->name) + "'", local->type.ti, c, args); }
                 if (const std::string* reason = lambda_variable_returns_nothing(id)) { void_hit_ = {"'" + std::string(id->name) + "'", {}, nullptr, *reason}; }
+                uncallable_variable(*local, scope_index, id);
                 return {};   // a callable local without a signature
             }
             if (class_ctx_ && !id->global_qualified) {
@@ -8998,6 +9205,8 @@ private:
             if (!id->global_qualified) {
                 if (const std::string space = enclosing_namespace_member(id->name); !space.empty()) {
                     if (namespace_member_unready(space, id->name, c->location, true) || !namespace_member_settled(space, id->name, c->location)) { return {}; }
+                    struct reach { bool& flag; bool outer; ~reach() { flag = outer; } } bare{bare_member_reach_, bare_member_reach_};
+                    bare_member_reach_ = bare_name_reaches_members(id);
                     return check_namespace_call(space, id->name, args, c->location, seen, c);
                 }
             }
@@ -9019,14 +9228,29 @@ private:
                 if (sc->provable && !may_copy) { ov = &sc->ctors; }
                 return object_of(id->name);
             }
-            if (enums_.count(id->name)) { return {}; }
             std::string name(id->name);
+            if (const auto named = enums_.find(id->name); named != enums_.end()) {
+                if (!bare_name_reaches_members(id) && !callable_elsewhere(name, nullptr)) { never_a_function(id->location, id->name, "enum", declaration_place(named->second->location, id->location)); }
+                return {};
+            }
             if (const function_decl* declared = program_function(id->name)) {
                 note_global_use(id->name);
                 const std::vector<const function_decl*> one{declared};
                 ctype r = check_script_overloads(id->name, one, args, c->location, /*foreign=*/true, /*scored=*/false).result;
                 r.tentative = true;
                 return r;
+            }
+            if (!bare_name_reaches_members(id)) {
+                const std::string* declarer = nullptr;
+                if (const variable_decl* g = program_variable(name, declarer); never_called(g)) {
+                    note_global_use(id->name);
+                    never_a_function(id->location, id->name, g->type->spelling(), declaration_place(g->location, id->location));
+                    return {};
+                }
+                if (const enum_decl* named = program_enum(name, declarer); named && !callable_elsewhere(name, declarer)) {
+                    never_a_function(id->location, id->name, "enum", declaration_place(named->location, id->location));
+                    return {};
+                }
             }
             if (extra_global(name)) { note_global_use(id->name); return {}; }
             if (name == "regex") { check_regex_constant(c); }
@@ -9099,6 +9323,7 @@ private:
                 }
             }
             ctype recv = declared_container_receiver(m->object.get(), infer(m->object.get()));
+            if (function_member(m, recv)) { return {}; }
             if (!m->is_static && recv.kind == ctype::object_k && !recv.cls.empty() && eng_.has_constant_arguments()) {
                 check_constant_arguments(std::string(recv.cls) + "." + std::string(m->member), std::string(m->member), c);
             }
@@ -9149,8 +9374,10 @@ private:
                 if (const ctype held = referent_receiver(m->object.get()); held.kind == ctype::object_k) { class_member_call(c, m, held, args, nullptr); }
             }
             if (recv.kind == ctype::enum_ref_k) {
+                enum_value_called(m, recv);
                 return {};
             }
+            if (recv.is_unknown() && enum_value_called(m, recv)) { return {}; }
             uint8_t proven = 0;
             if (!recv.tentative || recv.element_proof) {
                 proven = recv.kind == ctype::string_k ? 1 : recv.kind == ctype::array_k ? 2 : recv.kind == ctype::map_k ? 3 : 0;
@@ -9266,6 +9493,7 @@ private:
             }
             if (hit.field && hit.field->type) {
                 if (const ctype held = member_type(hit); signature_slot(held)) { return check_signature_call("'" + std::string(m->member) + "'", held.ti, c, args); }
+                if (want_static) { static_field_called(m, recv, hit); }
             }
             note_host_nodiscard(std::string(recv.cls) + "." + std::string(m->member));
             if (type_argument_call_ && (find_sclass(recv.cls) || eng_.find_script_class(std::string(recv.cls)))) { type_argument_host_callee_.clear(); }   // a script class's field: no host method
@@ -9459,7 +9687,9 @@ private:
         if (target->get_type() == node_type::binary_expr) {
             auto* subscript = static_cast<binary_expr*>(target);
             if (subscript->op.type == token_type::left_bracket) {
-                const ctype recv = declared_container_receiver(subscript->left.get(), infer(subscript->left.get()));
+                const ctype stored_in = infer(subscript->left.get());
+                function_subscripted(subscript, stored_in);
+                const ctype recv = declared_container_receiver(subscript->left.get(), stored_in);
                 const ctype key = infer(subscript->right.get());
                 if (recv.kind == ctype::map_k && !recv.tentative && key.kind == ctype::object_k && !key.tentative && !key.cls.empty()) { warn_identity_map_key(subscript, key.cls); }
                 check_map_subscript_key(subscript, recv, key);

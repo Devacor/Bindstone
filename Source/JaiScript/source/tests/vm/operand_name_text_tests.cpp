@@ -129,7 +129,8 @@ public:
 			});
 		});
 
-		// E::v, C::s and ns::x name their callee whatever the arguments are: the VM's check ahead of an argument that runs code named none
+		// E::v, C::s and ns::x name their callee whatever the arguments are: the VM's check ahead of an argument that runs code named none.
+		// The load refuses a call of a name declared with a type no call takes; [[warn_mode]] leaves the verdict to the run, whose text this pins
 		test("a_qualified_callee_keeps_its_name", [this]() {
 			const std::string scoped = prelude() +
 				"enum Lvl { low, mid, high }\n"
@@ -137,36 +138,36 @@ public:
 				"namespace cfg { int lo = 1; var hooks = [1]; namespace inner { float deep = 2.5; } }\n"
 				"using cfg::lo, Lvl::low;\n";
 			check_cases(scoped, {
-				{"return Lvl::high(1);", "Cannot call 'high': it is an int, not a function"},
-				{"return Lvl::high(add(1, 2));", "Cannot call 'high': it is an int, not a function"},
-				{"return Lvl::high(gint);", "Cannot call 'high': it is an int, not a function"},
-				{"return Lvl::low(add(1, 2)) + 1;", "Cannot call 'low': it is an int, not a function"},
-				{"int n = 0; for (int i = 0; i < 2; ++i) { n += Lvl::mid(add(i, 1)); } return n;", "Cannot call 'mid': it is an int, not a function"},
-				{"return Cfg::max(3);", "Cannot call 'max': it is an int, not a function"},
-				{"return Cfg::max(add(1, 2));", "Cannot call 'max': it is an int, not a function"},
+				{"[[warn_mode]]; return Lvl::high(1);", "Cannot call 'high': it is an int, not a function"},
+				{"[[warn_mode]]; return Lvl::high(add(1, 2));", "Cannot call 'high': it is an int, not a function"},
+				{"[[warn_mode]]; return Lvl::high(gint);", "Cannot call 'high': it is an int, not a function"},
+				{"[[warn_mode]]; return Lvl::low(add(1, 2)) + 1;", "Cannot call 'low': it is an int, not a function"},
+				{"[[warn_mode]]; int n = 0; for (int i = 0; i < 2; ++i) { n += Lvl::mid(add(i, 1)); } return n;", "Cannot call 'mid': it is an int, not a function"},
+				{"[[warn_mode]]; return Cfg::max(3);", "Cannot call 'max': it is an int, not a function"},
+				{"[[warn_mode]]; return Cfg::max(add(1, 2));", "Cannot call 'max': it is an int, not a function"},
 				{"return Cfg::hook(add(1, 2));", "Cannot call 'hook': it is null, not a function"},
-				{"return Cfg::label(add(1, 2));", "Cannot call 'label': it is a string, not a function"},
-				{"return cfg::lo(1);", "Cannot call 'lo': it is an int, not a function"},
-				{"return cfg::lo(add(1, 2));", "Cannot call 'lo': it is an int, not a function"},
+				{"[[warn_mode]]; return Cfg::label(add(1, 2));", "Cannot call 'label': it is a string, not a function"},
+				{"[[warn_mode]]; return cfg::lo(1);", "Cannot call 'lo': it is an int, not a function"},
+				{"[[warn_mode]]; return cfg::lo(add(1, 2));", "Cannot call 'lo': it is an int, not a function"},
 				{"return cfg::hooks(add(1, 2));", "Cannot call 'hooks': it is an array, not a function"},
-				{"return cfg::inner::deep(gint);", "Cannot call 'deep': it is a float, not a function"},
-				{"return lo(add(1, 2));", "Cannot call 'lo': it is an int, not a function"},
-				{"return low(add(1, 2));", "Cannot call 'low': it is an int, not a function"},
+				{"[[warn_mode]]; return cfg::inner::deep(gint);", "Cannot call 'deep': it is a float, not a function"},
+				{"[[warn_mode]]; return lo(add(1, 2));", "Cannot call 'lo': it is an int, not a function"},
+				{"[[warn_mode]]; return low(add(1, 2));", "Cannot call 'low': it is an int, not a function"},
 				{"return ::gint(add(1, 2));", "Cannot call 'gint': it is an int, not a function"},
-				{"auto l = (int x) => Lvl::high(add(x, 1)); return l(1);", "Cannot call 'high': it is an int, not a function"},
-				{"auto l = function(int x) { return Cfg::max(add(x, 1)); }; return l(1);", "Cannot call 'max': it is an int, not a function"},
-				{"auto l = (int x) => cfg::lo(add(x, 1)); return l(1);", "Cannot call 'lo': it is an int, not a function"},
+				{"[[warn_mode]]; auto l = (int x) => Lvl::high(add(x, 1)); return l(1);", "Cannot call 'high': it is an int, not a function"},
+				{"[[warn_mode]]; auto l = function(int x) { return Cfg::max(add(x, 1)); }; return l(1);", "Cannot call 'max': it is an int, not a function"},
+				{"[[warn_mode]]; auto l = (int x) => cfg::lo(add(x, 1)); return l(1);", "Cannot call 'lo': it is an int, not a function"},
 			});
 			const std::string in_class = scoped +
 				"class S {\n"
 				"    Lvl cur = Lvl::mid;\n"
-				"    int by_enum() { return Lvl::high(cur); }\n"
-				"    int by_static() { return Cfg::max(cur); }\n"
-				"    int by_namespace() { return cfg::lo(cur); }\n"
-				"    int by_using() { return lo(cur); }\n"
-				"    static int from_static() { return Lvl::low(add(1, 2)); }\n"
+				"    int by_enum() { [[warn_mode]] return Lvl::high(cur); }\n"
+				"    int by_static() { [[warn_mode]] return Cfg::max(cur); }\n"
+				"    int by_namespace() { [[warn_mode]] return cfg::lo(cur); }\n"
+				"    int by_using() { [[warn_mode]] return lo(cur); }\n"
+				"    static int from_static() { [[warn_mode]] return Lvl::low(add(1, 2)); }\n"
 				"}\n"
-				"class D : Cfg { int inherited() { return max(add(1, 2)); } int qualified() { return Cfg::max(add(1, 2)); } }\n";
+				"class D : Cfg { int inherited() { return max(add(1, 2)); } int qualified() { [[warn_mode]] return Cfg::max(add(1, 2)); } }\n";
 			check_cases(in_class, {
 				{"return S().by_enum();", "Cannot call 'high': it is an int, not a function"},
 				{"return S().by_static();", "Cannot call 'max': it is an int, not a function"},
@@ -177,12 +178,12 @@ public:
 				{"return D().qualified();", "Cannot call 'max': it is an int, not a function"},
 			});
 			const std::pair<const char*, const char*> at_program_scope[] = {
-				{"Lvl::high(add(1, 2));", "Cannot call 'high': it is an int, not a function"},
-				{"Cfg::max(add(1, 2));", "Cannot call 'max': it is an int, not a function"},
-				{"cfg::lo(add(1, 2));", "Cannot call 'lo': it is an int, not a function"},
-				{"lo(add(1, 2));", "Cannot call 'lo': it is an int, not a function"},
-				{"for (int i = 0; i < 2; ++i) { Lvl::high(i); }", "Cannot call 'high': it is an int, not a function"},
-				{"var r = cfg::inner::deep(gint) + 1;", "Cannot call 'deep': it is a float, not a function"},
+				{"[[warn_mode]] Lvl::high(add(1, 2));", "Cannot call 'high': it is an int, not a function"},
+				{"[[warn_mode]] Cfg::max(add(1, 2));", "Cannot call 'max': it is an int, not a function"},
+				{"[[warn_mode]] cfg::lo(add(1, 2));", "Cannot call 'lo': it is an int, not a function"},
+				{"[[warn_mode]] lo(add(1, 2));", "Cannot call 'lo': it is an int, not a function"},
+				{"[[warn_mode]] for (int i = 0; i < 2; ++i) { Lvl::high(i); }", "Cannot call 'high': it is an int, not a function"},
+				{"[[warn_mode]] var r = cfg::inner::deep(gint) + 1;", "Cannot call 'deep': it is a float, not a function"},
 			};
 			std::string failures;
 			for (const auto& c : at_program_scope) {
@@ -209,13 +210,13 @@ public:
 				{"var h = 5; int n = 0; for (int i = 0; i < 3; ++i) { n += h(add(add(i, 1), 2)); } return n;", "Cannot call 'h': it is an int, not a function"},
 				{"var h = 5; int n = 0; for (int i = 0; i < 3; ++i) { h = h + 1; n += h(add(i, 1)); } return n;", "Cannot call 'h': it is an int, not a function"},
 				{"int n = 0; for (int i = 0; i < 3; ++i) { var h = i + 1; n += h(i); } return n;", "Cannot call 'h': it is an int, not a function"},
-				{"int n = 0; for (int i = 0; i < 3; ++i) { n += i(5); } return n;", "Cannot call 'i': it is an int, not a function"},
-				{"int n = 0; for (int i = 0; i < 3; ++i) { n += n(5); } return n;", "Cannot call 'n': it is an int, not a function"},
-				{"array<int> xs = [1, 2, 3]; int n = 0; for (int p : xs) { n += p(5); } return n;", "Cannot call 'p': it is an int, not a function"},
+				{"[[warn_mode]]; int n = 0; for (int i = 0; i < 3; ++i) { n += i(5); } return n;", "Cannot call 'i': it is an int, not a function"},
+				{"[[warn_mode]]; int n = 0; for (int i = 0; i < 3; ++i) { n += n(5); } return n;", "Cannot call 'n': it is an int, not a function"},
+				{"[[warn_mode]]; array<int> xs = [1, 2, 3]; int n = 0; for (int p : xs) { n += p(5); } return n;", "Cannot call 'p': it is an int, not a function"},
 				{"array<int> xs = [1, 2, 3]; int n = 0; for (auto& p : xs) { n += p(5); } return n;", "Cannot call 'p': it is an int, not a function"},
-				{"int n = 0; float g = 1.5; for (int i = 0; i < 3; ++i) { g = g * 2.0; n += g(i); } return n;", "Cannot call 'g': it is a float, not a function"},
-				{"int n = 0; bool b = true; for (int i = 0; i < 3; ++i) { b = !b; n += b(i); } return n;", "Cannot call 'b': it is a bool, not a function"},
-				{"int n = 0; int k = 0; while (k < 3) { k = k + 1; n += k(k); } return n;", "Cannot call 'k': it is an int, not a function"},
+				{"[[warn_mode]]; int n = 0; float g = 1.5; for (int i = 0; i < 3; ++i) { g = g * 2.0; n += g(i); } return n;", "Cannot call 'g': it is a float, not a function"},
+				{"[[warn_mode]]; int n = 0; bool b = true; for (int i = 0; i < 3; ++i) { b = !b; n += b(i); } return n;", "Cannot call 'b': it is a bool, not a function"},
+				{"[[warn_mode]]; int n = 0; int k = 0; while (k < 3) { k = k + 1; n += k(k); } return n;", "Cannot call 'k': it is an int, not a function"},
 				{"var h = (int x) => x * 2; int n = 0; for (int i = 0; i < 3; ++i) { n += h(add(add(i, 1), 2)); } return n;", "= 24"},
 				{"array<var> fs = [next, next]; int n = 0; for (auto& p : fs) { n += p(5); } return n;", "= 12"},
 				{"int n = 0; for (int i = 0; i < 3; ++i) { var g = next; n += g(i); } return n;", "= 6"},

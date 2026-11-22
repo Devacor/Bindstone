@@ -24,7 +24,7 @@ namespace jai_lsp {
 
 enum class symbol_kind : uint8_t {
 	local, parameter, global, function, class_type, field, method, constructor, enum_type, enum_value,
-	namespace_name, host_function, host_global, host_class, host_member, host_namespace
+	namespace_name, host_function, host_global, host_class, host_member, host_namespace, type_parameter
 };
 
 struct symbol {
@@ -38,6 +38,7 @@ struct symbol {
 	text_span span;           // the declaring name
 	bool is_static = false;
 	std::vector<std::string> signatures;   // functions, methods, constructors: one per overload
+	std::string instance;     // a generic class's instance this name spells (Stack<int>): the class a hover shows
 };
 
 struct occurrence {
@@ -96,6 +97,16 @@ struct unit_model {
 	const jai::type_info* capture_member_ti = nullptr;
 };
 
+// A generic as its text reads with the type parameters left as names, parsed on its own: the class or function its author
+// wrote, which the walks and lookups read as they read a declaration with no parameters
+struct generic_view {
+	std::shared_ptr<const jai::detail::generic_definition> definition;
+	jai::declaration_ptr holder;                  // the parse (a method's sits in its class, a namespace's in its namespace)
+	jai::declaration_ptr node;                    // the class_decl or function_decl inside it; null when the text did not parse
+	const jai::declaration* decl = nullptr;       // node.get()
+};
+using generic_view_map = std::unordered_map<const jai::detail::generic_definition*, generic_view>;
+
 struct unit {
 	std::string path;
 	std::string text;
@@ -107,6 +118,8 @@ struct unit {
 	std::vector<jai::declaration_ptr> decls;      // the parse, or what parsed around its errors
 	std::vector<jai::declaration_ptr> good_decls; // the last clean parse
 	std::vector<jai::declaration_ptr> checked_decls; // decls with the generic instances its check declared: what the checker walks
+	generic_view_map generic_views;               // the generics its parses declare, those in their text included
+	generic_view_map instance_views;              // the generic methods its check's instances declare, made as a lookup reaches them
 	bool parse_ok = false;
 	std::vector<std::string> salvaged;            // failing parse: top-level names read off the tokens (no cascade of undeclared names)
 	std::vector<file_diagnostic> parse_errors;

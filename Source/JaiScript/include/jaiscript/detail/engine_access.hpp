@@ -70,6 +70,7 @@ namespace jai::detail {
         JAI_FORCEINLINE static bool type_argument_method(const engine& a_engine, const std::string& a_name) { return a_engine.type_argument_method(a_name); }
         JAI_FORCEINLINE static check_report check_expanding(engine& a_engine, std::vector<declaration_ptr>& a_declarations, check_options a_options, const std::vector<std::string>* a_extra = nullptr) { return a_engine.check_expanding(a_declarations, std::move(a_options), a_extra); }
         JAI_FORCEINLINE static void register_generics(engine& a_engine, const std::vector<declaration_ptr>& a_declarations, const std::string& a_file) { a_engine.register_generics(a_declarations, a_file); }
+        JAI_FORCEINLINE static void forget_generics(engine& a_engine) { a_engine.forget_generics(); }
         JAI_FORCEINLINE static detail::execution_limits& execution_limits(engine& a_engine) noexcept { return a_engine.execution_limits(); }
         JAI_FORCEINLINE static void parallel_spin_wait_us(engine& a_engine, size_t microseconds) { return a_engine.parallel_spin_wait_us(microseconds); }
         JAI_FORCEINLINE static size_t parallel_spin_wait_us(const engine& a_engine) { return a_engine.parallel_spin_wait_us(); }

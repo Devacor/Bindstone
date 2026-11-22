@@ -1405,6 +1405,17 @@ struct engine::implementation {
         }
         index_pooled_namespace_generics();
     }
+    void forget_generics() {
+        if (generics_.empty() && dropped_generics_.empty() && generic_instances_.empty() && generic_method_names_.empty()) { return; }
+        generics_.clear();
+        dropped_generics_.clear();
+        generic_instances_.clear();
+        instances_of_.clear();
+        instance_shapes_.clear();
+        generic_method_names_.clear();
+        ++script_cache_epoch;
+        index_pooled_namespace_generics();
+    }
     // The instance a declaration was made for (a class's, a function's, a method's), through the namespaces its text stands
     // in; its name is empty for any other declaration
     static detail::generic_instance_id instance_of(const declaration& d) { return instance_of_impl(d); }
@@ -5940,6 +5951,8 @@ check_report engine::check_expanding(std::vector<declaration_ptr>& declarations,
 }
 
 void engine::register_generics(const std::vector<declaration_ptr>& declarations, const std::string& file) { impl->register_generics(declarations, file); }
+
+void engine::forget_generics() { impl->forget_generics(); }
 
 std::string engine::less_than_answers(const std::vector<declaration_ptr>& declarations, const std::vector<std::string>& queries) {
     return impl->less_answers_now(declarations, queries);

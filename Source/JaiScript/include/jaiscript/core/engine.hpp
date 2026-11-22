@@ -940,6 +940,9 @@ namespace jai {
         check_report check_expanding(std::vector<declaration_ptr>& declarations, detail::check_options options, const std::vector<std::string>* extra_globals = nullptr);
         // a unit's generics, for the units checked after it (a run and a pooled closure unit declare theirs themselves)
         void register_generics(const std::vector<declaration_ptr>& declarations, const std::string& file);
+        // every generic definition and instance record goes: a host that checks unrelated programs on one engine (the language
+        // server) pools only the next program's, which its units then register
+        void forget_generics();
         // A host function a parallel body may not call: what jai::serial records. Every other registered host function, the
         // library's own included, is taken to be safe on any thread. A namespace entry is marked by its qualified name.
         void serial_function(const std::string& name);

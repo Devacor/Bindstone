@@ -161,6 +161,33 @@ inline signature_info function_signature(const jai::function_decl& fn, std::stri
 	return sig;
 }
 
+// Tokens as their source spells them, spaced only after a comma and around a bound's ':'
+inline std::string spelled_tokens(const std::vector<jai::token>& tokens) {
+	std::string out;
+	for (const auto& t : tokens) {
+		if (t.type == jai::token_type::comma) { out += ", "; continue; }
+		if (t.type == jai::token_type::colon) { out += " : "; continue; }
+		out += t.lexeme;
+	}
+	return out;
+}
+
+// "<T>", "<K, V>", "<T : Entity>": a generic's parameter list as declared
+inline std::string generic_parameters_text(const jai::detail::generic_definition& g) {
+	std::string out = "<";
+	for (size_t i = 0; i < g.parameters.size(); ++i) {
+		if (i) { out += ", "; }
+		out += g.parameters[i].name;
+		if (!g.parameters[i].bound.empty()) { out += " : " + spelled_tokens(g.parameters[i].bound); }
+	}
+	return out + ">";
+}
+
+// The generics the declarations hold, at program scope, in namespaces and in classes, each with its view: the text with the
+// type parameters left as names, parsed alone (a generic class's generic methods get theirs from its view)
+void collect_generic_views(jai::engine& eng, const std::vector<jai::declaration_ptr>& decls, generic_view_map& out);
+const generic_view& generic_view_of(jai::engine& eng, const std::shared_ptr<const jai::detail::generic_definition>& definition, generic_view_map& out);
+
 inline bool is_identifier_text(std::string_view s) {
 	if (s.empty()) { return false; }
 	auto head = [](char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; };

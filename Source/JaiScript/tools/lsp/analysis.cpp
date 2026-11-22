@@ -141,6 +141,9 @@ void surface_of(const std::vector<jai::declaration_ptr>& decls, std::string& out
 						out += std::string(fn->name);
 						params(fn);
 						out += ';';
+					} else if (m.declaration->get_type() == jai::node_type::generic_decl) {
+						const auto& g = *static_cast<const jai::generic_decl*>(m.declaration.get())->definition;
+						out += std::string(g.name) + "<>" + std::to_string(g.stamp) + ";";
 					}
 				}
 				out += "}";
@@ -151,6 +154,11 @@ void surface_of(const std::vector<jai::declaration_ptr>& decls, std::string& out
 				out += "n " + std::string(n->name) + "{";
 				surface_of(n->declarations, out);
 				out += "}";
+				break;
+			}
+			case jai::node_type::generic_decl: {   // an importer makes its instances from the text: the whole of it is surface
+				const auto& g = *static_cast<const jai::generic_decl*>(d.get())->definition;
+				out += "g " + g.qualified_name() + ":" + std::to_string(g.stamp) + ";";
 				break;
 			}
 			default:
@@ -209,6 +217,11 @@ std::vector<std::string> salvage_names(const std::vector<lex_token>& tokens) {
 	return out;
 }
 
+// A check declared generic instances among the declarations: their requests stand ahead of the unit's own
+bool holds_instance_requests(const std::vector<jai::declaration_ptr>& decls) {
+	return std::any_of(decls.begin(), decls.end(), [](const jai::declaration_ptr& d) { return d && d->get_type() == jai::node_type::generic_instance_decl; });
+}
+
 class type_collector : public jai::check_observer {
 public:
 	explicit type_collector(std::unordered_map<const jai::expression*, jai::check_expression_type>& out) : out_(out) {}
@@ -218,6 +231,60 @@ private:
 };
 
 } // namespace
+
+const generic_view& generic_view_of(jai::engine& eng, const std::shared_ptr<const jai::detail::generic_definition>& definition, generic_view_map& out) {
+	if (auto held = out.find(definition.get()); held != out.end()) { return held->second; }
+	generic_view& view = out[definition.get()];
+	view.definition = definition;
+	auto* symbols = jai::detail::engine_access::get_symbolizer(eng);
+	try {
+		std::vector<jai::token> text = jai::detail::generic_instance_tokens(*definition, {}, definition->name, *symbols);
+		jai::parser prs(text, symbols, &eng, jai::detail::engine_access::get_registered_template_types(eng), std::string(definition->location.filename));
+		auto parsed = prs.parse();
+		if (!parsed || parsed.value().empty()) { return view; }
+		view.holder = parsed.value().front();
+	} catch (const std::exception&) {
+		return view;
+	}
+	jai::declaration_ptr d = view.holder;
+	while (d && d->get_type() == jai::node_type::namespace_decl && !static_cast<const jai::namespace_decl*>(d.get())->declarations.empty()) {
+		d = static_cast<const jai::namespace_decl*>(d.get())->declarations.front();
+	}
+	if (d && definition->kind == jai::detail::generic_kind::method && d->get_type() == jai::node_type::class_decl) {
+		const auto& members = static_cast<const jai::class_decl*>(d.get())->members;
+		d = members.empty() ? nullptr : members.front().declaration;
+	}
+	const bool shaped = d && (definition->kind == jai::detail::generic_kind::class_type ? d->get_type() == jai::node_type::class_decl : d->get_type() == jai::node_type::function_decl);
+	view.node = shaped ? d : nullptr;
+	view.decl = view.node.get();
+	if (view.decl && view.decl->get_type() == jai::node_type::class_decl) {
+		std::vector<std::shared_ptr<const jai::detail::generic_definition>> methods;
+		for (const auto& m : static_cast<const jai::class_decl*>(view.decl)->members) {
+			if (m.declaration && m.declaration->get_type() == jai::node_type::generic_decl) { methods.push_back(static_cast<const jai::generic_decl*>(m.declaration.get())->definition); }
+		}
+		for (const auto& method : methods) { generic_view_of(eng, method, out); }   // a map's elements stay where they are as it grows
+	}
+	return view;
+}
+
+void collect_generic_views(jai::engine& eng, const std::vector<jai::declaration_ptr>& decls, generic_view_map& out) {
+	for (const auto& d : decls) {
+		if (!d) { continue; }
+		switch (d->get_type()) {
+			case jai::node_type::generic_decl: generic_view_of(eng, static_cast<const jai::generic_decl*>(d.get())->definition, out); break;
+			case jai::node_type::namespace_decl: collect_generic_views(eng, static_cast<const jai::namespace_decl*>(d.get())->declarations, out); break;
+			case jai::node_type::class_decl:
+				for (const auto& m : static_cast<const jai::class_decl*>(d.get())->members) {
+					if (m.declaration && m.declaration->get_type() == jai::node_type::generic_decl) {
+						generic_view_of(eng, static_cast<const jai::generic_decl*>(m.declaration.get())->definition, out);
+					}
+				}
+				break;
+			default:
+				break;
+		}
+	}
+}
 
 std::vector<file_diagnostic> parse_error_lines(const std::string& all, const std::string& path) {
 	std::vector<file_diagnostic> out;
@@ -358,6 +425,10 @@ void workspace::parse(unit& u, bool publish) {
 		u.parse_ok = false;
 		u.parse_errors.push_back({0, 0, 0, true, std::string("parser: ") + ex.what(), UINT32_MAX, 0, "parse"});
 	}
+	u.generic_views.clear();
+	u.instance_views.clear();
+	collect_generic_views(eng, u.decls, u.generic_views);
+	if (!u.parse_ok) { collect_generic_views(eng, u.good_decls, u.generic_views); }
 	if (!publish) { return; }
 	for (const auto& d : u.decls) {
 		if (!d) { continue; }
@@ -536,7 +607,6 @@ const program& workspace::program_of(const std::string& path) {
 			auto decls = program_decls(*u);
 			jai::detail::collect_unit_names(decls, prog.names);
 			jai::detail::collect_unit_classes(decls, prog.classes);
-			jai::detail::engine_access::register_generics(*engine_, decls, u->path);   // every unit instantiates what the program declares
 			jai::detail::collect_unit_enums(decls, p, prog.enums);
 			jai::detail::collect_unit_functions(decls, p, prog.functions);
 			jai::detail::collect_unit_globals(decls, p, prog.globals);
@@ -562,6 +632,11 @@ std::vector<std::string> workspace::program_units(const std::string& path) {
 void workspace::pool_classes(const program& prog) {
 	if (pooled_program_ == prog.signature) { return; }
 	jai::detail::engine_access::pool_program_classes(*engine_, prog.classes, prog.enums, prog.names, prog.functions, prog.globals);
+	// the generics too are the program's alone: two programs that each declare largest<T> are no overloads of one another
+	jai::detail::engine_access::forget_generics(*engine_);
+	for (const auto& p : prog.units) {
+		if (unit* u = find(p)) { jai::detail::engine_access::register_generics(*engine_, program_decls(*u), u->path); }
+	}
 	pooled_program_ = prog.signature;
 }
 
@@ -585,7 +660,10 @@ void workspace::analyze(unit& u, bool want_model) {
 	const program* program_now = &program_of(u.path);
 	if (u.checked_epoch != u.epoch || u.checked_program != program_now->signature) {
 		pool_classes(*program_now);
-		if (namespace_answers(u) != u.namespace_answers || less_moved(u)) {   // parsed before its program's classes and names were known
+		// a check that made instances changed the parse it read (a request marked made, a call renamed to its instance): under a
+		// program whose generics may have moved since, the unit is checked from a fresh parse
+		const bool made_for_another = u.checked_epoch == u.epoch && holds_instance_requests(u.checked_decls);
+		if (made_for_another || namespace_answers(u) != u.namespace_answers || less_moved(u)) {   // parsed before its program's classes and names were known
 			u.settling = true;
 			parse(u);
 			u.settling = false;
@@ -708,8 +786,8 @@ std::shared_ptr<unit_model> workspace::analyze_text(unit& base, std::string text
 	options.program_enums = &prog.enums;
 	options.observer = &collector;
 	try {
-		auto checked = temp.decls;
-		jai::detail::engine_access::check_expanding(*engine_, checked, options);
+		temp.checked_decls = temp.decls;
+		jai::detail::engine_access::check_expanding(*engine_, temp.checked_decls, options);
 	} catch (const std::exception&) {
 	}
 	semantic_walker(*this, temp, prog, *model).run();

@@ -3562,6 +3562,10 @@ bool parser::generic_parameters(detail::generic_definition& definition, size_t o
         for (const auto& earlier : definition.parameters) {
             if (earlier.name == t.lexeme) { return fail("duplicate type parameter '" + std::string(t.lexeme) + "' in '" + generic + "'", t); }
         }
+        if (const std::string_view enclosing = type_parameter_generic(t.lexeme); !enclosing.empty()) {
+            return fail("'" + std::string(t.lexeme) + "' is a type parameter of '" + std::string(enclosing) + "': the generic method '" + generic +
+                        "' cannot declare it again; give its parameter another name (" + generic + "<U>)", t);
+        }
         detail::generic_parameter parameter;
         parameter.name = symbolizer_->intern_with_view(t.lexeme).second;
         parameter.name_id = get_symbol_id(t);

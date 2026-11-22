@@ -146,6 +146,20 @@ public:
 				"generic method 'm' cannot be marked override: a generic method is not virtual"));
 		});
 
+		test("a_generic_method_cannot_declare_its_classs_type_parameter_again", [this]() {
+			auto e = make_engine();
+			const std::string text = "'T' is a type parameter of 'Box': the generic method 'get' cannot declare it again; give its parameter another name (get<U>)";
+			const std::string unused = failure(*e, "class Box<T> { T v; T get<T>(T x) { return x; } }\n1;");
+			check_true(contains(unused, "<script>:1:27: error: " + text), unused);
+			check_true(contains(failure(*e, "class Box<T> { T v; T get<T>(T x) { return x; } }\nBox<int> b; b.get(1);"), text));
+			check_true(contains(failure(*e, "class Item { int n = 1; } class Box<T> { T v; T get<T>(T x) { return x; } }\nBox<Item> b;"), text));
+			check_true(contains(failure(*e, "class Box<T> { static T make<T>() { return T(); } }"),
+				"'T' is a type parameter of 'Box': the generic method 'make' cannot declare it again; give its parameter another name (make<U>)"));
+			check_true(contains(failure(*e, "namespace n { class Box<K, T> { T v; U get<U, T>(U x) { return x; } } }"), text));
+			// its own name for a parameter, and a lambda that types a parameter by the class's, keep loading
+			check_eq((int64_t)5, e->execute("class Box<T> { T v; U get<U>(U x) { return x; } int f() { auto l = (T x) => 1; return l(v); } }\nBox<int> b; b.get(4) + b.f();").as_int());
+		});
+
 		test("a_generic_class_is_not_overloaded_by_its_parameter_count", [this]() {
 			auto e = make_engine();
 			const std::string text = "generic class 'Dup' is declared with 1 type parameter on line 1 and with 2 type parameters here: a generic class cannot be overloaded by its parameter count";

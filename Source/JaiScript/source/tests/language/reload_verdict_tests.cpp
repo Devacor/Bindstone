@@ -529,6 +529,187 @@ public:
 			check_eq(std::string("null"), p.run("class Fresh { int a = 1; }\nint fresh() { return 1; }"));
 			check_true(warnings().empty(), listed(warnings()));
 		});
+
+		test("a_bite_never_replaces_what_live_code_holds_with_the_text_it_was_saved_from", [this]() {
+			// A bite carries the instances its text names as declarations. Saved where the generic had one text and run where it
+			// has another, it makes them again from the declaration the engine holds: the engine's own objects and callers keep
+			// the code they run, and the bite's code is checked against what it will meet.
+			const std::string lib_v1 = "class Cell<T> { T v; int tag() { return 1; } }\nT same<T>(T x) { return x; }\nnamespace box { class Lid<T> { T v; int tag() { return 10; } } T pick<T>(T x) { return x; } }\n";
+			const std::string user = "Cell<float> f; f.v = 1.5; Cell<Cell<int>> nested; nested.v.v = same(4); box::Lid<int> lid; lid.v = box::pick(3);\n"
+			                         "to_string(f.tag()) + \"|\" + to_string(nested.v.v) + \"|\" + to_string(nested.tag()) + \"|\" + to_string(lid.tag() + lid.v) + \"|\" + reflect::type_of(nested);";
+			const auto engine_with = [](const std::string& text) {
+				auto e = make_engine();
+				stdlib::register_all(*e);
+				if (!text.empty()) { e->execute(text); }
+				return e;
+			};
+			const auto outcome = [](engine& e, const std::string& code) {
+				try {
+					return e.execute(code).to_string();
+				} catch (const std::exception& error) {
+					return std::string("ERR: ") + error.what();
+				}
+			};
+			auto maker = engine_with(lib_v1);
+			jaibite made = maker->jaibite(user);
+			check_eq(std::string("1|4|1|13|Cell<Cell<int>>"), made.execute().to_string(), "where it was made");
+			const std::vector<uint8_t> bytes = made.save_bytes();
+			const auto loaded_in = [&](engine& e) {
+				try {
+					return e.jaibite_load_bytes(bytes).execute().to_string();
+				} catch (const std::exception& error) {
+					return std::string("ERR: ") + error.what();
+				}
+			};
+			{
+				auto same_text = engine_with(lib_v1);
+				check_eq(std::string("1|4|1|13|Cell<Cell<int>>"), loaded_in(*same_text), "an engine that holds the text it was saved from");
+			}
+			// another body for every generic the bite names (a namespace's function declared again by another text is written
+			// override), and live objects of the instances it names
+			const std::string lib_v2 = "class Cell<T> { T v; int tag() { return 2; } }\nT same<T>(T x) { return x + x; }\nnamespace box { class Lid<T> { T v; int tag() { return 20; } } T pick<T>(T x) override { return x + 1; } }\n";
+			const std::string live = "Cell<float> early; Cell<Cell<int>> early_nested; Cell<int> early_int; box::Lid<int> early_lid; int warm = same(1) + box::pick(1);\n"
+			                         "string held() { return to_string(early.tag()) + to_string(early_nested.tag()) + to_string(early_int.tag()) + \"|\" + to_string(early_lid.tag()) + \"|\" + to_string(same(1)) + to_string(box::pick(1)); }\n";
+			{
+				auto other = engine_with(lib_v2 + live);
+				check_eq(std::string("222|20|22"), outcome(*other, "held();"), "before the bite");
+				check_eq(std::string("2|8|2|24|Cell<Cell<int>>"), loaded_in(*other), "the bite runs the text the engine holds");
+				check_eq(std::string("222|20|22"), outcome(*other, "held();"), "and what live code holds answers as it did");
+				check_eq(std::string("2|8|2|24|Cell<Cell<int>>"), loaded_in(*other), "loaded and run again");
+				check_eq(std::string("222|20|22"), outcome(*other, "held();"));
+			}
+			{
+				auto unmade = engine_with(lib_v2);   // the generics declared, no instance made yet
+				check_eq(std::string("2|8|2|24|Cell<Cell<int>>"), loaded_in(*unmade), "no instance made before the bite");
+				check_eq(std::string("2"), outcome(*unmade, "Cell<float> later; later.tag();"), "a later unit's instance is the engine's text");
+			}
+			// a bite made in this engine, then the generic declared again: its next run follows the declaration
+			{
+				auto e = engine_with(lib_v1);
+				jaibite own = e->jaibite(user);
+				check_eq(std::string("1|4|1|13|Cell<Cell<int>>"), own.execute().to_string());
+				e->execute(lib_v2 + live);
+				check_eq(std::string("222|20|22"), outcome(*e, "held();"));
+				check_eq(std::string("2|8|2|24|Cell<Cell<int>>"), own.execute().to_string(), "the bite's own next run");
+				check_eq(std::string("222|20|22"), outcome(*e, "held();"), "left live code as it was");
+			}
+			// a declaration the bite's text no longer fits is the bite's load error, as the same text's would be
+			const std::vector<std::pair<std::string, std::string>> unfit = {
+				{"class Cell<K, V> { K v; int tag() { return 3; } }\nT same<T>(T x) { return x; }\nnamespace box { class Lid<T> { T v; int tag() { return 10; } } T pick<T>(T x) { return x; } }\n", "'Cell' takes 2 type arguments, not 1"},
+				{"class Cell<T> { T held; int tag() { return 4; } }\nT same<T>(T x) { return x; }\nnamespace box { class Lid<T> { T v; int tag() { return 10; } } T pick<T>(T x) { return x; } }\n", "no member 'v' in class 'Cell<float>'"},
+				{"class Cell<T> { T v; int tag() { return 1; } }\nT same<T>(T x, T y) { return x; }\nnamespace box { class Lid<T> { T v; int tag() { return 10; } } T pick<T>(T x) { return x; } }\n", "'same<int>' expects 2 argument(s), got 1"},
+				{"class Cell { int v = 1; int tag() { return 77; } }\nT same<T>(T x) { return x; }\nnamespace box { class Lid<T> { T v; int tag() { return 10; } } T pick<T>(T x) { return x; } }\n", "'Cell<float>' is not declared yet: it waits for 'Cell'"},
+			};
+			for (const auto& [text, says] : unfit) {
+				auto e = engine_with(text);
+				const std::string refused = loaded_in(*e);
+				check_true(failed(refused) && has(refused, says), says + ": " + refused);
+			}
+			// where nothing declares the generic the bite's instances wait for a declaration, as they always did
+			{
+				auto bare = engine_with("");
+				const std::string waits = loaded_in(*bare);
+				check_true(failed(waits), "no generic declared: " + waits);
+			}
+		});
+
+		test("a_saved_bite_runs_as_its_source_would_in_every_engine_it_meets", [this]() {
+			// Bites saved from one text of a library of generics, loaded where the library has another text: each answers what its
+			// own source answers there, or fails where that source fails, and whatever the engine's live code holds answers as it
+			// did before the bite ran
+			const auto library = [](const std::string& cell, const std::string& same, const std::string& tool, const std::string& box) {
+				return "class Limit { int n = 0; }\n" + cell + "\n" + same + "\n" + tool + "\n" + box + "\n";
+			};
+			const std::string cell = "class Cell<T> { T v; int tag() { return 1; } }", same = "T same<T>(T x) { return x; }";
+			const std::string tool = "class Tool { int level = 1; T scaled<T>(T x) { return x; } }";
+			const std::string box = "namespace box { class Lid<T> { T v; int tag() { return 10; } } T pick<T>(T x) { return x; } }";
+			const std::vector<std::pair<std::string, std::string>> engines = {
+				{"the text the bites were saved from", library(cell, same, tool, box)},
+				{"other bodies", library("class Cell<T> { T v; int tag() { return 2; } }", "T same<T>(T x) { return x + x; }", "class Tool { int level = 1; T scaled<T>(T x) { return x + x; } }",
+				                          "namespace box { class Lid<T> { T v; int tag() { return 20; } } T pick<T>(T x) { return x + 1; } }")},
+				{"a field added", library("class Cell<T> { T v; int extra = 7; int tag() { return 3 + extra; } }", same, tool, box)},
+				{"another count of type parameters", library("class Cell<K, V> { K v; int tag() { return 4; } }", same, tool, box)},
+				{"another count of value parameters", library(cell, "T same<T>(T x, T y) { return x; }", tool, box)},
+				{"a bound the arguments do not meet", library("class Cell<T : Limit> { T v; int tag() { return 5; } }", same, tool, box)},
+				{"a plain class of the name", library("class Cell { int v = 1; int tag() { return 6; } }", same, tool, box)},
+				{"a plain function of the name", library(cell, "int same(int x) { return x + 100; }", tool, box)},
+				{"the method no longer generic", library(cell, same, "class Tool { int level = 1; int scaled(int x) { return x + 50; } }", box)},
+				{"another namespace text", library(cell, same, tool, "namespace box { class Lid<T> { T v; int tag() { return 30; } } T pick<T>(T x, int n = 2) { return x + n; } }")},
+				{"no class generic", library("", same, tool, box)},
+				{"nothing declared", ""},
+			};
+			const std::vector<std::pair<std::string, std::string>> sources = {
+				{"classes and functions", "Cell<float> f; f.v = 1.5; Cell<Cell<int>> nested; nested.v.v = same(4); to_string(f.tag()) + \"|\" + to_string(nested.v.v) + \"|\" + reflect::type_of(nested);"},
+				{"functions only", "to_string(same(4)) + \"|\" + same(\"s\") + \"|\" + to_string(same<float>(1.5));"},
+				{"classes only", "Cell<int> a; Cell<string> b; b.v = \"t\"; to_string(a.tag() + b.tag()) + \"|\" + b.v;"},
+				{"a generic method", "Tool t; to_string(t.scaled<int>(4)) + \"|\" + t.scaled(\"m\");"},
+				{"a namespace's", "box::Lid<int> lid; lid.v = box::pick(3); to_string(lid.tag() + lid.v) + \"|\" + to_string(box::pick<float>(0.5));"},
+				{"its own generic beside the library's", "class Pair<A, B> { A a; B b; } U twice<U>(U x) { return x + x; } Pair<int, Cell<int>> p; p.a = twice(same(2)); to_string(p.a) + \"|\" + to_string(p.b.tag());"},
+			};
+			const std::string live = "Cell<float> early; Cell<Cell<int>> early_nested; Cell<int> early_int; Cell<string> early_text; box::Lid<int> early_lid; Tool early_tool;\n"
+			                         "string held() { return to_string(early.tag()) + to_string(early_nested.tag()) + to_string(early_int.tag()) + to_string(early_text.tag()) + \"|\" + to_string(early_lid.tag()) + \"|\" + "
+			                         "to_string(same(1)) + same(\"h\") + to_string(same(0.5)) + \"|\" + to_string(box::pick(1)) + to_string(box::pick(0.5)) + \"|\" + to_string(early_tool.scaled(2)) + early_tool.scaled(\"k\"); }\n";
+			const auto engine_with = [](const std::string& text) {
+				auto e = make_engine();
+				stdlib::register_all(*e);
+				if (!text.empty()) { e->execute(text); }
+				return e;
+			};
+			const auto outcome = [](engine& e, const std::string& code) {
+				try {
+					return e.execute(code).to_string();
+				} catch (const std::exception& error) {
+					return std::string("ERR: ") + error.what();
+				}
+			};
+			size_t cases = 0, refused = 0;
+			std::string wrong;
+			std::set<std::string> waiting;
+			for (const auto& [source_name, source] : sources) {
+				auto maker = engine_with(engines.front().second);
+				jaibite made = maker->jaibite(source);
+				const std::string where_made = made.execute().to_string();
+				const std::vector<uint8_t> bytes = made.save_bytes();
+				for (const auto& [engine_name, text] : engines) {
+					for (const bool with_live : {false, true}) {
+						const std::string what = source_name + ", loaded where the library has " + engine_name + (with_live ? ", live instances made" : "");
+						auto e = engine_with(text);
+						auto twin = engine_with(text);
+						std::string before;
+						if (with_live) {
+							before = outcome(*e, live + "held();");
+							if (failed(before)) { continue; }   // this library does not make those instances
+							(void)outcome(*twin, live + "held();");
+						}
+						const std::string expected = outcome(*twin, source);
+						std::string got;
+						try {
+							jaibite loaded = e->jaibite_load_bytes(bytes);
+							got = loaded.execute().to_string();
+						} catch (const std::exception& error) {
+							got = std::string("ERR: ") + error.what();
+						}
+						++cases;
+						if (failed(expected)) {
+							++refused;
+							if (!failed(got)) { wrong += what + ": the source fails (" + expected.substr(0, 110) + "), the bite answered " + got + "\n"; }
+						} else if (got != expected) {
+							// a call the saved text bound to a generic's instance stays that instance's: where the engine declares no
+							// generic of the name the bite waits for one and says so, though its source would reach the plain function
+							if (has(got, "is not declared yet: it waits for")) { waiting.insert(source_name + " | " + engine_name); }
+							else { wrong += what + ": the source answers " + expected + ", the bite " + got.substr(0, 260) + "\n"; }
+						}
+						if (with_live && before != outcome(*e, "held();")) { wrong += what + ": what live code holds changed\n"; }
+						if (engine_name == engines.front().first && got != where_made) { wrong += what + ": not as where it was made: " + got.substr(0, 200) + "\n"; }
+					}
+				}
+			}
+			check_eq(std::string(), wrong);
+			std::string waited;
+			for (const auto& w : waiting) { waited += w + "\n"; }
+			check_eq(std::string("classes and functions | a plain function of the name\n"), waited);
+			check_true(cases >= 90 && refused >= 20, "the table covers loads that run and loads that are refused: " + std::to_string(cases) + " cases, " + std::to_string(refused) + " refused");
+		});
 	}
 };
 

@@ -2019,6 +2019,149 @@ struct engine::implementation {
         }
         return added;
     }
+    // the stamp of the definition a made declaration came from (a class's, a function's, a method's), through its namespaces
+    static const function_decl* made_function(const declaration& d) {
+        switch (d.get_type()) {
+            case node_type::function_decl:
+                return static_cast<const function_decl*>(&d);
+            case node_type::class_decl:
+                for (const auto& m : static_cast<const class_decl&>(d).members) {
+                    if (m.declaration && m.declaration->get_type() == node_type::function_decl) { return static_cast<const function_decl*>(m.declaration.get()); }
+                }
+                return nullptr;
+            case node_type::namespace_decl:
+                for (const auto& member : static_cast<const namespace_decl&>(d).declarations) {
+                    if (!member) { continue; }
+                    if (const function_decl* found = made_function(*member)) { return found; }
+                }
+                return nullptr;
+            default:
+                return nullptr;
+        }
+    }
+    static uint64_t made_from_stamp(const declaration& d) {
+        switch (d.get_type()) {
+            case node_type::class_decl: {
+                const auto& c = static_cast<const class_decl&>(d);
+                if (c.instance_stamp != 0) { return c.instance_stamp; }
+                if (!c.method_instances) { return 0; }
+                for (const auto& m : c.members) {
+                    if (m.declaration && m.declaration->get_type() == node_type::function_decl) { return static_cast<const function_decl&>(*m.declaration).instance_stamp; }
+                }
+                return 0;
+            }
+            case node_type::function_decl:
+                return static_cast<const function_decl&>(d).instance_stamp;
+            case node_type::namespace_decl:
+                for (const auto& member : static_cast<const namespace_decl&>(d).declarations) {
+                    if (!member) { continue; }
+                    if (const uint64_t stamp = made_from_stamp(*member)) { return stamp; }
+                }
+                return 0;
+            default:
+                return 0;
+        }
+    }
+    // A unit held past a change of the program's generics (a bite: one loaded from a save, or one made before a generic it
+    // names was declared again) carries instances made from text the engine does not hold for the generic. Offered as the
+    // unit starts, one would replace the class or the function live code uses with the text the bite was saved from. Each
+    // is made again from the declaration the engine holds, as a unit parsed again makes its own: a class's request is asked
+    // again, and a function's or a method's is asked of the one declaration the engine holds that takes its type arguments
+    // (of several, the one that takes its value parameters too): the unit's calls name the instance already, so no check
+    // asks again, and a call the declaration does not take is the call's error. With no such declaration, or no single one,
+    // the instance leaves the unit and the calls that name it fail the unit's check. An instance of a generic the unit
+    // declares itself stays, so does one of a generic a file dropped (it stands for every unit), and so does one of a generic
+    // the engine has no declaration for (it waits for one, as it always did): but a method's instance has nothing to wait
+    // for where its class stands without the generic, and leaves. True when an instance left.
+    static const class_decl* method_instances_of(const declaration& d) {
+        if (d.get_type() == node_type::class_decl) { return static_cast<const class_decl&>(d).method_instances ? static_cast<const class_decl*>(&d) : nullptr; }
+        if (d.get_type() != node_type::namespace_decl) { return nullptr; }
+        for (const auto& member : static_cast<const namespace_decl&>(d).declarations) {
+            if (!member) { continue; }
+            if (const class_decl* found = method_instances_of(*member)) { return found; }
+        }
+        return nullptr;
+    }
+    bool withdraw_stale_instances(engine& self, std::vector<declaration_ptr>& decls) {
+        if (generics_.empty()) { return false; }
+        const generic_request_index requests = index_requests(decls);
+        if (requests.empty()) { return false; }
+        std::vector<detail::generic_definition_ptr> own;
+        collect_generics(decls, own);
+        std::unordered_map<const generic_instance_decl*, uint64_t> made;   // each request's declarations, by the stamp they carry
+        std::unordered_map<const generic_instance_decl*, size_t> taken;    // and, for a function's or a method's, its value parameters
+        std::unordered_map<const generic_instance_decl*, std::string> method_owner;   // a method's: the class it is a method of
+        for (const auto& d : decls) {
+            if (!d || d->get_type() == node_type::generic_instance_decl) { continue; }
+            const auto asked = requests.find(instance_of(*d));
+            if (asked == requests.end()) { continue; }
+            made.emplace(asked->second, made_from_stamp(*d));
+            if (const function_decl* fn = made_function(*d)) { taken.emplace(asked->second, fn->parameters.size()); }
+            if (const class_decl* methods = method_instances_of(*d)) { method_owner.emplace(asked->second, std::string(methods->name)); }
+        }
+        std::unordered_set<const generic_instance_decl*> stale;
+        std::unordered_set<const generic_instance_decl*> dropped;
+        std::unordered_map<const generic_instance_decl*, detail::generic_definition_ptr> again;   // a function's or a method's: what makes it now
+        for (const auto& [id, request] : requests) {
+            if (!request->expanded || request->remade) { continue; }
+            const auto from = made.find(request);
+            if (from == made.end() || from->second == 0) { continue; }
+            const uint64_t stamp = from->second;
+            if (std::any_of(own.begin(), own.end(), [&](const detail::generic_definition_ptr& g) { return g->stamp == stamp; })) { continue; }
+            const auto same_text = [&](const detail::generic_definition_ptr& g) { return g->stamp == stamp; };
+            if (const auto gone = dropped_generics_.find(std::string(request->generic)); gone != dropped_generics_.end() && std::any_of(gone->second.begin(), gone->second.end(), same_text)) { continue; }
+            const auto held = generics_.find(std::string(request->generic));
+            if (held == generics_.end() || held->second.empty()) {
+                const auto owner = method_owner.find(request);
+                if (owner != method_owner.end() && (self.get_class_definition(owner->second) || self.get_class_registry().find_script_class(owner->second))) {
+                    stale.insert(request);
+                    dropped.insert(request);
+                }
+                continue;
+            }
+            if (std::any_of(held->second.begin(), held->second.end(), same_text)) { continue; }
+            stale.insert(request);
+            if (request->stamp == 0) { continue; }   // a class's: its name finds the declaration
+            detail::generic_definition_ptr sole, sole_fitting;
+            size_t typed = 0, fitting = 0;
+            const auto parameters = taken.find(request);
+            for (const auto& g : held->second) {
+                if (g->kind == detail::generic_kind::class_type || g->parameters.size() != request->arguments.size()) { continue; }
+                sole = g;
+                ++typed;
+                if (parameters == taken.end() || parameters->second < g->required_values() || parameters->second > g->values.size()) { continue; }
+                sole_fitting = g;
+                ++fitting;
+            }
+            if (typed == 1) { again.emplace(request, std::move(sole)); }
+            else if (fitting == 1) { again.emplace(request, std::move(sole_fitting)); }
+            else { dropped.insert(request); }
+        }
+        if (stale.empty()) { return false; }
+        std::erase_if(decls, [&](const declaration_ptr& d) {
+            if (!d) { return false; }
+            if (d->get_type() == node_type::generic_instance_decl) { return dropped.count(static_cast<const generic_instance_decl*>(d.get())) != 0; }
+            const auto asked = requests.find(instance_of(*d));
+            return asked != requests.end() && stale.count(asked->second) != 0;
+        });
+        for (const auto& d : decls) {
+            if (!d || d->get_type() != node_type::generic_instance_decl) { continue; }
+            auto& request = static_cast<generic_instance_decl&>(*d);
+            if (stale.count(&request) == 0) { continue; }
+            request.expanded = false;
+            request.unresolved = false;
+            request.failures.clear();
+            request.bounds.clear();
+            request.needs.clear();
+            request.file.clear();
+            request.definition.reset();
+            if (const auto made_by = again.find(&request); made_by != again.end()) {
+                request.definition = made_by->second;
+                request.stamp = detail::generic_instance_stamp(*made_by->second);
+            }
+        }
+        return true;
+    }
     // The unit declares again a generic (or declares a class under a generic class's name) the engine holds instances of:
     // its check has instances to make again or to warn of, whatever a loaded stamp says of its text
     bool remakes_instances(engine& self, const std::vector<declaration_ptr>& decls) {
@@ -5451,7 +5594,10 @@ jai::jaibite engine::jaibite(const std::string& scriptContent) {
 // whenever the switch or the surface epoch moved. Source is only available at creation time (loaded
 // bites format their listing without snippets).
 void engine::check_bite(jai::jaibite& bite, const std::string* source) {
-    const bool remakes = impl->remakes_instances(*this, bite.declarations_);   // as for a unit's entry (check_entry)
+    // a bite outlives the parses a change of the program's generics makes again: the instances it carries follow that change here
+    const bool stale = impl->withdraw_stale_instances(*this, bite.declarations_);
+    if (stale) { bite.compiled_.reset(); }
+    const bool remakes = impl->remakes_instances(*this, bite.declarations_) || stale;   // as for a unit's entry (check_entry)
     if (bite.stamp_loaded_ && !remakes && impl->outside_key(*this, bite.context_.outside) == bite.context_.outside_key) {
         bite.check_state_ = jaibite::check_state::clean;   // the names the stamp resolved resolve here as where it was checked
         std::vector<implementation::closure_stamp> generic_files;

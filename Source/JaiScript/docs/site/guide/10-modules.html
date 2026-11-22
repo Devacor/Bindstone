@@ -92,6 +92,7 @@ after load_physics: gravity() = 9.81</code></pre></div>
 <p><strong>An include inside a function body is that function&#x27;s own text</strong>, pasted in when the function is parsed (for a literal path). It is not a reload; to replace program-scope functions and classes from inside a function, import the file.</p>
 <ul>
 <li>The file reads and writes the function&#x27;s parameters and locals, and the variables it declares are locals.</li>
+<li>A mistake in the included text is listed under the included file&#x27;s path and its own line, as a mistake in any file of the program is.</li>
 <li>A function it declares is a nested function of the body: callable below the include, gone when the body returns, and capturing nothing (the body&#x27;s locals are a parse error inside it).</li>
 <li>A program-scope function of the same name is hidden inside the body and unchanged elsewhere. The checker warns: <code>function &#x27;helper&#x27; from the include in function &#x27;reload&#x27; is local to it and hides the program-scope &#x27;helper&#x27; there without replacing it; import the file to replace program-scope functions</code>.</li>
 <li>A class written in a function, method or lambda body is a parse error, and so is one that a file included there declares: <code>an include inside a function body cannot declare class &#x27;Rules&#x27; (a class is a program-scope type and the included text is the function&#x27;s own); import &#x27;rules.jai&#x27; instead</code>.</li>

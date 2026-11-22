@@ -2818,7 +2818,7 @@ struct engine::implementation {
                 for (const auto& d : r.diagnostics) {
                     entry.closure_diags.push_back({d.severity, 0, 0,
                         (d.file.empty() ? unit.path : d.file) + ":" + std::to_string(d.line) + ":" + std::to_string(d.column) + ": " + d.message,
-                        d.related_line, d.related_column, {}, d.notes});
+                        d.related_line, d.related_column, {}, d.notes, d.related_file});
                 }
             }
             if (before_pending) { withdraw_pending_text(*held, source, *before_pending, standing); }

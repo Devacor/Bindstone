@@ -100,7 +100,7 @@ static check failed:
 clean load: 4</code></pre></div>
 <ul>
 <li>The checker is flow-insensitive: the warn region reports the assignment inside <code>if (false)</code>, as a warning, though the runtime never reaches it.</li>
-<li>A <code>check_diagnostic</code> carries <code>severity</code>, <code>line</code>, <code>column</code>, <code>message</code> and <code>related_line</code>/<code>related_column</code> (the declaration a bad store violates).</li>
+<li>A <code>check_diagnostic</code> carries <code>severity</code>, <code>line</code>, <code>column</code>, <code>message</code> and <code>related_line</code>/<code>related_column</code> (the declaration a bad store violates), with <code>related_file</code> when that declaration stands in another file than the diagnostic.</li>
 <li>A <code>check_report</code> holds the <code>diagnostics</code> vector, <code>capped</code> (the 100-diagnostic cap was hit), <code>has_errors()</code>, <code>error_count()</code> and <code>format(source, name)</code>, which renders the listing above.</li>
 <li><code>check()</code> throws <code>jai::parse_error</code> only when the source does not parse, so a build step can walk every script and fail on <code>has_errors()</code> without executing anything.</li>
 <li>One bad line produces one diagnostic: an erroring expression assumes its declared or expected type afterwards, and identical (line, column, message) triples are reported once.</li>

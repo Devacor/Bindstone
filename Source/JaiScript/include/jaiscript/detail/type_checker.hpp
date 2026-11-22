@@ -43,6 +43,8 @@ namespace jai {
         std::string file;
         // A diagnostic inside a generic's instance: "in Stack<int>, instantiated at app.jai:12:5", outermost instance last
         std::vector<std::string> notes;
+        // The related point's file when it is not the diagnostic's own (an instance of a generic another file declares)
+        std::string related_file;
     };
 
     struct check_report {

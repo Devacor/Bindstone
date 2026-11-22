@@ -83,7 +83,7 @@ std::string check_report::format(std::string_view source, std::string_view scrip
         out += (d.severity == check_diagnostic::level::error) ? ": error: " : ": warning: ";
         out += d.message;
         if (d.related_line != 0) {
-            out += " (declared at " + std::to_string(d.related_line) + ":" + std::to_string(d.related_column) + ")";
+            out += " (declared at " + (d.related_file.empty() ? std::string() : d.related_file + ":") + std::to_string(d.related_line) + ":" + std::to_string(d.related_column) + ")";
         }
         out += '\n';
         for (const auto& note : d.notes) {
@@ -1252,9 +1252,21 @@ private:
 
     // -------------------------------------------------------------- diagnostics
 
-    // always_error: a program no run survives, an error under [[warn_mode]] too
+    // Where the declaration a diagnostic cites stands. One an AST node gives carries its file, which the listing names when
+    // it is not the diagnostic's own (an instance of a generic another file declares, text spliced into a body)
+    struct declared_at {
+        size_t line = 0, column = 0;
+        const std::string* file = nullptr;
+        declared_at() = default;
+        declared_at(size_t a_line, size_t a_column) : line(a_line), column(a_column) {}
+        declared_at(const source_location& a_place) : line(a_place.line), column(a_place.column), file(&a_place.filename) {}
+    };
     void diag(diag_level severity, const source_location& loc, std::string message,
               size_t related_line = 0, size_t related_column = 0, bool always_error = false) {
+        diag(severity, loc, std::move(message), declared_at{related_line, related_column}, always_error);
+    }
+    // always_error: a program no run survives, an error under [[warn_mode]] too
+    void diag(diag_level severity, const source_location& loc, std::string message, const declared_at& related, bool always_error = false) {
         if (!collect_diagnostics_) { return; }
         const uint8_t mode = region_mode();
         // an error in an instance the unit only makes again is that instance's, which keeps its earlier declaration: under
@@ -1274,8 +1286,10 @@ private:
         if (!seen_.insert(std::move(key)).second) {
             return;
         }
-        diags_.push_back({severity, loc.line, loc.column, std::move(message), file.empty() ? related_line : 0, file.empty() ? related_column : 0, std::move(file),
-                          instance_notes(instance_ctx_)});
+        const bool cites = file.empty() && related.line != 0;
+        std::string related_file = cites && related.file && !related.file->empty() && *related.file != loc.filename ? *related.file : std::string();
+        diags_.push_back({severity, loc.line, loc.column, std::move(message), cites ? related.line : 0, cites ? related.column : 0, std::move(file),
+                          instance_notes(instance_ctx_), std::move(related_file)});
     }
 
     // -------------------------------------------------------------- generics (detail/generics.hpp)
@@ -1423,11 +1437,11 @@ private:
         if (!same_generic_signature(*earlier, g)) {
             diag(diag_level::error, g.location, "generic class '" + qualified + "' is declared with " + counted(earlier->parameters.size()) + " on line " +
                  std::to_string(earlier->location.line) + " and with " + counted(g.parameters.size()) + " here: a generic class cannot be overloaded by its parameter count",
-                 earlier->location.line, earlier->location.column, /*always_error=*/true);
+                 earlier->location, /*always_error=*/true);
             return;
         }
         diag(diag_level::error, g.location, "generic '" + generic_spelling(g) + "' is declared again: line " + std::to_string(earlier->location.line) +
-             " declares it with the same parameters", earlier->location.line, earlier->location.column, /*always_error=*/true);
+             " declares it with the same parameters", earlier->location, /*always_error=*/true);
     }
     // The unit's earlier generic that `g` clashes with: one of its signature (`g` declares it again), or for a generic class one of
     // another parameter count, as a class's name is one class (functions overload by their parameters, a generic class by nothing)
@@ -2256,7 +2270,7 @@ private:
                 const declaration* earlier = fields.count(name) ? fields[name] : methods.count(name) ? methods[name] : nullptr;
                 if (earlier) {
                     diag(diag_level::error, d->location, "redeclaration of member '" + std::string(name) + "' in class '" + std::string(cd->name) + "'",
-                         earlier->location.line, earlier->location.column);
+                         earlier->location);
                 } else {
                     fields.emplace(name, d);
                 }
@@ -2264,7 +2278,7 @@ private:
                 const std::string_view name = static_cast<const function_decl*>(d)->name;
                 if (auto field = fields.find(name); field != fields.end()) {
                     diag(diag_level::error, d->location, "redeclaration of member '" + std::string(name) + "' in class '" + std::string(cd->name) + "'",
-                         field->second->location.line, field->second->location.column);
+                         field->second->location);
                 }
                 methods.emplace(name, d);
             }
@@ -2683,7 +2697,7 @@ private:
         const ctype declared = namespace_variable_type(path, member, &hit);
         if (declared.is_unknown()) { return {}; }
         check_store(rhs, compound, base_op, declared, declared_variable_type_name(hit.decl), "'" + path + "::" + std::string(member) + "'", loc,
-                    hit.foreign ? 0 : hit.decl->location.line, hit.foreign ? 0 : hit.decl->location.column);
+                    hit.foreign ? declared_at{} : declared_at{hit.decl->location});
         return declared;
     }
 
@@ -2708,7 +2722,26 @@ private:
         }
     }
 
+    // the unit's own declaration: no instance's (those carry their generic's file)
+    static bool own_text(const declaration& d) {
+        switch (d.get_type()) {
+            case node_type::generic_instance_decl: return false;
+            case node_type::class_decl: return static_cast<const class_decl&>(d).instance_stamp == 0 && !static_cast<const class_decl&>(d).method_instances;
+            case node_type::function_decl: return static_cast<const function_decl&>(d).instance_stamp == 0;
+            case node_type::namespace_decl: {
+                const auto& members = static_cast<const namespace_decl&>(d).declarations;
+                return members.empty() || std::any_of(members.begin(), members.end(), [](const declaration_ptr& m) { return m && own_text(*m); });
+            }
+            default: return true;
+        }
+    }
+
     void collect_top_level() {
+        // the unit's file is where its first own declaration stands; a unit of instances only takes its first request's
+        for (const auto& d : decls_) {
+            if (!unit_file_.empty()) { break; }
+            if (d && own_text(*d)) { unit_file_ = d->location.filename; }
+        }
         collect_generics(decls_);
         generics_live_ = !generics_.empty() || eng_.declares_generics();
         collect_scope_decls(decls_);
@@ -2794,14 +2827,14 @@ private:
                         !detail::differs_only_by_reference(fn->parameters, earlier->parameters)) { continue; }
                     diag(diag_level::error, fn->location,
                          detail::reference_only_overload_text(fn->name, fn->parameters, earlier->parameters, earlier->location.line),
-                         earlier->location.line, earlier->location.column);
+                         earlier->location);
                     break;
                 }
             }
             if (!inserted && !fn->is_override) {
                 diag(diag_level::error, fn->location,
                      "'" + std::string(fn->name) + "' is already defined" + (by_name ? std::string() : " with parameters " + sig),
-                     it->second->location.line, it->second->location.column);
+                     it->second->location);
                 continue;
             }
             if (!by_name) { continue; }
@@ -2810,7 +2843,7 @@ private:
                 diag(diag_level::warning, fn->location,
                      "duplicate definition of function '" + std::string(fn->name) +
                      "' replaces the earlier one (a coroutine does not overload)",
-                     nit->second->location.line, nit->second->location.column);
+                     nit->second->location);
             }
         }
     }
@@ -2996,8 +3029,9 @@ private:
                     (hit->is_static ? "static field '" : "field '") + std::string(name) +
                     "' of class '" + std::string(hit->cls) + "'";
                 if (hit->decl && hit->decl->location.line != 0) {
-                    msg += " (field declared at " + std::to_string(hit->decl->location.line) + ":" +
-                           std::to_string(hit->decl->location.column) + ")";
+                    const source_location& field_at = hit->decl->location;   // a parent another file declares: that file's line
+                    msg += " (field declared at " + (field_at.filename.empty() || field_at.filename == loc.filename ? std::string() : field_at.filename + ":") +
+                           std::to_string(field_at.line) + ":" + std::to_string(field_at.column) + ")";
                 }
                 diag(diag_level::warning, loc, std::move(msg));
                 return;
@@ -3360,7 +3394,7 @@ private:
             stored = binary_result(gt, base_op, rhs);
         }
         check_store(stored, /*compound=*/false, base_op, target, pt->canonical_name(),
-                    "property '" + std::string(member) + "'", loc, 0, 0);
+                    "property '" + std::string(member) + "'", loc, {});
     }
 
     bool chain_open(std::string_view cls, int depth = 0) {
@@ -6463,7 +6497,7 @@ private:
         const std::string name(fname);
         diag(diag_level::error, loc, "ambiguous call to '" + name + "' with " + list + ": '" + name + detail::parameter_signature(best->parameters) +
              "' and '" + name + detail::parameter_signature(rival->parameters) + "' match equally",
-             best->location.line, best->location.column);
+             best->location);
     }
 
     // A T& parameter's argument: a primitive of exactly that kind, a class T or a subclass; unknown and var& / auto& pass; a const T&
@@ -6557,8 +6591,7 @@ private:
 
     void report_no_overload(std::string_view fname, const std::vector<const function_decl*>& overloads,
                             const std::vector<ctype>& args, const source_location& loc, bool foreign = false) {
-        size_t rl = (overloads.empty() || foreign) ? 0 : overloads[0]->location.line;
-        size_t rc = (overloads.empty() || foreign) ? 0 : overloads[0]->location.column;
+        const declared_at declared = (overloads.empty() || foreign) ? declared_at{} : declared_at{overloads[0]->location};
         const std::string hint = hidden_function_hint(fname, args);
         if (overloads.size() == 1) {
             const function_decl* fn = overloads[0];
@@ -6568,7 +6601,7 @@ private:
                     ? std::to_string(min_a)
                     : std::to_string(min_a) + " to " + std::to_string(max_a);
                 diag(diag_level::error, loc, "'" + std::string(fname) + "' expects " + expected +
-                     " argument(s), got " + std::to_string(args.size()) + hint, rl, rc);
+                     " argument(s), got " + std::to_string(args.size()) + hint, declared);
                 return;
             }
             for (size_t i = 0; i < args.size(); ++i) {
@@ -6576,7 +6609,7 @@ private:
                 if (p.is_reference) {
                     if (!reference_parameter_binds(p, args[i])) {
                         diag(diag_level::error, loc, "argument " + std::to_string(i + 1) + " of '" + std::string(fname) + "': cannot bind '" +
-                             ctype_name(args[i]) + "' to '" + p.name + "' declared '" + (p.is_const ? "const " : "") + p.type->canonical_name() + "&'" + hint, rl, rc);
+                             ctype_name(args[i]) + "' to '" + p.name + "' declared '" + (p.is_const ? "const " : "") + p.type->canonical_name() + "&'" + hint, declared);
                         return;
                     }
                     continue;
@@ -6586,14 +6619,14 @@ private:
                     diag(diag_level::error, loc, "argument " + std::to_string(i + 1) + " of '" +
                          std::string(fname) + "': cannot pass '" + ctype_name(args[i]) + "' to '" +
                          p.name + "' declared '" + (p.type ? p.type->canonical_name() : "auto") + "'" + assignment_detail(args[i], pt) + hint,
-                         rl, rc);
+                         declared);
                     return;
                 }
             }
             return;
         }
         diag(diag_level::error, loc, "no overload of '" + std::string(fname) + "' matches this call (" +
-             std::to_string(args.size()) + " argument(s))" + hint, rl, rc);
+             std::to_string(args.size()) + " argument(s))" + hint, declared);
     }
 
     // Host (C++) function surface: reject only certainties — arity misses across every
@@ -6849,7 +6882,7 @@ private:
             initializing_field_ = nullptr;
             if (field->type && !field->auto_spelled && field->type->base_type != script_value_type::jai_any_type) {
                 check_store(value, false, token_type::equal, declared_variable_type(field), declared_variable_type_name(field),
-                            "field '" + std::string(field->name) + "'", init.location, field->location.line, field->location.column);
+                            "field '" + std::string(field->name) + "'", init.location, field->location);
             }
             if (previous && !warned && position(previous->target) > at) {
                 diag(diag_level::warning, init.location, "member initializer of '" + std::string(field->name) + "' follows '" + previous->target +
@@ -6902,14 +6935,14 @@ private:
                     if (args.size() > fields.size()) {   // the runtime's text (detail::too_many_initializers)
                         diag(diag_level::error, loc, "too many initializers for '" + std::string(cls_name) + "': it has " +
                              std::to_string(fields.size()) + (fields.size() == 1 ? " field" : " fields") + ", got " + std::to_string(args.size()),
-                             c.foreign ? 0 : c.decl->location.line, c.foreign ? 0 : c.decl->location.column);
+                             c.foreign ? declared_at{} : declared_at{c.decl->location});
                         return;
                     }
                     for (size_t i = 0; i < args.size(); ++i) {
                         const variable_decl* f = fields[i];
                         if (!f->type || f->type->base_type == script_value_type::jai_any_type) { continue; }
                         check_store(args[i], false, token_type::equal, ctype_from_type_info(f->type.get()), declared_variable_type_name(f),
-                                    "field '" + std::string(f->name) + "'", loc, 0, 0);
+                                    "field '" + std::string(f->name) + "'", loc, {});
                     }
                     return;
                 case aggregate_shape::not_aggregate:
@@ -6920,7 +6953,7 @@ private:
                 for (size_t i = 0; i < args.size() && i < 6; ++i) { if (i) { list += ", "; } list += ctype_name(args[i]); }
                 if (args.size() > 6) { list += ", ..."; }
                 diag(diag_level::error, loc, "no constructor of '" + std::string(cls_name) + "' takes " + list + ")",
-                     c.foreign ? 0 : c.decl->location.line, c.foreign ? 0 : c.decl->location.column);
+                     c.foreign ? declared_at{} : declared_at{c.decl->location});
             }
             return;
         }
@@ -7694,15 +7727,15 @@ private:
 
     // x op= rhs runs the class's operator op= when it declares one taking rhs, else x op rhs: the binary rows above, then the store;
     // the diagnostic names the compound spelling
-    bool check_compound_operands(const ctype& target, token_type base_op, const ctype& rhs, const source_location& loc, size_t decl_line, size_t decl_col) {
+    bool check_compound_operands(const ctype& target, token_type base_op, const ctype& rhs, const source_location& loc, const declared_at& declared) {
         if (incdec_op_) {
             if (!incdec_refused(target, incdec_op_, incdec_postfix_)) { return false; }
-            diag(diag_level::error, loc, std::string("cannot apply '") + incdec_op_ + "' to '" + ctype_name(target) + "'", decl_line, decl_col);
+            diag(diag_level::error, loc, std::string("cannot apply '") + incdec_op_ + "' to '" + ctype_name(target) + "'", declared);
             return true;
         }
         const binary_refusal refusal = builtin_binary_refusal(target, base_op, rhs);
         if (!refusal.op) { return false; }
-        diag(diag_level::error, loc, builtin_binary_message(std::string(refusal.op) + "=", refusal, target, rhs, /*compound=*/true), decl_line, decl_col);
+        diag(diag_level::error, loc, builtin_binary_message(std::string(refusal.op) + "=", refusal, target, rhs, /*compound=*/true), declared);
         return true;
     }
 
@@ -8470,7 +8503,7 @@ private:
                 }
                 diag(diag_level::error, m->location, "no value '" + std::string(m->member) +
                      "' in enum '" + std::string(recv.cls) + "'",
-                     e->location.line, e->location.column);
+                     e->location);
             }
             return {};
         }
@@ -8508,14 +8541,11 @@ private:
         if (!want_static) {
             if (ctype t; handle_builtin_result(m->member, t)) { return {}; }   // builtin as a value: lenient
         }
-        size_t rl = 0, rc = 0;
-        if (auto it = classes_.find(cls); it != classes_.end()) {
-            rl = it->second.decl->location.line;
-            rc = it->second.decl->location.column;
-        }
+        declared_at declared;
+        if (auto it = classes_.find(cls); it != classes_.end()) { declared = it->second.decl->location; }
         diag(diag_level::error, m->location,
              std::string(want_static ? "no static member '" : "no member '") + std::string(m->member) +
-             "' in class '" + std::string(cls) + "'", rl, rc);
+             "' in class '" + std::string(cls) + "'", declared);
         (void)writing;
         return {};
     }
@@ -9257,14 +9287,11 @@ private:
             return {};
         }
         if (hit.certain && !recv.open) {
-            size_t rl = 0, rc = 0;
-            if (auto it = classes_.find(recv.cls); it != classes_.end()) {
-                rl = it->second.decl->location.line;
-                rc = it->second.decl->location.column;
-            }
+            declared_at declared;
+            if (auto it = classes_.find(recv.cls); it != classes_.end()) { declared = it->second.decl->location; }
             diag(diag_level::error, m->location,
                  std::string(want_static ? "no static member '" : "no member '") + std::string(m->member) +
-                 "' in class '" + std::string(recv.cls) + "'", rl, rc);
+                 "' in class '" + std::string(recv.cls) + "'", declared);
         }
         return {};
     }
@@ -9315,7 +9342,7 @@ private:
                     const ctype slot = ctype_from_type_info(referent);
                     if (reference_store_checked(slot) && !rhs.is_unknown() && !rhs.tentative) {
                         check_store(rhs, compound, base_op, slot, referent->canonical_name() + "&",
-                                    "'" + std::string(id->name) + "'", a->location, local->line, local->column);
+                                    "'" + std::string(id->name) + "'", a->location, declared_at{local->line, local->column});
                     }
                 }
                 if (local->reference_parameter && stamping()) {
@@ -9326,7 +9353,7 @@ private:
                 const auto space = std::find(namespace_scopes_.begin(), namespace_scopes_.end(), scope_index);
                 const std::string spelled = space == namespace_scopes_.end() ? std::string(id->name)
                     : std::string(namespace_walk_names_[static_cast<size_t>(space - namespace_scopes_.begin())]) + "::" + std::string(id->name);
-                check_store(rhs, compound, base_op, local->type, local->display, "'" + spelled + "'", a->location, local->line, local->column);
+                check_store(rhs, compound, base_op, local->type, local->display, "'" + spelled + "'", a->location, declared_at{local->line, local->column});
                 if (!compound && same_type(local->type, rhs)) { store_proof = proof_same_type; }
                 if (compound) { stamp(a->static_operand_class, operand_class_of(local->type, rhs), operand_class_unknown); }   // the fused compound's typed row
                 return done(local->type);
@@ -9342,7 +9369,7 @@ private:
                         if (!ft.is_unknown()) {
                             check_store(rhs, compound, base_op, ft, declared_variable_type_name(hit.field),
                                         "field '" + std::string(id->name) + "'", a->location,
-                                        hit.foreign ? 0 : hit.field->location.line, hit.foreign ? 0 : hit.field->location.column);
+                                        hit.foreign ? declared_at{} : declared_at{hit.field->location});
                         }
                         return done(ft);
                     }
@@ -9364,7 +9391,7 @@ private:
                 note_global_use(id->name);
                 ctype gt = program_scope_store_type(name);
                 if (gt.is_unknown()) { return done(rhs); }
-                check_store(rhs, compound, base_op, gt, ctype_name(gt), "'" + name + "'", a->location, 0, 0);
+                check_store(rhs, compound, base_op, gt, ctype_name(gt), "'" + name + "'", a->location, {});
                 return done(gt);
             }
             if (functions_.count(id->name) || find_sclass(id->name) || enums_.count(id->name) ||
@@ -9376,7 +9403,7 @@ private:
                 ctype gt = engine_global_type(name);
                 if (!gt.is_unknown()) {
                     check_store(rhs, compound, base_op, gt, ctype_name(gt),
-                                "'" + std::string(id->name) + "'", a->location, 0, 0);
+                                "'" + std::string(id->name) + "'", a->location, {});
                 }
                 return done(gt);   // engine globals: never proven (S3)
             }
@@ -9403,7 +9430,7 @@ private:
                     if (const ctype nt = check_namespace_variable_store(path, m->member, rhs, compound, base_op, a->location); !nt.is_unknown()) { return nt; }
                 }
                 if (const var_entry* x = qualified_extern(m); x && !x->dynamic) {
-                    check_store(rhs, compound, base_op, x->type, x->display, "'" + qualified_spelling(m) + "'", a->location, x->line, x->column);
+                    check_store(rhs, compound, base_op, x->type, x->display, "'" + qualified_spelling(m) + "'", a->location, declared_at{x->line, x->column});
                     return x->type;
                 }
             }
@@ -9422,7 +9449,7 @@ private:
                 if (!ft.is_unknown()) {
                     check_store(rhs, compound, base_op, ft, declared_variable_type_name(typed_field),
                                 "field '" + std::string(typed_field->name) + "'", a->location,
-                                hit.foreign ? 0 : typed_field->location.line, hit.foreign ? 0 : typed_field->location.column);
+                                hit.foreign ? declared_at{} : declared_at{typed_field->location});
                 }
                 return recv.diagnostic_only ? result_type : ft;
             }
@@ -9459,7 +9486,7 @@ private:
                     return stored;
                 }
                 const ctype element = container_value_type(recv);
-                if (compound && check_compound_operands(element, base_op, rhs, a->location, 0, 0)) { return element; }
+                if (compound && check_compound_operands(element, base_op, rhs, a->location, {})) { return element; }
                 const ctype stored = compound ? binary_result(element, base_op, rhs) : rhs;
                 const bool assigns = !compound && element.kind == ctype::object_k && !element.cls.empty() && assign_operator_accepts(element.cls, stored);
                 const auto issue = assigns ? std::string() : container_element_issue(stored, element.ti);
@@ -9483,7 +9510,7 @@ private:
             t.tentative = false;
             const std::string name = ctype_name(t);
             const bool spelled_cast = target->get_type() == node_type::cast_expr && !static_cast<cast_expr*>(target)->implicit_ref;
-            check_store(rhs, compound, base_op, t, name, spelled_cast ? "a cast<" + name + "&> target" : std::string("the reference"), a->location, 0, 0);
+            check_store(rhs, compound, base_op, t, name, spelled_cast ? "a cast<" + name + "&> target" : std::string("the reference"), a->location, {});
             return t;
         }
         non_lvalue_target(a->location, target);
@@ -9597,16 +9624,16 @@ private:
     bool incdec_postfix_ = false;       // that desugar's form
     void check_store(const ctype& rhs, bool compound, token_type base_op, const ctype& target,
                      const std::string& target_display, const std::string& what,
-                     const source_location& loc, size_t decl_line, size_t decl_col) {
+                     const source_location& loc, const declared_at& declared) {
         if (target.is_unknown()) { return; }
         if (compound && incdec_op_ && target.kind == ctype::string_k) {
-            diag(diag_level::error, loc, std::string("cannot apply '") + incdec_op_ + "' to 'string'", decl_line, decl_col);
+            diag(diag_level::error, loc, std::string("cannot apply '") + incdec_op_ + "' to 'string'", declared);
             return;
         }
         if (compound && base_op == token_type::plus && target.kind == ctype::string_k && !rhs.is_unknown() &&
             rhs.kind != ctype::string_k && rhs.kind != ctype::char_k && rhs.kind != ctype::utf8_k && !eng_.has_function("+")) {
             // a string target appends text only (a char is text; string += int raises, unlike binary +)
-            diag(diag_level::error, loc, "cannot apply '+=' to 'string' and '" + ctype_name(rhs) + "'", decl_line, decl_col);
+            diag(diag_level::error, loc, "cannot apply '+=' to 'string' and '" + ctype_name(rhs) + "'", declared);
             return;
         }
         if (compound && !rhs.is_unknown() && target.kind != ctype::object_k) {   // a class target's operator decides
@@ -9615,7 +9642,7 @@ private:
             const auto integral = [](const ctype& t) { return t.kind == ctype::int_k || t.kind == ctype::char_k; };
             if (bitwise && (!integral(target) || !integral(rhs))) {
                 diag(diag_level::error, loc, std::string("cannot apply '") + bitwise + "' to '" + ctype_name(target) + "' and '" + ctype_name(rhs) + "'",
-                     decl_line, decl_col);
+                     declared);
                 return;
             }
         }
@@ -9624,7 +9651,7 @@ private:
                         : in_place_operator_may_take(target, std::string(detail::binary_op_name(base_op)) + "=", &rhs, false))) {
             return;   // the class's in-place operator runs on the object: nothing is stored
         }
-        if (compound && check_compound_operands(target, base_op, rhs, loc, decl_line, decl_col)) { return; }
+        if (compound && check_compound_operands(target, base_op, rhs, loc, declared)) { return; }
         ctype stored = compound ? binary_result(target, base_op, rhs) : rhs;
         if (assignable(stored, target)) {
             if (!compound) { warn_dynamic_handle_copy(rhs, target); }
@@ -9632,7 +9659,7 @@ private:
         }
         if (!compound && target.kind == ctype::object_k && assign_operator_accepts(target.cls, stored)) { return; }
         diag(diag_level::error, loc, "cannot assign '" + ctype_name(stored) + "' to " + what +
-             " declared '" + target_display + "'" + assignment_detail(stored, target), decl_line, decl_col);
+             " declared '" + target_display + "'" + assignment_detail(stored, target), declared);
     }
 
     // `target = rhs` on a class-typed target runs a user operator=(rhs) ahead of the
@@ -12010,7 +12037,7 @@ private:
         if (it == initializing_field_->unready.end() || it->second != field) { return; }
         const std::string read(field->name), initializing(initializing_field_->name);
         diag(diag_level::error, loc, "field initializer of '" + initializing + "' reads '" + read + "' before its initialization: fields initialize in declaration order" +
-             (read == initializing ? std::string() : "; declare '" + read + "' above '" + initializing + "'"), field->location.line, field->location.column);
+             (read == initializing ? std::string() : "; declare '" + read + "' above '" + initializing + "'"), field->location);
     }
 
     // A class that holds itself by value, directly, through other classes' value fields or through a base, never finishes

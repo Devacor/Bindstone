@@ -710,6 +710,50 @@ public:
 			check_eq(std::string("classes and functions | a plain function of the name\n"), waited);
 			check_true(cases >= 90 && refused >= 20, "the table covers loads that run and loads that are refused: " + std::to_string(cases) + " cases, " + std::to_string(refused) + " refused");
 		});
+
+		test("a_diagnostic_about_another_files_text_names_that_file", [this]() {
+			// A unit's listing names the unit's file. A place in another file's text (a file spliced into a function's body, a
+			// generic another file declares) is that file's: its path leads the line
+			program p("g1_names");
+			p.write("part.jai", "int n = \"text\";\n");
+			p.write("outer.jai", "int f() {\n\tinclude \"part.jai\";\n\treturn 1;\n}\n");
+			const std::string spliced = p.run_file("outer.jai");
+			check_true(failed(spliced) && has(spliced, "part.jai:1:") && !has(spliced, "outer.jai:1:"), spliced);
+			p.write("lib.jai", "class Box<T> {\n\tT item;\n\tint size() { return item.size(); }\n}\nT twice<T>(T x) { return x.none(); }\n");
+			p.write("game.jai", "import \"lib.jai\";\nBox<int> b;\nint n = b.size();\n");
+			const std::string instance = p.run_file("game.jai");
+			check_true(failed(instance) && has(instance, "lib.jai:3:") && has(instance, "in Box<int>, instantiated at ") && has(instance, "game.jai:2:"), instance);
+			p.write("calls.jai", "import \"lib.jai\";\nint m = twice(3);\n");
+			const std::string function_instance = p.run_file("calls.jai");
+			check_true(failed(function_instance) && has(function_instance, "lib.jai:5:") && has(function_instance, "calls.jai:2:"), function_instance);
+			// a declaration a diagnostic cites is cited with its file when that is another: an instance of a generic lib.jai declares
+			p.write("uses.jai", "import \"lib.jai\";\nBox<string> s;\ns.nothing = 1;\ns.item = 3;\nclass Own { int hp = 1; }\nOwn o;\no.nothing = 2;\n");
+			const std::string cited = p.run_file("uses.jai");
+			check_true(has(cited, "no member 'nothing' in class 'Box<string>' (declared at ") && has(cited, "lib.jai:1:7)"), cited);
+			check_true(has(cited, "cannot assign 'int' to field 'item' declared 'string'") && has(cited, "lib.jai:2:4)"), cited);
+			check_true(has(cited, "no member 'nothing' in class 'Own' (declared at 5:7)"), "one in the unit's own file is cited by line: " + cited);
+			// a warning in text spliced into a method cites the field it shadows in the class's own file
+			p.write("part4.jai", "int hp = 3;\n");
+			p.write("keeper.jai", "class Keeper {\n\tint hp = 1;\n\tint hit() {\n\t\tinclude \"part4.jai\";\n\t\treturn hp;\n\t}\n}\n");
+			const std::string keeper = p.run_file("keeper.jai");
+			std::string shadowed;
+			for (const auto& d : p.eng->last_check_diagnostics().diagnostics) { shadowed += d.file + " " + d.message + "\n"; }
+			check_true(has(shadowed, "part4.jai local 'hp' shadows field 'hp' of class 'Keeper' (field declared at ") && has(shadowed, "keeper.jai:2:"), keeper + " | " + shadowed);
+			// spliced text that names the unit's first instance, with a mistake of its own and one after it in the unit's text
+			p.write("part2.jai", "Box<string> held;\nint n = \"text\";\n");
+			p.write("outer2.jai", "import \"lib.jai\";\nint g() {\n\tinclude \"part2.jai\";\n\tint m = \"more\";\n\treturn 1;\n}\n");
+			const std::string both = p.run_file("outer2.jai");
+			check_true(failed(both) && has(both, "part2.jai:2:") && has(both, "outer2.jai:4:") && !has(both, "outer2.jai:2:"), both);
+			// a mistake the parser finds in spliced text
+			p.write("part3.jai", "int n = ;\n");
+			p.write("outer3.jai", "int h() {\n\tinclude \"part3.jai\";\n\treturn 1;\n}\n");
+			const std::string unparsed = p.run_file("outer3.jai");
+			check_true(failed(unparsed) && has(unparsed, "part3.jai"), unparsed);
+			// and an executed string that names them
+			check_eq(std::string("null"), p.run_file("lib.jai"));
+			const std::string from_text = p.run("Box<float> late; late.size();");
+			check_true(failed(from_text) && has(from_text, "lib.jai:3:") && has(from_text, "in Box<float>, instantiated at <script>:1:"), from_text);
+		});
 	}
 };
 

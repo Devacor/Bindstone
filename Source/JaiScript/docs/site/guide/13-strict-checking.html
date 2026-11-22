@@ -68,7 +68,7 @@ c.hp = "full";                              // a type error: this one stops the 
          ^</code></pre></div>
 <ul><li><strong>Location.</strong> Line and column of the expression. <code>&lt;script&gt;</code> is a source string; a file, run directly or reached through <code>import</code> or <code>include</code>, is named by its resolved path.</li>
 <li><strong>Severity.</strong> An <code>error</code> stops the load. A <code>warning</code> never does: the runner prints warnings when a load fails or under <code>--warnings</code>, and a host reads them from <code>engine-&gt;last_check_diagnostics()</code>.</li>
-<li><strong>Message</strong>, with <code>(declared at L:C)</code> pointing at the declaration it holds the code to, then the source line and a caret.</li></ul>
+<li><strong>Message</strong>, with <code>(declared at L:C)</code> pointing at the declaration it holds the code to, then the source line and a caret. A declaration that stands in another file is cited with that file, <code>(declared at lib.jai:L:C)</code>: a class or a field made from a generic that file declares.</li></ul>
 <p>Every problem in the program comes out in one listing, sorted by location, up to 100 entries. An expression that draws an error is taken as its declared type afterwards, so one bad line gives one entry.</p>
 <h2 id="what-the-checker-sees">Caught at load<a class="hlink" href="#what-the-checker-sees" aria-label="link">&#8203;</a></h2>
 <p>Each row is an error whenever the types involved are declared or inferred (<code>auto</code> counts: it holds the type it inferred).</p>

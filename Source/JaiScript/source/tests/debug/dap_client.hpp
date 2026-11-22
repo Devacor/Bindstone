@@ -16,6 +16,7 @@
     #include <sys/socket.h>
     #include <netinet/in.h>
     #include <arpa/inet.h>
+    #include <sys/select.h>
     #include <unistd.h>
     #include <cerrno>
 #endif
@@ -138,13 +139,31 @@ inline std::string quote(const std::string& text) {
 using socket_t = SOCKET;
 inline constexpr socket_t k_no_socket = INVALID_SOCKET;
 inline void close_socket(socket_t s) { ::closesocket(s); }
-inline bool timed_out() { return ::WSAGetLastError() == WSAETIMEDOUT; }
 #else
 using socket_t = int;
 inline constexpr socket_t k_no_socket = -1;
 inline void close_socket(socket_t s) { ::close(s); }
-inline bool timed_out() { return errno == EAGAIN || errno == EWOULDBLOCK; }
 #endif
+
+inline constexpr int k_nothing_yet = -2;
+
+// The bytes read, 0 once the peer closes, -1 on an error, or k_nothing_yet after 50 quiet ms; readiness is waited for, not a
+// receive timeout, which leaves a Windows socket indeterminate once it fires
+inline int recv_some(socket_t s, char* into, int size) {
+    fd_set readable;
+    FD_ZERO(&readable);
+    FD_SET(s, &readable);
+    timeval wait{0, 50000};
+    const int ready = ::select(static_cast<int>(s) + 1, &readable, nullptr, nullptr, &wait);
+    if (ready == 0) return k_nothing_yet;
+    if (ready < 0) {
+#ifndef _WIN32
+        if (errno == EINTR) return k_nothing_yet;
+#endif
+        return -1;
+    }
+    return ::recv(s, into, size, 0);
+}
 
 class client {
 public:
@@ -160,13 +179,6 @@ public:
             addr.sin_port = htons(static_cast<uint16_t>(port));
             ::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
             if (s != k_no_socket && ::connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
-#ifdef _WIN32
-                DWORD tv = 50;
-                ::setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
-#else
-                timeval tv{0, 50000};
-                ::setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-#endif
                 socket_ = s;
                 break;
             }
@@ -240,8 +252,8 @@ private:
                 }
             }
             if (watch.stalled(buffer_.size())) return std::nullopt;
-            const int n = ::recv(socket_, tmp, sizeof(tmp), 0);
-            if (n == 0 || (n < 0 && !timed_out())) return std::nullopt;
+            const int n = recv_some(socket_, tmp, sizeof(tmp));
+            if (n == 0 || n == -1) return std::nullopt;
             if (n > 0) buffer_.append(tmp, tmp + n);
             else if (quiet_ends && quiet_ends()) return std::nullopt;
         }

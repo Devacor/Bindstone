@@ -258,6 +258,81 @@ public:
 				check_eq(value, p.run("tick();"), r.name + ": and the old code runs");
 			}
 		});
+
+		test("the_same_declaration_in_two_files_gets_one_verdict_whatever_it_declares", [this]() {
+			// every arrangement of two files that declare the name (a answers "a", b answers "b"), a third that only calls it and a
+			// root that may declare its own: the later declaration to run is the one every caller reaches
+			struct arrangement {
+				std::string name;
+				std::string root;     // ${own}: the root's own declaration; ${call}: the call
+				std::string expected;
+			};
+			const std::vector<arrangement> arrangements = {
+				{"a then b", "import \"fa.jai\";\nimport \"fb.jai\";\n${call} + use_a() + use_b();", "bbb"},
+				{"b then a", "import \"fb.jai\";\nimport \"fa.jai\";\n${call} + use_a() + use_b();", "aaa"},
+				{"a, b, then a file that only calls", "import \"fa.jai\";\nimport \"fb.jai\";\nimport \"fc.jai\";\n${call} + use_a() + use_b() + use_c();", "bbbb"},
+				{"the calling file first", "import \"fc.jai\";\nimport \"fa.jai\";\nimport \"fb.jai\";\n${call} + use_a() + use_b() + use_c();", "bbbb"},
+				{"b, a, then the calling file", "import \"fb.jai\";\nimport \"fa.jai\";\nimport \"fc.jai\";\n${call} + use_a() + use_b() + use_c();", "aaaa"},
+				{"a call between the imports", "string out = \"\";\nimport \"fa.jai\";\nout += ${call} + use_a();\nimport \"fb.jai\";\nout += \"|\" + ${call} + use_a() + use_b();\nout;", "aa|bbb"},
+				{"the root's own declaration, then b", "${own}string out = ${call};\nimport \"fb.jai\";\nout += \"|\" + ${call} + use_b();\nout;", "r|bb"},
+			};
+			const auto fill = [](std::string text, const std::string& own, const std::string& call) {
+				for (size_t at = text.find("${own}"); at != std::string::npos; at = text.find("${own}")) { text.replace(at, 6, own); }
+				for (size_t at = text.find("${call}"); at != std::string::npos; at = text.find("${call}")) { text.replace(at, 7, call); }
+				return text;
+			};
+			const std::vector<family> all = families();
+			for (const family& f : all) {
+				for (const arrangement& a : arrangements) {
+					program p("g1_" + std::to_string(&f - all.data()) + "_" + std::to_string(&a - arrangements.data()));
+					p.write("fa.jai", declared(f, "a") + "string use_a() { return " + f.call + "; }\n");
+					p.write("fb.jai", declared(f, "b") + "string use_b() { return " + f.call + "; }\n");
+					p.write("fc.jai", "string use_c() { return " + f.call + "; }\n");
+					p.write("root.jai", fill(a.root, declared(f, "r"), f.call));
+					check_eq(a.expected, p.run_file("root.jai"), f.name + ", " + a.name);
+				}
+			}
+			// a reload that declares it again: the file that ran last is the one every caller reaches, at once
+			for (const family& f : all) {
+				program p("g1_reload_" + std::to_string(&f - all.data()));
+				const auto file = [&](const char* letter, const char* user) { return declared(f, letter) + "string " + user + "() { return " + f.call + "; }\n"; };
+				p.write("fa.jai", file("a", "use_a"));
+				p.write("fb.jai", file("b", "use_b"));
+				p.write("fc.jai", "string use_c() { return " + f.call + "; }\n");
+				p.write("root.jai", "import \"fa.jai\";\nimport \"fb.jai\";\nimport \"fc.jai\";\nstring all() { import(\"fa.jai\", \"fb.jai\", \"fc.jai\"); return " + f.call + " + use_a() + use_b() + use_c(); }\n");
+				std::string trace = p.run_file("root.jai");
+				const auto step = [&](const std::string& code) { trace += " "; trace += p.run(code); };
+				step("all();");
+				p.write("fa.jai", file("A", "use_a"));
+				step("all();");
+				p.write("fb.jai", file("B", "use_b"));
+				step("all();");
+				p.write("fc.jai", "string use_c() { return " + f.call + " + \"!\"; }\n");
+				step("all();");
+				p.write("fa.jai", file("Z", "use_a"));
+				step("all();");
+				step(f.call + ";");
+				check_eq(std::string("null bbbb AAAA BBBB BBBB! ZZZZ! Z"), trace, f.name + ": across reloads");
+			}
+		});
+
+		test("generic_functions_that_differ_in_shape_stay_overloads_across_files", [this]() {
+			program p("g1_shapes");
+			p.write("fa.jai", "string f<T>(T x) { return \"one\"; }\nstring g<T>(array<T> xs) { return \"array\"; }\n");
+			p.write("fb.jai", "string f<T>(T x, T y) { return \"two\"; }\nstring g<K, V>(map<K, V> m) { return \"map\"; }\n");
+			p.write("root.jai", "import \"fa.jai\";\nimport \"fb.jai\";\nf(1) + \" \" + f(1, 2) + \" \" + g([1]) + \" \" + g({\"k\": 1});");
+			check_eq(std::string("one two array map"), p.run_file("root.jai"));
+			// an instance only a calling file names follows the declaration that ran last, as every other does
+			program q("g1_third");
+			q.write("fa.jai", "string f<T>(T x) { return \"a\"; }\n");
+			q.write("fb.jai", "string f<T>(T x) { return \"b\"; }\n");
+			q.write("fc.jai", "string use_c() { return f(\"text\") + f(2.5); }\n");
+			q.write("root.jai", "import \"fa.jai\";\nimport \"fb.jai\";\nimport \"fc.jai\";\nstring all() { import(\"fa.jai\", \"fb.jai\", \"fc.jai\"); return use_c(); }\n");
+			check_eq(std::string("null"), q.run_file("root.jai"));
+			check_eq(std::string("bb"), q.run("all();"));
+			q.write("fa.jai", "string f<T>(T x) { return \"A\"; }\n");
+			check_eq(std::string("AA"), q.run("all();"), "the file declared again makes every instance the engine holds again");
+		});
 	}
 };
 

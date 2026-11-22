@@ -1520,7 +1520,8 @@ private:
         return held != classes_.end() && held->second.decl && held->second.decl->instance_stamp == 0 && !held->second.decl->method_instances ? held->second.decl : nullptr;
     }
     // The generics a qualified name declares: this unit's, then those of the rest of the program this unit does not declare again.
-    // A class's name is one class: the unit's generic class, or its class of the name, stands for the program's generic class.
+    // A class's name is one class: the unit's generic class, or its class of the name, stands for the program's generic class;
+    // a function or a method of one shape is one generic, and the unit's own stands for the program's.
     std::vector<generic_definition_ptr> generics_named(const std::string& qualified) {
         std::vector<generic_definition_ptr> found;
         if (auto own = generics_.find(qualified); own != generics_.end()) { found = own->second; }
@@ -1529,7 +1530,7 @@ private:
             for (const auto& g : *held) {
                 if (class_here && g->kind == generic_kind::class_type) { continue; }
                 const bool declared_here = std::any_of(found.begin(), found.end(), [&](const generic_definition_ptr& f) {
-                    return f == g || (same_generic_signature(*f, *g) && f->location.filename == g->location.filename);
+                    return f == g || same_generic_signature(*f, *g);
                 });
                 if (!declared_here) { found.push_back(g); }
             }

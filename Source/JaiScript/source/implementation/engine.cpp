@@ -1472,10 +1472,11 @@ struct engine::implementation {
             }
             auto& held = generics_[definition->qualified_name()];
             // a class's name is one generic class, whatever file or parameter list declared it before; a function's or a method's
-            // is one per shape and file
+            // is one per shape, whatever file declared it before: the declaration pooled last stands for the program, as the
+            // function a later file declares replaces an earlier file's of its signature
             auto earlier = std::find_if(held.begin(), held.end(), [&](const detail::generic_definition_ptr& g) {
                 if (definition->kind == detail::generic_kind::class_type) { return g->kind == detail::generic_kind::class_type; }
-                return same_generic_shape(*g, *definition) && g->location.filename == definition->location.filename;
+                return same_generic_shape(*g, *definition);
             });
             if (earlier == held.end()) {
                 held.push_back(definition);

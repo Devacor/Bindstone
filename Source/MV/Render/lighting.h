@@ -17,10 +17,11 @@ namespace MV {
 			float y = 0.0f;
 			float height = 0.0f;   // above the plane, toward the viewer
 			float radius = 0.0f;   // reach on the plane
+			float innerRadius = 0.0f;   // gives nothing inside it, full just outside, fading from there to the radius
 			float red = 0.0f;      // colour times intensity, pulse included
 			float green = 0.0f;
 			float blue = 0.0f;
-			float falloff = 1.0f;  // exponent of the fade from the centre to the radius
+			float falloff = 1.0f;  // exponent of the fade from the inner radius to the radius
 			const void* scope = nullptr;   // the scene (its root node) the light belongs to; it lights only that scene
 		};
 

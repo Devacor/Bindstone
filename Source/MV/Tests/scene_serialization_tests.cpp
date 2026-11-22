@@ -254,10 +254,10 @@ namespace mv_tests {
 				check_near(sprite->bounds().maxPoint.y, copy->bounds().maxPoint.y, 1e-3f);
 			});
 
-			test("Light saves and loads as its own $type with its colour, reach, height and pulse", [] {
+			test("Light saves and loads as its own $type with its colour, reach, inner radius, height and pulse", [] {
 				SceneHost host;
 				auto scene = Node::make(host.renderer, "root");
-				scene->make("orb")->attach<MV::Scene::Light>()->id("glow")->color(MV::Color(1.0f, 0.5f, 0.25f, 1.0f))->intensity(1.5f)->radius(300.0f)->height(40.0f)->falloff(1.5f)->pulse(0.2f, 3.0f, 0.25f);
+				scene->make("orb")->attach<MV::Scene::Light>()->id("glow")->color(MV::Color(1.0f, 0.5f, 0.25f, 1.0f))->intensity(1.5f)->radius(300.0f)->innerRadius(60.0f)->height(40.0f)->falloff(1.5f)->pulse(0.2f, 3.0f, 0.25f);
 
 				ScratchScene file;
 				auto loaded = saveAndLoad(host, scene, file);
@@ -267,6 +267,7 @@ namespace mv_tests {
 				check_near(0.5f, light->color().G, 1e-5f);
 				check_near(1.5f, light->intensity(), 1e-5f);
 				check_near(300.0f, light->radius(), 1e-5f);
+				check_near(60.0f, light->innerRadius(), 1e-5f);
 				check_near(40.0f, light->height(), 1e-5f);
 				check_near(1.5f, light->falloff(), 1e-5f);
 				check_near(0.2f, light->pulseAmplitude(), 1e-5f);
@@ -278,7 +279,7 @@ namespace mv_tests {
 				SceneHost host;
 				auto scene = Node::make(host.renderer, "root");
 				auto orb = scene->make("orb")->position(MV::point(100.0f, 50.0f));
-				orb->attach<MV::Scene::Light>()->radius(200.0f);
+				orb->attach<MV::Scene::Light>()->radius(200.0f)->innerRadius(30.0f);
 				auto other = Node::make(host.renderer, "other");
 				other->make("lamp")->attach<MV::Scene::Light>();
 
@@ -294,9 +295,12 @@ namespace mv_tests {
 				check_near(orb->worldPosition().x, mine.x, 1e-3f);
 				check_near(orb->worldPosition().y, mine.y, 1e-3f);
 				check_near(200.0f, mine.radius, 1e-3f);
+				check_near(30.0f, mine.innerRadius, 1e-3f);
 
 				scene->scale(MV::Scale(2.0f, 2.0f, 1.0f));
-				check_near(400.0f, lightOfScene().radius, 1e-2f);
+				mine = lightOfScene();
+				check_near(400.0f, mine.radius, 1e-2f);
+				check_near(60.0f, mine.innerRadius, 1e-2f);
 
 				orb->hide();
 				host.renderer.lighting().beginFrame();

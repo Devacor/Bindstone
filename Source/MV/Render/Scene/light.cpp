@@ -1,5 +1,6 @@
 #include "light.h"
 #include "MV/Render/sharedTextures.h"
+#include <algorithm>
 #include <array>
 #include <cmath>
 
@@ -86,6 +87,7 @@ namespace MV {
 			a_light.y = centre.y;
 			a_light.height = *ourHeight * worldPerLocal;
 			a_light.radius = *ourRadius * worldPerLocal;
+			a_light.innerRadius = std::clamp(*ourInnerRadius, 0.0f, *ourRadius) * worldPerLocal;
 			a_light.red = ourColor->R * brightness;
 			a_light.green = ourColor->G * brightness;
 			a_light.blue = ourColor->B * brightness;
@@ -98,6 +100,7 @@ namespace MV {
 			struct LightUniformNames {
 				std::array<std::string, Render::Lighting::LIGHTS_PER_DRAW> positions;
 				std::array<std::string, Render::Lighting::LIGHTS_PER_DRAW> colors;
+				std::array<std::string, Render::Lighting::LIGHTS_PER_DRAW> innerRadii;
 			};
 
 			const LightUniformNames& lightUniformNames() {
@@ -106,6 +109,7 @@ namespace MV {
 					for (size_t i = 0; i < Render::Lighting::LIGHTS_PER_DRAW; ++i) {
 						names.positions[i] = "lightPositions[" + std::to_string(i) + "]";
 						names.colors[i] = "lightColors[" + std::to_string(i) + "]";
+						names.innerRadii[i] = "lightInnerRadii[" + std::to_string(i) + "]";
 					}
 					return names;
 				}();
@@ -138,7 +142,7 @@ namespace MV {
 				if (light.scope != a_scope) {
 					continue;
 				}
-				PointPrecision reach = 1.0f - distanceToBox(light, a_worldBounds) / light.radius;
+				PointPrecision reach = 1.0f - std::max(distanceToBox(light, a_worldBounds) - light.innerRadius, 0.0f) / std::max(light.radius - light.innerRadius, 0.001f);
 				if (reach <= 0.0f) {
 					continue;
 				}
@@ -160,6 +164,7 @@ namespace MV {
 				const float color[4] = { light.red, light.green, light.blue, light.falloff };
 				a_shader.setFloats(names.positions[i], position, 4);
 				a_shader.setFloats(names.colors[i], color, 4);
+				a_shader.setFloats(names.innerRadii[i], &light.innerRadius, 1);
 			}
 			a_shader.set("lightCount", static_cast<PointPrecision>(count), false);
 			a_shader.setFloats("ambient", lighting.ambient(), 3);

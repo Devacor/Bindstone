@@ -39,7 +39,15 @@ namespace MV {
 			}
 			PointPrecision radius() const { return ourRadius; }
 
-			// The exponent of the fade from the centre to the radius: 1 fades evenly, higher keeps it near the centre.
+			// Inside it the light gives nothing, so a light set in a painted glow leaves the glow as painted; it eases up to
+			// full just outside and fades from there to the radius.
+			std::shared_ptr<Light> innerRadius(PointPrecision a_innerRadius) {
+				ourInnerRadius = a_innerRadius;
+				return std::static_pointer_cast<Light>(shared_from_this());
+			}
+			PointPrecision innerRadius() const { return ourInnerRadius; }
+
+			// The exponent of the fade from the inner radius to the radius: 1 fades evenly, higher keeps it near the inside.
 			std::shared_ptr<Light> falloff(PointPrecision a_falloff) {
 				ourFalloff = a_falloff;
 				return std::static_pointer_cast<Light>(shared_from_this());
@@ -107,6 +115,7 @@ namespace MV {
 			JAI_NAMED_PROPERTY((Color), "color", ourColor, (Color(1.0f, 0.62f, 0.28f, 1.0f)));
 			JAI_NAMED_PROPERTY((PointPrecision), "intensity", ourIntensity, 1.0f);
 			JAI_NAMED_PROPERTY((PointPrecision), "radius", ourRadius, 256.0f);
+			JAI_NAMED_PROPERTY((PointPrecision), "innerRadius", ourInnerRadius, 0.0f);
 			JAI_NAMED_PROPERTY((PointPrecision), "falloff", ourFalloff, 2.0f);
 			JAI_NAMED_PROPERTY((PointPrecision), "height", ourHeight, 64.0f);
 			JAI_NAMED_PROPERTY((PointPrecision), "pulseAmplitude", ourPulseAmplitude, 0.0f);

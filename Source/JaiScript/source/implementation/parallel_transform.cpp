@@ -518,6 +518,26 @@ namespace {
 		return script_value(v);
 	}
 
+	// A class's static field (a base's through a derived class, a namespace's class), or a namespace's script variable, by the owner
+	// as written and the member; owner_class receives the class that declares the field (null for a namespace's variable)
+	const script_value* static_field_cell(engine& eng, uint64_t owner_id, uint64_t member_id, class_definition** owner_class = nullptr) {
+		const std::string_view owner = engine_access::get_symbolizer(eng)->get_string(owner_id);
+		if (const auto cls = engine_access::get_class_definition(eng, std::string(owner))) {
+			if (!cls->static_method_in_chain(member_id).is_null()) { return nullptr; }
+			class_definition* declaring = nullptr;
+			const script_value* field = cls->find_static_field_in_chain(member_id, &declaring);
+			if (owner_class) { *owner_class = declaring; }
+			return field;
+		}
+		auto& namespaces = engine_access::script_namespaces(eng);
+		const auto space = namespaces.find(owner_id);
+		if (space == namespaces.end() || !space->second || !space->second->scope || space->second->functions.count(member_id) ||
+		    space->second->classes.count(member_id) || space->second->enums.count(member_id)) {
+			return nullptr;
+		}
+		return space->second->scope->get_own_value_ptr(member_id);
+	}
+
 	// ============================== ADMISSION ==============================
 
 	std::string counted_variable_written(std::string_view name) {
@@ -1111,10 +1131,85 @@ namespace {
 		// touch is a subscript read; enforcement of no-writes is the write wall plus
 		// the statically-free rejections below). subscript_root keeps the name eligible
 		// for the borrow (raw-read) tier; any other read demotes it to snapshot.
+		// A class's static field named through its class (C::s, Box<int>::s, a base's static through a derived class): program state
+		// the body reads as it reads a global, captured under the name "C::s" that the chain walks root at. A const static of a
+		// primitive is a pinned constant instead (adm.const_static_reads)
+		std::unordered_map<const expression*, identifier_expr*> static_root_index;
+		std::unordered_map<identifier_expr*, std::pair<uint64_t, uint64_t>> static_root_fields;
+		// The class or namespace a static member's chain names (C, ns::C, ns): empty for any other object
+		static std::string static_owner_path(const expression* e) {
+			if (e->get_type() == node_type::identifier_expr) { return std::string(static_cast<const identifier_expr*>(e)->name); }
+			if (e->get_type() != node_type::member_expr || !static_cast<const member_expr*>(e)->is_static) { return {}; }
+			const auto* m = static_cast<const member_expr*>(e);
+			const std::string head = m->object ? static_owner_path(m->object.get()) : std::string();
+			return head.empty() ? head : head + "::" + std::string(m->member);
+		}
+		identifier_expr* static_field_root(const expression* e) {
+			if (proof_mode || !e || e->get_type() != node_type::member_expr) { return nullptr; }
+			auto* m = const_cast<member_expr*>(static_cast<const member_expr*>(e));
+			if (!m->is_static || !m->object) { return nullptr; }
+			if (auto found = static_root_index.find(m); found != static_root_index.end()) { return found->second; }
+			if (m->object->get_type() == node_type::identifier_expr) {
+				auto* owner = static_cast<identifier_expr*>(m->object.get());
+				if (owner->symbol_id == UINT64_MAX || is_local(owner) || engine_access::is_enum_name(*eng, owner->symbol_id)) { return nullptr; }
+			}
+			const std::string owner = static_owner_path(m->object.get());
+			if (owner.empty()) { return nullptr; }
+			const uint64_t owner_id = sym->intern(owner);
+			if (m->member_id == UINT64_MAX) { m->member_id = sym->intern(m->member); }
+			if (!static_field_cell(*eng, owner_id, m->member_id) || class_constant(owner_id, m->member_id)) { return nullptr; }
+			(void)sym->get_class_var_id_with_view(owner_id);   // the static read asks for a class of the name first
+			const uint64_t qualified_id = sym->intern(owner + "::" + std::string(m->member));
+			auto root = std::make_shared<identifier_expr>(m->location, sym->get_string(qualified_id), qualified_id);
+			adm.static_roots.push_back(root);
+			static_root_index.emplace(m, root.get());
+			static_root_fields.emplace(root.get(), std::make_pair(owner_id, m->member_id));
+			return root.get();
+		}
+
+		// A bare name in a walked method that is a static of its class chain (`made` for C::made) captures as C::made does; any other
+		// name is itself
+		identifier_expr* captured_root(identifier_expr* n) {
+			if (!method_class || proof_mode || n->global_qualified || n->symbol_id == UINT64_MAX) { return n; }
+			if (auto found = static_root_index.find(n); found != static_root_index.end()) { return found->second; }
+			auto* cls = const_cast<class_definition*>(method_class);
+			class_definition* owner = detail::bare_static_owner(cls, cls, n->symbol_id);
+			if (!owner || !cls->static_method_in_chain(n->symbol_id).is_null()) { return n; }
+			const uint64_t owner_id = owner->interned_name_id();
+			const uint64_t qualified_id = sym->intern(owner->get_name() + "::" + std::string(n->name));
+			auto root = std::make_shared<identifier_expr>(n->location, sym->get_string(qualified_id), qualified_id);
+			adm.static_roots.push_back(root);
+			static_root_index.emplace(n, root.get());
+			static_root_fields.emplace(root.get(), std::make_pair(owner_id, n->symbol_id));
+			return root.get();
+		}
+
+		// The static field a member/subscript chain roots at (C::s.items[0]), as chain_root_identifier finds a named root
+		identifier_expr* static_chain_root(const expression* e) {
+			while (e) {
+				if (identifier_expr* field = static_field_root(e)) { return field; }
+				if (e->get_type() == node_type::member_expr && !static_cast<const member_expr*>(e)->is_static) {
+					e = static_cast<const member_expr*>(e)->object.get();
+					continue;
+				}
+				if (e->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(e)->op.type == token_type::left_bracket) {
+					e = static_cast<const binary_expr*>(e)->left.get();
+					continue;
+				}
+				break;
+			}
+			return nullptr;
+		}
+
 		void touch_capture(identifier_expr* n, bool subscript_root, const expression* index = nullptr) {
+			n = captured_root(n);
 			auto [it, inserted] = capture_index.try_emplace(n->symbol_id, adm.captures.size());
 			if (inserted) {
 				adm.captures.push_back({ n->symbol_id, n->name, subscript_root });   // name view = symbolizer storage (permanent)
+				if (auto field = static_root_fields.find(n); field != static_root_fields.end()) {
+					adm.captures.back().static_class_id = field->second.first;
+					adm.captures.back().static_member_id = field->second.second;
+				}
 			} else if (!subscript_root) {
 				adm.captures[it->second].borrow_eligible = false;
 			}
@@ -1124,11 +1219,13 @@ namespace {
 		}
 		// A use of the captured value itself: a captured handle refuses it (a worker reads its own copy of the object)
 		void note_bare_capture(identifier_expr* n) {
+			n = captured_root(n);
 			auto& entry = adm.captures[capture_index[n->symbol_id]];
 			if (!entry.bare_use) { entry.bare_use = n; }
 		}
 		// A method on a chain rooted at a captured name: pinned like an element's, judged at the barrier against the value
 		void note_captured_method_call(identifier_expr* root, const member_expr* m, const call_expr* call) {
+			root = captured_root(root);
 			adm.captured_method_calls.push_back({ root->symbol_id, m->member_id, m->member, m });
 			collect_element_method(m->member_id, m->member, m, call);
 			note_method_argument_conversions(nullptr, m->member_id, call);
@@ -1253,6 +1350,10 @@ namespace {
 					rooted_at_self = true;   // method-body chain on the element itself
 					break;
 				}
+				if (identifier_expr* field = cur != m ? static_field_root(cur) : nullptr) {
+					root = field;
+					break;
+				}
 				if (cur->get_type() == node_type::member_expr) {
 					auto* node = const_cast<member_expr*>(static_cast<const member_expr*>(cur));
 					if (node->member_id == UINT64_MAX) { node->member_id = sym->intern(node->member); }
@@ -1302,7 +1403,7 @@ namespace {
 					return fail(m, std::string(what) + " reaches captured state '" + std::string(root->name) + "' (captured reads are read-only)");
 				}
 				touch_capture(root, false);
-				auto& entry = adm.captures[capture_index[root->symbol_id]];
+				auto& entry = adm.captures[capture_index[captured_root(root)->symbol_id]];
 				if (!entry.member_use) { entry.member_use = m; }
 			}
 			if (proof_mode && root && !proof_chain_type(m)) { root_escaped = true; }   // an unknown receiver or a user accessor
@@ -1357,6 +1458,7 @@ namespace {
 					// Self fields are element-rooted, never enclosing state
 					return (!ident->global_qualified && (is_local(ident->symbol_id) || self_field(ident->symbol_id))) ? nullptr : ident;
 				}
+				if (identifier_expr* field = const_cast<admission_builder*>(this)->static_field_root(cur)) { return field; }
 				if (cur->get_type() == node_type::binary_expr &&
 				    static_cast<const binary_expr*>(cur)->op.type == token_type::left_bracket) {
 					cur = static_cast<const binary_expr*>(cur)->left.get();
@@ -2183,7 +2285,7 @@ namespace {
 				} else if (n->is_reference) {
 					// By-ref iteration mutates elements in place - on captured state (a member of a captured object
 					// included) that is a write, and on a worker's view it would silently diverge
-					if (identifier_expr* root = global_rooted(n->container.get()) ? chain_root_identifier(n->container.get()) : nullptr) {
+					if (identifier_expr* root = global_rooted(n->container.get()) ? chain_root_identifier(n->container.get()) : static_chain_root(n->container.get())) {
 						return fail(n, "cannot iterate captured state '" + std::string(root->name) +
 						               "' by reference in a parallel body (captured reads are read-only)");
 					}
@@ -2349,6 +2451,10 @@ namespace {
 						}
 						if (const_ref_local(root)) { return walk_expr(n->right); }
 					}
+					if (identifier_expr* field = static_field_root(n->left.get())) {
+						touch_capture(field, true, n->right.get());
+						return walk_expr(n->right);
+					}
 					if (proof_mode && chain_root_is_element(e)) { return proof_chain_value(e); }
 				}
 				return walk_expr(n->left) && walk_expr(n->right);
@@ -2400,6 +2506,11 @@ namespace {
 							return true;
 						}
 					}
+				}
+				if (identifier_expr* field = static_field_root(m)) {
+					touch_capture(field, false);
+					note_bare_capture(field);
+					return true;
 				}
 				return walk_local_member_chain(m, "member access");
 			}
@@ -2540,6 +2651,12 @@ namespace {
 				// A member store, or a reference bound to a member, roots at the element or a worker-local value (a store into the
 				// transform's private copy is legal and invisible); an enclosing-rooted chain fails inside
 				if (aliasing && proof_mode) { return fail(t.get(), "a reference to a member escapes the proof"); }
+				if (identifier_expr* field = static_field_root(t.get())) {
+					if (aliasing) {
+						return fail(t.get(), std::string(what) + " would alias enclosing state '" + std::string(field->name) + "' (captured reads are read-only)");
+					}
+					return fail(t.get(), "body writes enclosing state '" + std::string(field->name) + "'");
+				}
 				if (aliasing) {
 					const identifier_expr* root = chain_root_identifier(t.get());
 					if (root && !is_local(root) && !self_field(root)) {
@@ -2682,6 +2799,7 @@ namespace {
 					// class-method admission (the receiver's class is a runtime fact; names
 					// no element class defines are builtins and simply never match)
 					identifier_expr* chain_root = proof_mode ? nullptr : chain_root_identifier(m->object.get());
+					if (!chain_root) { chain_root = static_chain_root(m->object.get()); }
 					if (chain_root && !is_local(chain_root) && !self_field(chain_root) && !is_element_symbol(chain_root) &&
 					    !parallel_readonly_method(m->member)) {
 						note_captured_method_call(chain_root, m, call);   // a method of an object a captured one holds
@@ -5343,6 +5461,9 @@ struct region_guard_t {
 				}
 			}
 			slot->capture_name_ids.clear();
+			for (auto& pinned : slot->method_pins.statics) {
+				if (pinned.captured) { pinned.value = script_value(std::monostate{}, &eng); }
+			}
 			slot->element_refs.clear();
 			slot->cursors.clear();
 			slot->call_args.clear();
@@ -5454,6 +5575,16 @@ struct region_run {
 		}
 		return false;
 	}
+	checked_result<script_value> static_field_value(const parallel_admission::capture_entry& entry) {
+		const script_value* field = static_field_cell(eng, entry.static_class_id, entry.static_member_id);
+		if (!field) { return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable)); }
+		return *field;
+	}
+	const void* static_field_owner(const parallel_admission::capture_entry& entry) {
+		class_definition* owner = nullptr;
+		(void)static_field_cell(eng, entry.static_class_id, entry.static_member_id, &owner);
+		return owner;
+	}
 	checked_result<void> classify_and_add(const parallel_admission::capture_entry& entry, bool method_scope = false) {
 		// a local of the frame the statement runs in reads from that frame's slot: no environment
 		// chain can see it, and a global of the same name must not shadow it; a method's capture
@@ -5470,7 +5601,8 @@ struct region_run {
 			return usage("'::" + std::string(entry.name) + "' names the program's '" + std::string(entry.name) + "' and the body also reads a nearer '" +
 			             std::string(entry.name) + "' (a worker holds one variable of a name: rename one)");
 		}
-		auto global = entry.qualified_use ? engine_access::get_global_environment(eng)->get(entry.name_id)
+		auto global = entry.static_class_id ? static_field_value(entry)
+		            : entry.qualified_use ? engine_access::get_global_environment(eng)->get(entry.name_id)
 		            : frame_local ? checked_result<script_value>(*frame_local)
 		            : (plan.capture_env && !method_scope) ? plan.capture_env->get(entry.name_id)
 		                                                   : engine_access::get_global_environment(eng)->get(entry.name_id);
@@ -6139,10 +6271,7 @@ struct region_run {
 			for (const auto& read : source->const_static_reads) {
 				if (slot.method_pins.find_static(read.class_name_id, read.name_id)) { continue; }
 				std::optional<script_value> constant = class_constant_value(eng, read.class_name_id, read.name_id);
-				if (!constant) {
-					return usage("'" + std::string(engine_access::get_symbolizer(eng)->get_string(read.class_name_id)) + "::" + std::string(engine_access::get_symbolizer(eng)->get_string(read.name_id)) +
-					             "' is no longer a constant (a parallel body reads only const statics of a primitive value)");
-				}
+				if (!constant) { continue; }   // declared again as no constant: read as any static is (stale_constants)
 				slot.method_pins.statics.push_back({ read.class_name_id, read.name_id, std::move(*constant) });
 			}
 		}
@@ -6192,6 +6321,27 @@ struct region_run {
 		slot.pins_serial = record->serial;
 		return {};
 	}
+	// A class constant the statement was admitted reading that its class, declared again, no longer holds as one: the body reads it as
+	// it reads any static, each worker a copy as of the statement
+	checked_result<void> stale_constant_reads(admission_builder& builder, std::vector<parallel_method_pin_table::static_entry>& out) {
+		for (const parallel_admission* source : std::initializer_list<const parallel_admission*>{ adm, &builder.adm }) {
+			for (const auto& read : source->const_static_reads) {
+				if (class_constant_value(eng, read.class_name_id, read.name_id)) [[likely]] { continue; }
+				const std::string name = std::string(engine_access::get_symbolizer(eng)->get_string(read.class_name_id)) + "::" +
+				                         std::string(engine_access::get_symbolizer(eng)->get_string(read.name_id));
+				const auto cls = engine_access::get_class_definition(eng, std::string(engine_access::get_symbolizer(eng)->get_string(read.class_name_id)));
+				class_definition* owner = nullptr;
+				const script_value* field = cls ? cls->find_static_field_in_chain(read.name_id, &owner) : nullptr;
+				if (!field) { return usage("captured name '" + name + "' is not defined at the region barrier"); }
+				try {
+					out.push_back({ read.class_name_id, read.name_id, field->deref().parallel_detached_copy(&eng), true, owner });
+				} catch (const std::exception& e) {
+					return usage("captured name '" + name + "': " + e.what());
+				}
+			}
+		}
+		return {};
+	}
 	checked_result<void> provision_slots() {
 		JAI_REGION_PHASE(slots);
 		std::unordered_map<uint64_t, uint64_t>& snapshot_validated = state.snapshot_validated;
@@ -6208,6 +6358,8 @@ struct region_run {
 			if (type_info* t = zv.get_type_info().get()) { value_types.push_back(t); }
 		}
 		admission_builder& builder = method_adm();
+		std::vector<parallel_method_pin_table::static_entry> stale_constants;
+		if (auto stale = stale_constant_reads(builder, stale_constants); !stale) { return stale; }
 		for (size_t k = 0; k < worker_count; ++k) {
 			auto& slot = pool->worker_slots[k];
 			state.faults.checkpoint("region.worker_slot", k);
@@ -6269,6 +6421,7 @@ struct region_run {
 			// cross-region cache (content-proven against the live source), borrows mint the
 			// zero-copy view. Defines are per call and nulled at the join.
 			slot->capture_name_ids.clear();
+			std::vector<parallel_method_pin_table::static_entry> static_captures;
 			bool any_snapshot_miss = false;
 			std::vector<const void*> fresh_nodes;
 			for (auto& cap : captures) {
@@ -6312,6 +6465,10 @@ struct region_run {
 				} catch (const std::exception& e) {
 					return usage("captured name '" + std::string(cap.entry->name) + "': " + e.what());
 				}
+				if (cap.entry->static_class_id) {   // read through the class: the worker's static reads find it among the pins
+					static_captures.push_back({ cap.entry->static_class_id, cap.entry->static_member_id, std::move(provisioned), true, static_field_owner(*cap.entry) });
+					continue;
+				}
 				state.faults.checkpoint("region.capture_track", k);
 				slot->capture_name_ids.push_back(cap.entry->name_id);
 				state.faults.checkpoint("region.capture_publish", k);
@@ -6336,6 +6493,19 @@ struct region_run {
 				}
 			} else if (auto pinned = pin_methods(*slot, k); !pinned) {
 				return pinned;
+			}
+			for (const auto& stale : stale_constants) {
+				static_captures.push_back({ stale.class_name_id, stale.name_id, stale.value.parallel_detached_copy(&eng), true, stale.owner });
+			}
+			for (auto& field : static_captures) {
+				auto& statics = slot->method_pins.statics;
+				auto kept = std::find_if(statics.begin(), statics.end(), [&field](const auto& s) { return s.class_name_id == field.class_name_id && s.name_id == field.name_id; });
+				if (kept != statics.end()) {
+					kept->value = std::move(field.value);
+					kept->owner = field.owner;
+				} else {
+					statics.push_back(std::move(field));
+				}
 			}
 			slot->method_pins.definition_env = slot->method_env;
 			const bool pinned = !slot->method_pins.entries.empty() || !slot->method_pins.statics.empty() || !slot->method_pins.operators.empty() ||

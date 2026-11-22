@@ -4662,7 +4662,8 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 				if (member.what == detail::member_probe_hit::kind::field && member.instance) {
 					this_field_ic_arm(f, cache_slot, member.instance, sym);
 				}
-				scratch.emplace(*member.value_ptr);
+				const script_value* pinned = member.what == detail::member_probe_hit::kind::static_field ? parallel_static_copy(member.class_def, sym) : nullptr;
+				scratch.emplace(pinned ? *pinned : *member.value_ptr);
 				return &scratch.value();
 			}
 			if (script_value* cached = env_lookup_cached(f, cache_slot, sym)) {
@@ -4720,7 +4721,8 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 					return &scratch.value();
 				}
 				if (class_definition* owner = detail::bare_static_owner(frame_declaring_class(f), instance->get_class_definition(), sym)) {
-					scratch.emplace(owner->get_static_field(sym));
+					const script_value* pinned = parallel_static_copy(owner, sym);
+					scratch.emplace(pinned ? *pinned : owner->get_static_field(sym));
 					return &scratch.value();
 				}
 				if (resolving_callee) {
@@ -15327,6 +15329,12 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 	return {};
 }
 
+// KEEP BYTE-PARALLEL with interpreter::parallel_static_copy
+const script_value* vm_backend::parallel_static_copy(class_definition* a_owner, uint64_t a_sym) const {
+	if (!parallel_worker_ || !parallel_method_pins_ || !a_owner) [[likely]] { return nullptr; }
+	return parallel_method_pins_->find_captured_static(a_owner, a_sym);
+}
+
 op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_value& out) {
 	identifier_expr* ident_expr = nullptr;
 	if (expr->object->get_type() == node_type::identifier_expr) {
@@ -15365,6 +15373,12 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 			return raise_(make_error_code(runtime_error_code::type_mismatch));
 		}
 		name_id = symbolizer_->intern(name);
+		if (parallel_worker_ && parallel_method_pins_) [[unlikely]] {   // KEEP BYTE-PARALLEL with interpreter's static member read
+			if (const script_value* pinned = parallel_method_pins_->find_static(name_id, expr->member_id)) {
+				out = *pinned;
+				return {};
+			}
+		}
 	} else {
 		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}

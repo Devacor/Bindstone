@@ -113,6 +113,49 @@ public:
 			e->parallel_thread_count(2);
 			check_true(e->execute(src + "pb[11] == 344.0;").as_bool(), "the second region reads the rebound globals");
 		});
+		// a class's static is program state as a global is: read as of the statement through its class or bare in the class's methods,
+		// a write refused, in every parallel form and at every worker count
+		test("a_class_static_reads_as_a_global_does_in_a_parallel_body", [this]() {
+			const std::string prelude = R"(
+				class Plain { static int made = 7; static string tag = "t"; static array<int> list = [1, 2, 3]; static float f = 1.5;
+					int bare() { return made + list.size(); } }
+				class Kid : Plain { }
+				class Acc<T> { static T made = 9; }
+				namespace ns { class In { static int k = 4; } int g = 6; }
+				int via_fn() { return Plain::made; }
+			)";
+			const std::pair<const char*, const char*> cases[] = {
+				{"array<int> xs = [0, 0, 0]; parallel_for (auto& x : xs) { x = Plain::made; } to_string(xs);", "[7, 7, 7]"},
+				{"array<string> xs = [\"\", \"\"]; parallel_for (auto& x : xs) { x = Plain::tag + \"!\"; } to_string(xs);", "[\"t!\", \"t!\"]"},
+				{"array<int> xs = [0, 0]; parallel_for (auto& x : xs) { x = Plain::list[1] + Plain::list.size(); } to_string(xs);", "[5, 5]"},
+				{"array<float> xs = [0.0]; parallel_for (auto& x : xs) { x = Plain::f; } to_string(xs);", "[1.5]"},
+				{"array<int> xs = [0, 0]; parallel_for (auto& x : xs) { x = Kid::made; } to_string(xs);", "[7, 7]"},
+				{"array<int> xs = [0, 0]; parallel_for (auto& x : xs) { x = Acc<int>::made; } to_string(xs);", "[9, 9]"},
+				{"array<int> xs = [0, 0]; parallel_for (auto& x : xs) { x = via_fn(); } to_string(xs);", "[7, 7]"},
+				{"array<int> xs = [0, 0]; parallel_for (auto& x : xs) { x = ns::In::k + ns::g; } to_string(xs);", "[10, 10]"},
+				{"string r = \"ran\"; try { array<int> xs = [0, 0]; parallel_for (auto& x : xs) { ns::g = x; } } catch (e) { r = e; } r;",
+				 "parallel_for: body writes enclosing state 'ns::g' at 8:86"},
+				{"array<Plain> ps = [Plain(), Plain()]; array<int> xs = [0, 0]; parallel_for (auto& p, auto& x : ps, xs) { x = p.bare(); } to_string(xs);", "[10, 10]"},
+				{"to_string(parallel_transform([1, 2], [](int x) { return x + Plain::made; }));", "[8, 9]"},
+				{"to_string(parallel_reduce([1, 2], 0, [](int a, int x) { return a + x + Plain::made; }, [](int a, int b) { return a + b; }));", "17"},
+				{"Plain::made = 11; array<int> xs = [0, 0]; parallel_for (auto& x : xs) { x = Plain::made; } Plain::made = 7; to_string(xs);", "[11, 11]"},
+				{"string r = \"ran\"; try { array<int> xs = [0, 0]; parallel_for (auto& x : xs) { Plain::made = x; } } catch (e) { r = e; } r;",
+				 "parallel_for: body writes enclosing state 'Plain::made' at 8:89"},
+				{"string r = \"ran\"; try { array<int> xs = [0, 0]; parallel_for (auto& x : xs) { Plain::list.push(1); } } catch (e) { r = e; } r;",
+				 "parallel_for: method 'push' may mutate captured state 'Plain::list' at 8:94"},
+				{"string r = \"ran\"; try { array<int> xs = [0, 0]; parallel_for (auto& x : xs) { for (auto& v : Plain::list) { v = 1; } } } catch (e) { r = e; } r;",
+				 "parallel_for: cannot iterate captured state 'Plain::list' by reference in a parallel body (captured reads are read-only) at 8:82"},
+				{"to_string(Plain::made) + to_string(Plain::list);", "7[1, 2, 3]"},
+			};
+			for (size_t workers : {size_t(1), size_t(2), size_t(4)}) {
+				check_each(cases, [&](const auto& c) {
+					auto e = make_engine();
+					jai::stdlib::register_all(*e);
+					e->parallel_thread_count(workers);
+					check_eq(std::string(c.second), e->execute(prelude + c.first).to_string());
+				});
+			}
+		});
 		// every body shape (strings, float math, nested containers, recursion, captured scalars, maps and read-only methods,
 		// a weight fn) lands what the serial loop lands at every worker count
 		test("parallel_transform_lands_what_the_serial_loop_lands", [this]() {

@@ -446,6 +446,8 @@ namespace jai::vm {
         void set_parallel_method_pins(const detail::parallel_method_pin_table* pins) override {
             parallel_method_pins_ = pins;
         }
+        // A worker's copy of a class static its region captured, else null
+        const script_value* parallel_static_copy(class_definition* a_owner, uint64_t a_sym) const;
 
     private:
         struct cell_state;

@@ -2112,7 +2112,10 @@ struct engine::implementation {
         std::string path;   // resolved spelling: the key the unit later executes under
         std::string source;
         std::shared_ptr<script_cache_entry> entry;
+        bool pending = false;   // a loaded module read from other text than it runs from (pending_text)
     };
+    struct program_pools;
+    std::unordered_set<std::string> reload_group_;   // the modules a reload is deciding now: what it pools is its own to keep or put back
     // The root's closure findings, republished by every checked_report: the strict throw
     // text and the diagnostics folded into the caller-visible report.
     std::string program_check_listing_;
@@ -2302,7 +2305,7 @@ struct engine::implementation {
     // check stands on a text nobody read.
     void collect_closure_units(engine& self, const std::vector<std::string>& paths, std::unordered_set<std::string>& visited,
                                std::vector<closure_unit>& out, std::vector<closure_stamp>& stamps, const std::string& from_file,
-                               std::string& parse_failures) {
+                               std::string& parse_failures, std::shared_ptr<program_pools>& before_pending) {
         detail::load_phase_scope reporting(collector(), detail::load_collector::k_no_file, load_phase::import_bookkeeping);
         for (const auto& path : paths) {
             closure_unit unit;
@@ -2333,10 +2336,12 @@ struct engine::implementation {
             }
             std::vector<std::string> nested;
             literal_unit_paths(unit.entry->declarations, nested);
+            unit.pending = pending_text(unit);
+            if (unit.pending && !before_pending) { before_pending = saved_pools(); }
             pool_unit(unit.entry->declarations, unit.path, unit_key(*unit.entry, unit.source));
             std::string unit_path = unit.path;
             out.push_back(std::move(unit));
-            collect_closure_units(self, nested, visited, out, stamps, unit_path, parse_failures);
+            collect_closure_units(self, nested, visited, out, stamps, unit_path, parse_failures, before_pending);
         }
     }
 
@@ -2499,10 +2504,12 @@ struct engine::implementation {
             std::vector<closure_unit> closure;
             std::vector<closure_stamp> stamps;
             std::string parse_failures;
+            std::shared_ptr<program_pools> before_pending;
+            std::vector<closure_unit> standing;   // the gathered units that are no pending text: what stays pooled
             if (!roots.empty()) {
                 pool_unit(held->declarations, held->source_path, unit_key(*held, source));
                 std::unordered_set<std::string> visited;
-                collect_closure_units(self, roots, visited, closure, stamps, held->source_path, parse_failures);
+                collect_closure_units(self, roots, visited, closure, stamps, held->source_path, parse_failures, before_pending);
                 for (auto& unit : closure) {
                     try {
                         reparse_if_moved(self, unit.entry, unit.source);
@@ -2511,6 +2518,9 @@ struct engine::implementation {
                     }
                 }
                 reparse_if_moved(self, held, std::string(source));
+                if (before_pending) {
+                    for (const auto& unit : closure) { if (!unit.pending) { standing.push_back(unit); } }
+                }
                 // the instances each unit's text names, before any unit is checked: the type of another unit's variable or result may be one
                 if (parse_failures.empty()) {
                     for (auto& unit : closure) {
@@ -2563,6 +2573,7 @@ struct engine::implementation {
                         d.related_line, d.related_column, {}, d.notes});
                 }
             }
+            if (before_pending) { withdraw_pending_text(*held, source, *before_pending, standing); }
         } else {
             check_entry(self, *held, true);
         }
@@ -2881,6 +2892,25 @@ struct engine::implementation {
     program_pools save_program_pools() const {
         return {program_names_, program_classes_, program_enums_, program_functions_, program_globals_, program_name_units_, pooled_unit_keys_,
                 pooled_unit_declarations_, generics_, dropped_generics_};
+    }
+    std::shared_ptr<program_pools> saved_pools() const { return std::make_shared<program_pools>(save_program_pools()); }
+    // A loaded module whose file changed is pending until an import of it is reached and its reload is decided. A root's
+    // gather reads its new text, since the root is checked against what its imports will bring; the pools hold the text
+    // a module runs from everywhere else, so a reload that is rejected, or never reached, leaves nothing of the edit in
+    // them (docs/site/embedding/07-hot-reload.html "Check, then apply"). A reload's own gather is no such root: what its
+    // modules read stays pooled until its verdict, since its dependents are checked against every file it reads.
+    bool pending_text(const closure_unit& unit) const {
+        if (!reload_group_.empty()) { return false; }
+        const auto loaded = loaded_units_.find(loaded_unit_of(unit.path));
+        return loaded != loaded_units_.end() && loaded->second.entry && loaded->second.entry != unit.entry;
+    }
+    // The root is judged: the pools as they stood before its gather pooled a pending text, then what the gather may leave
+    void withdraw_pending_text(script_cache_entry& root, std::string_view source, program_pools& before_pending, const std::vector<closure_unit>& standing) {
+        restore_program_pools(std::move(before_pending));
+        pool_unit(root.declarations, root.source_path, unit_key(root, source));
+        for (const auto& unit : standing) {
+            if (unit.entry) { pool_unit(unit.entry->declarations, unit.path, unit_key(*unit.entry, unit.source)); }
+        }
     }
     void restore_program_pools(program_pools&& saved) {
         ++program_union_epoch_;
@@ -8697,6 +8727,12 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             if (!v.failed++) { v.first = std::current_exception(); }
         };
         auto pools = I.save_program_pools();
+        struct deciding_scope {
+            implementation& impl;
+            std::unordered_set<std::string> outer;
+            ~deciding_scope() { impl.reload_group_ = std::move(outer); }
+        } deciding{I, I.reload_group_};
+        for (const auto& m : group) { I.reload_group_.insert(m.resolved); }
         I.import_frames_.emplace_back();   // what the parses read: a failure waits on those files too
         struct frame_scope {
             implementation& impl;

@@ -365,7 +365,11 @@ std::vector<std::string> workspace::reference_scope(unit& u, const symbol& s) {
 std::vector<location> workspace::collect_references(const std::vector<std::string>& paths, const std::vector<std::string>& keys, bool include_declaration) {
 	std::vector<location> out;
 	std::unordered_set<std::string> families;
-	for (const auto& k : keys) { families.insert(generic_family(k)); }
+	bool instance_keys = false;   // a key naming an instance reaches its generic's own occurrences, which hold no '<'
+	for (const auto& k : keys) {
+		families.insert(generic_family(k));
+		instance_keys = instance_keys || k.find('<') != std::string::npos;
+	}
 	for (const auto& p : paths) {
 		unit* x = get(p);
 		if (!x) { continue; }
@@ -373,7 +377,11 @@ std::vector<location> workspace::collect_references(const std::vector<std::strin
 		for (const auto& o : m.occurrences) {
 			if (!include_declaration && o.declaration) { continue; }
 			const std::string& key = m.symbols[o.symbol].key;
-			if (std::find(keys.begin(), keys.end(), key) != keys.end() || families.count(generic_family(key))) { out.push_back({p, o.span}); }
+			const bool spelled_instance = key.find('<') != std::string::npos;
+			if (std::find(keys.begin(), keys.end(), key) != keys.end() || (spelled_instance && families.count(generic_family(key))) ||
+			    (!spelled_instance && instance_keys && families.count(key))) {
+				out.push_back({p, o.span});
+			}
 		}
 	}
 	return out;

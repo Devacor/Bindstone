@@ -286,8 +286,8 @@ uint32_t program_view::instance_call_symbol(unit_model& m, uint32_t generic, con
 
 const jai::detail::generic_definition* program_view::generic_of(const jai::declaration* d) {
 	if (!d) { return nullptr; }
-	for (unit* u : units()) {
-		const auto& idx = index_of(*u);
+	if (unit* owner = unit_of_node(d)) {   // a view stands in its generic's file
+		const auto& idx = index_of(*owner);
 		if (auto it = idx.generics.find(d); it != idx.generics.end()) { return it->second; }
 	}
 	for (const auto& [definition, view] : current.instance_views) { if (view.decl == d) { return definition; } }
@@ -1538,7 +1538,7 @@ void semantic_walker::type_name_pass() {
 		std::string spelled;
 		const jai::class_decl* cd = s == UINT32_MAX ? view_.find_class(t.lexeme) : nullptr;
 		if (s != UINT32_MAX) {
-		} else if (cd && view_.generic_of(cd) && spelled_instance(u_.tokens, i, spelled)) {
+		} else if (cd && i + 1 < u_.tokens.size() && u_.tokens[i + 1].type == jai::token_type::less && view_.generic_of(cd) && spelled_instance(u_.tokens, i, spelled)) {
 			const jai::class_decl* made = view_.find_instance(spelled);
 			s = made ? view_.instance_symbol(m_, std::string(made->name), std::string(t.lexeme)) : view_.global_symbol(m_, std::string(t.lexeme));
 		} else if (cd || view_.find_enum(t.lexeme)) {

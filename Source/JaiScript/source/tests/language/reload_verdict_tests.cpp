@@ -409,6 +409,126 @@ public:
 				check_eq(std::string("bbb"), p.run_file("root.jai"), method);
 			}
 		});
+
+		test("a_file_the_host_runs_again_is_checked_as_a_reload", [this]() {
+			for (const bool hand_text : {false, true}) {
+				const std::string how = hand_text ? " (execute_file_source)" : " (execute_file)";
+				program p(hand_text ? "c_source" : "c_file");
+				const auto run_root = [&](const std::string& text) {
+					p.write("root.jai", text);
+					if (!hand_text) { return p.run_file("root.jai"); }
+					try {
+						return p.eng->execute_file_source(p.path("root.jai"), text).to_string();
+					} catch (const std::exception& e) {
+						return std::string("ERR: ") + e.what();
+					}
+				};
+				p.write("user.jai", "int use() { return f(1) + 1; }\nint size() { C c; return c.a; }\n");
+				const std::string v1 = "int f(int x) { return x; }\nclass C { int a = 3; }\nimport \"user.jai\";\n";
+				check_eq(std::string("null"), run_root(v1), "the first run" + how);
+				check_eq(std::string("2|3"), p.run("to_string(use()) + \"|\" + to_string(size());"));
+				// the same text again is no reload
+				check_eq(std::string("null"), run_root(v1), "the same text again" + how);
+				// a function another file calls, declared with other parameters
+				const std::string rejected = run_root("int f(string x) { return 9; }\nclass C { int a = 3; }\nint fresh() { return 1; }\nimport \"user.jai\";\n");
+				check_true(has(rejected, "static check failed:") && has(rejected, "user.jai:1:23: error: argument 1 of 'f': cannot pass 'int' to 'x' declared 'string'"),
+				           "the caller in another file rejects it" + how + ": " + rejected);
+				check_eq(std::string("2|3"), p.run("to_string(use()) + \"|\" + to_string(size());"), "nothing applied" + how);
+				// and nothing of it stays in what later text is checked against
+				check_eq(std::string("1"), p.run("f(1);"), "a later text is checked against the function that runs" + how);
+				check_true(has(p.run("fresh();"), "use of undeclared identifier 'fresh'"), "what the rejected text declared is not declared" + how + ": " + p.run("fresh();"));
+				// rejected for a mistake of its own, the same
+				const std::string own_mistake = run_root("int f(int x) { return x; }\nclass C { int a = 3; }\nint fresh2() { return nope; }\nimport \"user.jai\";\n");
+				check_true(has(own_mistake, "use of undeclared identifier 'nope'"), "its own mistake" + how + ": " + own_mistake);
+				check_true(has(p.run("fresh2();"), "use of undeclared identifier 'fresh2'"), "nothing of that text either" + how + ": " + p.run("fresh2();"));
+				check_eq(std::string("2|3"), p.run("to_string(use()) + \"|\" + to_string(size());"), "nothing applied" + how);
+				// a class another file reads a field of, declared without it
+				const std::string reshaped = run_root("int f(int x) { return x; }\nclass C { int b = 3; }\nimport \"user.jai\";\n");
+				check_true(has(reshaped, "user.jai:2:") && has(reshaped, "error: no member 'a' in class 'C'"), "the field's reader rejects it" + how + ": " + reshaped);
+				check_eq(std::string("2|3"), p.run("to_string(use()) + \"|\" + to_string(size());"), "nothing applied" + how);
+				// an edit every loaded unit still fits applies
+				check_eq(std::string("null"), run_root("int f(int x) { return x + 5; }\nclass C { int a = 3; int b = 4; }\nimport \"user.jai\";\n"), "a fitting edit" + how);
+				check_eq(std::string("7|3"), p.run("to_string(use()) + \"|\" + to_string(size());"), "and runs" + how);
+				// text the host executes as a string checks no unit but its own: a function of other parameters is an overload beside the first
+				check_eq(std::string("9"), p.run("int f(string x) { return 9; }\nf(\"s\");"), "an executed string" + how);
+				check_eq(std::string("7"), p.run("use();"), how);
+				// two files the host runs itself, neither importing the other: the one run again is checked against the other
+				const auto run_lib = [&](const std::string& text) {
+					p.write("lib.jai", text);
+					if (!hand_text) { return p.run_file("lib.jai"); }
+					try {
+						return p.eng->execute_file_source(p.path("lib.jai"), text).to_string();
+					} catch (const std::exception& e) {
+						return std::string("ERR: ") + e.what();
+					}
+				};
+				p.write("caller.jai", "int call() { D d; return g(1) + d.a; }\n");
+				check_eq(std::string("null"), run_lib("int g(int x) { return x; }\nclass D { int a = 3; }\n"), how);
+				check_eq(std::string("null"), p.run_file("caller.jai"), how);
+				check_eq(std::string("4"), p.run("call();"), how);
+				const std::string lone = run_lib("int g(string x) { return 9; }\nclass D { int a = 3; }\n");
+				check_true(has(lone, "caller.jai:1:") && has(lone, "error: argument 1 of 'g': cannot pass 'int' to 'x' declared 'string'"), "a file run beside it rejects it" + how + ": " + lone);
+				check_eq(std::string("4"), p.run("call();"), "nothing applied" + how);
+				const std::string lone_class = run_lib("int g(int x) { return x; }\nclass D { int b = 3; }\n");
+				check_true(has(lone_class, "caller.jai:1:") && has(lone_class, "error: no member 'a' in class 'D'"), "and for its class" + how + ": " + lone_class);
+				check_eq(std::string("4"), p.run("call();"), "nothing applied" + how);
+				check_eq(std::string("null"), run_lib("int g(int x) { return x + 10; }\nclass D { int a = 3; }\n"), "a fitting edit" + how);
+				check_eq(std::string("14"), p.run("call();"), how);
+			}
+		});
+
+		test("text_the_host_executes_warns_of_each_use_in_another_unit_it_no_longer_fits", [this]() {
+			// A string checks no unit but its own. Where it declares again a class or a function the engine holds, what a reload of
+			// that text would be rejected for is a warning of its check, at each use's file and line: nothing is refused
+			program p("c_text");
+			const auto warnings = [&]() {   // each place by its file's name
+				std::vector<std::string> texts;
+				for (const auto& d : p.eng->last_check_diagnostics().diagnostics) {
+					if (d.severity != check_diagnostic::level::warning) { continue; }
+					const size_t open = d.message.rfind('('), cut = d.message.find_last_of("/\\");
+					texts.push_back(open != std::string::npos && cut != std::string::npos && cut > open ? d.message.substr(0, open + 1) + d.message.substr(cut + 1) : d.message);
+				}
+				return texts;
+			};
+			const auto listed = [](const std::vector<std::string>& texts) {
+				std::string all;
+				for (const auto& t : texts) { all += t + "\n"; }
+				return all;
+			};
+			const std::string lead = "a use in another unit no longer fits what this text declares: ";
+			p.write("user.jai", "int size() { C c; return c.a; }\n");
+			p.write("other.jai", "int twice() { C c; return c.a + c.a; }\nint count() { int n = tally(2); return n; }\n");
+			check_eq(std::string("null"), p.run("class C { int a = 3; }\nint tally(int n) { return n; }"));
+			check_eq(std::string("null"), p.run_file("user.jai"));
+			check_eq(std::string("null"), p.run_file("other.jai"));
+			check_eq(std::string("3|6|2"), p.run("to_string(size()) + \"|\" + to_string(twice()) + \"|\" + to_string(count());"));
+			check_true(warnings().empty(), listed(warnings()));
+			// a class two files read a field of, declared without it: the string runs, and each reader is named
+			check_eq(std::string("null"), p.run("class C { int b = 3; }"));
+			check_eq(lead + "no member 'a' in class 'C' (user.jai:1:28)\n" + lead + "no member 'a' in class 'C' (other.jai:1:29)\n" + lead + "no member 'a' in class 'C' (other.jai:1:35)\n",
+			         listed(warnings()));
+			check_true(failed(p.run("size();")), "the use fails where it runs");
+			// the same text again declares nothing new
+			check_eq(std::string("null"), p.run("class C { int b = 3; }"));
+			check_true(warnings().empty(), listed(warnings()));
+			// a declaration every use fits
+			check_eq(std::string("null"), p.run("class C { int a = 4; int b = 3; }"));
+			check_true(warnings().empty(), listed(warnings()));
+			check_eq(std::string("4|8"), p.run("to_string(size()) + \"|\" + to_string(twice());"));
+			// a function declared again with its parameters and another result
+			check_eq(std::string("null"), p.run("string tally(int n) { return \"s\"; }"));
+			check_eq(lead + "cannot initialize 'n' declared 'int' with 'string' (other.jai:2:19)\n", listed(warnings()));
+			check_true(failed(p.run("count();")), "the use fails where it runs: " + p.run("count();"));
+			// other parameters are an overload beside the first: every caller still fits
+			check_eq(std::string("null"), p.run("int tally(int n) { return n + 1; }"));
+			check_true(warnings().empty(), listed(warnings()));
+			check_eq(std::string("null"), p.run("int tally(string s) { return 9; }"));
+			check_true(warnings().empty(), listed(warnings()));
+			check_eq(std::string("3"), p.run("count();"));
+			// a string that declares nothing the engine holds
+			check_eq(std::string("null"), p.run("class Fresh { int a = 1; }\nint fresh() { return 1; }"));
+			check_true(warnings().empty(), listed(warnings()));
+		});
 	}
 };
 

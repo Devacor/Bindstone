@@ -1739,13 +1739,22 @@ public:
 			edit(lib_text("2", added, "x"));
 			check_eq(std::string("122"), frame());
 			check_eq(std::string("2|2|2"), held());
-			// The host runs the generic's file itself: no caller is checked on that route (a function's are not either), so the
-			// instance the text cannot make keeps its earlier declaration, with the warning
+			// The host runs the generic's file itself: a file that already ran is a reload of that unit, so the instance a loaded
+			// unit names and the text cannot make rejects it, and nothing is applied
 			edit("class Box<T> {\n\tT item;\n" + added + "\tint size() { return item.size(); }\n" + sizer_text + "}\nT twice<T>(T x) { return x + x; }\n");
-			e->execute_file(lib);
-			check_eq(std::vector<std::string>{"'Box<int>' keeps its earlier declaration: this declaration of 'Box' cannot make it: int has no member 'size' (" + lib + ":4:27)"}, warnings(*e));
-			check_eq(std::string("2|2|0"), held(), "Box<int> keeps its declaration, Box<string> is the new text");
-			check_eq(std::string("220"), frame());
+			std::string refused;
+			try {
+				e->execute_file(lib);
+			} catch (const std::exception& error) {
+				refused = error.what();
+			}
+			check_true(contains(refused, "lib.jai:4:27: error: int has no member 'size'\n    in Box<int>, instantiated at ") && contains(refused, "game.jai:2:4"), refused);
+			check_eq(std::string("2|2|2"), held(), "nothing applied");
+			// the module's import meets the same text: rejected once on that route too, then it waits
+			const std::string import_refused = frame();
+			check_true(contains(import_refused, "lib.jai:4:27: error: int has no member 'size'"), import_refused);
+			check_eq(std::string("122"), frame());
+			check_eq(std::string("122"), frame());
 		});
 
 		test("a_reload_gives_an_instances_users_the_verdict_it_gives_a_functions_callers", [this]() {
@@ -1810,7 +1819,8 @@ public:
 				{"a generic method, gone from its class", method_v1, method_user, tool(""), 'r', false, false, "error: no member 'scaled' in class 'Tool'"},
 				{"a generic method, dropped with its class", method_v1, method_user, limit, 'd', false, false, ""},
 			};
-			// How the new text arrives. A reload checks the units it does not run again; no other route does.
+			// How the new text arrives. A reload (an import, or a file the host runs again) checks the units it does not run again; a
+			// later execute of the text, another file and strings do not.
 			enum class route { root_file, module, executed_string, module_run_again, execute_file, execute_file_source, later_execute, another_file, strings_only };
 			const std::vector<std::pair<route, std::string>> routes = {
 				{route::root_file, "a reload, the root file uses it"}, {route::module, "a reload, another module uses it"}, {route::executed_string, "a reload, an executed string uses it"},
@@ -1882,7 +1892,9 @@ public:
 					for (const auto& d : e->last_check_diagnostics().diagnostics) { if (d.severity == check_diagnostic::level::warning) { warned += d.message + "\n"; } }
 					const std::string after = outcome(*e, "use();");
 					const bool rejected = verdict.rfind("ERR: static check failed:", 0) == 0;
-					const bool reloads = how == route::root_file || how == route::module || how == route::executed_string || how == route::module_run_again;
+					// a file the host runs again (execute_file, execute_file_source of a path that already ran) is a reload too
+				const bool reloads = how == route::root_file || how == route::module || how == route::executed_string || how == route::module_run_again ||
+				                     how == route::execute_file || how == route::execute_file_source;
 					// what the text drops stays for every unit, one that runs again too, as a function or a class it drops does
 					const bool rejects = reloads && s.reload == 'r';
 					check_eq(rejects, rejected, what + ": " + verdict);

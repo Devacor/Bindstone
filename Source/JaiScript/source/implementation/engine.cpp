@@ -46,6 +46,7 @@
 #include <jaiscript/detail/constant_arguments.hpp>
 #include <jaiscript/detail/type_value.hpp>
 #include <jaiscript/detail/generics.hpp>
+#include <jaiscript/detail/function_overloads.hpp>
 #include <jaiscript/detail/run_record.hpp>
 #include <jaiscript/core/script_run.hpp>
 #ifdef JAISCRIPT_VM_COVERAGE
@@ -2927,7 +2928,8 @@ struct engine::implementation {
     // unit's own last check did not raise is the reload's; the listing names the unit's file and line, the files that failed
     // land in failing_files (unstamped) and the units, each with the entry that was judged, in failing_units.
     std::string reload_dependents_listing(engine& self, const std::unordered_set<uint32_t>& rerunning, const std::unordered_set<std::string>& files,
-                                          std::vector<closure_stamp>& failing_files, std::vector<judged_unit>& failing_units) {
+                                          std::vector<closure_stamp>& failing_files, std::vector<judged_unit>& failing_units,
+                                          std::vector<check_diagnostic>* found = nullptr) {
         std::vector<uint32_t> units;
         for (const auto& [unit, loaded] : loaded_units_) {
             if (!rerunning.count(unit) && loaded.entry->checked) { units.push_back(unit); }
@@ -2953,6 +2955,10 @@ struct engine::implementation {
                 if (std::any_of(known.begin(), known.end(), same)) { return; }
                 if (std::any_of(broken.diagnostics.begin(), broken.diagnostics.end(), [&](const check_diagnostic& b) { return same(b) && b.file == d.file; })) { return; }
                 broken.diagnostics.push_back(d);
+                if (found) {   // each with the file it stands in
+                    found->push_back(d);
+                    if (found->back().file.empty()) { found->back().file = entry.source_path; }
+                }
             };
             for (const auto& d : recheck.diagnostics) { raise(d); }
             if (!moved.empty() && names_instance_of(entry.declarations, moved)) {
@@ -3032,6 +3038,120 @@ struct engine::implementation {
         dropped_generics_ = std::move(saved.dropped_generics);
         index_pooled_namespace_generics();
     }
+
+    // the unit declares a function or a class at program scope under a name the engine already holds
+    static bool declares_held_code(engine& self, const std::vector<declaration_ptr>& decls) {
+        for (const auto& d : decls) {
+            if (!d) { continue; }
+            if (d->get_type() == node_type::function_decl) {
+                const auto& f = static_cast<const function_decl&>(*d);
+                if (f.instance_stamp == 0 && self.has_function(std::string(f.name))) { return true; }
+            } else if (d->get_type() == node_type::class_decl) {
+                const auto& c = static_cast<const class_decl&>(*d);
+                if (c.instance_stamp == 0 && !c.method_instances && self.get_class_definition(std::string(c.name))) { return true; }
+            }
+        }
+        return false;
+    }
+    // Text the host executes as a string checks no unit but its own (docs/site/embedding/07-hot-reload.html "Callers in other
+    // files"). Where it declares again a function or a class the engine holds, what a reload of that text would be rejected
+    // for is a warning of its check instead, naming each use's file and line: nothing is refused.
+    // the script functions the engine holds at program scope under a name
+    std::vector<std::shared_ptr<script_defined_function>> held_functions(engine& self, std::string_view name) {
+        std::vector<std::shared_ptr<script_defined_function>> result;
+        const auto id = string_symbolizer_.find(name);
+        const script_value* value = id && global_environment_ ? global_environment_->get_own_value_ptr(*id) : nullptr;
+        const script_callable* callable = value ? detail::script_callable_of(*value, &self) : nullptr;
+        if (!callable) { return result; }
+        if (callable->kind == script_callable::kind_type::function && callable->fn && callable->fn->declared) {
+            result.push_back(callable->fn);
+        } else if (callable->kind == script_callable::kind_type::overload_set && callable->overloads()) {
+            result = callable->overloads()->members;
+        }
+        return result;
+    }
+    // What the text's run replaces is what the borrowed tables say it declares: a class of the name, and a program-scope
+    // function of the same parameters. A function the engine holds with other parameters stays an overload beside the text's,
+    // so that name's callers are left unchecked, as are a namespace's functions (they collide or are written override) and
+    // the variables the text declares.
+    void pool_text_for_warning(engine& self, script_cache_entry& held, std::string_view source, const program_pools& before) {
+        pool_unit(held.declarations, held.source_path, unit_key(held, source));
+        program_globals_ = before.globals;
+        const auto declares_with = [&](std::string_view name, const std::vector<parameter>& parameters) {
+            return std::any_of(held.declarations.begin(), held.declarations.end(), [&](const declaration_ptr& d) {
+                return d && d->get_type() == node_type::function_decl && static_cast<const function_decl&>(*d).name == name &&
+                       detail::same_signature(static_cast<const function_decl&>(*d).parameters, parameters);
+            });
+        };
+        for (auto& [name, units] : program_functions_) {
+            const auto own = units.find(held.source_path);
+            if (own == units.end()) { continue; }
+            const auto kept = held_functions(self, name);
+            const bool beside = std::any_of(kept.begin(), kept.end(), [&](const std::shared_ptr<script_defined_function>& fn) { return fn && !declares_with(name, fn->parameters()); });
+            if (beside || name.find("::") != std::string::npos) { units.erase(own); }
+        }
+    }
+    void warn_text_dependents(engine& self, const std::shared_ptr<script_cache_entry>& held, std::string_view source) {
+        if (loaded_units_.empty() || unit_ran_before(*held, source) || !declares_held_code(self, held->declarations)) { return; }
+        program_pools pools = save_program_pools();
+        pool_text_for_warning(self, *held, source, pools);
+        std::vector<closure_stamp> failing_files;
+        std::vector<judged_unit> failing_units;
+        std::vector<check_diagnostic> found;
+        (void)reload_dependents_listing(self, {}, {}, failing_files, failing_units, &found);
+        restore_program_pools(std::move(pools));
+        for (const auto& d : found) {
+            std::string text = "a use in another unit no longer fits what this text declares: " + d.message + " (" + d.file + ":" + std::to_string(d.line) + ":" + std::to_string(d.column) + ")";
+            for (const auto& note : d.notes) { text += " " + note; }
+            last_check_.diagnostics.push_back({check_diagnostic::level::warning, 0, 0, std::move(text)});
+        }
+    }
+
+    // A file the host runs again from other text (execute_file, execute_file_source of a path that already ran) is a reload of
+    // that unit: every other loaded unit is checked against the declarations it brings before any of it runs, and one that
+    // no longer fits rejects it with its own file and line, nothing applied (docs/site/embedding/07-hot-reload.html "Callers
+    // in other files"). A module's import was judged with its group (check_group), and text the host executes as a string
+    // checks no unit but its own. The pools are the check's to borrow: they go back as they were either way.
+    void check_rerun_dependents(engine& self, const std::shared_ptr<script_cache_entry>& held, std::string_view source) {
+        if (held->loaded_noted) { return; }   // the entry its unit last ran: the same text, at no cost to a host that runs it every frame
+        const std::string& path = held->source_path;
+        if (path == "<script>") { warn_text_dependents(self, held, source); return; }
+        if (path.empty() || importing_.count(path)) { return; }
+        const uint32_t unit = loaded_unit_of(path);
+        const auto loaded = loaded_units_.find(unit);
+        if (unit == 0 || loaded == loaded_units_.end() || !loaded->second.entry || loaded->second.entry == held) { return; }
+        if (unit_key(*loaded->second.entry, loaded->second.source) == unit_key(*held, source)) { return; }   // the text it ran from
+        program_pools pools = save_program_pools();
+        pool_unit(held->declarations, path, unit_key(*held, source));
+        std::unordered_set<std::string> reads{path};
+        for (const auto& gathered : held->closure_stamps) { reads.insert(gathered.path); }
+        std::vector<closure_stamp> failing_files;
+        std::vector<judged_unit> failing_units;
+        const std::string listing = reload_dependents_listing(self, {unit}, reads, failing_files, failing_units);
+        restore_program_pools(std::move(pools));
+        if (!listing.empty()) { throw static_check_error("static check failed:\n" + listing); }
+    }
+
+    // The check tables as that reload finds them, taken before its check pools any of the new text: a reload rejected for its
+    // own mistake or for another unit's use puts them back, so nothing of it stays (as a module's rejected reload leaves
+    // nothing). Null for any other run.
+    std::shared_ptr<program_pools> pools_before_rerun(script_cache_entry& held, std::string_view source, bool textual) {
+        const std::string& path = held.source_path;
+        if (textual || held.loaded_noted || path.empty() || path == "<script>" || importing_.count(path)) { return nullptr; }
+        const auto loaded = loaded_units_.find(loaded_unit_of(path));
+        if (loaded == loaded_units_.end() || !loaded->second.entry || loaded->second.entry.get() == &held) { return nullptr; }
+        if (unit_key(*loaded->second.entry, loaded->second.source) == unit_key(held, source)) { return nullptr; }
+        return saved_pools();
+    }
+    struct rerun_pools {
+        implementation& impl;
+        std::shared_ptr<program_pools> before;
+        int unwinding = std::uncaught_exceptions();
+        ~rerun_pools() {
+            if (before && std::uncaught_exceptions() > unwinding) { impl.restore_program_pools(std::move(*before)); }
+        }
+        void accept() { before.reset(); }
+    };
 
     // A unit's run. A re-run of a unit whose source declares a reload hook snapshots the unit's program-scope variables first and
     // hands them to the hook once the run's top-level code finishes; a unit without one pays nothing. A textual include runs under
@@ -5189,6 +5309,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         auto cached = impl->acquire_entry(*this, scriptContent, sourcePath, cacheFile, cacheFresh);
         impl->note_text_stamp(*cached, loaded_under);
         for (const auto& s : cached->spliced_stamps) { impl->note_closure_file(s.path, true, s.mtime, s.size); }
+        implementation::rerun_pools rerun{*impl, impl->pools_before_rerun(*cached, scriptContent, textual)};
 
         // Static-check hook: one place, at the parse-cache entry — covers execute(),
         // hot-reload re-parses (new source = new entry) and registration-epoch changes.
@@ -5209,6 +5330,8 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
             impl->gate_checked(impl->check_with_instance_vars(*this, *cached, instanceVars), scriptContent, listing_name);
         }
         if (!include_scope.empty()) { impl->warn_scoped_enums(*this, *cached, sourcePath, include_scope); }
+        if (!textual) { impl->check_rerun_dependents(*this, cached, scriptContent); }
+        rerun.accept();   // checked: what runs from here is no rejected reload
 
         // Rewrite a missing/stale/rejected cache AFTER the check hook so a clean check
         // stamps checked_clean, and BEFORE execution on purpose: a runtime error doesn't

@@ -1322,12 +1322,14 @@ bool namespace_function_waits(engine& eng, const std::shared_ptr<script_namespac
     if (decl.instance_stamp == 0 || decl.method_instance) { return false; }
     class_registry& registry = engine_access::get_class_registry(eng);
     std::string generic(instance_generic_name(decl.instance_name));
-    if (generic_declared(eng, generic, decl.instance_stamp, decl.instance_remade)) { return false; }
+    // a namespace's instance is declared as the declaration it was made from runs: one made from a declaration that collided
+    // (declare_script_class) never is, and what the namespace holds stays
+    if (generic_declared(eng, generic, decl.instance_stamp, true)) { return false; }
     auto& waiting = registry.waiting_functions_;
     const auto earlier = std::find_if(waiting.begin(), waiting.end(), [&](const class_registry::waiting_function& w) {
         return w.space == space && w.name_id == decl.name_id && w.declaration && same_signature(w.declaration->parameters, decl.parameters);
     });
-    class_registry::waiting_function parked{std::move(generic), decl.instance_stamp, decl.instance_remade, nullptr, decl.name_id, nullptr, script_value(std::monostate{}, &eng), false, space, space_id,
+    class_registry::waiting_function parked{std::move(generic), decl.instance_stamp, true, nullptr, decl.name_id, nullptr, script_value(std::monostate{}, &eng), false, space, space_id,
                                             std::make_shared<function_decl>(decl)};
     if (earlier != waiting.end()) { *earlier = std::move(parked); } else { waiting.push_back(std::move(parked)); }
     return true;
@@ -1354,6 +1356,18 @@ checked_result<void> declare_script_function(engine& eng, const function_decl& d
 checked_result<void> declare_script_class(class_decl* decl, const class_declaration_host& host) {
     if (decl->generic_marker) {   // a generic's declaration ran: the instances that waited for it
         class_registry& registry = engine_access::get_class_registry(*host.eng);
+        if (const auto& declared = decl->marker_definition; declared && declared->kind == generic_kind::function && !declared->space.empty()) {
+            // a namespace's function: the declaration another unit ran for these value parameters stands unless this one overrides
+            auto& standing = registry.namespace_generics_[std::string(decl->name)];
+            const auto held = std::find_if(standing.begin(), standing.end(), [&](const class_registry::namespace_generic& g) { return same_generic_signature(*g.definition, *declared); });
+            if (held != standing.end() && held->unit != host.unit.id && !generic_declared_override(*declared)) {
+                const size_t cut = declared->space.rfind("::");
+                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                    "Function '{0}' already exists in namespace '{1}'. Use 'override' keyword to replace it.",
+                    host.symbols->intern(declared->name), host.symbols->intern(cut == std::string::npos ? declared->space : declared->space.substr(cut + 2)));
+            }
+            if (held != standing.end()) { *held = {declared, host.unit.id}; } else { standing.push_back({declared, host.unit.id}); }
+        }
         registry.declared_generics_[std::string(decl->name)].insert(decl->marker_stamp);
         for (size_t i = 0; i < registry.waiting_functions_.size();) {
             if (const auto& w = registry.waiting_functions_[i]; w.generic != decl->name || !generic_declared(*host.eng, w.generic, w.stamp, w.remade)) { ++i; continue; }

@@ -224,6 +224,18 @@ void own_token_text(generic_definition& definition, string_symbolizer& symbols) 
 	for (generic_parameter& parameter : definition.parameters) { own(parameter.bound); }
 }
 
+bool generic_declared_override(const generic_definition& definition) {
+	int depth = 0;
+	for (size_t i = definition.list_end; i < definition.tokens.size(); ++i) {
+		const token_type kind = definition.tokens[i].type;
+		if (kind == token_type::left_paren) { ++depth; }
+		else if (kind == token_type::right_paren) { --depth; }
+		else if (depth == 0 && kind == token_type::left_brace) { return false; }   // the body: no marker stood before it
+		else if (depth == 0 && kind == token_type::override_keyword) { return true; }
+	}
+	return false;
+}
+
 uint64_t generic_stamp(const std::vector<token>& tokens) {
 	uint64_t hash = 14695981039346656037ull;
 	for (const token& t : tokens) {
@@ -431,6 +443,7 @@ std::shared_ptr<class_decl> generic_marker(const generic_decl& declared, string_
 			declared.marker = std::make_shared<class_decl>(declared.location, name, id);
 			declared.marker->generic_marker = true;
 			declared.marker->marker_stamp = declared.definition->stamp;
+			declared.marker->marker_definition = declared.definition;
 		}
 	}
 	return declared.marker;

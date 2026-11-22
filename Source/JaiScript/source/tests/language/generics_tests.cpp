@@ -837,7 +837,10 @@ public:
 			check_eq((int64_t)13, e->execute("use();").as_int());
 			e->execute("T same<T>(T x) { return x + x; }");
 			check_eq((int64_t)16, e->execute("use();").as_int());
-			e->execute("namespace wire { T twice<T>(T x) { return x + x; } }");
+			// a namespace's function declared again by another text collides, as its plain function does, unless it is written override
+			check_true(contains(failure(*e, "namespace wire { T twice<T>(T x) { return x + x; } }"), "Function 'twice' already exists in namespace 'wire'. Use 'override' keyword to replace it."));
+			check_eq((int64_t)16, e->execute("use();").as_int());
+			e->execute("namespace wire { T twice<T>(T x) override { return x + x; } }");
 			check_eq((int64_t)26, e->execute("use();").as_int());
 			// another parameter list is another overload beside the first, as for a plain function: the instance stays
 			e->execute("T same<T>(T x, T y) { return x * y; }");

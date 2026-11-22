@@ -1370,6 +1370,21 @@ struct engine::implementation {
     }
 
     static bool same_generic_shape(const detail::generic_definition& a, const detail::generic_definition& b) { return detail::same_generic_signature(a, b); }
+    // A namespace's generic function that another file (or another executed text) already declares with the same value
+    // parameters, and that is not written `override`: its declaration raises as it runs, as a plain namespace function's does
+    // (class_registry.cpp declare_script_class), so the pool keeps the declaration that stands
+    bool namespace_function_collides(const detail::generic_definition& definition) const {
+        if (definition.kind != detail::generic_kind::function || definition.space.empty()) { return false; }
+        const auto held = generics_.find(definition.qualified_name());
+        if (held == generics_.end()) { return false; }
+        const std::string& file = definition.location.filename;
+        for (const auto& g : held->second) {
+            if (g->stamp == definition.stamp || !same_generic_shape(*g, definition)) { continue; }
+            const bool other_text = g->location.filename != file || file.empty() || file == "<script>";
+            return other_text && !detail::generic_declared_override(definition);
+        }
+        return false;
+    }
     static void collect_generics(const std::vector<declaration_ptr>& decls, std::vector<detail::generic_definition_ptr>& out) {
         for (const auto& d : decls) {
             if (!d) { continue; }
@@ -1465,6 +1480,7 @@ struct engine::implementation {
         }
         for (const auto& definition : declared) {
             if (definition->kind == detail::generic_kind::method) { generic_method_names_.emplace(definition->name); }
+            if (namespace_function_collides(*definition)) { continue; }   // what stands stays the program's: this declaration raises when it runs
             if (const auto dropped = dropped_generics_.find(definition->qualified_name()); dropped != dropped_generics_.end()) {   // the name is a generic's again
                 auto& standing = generics_[definition->qualified_name()];
                 for (const auto& g : dropped->second) { if (std::erase(standing, g) != 0) { ++script_cache_epoch; } }

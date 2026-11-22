@@ -8,6 +8,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -332,6 +333,81 @@ public:
 			check_eq(std::string("bb"), q.run("all();"));
 			q.write("fa.jai", "string f<T>(T x) { return \"A\"; }\n");
 			check_eq(std::string("AA"), q.run("all();"), "the file declared again makes every instance the engine holds again");
+		});
+
+		test("a_namespaces_generic_function_collides_across_files_as_its_plain_function_does", [this]() {
+			// a namespace's function another unit declares with the same parameters raises where the second declaration runs,
+			// unless that declaration is written `override`: the generic gets the plain function's verdict, text included
+			struct form {
+				std::string name;
+				std::string declare;   // %s: the letter its body answers; %o: where `override` stands
+				std::string call;
+			};
+			const std::vector<form> forms = {
+				{"a plain function", "namespace n { string f(int x)%o { return \"%s\"; } }\n", "n::f(1)"},
+				{"a generic function", "namespace n { string f<T>(T x)%o { return \"%s\"; } }\n", "n::f(1)"},
+				{"a generic function called with its type argument", "namespace n { string f<T>(T x)%o { return \"%s\"; } }\n", "n::f<int>(1)"},
+			};
+			const auto text = [](const form& f, const std::string& letter, bool overrides) {
+				std::string out = f.declare;
+				out.replace(out.find("%o"), 2, overrides ? " override" : "");
+				out.replace(out.find("%s"), 2, letter);
+				return out;
+			};
+			const std::string collision = "Function 'f' already exists in namespace 'n'. Use 'override' keyword to replace it.";
+			for (const form& f : forms) {
+				const auto files = [&](program& p, bool override_a, bool override_b) {
+					p.write("fa.jai", text(f, "a", override_a) + "string use_a() { return " + f.call + "; }\n");
+					p.write("fb.jai", text(f, "b", override_b) + "string use_b() { return " + f.call + "; }\n");
+					p.write("fc.jai", "string use_c() { return " + f.call + "; }\n");
+				};
+				const std::string second = "string out = \"\";\nimport \"fa.jai\";\nout += " + f.call + " + use_a();\n"
+				                           "try { import(\"fb.jai\"); out += \"|loaded\"; } catch (e) { out += \"|\" + e; }\nout += \"|\" + " + f.call + " + use_a();\nout;";
+				{
+					program p("n1_plain_" + std::to_string(&f - forms.data()));
+					files(p, false, false);
+					p.write("root.jai", second);
+					check_eq("aa|" + collision + "|aa", p.run_file("root.jai"), f.name + ": the second file's declaration collides and the first stands");
+					check_eq(std::string("a"), p.run(f.call + ";"), f.name + ": later text reaches the declaration that stands");
+				}
+				{
+					program p("n1_first_" + std::to_string(&f - forms.data()));
+					files(p, true, false);
+					p.write("root.jai", second);
+					check_eq("aa|" + collision + "|aa", p.run_file("root.jai"), f.name + ": override on the first only does not let the second in");
+				}
+				{
+					program p("n1_second_" + std::to_string(&f - forms.data()));
+					files(p, false, true);
+					p.write("root.jai", "import \"fa.jai\";\nimport \"fb.jai\";\nimport \"fc.jai\";\n"
+					                    "string all() { import(\"fa.jai\", \"fb.jai\", \"fc.jai\"); return " + f.call + " + use_a() + use_b() + use_c(); }\n");
+					check_eq(std::string("null"), p.run_file("root.jai"), f.name);
+					check_eq(std::string("bbbb"), p.run("all();"), f.name + ": override on the second replaces, for every caller");
+					// a reload of either file: the overriding file replaces again, the other collides with what stands and waits
+					p.write("fb.jai", text(f, "B", true) + "string use_b() { return " + f.call + "; }\n");
+					check_eq(std::string("BBBB"), p.run("all();"), f.name + ": the overriding file declared again");
+					p.write("fa.jai", text(f, "A", false) + "string use_a() { return " + f.call + "; }\n");
+					check_eq("ERR: " + collision, p.run("all();").substr(0, 5 + collision.size()), f.name + ": the first file declared again collides with the declaration that stands");
+					check_eq(std::string("BBBB"), p.run("all();"), f.name + ": and the program runs on");
+				}
+				{
+					program p("n1_same_" + std::to_string(&f - forms.data()));
+					files(p, false, false);
+					p.write("root.jai", "import \"fc.jai\";\nimport \"fa.jai\";\nstring all() { import(\"fa.jai\", \"fc.jai\"); return " + f.call + " + use_a() + use_c(); }\n");
+					check_eq(std::string("null"), p.run_file("root.jai"), f.name + ": a file that only calls it, imported first");
+					check_eq(std::string("aaa"), p.run("all();"), f.name);
+					p.write("fa.jai", text(f, "A", false) + "string use_a() { return " + f.call + "; }\n");
+					check_eq(std::string("AAA"), p.run("all();"), f.name + ": the same file run again replaces its own");
+				}
+			}
+			// a class in a namespace is replaced by the later file, a generic method with it
+			for (const char* method : {"string f(int x)", "string f<T>(T x)"}) {
+				program p(std::string("n1_method_") + (method[8] == '<' ? "g" : "p"));
+				p.write("fa.jai", std::string("namespace n { class K { ") + method + " { return \"a\"; } } }\nstring use_a() { return n::K().f(1); }\n");
+				p.write("fb.jai", std::string("namespace n { class K { ") + method + " { return \"b\"; } } }\nstring use_b() { return n::K().f(1); }\n");
+				p.write("root.jai", "import \"fa.jai\";\nimport \"fb.jai\";\nn::K().f(1) + use_a() + use_b();");
+				check_eq(std::string("bbb"), p.run_file("root.jai"), method);
+			}
 		});
 	}
 };

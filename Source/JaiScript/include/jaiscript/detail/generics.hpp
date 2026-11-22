@@ -89,6 +89,9 @@ namespace jai::detail {
 		}
 	};
 	using generic_definition_ptr = std::shared_ptr<const generic_definition>;
+	// The declaration is written `override` (string f<T>(T x) override { ... }): it replaces a namespace's function of its
+	// name and value parameters that another unit declared, as a plain function's does
+	bool generic_declared_override(const generic_definition& definition);
 
 	// What identifies an instance: its name and the declaration it is made from. Two generic functions (or methods) of a name
 	// that take the same type arguments are two instances of that one name, overloads of it as two functions written by hand

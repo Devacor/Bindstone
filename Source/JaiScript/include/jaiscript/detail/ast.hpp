@@ -1133,6 +1133,7 @@ namespace jai {
         bool instance_remade = false;
         bool generic_marker = false;   // no class: a generic class's declaration ran (generic_decl::marker), `name` its qualified name
         uint64_t marker_stamp = 0;     // a marker's: the stamp of the definition whose declaration it is
+        std::shared_ptr<const detail::generic_definition> marker_definition;   // a marker's: that definition. Never serialized.
 
         class_decl(const source_location& loc, std::string_view n, uint64_t nid = UINT64_MAX)
             : declaration(loc, node_type::class_decl), name(n), name_id(nid) {}    };

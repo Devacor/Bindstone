@@ -47,6 +47,14 @@ public:
     // The generics whose declaration has run, by qualified name: the stamp of each definition declared under it (a class's
     // generic method is declared as its class is)
     std::unordered_map<std::string, std::unordered_set<uint64_t>> declared_generics_;
+    // A namespace's generic functions, by qualified name: the declaration that stands for each set of value parameters and
+    // the unit that ran it. Another unit's declaration of the same parameters collides as a plain function's does, unless it
+    // is written `override`; the unit's own run again replaces its own.
+    struct namespace_generic {
+        std::shared_ptr<const detail::generic_definition> definition;
+        uint32_t unit = 0;
+    };
+    std::unordered_map<std::string, std::vector<namespace_generic>> namespace_generics_;
     // A generic function's instance a unit offered before its generic's declaration ran, bound when that declaration runs:
     // the function as the offering backend made it, to its name in `env` (detail::declare_script_function), or a
     // namespace's function, its declaration joining `space` (detail::namespace_function_waits)

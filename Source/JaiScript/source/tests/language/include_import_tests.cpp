@@ -78,6 +78,18 @@ public:
             cleanup_temp_file(generics);
         });
 
+        // A file a function includes lists its warning under its own name and line, not the including file's
+        test("an_include_in_a_function_lists_its_warning_under_its_file", [=, this]() {
+            auto included = create_temp_file("warn_region_include.jai", "[[warn_mode]];\nfunction k() { return undeclared_inc; }\n");
+            auto eng = make_engine();
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
+            const std::string root = "void run() { include(\"warn_region_include.jai\"); }\n1;\n";
+            eng->execute(root);
+            const std::string listing = eng->last_check_diagnostics().format(root, "<script>");
+            check_true(listing.find("warn_region_include.jai:2:") != std::string::npos && listing.find("<script>:2:") == std::string::npos, listing);
+            cleanup_temp_file(included);
+        });
+
         test("include_with_angle_brackets", [=, this]() {
             auto eng = make_engine();
             

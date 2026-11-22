@@ -511,6 +511,9 @@ public:
         stack_.arm();
         try {
             collect_top_level();
+            for (const auto& d : decls_) {   // the unit's own text (an include spliced into a body keeps its file's places)
+                if (unit_file_.empty() && d && !instance_node(*d) && !d->location.filename.empty()) { unit_file_ = d->location.filename; }
+            }
             scopes_.emplace_back();
             mode_guard unit(mode_stack_, leading_mode(decls_), /*scoped=*/true);
             warn_duplicate_top_level_functions();   // under the unit's [[warn_mode]] / [[strict_mode]]
@@ -1264,8 +1267,8 @@ private:
             capped_ = true;
             return;
         }
-        // inside a template's body and inside a generic another file declares the place is that file's
-        std::string file = template_files_ > 0 || (instance_ctx_ && loc.filename != unit_file_) ? loc.filename : std::string();
+        // inside a template's body, a generic another file declares and a file an include splices in, the place is that file's
+        std::string file = template_files_ > 0 || (!unit_file_.empty() && !loc.filename.empty() && loc.filename != unit_file_) ? loc.filename : std::string();
         std::string key = file + ":" + std::to_string(loc.line) + ":" + std::to_string(loc.column) + ":" + message;
         if (instance_ctx_) { key += ":"; key += instance_ctx_->name; }   // each instance reports what its own arguments break
         if (!seen_.insert(std::move(key)).second) {

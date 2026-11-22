@@ -162,12 +162,12 @@ silent after disconnect: true</code></pre></div>
 <li><strong>There is no queued delivery.</strong> Receivers run on the emitting thread, so a signal with script receivers is emitted on the thread using that engine (<a href="02-dynamic-binder.html#live-objects-both-directions">one engine serves one thread at a time</a>). A host that emits from a worker and wants receivers on its main thread hands the emit over itself.</li>
 </ul>
 <h3 id="destroy-order">Destroy order<a class="hlink" href="#destroy-order" aria-label="link">&#8203;</a></h3>
-<p>An engine and the emitters its script connected to may be destroyed in either order. Once the engine is gone:</p>
+<p>An engine and the emitters its script connected to may be destroyed in either order. An emitter the program owns dies in its turn with the program's variables, and its receivers with it. For an emitter that is still alive after them (the host owns it, or its own receiver keeps it), the engine's destruction releases what each script receiver binds or captures, the last connected first, while script still runs: an object only a receiver kept runs its destructor then. The receivers stay connected. From that moment, and once the engine is gone:</p>
 <ul>
-<li>Its script receivers are skipped as if blocked (text, function values, and script <code>on_change</code> callbacks), so <code>emit_while</code> continues past them and C++ receivers keep firing. A text receiver connected afterwards is skipped too.</li>
-<li>Dropping a receiver, an emitter or its owner releases what script receivers captured without running any script: no receiver body, no script destructor.</li>
-<li>A <code>std::function</code> made by <code>convert_script_function</code> throws <code>Cannot call a script function after its engine was destroyed</code> when called.</li>
-<li>Script values the host holds directly should still be dropped before the engine. Releasing one afterwards runs no script, and nothing else may be done with it.</li>
+<li>Its script receivers are skipped as if blocked (text, function values, and script <code>on_change</code> callbacks), so <code>emit_while</code> continues past them and C++ receivers keep firing: a destructor the engine's destruction runs may emit, and no script receiver hears it. A text receiver connected afterwards is skipped too.</li>
+<li>Dropping a receiver, an emitter or its owner runs no script: no receiver body, and no script destructor, since the engine already ran them.</li>
+<li>A <code>std::function</code> made by <code>convert_script_function</code> throws <code>Cannot call a script function after its engine was destroyed</code> when called. What its script function captured was released with the receivers'.</li>
+<li>Script values the host holds directly should still be dropped before the engine. The engine destroys the object such a value names as it is destroyed itself; releasing the value afterwards runs no script, and nothing else may be done with it.</li>
 </ul>
 <h3 id="script-receivers-and-hot-reload">Script receivers and hot reload<a class="hlink" href="#script-receivers-and-hot-reload" aria-label="link">&#8203;</a></h3>
 <p>Connections are C++ state on the emitter, so a reload neither drops nor duplicates them, and re-running code that connects under a name replaces that name&#x27;s receiver. What runs after the reload depends on the receiver:</p>

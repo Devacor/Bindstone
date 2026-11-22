@@ -282,12 +282,21 @@ error naming the extraction that works. <code>unchecked_array_node()</code> requ
 <tr><td>a <code>jai::held_value</code>: what <code>execute</code>, <code>execute_file</code>, <code>get_variable</code> and <code>eng-&gt;hold(v)</code> return</td><td>until its engine is destroyed. It never keeps the engine alive.</td></tr>
 <tr><td>a held value after its engine is gone</td><td><code>valid()</code> is false, <code>get_engine()</code> is null, every read throws <code>jai::runtime_error</code> <code>Value outlived its engine.</code>; copying, assigning and destroying it are safe</td></tr>
 <tr><td>a <code>jai::coroutine_handle</code> C++ owns after its engine is gone</td><td><code>done()</code> is true and <code>next</code> returns the error <code>Value outlived its engine.</code>; dropping it is safe</td></tr>
+<tr><td>a <code>std::function</code> made of a script function (a <code>std::function</code> parameter, <code>convert_script_function</code>) after its engine is gone</td><td>a call throws <code>jai::runtime_error</code> <code>Cannot call a script function after its engine was destroyed</code>; copying, moving and destroying it are safe</td></tr>
+<tr><td>a plain <code>script_value</code> C++ kept after its engine is gone</td><td>only dropping it is safe. The engine already destroyed the object it names</td></tr>
 </tbody></table></div>
 <ul>
 <li><strong>Teardown.</strong> A destroyed engine first releases every held payload while it can still run script, so a
 held instance's destructor runs then. The program's variables die next, last constructed first, and then every coroutine
 still alive ends, the last made first: its locals, arguments and receiver are destroyed while script still runs
-(<a href="../embedding/09-coroutine-hosting.html#driving-from-c-pattern-2-the-native-handle">Driving from C++ with the native handle</a>).</li>
+(<a href="../embedding/09-coroutine-hosting.html#driving-from-c-pattern-2-the-native-handle">Driving from C++ with the native handle</a>).
+Then the engine lets go of what the host's callbacks hold, the last made first: the script function inside each
+<code>std::function</code> the host made of one, and what each script receiver on a signal binds or captures
+(<a href="../embedding/10-signals-properties.html#destroy-order">Destroy order</a>). Last, every script object still alive
+is destroyed, its destructor running once: one that handles reaching each other kept, and one a plain
+<code>script_value</code> of the host's still names
+(<a href="../guide/07-classes.html#what-the-engine-destroys">What the engine destroys</a> has the order). So no destructor
+is left unrun when the engine is gone, and nothing the host drops afterwards runs script.</li>
 <li><strong>Threads.</strong> Another thread may copy, read, assign or drop a value only while the engine is idle, with
 the hand-off synchronized as for any C++ object. Debug builds assert when an object dies on another thread while its
 engine runs.</li>

@@ -9,12 +9,13 @@ A bound C++ object a value holds without an instance (a raw C++ object, a corout
 ## The block
 
 ```
-[ definition pin? ]  [ control block | class_instance (object_holder at offset 0) ]  [ cells ]
+[ definition pin, birth? ]  [ control block | class_instance (object_holder at offset 0) ]  [ cells ]
 ```
 
 `class_instance::make` makes the whole block. The control block's two counts are 32 bits each; its deallocator says whether
-a definition pin precedes it (a destructor class's instance pins its definition there); the strong family's last weak reference
-frees the block. Every handle of the object, a script value's, a `strong_ptr<class_instance>` the runtime keeps and a host
+a definition pin and a birth precede it (a destructor class's instance pins its definition there and records when it was made
+among its engine's, the order the engine's teardown destroys the instances still alive in); the strong family's last weak
+reference frees the block. Every handle of the object, a script value's, a `strong_ptr<class_instance>` the runtime keeps and a host
 `shared_ptr` over it alike, is one count on the one control block: two wraps of one C++ object are the same object, and
 `use_count()` counts every owner.
 

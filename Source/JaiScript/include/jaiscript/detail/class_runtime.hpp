@@ -105,6 +105,17 @@ inline std::shared_ptr<class_definition>* object_block::definition_pin(control_b
     return cb->dealloc_fn == &release_pinned
         ? reinterpret_cast<std::shared_ptr<class_definition>*>(reinterpret_cast<std::byte*>(cb) - pin_bytes) : nullptr;
 }
+
+inline uint64_t* object_block::birth(control_block_base* cb) noexcept {
+    return cb->dealloc_fn == &release_pinned ? reinterpret_cast<uint64_t*>(reinterpret_cast<std::byte*>(cb) - sizeof(uint64_t)) : nullptr;
+}
+
+// A destructor instance a parallel region made takes its birth when the join registers it, in element order
+inline void note_birth_after_region(class_instance& instance, engine& eng) noexcept {
+    if (uint64_t* birth = object_block::birth(cb_from_object(&instance)); birth && *birth == 0) {
+        *birth = engine_access::next_destructor_instance_birth_after_region(eng);
+    }
+}
 }
 
 inline strong_ptr<class_instance> class_instance::make(std::string_view class_name, engine* eng) {
@@ -114,9 +125,14 @@ inline strong_ptr<class_instance> class_instance::make(std::string_view class_na
 inline strong_ptr<class_instance> class_instance::make(uint64_t type_id, engine* eng, uint32_t slots, class_definition* destructor_owner) {
     using block_cb = detail::control_block<class_instance>;
     static_assert(sizeof(block_cb) == detail::k_instance_cb_offset + sizeof(class_instance), "the cells follow the instance");
+    static_assert(detail::object_block::pin_bytes % alignof(block_cb) == 0 && sizeof(std::shared_ptr<class_definition>) % alignof(uint64_t) == 0,
+                  "the pin and the birth leave the control block aligned");
     const size_t prefix = destructor_owner ? detail::object_block::pin_bytes : 0;
     auto* memory = static_cast<std::byte*>(::operator new(prefix + sizeof(block_cb) + trailing_bytes(slots)));
-    if (destructor_owner) { new (memory) std::shared_ptr<class_definition>(destructor_owner->shared_from_this()); }
+    if (destructor_owner) {
+        new (memory) std::shared_ptr<class_definition>(destructor_owner->shared_from_this());
+        new (memory + sizeof(std::shared_ptr<class_definition>)) uint64_t(eng ? detail::engine_access::next_destructor_instance_birth(*eng) : 0);
+    }
     auto* cb = new (memory + prefix) block_cb();
     cb->dealloc_fn = destructor_owner ? &detail::object_block::release_pinned : &detail::object_block::release;
     const trailing_cells trailing{memory + prefix + sizeof(block_cb), slots};

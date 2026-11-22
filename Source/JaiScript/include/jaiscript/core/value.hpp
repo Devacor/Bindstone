@@ -3072,7 +3072,9 @@ namespace detail {
     // A value handed out of the engine (execute, execute_file, get_variable, hold): it keeps its payload until its engine is
     // destroyed, never the engine itself. The engine's teardown releases the payload while the engine still runs destructors and
     // leaves the held value outlived: valid() is false, get_engine() is null and every read throws "Value outlived its engine."
-    // A copy into a plain script_value is a borrow, valid while the engine lives (internal/value16_design.md)
+    // A copy into a plain script_value is a borrow, valid while the engine lives (internal/value16_design.md). A callback's hold
+    // (the function a std::function made of a script function calls, what a signal receiver saved) is released later in the
+    // teardown, after the program's variables, so a receiver still fires for the destructors those run
     class held_value : public script_value {
     public:
         held_value(script_value value, engine* holder);
@@ -3119,6 +3121,7 @@ namespace detail {
 
     private:
         friend class engine;
+        held_value(script_value value, engine* holder, bool callback);
         void check_alive() const { if (outlived_) [[unlikely]] { throw_outlived(); } }
         void rebind(engine* holder, bool outlived);
         [[noreturn]] JAI_NOINLINE static void throw_outlived();
@@ -3126,6 +3129,7 @@ namespace detail {
         held_value* previous_ = nullptr;   // the engine's registry of held values: an intrusive list under its lock
         held_value* next_ = nullptr;
         bool outlived_ = false;
+        bool callback_ = false;            // which of the engine's two lists holds it, fixed when it is made
     };
 
     // ---- script_array kind-dispatched element access (script_value complete here) ----

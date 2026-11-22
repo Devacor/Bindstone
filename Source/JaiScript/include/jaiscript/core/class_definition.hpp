@@ -59,14 +59,18 @@ namespace detail {
         std::shared_ptr<class_definition> def;
         void operator()(class_instance* ptr) const noexcept;
     };
-    // The object block (internal/object_layout.md): a destructor class's pin on its definition, the instance's strong_ptr
-    // control block and instance (an object value's holder itself), then the cells. The strong family's last weak reference
-    // frees the block through one of two deallocators, and which one it is says whether the pin is there.
+    // The object block (internal/object_layout.md): a destructor class's pin on its definition and its birth among its engine's
+    // destructor instances, the instance's strong_ptr control block and instance (an object value's holder itself), then the
+    // cells. The strong family's last weak reference frees the block through one of two deallocators, and which one it is says
+    // whether the pin and the birth are there.
     struct object_block {
-        static constexpr size_t pin_bytes = sizeof(std::shared_ptr<class_definition>);
+        static constexpr size_t pin_bytes = sizeof(std::shared_ptr<class_definition>) + sizeof(uint64_t);
         inline static void release(control_block_base* cb) noexcept;
         inline static void release_pinned(control_block_base* cb) noexcept;
         inline static std::shared_ptr<class_definition>* definition_pin(control_block_base* cb) noexcept;
+        // When the instance was made (engine::next_destructor_instance_birth): the engine's teardown destroys the survivors in
+        // the reverse of it. Null for an allocation without the pin; 0 until a parallel region's join registers its instance
+        inline static uint64_t* birth(control_block_base* cb) noexcept;
     };
 }
 
@@ -771,6 +775,14 @@ public:
                               std::vector<detail::release_action>& actions, const class_definition* constructed = nullptr) const;
     script_value take_field_for_destroy(class_instance* instance, uint64_t field) const;
     void run_destructor_body(class_instance* instance, const class_definition* level, const script_value& body) const;
+    // Engine teardown, while script still runs: the destructors of the instances still alive (what a reference cycle or the
+    // host keeps), each once and no member taken. The last made goes first, as its death would run it: each level's body, then
+    // the instances that level's members alone hold, the members last declared first. An instance one member alone holds waits
+    // for that member's instance, and a ring of such holders starts at its last made. `survivors` pins every instance alive at
+    // the call and gains the ones a member leads to; the caller keeps them pinned until release_survivor_members
+    static void run_surviving_destructors(engine& eng, std::vector<strong_ptr<class_instance>>& survivors);
+    // Engine teardown, once no script can run: the instance gives up its members, which ends the cycle that kept it alive
+    static void release_survivor_members(class_instance& instance) noexcept;
     // The same question for a declared type (null, var and unknown kinds can hold anything)
     bool type_tree_runs_destructor(const type_info_ptr& t, std::vector<const class_definition*>& in_progress, uint8_t mode = 0) const;
 

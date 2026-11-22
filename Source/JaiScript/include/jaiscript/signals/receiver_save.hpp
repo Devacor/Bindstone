@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -26,11 +27,12 @@ namespace detail {
 struct receiver_save {
 	enum class kind_type : uint8_t { function, method, source };
 	kind_type kind = kind_type::source;
-	std::optional<script_value> function;   // function and method: the connected value, named when a save writes it
+	// What the receiver keeps of its engine is a callback's hold: the engine's teardown releases it with the receiver's function
+	std::optional<held_value> function;     // function and method: the connected value, named when a save writes it
 	std::string source;
 	std::vector<std::string> parameter_names;
 	std::string captures;                   // the value captures as one JSON object, empty for none
-	instance_variables capture_values;      // a loaded source receiver's captures: each emit runs over a copy of them
+	std::unordered_map<std::string, held_value> capture_values;   // a loaded source receiver's captures: each emit runs over a copy of them
 };
 
 // One saved receiver as an archive writes and reads it, whatever the signal's signature

@@ -1445,6 +1445,10 @@ namespace jai {
         bool parallel_region_active() const noexcept { return parallel_region_active_; }
         // the region guard's record of its region (on while workers run, back to the enclosing region's state after)
         void note_parallel_region(bool active) noexcept { parallel_region_active_ = active; }
+        // A destructor class's instance takes its place among the engine's when it is made; one a region makes takes it at the join
+        uint64_t next_destructor_instance_birth() noexcept { return parallel_region_active_ ? 0 : ++destructor_instance_births_; }
+        uint64_t next_destructor_instance_birth_after_region() noexcept { return ++destructor_instance_births_; }
+        bool callbacks_released() const noexcept { return callbacks_released_; }
         // Workers copy and construct class instances (by-value bindings, whole reads): the
         // class-definition instance registry they register into is engine-shared, so its
         // mutations serialize on this lock while a region runs (unlocked otherwise).
@@ -1737,7 +1741,16 @@ namespace jai {
         friend class held_value;
         void register_held(held_value* held);
         void unregister_held(held_value* held) noexcept;
-        void release_held_values() noexcept;
+        void move_held(held_value* from, held_value* to) noexcept;   // `to` takes `from`'s place in the registry
+        // The plain holds give up their payloads, or the callbacks' holds (after which the engine's script receivers stay quiet)
+        void release_held_values(bool callbacks = false) noexcept;
+        // The hold of a script function a host callback calls, or of what a signal receiver saved: released with the coroutines
+        held_value hold_callback(script_value value) const;
+        // Engine teardown: every instance still alive runs its destructors while script runs (the survivors stay pinned until
+        // release_surviving_instances lets their members go, once no script can run)
+        void destroy_surviving_instances() noexcept;
+        void release_surviving_instances() noexcept;
+        std::vector<std::shared_ptr<class_definition>> definitions_for_teardown() const;
         // Every live coroutine, the last made first: teardown retires the ones still alive while the engine runs their destructors
         void register_coroutine(coroutine_handle* a_coroutine) noexcept;
         void unregister_coroutine(coroutine_handle* a_coroutine) noexcept;
@@ -1753,7 +1766,9 @@ namespace jai {
         bool hot_reload_reporting_ = false;
         bool skip_unknown_receivers_ = false;
         bool parallel_region_active_ = false;
+        bool callbacks_released_ = false;   // the teardown released the callbacks' holds: no script receiver of this engine fires
         bool construction_access_waived_ = false;
+        uint64_t destructor_instance_births_ = 0;   // the last stamp a destructor class's instance took (next_destructor_instance_birth)
         type_info* handle_construction_ = nullptr;   // the handle type a new / make_shared construction about to start yields
         int* active_run_pins_ = nullptr;
         std::vector<field_migration_report> hot_reload_reports_;

@@ -202,7 +202,7 @@ std::shared_ptr<const receiver_save> function_receiver_save(const script_value& 
 	}
 	auto result = std::make_shared<receiver_save>();
 	result->kind = kind;
-	result->function = function;
+	if (engine* eng = function.payload_engine()) { result->function.emplace(engine_access::hold_callback(*eng, function)); }
 	return result;
 }
 
@@ -244,12 +244,12 @@ bool receiver_record_of(const receiver_save& a_save, serialization::archive_writ
 			a_out.captures = a_save.captures;
 			return true;
 		case receiver_save::kind_type::function:
-			if (eng && a_save.function) { a_out.function = program_function_name(*eng, *a_save.function); }
+			if (eng && a_save.function && a_save.function->valid()) { a_out.function = program_function_name(*eng, *a_save.function); }
 			return !a_out.function.empty();
 		case receiver_save::kind_type::method: {
 			script_value object = script_value::make_null(eng);
 			script_value method = script_value::make_null(eng);
-			if (!eng || !a_save.function || !bound_parts(*a_save.function, object, method)) { return false; }
+			if (!eng || !a_save.function || !a_save.function->valid() || !bound_parts(*a_save.function, object, method)) { return false; }
 			a_out.method = bound_method_name(*eng, method);
 			if (a_out.method.empty()) { return false; }
 			a_out.object = a_writer.reference_object(object);
@@ -345,7 +345,7 @@ void archive_reader_core::arm_deferred_receivers() {
 					const script_value captures = stdlib::load_archive_value(eng, reader.read_value(), true);
 					if (captures.is_map()) {
 						for (const auto& [name, value] : captures.as_map()) {
-							if (name.is_string()) { source->capture_values.insert_or_assign(name.as_string(), value.deref()); }
+							if (name.is_string()) { source->capture_values.insert_or_assign(name.as_string(), detail::engine_access::hold_callback(*eng, value.deref())); }
 						}
 					}
 				}

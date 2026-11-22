@@ -680,6 +680,135 @@ public:
             });
         });
 
+        test("an_object_only_a_cycle_keeps_is_destroyed_at_teardown", [this]() {
+            // objects no variable names any more (a handle, a container, a closure or a bound method of their own keeps them) are
+            // destroyed with the engine: each destructor runs once while script still runs, the last constructed first, and an object
+            // only one member holds follows that member's object; TYPE is the class, as itself and as an instance of a generic class
+            struct shape { const char* what; const char* program; const char* log; };
+            static const shape shapes[] = {
+                {"a cycle of two", "auto a = new TYPE(\"a\"); auto b = new TYPE(\"b\"); a.other = b; b.other = a;", "b;a;"},
+                {"a cycle of three", "auto a = new TYPE(\"a\"); auto b = new TYPE(\"b\"); auto c = new TYPE(\"c\"); a.other = b; b.other = c; c.other = a;", "c;a;b;"},
+                {"an object that holds itself", "auto a = new TYPE(\"a\"); a.other = a;", "a;"},
+                {"two cycles", "auto a = new TYPE(\"a\"); a.other = a; auto b = new TYPE(\"b\"); b.other = b;", "b;a;"},
+                {"a cycle through an array", "auto a = new TYPE(\"a\"); a.kids.push(a); auto b = new TYPE(\"b\"); auto c = new TYPE(\"c\"); b.kids.push(c); c.kids.push(b);", "c;b;a;"},
+                {"a cycle through a map", "auto b = new TYPE(\"b\"); auto c = new TYPE(\"c\"); b.named[\"c\"] = c; c.named[\"b\"] = b;", "c;b;"},
+                {"a cycle through nested containers", "auto a = new TYPE(\"a\"); auto b = new TYPE(\"b\"); a.kids.push([{\"b\": b}]); b.named[\"a\"] = [a];", "b;a;"},
+                {"a cycle through a lambda capture", "auto a = new TYPE(\"a\"); a.act = [a]() { return a.name; };", "a;"},
+                {"a cycle through a bound method", "auto a = new TYPE(\"a\"); a.act = reflect::bind(a, \"get\");", "a;"},
+                {"a cycle through a coroutine frame", "auto a = new TYPE(\"a\"); a.act = a.steps(); a.act.next();", "a;"},
+                {"a cycle through a coroutine never started", "auto a = new TYPE(\"a\"); a.act = a.steps();", "a;"},
+                {"the members of an object that holds itself", "auto a = new TYPE(\"a\"); a.other = a; a.kids.push(new TYPE(\"kid\")); a.kids.push(new TYPE(\"last\")); a.named[\"m\"] = new TYPE(\"mapped\");",
+                 "a;mapped;last;kid;"},
+                {"an object two members of a cycle share", "auto a = new TYPE(\"a\"); auto b = new TYPE(\"b\"); auto shared = new TYPE(\"shared\"); a.other = b; b.other = a; a.kids.push(shared); b.kids.push(shared);",
+                 "shared;b;a;"},
+                {"an object made before the cycle that shares it", "auto shared = new TYPE(\"shared\"); auto a = new TYPE(\"a\"); auto b = new TYPE(\"b\"); a.other = b; b.other = a; a.kids.push(shared); b.kids.push(shared);",
+                 "b;a;shared;"},
+                {"a by-value member of an object that holds itself", "auto h = new Holder(); h.self = h;", "holder;inner;"},
+                {"a member's own member", "auto h = new Holder(); h.self = h; h.inner.kids.push(new TYPE(\"deep\"));", "holder;inner;deep;"},
+                {"a cycle a closure of a closure keeps", "auto a = new TYPE(\"a\"); auto inner = [a]() { return a.name; }; a.act = [inner]() { return inner(); };", "a;"},
+                {"a cycle beside a variable the program still names", "auto a = new TYPE(\"a\"); a.other = a; KEPT = new TYPE(\"kept\");", "kept;a;"},
+            };
+            std::string wrong;
+            for (const char* declared : {"class Node { string name; var other = null; array<var> kids; map<string, var> named; var act = null; Node(string n) { name = n; } "
+                                         "~Node() { note_end(name); } string get() { return name; } coroutine int steps() { yield 1; yield 2; return 3; } } "
+                                         "class Holder { Node inner = Node(\"inner\"); var self = null; ~Holder() { note_end(\"holder\"); } } var KEPT = null;",
+                                         "class Node<T> { T name; var other = null; array<var> kids; map<string, var> named; var act = null; Node(T n) { name = n; } "
+                                         "~Node() { note_end(name); } T get() { return name; } coroutine int steps() { yield 1; yield 2; return 3; } } "
+                                         "class Holder { Node<string> inner = Node<string>(\"inner\"); var self = null; ~Holder() { note_end(\"holder\"); } } var KEPT = null;"}) {
+                const std::string type = std::string_view(declared).find("<T>") != std::string_view::npos ? "Node<string>" : "Node";
+                for (const shape& s : shapes) {
+                    std::string program = s.program;
+                    for (size_t at = program.find("TYPE"); at != std::string::npos; at = program.find("TYPE", at)) { program.replace(at, 4, type); }
+                    std::string log;
+                    {
+                        auto e = make_engine();
+                        jai::stdlib::register_all(*e);
+                        e->add_function("note_end", [&log](const std::string& text) { log += text + ";"; });
+                        e->execute(declared);
+                        e->execute("void make() { " + program + " } make();");
+                        if (!log.empty()) { wrong += type + ", " + s.what + ": '" + log + "' died while the cycle held it\n"; }
+                        log.clear();
+                    }
+                    if (log != s.log) { wrong += type + ", " + s.what + ": the destructor log is '" + log + "', expected '" + s.log + "'\n"; }
+                }
+            }
+            check_eq(std::string(), wrong, "every destructor runs once at teardown, in its order");
+        });
+
+        test("a_destructor_at_teardown_finds_the_rest_of_its_cycle_whole", [this]() {
+            // every destructor of the objects teardown destroys runs before any of them loses a member: one reads another's fields
+            // and calls its methods whether or not that one's destructor already ran, and a destructor that lets go of the cycle
+            // itself destroys nothing twice
+            struct shape { const char* what; const char* declared; const char* program; const char* log; };
+            static const shape shapes[] = {
+                {"each reads the other",
+                 "class Peer { string name; int hp = 7; var other = null; Peer(string n) { name = n; } string hello() { return name + \"!\"; } "
+                 "~Peer() { note_end(name + \" sees \" + other.name + \" \" + to_string(other.hp) + \" \" + other.hello()); } }",
+                 "auto a = new Peer(\"a\"); auto b = new Peer(\"b\"); a.other = b; b.other = a;", "b sees a 7 a!;a sees b 7 b!;"},
+                {"each reads a typed member of the other",
+                 "class Peer { string name; array<int> scores = [1, 2]; map<string, int> ages = {\"x\": 3}; var other = null; Peer(string n) { name = n; } "
+                 "~Peer() { note_end(name + \" \" + to_string(other.scores.size()) + to_string(other.ages[\"x\"])); } }",
+                 "auto a = new Peer(\"a\"); auto b = new Peer(\"b\"); a.other = b; b.other = a;", "b 23;a 23;"},
+                {"a destructor writes the other",
+                 "class Peer { string name; int hits = 0; var other = null; Peer(string n) { name = n; } ~Peer() { other.hits += 1; note_end(name + to_string(hits)); } }",
+                 "auto a = new Peer(\"a\"); auto b = new Peer(\"b\"); a.other = b; b.other = a;", "b0;a1;"},
+                {"a destructor lets go of its cycle",
+                 "class Peer { string name; var other = null; Peer(string n) { name = n; } ~Peer() { note_end(name); other = null; } }",
+                 "auto a = new Peer(\"a\"); auto b = new Peer(\"b\"); a.other = b; b.other = a;", "b;a;"},
+                {"a destructor empties the container that holds the next object",
+                 "class Peer { string name; array<var> kids; Peer(string n) { name = n; } ~Peer() { note_end(name); kids.clear(); } }",
+                 "auto a = new Peer(\"a\"); auto b = new Peer(\"b\"); a.kids.push(b); b.kids.push(a);", "b;a;"},
+                {"a derived object's base destructor runs after its own, ahead of the next object",
+                 "class Base { string name; var other = null; ~Base() { note_end(\"base of \" + name); } } "
+                 "class Peer : Base { Peer(string n) { name = n; } ~Peer() { note_end(name); } }",
+                 "auto a = new Peer(\"a\"); auto b = new Peer(\"b\"); a.other = b; b.other = a;", "b;base of b;a;base of a;"},
+                {"a destructor that raises is reported and the rest still run",
+                 "class Peer { string name; var other = null; Peer(string n) { name = n; } ~Peer() { note_end(name); if (name == \"b\") { throw \"boom\"; } } }",
+                 "auto a = new Peer(\"a\"); auto b = new Peer(\"b\"); a.other = b; b.other = a;", "b;a;"},
+            };
+            std::string wrong;
+            for (const shape& s : shapes) {
+                std::string log;
+                std::string reported;
+                {
+                    auto e = make_engine();
+                    jai::stdlib::register_all(*e);
+                    e->add_function("note_end", [&log](const std::string& text) { log += text + ";"; });
+                    e->set_script_error_handler([&reported](const std::string& text) { reported += text; });
+                    e->execute(s.declared);
+                    e->execute(std::string("void make() { ") + s.program + " } make();");
+                    if (!log.empty()) { wrong += std::string(s.what) + ": '" + log + "' died while the cycle held it\n"; }
+                    log.clear();
+                }
+                if (log != s.log) { wrong += std::string(s.what) + ": the destructor log is '" + log + "', expected '" + s.log + "'\n"; }
+                const bool raises = std::string_view(s.declared).find("throw") != std::string_view::npos;
+                if (raises != (reported.find("boom") != std::string::npos)) { wrong += std::string(s.what) + ": reported '" + reported + "'\n"; }
+            }
+            check_eq(std::string(), wrong, "a destructor at teardown sees whole objects");
+        });
+
+        test("a_value_the_host_keeps_past_its_engine_was_destroyed_with_the_engine", [this]() {
+            // a plain script_value the host kept is the host's to drop, before the engine or after: the object it names is destroyed
+            // with the engine, once, and dropping the value afterwards runs nothing
+            std::string log;
+            std::optional<jai::script_value> kept;
+            std::optional<jai::script_value> cycle;
+            {
+                auto e = make_engine();
+                jai::stdlib::register_all(*e);
+                e->add_function("note_end", [&log](const std::string& text) { log += text + ";"; });
+                e->execute("class Node { string name; var other = null; Node(string n) { name = n; } ~Node() { note_end(name); } }");
+                kept.emplace(static_cast<const jai::script_value&>(e->execute("new Node(\"kept\");")));
+                cycle.emplace(static_cast<const jai::script_value&>(e->execute("auto a = new Node(\"a\"); auto b = new Node(\"b\"); a.other = b; b.other = a; a = null; b;")));
+                e->execute("b = null;");
+                check_eq(std::string(), log, "the host's values keep their objects alive");
+            }
+            check_eq(std::string("b;a;kept;"), log, "the engine destroys what the host still holds");
+            kept.reset();
+            cycle.reset();
+            check_eq(std::string("b;a;kept;"), log, "dropping the values after the engine runs nothing");
+        });
+
         test("a_destructor_at_teardown_sees_the_functions_a_run_sees", [this]() {
             // every destructor the engine's own destruction runs (a global, a namespace member, a static, a suspended run's local)
             // calls what a destructor mid-run calls: the formatted print, format, the stdlib namespaces, a host function

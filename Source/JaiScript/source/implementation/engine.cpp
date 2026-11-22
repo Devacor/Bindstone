@@ -778,7 +778,9 @@ struct engine::implementation {
     type_info_arena type_arena_;
     std::unordered_map<type_key, type_info*, type_key_hash> type_infos_;
     std::mutex held_lock;   // the held values' registry (held_value): touched only when a host constructs, copies, moves or drops one
-    held_value* held_head = nullptr;
+    held_value* held_head[2] = {nullptr, nullptr};   // the plain holds, then the callbacks' (held_value::callback_), each the last made first
+    // Engine teardown: the instances destroy_surviving_instances found alive, pinned until their members are released
+    std::vector<strong_ptr<class_instance>> teardown_survivors_;
     coroutine_handle* coroutine_head = nullptr;   // live coroutines, the last made first (engine::register_coroutine)
 
     // Secondary index for O(1) lookup by type ID (stores pointers into type_infos_)
@@ -4530,8 +4532,8 @@ engine::engine() : impl(std::make_unique<implementation>()) {
     impl->global_environment_->explain_undefined([this](uint64_t id) { return detail::undeclared_instance_text(*this, id); });
 }
 
-bool engine_loading(const engine* a_engine) {
-    return a_engine && a_engine->loading();
+bool engine_quiet(const engine* a_engine) {
+    return a_engine && (a_engine->loading() || detail::engine_access::callbacks_released(*a_engine));
 }
 
 engine::load_session::load_session(engine* a_engine) : eng(a_engine) {
@@ -4635,6 +4637,41 @@ void engine::release_program_scope_in_reverse() noexcept {
     }
 }
 
+// Every definition an instance can still belong to, in name order: the teardown's walks over the instances alive take them in it
+std::vector<std::shared_ptr<class_definition>> engine::definitions_for_teardown() const {
+    std::vector<std::shared_ptr<class_definition>> result;
+    std::unordered_set<const class_definition*> seen;
+    const auto add = [&](std::shared_ptr<class_definition> def) {
+        if (def && seen.insert(def.get()).second) { result.push_back(std::move(def)); }
+    };
+    for (const auto& [name, def] : impl->class_registry_.script_classes_) { add(def); }
+    for (const auto& [name, def] : impl->classes) { add(def); }
+    for (const auto& [id, def] : impl->classesByTypeId) { add(def); }
+    for (const auto& [type, def] : impl->classesByType) { add(def); }
+    std::stable_sort(result.begin(), result.end(), [](const auto& a, const auto& b) { return a->get_name() < b->get_name(); });
+    return result;
+}
+
+// An instance alive here is one a reference cycle keeps or one the host still holds: its destructors run now, and it stays
+// pinned with its members in place until no script can run (release_surviving_instances), so no destructor meets a half-dead object
+void engine::destroy_surviving_instances() noexcept {
+    try {
+        std::vector<strong_ptr<class_instance>>& survivors = impl->teardown_survivors_;
+        for (const auto& def : definitions_for_teardown()) {
+            for (auto& live : def->live_instances()) { survivors.push_back(std::move(live)); }
+        }
+        if (!survivors.empty()) { class_definition::run_surviving_destructors(*this, survivors); }
+    } catch (...) {}
+}
+
+// Called with the backend gone and before the definitions detach: every instance alive is pinned across the detach, and
+// the caller lets go of their members after it
+void engine::release_surviving_instances() noexcept {
+    std::vector<strong_ptr<class_instance>> survivors = std::move(impl->teardown_survivors_);
+    impl->teardown_survivors_.clear();
+    for (size_t i = survivors.size(); i-- > 0;) { class_definition::release_survivor_members(*survivors[i]); }
+}
+
 // Reset the backend before impl members unwind so callable thunks (destructor deleters,
 // stored function values) firing during teardown see get_execution_backend() == nullptr
 // and fail soft instead of re-entering a half-destroyed backend.
@@ -4669,9 +4706,18 @@ engine::~engine() {
             release_program_scope_in_reverse();
         }
         retire_coroutines();
+        // What the host still holds of the program goes next: the functions its callbacks and receivers call, then every
+        // instance still alive (a reference cycle keeps it, or a value the host kept) runs its destructors
+        release_held_values(true);
+        if (impl->backend) { destroy_surviving_instances(); }
         impl->format_literal_rows_.clear();
         impl->tearing_down = true;
         impl->backend.reset();
+        try {
+            for (const auto& def : definitions_for_teardown()) {
+                for (auto& live : def->live_instances()) { impl->teardown_survivors_.push_back(std::move(live)); }
+            }
+        } catch (...) {}
         // Definitions a host or a captured environment keeps alive past this point must not
         // consult the engine from an instance destructor (registry_lock reads it)
         for (auto& [name, def] : impl->classes) { if (def) { def->detach_for_teardown(); } }
@@ -4684,8 +4730,10 @@ engine::~engine() {
         for (auto& [name, def] : impl->class_registry_.script_classes_) { if (def) { def->release_values_for_teardown(); } }
         for (auto& [name, def] : impl->classes) { if (def && def->is_script_class()) { def->release_values_for_teardown(); } }
         script_value::release_deferred_cell_cycles(this);
+        release_surviving_instances();
         // a destructor that ran during teardown may have held a value
         release_held_values();
+        release_held_values(true);
         retire_coroutines();
     }
 }
@@ -5108,13 +5156,19 @@ held_value::held_value(script_value value, engine* holder) : script_value(std::m
     if (engine_) { engine_->register_held(this); }
 }
 
-held_value::held_value(const held_value& other) : script_value(static_cast<const script_value&>(other)), engine_(other.engine_), outlived_(other.outlived_) {
+held_value::held_value(script_value value, engine* holder, bool callback) : script_value(std::move(value)), engine_(holder), callback_(callback) {
     if (engine_) { engine_->register_held(this); }
 }
 
-held_value::held_value(held_value&& other) noexcept : script_value(static_cast<script_value&&>(other)), engine_(other.engine_), outlived_(other.outlived_) {
+held_value::held_value(const held_value& other) : script_value(static_cast<const script_value&>(other)), engine_(other.engine_), outlived_(other.outlived_), callback_(other.callback_) {
     if (engine_) { engine_->register_held(this); }
-    other.rebind(nullptr, false);   // the moved-from value is a plain null: it names no engine
+}
+
+// A moved hold keeps its place among the engine's: the holds are released in the order they were made, wherever they moved since
+held_value::held_value(held_value&& other) noexcept : script_value(static_cast<script_value&&>(other)), engine_(other.engine_), outlived_(other.outlived_), callback_(other.callback_) {
+    if (engine_) { engine_->move_held(&other, this); }
+    other.engine_ = nullptr;   // the moved-from value is a plain null: it names no engine
+    other.outlived_ = false;
 }
 
 void held_value::rebind(engine* holder, bool outlived) {
@@ -5167,27 +5221,43 @@ void string_symbolizer::throw_frozen_miss(std::string_view name) {
 
 void engine::register_held(held_value* held) {
     std::scoped_lock lock(impl->held_lock);
+    held_value*& head = impl->held_head[held->callback_];
     held->previous_ = nullptr;
-    held->next_ = impl->held_head;
-    if (impl->held_head) { impl->held_head->previous_ = held; }
-    impl->held_head = held;
+    held->next_ = head;
+    if (head) { head->previous_ = held; }
+    head = held;
 }
 
 void engine::unregister_held(held_value* held) noexcept {
     std::scoped_lock lock(impl->held_lock);
-    if (held->previous_) { held->previous_->next_ = held->next_; } else if (impl->held_head == held) { impl->held_head = held->next_; }
+    held_value*& head = impl->held_head[held->callback_];
+    if (held->previous_) { held->previous_->next_ = held->next_; } else if (head == held) { head = held->next_; }
     if (held->next_) { held->next_->previous_ = held->previous_; }
     held->previous_ = held->next_ = nullptr;
 }
 
-void engine::release_held_values() noexcept {
+void engine::move_held(held_value* from, held_value* to) noexcept {
+    std::scoped_lock lock(impl->held_lock);
+    held_value*& head = impl->held_head[from->callback_];
+    to->previous_ = from->previous_;
+    to->next_ = from->next_;
+    if (to->previous_) { to->previous_->next_ = to; } else if (head == from) { head = to; }
+    if (to->next_) { to->next_->previous_ = to; }
+    from->previous_ = from->next_ = nullptr;
+}
+
+// A callback's hold released here leaves its receiver connected and its std::function callable: from then on the engine's
+// script receivers stay quiet (engine_quiet) and a kept callback throws
+void engine::release_held_values(bool callbacks) noexcept {
+    if (callbacks) { callbacks_released_ = true; }
     for (;;) {
         script_value doomed(std::monostate{}, nullptr);
         {
             std::scoped_lock lock(impl->held_lock);
-            held_value* held = impl->held_head;
+            held_value*& head = impl->held_head[callbacks];
+            held_value* held = head;
             if (!held) { return; }
-            impl->held_head = held->next_;
+            head = held->next_;
             if (held->next_) { held->next_->previous_ = nullptr; }
             held->previous_ = held->next_ = nullptr;
             held->engine_ = nullptr;
@@ -5225,6 +5295,10 @@ void engine::retire_coroutines() noexcept {
 
 held_value engine::hold(script_value result) const {
     return held_value(std::move(result), const_cast<engine*>(this));
+}
+
+held_value engine::hold_callback(script_value value) const {
+    return held_value(std::move(value), const_cast<engine*>(this), true);
 }
 
 namespace {

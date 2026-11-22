@@ -238,11 +238,45 @@ drop a</code></pre></div>
 <tr><td>A temporary bound to a <code>const T&amp;</code></td><td>With the reference's scope.</td></tr>
 <tr><td>A program-scope variable (namespace variables and statics included)</td><td>When the engine is destroyed, last constructed first.</td></tr>
 <tr><td>A suspended coroutine's locals, and the arguments of one never started</td><td>When its last handle goes. A coroutine still alive when the engine is destroyed (C++ owns its handle, or a field of its own receiver holds it) ends then, after the program-scope variables, the last made first.</td></tr>
+<tr><td>An object nothing lets go of: handles that reach each other keep it (<code>a.other = b; b.other = a;</code>, a closure or a bound method stored in the object it captures), or the host still holds it</td><td>When the engine is destroyed, after the program-scope variables and the coroutines, the last constructed first (<a href="#what-the-engine-destroys">below</a>).</td></tr>
 </tbody></table></div>
 <ul>
 <li>A dying object runs its destructor body, then its members die, last declared first, then its base's destructor and the base's members.</li>
 <li>A dying container destroys its elements last to first: an array from its last element (<code>clear</code>, <code>slice</code> and <code>filter</code> do the same to what they drop), a map from its last key, each value before its key.</li>
 <li>An error a destructor raises while another error is unwinding, or while the engine is destroyed, goes to the engine's script error handler instead of propagating, and the first error continues. C++ would terminate; a script must not end its host.</li>
+</ul>
+<h3 id="what-the-engine-destroys">What the engine destroys<a class="hlink" href="#what-the-engine-destroys" aria-label="link">&#8203;</a></h3>
+<p>Handles that reach each other keep their objects alive for the whole run, as C++'s <code>shared_ptr</code> does: nothing collects a cycle while the program runs, and a <code>weak_ptr</code> on one side is still how a program lets one go early. What is left when the engine is destroyed is the engine's, and every destructor runs once, while script still runs:</p>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Socket {
+    string name;
+    Socket(string n) { name = n; }
+    ~Socket() { print("close " + name); }
+}
+class Peer {
+    string name;
+    var other = null;
+    shared_ptr&lt;Socket&gt; socket;
+    Peer(string n) { name = n; socket = new Socket(n + "'s socket"); }
+    ~Peer() { print("~" + name + ", whose peer is " + other.name); }
+}
+void pair_up() {
+    auto a = new Peer("a");
+    auto b = new Peer("b");
+    a.other = b;
+    b.other = a;
+}
+pair_up();
+print("end of the program");</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">end of the program
+~b, whose peer is a
+close b's socket
+~a, whose peer is b
+close a's socket</code></pre></div>
+<ul>
+<li><strong>The order.</strong> After the program-scope variables and the coroutines, the engine takes the last constructed object still alive and destroys it as a death does: its destructor body, then the objects only its members hold, the members last declared first (each of those the same way), then its base's destructor and the objects only the base's members hold. Then the last constructed of what remains, until nothing does. An object only one member holds waits for that member's object, whichever was constructed first: <code>b</code>'s socket closes after <code>~b</code>, and <code>a</code>, which only <code>b.other</code> holds, follows the socket because <code>other</code> is declared ahead of it. A ring of such holders starts at its last constructed (<code>b</code> above).</li>
+<li><strong>What a destructor sees.</strong> Every one of these destructors runs before any of these objects loses a member. A destructor that reads or calls another object of its cycle finds it whole, even when that object's own destructor has already run (<code>~a</code> reads <code>b.name</code> above). The members are released once the last of them has run, when no script runs any more. The program's own variables died first: one that held an object, an array, a map or a closure reads as <code>null</code> in such a destructor, and a number or a string is still there, as are the program's functions.</li>
+<li><strong>Exactly once.</strong> A destructor that lets go of the cycle itself (<code>other = null;</code>) destroys nothing a second time, and an object's destructor that raises is reported and the rest still run. An object one of these destructors makes and leaves behind is released without its own destructor.</li>
+<li>The host's side of this (a value, a callback or a signal receiver it kept) is in <a href="../embedding/17-host-api.html#value-lifetime">How long a value lives</a>.</li>
 </ul>
 <h2 id="inheritance-super-super-explicit-override">Inheritance: <code>super(...)</code>, <code>super::</code>, <code>override</code><a class="hlink" href="#inheritance-super-super-explicit-override" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cat {

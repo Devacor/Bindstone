@@ -530,6 +530,166 @@ void class_instance::release_orphan_fields() noexcept {
     }
 }
 
+namespace {
+// The instances `value` alone holds, in the order its release would destroy them: the instance it names, or the ones in the
+// arrays and maps only it holds (an array's elements last to first, a map's entries in key order, each value ahead of its key).
+// A pinned instance counts the teardown's own handle
+void solely_held_instances(const script_value& value, const std::unordered_set<const class_instance*>& pinned,
+                           std::vector<const script_value*>& pending, std::vector<class_instance*>& found) {
+    const auto consider = [&](const strong_ptr<script_value::object_holder>& holder) {
+        if (!holder || !holder->is_instance()) { return; }
+        class_instance* held = holder->unchecked_instance();
+        if (holder->object_use_count() == (pinned.count(held) ? 2 : 1)) { found.push_back(held); }
+    };
+    pending.clear();
+    pending.push_back(&value);
+    while (!pending.empty()) {
+        const script_value& next = *pending.back();
+        pending.pop_back();
+        switch (next.raw_storage_index()) {
+        case script_value::TYPEID_OBJECT:
+            consider(next.unchecked_object_handle());
+            break;
+        case script_value::TYPEID_ARRAY: {
+            if (!next.release_cascades()) { break; }
+            const script_array& elements = *next.unchecked_get_array_storage();
+            if (elements.kind() == script_array::kind_t::obj) {
+                for (size_t i = elements.objs().size(); i-- > 0;) { consider(elements.objs()[i].handle); }
+            } else {
+                for (const script_value& element : elements.values()) { pending.push_back(&element); }
+            }
+            break;
+        }
+        case script_value::TYPEID_MAP: {
+            if (!next.release_cascades()) { break; }
+            const size_t base = pending.size();
+            for (const auto& [key, held] : *next.unchecked_get_map_storage()) {
+                pending.push_back(&held);
+                pending.push_back(&key);
+            }
+            std::reverse(pending.begin() + static_cast<ptrdiff_t>(base), pending.end());
+            break;
+        }
+        default: break;
+        }
+    }
+}
+}
+
+void class_definition::run_surviving_destructors(engine& eng, std::vector<strong_ptr<class_instance>>& survivors) {
+    std::unordered_set<const class_instance*> pinned;
+    std::unordered_map<const class_instance*, class_instance*> sole_holder;
+    std::unordered_set<const class_instance*> destroyed;
+    std::vector<const script_value*> pending;
+    std::vector<class_instance*> found;
+    const auto birth_of = [](const class_instance* instance) {
+        const uint64_t* birth = detail::object_block::birth(detail::cb_from_object(const_cast<class_instance*>(instance)));
+        return birth ? *birth : uint64_t{0};
+    };
+    for (const auto& survivor : survivors) { pinned.insert(survivor.get()); }
+    for (const auto& survivor : survivors) {
+        class_instance* holder = survivor.get();
+        const auto note = [&](const script_value& member) {
+            found.clear();
+            solely_held_instances(member, pinned, pending, found);
+            for (class_instance* held : found) { if (pinned.count(held)) { sole_holder[held] = holder; } }
+        };
+        for (size_t slot = 0; slot < holder->flat_fields_.size(); ++slot) {
+            if (const script_value* member = holder->flat_fields_.present_cell(slot)) { note(*member); }
+        }
+        if (const auto* overflow = holder->overflow_fields()) {
+            for (const auto& [id, member] : *overflow) { note(member); }
+        }
+    }
+    std::vector<class_instance*> order;
+    for (size_t i = survivors.size(); i-- > 0;) {
+        if (survivors[i]->destructor_armed_) { order.push_back(survivors[i].get()); }
+    }
+    std::stable_sort(order.begin(), order.end(), [&](const class_instance* a, const class_instance* b) { return birth_of(a) > birth_of(b); });
+
+    struct step {
+        strong_ptr<class_instance> instance;
+        const class_definition* level = nullptr;   // null: the instance's death begins
+    };
+    std::vector<step> steps;
+    const auto destroy = [&](class_instance* first) {
+        steps.push_back({first->strong_from_this(), nullptr});
+        while (!steps.empty()) {
+            step now = std::move(steps.back());
+            steps.pop_back();
+            class_instance* instance = now.instance.get();
+            if (!instance) { continue; }
+            const class_definition* level = now.level;
+            if (!level) {
+                if (!destroyed.insert(instance).second) { continue; }
+                level = instance->class_def_;
+                if (!level) { continue; }
+            }
+            const class_definition* layout = instance->class_def_ ? instance->class_def_ : level;
+            if (instance->destructor_armed_ && (!instance->construction_pending_ || instance->level_constructed(level))) {
+                if (const script_value* body = level->destructor_body(eng)) {
+                    detail::dispatch_level_scope level_dispatch(*instance, const_cast<class_definition*>(level), class_instance::cdtor_phase::destruction);
+                    layout->run_destructor_body(instance, level, *body);
+                }
+            }
+            for (const auto& parent : level->parent_classes_) {
+                if (parent) { steps.push_back({now.instance, parent.get()}); }
+            }
+            // the members as the body left them: the last declared one's instances are the next to go
+            level->for_each_own_field_id([&](uint64_t field) {
+                const class_definition* current = instance->class_def_ ? instance->class_def_ : level;
+                const uint32_t slot = current->field_slot(field);
+                const script_value* member = slot != k_no_field_slot ? instance->field_slot_value(slot) : nullptr;
+                if (!member) { return; }
+                found.clear();
+                solely_held_instances(*member, pinned, pending, found);
+                for (size_t i = found.size(); i-- > 0;) {
+                    strong_ptr<class_instance> held = found[i]->strong_from_this();
+                    if (!held || destroyed.count(found[i])) { continue; }
+                    if (pinned.insert(found[i]).second) { survivors.push_back(held); }
+                    steps.push_back({std::move(held), nullptr});
+                }
+            });
+        }
+    };
+    std::unordered_set<const class_instance*> climbed;
+    for (class_instance* candidate : order) {
+        if (destroyed.count(candidate)) { continue; }
+        // up to the instance no member alone holds; a ring of sole holders starts at its last made member
+        class_instance* first = candidate;
+        climbed.clear();
+        for (class_instance* at = candidate;;) {
+            climbed.insert(at);
+            const auto holder = sole_holder.find(at);
+            if (holder == sole_holder.end() || destroyed.count(holder->second)) { first = at; break; }
+            class_instance* up = holder->second;
+            if (!climbed.count(up)) { at = up; continue; }
+            first = nullptr;
+            class_instance* member = up;
+            do {
+                if (member->destructor_armed_ && !destroyed.count(member) && (!first || birth_of(member) > birth_of(first))) { first = member; }
+                member = sole_holder.find(member)->second;
+            } while (member != up);
+            if (!first) { first = up; }
+            break;
+        }
+        destroy(first);
+        if (!destroyed.count(candidate)) { destroy(candidate); }
+    }
+}
+
+void class_definition::release_survivor_members(class_instance& instance) noexcept {
+    std::vector<script_value> work;
+    if (instance.extras_ && instance.extras_->native) { work.push_back(std::move(*instance.extras_->native)); }
+    if (auto* overflow = instance.overflow_fields()) {
+        for (auto& [id, member] : *overflow) { work.push_back(std::move(member)); }
+    }
+    for (size_t slot = 0; slot < instance.flat_fields_.size(); ++slot) {
+        if (script_value* member = instance.flat_fields_.cell(slot)) { work.push_back(std::move(*member)); }
+    }
+    detail::release_work(work);
+}
+
 namespace detail {
 
 void strong_last_release<class_instance>::run(class_instance* object, control_block_base* cb) noexcept {

@@ -244,6 +244,7 @@ namespace {
 				if (auto live = weak.lock()) {
 					state.faults.checkpoint("region.instance_register");
 					live->get_class_definition()->register_instance_after_region(weak, &state.faults, live.get());
+					if (engine* owner = live->get_engine()) { detail::note_birth_after_region(*live, *owner); }
 				}
 				++at[i];
 			}

@@ -49,8 +49,9 @@ struct loaded_receiver;
 
 // The engine's lifetime token: expired once the engine is destroyed (defined in engine.cpp)
 std::weak_ptr<const void> engine_lifetime_token(engine* a_engine);
-// A load in progress on the engine: its script receivers stay quiet (defined in engine.cpp)
-bool engine_loading(const engine* a_engine);
+// The engine's script receivers stay quiet: a load is in progress on it, or its teardown has released what they hold (defined
+// in engine.cpp)
+bool engine_quiet(const engine* a_engine);
 
 template<typename T>
 class receiver {
@@ -174,8 +175,8 @@ public:
 		if (eng) { script_engine_ = eng; }
 	}
 	bool engine_gone() const noexcept { return engine_bound_ && engine_alive_.expired(); }
-	// a script receiver skips while its engine is gone or loading (a load does not notify)
-	bool engine_quiet() const { return engine_bound_ && (engine_alive_.expired() || engine_loading(script_engine_)); }
+	// a script receiver skips while its engine is gone, loading (a load does not notify) or past releasing its receivers
+	bool engine_quiet() const { return engine_bound_ && (engine_alive_.expired() || jai::engine_quiet(script_engine_)); }
 	engine* script_engine() const { return script_engine_; }
 
 	const std::shared_ptr<std::vector<std::string>>& parameter_names() const {

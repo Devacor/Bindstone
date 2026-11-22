@@ -727,7 +727,7 @@ try {
 <h4 id="host-errors-callbacks">Callbacks<a class="hlink" href="#host-errors-callbacks" aria-label="link">&#8203;</a></h4>
 <div class="tablewrap"><table><thead><tr><th>Text</th><th>When</th><th>Fix</th></tr></thead><tbody>
 <tr id="err-cannot-convert-non-function-to-callback"><td><code>Cannot convert a value that is not a function to a std::function callback</code></td><td><code>convert_script_function</code> gets a non-function value.</td><td>Pass a script function or lambda.</td></tr>
-<tr id="err-script-function-after-engine-destroyed"><td><code>Cannot call a script function after its engine was destroyed</code></td><td>The host calls a converted callback kept past its engine.</td><td>Drop the callback before the engine.</td></tr>
+<tr id="err-script-function-after-engine-destroyed"><td><code>Cannot call a script function after its engine was destroyed</code></td><td>The host calls a converted callback kept past its engine, or while the engine is destroyed, once it has released the callback's function.</td><td>Drop the callback before the engine.</td></tr>
 </tbody></table></div>
 <h4 id="host-errors-engine-entry-points">Engine entry points<a class="hlink" href="#host-errors-engine-entry-points" aria-label="link">&#8203;</a></h4>
 <div class="tablewrap"><table><thead><tr><th>Text</th><th>When</th><th>Fix</th></tr></thead><tbody>

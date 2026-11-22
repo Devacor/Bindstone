@@ -48,6 +48,28 @@ public:
     const_tests() : suite("Const") {}
 
     void forge_tests() override {
+        // An enum's value read with a dot and called, or a const map's key read so, writes nothing: the text is the call's, not the
+        // const rule's, at load and at run time
+        test("a_call_of_an_enum_value_or_a_map_key_is_no_write", [this]() {
+            CHECK_ERROR("enum Lvl { low, high } print(Lvl.high(1));", "error: cannot call 'high': it is an int, not a function");
+            CHECK_ERROR("namespace ns { enum Lvl { low, high } } print(ns::Lvl.high(1));", "error: cannot call 'high': it is an int, not a function");
+            CHECK_ERROR("const map<string, int> cm = {\"high\": 2}; print(cm.high(1));", "error: map has no member 'high'; read the key as [\"high\"]");
+            const auto lvl = run("enum Lvl { low, high } print(Lvl.high(1));");
+            check_false(contains(lvl.error, "is const"), lvl.error);
+            const auto at_run = run(R"JS(
+                [[warn_mode]];
+                enum Lvl { low, high }
+                const var cm = {"high": 2};
+                try { print(Lvl.high(1)); } catch (e) { print(e); }
+                try { print(Lvl::high(1)); } catch (e) { print(e); }
+                try { print(cm.high(1)); } catch (e) { print(e); }
+                print(Lvl.high, " ", Lvl.size(), " ", cm.size());
+            )JS");
+            check_eq(std::string(""), at_run.error);
+            check_eq(std::string("Cannot call 'high': it is an int, not a function\nCannot call 'high': it is an int, not a function\n"
+                                 "map has no member 'high'; read the key as [\"high\"]\n1 2 1\n"), at_run.output);
+        });
+
         // ------------------------------------------------------------------ declarations
         test("const_reads_like_a_variable", [this]() {
             const auto r = run(R"JS(
@@ -452,8 +474,8 @@ public:
                 {"void w() { cast<Box&>(cb).n = 4; }", "void d() { w(); } report([]() { d(); });", "Cannot cast const 'cb' to Box&: cast<Box>(cb) copies it @6 #5\n", true},
                 {"void w() { cb.n = 6; } void w2() { w(); } void w3() { w2(); }", "void d() { w3(); } report([]() { d(); });",
                  "Cannot assign to 'cb.n': it is read-only ('cb' is const) @6 #7\n", true},
-                {"enum Lvl { low, mid, high } void w() { Lvl.high(1); }", "void d() { w(); } report([]() { d(); });",
-                 "Cannot call 'high' on 'Lvl': 'Lvl' is const and 'high' changes it @6 #5\n", true},
+                {"enum Lvl { low, mid, high } void w() { Lvl.clear(); }", "void d() { w(); } report([]() { d(); });",
+                 "Cannot call 'clear' on 'Lvl': 'Lvl' is const and 'clear' changes it @6 #5\n", true},
             };
             std::string failures;
             for (const guarded_case& c : cases) {

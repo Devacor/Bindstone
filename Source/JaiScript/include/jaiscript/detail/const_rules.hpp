@@ -695,6 +695,11 @@ namespace jai::detail {
 		if (receiver.is_array() || receiver.is_map() || receiver.is_string() || receiver.current_type() == script_value_type::jai_utf8_string_type) {
 			builtin = true;
 			if (ref_write_reading_method(name)) { return std::nullopt; }
+			if (eng && call && call->callee && call->callee->get_type() == node_type::member_expr) {   // a key read with a dot and called: no method runs
+				const uint64_t id = static_cast<const member_expr*>(call->callee.get())->member_id;
+				const int kind = receiver.is_array() ? 0 : receiver.is_map() ? 1 : receiver.is_string() ? 2 : 3;
+				if (id != UINT64_MAX && !engine_access::builtin_method_ids(*eng, kind).count(id)) { return std::nullopt; }
+			}
 			if (!ref_write_element_callback(name)) { return size_t(0); }
 			if (receiver.is_array() && named_callback_writes_element(call, name, caller, env, eng, symbolizer)) { return size_t(0); }
 			return std::nullopt;

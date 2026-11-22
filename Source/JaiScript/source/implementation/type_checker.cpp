@@ -3716,6 +3716,40 @@ private:
         return v;
     }
 
+    // An enum's name read as its value table (a map<string, int>)
+    bool enum_table(const expression* e) {
+        if (e->get_type() == node_type::identifier_expr) {
+            const auto* id = static_cast<const identifier_expr*>(e);
+            return find_enum(id->name) || eng_.is_enum_name(std::string(id->name));
+        }
+        if (e->get_type() == node_type::member_expr && static_cast<const member_expr*>(e)->is_static) {
+            const auto* m = static_cast<const member_expr*>(e);
+            return namespace_enum(m) || eng_.is_enum_name(qualified_spelling(m));
+        }
+        return false;
+    }
+    // A builtin method of the library value a const path ends at (no type: an enum's value table, a map)
+    bool library_method(const type_info* t, std::string_view member) {
+        int kind = 1;
+        if (t && t->base_type == script_value_type::jai_array_type) { kind = 0; }
+        else if (t && t->base_type == script_value_type::jai_string_type) { kind = 2; }
+        else if (t && t->base_type == script_value_type::jai_utf8_string_type) { kind = 3; }
+        return eng_.builtin_method_ids(kind).count(eng_.symbolize(member)) != 0;
+    }
+    // E.v(...): an enum's value read with a dot is an int, and a call of it is the run time's text
+    void enum_value_called(const member_expr* m) {
+        const enum_decl* e = nullptr;
+        if (m->object->get_type() == node_type::identifier_expr) { e = find_enum(static_cast<const identifier_expr*>(m->object.get())->name); }
+        else if (m->object->get_type() == node_type::member_expr) { e = namespace_enum(static_cast<const member_expr*>(m->object.get())); }
+        if (!e) { return; }
+        for (const auto& [value, _] : e->values) {
+            if (value == m->member) {
+                diag(diag_level::error, m->location, "cannot call '" + std::string(m->member) + "': it is an int, not a function");
+                return;
+            }
+        }
+    }
+
     // a method call on a const-rooted receiver: an error when the method writes its receiver (internal/const.md 3.3)
     void check_const_call(call_expr* c) {
         if (!c->callee || c->callee->get_type() != node_type::member_expr) { stamp_const(c->const_check, const_none, {}); return; }
@@ -3728,6 +3762,11 @@ private:
         size_t line = 0;
         if (h.final_known && h.final_library) {
             builtin = true;
+            if ((h.final_ti || enum_table(m->object.get())) && !library_method(h.final_ti, m->member)) {   // a key or an enum's value read with a dot and called: nothing is written
+                stamp_const(c->const_check, const_none, {});
+                if (!h.final_ti) { enum_value_called(m); }
+                return;
+            }
             if (ref_write_reading_method(m->member)) {
                 verdict = const_none;
             } else if (ref_write_element_callback(m->member)) {

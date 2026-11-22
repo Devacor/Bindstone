@@ -498,16 +498,45 @@ std::string watch_refusal(const expression* e) {
 }
 
 // Each `this` in text spelled k_this_name (the lexer's tokens find it outside strings and comments)
-std::string with_this_renamed(const std::string& text, string_symbolizer* symbols) {
-    lexer lex(text, symbols, std::string(evaluation_source));
+// A bare name a method frame calls (`twice(2)`, `tagged<int>(7)`) that the frame's scope does not hold: one of its class's methods,
+// called through the frame's `this` as the method's own code calls it (a local or a field of the name wins, as there)
+bool bare_method_call(const std::vector<token>& tokens, size_t i, const class_definition* cls, const std::vector<std::pair<std::string, script_value>>& scope,
+                      engine& eng) {
+    const token& name = tokens[i];
+    if (!cls || name.type != token_type::identifier || i + 1 >= tokens.size()) { return false; }
+    if (i > 0) {
+        switch (tokens[i - 1].type) {
+            case token_type::dot: case token_type::question_dot: case token_type::arrow: case token_type::colon_colon: case token_type::identifier:
+            case token_type::greater: case token_type::right_angle: case token_type::tilde: case token_type::int_keyword: case token_type::float_keyword:
+            case token_type::bool_keyword: case token_type::char_keyword: case token_type::string_keyword: case token_type::void_keyword:
+            case token_type::auto_keyword: case token_type::var_keyword: case token_type::function_keyword: case token_type::class_keyword:
+            case token_type::coroutine_keyword: case token_type::new_keyword:
+                return false;
+            default:
+                break;
+        }
+    }
+    const std::string spelled(name.lexeme);
+    if (std::any_of(scope.begin(), scope.end(), [&](const auto& entry) { return entry.first == spelled; })) { return false; }
+    if (tokens[i + 1].type == token_type::left_paren) { return cls->defines_method(detail::engine_access::get_symbolizer(eng)->intern(spelled)); }
+    return tokens[i + 1].type == token_type::less && detail::engine_access::names_generic_method(eng, spelled);
+}
+
+std::string with_this_renamed(const std::string& text, engine& eng, const class_definition* cls, const std::vector<std::pair<std::string, script_value>>& scope) {
+    lexer lex(text, detail::engine_access::get_symbolizer(eng), std::string(evaluation_source));
     const auto tokens = lex.tokenize();
     std::vector<size_t> line_starts{0};
     for (size_t i = 0; i < text.size(); ++i) { if (text[i] == '\n') line_starts.push_back(i + 1); }
     std::string out = text;
-    for (auto it = tokens.rbegin(); it != tokens.rend(); ++it) {
-        if (it->type != token_type::this_keyword || it->location.line == 0 || it->location.line > line_starts.size()) continue;
-        const size_t at = line_starts[it->location.line - 1] + it->location.column - 1;
-        if (out.compare(at, 4, "this") == 0) { out.replace(at, 4, k_this_name); }
+    for (size_t i = tokens.size(); i-- > 0;) {
+        const token& t = tokens[i];
+        if (t.location.line == 0 || t.location.line > line_starts.size()) continue;
+        const size_t at = line_starts[t.location.line - 1] + t.location.column - 1;
+        if (t.type == token_type::this_keyword) {
+            if (out.compare(at, 4, "this") == 0) { out.replace(at, 4, k_this_name); }
+        } else if (bare_method_call(tokens, i, cls, scope, eng) && out.compare(at, t.lexeme.size(), t.lexeme) == 0) {
+            out.insert(at, std::string(k_this_name) + ".");
+        }
     }
     return out;
 }
@@ -690,8 +719,25 @@ script_value controller::run_evaluation(const std::string& text, size_t frame, e
     auto* backend = detail::engine_access::get_execution_backend(*engine_);
     if (!backend) { throw runtime_error("No script is running"); }
     const auto scope = frame_scope(frame);
-    const bool has_this = std::any_of(scope.begin(), scope.end(), [](const auto& entry) { return entry.first == k_this_name; });
-    const std::string source = has_this ? with_this_renamed(text, detail::engine_access::get_symbolizer(*engine_)) : text;
+    const auto self = std::find_if(scope.begin(), scope.end(), [](const auto& entry) { return entry.first == k_this_name; });
+    const class_definition* self_class = nullptr;
+    if (self != scope.end()) {
+        const script_value instance = expansion_target(self->second);
+        if (instance.raw_storage_index() == script_value::TYPEID_OBJECT) {
+            if (const auto held = const_cast<script_value&>(instance).get_class_instance()) { self_class = held->get_class_definition(); }
+        }
+    }
+    std::string source = self != scope.end() ? with_this_renamed(text, *engine_, self_class, scope) : text;
+    // the checker reads a held object's class into the unit (a generic method's instance it calls): the classes join the text the
+    // unit is cached under, so a frame of another class checks its own
+    std::string classes;
+    for (const auto& [name, value] : scope) {
+        const script_value instance = expansion_target(value);
+        if (instance.raw_storage_index() != script_value::TYPEID_OBJECT) { continue; }
+        const auto held = const_cast<script_value&>(instance).get_class_instance();
+        if (const class_definition* cls = held ? held->get_class_definition() : nullptr; cls && cls->is_script_class()) { classes += " " + name + ":" + cls->get_name(); }
+    }
+    if (!classes.empty()) { source += "\n//" + classes; }
     if (mode == evaluation_mode::watch) {
         const std::string refused = watch_text_refusal(source, *engine_);
         if (!refused.empty()) { throw runtime_error("A watch only reads: " + refused + " changes state (evaluate it in the Debug Console)"); }

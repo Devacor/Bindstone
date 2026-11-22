@@ -352,6 +352,18 @@ public:
         return id && engine_access::is_enum_name(engine_, *id);
     }
     bool is_const_global(const std::string& name) const { note(name); return engine_access::is_const_global(engine_, name); }
+    // The script class of the object an instance variable of the debugger's evaluation holds now (detail: the receiver of a
+    // generic method's instance); empty for any other name or value
+    std::string_view evaluation_receiver_class(const std::string& name) const {
+        const instance_variables* scope = engine_access::debug_evaluation_scope(engine_);
+        const auto held = scope ? scope->find(name) : instance_variables::const_iterator();
+        if (!scope || held == scope->end()) { return {}; }
+        const script_value& value = held->second.deref();
+        if (!value.is_object() || value.is_null()) { return {}; }
+        const auto instance = const_cast<script_value&>(value).get_class_instance();
+        const class_definition* cls = instance ? instance->get_class_definition() : nullptr;
+        return cls && cls->is_script_class() ? std::string_view(cls->get_name()) : std::string_view();
+    }
     held_value get_variable(const std::string& name) const { note(name); return engine_.get_variable(name); }
     std::shared_ptr<class_definition> get_class_definition(const std::string& name) const { note(name); return engine_access::get_class_definition(engine_, name); }
     std::shared_ptr<script_class_definition> find_script_class(const std::string& name) const { note(name); return engine_access::get_class_registry(engine_).find_script_class(name); }
@@ -1640,8 +1652,12 @@ private:
         if (recv.is_unknown()) {
             if (const ctype held = referent_receiver(m->object.get()); held.kind == ctype::object_k && !held.cls.empty()) { return held.cls; }
             if (m->object->get_type() == node_type::identifier_expr) {
-                const std::string_view declared = declared_global_class(static_cast<const identifier_expr*>(m->object.get()));
+                const auto* id = static_cast<const identifier_expr*>(m->object.get());
+                const std::string_view declared = declared_global_class(id);
                 if (!declared.empty()) { return declared; }
+                // a name of the frame the debugger evaluates in (its instance variables, which no declaration names): the class of
+                // the object it holds now
+                if (const std::string_view held = eng_.evaluation_receiver_class(std::string(id->name)); !held.empty()) { return held; }
             }
         }
         unknown = recv.is_unknown();

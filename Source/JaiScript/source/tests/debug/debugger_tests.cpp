@@ -849,6 +849,49 @@ public:
     }
 
     // a reserved word naming a method or a field is a member like any other: the frame names it, its reads show in the locals
+    // the console takes what the method's own code takes: a generic method called through this or bare, a plain method called bare
+    std::string console_calls_in_a_generic_method(jai::backend_type type) {
+        auto eng = make_backend_engine(type);
+        auto& dbg = eng->debugger();
+        stop_waiter stops(dbg);
+        dbg.set_breakpoints("<script>", {3});
+        dbg.set_enabled(true);
+        const std::string src =
+            "class Box<T> {\n"                                                       // line 1
+            "    T item;\n"                                                          // line 2
+            "    T twice(T extra) { T sum = item + extra; return sum + sum; }\n"     // line 3 (breakpoint)
+            "    U tagged<U>(U tag) { U copy = tag; return copy; }\n"                // line 4
+            "}\n"                                                                    // line 5
+            "Box<int> b; b.item = 4;\n"                                              // line 6
+            "Box<string> s; s.item = \"a\";\n"                                       // line 7
+            "int r1 = b.twice(1);\n"                                                 // line 8
+            "string r2 = s.twice(\"b\");\n";                                         // line 9
+        std::string script_error;
+        std::thread script([&] {
+            try { eng->execute(src); } catch (const std::exception& e) { script_error = e.what(); }
+        });
+        auto attempt = [&](auto&& step) -> std::string {
+            try { return step(); } catch (const std::exception& e) { return std::string("error: ") + e.what(); }
+        };
+        std::string result;
+        for (int stop = 0; stop < 4; ++stop) {   // line 3 stops at both its statements, in Box<int> then in Box<string>
+            if (!stops.wait()) { result += "<no stop>"; break; }
+            auto seen = parked_read(dbg, [&] {
+                std::string text;
+                for (const char* expression : {"this.tagged<int>(7)", "tagged<int>(8)", "twice(extra)", "this.twice(extra)", "b.tagged<string>(\"q\")"}) {
+                    text += std::string(expression) + "=" + attempt([&] { return dbg.evaluate(expression, 0, debug::evaluation_mode::console).value; }) + " ";
+                }
+                return text;
+            });
+            result += (seen ? *seen : std::string("<no read>")) + "| ";
+            dbg.resume();
+        }
+        dbg.clear_breakpoints();
+        dbg.detach();
+        script.join();
+        return result + script_error;
+    }
+
     void keyword_named_members_in_frames_and_locals(jai::backend_type type) {
         auto eng = make_backend_engine(type);
         auto& dbg = eng->debugger();
@@ -1253,6 +1296,13 @@ public:
                                     "f:13(s=\"tk\",v=1,x=3) <script>:15() globals(g,) set v=7 set v text=error: Cannot assign string to 'v' (declared int) "
                                     "nope=error: No variable 'nope' is in scope at this stop | "
                                     "r=7 g=21 nope=error"), interp);
+        });
+        test("the_console_calls_generic_and_bare_methods_in_a_method_frame", [this]() {
+            const std::string in_int = "this.tagged<int>(7)=7 tagged<int>(8)=8 twice(extra)=10 this.twice(extra)=10 b.tagged<string>(\"q\")=\"q\" | ";
+            const std::string in_string = "this.tagged<int>(7)=7 tagged<int>(8)=8 twice(extra)=\"abab\" this.twice(extra)=\"abab\" b.tagged<string>(\"q\")=\"q\" | ";
+            const std::string want = in_int + in_int + in_string + in_string;
+            check_eq(want, console_calls_in_a_generic_method(jai::backend_type::interpreter), "interpreter");
+            check_eq(want, console_calls_in_a_generic_method(jai::backend_type::vm), "vm");
         });
         test("keyword_named_members_in_frames_and_locals", [this]() {
             keyword_named_members_in_frames_and_locals(jai::backend_type::interpreter);

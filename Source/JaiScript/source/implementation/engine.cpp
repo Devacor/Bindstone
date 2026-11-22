@@ -4961,6 +4961,8 @@ held_value engine::execute(const std::string& scriptContent, const instance_vari
     return hold(execute_source(scriptContent, instanceVars, "<script>"));
 }
 
+const instance_variables* engine::debug_evaluation_scope() const noexcept { return impl->evaluation_scope_; }
+
 script_value engine::debug_evaluate(const std::string& text, instance_variables& scope) {
     const instance_variables names = scope;
     struct scope_guard { instance_variables*& slot; instance_variables* saved; ~scope_guard() { slot = saved; } } guard{impl->evaluation_scope_, impl->evaluation_scope_};

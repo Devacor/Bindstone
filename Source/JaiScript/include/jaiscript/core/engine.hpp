@@ -1770,6 +1770,8 @@ namespace jai {
         // The debugger's evaluation (debug::controller::evaluate): `text` runs as its own unit labeled debug::evaluation_source with
         // `scope` as instance variables, and each one's value after the run comes back in `scope`
         script_value debug_evaluate(const std::string& text, instance_variables& scope);
+        // the names a debug_evaluate in flight runs with (null outside one): the checker reads the class of a receiver among them
+        const instance_variables* debug_evaluation_scope() const noexcept;
         script_value execute_source(const std::string& script_content,
                                     const instance_variables& instanceVars,
                                     const std::string& source_path,

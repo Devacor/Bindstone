@@ -111,8 +111,9 @@ step out stops at the caller's next statement.</li></ol>
 <p>Each row carries its kind (<code>int</code>, <code>string</code>, <code>array</code>, <code>object</code>, ...); a string
 shows quoted, and a value's text stops after 1000 bytes.</p>
 <h3 id="evaluating">Evaluating expressions<a class="hlink" href="#evaluating" aria-label="link">&#8203;</a></h3>
-<p>An expression runs in the selected frame: its locals, its captures, <code>this</code> and the fields it names bare in
-a method, then the program's names (<code>::name</code> reaches a global a local hides). It runs on the parked script
+<p>An expression runs in the selected frame: its locals, its captures, <code>this</code> and the fields and methods it names bare in
+a method (a generic method's instance too, <code>tagged&lt;int&gt;(7)</code> or <code>this.tagged&lt;int&gt;(7)</code>, made for the
+class of the object the frame holds), then the program's names (<code>::name</code> reaches a global a local hides). It runs on the parked script
 thread through the engine, so its operators, conversions and errors are the script's own, on both backends.</p>
 <ul>
 <li><strong>Watch and hover only read.</strong> VS&nbsp;Code evaluates them at every stop, so an assignment, an increment,

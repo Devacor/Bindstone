@@ -1450,6 +1450,8 @@ namespace jai::vm {
 
         void capture_stack_trace();
         size_t trace_grafts_through(size_t cut);
+        size_t null_chain_frames_through(size_t cut, size_t first) const;
+        bool null_chain_closures_ = false;   // a `?.` chain's lambda was made: a capped trace counts its frames out
         static size_t graft_frames_at(const chunk& code, size_t ip, const ast_node** node, std::vector<stack_frame>& out,
                                       std::vector<const chunk::inline_site*>* sites = nullptr);
         static const ast_node* frame_statement(const frame& fr);

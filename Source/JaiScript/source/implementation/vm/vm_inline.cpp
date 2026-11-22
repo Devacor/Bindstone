@@ -664,7 +664,9 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		auto* t = static_cast<const ternary_expr*>(e.get());
 		auto cond = clone_expr(t->condition, c); auto a = clone_expr(t->then_expression, c); auto b = clone_expr(t->else_expression, c);
 		if (!c.ok) return nullptr;
-		return c.make<ternary_expr>(t->location, cond, a, b);
+		auto made = c.make<ternary_expr>(t->location, cond, a, b);
+		made->null_chain = t->null_chain;
+		return made;
 	}
 	case node_type::cast_expr: {
 		auto* k = static_cast<const cast_expr*>(e.get());

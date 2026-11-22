@@ -462,6 +462,8 @@ namespace jai {
         type_info_ptr return_type;
         // return_type is the signature's the lambda is checked against, not one it spells (the checker's stamp, as parameter::contextual)
         bool contextual_return = false;
+        // the parser's rewrite of a `?.` chain over a base that runs code (parser::null_chain_rest): no frame of it in a trace
+        bool null_chain = false;
         statement_ptr body;
         size_t local_count = 0;  // Total slots needed (params + locals) for stack allocation
 
@@ -569,6 +571,10 @@ namespace jai {
         expression_ptr condition;
         expression_ptr then_expression;
         expression_ptr else_expression;
+        // the parser's rewrite of a `?.` chain (parser::null_chain_rest), whose texts name the chain: chain_test, or chain_lambda_test
+        // as the one statement of the lambda an impure base binds through
+        static constexpr uint8_t chain_test = 1, chain_lambda_test = 2;
+        uint8_t null_chain = 0;
 
         ternary_expr(const source_location& loc, expression_ptr c, expression_ptr t, expression_ptr e)
             : expression(loc, node_type::ternary_expr), condition(c), then_expression(t), else_expression(e) {}    };
@@ -1336,6 +1342,17 @@ namespace jai {
                 return static_cast<const literal_expr*>(expr)->value.is_bool();
             default:
                 return false;
+        }
+    }
+
+    namespace detail {
+        // A frame of a `?.` chain's lambda (parser::null_chain_rest), standing at its one statement: a trace names no frame of it
+        // (KEEP the one test for both backends' traces)
+        inline bool null_chain_frame(const ast_node* statement) noexcept {
+            if (statement && statement->get_type() == node_type::statement_decl) { statement = static_cast<const statement_decl*>(statement)->statement.get(); }
+            if (!statement || statement->get_type() != node_type::return_stmt) { return false; }
+            const expression* value = static_cast<const return_stmt*>(statement)->value.get();
+            return value && value->get_type() == node_type::ternary_expr && static_cast<const ternary_expr*>(value)->null_chain == ternary_expr::chain_lambda_test;
         }
     }
 

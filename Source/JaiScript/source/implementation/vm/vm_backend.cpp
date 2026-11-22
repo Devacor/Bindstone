@@ -1750,12 +1750,13 @@ void vm_backend::capture_stack_trace() {
 		}
 		if (captured_trace_.size() >= k_stack_trace_frames) {   // the frames above the innermost top-level one, counted, not walked
 			const size_t first = top_frame_mark_ == SIZE_MAX ? 0 : top_frame_mark_ + 1;
-			cap_stack_trace(captured_trace_, frames_.size() - first - walked + 1 + trace_grafts_through(frames_.size() - 1 - walked));
+			cap_stack_trace(captured_trace_, frames_.size() - first - walked + 1 + trace_grafts_through(frames_.size() - 1 - walked) -
+			                                 null_chain_frames_through(frames_.size() - 1 - walked, first));
 			trace_captured_ = true;
 			return;
 		}
 		graft_frames_at(*fr->code, fr->ip, &node, captured_trace_);   // inlined callees: their frames as the interpreter has them, innermost first, each caller's line its call's
-		captured_trace_.push_back(trace_frame_at(frame_function_name(*fr), location_of(node)));
+		if (!detail::null_chain_frame(node)) { captured_trace_.push_back(trace_frame_at(frame_function_name(*fr), location_of(node))); }
 	}
 	captured_trace_.push_back(trace_frame_at("<script>", location_of(top_node)));
 	cap_stack_trace(captured_trace_);
@@ -1806,6 +1807,20 @@ size_t vm_backend::trace_grafts_through(size_t cut) {
 	for (size_t j = passed; j < try_records_.size(); ++j) { try_records_[j].trace_grafts_below = total - try_records_[j].trace_grafts_below; }
 	if (engine_) { detail::engine_access::count_trace_graft_frame_reads(*engine_, reads); }
 	return total - above_cut;
+}
+
+// The frames of `?.` chains' lambdas in frames_[first, cut], which a trace leaves out (none walked until such a closure was made)
+size_t vm_backend::null_chain_frames_through(size_t cut, size_t first) const {
+	if (!null_chain_closures_) [[likely]] { return 0; }
+	size_t result = 0;
+	std::vector<stack_frame> grafted;   // a graft's statement stands for its caller's: the frame's own is its call's
+	for (size_t k = first; k <= cut && k < frames_.size(); ++k) {
+		const frame& fr = *frames_[k];
+		const ast_node* node = frame_statement(fr);
+		if (fr.code->graft_calls) { graft_frames_at(*fr.code, fr.ip, &node, grafted); }
+		if (!fr.top_level && detail::null_chain_frame(node)) { ++result; }
+	}
+	return result;
 }
 
 // capture_stack_trace's walk, uncapped, with the top level only while a top-level frame is live; refs names the frame that runs
@@ -14387,6 +14402,7 @@ op_status vm_backend::exec_bind_captures(frame& f, const vm_instruction& ins) {
 
 op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 	const closure_proto& proto = f.code->closure_protos[ins.a];
+	if (proto.lambda && proto.lambda->null_chain) [[unlikely]] { null_chain_closures_ = true; }
 	auto closure_env = environment_;
 	size_t init_count = 0;
 	for (const auto& capture : proto.captures) { if (capture.init) { ++init_count; } }

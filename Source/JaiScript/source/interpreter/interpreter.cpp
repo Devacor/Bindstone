@@ -10646,11 +10646,13 @@ void interpreter::capture_stack_trace() {
     for (size_t i = call_stack_.size(); i-- > 0;) {
         levels_from(i + 1);
         if (captured_trace_.size() >= k_stack_trace_frames) {
-            cap_stack_trace(captured_trace_, i + constructions + 2);
+            size_t chain_frames = 0;   // a `?.` chain's lambda has no frame in a trace (KEEP BYTE-PARALLEL with vm_backend::null_chain_frames_through)
+            for (size_t k = 0; k <= i; ++k) { chain_frames += detail::null_chain_frame(call_stack_[k].current_node) ? 1 : 0; }
+            cap_stack_trace(captured_trace_, i + constructions + 2 - chain_frames);
             trace_captured_ = true;
             return;
         }
-        captured_trace_.push_back(call_frame_trace(call_stack_[i]));
+        if (!detail::null_chain_frame(call_stack_[i].current_node)) { captured_trace_.push_back(call_frame_trace(call_stack_[i])); }
     }
     levels_from(0);
     captured_trace_.push_back(trace_frame_at("<script>", top_level_node_ ? &top_level_node_->location : nullptr));

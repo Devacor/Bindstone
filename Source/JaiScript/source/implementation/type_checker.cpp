@@ -7751,7 +7751,9 @@ private:
 
     JAI_NOINLINE ctype infer_ternary(ternary_expr* t, const type_info* expected) {
         const size_t mark = narrow_ended_.size();
+        const expression* outer_chain_test = std::exchange(null_chain_test_, t->null_chain ? t->condition.get() : nullptr);
         infer(t->condition.get());
+        null_chain_test_ = outer_chain_test;
         std::vector<narrow_fact> when_true, when_false;
         narrow_conclude(t->condition.get(), mark, when_true, when_false);
         const size_t held = narrow_facts_.size();
@@ -9753,7 +9755,10 @@ private:
 
     // null against a declared slot that never holds it (a store of null raises or converts there); handles and
     // functions hold null, and a call's container result is null when the body falls off its end
+    // a `?.` chain's own test (parser::null_chain_rest): `?.` over a value that is never null reads it as `.` does
+    const expression* null_chain_test_ = nullptr;
     void check_null_comparison(const binary_expr* b, const ctype& t, const expression* operand, const char* op) {
+        if (b == null_chain_test_) { return; }
         switch (t.kind) {
             case ctype::int_k: case ctype::float_k: case ctype::char_k: case ctype::bool_k: case ctype::string_k: case ctype::utf8_k: break;
             case ctype::array_k: case ctype::map_k: case ctype::math_k:

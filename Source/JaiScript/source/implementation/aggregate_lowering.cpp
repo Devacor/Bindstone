@@ -1419,7 +1419,9 @@ private:
 				stmt_ctx branch;   // a branch runs conditionally: nothing of it hoists
 				auto c = expr(t->condition, ctx), th = expr(t->then_expression, branch), el = expr(t->else_expression, branch);
 				if (c == t->condition && th == t->then_expression && el == t->else_expression) return e;
-				return std::make_shared<ternary_expr>(t->location, c, th, el);
+				auto copy = std::make_shared<ternary_expr>(t->location, c, th, el);
+				copy->null_chain = t->null_chain;
+				return copy;
 			}
 			case node_type::array_literal_expr: {
 				auto* a = static_cast<const array_literal_expr*>(e.get());

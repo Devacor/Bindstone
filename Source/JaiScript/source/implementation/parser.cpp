@@ -4060,6 +4060,29 @@ JAI_NOINLINE checked_result<expression_ptr> parser::subscript(expression_ptr exp
     return subscript_node(std::move(expr), std::move(index), previous().location);
 }
 
+// The rewrite's conditional, and the lambda an impure base binds through, are the chain's own: texts name the chain and no trace a frame
+// of the lambda
+void parser::mark_null_chain(jai::expression* rewritten) {
+    if (rewritten->get_type() == node_type::ternary_expr) {
+        static_cast<ternary_expr*>(rewritten)->null_chain = ternary_expr::chain_test;
+    } else if (rewritten->get_type() == node_type::call_expr) {
+        auto* call = static_cast<call_expr*>(rewritten);
+        if (!call->callee || call->callee->get_type() != node_type::lambda_expr) { return; }
+        auto* lambda = static_cast<lambda_expr*>(call->callee.get());
+        lambda->null_chain = true;
+        const ast_node* body = lambda->body.get();   // lambda_expression_body: one return of the conditional
+        if (body && body->get_type() == node_type::block_stmt) {
+            const auto& declarations = static_cast<const block_stmt*>(body)->declarations;
+            body = declarations.size() == 1 ? declarations.front().get() : nullptr;
+        }
+        if (body && body->get_type() == node_type::statement_decl) { body = static_cast<const statement_decl*>(body)->statement.get(); }
+        const jai::expression* value = body && body->get_type() == node_type::return_stmt ? static_cast<const return_stmt*>(body)->value.get() : nullptr;
+        if (value && value->get_type() == node_type::ternary_expr) {
+            const_cast<ternary_expr*>(static_cast<const ternary_expr*>(value))->null_chain = ternary_expr::chain_lambda_test;
+        }
+    }
+}
+
 // a?.b.c: a null before the ?. skips the rest of the chain, which then yields null (JavaScript's and C#'s optional chaining). The
 // last ?. a plain link follows (one more than its member and that member's call) is rewritten over the tokens: a base that runs no
 // code reads twice, `(null != base) ? base.rest : null`; any other base is evaluated once into an arrow function's parameter,
@@ -4154,6 +4177,7 @@ checked_result<expression_ptr> parser::null_chain_rest(size_t chain_start, const
         report_error("unexpected tokens in an optional chain", tokens[link]);
         return make_error_code(parse_error_code::syntax_error);
     }
+    mark_null_chain(parsed.value().get());
     return parsed.value();
 }
 

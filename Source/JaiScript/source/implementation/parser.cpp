@@ -2552,15 +2552,27 @@ JAI_NOINLINE checked_result<type_info_ptr> parser::named_type() {
     return make_error_code(parse_error_code::syntax_error);
 }
 
+// const and a reference are a variable's, never a type argument's
+JAI_NOINLINE static std::string qualified_type_argument_text(const std::string& type, bool is_const) {
+    if (is_const) { return "a type argument names a type: 'const " + type + "' is not one an instance can be made with; const goes on the variable, never in a type argument"; }
+    return "a type argument names a type: '" + type + "&' is a reference, not one an instance can be made with; a generic writes T& in its own parameter list";
+}
+
 JAI_NOINLINE checked_result<type_info_ptr> parser::instance_type(const std::string& type_name, bool host_template) {
     const token open = advance();
     std::vector<type_info_ptr> templateParams;
     do {
         type_info_ptr param;
+        const token argument_start = peek();
+        const bool is_const = match(token_type::const_keyword);
         if (check(token_type::identifier) && (peek().lexeme == "uint8" || peek().lexeme == "int8")) {
             param = store_type_info(advance().lexeme == "uint8" ? type_info::make_uint8(*symbolizer_) : type_info::make_int8(*symbolizer_));
         } else {
             JAISCRIPT_TRY_ASSIGN(param, parse_type());
+        }
+        if (param && (is_const || check(token_type::ampersand))) {
+            report_error(qualified_type_argument_text(param->canonical_name(), is_const), is_const ? argument_start : peek());
+            return make_error_code(parse_error_code::syntax_error);
         }
         if (!param || (!host_template && param->base_type == script_value_type::jai_null_type)) {
             report_error(host_template ? "a template argument needs a concrete type"
@@ -3418,6 +3430,13 @@ size_t parser::type_arguments_end(size_t open, bool& split, bool placeholders) c
             case token_type::weak_ptr_keyword: case token_type::var_keyword: case token_type::function_keyword:
                 if (depth == 0) { return SIZE_MAX; }
                 break;
+            case token_type::ampersand:   // Box<int&>: no expression has '&' before '>' or ','; the type parse says what is wrong
+                if (depth == 0 || !placeholders || i + 1 >= tokens.size() ||
+                    (tokens[i + 1].type != token_type::greater && tokens[i + 1].type != token_type::right_shift && tokens[i + 1].type != token_type::comma)) { return SIZE_MAX; }
+                break;
+            case token_type::const_keyword:   // Box<const int>: no expression starts with const
+                if (depth == 0 || !placeholders || (tokens[i - 1].type != token_type::less && tokens[i - 1].type != token_type::comma)) { return SIZE_MAX; }
+                break;
             case token_type::void_keyword:   // function<void(A...)>: a signature's result is a type's spelling wherever it stands
                 if (depth < 64 && ((signatures >> depth) & 1) && tokens[i - 1].type == token_type::less) { break; }
                 [[fallthrough]];
@@ -3640,6 +3659,48 @@ bool parser::generic_extent(detail::generic_kind kind, size_t list_end, size_t& 
     }
     report_error(kind == detail::generic_kind::class_type ? "expected '}' after class body" : "expected '}' after block", tokens.back());
     return false;
+}
+
+// A constructor and an operator are no generics, as in this version a lambda is not: Box<T>(T x) and operator+<T>(T x) in a
+// class say so, and so does a generic class's constructor spelled with the class's own parameters (Pair<K, V>(...))
+bool parser::refuse_generic_member_head(std::string_view class_name) {
+    if (pushed_back_token_) { return false; }
+    const std::vector<token>& tokens = *stream_;
+    size_t at = attributes_end(current_);
+    while (at < tokens.size() && (tokens[at].type == token_type::static_keyword || tokens[at].type == token_type::override_keyword ||
+                                  tokens[at].type == token_type::coroutine_keyword)) { ++at; }
+    const auto listed = [&](size_t open) {   // the type parameters at `open` and a parameter list after them
+        const size_t close = open < tokens.size() && tokens[open].type == token_type::less ? type_parameters_end(open) : SIZE_MAX;
+        return close != SIZE_MAX && close < tokens.size() && tokens[close].type == token_type::left_paren ? close : SIZE_MAX;
+    };
+    if (const size_t close = at + 1 < tokens.size() && tokens[at].type == token_type::identifier && tokens[at].lexeme == class_name ? listed(at + 1) : SIZE_MAX;
+        close != SIZE_MAX) {
+        std::vector<std::string_view> written, declared;   // Pair<K, V>: the class's own parameters, in order
+        for (size_t i = at + 2; i < close; i += 2) { written.push_back(tokens[i].lexeme); }
+        for (const auto& parameter : generic_type_parameters_) { if (parameter.generic == class_name) { declared.push_back(parameter.name); } }
+        const bool own = !declared.empty() && written == declared;
+        std::string instance(class_name);
+        for (size_t i = 0; i < declared.size(); ++i) { instance += (i ? ", " : "<") + std::string(declared[i]) + (i + 1 == declared.size() ? ">" : ""); }
+        report_error(own ? "a constructor is named by its class's bare name: write " + std::string(class_name) + "(...); inside the class, " +
+                               std::string(class_name) + " is " + instance
+                         : "a constructor takes no type parameters: give the class them (class " + std::string(class_name) +
+                               "<T>), or declare a constructor for each type it takes", tokens[at + 1]);
+        current_ = close;
+        return true;
+    }
+    size_t name = type_run_end(at);
+    if (name != SIZE_MAX && name < tokens.size() && tokens[name].type == token_type::ampersand) { ++name; }
+    if (name == SIZE_MAX || name + 1 >= tokens.size() || tokens[name].type != token_type::identifier || tokens[name].lexeme != "operator") { return false; }
+    size_t open = name + 2;   // past the operator's own token, or its two: () and []
+    if ((tokens[name + 1].type == token_type::left_paren && open < tokens.size() && tokens[open].type == token_type::right_paren) ||
+        (tokens[name + 1].type == token_type::left_bracket && open < tokens.size() && tokens[open].type == token_type::right_bracket)) { ++open; }
+    if (listed(open) == SIZE_MAX) { return false; }
+    std::string spelled = "operator";
+    for (size_t i = name + 1; i < open; ++i) { spelled += tokens[i].lexeme; }
+    report_error("an operator takes no type parameters: give the class them (class " + std::string(class_name) + "<T>), or declare " + spelled +
+                 " for each type it takes", tokens[open]);
+    current_ = open;
+    return true;
 }
 
 // A type parameter's name is reserved in its generic: an instance replaces every bare use of it, so a variable, a parameter, a
@@ -6065,6 +6126,10 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
         }
 
         if (foreign_word_at_statement()) {
+            synchronize_class_member(class_open_index);
+            continue;
+        }
+        if (refuse_generic_member_head(className.lexeme)) {
             synchronize_class_member(class_open_index);
             continue;
         }

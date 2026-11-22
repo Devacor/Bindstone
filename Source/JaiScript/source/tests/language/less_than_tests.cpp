@@ -289,10 +289,10 @@ public:
 			const std::string braces = failure(*e, "class S { int a = 1; int b = 2; bool f() { return a < b > {}; } }\nprint(1);");
 			check_true(contains(braces, "cannot compare 'bool' with 'map' using '>'"), braces);
 			// '>' before '()' is spelled by no comparison: type arguments, and the callee that takes none says so
-			check_true(contains(failure(*e, "class Pet { }\nvoid f() { auto l = (int x) => x; print(l<Pet>()); }"), "'l' takes no type arguments: a type argument goes to a host function"));
-			check_true(contains(failure(*e, "void f() { auto l = (int x) => x; print(l<int>(2)); }"), "'l' takes no type arguments: a type argument goes to a host function"));
+			check_true(contains(failure(*e, "class Pet { }\nvoid f() { auto l = (int x) => x; print(l<Pet>()); }"), "'l' takes no type arguments: it is a lambda, and a lambda takes no type parameters"));
+			check_true(contains(failure(*e, "void f() { auto l = (int x) => x; print(l<int>(2)); }"), "'l' takes no type arguments: it is a lambda, and a lambda takes no type parameters"));
 			// a plain function and a plain class keep the reading that names them
-			check_true(contains(failure(*e, "class Pet { }\nint plain(Pet p) { return 1; }\nprint(plain<Pet>(Pet()));"), "'plain' takes no type arguments: a type argument goes to a host function"));
+			check_true(contains(failure(*e, "class Pet { }\nint plain(Pet p) { return 1; }\nprint(plain<Pet>(Pet()));"), "'plain' takes no type arguments: it is not a generic function"));
 			check_true(contains(failure(*e, "class Pet { }\nclass Hero { }\nprint(Hero<Pet>());"), "'Hero' takes no type arguments: it is not a generic class"));
 		});
 		test("a_missing_generic_is_named_where_a_site_compares", [this]() {

@@ -340,6 +340,8 @@ namespace jai {
         bool generic_parameters(detail::generic_definition& definition, size_t open, size_t& list_end);
         bool generic_extent(detail::generic_kind kind, size_t list_end, size_t& end);
         bool reserved_parameter_names(const detail::generic_definition& definition);
+        // A class member's head that lists type parameters where no generic can stand (a constructor's, an operator's): its error, and true
+        bool refuse_generic_member_head(std::string_view class_name);
         declaration_ptr parse_generic_text(const std::vector<token>& text, detail::generic_definition* definition = nullptr);
         size_t attributes_end(size_t at) const;   // past the [[attribute]] groups at `at`
         // The instances this parse's text names since its last top-level declaration began: each becomes a generic_instance_decl

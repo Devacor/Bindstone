@@ -155,10 +155,17 @@ public:
 
 		test("a_script_callee_takes_no_type_arguments", [this]() {
 			auto e = make_engine();
-			for (const char* code : {"int f(int x) { return x; } f<int>(1);",
-			                         "class C { int m() { return 1; } } C c; c.m<int>();",
-			                         "void g() { auto l = [](int x) { return x; }; l<int>(2); }"}) {
-				check_true(contains(failure(*e, code), "takes no type arguments: a type argument goes to a host function"), code);
+			const std::pair<const char*, const char*> cases[] = {
+				{"int f(int x) { return x; } f<int>(1);", "'f' takes no type arguments: it is not a generic function"},
+				{"namespace ns { int f(int x) { return x; } } ns::f<int>(1);", "'ns::f' takes no type arguments: it is not a generic function"},
+				{"class C { int m() { return 1; } } C c; c.m<int>();", "'m' takes no type arguments: it is not a generic method"},
+				{"class C { int m() { return 1; } int u() { return m<int>(); } }", "'m' takes no type arguments: it is not a generic method"},
+				{"class C { static int s() { return 1; } } C::s<int>();", "'s' takes no type arguments: it is not a generic method"},
+				{"class Hero { int n = 1; } Hero<int>();", "'Hero' takes no type arguments: it is not a generic class"},
+				{"void g() { auto l = [](int x) { return x; }; l<int>(2); }", "'l' takes no type arguments: it is a lambda, and a lambda takes no type parameters"}};
+			for (const auto& [code, text] : cases) {
+				const std::string got = failure(*e, code);
+				check_true(contains(got, text), std::string(code) + " -> " + got);
 			}
 		});
 
@@ -207,7 +214,7 @@ public:
 			auto e = make_engine();
 			bind_probe(*e);
 			check_eq((int64_t)3, e->execute("class Box<T> { T v; } Box<int> b; b.v = 3; b.v;").as_int());
-			check_true(contains(failure(*e, "int f(int x) { return x; } f<int>(1);"), "'f' takes no type arguments: a type argument goes to a host function"));
+			check_true(contains(failure(*e, "int f(int x) { return x; } f<int>(1);"), "'f' takes no type arguments: it is not a generic function"));
 		});
 
 		test("an_unknown_type_argument_is_the_declarations_error", [this]() {

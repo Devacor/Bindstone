@@ -209,6 +209,45 @@ public:
 			check_eq((int64_t)12, e->execute("auto f = (x) => id<int>(x); auto g = (x) => ns::id<int>(x); f(5) + g(7);").as_int());
 		});
 
+		test("a_type_argument_that_is_no_type_says_what_it_is", [this]() {
+			auto e = make_engine();
+			e->execute("class Box<T> { T v; } namespace ns { class Bag<T> { T v; } } 1;");
+			const std::string reference = "a type argument names a type: 'int&' is a reference, not one an instance can be made with; a generic writes T& in its own parameter list";
+			const std::string constant = "a type argument names a type: 'const int' is not one an instance can be made with; const goes on the variable, never in a type argument";
+			const std::string value = "a type argument names a type: a value is not one an instance can be made with; 'Box' takes types (Box<T>)";
+			const std::pair<std::string, std::string> cases[] = {
+				{"Box<int&> a;", reference}, {"void f(Box<int&> b) {}", reference}, {"array<Box<int&>> xs;", reference},
+				{"Box<const int> a;", constant}, {"shared_ptr<Box<const int>> p;", constant},
+				{"Box<3> a;", value}, {"Box<\"s\"> a;", value},
+				{"ns::Bag<3> a;", "a type argument names a type: a value is not one an instance can be made with; 'ns::Bag' takes types (ns::Bag<T>)"}};
+			for (const auto& [code, text] : cases) {
+				const std::string got = failure(*e, code);
+				check_true(contains(got, text) && !contains(got, "undeclared"), code + " -> " + got);
+			}
+			check_true(contains(failure(*e, "Box<int&> a;"), "<script>:1:8: error: " + reference));   // at the '&', and const at its own word
+			check_true(contains(failure(*e, "Box<const int> a;"), "<script>:1:5: error: " + constant));
+			check_true(contains(failure(*e, "Box<3> a;"), "<script>:1:5: error: " + value));
+			// '<' and '&' that no type argument list closes still compare
+			check_true(e->execute("int a = 1; int b = 3; bool c = a < (b & 2); c && a < b;").as_bool());
+		});
+
+		test("a_constructor_and_an_operator_take_no_type_parameters", [this]() {
+			auto e = make_engine();
+			const std::pair<std::string, std::string> cases[] = {
+				{"class Box { int v; Box<T>(T x) { v = 1; } }", "<script>:1:23: error: a constructor takes no type parameters: give the class them (class Box<T>), or declare a constructor for each type it takes"},
+				{"class Pair<K, V> { K k; Pair<K, V>(K a) { k = a; } }", "<script>:1:29: error: a constructor is named by its class's bare name: write Pair(...); inside the class, Pair is Pair<K, V>"},
+				{"class Box { int v; Box operator+<T>(T x) { return this; } }", "<script>:1:33: error: an operator takes no type parameters: give the class them (class Box<T>), or declare operator+ for each type it takes"},
+				{"class Box { int v; static Box operator*<T>(Box a, T x) { return a; } }", "an operator takes no type parameters: give the class them (class Box<T>), or declare operator* for each type it takes"},
+				{"class Box { int v; T operator()<T>(T x) { return x; } }", "an operator takes no type parameters: give the class them (class Box<T>), or declare operator() for each type it takes"},
+				{"class Box { int v; int operator[]<T>(T x) { return 1; } }", "an operator takes no type parameters: give the class them (class Box<T>), or declare operator[] for each type it takes"}};
+			for (const auto& [code, text] : cases) {
+				const std::string got = failure(*e, code);
+				check_true(contains(got, text), code + " -> " + got);
+			}
+			// a constructor and an operator of a generic class are written as a plain class's, and an operator< is no type parameter list
+			check_eq((int64_t)7, e->execute("class Pair<K, V> { K k; Pair(K a) { k = a; } bool operator<(Pair<K, V> o) { return k < o.k; } } Pair<int, int> p = Pair<int, int>(7); Pair<int, int> q = Pair<int, int>(9); p < q ? p.k : 0;").as_int());
+		});
+
 		test("a_generic_class_is_not_overloaded_by_its_parameter_count", [this]() {
 			auto e = make_engine();
 			const std::string text = "generic class 'Dup' is declared with 1 type parameter on line 1 and with 2 type parameters here: a generic class cannot be overloaded by its parameter count";
@@ -671,7 +710,7 @@ public:
 			check_true(contains(failure(*e, "T id<T>(T x) { return x; } id<int>(1, 2);"), "'id<T>' takes 1 argument, not 2"));
 			check_true(contains(failure(*e, "class Two<K, V> { K k; V v; Two(K a, V b) { k = a; v = b; } } auto p = Two(\"hp\", 10);"),
 				"'Two' is a generic class: its type arguments are written, never deduced from a constructor's (Two<K, V>(...))"));
-			check_true(contains(failure(*e, "int f(int x) { return x; } f<int>(1);"), "'f' takes no type arguments: a type argument goes to a host function"));
+			check_true(contains(failure(*e, "int f(int x) { return x; } f<int>(1);"), "'f' takes no type arguments: it is not a generic function"));
 			// a parse error only an argument brings: reported in the generic, with the instance's note
 			const std::string parse = failure(*e, "class Init<T> { T made() { return T(1, 2); } }\nclass Vec { Vec(int a, int b) {} }\nInit<Vec> ok; Init<int> bad;\n");
 			check_true(contains(parse, "a 'int' is initialized by one value, not 2") && contains(parse, "in Init<int>, instantiated at <script>:3:19") && !contains(parse, "Init<Vec>,"));
@@ -1652,7 +1691,7 @@ public:
 				{"a function body that does not check for its instance", lib_text("7", added, "x.size()"),
 					{"lib.jai:7:28: error: int has no member 'size'", "    in twice<int>, instantiated at ", "game.jai:4:65"}},
 				{"a function of the generic function's name", "class Box<T> {\n\tT item;\n" + added + "\tint size() { return 7; }\n" + sizer_text + "}\nstring twice(string x) { return x; }\n",
-					{"game.jai:4:65: error: 'twice' takes no type arguments: a type argument goes to a host function"}},
+					{"game.jai:4:65: error: 'twice' takes no type arguments: it is not a generic function"}},
 				{"another type parameter count for the function", "class Box<T> {\n\tT item;\n" + added + "\tint size() { return 7; }\n" + sizer_text + "}\nT twice<T, U>(T x) { return x; }\n",
 					{"game.jai:4:65: error: cannot deduce U for 'twice': no parameter names it; write twice<int, U>(...)"}},
 			};
@@ -1748,7 +1787,7 @@ public:
 					"error: cannot deduce U for 'twice': no parameter names it; write twice<int, U>(...)"},
 				{"a generic function, another value parameter count", fn_v1, fn_user, limit + "T twice<T>(T x, T y) { return x + y; }\n", 'r', false, false, "error: 'twice<T>' takes 2 arguments, not 1"},
 				{"a generic function, a function of its name", fn_v1, fn_user, limit + "string twice(string x) { return x; }\n", 'r', false, false,
-					"error: 'twice' takes no type arguments: a type argument goes to a host function"},
+					"error: 'twice' takes no type arguments: it is not a generic function"},
 				{"a generic function, dropped", fn_v1, fn_user, limit, 'd', false, false, "error: use of undeclared identifier 'twice'"},
 				{"a generic method, edited", method_v1, method_user, tool("\tT scaled<T>(T x) { return x + x; }\n"), 'a', false, false, ""},
 				{"a generic method, a body that does not check for int", method_v1, method_user, tool("\tT scaled<T>(T x) { return x.size(); }\n"), 'r', true, false,
@@ -1760,7 +1799,7 @@ public:
 				{"a generic method, another value parameter count", method_v1, method_user, tool("\tT scaled<T>(T x, T y) { return x + y; }\n"), 'r', false, false,
 					"error: 'Tool::scaled<T>' takes 2 arguments, not 1"},
 				{"a generic method, a method of its name", method_v1, method_user, tool("\tstring scaled(string x) { return x; }\n"), 'r', false, false,
-					"error: 'scaled' takes no type arguments: a type argument goes to a host function"},
+					"error: 'scaled' takes no type arguments: it is not a generic method"},
 				{"a generic method, gone from its class", method_v1, method_user, tool(""), 'r', false, false, "error: no member 'scaled' in class 'Tool'"},
 				{"a generic method, dropped with its class", method_v1, method_user, limit, 'd', false, false, "error: no member 'scaled' in class 'Tool'"},
 			};

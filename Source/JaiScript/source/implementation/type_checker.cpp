@@ -788,6 +788,7 @@ private:
     bool type_argument_call_ = false;
     std::vector<std::pair<type_info_ptr, source_location>>* unknown_type_arguments_ = nullptr;   // the call's type arguments that name no type, while they are inferred
     std::string type_argument_script_callee_;
+    std::string_view type_argument_script_kind_;   // what it is: a function, a method, a class, a lambda
     std::string type_argument_host_callee_;
     // Every name the program scope declares (top level and namespace bodies, any order): a function reads a global declared
     // after it, so "undeclared" fires for names absent from this set AND the engine surface. A name a block, function, lambda
@@ -5064,10 +5065,15 @@ private:
         if (eng_.host_function_result(callable, k) && k == script_value_type::jai_invalid_type) { void_hit_ = {"'" + callable + "'"}; }
     }
     // a script callee of a call with type arguments: the call's one error, in place of the overload verdict
-    bool script_callee_takes_type_arguments(std::string_view fname) {
+    bool script_callee_takes_type_arguments(std::string_view fname, std::string_view kind) {
         if (!type_argument_call_) { return false; }
         type_argument_script_callee_ = std::string(fname);
+        type_argument_script_kind_ = kind;
         return true;
+    }
+    JAI_NOINLINE static std::string no_type_parameters_text(const std::string& callee, std::string_view kind) {
+        if (kind == "lambda") { return "'" + callee + "' takes no type arguments: it is a lambda, and a lambda takes no type parameters"; }
+        return "'" + callee + "' takes no type arguments: it is not a generic " + std::string(kind);
     }
     // A host registration's typed result (core/permission.hpp jai::returns<jai::type_arg> and its siblings): the first type
     // argument T, array<T> or shared_ptr<T>
@@ -5284,7 +5290,7 @@ private:
         if (ctype result; check_namespace_function_call(path, member, args, loc, seen, result)) { return result; }
         const std::string qualified = path + "::" + std::string(member);
         if (const std::string_view cls = namespace_class_named(qualified); !cls.empty()) {   // a construction, typed as the bare spelling is
-            if (script_callee_takes_type_arguments(cls)) { return {}; }
+            if (script_callee_takes_type_arguments(cls, "class")) { return {}; }
             if (const sclass* sc = find_sclass(cls)) { check_ctor_call(cls, *sc, args, loc); }
             return read_through_declared_slot(object_of(cls));
         }
@@ -6181,7 +6187,7 @@ private:
     // program takes it; the result is typed only when the one that does is this unit's own, and no proof rests on the set
     ctype check_program_overloads(std::string_view fname, const std::vector<const function_decl*>& own, const std::vector<const function_decl*>& foreign,
                                   const std::vector<ctype>& args, const source_location& loc, bool foreign_first = false) {
-        if (script_callee_takes_type_arguments(fname)) { return {}; }
+        if (script_callee_takes_type_arguments(fname, "function")) { return {}; }
         std::vector<const function_decl*> all(own);
         all.insert(all.end(), foreign.begin(), foreign.end());
         const bool rivals = arity_rivals(all, args.size());
@@ -6245,8 +6251,8 @@ private:
     // among them by type (methods); a program's free functions of one name are redefinitions, the last one taking the call
     call_check check_script_overloads(std::string_view fname, const std::vector<const function_decl*>& overloads,
                                       const std::vector<ctype>& args, const source_location& loc, bool foreign = false,
-                                      bool scored = true) {
-        if (script_callee_takes_type_arguments(fname)) { return {}; }
+                                      bool scored = true, std::string_view kind = "function") {
+        if (script_callee_takes_type_arguments(fname, kind)) { return {}; }
         const function_decl* only_viable = nullptr;
         int viable_count = 0;
         int nodiscard_viable = 0;
@@ -7404,6 +7410,7 @@ private:
     }
 
     JAI_NOINLINE ctype infer_binary(binary_expr* b) {
+        if (b->op.type == token_type::greater && value_as_type_argument(b)) { return {}; }
         const size_t mark = narrow_ended_.size();
         ctype l = infer(b->left.get());
         const size_t held = narrow_facts_.size();
@@ -7416,6 +7423,27 @@ private:
         ctype r = infer(b->right.get());
         narrow_pop(held);
         return binary_type(b, l, r);
+    }
+
+    // Box<3> x; reads as (Box < 3) > x, where a generic class's bare name is an error anyway: its one error says a type
+    // argument is a type
+    JAI_NOINLINE bool value_as_type_argument(const binary_expr* b) {
+        if (!generics_live_ || !b->left || b->left->get_type() != node_type::binary_expr) { return false; }
+        const auto* less = static_cast<const binary_expr*>(b->left.get());
+        if (less->op.type != token_type::less || !less->left || !less->right || less->right->get_type() != node_type::literal_expr) { return false; }
+        std::string name;
+        if (less->left->get_type() == node_type::identifier_expr) {
+            const auto* id = static_cast<const identifier_expr*>(less->left.get());
+            if (find_local(id->name)) { return false; }
+            name = std::string(id->name);
+        } else if (less->left->get_type() == node_type::member_expr && static_cast<const member_expr*>(less->left.get())->is_static) {
+            name = qualified_spelling(static_cast<const member_expr*>(less->left.get()));
+        }
+        const generic_definition_ptr g = name.empty() ? nullptr : generic_class_named(name);
+        if (!g) { return false; }
+        diag(diag_level::error, less->right->location,
+             "a type argument names a type: a value is not one an instance can be made with; '" + name + "' takes types (" + generic_spelling(*g) + ")");
+        return true;
     }
 
     JAI_NOINLINE ctype binary_type(binary_expr* b, ctype& l, ctype& r) {
@@ -8524,6 +8552,7 @@ private:
         // a call in the callee's receiver resolves its own type arguments: the enclosing call's state comes back after it
         const bool outer_type_argument_call = type_argument_call_;
         std::string outer_script_callee = std::move(type_argument_script_callee_), outer_host_callee = std::move(type_argument_host_callee_);
+        const std::string_view outer_script_kind = type_argument_script_kind_;
         type_argument_call_ = c->type_argument_count > 0;
         type_argument_script_callee_.clear();
         type_argument_host_callee_.clear();
@@ -8547,7 +8576,7 @@ private:
             t = {};
         } else if (c->type_argument_count > 0) {
             if (!type_argument_script_callee_.empty()) {
-                diag(diag_level::error, c->location, "'" + type_argument_script_callee_ + "' takes no type arguments: a type argument goes to a host function");
+                diag(diag_level::error, c->location, no_type_parameters_text(type_argument_script_callee_, type_argument_script_kind_));
                 ov = nullptr;
                 t = {};
             } else if (!type_argument_host_callee_.empty()) {
@@ -8556,6 +8585,7 @@ private:
         }
         type_argument_call_ = outer_type_argument_call;
         type_argument_script_callee_ = std::move(outer_script_callee);
+        type_argument_script_kind_ = outer_script_kind;
         type_argument_host_callee_ = std::move(outer_host_callee);
         narrow_call_arguments(c, ov, seen);
         t = check_call(c, args, ov, std::move(t));
@@ -8834,7 +8864,7 @@ private:
             size_t scope_index = 0;
             if (const var_entry* local = callable_variable(id, &scope_index)) {
                 if (scope_index == 0) { note_global_use(id->name); }
-                if (local->lambda && script_callee_takes_type_arguments(id->name)) { return {}; }
+                if (local->lambda && script_callee_takes_type_arguments(id->name, "lambda")) { return {}; }
                 if (!local->dynamic && signature_slot(local->type)) { return check_signature_call("'" + std::string(id->name) + "'", local->type.ti, c, args); }
                 if (const std::string* reason = lambda_variable_returns_nothing(id)) { void_hit_ = {"'" + std::string(id->name) + "'", {}, nullptr, *reason}; }
                 return {};   // a callable local without a signature
@@ -8846,7 +8876,7 @@ private:
                     if (hit.methods) {
                         if (hit.provable) { ov = hit.methods; ov_class_ = class_ctx_name_; }
                         hidden_function_probe_ = true;
-                        ctype r = check_script_overloads(id->name, *hit.methods, args, c->location, hit.foreign).result;
+                        ctype r = check_script_overloads(id->name, *hit.methods, args, c->location, hit.foreign, true, "method").result;
                         hidden_function_probe_ = false;
                         if (!nodiscard_hit_.name.empty()) { nodiscard_hit_.name = std::string(class_ctx_name_) + "." + nodiscard_hit_.name; }
                         if (!void_hit_.shown.empty()) {
@@ -8881,7 +8911,7 @@ private:
                 return check_script_overloads(id->name, it->second, args, c->location).result;
             }
             if (const sclass* sc = find_sclass(id->name)) {
-                if (script_callee_takes_type_arguments(id->name)) { return {}; }
+                if (script_callee_takes_type_arguments(id->name, "class")) { return {}; }
                 report_class_before_declaration(id->name, c->location);
                 report_instance_before_declaration(id->name, c->location, false);
                 const bool may_copy = check_ctor_call(id->name, *sc, args, c->location);
@@ -9123,7 +9153,7 @@ private:
         if (hit.found) {
             if (hit.methods) {
                 if (hit.provable && ov) { *ov = hit.methods; ov_class_ = recv.cls; }
-                ctype result = check_script_overloads(m->member, *hit.methods, args, c->location, hit.foreign).result;
+                ctype result = check_script_overloads(m->member, *hit.methods, args, c->location, hit.foreign, true, "method").result;
                 if (!nodiscard_hit_.name.empty()) { nodiscard_hit_.name = std::string(recv.cls) + "." + nodiscard_hit_.name; }
                 // a method dispatches on the object, so only a static's result is known (an override may give a value)
                 if (!void_hit_.shown.empty()) {

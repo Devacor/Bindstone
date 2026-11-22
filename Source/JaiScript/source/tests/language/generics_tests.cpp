@@ -1114,6 +1114,50 @@ public:
 				"enum Tint { red, green } of(array<int>(3)) + \" \" + of(map<string, int>()) + \" \" + of(Tint::green);").as_string());
 		});
 
+		test("a_declared_result_has_a_type_deduction_reads", [this, deducible]() {
+			// each program is one unit: the receivers are declared where the calls stand, so the load is certain of them
+			const std::string declared = deducible +
+				"class Of<T> {} string of<T>(T x) { string name = reflect::type_of(Of<T>()); return name.substr(3, name.size() - 4); }\n"
+				"U apply<T, U>(T x, function<U(T)> f) { return f(x); } namespace tools { T keep<T>(T x) { return x; } } class Bag { T hold<T>(T x) { return x; } }\n"
+				"string s = \"hello\"; utf8_string u = \"hello\"; array<int> xs = [3, 1, 2]; array<string> names = [\"b\", \"a\"]; map<string, int> ages = {\"a\": 1}; Bag bag;\n";
+			const auto text = [&](const std::string& code) { auto e = stdlib_engine(); return e->execute(declared + code).as_string(); };
+			const auto refusal = [&](const std::string& code) { auto e = stdlib_engine(); return failure(*e, declared + code); };
+			// a builtin method's result is the one the registry's catalog states, on each receiver
+			check_eq(std::string("string bool int int char"), text(
+				"of(s.substr(1)) + \" \" + of(s.contains(\"l\")) + \" \" + of(s.find(\"l\")) + \" \" + of(s.compare(\"a\")) + \" \" + of(s.at(0));"));
+			check_eq(std::string("utf8_string utf8_string bool int"), text(
+				"of(u.substr(1)) + \" \" + of(u.at(0)) + \" \" + of(u.contains(\"l\")) + \" \" + of(u.find(\"l\"));"));
+			check_eq(std::string("bool int string bool bool"), text(
+				"of(xs.contains(1)) + \" \" + of(xs.index_of(1)) + \" \" + of(names.join(\",\")) + \" \" + of(ages.contains(\"a\")) + \" \" + of(ages.has(\"a\"));"));
+			check_eq(std::string("int float"), text("of(s.to_int(0)) + \" \" + of(s.to_float(0.5));"));   // the fallback's own type settles it
+			// a host function's declared result, a host namespace entry's and a math value's component
+			check_eq(std::string("int string string float int"), text(
+				"of(thread_count()) + \" \" + of(current_script_dir()) + \" \" + of(string::repeat(\"a\", 2)) + \" \" + of(math::vec2(1.0, 2.0).x) + \" \" + of(math::ivec2(1, 2).x);"));
+			// an operator over them, a literal of them, an auto variable declared with one
+			check_eq(std::string("int string bool float array<string> array<bool> string"), text(
+				"auto part = s.substr(1); of(s.find(\"l\") + 1) + \" \" + of(s.substr(1) + s.substr(2)) + \" \" + of(s.contains(\"l\") && true) + \" \" + of(s.find(\"l\") * 1.5) + \" \" + "
+				"of([s.substr(1), \"x\"]) + \" \" + of([xs.contains(1)]) + \" \" + of(part);"));
+			// a lambda that returns one names its signature's result, declared or an arrow; a generic method and a namespace's
+			// function deduce as a function does
+			check_eq(std::string("string string string int int bool int"), text(
+				"of(apply(1, (int k) => names.join(\",\"))) + \" \" + of(apply(1, k => names.join(\",\"))) + \" \" + of(apply(1, (int k) => { if (k > 0) { return s.substr(k); } return \"none\"; })) + \" \" + "
+				"of(apply(s.find(\"l\"), k => k + 1)) + \" \" + of(apply(1, (int k) => thread_count())) + \" \" + of(tools::keep(xs.contains(1))) + \" \" + of(bag.hold(s.find(\"l\")));"));
+			check_eq(std::string("2,ello"), text("to_string(either(s.find(\"l\"), s.find(\"h\"))) + \",\" + id(s.substr(1));"));
+			// declared results that disagree are the usual error, and a lambda whose returns disagree still says nothing
+			check_true(contains(refusal("either(s.find(\"l\"), s.substr(1));"), "cannot deduce T for 'either': it is int from argument 1 and string from argument 2"));
+			check_true(contains(refusal("apply(1, (int k) => { if (k > 0) { return s.find(\"l\"); } return \"none\"; });"),
+				"cannot deduce U for 'apply': argument 2 is a function, which says nothing of a type; write apply<int, U>(...)"));
+			// a call that finds its type arguments in what the load is certain of keeps them: a declared result beside it converts
+			// as any argument does
+			check_eq(std::string("float int string 2.0"), text(
+				"of(either(s.find(\"l\"), 2.5)) + \" \" + of(either(xs.contains(1), 1)) + \" \" + of(either(s.substr(1), \"x\")) + \" \" + to_string(either(s.find(\"l\"), 2.5));"));
+			check_eq(std::string("5"), text("T first<T>(T a, int n) { return a; } U first<U>(string a, U n) { return n; } to_string(first(s.substr(1), 5));"));
+			// what no declaration states is still not known: a var's method, a builtin's open result, a builtin called on a builtin's result
+			for (const char* unknown : {"var v = s; id(v.substr(1));", "id(s.split(\",\"));", "id(s.substr(1).size());"}) {
+				check_true(contains(refusal(unknown), "cannot deduce T for 'id': argument 1's type is not known at load; write id<T>(...)"), unknown);
+			}
+		});
+
 		test("an_ordinary_function_that_fits_wins_over_a_generic", [this]() {
 			auto e = stdlib_engine();
 			check_eq(std::string("101s"), e->execute("T id<T>(T x) { return x; } int id(int x) { return x + 100; } to_string(id(1)) + id(\"s\");").as_string());

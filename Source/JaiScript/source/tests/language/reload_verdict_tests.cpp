@@ -138,6 +138,54 @@ public:
 				check_true(has(p.run("fresh();"), "error: use of undeclared identifier 'fresh'"), "the module's rejected text does not");
 			}
 		});
+
+		test("a_module_rejected_for_a_file_in_its_closure_raises_once_and_waits", [this]() {
+			struct closure {
+				std::string name;
+				std::string part;          // the file in the module's closure; empty: the module's own text is what breaks
+				std::string good, broken, fixed;
+				std::string outer;         // the module the import reaches
+				std::string error;         // what the rejection names
+			};
+			const std::vector<closure> closures = {
+				{"an imported module", "part.jai", "int part() { return 1; }\n", "int part() { return \"broken\"; }\n", "int part() { return 2; }\n",
+				 "import \"part.jai\";\nint outer() { return part() + 10; }\n", "part.jai:1:14: error: cannot return 'string' from 'part'"},
+				{"a file included at the top level", "part.jai", "int part() { return 1; }\n", "int part() { return \"broken\"; }\n", "int part() { return 2; }\n",
+				 "include \"part.jai\";\nint outer() { return part() + 10; }\n", "part.jai:1:14: error: cannot return 'string' from 'part'"},
+				{"a file spliced into a function", "part.jai", "int n = 1;\n", "int n = \"broken\";\n", "int n = 2;\n",
+				 "int outer() { include \"part.jai\"; return n + 10; }\n", "error: cannot initialize 'n' declared 'int' with 'string'"},
+				{"a generic's file whose edit breaks an instance", "part.jai", "class Box<T> { T item; int size() { return 1; } }\n",
+				 "class Box<T> { T item; int size() { return item.size(); } }\n", "class Box<T> { T item; int size() { return 2; } }\n",
+				 "import \"part.jai\";\nint outer() { Box<int> b; return b.size() + 10; }\n", "part.jai:1:49: error: int has no member 'size'"},
+				{"a generic's file that no longer parses", "part.jai", "class Box<T> { T item; int size() { return 1; } }\n",
+				 "class Box<T> { T item; int size() { return 5 +; } }\n", "class Box<T> { T item; int size() { return 2; } }\n",
+				 "import \"part.jai\";\nint outer() { Box<int> b; return b.size() + 10; }\n", "part.jai:1:47: error: expected expression"},
+				{"the module's own text", "", "int outer() { return 11; }\n", "int outer() { return \"broken\"; }\n", "int outer() { return 12; }\n",
+				 "", "outer.jai:1:15: error: cannot return 'string' from 'outer'"},
+			};
+			for (const closure& c : closures) {
+				program p("d_" + std::to_string(&c - closures.data()));
+				const std::string edited = c.part.empty() ? "outer.jai" : c.part;
+				p.write("outer.jai", c.outer);
+				p.write(edited, c.good);
+				p.write("root.jai", "import \"outer.jai\";\nint tick() { import(\"outer.jai\"); return outer(); }\n");
+				check_eq(std::string("null"), p.run_file("root.jai"), c.name);
+				check_eq(std::string("11"), p.run("tick();"), c.name + ": before the edit");
+				p.write(edited, c.broken);
+				const std::string first = p.run("tick();");
+				check_true(failed(first) && has(first, c.error), c.name + ": the first reach raises the rejection: " + first);
+				for (int reach = 1; reach <= 3; ++reach) {
+					check_eq(std::string("11"), p.run("tick();"), c.name + ": reach " + std::to_string(reach) + " after it runs the code the program had");
+				}
+				check_eq(std::string("false"), p.run("string path = \"outer\" + \".jai\"; to_string(import(path));"), c.name + ": an import of it answers false while it waits");
+				p.write(edited, c.fixed);
+				check_eq(std::string("12"), p.run("tick();"), c.name + ": the fix reloads");
+				// another broken edit is another rejection, raised once
+				p.write(edited, c.broken);
+				check_true(failed(p.run("tick();")), c.name + ": a second broken edit raises again");
+				check_eq(std::string("12"), p.run("tick();"), c.name + ": and waits again");
+			}
+		});
 	}
 };
 

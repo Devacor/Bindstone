@@ -8592,7 +8592,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
                 walking.insert(walking.end(), crec->second.children.rbegin(), crec->second.children.rend());
                 continue;
             }
-            if (!same && I.held_failure(crec->second, u.mtime, u.size)) { continue; }
+            if (I.held_failure(crec->second, u.mtime, u.size)) { continue; }
             nested_changed.push_back(std::move(u));
         }
     };
@@ -8632,7 +8632,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         if (rec->second.missing) { changed.push_back(i); continue; }
         const bool same = m.mtime == rec->second.mtime && m.size == rec->second.size;
         if (same && !I.closure_moved(rec->second)) { walk(rec->second); continue; }
-        if (!same && I.held_failure(rec->second, m.mtime, m.size)) { held = true; continue; }
+        if (I.held_failure(rec->second, m.mtime, m.size)) { held = true; continue; }
         changed.push_back(i);
     }
     for (const auto& m : mods) { I.note_import_child(m.resolved); }
@@ -8657,6 +8657,12 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         rec->second.failed_size = m.size;
         rec->second.failed_closure.clear();
         rec->second.failed_units.clear();
+    };
+    // a failure of the run itself waits on the files that run read, each under the stamp of the text it read (the module's
+    // closure, the failed run's reads merged in)
+    const auto record_run_failure = [&](const import_unit& m) {
+        record_failure(m);
+        if (auto rec = I.import_cache.find(m.resolved); rec != I.import_cache.end()) { rec->second.failed_closure = rec->second.closure; }
     };
     // a failure before the run waits on every file it involved, each under the stamp of the text the failing check judged:
     // what its load read (as the loader stamped it), the dependents it broke (a module under the stamp it last ran from; a
@@ -8914,11 +8920,11 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
                 execute_source(contents[k], instance_variables{}, m.resolved, false, {}, &loaded_under);
             } catch (const static_check_error&) {
                 I.merge_import_frame(m.resolved, I.end_import_frame());
-                record_failure(m);
+                record_run_failure(m);
                 throw;
             } catch (const parse_error&) {
                 I.merge_import_frame(m.resolved, I.end_import_frame());
-                record_failure(m);
+                record_run_failure(m);
                 throw;
             } catch (...) {
                 I.merge_import_frame(m.resolved, I.end_import_frame());

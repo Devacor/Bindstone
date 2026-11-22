@@ -303,6 +303,25 @@ public:
 			check_true(contains(e->check("class Receipt { int id; } auto r = from_json<Receipt>(\"{}\"); r.Idd;").format(), "no member 'Idd' in class 'Receipt'"));
 			check_eq(std::string("x"), e->execute("var plain = from_json(\"{\\\"a\\\": \\\"x\\\"}\"); plain[\"a\"];").as_string());
 		});
+
+		test("from_binary_with_a_type_argument_builds_that_type_as_from_json_does", [this]() {
+			auto e = make_engine();
+			stdlib::register_all(*e);
+			e->execute("class Item { string name; int qty = 1; } class Order { int id; array<Item> items; shared_ptr<Item> first; }"
+			           " Order made; made.id = 2; Item hat; hat.name = \"hat\"; made.items.push(hat); made.first = new Item(); made.first->name = \"pin\";");
+			check_eq(std::string("2 hat 1 pin"), e->execute("Order o = from_binary<Order>(to_binary(made)); to_string(o.id) + \" \" + o.items[0].name + \" \" + to_string(o.items[0].qty) + \" \" + o.first->name;").as_string());
+			// untagged data builds a class by the record rules, as from_json<T> of an object does
+			check_eq(std::string("b 1"), e->execute("auto all = from_binary<array<Item>>(to_binary([{\"name\": \"a\"}, {\"name\": \"b\"}])); all[1].name + \" \" + to_string(all[1].qty);").as_string());
+			check_eq(std::string("pin"), e->execute("shared_ptr<Item> h = from_binary<shared_ptr<Item>>(to_binary(made.first)); h->name;").as_string());
+			check_eq(script_int(6), e->execute("from_binary<int>(to_binary(5)) + 1;").as_int());
+			check_eq(std::string("b"), e->execute("map<int, string> m; m[3] = \"b\"; from_binary<map<int, string>>(to_binary(m))[3];").as_string());
+			check_eq(std::string("hat"), e->execute("from_binary<Item>(base64_decode(base64_encode(to_binary(hat)))).name;").as_string());
+			check_eq(std::string("from_binary: the data is map, not array<int>"), failure(*e, "from_binary<array<int>>(to_binary({}));"));
+			check_eq(std::string("from_binary: field 'qty' of 'Item' is int, not string"), failure(*e, "from_binary<Item>(to_binary({\"qty\": \"x\"}));"));
+			check_eq(std::string("from_json: field 'qty' of 'Item' is int, not string"), failure(*e, "from_json<Item>(to_json({\"qty\": \"x\"}));"));
+			check_true(contains(e->check("class Receipt { int id; } auto r = from_binary<Receipt>(to_binary(1)); r.Idd;").format(), "no member 'Idd' in class 'Receipt'"));
+			check_eq(std::string("x"), e->execute("var plain = from_binary(to_binary({\"a\": \"x\"})); plain[\"a\"];").as_string());
+		});
 	}
 
 	static void bind_records(engine& eng) {

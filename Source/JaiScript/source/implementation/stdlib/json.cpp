@@ -238,18 +238,135 @@ namespace stdlib {
 		throw serialization_error("Invalid shared_ptr ID: " + std::to_string(id));
 	}
 
+	// the type parameters of the generic class a name declares, or -1 when none does
+	inline int generic_class_parameters(engine& eng, std::string_view name) {
+		const auto* declared = detail::engine_access::find_generics(eng, std::string(name));
+		if (!declared) { return -1; }
+		for (const auto& g : *declared) {
+			if (g->kind == detail::generic_kind::class_type) { return static_cast<int>(g->parameters.size()); }
+		}
+		return -1;
+	}
+
+	inline std::string type_argument_count_text(std::string_view name, size_t wanted, size_t given) {
+		return "'" + std::string(name) + "' takes " + std::to_string(wanted) + (wanted == 1 ? " type argument" : " type arguments") + ", not " + std::to_string(given);
+	}
+
+	// What a name that takes no type arguments is, as the checker tells it (none: no type of the name)
+	inline detail::plain_type_kind data_plain_type(engine& eng, std::string_view name) {
+		if (detail::builtin_type_name(name)) { return detail::plain_type_kind::builtin; }
+		if (const auto id = detail::engine_access::get_symbolizer(eng)->find(name); id && detail::engine_access::is_enum_name(eng, *id)) { return detail::plain_type_kind::enumeration; }
+		if (const auto def = detail::engine_access::get_class_definition(eng, std::string(name))) {
+			return def->is_cpp_class() ? detail::plain_type_kind::host_class : detail::plain_type_kind::script_class;
+		}
+		return detail::plain_type_kind::none;
+	}
+
+	// Why a name arriving as text (a whitespace-free key whose generic class is `generic`) spells no instance, in the checker's
+	// words for the same spelling; empty when it spells one the program could make. One pass with an explicit stack: a name
+	// nests as deep as the data does.
+	inline std::string instance_spelling_mistake(engine& eng, std::string_view key, std::string_view generic) {
+		const std::string malformed = "it is not the spelling of a type";
+		const size_t open = generic.size();
+		// the instance's own list first: a count it does not take is the mistake, whatever its arguments are
+		size_t root_arguments = 0;
+		int depth = 0;
+		size_t close = open;
+		for (; close < key.size(); ++close) {
+			const char c = key[close];
+			if (c == '<' || c == '(') { ++depth; }
+			else if (c == '>' || c == ')') { if (--depth == 0) { break; } }
+			else if (c == ',' && depth == 1) { ++root_arguments; }
+		}
+		if (close == key.size()) { return malformed; }
+		if (close > open + 1) { ++root_arguments; }
+		if (const int wanted = generic_class_parameters(eng, generic); root_arguments != static_cast<size_t>(wanted)) {
+			return type_argument_count_text(generic, static_cast<size_t>(wanted), root_arguments);
+		}
+		struct argument_list {
+			std::string_view name;
+			size_t wanted = 0;
+			size_t given = 0;
+			bool paren = false;     // a signature's parameters, closed by ')'
+			bool skipped = false;   // a signature's or a host template's arguments, which the data's name does not check
+			bool instance = false;  // a generic class's: its spelling joins them with ", "
+		};
+		std::vector<argument_list> lists;
+		size_t spelled_size = key.size();   // the instance's name as the engine spells it, which an instance's limit counts
+		bool closed_one = false;    // the token before this delimiter was a list that closed, not a name
+		size_t start = 0;
+		for (size_t i = 0; i <= key.size(); ++i) {
+			const char c = i < key.size() ? key[i] : '\0';
+			const bool delimiter = i == key.size() || c == '<' || c == '>' || c == ',' || c == '(' || c == ')';
+			if (!delimiter) { continue; }
+			const std::string_view name = key.substr(start, i - start);
+			start = i + 1;
+			const bool skipping = !lists.empty() && lists.back().skipped;
+			if (c == '<' || c == '(') {
+				if (closed_one) { return malformed; }
+				argument_list list{name};
+				list.paren = c == '(';
+				if (skipping || name == "function" || name == "coroutine") {
+					list.skipped = true;
+				} else if (c == '(') {
+					return malformed;
+				} else if (name == "array" || name == "shared_ptr" || name == "weak_ptr" || name == "map") {
+					list.wanted = name == "map" ? 2 : 1;
+				} else if (const int wanted = generic_class_parameters(eng, name); wanted >= 0) {
+					list.wanted = static_cast<size_t>(wanted);
+					list.instance = true;
+				} else if (detail::engine_access::is_template_type(eng, std::string(name))) {
+					list.skipped = true;
+				} else if (const detail::plain_type_kind kind = data_plain_type(eng, name); kind != detail::plain_type_kind::none) {
+					return detail::no_type_arguments_text(name, kind);
+				} else {
+					return name.empty() ? malformed : "unknown type '" + detail::shown_instance_name(name) + "'";
+				}
+				lists.push_back(list);
+				continue;
+			}
+			if (lists.empty() || i == key.size()) { return malformed; }   // a name outside every list, or a list the key never closes
+			const bool empty_list = c == '>' && name.empty() && !closed_one && key[i - 1] == '<';
+			if (closed_one && !name.empty()) { return malformed; }
+			if (!closed_one && !skipping && !empty_list) {
+				if (name.empty()) { return malformed; }
+				if (name == "void" || name == "auto") { return "a type argument names a type: '" + std::string(name) + "' is not one an instance can be made with"; }
+				if (name == "array" || name == "shared_ptr" || name == "weak_ptr" || name == "map") { return type_argument_count_text(name, name == "map" ? 2 : 1, 0); }
+				if (const int wanted = generic_class_parameters(eng, name); wanted >= 0) { return type_argument_count_text(name, static_cast<size_t>(wanted), 0); }
+				if (name != "function" && data_plain_type(eng, name) == detail::plain_type_kind::none) { return "unknown type '" + detail::shown_instance_name(name) + "'"; }
+			}
+			closed_one = false;
+			if (!empty_list) { ++lists.back().given; }
+			if (c == ',') { continue; }
+			const argument_list list = lists.back();
+			if (list.paren != (c == ')')) { return malformed; }
+			lists.pop_back();
+			closed_one = true;
+			if (!list.skipped && list.given != list.wanted) { return type_argument_count_text(list.name, list.wanted, list.given); }
+			if (list.instance && list.given > 1) { spelled_size += list.given - 1; }
+			if (!lists.empty()) { continue; }
+			if (i + 1 != key.size()) { return malformed; }
+			if (spelled_size > detail::k_generic_name_limit) { return "no instance's name is longer than " + std::to_string(detail::k_generic_name_limit) + " characters"; }
+			return std::string();
+		}
+		return malformed;
+	}
+
 	// A $type that names no class is data, except an instance of a declared generic: one a unit offered that still waits for
-	// what it is built on, or one the program never made (docs/site/guide/21-generics.html "One instance, one class")
-	JAI_NOINLINE inline void refuse_unmade_instance(engine& eng, const std::string& type_name) {
+	// what it is built on, a spelling that names no instance, or one the program never made (docs/site/guide/21-generics.html
+	// "One instance, one class"), whose advice names the load the archive came through
+	JAI_NOINLINE inline void refuse_unmade_instance(engine& eng, const std::string& type_name, bool binary) {
 		if (const std::string waiting = detail::waiting_instance_text(eng, type_name); !waiting.empty()) { throw serialization_error(waiting); }
 		const std::string key = detail::type_name_key(type_name);   // a generic's own name is one word: its key is itself
 		const size_t open = key.find('<');
 		if (open == std::string::npos || open == 0 || key.back() != '>' || !detail::engine_access::declares_generics(eng)) { return; }
 		const std::string generic = key.substr(0, open);
-		const auto* declared = detail::engine_access::find_generics(eng, generic);
-		if (!declared || std::none_of(declared->begin(), declared->end(), [](const auto& g) { return g->kind == detail::generic_kind::class_type; })) { return; }
-		throw serialization_error("'" + type_name + "' names an instance of the generic '" + generic + "' that the program never made: name the type where it is loaded, as from_json<" +
-		                          type_name + ">(text) does");
+		if (generic_class_parameters(eng, generic) < 0) { return; }
+		if (const std::string mistake = instance_spelling_mistake(eng, key, generic); !mistake.empty()) {
+			throw serialization_error("'" + type_name + "' names no instance of the generic '" + generic + "': " + mistake);
+		}
+		throw serialization_error("'" + type_name + "' names an instance of the generic '" + generic + "' that the program never made: name the type where it is loaded, as " +
+		                          (binary ? "from_binary<" + type_name + ">(bytes)" : "from_json<" + type_name + ">(text)") + " does");
 	}
 
 	// The archive form of one value back to a live value. A class instance (a {"$type": Name, "$val": {members}} map naming a
@@ -461,7 +578,7 @@ namespace stdlib {
 				const std::string spelled = detail::registered_type_spelling(eng_, type_name);
 				class_def = detail::engine_access::get_class_definition(*eng_, spelled);
 				if (!class_def) {
-					refuse_unmade_instance(*eng_, type_name);
+					refuse_unmade_instance(*eng_, type_name, !json_string_keys_);
 					return false;
 				}
 				type_name = spelled;
@@ -654,6 +771,16 @@ namespace stdlib {
 		return result;
 	}
 
+	static script_value parse_binary_bytes(engine* eng, const std::string& bytes) {
+		std::vector<uint8_t> data(bytes.begin(), bytes.end());
+		detail::engine_access::load_session session(eng);
+		serialization::binary_archive_reader reader(data, eng);
+		reader.count_work();
+		script_value result = load_archive_value(eng, reader.read_value(), false);
+		session.complete();
+		return result;
+	}
+
     // Register JSON and binary serialization functions with an engine
     void register_json_functions(engine& eng_ref) {
         engine* eng = &eng_ref;
@@ -681,7 +808,7 @@ namespace stdlib {
 		}, serial);
 		// from_json<T>(text): the document as a T, a class built from an object by jai::make_record's rules
 		eng_ref.add_function("from_json", [eng](const script_type& type, const std::string& json) -> script_value {
-			auto built = detail::json_to_type(*eng, parse_json_text(eng, json), type.info(), "from_json");
+			auto built = detail::json_to_type(*eng, parse_json_text(eng, json), type.info(), "from_json", "the JSON");
 			if (!built) { throw runtime_error(eng->format_error(built)); }
 			return std::move(built.value());
 		}, serial, returns<type_arg>);
@@ -709,16 +836,14 @@ namespace stdlib {
                 throw runtime_error("from_binary expects a string argument");
             }
 
-            script_string binary_data = args[0].as<script_string>();
-            std::vector<uint8_t> data(binary_data.begin(), binary_data.end());
-
-            detail::engine_access::load_session session(eng);
-            serialization::binary_archive_reader reader(data, eng);
-            reader.count_work();
-			script_value result = load_archive_value(eng, reader.read_value(), false);
-			session.complete();
-			return result;
+			return parse_binary_bytes(eng, args[0].as<script_string>());
         }, serial);
+		// from_binary<T>(bytes): the archive's value as a T, by from_json<T>'s rules
+		eng_ref.add_function("from_binary", [eng](const script_type& type, const std::string& bytes) -> script_value {
+			auto built = detail::json_to_type(*eng, parse_binary_bytes(eng, bytes), type.info(), "from_binary", "the data");
+			if (!built) { throw runtime_error(eng->format_error(built)); }
+			return std::move(built.value());
+		}, serial, returns<type_arg>);
 
         eng_ref.add_function("base64_encode", [eng](const std::string& input) -> script_value {
             return script_value(base64_encode(input), eng);

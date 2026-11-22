@@ -1896,6 +1896,60 @@ public:
 			check_eq(std::string("map"), e->execute(R"(reflect::type_of(from_json("{\"$type\":\"Nowhere\",\"$val\":{\"v\":1.5}}"));)").as_string());
 		});
 
+		test("the_error_for_a_type_naming_no_instance_fits_the_mistake", [this]() {
+			auto e = stdlib_engine();
+			e->execute("class Cell<T> { T v; }\nclass Duo<A, B> { A a; B b; }\nenum Color { red }\nclass Plain { int n = 1; }\nnamespace shop { class Item { int n = 2; } }\nCell<int> made;");
+			std::string payload;
+			e->add_function("payload", [&payload]() { return payload; });
+			const std::string blob = e->execute("to_binary(made);").as_string();
+			const auto renamed = [&](const std::string& type) {
+				const size_t at = blob.find("Cell<int>");
+				const uint32_t size = static_cast<uint32_t>(type.size());
+				return blob.substr(0, at - 4) + std::string(reinterpret_cast<const char*>(&size), 4) + type + blob.substr(at + 9);
+			};
+			const auto by_json = [&](const std::string& type) {
+				payload = "{\"$type\":\"" + type + "\",\"$val\":{}}";
+				return e->execute("string got = \"(no error)\"; try { from_json(payload()); } catch (e) { got = e; } got;").as_string();
+			};
+			const auto by_binary = [&](const std::string& type) {
+				payload = renamed(type);
+				return e->execute("string got = \"(no error)\"; try { from_binary(payload()); } catch (e) { got = e; } got;").as_string();
+			};
+			std::vector<std::pair<std::string, std::string>> mistakes = {
+				{"Cell<float>", "'Cell<float>' names an instance of the generic 'Cell' that the program never made: name the type where it is loaded, as from_json<Cell<float>>(text) does"},
+				{"Cell<Duo<float, Color>>", "'Cell<Duo<float, Color>>' names an instance of the generic 'Cell' that the program never made: name the type where it is loaded, as from_json<Cell<Duo<float, Color>>>(text) does"},
+				{"Cell<map<string,array<shop::Item>>>", "'Cell<map<string,array<shop::Item>>>' names an instance of the generic 'Cell' that the program never made: name the type where it is loaded, as from_json<Cell<map<string,array<shop::Item>>>>(text) does"},
+				{"Cell<Nope>", "'Cell<Nope>' names no instance of the generic 'Cell': unknown type 'Nope'"},
+				{"Cell<array<Nope>>", "'Cell<array<Nope>>' names no instance of the generic 'Cell': unknown type 'Nope'"},
+				{"Cell<int,int>", "'Cell<int,int>' names no instance of the generic 'Cell': 'Cell' takes 1 type argument, not 2"},
+				{"Duo<int>", "'Duo<int>' names no instance of the generic 'Duo': 'Duo' takes 2 type arguments, not 1"},
+				{"Cell<>", "'Cell<>' names no instance of the generic 'Cell': 'Cell' takes 1 type argument, not 0"},
+				{"Cell<Duo<int>>", "'Cell<Duo<int>>' names no instance of the generic 'Cell': 'Duo' takes 2 type arguments, not 1"},
+				{"Cell<Cell>", "'Cell<Cell>' names no instance of the generic 'Cell': 'Cell' takes 1 type argument, not 0"},
+				{"Cell<map<int>>", "'Cell<map<int>>' names no instance of the generic 'Cell': 'map' takes 2 type arguments, not 1"},
+				{"Cell<int<int>>", "'Cell<int<int>>' names no instance of the generic 'Cell': 'int' takes no type arguments: it is a builtin type"},
+				{"Cell<Plain<int>>", "'Cell<Plain<int>>' names no instance of the generic 'Cell': 'Plain' takes no type arguments: it is not a generic class"},
+				{"Cell<Color<int>>", "'Cell<Color<int>>' names no instance of the generic 'Cell': 'Color' takes no type arguments: it is an enum"},
+				{"Cell<void>", "'Cell<void>' names no instance of the generic 'Cell': a type argument names a type: 'void' is not one an instance can be made with"},
+				{"Cell<int>>", "'Cell<int>>' names no instance of the generic 'Cell': it is not the spelling of a type"},
+				{"Cell<int><int>", "'Cell<int><int>' names no instance of the generic 'Cell': it is not the spelling of a type"},
+				{"Cell<,>", "'Cell<,>' names no instance of the generic 'Cell': 'Cell' takes 1 type argument, not 2"},
+				{"Duo<int,>", "'Duo<int,>' names no instance of the generic 'Duo': it is not the spelling of a type"},
+			};
+			std::string deep = "int";
+			for (int i = 0; i < 700; ++i) { deep = "Cell<" + deep + ">"; }
+			mistakes.emplace_back(deep, "'" + deep + "' names no instance of the generic 'Cell': no instance's name is longer than 4096 characters");
+			for (const auto& [type, text] : mistakes) {
+				check_eq(text, by_json(type), "from_json of " + type);
+				const size_t advice = text.find(", as from_json<");
+				check_eq(advice == std::string::npos ? text : text.substr(0, advice) + ", as from_binary<" + type + ">(bytes) does", by_binary(type), "from_binary of " + type);
+			}
+			// the advice loads, from either archive
+			check_eq(std::string("Cell<float>"), e->execute("reflect::type_of(from_json<Cell<float>>(\"{\\\"$type\\\":\\\"Cell<float>\\\",\\\"$val\\\":{}}\"));").as_string());
+			payload = renamed("Cell<bool>");
+			check_eq(std::string("Cell<bool>"), e->execute("reflect::type_of(from_binary<Cell<bool>>(payload()));").as_string());
+		});
+
 		test("printed_and_saved_type_names_keep_their_spellings", [this]() {
 			auto e = stdlib_engine();
 			e->execute("class Duo<A, B> { A a; B b; } class Box<T> { T v; } namespace shop { class Item { int n = 2; } class Shelf<T> { T item; } }"

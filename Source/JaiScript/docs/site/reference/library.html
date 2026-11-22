@@ -163,7 +163,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 
 <h2 id="json-and-key-order">JSON and key order<a class="hlink" href="#json-and-key-order" aria-label="link">&#8203;</a></h2>
 <h3 id="json-encoding">JSON encoding<a class="hlink" href="#json-encoding" aria-label="link">&#8203;</a></h3>
-<p><code>to_json(x)</code> writes compact JSON, <code>to_json(x, n)</code> indents <code>n</code> spaces per level, <code>from_json(text)</code> reads it back. <code>to_binary</code> and <code>from_binary</code> round-trip the same values. Loading rules: <a href="../guide/09-containers-strings.html#json">JSON</a>.</p>
+<p><code>to_json(x)</code> writes compact JSON, <code>to_json(x, n)</code> indents <code>n</code> spaces per level, <code>from_json(text)</code> reads it back. <code>to_binary</code> and <code>from_binary</code> round-trip the same values; <code>from_json&lt;T&gt;(text)</code> and <code>from_binary&lt;T&gt;(bytes)</code> load a <code>T</code> (<a href="../guide/06-functions.html#type-arguments">Type arguments</a>). Loading rules: <a href="../guide/09-containers-strings.html#json">JSON</a>.</p>
 <div class="tablewrap"><table><thead><tr><th>Value</th><th>JSON</th></tr></thead><tbody>
 <tr><td>a map with string keys, an array, a string, <code>bool</code>, <code>null</code></td><td>an object, an array, a string, <code>true</code>/<code>false</code>, <code>null</code></td></tr>
 <tr><td>an <code>int</code>, a <code>float</code></td><td>A number that reads back as the same kind. A float is written with every digit it needs to read back exactly.</td></tr>

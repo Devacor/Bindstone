@@ -18,8 +18,9 @@ class engine;
 namespace jai::detail {
 
 	script_value make_type_value(const type_info_ptr& type, engine* eng);
-	// from_json<T>: a parsed document as T, a class built by jai::make_record's rules (each value widened as a record field's is)
-	checked_result<script_value> json_to_type(engine& eng, const script_value& value, const type_info_ptr& type, std::string_view who);
+	// from_json<T> and from_binary<T>: a loaded document as T, a class built by jai::make_record's rules (each value widened as a
+	// record field's is); `document` names it in the refusal ("the JSON", "the data")
+	checked_result<script_value> json_to_type(engine& eng, const script_value& value, const type_info_ptr& type, std::string_view who, std::string_view document);
 	// reflect::type, on every engine at construction
 	void register_type_library(engine& eng);
 

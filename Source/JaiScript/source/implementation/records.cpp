@@ -264,14 +264,14 @@ namespace detail {
 		return value_converter<script_type>::to(script_type(type), eng);
 	}
 
-	checked_result<script_value> json_to_type(engine& eng, const script_value& value, const type_info_ptr& type, std::string_view who) {
+	checked_result<script_value> json_to_type(engine& eng, const script_value& value, const type_info_ptr& type, std::string_view who, std::string_view document) {
 		if (records_detail::script_class_type(type.get()) && value.is_map()) { return records_detail::build(eng, type, value, who, false); }
 		auto widened = records_detail::widen(eng, value, type, who);
 		if (!widened) { return widened; }
 		const std::string spelled = type ? type->canonical_name() : std::string();
 		auto stored = typed_store_convert(widened.value(), type, &eng, [&]() { return slot_site{slot_kind::none, {}, {}}; });
 		if (!stored) {
-			return records_detail::refused(eng, who, "the JSON is " + records_detail::value_type_text(widened.value()) + ", not " + spelled);
+			return records_detail::refused(eng, who, std::string(document) + " is " + records_detail::value_type_text(widened.value()) + ", not " + spelled);
 		}
 		script_value out = std::move(stored.value());
 		if (type && type->base_type != script_value_type::jai_any_type) { out.set_type_info(type); }

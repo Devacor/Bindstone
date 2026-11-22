@@ -701,6 +701,15 @@ print(where(), &quot; &quot;, debug::stack().size());</code></pre></div>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="from_binary(bytes: string) -&gt; var deserialize  register_all() or area registration"><h3 id="api-5079eb33ba75"><code>from_binary(bytes: string) -&gt; var</code></h3><p><strong>register_all() or area registration</strong> &middot; deserialize</p>
 </div>
+<div class="api-entry" data-provider="stdlib" data-search="from_binary&lt;t&gt;(bytes: string) -&gt; t deserialize the archive&#x27;s value as a t, by from_json&lt;t&gt;&#x27;s rules: a class is built with t() and its fields stored by name (from_binary&lt;array&lt;t&gt;&gt;, shared_ptr&lt;t&gt; and maps alike); a key the class has no field for is skipped. register_all() or area registration"><h3 id="api-01eaac138aeb"><code>from_binary&lt;T&gt;(bytes: string) -&gt; T</code></h3><p><strong>register_all() or area registration</strong> &middot; deserialize</p>
+<p>The archive&#x27;s value as a T, by from_json&lt;T&gt;&#x27;s rules: a class is built with T() and its fields stored by name (from_binary&lt;array&lt;T&gt;&gt;, shared_ptr&lt;T&gt; and maps alike); a key the class has no field for is skipped.</p>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Pet { string name; int age = 1; }
+Pet rex;
+rex.name = &quot;rex&quot;;
+Pet back = from_binary&lt;Pet&gt;(to_binary(rex));
+print(back.name, &quot; &quot;, back.age);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">rex 1</code></pre></div>
+</div>
 <div class="api-entry" data-provider="stdlib" data-search="from_json(text: string) -&gt; var deserialize reconstructs registered classes when tagged; otherwise values/maps/arrays. register_all() or area registration"><h3 id="api-a94ccf3230d6"><code>from_json(text: string) -&gt; var</code></h3><p><strong>register_all() or area registration</strong> &middot; deserialize</p>
 <p>Reconstructs registered classes when tagged; otherwise values/maps/arrays.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var v = from_json(&quot;{\&quot;hp\&quot;: 3, \&quot;tags\&quot;: [\&quot;a\&quot;]}&quot;);

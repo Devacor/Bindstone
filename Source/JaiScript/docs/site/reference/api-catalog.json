@@ -2760,6 +2760,22 @@
     },
     {
       "owner": "global",
+      "name": "from_binary",
+      "signature": "from_binary<T>(bytes: string) -> T",
+      "provider": "stdlib",
+      "effect": "deserialize",
+      "notes": "The archive's value as a T, by from_json<T>'s rules: a class is built with T() and its fields stored by name (from_binary<array<T>>, shared_ptr<T> and maps alike); a key the class has no field for is skipped.",
+      "source": "include/jaiscript/stdlib/json.hpp",
+      "form": "function",
+      "availability": "register_all() or area registration",
+      "display": "from_binary<T>(bytes: string) -> T",
+      "example": {
+        "code": "class Pet { string name; int age = 1; }\nPet rex;\nrex.name = \"rex\";\nPet back = from_binary<Pet>(to_binary(rex));\nprint(back.name, \" \", back.age);",
+        "output": "rex 1"
+      }
+    },
+    {
+      "owner": "global",
       "name": "base64_encode",
       "signature": "base64_encode(bytes: string) -> string",
       "provider": "stdlib",

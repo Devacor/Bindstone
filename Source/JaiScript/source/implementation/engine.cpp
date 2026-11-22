@@ -2085,7 +2085,6 @@ struct engine::implementation {
         return nullptr;
     }
     bool withdraw_stale_instances(engine& self, std::vector<declaration_ptr>& decls) {
-        if (generics_.empty()) { return false; }
         const generic_request_index requests = index_requests(decls);
         if (requests.empty()) { return false; }
         std::vector<detail::generic_definition_ptr> own;

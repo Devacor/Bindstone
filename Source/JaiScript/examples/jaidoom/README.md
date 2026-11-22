@@ -24,16 +24,13 @@ JaiDoom is a fan project, not affiliated with or endorsed by id Software; DOOM i
 1. Build the runner (see `../../docs/BUILD.md`), or drop `jaiscript.exe` next to `play.bat`.
 2. Double-click `play.bat` (Windows) or run `./play.sh` (Linux, macOS, Git Bash).
 
-The launchers' first run fetches the game data itself (they pass `-- fetch`): Freedoom Phase 1 and 2 from
-the Freedoom project's release, and, if you say yes, the DOOM shareware episode from a pinned mirror.
+The first run fetches the game data itself: Freedoom Phase 1 and 2 from the Freedoom
+project's release, and, if you say yes, the DOOM shareware episode from a pinned mirror.
 Every file is verified by SHA-256 before it is kept, the archive is unpacked by the runner,
 and the sound and music lumps are decoded into `cache/` so play starts with audio. Nothing
 game-related is committed to the repository; `wads/SOURCES.txt` records where each file
 came from and under which license. The registered DOOM and DOOM II data are commercial:
 put your own `doom.wad` or `doom2.wad` in `wads/` and pass it on the command line.
-
-`jaiscript jaidoom.jai` without `fetch` or `bootstrap` never downloads: with no data it prints how to fetch it
-and exits with code 0, so a tool that runs every `.jai` file in the repository reaches no network.
 
 Headless, for scripts and CI: `bootstrap.bat` or `./bootstrap.sh`, with `--no-shareware`
 to stay entirely on BSD-licensed data and `--no-audio` to skip the cache.
@@ -78,8 +75,7 @@ or ends the run when nothing follows.
 ## Command line
 
 ```
-jaiscript jaidoom.jai                            # play (dropping jaidoom.jai onto jaiscript.exe works too); no data: says how to fetch it
-jaiscript jaidoom.jai -- fetch                   # play.bat and play.sh do this: fetch the data on the loading screen first if it is missing
+jaiscript jaidoom.jai                            # play.bat does this; dropping jaidoom.jai onto jaiscript.exe works too
 jaiscript jaidoom.jai -- freedoom2 MAP01         # another IWAD and map (MAPxx names work)
 jaiscript jaidoom.jai -- doom2 MAP07             # your own registered WAD from wads/ (a path works as well)
 jaiscript jaidoom.jai -- doom2 mypack.wad        # a map pack merged over it

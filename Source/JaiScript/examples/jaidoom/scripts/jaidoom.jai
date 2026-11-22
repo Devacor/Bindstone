@@ -19,9 +19,8 @@
 //   cheats (type them): iddqd idkfa idfa idclip idclev## (E#M#)
 //                       idbehold + s/i/r/a/l, iddt (map reveal cycle)
 //
-// First run: with no WAD in wads/, `-- fetch` (what play.bat and play.sh pass) fetches Freedoom and (if you
-//            say yes) the DOOM shareware episode, verified by SHA-256, and decodes the audio (boot.jai); a run
-//            without it downloads nothing and prints how to fetch.
+// First run: with no WAD in wads/ the game fetches Freedoom and (if you say yes) the DOOM
+//            shareware episode itself, verified by SHA-256, and decodes the audio (boot.jai).
 //            Headless: jaiscript jaidoom.jai -- bootstrap [--no-shareware] [--no-audio]
 //           jaiscript jaidoom.jai -- uncapped    (smooth motion with no frame cap: every frame the machine allows)
 //           jaiscript jaidoom.jai -- --mute      (no music or sound)
@@ -1535,21 +1534,12 @@ function flowtest() -> int {
 	return fails;
 }
 
-function print_fetch_instructions(string path) -> void {
-	print(`JaiDOOM has no game data at ${path}; the data is not part of the repository.`);
-	print("Fetch it (Freedoom, and the DOOM shareware episode if you say yes), then play:");
-	print("  ../play.bat or ../play.sh, or: jaiscript jaidoom.jai -- fetch");
-	print("Fetch it without the screen: ../bootstrap.bat or ../bootstrap.sh [--no-shareware] [--no-audio]");
-	print("Or put your own doom.wad or doom2.wad in wads/ and name it: jaiscript jaidoom.jai -- doom2 MAP01");
-}
-
 function main() -> int {
 	var path = "doom1";
 	var mapname = "";
 	bool test = false;
 	bool flow = false;
 	bool bootstrap = false;
-	bool fetch = false;
 	bool path_given = false;
 	array<string> extra_wads = [];   // PWADs merged over the base, in order
 	bool want_shareware = true;
@@ -1558,7 +1548,6 @@ function main() -> int {
 	for (int i = 0; i < args.size(); ++i) {
 		if (args[i] == "selftest") { test = true; }
 		else if (args[i] == "bootstrap") { bootstrap = true; }
-		else if (args[i] == "fetch") { fetch = true; }
 		else if (args[i] == "--no-shareware") { want_shareware = false; }
 		else if (args[i] == "--no-audio") { want_audio = false; }
 		else if (args[i] == "--mute") { MUTE = true; }
@@ -1589,9 +1578,8 @@ function main() -> int {
 		else if (args[i].starts_with("E") || args[i].starts_with("MAP")) { mapname = args[i]; }
 	}
 	path = wad_path(path);
-	if (bootstrap) { return boot_run(false, want_shareware, want_audio) ? 0 : 1; }   // headless: bootstrap.bat/.sh, CI
-	if (!file::exists(path) && !test && !flow) {
-		if (!fetch) { print_fetch_instructions(path); return 0; }                    // a run that did not ask never downloads
+	if (bootstrap) { return boot_run(false, want_shareware, want_audio) ? 0 : 1; }   // headless: play.bat/bootstrap.sh, CI
+	if (!file::exists(path) && !test && !flow) {                                    // first run: the game fetches its own data
 		if (!boot_run(true, want_shareware, want_audio)) { return 1; }
 		if (!file::exists(path)) { print(`no WAD at ${path} (declined or failed); run again with -- bootstrap to retry`); return 1; }
 	}

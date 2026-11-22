@@ -15775,7 +15775,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_get_member_at(frame& f, const vm_inst
 		// a stamped read over an evaluated reference hands back the member's reference (KEEP BYTE-PARALLEL with the interpreter's
 		// member read)
 		script_value part = detail::math::evaluated_component_reference(*receiver, expr, engine_);
-		if (!part.is_reference() && expr->place_read == member_expr::place_read_field) {
+		if (!part.is_reference()) {
 			auto field = detail::evaluated_member_reference(*receiver, expr, environment_.get(), engine_, symbolizer_);
 			if (!field) { return raise_from(field); }
 			part = std::move(field.value());

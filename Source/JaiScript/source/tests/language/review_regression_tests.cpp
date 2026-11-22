@@ -5152,6 +5152,40 @@ public:
                 to_json(m) + " " + to_json(rows) + " " + to_string(units["u"].hp) + " " + to_string(hs[1].hp) + " " +
                     to_string(hs[1].child.hp) + " " + to_json(g.cells)
             )", R"({"a":12} {"q":[0,12]} 1321 5 10 [0,0,7])"},
+                {"reference_parameters_bind_a_member_of_a_computed_element", R"(
+                class Leaf { float z = 0.0; }
+                class Pt { math::vec2 p = math::vec2(1.0, 2.0); float w = 1.0; Leaf inner; }
+                void bumpf(float& f) { f += 10.0; }
+                var gobjs = [Pt(), Pt(), Pt()];
+                array<Pt> tobjs = [Pt(), Pt(), Pt()];
+                map<string, Pt> mobjs = {"a": Pt(), "b": Pt()};
+                array<array<Pt>> nested = [[Pt(), Pt()], [Pt(), Pt()]];
+                array<shared_ptr<Pt>> hobjs = [make_shared<Pt>(), make_shared<Pt>()];
+                class Holder { void bump(float& f) { f += 100.0; } }
+                Holder hd;
+                int one() { return 1; }
+                int i = 0;
+                string k = "b";
+                bumpf(gobjs[i + 1].w);
+                bumpf(gobjs[one()].w);
+                bumpf(tobjs[i + 1].w);
+                bumpf(mobjs[k + ""].w);
+                bumpf(mobjs["a"].w);
+                bumpf(nested[i + 1][i].w);
+                bumpf(tobjs[i + 2].inner.z);
+                bumpf(tobjs[i + 2].p.x);
+                bumpf(hobjs[i + 1].w);
+                hd.bump(tobjs[i].w);
+                bumpf(cast<float&>(tobjs[i].w));
+                string r = "";
+                void drop(float& f, array<Pt>& a) { a.clear(); f += 1.0; }
+                array<Pt> gone = [Pt(), Pt()];
+                try { drop(gone[i + 1].w, gone); } catch (e) { r = e; }
+                void byval(float f, float g) { r += " " + to_string(f) + "/" + to_string(g); }
+                float setw(array<Pt>& a, int n) { a[n].w = 5.0; return 0.0; }
+                byval(tobjs[i + 1].w, setw(tobjs, 1));
+                to_string(gobjs[1].w) + " " + to_string(tobjs[1].w) + " " + to_string(mobjs["b"].w) + " " + to_string(mobjs["a"].w) + " " + to_string(nested[1][0].w) + " " + to_string(tobjs[2].inner.z) + " " + to_string(tobjs[2].p.x) + " " + to_string(hobjs[1].w) + " " + to_string(tobjs[0].w) + " " + r
+            )", "21.0 5.0 11.0 11.0 11.0 10.0 11.0 11.0 111.0 Reference to a removed array element 11.0/0.0"},
             };
             check_each(cases, [&](const auto& c) { expect(std::get<1>(c), std::get<2>(c), std::get<0>(c)); });
         });

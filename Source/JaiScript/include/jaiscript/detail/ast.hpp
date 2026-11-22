@@ -402,9 +402,8 @@ namespace jai {
         // engine-independent - safe to share across engines like the other AST caches.
         mutable uint8_t math_intrinsic_cache = 255;
         // A member a reference binds over an evaluated base (`f(a[i+1].x)`, `return m[k + s].hp`): when the base evaluates to a
-        // reference the read hands back a reference, a math component's COMPONENT reference, and with place_read_field a field's
-        // (transient_read_marker stamps it; detail/math_component_store.hpp, detail/ref_lvalue.hpp evaluated_member_reference)
-        static constexpr uint8_t place_read_component = 1;
+        // reference the read hands back a reference, a math component's COMPONENT reference, else a field's (transient_read_marker
+        // stamps it; detail/math_component_store.hpp, detail/ref_lvalue.hpp evaluated_member_reference)
         static constexpr uint8_t place_read_field = 2;
         mutable uint8_t place_read = 0;
         // the checker proved an enum's value read by name (the name holds a map<string,int>, whose member read runs no user code): a

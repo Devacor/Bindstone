@@ -4381,7 +4381,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
     if (expr->place_read) [[unlikely]] {
         // KEEP BYTE-PARALLEL with vm_backend::exec_get_member
         script_value part = detail::math::evaluated_component_reference(objectValue, expr, engine_);
-        if (!part.is_reference() && expr->place_read == member_expr::place_read_field) {
+        if (!part.is_reference()) {
             auto field = detail::evaluated_member_reference(objectValue, expr, environment_.get(), engine_, string_symbolizer_);
             if (!field) { return field.error_value(); }
             part = std::move(field.value());

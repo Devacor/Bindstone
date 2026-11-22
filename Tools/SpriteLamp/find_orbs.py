@@ -3,7 +3,8 @@ centre and size. Prints JSON (one entry per orb, in image pixels) and writes a d
 
 	python Tools/SpriteLamp/find_orbs.py Assets/Map/MapRightSide_0*.webp [--debug out.png] [--json orbs.json]
 
-An orb is "large" (a big glowing sphere or swirl) or "small" (a lamp's cluster of little spheres) by its lit area.
+An orb is "large" (a big glowing sphere or swirl) or "small" (a lamp's cluster of little spheres) by its lit area. Its
+"radius" is that of a disc of its lit area; its "extent" is half its mean width and height, how far the painting glows.
 Needs numpy, Pillow and scipy.
 """
 import argparse, json, math, os
@@ -49,6 +50,8 @@ def findOrbs(a_path):
 			"x": round(centreX * scale),
 			"y": round(centreY * scale),
 			"radius": round(math.sqrt(area / math.pi) * scale),
+			# Half the orb's mean width and height, swirls and halo included: how far its painted glow reaches.
+			"extent": round((xs.max() - xs.min() + ys.max() - ys.min() + 2) * scale / 4),
 			"area": round(area * scale * scale),
 			"kind": "large" if area >= LARGE_AREA else "small",
 			"colour": [round(float(channel), 3) for channel in colour],

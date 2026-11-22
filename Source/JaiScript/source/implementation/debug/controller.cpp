@@ -37,6 +37,11 @@ using stop_line_map = std::unordered_map<std::string, std::vector<int>>;
 
 void collect_stop_lines(const statement* s, stop_line_map& out);
 
+// A refused store raises the text the script's own store would, its names substituted
+[[noreturn]] JAI_NOINLINE void throw_store_failure(const checked_result<void>& a_stored, engine& a_engine) {
+    throw runtime_error(format_error(a_stored, *detail::engine_access::get_symbolizer(a_engine)));
+}
+
 // Lambda bodies inside an expression hold statements of their own
 void collect_expression_stop_lines(const expression* e, stop_line_map& out) {
     if (!e) return;
@@ -347,7 +352,7 @@ void controller::set_variable(const std::string& name, const script_value& value
     }
     script_value assigned = value;
     auto stored = detail::variable_store(storage->deref(), assigned, engine_, detail::slot_site{detail::slot_kind::assignment, name});
-    if (!stored) { throw runtime_error(stored.message().empty() ? stored.error().message() : std::string(stored.message())); }
+    if (!stored) { throw_store_failure(stored, *engine_); }
 }
 
 
@@ -721,7 +726,7 @@ script_value controller::run_evaluation(const std::string& text, size_t frame, e
             if (name == k_this_name || same_value(now, before.at(name))) continue;
             if (script_value* storage = backend->debug_local_storage(name, frame)) {
                 auto stored = detail::variable_store(storage->deref(), now, engine_, detail::slot_site{detail::slot_kind::assignment, name});
-                if (!stored) { throw runtime_error(stored.message().empty() ? stored.error().message() : std::string(stored.message())); }
+                if (!stored) { throw_store_failure(stored, *engine_); }
             } else if (self != names.end()) {   // a field the frame's `this` names bare: the script's own field store takes it
                 instance_variables field_write{{std::string(k_this_name), self->second}, {"__jai_value", now}};
                 detail::engine_access::debug_evaluate(*engine_, std::string(k_this_name) + "." + name + " = __jai_value;", field_write);

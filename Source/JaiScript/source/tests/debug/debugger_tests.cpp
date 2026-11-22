@@ -833,6 +833,7 @@ public:
                     text += " set v=" + attempt([&] { dbg.set_variable("v", eng->make_value(20)); return dbg.get_variable("v").to_string(); });
                 } else {
                     text += " set v=" + attempt([&] { dbg.set_variable("v", eng->make_value(7)); return std::string("7"); });
+                    text += " set v text=" + attempt([&] { dbg.set_variable("v", eng->make_value(std::string("oops"))); return std::string("set"); });
                     text += " nope=" + attempt([&] { dbg.set_variable("nope", eng->make_value(1)); return std::string("set"); });
                 }
                 return text;
@@ -1249,7 +1250,8 @@ public:
             check_eq(interp, scoped_locals(jai::backend_type::vm), "the vm's locals table answers as the interpreter's scopes do");
             check_eq(std::string("f:9(v=2,x=3) <script>:15() globals(g,) v=2 x=3 g=5 set v=20 | "
                                     "take:4(t=Token{n: \"tk\"}) f:12(v=1,x=3) <script>:15() globals(g,) t.n=\"tk\":string t.m=error: Token has no member 'm' | "
-                                    "f:13(s=\"tk\",v=1,x=3) <script>:15() globals(g,) set v=7 nope=error: No variable 'nope' is in scope at this stop | "
+                                    "f:13(s=\"tk\",v=1,x=3) <script>:15() globals(g,) set v=7 set v text=error: Cannot assign string to 'v' (declared int) "
+                                    "nope=error: No variable 'nope' is in scope at this stop | "
                                     "r=7 g=21 nope=error"), interp);
         });
         test("keyword_named_members_in_frames_and_locals", [this]() {

@@ -1333,6 +1333,45 @@ public:
 			check_true(contains(failure(*e, "Vault v; v.json();"), "cannot deduce T for 'json': no parameter names it; write json<T>()"));
 		});
 
+		test("a_generic_methods_instance_is_named_bare_with_its_type_arguments_wherever_methods_are_listed", [this]() {
+			auto e = stdlib_engine();
+			e->execute(R"(
+				class Plain {
+					int n = 1;
+					T conv<T>(T x) { return x; }
+					int other() { return 2; }
+					static T mk<T>() { return T(); }
+					int open() { return hid<int>(4); }
+				private:
+					T hid<T>(T x) { return x; }
+				}
+				class Pair<K, V> { K first; T conv<T>(T x) { return x; } }
+				class Kid : Plain { T conv<T>(T x) { return x + x; } }
+				namespace zoo { class Pen<T> { T held; U take<U>(U x) { return x; } } }
+				Plain p; p.conv(1); p.conv("s"); Plain::mk<int>(); p.open();
+				Pair<string, int> q; q.conv(1);
+				Kid k; k.conv(1);
+				zoo::Pen<int> pen; pen.take(2);
+				string names(var of) { string out; for (auto m : reflect::methods(of)) { out += m["name"] + ":" + m["from"] + ":" + m["access"] + " "; } return out; }
+			)");
+			check_eq(std::string("conv<int>:Plain:public conv<string>:Plain:public hid<int>:Plain:private mk<int>:Plain:public open:Plain:public other:Plain:public "),
+			         e->execute("names(p);").as_string());
+			check_eq(e->execute("names(p);").as_string(), e->execute("names(\"Plain\");").as_string());
+			check_eq(std::string("conv<int>:Pair<string, int>:public "), e->execute("names(q);").as_string());
+			const std::string kid = e->execute("names(k);").as_string();   // the derived class's instance hides the base's
+			check_true(contains(kid, "conv<int>:Kid:public ") && !contains(kid, "conv<int>:Plain"), kid);
+			check_eq(std::string("take<int>:zoo::Pen<int>:public "), e->execute("names(pen);").as_string());
+			check_eq(std::string("[[{\"default\": false, \"name\": \"x\", \"type\": \"int\"}]]"), e->execute("to_string(reflect::method_arguments(\"Plain\", \"conv<int>\"));").as_string());
+			check_eq(std::string("[[{\"default\": false, \"name\": \"x\", \"type\": \"int\"}]]"), e->execute("to_string(reflect::method_arguments(q, \"conv<int>\"));").as_string());
+			check_eq(std::string("true true false"), e->execute("to_string(reflect::has_method(p, \"conv<int>\")) + \" \" + to_string(reflect::has_method(k, \"conv<int>\")) + \" \" + to_string(reflect::has_method(p, \"conv<float>\"));").as_string());
+			check_eq((int64_t)19, e->execute("reflect::bind(p, \"conv<int>\")(5) + reflect::invoke(p, \"conv<int>\", 6) + reflect::invoke(\"Plain\", \"mk<int>\") + reflect::bind(k, \"conv<int>\")(4);").as_int());
+			check_true(contains(failure(*e, "reflect::method_arguments(\"Plain\", \"conv<float>\");"), "reflect::method_arguments: 'Plain' has no method 'conv<float>'"));
+			check_eq(std::string("false"), e->execute("to_string(reflect::has_method(p, \"Plain::conv<int>\"));").as_string());   // the name it is declared under is no name it lists
+			// the private-access error names the method as the class lists it
+			const std::string denied = failure(*e, "p.hid<int>(1);");
+			check_true(contains(denied, "Cannot access private member 'hid<int>' of class 'Plain'"), denied);
+		});
+
 		test("the_receivers_class_picks_a_generic_methods_instance", [this]() {
 			auto e = stdlib_engine();
 			e->execute(R"(

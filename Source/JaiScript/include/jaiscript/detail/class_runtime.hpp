@@ -2764,15 +2764,25 @@ inline bool member_access_allowed(const class_definition* cls, uint64_t member_i
     return !declarer || declarer == ctx || (ctx && ctx->derives_from(declarer));
 }
 
+// The member as its class lists it (detail::member_display_name): a generic method's instance by its bare name
+JAI_NOINLINE inline checked_result<void> member_access_denied(const class_definition* declarer, uint64_t member_id) {
+    uint64_t shown = member_id;
+    if (engine* eng = declarer->get_engine()) {
+        string_symbolizer* symbols = engine_access::get_symbolizer(*eng);
+        const std::string_view name = symbols->get_string(member_id);
+        if (const std::string_view bare = member_display_name(name); bare.size() != name.size()) { shown = symbols->intern(std::string(bare)); }
+    }
+    return checked_result<void>(make_error_code(runtime_error_code::access_violation),
+        "Cannot access private member '{0}' of class '{1}'", shown, declarer->get_type_id());
+}
+
 inline checked_result<void> enforce_member_access(const class_definition* cls, uint64_t member_id,
                                                   const class_definition* ctx) {
     if (member_access_allowed(cls, member_id, ctx)) {
         return {};
     }
     access_level level = access_level::public_access;
-    const class_definition* declarer = cls->find_nonpublic_declarer(member_id, level);
-    return checked_result<void>(make_error_code(runtime_error_code::access_violation),
-        "Cannot access private member '{0}' of class '{1}'", member_id, declarer->get_type_id());
+    return member_access_denied(cls->find_nonpublic_declarer(member_id, level), member_id);
 }
 
 // operator= on a plain store (docs/site/embedding/06-static-checking.html "One conversion table"; C++ assignment; no slicing).

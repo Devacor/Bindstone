@@ -170,6 +170,19 @@ namespace jai::detail {
 	// argument as a script type
 	bool generic_parameter_read(const generic_definition& definition, size_t parameter, const std::unordered_set<std::string>& templates);
 
+	// A member as its class lists it: a generic method's instance is declared under its class's name (Pair<string, int>::conv<int>,
+	// so no derived class's instance overrides it) and listed bare with its type arguments (conv<int>); any other name as it is
+	inline std::string_view member_display_name(std::string_view name) {
+		size_t cut = std::string_view::npos;
+		int angles = 0;
+		for (size_t i = 0; i + 1 < name.size(); ++i) {
+			if (name[i] == '<') { ++angles; }
+			else if (name[i] == '>') { --angles; }
+			else if (angles == 0 && name[i] == ':' && name[i + 1] == ':') { cut = i + 2; }
+		}
+		return cut == std::string_view::npos || name.find('<', cut) == std::string_view::npos ? name : name.substr(cut);
+	}
+
 	// The instance's name: template_instance_name over the generic's qualified name and each argument's canonical spelling
 	std::string generic_instance_name(std::string_view generic, const std::vector<type_info_ptr>& arguments);
 

@@ -3120,7 +3120,7 @@ private:
         const std::string_view ctx = class_ctx_ ? class_ctx_name_ : std::string_view{};
         if (!ctx.empty() && class_is_or_derives(ctx, hit.declarer)) { return false; }
         diag(diag_level::error, loc,
-             "Cannot access private member '" + std::string(member) + "' of class '" + std::string(hit.declarer) + "'");
+             "Cannot access private member '" + std::string(member_display_name(member)) + "' of class '" + std::string(hit.declarer) + "'");
         return true;
     }
 

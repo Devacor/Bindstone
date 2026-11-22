@@ -8,6 +8,7 @@
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/generics.hpp>
 #include <jaiscript/properties/property_schema.hpp>
 #include <jaiscript/stdlib/io.hpp>
 #include <algorithm>
@@ -113,6 +114,24 @@ inline const std::string& expect_name(const std::vector<script_value>& args, siz
 // script probing unknown names does not grow the symbolizer (and nothing interns while it is frozen)
 inline std::optional<uint64_t> known_symbol(engine* eng, std::string_view name) {
     return detail::engine_access::get_symbolizer(*eng)->find(name);
+}
+
+// The id of the method a class lists under `name` (detail::member_display_name) that `found` accepts: the name's own, else a
+// generic method's instance, declared under the name of the class that declares it, the nearest level first
+template <typename Found>
+std::optional<uint64_t> listed_method_symbol(engine* eng, const class_definition* def, std::string_view name, Found&& found, int depth = 0) {
+    if (depth == 0) {
+        if (detail::member_display_name(name).size() != name.size()) { return std::nullopt; }   // a name no class lists
+        if (const auto own = known_symbol(eng, name); own && found(*own)) { return own; }
+        if (name.find('<') == std::string_view::npos) { return std::nullopt; }
+    }
+    if (!def || depth > 64) { return std::nullopt; }
+    if (const auto declared = known_symbol(eng, def->get_name() + "::" + std::string(name)); declared && found(*declared)) { return declared; }
+    for (const auto& parent : def->get_parent_classes()) {
+        if (const auto inherited = listed_method_symbol(eng, parent.get(), name, found, depth + 1)) { return inherited; }
+    }
+    if (const auto cpp_base = def->get_cpp_base_class()) { return listed_method_symbol(eng, cpp_base.get(), name, found, depth + 1); }
+    return std::nullopt;
 }
 
 // The B-group doors. KEEP ALIGNED with interpreter::resolve_member_target — the ONE
@@ -363,13 +382,13 @@ struct method_collector {
     std::vector<std::pair<std::tuple<std::string, int64_t, bool>, script_value>> entries;
     std::set<std::tuple<std::string, int64_t, bool>> seen;
 
-    void add(const std::string& name, int64_t arity, bool is_static,
+    void add(const std::string& name, uint64_t id, int64_t arity, bool is_static,
              const class_definition* level, script_value params) {
         std::tuple<std::string, int64_t, bool> key{name, arity, is_static};
         if (!seen.insert(key).second) { return; }
         std::string access = "public";
         access_level lvl = access_level::public_access;
-        if (level->find_nonpublic_declarer(detail::engine_access::get_symbolizer(*eng)->intern(name), lvl)) {
+        if (level->find_nonpublic_declarer(id, lvl)) {
             access = (lvl == access_level::private_access) ? "private" : "protected";
         }
         entries.emplace_back(std::move(key),
@@ -386,15 +405,15 @@ struct method_collector {
     }
 };
 
-// only_id = 0 enumerates everything; a member id filters to that name. Auto-accessors
+// An empty `only` enumerates everything; a name filters to the methods listed under it. Auto-accessors
 // and _get_/_set_ spellings are the PROPERTY surface (fields() owns them); a method
 // sharing the class's name is the constructor surface (construct() owns it).
 inline void collect_methods_of(engine* eng, const class_definition* def,
-                               method_collector& out, uint64_t only_id) {
+                               method_collector& out, std::string_view only) {
     auto* sym = detail::engine_access::get_symbolizer(*eng);
     auto surfaced = [&](uint64_t id, std::string& name_out) {
-        if (only_id && id != only_id) { return false; }
-        name_out = std::string(sym->get_string(id));
+        name_out = std::string(detail::member_display_name(sym->get_string(id)));
+        if (!only.empty() && name_out != only) { return false; }
         if (name_out.empty() || name_out == def->get_name()) { return false; }
         if (name_out.rfind("_get_", 0) == 0 || name_out.rfind("_set_", 0) == 0) { return false; }
         return true;
@@ -403,14 +422,14 @@ inline void collect_methods_of(engine* eng, const class_definition* def,
     for (const auto& [id, decls] : def->script_method_overloads()) {
         if (!surfaced(id, name)) { continue; }
         for (const auto& fd : decls) {
-            out.add(name, static_cast<int64_t>(fd->parameters.size()), false, def,
+            out.add(name, id, static_cast<int64_t>(fd->parameters.size()), false, def,
                     params_array_for(eng, fd->parameters));
         }
     }
     for (const auto& [id, decls] : def->script_static_method_overloads()) {
         if (!surfaced(id, name)) { continue; }
         for (const auto& fd : decls) {
-            out.add(name, static_cast<int64_t>(fd->parameters.size()), true, def,
+            out.add(name, id, static_cast<int64_t>(fd->parameters.size()), true, def,
                     params_array_for(eng, fd->parameters));
         }
     }
@@ -431,7 +450,7 @@ inline void collect_methods_of(engine* eng, const class_definition* def,
                             eng, "arg" + std::to_string(i++), cpp_param_type_name(eng, pt), false));
                     }
                 }
-                out.add(name, static_cast<int64_t>(arity), false, def, std::move(params));
+                out.add(name, id, static_cast<int64_t>(arity), false, def, std::move(params));
             }
         }
     }
@@ -440,18 +459,18 @@ inline void collect_methods_of(engine* eng, const class_definition* def,
         if (!surfaced(id, name) || !value.is_function()) { continue; }
         if (def->script_method_overloads().count(id) ||
             def->cpp_method_overload_table().count(id)) { continue; }
-        out.add(name, -1, false, def, script_value::make_array(nullptr, eng));
+        out.add(name, id, -1, false, def, script_value::make_array(nullptr, eng));
     }
     for (const auto& [id, value] : def->static_method_values()) {
         if (!surfaced(id, name) || !value.is_function()) { continue; }
         if (def->script_static_method_overloads().count(id)) { continue; }
-        out.add(name, -1, true, def, script_value::make_array(nullptr, eng));
+        out.add(name, id, -1, true, def, script_value::make_array(nullptr, eng));
     }
     for (const auto& parent : def->get_parent_classes()) {
-        if (parent) { collect_methods_of(eng, parent.get(), out, only_id); }
+        if (parent) { collect_methods_of(eng, parent.get(), out, only); }
     }
     if (auto cpp_base = def->get_cpp_base_class()) {
-        collect_methods_of(eng, cpp_base.get(), out, only_id);
+        collect_methods_of(eng, cpp_base.get(), out, only);
     }
 }
 
@@ -576,8 +595,8 @@ void register_reflection_functions(engine& eng_ref) {
         if (!args[1].is_string()) { throw runtime_error("reflect::has_method expects a method name string"); }
         auto def = reflect_detail::resolve_class(eng, args[0], "has_method");
         if (!def) { return script_value(false, eng); }
-        const auto id = reflect_detail::known_symbol(eng, args[1].as_string());
-        return script_value(id && def->defines_method(*id), eng);
+        const auto id = reflect_detail::listed_method_symbol(eng, def, args[1].as_string(), [&](uint64_t m) { return def->defines_method(m); });
+        return script_value(id.has_value(), eng);
     });
 
     add("classes", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -729,13 +748,12 @@ void register_reflection_functions(engine& eng_ref) {
     add("invoke", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_min_args(args, 2, "invoke");
         const std::string& name = reflect_detail::expect_name(args, 1, "invoke");
-        const auto known = reflect_detail::known_symbol(eng, name);
-        const uint64_t id = known ? *known : UINT64_MAX;
         std::vector<script_value> call_args(args.begin() + 2, args.end());
         const script_value& target = args[0].deref();
         if (target.is_string()) {   // class form: static method
             auto* def = reflect_detail::resolve_class(eng, target, "invoke");
-            script_value method = known ? def->get_static_method(id, false) : script_value::make_null(eng);
+            const auto known = reflect_detail::listed_method_symbol(eng, def, name, [&](uint64_t m) { return def->get_static_method(m, false).is_function(); });
+            script_value method = known ? def->get_static_method(*known, false) : script_value::make_null(eng);
             if (method.is_function()) {
                 return method.as_function()(call_args);
             }
@@ -746,7 +764,8 @@ void register_reflection_functions(engine& eng_ref) {
         if (!door.def) {
             throw runtime_error("reflect::invoke expects an object or class name");
         }
-        script_value dispatcher = known ? door.def->get_method(id, false) : script_value::make_invalid(eng);
+        const auto known = reflect_detail::listed_method_symbol(eng, door.def, name, [&](uint64_t m) { return door.def->get_method(m, false).is_function(); });
+        script_value dispatcher = known ? door.def->get_method(*known, false) : script_value::make_invalid(eng);
         if (!dispatcher.is_function()) {
             throw runtime_error("reflect::invoke: '" + door.def->get_name() +
                                 "' has no method '" + name + "'");
@@ -766,9 +785,8 @@ void register_reflection_functions(engine& eng_ref) {
                                 reflect_detail::semantic_type_name(target, eng) +
                                 " run on the value: wrap the call in a lambda ([&]() { ... })");
         }
-        const auto known = reflect_detail::known_symbol(eng, name);
-        const uint64_t id = known ? *known : UINT64_MAX;
-        script_value dispatcher = known ? door.def->get_method(id, false) : script_value::make_invalid(eng);
+        const auto known = reflect_detail::listed_method_symbol(eng, door.def, name, [&](uint64_t m) { return door.def->get_method(m, false).is_function(); });
+        script_value dispatcher = known ? door.def->get_method(*known, false) : script_value::make_invalid(eng);
         if (!dispatcher.is_function()) {
             throw runtime_error("reflect::bind: '" + door.def->get_name() + "' has no method '" + name + "'");
         }
@@ -820,7 +838,7 @@ void register_reflection_functions(engine& eng_ref) {
         auto* def = reflect_detail::resolve_class(eng, args[0], "methods");
         if (!def) { throw runtime_error("reflect::methods expects a class or class name"); }
         reflect_detail::method_collector out{eng};
-        reflect_detail::collect_methods_of(eng, def, out, 0);
+        reflect_detail::collect_methods_of(eng, def, out, {});
         return out.sorted_array();
     });
 
@@ -830,9 +848,7 @@ void register_reflection_functions(engine& eng_ref) {
         auto* def = reflect_detail::resolve_class(eng, args[0], "method_arguments");
         if (!def) { throw runtime_error("reflect::method_arguments expects a class or class name"); }
         reflect_detail::method_collector out{eng};
-        if (const auto known = reflect_detail::known_symbol(eng, name)) {
-            reflect_detail::collect_methods_of(eng, def, out, *known);
-        }
+        reflect_detail::collect_methods_of(eng, def, out, name);
         if (out.entries.empty()) {
             throw runtime_error("reflect::method_arguments: '" + def->get_name() +
                                 "' has no method '" + name + "'");

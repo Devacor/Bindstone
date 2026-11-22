@@ -2,6 +2,7 @@
 #include "projectPanel.h"
 #include "scriptPanel.h"
 #include "fileDialog.h"
+#include "MV/Render/Scene/light.h"
 #include <algorithm>
 #include <charconv>
 #include <cstring>
@@ -936,6 +937,9 @@ namespace Workbench {
 					auto parallax = a_node->attach<MV::Scene::Parallax>();
 					parallax->authoring(true);
 					return parallax.self();
+				} },
+				{ "Light", [](const std::shared_ptr<MV::Scene::Node>& a_node, Managers&, MV::TapDevice&) -> std::shared_ptr<MV::Scene::Component> {
+					return a_node->attach<MV::Scene::Light>().self();
 				} } };
 		}
 

@@ -194,6 +194,9 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\parallax.cpp">
       <Filter>MV\Render\Scene</Filter>
     </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\light.cpp">
+      <Filter>MV\Render\Scene</Filter>
+    </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\webServer.cpp">
       <Filter>MV\Network</Filter>
     </ClCompile>
@@ -278,6 +281,9 @@
       <Filter>MV\Render</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\deviceBindings.h">
+      <Filter>MV\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\lighting.h">
       <Filter>MV\Render</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\glDevice.h">
@@ -421,6 +427,9 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\controllerDevice.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\tapDevice.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\parallax.h">
+      <Filter>MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\light.h">
       <Filter>MV\Render\Scene</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Script\script.h">

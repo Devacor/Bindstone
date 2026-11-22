@@ -18,4 +18,5 @@
 	#include "MV/Render/Scene/palette.h"
 	#include "MV/Render/Scene/path.h"
 	#include "MV/Render/Scene/parallax.h"
+	#include "MV/Render/Scene/light.h"
 #endif

@@ -31,6 +31,7 @@
 #include "MV/Render/matrix.hpp"
 #include "MV/Render/device.h"   // RHI seam; Shader/Draw2D hold Render::Device + Bound* handles.
 #include "MV/Render/batchingDevice.h"
+#include "MV/Render/lighting.h"
 #include "MV/Utility/generalUtility.h"
 #include <jaiscript/signals/signal_decl.hpp>
 
@@ -97,6 +98,7 @@ namespace MV {
 	extern const std::string PREMULTIPLY_ID;
 	extern const std::string COLOR_PICKER_ID;
 	extern const std::string ALPHA_FILTER_ID;
+	extern const std::string LIT_ID;
 	extern const std::string DEFAULT_VERTEX_SHADER_FILE;
 
 #if SDL_BYTEORDER == SDL_BIG_ENDIAN
@@ -354,6 +356,10 @@ namespace MV {
 		inline bool setVec3(const std::string& a_variableName, const Point<PointPrecision>& a_point, bool a_errorIfNotPresent = true) {
 			return recordUniform(a_variableName, &a_point.x, 3);
 		}
+		// A float, vec2, vec3 or vec4 from a_count (1 to 4) floats.
+		inline bool setFloats(const std::string& a_variableName, const float* a_values, uint32_t a_count) {
+			return recordUniform(a_variableName, a_values, a_count);
+		}
 
 		inline bool set(const std::string& a_variableName, const TransformMatrix& a_matrix, bool a_errorIfNotPresent = true) {
 			if (recordingTarget.record) {
@@ -405,6 +411,13 @@ namespace MV {
 			return *this;
 		}
 
+		// Its fragment stage lights the surface: a draw with it receives the scene's lights and a normal map.
+		bool lit() const { return litByScene; }
+		Shader& lit(bool a_lit) {
+			litByScene = a_lit;
+			return *this;
+		}
+
 		Render::Device* device() const { return renderDevice; }
 		Render::BoundShaderModule vertexShaderModule() const { return vertexModule; }
 		Render::BoundShaderModule fragmentShaderModule() const { return fragmentModule; }
@@ -448,6 +461,7 @@ namespace MV {
 		Render::BoundShaderModule fragmentModule;
 		RecordingTarget           recordingTarget;
 		bool                      vertexStageOnlyTransforms = false;
+		bool                      litByScene = false;
 	};
 
 	struct MaterialContext {
@@ -690,6 +704,10 @@ namespace MV {
 		// Clip-stencil nesting tracker; the Stencil component drives it via push/pop. See StencilStack.
 		StencilStack& stencil() { return stencilStack; }
 
+		Render::Lighting& lighting() { return *sceneLighting; }
+		// For a light that may outlive the renderer (a script engine keeps scene nodes past it).
+		std::weak_ptr<Render::Lighting> lightingHandle() const { return sceneLighting; }
+
 		// Material management
 		std::shared_ptr<Material> loadMaterial(const std::string& a_id, const std::string& a_shaderProgramId);
 		bool hasMaterial(const std::string& a_id) const;
@@ -758,6 +776,7 @@ namespace MV {
 		std::unique_ptr<Render::Device> backend;
 		std::unique_ptr<Render::BatchingDevice> batchedDevice;
 		StencilStack stencilStack{ *this };
+		std::shared_ptr<Render::Lighting> sceneLighting = std::make_shared<Render::Lighting>();
 		double frameStartSeconds = 0.0;
 		FrameReport lastFrameReport;
 

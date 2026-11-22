@@ -1343,9 +1343,9 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 				}
 				a_app.runFrames(4);
 				std::string all = componentNames(node);
-				expect(all == "Sprite Text Clickable Button FocusGroup Stencil Grid Parallax ", "every kind is on the node in the order it was added: " + all);
+				expect(all == "Sprite Text Clickable Button FocusGroup Stencil Grid Parallax Light ", "every kind is on the node in the order it was added: " + all);
 				expect(a_app.removeComponent(node->component<MV::Scene::Clickable>(true, false).self()), "one from the middle comes off");
-				expect(componentNames(node) == "Sprite Text Button FocusGroup Stencil Grid Parallax ", "leaving the rest: " + componentNames(node));
+				expect(componentNames(node) == "Sprite Text Button FocusGroup Stencil Grid Parallax Light ", "leaving the rest: " + componentNames(node));
 				pressWithControl(SDLK_z);
 				a_app.runFrames(3);
 				expect(componentNames(node) == all, "and undo puts it back where it was, not last: " + componentNames(node));
@@ -2746,9 +2746,20 @@ static int RunAssetVerification() {
 	return failed == 0 ? 0 : 1;
 }
 
-// CPU baseline for the particle hot loops (single-threaded, no GL): Particle::update (the per-frame
-// per-particle simulation, incl. the per-particle TransformMatrix) and the vertex-generation loop
-// from loadParticlesToPoints. Establishes a "before" number for perf work. Run: BindstoneClient.exe -emitterbench
+static void saveFrameBuffer(MV::Draw2D& a_renderer, const std::string& a_path) {
+	auto size = a_renderer.window().drawableSize();
+	SDL_Surface* surface = SDL_CreateRGBSurface(0, size.width, size.height, 32, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
+	std::vector<uint8_t> pixels(static_cast<size_t>(size.width) * size.height * 4);
+	a_renderer.flushDraws();
+	glReadPixels(0, 0, size.width, size.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+	auto* target = static_cast<uint8_t*>(surface->pixels);
+	for (int y = 0; y < size.height; ++y) {
+		std::memcpy(target + static_cast<size_t>(y) * surface->pitch, pixels.data() + static_cast<size_t>(size.height - 1 - y) * size.width * 4, static_cast<size_t>(size.width) * 4);
+	}
+	SDL_SaveBMP(surface, a_path.c_str());
+	SDL_FreeSurface(surface);
+}
+
 // -spriteshot [count] [scaled]: a grid of sprites from the shipped atlases, runs of eight to a texture, turned and
 // tinted in a repeating pattern (and with scaled, stretched 1.4 x 0.7 before turning); draws 120 frames, prints the
 // frame summary and writes sprite_shot.bmp.
@@ -2791,17 +2802,7 @@ static int RunSpriteShot(int a_count, bool a_scaled) {
 		managers.renderer.clearScreen();
 		root->draw();
 		if (frame == frameCount - 1) {
-			auto size = managers.renderer.window().drawableSize();
-			SDL_Surface* surface = SDL_CreateRGBSurface(0, size.width, size.height, 32, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
-			std::vector<uint8_t> pixels(static_cast<size_t>(size.width) * size.height * 4);
-			managers.renderer.flushDraws();
-			glReadPixels(0, 0, size.width, size.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
-			auto* target = static_cast<uint8_t*>(surface->pixels);
-			for (int y = 0; y < size.height; ++y) {
-				std::memcpy(target + static_cast<size_t>(y) * surface->pitch, pixels.data() + static_cast<size_t>(size.height - 1 - y) * size.width * 4, static_cast<size_t>(size.width) * 4);
-			}
-			SDL_SaveBMP(surface, "sprite_shot.bmp");
-			SDL_FreeSurface(surface);
+			saveFrameBuffer(managers.renderer, "sprite_shot.bmp");
 		}
 		managers.renderer.updateScreen();
 		frames.push_back(managers.renderer.lastFrame());
@@ -2811,6 +2812,58 @@ static int RunSpriteShot(int a_count, bool a_scaled) {
 	return 0;
 }
 
+// -mapshot <file.bmp> [frames] [x y zoom]: map.scene in a 1600x900 window, centred on (x, y) of the map at zoom (by
+// default the whole map), updated 60 steps a second of game time; writes the last frame to the file and prints the
+// frame summary, so two frame counts show two moments of anything that animates.
+static int RunMapShot(const std::string& a_path, int a_frames, std::optional<MV::Point<>> a_centre, MV::PointPrecision a_zoom) {
+	Managers managers({ "", "" });
+	auto jaiEngine = MV::makeScriptEngine(managers.services);
+	managers.services.connect<jai::engine>(jaiEngine.get());
+	if (!managers.renderer.initialize(MV::Size<int>(1600, 900))) {
+		std::cout << "[mapshot] renderer init failed" << std::endl;
+		return 1;
+	}
+	managers.renderer.loadShader("vortex", "Shaders/default.vert", "Shaders/vortex.frag");
+	managers.renderer.loadShader("lillypad", "Shaders/lillypad.vert", "Shaders/default.frag");
+	managers.renderer.loadShader("wave", "Shaders/wave.vert", "Shaders/wave.frag");
+	managers.renderer.loadShader("waterfall", "Shaders/default.vert", "Shaders/waterfall.frag");
+	managers.renderer.loadShader("pool", "Shaders/default.vert", "Shaders/pool.frag");
+	managers.renderer.loadShader("shimmer", "Shaders/default.vert", "Shaders/shimmer.frag");
+
+	auto map = MV::Scene::Node::load("Scenes/map.scene", managers.services, true);
+	while (managers.textures.pendingTextureLoads() > 0) {
+		managers.pool.run_posted();
+	}
+	const MV::Size<> mapSize(6144.0f, 2048.0f);
+	const MV::Size<> view = managers.renderer.world().size();
+	MV::Point<> centre = a_centre.value_or(MV::Point<>(mapSize.width / 2.0f, mapSize.height / 2.0f));
+	MV::PointPrecision zoom = a_centre ? a_zoom : std::min(view.width / mapSize.width, view.height / mapSize.height);
+	map->scale(MV::Scale(zoom, zoom, 1.0f));
+	map->position(MV::Point<>(view.width / 2.0f - centre.x * zoom, view.height / 2.0f - centre.y * zoom));
+
+	std::vector<MV::FrameReport> frames;
+	for (int frame = 0; frame < a_frames; ++frame) {
+		SDL_Event event;
+		while (SDL_PollEvent(&event)) {
+			managers.renderer.handleEvent(event);
+		}
+		map->update(1.0 / 60.0);
+		managers.renderer.clearScreen();
+		map->draw();
+		if (frame == a_frames - 1) {
+			saveFrameBuffer(managers.renderer, a_path);
+		}
+		managers.renderer.updateScreen();
+		frames.push_back(managers.renderer.lastFrame());
+	}
+	std::cout << MV::summarizeFrames(frames, 10) << std::endl;
+	std::cout << "Map shot: " << a_path << ", " << a_frames << " frames, " << managers.renderer.lighting().sourceCount() << " lights" << std::endl;
+	return 0;
+}
+
+// CPU baseline for the particle hot loops (single-threaded, no GL): Particle::update (the per-frame
+// per-particle simulation, incl. the per-particle TransformMatrix) and the vertex-generation loop
+// from loadParticlesToPoints. Establishes a "before" number for perf work. Run: BindstoneClient.exe -emitterbench
 static void RunEmitterBenchmark() {
 	using namespace MV;
 	std::cout << "\n=== Emitter CPU baseline (single-thread; Particle::update + vertex gen, no GL) ===\n";
@@ -2974,6 +3027,16 @@ int main(int argc, char *argv[]) {
 				}
 			}
 			return RunSpriteShot(count, scaled);
+		}
+		if (strcmp(argv[i], "-mapshot") == 0 && i + 1 < argc) {
+			int frames = i + 2 < argc ? std::max(1, std::atoi(argv[i + 2])) : 120;
+			std::optional<MV::Point<>> centre;
+			MV::PointPrecision zoom = 1.0f;
+			if (i + 5 < argc) {
+				centre = MV::Point<>(static_cast<MV::PointPrecision>(std::atof(argv[i + 3])), static_cast<MV::PointPrecision>(std::atof(argv[i + 4])));
+				zoom = static_cast<MV::PointPrecision>(std::atof(argv[i + 5]));
+			}
+			return RunMapShot(argv[i + 1], frames, centre, zoom);
 		}
 		if (strcmp(argv[i], "-emitterbench") == 0) {
 			RunEmitterBenchmark();

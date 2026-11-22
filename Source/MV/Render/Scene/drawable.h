@@ -266,6 +266,10 @@ namespace MV {
 			// Runs material/userMaterialSettings; records into the shader's uniform set on the device
 			// path, or issues GL live on the legacy path. Shared by both branches of the draw impl.
 			void applyMaterialPass(Draw2D& a_renderer);
+			// A lit shader's lights and its normal map (texture1): texture slot 1 when the drawable has one, else a Sprite
+			// Lamp export beside texture 0's file, else a flat surface.
+			void applyLighting(Draw2D& a_renderer);
+			std::shared_ptr<TextureDefinition> normalMapBesideTexture();
 
 			// Create or resize+upload the device vertex+index buffers from points/vertexIndices
 			// (recreate on byte-size change since updateBuffer can't grow; else honor the dirty flags).
@@ -408,6 +412,9 @@ namespace MV {
 			void rebuildTextureCache();
 
 			std::vector<std::pair<std::string, std::shared_ptr<TextureDefinition>>> cachedTextureList;
+
+			std::shared_ptr<TextureDefinition> foundNormalMap;
+			std::string foundNormalMapFor;   // the texture 0 file foundNormalMap was looked for beside
 
 		private:
 			virtual void clearTextureCoordinates(size_t a_textureId) {

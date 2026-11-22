@@ -17,6 +17,7 @@ namespace MV {
 	const std::string PREMULTIPLY_ID = "premultiply";
 	const std::string COLOR_PICKER_ID = "colorPicker";
 	const std::string ALPHA_FILTER_ID = "alphaFilter";
+	const std::string LIT_ID = "lit";
 	const std::string DEFAULT_VERTEX_SHADER_FILE = "Shaders/default.vert";
 
 	bool RUNNING_IN_HEADLESS = false;
@@ -903,6 +904,7 @@ namespace MV {
 
 	void Draw2D::clearScreen(){
 		updateCameraProjectionMatrices();
+		sceneLighting->beginFrame();
 		sdlWindow.refreshContext();
 		// The clear is the frame's first render-pass boundary. The GL backend issues glClear; the headless backend is inert.
 		frameStartSeconds = steadySeconds();
@@ -1203,6 +1205,9 @@ namespace MV {
 		loadShader(MV::PREMULTIPLY_ID, DEFAULT_VERTEX_SHADER_FILE, "Shaders/premultiply.frag");
 		loadShader(MV::ALPHA_FILTER_ID, DEFAULT_VERTEX_SHADER_FILE, "Shaders/alphaFilter.frag");
 		loadShader(MV::COLOR_PICKER_ID, DEFAULT_VERTEX_SHADER_FILE, "Shaders/colorPicker.frag");
+		// lit.vert multiplies the position by `transformation` and derives the rest from the result, so a batch's
+		// clip-space vertices light the same.
+		loadShader(MV::LIT_ID, "Shaders/lit.vert", "Shaders/lit.frag")->batchable(true).lit(true);
 	}
 
 	std::shared_ptr<Shader> Draw2D::loadShader(const std::string &a_id, const std::string &a_vertexShaderFilename, const std::string &a_fragmentShaderFilename) {

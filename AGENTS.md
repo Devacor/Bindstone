@@ -70,6 +70,8 @@ is the verdict:
 - `-verifyassets` — loads and round-trips every scene, `.bindsnap` and catalog, evaluates the gameplay scripts and
   static-checks the interface scripts (details in "The gate" below).
 - `-loginshot [frames]` — renders the Login page for N frames and writes `login_shot.bmp`.
+- `-mapshot <file.bmp> [frames] [x y zoom]` — renders `map.scene` (by default the whole map, else centred on a map
+  point at a zoom) at 60 updates a second of game time, writes the last frame and prints draw calls and frame times.
 - `-workbenchsmoke` / `-workbenchshot` — 120 Workbench frames; the latter writes `workbench_shot.bmp`.
   `-workbenchgizmoshot` loads `map.scene` and selects a node; `-workbenchselftest` drives a load, select, save,
   BindSnap drop and undo/redo and checks each result. All exit nonzero on a failed load, a script error or an

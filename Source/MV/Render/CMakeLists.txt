@@ -7,6 +7,7 @@ target_sources(BindStone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/deviceBindings.h
   ${CMAKE_CURRENT_SOURCE_DIR}/formattedText.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/formattedText.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/lighting.h
   ${CMAKE_CURRENT_SOURCE_DIR}/matrix.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/points.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/points.h
@@ -32,6 +33,8 @@ target_sources(BindStone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/Scene/emitter.h
   ${CMAKE_CURRENT_SOURCE_DIR}/Scene/grid.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/Scene/grid.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/Scene/light.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/Scene/light.h
   ${CMAKE_CURRENT_SOURCE_DIR}/Scene/node.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/Scene/node.h
   ${CMAKE_CURRENT_SOURCE_DIR}/Scene/palette.cpp

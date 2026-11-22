@@ -1,4 +1,5 @@
 #include "drawable.h"
+#include "light.h"
 
 #include "MV/Utility/scopeGuard.hpp"
 #include <jaiscript/serialization/archive.hpp>
@@ -200,6 +201,40 @@ namespace MV {
 					try { userMaterialSettings(*shaderProgram); } catch (std::exception &e) { MV::error("Drawable::defaultDrawImplementation. Exception in userMaterialSettings: ", e.what()); }
 				}
 			}
+			if (shaderProgram->lit()) {
+				applyLighting(a_renderer);
+			}
+		}
+
+		void Drawable::applyLighting(Draw2D &a_renderer) {
+			auto ourOwner = owner();
+			applyLights(*shaderProgram, a_renderer, ourOwner->worldFromLocal(*localBounds), ourOwner->root().get());
+			if (materialInstance && materialInstance->textures().count(1)) {
+				shaderProgram->set("normalMapped", 1.0f, false);
+				return;
+			}
+			auto slot = ourTextures->find(1);
+			auto normalMap = slot != ourTextures->end() ? slot->second->texture() : normalMapBesideTexture();
+			shaderProgram->set("texture1", normalMap.get(), 1, false);
+			shaderProgram->set("normalMapped", normalMap && normalMap->boundTexture().valid() ? 1.0f : 0.0f, false);
+		}
+
+		std::shared_ptr<TextureDefinition> Drawable::normalMapBesideTexture() {
+			auto albedo = ourTextures->find(0);
+			auto file = albedo != ourTextures->end() ? std::dynamic_pointer_cast<FileTextureDefinition>(albedo->second->texture()) : nullptr;
+			std::string source = file ? file->name() : std::string();
+			if (source != foundNormalMapFor) {
+				foundNormalMapFor = source;
+				foundNormalMap.reset();
+				if (auto path = spriteLampNormalMapBeside(source); !path.empty()) {
+					auto parameters = file->fileTextureParameters();
+					auto normalMap = FileTextureDefinition::make(path, parameters.powerTwo, parameters.repeat, parameters.pixel);
+					normalMap->renderDevice(shaderProgram->device());
+					normalMap->load();
+					foundNormalMap = normalMap;
+				}
+			}
+			return foundNormalMap;
 		}
 
 		void Drawable::syncDeviceBuffers(Render::Device* a_device, Render::BufferUpdateHint a_hint) {

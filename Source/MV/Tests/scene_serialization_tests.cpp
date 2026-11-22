@@ -14,6 +14,7 @@
 #include "MV/Render/Scene/path.h"
 #include "MV/Render/Scene/grid.h"
 #include "MV/Render/Scene/focusGroup.h"
+#include "MV/Render/Scene/light.h"
 #include <cstdlib>
 
 #include <string>
@@ -251,6 +252,60 @@ namespace mv_tests {
 				check_near(sprite->bounds().minPoint.y, copy->bounds().minPoint.y, 1e-3f);
 				check_near(sprite->bounds().maxPoint.x, copy->bounds().maxPoint.x, 1e-3f);
 				check_near(sprite->bounds().maxPoint.y, copy->bounds().maxPoint.y, 1e-3f);
+			});
+
+			test("Light saves and loads as its own $type with its colour, reach, height and pulse", [] {
+				SceneHost host;
+				auto scene = Node::make(host.renderer, "root");
+				scene->make("orb")->attach<MV::Scene::Light>()->id("glow")->color(MV::Color(1.0f, 0.5f, 0.25f, 1.0f))->intensity(1.5f)->radius(300.0f)->height(40.0f)->falloff(1.5f)->pulse(0.2f, 3.0f, 0.25f);
+
+				ScratchScene file;
+				auto loaded = saveAndLoad(host, scene, file);
+				check_true(hasSerializedType(file.contents(), "Light"), "Light saved as a sliced base type");
+				auto light = loaded->get("orb")->component<MV::Scene::Light>(true, false);
+				check_not_null(light.self(), "Light did not load as Light");
+				check_near(0.5f, light->color().G, 1e-5f);
+				check_near(1.5f, light->intensity(), 1e-5f);
+				check_near(300.0f, light->radius(), 1e-5f);
+				check_near(40.0f, light->height(), 1e-5f);
+				check_near(1.5f, light->falloff(), 1e-5f);
+				check_near(0.2f, light->pulseAmplitude(), 1e-5f);
+				check_near(3.0f, light->pulsePeriod(), 1e-5f);
+				check_near(0.25f, light->pulsePhase(), 1e-5f);
+			});
+
+			test("a Light reaches the renderer's lighting from its node's world position, for its own scene only", [] {
+				SceneHost host;
+				auto scene = Node::make(host.renderer, "root");
+				auto orb = scene->make("orb")->position(MV::point(100.0f, 50.0f));
+				orb->attach<MV::Scene::Light>()->radius(200.0f);
+				auto other = Node::make(host.renderer, "other");
+				other->make("lamp")->attach<MV::Scene::Light>();
+
+				auto lightOfScene = [&]() {
+					host.renderer.lighting().beginFrame();
+					const auto& lights = host.renderer.lighting().lights();
+					auto found = std::find_if(lights.begin(), lights.end(), [&](const MV::Render::PointLight& a_light) { return a_light.scope == scene.get(); });
+					check_true(found != lights.end(), "the light is scoped to its scene's root");
+					return found != lights.end() ? *found : MV::Render::PointLight{};
+				};
+				auto mine = lightOfScene();
+				check_eq(size_t(2), host.renderer.lighting().lights().size());
+				check_near(orb->worldPosition().x, mine.x, 1e-3f);
+				check_near(orb->worldPosition().y, mine.y, 1e-3f);
+				check_near(200.0f, mine.radius, 1e-3f);
+
+				scene->scale(MV::Scale(2.0f, 2.0f, 1.0f));
+				check_near(400.0f, lightOfScene().radius, 1e-2f);
+
+				orb->hide();
+				host.renderer.lighting().beginFrame();
+				check_eq(size_t(1), host.renderer.lighting().lights().size(), "a hidden light gives none");
+				orb->detach<MV::Scene::Light>();
+				check_eq(size_t(1), host.renderer.lighting().sourceCount(), "a detached light leaves the lighting");
+				other.reset();
+				check_eq(size_t(0), host.renderer.lighting().sourceCount(), "a destroyed light leaves the lighting");
+				check_true(host.renderer.getShader(MV::LIT_ID)->lit(), "the lit shader is loaded and receives lights");
 			});
 
 			test("loaded Clickable script receiver is armed and fires on press", [] {

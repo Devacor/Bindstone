@@ -4089,7 +4089,7 @@ void parser::mark_null_chain(jai::expression* rewritten) {
 // `((p) => (null != p) ? p.rest : null)(base)`. Each part parses again, so an earlier ?. in it is rewritten the same way.
 checked_result<expression_ptr> parser::null_chain_rest(size_t chain_start, const std::vector<size_t>& links, expression_ptr expr) {
     const std::vector<token>& tokens = *stream_;
-    const size_t chain_end = current_;
+    size_t chain_end = current_;
     auto group_end = [&](size_t at) {   // past the balanced group opened at `at`
         size_t depth = 0;
         for (size_t i = at; i < chain_end; ++i) {
@@ -4100,12 +4100,24 @@ checked_result<expression_ptr> parser::null_chain_rest(size_t chain_start, const
         }
         return chain_end;
     };
-    size_t link = SIZE_MAX;
-    for (size_t k = links.size(); k-- > 0;) {
-        size_t at = links[k] + 2;   // past ?. and the member's name
-        if (at < chain_end && tokens[at].type == token_type::left_paren) { at = group_end(at); }
-        if (at < chain_end && tokens[at].type != token_type::question_dot) { link = links[k]; break; }
+    auto last_plain_link = [&]() {
+        for (size_t k = links.size(); k-- > 0;) {
+            size_t at = links[k] + 2;   // past ?. and the member's name
+            if (at < chain_end && tokens[at].type == token_type::left_paren) { at = group_end(at); }
+            if (at < chain_end && tokens[at].type != token_type::question_dot) { return links[k]; }
+        }
+        return SIZE_MAX;
+    };
+    // a postfix ++/-- after the chain's plain links is a store to the chain, as `chain += 1` is: it stays outside the rewrite
+    const token_type last = chain_end > chain_start ? tokens[chain_end - 1].type : token_type::eof;
+    const bool counted = last == token_type::plus_plus || last == token_type::minus_minus;
+    if (counted) { --chain_end; }
+    size_t link = last_plain_link();
+    if (counted && link == SIZE_MAX) {
+        ++chain_end;
+        link = last_plain_link();
     }
+    const bool store_outside = counted && chain_end < current_;
     if (link == SIZE_MAX) { return expr; }
 
     bool pure = true;
@@ -4178,6 +4190,7 @@ checked_result<expression_ptr> parser::null_chain_rest(size_t chain_start, const
         return make_error_code(parse_error_code::syntax_error);
     }
     mark_null_chain(parsed.value().get());
+    if (store_outside) { return desugar_incdec(tokens[chain_end], parsed.value(), true); }
     return parsed.value();
 }
 

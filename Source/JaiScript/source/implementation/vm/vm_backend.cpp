@@ -1498,6 +1498,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 					if (stack_.size() > df.stack_base) {
 						stack_.truncate(df.stack_base);
 					}
+					binding_failed();
 					frames_.pop_back();
 					sync_unit();
 					environment_ = prev_env;
@@ -1520,6 +1521,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 						return try_convert_for_parameter(v, param.type, detail::slot_site{detail::slot_kind::parameter, param.name, function->name, false});
 					});
 					if (!bound) {
+						binding_failed();
 						frames_.pop_back();
 						sync_unit();
 						environment_ = prev_env;
@@ -1540,6 +1542,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 			auto converted_result = try_convert_for_parameter(args[i], param.type,
 				detail::slot_site{detail::slot_kind::parameter, param.name, function->name, param.is_reference});
 			if (!converted_result) {
+				binding_failed();
 				frames_.pop_back();
 				sync_unit();
 				environment_ = prev_env;
@@ -13700,7 +13703,10 @@ op_status vm_backend::bind_frame_parameters(call_record& rec, const std::vector<
 		pop_script_frame_core(rec);
 		throw;
 	}
-	if (bound == op_status::failed) { pop_script_frame_core(rec); }
+	if (bound == op_status::failed) {
+		binding_failed();
+		pop_script_frame_core(rec);
+	}
 	return bound;
 }
 
@@ -13868,6 +13874,7 @@ op_status vm_backend::tail_splice_frame(call_record& rec, const script_defined_f
 		frames_.pop_back();
 		throw;
 	}
+	if (bound == op_status::failed) { binding_failed(); }
 	frames_.pop_back();
 	if (bound == op_status::failed) {
 		return bound;
@@ -23549,6 +23556,10 @@ checked_result<script_value> vm_backend::host_reference_argument(const std::vect
 	return passed.is_reference() && passed.get_reference_holder() ? passed : make_null();
 }
 
+void vm_backend::binding_failed() {
+	if (!trace_captured_) { capture_stack_trace(); }
+}
+
 void vm_backend::binding_threw(frame& callee) {
 	if (!trace_captured_) { capture_stack_trace(); }
 	assert(callee.code->code.back().op == opcode::op_halt);
@@ -24068,6 +24079,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	                                   env_untouched ? environment_ : previousEnv, site, caller_frame, caller_code,
 	                                   &function, caller_unit);
 		if (bind_result == op_status::failed) {
+			binding_failed();
 			cleanup();
 			return pending_error_;
 		}
@@ -24323,6 +24335,7 @@ checked_result<script_value> vm_backend::run_callback(callback_session& s, const
 			throw;
 		}
 		if (bound == op_status::failed) {
+			binding_failed();
 			cleanup();
 			return pending_error_;
 		}

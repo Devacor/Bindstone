@@ -1456,6 +1456,35 @@ public:
             });
         });
 
+        // A run-time error raised by the binding itself (the default's own expression, the argument's conversion) keeps the callee's
+        // frame as a throw there does, uncaught and in the caught value's stack
+        test("an_error_the_binding_raises_keeps_the_callee_frame", [this]() {
+            const char* prelude =
+                "var xs = [1];\n"
+                "var text = \"s\";\n"
+                "class Money { int v = 0; Money(int a) { v = a; } }\n";
+            const char* index_text = "Array index 9 out of bounds for array of size 1";
+            const std::tuple<const char*, const char*, const char*> cases[] = {
+                {"int g(\n  int a = xs[9]\n) {\n  return a;\n}\ng();\n", index_text, "g:7|<script>:9"},
+                {"int g(\n  int a\n) {\n  return a;\n}\ng(text);\n", "Cannot pass string to parameter 'a' of 'g' (declared int)", "g:7|<script>:9"},
+                {"int g(\n  int a = 1,\n  int b = xs[9]\n) {\n  return a;\n}\nvoid h() {\n  g();\n}\nh();\n", index_text, "g:8|h:11|<script>:13"},
+                {"class C {\n  int m(\n    int a = xs[9]\n  ) {\n    return a;\n  }\n}\nC c;\nc.m();\n", index_text, "m:8|<script>:12"},
+                {"class C {\n  static int s(\n    int a = xs[9]\n  ) {\n    return a;\n  }\n}\nC::s();\n", index_text, "s:8|<script>:11"},
+                {"var l = [](\n  int a = xs[9]\n) {\n  return a;\n};\nl();\n", index_text, "<lambda>:7|<script>:9"},
+                {"coroutine int co(\n  int a = xs[9]\n) {\n  yield a;\n}\nauto c = co();\nc.next();\n", index_text, "co:7|<script>:10"},
+                {"Money m(text);\n", "Cannot pass string to parameter 'a' of 'Money' (declared int)", "Money:0|<script>:4"},
+                {"int t(int n,\n  int a = xs[9]\n) {\n  return n;\n}\nint tc() {\n  return t(1);\n}\ntc();\n", index_text, "t:7|tc:10|<script>:12"},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                check_eq(std::string(std::get<1>(c)), failure_text(*engine, (std::string(prelude) + std::get<0>(c)).c_str()));
+                check_eq(std::string(std::get<2>(c)), trace_shape(*engine));
+            });
+            auto engine = make_engine();
+            check_eq(std::string("2"), printed_output(*engine, std::string(prelude) +
+                "int g(int a = xs[9]) { return a; }\nvoid h() { g(); }\ntry { h(); } catch (e) { print(e.stack.size() - 1); }\n"));
+        });
+
         // Regression: caught typed-return conversion error left the callee frame/env and
         // hasReturnValue_ live - catch body truncated, post-try statements skipped. The
         // literal typed mismatch is a strict load error (a strongly-typed value never reaches

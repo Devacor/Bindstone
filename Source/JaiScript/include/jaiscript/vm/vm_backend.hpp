@@ -1416,6 +1416,9 @@ namespace jai::vm {
         // at its closing op_halt, where it leaves as a throw out of its body does with no instruction of the body run. The stack is
         // taken here, while the frame stands at its start
         JAI_NOINLINE void binding_threw(frame& callee);
+        // A default argument or a conversion raised while a frame's parameters were binding: the stack is taken while the frame stands,
+        // as for a throw there (KEEP BYTE-PARALLEL with the interpreter's call_function)
+        JAI_NOINLINE void binding_failed();
         // Ref-param bind against the caller's variable storage: shares an existing
         // reference holder (cells alias), or boxes the value on demand (cell) when the
         // variable predates its escape mark

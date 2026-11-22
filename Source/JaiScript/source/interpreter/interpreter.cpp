@@ -9260,6 +9260,12 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     }
 
     // parameters bind into the call frame; a reference parameter binds to its argument's storage
+    // an error while they bind is the callee's: the stack is taken while its frame stands, as for a throw there (KEEP BYTE-PARALLEL
+    // with vm_backend::binding_failed)
+    auto binding_failed = [&]() {
+        if (!trace_captured_) { capture_stack_trace(); }
+        cleanup();
+    };
 
     std::vector<script_value> held_args;
     const std::vector<script_value>* argv = &args;
@@ -9286,14 +9292,14 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 auto storage = param.is_reference ? named_storage_reference(param.default_value.get()) : std::nullopt;
                 if (storage) {
                     if (!*storage) {
-                        cleanup();
+                        binding_failed();
                         return storage->error_value();
                     }
                     default_val = std::move(storage->value());
                 } else {
                     auto default_result = dispatch_expr(param.default_value.get());
                     if (!default_result) {
-                        cleanup();
+                        binding_failed();
                         return default_result.error_value();
                     }
                     default_val = pop_value();
@@ -9302,7 +9308,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                         if (d->get_type() == node_type::member_expr && static_cast<const member_expr*>(d)->is_static) {
                             if (auto cell = static_storage_reference(static_cast<const member_expr*>(d))) {
                                 if (!*cell) {
-                                    cleanup();
+                                    binding_failed();
                                     return cell->error_value();
                                 }
                                 default_val = std::move(cell->value());
@@ -9313,14 +9319,14 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                             return try_convert_for_parameter(v, param.type, detail::slot_site{detail::slot_kind::parameter, param.name, function.name, false});
                         });
                         if (!bound) {
-                            cleanup();
+                            binding_failed();
                             return bound.error_value();
                         }
                         default_val = std::move(bound.value());
                     }
                 }
                 if (!is_unwinding_ && !detail::default_binds_reference(param, default_val)) {
-                    cleanup();
+                    binding_failed();
                     return detail::non_lvalue_default_error(param, *string_symbolizer_);
                 }
                 if (param.ref_escaping && !default_val.is_reference()) {
@@ -9346,7 +9352,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 auto bound = bind_reference_parameter(param, frame_index,
                                                       (*call_ctx->arg_exprs)[i].get(), previousEnv, &arg, caller_unit, &function, i);
                 if (!bound) {
-                    cleanup();
+                    binding_failed();
                     return bound.error_value();
                 }
                 // the evaluated argument the call keeps names what the parameter the binder resolved names: a view too, and a value
@@ -9372,7 +9378,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                             detail::ref_parameter_takes_temporary(*engine_, function.parameters(), function.body.get(), i, !parallel_worker_))) {
                     call_stack_[frame_index].set_local(param.slot_index, detail::make_reference_argument_temporary(param, arg, engine_));
                 } else {
-                    cleanup();
+                    binding_failed();
                     return checked_result<script_value>(
                         make_error_code(runtime_error_code::invalid_reference),
                         "Cannot pass non-lvalue to reference parameter"
@@ -9435,7 +9441,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                     detail::capture_argument(engine_, held_args[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(function.parameters(), j));
                 }
                 if (auto placed = bind_later_places(function, call_ctx, i + 1, held_args, frame_index, previousEnv, caller_unit); !placed) {
-                    cleanup();
+                    binding_failed();
                     return placed.error_value();
                 }
                 argv = &held_args;
@@ -9445,7 +9451,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 detail::slot_site{detail::slot_kind::parameter, param.name, function.name, param.is_reference},
                 elide ? &const_cast<script_value&>(arg) : nullptr);
             if (!convert_result) {
-                cleanup();
+                binding_failed();
                 return convert_result.error_value();
             }
             script_value converted_arg = std::move(convert_result.value());
@@ -9515,7 +9521,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         const script_value* bound = call_stack_[frame_index].get_local(param.slot_index);
         if (bound) {   // KEEP BYTE-PARALLEL with vm_backend::bind_parameters
             if (auto named = detail::bind_handle_object(*const_cast<script_value*>(bound), param.type.get(), engine_); !named) {
-                cleanup();
+                binding_failed();
                 return named.error_value();
             }
             script_value::bind_view(*bound);
@@ -9532,7 +9538,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 }
             }
             auto rejection = detail::typed_slot_rejection(bound->deref(), *param.type, detail::slot_site{detail::slot_kind::parameter, param.name, function.name, param.is_reference}, engine_);
-            cleanup();
+            binding_failed();
             return rejection;
         }
         if ((param.ref_escaping || param.declared_ref_escapes) && bound) [[unlikely]] {   // its reference reaches a binding that cannot see the name

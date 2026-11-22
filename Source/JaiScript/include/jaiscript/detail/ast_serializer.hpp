@@ -877,6 +877,7 @@ namespace jai::detail {
             varint(g.bases.size());
             for (const auto& name : g.bases) str(name);
             location(g.location);
+            u8(g.check_mode);
         }
 
         JAI_NOINLINE void write_generic_instance_decl(const ast_node* n) {
@@ -2072,6 +2073,8 @@ namespace jai::detail {
             member_names(g->member_functions);
             member_names(g->bases);
             g->location = location();
+            g->check_mode = u8();
+            if (g->check_mode > check_mode_attr_strict) jaibite_fail("corrupt check mode attribute");
             return std::make_shared<generic_decl>(loc, std::move(g));
         }
 

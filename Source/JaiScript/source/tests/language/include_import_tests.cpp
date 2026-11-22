@@ -60,6 +60,24 @@ public:
             cleanup_temp_file(math_file);
         });
         
+        // A generic declared in a [[warn_mode]] region checks its instances in it, as a plain declaration there checks, wherever an
+        // instance is made
+        test("warn_mode_reaches_a_generics_instances", [=, this]() {
+            auto generics = create_temp_file("warn_region_generics.jai",
+                "[[warn_mode]];\nclass WBox<T> { T v; T f() { return undeclared_wb; } }\nT wtwice<T>(T x) { return x + undeclared_wt; }\n");
+            auto eng = make_engine();
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
+            const auto loads = [&](const std::string& source) {
+                try { eng->execute(source); return std::string("loaded"); } catch (const std::exception& e) { return std::string(e.what()); }
+            };
+            check_eq(std::string("loaded"), loads("import \"warn_region_generics.jai\"; WBox<int> a; int uses_wtwice() { return wtwice<int>(1); } 1;"), "instances of an imported warn file's generics");
+            check_false(eng->last_check_diagnostics().has_errors(), "the instances' undeclared names are warnings");
+            check_eq(std::string("loaded"), loads("[[warn_mode]] class SBox<T> { T f() { return undeclared_sb; } }\nSBox<int> s; 1;"), "a generic class under a leading [[warn_mode]]");
+            check_eq(std::string("loaded"), loads("[[warn_mode]] T stwice<T>(T x) { return x + undeclared_st; }\nint uses_stwice() { return stwice<int>(1); } 1;"), "a generic function under a leading [[warn_mode]]");
+            check_true(loads("class EBox<T> { T f() { return undeclared_eb; } }\nEBox<int> e; 1;").find("undeclared_eb") != std::string::npos, "outside a warn region the instance's name is an error");
+            cleanup_temp_file(generics);
+        });
+
         test("include_with_angle_brackets", [=, this]() {
             auto eng = make_engine();
             

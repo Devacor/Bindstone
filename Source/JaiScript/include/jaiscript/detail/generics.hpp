@@ -62,6 +62,7 @@ namespace jai::detail {
 		uint32_t name_token = 0;     // tokens[name_token] is the name; tokens[name_token + 1 .. list_end) its parameter list, brackets included
 		uint32_t list_end = 0;
 		uint64_t stamp = 0;          // what an instance's definition is compared by: the tokens and where they stand
+		uint8_t check_mode = 0;      // the [[warn_mode]] / [[strict_mode]] region it is declared in, which its instances check under
 		std::vector<generic_value_parameter> values;   // a function's or a method's parameters
 		// a class's members by name (its fields and statics; its methods) and its bases without their type arguments: what a
 		// '<' after a name reads through where a class derives from an instance (detail/less_than.hpp)

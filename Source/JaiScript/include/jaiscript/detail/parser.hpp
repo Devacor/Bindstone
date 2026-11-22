@@ -301,6 +301,7 @@ namespace jai {
         checked_result<expression_ptr> expression();
         checked_result<expression_ptr> null_chain_rest(size_t chain_start, const std::vector<size_t>& links, expression_ptr expr);
         static void mark_null_chain(jai::expression* rewritten);
+        std::vector<detail::generic_definition*> file_generics_;   // the generics this parse declares (their check mode)
         // an operand and every operator after it that binds at least min_precedence (= is 0, * / % the tightest)
         checked_result<expression_ptr> operator_expression(int min_precedence);
         checked_result<expression_ptr> unary();

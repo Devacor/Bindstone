@@ -1223,6 +1223,15 @@ checked_result<std::vector<declaration_ptr>> parser::parse_pass() {
         return failed_parse();
     }
 
+    // a generic declared under the file's own [[warn_mode]] / [[strict_mode]] checks its instances under it, wherever they are made
+    for (const auto& d : declarations) {
+        if (!d || d->get_type() == node_type::generic_instance_decl) { continue; }
+        if (d->check_mode_attr != check_mode_attr_none) {
+            for (detail::generic_definition* g : file_generics_) { if (g->check_mode == check_mode_attr_none) { g->check_mode = d->check_mode_attr; } }
+        }
+        break;
+    }
+
     // Escape-mark + transient-read passes (shared with jaibite loads, which must
     // re-derive the parser-pass flags the serializer does not carry)
     try {
@@ -3796,6 +3805,11 @@ checked_result<declaration_ptr> parser::generic_declaration(const generic_site& 
     }
     auto definition = std::make_shared<detail::generic_definition>();
     definition->kind = site.kind;
+    for (size_t at = site.begin; at + 4 < tokens.size() && tokens[at].type == token_type::left_bracket && tokens[at + 1].type == token_type::left_bracket; at += 5) {
+        if (tokens[at + 2].lexeme == "warn_mode") { definition->check_mode = check_mode_attr_warn; }
+        else if (tokens[at + 2].lexeme == "strict_mode") { definition->check_mode = check_mode_attr_strict; }
+    }
+    file_generics_.push_back(definition.get());
     definition->name = symbolizer_->intern_with_view(name.lexeme).second;
     definition->space = std::string(site.space);
     definition->owner = std::string(site.owner);
@@ -3889,7 +3903,9 @@ checked_result<declaration_ptr> parser::generic_declaration(const generic_site& 
             definition->values.push_back({p.type, p.is_reference, p.default_value != nullptr});
         }
     }
-    return declaration_ptr(std::make_shared<generic_decl>(name.location, std::move(definition)));
+    auto generic = std::make_shared<generic_decl>(name.location, std::move(definition));
+    generic->check_mode_attr = generic->definition->check_mode;   // a leading one is the file's, as a plain declaration's is
+    return declaration_ptr(std::move(generic));
 }
 
 // callee<T1, T2>(args) is callee(T1, T2, args): each type argument a type value (cast_expr::type_value), which a host takes

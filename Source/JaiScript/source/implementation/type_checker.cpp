@@ -1451,6 +1451,15 @@ private:
         return false;
     }
 
+    // The [[warn_mode]] / [[strict_mode]] region a requested instance's generic is declared in (none: the unit's own region)
+    uint8_t instance_region_mode(const generic_instance_decl* request) {
+        if (!request) { return check_mode_attr_none; }
+        for (const generic_definition_ptr& g : generics_named(std::string(request->generic))) {
+            if (g && generic_instance_stamp(*g) == request->stamp) { return g->check_mode; }
+        }
+        return check_mode_attr_none;
+    }
+
     // A generic method's instances: each a method of the class the declaration names, checked as that class's own
     void walk_method_instances(const class_decl* cd) {
         sclass* owner = find_sclass(cd->name);
@@ -1470,6 +1479,7 @@ private:
             const generic_instance_decl* request = instance_request(*fn);
             if (unmade_instances_.count(request)) { continue; }
             instance_scope scope(instance_ctx_, request);
+            mode_guard declared(mode_stack_, instance_region_mode(request), /*scoped=*/true);
             walk_function(fn);
         }
         class_ctx_ = enclosing;
@@ -11399,6 +11409,7 @@ private:
                     const generic_instance_decl* request = instance_request(*fn);
                     if (unmade_instances_.count(request)) { break; }
                     instance_scope scope(instance_ctx_, request);
+                    mode_guard declared(mode_stack_, instance_region_mode(request), /*scoped=*/true);
                     walk_function_declaration(fn);
                     break;
                 }
@@ -11415,6 +11426,7 @@ private:
                     const generic_instance_decl* request = class_instance_request(cd->name);
                     if (unmade_instances_.count(request)) { break; }
                     instance_scope scope(instance_ctx_, request);
+                    mode_guard declared(mode_stack_, instance_region_mode(request), /*scoped=*/true);
                     if (!classes_.count(cd->name)) { collect_class(cd); }
                     walk_class(cd);
                     break;

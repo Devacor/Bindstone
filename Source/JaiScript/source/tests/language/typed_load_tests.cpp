@@ -204,6 +204,86 @@ public:
 			check_eq(std::string("loaded"), load("fits", "Fits", "from_binary"), "a record whose members fit");
 			check_eq(std::string("loaded"), load("field", "Field", {}), "the archive's own rule keeps the constructed value");
 		});
+
+		test("every_route_and_pair_of_classes_loads_whole_or_not_at_all", [this]() {
+			// What one version of a program saved, loaded where the field is declared with each class in turn: a field, an array's
+			// element, a map's value and a handle, as JSON and as binary, by a typed load and by an untyped one. A typed load
+			// answers the saved data whole or refuses it; an untyped load answers it whole or keeps the constructed value. No load
+			// answers an object of a class the field does not hold, and none drops a value it could have kept.
+			const std::string classes = "class Cell<T> { T held; } class Other { string o = \"o\"; } class Base { int b = 1; } class Derived : Base { int d = 1; }"
+			                            " Cell<int> made_i; Cell<string> made_s; Cell<Cell<int>> made_c;";
+			const std::vector<std::pair<std::string, std::string>> types = {   // a class and how the saved object differs from a constructed one
+				{"Cell<int>", "x.held = 5;"}, {"Cell<string>", "x.held = \"s\";"}, {"Cell<Cell<int>>", "x.held.held = 6;"},
+				{"Other", "x.o = \"p\";"}, {"Base", "x.b = 2;"}, {"Derived", "x.b = 2; x.d = 3;"},
+			};
+			struct route {
+				std::string name;
+				std::string declared;   // %T: the class
+				std::string fill;       // with `x` made
+				bool handle;
+			};
+			const std::vector<route> routes = {
+				{"a field", "%T v;", "h.v = x;", false}, {"an element", "array<%T> v;", "h.v.push(x);", false},
+				{"a map's value", "map<string, %T> v;", "h.v[\"k\"] = x;", false}, {"a handle", "shared_ptr<%T> v;", "h.v = x;", true},
+			};
+			const auto with = [](std::string text, const std::string& type) {
+				text.replace(text.find("%T"), 2, type);
+				return text;
+			};
+			const auto fits = [](const std::string& saved, const std::string& declared) { return saved == declared || (saved == "Derived" && declared == "Base"); };
+			const auto outcome = [](engine& e, const std::string& code) {
+				try {
+					return e.execute(code).to_string();
+				} catch (const std::exception& error) {
+					return std::string("ERR: ") + error.what();
+				}
+			};
+			size_t loads = 0;
+			for (const route& r : routes) {
+				std::vector<std::string> json(types.size()), binary(types.size());
+				for (size_t saved = 0; saved < types.size(); ++saved) {
+					auto writer = make_engine();
+					stdlib::register_all(*writer);
+					writer->execute(classes + " class Holder { " + with(r.declared, types[saved].first) + " int mark = 0; } Holder h; h.mark = 7; " +
+					                (r.handle ? "auto x = new " + types[saved].first + "(); " : types[saved].first + " x; ") + types[saved].second + " " + r.fill);
+					json[saved] = writer->execute("to_json(h);").as_string();
+					binary[saved] = writer->execute("to_binary(h);").as_string();
+				}
+				for (size_t declared = 0; declared < types.size(); ++declared) {
+					auto e = make_engine();
+					stdlib::register_all(*e);
+					std::string payload;
+					e->add_function("payload", [&payload]() { return payload; });
+					e->execute(classes + " class Holder { " + with(r.declared, types[declared].first) + " int mark = 0; }");
+					const std::string kept = e->execute("Holder k; k.mark = 7; to_json(k);").as_string();   // the saved mark over a constructed v
+					for (size_t saved = 0; saved < types.size(); ++saved) {
+						const std::string what = r.name + " declared " + types[declared].first + ", saved " + types[saved].first;
+						const bool whole = fits(types[saved].first, types[declared].first);
+						// JSON, typed and untyped
+						payload = json[saved];
+						const std::string typed_json = outcome(*e, "to_json(from_json<Holder>(payload()));");
+						const std::string untyped_json = outcome(*e, "to_json(from_json(payload()));");
+						// binary, untyped and typed, through the script
+						payload = binary[saved];
+						const std::string untyped_binary = outcome(*e, "to_json(from_binary(payload()));");
+						const std::string typed_binary = outcome(*e, "to_json(from_binary<Holder>(payload()));");
+						loads += 4;
+						if (whole) {
+							check_eq(json[saved], typed_json, what + ": a typed JSON load answers the save whole");
+							check_eq(json[saved], untyped_json, what + ": an untyped JSON load answers the save whole");
+							check_eq(json[saved], typed_binary, what + ": a typed binary load answers the save whole");
+							check_eq(json[saved], untyped_binary, what + ": an untyped binary load answers the save whole");
+						} else {
+							check_true(typed_json.rfind("ERR: from_json: field 'v' of 'Holder' is ", 0) == 0, what + ": a typed JSON load refuses it: " + typed_json);
+							check_true(typed_binary.rfind("ERR: from_binary: field 'v' of 'Holder' is ", 0) == 0, what + ": a typed binary load refuses it: " + typed_binary);
+							check_eq(kept, untyped_json, what + ": an untyped JSON load keeps the constructed value");
+							check_eq(kept, untyped_binary, what + ": an untyped binary load keeps the constructed value");
+						}
+					}
+				}
+			}
+			check_eq(size_t(576), loads, "every pair on every route in both formats by both loads");
+		});
 	}
 };
 

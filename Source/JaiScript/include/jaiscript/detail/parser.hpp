@@ -350,10 +350,11 @@ namespace jai {
             std::string_view generic;
             std::vector<type_info_ptr> arguments;
             source_location at;
+            bool as_value = false;
         };
         std::vector<generic_use> generic_uses_;
         std::unordered_set<uint64_t> requested_instances_;
-        void note_generic_use(std::string_view generic, std::vector<type_info_ptr> arguments, const source_location& at);
+        void note_generic_use(std::string_view generic, std::vector<type_info_ptr> arguments, const source_location& at, bool as_value = false);
         void flush_generic_uses(std::vector<declaration_ptr>& out);
         checked_result<expression_ptr> postfix_rest(expression_ptr expr, size_t chain_start, bool chain_starts_clean);
         checked_result<expression_ptr> postfix_operator(expression_ptr expr, std::vector<size_t>& null_links);

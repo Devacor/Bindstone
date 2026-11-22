@@ -1516,6 +1516,29 @@ private:
         for (const auto& g : generics_named(std::string(name))) { if (g->kind == generic_kind::class_type) { return g; } }
         return nullptr;
     }
+    // A generic function or method a bare name reaches where a value stands, by the lookup a call of it takes: what to write
+    // instead, or empty when the name reaches none
+    JAI_NOINLINE std::string generic_named_as_value(std::string_view name) {
+        if (!generics_live_) { return {}; }
+        std::vector<generic_definition_ptr> found;
+        const bool in_class = class_ctx_ && !(found = class_generics(class_ctx_name_, name)).empty();
+        for (std::string space(namespace_walk_names_.empty() ? std::string_view() : namespace_walk_names_.back()); found.empty() && !space.empty();) {
+            found = generics_named(space + "::" + std::string(name));
+            const size_t cut = space.rfind("::");
+            space.resize(cut == std::string::npos ? 0 : cut);
+        }
+        if (found.empty()) { found = generics_named(std::string(name)); }
+        return generic_value_spelled(found, name, in_class ? "this" : "");
+    }
+    // `spelled` names `found` where a value stands; through `receiver` when it is a method reached through one
+    static std::string generic_value_spelled(const std::vector<generic_definition_ptr>& found, std::string_view spelled, const std::string& receiver) {
+        const auto callable = std::find_if(found.begin(), found.end(), [](const generic_definition_ptr& g) { return g->kind != generic_kind::class_type; });
+        if (callable == found.end()) { return {}; }
+        const generic_definition& g = **callable;
+        const std::string call = std::string(spelled) + generic_spelling(g).substr(g.qualified_name().size());
+        if (!receiver.empty() && !g.is_static) { return detail::generic_method_value_text(spelled, {}, receiver, call); }
+        return detail::generic_value_text(spelled, {}, g.kind == generic_kind::method, call);
+    }
     // What a name is that takes no type arguments (detail/generics.hpp): a builtin type, an enum, a host class, a script class
     plain_type_kind plain_type_named(const std::string& name) {
         if (name.empty() || find_local(name)) { return plain_type_kind::none; }
@@ -2226,6 +2249,10 @@ private:
 
     void undeclared(const source_location& loc, std::string_view name, bool less_site = false) {
         if (instance_requests_.count(name)) { return; }   // an instance that could not be made: its request says why
+        if (const std::string generic = generic_named_as_value(name); !generic.empty()) {
+            diag(diag_level::error, loc, generic);
+            return;
+        }
         // Literal imports are covered by the program closure's names; a dynamic path can
         // define anything - keep the signal, drop the teeth.
         diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, loc,
@@ -5436,6 +5463,12 @@ private:
             if (refuse_bare_generic_class(named, m->location)) { return; }
         }
         if (space.empty() || namespace_declares(space, parts[next])) { return; }
+        const std::string member = space + "::" + std::string(parts[next]);
+        if (instance_requests_.count(member)) { return; }   // an instance that could not be made: its request says why
+        if (const std::string generic = generic_value_spelled(generics_named(member), path + "::" + std::string(parts.back()), ""); !generic.empty()) {
+            diag(diag_level::error, m->location, generic);
+            return;
+        }
         diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, m->location,
              "no member '" + std::string(parts[next]) + "' in namespace '" + space + "'");
     }
@@ -8361,6 +8394,14 @@ private:
                 return named;
             }
             if (hit.field && (hit.field->type || hit.field->function_spelling)) { return member_type(hit); }
+            return {};
+        }
+        // a generic method is no member: it is named, called or bound with its type arguments
+        if (want_static && instance_requests_.count(std::string(cls) + "::" + std::string(m->member))) { return {}; }   // its request says why
+        if (const std::string generic = generic_value_spelled(class_generics(cls, m->member), want_static ? std::string(cls) + "::" + std::string(m->member) : std::string(m->member),
+                                                              want_static ? std::string() : detail::method_value_receiver(m));
+            !generic.empty()) {
+            diag(diag_level::error, m->location, generic);
             return {};
         }
         if (!hit.certain || recv.open) { return {}; }

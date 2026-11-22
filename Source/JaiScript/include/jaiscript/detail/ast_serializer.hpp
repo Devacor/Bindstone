@@ -40,7 +40,7 @@ namespace jai::detail {
     // BUMP THIS on any change to what a parse produces: the serialized bytes and the parse-time semantics baked into the
     // AST (slot assignment, node and token numbers, capture plans). A stale sidecar is reparsed and rewritten (the version
     // check feeds the corrupt-file fallback), so a bump is always safe and a missed one leaves stale caches.
-    inline constexpr uint32_t k_jaibite_version = 73;
+    inline constexpr uint32_t k_jaibite_version = 75;
     // Header flags (u32):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -889,6 +889,7 @@ namespace jai::detail {
             varint(d->needs.size());
             for (const auto& need : d->needs) str(need);
             flag(d->expanded);
+            flag(d->as_value);
             varint(d->bounds.size());
             for (const auto& b : d->bounds) {
                 str(b.parameter);
@@ -2081,6 +2082,7 @@ namespace jai::detail {
             d->within_stamp = fixed_u64();
             for (uint64_t needs = varint(); needs > 0; --needs) { d->needs.push_back(view()); }
             d->expanded = flag();
+            d->as_value = flag();
             uint64_t nb = varint();
             check_count(nb);
             for (uint64_t i = 0; i < nb; ++i) {

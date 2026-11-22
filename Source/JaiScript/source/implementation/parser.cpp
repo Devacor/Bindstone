@@ -13,6 +13,7 @@
 #include "../../include/jaiscript/detail/template_library.hpp"
 #include "../../include/jaiscript/detail/less_than.hpp"
 #include "../../include/jaiscript/detail/type_checker.hpp"
+#include "../../include/jaiscript/detail/method_value.hpp"
 #include <algorithm>
 #include <iterator>
 #include <map>
@@ -3869,8 +3870,8 @@ JAI_NOINLINE checked_result<expression_ptr> parser::type_argument_call(expressio
     return call;
 }
 
-// Name<Args>{...} and Name<Args>::member name a generic class's instance as a class's own name would; no other token follows an
-// instance's name in an expression
+// Name<Args>{...}, Name<Args>::member and Name<Args> where a value stands name a generic class's instance as a class's own name
+// would; a generic function's instance is no value, which the check says once it knows what the name declares
 JAI_NOINLINE checked_result<expression_ptr> parser::generic_instance_reference(expression_ptr callee, std::vector<type_info_ptr> arguments, const token& at) {
     std::string generic;
     bool named = true;
@@ -3883,15 +3884,16 @@ JAI_NOINLINE checked_result<expression_ptr> parser::generic_instance_reference(e
         generic.insert(0, "::" + std::string(static_cast<const member_expr*>(e)->member));
         e = static_cast<const member_expr*>(e)->object.get();
     }
-    if (!named || !(check(token_type::left_brace) || check(token_type::colon_colon))) {
-        const std::string spelled = named ? type_info::instance_name(generic, arguments) : std::string("f<T>");
-        report_error("'" + spelled + "' names a generic's instance, which is not a value: call it, or pass a lambda that does ((x) => " + spelled + "(x))", at);
+    if (!named) {   // a receiver's generic method: the receiver's class, which picks the instance, is no parse fact
+        const auto* m = static_cast<const member_expr*>(callee.get());
+        const std::string spelled = type_info::instance_name(m->member, arguments);
+        report_error(detail::generic_method_value_text(spelled, m->member, detail::method_value_receiver(m), spelled), at);
         return make_error_code(parse_error_code::syntax_error);
     }
     const bool qualified = callee->get_type() == node_type::member_expr;
     const std::string_view last = qualified ? static_cast<const member_expr*>(callee.get())->member : static_cast<const identifier_expr*>(callee.get())->name;
     const auto [id, view] = symbolizer_->intern_with_view(type_info::instance_name(last, arguments));
-    note_generic_use(generic, std::move(arguments), callee->location);
+    note_generic_use(generic, std::move(arguments), callee->location, !(check(token_type::left_brace) || check(token_type::colon_colon)));
     if (qualified) {
         return expression_ptr(std::make_shared<member_expr>(callee->location, static_cast<const member_expr*>(callee.get())->object, view, id, false, true));
     }
@@ -3911,10 +3913,10 @@ checked_result<type_info_ptr> parser::parse_type_text(std::vector<declaration_pt
     return type;
 }
 
-void parser::note_generic_use(std::string_view generic, std::vector<type_info_ptr> arguments, const source_location& at) {
+void parser::note_generic_use(std::string_view generic, std::vector<type_info_ptr> arguments, const source_location& at, bool as_value) {
     const std::string_view generic_view = symbolizer_->intern_with_view(generic).second;
     const auto [name_id, name_view] = symbolizer_->intern_with_view(detail::generic_instance_name(generic, arguments));
-    generic_uses_.push_back({name_view, name_id, generic_view, std::move(arguments), at});
+    generic_uses_.push_back({name_view, name_id, generic_view, std::move(arguments), at, as_value});
 }
 
 void parser::flush_generic_uses(std::vector<declaration_ptr>& out) {
@@ -3923,6 +3925,7 @@ void parser::flush_generic_uses(std::vector<declaration_ptr>& out) {
         auto request = std::make_shared<generic_instance_decl>(use.at, use.name, use.name_id);
         request->generic = use.generic;
         request->arguments = std::move(use.arguments);
+        request->as_value = use.as_value;
         out.push_back(std::move(request));
     }
     generic_uses_.clear();

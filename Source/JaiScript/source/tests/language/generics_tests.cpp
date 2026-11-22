@@ -141,7 +141,7 @@ public:
 			check_true(contains(failure(*e, "auto f = []<T>(T x) { return x; };"),
 				"a lambda takes no type parameters: give it auto parameters ([](auto x) { ... }), which take any type"));
 			check_true(contains(failure(*e, "T f<T>(T x) { return x; } function g = f<int>;"),
-				"'f<int>' names a generic's instance, which is not a value: call it, or pass a lambda that does ((x) => f<int>(x))"));
+				"'f<int>' is an instance of the generic function 'f', which is not a value: call it, or pass a lambda that does ((x) => f<int>(x))"));
 			check_true(contains(failure(*e, "class B { override T m<T>() { return T(); } }"),
 				"generic method 'm' cannot be marked override: a generic method is not virtual"));
 		});
@@ -158,6 +158,55 @@ public:
 			check_true(contains(failure(*e, "namespace n { class Box<K, T> { T v; U get<U, T>(U x) { return x; } } }"), text));
 			// its own name for a parameter, and a lambda that types a parameter by the class's, keep loading
 			check_eq((int64_t)5, e->execute("class Box<T> { T v; U get<U>(U x) { return x; } int f() { auto l = (T x) => 1; return l(v); } }\nBox<int> b; b.get(4) + b.f();").as_int());
+		});
+
+		test("a_generic_classs_instance_is_a_value_wherever_a_class_name_is", [this]() {
+			auto e = stdlib_engine();
+			e->execute(R"(
+				class Base<T> { T v; string who() { return "base"; } }
+				class More<T> : Base<T> { int extra = 3; string who() override { return "more"; } }
+				namespace zoo { class Wild<T> : Base<T> { string who() override { return "wild"; } } }
+			)");
+			check_eq(std::string("more 4 3 More<int>"), e->execute(R"(
+				auto raw = new Base<int>();
+				raw.v = 4;
+				extend(raw, More<int>);
+				raw.who() + " " + to_string(raw.v) + " " + to_string(raw.extra) + " " + reflect::type_of(raw);
+			)").as_string());
+			check_eq(std::string("wild zoo::Wild<string>"), e->execute("auto w = new Base<string>(); extend(w, zoo::Wild<string>); w.who() + \" \" + reflect::type_of(w);").as_string());
+			check_eq(std::string("Base<float> 0.0"), e->execute("auto make = Base<float>; auto made = make(); reflect::type_of(made) + \" \" + to_string(made.v);").as_string());
+			check_true(contains(failure(*e, "auto raw = new Base<int>(); extend(raw, More);"), "'More' is a generic class: name its type arguments (More<T>)"));
+		});
+
+		test("a_generic_function_or_method_where_a_value_stands_says_it_is_none", [this]() {
+			auto e = make_engine();
+			e->execute(R"(
+				class Plain { T conv<T>(T x) { return x; } static T mk<T>() { return T(); } }
+				namespace ns { T id<T>(T x) { return x; } }
+				T id<T>(T x) { return x; }
+				Plain p;
+			)");
+			const auto said = [&](const std::string& code, const std::string& text) {
+				const std::string got = failure(*e, code);
+				check_true(contains(got, text), code + " -> " + got);
+			};
+			const std::string lambda = ", which is not a value: call it, or pass a lambda that does ((x) => ";
+			said("auto f = id;", "'id' is a generic function" + lambda + "id<T>(x))");
+			said("function<int(int)> f = id;", "'id' is a generic function" + lambda + "id<T>(x))");
+			said("print(id);", "'id' is a generic function" + lambda + "id<T>(x))");
+			said("auto f = id<int>;", "'id<int>' is an instance of the generic function 'id'" + lambda + "id<int>(x))");
+			said("var v = [id<int>];", "'id<int>' is an instance of the generic function 'id'" + lambda + "id<int>(x))");
+			said("auto f = ns::id;", "'ns::id' is a generic function" + lambda + "ns::id<T>(x))");
+			said("auto f = ns::id<int>;", "'ns::id<int>' is an instance of the generic function 'ns::id'" + lambda + "ns::id<int>(x))");
+			said("namespace ns { auto f = id; }", "'id' is a generic function" + lambda + "id<T>(x))");
+			said("auto f = Plain::mk;", "'Plain::mk' is a generic method" + lambda + "Plain::mk<T>(x))");
+			said("auto f = Plain::mk<int>;", "'Plain::mk<int>' is an instance of the generic method 'Plain::mk'" + lambda + "Plain::mk<int>(x))");
+			said("auto f = p.conv;", "'conv' is a generic method, which is not a value: call it, or bind an instance with reflect::bind(p, \"conv<T>\")");
+			said("auto f = p.conv<int>;", "'conv<int>' is an instance of the generic method 'conv', which is not a value: call it, or bind it with reflect::bind(p, \"conv<int>\")");
+			said("class In { T twice<T>(T x) { return x + x; } int use() { auto f = twice; return 1; } }",
+			     "'twice' is a generic method, which is not a value: call it, or bind an instance with reflect::bind(this, \"twice<T>\")");
+			// the lambdas the texts advise load and run
+			check_eq((int64_t)12, e->execute("auto f = (x) => id<int>(x); auto g = (x) => ns::id<int>(x); f(5) + g(7);").as_int());
 		});
 
 		test("a_generic_class_is_not_overloaded_by_its_parameter_count", [this]() {

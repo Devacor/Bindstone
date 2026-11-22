@@ -1,5 +1,6 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/detail/less_than.hpp>
+#include <jaiscript/detail/method_value.hpp>
 #include <jaiscript/core/script_type.hpp>
 #include <jaiscript/core/engine_time.hpp>
 #include <jaiscript/core/http_transport.hpp>
@@ -1664,6 +1665,18 @@ struct engine::implementation {
             } else if (auto held = generics_.find(generic); held != generics_.end() && !unit_declares_class(decls, generic)) {   // the unit's own class takes the name
                 for (const auto& g : held->second) {
                     if (g->kind == detail::generic_kind::class_type) { definition = g; break; }
+                }
+            }
+            if (!definition && request.as_value) {   // a generic function's instance where a value stands: no value either
+                std::vector<detail::generic_definition_ptr> declared;
+                collect_generics(decls, declared);
+                if (const auto held = generics_.find(generic); held != generics_.end()) { declared.insert(declared.end(), held->second.begin(), held->second.end()); }
+                const auto callable = std::find_if(declared.begin(), declared.end(), [&](const detail::generic_definition_ptr& g) {
+                    return g->kind != detail::generic_kind::class_type && g->qualified_name() == generic;
+                });
+                if (callable != declared.end()) {
+                    fail(detail::generic_value_text(request.name, generic, (*callable)->kind == detail::generic_kind::method, request.name));
+                    return;
                 }
             }
             if (!definition) {

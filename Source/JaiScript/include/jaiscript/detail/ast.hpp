@@ -1277,6 +1277,7 @@ namespace jai {
         std::vector<std::string_view> needs;   // the classes the instance waits for (class_decl::instance_needs)
         bool expanded = false;
         bool unresolved = false;    // no generic of that name was declared when it was asked for: asked again at the next check
+        bool as_value = false;      // the text names it where a value stands (extend(obj, More<int>)), as a class's name can stand
         std::vector<bound> bounds;
         std::vector<failure> failures;
         std::string file;           // the generic's file (the unit's own text when empty or equal to it)

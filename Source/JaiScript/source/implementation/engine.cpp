@@ -4576,7 +4576,10 @@ void engine::load_session::complete() {
         auto* def = instance ? instance->get_class_definition() : nullptr;
         script_value post_load = def ? def->get_method(post_load_id, false) : script_value(std::monostate{}, eng);
         if (post_load.type() != script_value_type::jai_function_type) { continue; }
-        auto ran = post_load.as_function()({ self, script_value(version, eng) });
+        auto ran = [&]() {
+            load_callout callout(eng);
+            return post_load.as_function()({ self, script_value(version, eng) });
+        }();
         if (!ran) { throw runtime_error(eng->format_error(ran)); }
         if (eng->backend_unwinding()) { throw runtime_error(eng->backend_exception_text()); }
     }
@@ -9838,6 +9841,7 @@ strong_ptr<class_instance> engine::construct_script_layer_for_load(const std::st
     if (!ctor.is_function()) { return nullptr; }
     checked_result<script_value> constructed = [&]() {
         construction_access_waiver waiver(this);
+        load_callout callout(this);
         return ctor.as_function()({});
     }();
     if (!constructed) { throw runtime_error(format_error(constructed)); }

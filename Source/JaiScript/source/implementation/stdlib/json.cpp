@@ -64,7 +64,10 @@ namespace stdlib {
             object = entry->load_fn(wrapper, 1);
             reader.end_object();
         } else if (host_has_default_constructor(eng, base_name)) {
-            auto made = eng->get_variable(base_name).as_function()({});
+            auto made = [&]() {
+                detail::engine_access::load_callout callout(eng);
+                return eng->get_variable(base_name).as_function()({});
+            }();
             if (!made) {
                 throw runtime_error(eng->format_error(made));
             }
@@ -122,13 +125,17 @@ namespace stdlib {
         if (def.script_declares_user_accessor(field.setter_id)) { return true; }   // an accessor with no field holds no state
         script_value setter = inst.get_method(field.setter_id, false);
         if (!setter.is_function()) { return true; }
-        auto written = setter.as_function()({ instance, v });
+        auto written = [&]() {
+            detail::engine_access::load_callout callout(eng);
+            return setter.as_function()({ instance, v });
+        }();
         if (!written) {
             // a binding refuses a value of another type by throwing: a saved value its current value's type would not take
             // is a retype (the constructed value stays); a value it would take is the host's own error
             script_value current(std::monostate{}, eng);
             const std::string prop_name(detail::engine_access::get_symbolizer(*eng)->get_string(member_id));
             if (script_value getter = inst.get_method(detail::engine_access::symbolize(*eng, "_get_" + prop_name), false); getter.is_function()) {
+                detail::engine_access::load_callout callout(eng);
                 if (auto read = getter.as_function()({ instance })) { current = read.value().try_unwrap_transparent_wrapper().value_or(read.value()); }
             }
             const type_info_ptr kind = current.is_null() ? nullptr : current.get_type_info();
@@ -602,6 +609,7 @@ namespace stdlib {
 			if (detail::engine_access::script_class_default_constructible(*eng_, *class_def)) {
 				checked_result<script_value> constructed = [&]() {
 					detail::engine_access::construction_access_waiver waiver(eng_);
+					detail::engine_access::load_callout callout(eng_);
 					return ctor.as_function()({});
 				}();
 				if (!constructed) {

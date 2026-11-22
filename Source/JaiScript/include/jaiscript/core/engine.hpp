@@ -1640,6 +1640,12 @@ namespace jai {
             engine* eng;
             std::string_view outer;
         };
+        // Code a load runs (a constructor, a post_load hook, a host's accessor) is not the load's data: what that code loads in
+        // turn starts from the archive's rule, and the load's own rule holds again when the code returns
+        class load_callout : public load_rule {
+        public:
+            explicit load_callout(engine* a_engine) : load_rule(a_engine, {}) {}
+        };
         std::string_view typed_load_who() const noexcept { return typed_load_who_; }
         // A class's properties in the order a load restores them (its declaration order, base first), kept for the
         // load in progress

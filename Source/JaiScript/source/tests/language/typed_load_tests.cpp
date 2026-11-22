@@ -9,6 +9,7 @@
 #include <jaiscript/detail/engine_access.hpp>
 #include <jaiscript/detail/type_value.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
+#include <jaiscript/serialization/json_archive.hpp>
 #include <string>
 #include <vector>
 
@@ -335,6 +336,37 @@ public:
 			}
 			// the rest of a refused document is not kept either: the typed load raises, it does not answer a holder without w
 			check_true(outcome(*e, "from_json<Keeper>(" + quoted(members(2)) + ").own.id;").rfind("ERR: ", 0) == 0);
+		});
+
+		test("a_load_that_code_run_by_a_typed_load_starts_follows_its_own_rule", [this]() {
+			// The typed rule is the typed load's own. Code that load runs (a constructor, a post_load hook) is not its data: an
+			// archive a host function reads for that code starts from the archive's rule, where it inherited the typed one and
+			// refused, in the typed load's name, a value its own load keeps the constructed value for.
+			auto e = make_engine();
+			stdlib::register_all(*e);
+			const std::string saved = "{\"$type\":\"Config\",\"$val\":{\"level\":\"high\",\"name\":\"kept\"}}";   // level no longer fits its field
+			e->add_function("host_config", [raw = e.get(), saved]() -> script_value {
+				serialization::json_archive_reader reader(saved, raw);
+				return stdlib::load_archive_value(raw, reader.read_value(), true);
+			});
+			e->execute("class Config { int level = 1; string name = \"made\"; } class Inner { int n = 3; }"
+			           " class Built { string seen = \"\"; Inner inner; Built() { var c = host_config(); seen = to_string(c.level) + c.name; } }"
+			           " class Hooked { string seen = \"\"; int n = 0; void post_load(int version) { var c = host_config(); seen = to_string(c.level) + c.name; } }");
+			check_eq(std::string("1kept"), outcome(*e, "var c = host_config(); to_string(c.level) + c.name;"), "the host's read alone: the archive's rule");
+			const std::string built = "{\"inner\":{\"n\":8}}";
+			check_eq(std::string("1kept|8"), outcome(*e, "auto b = from_json<Built>(" + quoted(built) + "); b.seen + \"|\" + to_string(b.inner.n);"),
+			         "a constructor a typed load of an untagged record runs");
+			check_eq(std::string("1kept|8"), outcome(*e, "auto b = from_json<Built>(" + quoted("{\"$type\":\"Built\",\"$val\":" + built + "}") + "); b.seen + \"|\" + to_string(b.inner.n);"),
+			         "a constructor a typed load of a tagged record runs");
+			check_eq(std::string("1kept|4"), outcome(*e, "auto h = from_json<Hooked>(" + quoted("{\"$type\":\"Hooked\",\"$val\":{\"n\":4}}") + "); h.seen + \"|\" + to_string(h.n);"),
+			         "a post_load hook a typed load runs");
+			check_eq(std::string("1kept|8"), outcome(*e, "Built made; made.inner.n = 8; auto b = from_binary<Built>(to_binary(made)); b.seen + \"|\" + to_string(b.inner.n);"),
+			         "and through a typed binary load");
+			// the typed load's rule holds for its own data, before and after the code it runs
+			check_eq(std::string("ERR: from_json: field 'n' of 'Inner' is int, not string"),
+			         outcome(*e, "from_json<Built>(" + quoted("{\"$type\":\"Built\",\"$val\":{\"inner\":{\"$type\":\"Inner\",\"$val\":{\"n\":\"x\"}}}}") + ");"));
+			check_eq(std::string("ERR: from_json: field 'n' of 'Hooked' is int, not string"),
+			         outcome(*e, "from_json<Hooked>(" + quoted("{\"$type\":\"Hooked\",\"$val\":{\"n\":\"x\"}}") + ");"));
 		});
 	}
 };

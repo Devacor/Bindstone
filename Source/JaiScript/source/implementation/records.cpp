@@ -198,6 +198,7 @@ namespace records_detail {
 		}
 		R made = [&]() {
 			detail::engine_access::construction_access_waiver waiver(&eng);   // a record reaches a private T() as reflection does
+			detail::engine_access::load_callout callout(&eng);
 			return ctor.value().as_function()({});
 		}();
 		if (!made) { return made; }

@@ -213,7 +213,8 @@ struct analysis {
 						break;
 					}
 				} else if (c->callee) {
-					expr(c->callee.get());
+					// a call names its callee: a local called by name keeps its slot, so the error the call raises names it
+					expr(c->callee.get(), c->callee->get_type() == node_type::identifier_expr ? pos::call_arg : pos::value);
 				}
 				for (const auto& a : c->arguments) expr(a.get(), intrinsic ? pos::intrinsic_arg : pos::call_arg);
 				break;

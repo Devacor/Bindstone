@@ -129,6 +129,42 @@ public:
 			});
 		});
 
+		// A value no call takes is named by its type, whichever it is: the texts read "invalid" for a utf8_string and every math
+		// kind, and the VM, which keeps a typed math local as its components, named no callee at all there
+		test("a_called_value_is_named_by_its_type_whatever_holds_it", [this]() {
+			check_cases("[[warn_mode]];\nmath::vec2 gvec = math::vec2(1.0, 2.0);\nvar gany = math::vec3(1.0, 2.0, 3.0);\nutf8_string gtext = \"t\";\n", {
+				{"gvec(); return 0;", "Cannot call 'gvec': it is a math::vec2, not a function"},
+				{"gany(); return 0;", "Cannot call 'gany': it is a math::vec3, not a function"},
+				{"gtext(); return 0;", "Cannot call 'gtext': it is a utf8_string, not a function"},
+				{"math::vec2 local = math::vec2(1.0, 2.0); local(); return 0;", "Cannot call 'local': it is a math::vec2, not a function"},
+				{"math::vec2 local = math::vec2(1.0, 2.0); local(1, 2); return 0;", "Cannot call 'local': it is a math::vec2, not a function"},
+				{"math::vec2 local = math::vec2(1.0, 2.0); float sum = local.x + local.y; local(); return 0;", "Cannot call 'local': it is a math::vec2, not a function"},
+				{"math::vec3 local = math::vec3(1.0, 2.0, 3.0); local(); return 0;", "Cannot call 'local': it is a math::vec3, not a function"},
+				{"math::vec4 local = math::vec4(1.0, 2.0, 3.0, 4.0); local(); return 0;", "Cannot call 'local': it is a math::vec4, not a function"},
+				{"math::ivec2 local = math::ivec2(1, 2); local(); return 0;", "Cannot call 'local': it is a math::ivec2, not a function"},
+				{"math::ivec3 local = math::ivec3(1, 2, 3); local(); return 0;", "Cannot call 'local': it is a math::ivec3, not a function"},
+				{"math::color local = math::color(1.0, 0.5, 0.25, 1.0); local(); return 0;", "Cannot call 'local': it is a math::color, not a function"},
+				{"var loose = math::vec2(1.0, 2.0); loose(); return 0;", "Cannot call 'loose': it is a math::vec2, not a function"},
+				{"auto inferred = math::ivec2(1, 2); inferred(); return 0;", "Cannot call 'inferred': it is a math::ivec2, not a function"},
+				{"utf8_string local = \"t\"; local(); return 0;", "Cannot call 'local': it is a utf8_string, not a function"},
+				{"var loose = gtext; loose(); return 0;", "Cannot call 'loose': it is a utf8_string, not a function"},
+				{"(math::vec2(1.0, 2.0))(); return 0;", "Cannot call a value of type math::vec2: it is not a function"},
+				{"array<math::color> shades = [math::color(1.0, 1.0, 1.0, 1.0)]; shades[0](); return 0;", "Cannot call a value of type math::color: it is not a function"},
+				{"array<utf8_string> words = [gtext]; words[0](); return 0;", "Cannot call a value of type utf8_string: it is not a function"},
+				// the kinds the texts already named stay as they were
+				{"int count = 3; count(); return 0;", "Cannot call 'count': it is an int, not a function"},
+				{"float ratio = 1.5; ratio(); return 0;", "Cannot call 'ratio': it is a float, not a function"},
+				{"array<int> xs = [1]; xs(); return 0;", "Cannot call 'xs': it is an array, not a function"},
+			});
+			check_cases("[[warn_mode]];\nint through(math::vec2 p) { p(); return 0; }\n", {
+				{"return through(math::vec2(1.0, 2.0));", "Cannot call 'p': it is a math::vec2, not a function"},
+			});
+			// a typed math local the VM keeps as components answers its other uses as before
+			check_cases("", {
+				{"math::vec2 local = math::vec2(1.0, 2.0); local = local + local; return math::itrunc(local.x + local.y);", "= 6"},
+			});
+		});
+
 		// E::v, C::s and ns::x name their callee whatever the arguments are: the VM's check ahead of an argument that runs code named none.
 		// The load refuses a call of a name declared with a type no call takes; [[warn_mode]] leaves the verdict to the run, whose text this pins
 		test("a_qualified_callee_keeps_its_name", [this]() {

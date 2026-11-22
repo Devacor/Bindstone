@@ -153,7 +153,7 @@ inline uint64_t callee_name_symbol(const expression* callee) {
 // Interned base-type spellings, filled once at backend init: error paths never intern
 // (parallel workers run against a frozen symbolizer)
 struct base_type_symbols {
-    static constexpr size_t count = static_cast<size_t>(script_value_type::jai_invalid_type) + 1;
+    static constexpr size_t count = static_cast<size_t>(k_last_script_value_type) + 1;   // every kind: utf8_string and the math kinds follow jai_invalid_type
     uint64_t ids[count] = {};
     template <typename Symbolizer>
     void intern(const Symbolizer& symbolizer) {
@@ -189,7 +189,7 @@ inline not_callable_text not_callable_diagnostic(uint64_t name_id, script_value_
         return {"Cannot call a value of type {0}: it is not a function", type_id, 0};
     }
     const char c = spelling.empty() ? 'x' : static_cast<char>(spelling.front() | 0x20);
-    const bool vowel = c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u';
+    const bool vowel = (c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u') && !spelling.starts_with("utf8");   // "a utf8_string", as the load's text reads
     return {vowel ? "Cannot call '{0}': it is an {1}, not a function"
                   : "Cannot call '{0}': it is a {1}, not a function", name_id, type_id};
 }

@@ -1083,6 +1083,7 @@ struct engine::implementation {
         uint64_t cache_mtime = 0, cache_size = 0;
         bool cache_stamped = false;
         std::filesystem::path cache_write_failed;   // the cache file this source text could not write: never retried on every hit
+        bool foreign_cache_replaced = false;   // a run of this text has written its cache (or chosen not to): another registration's is adopted after
         bool identity_known = false;
         detail::jaibite_source_identity identity;
         // what the parse and a clean check rest on beyond the text: the parse holds while the namespace classes it asked about
@@ -2171,7 +2172,7 @@ struct engine::implementation {
         if (cached) {
             if (report && !cacheFile.empty()) { report->note_cache(sourcePath, load_cache::memory, ""); }
             detail::load_phase_scope comparing(report, load_phase::freshness);
-            cacheFresh = !cacheFile.empty() && (cache_holds(*cached, cacheFile, content) || (!shipped.empty() && cache_holds(*cached, shipped, content)));
+            cacheFresh = !cacheFile.empty() && (cache_holds(self, *cached, cacheFile, content) || (!shipped.empty() && cache_holds(self, *cached, shipped, content)));
         } else if (!cacheFile.empty()) {
             // a cache loads only when it records this exact source; anything else parses below and is rewritten
             cached = try_load_jaibite_entry(self, cacheFile, sourcePath, content, identity);
@@ -3574,9 +3575,10 @@ struct engine::implementation {
     }
 
     // An in-memory hit rewrites its cache unless it is the file the entry last wrote or loaded, or a file whose header
-    // records this source (another engine's write, adopted whatever its surface, so engines sharing a file never take
-    // turns rewriting it on every hit; a miss still loads only under a matching fingerprint)
-    bool cache_holds(script_cache_entry& entry, const std::filesystem::path& cacheFile, const std::string& source) {
+    // records this source under this engine's registration fingerprint. Another registration's cache of the text is replaced
+    // once, so the next load of this surface hits, and adopted after that, so engines of two surfaces sharing a file never
+    // take turns rewriting it on every hit.
+    bool cache_holds(const engine& self, script_cache_entry& entry, const std::filesystem::path& cacheFile, const std::string& source) {
         uint64_t mtime = 0, size = 0;
         if (!stat_cache_file(cacheFile, mtime, size)) { return false; }
         if (entry.cache_stamped && mtime == entry.cache_mtime && size == entry.cache_size && entry.cache_file == cacheFile) { return true; }
@@ -3588,6 +3590,7 @@ struct engine::implementation {
         if (!detail::read_jaibite_header(header, sizeof(header), fingerprint, recorded) || recorded != identity_of(entry, source)) {
             return false;
         }
+        if (fingerprint != self.registration_fingerprint() && !entry.foreign_cache_replaced) { return false; }
         entry.cache_file = cacheFile;
         entry.cache_mtime = mtime;
         entry.cache_size = size;
@@ -5028,7 +5031,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         const check_report& rep = impl->checked_report(*this, cached, scriptContent);
         // the check made the generic instances the unit names: their bodies' lines are statements a breakpoint binds to
         if (impl->debugger_ && (cached != parsed || cached->declarations.size() != parsed_declarations)) { impl->debugger_->note_source(sourcePath, &cached->declarations); }
-        if (cached != parsed && !cacheFile.empty()) { cacheFresh = impl->cache_holds(*cached, cacheFile, scriptContent); }   // the gather parsed the root again
+        if (cached != parsed && !cacheFile.empty()) { cacheFresh = impl->cache_holds(*this, *cached, cacheFile, scriptContent); }   // the gather parsed the root again
         for (const auto& s : cached->spliced_stamps) { impl->note_closure_file(s.path, true, s.mtime, s.size); }   // the generics its instances were made from
         // a unit from a file (the root file, an include, an import) lists under its path
         const std::string_view listing_name = sourcePath.empty() ? std::string_view("<script>") : std::string_view(sourcePath);
@@ -5045,6 +5048,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         // stamps checked_clean, and BEFORE execution on purpose: a runtime error doesn't
         // invalidate a good parse.
         const bool cacheWanted = !cacheFile.empty() && (!cacheFresh || cached->restamp);
+        if (cacheWanted) { cached->foreign_cache_replaced = true; }
         if (cacheWanted && cached->spliced_stamps.empty() && !cached->outside_generics) {   // a unit with spliced includes keeps no cache: its freshness knows only its own file
             detail::load_phase_scope writing(report, load_phase::cache_write);
             impl->write_jaibite_cache(*this, cacheFile, *cached, sourcePath, scriptContent);

@@ -189,6 +189,59 @@ public:
 			check_eq(std::string("corrupt"), reason());
 		});
 
+		test("a_cache_another_registration_wrote_is_replaced_so_the_next_load_hits", [this]() {
+			folder f("fingerprints");
+			f.write("leaf.jai", "int leaf_value = 3;\n");
+			f.write("mod.jai", "import \"leaf.jai\";\nint twice(int x) { return x * 2; }\n");
+			f.write("part.jai", "int part_value = 4;\n");
+			const std::string root = f.write("root.jai", "import \"mod.jai\";\ninclude \"part.jai\";\nint r = twice(leaf_value) + part_value;\n");
+			const std::vector<std::string> files {"root.jai", "mod.jai", "leaf.jai", "part.jai"};
+			const auto other_host = [](engine& e) { e.add_function("load_report_other_host", std::function<int()>([] { return 1; })); };
+			const auto load = [&](const std::function<void(engine&)>& a_setup) {
+				auto e = reporting_engine(f);
+				if (a_setup) { a_setup(*e); }
+				e->execute_file(root);
+				check_eq(script_int(10), e->get_variable("r").value().as_int());
+				return e->load_report_snapshot();
+			};
+			load(other_host);
+			// a host of another registration finds every cache written under the first one's and replaces it
+			const load_report_summary replacing = load({});
+			for (const std::string& name : files) {
+				const load_report_row& row = row_of(replacing, name);
+				check_true(row.cache == load_cache::miss, name + " misses");
+				check_eq(std::string("fingerprint"), row.cache_reason, name);
+				check_eq(std::string("written"), row.cache_write, name + " is written again");
+			}
+			const load_report_summary again = load({});
+			for (const std::string& name : files) {
+				check_true(row_of(again, name).cache == load_cache::hit, name + " hits on the next load");
+			}
+			// the first host's next load replaces them in turn
+			const load_report_summary back = load(other_host);
+			for (const std::string& name : files) {
+				check_eq(std::string("written"), row_of(back, name).cache_write, name + " is written for the first host again");
+			}
+			const load_report_summary settled = load(other_host);
+			for (const std::string& name : files) {
+				check_true(row_of(settled, name).cache == load_cache::hit, name + " hits for the first host");
+			}
+			// two live engines of the two registrations each write a file once, however often they run it in turn
+			auto first = reporting_engine(f);
+			other_host(*first);
+			auto second = reporting_engine(f);
+			for (int round = 0; round < 3; ++round) {
+				first->execute_file(root);
+				second->execute_file(root);
+			}
+			for (const auto& e : {first, second}) {
+				const load_report_summary report = e->load_report_snapshot();
+				for (const std::string& name : files) {
+					check_true(count_of(row_of(report, name), load_phase::cache_write) <= 1, name + " is written at most once by each engine");
+				}
+			}
+		});
+
 		test("a_unit_with_a_spliced_file_keeps_no_cache_and_says_so", [this]() {
 			folder f("spliced");
 			f.write("part.inc", "int spliced_local = 4;\n");

@@ -1741,7 +1741,12 @@ struct engine::implementation {
         for (const auto& argument : request.arguments) { sized_arguments(self, decls, argument.get(), host.sized); }
         for (size_t p = 0; p < definition->parameters.size(); ++p) {
             if (definition->parameters[p].bound.empty()) { continue; }
-            std::vector<token> bound = detail::generic_bound_tokens(*definition, p, request.arguments, string_symbolizer_, &host);
+            // a handle meets the bound its class meets: the parameter reads as that class in its own bound (T : Comparable<T>)
+            std::vector<type_info_ptr> bounded = request.arguments;
+            if (const type_info* held = bounded[p].get(); held && held->base_type == script_value_type::jai_shared_ptr_type && held->element_type()) {
+                bounded[p] = held->element_type();
+            }
+            std::vector<token> bound = detail::generic_bound_tokens(*definition, p, bounded, string_symbolizer_, &host);
             bound.emplace_back(token_type::eof, "", definition->parameters[p].location);
             parser reader(bound, &string_symbolizer_, &self, registeredTemplateTypes, file);
             auto type = reader.parse_type_text(made);

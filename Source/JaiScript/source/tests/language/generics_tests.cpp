@@ -1369,6 +1369,10 @@ public:
 			check_true(contains(failure(*e, "weak_ptr<Goblin> w = g; ident(w);"), "ident<weak_ptr<Goblin>>: " + weak));
 			check_true(contains(failure(*e, "Hold<weak_ptr<Goblin>> h;"), "Hold<weak_ptr<Goblin>>: " + weak));
 			check_eq((int64_t)4, e->execute("weak_ptr<Goblin> w = g; ident<shared_ptr<Goblin>>(w.lock());").as_int());
+			// in a bound that names the parameter, a handle reads as its class: shared_ptr<Num> meets T : Comparable<T> as Num does
+			e->execute("class Comparable<T> { bool before(T other) { return true; } } class Num : Comparable<Num> { int n = 0; } bool sorted<T : Comparable<T>>(T a, T b) { return a.before(b); } 1;");
+			check_true(e->execute("shared_ptr<Num> x = new Num(); shared_ptr<Num> y = new Num(); sorted(x, y) && sorted(Num(), Num());").as_bool());
+			check_true(contains(failure(*e, "shared_ptr<Rock> a = new Rock(); sorted(a, a);"), "sorted<shared_ptr<Rock>>: 'shared_ptr<Rock>' does not derive from 'Comparable<Rock>', which T requires"));
 		});
 
 		test("a_bound_that_names_no_class_says_so_where_the_instance_is_asked_for", [this]() {

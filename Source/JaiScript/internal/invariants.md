@@ -457,3 +457,26 @@ ambient unit, the load session, the limits' per-entry fields, the debugger's ste
   at the same semantic points and never by native depth.
 - A run resumes only on the thread that started it, C++ exceptions never cross the fiber (the body catches and the host
   side rethrows), and every switch advances the vm's raw epoch.
+
+## 17. A value produced while a throw unwinds is never consumed
+
+A script `throw` sets the backend's unwinding state and every executor on the way out returns ok. A call entered from
+native code (an operator a kernel dispatches, a class's `operator[]`, a conversion, `to_string`, a callback) that unwinds
+past its entry frame hands its native caller an ok result holding a placeholder null. Whatever would turn that result into
+an effect (a store, a declaration, a landing in a temp, an operand another kernel reads, a branch) tests the unwinding
+state first and ends its instruction or statement, as the unfused sequence ends before its consumer runs: the catch
+receives the thrown value and the target keeps its value (the site: the right side before every part of the target).
+The test sits where the value is produced when one place serves every consumer:
+
+- The VM's fused binary: `binary_fused_general_rows` hands no value to any sink (the push, a temp, a declaration, a store,
+  an index operand), and `fused_subscript_value` hands back no operand, which every reader ends on through
+  `operand_unread`.
+- A stack form that replays `INDEX` and then stores or compounds (`exec_index_store`, `exec_index_compound_fused`) ends
+  after the index; the text-append chain's general step stores nothing.
+- A compound through a binary operator (`a op= b` with no in-place operator) computes and then stores: each site in both
+  backends tests between the two (the identifier, this-field, member and element compounds, KEEP BYTE-PARALLEL), and
+  `detail::ref_compound_store_constrained` asks the calling backend.
+
+A new consumer of `binary_general`, `compound_value`, `object_compound_through_binary`, `exec_index`, `exec_unary` or a
+function value's call tests the same way. Suite `Operator Unwind` pins it with the expected text stated in each case: the
+compound's sites are parallel in both backends, so a differential oracle cannot see a fault they share.

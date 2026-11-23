@@ -432,6 +432,85 @@ public:
 			)", "72.0 240036 112021 42 75", "general callees");
 		});
 
+		test("a_block_call_binds_a_reference_parameter_to_a_local_no_cell_holds", [this]() {
+			// the callee's T& names the caller's array, string or handle local: what the callee does through it (an element, a push, a new
+			// value, a new object) is what the caller reads after the call; a run's second call meets its site's cache with a fresh local
+			all(R"(
+				class Box { int v = 0; }
+				int place_ok(array<int>& a, int n, int c) { for (int i = 1; i < n; ++i) { int ai = a[i]; if (ai == c || ai - i == c - n || ai + i == c + n) { return 0; } } return 1; }
+				int push_to(array<int>& a, int v) { switch (v) { default: a.push(v); return a.size(); } }
+				int reseat(array<int>& a, int v) { switch (v) { default: if (v == 3) { a = [9, 9]; } return a.size(); } }
+				int retag(string& s, int v) { switch (v) { default: s = s + to_string(v); return s.size(); } }
+				int fill(shared_ptr<Box>& b, int v) { switch (v) { default: if (v == 2) { b = new Box(); } b.v = b.v + v + 1; return b.v; } }
+				function run(int n) -> string {
+					array<int> a = [0, 3, 1];
+					string tag = "t";
+					shared_ptr<Box> box = new Box();
+					shared_ptr<Box> first = box;
+					int s = 0;
+					for (int i = 0; i < n; ++i) {
+						s += place_ok(a, 2, i);
+						s += push_to(a, i) * 10;
+						s += a[0] + a.size();
+						s += retag(tag, i);
+						if (tag == "t01") { s += 1000; }
+						s += reseat(a, i) * 100;
+						s += fill(box, i);
+						s += box.v;
+					}
+					return to_string(s) + " " + tag + " " + to_string(a.size()) + " " + to_string(box.v) + " " + to_string(first.v);
+				}
+				run(6) + " | " + run(6);
+			)", "3856 t012345 4 18 3 | 3856 t012345 4 18 3", "reference parameters over locals");
+			// a T& parameter passed on to the next call's T&, and a T& over a cell's local beside one over an array
+			all(R"(
+				int N = 6;
+				int solutions = 0;
+				bool is_place_ok(array<int>& a, int n, int c) { for (int i = 1; i < n; ++i) { int ai = a[i]; if (ai == c || ai - i == c - n || ai + i == c + n) { return false; } } return true; }
+				void add_queen(array<int>& a, int n) {
+					if (n > N) { ++solutions; return; }
+					for (int c = 1; c <= N; ++c) { if (is_place_ok(a, n, c)) { a[n] = c; add_queen(a, n + 1); } }
+				}
+				function run() -> int { solutions = 0; array<int> a = [0, 0, 0, 0, 0, 0, 0]; add_queen(a, 1); return solutions; }
+				to_string(run()) + " " + to_string(run());
+			)", "4 4", "a reference passed on");
+			all(R"(
+				int at(array<int>& a, int i) { switch (i) { default: return a[i & 3]; } }
+				int grow(array<int>& a, int& total, int i) { switch (i) { default: a.push(i); total = total + a.size(); return total; } }
+				function run(int n) -> string {
+					array<int> a = [1, 2, 3, 4];
+					int total = 0;
+					int s = 0;
+					for (int i = 0; i < n; ++i) { s += at(a, i); s += grow(a, total, i); s += total; }
+					return to_string(s) + " " + to_string(total) + " " + to_string(a.size());
+				}
+				function passed_on(int n) -> string {
+					array<int> a = [1, 2, 3, 4];
+					int total = 0;
+					int s = 0;
+					for (int i = 0; i < n; ++i) { s += grow(a, total, i); s += at(a, i); }
+					return to_string(s) + " " + to_string(total) + " " + to_string(a.size());
+				}
+				run(9) + " | " + run(9) + " | " + passed_on(9) + " | " + passed_on(9);
+			)", "711 81 13 | 711 81 13 | 366 81 13 | 366 81 13", "a scalar local the block reads, and one it only passes on, beside an array");
+			// a callee that throws after writing through its reference
+			all(R"(
+				int checked(array<int>& a, int i) { switch (i) { default: if (i == 4) { throw "four"; } a.push(i); return a.size(); } }
+				function run(int n) -> string {
+					array<int> a = [];
+					string log = "";
+					int s = 0;
+					for (int i = 0; i < n; ++i) {
+						int before = s + i;
+						try { s += checked(a, i); } catch (e) { log += e + ":" + to_string(before) + ":" + to_string(s) + ":" + to_string(a.size()) + ";"; }
+						s += 1;
+					}
+					return log + to_string(s) + " " + to_string(a.size());
+				}
+				run(7) + " | " + run(7);
+			)", "four:18:14:4;28 6 | four:18:14:4;28 6", "a throwing callee over a reference");
+		});
+
 		test("a_block_callee_that_throws_leaves_the_callers_values_as_written", [this]() {
 			all(R"(
 				int gthrow(int x) { switch (x) { default: if (x == 5) { throw "five"; } return x * 2; } }
@@ -554,9 +633,16 @@ public:
 			)"), "an int for a float parameter converts in the binder");
 			check_eq(0ull, lean_calls(R"(
 				int byref(int& x, int y) { switch (y) { default: x = x + y; return x; } }
-				function run(int n) -> int { int acc = 0; int s = 0; for (int i = 0; i < n; ++i) { s += byref(acc, i); } return s; }
+				function run(int n) -> int { int acc = 0; int s = 0; for (int i = 0; i < n; ++i) { s += byref(acc, i); s += acc; } return s; }
 				run(50);
-			)"), "a reference parameter binds the caller's variable");
+			)"), "a T& over a local the block reads: the general door writes its slot back and reads it again");
+			const unsigned long long by_reference = lean_calls(R"(
+				int at(array<int>& a, int i) { switch (i) { default: return a[i & 3]; } }
+				int byref(int& x, int y) { switch (y) { default: x = x + y; return x; } }
+				function run(int n) -> int { array<int> a = [1, 2, 3, 4]; int acc = 0; int s = 0; for (int i = 0; i < n; ++i) { s += at(a, i); s += byref(acc, i); } return s + acc; }
+				run(50);
+			)");
+			check_true(by_reference >= 96 && by_reference <= 100, "a T& over a local the block holds no cell for enters lean: " + std::to_string(by_reference));
 			check_eq(0ull, lean_calls(R"(
 				int dflt(int x, int y = 5) { switch (x) { default: return x + y; } }
 				function run(int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { s += dflt(i, i); } return s; }

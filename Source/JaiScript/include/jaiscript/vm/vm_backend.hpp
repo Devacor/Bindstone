@@ -2273,6 +2273,8 @@ namespace jai::vm {
         op_status vm_check(const checked_result<void>& r) { return r ? op_status::ok : raise_from(r); }
         // a fused operand whose read handed back nothing: it raised, or a script operator it ran threw and the instruction ends for the unwind
         op_status operand_unread() const noexcept { return is_unwinding_ ? op_status::ok : op_status::failed; }
+        // a compound assignment whose operator threw: nothing is stored, and the value a consumer would take is the unwind's to drop
+        op_status compound_unwound(bool no_result) { if (!no_result) { stack_.push_back(make_null()); } return op_status::ok; }
 
         op_status exec_load(frame& f, const vm_instruction& ins);
         op_status exec_load_impl(frame& f, const vm_instruction& ins);

@@ -1312,6 +1312,12 @@ namespace jai::detail {
 						"Unknown compound assignment operator");
 			}
 		}
+		// only an operator over something other than two numbers runs script: when it threw, the referent keeps its value
+		const size_t current_kind = currentValue.deref().raw_storage_index(), right_kind = rightValue.raw_storage_index();
+		if (by_global_operator || (current_kind != script_value::TYPEID_INT && current_kind != script_value::TYPEID_FLOAT) ||
+		    (right_kind != script_value::TYPEID_INT && right_kind != script_value::TYPEID_FLOAT)) {
+			if (auto* backend = engine_access::calling_backend(*eng); backend && backend->is_unwinding()) [[unlikely]] { return resultValue; }
+		}
 		if (type_info* declared = declared_static ? declared_static : ref_declared_type(refLocal); declared && !ref_storage_enforces(refLocal, declared)) [[unlikely]] {
 			auto converted = ref_declared_convert(refLocal, declared, resultValue, eng);
 			if (!converted) { return resultValue; }

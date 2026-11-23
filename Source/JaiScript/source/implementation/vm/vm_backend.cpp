@@ -3943,6 +3943,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 					if (!result) {
 						return raise_from(result);
 					}
+					if (is_unwinding_) [[unlikely]] { return compound_unwound(no_result); }
 					target = std::move(result.value());
 					if (!no_result) { stack_.push_back(result_needed ? target.clone() : target); }
 					return {};
@@ -3955,6 +3956,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 			if (op_symbol_id != 0) {
 				auto custom_outcome = object_compound_through_binary(target, rightValue, op_symbol_id);
 				if (custom_outcome.has_value() && !*custom_outcome) { return raise_from(*custom_outcome); }
+				if (is_unwinding_) [[unlikely]] { return compound_unwound(no_result); }   // KEEP BYTE-PARALLEL with the interpreter's identifier compound
 				std::optional<script_value> custom_result;
 				if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
 				if (custom_result.has_value()) {
@@ -4258,6 +4260,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 		if (op_symbol_id != 0) {
 			auto custom_outcome = object_compound_through_binary(currentValue, rightValue, op_symbol_id);
 			if (custom_outcome.has_value() && !*custom_outcome) { return raise_from(*custom_outcome); }
+			if (is_unwinding_) [[unlikely]] { return compound_unwound(no_result); }   // KEEP BYTE-PARALLEL with the interpreter's implicit-this compound
 			std::optional<script_value> custom_result;
 			if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
 			if (custom_result.has_value()) {
@@ -4297,6 +4300,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 		}
 	}
 	VM_TRY_ASSIGN(resultValue, compound_value(compound_kind_token(kind), currentValue, rightValue));
+	if (is_unwinding_) [[unlikely]] { return compound_unwound(no_result); }
 
 	// the field's declared type converts the stored value; a consumed expression's value is the stored one, read back through a
 	// property's getter (KEEP BYTE-PARALLEL with the interpreter's implicit-this compound)
@@ -6450,6 +6454,7 @@ op_status vm_backend::exec_index_compound(frame& f, const uint32_t compound) {
 		const bool text_slot = currentValue.is_reference() && currentValue.get_reference_holder() && currentValue.get_reference_holder()->string_element();
 		VM_TRY_ASSIGN(resultValue, compound_value(op, currentValue, rightValue, incdec, text_slot));
 	}
+	if (is_unwinding_) [[unlikely]] { return compound_unwound(false); }   // KEEP BYTE-PARALLEL with the interpreter's element compound
 
 	if (!currentValue.is_reference()) {
 		return raise_(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
@@ -17393,6 +17398,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, 
 		if (op_symbol_id != 0) {
 			auto custom_outcome = object_compound_through_binary(currentValue, rightValue, op_symbol_id);
 			if (custom_outcome.has_value() && !*custom_outcome) { return raise_from(*custom_outcome); }
+			if (is_unwinding_) [[unlikely]] { return compound_unwound(false); }   // KEEP BYTE-PARALLEL with the interpreter's member compound
 			std::optional<script_value> custom_result;
 			if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
 			if (custom_result.has_value()) {
@@ -17443,6 +17449,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, 
 		}
 	}
 	VM_TRY_ASSIGN(resultValue, compound_value(compound_kind_token(kind), currentValue, rightValue, incdec));
+	if (is_unwinding_) [[unlikely]] { return compound_unwound(false); }
 
 	if (member->is_static) {
 		script_value stored_static = make_null();

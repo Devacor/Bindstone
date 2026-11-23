@@ -1654,6 +1654,7 @@ checked_result<void> interpreter::assign_compound_identifier(assignment_expr* ex
                     if (!result) {
                         return result.error_value();
                     }
+                    if (is_unwinding_) { push_value(make_value()); return {}; }   // the operator threw: nothing is stored
                     target = std::move(result.value());
                     push_value(expression_result_needed_ ? target.clone() : target);
                     return {};
@@ -1668,6 +1669,7 @@ checked_result<void> interpreter::assign_compound_identifier(assignment_expr* ex
             if (op_symbol_id != 0) {
                 auto custom_outcome = object_compound_through_binary(target, rightValue, op_symbol_id);
                 if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
+                if (is_unwinding_) { push_value(make_value()); return {}; }   // the operator threw: nothing is stored (KEEP BYTE-PARALLEL with the VM's compound store)
                 std::optional<script_value> custom_result;
                 if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
                 if (custom_result.has_value()) {
@@ -1838,6 +1840,7 @@ checked_result<void> interpreter::assign_compound_identifier(assignment_expr* ex
             if (op_symbol_id != 0) {
                 auto custom_outcome = object_compound_through_binary(currentValue, rightValue, op_symbol_id);
                 if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
+                if (is_unwinding_) { push_value(make_value()); return {}; }   // KEEP BYTE-PARALLEL with the VM's this-field compound
                 std::optional<script_value> custom_result;
                 if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
                 if (custom_result.has_value()) {
@@ -1857,6 +1860,7 @@ checked_result<void> interpreter::assign_compound_identifier(assignment_expr* ex
         }
 
         JAISCRIPT_TRY_ASSIGN(script_value resultValue, compound_value(detail::compound_base(expr->op.type), currentValue, rightValue, expr->incdec_desugar));
+        if (is_unwinding_) { push_value(make_value()); return {}; }
 
         // Store the enforced (declared-type converted) value; a consumed expression's
         // value is the stored one, read back through a property getter
@@ -1953,6 +1957,7 @@ checked_result<void> interpreter::assign_compound_member(assignment_expr* expr, 
         if (op_symbol_id != 0) {
             auto custom_outcome = object_compound_through_binary(currentValue, rightValue, op_symbol_id);
             if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
+            if (is_unwinding_) { push_value(make_value()); return {}; }   // KEEP BYTE-PARALLEL with the VM's member compound
             std::optional<script_value> custom_result;
             if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
             if (custom_result.has_value()) {
@@ -1984,6 +1989,7 @@ checked_result<void> interpreter::assign_compound_member(assignment_expr* expr, 
     }
 
     JAISCRIPT_TRY_ASSIGN(script_value resultValue, compound_value(detail::compound_base(expr->op.type), currentValue, rightValue, expr->incdec_desugar));
+    if (is_unwinding_) { push_value(make_value()); return {}; }
 
     if (memberExpr->is_static) {
         script_value stored_static;
@@ -2096,6 +2102,7 @@ checked_result<void> interpreter::assign_compound_element(assignment_expr* expr,
         const bool text_slot = currentValue.is_reference() && currentValue.get_reference_holder() && currentValue.get_reference_holder()->string_element();
         JAISCRIPT_TRY_ASSIGN(resultValue, compound_value(detail::compound_base(expr->op.type), currentValue, rightValue, expr->incdec_desugar, text_slot));
     }
+    if (is_unwinding_) { push_value(make_value()); return {}; }   // KEEP BYTE-PARALLEL with vm_backend::exec_index_compound
 
     if (currentValue.is_reference()) {
         // The target read minted the element reference: store through it, never

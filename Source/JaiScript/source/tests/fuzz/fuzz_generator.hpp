@@ -22,6 +22,7 @@
 #include "fuzz_const_band.hpp"
 #include "fuzz_defaults_band.hpp"
 #include "fuzz_falloff_band.hpp"
+#include "fuzz_unwind_band.hpp"
 #include "fuzz_generics_band.hpp"
 #include "fuzz_block_band.hpp"
 #include "fuzz_local_alias_band.hpp"
@@ -471,6 +472,9 @@ namespace jai::fuzz {
 			falloff_band fband(seed_);   // results of callees that end without returning a value: under the call-arguments band's switch
 			const bool falloff_roll = fband.roll();
 			if (call_args_ == band_mode::always || (call_args_ == band_mode::sometimes && falloff_roll)) { p.segments.push_back(fband.emit()); p.labels.push_back("fall-off"); }
+			unwind_band uband(seed_);   // operators, subscripts and text conversions that throw under a store, a declaration or a test: under the call-arguments band's switch
+			const bool unwind_roll = uband.roll();
+			if (call_args_ == band_mode::always || (call_args_ == band_mode::sometimes && unwind_roll)) { p.segments.push_back(uband.emit()); p.labels.push_back("unwind"); }
 			local_alias_band lband(seed_);
 			const bool local_alias_roll = lband.roll();
 			if (local_alias_ == band_mode::always || (local_alias_ == band_mode::sometimes && local_alias_roll)) { p.segments.push_back(lband.emit()); p.labels.push_back("local-alias"); }

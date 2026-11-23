@@ -562,6 +562,8 @@ A `continue` and every other branch onto a back edge lands on the fused instruct
 unfused. A fused back edge is a plain position of the miss lever: its miss re-runs the general back edge (a compare-headed loop's, the
 general step).
 
+The block loop's instruction pointer stays in a register: an out-of-line executor that moves it takes a copy and hands it back.
+
 ### Inlined leaves
 
 A plain identifier call that the checker resolved to one free script function (`call_expr::proven_callee_decl`: exact arity, a

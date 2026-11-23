@@ -8400,6 +8400,14 @@ static bool cells_miss_plain(const vm_instruction& ci) {
 			if (next CMP (END)) [[likely]] { ip = ci.c; JAI_CELL_NEXT; } \
 			ip += packed >> k_cell_for_exit_shift; \
 			JAI_CELL_NEXT; }
+// a pinned int add or subtract by its own opcode: the operands read once, an overflow the instruction's own miss
+#define JAI_CELL_INT_SUM(TRY, RIGHT) { \
+			const uint32_t dst = ci.a; \
+			script_int sum; \
+			if (!ints::TRY(static_cast<script_int>(hot.cells[ci.b].bits), RIGHT, sum)) [[unlikely]] { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); break; } \
+			hot.cells[dst].bits = static_cast<int64_t>(sum); hot.cells[dst].kind = static_cast<uint8_t>(script_value::TYPEID_INT); hot.dirty->b[dst] = 1; \
+			++ip; \
+			JAI_CELL_NEXT; }
 // one frame's block run (Raw: a frame program's, its calls and returns on the hot switch: a raw call or return into another frame
 // program continues here with fp following it; any other switch returns to the raw chain)
 template <bool Raw>
@@ -8488,16 +8496,10 @@ next_frame:
 		case opcode::op_c_add_ffk: cell_put_float(hot, ci.a, cell_float_of_bits(hot.cells[ci.b].bits) + hot.consts[ci.c].unchecked_float_payload()); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_sub_ffk: cell_put_float(hot, ci.a, cell_float_of_bits(hot.cells[ci.b].bits) - hot.consts[ci.c].unchecked_float_payload()); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_mul_ffk: cell_put_float(hot, ci.a, cell_float_of_bits(hot.cells[ci.b].bits) * hot.consts[ci.c].unchecked_float_payload()); ++ip; JAI_CELL_NEXT;
-		case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: {
-			const script_int a = static_cast<script_int>(hot.cells[ci.b].bits);
-			const bool konst = ci.op == opcode::op_c_add_iik || ci.op == opcode::op_c_sub_iik;
-			const script_int r2 = konst ? hot.consts[ci.c].unchecked_int_payload() : static_cast<script_int>(hot.cells[ci.c].bits);
-			script_int r;
-			if (!(ci.op == opcode::op_c_add_ii || ci.op == opcode::op_c_add_iik ? ints::try_add(a, r2, r) : ints::try_sub(a, r2, r))) [[unlikely]] { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); break; }
-			hot.cells[ci.a].bits = static_cast<int64_t>(r); hot.cells[ci.a].kind = static_cast<uint8_t>(script_value::TYPEID_INT); hot.dirty->set(ci.a);
-			++ip;
-			JAI_CELL_NEXT;
-		}
+		case opcode::op_c_add_ii: JAI_CELL_INT_SUM(try_add, static_cast<script_int>(hot.cells[ci.c].bits));
+		case opcode::op_c_sub_ii: JAI_CELL_INT_SUM(try_sub, static_cast<script_int>(hot.cells[ci.c].bits));
+		case opcode::op_c_add_iik: JAI_CELL_INT_SUM(try_add, hot.consts[ci.c].unchecked_int_payload());
+		case opcode::op_c_sub_iik: JAI_CELL_INT_SUM(try_sub, hot.consts[ci.c].unchecked_int_payload());
 		case opcode::op_c_mov_p: hot.cells[ci.a].bits = hot.cells[ci.b].bits; hot.cells[ci.a].kind = hot.cells[ci.b].kind; hot.dirty->set(ci.a); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_sin_f: cell_put_float(hot, ci.a, detail::portable_math::sin(cell_float_of_bits(hot.cells[ci.b].bits))); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_gdepth: current_call_depth_ += ci.a ? 1 : -1; ++ip; JAI_CELL_NEXT;
@@ -8660,7 +8662,7 @@ next_frame:
 				}
 				frame* back = nullptr;
 				const chunk::cell_loop* back_loop = nullptr;
-				st = exec_c_ret(f, ip, ci, regs, back, back_loop);
+				{ size_t at = ip; st = exec_c_ret(f, at, ci, regs, back, back_loop); ip = at; }   // out of line: a copy keeps ip in its register
 				if (back) { fp = back; lp = back_loop; cells_frame_ = back; goto next_frame; }
 				if (raw_switch_) { if (raw_follow(fp, lp, st)) goto next_frame; return st; }
 				break;

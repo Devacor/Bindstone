@@ -4309,6 +4309,26 @@ private:
         }
     }
 
+    // the program-scope variables of other units an argument reads, each with its declared type: such a name is that unit's cell only
+    // until a later unit declares it too (internal/global_shadowing.md), so a proof over it keeps a record whatever this unit includes.
+    // False: one of them has no type a record holds
+    bool other_units_globals(const expression_ptr& argument, std::vector<proof_global>& deps) {
+        if (!program_globals_ || !semantic_walk()) { return true; }
+        bool recorded = true;
+        detail::body_walker names;
+        names.symbolizer = nullptr;
+        names.on_identifier = [&](identifier_expr* id) {
+            if (id->slot_index != SIZE_MAX || id->symbol_id == UINT64_MAX || functions_.count(id->name) || enums_.count(id->name)) { return; }
+            const bool own = id->global_qualified ? !scopes_.empty() && scopes_[0].count(id->name) != 0 : find_local(id->name) != nullptr;
+            const variable_decl* declared = own ? nullptr : program_global(std::string(id->name));
+            if (!declared) { return; }
+            if (!certain_type(declared->type.get())) { recorded = false; return; }
+            deps.push_back(proof_of(id->symbol_id, declared->type.get()));
+        };
+        names.expr(argument);
+        return recorded;
+    }
+
     // C1: one statically resolved same-script callee, exact arity, no defaults in play: the inliner's
     // identity and per-argument same_type (an untyped/var parameter binds as identity, a reference none).
     void stamp_call_proofs(call_expr* c, const std::vector<const function_decl*>* ov, const std::vector<ctype>& args, bool free_callee) {
@@ -4335,7 +4355,7 @@ private:
             if (p.is_reference) { continue; }   // a reference parameter binds, never converts: no proof, no count
             const bool untyped = !p.type || p.type->base_type == script_value_type::jai_any_type;
             deps.clear();
-            if (!(certain_program || certain_argument(c->arguments[i].get(), deps))) { continue; }
+            if (certain_program ? !other_units_globals(c->arguments[i], deps) : !certain_argument(c->arguments[i].get(), deps)) { continue; }
             if (untyped || same_type(ctype_from_type_info(p.type.get()), args[i])) {
                 c->static_arg_proofs[i] = proof_same_type;
                 if (certain_program) { ++counts_.args; }

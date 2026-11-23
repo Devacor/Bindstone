@@ -337,6 +337,15 @@ public:
 			expect(later, "undeclared|undeclared|42|42", "a global declared below its first use");
 			check(later.entries >= 2, "the loop's block is entered at both calls after the declaration, entered " + std::to_string(later.entries));
 		});
+
+		// a unit that imports nothing reads a global a unit loaded after it declares: once a third unit declares the name too, the
+		// function reads that cell (the newest: the name was declared after the function), and the record its graft keeps refuses
+		test("a_unit_without_imports_keeps_a_record_of_another_units_global", [this]() {
+			const outcome r = run("foreign_global", {{{{"leaf.jai", "int two(int a, int b) { return a + b; }\nfunction g() { int s = 0; for (int i = 0; i < 2; i++) { s += two(N, arr[idx]); } return s; }\n"}, {"state.jai", "int N = 1;\narray<int> arr = [1, 2, 3];\nint idx = 0;\n"}, {"rival.jai", "string N = \"s\";\n"},
+				{"main.jai", "import \"leaf.jai\";\nimport \"state.jai\";\nstring r = to_string(g());\nstring P = \"rival.jai\";\nimport(P);\nidx = 10;\ntry { r += \"|\" + to_string(g()); } catch (e) { r += \"|\" + to_string(e); }\nidx = 0;\ntry { r += \"|\" + to_string(g()); } catch (e) { r += \"|\" + to_string(e); }\nr;\n"}}, "", "main.jai"}});
+			expect(r, "4|Array index 10 out of bounds for array of size 3|Cannot pass string to parameter 'a' of 'two' (declared int)", "the arguments keep their order once the name is another unit's");
+			check(count(r.listing, "-- inlined two") > 0, "the leaf unit's call grafts: " + r.listing.substr(0, 3000));
+		});
 	}
 };
 

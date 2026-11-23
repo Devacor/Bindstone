@@ -540,6 +540,28 @@ inside either half reads its own origin, its own site row and its own liveness, 
 end's switch (`engine::ir_passes`) off leaves every pair two instructions. The site logic asks `cell_first_op` what a fused instruction
 was. The fused executors are out of line (the block switch's shape rule).
 
+### Fused back edges
+
+A loop's control in a copy is one instruction per iteration (`op_c_for_lt`, `le`, `gt`, `ge` and their `k` forms): the step on the
+var, the budget poll and the compare against the end, the body's copy ip its target. It takes a pinned int var and end and a constant
+step that fits a signed byte (a subtracting step is the negated byte: the same sum and the same overflow), and it commits nothing
+unless the whole edge succeeds: a var within 2^62 of the int range's ends (where a byte's step could overflow), a spent poll, a
+tripped memory cap or an armed debugger runs the unfused form that stays in the copy beside it, so every raise and every miss is the
+one that form makes, and the budget ticks once an iteration either way.
+
+- A block's own counted back edge stands ahead of `op_c_cfor_back`, its unfused form; the loop's exit is a `C_EXIT` onto the general
+  `CFOR_POP`.
+- An inner counted loop's poll takes the fused opcode; its step and its compare, the two instructions after it, are the unfused form.
+  A step or a compare the byte forms do not carry (a cell's step, a wide constant, `==`, `!=`) is `op_c_for_any`: the same poll, then
+  the two instructions' own words in the same dispatch.
+- A compare-headed loop that steps the compared var last (a `for` from a variable, a `while` with a trailing `i += k`) fuses at the
+  step: the step, the poll of the back edge after it and the head's compare. Off its fast row the step runs alone and the back edge
+  polls. The block's own head compare leaves the block, so that loop's fused exit is a `C_EXIT` that flushes what the head's row flushes.
+
+A `continue` and every other branch onto a back edge lands on the fused instruction. `engine::ir_passes(false)` leaves every back edge
+unfused. A fused back edge is a plain position of the miss lever: its miss re-runs the general back edge (a compare-headed loop's, the
+general step).
+
 ### Inlined leaves
 
 A plain identifier call that the checker resolved to one free script function (`call_expr::proven_callee_decl`: exact arity, a

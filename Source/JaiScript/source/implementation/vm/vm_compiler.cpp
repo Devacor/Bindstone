@@ -193,6 +193,7 @@ namespace {
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
 			case opcode::op_c_cfor_back:
+			case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any:
 			case opcode::op_c_cmp_any:
 			case opcode::op_c_jcmp_any:
 			case opcode::op_c_neg:
@@ -435,6 +436,7 @@ namespace {
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
 			case opcode::op_c_cfor_back:
+			case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any:
 			case opcode::op_c_cmp_any:
 			case opcode::op_c_jcmp_any:
 			case opcode::op_c_neg:
@@ -3991,6 +3993,23 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		default: return opcode::op_halt;
 		}
 	};
+	auto counted_back_edge_op = [](uint8_t cmp, bool konst) {   // the fused counted back edge of a comparison, op_halt where none carries it
+		switch (static_cast<token_type>(cmp)) {
+		case token_type::less: return konst ? opcode::op_c_for_ltk : opcode::op_c_for_lt;
+		case token_type::less_equal: return konst ? opcode::op_c_for_lek : opcode::op_c_for_le;
+		case token_type::greater: return konst ? opcode::op_c_for_gtk : opcode::op_c_for_gt;
+		case token_type::greater_equal: return konst ? opcode::op_c_for_gek : opcode::op_c_for_ge;
+		default: return opcode::op_halt;
+		}
+	};
+	// a constant step as the fused back edge's signed byte, negated for a subtracting step (the same sum and the same overflow)
+	auto counted_step_byte = [](const script_value& step, bool subtract, int32_t& out) {
+		if (step.raw_storage_index() != script_value::TYPEID_INT) return false;
+		const script_int by = step.unchecked_as_int();
+		if (by < -127 || by > 127) return false;
+		out = static_cast<int32_t>(subtract ? -by : by);
+		return true;
+	};
 	auto commutative_fast = [](opcode o) {
 		switch (o) {
 		case opcode::op_t_add_ii: case opcode::op_t_mul_ii: case opcode::op_t_and_ii: case opcode::op_t_or_ii: case opcode::op_t_xor_ii:
@@ -6447,7 +6466,15 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		} else {
 			const counted_for_proto& p = c.counted_for_protos[counted];
 			auto int_cop = [&](fused_operand o) { if (o.const_index != k_invalid_u32) return k_typed_const_bit | o.const_index; synthetic(o); return current[o.slot]; };   // an environment bound reads its synthetic slot's cell
-			append(vm_instruction{opcode::op_c_cfor_back, current[p.var.slot], int_cop(p.end), int_cop(p.step)}, back);
+			const uint32_t var_cell = current[p.var.slot], end_cop = int_cop(p.end), step_cop = int_cop(p.step);
+			// the fused back edge stands ahead of the general one, which it runs on a spent poll or an overflow; its exit is the general CFOR_POP
+			int32_t step_byte = 0;
+			const opcode fused = ir_passes_ && var_cell <= k_cell_for_var_mask && pinned_operand(var_cell, kint) && pinned_operand(end_cop, kint) && (step_cop & k_typed_const_bit)
+				&& counted_step_byte(c.constants[step_cop & ~k_typed_const_bit], p.step_subtract, step_byte) && p.exit_ip > 0 && p.exit_ip <= original_size && code[p.exit_ip - 1].op == opcode::op_cfor_pop
+				? counted_back_edge_op(p.cmp, (end_cop & k_typed_const_bit) != 0) : opcode::op_halt;
+			if (fused != opcode::op_halt) { append(vm_instruction{fused, var_cell | (static_cast<uint32_t>(static_cast<uint8_t>(step_byte)) << k_cell_for_step_shift) | (2u << k_cell_for_exit_shift), end_cop & ~k_typed_const_bit, loop.copy_head + 1}, back); }
+			append(vm_instruction{opcode::op_c_cfor_back, var_cell, end_cop, step_cop}, back);
+			if (fused != opcode::op_halt) { append(vm_instruction{opcode::op_c_exit, p.exit_ip - 1, 0, 0}, back); }
 			code[back] = vm_instruction{opcode::op_cells_cfor_back, loop_index, static_cast<uint32_t>(head), 0};
 		}
 		copy_at[back - head] = loop.copy_back;
@@ -6561,6 +6588,61 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			const size_t m = copy_at[bip - head] - loop.copy_head;
 			if (m < loop.live_temps.size()) { for (const uint32_t k : held) { loop.live_temps[m].set(k); } }
 		}
+		if (ir_passes_) {
+			// an inner counted loop's back edge as one instruction: its poll takes a fused opcode over the step and the compare after it, which keep
+			// their words (a spent poll or an overflow runs them as they are, a C_FOR_ANY reads them); nothing else lands on either
+			std::vector<uint32_t> landings;
+			for (const fixup& fx : fixups) {
+				if (fx.field == 0) { landings.push_back(code[fx.at].a); }
+				else if (fx.field == 1) { landings.push_back(code[fx.at].c & 0x7FFFFFFFu); }
+				else if (fx.field == 3) { landings.push_back(loop.switch_targets[fx.at]); }
+			}
+			for (const chunk::cell_loop::boundary& bd : loop.boundaries) { landings.push_back(copy_at[bd.end - head]); }
+			auto lands = [&](uint32_t at) { return std::find(landings.begin(), landings.end(), at) != landings.end(); };
+			for (uint32_t ip2 = loop.copy_head; ip2 + 2 < loop.copy_back; ++ip2) {
+				vm_instruction& poll = code[ip2];
+				if (poll.op != opcode::op_c_jump || poll.c != 1 || poll.a != ip2 + 1 || lands(ip2 + 1) || lands(ip2 + 2)) continue;
+				const vm_instruction& step = code[ip2 + 1];
+				const vm_instruction& test = code[ip2 + 2];
+				const bool by_constant = step.op == opcode::op_c_add_iik || step.op == opcode::op_c_sub_iik;
+				const bool subtract = step.op == opcode::op_c_sub_ii || step.op == opcode::op_c_sub_iik;
+				if ((!by_constant && step.op != opcode::op_c_add_ii && step.op != opcode::op_c_sub_ii) || step.a != step.b) continue;
+				if (test.op != opcode::op_c_jcmp_p || (test.a & k_cell_index_mask) != step.a || !(test.c & 0x80000000u)) continue;
+				const opcode packed = static_cast<opcode>(test.a >> k_cell_op_shift);
+				if (packed < opcode::op_t_jlt_ii || packed > opcode::op_t_jne_ii) continue;
+				int32_t step_byte = 0;
+				const opcode fused = step.a <= k_cell_for_var_mask && by_constant && counted_step_byte(c.constants[step.c], subtract, step_byte)
+					? counted_back_edge_op(cmp_token_of(packed), (test.b & k_typed_const_bit) != 0) : opcode::op_halt;
+				if (fused == opcode::op_halt) { poll.op = opcode::op_c_for_any; continue; }
+				poll = vm_instruction{fused, step.a | (static_cast<uint32_t>(static_cast<uint8_t>(step_byte)) << k_cell_for_step_shift) | (3u << k_cell_for_exit_shift), test.b & ~k_typed_const_bit, test.c & 0x7FFFFFFFu};
+			}
+			// a compare-headed loop that steps the compared var last (a for's update, a while's trailing `i += k`): the step takes the fused opcode
+			// over the back edge's poll and the head's compare, which stay for the first pass and for a spent poll. The block's own head compare
+			// leaves the block, so its fused exit is a C_EXIT that flushes what the head's row flushes
+			for (uint32_t ip2 = loop.copy_head + 1; ip2 < loop.copy_back; ++ip2) {
+				const vm_instruction step = code[ip2], edge = code[ip2 + 1];
+				if ((step.op != opcode::op_c_add_iik && step.op != opcode::op_c_sub_iik) || step.a != step.b || step.a > k_cell_for_var_mask) continue;
+				const bool own = edge.op == opcode::op_c_back && ip2 + 1 == loop.copy_back;
+				if (!own && !(edge.op == opcode::op_c_jump && edge.c == 1 && edge.a >= loop.copy_head && edge.a < ip2)) continue;
+				const uint32_t head_at = own ? loop.copy_head : edge.a;
+				const vm_instruction test = code[head_at];
+				if (test.op != (own ? opcode::op_c_cmp_p : opcode::op_c_jcmp_p) || (!own && (test.c & 0x80000000u))) continue;
+				const opcode packed = static_cast<opcode>(test.a >> k_cell_op_shift);
+				if (packed < opcode::op_t_jlt_ii || packed > opcode::op_t_jge_ii) continue;
+				uint8_t tok = cmp_token_of(packed);
+				uint32_t end = test.b;
+				if ((test.a & k_cell_index_mask) != step.a) {   // the var on the right: the mirrored order against the left cell
+					if (end != step.a) continue;
+					end = test.a & k_cell_index_mask; tok = mirror_tok(tok);
+				}
+				int32_t step_byte = 0;
+				if (!counted_step_byte(c.constants[step.c], step.op == opcode::op_c_sub_iik, step_byte)) continue;
+				const uint32_t exit_at_copy = own ? static_cast<uint32_t>(code.size()) : (test.c & 0x7FFFFFFFu);
+				if (exit_at_copy <= ip2 || exit_at_copy - ip2 > 0xFFFFu) continue;
+				if (own) { append(vm_instruction{opcode::op_c_exit, test.c, 0, 0}, back); loop.live_temps.push_back(loop.live_temps[0]); }
+				code[ip2] = vm_instruction{counted_back_edge_op(tok, (end & k_typed_const_bit) != 0), step.a | (static_cast<uint32_t>(static_cast<uint8_t>(step_byte)) << k_cell_for_step_shift) | ((exit_at_copy - ip2) << k_cell_for_exit_shift), end & ~k_typed_const_bit, head_at + 1};
+			}
+		}
 		// fused pairs: the block loop runs an adjacent pair of plain instructions as one dispatch; the first instruction takes the
 		// pair's opcode and keeps its word, the second keeps both (a jump into it dispatches it alone); greedy left to right, a pair's second
 		// instruction starts no pair; the sites, the origins, the site rows and the liveness are per instruction and stand as they are
@@ -6579,6 +6661,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					continue;
 				}
 				if (ins.op != opcode::op_c_jcmp_p) continue;
+				if (ip2 >= loop.copy_head + 2 && code[ip2 - 2].op == opcode::op_c_for_any) continue;   // a C_FOR_ANY reads its compare's packed word
 				const opcode cmp = static_cast<opcode>(ins.a >> k_cell_op_shift);
 				const bool konst = (ins.b & k_typed_const_bit) != 0;
 				opcode direct = opcode::op_halt;

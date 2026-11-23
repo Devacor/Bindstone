@@ -352,9 +352,14 @@ namespace jai::vm {
         op_cast_temp,       // a=fused_binary_protos index (left = the operand; k_invalid_u32 = the operand rides the stack), b=frame slot (a compiler temp), c=node index (cast_expr):
                             // cast<int>, cast<float> or cast<bool> of a value lands in the temp; an int, a float or a bool converts where it stands, any other operand is op_cast's
         op_c_cast,          // a = the target's storage index << 24 | dst cell, b = src cell or const: op_cast_temp on a cell (a float no int holds, or another kind, misses)
+        // a counted loop's back edge in a cell copy as one instruction: a = var cell | step << 8 (a signed byte) | the exit's distance << 16, b = end cell (the k forms: a
+        // constant index), c = the body's copy ip. The budget poll, the step on the pinned int var and the compare; a spent poll or an overflow
+        // runs the instruction after it, which is the unfused back edge (an inner loop's step and compare, an outer loop's C_CFOR_BACK)
+        op_c_for_lt, op_c_for_le, op_c_for_gt, op_c_for_ge, op_c_for_ltk, op_c_for_lek, op_c_for_gtk, op_c_for_gek,
+        op_c_for_any,       // an inner counted loop's poll, step and compare, the two instructions after it, as one dispatch (a step or a compare the forms above do not carry)
     };
     inline constexpr size_t k_opcode_space = 512;   // tables indexed by opcode (the coverage report's) are this long
-    static_assert(static_cast<size_t>(opcode::op_c_cast) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
+    static_assert(static_cast<size_t>(opcode::op_c_for_any) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
     static_assert(static_cast<uint32_t>(opcode::op_d_jne) < 256 && static_cast<uint32_t>(opcode::op_t_load) < 256, "a cell instruction packs a typed opcode above k_cell_op_shift in 8 bits");
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
@@ -379,6 +384,9 @@ namespace jai::vm {
     inline constexpr uint32_t k_cell_member_compound_bit = 0x40000000u;   // op_c_mstore's a: a compound site, its kind above the value
     inline constexpr uint32_t k_cell_member_kind_shift = 26;
     inline constexpr uint32_t k_cell_member_value_mask = (1u << k_cell_member_kind_shift) - 1;
+    inline constexpr uint32_t k_cell_for_var_mask = 0xFFu;   // op_c_for_*'s a: the var cell, the signed step byte above it, the exit's distance above that
+    inline constexpr uint32_t k_cell_for_step_shift = 8;
+    inline constexpr uint32_t k_cell_for_exit_shift = 16;
     inline constexpr uint32_t k_dyn_dst_push = 3;   // an op_d_* arithmetic result pushed onto the operand stack (op_binary_fused's landing)
 
     inline constexpr uint32_t k_member_base_release = 0x80000000u;   // op_member_temp c: the base is an element's alias temp the read is the last to read
@@ -733,6 +741,15 @@ namespace jai::vm {
             case opcode::op_c_jle_iik: return "C_JLE_IIK";
             case opcode::op_c_jgt_iik: return "C_JGT_IIK";
             case opcode::op_c_jge_iik: return "C_JGE_IIK";
+            case opcode::op_c_for_lt: return "C_FOR_LT";
+            case opcode::op_c_for_le: return "C_FOR_LE";
+            case opcode::op_c_for_gt: return "C_FOR_GT";
+            case opcode::op_c_for_ge: return "C_FOR_GE";
+            case opcode::op_c_for_ltk: return "C_FOR_LTK";
+            case opcode::op_c_for_lek: return "C_FOR_LEK";
+            case opcode::op_c_for_gtk: return "C_FOR_GTK";
+            case opcode::op_c_for_gek: return "C_FOR_GEK";
+            case opcode::op_c_for_any: return "C_FOR_ANY";
             case opcode::op_cells_resume: return "CELLS_RESUME";
             case opcode::op_ref_target_store: return "REF_TARGET_STORE";
             case opcode::op_get_member_this: return "GET_MEMBER_THIS";

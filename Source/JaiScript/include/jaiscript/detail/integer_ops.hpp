@@ -51,6 +51,10 @@ namespace jai {
         inline script_int wsub(script_int a, script_int b) noexcept { return static_cast<script_int>(static_cast<uint64_t>(a) - static_cast<uint64_t>(b)); }
         inline script_int wmul(script_int a, script_int b) noexcept { return static_cast<script_int>(static_cast<uint64_t>(a) * static_cast<uint64_t>(b)); }
 
+        // Whether a + b and a - b stay in range for every b of magnitude below 2^62: a's top two bits agree (|a| < 2^62). A sufficient
+        // test in two operations for a small step; a caller it turns away takes try_add / try_sub.
+        inline bool small_step_fits(script_int a) noexcept { const uint64_t u = static_cast<uint64_t>(a); return static_cast<script_int>(u ^ (u << 1)) >= 0; }
+
         // --- Overflow detectors (only instantiated in checked builds). `out` always
         //     receives the wrapped result; returns true iff a true overflow occurred. ---
         inline bool add_ovf(script_int a, script_int b, script_int& out) noexcept { out = wadd(a, b); return (~(a ^ b) & (a ^ out)) < 0; }

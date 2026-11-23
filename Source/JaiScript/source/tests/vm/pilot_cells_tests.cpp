@@ -1866,6 +1866,127 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 				}
 			}
 		});
+		test("a_loops_back_edge_is_one_instruction_and_its_misses_are_the_general_back_edges", [this]() {
+			// the fused back edge of every counted shape (a block's own, an inner loop's, a frame program's; the four orders against a cell and a
+			// constant; a negative step, a wide one, a cell's, != and ==) and of a compare-headed loop that steps its var last (a for from a
+			// variable, a while), with a continue into it and the var and the end written by the body: the same on both backends, proofs on and
+			// off, the passes off, and under an injected miss at every position
+			const std::string defs = R"(
+				array<int> A = []; for (int k = 0; k < 40; ++k) { A.push(k * 7 % 11); }
+				int up(int n) { int s = 0; for (int i = 0; i < n; ++i) { s += i; } return s; }
+				int up_le(int n) { int s = 0; for (int i = 1; i <= n; i += 3) { s += i; } return s; }
+				int down(int n) { int s = 0; for (int i = 10; i > n; --i) { s += i; } for (int i = 10; i >= n; i -= 2) { s += i * 2; } return s; }
+				int konst() { int s = 0; for (int i = 0; i < 9; ++i) { for (int j = 8; j >= 0; --j) { for (int k = 5; k > 1; k -= 2) { s += i + j * k; } } for (int m = 0; m <= 3; ++m) { s += m; } } return s; }
+				int nested(int n) { int s = 0; for (int i = 0; i < n; ++i) { for (int j = 0; j <= i; ++j) { if ((i + j) % 3 == 0) { continue; } s += j; } } return s; }
+				int stride(int n, int st) { int s = 0; for (int i = 0; i < n; ++i) { for (int j = 0; j < 40; j += st) { s += A[j]; } for (int k = 0; k != 6; ++k) { s += k; } for (int m = 0; m < 2000; m += 1000) { s += m; } for (int q = 7; q == 7; q += st) { s += 1; } } return s; }
+				int bent(int n) { int s = 0; for (int i = 0; i < n; ++i) { for (int j = 0; j < n; ++j) { if (j == 2) { j += 1; } if (j == 5) { n = n - 1; } s += j; } } return s * 10 + n; }
+				int ranged(int a, int b) { int s = 0; for (int i = a; i < b; ++i) { for (int j = b; j > i; j -= 2) { if (j == 4) { continue; } s += i * j; } } int w = a; while (b > w) { s += w; w += 1; } return s; }
+				function mixed(var& arr, int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { for (int j = i; j < n; ++j) { s += arr[j]; } } for (int i = n; i >= 1; --i) { s += arr[i]; } return s; }
+				function tail(var& arr, int a, int b) -> int { int s = 0; for (int i = a; i <= b; i += 2) { s += arr[i]; } int w = b; while (w > a) { s += arr[w] * 2; w -= 3; } return s; }
+				function all() -> string {
+					return to_string(up(10)) + "," + to_string(up(0)) + "," + to_string(up_le(10)) + "," + to_string(down(3)) + "," + to_string(konst()) + "," + to_string(nested(9))
+						+ "," + to_string(stride(3, 7)) + "," + to_string(bent(8)) + "," + to_string(ranged(2, 9)) + "," + to_string(ranged(5, 5)) + "," + to_string(mixed(A, 12)) + "," + to_string(tail(A, 3, 30));
+				}
+			)";
+			const std::string expected = "45,0,22,105,3294,81,3141,615,541,0,403,162";
+			both(defs + "all();", expected, "fused back edges");
+			both(defs + "all();", expected, "fused back edges, proofs off", false);
+			auto run_with = [&](const std::string& script, bool passes, uint32_t miss_every) -> std::string {
+				auto e = jai::foundry::make_default_engine();
+				e->set_backend(backend_type::vm);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
+				if (!passes) { e->ir_passes(false); }
+				if (miss_every) { e->cells_miss_every(miss_every); }
+				try { return e->execute(script).as_string(); }
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			check_eq(expected, run_with(defs + "all();", false, 0), "the passes off");
+			if (engine::miss_injection_available()) {
+				for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) { check_eq(expected, run_with(defs + "all();", true, every), "under an injected miss at every " + std::to_string(every)); }
+			}
+			const std::string listing = listing_run(defs + "all();");
+			for (const char* op : { "C_FOR_LT ", "C_FOR_LE ", "C_FOR_GT ", "C_FOR_GE ", "C_FOR_LTK ", "C_FOR_LEK ", "C_FOR_GTK ", "C_FOR_GEK ", "C_FOR_ANY " }) {
+				check_true(listing.find(op) != std::string::npos, std::string("the listing holds ") + op + ": " + listing);
+			}
+			// an overflow at the fused step is the general back edge's raise, the iterations before it kept; a step that commits nothing leaves
+			// the var, the end and the body's work as the general form has them (a counted program, a counted block, a compare-headed loop)
+			const std::string edges = R"(
+				int HITS = 0;
+				int program(int n) { for (int i = 9223372036854775800; i < n; i += 4) { HITS += 1; } return HITS; }
+				int inner(int n) { for (int k = 0; k < 2; ++k) { for (int i = 9223372036854775806; i <= n; ++i) { HITS += 1; } } return HITS; }
+				int downward(int n) { for (int i = -9223372036854775800; i > n; i -= 7) { HITS += 1; } return HITS; }
+				function block(var& arr, int n) -> int { for (int i = 9223372036854775800; i < n; i += 4) { HITS += arr[0]; } return HITS; }
+				function headed(var& arr, int from, int n) -> int { for (int i = from; i <= n; i += 100) { HITS += arr[0]; } return HITS; }
+				int headed_program(int from, int n) { int i = from; while (i >= n) { HITS += 1; i -= 100; } return HITS; }
+				function probe(int which) -> string {
+					HITS = 0;
+					string out = "";
+					array<int> one = [1];
+					try {
+						if (which == 0) { out = to_string(program(9223372036854775807)); }
+						if (which == 1) { out = to_string(inner(9223372036854775807)); }
+						if (which == 2) { out = to_string(downward(-9223372036854775807 - 1)); }
+						if (which == 3) { out = to_string(block(one, 9223372036854775807)); }
+						if (which == 4) { out = to_string(headed(one, 9223372036854775657, 9223372036854775807)); }
+						if (which == 5) { out = to_string(headed_program(-9223372036854775657, -9223372036854775807 - 1)); }
+					} catch (err) { out = "throw:" + err; }
+					return out + "|" + to_string(HITS);
+				}
+			)";
+			const char* texts[] = { "'+='", "'++'", "'-='", "'+='", "'+='", "'-='" };
+			const char* hits[] = { "|2", "|2", "|2", "|2", "|2", "|2" };
+			for (int which = 0; which < 6; ++which) {
+				const std::string call = edges + "probe(" + std::to_string(which) + ");";
+				both(call, "", "an overflow at the back edge");
+				both(call, "", "an overflow at the back edge, proofs off", false);
+				const std::string vm = run_on(true, call);
+				check_true(vm.rfind("throw:", 0) == 0 && vm.find(std::string("Integer overflow in ") + texts[which]) != std::string::npos && vm.size() >= 2 && vm.compare(vm.size() - 2, 2, hits[which]) == 0,
+					"the general back edge's text and the iterations before it (" + std::to_string(which) + "): " + vm);
+				check_eq(vm, run_with(call, false, 0), "the passes off");
+				if (engine::miss_injection_available()) {
+					for (uint32_t every : { 1u, 2u, 3u }) { check_eq(vm, run_with(call, true, every), "under an injected miss at every " + std::to_string(every)); }
+				}
+			}
+		});
+		test("a_fused_back_edge_ticks_the_budget_once_an_iteration", [this]() {
+			// an endless loop of each fused shape ends at the step budget with the terminal text on both backends, under an injected miss too, and
+			// the block has run the iterations the unfused back edge runs before each budget (one tick an iteration, the passes on or off)
+			const char* shapes[] = {
+				"int HITS = 0; int f() { for (int i = 0; i < 2; i += 0) { HITS += 1; } return 0; } f();",
+				"int HITS = 0; int f() { int i = 0; while (i < 2) { for (int j = 0; j < 8; ++j) { HITS += 1; } } return 0; } f();",
+				"int HITS = 0; int f(int a) { for (int i = a; i < 2; i += 0) { HITS += 1; } return 0; } f(0);",
+				"int HITS = 0; function f(var& q) { for (int i = 0; i < 2; i += 0) { HITS += q[0]; } } f([1]);",
+				"int HITS = 0; function f(var& q, int a) { for (int i = a; i < 2; i += 0) { HITS += q[0]; } } f([1], 0);",
+				"int HITS = 0; int f(int st) { for (int k = 0; k < 2; k += 0) { for (int j = 0; j < 8; j += st) { HITS += 1; } } return 0; } f(1);",
+			};
+			auto run = [](bool vm, const char* src, uint64_t steps, bool passes, uint32_t miss_every, std::string& hits) -> std::string {
+				auto e = jai::foundry::make_default_engine();
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
+				stdlib::register_all(*e);
+				if (!passes) { e->ir_passes(false); }
+				e->execution_step_budget(steps);
+				e->execution_budget(30.0);
+				if (miss_every) { e->cells_miss_every(miss_every); }
+				std::string out;
+				try { out = e->execute(src).to_string(); } catch (const std::exception& ex) { out = std::string("throw:") + ex.what(); }
+				e->execution_step_budget(0);
+				try { hits = e->execute("HITS;").to_string(); } catch (const std::exception& ex) { hits = std::string("throw:") + ex.what(); }
+				return out;
+			};
+			for (const char* s : shapes) {
+				for (uint64_t steps : { 1u, 2u, 5u }) {
+					std::string interp_hits, fused_hits, unfused_hits, injected_hits;
+					check_true(run(false, s, steps, true, 0, interp_hits).find("Script execution budget exceeded") != std::string::npos, std::string("interpreter step budget: ") + s);
+					check_true(run(true, s, steps, true, 0, fused_hits).find("Script execution budget exceeded") != std::string::npos, std::string("vm step budget: ") + s);
+					check_true(run(true, s, steps, false, 0, unfused_hits).find("Script execution budget exceeded") != std::string::npos, std::string("vm step budget, the passes off: ") + s);
+					check_eq(unfused_hits, fused_hits, std::string("the iterations before budget ") + std::to_string(steps) + ": " + s);
+					if (!engine::miss_injection_available()) continue;
+					for (uint32_t every : { 1u, 3u, 7u }) {
+						check_true(run(true, s, steps, true, every, injected_hits).find("Script execution budget exceeded") != std::string::npos, "vm step budget under an injected miss at every " + std::to_string(every) + ": " + s);
+					}
+				}
+			}
+		});
 		test("an_endless_loop_around_a_closed_loop_and_a_host_call_ends_at_every_step_budget", [this]() {
 			// jaiscript_fuzz seeds 5792 and 9516 (--max-depth 3) on the vm ran past the budget in most runs: the loop counter is reset inside the
 			// body (i /= 94; a loop storing 0 into it), the body holds a closed counted loop, a host call and a continue; whether the deadline

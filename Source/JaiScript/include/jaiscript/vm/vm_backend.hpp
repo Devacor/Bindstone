@@ -2515,6 +2515,7 @@ namespace jai::vm {
         op_status cells_run_cold(frame& f, const chunk::cell_loop& loop, const vm_instruction& ci);   // the call door's instructions, off the block loop's hot switch
         op_status cfor_advance(counted_for_state& st, bool& again);             // the counted back edge's step and compare on the general slot
         JAI_FORCEINLINE op_status exec_c_cfor_back(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
+        op_status exec_c_for_general(frame& f, const vm_instruction& ins, const cell_regs& cr);   // a fused counted back edge off its fast row
 #if defined(_MSC_VER)
         __declspec(noinline)
 #endif

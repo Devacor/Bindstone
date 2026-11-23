@@ -8375,6 +8375,7 @@ static bool cells_miss_plain(const vm_instruction& ci) {
 	case opcode::op_c_append: case opcode::op_c_text_append: case opcode::op_c_push: case opcode::op_c_mload: case opcode::op_c_mstore: case opcode::op_c_size:
 	case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp:
 	case opcode::op_c_ret:
+	case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any:
 	case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 	case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
 	case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f:
@@ -8385,6 +8386,20 @@ static bool cells_miss_plain(const vm_instruction& ci) {
 	}
 }
 #endif
+// a fused back edge on its fast row: the byte step on the pinned int var (its kind stands: every path here has written it; a var within a
+// step of the int range's ends is the general row's, which checks the sum), the poll and the compare against the end; a spent poll, a tripped
+// memory cap or an armed debugger commits nothing and takes the general row.
+// The dirty byte and the memory test are spelled out: this switch is past the size where the compiler inlines its small helpers
+#define JAI_CELL_FOR(CMP, END) { \
+			const uint32_t packed = ci.a, var = packed & k_cell_for_var_mask; \
+			const script_int from = static_cast<script_int>(hot.cells[var].bits); \
+			if (!ints::small_step_fits(from) || budget_tick_ >= 1023 || limits_->memory_used > limits_->memory_limit || debug_hook_) [[unlikely]] goto cell_for_general; \
+			const script_int next = ints::wadd(from, static_cast<int8_t>(packed >> k_cell_for_step_shift)); \
+			++budget_tick_; \
+			hot.cells[var].bits = static_cast<int64_t>(next); hot.dirty->b[var] = 1; \
+			if (next CMP (END)) [[likely]] { ip = ci.c; JAI_CELL_NEXT; } \
+			ip += packed >> k_cell_for_exit_shift; \
+			JAI_CELL_NEXT; }
 // one frame's block run (Raw: a frame program's, its calls and returns on the hot switch: a raw call or return into another frame
 // program continues here with fp following it; any other switch returns to the raw chain)
 template <bool Raw>
@@ -8528,6 +8543,17 @@ next_frame:
 		}
 		case opcode::op_c_math: f.ip = ip; st = exec_c_math(f, ci, regs); ip = f.ip; break;
 		case opcode::op_c_cfor_back: st = exec_c_cfor_back(f, ip, ci, regs); break;
+		case opcode::op_c_for_lt: JAI_CELL_FOR(<, static_cast<script_int>(hot.cells[ci.b].bits));
+		case opcode::op_c_for_le: JAI_CELL_FOR(<=, static_cast<script_int>(hot.cells[ci.b].bits));
+		case opcode::op_c_for_gt: JAI_CELL_FOR(>, static_cast<script_int>(hot.cells[ci.b].bits));
+		case opcode::op_c_for_ge: JAI_CELL_FOR(>=, static_cast<script_int>(hot.cells[ci.b].bits));
+		case opcode::op_c_for_ltk: JAI_CELL_FOR(<, hot.consts[ci.b].unchecked_int_payload());
+		case opcode::op_c_for_lek: JAI_CELL_FOR(<=, hot.consts[ci.b].unchecked_int_payload());
+		case opcode::op_c_for_gtk: JAI_CELL_FOR(>, hot.consts[ci.b].unchecked_int_payload());
+		case opcode::op_c_for_gek: JAI_CELL_FOR(>=, hot.consts[ci.b].unchecked_int_payload());
+		case opcode::op_c_for_any:
+		cell_for_general:   // a fused back edge's spent poll or overflow lands here too
+			f.ip = ip; st = exec_c_for_general(f, ci, regs); ip = f.ip; break;
 		case opcode::op_c_cmp_any: { size_t at = ip; st = exec_c_cmp_any(f, at, ci, regs, true); ip = at; } break;
 		case opcode::op_c_jcmp_any: {
 			// two int cells, or an int cell and an int constant: the kernel's int row inline (the kinds are read here, every time)
@@ -9323,6 +9349,36 @@ op_status vm_backend::cells_resume(frame& f, const vm_instruction& ins) {
 	const op_status st = cells_land(f, loop, cc);
 	if (st == op_status::failed || f.cells->loop == k_invalid_u32) return st;   // a miss: f.ip is the general consumer's
 	return cells_run(f, loop);
+}
+// a fused back edge off its fast row (a spent poll, an armed debugger, an overflow), by the instruction after it. A counted block's general
+// back edge runs whole. A compare-headed loop's step runs here alone and the back edge after it polls. An inner counted loop's poll runs here
+// (a spent one misses onto the general back edge, which raises); its step and compare are the two instructions after it, run as they are for a
+// fast row, or here in this dispatch for C_FOR_ANY (an overflow leaves the step's own instruction to miss)
+JAI_NOINLINE op_status vm_backend::exec_c_for_general(frame& f, const vm_instruction& ins, const cell_regs& cr) {
+	const chunk::cell_loop& loop = *cr.loop;
+	const vm_instruction& after = cr.code[f.ip + 1];
+	if (after.op == opcode::op_c_cfor_back) { ++f.ip; return {}; }
+	if (ins.op != opcode::op_c_for_any && (after.op == opcode::op_c_jump || after.op == opcode::op_c_back)) {
+		const uint32_t var = ins.a & k_cell_for_var_mask;
+		script_int next;
+		if (!ints::try_add(static_cast<script_int>(cr.cells[var].bits), static_cast<int8_t>(ins.a >> k_cell_for_step_shift), next)) [[unlikely]] { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 1); return {}; }
+		cr.cells[var].bits = static_cast<int64_t>(next); cr.dirty->set(var);
+		++f.ip;
+		return {};
+	}
+	if (execution_limit_exhausted() || debug_hook_) [[unlikely]] { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); return {}; }
+	++f.ip;
+	if (ins.op != opcode::op_c_for_any) return {};
+	const bool by_constant = after.op == opcode::op_c_add_iik || after.op == opcode::op_c_sub_iik;
+	const script_int by = by_constant ? cr.consts[after.c].unchecked_int_payload() : static_cast<script_int>(cr.cells[after.c].bits);
+	const script_int i = static_cast<script_int>(cr.cells[after.b].bits);
+	script_int next;
+	if (!(after.op == opcode::op_c_add_ii || after.op == opcode::op_c_add_iik ? ints::try_add(i, by, next) : ints::try_sub(i, by, next))) [[unlikely]] return {};
+	cr.cells[after.a].bits = static_cast<int64_t>(next); cr.cells[after.a].kind = static_cast<uint8_t>(script_value::TYPEID_INT); cr.dirty->set(after.a);
+	size_t at = f.ip + 1;
+	const op_status st = exec_c_jcmp(f, at, cr.code[at], cr);
+	f.ip = at;
+	return st;
 }
 // a counted loop's cell back edge: the step on the var cell (an overflow misses onto the general back edge, which
 // raises its own text), the compare against the end cell or literal, then the body again or the exit

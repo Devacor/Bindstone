@@ -6270,7 +6270,7 @@ std::string engine::jaibite_cache_path(const std::string& sourcePath) const {
 
 // A binary operator a host registers over numbers, or untyped (it may take numbers): the numeric fast lanes must consult it
 static bool numeric_operator_takes_numbers(std::string_view name, size_t arity, const std::vector<param_type_info>& params) {
-    static constexpr std::string_view k_numeric_operators[] = {"+", "-", "*", "/", "%", "<", ">", "<=", ">=", "==", "!=", "<=>"};
+    static constexpr std::string_view k_numeric_operators[] = {"+", "-", "*", "/", "%", "<", ">", "<=", ">=", "==", "!=", "<=>", "&", "|", "^", "<<", ">>"};
     if (arity != 2 || std::find(std::begin(k_numeric_operators), std::end(k_numeric_operators), name) == std::end(k_numeric_operators)) { return false; }
     auto takes_number = [](const param_type_info& p) {
         const script_value_type t = p.base_type;

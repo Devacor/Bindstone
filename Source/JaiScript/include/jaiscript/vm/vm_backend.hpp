@@ -2271,6 +2271,8 @@ namespace jai::vm {
         }
         op_status vm_check(op_status s) { return s; }
         op_status vm_check(const checked_result<void>& r) { return r ? op_status::ok : raise_from(r); }
+        // a fused operand whose read handed back nothing: it raised, or a script operator it ran threw and the instruction ends for the unwind
+        op_status operand_unread() const noexcept { return is_unwinding_ ? op_status::ok : op_status::failed; }
 
         op_status exec_load(frame& f, const vm_instruction& ins);
         op_status exec_load_impl(frame& f, const vm_instruction& ins);

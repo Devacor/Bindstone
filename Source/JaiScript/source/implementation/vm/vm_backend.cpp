@@ -4828,6 +4828,7 @@ const script_value* vm_backend::fused_subscript_value(frame& f, const fused_oper
 		vm_instruction index_ins{opcode::op_index, index_flag_lvalue_shape | index_flag_transient_read, 0, 0};
 		auto indexed = exec_index(f, index_ins);
 		if (indexed == op_status::failed) return nullptr;
+		if (is_unwinding_) [[unlikely]] return nullptr;   // a class's operator[] threw: no operand, and operand_unread ends the instruction
 		script_value element = std::move(stack_.back());
 		stack_.pop_back();
 		scratch.emplace(std::move(element));
@@ -4893,7 +4894,7 @@ op_status vm_backend::exec_operand_temp(frame& f, const vm_instruction& ins) {
 	if (const uint32_t ci = f.code->fused_binary_protos[ins.a].left.const_index; ci != k_invalid_u32) { frame_slot_set(f, ins.b, materialize_constant(*f.code, ci)); return {}; }   // a ternary arm's literal
 	std::optional<script_value> scratch;
 	const script_value* v = fused_subscript_value(f, f.code->fused_binary_protos[ins.a].left, scratch, f.ip * 3);
-	if (!v) return op_status::failed;
+	if (!v) return operand_unread();
 	script_value out = *v;
 	frame_slot_set(f, ins.b, std::move(out));
 	return {};
@@ -4915,7 +4916,7 @@ op_status vm_backend::exec_math_temp(frame& f, const vm_instruction& ins) {
 			v = &f.code->constants[arg.const_index];
 		} else {
 			v = fused_subscript_value(f, arg, scratch, f.ip * 3);   // the identifier ladder raises before it hands back null
-			if (!v) return op_status::failed;
+			if (!v) return operand_unread();
 		}
 	} else {
 		assert(!stack_.empty());
@@ -4971,10 +4972,10 @@ op_status vm_backend::exec_math_pair(frame& f, const vm_instruction& ins, detail
 	const fused_binary_proto& p = f.code->fused_binary_protos[ins.a];
 	std::optional<script_value> scratch_l, scratch_r;
 	const script_value* l = p.left.const_index != k_invalid_u32 ? &f.code->constants[p.left.const_index] : fused_subscript_value(f, p.left, scratch_l, f.ip * 3);
-	if (!l) return op_status::failed;
+	if (!l) return operand_unread();
 	script_value held = l->deref();   // the second read may resolve a name that moves the first's storage
 	const script_value* r = p.right.const_index != k_invalid_u32 ? &f.code->constants[p.right.const_index] : fused_subscript_value(f, p.right, scratch_r, f.ip * 3 + 1);
-	if (!r) return op_status::failed;
+	if (!r) return operand_unread();
 	const script_value& rv = r->deref();
 	auto num = [](const script_value& v, detail::scalar_num& n) {
 		const size_t raw = v.raw_storage_index();
@@ -5068,7 +5069,7 @@ op_status vm_backend::exec_math_alias(frame& f, const vm_instruction& ins) {
 			v = &f.code->constants[operand.const_index];
 		} else {
 			v = fused_subscript_value(f, operand, scratch, f.ip * 3);
-			if (!v) return op_status::failed;
+			if (!v) return operand_unread();
 		}
 		v = &v->deref();
 	} else {
@@ -5120,7 +5121,7 @@ op_status vm_backend::exec_unary_temp(frame& f, const vm_instruction& ins) {
 		else {
 			std::optional<script_value> scratch;
 			const script_value* v = fused_subscript_value(f, arg, scratch, f.ip * 3);   // the identifier ladder raises before it hands back null
-			if (!v) return op_status::failed;
+			if (!v) return operand_unread();
 			stack_.push_back(v->deref());   // LOAD pushes the referent
 		}
 	}
@@ -5231,7 +5232,7 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 		lp = &f.code->constants[p.left.const_index];   // engine-less template: fast path reads raw
 	} else if (p.left.is_subscript()) {
 		lp = fused_subscript_value(f, p.left, lscratch, f.ip * 3);
-		if (!lp) return op_status::failed;
+		if (!lp) return operand_unread();
 	} else if (!(ident_fast_head && (lp = fused_cmp_operand(f, p.left, f.ip * 3)) != nullptr)) {
 		lp = fused_ident_value(f, p.left, lscratch, f.ip * 3);
 		if (!lp) return op_status::failed;
@@ -5240,7 +5241,7 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 		rp = &f.code->constants[p.right.const_index];
 	} else if (p.right.is_subscript()) {
 		rp = fused_subscript_value(f, p.right, rscratch, f.ip * 3 + 1);
-		if (!rp) return op_status::failed;
+		if (!rp) return operand_unread();
 	} else if (!(ident_fast_head && (rp = fused_cmp_operand(f, p.right, f.ip * 3 + 1)) != nullptr)) {
 		rp = fused_ident_value(f, p.right, rscratch, f.ip * 3 + 1);
 		if (!rp) return op_status::failed;
@@ -5364,6 +5365,7 @@ op_status vm_backend::binary_fused_general_rows(const fused_binary_proto& p, tok
 	if (!result) {
 		return raise_from(result);
 	}
+	if (is_unwinding_) [[unlikely]] { return {}; }   // a script operator threw: no sink takes a value, as its pair's consumer never runs
 	out.emplace(std::move(result.value()));
 	return {};
 }
@@ -6601,6 +6603,7 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 	if (indexed == op_status::failed) {
 		return indexed;
 	}
+	if (is_unwinding_) [[unlikely]] { return {}; }   // a class's operator[] threw: the pair's store never runs
 	return exec_index_assign(f, ins);
 }
 
@@ -11968,6 +11971,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 	if (indexed == op_status::failed) {
 		return indexed;
 	}
+	if (is_unwinding_) [[unlikely]] { return {}; }   // a class's operator[] threw: the pair's compound never runs
 	stack_.push_back(std::move(rhs));
 	return exec_index_compound(f, ins.a);
 }
@@ -16973,7 +16977,7 @@ op_status vm_backend::exec_velem_load(frame& f, const vm_instruction& ins) {
 	}
 	std::optional<script_value> scratch;
 	const script_value* elem = fused_subscript_value(f, p.sub, scratch, f.ip * 3);
-	if (!elem) return op_status::failed;
+	if (!elem) return operand_unread();
 	script_value out = make_null();
 	VM_TRY(member_access_value(f, *elem, static_cast<member_expr*>(f.code->nodes[p.node].get()), out));
 	assert(!switch_to_);
@@ -17032,7 +17036,7 @@ op_status vm_backend::exec_velem_store(frame& f, const vm_instruction& ins) {
 	}
 	std::optional<script_value> scratch;
 	const script_value* elem = fused_subscript_value(f, p.sub, scratch, f.ip * 3);
-	if (!elem) return op_status::failed;
+	if (!elem) return operand_unread();
 	script_value base = *elem;
 	auto* member = static_cast<member_expr*>(f.code->nodes[p.node].get());
 	const size_t ins_index = static_cast<size_t>(&ins - f.code->code.data());
@@ -17609,7 +17613,7 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 	    site.bi_array != builtin_method_registries::k_no_builtin) {
 		// The site is `.push` by construction (try_emit_fused_push) and the receiver is an
 		// array, so the builtin is push: no member-node walk, no id compare
-		if (!resolve_value()) return op_status::failed;
+		if (!resolve_value()) return operand_unread();
 		{
 			const push_append lane = typed_push_append(objd, val->deref());
 			if (lane == push_append::failed) return op_status::failed;
@@ -17678,7 +17682,7 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 		VM_TRY(exec_index(f, index_ins));
 		if (is_unwinding_) [[unlikely]] { return {}; }
 	} else {
-		if (!resolve_value()) return op_status::failed;
+		if (!resolve_value()) return operand_unread();
 		stack_.push_back(val->deref());
 		release_value_temp();
 	}
@@ -17935,6 +17939,7 @@ op_status vm_backend::text_append_general(frame& f, const text_append_proto& p, 
 		if (p.assign) {
 			auto step = binary_general(token_type::plus, acc.deref(), v);
 			if (!step) return raise_from(step);
+			if (is_unwinding_) [[unlikely]] return {};   // a piece's text or operator threw: the target holds its own, nothing is stored
 			acc = std::move(step.value());
 			continue;
 		}
@@ -24844,7 +24849,7 @@ JAI_NOINLINE op_status vm_backend::exec_cast_temp(frame& f, const vm_instruction
 		if (arg.const_index != k_invalid_u32) { v = &f.code->constants[arg.const_index]; }
 		else {
 			v = fused_subscript_value(f, arg, scratch, f.ip * 3);   // the identifier ladder raises before it hands back null
-			if (!v) return op_status::failed;
+			if (!v) return operand_unread();
 			v = &v->deref();   // LOAD pushes the referent
 		}
 	} else { v = &stack_.back(); }   // a reference here is op_cast's to read: its dereference may run a getter, once

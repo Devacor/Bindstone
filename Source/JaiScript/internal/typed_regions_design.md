@@ -63,8 +63,12 @@ numeric rows in place, and any other kind, a property reference, an overflow, a 
 a shift out of range runs the original instruction from `chunk::typed_sites`.
 
 Inside a cell block, operations whose operand cells are pinned to one kind take per-kind forms
-that read no kind: `op_c_add_ii`, `op_c_sub_ff` and their constant (`k`) forms, the pinned
-compare-jumps (`op_c_jlt_ff`, `op_c_jge_iik`, ...), the pinned moves `op_c_mov_p` / `op_c_mov_k`,
+that read no kind: `op_c_add_ii`, `op_c_sub_ff` and their constant (`k`) forms, the eight other int
+operators (`op_c_mul_ii` ... `op_c_shr_iik`: an overflow, a zero divisor or a shift count outside 0..63 is
+the instruction's miss; a constant form exists only for a divisor that is not zero and a count within
+0..63, and an instruction a pair took keeps the packed `op_c_arith_p`), the pinned
+compare-jumps (`op_c_jlt_ff`, `op_c_jge_iik`, `op_c_jeq_ii`, ...; an int equality a pair took keeps the packed
+`op_c_jcmp_p`, as a float equality does), the pinned moves `op_c_mov_p` / `op_c_mov_k`,
 `op_c_sin_f` / `op_c_cos_f` / `op_c_sqrt_f`, `op_c_jtruth` (a call's landed int, float or bool as a
 branch) and `op_c_load_f` (a float element read in place into a float cell).
 

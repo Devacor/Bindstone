@@ -187,6 +187,8 @@ namespace {
 			case opcode::op_c_mov:
 			case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 			case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
+			case opcode::op_c_mul_ii: case opcode::op_c_div_ii: case opcode::op_c_mod_ii: case opcode::op_c_and_ii: case opcode::op_c_or_ii: case opcode::op_c_xor_ii: case opcode::op_c_shl_ii: case opcode::op_c_shr_ii: case opcode::op_c_mul_iik: case opcode::op_c_div_iik: case opcode::op_c_mod_iik: case opcode::op_c_and_iik: case opcode::op_c_or_iik: case opcode::op_c_xor_iik: case opcode::op_c_shl_iik: case opcode::op_c_shr_iik:
+			case opcode::op_c_jeq_ii: case opcode::op_c_jne_ii: case opcode::op_c_jeq_iik: case opcode::op_c_jne_iik:
 			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f: case opcode::op_c_jtruth:
 			case opcode::op_graft_depth: case opcode::op_c_gdepth:
 			case opcode::op_c_load_f: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
@@ -430,6 +432,8 @@ namespace {
 			case opcode::op_c_mov:
 			case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 			case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
+			case opcode::op_c_mul_ii: case opcode::op_c_div_ii: case opcode::op_c_mod_ii: case opcode::op_c_and_ii: case opcode::op_c_or_ii: case opcode::op_c_xor_ii: case opcode::op_c_shl_ii: case opcode::op_c_shr_ii: case opcode::op_c_mul_iik: case opcode::op_c_div_iik: case opcode::op_c_mod_iik: case opcode::op_c_and_iik: case opcode::op_c_or_iik: case opcode::op_c_xor_iik: case opcode::op_c_shl_iik: case opcode::op_c_shr_iik:
+			case opcode::op_c_jeq_ii: case opcode::op_c_jne_ii: case opcode::op_c_jeq_iik: case opcode::op_c_jne_iik:
 			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f: case opcode::op_c_jtruth:
 			case opcode::op_graft_depth: case opcode::op_c_gdepth:
 			case opcode::op_c_load_f: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
@@ -6690,6 +6694,41 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				else if (a1 == opcode::op_c_arith_p && b1 == opcode::op_c_load) { fused = opcode::op_c_arith_load; }
 				else if (a1 == opcode::op_c_load && b1 == opcode::op_c_jcmp_p) { fused = opcode::op_c_load_jcmp; }
 				if (fused != opcode::op_halt) { code[ip2].op = fused; ++ip2; }
+			}
+		}
+		if (ir_passes_) {
+			// a pinned int operation or equality compare-jump no pair took names itself in the opcode (a pair's second instruction keeps its packed
+			// word, which the pair's executor reads); a constant divisor of zero or a constant count outside 0..63 stays C_ARITH_P, whose miss it is
+			for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) {
+				vm_instruction& ins = code[ip2];
+				const opcode before = ip2 > loop.copy_head ? code[ip2 - 1].op : opcode::op_halt;
+				if (ins.op == opcode::op_c_jcmp_p && before != opcode::op_c_jcmp2 && before != opcode::op_c_load_jcmp && !(ip2 >= loop.copy_head + 2 && code[ip2 - 2].op == opcode::op_c_for_any)) {
+					const opcode cmp = static_cast<opcode>(ins.a >> k_cell_op_shift);
+					if (cmp != opcode::op_t_jeq_ii && cmp != opcode::op_t_jne_ii) continue;
+					const bool against_constant = (ins.b & k_typed_const_bit) != 0;
+					ins.op = cmp == opcode::op_t_jeq_ii ? (against_constant ? opcode::op_c_jeq_iik : opcode::op_c_jeq_ii) : (against_constant ? opcode::op_c_jne_iik : opcode::op_c_jne_ii);
+					ins.a &= k_cell_index_mask; ins.b &= ~k_typed_const_bit;
+					continue;
+				}
+				if (ins.op != opcode::op_c_arith_p || before == opcode::op_c_arith2) continue;
+				const opcode packed = static_cast<opcode>(ins.a >> k_cell_op_shift);
+				if (packed > opcode::op_t_shr_ii) continue;   // a float operation
+				const bool konst = (ins.c & k_typed_const_bit) != 0;
+				const script_int by = konst ? c.constants[ins.c & ~k_typed_const_bit].unchecked_as_int() : 1;
+				opcode direct = opcode::op_halt;
+				switch (packed) {
+				case opcode::op_t_mul_ii: direct = konst ? opcode::op_c_mul_iik : opcode::op_c_mul_ii; break;
+				case opcode::op_t_div_ii: if (by != 0) { direct = konst ? opcode::op_c_div_iik : opcode::op_c_div_ii; } break;
+				case opcode::op_t_mod_ii: if (by != 0) { direct = konst ? opcode::op_c_mod_iik : opcode::op_c_mod_ii; } break;
+				case opcode::op_t_and_ii: direct = konst ? opcode::op_c_and_iik : opcode::op_c_and_ii; break;
+				case opcode::op_t_or_ii: direct = konst ? opcode::op_c_or_iik : opcode::op_c_or_ii; break;
+				case opcode::op_t_xor_ii: direct = konst ? opcode::op_c_xor_iik : opcode::op_c_xor_ii; break;
+				case opcode::op_t_shl_ii: if (by >= 0 && by <= 63) { direct = konst ? opcode::op_c_shl_iik : opcode::op_c_shl_ii; } break;
+				case opcode::op_t_shr_ii: if (by >= 0 && by <= 63) { direct = konst ? opcode::op_c_shr_iik : opcode::op_c_shr_ii; } break;
+				default: break;
+				}
+				if (direct == opcode::op_halt) continue;
+				ins.op = direct; ins.a &= k_cell_index_mask; ins.c &= ~k_typed_const_bit;
 			}
 		}
 		if (ir_passes_) {

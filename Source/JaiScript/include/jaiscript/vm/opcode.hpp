@@ -357,9 +357,14 @@ namespace jai::vm {
         // runs the instruction after it, which is the unfused back edge (an inner loop's step and compare, an outer loop's C_CFOR_BACK)
         op_c_for_lt, op_c_for_le, op_c_for_gt, op_c_for_ge, op_c_for_ltk, op_c_for_lek, op_c_for_gtk, op_c_for_gek,
         op_c_for_any,       // an inner counted loop's poll, step and compare, the two instructions after it, as one dispatch (a step or a compare the forms above do not carry)
+        // pinned int arithmetic by its own opcode, as op_c_add_ii: a = dst cell, b = left cell, c = right cell; an overflow, a zero divisor or a shift count
+        // outside 0..63 misses. The k forms: c = a constant index of a value the compiler read (a divisor that is not zero, a count within 0..63)
+        op_c_mul_ii, op_c_div_ii, op_c_mod_ii, op_c_and_ii, op_c_or_ii, op_c_xor_ii, op_c_shl_ii, op_c_shr_ii,
+        op_c_mul_iik, op_c_div_iik, op_c_mod_iik, op_c_and_iik, op_c_or_iik, op_c_xor_iik, op_c_shl_iik, op_c_shr_iik,
+        op_c_jeq_ii, op_c_jne_ii, op_c_jeq_iik, op_c_jne_iik,   // the pinned int equality compare-jumps, as op_c_jlt_ii
     };
     inline constexpr size_t k_opcode_space = 512;   // tables indexed by opcode (the coverage report's) are this long
-    static_assert(static_cast<size_t>(opcode::op_c_for_any) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
+    static_assert(static_cast<size_t>(opcode::op_c_jne_iik) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
     static_assert(static_cast<uint32_t>(opcode::op_d_jne) < 256 && static_cast<uint32_t>(opcode::op_t_load) < 256, "a cell instruction packs a typed opcode above k_cell_op_shift in 8 bits");
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
@@ -750,6 +755,26 @@ namespace jai::vm {
             case opcode::op_c_for_gtk: return "C_FOR_GTK";
             case opcode::op_c_for_gek: return "C_FOR_GEK";
             case opcode::op_c_for_any: return "C_FOR_ANY";
+            case opcode::op_c_mul_ii: return "C_MUL_II";
+            case opcode::op_c_div_ii: return "C_DIV_II";
+            case opcode::op_c_mod_ii: return "C_MOD_II";
+            case opcode::op_c_and_ii: return "C_AND_II";
+            case opcode::op_c_or_ii: return "C_OR_II";
+            case opcode::op_c_xor_ii: return "C_XOR_II";
+            case opcode::op_c_shl_ii: return "C_SHL_II";
+            case opcode::op_c_shr_ii: return "C_SHR_II";
+            case opcode::op_c_mul_iik: return "C_MUL_IIK";
+            case opcode::op_c_div_iik: return "C_DIV_IIK";
+            case opcode::op_c_mod_iik: return "C_MOD_IIK";
+            case opcode::op_c_and_iik: return "C_AND_IIK";
+            case opcode::op_c_or_iik: return "C_OR_IIK";
+            case opcode::op_c_xor_iik: return "C_XOR_IIK";
+            case opcode::op_c_shl_iik: return "C_SHL_IIK";
+            case opcode::op_c_shr_iik: return "C_SHR_IIK";
+            case opcode::op_c_jeq_ii: return "C_JEQ_II";
+            case opcode::op_c_jne_ii: return "C_JNE_II";
+            case opcode::op_c_jeq_iik: return "C_JEQ_IIK";
+            case opcode::op_c_jne_iik: return "C_JNE_IIK";
             case opcode::op_cells_resume: return "CELLS_RESUME";
             case opcode::op_ref_target_store: return "REF_TARGET_STORE";
             case opcode::op_get_member_this: return "GET_MEMBER_THIS";

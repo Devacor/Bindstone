@@ -107,11 +107,13 @@ namespace {
 		case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 		case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_neg: case opcode::op_c_bnot:
 		case opcode::op_c_lnot: case opcode::op_c_cast: case opcode::op_c_cmpval: case opcode::op_c_append: case opcode::op_c_text_append:
+		case opcode::op_c_mul_ii: case opcode::op_c_div_ii: case opcode::op_c_mod_ii: case opcode::op_c_and_ii: case opcode::op_c_or_ii: case opcode::op_c_xor_ii: case opcode::op_c_shl_ii: case opcode::op_c_shr_ii: case opcode::op_c_mul_iik: case opcode::op_c_div_iik: case opcode::op_c_mod_iik: case opcode::op_c_and_iik: case opcode::op_c_or_iik: case opcode::op_c_xor_iik: case opcode::op_c_shl_iik: case opcode::op_c_shr_iik:
 			return fam::cell_arith;
 		case opcode::op_c_cmp_p: case opcode::op_c_jcmp_p: case opcode::op_c_jcmp2: case opcode::op_c_cmp_any:
 		case opcode::op_c_jcmp_any: case opcode::op_c_jump: case opcode::op_c_back: case opcode::op_c_back_step: case opcode::op_c_cfor_back: case opcode::op_c_range:
 		case opcode::op_c_exit: case opcode::op_c_bail:
 		case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any:
+		case opcode::op_c_jeq_ii: case opcode::op_c_jne_ii: case opcode::op_c_jeq_iik: case opcode::op_c_jne_iik:
 			return fam::cell_branch;
 		case opcode::op_c_load: case opcode::op_c_load_any: case opcode::op_c_load2: case opcode::op_c_load_jcmp: case opcode::op_c_index_store: case opcode::op_c_push:
 		case opcode::op_c_size: case opcode::op_c_guard: case opcode::op_c_rebind:

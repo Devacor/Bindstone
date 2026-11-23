@@ -1095,7 +1095,7 @@ public:
 				return jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
 			};
 			const std::string d = listing_of("var f = function(int n) { int total = 0; int i = 0; while (i < n) { if ((i % 2) == 0) { total += i; } else { total -= i; } i = i + 1; } return total; };");
-			check_true(d.find("CELLS_BACK") != std::string::npos && d.find("C_JCMP") != std::string::npos && d.find("C_JUMP") != std::string::npos, "the two-arm diamond closes with cell branches: " + d);
+			check_true(d.find("CELLS_BACK") != std::string::npos && d.find("C_JEQ_IIK") != std::string::npos && d.find("C_JUMP") != std::string::npos, "the two-arm diamond closes with cell branches: " + d);
 			const std::string g = listing_of("var f = function(var& pix, var& pal, var& tp, int n, int th) { int y = 0; while (y < n) { int iv = (y * 7) % th - 3; if (iv < 0) { iv = iv + th; } pix[y] = pal[tp[iv]]; y = y + 1; } return y; };");
 			check_true(g.find("CELLS_BACK") != std::string::npos && (g.find("C_JCMP") != std::string::npos || g.find("C_JL") != std::string::npos || g.find("C_JG") != std::string::npos) && g.find("C_GUARD") != std::string::npos, "the texture shape closes over its guarded arm and its container guard: " + g);
 			const std::string b = listing_of("var f = function(int n) { int total = 0; int i = 0; while (i < n) { if (i == 5) { break; } total += i; i = i + 1; } return total; };");
@@ -1987,6 +1987,116 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 				}
 			}
 		});
+		test("a_pinned_int_operation_runs_by_its_own_opcode_and_misses_as_the_general_one_raises", [this]() {
+			// * / % & | ^ << >> over pinned ints, against a cell and against a constant, alone between other instructions (their own opcodes)
+			// and in runs (the paired form), and the compound forms over a typed global (the checker's class pins the cells): the same on both
+			// backends, proofs on and off, the passes off and under an injected miss; an overflow, a zero divisor, the least int over -1 and a
+			// shift count out of range raise the general operation's text after the iterations before them
+			const std::string defs = R"(
+				int G = 7; float GF = 0.25;
+				int ops(int n, int m, int sh) {
+					int acc = 1;
+					for (int i = 1; i <= n; ++i) {
+						int a = i * m; acc += a;
+						int b = a / 3; acc += b;
+						int c = a % 7; acc += c;
+						int d = a & 255; acc += d;
+						int e = a | 16; acc += e;
+						int f = a ^ 77; acc += f;
+						int g = i << 3; acc += g;
+						int h = a >> 2; acc += h;
+						int j = i * 5; acc += j;
+						int k = a / i; acc += k;
+						int l = a % i; acc += l;
+						int o = a & m; acc += o;
+						int p = a | m; acc += p;
+						int q = a ^ i; acc += q;
+						int r = i << sh; acc += r;
+						int t = a >> sh; acc += t;
+						int u = a / -1; acc += u;
+						int v = a % -1; acc += v;
+						acc = acc & 1048575;
+					}
+					return acc;
+				}
+				int runs(int n, int m) { int acc = 1; for (int i = 1; i <= n; ++i) { int a = i * m; int b = a / 3; int c = (a % 7) << (i & 7); int d = (a & 255) | (b ^ c); acc = (acc + d + (a >> (i & 3))) & 1048575; } return acc; }
+				int compounds(int n) { int s = 3; float f = 1.5; for (int i = 1; i <= n; ++i) { s += G; s -= i; f += GF; s *= 3; f *= 1.25; s /= 2; f -= GF; s &= 65535; f /= 1.5; s |= 256; f += 0.5; s ^= G; s <<= 1; f -= 0.125; s >>= 1; } return s + math::itrunc(f * 1000.0); }
+				int equals(int n, int m) { int c = 0; for (int i = 0; i < n; ++i) { if (i == m) { c += 10; } c += 1; if (i != m) { c += 2; } c += 1; if (i != 3) { c += 4; } c += 1; if (i == 5) { c += 100; } } return c; }
+				int edge(int which, int a, int b) {
+					int seen = 0;
+					for (int i = 0; i < 3; ++i) {
+						int x = a + i;
+						seen += 1;
+						if (which == 0) { int y = x * b; seen += y & 1; }
+						if (which == 1) { int y = x / b; seen += y & 1; }
+						if (which == 2) { int y = x % b; seen += y & 1; }
+						if (which == 3) { int y = x << b; seen += y & 1; }
+						if (which == 4) { int y = x >> b; seen += y & 1; }
+						if (which == 5) { int y = x * 4611686018427387904; seen += y & 1; }
+						if (which == 6) { int y = x / -1; seen += y & 1; }
+						if (which == 7) { int y = x % -1; seen += y & 1; }
+						if (which == 8) { int y = x / (b - 5); seen += y & 1; }
+						if (which == 9) { int y = x % (b - 5); seen += y & 1; }
+						if (which == 10) { seen *= b; }
+						if (which == 11) { seen /= b; }
+					}
+					return seen;
+				}
+				function probe(int which, int a, int b) -> string {
+					string out = "";
+					try { out = to_string(edge(which, a, b)); } catch (err) { out = "throw:" + err; }
+					return out;
+				}
+			)";
+			struct row { const char* call; const char* expected; };
+			const row rows[] = {
+				{ "to_string(ops(40, 12345, 3)) + \",\" + to_string(runs(40, 12345)) + \",\" + to_string(compounds(25)) + \",\" + to_string(equals(9, 4)) + \",\" + to_string(equals(3, 7));", "" },
+				{ "probe(0, 3, 5) + \",\" + probe(1, 30, 5) + \",\" + probe(2, 30, 7) + \",\" + probe(3, 3, 5) + \",\" + probe(4, 300, 2) + \",\" + probe(6, 30, 5) + \",\" + probe(7, 30, 5) + \",\" + probe(10, 0, 3) + \",\" + probe(11, 0, 2);", "5,3,4,3,6,4,3,39,0" },
+				{ "probe(0, 4611686018427387903, 2);", "throw:Integer overflow in '*'" },
+				{ "probe(1, 10, 0);", "throw:Division by zero" },
+				{ "probe(2, 10, 0);", "throw:Modulo by zero" },
+				{ "probe(3, 1, 64);", "throw:Shift amount must be between 0 and 63" },
+				{ "probe(4, 1, -1);", "throw:Shift amount must be between 0 and 63" },
+				{ "probe(5, 0, 0);", "throw:Integer overflow in '*'" },
+				{ "probe(6, -9223372036854775807 - 1, 0);", "throw:Integer overflow in '/'" },
+				{ "probe(7, -9223372036854775807 - 1, 0);", "3" },
+				{ "probe(8, 3, 5);", "throw:Division by zero" },
+				{ "probe(9, 3, 5);", "throw:Modulo by zero" },
+				{ "probe(10, 0, 4611686018427387904);", "throw:Integer overflow in '*='" },
+				{ "probe(11, 0, 0);", "throw:Division by zero" },
+			};
+			auto run_with = [&](const std::string& script, bool passes, uint32_t miss_every) -> std::string {
+				auto e = jai::foundry::make_default_engine();
+				e->set_backend(backend_type::vm);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
+				if (!passes) { e->ir_passes(false); }
+				if (miss_every) { e->cells_miss_every(miss_every); }
+				try { return e->execute(script).as_string(); }
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (const row& r : rows) {
+				const std::string script = defs + r.call;
+				both(script, r.expected, r.call);
+				both(script, r.expected, (std::string(r.call) + " proofs off").c_str(), false);
+				const std::string vm = run_on(true, script);
+				check_eq(vm, run_with(script, false, 0), std::string(r.call) + " the passes off");
+				if (!engine::miss_injection_available()) continue;
+				for (uint32_t every : { 1u, 2u, 3u, 7u }) { check_eq(vm, run_with(script, true, every), std::string(r.call) + " under an injected miss at every " + std::to_string(every)); }
+			}
+			const std::string listing = listing_run(defs + "ops(4, 5, 1) + runs(4, 5) + compounds(4) + equals(3, 1) + edge(0, 1, 1);");
+			for (const char* op : { "C_MUL_II ", "C_DIV_II ", "C_MOD_II ", "C_AND_II ", "C_OR_II ", "C_XOR_II ", "C_SHL_II ", "C_SHR_II ",
+			                        "C_MUL_IIK ", "C_DIV_IIK ", "C_MOD_IIK ", "C_AND_IIK ", "C_OR_IIK ", "C_XOR_IIK ", "C_SHL_IIK ", "C_SHR_IIK ", "C_ARITH_P2 ",
+			                        "C_JEQ_II ", "C_JNE_II ", "C_JEQ_IIK ", "C_JNE_IIK " }) {
+				check_true(listing.find(op) != std::string::npos, std::string("the listing holds ") + op + ": " + listing);
+			}
+			// a constant the operation cannot take stays the general form's
+			const char* refused[] = { "x / 0", "x % 0", "x << 64", "x >> -1" };
+			for (const char* expr : refused) {
+				const std::string script = std::string("function f(int n) -> string { int acc = 0; string out = \"\"; try { for (int i = 0; i < n; ++i) { int x = i + 1; acc += 1; int y = ") + expr + "; acc += y; } } catch (err) { out = err; } return out + \"|\" + to_string(acc); } f(3);";
+				both(script, "", expr);
+				check_eq(run_on(true, script), run_with(script, false, 0), std::string(expr) + " the passes off");
+			}
+		});
 		test("an_endless_loop_around_a_closed_loop_and_a_host_call_ends_at_every_step_budget", [this]() {
 			// jaiscript_fuzz seeds 5792 and 9516 (--max-depth 3) on the vm ran past the budget in most runs: the loop counter is reset inside the
 			// body (i /= 94; a loop storing 0 into it), the body holds a closed counted loop, a host call and a continue; whether the deadline
@@ -2250,7 +2360,7 @@ var narrows = function(int n) { int acc = 0; float f = 0.5; for (int i = 0; i < 
 				both(std::string(defs) + " " + p.call, "", (std::string(p.call) + " proofs off").c_str(), false);
 			}
 			const std::string listing = listing_of(defs);
-			check(listing.find("C_ARITH_P") != std::string::npos && listing.find("C_JCMP_P") != std::string::npos && listing.find("C_CMP_P") != std::string::npos, "the pinned forms are emitted: " + listing);
+			check(listing.find("C_MUL_IIK") != std::string::npos && listing.find("C_JEQ_IIK") != std::string::npos && listing.find("C_JGT_FFK") != std::string::npos && listing.find("C_CMP_P") != std::string::npos, "the pinned forms are emitted: " + listing);
 			const std::string adopted_listing = listing_of("var adopted = function(int n) { var v = 1; int acc = 0; for (int i = 0; i < n; ++i) { v = v + i; acc = acc + math::itrunc(v); } return acc; };");
 			check(adopted_listing.find("C_ARITH_ANY") != std::string::npos, "an adopted kind keeps the run-time kinds: " + adopted_listing);
 			// the switch off: the same pinned forms and the same results (the differential the fuzz's --no-passes chain runs)

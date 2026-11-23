@@ -8376,6 +8376,8 @@ static bool cells_miss_plain(const vm_instruction& ci) {
 	case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp:
 	case opcode::op_c_ret:
 	case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any:
+	case opcode::op_c_mul_ii: case opcode::op_c_div_ii: case opcode::op_c_mod_ii: case opcode::op_c_and_ii: case opcode::op_c_or_ii: case opcode::op_c_xor_ii: case opcode::op_c_shl_ii: case opcode::op_c_shr_ii: case opcode::op_c_mul_iik: case opcode::op_c_div_iik: case opcode::op_c_mod_iik: case opcode::op_c_and_iik: case opcode::op_c_or_iik: case opcode::op_c_xor_iik: case opcode::op_c_shl_iik: case opcode::op_c_shr_iik:
+	case opcode::op_c_jeq_ii: case opcode::op_c_jne_ii: case opcode::op_c_jeq_iik: case opcode::op_c_jne_iik:
 	case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 	case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
 	case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f:
@@ -8408,6 +8410,18 @@ static bool cells_miss_plain(const vm_instruction& ci) {
 			hot.cells[dst].bits = static_cast<int64_t>(sum); hot.cells[dst].kind = static_cast<uint8_t>(script_value::TYPEID_INT); hot.dirty->b[dst] = 1; \
 			++ip; \
 			JAI_CELL_NEXT; }
+// a pinned int operation by its own opcode: STEP gives out from left and right, or misses (the instruction's own miss)
+#define JAI_CELL_INT_OP(RIGHT, STEP) { \
+			const uint32_t dst = ci.a; \
+			const script_int left = static_cast<script_int>(hot.cells[ci.b].bits), right = RIGHT; \
+			script_int out; \
+			STEP \
+			hot.cells[dst].bits = static_cast<int64_t>(out); hot.cells[dst].kind = static_cast<uint8_t>(script_value::TYPEID_INT); hot.dirty->b[dst] = 1; \
+			++ip; \
+			JAI_CELL_NEXT; }
+#define JAI_CELL_INT_MISS { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); break; }
+#define JAI_CELL_INT_CELL static_cast<script_int>(hot.cells[ci.c].bits)
+#define JAI_CELL_INT_CONST hot.consts[ci.c].unchecked_int_payload()
 // one frame's block run (Raw: a frame program's, its calls and returns on the hot switch: a raw call or return into another frame
 // program continues here with fp following it; any other switch returns to the raw chain)
 template <bool Raw>
@@ -8500,6 +8514,22 @@ next_frame:
 		case opcode::op_c_sub_ii: JAI_CELL_INT_SUM(try_sub, static_cast<script_int>(hot.cells[ci.c].bits));
 		case opcode::op_c_add_iik: JAI_CELL_INT_SUM(try_add, hot.consts[ci.c].unchecked_int_payload());
 		case opcode::op_c_sub_iik: JAI_CELL_INT_SUM(try_sub, hot.consts[ci.c].unchecked_int_payload());
+		case opcode::op_c_mul_ii: JAI_CELL_INT_OP(JAI_CELL_INT_CELL, if (!ints::try_mul(left, right, out)) [[unlikely]] JAI_CELL_INT_MISS)
+		case opcode::op_c_mul_iik: JAI_CELL_INT_OP(JAI_CELL_INT_CONST, if (!ints::try_mul(left, right, out)) [[unlikely]] JAI_CELL_INT_MISS)
+		case opcode::op_c_div_ii: JAI_CELL_INT_OP(JAI_CELL_INT_CELL, if (right == 0 || !ints::try_div(left, right, out)) [[unlikely]] JAI_CELL_INT_MISS)
+		case opcode::op_c_div_iik: JAI_CELL_INT_OP(JAI_CELL_INT_CONST, if (!ints::try_div(left, right, out)) [[unlikely]] JAI_CELL_INT_MISS)
+		case opcode::op_c_mod_ii: JAI_CELL_INT_OP(JAI_CELL_INT_CELL, if (right == 0) [[unlikely]] JAI_CELL_INT_MISS out = ints::mod(left, right);)
+		case opcode::op_c_mod_iik: JAI_CELL_INT_OP(JAI_CELL_INT_CONST, out = ints::mod(left, right);)
+		case opcode::op_c_and_ii: JAI_CELL_INT_OP(JAI_CELL_INT_CELL, out = left & right;)
+		case opcode::op_c_and_iik: JAI_CELL_INT_OP(JAI_CELL_INT_CONST, out = left & right;)
+		case opcode::op_c_or_ii: JAI_CELL_INT_OP(JAI_CELL_INT_CELL, out = left | right;)
+		case opcode::op_c_or_iik: JAI_CELL_INT_OP(JAI_CELL_INT_CONST, out = left | right;)
+		case opcode::op_c_xor_ii: JAI_CELL_INT_OP(JAI_CELL_INT_CELL, out = left ^ right;)
+		case opcode::op_c_xor_iik: JAI_CELL_INT_OP(JAI_CELL_INT_CONST, out = left ^ right;)
+		case opcode::op_c_shl_ii: JAI_CELL_INT_OP(JAI_CELL_INT_CELL, if (right < 0 || right > 63) [[unlikely]] JAI_CELL_INT_MISS out = left << right;)
+		case opcode::op_c_shl_iik: JAI_CELL_INT_OP(JAI_CELL_INT_CONST, out = left << right;)
+		case opcode::op_c_shr_ii: JAI_CELL_INT_OP(JAI_CELL_INT_CELL, if (right < 0 || right > 63) [[unlikely]] JAI_CELL_INT_MISS out = left >> right;)
+		case opcode::op_c_shr_iik: JAI_CELL_INT_OP(JAI_CELL_INT_CONST, out = left >> right;)
 		case opcode::op_c_mov_p: hot.cells[ci.a].bits = hot.cells[ci.b].bits; hot.cells[ci.a].kind = hot.cells[ci.b].kind; hot.dirty->set(ci.a); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_sin_f: cell_put_float(hot, ci.a, detail::portable_math::sin(cell_float_of_bits(hot.cells[ci.b].bits))); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_gdepth: current_call_depth_ += ci.a ? 1 : -1; ++ip; JAI_CELL_NEXT;
@@ -8533,6 +8563,10 @@ next_frame:
 		case opcode::op_c_jle_iik: if ((static_cast<script_int>(hot.cells[ci.a].bits) <= hot.consts[ci.b].unchecked_int_payload()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
 		case opcode::op_c_jgt_iik: if ((static_cast<script_int>(hot.cells[ci.a].bits) > hot.consts[ci.b].unchecked_int_payload()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
 		case opcode::op_c_jge_iik: if ((static_cast<script_int>(hot.cells[ci.a].bits) >= hot.consts[ci.b].unchecked_int_payload()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
+		case opcode::op_c_jeq_ii: if ((hot.cells[ci.a].bits == hot.cells[ci.b].bits) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
+		case opcode::op_c_jne_ii: if ((hot.cells[ci.a].bits != hot.cells[ci.b].bits) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
+		case opcode::op_c_jeq_iik: if ((static_cast<script_int>(hot.cells[ci.a].bits) == hot.consts[ci.b].unchecked_int_payload()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
+		case opcode::op_c_jne_iik: if ((static_cast<script_int>(hot.cells[ci.a].bits) != hot.consts[ci.b].unchecked_int_payload()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
 		case opcode::op_c_cos_f: cell_put_float(hot, ci.a, detail::portable_math::cos(cell_float_of_bits(hot.cells[ci.b].bits))); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_sqrt_f: cell_put_float(hot, ci.a, std::sqrt(cell_float_of_bits(hot.cells[ci.b].bits))); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_mov_k: {

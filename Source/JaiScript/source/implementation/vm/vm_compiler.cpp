@@ -191,7 +191,7 @@ namespace {
 			case opcode::op_c_jeq_ii: case opcode::op_c_jne_ii: case opcode::op_c_jeq_iik: case opcode::op_c_jne_iik:
 			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f: case opcode::op_c_jtruth:
 			case opcode::op_graft_depth: case opcode::op_c_gdepth:
-			case opcode::op_c_load_f: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
+			case opcode::op_c_load_f: case opcode::op_c_load_i: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
 			case opcode::op_c_cfor_back:
@@ -436,7 +436,7 @@ namespace {
 			case opcode::op_c_jeq_ii: case opcode::op_c_jne_ii: case opcode::op_c_jeq_iik: case opcode::op_c_jne_iik:
 			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f: case opcode::op_c_jtruth:
 			case opcode::op_graft_depth: case opcode::op_c_gdepth:
-			case opcode::op_c_load_f: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
+			case opcode::op_c_load_f: case opcode::op_c_load_i: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
 			case opcode::op_c_cfor_back:
@@ -6775,7 +6775,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// pair's opcode and keeps its word, the second keeps both (a jump into it dispatches it alone); greedy left to right, a pair's second
 		// instruction starts no pair; the sites, the origins, the site rows and the liveness are per instruction and stand as they are
 		if (ir_passes_) {
-			// pinned reads and compares by kind: a float element read into a float cell through a pinned int index (no fold) and a pinned
+			// pinned reads and compares by kind: a float or an int element read into a cell of its kind through a pinned int index (no fold) and a pinned
 			// compare-jump name their operation in the opcode; the site rows, origins and liveness stand as they are
 			const uint8_t kf = static_cast<uint8_t>(script_value::TYPEID_FLOAT), ki = static_cast<uint8_t>(script_value::TYPEID_INT);
 			for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) {
@@ -6783,8 +6783,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (ins.op == opcode::op_c_load && ip2 < c.typed_sites.size()) {
 					const chunk::typed_site& site = c.typed_sites[ip2];
 					const uint32_t ix = site.operands[0];
-					if (site.fold_count == 0 && site.decl_expect == kf && site.cont_slot != chunk::k_iter_container && !(ix & k_typed_const_bit) && ix < loop.cells.size() && loop.cells[ix].kind == ki) {
-						ins.op = opcode::op_c_load_f; ins.b = ix;
+					if (site.fold_count == 0 && (site.decl_expect == kf || site.decl_expect == ki) && site.cont_slot != chunk::k_iter_container && !(ix & k_typed_const_bit) && ix < loop.cells.size() && loop.cells[ix].kind == ki) {
+						ins.op = site.decl_expect == kf ? opcode::op_c_load_f : opcode::op_c_load_i; ins.b = ix;
 					}
 					continue;
 				}

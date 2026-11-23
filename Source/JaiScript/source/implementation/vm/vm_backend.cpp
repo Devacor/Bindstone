@@ -7713,7 +7713,7 @@ static opcode cell_first_op(opcode op) {
 	switch (op) {
 	case opcode::op_c_arith2: case opcode::op_c_arith_load: return opcode::op_c_arith_p;
 	case opcode::op_c_jcmp2: return opcode::op_c_jcmp_p;
-	case opcode::op_c_load2: case opcode::op_c_load_jcmp: case opcode::op_c_load_f: return opcode::op_c_load;
+	case opcode::op_c_load2: case opcode::op_c_load_jcmp: case opcode::op_c_load_f: case opcode::op_c_load_i: return opcode::op_c_load;
 	default: return op;
 	}
 }
@@ -8469,7 +8469,7 @@ static bool cells_miss_plain(const vm_instruction& ci) {
 	case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 	case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
 	case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f:
-	case opcode::op_c_load_f: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
+	case opcode::op_c_load_f: case opcode::op_c_load_i: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
 		return true;
 	default:
 		return false;
@@ -8633,6 +8633,18 @@ next_frame:
 			const uint64_t at = static_cast<uint64_t>(hot.cells[ci.b].bits);
 			if (node && node->kind() == script_array::kind_t::f64 && at < node->floats().size()) { cell_put_float(hot, ci.a, node->floats()[at]); ++ip; JAI_CELL_NEXT; }
 			st = exec_c_load(f, ip, ci, regs, false);
+			break;
+		}
+		case opcode::op_c_load_i: {   // an int buffer's element in place; any other container kind or index runs C_LOAD's rows
+			const script_array* node = cs.site_node[ip - loop.copy_head];
+			const uint64_t at = static_cast<uint64_t>(hot.cells[ci.b].bits);
+			if (node && node->kind() == script_array::kind_t::i64 && at < node->ints().size()) {
+				const uint32_t dst = ci.a;
+				hot.cells[dst].bits = static_cast<int64_t>(node->ints()[at]); hot.cells[dst].kind = static_cast<uint8_t>(script_value::TYPEID_INT); hot.dirty->b[dst] = 1;
+				++ip;
+				JAI_CELL_NEXT;
+			}
+			{ size_t at = ip; st = exec_c_load_general(f, at, ci.a, ci.c, regs); ip = at; }
 			break;
 		}
 		case opcode::op_c_jlt_ff: if ((cell_float_of_bits(hot.cells[ci.a].bits) < cell_float_of_bits(hot.cells[ci.b].bits)) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
@@ -10835,6 +10847,12 @@ op_status vm_backend::exec_c_mload(frame& f, const vm_instruction& ins) {
 	if (!cell_land_fast(f, loop, ins.a, kind, bits)) return miss();
 	++f.ip;
 	return {};
+}
+
+// a pinned element read off its row runs the general read here: one copy for every pinned form, outside the block switch
+JAI_NOINLINE op_status vm_backend::exec_c_load_general(frame& f, size_t& ip, uint32_t dst, uint32_t original_ip, const cell_regs& cr) {
+	const vm_instruction general{opcode::op_c_load, dst, 0, original_ip};
+	return exec_c_load(f, ip, general, cr, false);
 }
 
 // the typed index store lane with its index and value read from cells, every container guard kept

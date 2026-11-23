@@ -116,6 +116,7 @@ namespace {
 		case opcode::op_c_jeq_ii: case opcode::op_c_jne_ii: case opcode::op_c_jeq_iik: case opcode::op_c_jne_iik:
 			return fam::cell_branch;
 		case opcode::op_c_load: case opcode::op_c_load_any: case opcode::op_c_load2: case opcode::op_c_load_jcmp: case opcode::op_c_index_store: case opcode::op_c_push:
+		case opcode::op_c_load_f: case opcode::op_c_load_i:
 		case opcode::op_c_size: case opcode::op_c_guard: case opcode::op_c_rebind:
 			return fam::cell_mem;
 		case opcode::op_c_mload: case opcode::op_c_mstore: return fam::cell_member;

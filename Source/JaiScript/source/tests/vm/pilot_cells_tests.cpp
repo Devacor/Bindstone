@@ -2219,6 +2219,51 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 				check_true(detail::engine_access::cells_counters(*e).entries - before > 100, "under the lever the block stays entered");
 			}
 		});
+		test("an_int_element_read_through_an_int_cell_runs_in_place_or_as_the_general_read", [this]() {
+			// int x = a[i] and a read inside an expression, through a pinned int index, are C_LOAD_I over an int buffer; an index out of bounds
+			// or below zero, a float buffer and an untyped array behind the same site (ints, then a float, then a string) are the general
+			// read's, with its conversions and its texts after the iterations before them
+			const std::string defs = R"(
+				function total(array<int>& a, int from, int to) -> string {
+					int s = 0; string out = "";
+					try { for (int i = from; i < to; ++i) { int x = a[i]; s += x; if (a[i] == 7) { s += 1000; } } } catch (err) { out = "throw:" + err; }
+					return out + "|" + to_string(s);
+				}
+				function widened(array<float>& a, int n) -> string { float s = 0.0; for (int i = 0; i < n; ++i) { float x = a[i]; s += x; } return to_string(s); }
+				function loose(var& a, int n) -> string {
+					int s = 0; string out = "";
+					try { for (int i = 0; i < n; ++i) { int x = a[i]; s += x; } } catch (err) { out = "throw:" + err; }
+					return out + "|" + to_string(s);
+				}
+				array<int> A = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8, 9, 7, 9, 3];
+				array<float> F = [0.5, 1.5, 2.5, 3.5];
+				var V = [1, 2, 3, 4.5, 5, "six", 7];
+			)";
+			auto run_with = [&](const std::string& script, bool passes, uint32_t miss_every) -> std::string {
+				auto e = jai::foundry::make_default_engine();
+				e->set_backend(backend_type::vm);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
+				if (!passes) { e->ir_passes(false); }
+				if (miss_every) { e->cells_miss_every(miss_every); }
+				try { return e->execute(script).to_string(); }
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			const char* calls[] = { "total(A, 0, 16);", "total(A, 10, 20);", "total(A, -2, 4);", "total(A, 5, 5);", "widened(F, 4);", "loose(A, 16);", "loose(V, 3);", "loose(V, 5);", "loose(V, 7);" };
+			for (const char* call : calls) {
+				const std::string script = defs + call;
+				both(script, "", call);
+				both(script, "", (std::string(call) + " proofs off").c_str(), false);
+				const std::string vm = run_on(true, script);
+				check_eq(vm, run_with(script, false, 0), std::string(call) + " the passes off");
+				if (!engine::miss_injection_available()) continue;
+				for (uint32_t every : { 1u, 2u, 3u, 7u }) { check_eq(vm, run_with(script, true, every), std::string(call) + " under an injected miss at every " + std::to_string(every)); }
+			}
+			check_eq(std::string("|1080"), run_on(true, defs + "total(A, 0, 16);"), "the reads' sum");
+			check_true(run_on(true, defs + "total(A, 10, 20);").rfind("throw:Array index 16 out of bounds", 0) == 0, "the general read's bounds text: " + run_on(true, defs + "total(A, 10, 20);"));
+			const std::string listing = listing_run(defs + "total(A, 0, 2);");
+			const size_t at = listing.find("== total");
+			check_true(at != std::string::npos && listing.find("C_LOAD_I ", at) != std::string::npos, "the reads name themselves: " + listing);
+		});
 		test("an_endless_loop_around_a_closed_loop_and_a_host_call_ends_at_every_step_budget", [this]() {
 			// jaiscript_fuzz seeds 5792 and 9516 (--max-depth 3) on the vm ran past the budget in most runs: the loop counter is reset inside the
 			// body (i /= 94; a loop storing 0 into it), the body holds a closed counted loop, a host call and a continue; whether the deadline
@@ -4274,7 +4319,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"array<int> A = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8, 9, 7, 9, 3]; array<int> B = [2, 7, 1, 8, 2, 8, 1, 8, 2, 8, 4, 5, 9, 0, 4, 5];\n"
 				"var chains = function(int n) { int acc = 0; for (int i = 0; i < n; i++) { int a = i * 3 * 5; int b = a * 2 ^ i; int c = (b & 1023) * 7; acc = acc ^ c * 3 * a; } return acc; };\n"
 				"var compares = function(int n) { int hits = 0; for (int i = 0; i < n; i++) { int p0 = A[i]; int p1 = B[i]; int p2 = A[15 - i]; int p3 = B[15 - i]; if (p0 == p1 && p0 == p2 && p0 == p3) { hits = hits + 100; continue; } if (p0 == p2 && p1 == p3) { hits = hits + 10; continue; } if (p0 > p1 && p2 > p3) { hits = hits + 1; } } return hits; };\n"
-				"var loads = function(int n) { int s = 0; for (int i = 0; i < n; i++) { int x = A[i]; int y = B[i]; int z = A[(i + 1) & 15]; int w = B[(i + 2) & 15]; s = s + x * y - z + w; } return s; };\n"
+				"var loads = function(int n) { int s = 0; for (int i = 0; i < n; i++) { int x = A[i]; int y = B[i]; int z = A[(i + 1) & 15]; int w = B[(i + 2) & 15]; int u = A[3]; int v = B[5]; s = s + x * y - z + w + u - v; } return s; };\n"
 				"var landing = function(int n) { int s = 0; for (int i = 0; i < n; i++) { if (i > 7) { s = s + 1; } s = s + i * 2; s = s - 1; } return s; };\n"
 				"var blows = function(int n) { int s = 0; string m = \"\"; try { for (int i = 0; i < n; i++) { int a = 4611686018427387900 + i; int b = a * 2 + a; s = s + b; } } catch (err) { m = err; } return m; };\n";
 			const std::string body = "string run() { return to_string(chains(16)) + \"|\" + to_string(compares(16)) + \"|\" + to_string(loads(16)) + \"|\" + to_string(landing(16)) + \"|\" + blows(3); }\nrun();";

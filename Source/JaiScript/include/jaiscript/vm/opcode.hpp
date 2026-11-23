@@ -362,9 +362,10 @@ namespace jai::vm {
         op_c_mul_ii, op_c_div_ii, op_c_mod_ii, op_c_and_ii, op_c_or_ii, op_c_xor_ii, op_c_shl_ii, op_c_shr_ii,
         op_c_mul_iik, op_c_div_iik, op_c_mod_iik, op_c_and_iik, op_c_or_iik, op_c_xor_iik, op_c_shl_iik, op_c_shr_iik,
         op_c_jeq_ii, op_c_jne_ii, op_c_jeq_iik, op_c_jne_iik,   // the pinned int equality compare-jumps, as op_c_jlt_ii
+        op_c_load_i,        // a = dst cell, b = the pinned int index cell, c = the original ip: C_LOAD of an int element into an int cell (an int buffer read in place; anything else runs C_LOAD), op_c_load_f's twin
     };
     inline constexpr size_t k_opcode_space = 512;   // tables indexed by opcode (the coverage report's) are this long
-    static_assert(static_cast<size_t>(opcode::op_c_jne_iik) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
+    static_assert(static_cast<size_t>(opcode::op_c_load_i) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
     static_assert(static_cast<uint32_t>(opcode::op_d_jne) < 256 && static_cast<uint32_t>(opcode::op_t_load) < 256, "a cell instruction packs a typed opcode above k_cell_op_shift in 8 bits");
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
@@ -730,6 +731,7 @@ namespace jai::vm {
             case opcode::op_sleep: return "SLEEP";
             case opcode::op_format_call: return "FORMAT_CALL";
             case opcode::op_c_load_f: return "C_LOAD_F";
+            case opcode::op_c_load_i: return "C_LOAD_I";
             case opcode::op_c_jlt_ff: return "C_JLT_FF";
             case opcode::op_c_jle_ff: return "C_JLE_FF";
             case opcode::op_c_jgt_ff: return "C_JGT_FF";

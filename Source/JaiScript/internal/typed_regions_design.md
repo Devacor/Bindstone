@@ -73,7 +73,8 @@ the instruction's miss; a constant form exists only for a divisor that is not ze
 compare-jumps (`op_c_jlt_ff`, `op_c_jge_iik`, `op_c_jeq_ii`, ...; an int equality a pair took keeps the packed
 `op_c_jcmp_p`, as a float equality does), the pinned moves `op_c_mov_p` / `op_c_mov_k`,
 `op_c_sin_f` / `op_c_cos_f` / `op_c_sqrt_f`, `op_c_jtruth` (a call's landed int, float or bool as a
-branch) and `op_c_load_f` (a float element read in place into a float cell).
+branch), `op_c_load_f` (a float element read in place into a float cell) and `op_c_load_i` (its int twin: an int
+buffer's element through a pinned int index cell into an int cell; any other container or index runs `op_c_load`).
 
 The compiler lowers in place after a callable's body is complete
 (`vm_compiler::lower_typed_ops`; the moves lower at emission, where the LOAD or CONST just

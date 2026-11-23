@@ -4666,11 +4666,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// alias until its last site); a push receiver is resolved at entry, never rebound
 		std::vector<uint32_t> boundary_locals;   // the named locals the body's boundary statements declare, the one a boundary defines as a cell aside (a named slot is one declaration's)
 		auto pinned_store = [&](size_t at) { return pinned_store_cand == cand && std::find(pinned_store_ips.begin(), pinned_store_ips.end(), static_cast<uint32_t>(at)) != pinned_store_ips.end(); };
+		// a container a boundary statement of this body declares exists only after that statement ran: no entry resolves it, so a site
+		// over it is the general form's (a boundary of its own, or part of the one that declares it)
+		auto boundary_local = [&](uint32_t slot) { return std::find(boundary_locals.begin(), boundary_locals.end(), slot) != boundary_locals.end(); };
 		auto alias_site = [&](ir_op& op, size_t at) -> bool {
 			if (op.container == k_invalid_u32) return true;
-			// a container a boundary statement of this body declares exists only after that statement ran: no entry resolves it, so a site
-			// over it is the general form's (a boundary of its own, or part of the one that declares it)
-			if (std::find(boundary_locals.begin(), boundary_locals.end(), op.container) != boundary_locals.end()) { refuse(chunk::cell_refusal_representation, at); return false; }
+			if (boundary_local(op.container)) { refuse(chunk::cell_refusal_representation, at); return false; }
 			if (!is_alias(op.container)) return true;
 			if (op.kind == ir::push) { refuse(chunk::cell_refusal_translation, at); return false; }
 			slot_read(op, op.container);
@@ -5147,13 +5148,27 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// the size of an array held in a frame slot or the environment: a site whose node the entry resolves, read live (a push inside the
 				// body grows it); an environment receiver's site carries the general instruction's ip (its lookup's cache slot) and its call site
 				const call_site& cs2 = c.call_sites[st.b];
-				if (st.c != 2 || (cs2.receiver_slot != k_invalid_u32 && cs2.receiver_slot >= k_typed_slot_mask)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (st.c != 2 || (cs2.receiver_slot != k_invalid_u32 && (cs2.receiver_slot >= k_typed_slot_mask || boundary_local(cs2.receiver_slot)))) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (!(ip + 1 < back && code[ip + 1].op == opcode::op_call_temp && code[ip + 1].a == st.a)) { refuse(chunk::cell_refusal_translation, ip); break; }
 				use_slot(st.a, kint, true, k_typed_dst_temp, nullptr, ip);
 				op.kind = ir::size; op.a = st.a; op.writes = st.a; op.container = cs2.receiver_slot; op.proto = st.b;
 				ops.push_back(op);
 				op = ir_op{}; op.kind = ir::skip;   // the call's landing: the block's size reads an array, a miss leaves at the size
 				++ip;
+			} else if (st.op == opcode::op_load && st.a != k_invalid_u32 && st.a < k_typed_slot_mask && st.c == 0 && ip + 2 < back && code[ip + 1].op == opcode::op_call_builtin && code[ip + 1].a == 0
+			           && (code[ip + 1].c >> 4) == 1 && (code[ip + 1].c & 15u) != 1 && (code[ip + 1].c & 15u) != 3 && code[ip + 1].b < c.call_sites.size()
+			           && c.call_sites[code[ip + 1].b].bi_array != builtin_method_registries::k_no_builtin && code[ip + 2].op == opcode::op_call_temp && code[ip + 2].a < k_typed_slot_mask
+			           && find_cell(st.a) < 0) {
+				// `r.size()` on a slot receiver whose kind the run picks (a reference local, a var) and no cell holds: the size site of the array
+				// the entry finds there, where the name is the array's builtin; any other receiver refuses the entry, and the general form makes the call
+				const uint32_t landed = code[ip + 2].a;
+				if (boundary_local(st.a)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				use_slot(landed, kint, true, k_typed_dst_temp, nullptr, ip);
+				op.kind = ir::size; op.a = landed; op.writes = landed; op.container = st.a; op.proto = code[ip + 1].b;
+				ops.push_back(op);
+				op = ir_op{}; op.kind = ir::skip;
+				ops.push_back(op);   // the call and its landing
+				ip += 2;
 			} else if (st.op == opcode::op_member_temp && member_base_slot_of(st.c) < k_typed_slot_mask && st.b < k_typed_slot_mask) {
 				// a member read of a frame-slot instance into a compiler temp (`p.x`): a load site whose container is the base slot and whose
 				// field the entry resolves once (the class, the plain field slot, no user accessor); the temp takes the field's own kind; a

@@ -236,7 +236,10 @@ chains, `!e`) translate to one `cmp` whose target word carries the jump's sense 
 since a NaN fails both `<` and `>=`); the pair's origin is the value instruction and the jump's copy is a
 placeholder no branch may target. A compare-headed loop's head is the span from the back edge's target to the
 compare: the condition's temps and reads translate like the body and run every iteration before the compare,
-and the compare's miss resumes at its own origin. `math` covers the pure one-argument intrinsics (`itrunc` and
+and the compare's miss resumes at its own origin. An array's size (`a.size()`) is a site read live: `SIZE_TEMP` where the
+checker proved the receiver an array (a frame slot or an environment name), and the general triple (`LOAD`, `CALL_BUILTIN`, `CALL_TEMP`)
+on a frame slot whose kind the run picks (a reference local, a `var` no cell holds) where the name is the array's builtin; the entry
+admits an array there and refuses any other receiver, whose call the general form makes. `math` covers the pure one-argument intrinsics (`itrunc` and
 `ifloor` land an int, `abs` keeps its argument's kind, `floor`, `ceil`, `sqrt`, `sin`, `cos`, `tan` and the
 angle conversions land a float). `x op= y` and `++x` / `x--` in statement position on a slot the typed
 lowering left general are `arith` with the compound landing, kinds at run time; a compound the checker

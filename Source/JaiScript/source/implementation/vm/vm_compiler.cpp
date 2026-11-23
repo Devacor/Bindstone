@@ -4662,8 +4662,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		};
 		// a site whose container is an alias reads the alias (the must-define dataflow holds it to a defined alias, the liveness keeps the
 		// alias until its last site); a push receiver is resolved at entry, never rebound
+		std::vector<uint32_t> boundary_locals;   // the named locals the body's boundary statements declare, the one a boundary defines as a cell aside (a named slot is one declaration's)
 		auto alias_site = [&](ir_op& op, size_t at) -> bool {
-			if (op.container == k_invalid_u32 || !is_alias(op.container)) return true;
+			if (op.container == k_invalid_u32) return true;
+			// a container a boundary statement of this body declares exists only after that statement ran: no entry resolves it, so a site
+			// over it is the general form's (a boundary of its own, or part of the one that declares it)
+			if (std::find(boundary_locals.begin(), boundary_locals.end(), op.container) != boundary_locals.end()) { refuse(chunk::cell_refusal_representation, at); return false; }
+			if (!is_alias(op.container)) return true;
 			if (op.kind == ir::push) { refuse(chunk::cell_refusal_translation, at); return false; }
 			slot_read(op, op.container);
 			return true;
@@ -5889,6 +5894,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					const int dk = find_cell(declared);
 					if (dk >= 0 && cells[dk].kind != 0 && cells[dk].kind != stamp_kind(declared_type)) { declared = k_invalid_u32; }
 				}
+				for (size_t j = snap_ip; j < end; ++j) {
+					const ast_node* sn = stmt_of(j);
+					if (!sn || sn->get_type() != node_type::variable_decl || (j > snap_ip && stmt_of(j - 1) == sn)) continue;
+					const size_t slot = static_cast<const variable_decl*>(sn)->slot_index;
+					if (slot < c.first_temp_slot && slot != declared && std::find(boundary_locals.begin(), boundary_locals.end(), static_cast<uint32_t>(slot)) == boundary_locals.end()) { boundary_locals.push_back(static_cast<uint32_t>(slot)); }
+				}
 				bool entered = false;   // the statement's start is a branch target: it stays a boundary of its own (the one before resumes into it)
 				for (size_t j = first; j <= back && !entered; ++j) {
 					const uint32_t tgt = branch_target(j);
@@ -5913,7 +5924,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		}
 		// a call the door cannot land (its consumer is not a cell destination) bails like a translation gap: the general form takes the iteration there
 		const bool door_refusal = refusal == chunk::cell_refusal_effect && refusal_ip < code.size() && code[refusal_ip].op == opcode::op_probe_callee;
-		if ((refusal == chunk::cell_refusal_translation || door_refusal) && snap_stmt && (snap_stmt->get_type() == node_type::expression_stmt || snap_stmt->get_type() == node_type::variable_decl || snap_stmt->get_type() == node_type::expression_decl)
+		// the end of a local no cell holds (a var, a container or an object a branch declares) bails too: its release may run a destructor, which
+		// the general form runs; a scope's own kill is its statement's first instruction, where the general form holds nothing pending
+		const bool kill_refusal = refusal == chunk::cell_refusal_effect && refusal_ip < code.size() && code[refusal_ip].op == opcode::op_kill_slot;
+		if ((refusal == chunk::cell_refusal_translation || door_refusal || kill_refusal) && snap_stmt &&
+		    (snap_stmt->get_type() == node_type::expression_stmt || snap_stmt->get_type() == node_type::variable_decl || snap_stmt->get_type() == node_type::expression_decl || (kill_refusal && snap_ip == refusal_ip))
 		    && snap_ip >= first && (line || counted != k_invalid_u32 || snap_ip > cmp_ip) && last_ip >= snap_ip && refusal_ip >= snap_ip && ops.size() >= snap_ip - first) {
 			const uint32_t arm_end = arm_end_of(snap_ip);
 			if (arm_end != k_invalid_u32 && refusal_ip < arm_end && last_ip < arm_end) {

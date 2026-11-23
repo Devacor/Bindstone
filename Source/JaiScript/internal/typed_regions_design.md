@@ -180,7 +180,9 @@ execution is a miss at its own origin with nothing observed first, standing for 
 the nearest target after the bail of a forward branch before it, since nothing between the two is reachable inside the block,
 so none of the arm's later locals leaves a cell for the entry guard), so the loop closes and the arm's frequency decides
 the cost (the miss-site table names the site); the head span, the back edge, the main path and the representation and
-effect classes refuse as before. A refusal names its class and its first offending instruction: `representation` (a value the model
+effect classes refuse as before. The end of a local no cell holds (the `KILL_SLOT` of a var, a container or an object a branch declares, at the
+branch's close or ahead of a `continue`) bails the same way where the kill is its statement's first instruction: the release may run a
+destructor, which is the general form's, and nothing of the statement is pending there. A refusal names its class and its first offending instruction: `representation` (a value the model
 does not take: strings, maps, members, getters, nested typed arrays, a local of two kinds), `effect` (a call,
 an exit, a binding write, a scope), `translation` (a supported core operation in an encoding the translation
 does not normalize yet: a coverage gap), `malformed` (a lifetime rule failed), `head` (a loop form the model
@@ -949,7 +951,9 @@ inside it and which holds no loop or frame control) does not refuse its loop: it
   general form continues from the end; an unwind drops the park.
 - **Spans.** Consecutive such statements are one boundary, and a statement whose end no trampoline can carry takes the next
   statement with it. A container the checker proves a map is no element site: a statement that reads or writes one is a boundary
-  rather than a site whose container the entry would refuse at run time.
+  rather than a site whose container the entry would refuse at run time. A named local a boundary statement of the body declares
+  (a container, a `var`, an object) is no site's container either: it exists only after its declaration ran, so no entry resolves
+  it, and a statement that reads or writes through it is a boundary (or refuses where it cannot be one, a loop's condition).
 - **Declarations.** A boundary statement that declares one `int`, `float` or `bool` local defines that local's cell: the resume
   reads it from its slot (its declared kind, or the block stays closed), so the statements after it read a defined cell rather
   than an adopted one the entry would have to guard.

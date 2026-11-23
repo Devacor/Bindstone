@@ -2100,6 +2100,53 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 				check_eq(run_on(true, script), run_with(script, false, 0), std::string(expr) + " the passes off");
 			}
 		});
+		test("a_block_that_misses_at_its_first_operations_every_entry_is_refused_for_the_call", [this]() {
+			// a loop whose string element read cannot land in a cell misses on every iteration it reaches the read: entered and missed sixteen
+			// times in a row with no back edge between, it is not entered again in that call, and the results are the general form's; a loop
+			// that gets past a back edge between such misses, and each new call, starts the count again
+			const std::string defs = R"(
+				function scan(array<string>& ks, array<int>& use, int n) -> int {
+					int s = 0;
+					for (int i = 0; i < n; ++i) {
+						if (use[i] != 0) { if (ks[i] == "k5") { s += 1; } } else { s += 2; }
+					}
+					return s;
+				}
+				array<string> KS = []; array<int> ALL = []; array<int> SOME = []; array<int> NONE = [];
+				for (int i = 0; i < 400; ++i) { KS.push("k" + to_string(i % 7)); ALL.push(1); SOME.push((i % 40) < 10 ? 1 : 0); NONE.push(0); }
+			)";
+			struct shape { const char* call; uint64_t least; uint64_t most; };
+			const shape shapes[] = {
+				{ "scan(KS, ALL, 400);", 16, 17 },                       // every entry misses at the read: the valve closes
+				{ "scan(KS, SOME, 400);", 100, 400 },                    // ten early misses, then thirty iterations in the block, ten times over: never refused
+				{ "scan(KS, NONE, 400);", 1, 2 },                        // no miss at all
+				{ "scan(KS, ALL, 40) + scan(KS, ALL, 40);", 32, 34 },    // each call counts for itself
+			};
+			for (const shape& sh : shapes) {
+				const std::string script = defs + sh.call;
+				const std::string interp = [&]() { auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::interpreter); stdlib::register_all(*e); return e->execute(script).to_string(); }();
+				auto e = jai::foundry::make_default_engine();
+				e->set_backend(backend_type::vm);
+				stdlib::register_all(*e);
+				e->execute(defs);
+				const uint64_t before = detail::engine_access::cells_counters(*e).entries;
+				const std::string vm = e->execute(sh.call).to_string();
+				const uint64_t entries = detail::engine_access::cells_counters(*e).entries - before;
+				check_eq(interp, vm, std::string(sh.call) + " both backends");
+				check_true(entries >= sh.least && entries <= sh.most, std::string(sh.call) + " entered " + std::to_string(entries) + " times, expected " + std::to_string(sh.least) + ".." + std::to_string(sh.most));
+			}
+			if (engine::miss_injection_available()) {
+				// the lever's misses are not the program's: a run under it refuses nothing, so every position stays exercised
+				auto e = jai::foundry::make_default_engine();
+				e->set_backend(backend_type::vm);
+				stdlib::register_all(*e);
+				e->cells_miss_every(1);
+				e->execute(defs);
+				const uint64_t before = detail::engine_access::cells_counters(*e).entries;
+				e->execute("scan(KS, NONE, 400);");
+				check_true(detail::engine_access::cells_counters(*e).entries - before > 100, "an injected miss at every instruction keeps the block entered");
+			}
+		});
 		test("an_endless_loop_around_a_closed_loop_and_a_host_call_ends_at_every_step_budget", [this]() {
 			// jaiscript_fuzz seeds 5792 and 9516 (--max-depth 3) on the vm ran past the budget in most runs: the loop counter is reset inside the
 			// body (i /= 94; a loop storing 0 into it), the body holds a closed counted loop, a host call and a continue; whether the deadline

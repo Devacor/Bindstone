@@ -7348,6 +7348,19 @@ void vm_backend::cells_push_inner_states(frame& f, const chunk::cell_loop& loop,
 	}
 }
 
+// a miss within a block's first operations with the budget's tick as the entry found it (no back edge ran, no call was made): entries that end
+// so k_cells_early_miss_limit times in a row ran the general form each time and paid an entry and a flush for it, so the loop is refused for the
+// rest of the call. The injection lever's misses are not the program's, so a run under it refuses nothing
+JAI_NOINLINE void vm_backend::cells_note_early_miss(frame& f, const chunk::cell_loop& loop) {
+#ifdef JAISCRIPT_MISS_INJECTION
+	if (miss_every_ != 0) return;
+#endif
+	cell_state& cs = *f.cells;
+	const uint32_t index = static_cast<uint32_t>(&loop - f.code->cell_loops.data());
+	if (cs.early_loop != index) { cs.early_loop = index; cs.early_misses = 0; }
+	if (++cs.early_misses >= k_cells_early_miss_limit && index < 64) { cs.refused_loops |= uint64_t(1) << index; }
+}
+
 // a container site refused the entry: the binding will not change within this call, so the loop is not tried again
 void vm_backend::refuse_container_site(frame& f, const chunk::cell_loop& loop) {
 	const size_t index = static_cast<size_t>(&loop - f.code->cell_loops.data());
@@ -7368,6 +7381,7 @@ void vm_backend::build_raw_window(frame& f) {
 }
 
 void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
+	if (f.cells->early_misses != 0 && budget_tick_ != f.cells->entry_tick && f.cells->early_loop == static_cast<uint32_t>(&loop - f.code->cell_loops.data())) { f.cells->early_misses = 0; }   // the loop got past a back edge
 	materialize_raw_window(f);
 	cells_writeback(f, loop);
 	f.cells->reset(loop.cells.size());
@@ -7549,6 +7563,7 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 	JAI_COVERAGE_MISS(f);
 	++cells_counters_.misses;	park_raw_callee(f, loop);   // a miss inside a raw call's argument zone: the general form resumes with the callee parked
 	(void)step;
+	if (budget_tick_ == f.cells->entry_tick && f.ip - loop.copy_head < k_cells_early_miss_span) { cells_note_early_miss(f, loop); }
 	if (loop.iter_proto != k_invalid_u32 && loop.iter_index_cell != k_invalid_u32 && !iter_states_.empty()) {
 		// the iteration state's next index: the element the block bound this iteration is done with (a miss inside the body), or is the
 		// general ITER_NEXT's to bind again (a miss at the head or its landing: an element the cells do not take, which refuses the
@@ -8420,6 +8435,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 	if (!loop.inline_sites.empty()) for (const uint32_t si : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) { JAI_CELLS_COUNT(1); if (!head) { refuse_container_site(f, loop); } return false; } }   // an inlined leaf's callee rebound: the general form's guard takes the fallback
 	for (const auto& ms : loop.math_alias_sites) { if (!math_alias_holds(f, ms)) { JAI_CELLS_COUNT(1); if (!head) { refuse_container_site(f, loop); } return false; } }   // a stdlib alias's name rebound: the general form makes the real call
 	++cells_counters_.entries;
+	cs.entry_tick = budget_tick_;
 	cs.env_loop = &loop;
 	if (resolved) { if (cells_entry_scope_free(f)) { cells_save_entry_row(f, loop); } } else if (row) { ++cells_counters_.row_entries; }
 	return true;
@@ -9461,7 +9477,7 @@ JAI_FORCEINLINE vm_backend::frame& vm_backend::raw_push(frame& f, const chunk::c
 	rec.f.side_bases_saved = false;
 	rec.f.pending_base = pending_callees_.size();
 	ncs.dirty.reset(body->max_cells);   // reset_call's, the loop set below
-	ncs.refused_loops = 0; ncs.park_at = k_invalid_u32; ncs.env_loop = nullptr;
+	ncs.refused_loops = 0; ncs.park_at = k_invalid_u32; ncs.env_loop = nullptr; ncs.early_misses = 0;
 	ncs.raw_landing = 0; ncs.lean_landing = 0; ncs.raw_call = 0;   // the entry the frame's cells_enter would have made
 	++current_call_depth_;
 	rec.f.code = body;

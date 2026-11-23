@@ -221,7 +221,9 @@ namespace jai {
         void mark_namespace_scope() noexcept { namespace_scope_ = true; }
 
         // A { } block's (or a loop's, a branch's) scope: a free function called from inside it sees the scope it was defined
-        // in, never the block's declarations (C++ scoping; a function defined inside the block keeps its caller's chain)
+        // in, never the block's declarations (C++ scoping; a function defined inside the block keeps its caller's chain). A
+        // lambda's capture environment and the call scope over it are marked the same way: a function the lambda calls never
+        // reads its captures
         bool block_scope() const noexcept { return block_scope_; }
         void set_block_scope(bool block) noexcept { block_scope_ = block; }
         // The environment a free function's call is parented on: the caller's, past the block scopes it stands in when

@@ -497,6 +497,26 @@ public:
             check_true(i_val.find("Cannot capture undefined variable 'nosuch'") != std::string::npos, i_val);
             check_eq(i_val, v_val, "byte-identical across backends");
         });
+
+        test("a_called_function_reads_the_programs_names_past_its_callers_captures", [expect]() {
+            const std::string reads = "int x = 5; function callee() { return x; }\n";
+            expect(reads + "function mk() { string x = \"cap\"; return [x]() { return to_string(callee()) + \"|\" + x; }; } mk()()", "5|cap", "a copied local");
+            expect(reads + "function mk() { string x = \"cap\"; return [&x]() { return to_string(callee()) + \"|\" + x; }; } mk()()", "5|cap", "a shared local");
+            expect(reads + "function run() { string x = \"cap\"; var f = () => to_string(callee()) + \"|\" + x; return f(); } run()", "5|cap", "an arrow function's shared local");
+            expect(reads + "string r = \"\"; { string x = \"blk\"; auto l = [x]() { return to_string(callee()) + \"|\" + x; }; r = l(); } r", "5|blk", "a block's local copied at top level");
+            expect(reads + "string r = \"\"; { string x = \"blk\"; auto l = [&]() { return to_string(callee()) + \"|\" + x; }; r = l();"
+                   " var g = function() { return to_string(callee()) + \"|\" + x; }; r += \"|\" + g(); } r", "5|blk|5|blk", "a block's local shared at top level");
+            expect("int level = 1; function read_level() { return level; } auto pinned = [level]() { return read_level() * 10 + level; }; level = 2; to_string(pinned())",
+                   "21", "a global pinned by [g] stays the lambda's own copy");
+            expect("int k = 3; function read_k() { return k; } auto f = [k = 40]() { return read_k() + k; }; to_string(f())", "43", "an init-capture");
+            expect("int hp = 9; function read_hp() { return hp; } class C { int v = 2; function go() { int hp = 70; var f = [this, hp]() { return read_hp() + hp + v; }; return f(); } }"
+                   " to_string(C().go())", "81", "a capture beside this");
+            expect("int total = 0; function bump() { total += 1; } function run() { int total = 100; var f = [&total]() { bump(); return total; }; return f(); }"
+                   " to_string(run()) + \"|\" + to_string(total)", "100|1", "a callee's store lands in the global");
+            expect("int x = 5; array<int> arr = [1, 2, 3]; int idx = 0; int two(int a, int b) { return a + b; } function callee() { return two(x, arr[idx]); } callee();\n"
+                   "string r = \"\"; { string x = \"blk\"; auto l = [x]() { return callee(); }; idx = 10; try { l(); } catch (e) { r = to_string(e); } idx = 0; r += \"|\" + to_string(l()); } r",
+                   "Array index 10 out of bounds for array of size 3|6", "an inlined call's arguments keep their order and their global");
+        });
     }
 };
 

@@ -14539,6 +14539,7 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 							// pooled-env recycle hazard for escaping handles)
 							auto global = engine_ ? engine_->get_global_environment() : nullptr;
 							captureEnv = std::make_shared<environment>(global, symbolizer_);
+							captureEnv->set_block_scope(true);
 						}
 						captureEnv->define(sym, detail::clone_for_capture(slot_val->deref()));
 					}
@@ -14926,6 +14927,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 		final_closure_env = std::move(method_env);
 	} else if (needs_capture_env) {
 		auto captureEnv = std::make_shared<environment>(detail::lambda_parent_scope(closure_env), symbolizer_);
+		captureEnv->set_block_scope(true);   // a function the lambda calls reads the program's names, never these (environment::call_parent)
 
 		if (captures_this && has_default_capture) {
 			auto result = environment_->get(this_id_);
@@ -15095,7 +15097,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 			auto carry = [&](uint64_t var_id) {
 				if (var_id == this_id_) { return; }
 				if (script_value* captured = captureEnv->get_own_value_ptr(var_id)) {
-					if (!carrier) { carrier = std::make_shared<environment>(method_env, symbolizer_); }
+					if (!carrier) { carrier = std::make_shared<environment>(method_env, symbolizer_); carrier->set_block_scope(true); }
 					carrier->define(var_id, *captured);
 				}
 			};
@@ -23603,6 +23605,7 @@ void vm_backend::setup_callee_env(const script_defined_function& function, call_
 				function.closure_env->get_parent(), function.closure_env->get_class_definition());
 		} else {
 			environment_ = acquire_scope_env(function.closure_env);
+			if (function.closure_env->block_scope()) { environment_->set_block_scope(true); }   // a capture environment's call scope: its callees read past both
 		}
 	} else {
 		environment_ = acquire_scope_env(environment::past_idle_call_scopes(environment::call_parent(prev_env, function.block_defined), function.block_defined));   // past the caller's block scopes (KEEP BYTE-PARALLEL with the interpreter's call_function)

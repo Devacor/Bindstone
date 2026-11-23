@@ -5127,6 +5127,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         // the capture environment holds every captured name itself, so it parents on the program scope, never on the creating
         // frame's scope (an escaping closure would otherwise keep that frame's whole chain)
         auto captureEnv = std::make_shared<environment>(detail::lambda_parent_scope(closure_env), string_symbolizer_);
+        captureEnv->set_block_scope(true);   // a function the lambda calls reads the program's names, never these (environment::call_parent)
         
         if (captures_this && has_default_capture) {
             auto result = environment_->get(this_id);
@@ -5310,7 +5311,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             auto carry = [&](uint64_t var_id) {
                 if (var_id == this_id) { return; }
                 if (script_value* captured = captureEnv->get_own_value_ptr(var_id)) {
-                    if (!carrier) { carrier = std::make_shared<environment>(method_env, string_symbolizer_); }
+                    if (!carrier) { carrier = std::make_shared<environment>(method_env, string_symbolizer_); carrier->set_block_scope(true); }
                     carrier->define(var_id, *captured);
                 }
             };
@@ -7719,6 +7720,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
                             if (!captureEnv) {
                                 // parented on the globals, as a lambda's capture environment is
                                 captureEnv = std::make_shared<environment>(get_global_environment(), string_symbolizer_);
+                            captureEnv->set_block_scope(true);
                             }
                             captureEnv->define(sym, detail::clone_for_capture(slot_val->deref()));
                         }
@@ -9190,6 +9192,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             // Regular closure
             call_stack_[frame_index].closure_env = function.closure_env;
             environment_ = std::make_shared<environment>(function.closure_env, env_symbolizer_);
+            if (function.closure_env->block_scope()) { environment_->set_block_scope(true); }   // a capture environment's call scope: its callees read past both
             // A closure created inside a method sees that method's class scope
             // (lexically, through its captured chain) between its own scopes and
             // the globals - the boundary env's OWN storage (the enclosing call's

@@ -72,6 +72,11 @@ This holds for `[=]`, `[&]` and capture-free `[]`: all take no
 global, so a global named in the body is read, and written, when the lambda runs. `[&g]` is the
 same as not listing `g`.
 
+A function a closure calls is no part of the closure: it reads the program's names, never the closure's captures. A free function's
+call is parented on its caller's scopes (`environment::call_parent`), which walks past a closure's capture environment and the call
+scope over it as it walks past a block scope (both carry the block-scope mark), so a capture that shares a global's name, a `[g]`
+copy or an init-capture among them, is the lambda's alone and the function it calls reads and writes the global.
+
 To pin a global's current value into a closure, capture it explicitly — `[self](){ ... }` copies
 the global at creation (legal here; ill-formed in C++) — or copy it through an init-capture.
 

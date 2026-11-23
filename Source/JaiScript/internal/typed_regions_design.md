@@ -577,6 +577,8 @@ A landing after a call re-reads the environment cells and re-borrows the string 
 `string_candidates`, recorded when the block is built) instead of scanning every cell twice; a block of a hundred cells landing
 once per column paid the scan on every column.
 
+The any-kind arithmetic (`op_c_arith_any`) runs its numeric rows in the switch: `+ - * /` over two int or float cells or constants, the int to float promotion included, landing where the result's kind lands as it is (a compiler value of that contract, a local already holding that kind); every other operator, kind and landing is its executor's, out of line. The kinds are read at every execution, so a `var` and a mixed int and float expression pay two kind tests, not a call.
+
 The block switch is one large function: each executor kept inline grows the switch, and past a point the compiler stops inlining the small helpers (buffer sizes, the dirty mask) into the hot cases. Executors stay inline or out of line by measured whole-program frequency: the move (`C_MOV`) and the head compare (`C_CMP_P`) stay inline, and the push runs out of line with its common row, an int or float cell into a frame-slot array's own typed buffer, kept in the switch. The switch has one dispatch point, not a dispatch tail replicated into every case.
 
 ### Fused cell pairs

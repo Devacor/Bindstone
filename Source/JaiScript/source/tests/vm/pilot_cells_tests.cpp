@@ -2412,6 +2412,61 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 				check_eq(unfused_hits, fused_hits, "the iterations before budget " + std::to_string(budget));
 			}
 		});
+		test("the_any_kind_arithmetic_lands_ints_floats_and_their_mixes_as_the_general_operation_does", [this]() {
+			// + - * / over a var and typed ints and floats in every pairing, an int result into a float local (the widening), a var that turns
+			// float in the loop, an int overflow, an int division by zero and a float one: the same on both backends, proofs on and off, the
+			// passes off and under an injected miss
+			const std::string defs = R"(
+				function mix(int n) -> string {
+					var v = 1; float f = 0.5; int k = 3; float acc = 0.0;
+					for (int i = 1; i <= n; ++i) {
+						v = v + i; f = f * i + k; acc = acc + v / i - f * 0.25;
+						float w = i * 0.5; acc = acc + w;
+						float h = v - k; acc = acc - h / 3;
+						if (i == 4) { v = v * 1.5; }
+					}
+					return to_string(acc) + " " + to_string(v) + " " + reflect::type_of(v);
+				}
+				function edge(int which, int n) -> string {
+					var v = 1; var z = 0; int s = 0; string out = "";
+					try {
+						for (int i = 0; i < n; ++i) {
+							if (which == 0) { v = v * 3037000500; }
+							if (which == 1) { var q = v / z; s += 1; }
+							if (which == 2) { var d = 1.5 / z; s += 1; out = to_string(d); }
+							if (which == 3) { v = v - 9223372036854775807; v = v - 9; }
+							if (which == 4) { var d = v + 0.5; v = d * 2; s += 1; }
+						}
+					} catch (err) { out = "throw:" + err; }
+					return out + "|" + to_string(s) + "|" + to_string(v);
+				}
+			)";
+			auto run_with = [&](const std::string& script, bool passes, uint32_t miss_every) -> std::string {
+				auto e = jai::foundry::make_default_engine();
+				e->set_backend(backend_type::vm);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
+				if (!passes) { e->ir_passes(false); }
+				if (miss_every) { e->cells_miss_every(miss_every); }
+				try { return e->execute(script).to_string(); }
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			struct row { const char* call; const char* holds; };
+			const row rows[] = {
+				{ "mix(9);", " float" }, { "mix(3);", " int" }, { "mix(0);", "0" },
+				{ "edge(0, 4);", "throw:Integer overflow in '*'" }, { "edge(1, 3);", "throw:Division by zero" }, { "edge(2, 3);", "|3|" },
+				{ "edge(3, 3);", "throw:Integer overflow in '-'" }, { "edge(4, 3);", "|3|" },
+			};
+			for (const row& r : rows) {
+				const std::string script = defs + r.call;
+				both(script, "", r.call);
+				both(script, "", (std::string(r.call) + " proofs off").c_str(), false);
+				const std::string vm = run_on(true, script);
+				check_true(vm.find(r.holds) != std::string::npos, std::string(r.call) + " gives " + vm);
+				check_eq(vm, run_with(script, false, 0), std::string(r.call) + " the passes off");
+				if (!engine::miss_injection_available()) continue;
+				for (uint32_t every : { 1u, 2u, 3u, 7u }) { check_eq(vm, run_with(script, true, every), std::string(r.call) + " under an injected miss at every " + std::to_string(every)); }
+			}
+		});
 		test("an_endless_loop_around_a_closed_loop_and_a_host_call_ends_at_every_step_budget", [this]() {
 			// jaiscript_fuzz seeds 5792 and 9516 (--max-depth 3) on the vm ran past the budget in most runs: the loop counter is reset inside the
 			// body (i /= 94; a loop storing 0 into it), the body holds a closed counted loop, a host call and a continue; whether the deadline

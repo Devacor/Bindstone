@@ -8624,7 +8624,41 @@ next_frame:
 			JAI_CELL_NEXT;
 		}
 		case opcode::op_c_guard: f.ip = ip; st = exec_c_guard(f, ci, regs); ip = f.ip; break;
-		case opcode::op_c_arith_any: { size_t at = ip; st = exec_c_arith_any(f, at, ci, regs); ip = at; } break;
+		case opcode::op_c_arith_any: {
+			// + - * / over two int or float cells or constants, landing where the result's kind lands as it is: the kernel's int row, its float row
+			// and its int to float promotion here (the kinds are read every time); any other operator, kind or landing is exec_c_arith_any's
+			const token_type op = static_cast<token_type>(ci.a >> k_cell_op_shift);
+			if (op == token_type::plus || op == token_type::minus || op == token_type::star || op == token_type::slash) {
+				const uint8_t ki = static_cast<uint8_t>(script_value::TYPEID_INT), kf = static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+				uint8_t lk, rk; int64_t lb, rb;
+				if (ci.b & k_typed_const_bit) { const script_value& lc = hot.consts[ci.b & ~k_typed_const_bit]; lk = static_cast<uint8_t>(lc.raw_storage_index()); lb = lc.unchecked_payload_bits(); }
+				else { lk = hot.cells[ci.b].kind; lb = hot.cells[ci.b].bits; }
+				if (ci.c & k_typed_const_bit) { const script_value& rc = hot.consts[ci.c & ~k_typed_const_bit]; rk = static_cast<uint8_t>(rc.raw_storage_index()); rb = rc.unchecked_payload_bits(); }
+				else { rk = hot.cells[ci.c].kind; rb = hot.cells[ci.c].bits; }
+				if ((lk == ki || lk == kf) && (rk == ki || rk == kf)) {
+					const uint32_t dk = ci.a & k_cell_index_mask;
+					uint8_t kind; int64_t out; bool ok = true;
+					if (lk == ki && rk == ki) {
+						const script_int a = static_cast<script_int>(lb), b = static_cast<script_int>(rb);
+						script_int r = 0;
+						ok = op == token_type::plus ? ints::try_add(a, b, r) : op == token_type::minus ? ints::try_sub(a, b, r) : op == token_type::star ? ints::try_mul(a, b, r) : (b != 0 && ints::try_div(a, b, r));
+						kind = ki; out = static_cast<int64_t>(r);
+					} else {
+						const script_float a = lk == ki ? static_cast<script_float>(static_cast<script_int>(lb)) : cell_float_of_bits(lb);
+						const script_float b = rk == ki ? static_cast<script_float>(static_cast<script_int>(rb)) : cell_float_of_bits(rb);
+						kind = kf; out = cell_bits_of_float(op == token_type::plus ? a + b : op == token_type::minus ? a - b : op == token_type::star ? a * b : a / b);
+					}
+					const chunk::cell_loop::cell& cl = loop.cells[dk];
+					if (ok && (cl.temp ? (cl.kind == 0 || cl.kind == kind) : hot.cells[dk].kind == kind)) {
+						JAI_CELLS_COUNT(7);
+						hot.cells[dk].bits = out; hot.cells[dk].kind = kind; hot.dirty->b[dk] = 1;
+						++ip;
+						JAI_CELL_NEXT;
+					}
+				}
+			}
+			size_t at = ip; st = exec_c_arith_any(f, at, ci, regs); ip = at;
+		} break;
 		case opcode::op_c_mov: st = exec_c_mov(f, ip, ci, regs); break;
 		case opcode::op_c_add_ff: cell_put_float(hot, ci.a, cell_float_of_bits(hot.cells[ci.b].bits) + cell_float_of_bits(hot.cells[ci.c].bits)); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_sub_ff: cell_put_float(hot, ci.a, cell_float_of_bits(hot.cells[ci.b].bits) - cell_float_of_bits(hot.cells[ci.c].bits)); ++ip; JAI_CELL_NEXT;

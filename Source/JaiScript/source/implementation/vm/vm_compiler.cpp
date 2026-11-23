@@ -196,7 +196,7 @@ namespace {
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
 			case opcode::op_c_cfor_back:
-			case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any:
+			case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any: case opcode::op_c_step_back:
 			case opcode::op_c_cmp_any:
 			case opcode::op_c_jcmp_any:
 			case opcode::op_c_neg:
@@ -442,7 +442,7 @@ namespace {
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
 			case opcode::op_c_cfor_back:
-			case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any:
+			case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any: case opcode::op_c_step_back:
 			case opcode::op_c_cmp_any:
 			case opcode::op_c_jcmp_any:
 			case opcode::op_c_neg:
@@ -6748,13 +6748,18 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			}
 			// a compare-headed loop that steps the compared var last (a for's update, a while's trailing `i += k`): the step takes the fused opcode
 			// over the back edge's poll and the head's compare, which stay for the first pass and for a spent poll. The block's own head compare
-			// leaves the block, so its fused exit is a C_EXIT that flushes what the head's row flushes
+			// leaves the block, so its fused exit is a C_EXIT that flushes what the head's row flushes. A head that is more than that compare
+			// (a bound computed there, a test of another value) leaves the step and the back edge alone as one instruction, C_STEP_BACK
 			for (uint32_t ip2 = loop.copy_head + 1; ip2 < loop.copy_back; ++ip2) {
 				const vm_instruction step = code[ip2], edge = code[ip2 + 1];
 				if ((step.op != opcode::op_c_add_iik && step.op != opcode::op_c_sub_iik) || step.a != step.b || step.a > k_cell_for_var_mask) continue;
 				const bool own = edge.op == opcode::op_c_back && ip2 + 1 == loop.copy_back;
 				if (!own && !(edge.op == opcode::op_c_jump && edge.c == 1 && edge.a >= loop.copy_head && edge.a < ip2)) continue;
+				int32_t step_byte = 0;
+				if (!counted_step_byte(c.constants[step.c], step.op == opcode::op_c_sub_iik, step_byte)) continue;
 				const uint32_t head_at = own ? loop.copy_head : edge.a;
+				const uint32_t stepped = step.a | (static_cast<uint32_t>(static_cast<uint8_t>(step_byte)) << k_cell_for_step_shift);
+				code[ip2] = vm_instruction{opcode::op_c_step_back, stepped, 0, head_at};
 				const vm_instruction test = code[head_at];
 				if (test.op != (own ? opcode::op_c_cmp_p : opcode::op_c_jcmp_p) || (!own && (test.c & 0x80000000u))) continue;
 				const opcode packed = static_cast<opcode>(test.a >> k_cell_op_shift);
@@ -6765,12 +6770,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					if (end != step.a) continue;
 					end = test.a & k_cell_index_mask; tok = mirror_tok(tok);
 				}
-				int32_t step_byte = 0;
-				if (!counted_step_byte(c.constants[step.c], step.op == opcode::op_c_sub_iik, step_byte)) continue;
 				const uint32_t exit_at_copy = own ? static_cast<uint32_t>(code.size()) : (test.c & 0x7FFFFFFFu);
 				if (exit_at_copy <= ip2 || exit_at_copy - ip2 > 0xFFFFu) continue;
 				if (own) { append(vm_instruction{opcode::op_c_exit, test.c, 0, 0}, back); loop.live_temps.push_back(loop.live_temps[0]); }
-				code[ip2] = vm_instruction{counted_back_edge_op(tok, (end & k_typed_const_bit) != 0), step.a | (static_cast<uint32_t>(static_cast<uint8_t>(step_byte)) << k_cell_for_step_shift) | ((exit_at_copy - ip2) << k_cell_for_exit_shift), end & ~k_typed_const_bit, head_at + 1};
+				code[ip2] = vm_instruction{counted_back_edge_op(tok, (end & k_typed_const_bit) != 0), stepped | ((exit_at_copy - ip2) << k_cell_for_exit_shift), end & ~k_typed_const_bit, head_at + 1};
 			}
 		}
 		// fused pairs: the block loop runs an adjacent pair of plain instructions as one dispatch; the first instruction takes the

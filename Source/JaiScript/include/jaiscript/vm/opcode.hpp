@@ -370,9 +370,11 @@ namespace jai::vm {
         // an element store of a pinned cell through a pinned int index cell: a = the store's proto, b = index cell | value cell << k_cell_store_value_shift, c = the
         // original ip (C_INDEX_STORE's a and c); a float into a float buffer (f) or an int into an int buffer (i) in place, anything else C_INDEX_STORE's rows
         op_c_store_f, op_c_store_i,
+        op_c_step_back,     // a = var cell | step << 8 (a signed byte), c = the head's copy ip: a loop's last step and the back edge after it (the poll, the jump) as one
+                            // instruction, where the head is more than a compare of the var (op_c_for_* otherwise); off its fast row the step runs alone and the back edge after it
     };
     inline constexpr size_t k_opcode_space = 512;   // tables indexed by opcode (the coverage report's) are this long
-    static_assert(static_cast<size_t>(opcode::op_c_store_i) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
+    static_assert(static_cast<size_t>(opcode::op_c_step_back) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
     static_assert(static_cast<uint32_t>(opcode::op_d_jne) < 256 && static_cast<uint32_t>(opcode::op_t_load) < 256, "a cell instruction packs a typed opcode above k_cell_op_shift in 8 bits");
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
@@ -772,6 +774,7 @@ namespace jai::vm {
             case opcode::op_c_for_gtk: return "C_FOR_GTK";
             case opcode::op_c_for_gek: return "C_FOR_GEK";
             case opcode::op_c_for_any: return "C_FOR_ANY";
+            case opcode::op_c_step_back: return "C_STEP_BACK";
             case opcode::op_c_mul_ii: return "C_MUL_II";
             case opcode::op_c_div_ii: return "C_DIV_II";
             case opcode::op_c_mod_ii: return "C_MOD_II";

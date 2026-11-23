@@ -8465,7 +8465,7 @@ static bool cells_miss_plain(const vm_instruction& ci) {
 	case opcode::op_c_append: case opcode::op_c_text_append: case opcode::op_c_push: case opcode::op_c_mload: case opcode::op_c_mstore: case opcode::op_c_size:
 	case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp:
 	case opcode::op_c_ret:
-	case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any:
+	case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any: case opcode::op_c_step_back:
 	case opcode::op_c_mul_ii: case opcode::op_c_div_ii: case opcode::op_c_mod_ii: case opcode::op_c_and_ii: case opcode::op_c_or_ii: case opcode::op_c_xor_ii: case opcode::op_c_shl_ii: case opcode::op_c_shr_ii: case opcode::op_c_mul_iik: case opcode::op_c_div_iik: case opcode::op_c_mod_iik: case opcode::op_c_and_iik: case opcode::op_c_or_iik: case opcode::op_c_xor_iik: case opcode::op_c_shl_iik: case opcode::op_c_shr_iik:
 	case opcode::op_c_jeq_ii: case opcode::op_c_jne_ii: case opcode::op_c_jeq_iik: case opcode::op_c_jne_iik:
 	case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
@@ -8727,6 +8727,15 @@ next_frame:
 		case opcode::op_c_for_lek: JAI_CELL_FOR(<=, hot.consts[ci.b].unchecked_int_payload());
 		case opcode::op_c_for_gtk: JAI_CELL_FOR(>, hot.consts[ci.b].unchecked_int_payload());
 		case opcode::op_c_for_gek: JAI_CELL_FOR(>=, hot.consts[ci.b].unchecked_int_payload());
+		case opcode::op_c_step_back: {   // JAI_CELL_FOR without its compare: the step, the poll, the head
+			const uint32_t var = ci.a & k_cell_for_var_mask;
+			const script_int from = static_cast<script_int>(hot.cells[var].bits);
+			if (!ints::small_step_fits(from) || budget_tick_ >= 1023 || limits_->memory_used > limits_->memory_limit || debug_hook_) [[unlikely]] goto cell_for_general;
+			++budget_tick_;
+			hot.cells[var].bits = static_cast<int64_t>(ints::wadd(from, static_cast<int8_t>(ci.a >> k_cell_for_step_shift))); hot.dirty->b[var] = 1;
+			ip = ci.c;
+			JAI_CELL_NEXT;
+		}
 		case opcode::op_c_for_any:
 		cell_for_general:   // a fused back edge's spent poll or overflow lands here too
 			f.ip = ip; st = exec_c_for_general(f, ci, regs); ip = f.ip; break;

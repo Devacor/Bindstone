@@ -21,6 +21,8 @@ public:
 		std::vector<std::pair<std::string, std::string>> files;   // written before the step runs (a second write of a name is an edit)
 		std::string source;                                       // executed as a string
 		std::string file;                                         // or executed as this file of the directory
+		bool fresh = false;                                       // a new engine runs this step and the ones after it, in the same directory
+		std::vector<std::string> removed;                         // files deleted before the step runs
 	};
 	struct outcome {
 		std::string text[4];
@@ -43,23 +45,30 @@ public:
 		outcome result;
 		for (int way = 0; way < 4; ++way) {
 			const std::filesystem::path dir = directory(name, way);
-			auto e = jai::foundry::make_default_engine();
-			e->set_backend(way < 2 ? jai::backend_type::interpreter : jai::backend_type::vm);
-			e->type_proofs(way % 2 == 0);
-			e->execution_budget(0);
-			e->import_recheck_interval(0);
-			jai::stdlib::register_all(e);
-			e->add_include_path(dir.string());
-			e->add_global("DIR", e->make_value(dir.generic_string()));
-			// the program's own edit of one of its files, for a reload in the middle of a loop
-			e->add_function("edit_file", [dir](const std::string& file, const std::string& text) { write(dir / file, text); });
-			e->add_function("copy_file", [dir](const std::string& to, const std::string& from) {
-				std::ifstream in(dir / from, std::ios::binary);
-				write(dir / to, std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()));
-			});
-			if (way == 2) { e->disassembly_sink([&result](const std::string& listing, const std::string&) { result.listing += listing; result.listing += '\n'; }); }
+			const auto engine_of_the_way = [&result, &dir, way]() {
+				auto e = jai::foundry::make_default_engine();
+				e->set_backend(way < 2 ? jai::backend_type::interpreter : jai::backend_type::vm);
+				e->type_proofs(way % 2 == 0);
+				e->execution_budget(0);
+				e->import_recheck_interval(0);
+				e->jaibite_cache(true);
+				jai::stdlib::register_all(e);
+				e->add_include_path(dir.string());
+				e->add_global("DIR", e->make_value(dir.generic_string()));
+				// the program's own edit of one of its files, for a reload in the middle of a loop
+				e->add_function("edit_file", [dir](const std::string& file, const std::string& text) { write(dir / file, text); });
+				e->add_function("copy_file", [dir](const std::string& to, const std::string& from) {
+					std::ifstream in(dir / from, std::ios::binary);
+					write(dir / to, std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()));
+				});
+				if (way == 2) { e->disassembly_sink([&result](const std::string& listing, const std::string&) { result.listing += listing; result.listing += '\n'; }); }
+				return e;
+			};
+			auto e = engine_of_the_way();
 			std::string& text = result.text[way];
 			for (const step& s : steps) {
+				if (s.fresh) { e = engine_of_the_way(); }
+				for (const std::string& gone : s.removed) { std::filesystem::remove(dir / gone); }
 				for (const auto& [file, body] : s.files) { write(dir / file, body); }
 				if (!text.empty()) { text += " / "; }
 				try {
@@ -214,6 +223,13 @@ public:
 				"string r = tick() + \",\" + to_string(sum_all());\nfor (int k = 0; k < 20; k++) { sum_all(); }\nr + \",\" + to_string(SCALE);\n";
 			expect(run("bite_absent", {{{}, source, ""}}, true), "absent,20.0,2.0", "the module is not there");
 			expect(run("bite_present", {{{{"live.jai", "SCALE = 4.0;\n"}}, source, ""}}, true), "live,40.0,4.0", "the module stores into the program's global");
+			// a file's cached bite: the first engine writes it beside the file, the next two load it, one with the module gone, one with it back
+			const outcome cached = run("bite_cache", {
+				{{{"live.jai", "SCALE = 4.0;\n"}, {"main.jai", source}}, "", "main.jai"},
+				{{}, "", "main.jai", true, {"live.jai"}},
+				{{{"live.jai", "SCALE = 8.0;\n"}}, "", "main.jai", true},
+			});
+			expect(cached, "live,40.0,4.0 / absent,20.0,2.0 / live,80.0,8.0", "one file, three engines");
 		});
 
 		test("a_unit_with_imports_keeps_the_grafts_and_field_reads_of_its_methods", [this]() {

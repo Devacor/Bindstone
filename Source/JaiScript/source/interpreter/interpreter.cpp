@@ -2900,12 +2900,11 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             call_stack_.back().set_local(decl->slot_index, std::move(value));
         } else {
             // Global variable or no slot assigned - use environment
+            const bool redeclared = !parallel_worker_ && environment_->is_program_scope() && environment_->get_own_value_ptr(decl->name_id) != nullptr;   // vm parity: define_decl_value
             if (!environment_->define_variable(decl->name_id, std::move(value))) [[unlikely]] { return detail::inline_redefinition(*string_symbolizer_, decl->name_id, decl); }
             if (decl->is_inline) [[unlikely]] { environment_->share(decl->name_id); }
-            if (environment_->is_program_scope()) {
-                engine_->mark_const_cell(environment_->get_env_var_ptr(decl->name_id), decl->is_const);
-                if (!parallel_worker_) { engine_->bump_definition_epoch(); }   // vm parity: define_decl_value
-            }
+            if (environment_->is_program_scope()) { engine_->mark_const_cell(environment_->get_env_var_ptr(decl->name_id), decl->is_const); }
+            if (redeclared) { engine_->bump_definition_epoch(); }
         }
         return {};
     };
@@ -10484,10 +10483,10 @@ checked_result<void> interpreter::visit_destructuring_decl_t(destructuring_decl*
 
         if (decl->slot_indices[i] != SIZE_MAX && !call_stack_.empty()) {
             call_stack_.back().set_local(decl->slot_indices[i], std::move(val));
-        } else if (!environment_->define_variable(decl->names[i].second, std::move(val))) [[unlikely]] {
-            return detail::inline_redefinition(*string_symbolizer_, decl->names[i].second, nullptr);
-        } else if (environment_->is_program_scope() && !parallel_worker_) {
-            engine_->bump_definition_epoch();   // vm parity: define_decl_value
+        } else {
+            const bool redeclared = !parallel_worker_ && environment_->is_program_scope() && environment_->get_own_value_ptr(decl->names[i].second) != nullptr;   // vm parity: define_decl_value
+            if (!environment_->define_variable(decl->names[i].second, std::move(val))) [[unlikely]] { return detail::inline_redefinition(*string_symbolizer_, decl->names[i].second, nullptr); }
+            if (redeclared) { engine_->bump_definition_epoch(); }
         }
     }
 

@@ -192,7 +192,7 @@ includes, a path computed at run time included, because each thing a unit loaded
 | the loaded unit | what changes | what answers it |
 |---|---|---|
 | declares a name the program does not | nothing the checker typed: the use is undeclared (a warning where a path is computed) | no proof exists |
-| an import declares a name another unit declares | a cell of its own; code keeps the cell it resolved (`internal/global_shadowing.md`), and code run or compiled later resolves the newest | every program-scope variable declaration moves the definition epoch, and the record is checked against the cell the frame resolves |
+| an import declares a name another unit declares | a cell of its own; code keeps the cell it resolved (`internal/global_shadowing.md`), and code run or compiled later resolves the newest | a declaration of a name the program scope already holds moves the definition epoch, and the record is checked against the cell the frame resolves |
 | a top-level include, or a module's re-run, declares a name of its unit again with another type | the cell changes type in place | the same declaration moves the definition epoch |
 | redefines a function: another body, other parameters, another return type | the name binds another function | the graft's guard reads the callee's identity at every entry; a `k_function` record's return type is checked per definition epoch, which a function definition moves; a reload is checked against its users before it applies |
 | redefines a class | fields retype, live instances migrate | under imports no argument proof rests on a member (`certain_argument`); member sites keep their class shape and method epochs |

@@ -4231,7 +4231,8 @@ private:
     // a program-scope name whose declared type changes only when its declaring unit runs again: this unit's own typed top-level
     // declaration, or the one spelled declaration another unit of the program makes, of any type a proof may rest on; a name a field
     // could shadow (inside a class) or a scope's own include could declare ahead of it (has_scoped_include_) stays uncertain. A unit loaded
-    // at run time declares into the program scope, where a declaration moves the definition epoch the dependencies are checked under.
+    // at run time declares into the program scope, where declaring a name the scope holds moves the definition epoch the dependencies are
+    // checked under.
     // The name and its proof join deps; declared receives the declared type
     bool certain_global(const identifier_expr* id, std::vector<proof_global>& deps, const type_info** declared = nullptr) {
         if (has_scoped_include_ || class_ctx_ || id->symbol_id == UINT64_MAX) return false;

@@ -75,6 +75,8 @@ namespace jai::vm {
         // A class level's field initializers outside a constructor (an aggregate's, a reload's): one body over the initializer
         // environment, each value stored into this's field
         std::shared_ptr<chunk> compile_level_initializers(std::string_view name, const std::vector<std::pair<uint64_t, expression_ptr>>& initializers);
+        // cast<int>(e), cast<float>(e) or cast<bool>(e) in value form (null: any other expression)
+        static const cast_expr* scalar_value_cast(const expression* e);
 
     private:
         enum class region_kind : uint8_t {

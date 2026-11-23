@@ -168,8 +168,8 @@ bool incdec_op(token_type t) { return t == token_type::plus_plus || t == token_t
 // an expression whose value lands in a slot by a block instruction (the typed declaration rows, the fused binary, the proven element
 // read, the math row): an identifier (a slot, or a global through the move's environment operand; `::name` stays general) or a
 // literal; arithmetic, a comparison, a shift or a unary of those; an element read of a proven kind over a named container; a math
-// intrinsic of those; a ternary as a whole value or as an operand lifted into a temp. A cast, a store or any other call lands on the
-// general form, which a block does not run.
+// intrinsic or a cast to int, float or bool of those; a ternary as a whole value or as an operand lifted into a temp. Any other cast, a
+// store or any other call lands on the general form, which a block does not run.
 bool landable(const expression* e, const land_ctx* eng);
 // an operand of a block instruction: a landable value, or a global read (the fused binary's environment rows)
 bool block_operand(const expression* e, const land_ctx* eng) { return e && (e->get_type() == node_type::identifier_expr || landable(e, eng)); }
@@ -201,6 +201,7 @@ bool landable(const expression* e, const land_ctx* eng) {
 		       (rt ? ternary_side(b->right.get(), b->left.get()) : inner_operand(b->right.get(), eng));
 	}
 	case node_type::unary_expr: { auto* u = static_cast<const unary_expr*>(e); return !incdec_op(u->op.type) && inner_operand(u->operand.get(), eng); }
+	case node_type::cast_expr: { const cast_expr* k = vm_compiler::scalar_value_cast(e); return k && inner_operand(k->operand.get(), eng); }
 	case node_type::ternary_expr: {   // the condition's jumps and one landing per arm: a declaration or a slot store from it is a block's
 		auto* x = static_cast<const ternary_expr*>(e);
 		return inner_operand(x->condition.get(), eng) && block_operand(x->then_expression.get(), eng) && block_operand(x->else_expression.get(), eng);

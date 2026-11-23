@@ -83,7 +83,7 @@ namespace {
 		case opcode::op_new: case opcode::op_array: case opcode::op_map: case opcode::op_closure: return fam::alloc;
 		case opcode::op_binary: case opcode::op_binary_fused: case opcode::op_binary_fused_decl: case opcode::op_binary_fused_store: case opcode::op_binary_fused_temp:
 		case opcode::op_unary: case opcode::op_unary_temp: case opcode::op_math: case opcode::op_math_temp: case opcode::op_compound_store: case opcode::op_compound_fused:
-		case opcode::op_incdec: case opcode::op_operand_temp: case opcode::op_cast: case opcode::op_to_bool: case opcode::op_case_eq:
+		case opcode::op_incdec: case opcode::op_operand_temp: case opcode::op_cast: case opcode::op_cast_temp: case opcode::op_to_bool: case opcode::op_case_eq:
 		case opcode::op_d_add: case opcode::op_d_sub: case opcode::op_d_mul: case opcode::op_d_div: case opcode::op_d_mod: case opcode::op_d_and: case opcode::op_d_or:
 		case opcode::op_d_xor: case opcode::op_d_shl: case opcode::op_d_shr:
 			return fam::arith;
@@ -106,7 +106,7 @@ namespace {
 		case opcode::op_c_arith_p: case opcode::op_c_arith_any: case opcode::op_c_arith2: case opcode::op_c_arith_load:
 		case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 		case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_neg: case opcode::op_c_bnot:
-		case opcode::op_c_lnot: case opcode::op_c_cmpval: case opcode::op_c_append: case opcode::op_c_text_append:
+		case opcode::op_c_lnot: case opcode::op_c_cast: case opcode::op_c_cmpval: case opcode::op_c_append: case opcode::op_c_text_append:
 			return fam::cell_arith;
 		case opcode::op_c_cmp_p: case opcode::op_c_jcmp_p: case opcode::op_c_jcmp2: case opcode::op_c_cmp_any:
 		case opcode::op_c_jcmp_any: case opcode::op_c_jump: case opcode::op_c_back: case opcode::op_c_back_step: case opcode::op_c_cfor_back: case opcode::op_c_range:
@@ -135,7 +135,7 @@ namespace {
 		switch (o) {
 		case opcode::op_binary_fused: case opcode::op_binary_fused_decl: case opcode::op_binary_fused_temp: case opcode::op_binary_fused_store:
 		case opcode::op_fused_cmp_jump: case opcode::op_t_decl_mov: case opcode::op_t_decl_const: case opcode::op_t_store_mov: case opcode::op_t_store_const:
-		case opcode::op_unary_temp: case opcode::op_math_temp: case opcode::op_call_temp: case opcode::op_math_guard: case opcode::op_inline_guard:
+		case opcode::op_unary_temp: case opcode::op_cast_temp: case opcode::op_math_temp: case opcode::op_call_temp: case opcode::op_math_guard: case opcode::op_inline_guard:
 		case opcode::op_jump: case opcode::op_jump_if_true: case opcode::op_jump_if_false: case opcode::op_load: case opcode::op_const: case opcode::op_store:
 		case opcode::op_decl_var: case opcode::op_operand_temp: case opcode::op_compound_fused: case opcode::op_incdec: case opcode::op_pop:
 		case opcode::op_return: case opcode::op_return_ident: case opcode::op_return_binary: case opcode::op_null: case opcode::op_true: case opcode::op_false:
@@ -699,7 +699,7 @@ void vm_backend::coverage_observe(frame& f, const vm_instruction& ins, coverage_
 		}
 		break;
 	case opcode::op_unary: l = stack_at(0); r = l; break;
-	case opcode::op_unary_temp: if (ins.a < c.fused_binary_protos.size()) { l = operand_value(c.fused_binary_protos[ins.a].left); r = l; } break;
+	case opcode::op_unary_temp: case opcode::op_cast_temp: if (ins.a < c.fused_binary_protos.size()) { l = operand_value(c.fused_binary_protos[ins.a].left); r = l; } break;
 	case opcode::op_compound_store: l = stack_at(0); r = l; break;
 	default: binary = false; break;
 	}

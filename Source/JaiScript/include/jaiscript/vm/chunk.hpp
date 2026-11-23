@@ -747,7 +747,7 @@ namespace jai::vm {
             case opcode::op_compound_fused: case opcode::op_math: case opcode::op_index_store: case opcode::op_index_compound_fused:
             case opcode::op_index_fused: case opcode::op_operand_temp: case opcode::op_call_temp: case opcode::op_member_temp: case opcode::op_set_member_fused: case opcode::op_math_temp: case opcode::op_push_fused:
             case opcode::op_cfor_prep: case opcode::op_cfor_back: case opcode::op_cfor_pop: case opcode::op_loop_back: case opcode::op_cells_back:
-            case opcode::op_cells_cfor_back: case opcode::op_fused_cmp_jump: case opcode::op_cast: case opcode::op_index_store_fused: case opcode::op_index_compound_operand:
+            case opcode::op_cells_cfor_back: case opcode::op_fused_cmp_jump: case opcode::op_cast: case opcode::op_cast_temp: case opcode::op_index_store_fused: case opcode::op_index_compound_operand:
                 return cell_refusal_translation;
             case opcode::op_get_member: case opcode::op_get_member_path: case opcode::op_set_member: case opcode::op_member_compound: case opcode::op_get_static: case opcode::op_namespace_entry: case opcode::op_set_static:
             case opcode::op_this: case opcode::op_super: case opcode::op_from_this: case opcode::op_null_guard: case opcode::op_probe_member:

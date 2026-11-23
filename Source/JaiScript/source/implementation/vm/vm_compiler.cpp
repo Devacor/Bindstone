@@ -156,6 +156,7 @@ namespace {
 			case opcode::op_math_temp:
 			case opcode::op_math_guard:
 			case opcode::op_unary_temp:
+			case opcode::op_cast_temp:
 			case opcode::op_index:
 			case opcode::op_index_store:
 			case opcode::op_index_compound_fused:
@@ -196,6 +197,7 @@ namespace {
 			case opcode::op_c_jcmp_any:
 			case opcode::op_c_neg:
 			case opcode::op_c_bnot:
+			case opcode::op_c_cast:
 			case opcode::op_c_probe:
 			case opcode::op_c_args:
 			case opcode::op_c_call:
@@ -396,6 +398,7 @@ namespace {
 			case opcode::op_math_temp:
 			case opcode::op_math_guard:
 			case opcode::op_unary_temp:
+			case opcode::op_cast_temp:
 			case opcode::op_index:
 			case opcode::op_index_store:
 			case opcode::op_index_compound_fused:
@@ -436,6 +439,7 @@ namespace {
 			case opcode::op_c_jcmp_any:
 			case opcode::op_c_neg:
 			case opcode::op_c_bnot:
+			case opcode::op_c_cast:
 			case opcode::op_c_probe:
 			case opcode::op_c_args:
 			case opcode::op_c_call:
@@ -4303,7 +4307,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		switch (o) {
 		case opcode::op_binary_fused: case opcode::op_binary_fused_decl: case opcode::op_binary_fused_temp: case opcode::op_binary_fused_store:
 		case opcode::op_fused_cmp_jump: case opcode::op_t_decl_mov: case opcode::op_t_decl_const: case opcode::op_t_store_mov: case opcode::op_t_store_const:
-		case opcode::op_unary_temp: case opcode::op_math_temp: case opcode::op_call_temp: case opcode::op_math_guard: case opcode::op_inline_guard:
+		case opcode::op_unary_temp: case opcode::op_cast_temp: case opcode::op_math_temp: case opcode::op_call_temp: case opcode::op_math_guard: case opcode::op_inline_guard:
 		case opcode::op_jump: case opcode::op_jump_if_true: case opcode::op_jump_if_false: case opcode::op_load: case opcode::op_const: case opcode::op_store:
 		case opcode::op_decl_var: case opcode::op_operand_temp: case opcode::op_compound_fused: case opcode::op_incdec: case opcode::op_pop:
 		case opcode::op_return: case opcode::op_return_ident: case opcode::op_return_binary: case opcode::op_null: case opcode::op_true: case opcode::op_false: case opcode::op_kill_slot:
@@ -4317,7 +4321,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		switch (o) {
 		case opcode::op_binary_fused: case opcode::op_binary_fused_decl: case opcode::op_binary_fused_temp: case opcode::op_binary_fused_store:
 		case opcode::op_fused_cmp_jump: case opcode::op_t_decl_mov: case opcode::op_t_decl_const: case opcode::op_t_store_mov: case opcode::op_t_store_const:
-		case opcode::op_unary_temp: case opcode::op_math_temp: case opcode::op_compound_fused:
+		case opcode::op_unary_temp: case opcode::op_cast_temp: case opcode::op_math_temp: case opcode::op_compound_fused:
 			return true;
 		default: return false;
 		}
@@ -4326,7 +4330,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		if (ins.op >= opcode::op_t_add_ii && ins.op <= opcode::op_t_mod_ff) return true;
 		switch (ins.op) {
 		case opcode::op_t_decl_mov: case opcode::op_t_decl_const: case opcode::op_t_store_mov: case opcode::op_t_store_const:
-		case opcode::op_binary_fused_decl: case opcode::op_binary_fused_temp: case opcode::op_binary_fused_store: case opcode::op_unary_temp:
+		case opcode::op_binary_fused_decl: case opcode::op_binary_fused_temp: case opcode::op_binary_fused_store: case opcode::op_unary_temp: case opcode::op_cast_temp:
 		case opcode::op_operand_temp: case opcode::op_math_guard:
 			return true;
 		case opcode::op_math_temp: return ins.c <= 0xFF;   // a stdlib alias steps past its CALL_TEMP
@@ -5224,6 +5228,15 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (!value(op, c.fused_binary_protos[st.a].left, 0, static_cast<uint32_t>(ip * 3), ip, op.b)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				use_slot(st.b, tk == token_type::tilde ? kint : tk == token_type::bang ? kbool : 0, true, k_typed_dst_temp, nullptr, ip);
 				op.kind = tk == token_type::minus ? ir::neg : tk == token_type::tilde ? ir::bnot : ir::lnot; op.a = st.b; op.writes = st.b;
+			} else if (st.op == opcode::op_cast_temp && st.a != k_invalid_u32 && st.a < c.fused_binary_protos.size() && st.b < k_typed_slot_mask && st.c < c.nodes.size()) {
+				// a scalar value cast into a compiler value of the target's kind, the operand's kind read at run time
+				const fused_operand& src = c.fused_binary_protos[st.a].left;
+				const uint8_t tk = stamp_kind(static_cast<const cast_expr*>(c.nodes[st.c].get())->target.get());
+				if (tk != kint && tk != kflt && tk != kbool) { refuse(chunk::cell_refusal_translation, ip); break; }
+				if (src.const_index != k_invalid_u32 && src.const_index < c.constants.size() && c.constants[src.const_index].raw_storage_index() == script_value::TYPEID_STRING) { refuse(chunk::cell_refusal_translation, ip); break; }   // text is the general cast's
+				if (!value(op, src, 0, static_cast<uint32_t>(ip * 3), ip, op.b)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				use_slot(st.b, tk, true, k_typed_dst_temp, nullptr, ip);
+				op.kind = ir::cast; op.tok = tk; op.a = st.b; op.writes = st.b;
 			} else if (st.op == opcode::op_math_temp && st.a != k_invalid_u32 && st.a < c.fused_binary_protos.size() && st.b < k_typed_slot_mask && st.c <= 0xFF &&
 			           detail::math_scalar_pair(static_cast<detail::math_fn>(st.c))) {
 				// a scalar pair row of two values (a cell, a literal, an environment value): min and max land the picked operand's kind, pow and
@@ -5574,6 +5587,18 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						use_slot(ai.a, 0, false, 0, nullptr, a);
 						use_slot(t, tk == token_type::tilde ? kint : 0, true, k_typed_dst_temp, nullptr, a);
 						ao.kind = tk == token_type::minus ? ir::neg : ir::bnot; ao.a = t; ao.b = ai.a; ao.writes = t; slot_read(ao, ai.a);
+						seq.push_back(ao);
+						ir_op sk; sk.kind = ir::skip; seq.push_back(sk); ++a;
+						cc.args.push_back(chunk::cell_loop::call_arg{ 0, t, static_cast<uint32_t>(a) });
+					} else if (slot_load && next && next->op == opcode::op_cast && next->b == 0 && next->a < c.nodes.size() && c.nodes[next->a]->get_type() == node_type::cast_expr &&
+					           scalar_value_cast(static_cast<const cast_expr*>(c.nodes[next->a].get()))) {
+						// cast<int>(slot), cast<float>(slot) or cast<bool>(slot) as an argument: the cast into an argument value
+						if (effect_seen) { refuse(chunk::cell_refusal_effect, a); break; }   // a computed argument after a verbatim load would run ahead of that load's getter
+						const uint8_t tk = stamp_kind(static_cast<const cast_expr*>(c.nodes[next->a].get())->target.get());
+						const uint32_t t = arg_temp_next++;
+						use_slot(ai.a, 0, false, 0, nullptr, a);
+						use_slot(t, tk, true, k_typed_dst_temp, nullptr, a);
+						ao.kind = ir::cast; ao.tok = tk; ao.a = t; ao.b = ai.a; ao.writes = t; slot_read(ao, ai.a);
 						seq.push_back(ao);
 						ir_op sk; sk.kind = ir::skip; seq.push_back(sk); ++a;
 						cc.args.push_back(chunk::cell_loop::call_arg{ 0, t, static_cast<uint32_t>(a) });
@@ -6080,7 +6105,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if ((pi.a & k_cell_index_mask) != t || k != (fast <= opcode::op_t_shr_ii ? ki : kf)) return false;
 				pi.a = (pi.a & ~k_cell_index_mask) | d; return true;
 			}
-			case opcode::op_c_math:   // the landing is the destination's own rule (a kind it does not take misses)
+			case opcode::op_c_math: case opcode::op_c_cast:   // the landing is the destination's own rule (a kind it does not take misses)
 				if ((pi.a & k_cell_index_mask) != t) return false;
 				pi.a = (pi.a & ~k_cell_index_mask) | d; return true;
 			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f:
@@ -6247,6 +6272,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			}
 			case ir::placeholder: append(vm_instruction{opcode::op_c_guard, 0, k_invalid_u32, 0}, ip); break;   // a counted loop has no head compare
 			case ir::neg: append(vm_instruction{opcode::op_c_neg, dst_of(op.a), cell_of(op.b), 0}, ip); break;
+			case ir::cast: append(vm_instruction{opcode::op_c_cast, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), 0}, ip); break;
 			case ir::bnot: append(vm_instruction{opcode::op_c_bnot, dst_of(op.a), cell_of(op.b), 0}, ip); break;
 			case ir::call: {
 				// the pushes and the call at the call's place (the probe has its own, ahead); a slot argument is the cell the loop holds for it here
@@ -6877,7 +6903,10 @@ bool vm_compiler::quiet_read(const expression* e) {
 			if (!(a->get_type() == node_type::literal_expr || primitive_local(a) || quiet_read(a))) return false;
 		}
 		arg = args.back().get();
-	} else if (unary_temp_operand(e)) { arg = static_cast<const unary_expr*>(e)->operand.get(); }
+	} else if (unary_temp_operand(e)) {
+		const cast_expr* cast = scalar_value_cast(e);
+		arg = cast ? cast->operand.get() : static_cast<const unary_expr*>(e)->operand.get();
+	}
 	if (!arg) return false;
 	return arg->get_type() == node_type::literal_expr || primitive_local(arg) || quiet_read(arg);
 }
@@ -7005,14 +7034,28 @@ bool vm_compiler::math_alias_call(const expression* e) {
 
 // The intrinsic's argument as an operand (a slot, a literal, an element read or another intrinsic into a temp;
 // anything else rides the stack), then op_math_temp lands the result in a fresh temp; `out` is that temp
-// a unary minus, complement or not whose operand is an operand shape or lands in a temp: a definition into a compiler
-// value wherever a consumer wants an operand (the lift, the flat pre-step, a math argument, a declaration, a store)
+// cast<int>(e), cast<float>(e) or cast<bool>(e) in value form: one operand in, an int, a float or a bool out (or a raise), as a unary is
+const cast_expr* vm_compiler::scalar_value_cast(const expression* e) {
+	if (!e || e->get_type() != node_type::cast_expr) return nullptr;
+	const auto* cast = static_cast<const cast_expr*>(e);
+	if (cast->by_reference || cast->implicit_ref || cast->binding_ref || cast->dynamic || cast->type_value || !cast->return_of.empty()) return nullptr;
+	if (!cast->operand || !cast->target || cast->target->is_enum || cast->target->is_byte_element()) return nullptr;
+	const script_value_type to = cast->target->base_type;
+	return to == script_value_type::jai_int_type || to == script_value_type::jai_float_type || to == script_value_type::jai_bool_type ? cast : nullptr;
+}
+
+// a unary minus, complement or not, or a scalar value cast, whose operand is an operand shape or lands in a temp: a definition into a
+// compiler value wherever a consumer wants an operand (the lift, the flat pre-step, a math argument, a declaration, a store)
 bool vm_compiler::unary_temp_operand(const expression* e) {
 	if (reference_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return false;
-	if (!e || e->get_type() != node_type::unary_expr) return false;
-	const auto* u = static_cast<const unary_expr*>(e);
-	if (u->op.type != token_type::minus && u->op.type != token_type::tilde && u->op.type != token_type::bang) return false;
-	const expression* o = u->operand.get();
+	const expression* o = nullptr;
+	if (const cast_expr* cast = scalar_value_cast(e)) { o = cast->operand.get(); }
+	else {
+		if (!e || e->get_type() != node_type::unary_expr) return false;
+		const auto* u = static_cast<const unary_expr*>(e);
+		if (u->op.type != token_type::minus && u->op.type != token_type::tilde && u->op.type != token_type::bang) return false;
+		o = u->operand.get();
+	}
 	if (!o) return false;
 	if (o->get_type() == node_type::identifier_expr || o->get_type() == node_type::literal_expr) return true;
 	if (fusable_index_expr(o) || math_temp_operand(o) != detail::math_fn::none || unary_temp_operand(o)) return true;
@@ -7049,6 +7092,7 @@ bool vm_compiler::scalar_value_expr(const expression* e) {
 	case node_type::identifier_expr: return !reference_slot_operand(e) && raw_scalar_kind(declared_type_of(e)) != 0;
 	case node_type::binary_expr: return numeric_value_binary(const_cast<expression*>(e));
 	case node_type::unary_expr: return unary_temp_operand(e) && scalar_value_expr(static_cast<const unary_expr*>(e)->operand.get());
+	case node_type::cast_expr: return unary_temp_operand(e);
 	case node_type::ternary_expr: { const auto* t = static_cast<const ternary_expr*>(e); return scalar_value_expr(t->then_expression.get()) && scalar_value_expr(t->else_expression.get()); }
 	default: return math_temp_operand(e) != detail::math_fn::none;
 	}
@@ -7106,8 +7150,8 @@ JAI_NOINLINE void vm_compiler::land_arm_in_temp(const expression_ptr& arm, uint3
 }
 
 JAI_NOINLINE void vm_compiler::compile_unary_into_temp(const expression_ptr& e, fused_operand& out) {
-	auto* u = static_cast<unary_expr*>(e.get());
-	const expression_ptr& arg = u->operand;
+	const cast_expr* cast = scalar_value_cast(e.get());
+	const expression_ptr& arg = cast ? cast->operand : static_cast<unary_expr*>(e.get())->operand;
 	fused_binary_proto p;
 	bool operand = true;
 	if (arg->get_type() == node_type::identifier_expr || arg->get_type() == node_type::literal_expr) {
@@ -7145,7 +7189,8 @@ JAI_NOINLINE void vm_compiler::compile_unary_into_temp(const expression_ptr& e, 
 	const uint32_t t = static_cast<uint32_t>(temp_next_);
 	++temp_next_;
 	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
-	emit(opcode::op_unary_temp, a, t, static_cast<uint32_t>(u->op.type));
+	if (cast) { emit(opcode::op_cast_temp, a, t, add_node(e)); }
+	else { emit(opcode::op_unary_temp, a, t, static_cast<uint32_t>(static_cast<unary_expr*>(e.get())->op.type)); }
 	note_landing(e.get());
 	out = fused_operand{};
 	out.slot = t;
@@ -7436,6 +7481,7 @@ bool vm_compiler::value_owns_nothing(const expression* e) {
 		}
 	}
 	case node_type::member_expr: return static_cast<const member_expr*>(e)->enum_constant;
+	case node_type::cast_expr: return scalar_value_cast(e) != nullptr;
 	case node_type::call_expr: {
 		const auto* call = static_cast<const call_expr*>(e);
 		if (size_temp_operand(e)) {
@@ -7477,6 +7523,9 @@ uint32_t vm_compiler::temp_landed(size_t ip, bool& owns) {
 		return ins.b;
 	case opcode::op_unary_temp:
 		owns = owns && static_cast<token_type>(ins.c) != token_type::bang;
+		return ins.b;
+	case opcode::op_cast_temp:
+		owns = false;
 		return ins.b;
 	case opcode::op_index_fused_decl: {
 		if (ins.a >= c.fused_index_protos.size() || !c.fused_index_protos[ins.a].decl_temp) return k_invalid_u32;

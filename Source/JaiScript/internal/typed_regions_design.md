@@ -152,7 +152,7 @@ first generic update instruction, the compare back to the body, the generic cond
 dead in the block, and a miss inside it pushes the general form's counted state first, `cells_miss`), snapshots (a guard's container value,
 live from the guard to the read it guards) and int and float literals. The operations: `arith` (the ten
 binary operators, pinned kinds as `op_c_arith_p` or a kind's own opcode, run-time kinds as `op_c_arith_any`), `mov` (`op_c_mov`),
-`cmp` with its test (`op_c_cmp_p` and `op_c_jcmp_p` for pinned kinds, `op_c_cmp_any` and `op_c_jcmp_any` for
+`cast` (`op_c_cast`), `cmp` with its test (`op_c_cmp_p` and `op_c_jcmp_p` for pinned kinds, `op_c_cmp_any` and `op_c_jcmp_any` for
 run-time kinds; a head's false edge exits the block), `load` (`op_c_load`, through a site row the typed
 lowering built or the translation builds for a general read), `store` (`op_c_index_store`), `math`
 (`op_c_math`), `jump`, the back edge (`op_c_back` or `op_c_cfor_back`) and `guard` (`op_c_guard`). A
@@ -279,6 +279,17 @@ A unary minus, complement or not over an operand is a definition into a compiler
 of `op_math_temp`): the lift, the flat pre-step, a math argument, a declaration, a statement-position store and an
 element store take it as an operand, the general unary runs verbatim underneath, and the cell copy lands neg and
 bnot (`op_c_neg`, `op_c_bnot`) with the checked negation's overflow as a miss.
+
+A value cast to `int`, `float` or `bool` (`cast<int>(e)`, `float(e)`) is a definition into a compiler value wherever a
+unary is one (`op_cast_temp`, `vm_compiler::scalar_value_cast`). An int, a float or a bool operand converts where it stands
+by the cast's rows for those pairs (`scalar_cast_bits`: a float truncates toward zero into an int, a bool is 0 or 1, an int
+widens, a bool target takes the truthiness) and lands as a temp's value does; a float no int holds and an operand of any
+other kind (a char, a string, an object with `to_int()`, a host-bound value, null) run `op_cast` over the operand as its
+load pushes it, so the conversion, its copy and its texts are the cast's. The operands are read at run time, so the form
+needs no proof. The cell copy is `op_c_cast` (the target's kind in the instruction, the operand's kind read from its cell
+or constant): the same rows, with the range error and any other kind a miss onto the general op. A cast of a slot as a call
+argument lands in an argument value, as a unary of a slot does. The reference forms and the class, enum, char, string and
+byte-element targets keep `op_cast`.
 
 A pure math call as a declaration's, a store's or an element store's value lands in a compiler temp (the
 math row) and moves, as a unary does; the nested index `a[b[i]]` takes an environment identifier as its
@@ -574,9 +585,9 @@ order. A void leaf grafts alone in a statement, nowhere a value is read.
 Inside a loop the graft must be a block end to end, or the call stays: a spilled operand, every by-value parameter's argument, every
 declaration and statement of the body and every return value must land by a block instruction (a slot identifier or a literal;
 arithmetic, a comparison, a shift or a unary over those or over global reads, which the fused binary's environment rows take; an
-element read of a proven kind over a named container; a member read or store over a named instance; a math intrinsic; a ternary of those, which lands as its condition's jumps and one
+element read of a proven kind over a named container; a member read or store over a named instance; a math intrinsic or a cast to int, float or bool; a ternary of those, which lands as its condition's jumps and one
 landing per arm; a store into a slot, a global, a field or an element; an increment of a slot), and every return must be proven. A declaration from a bare global, an
-unproven return's conversion, a cast or an increment of a global lands on the general form, which the block does not run,
+unproven return's conversion, any other cast or an increment of a global lands on the general form, which the block does not run,
 and the call's own landing in the block converts what a declaration cannot, so there the call is the better form. Outside a loop
 the body may be anything the clone takes.
 

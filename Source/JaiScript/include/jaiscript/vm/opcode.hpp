@@ -349,9 +349,12 @@ namespace jai::vm {
         op_instance_test,   // a = call site, b = chunk::instance_tests index, c = the class name's constant: reflect::is_instance_of(x, "T") over x on top; while reflect:: holds
                             // the library's function and a class is registered under T the instance test in place, else the call
         op_namespace_entry, // a=node index (member_expr), b=chunk::namespace_cells index: op_get_static of a member of a namespace only the host fills, pushed from its cell
+        op_cast_temp,       // a=fused_binary_protos index (left = the operand; k_invalid_u32 = the operand rides the stack), b=frame slot (a compiler temp), c=node index (cast_expr):
+                            // cast<int>, cast<float> or cast<bool> of a value lands in the temp; an int, a float or a bool converts where it stands, any other operand is op_cast's
+        op_c_cast,          // a = the target's storage index << 24 | dst cell, b = src cell or const: op_cast_temp on a cell (a float no int holds, or another kind, misses)
     };
     inline constexpr size_t k_opcode_space = 512;   // tables indexed by opcode (the coverage report's) are this long
-    static_assert(static_cast<size_t>(opcode::op_namespace_entry) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
+    static_assert(static_cast<size_t>(opcode::op_c_cast) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
     static_assert(static_cast<uint32_t>(opcode::op_d_jne) < 256 && static_cast<uint32_t>(opcode::op_t_load) < 256, "a cell instruction packs a typed opcode above k_cell_op_shift in 8 bits");
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
@@ -709,6 +712,8 @@ namespace jai::vm {
             case opcode::op_try_types: return "TRY_TYPES";
             case opcode::op_instance_test: return "INSTANCE_TEST";
             case opcode::op_namespace_entry: return "NAMESPACE_ENTRY";
+            case opcode::op_cast_temp: return "CAST_TEMP";
+            case opcode::op_c_cast: return "C_CAST";
             case opcode::op_sleep: return "SLEEP";
             case opcode::op_format_call: return "FORMAT_CALL";
             case opcode::op_c_load_f: return "C_LOAD_F";

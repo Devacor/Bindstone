@@ -2531,6 +2531,7 @@ namespace jai::vm {
         __declspec(noinline)
 #endif
         op_status exec_c_lnot(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);     // the truthiness inverted, a bool
+        op_status exec_c_cast(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);     // a scalar value cast of a cell
 #if defined(_MSC_VER)
         __declspec(noinline)
 #endif
@@ -2991,6 +2992,7 @@ namespace jai::vm {
     private:
         op_status non_lvalue_target(const expression* target);
         op_status exec_cast(frame& f, const vm_instruction& ins);
+        op_status exec_cast_temp(frame& f, const vm_instruction& ins);
 
         vm_coroutine_state& coroutine_fiber_state(coroutine_handle& handle);
         // The fiber a coroutine's first resume opens: its body's chunk, its entry scope and its frame over its own stack

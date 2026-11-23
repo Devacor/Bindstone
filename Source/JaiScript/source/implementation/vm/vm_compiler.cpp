@@ -5462,13 +5462,20 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (cp.kind_flags & compound_flag_ref_alias) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (!(cp.kind_flags & compound_flag_no_result) || cp.rhs_proto != k_invalid_u32 || (cp.kind_flags & compound_flag_old_result)) { refuse(chunk::cell_refusal_translation, ip); break; }
 				const uint8_t tok = static_cast<uint8_t>(compound_kind_token(cp.kind_flags));
-				if (!value(op, cp.rhs, 0, static_cast<uint32_t>(ip * 3), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				// the checker's class of a local target and its value (int_int, float_float) is the cells' contract, as a classed binary's: an
+				// environment value on the right reads unchecked and the operation takes its pinned form
+				const uint8_t cls = cp.slot == k_invalid_u32 || (cp.kind_flags & compound_kind_mask) == compound_percent ? 0 : cp.typed_class == operand_class_int_int ? 1 : cp.typed_class == operand_class_float_float ? 2 : 0;
+				opcode classed = cls != 0 ? arith_op(compound_kind_token(cp.kind_flags), cls) : opcode::op_halt;
+				if (classed != opcode::op_halt && cp.rhs.const_index != k_invalid_u32 && (cp.rhs.const_index >= c.constants.size() || c.constants[cp.rhs.const_index].raw_storage_index() != (cls == 1 ? script_value::TYPEID_INT : script_value::TYPEID_FLOAT))) { classed = opcode::op_halt; }
+				const uint8_t ck = classed == opcode::op_halt ? 0 : cls == 1 ? kint : kflt;
+				if (!value(op, cp.rhs, ck, static_cast<uint32_t>(ip * 3), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (cp.slot == k_invalid_u32) {
 					const uint32_t e = k_ir_env_bit | env_written(cp.symbol, k_typed_dst_compound, ip);   // an environment value stepped in place
 					op.kind = ir::arith; op.tok = tok; op.a = e; op.b = e;
 				} else {
-					use_slot(cp.slot, 0, false, 0, nullptr, ip); use_slot(cp.slot, 0, true, k_typed_dst_compound, nullptr, ip);
+					use_slot(cp.slot, ck, false, 0, nullptr, ip); use_slot(cp.slot, ck, true, k_typed_dst_compound, nullptr, ip);
 					op.kind = tok == static_cast<uint8_t>(token_type::plus) ? ir::append : ir::arith; op.tok = tok; op.a = cp.slot; op.b = cp.slot; op.writes = cp.slot; slot_read(op, cp.slot);   // plus on a slot: strings append in place, numbers add
+					if (op.kind == ir::arith) { op.fast = classed; }
 				}
 			} else if (st.op == opcode::op_incdec && st.b == k_invalid_u32 && !(st.c & incdec_flag_global_only) && (st.c & incdec_flag_no_result)) {
 				// ++g / g-- as a statement on an environment value: arith by one landing on the environment cell

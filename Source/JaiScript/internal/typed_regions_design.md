@@ -228,7 +228,9 @@ compare: the condition's temps and reads translate like the body and run every i
 and the compare's miss resumes at its own origin. `math` covers the pure one-argument intrinsics (`itrunc` and
 `ifloor` land an int, `abs` keeps its argument's kind, `floor`, `ceil`, `sqrt`, `sin`, `cos`, `tan` and the
 angle conversions land a float). `x op= y` and `++x` / `x--` in statement position on a slot the typed
-lowering left general are `arith` with the compound landing, kinds at run time.
+lowering left general are `arith` with the compound landing, kinds at run time; a compound the checker
+classed int_int or float_float on a local gives its cells that kind as their contract, as a classed binary
+does, so `s += G` over a typed global is the pinned add.
 
 A guarded container that is a reference to a map entry (a sprite table keyed by lump) is admitted like a pinned
 table entry while its key is present: no cell store writes a map, so the entry holds for the block. Admission is

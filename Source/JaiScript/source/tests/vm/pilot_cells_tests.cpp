@@ -2089,6 +2089,9 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 			                        "C_JEQ_II ", "C_JNE_II ", "C_JEQ_IIK ", "C_JNE_IIK " }) {
 				check_true(listing.find(op) != std::string::npos, std::string("the listing holds ") + op + ": " + listing);
 			}
+			// a compound on an int local over a typed global is the pinned add
+			const std::string global_listing = listing_run("int G = 7; int f(int n) { int s = 0; for (int i = 0; i < n; ++i) { s += G; } return s; } f(3);");
+			check_true(global_listing.find("C_ADD_II ") != std::string::npos && global_listing.find("C_APPEND") == std::string::npos, "a compound over a typed global is pinned: " + global_listing);
 			// a constant the operation cannot take stays the general form's
 			const char* refused[] = { "x / 0", "x % 0", "x << 64", "x >> -1" };
 			for (const char* expr : refused) {

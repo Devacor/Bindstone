@@ -609,8 +609,12 @@ one that form makes, and the budget ticks once an iteration either way.
 - A compare-headed loop that steps the compared var last (a `for` from a variable, a `while` with a trailing `i += k`) fuses at the
   step: the step, the poll of the back edge after it and the head's compare. Off its fast row the step runs alone and the back edge
   polls. The block's own head compare leaves the block, so that loop's fused exit is a `C_EXIT` that flushes what the head's row flushes.
-- A loop whose head is more than a compare of the stepped var (a bound computed there, `x < w - 1`; a size read; a test of another
-  value) fuses the step with the back edge after it alone (`op_c_step_back`: the step, the poll, the head's copy ip); the head runs as it is.
+- A head that sums its bound first, one cell plus a constant of 16 bits, and compares the stepped var against the sum (`x < w - 1`)
+  fuses with the sum inside (`op_c_for_lto..geo`): the instruction sums the source cell and the offset on every pass and writes the
+  bound's cell as the head's sum does, so nothing has to prove the source unchanged in the body; a source outside the fast row's
+  range runs the step alone, and the head after the back edge raises its own overflow.
+- Any other head (a size read, a test of another value, a compare of an expression of the var) fuses the step with the back edge
+  after it alone (`op_c_step_back`: the step, the poll, the head's copy ip); the head runs as it is.
 
 A `continue` and every other branch onto a back edge lands on the fused instruction. `engine::ir_passes(false)` leaves every back edge
 unfused. A fused back edge is a plain position of the miss lever: its miss re-runs the general back edge (a compare-headed loop's, the

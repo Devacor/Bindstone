@@ -372,9 +372,12 @@ namespace jai::vm {
         op_c_store_f, op_c_store_i,
         op_c_step_back,     // a = var cell | step << 8 (a signed byte), c = the head's copy ip: a loop's last step and the back edge after it (the poll, the jump) as one
                             // instruction, where the head is more than a compare of the var (op_c_for_* otherwise); off its fast row the step runs alone and the back edge after it
+        // a fused back edge whose head sums its bound first, one cell plus a constant (x < w - 1): a as op_c_for_lt's, b = bound cell | source cell <<
+        // k_cell_for_bound_source_shift | the signed offset << k_cell_for_bound_offset_shift, c = the body's copy ip, past the head's sum and compare
+        op_c_for_lto, op_c_for_leo, op_c_for_gto, op_c_for_geo,
     };
     inline constexpr size_t k_opcode_space = 512;   // tables indexed by opcode (the coverage report's) are this long
-    static_assert(static_cast<size_t>(opcode::op_c_step_back) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
+    static_assert(static_cast<size_t>(opcode::op_c_for_geo) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
     static_assert(static_cast<uint32_t>(opcode::op_d_jne) < 256 && static_cast<uint32_t>(opcode::op_t_load) < 256, "a cell instruction packs a typed opcode above k_cell_op_shift in 8 bits");
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
@@ -402,6 +405,8 @@ namespace jai::vm {
     inline constexpr uint32_t k_cell_for_var_mask = 0xFFu;   // op_c_for_*'s a: the var cell, the signed step byte above it, the exit's distance above that
     inline constexpr uint32_t k_cell_for_step_shift = 8;
     inline constexpr uint32_t k_cell_for_exit_shift = 16;
+    inline constexpr uint32_t k_cell_for_bound_source_shift = 8;    // op_c_for_lto..geo's b: the bound cell, the source cell above it, the signed 16-bit offset above that
+    inline constexpr uint32_t k_cell_for_bound_offset_shift = 16;
     inline constexpr uint32_t k_cell_offset_subtracts = 0x80000000u;   // op_c_load_fc / op_c_load_ic's b: the offset cell subtracts
     inline constexpr uint32_t k_cell_store_value_shift = 8;            // op_c_store_f / op_c_store_i's b: the value cell above the index cell
     inline constexpr uint32_t k_dyn_dst_push = 3;   // an op_d_* arithmetic result pushed onto the operand stack (op_binary_fused's landing)
@@ -775,6 +780,10 @@ namespace jai::vm {
             case opcode::op_c_for_gek: return "C_FOR_GEK";
             case opcode::op_c_for_any: return "C_FOR_ANY";
             case opcode::op_c_step_back: return "C_STEP_BACK";
+            case opcode::op_c_for_lto: return "C_FOR_LTO";
+            case opcode::op_c_for_leo: return "C_FOR_LEO";
+            case opcode::op_c_for_gto: return "C_FOR_GTO";
+            case opcode::op_c_for_geo: return "C_FOR_GEO";
             case opcode::op_c_mul_ii: return "C_MUL_II";
             case opcode::op_c_div_ii: return "C_DIV_II";
             case opcode::op_c_mod_ii: return "C_MOD_II";

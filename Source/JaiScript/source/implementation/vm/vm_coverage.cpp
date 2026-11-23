@@ -112,7 +112,7 @@ namespace {
 		case opcode::op_c_cmp_p: case opcode::op_c_jcmp_p: case opcode::op_c_jcmp2: case opcode::op_c_cmp_any:
 		case opcode::op_c_jcmp_any: case opcode::op_c_jump: case opcode::op_c_back: case opcode::op_c_back_step: case opcode::op_c_cfor_back: case opcode::op_c_range:
 		case opcode::op_c_exit: case opcode::op_c_bail:
-		case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any: case opcode::op_c_step_back:
+		case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any: case opcode::op_c_step_back: case opcode::op_c_for_lto: case opcode::op_c_for_leo: case opcode::op_c_for_gto: case opcode::op_c_for_geo:
 		case opcode::op_c_jeq_ii: case opcode::op_c_jne_ii: case opcode::op_c_jeq_iik: case opcode::op_c_jne_iik:
 			return fam::cell_branch;
 		case opcode::op_c_load: case opcode::op_c_load_any: case opcode::op_c_load2: case opcode::op_c_load_jcmp: case opcode::op_c_index_store: case opcode::op_c_push:

@@ -2388,7 +2388,7 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 			}
 			const std::string listing = listing_run(defs + "bounded(2, 4) + sized(A) + other(90) + scaled(3) + skipping(A, 4);");
 			size_t steps = 0; for (size_t at = listing.find("C_STEP_BACK "); at != std::string::npos; at = listing.find("C_STEP_BACK ", at + 1)) { ++steps; }
-			check_true(steps >= 5, "the steps before those back edges are C_STEP_BACK (" + std::to_string(steps) + "): " + listing);
+			check_true(steps >= 3, "the steps before the back edges of a size read, a test of another value and a compare of a product are C_STEP_BACK (" + std::to_string(steps) + "): " + listing);
 			// the budget: one tick an iteration, as the unfused back edge ticks
 			const char* endless = "int HITS = 0; int f(int n) { int s = 0; for (int i = 0; s < n - 1; i += 1) { HITS += 1; if (i > 1000000) { i = 0; } } return s; } f(3);";
 			auto budgeted = [](bool vm, const char* src, uint64_t steps, bool passes, std::string& hits) -> std::string {
@@ -2465,6 +2465,74 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 				check_eq(vm, run_with(script, false, 0), std::string(r.call) + " the passes off");
 				if (!engine::miss_injection_available()) continue;
 				for (uint32_t every : { 1u, 2u, 3u, 7u }) { check_eq(vm, run_with(script, true, every), std::string(r.call) + " under an injected miss at every " + std::to_string(every)); }
+			}
+		});
+		test("a_head_that_sums_its_bound_is_one_instruction_with_the_step_and_sums_again_every_pass", [this]() {
+			// x < w - 1 and its kin (a sum either way, each ordering, the var on the right) in a block's own loop, an inner loop and a while: the
+			// step, the poll, the head's sum and its compare are C_FOR_LTO..GEO. The bound's source may change in the body (every pass sums
+			// again); a source or a var past the fast row's range runs the step and the head as they are, and an overflow of the head's sum is
+			// the general sum's raise after the iterations the interpreter runs
+			const std::string defs = R"(
+				int HITS = 0;
+				int bounded(int n, int w) { int s = 0; for (int y = 0; y < n; ++y) { for (int x = 1; x < w - 1; ++x) { s += x * (y + 1); } } return s; }
+				int plus(int n) { int s = 0; for (int i = 0; i < n + 2; ++i) { s += i; } return s; }
+				int down(int lo) { int s = 0; for (int i = 20; i > lo + 1; --i) { s += i; } return s; }
+				int inclusive(int w) { int s = 0; for (int i = 0; i <= w - 2; i += 2) { s += i; } return s; }
+				int floor_at(int lo) { int s = 0; for (int i = 30; i >= lo + 3; i -= 3) { s += i; } return s; }
+				int mirrored(int w) { int s = 0; int x = 0; while (w - 1 > x) { s += x * 3; x += 1; } return s; }
+				int moving(int w) { int s = 0; for (int i = 0; i < w - 1; ++i) { if (i == 2) { w += 3; } if (i == 5) { w -= 1; } s += i * w; } return s; }
+				int wide(int w) { int s = 0; for (int i = 0; i < w - 1; ++i) { s += 1; if (i == 3) { w = 4611686018427387911; } if (i == 6) { w = 4; } } return s; }
+				int far(int k) { int w = 4611686018427387904 + k; int s = 0; for (int i = w - 5; i < w - 1; ++i) { s += 1; } return s; }
+				int edge(int w) { int s = 0; for (int i = 0; i < w - 1; ++i) { s += 1; HITS += 1; if (i == 3) { w = -9223372036854775807 - 1; } } return s; }
+				function probe(int w) -> string { string out = ""; try { out = to_string(edge(w)); } catch (err) { out = "throw:" + err; } return out + "|" + to_string(HITS); }
+			)";
+			auto run_with = [&](const std::string& script, bool passes, uint32_t miss_every) -> std::string {
+				auto e = jai::foundry::make_default_engine();
+				e->set_backend(backend_type::vm);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
+				if (!passes) { e->ir_passes(false); }
+				if (miss_every) { e->cells_miss_every(miss_every); }
+				try { return e->execute(script).to_string(); }
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			struct row { const char* call; const char* expected; };
+			const row rows[] = {
+				{ "to_string(bounded(5, 9)) + \",\" + to_string(bounded(3, 2)) + \",\" + to_string(plus(7)) + \",\" + to_string(down(11)) + \",\" + to_string(inclusive(13));", "420,0,36,132,30" },
+				{ "to_string(floor_at(4)) + \",\" + to_string(mirrored(9)) + \",\" + to_string(moving(6)) + \",\" + to_string(wide(9)) + \",\" + to_string(far(3));", "156,84,175,7,4" },
+				{ "probe(3);", "2|2" },
+				{ "probe(9);", "throw:Integer overflow in '-'|4" },
+			};
+			for (const row& r : rows) {
+				const std::string script = defs + r.call;
+				both(script, r.expected, r.call);
+				both(script, r.expected, (std::string(r.call) + " proofs off").c_str(), false);
+				check_eq(std::string(r.expected), run_with(script, false, 0), std::string(r.call) + " the passes off");
+				if (!engine::miss_injection_available()) continue;
+				for (uint32_t every : { 1u, 2u, 3u, 7u }) { check_eq(std::string(r.expected), run_with(script, true, every), std::string(r.call) + " under an injected miss at every " + std::to_string(every)); }
+			}
+			const std::string listing = listing_run(defs + "bounded(2, 4) + plus(1) + down(17) + inclusive(3) + floor_at(25) + mirrored(2) + moving(3);");
+			for (const char* fused : { "C_FOR_LTO ", "C_FOR_LEO ", "C_FOR_GTO ", "C_FOR_GEO " }) { check_true(listing.find(fused) != std::string::npos, std::string(fused) + "in the listing: " + listing); }
+			// the budget: one tick an iteration, as the unfused back edge ticks
+			const char* endless = "int HITS = 0; int f(int w) { int s = 0; for (int i = 0; i < w - 1; i += 1) { HITS += 1; if (i > 1000) { i = 0; } } return s; } f(5000);";
+			auto budgeted = [](bool vm, const char* src, uint64_t steps, bool passes, std::string& hits) -> std::string {
+				auto e = jai::foundry::make_default_engine();
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
+				stdlib::register_all(*e);
+				if (!passes) { e->ir_passes(false); }
+				e->execution_step_budget(steps);
+				e->execution_budget(30.0);
+				std::string out;
+				try { out = e->execute(src).to_string(); } catch (const std::exception& ex) { out = std::string("throw:") + ex.what(); }
+				e->execution_step_budget(0);
+				try { hits = e->execute("HITS;").to_string(); } catch (const std::exception& ex) { hits = std::string("throw:") + ex.what(); }
+				return out;
+			};
+			for (uint64_t budget : { 1u, 2u, 5u }) {
+				std::string interp_hits, fused_hits, unfused_hits;
+				check_true(budgeted(false, endless, budget, true, interp_hits).find("Script execution budget exceeded") != std::string::npos, "interpreter step budget");
+				check_true(budgeted(true, endless, budget, true, fused_hits).find("Script execution budget exceeded") != std::string::npos, "vm step budget");
+				check_true(budgeted(true, endless, budget, false, unfused_hits).find("Script execution budget exceeded") != std::string::npos, "vm step budget, the passes off");
+				check_eq(unfused_hits, fused_hits, "the iterations before budget " + std::to_string(budget));
 			}
 		});
 		test("an_endless_loop_around_a_closed_loop_and_a_host_call_ends_at_every_step_budget", [this]() {

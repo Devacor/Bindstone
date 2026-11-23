@@ -196,7 +196,7 @@ namespace {
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
 			case opcode::op_c_cfor_back:
-			case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any: case opcode::op_c_step_back:
+			case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any: case opcode::op_c_step_back: case opcode::op_c_for_lto: case opcode::op_c_for_leo: case opcode::op_c_for_gto: case opcode::op_c_for_geo:
 			case opcode::op_c_cmp_any:
 			case opcode::op_c_jcmp_any:
 			case opcode::op_c_neg:
@@ -442,7 +442,7 @@ namespace {
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
 			case opcode::op_c_cfor_back:
-			case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any: case opcode::op_c_step_back:
+			case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any: case opcode::op_c_step_back: case opcode::op_c_for_lto: case opcode::op_c_for_leo: case opcode::op_c_for_gto: case opcode::op_c_for_geo:
 			case opcode::op_c_cmp_any:
 			case opcode::op_c_jcmp_any:
 			case opcode::op_c_neg:
@@ -4033,11 +4033,28 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		default: return opcode::op_halt;
 		}
 	};
+	auto counted_offset_back_edge_op = [](uint8_t cmp) {   // the fused back edge over a head that sums its bound, op_halt where none carries the comparison
+		switch (static_cast<token_type>(cmp)) {
+		case token_type::less: return opcode::op_c_for_lto;
+		case token_type::less_equal: return opcode::op_c_for_leo;
+		case token_type::greater: return opcode::op_c_for_gto;
+		case token_type::greater_equal: return opcode::op_c_for_geo;
+		default: return opcode::op_halt;
+		}
+	};
 	// a constant step as the fused back edge's signed byte, negated for a subtracting step (the same sum and the same overflow)
 	auto counted_step_byte = [](const script_value& step, bool subtract, int32_t& out) {
 		if (step.raw_storage_index() != script_value::TYPEID_INT) return false;
 		const script_int by = step.unchecked_as_int();
 		if (by < -127 || by > 127) return false;
+		out = static_cast<int32_t>(subtract ? -by : by);
+		return true;
+	};
+	// a head's constant summand as the fused back edge's signed 16-bit offset, negated for a subtracting sum
+	auto counted_bound_offset = [](const script_value& summand, bool subtract, int32_t& out) {
+		if (summand.raw_storage_index() != script_value::TYPEID_INT) return false;
+		const script_int by = summand.unchecked_as_int();
+		if (by < -32767 || by > 32767) return false;
 		out = static_cast<int32_t>(subtract ? -by : by);
 		return true;
 	};
@@ -6748,8 +6765,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			}
 			// a compare-headed loop that steps the compared var last (a for's update, a while's trailing `i += k`): the step takes the fused opcode
 			// over the back edge's poll and the head's compare, which stay for the first pass and for a spent poll. The block's own head compare
-			// leaves the block, so its fused exit is a C_EXIT that flushes what the head's row flushes. A head that is more than that compare
-			// (a bound computed there, a test of another value) leaves the step and the back edge alone as one instruction, C_STEP_BACK
+			// leaves the block, so its fused exit is a C_EXIT that flushes what the head's row flushes. A head that sums its bound first, one cell
+			// plus a constant (x < w - 1), and compares the var against that sum fuses the same way with the sum inside (C_FOR_LTO..GEO: every
+			// pass sums again, so the bound's source may change in the body). Any other head (a size read, a test of another value) leaves the
+			// step and the back edge alone as one instruction, C_STEP_BACK
 			for (uint32_t ip2 = loop.copy_head + 1; ip2 < loop.copy_back; ++ip2) {
 				const vm_instruction step = code[ip2], edge = code[ip2 + 1];
 				if ((step.op != opcode::op_c_add_iik && step.op != opcode::op_c_sub_iik) || step.a != step.b || step.a > k_cell_for_var_mask) continue;
@@ -6760,7 +6779,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const uint32_t head_at = own ? loop.copy_head : edge.a;
 				const uint32_t stepped = step.a | (static_cast<uint32_t>(static_cast<uint8_t>(step_byte)) << k_cell_for_step_shift);
 				code[ip2] = vm_instruction{opcode::op_c_step_back, stepped, 0, head_at};
-				const vm_instruction test = code[head_at];
+				const vm_instruction first = code[head_at];
+				const bool sums_bound = (first.op == opcode::op_c_add_iik || first.op == opcode::op_c_sub_iik) && first.a != step.a && first.b != step.a && first.a <= 0xFFu && first.b <= 0xFFu;
+				int32_t bound_offset = 0;
+				if (sums_bound && !counted_bound_offset(c.constants[first.c], first.op == opcode::op_c_sub_iik, bound_offset)) continue;
+				const uint32_t test_at = head_at + (sums_bound ? 1u : 0u);
+				const vm_instruction test = code[test_at];
 				if (test.op != (own ? opcode::op_c_cmp_p : opcode::op_c_jcmp_p) || (!own && (test.c & 0x80000000u))) continue;
 				const opcode packed = static_cast<opcode>(test.a >> k_cell_op_shift);
 				if (packed < opcode::op_t_jlt_ii || packed > opcode::op_t_jge_ii) continue;
@@ -6770,10 +6794,17 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					if (end != step.a) continue;
 					end = test.a & k_cell_index_mask; tok = mirror_tok(tok);
 				}
+				if (sums_bound && end != first.a) continue;
 				const uint32_t exit_at_copy = own ? static_cast<uint32_t>(code.size()) : (test.c & 0x7FFFFFFFu);
 				if (exit_at_copy <= ip2 || exit_at_copy - ip2 > 0xFFFFu) continue;
-				if (own) { append(vm_instruction{opcode::op_c_exit, test.c, 0, 0}, back); loop.live_temps.push_back(loop.live_temps[0]); }
-				code[ip2] = vm_instruction{counted_back_edge_op(tok, (end & k_typed_const_bit) != 0), stepped | ((exit_at_copy - ip2) << k_cell_for_exit_shift), end & ~k_typed_const_bit, head_at + 1};
+				if (own) { append(vm_instruction{opcode::op_c_exit, test.c, 0, 0}, back); loop.live_temps.push_back(loop.live_temps[test_at - loop.copy_head]); }
+				const uint32_t packed_a = stepped | ((exit_at_copy - ip2) << k_cell_for_exit_shift);
+				if (sums_bound) {
+					const uint32_t bound = first.a | (first.b << k_cell_for_bound_source_shift) | (static_cast<uint32_t>(static_cast<uint16_t>(bound_offset)) << k_cell_for_bound_offset_shift);
+					code[ip2] = vm_instruction{counted_offset_back_edge_op(tok), packed_a, bound, test_at + 1};
+				} else {
+					code[ip2] = vm_instruction{counted_back_edge_op(tok, (end & k_typed_const_bit) != 0), packed_a, end & ~k_typed_const_bit, head_at + 1};
+				}
 			}
 		}
 		// fused pairs: the block loop runs an adjacent pair of plain instructions as one dispatch; the first instruction takes the

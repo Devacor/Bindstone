@@ -8465,7 +8465,7 @@ static bool cells_miss_plain(const vm_instruction& ci) {
 	case opcode::op_c_append: case opcode::op_c_text_append: case opcode::op_c_push: case opcode::op_c_mload: case opcode::op_c_mstore: case opcode::op_c_size:
 	case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp:
 	case opcode::op_c_ret:
-	case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any: case opcode::op_c_step_back:
+	case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any: case opcode::op_c_step_back: case opcode::op_c_for_lto: case opcode::op_c_for_leo: case opcode::op_c_for_gto: case opcode::op_c_for_geo:
 	case opcode::op_c_mul_ii: case opcode::op_c_div_ii: case opcode::op_c_mod_ii: case opcode::op_c_and_ii: case opcode::op_c_or_ii: case opcode::op_c_xor_ii: case opcode::op_c_shl_ii: case opcode::op_c_shr_ii: case opcode::op_c_mul_iik: case opcode::op_c_div_iik: case opcode::op_c_mod_iik: case opcode::op_c_and_iik: case opcode::op_c_or_iik: case opcode::op_c_xor_iik: case opcode::op_c_shl_iik: case opcode::op_c_shr_iik:
 	case opcode::op_c_jeq_ii: case opcode::op_c_jne_ii: case opcode::op_c_jeq_iik: case opcode::op_c_jne_iik:
 	case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
@@ -8491,6 +8491,20 @@ static bool cells_miss_plain(const vm_instruction& ci) {
 			++budget_tick_; \
 			hot.cells[var].bits = static_cast<int64_t>(next); hot.dirty->b[var] = 1; \
 			if (next CMP (END)) [[likely]] { ip = ci.c; JAI_CELL_NEXT; } \
+			ip += packed >> k_cell_for_exit_shift; \
+			JAI_CELL_NEXT; }
+// the same over a head that sums its bound: the source cell plus the offset is the head's sum, written to the bound cell as the head writes it
+#define JAI_CELL_FOR_SUMMED(CMP) { \
+			const uint32_t packed = ci.a, var = packed & k_cell_for_var_mask, bound_cell = ci.b & 0xFFu; \
+			const script_int from = static_cast<script_int>(hot.cells[var].bits); \
+			const script_int source = static_cast<script_int>(hot.cells[(ci.b >> k_cell_for_bound_source_shift) & 0xFFu].bits); \
+			if (!ints::small_step_fits(from) || !ints::small_step_fits(source) || budget_tick_ >= 1023 || limits_->memory_used > limits_->memory_limit || debug_hook_) [[unlikely]] goto cell_for_general; \
+			const script_int next = ints::wadd(from, static_cast<int8_t>(packed >> k_cell_for_step_shift)); \
+			const script_int bound = ints::wadd(source, static_cast<int16_t>(ci.b >> k_cell_for_bound_offset_shift)); \
+			++budget_tick_; \
+			hot.cells[var].bits = static_cast<int64_t>(next); hot.dirty->b[var] = 1; \
+			hot.cells[bound_cell].bits = static_cast<int64_t>(bound); hot.cells[bound_cell].kind = static_cast<uint8_t>(script_value::TYPEID_INT); hot.dirty->b[bound_cell] = 1; \
+			if (next CMP bound) [[likely]] { ip = ci.c; JAI_CELL_NEXT; } \
 			ip += packed >> k_cell_for_exit_shift; \
 			JAI_CELL_NEXT; }
 // a pinned int add or subtract by its own opcode: the operands read once, an overflow the instruction's own miss
@@ -8761,6 +8775,10 @@ next_frame:
 		case opcode::op_c_for_lek: JAI_CELL_FOR(<=, hot.consts[ci.b].unchecked_int_payload());
 		case opcode::op_c_for_gtk: JAI_CELL_FOR(>, hot.consts[ci.b].unchecked_int_payload());
 		case opcode::op_c_for_gek: JAI_CELL_FOR(>=, hot.consts[ci.b].unchecked_int_payload());
+		case opcode::op_c_for_lto: JAI_CELL_FOR_SUMMED(<);
+		case opcode::op_c_for_leo: JAI_CELL_FOR_SUMMED(<=);
+		case opcode::op_c_for_gto: JAI_CELL_FOR_SUMMED(>);
+		case opcode::op_c_for_geo: JAI_CELL_FOR_SUMMED(>=);
 		case opcode::op_c_step_back: {   // JAI_CELL_FOR without its compare: the step, the poll, the head
 			const uint32_t var = ci.a & k_cell_for_var_mask;
 			const script_int from = static_cast<script_int>(hot.cells[var].bits);

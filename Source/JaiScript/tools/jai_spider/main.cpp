@@ -10,6 +10,7 @@
 #include <jaiscript/stdlib/stdlib.hpp>
 
 #include "../jaiscript/http_transport.hpp"
+#include "../jaiscript/mail_transport.hpp"
 #include "../jaiscript/file_io.hpp"
 #include "console.hpp"
 #include "database.hpp"
@@ -724,6 +725,7 @@ private:
 		jai::stdlib::register_image(*eng);
 #endif
 		jai_runner::register_http_client(*eng);
+		jai_runner::register_mail_client(*eng);
 		jai_runner::register_file_io(*eng);
 		register_http_text(*eng);
 		spider_host::register_database(*eng, app_dir_);

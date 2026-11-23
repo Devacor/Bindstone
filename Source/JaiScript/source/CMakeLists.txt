@@ -46,6 +46,7 @@ set(JAISCRIPT_SOURCES
     implementation/stdlib/image_png.cpp
     implementation/stdlib/io.cpp
     implementation/stdlib/json.cpp
+    implementation/stdlib/mail.cpp
     implementation/stdlib/random.cpp
     implementation/stdlib/reflection.cpp
     implementation/stdlib/stdlib.cpp

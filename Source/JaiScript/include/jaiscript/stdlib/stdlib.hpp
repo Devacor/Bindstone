@@ -8,6 +8,7 @@
 #include "reflection.hpp"
 #include "web_text.hpp"
 #include "spider.hpp"
+#include "mail.hpp"
 #include "random.hpp"
 #include "crypto.hpp"
 #include "atomic.hpp"

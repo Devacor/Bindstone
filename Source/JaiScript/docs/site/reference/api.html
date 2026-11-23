@@ -913,6 +913,16 @@ print(vformat(pattern, &quot;orc&quot;, 7));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">&lt;b&gt;&amp;lt;i&amp;gt;&lt;/b&gt;</code></pre></div>
 </div>
 </section>
+<section class="api-group"><h2 id="group-mail">mail</h2>
+<div class="api-entry" data-provider="stdlib" data-search="mail::smtp(options: map) -&gt; mail::smtp construct a relay: host, port (587; 465 for tls, 25 for none), security (&quot;starttls&quot;, &quot;tls&quot; or &quot;none&quot;, which reaches loopback only), username and password, from, from_name, reply_to, timeout (30 s). register_mail() + a host transport; send needs the network permission"><h3 id="api-e3507ae45a8d"><code>mail::smtp(options: map) -&gt; mail::smtp</code></h3><p><strong>register_mail() + a host transport; send needs the network permission</strong> &middot; construct</p>
+<p>A relay: host, port (587; 465 for tls, 25 for none), security (&quot;starttls&quot;, &quot;tls&quot; or &quot;none&quot;, which reaches loopback only), username and password, from, from_name, reply_to, timeout (30 s).</p>
+</div>
+</section>
+<section class="api-group"><h2 id="group-mail-smtp">mail::smtp</h2>
+<div class="api-entry" data-provider="stdlib" data-search="mail::smtp.send(message: map) -&gt; string network one message (to, to_name, cc, bcc, from, from_name, reply_to, subject, text, html) over smtp; returns the relay&#x27;s answer (&quot;250 2.0.0 queued as 4f3b2&quot;) and raises on any failure. register_mail() + a host transport; send needs the network permission"><h3 id="api-0e5e5c2ea6c4"><code>mail::smtp.send(message: map) -&gt; string</code></h3><p><strong>register_mail() + a host transport; send needs the network permission</strong> &middot; network</p>
+<p>One message (to, to_name, cc, bcc, from, from_name, reply_to, subject, text, html) over SMTP; returns the relay&#x27;s answer (&quot;250 2.0.0 queued as 4F3B2&quot;) and raises on any failure.</p>
+</div>
+</section>
 <section class="api-group"><h2 id="group-map">map</h2>
 <div class="api-entry" data-provider="core" data-search="map::filter(values: map&lt;k,v&gt;, predicate: function(k, v) -&gt; bool) -&gt; map&lt;k,v&gt; copy, callback returns a new map of the entries the predicate accepts, preserving key/value constraints; the input does not mutate. only selected value elements copy; explicit handles retain identity. every engine"><h3 id="api-b8f32f5469d5"><code>map::filter(values: map&lt;K,V&gt;, predicate: function(K, V) -&gt; bool) -&gt; map&lt;K,V&gt;</code></h3><p><strong>Every engine</strong> &middot; copy, callback</p>
 <p>Returns a new map of the entries the predicate accepts, preserving key/value constraints; the input does not mutate. Only selected value elements copy; explicit handles retain identity.</p>

@@ -18,6 +18,7 @@
 #include <jaiscript/debug/connector.hpp>
 #include <jaiscript/debug/controller.hpp>
 #include <jaiscript/net/http_socket_transport.hpp>
+#include <jaiscript/net/smtp_socket_transport.hpp>
 #include <jaiscript/thread_pool.hpp>
 #include <functional>
 #include <memory>

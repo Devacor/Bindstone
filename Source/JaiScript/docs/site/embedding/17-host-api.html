@@ -585,7 +585,43 @@ below do.</li>
 <p>The runner and jai_spider make one transport per process: WinHTTP on Windows (the system's TLS and certificate
 store), sockets with <code>openssl_tls</code> on Linux and macOS when the build found OpenSSL, and plain sockets
 otherwise, where an https URL raises the plain-HTTP error. <code>JAISCRIPT_HTTP_TRANSPORT=socket</code> in the
-environment makes them use the socket transport on Windows too (plain HTTP only there).</p><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/16-thread-pool.html"><span>&larr; previous</span>Thread Pool for Host Work</a><a class="next" rel="next" href="../embedding/18-build-integration.html"><span>next &rarr;</span>Building JaiScript into a Host</a></nav></article>
+environment makes them use the socket transport on Windows too (plain HTTP only there).</p>
+<h2 id="smtp-transport">The SMTP transport<a class="hlink" href="#smtp-transport" aria-label="link">&#8203;</a></h2>
+<p>The <a href="19-jai-spider.html#mail"><code>mail::</code> client</a> (<code>mail::smtp(options)</code> and its
+<code>send(message)</code>) is opt-in the same way, and the host hands it the transport it sends through:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/stdlib/mail.hpp&gt;
+#include &lt;jaiscript/net/smtp_socket_transport.hpp&gt;   // or your own jai::smtp_transport
+#include &lt;jaiscript/net/openssl_tls.hpp&gt;             // where OpenSSL is linked
+
+jai::stdlib::register_mail(*eng, std::make_shared&lt;jai::net::smtp_socket_transport&gt;(std::make_shared&lt;jai::net::openssl_tls&gt;()));
+eng-&gt;enable(jai::permissions::network);              // send needs it, as spider:: does</code></pre></div>
+<p>Without a transport <code>send</code> raises <code>mail::smtp.send: no SMTP transport installed: the host passes one to
+jai::stdlib::register_mail</code>; without the permission, <code>Insufficient permission: network.</code></p>
+<p>A transport implements one function of <code>jai::smtp_transport</code>
+(<code>&lt;jaiscript/stdlib/mail.hpp&gt;</code>): <code>smtp_reply send(const smtp_request&amp;)</code>.</p>
+<ul>
+<li><strong>The request</strong> carries the relay&#x27;s host and port, its <code>jai::smtp_security</code> (<code>starttls</code>,
+<code>tls</code> or <code>none</code>), the login (none when <code>username</code> is empty), the EHLO name (the sender&#x27;s domain),
+the envelope (the sender and every recipient, bcc included), the message the library composed and the seconds left.</li>
+<li><strong>The reply</strong> is the server&#x27;s answer to the message (<code>250 2.0.0 queued as 4F3B2</code>), which
+<code>send</code> returns, or an <code>error</code> text, raised as <code>mail::smtp.send: HOST:PORT: error</code>;
+<code>"timed out"</code> reads <code>timed out after N s</code>. An exception out of <code>send</code> is reported like an error
+text. An error text never holds the login.</li>
+<li><strong>The library composes the message</strong>: the fields checked, the MIME parts, the encoded words, <code>Date</code> and
+<code>Message-ID</code>. A transport carries it as it is.</li>
+<li><strong><code>send</code> runs on the script&#x27;s thread</strong> and blocks it until the server takes the message or the
+time runs out. <code>smtp_socket_transport</code> keeps each conversation on its caller&#x27;s stack, so one serves every engine on
+every thread.</li>
+</ul>
+<p><code>&lt;jaiscript/net/smtp_socket_transport.hpp&gt;</code> provides <code>jai::net::smtp_socket_transport</code>, SMTP over the sockets of <code>http_socket_transport.hpp</code>, with TLS through the <code>jai::net::tls_layer</code> its constructor takes. Its conversation and its security rules: <a href="../reference/host.html#hostapi-smtp-headers">SMTP transport header</a>.</p>
+<p>The runner and jai_spider make one SMTP transport per process, and what it reaches depends on the build:</p>
+<div class="tablewrap"><table><thead><tr><th>Build</th><th>What sends</th></tr></thead><tbody>
+<tr><td>Linux and macOS, OpenSSL found</td><td>Every <code>security</code>: <code>starttls</code> and <code>tls</code> to a provider, <code>none</code> to a relay on the same machine.</td></tr>
+<tr><td>Windows, and any build without OpenSSL</td><td>Only <code>"security": "none"</code> to a relay on the same machine; <code>starttls</code> and <code>tls</code> raise <code>... needs TLS, and this transport has none ...</code>. WinHTTP, the tools&#x27; HTTPS on Windows, has no SMTP side, and the tools look for OpenSSL only on Linux and macOS.</td></tr>
+</tbody></table></div>
+<p>A relay on the same machine (Postfix, OpenSMTPD) is the usual shape for a web host anyway: it takes the message at once, keeps
+the provider&#x27;s password out of the app and retries when the provider is slow. On Windows, run one that listens on
+127.0.0.1, or build a host that links OpenSSL and passes <code>openssl_tls</code>.</p><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/16-thread-pool.html"><span>&larr; previous</span>Thread Pool for Host Work</a><a class="next" rel="next" href="../embedding/18-build-integration.html"><span>next &rarr;</span>Building JaiScript into a Host</a></nav></article>
 </main>
 </div>
 <footer class="site-footer">

@@ -20,6 +20,7 @@
 #include "fetch.hpp"   // download, zip_entries, zip_extract (runner host API)
 #include "sound.hpp"   // load_sound, play_sound, stop_sounds (runner host API)
 #include "http_transport.hpp"   // spider::catch / sling / get / post over WinHTTP or sockets
+#include "mail_transport.hpp"   // mail::smtp over sockets
 #endif
 
 #include <algorithm>
@@ -1341,6 +1342,7 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 	jai_runner::register_fetch(*eng);
 	jai_runner::register_sound(*eng);
 	jai_runner::register_http_client(*eng);
+	jai_runner::register_mail_client(*eng);
 
 	jai::script_value args = jai::script_value::make_array(nullptr, eng.get());
 	auto& arg_storage = args.as_array();

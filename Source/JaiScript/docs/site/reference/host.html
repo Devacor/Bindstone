@@ -492,6 +492,15 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>openssl_tls</code>, trust setup</td><td>The constructor takes the trust setup, a function of the <code>SSL_CTX*</code>. Without one it uses OpenSSL's default certificate paths.</td></tr>
 <tr><td><code>openssl_tls</code>, platform stores</td><td>On Android and iOS the trust setup fills the store from the platform (SecTrust, <code>/system/etc/security/cacerts</code>); on Windows, from the ROOT store.</td></tr>
 </tbody></table></div>
+<h3 id="hostapi-smtp-headers">SMTP transport header<a class="hlink" href="#hostapi-smtp-headers" aria-label="link">&#8203;</a></h3>
+<p>Opt-in like the HTTP headers: <a href="../embedding/17-host-api.html#smtp-transport">The SMTP transport</a>. Each failure&#x27;s text: <a href="errors.html#errors-mail">mail errors</a>.</p>
+<div class="tablewrap"><table><thead><tr><th>Header</th><th>Provides</th></tr></thead><tbody>
+<tr><td><code>&lt;jaiscript/net/smtp_socket_transport.hpp&gt;</code></td><td><code>jai::net::smtp_socket_transport</code>: SMTP over the sockets of <code>http_socket_transport.hpp</code>, one connection per message. Every wait is bounded by the timeout, name resolution excepted.</td></tr>
+<tr><td>the conversation</td><td>The greeting, <code>EHLO</code> with the sender&#x27;s domain, STARTTLS and <code>EHLO</code> again when asked, <code>AUTH PLAIN</code> (else <code>AUTH LOGIN</code>) when a login is given, <code>MAIL FROM</code>, a <code>RCPT TO</code> per recipient, <code>DATA</code> and the message, then <code>QUIT</code>, never awaited: the message is the server&#x27;s at its 250. A reply may span lines (<code>250-</code> then <code>250 </code>) and arrive in any number of reads.</td></tr>
+<tr><td>the message</td><td>Sent as the library composed it, every line break as CRLF and a line that starts with <code>.</code> given a second.</td></tr>
+<tr><td>security</td><td><code>starttls</code> and <code>tls</code> need a <code>jai::net::tls_layer</code> passed to the constructor (<code>openssl_tls</code> verifies the chain and the host name). <code>starttls</code> refuses a server that does not offer it, before the login, and drops whatever the server sent in the clear past its STARTTLS answer. <code>none</code> resolves the host and refuses it unless every address is loopback (127.0.0.0/8, ::1), before a connection is tried; a login goes in the clear only there.</td></tr>
+<tr><td>credentials</td><td>The login travels only in the AUTH commands. An error names the step and the server&#x27;s reply, never a command.</td></tr>
+</tbody></table></div>
 
 <h2 id="spider-reference">jai_spider<a class="hlink" href="#spider-reference" aria-label="link">&#8203;</a></h2>
 <p>The web host and its script library <code>lib/spider.jai</code>: <a href="../embedding/19-jai-spider.html">jai_spider</a>.</p>

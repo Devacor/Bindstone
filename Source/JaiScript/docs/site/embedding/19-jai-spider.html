@@ -279,6 +279,57 @@ connection (<code>Connection</code>, <code>Keep-Alive</code>, <code>Proxy-Connec
 <li>Which transport carries the call, and whether it speaks HTTPS, is in
 <a href="17-host-api.html#http-transport">The HTTP transport</a>.</li>
 </ul>
+<h2 id="mail">Sending email<a class="hlink" href="#mail" aria-label="link">&#8203;</a></h2>
+<p>jai_spider also installs the <code>mail::</code> client, for the mail a site sends: a sign-up&#x27;s verification, an order&#x27;s
+receipt. <code>mail::smtp(options)</code> names a relay and what its messages share; its <code>send(message)</code> sends one
+message over SMTP and returns the relay&#x27;s answer, or raises.</p>
+<div class="codeblock cb-jai" data-host="jai_spider"><span class="cb-label">jaiscript (under jai_spider)</span><pre><code class="lang-jai">// a relay on this machine: it takes the message at once, keeps the provider's password and retries
+mail::smtp relay = mail::smtp({"host": "127.0.0.1", "security": "none", "from": "shop@snapjaw.example", "from_name": "Snap Jaw"});
+
+void send_verification(string email, string handle, string token) {
+    string link = "https://snapjaw.example/verify?token=" + token;
+    relay.send({"to": email, "to_name": handle, "subject": "Confirm your email for Snap Jaw",
+        "text": `Hi ${handle},\n\nConfirm your email by opening ${link}\n`,
+        "html": `&lt;p&gt;Hi ${web::html_escape(handle)},&lt;/p&gt;&lt;p&gt;&lt;a href="${link}"&gt;Confirm your email&lt;/a&gt;&lt;/p&gt;`});
+}
+
+routes.post("/sign-up", (spider::request req) =&gt; {
+    map&lt;string, string&gt; form = req.form();
+    string token = crypto::random_hex(16);
+    db.execute("INSERT INTO users (email, handle, token) VALUES (?, ?, ?)", form["email"], form["handle"], token);
+    try {
+        send_verification(form["email"], form["handle"], token);
+    } catch (e) {
+        print(e);                                  // mail::smtp.send: 127.0.0.1:25: ...
+        return spider::html("&lt;p&gt;We could not send the email. Try again in a minute.&lt;/p&gt;", 503);
+    }
+    return spider::redirect("/check-your-email");
+});</code></pre></div>
+<div class="tablewrap"><table><thead><tr><th>Option of mail::smtp</th><th>What it sets</th></tr></thead><tbody>
+<tr><td><code>host</code></td><td>The relay; the only option it needs.</td></tr>
+<tr><td><code>security</code></td><td><code>"starttls"</code> (the default): the conversation turns to TLS before the login or the message, and a server that does not offer it is refused. <code>"tls"</code>: TLS from the first byte. <code>"none"</code>: in the clear, and only to a host whose every address is loopback.</td></tr>
+<tr><td><code>port</code></td><td>587 for <code>starttls</code>, 465 for <code>tls</code>, 25 for <code>none</code> unless given.</td></tr>
+<tr><td><code>username</code>, <code>password</code></td><td>The login, both or neither: AUTH PLAIN when the server offers it, else AUTH LOGIN. No error text, print or <code>to_json</code> shows them.</td></tr>
+<tr><td><code>from</code>, <code>from_name</code>, <code>reply_to</code></td><td>The sender, its display name and the Reply-To address, for every message that does not give its own.</td></tr>
+<tr><td><code>timeout</code></td><td>The seconds the whole conversation may take, 30 by default; every connect, read and write waits at most until then (name resolution aside).</td></tr>
+</tbody></table></div>
+<div class="tablewrap"><table><thead><tr><th>Field of a message</th><th>What it sets</th></tr></thead><tbody>
+<tr><td><code>to</code></td><td>An address or an array of them; <code>to_name</code> names a single one.</td></tr>
+<tr><td><code>cc</code>, <code>bcc</code></td><td>An address or an array of them. Bcc recipients get the message and appear in no header.</td></tr>
+<tr><td><code>from</code>, <code>from_name</code>, <code>reply_to</code></td><td>As the options, for this message.</td></tr>
+<tr><td><code>subject</code></td><td>One line; non-ASCII text is written as RFC 2047 encoded words.</td></tr>
+<tr><td><code>text</code>, <code>html</code></td><td>The body: <code>text/plain</code>, <code>text/html</code>, or both as <code>multipart/alternative</code>, in UTF-8 and quoted-printable.</td></tr>
+</tbody></table></div>
+<ul>
+<li><strong>A line break is refused, never stripped.</strong> An address with CR, LF, a space, a quote, a bracket or a comma, and a
+subject or display name with CR, LF or NUL, raise before anything is sent, so no input reaches a header of its own.</li>
+<li><strong>Each message gets a <code>Date</code> and a random <code>Message-ID</code></strong> at the sender&#x27;s domain, and
+the sender&#x27;s domain is the EHLO name.</li>
+<li><strong>A send blocks its worker</strong> until the relay takes the message, as <code>spider::catch</code> does; a relay on
+the same machine answers at once. Every failure raises <code>mail::smtp.send: HOST:PORT: why</code>
+(<a href="../reference/errors.html#errors-mail">mail errors</a>).</li>
+<li>Which builds speak TLS, Windows among them, is in <a href="17-host-api.html#smtp-transport">The SMTP transport</a>.</li>
+</ul>
 <h2 id="workers">Workers and request isolation<a class="hlink" href="#workers" aria-label="link">&#8203;</a></h2>
 <p>One network thread accepts connections, reads requests, serves static files and writes responses. Each complete
 request goes to a pool of worker threads (<code>--workers N</code>, one per hardware thread by default), and each

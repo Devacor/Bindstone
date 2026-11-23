@@ -3656,6 +3656,7 @@ public:
 			jai::stdlib::register_all(*e);
 			jai::stdlib::register_web(*e);
 			jai::stdlib::register_spider(*e);
+			jai::stdlib::register_mail(*e, nullptr);
 			std::set<std::string> names;
 			for (const std::string& name : detail::engine_access::host_function_names(*e)) { names.insert(name); }
 			auto* sym = detail::engine_access::get_symbolizer(*e);
@@ -3671,7 +3672,7 @@ public:
 				"__jai_parallel_range",
 				"app_cache_dir", "app_data_dir", "array::filter", "array::map", "array::sort", "crypto::sha256_file", "debug::locals",
 				"debug::stack", "extend",
-				"file::data", "from_binary", "from_json", "import_recheck_interval", "map::filter", "parallel_reduce",
+				"file::data", "from_binary", "from_json", "import_recheck_interval", "mail::smtp", "map::filter", "parallel_reduce",
 				"parallel_transform", "print", "reflect::bases", "reflect::bind", "reflect::call", "reflect::classes",
 				"reflect::construct", "reflect::construct_shared", "reflect::fields", "reflect::function_arguments",
 				"reflect::functions", "reflect::generation", "reflect::get", "reflect::globals", "reflect::has_field",

@@ -62,6 +62,7 @@
 #include "implementation/stdlib/time.cpp"
 #include "implementation/stdlib/web_text.cpp"
 #include "implementation/stdlib/spider.cpp"
+#include "implementation/stdlib/mail.cpp"
 #include "implementation/stdlib/random.cpp"
 #include "implementation/stdlib/crypto.cpp"
 #include "implementation/stdlib/atomic.cpp"

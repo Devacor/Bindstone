@@ -7139,6 +7139,30 @@
       "display": "spider::response.clear_cookie(name: string, options: map = {}) -> void"
     },
     {
+      "owner": "mail",
+      "name": "smtp",
+      "signature": "smtp(options: map) -> mail::smtp",
+      "provider": "stdlib",
+      "effect": "construct",
+      "notes": "A relay: host, port (587; 465 for tls, 25 for none), security (\"starttls\", \"tls\" or \"none\", which reaches loopback only), username and password, from, from_name, reply_to, timeout (30 s).",
+      "source": "include/jaiscript/stdlib/mail.hpp",
+      "form": "function",
+      "availability": "register_mail() + a host transport; send needs the network permission",
+      "display": "mail::smtp(options: map) -> mail::smtp"
+    },
+    {
+      "owner": "mail::smtp",
+      "name": "send",
+      "signature": "send(message: map) -> string",
+      "provider": "stdlib",
+      "effect": "network",
+      "notes": "One message (to, to_name, cc, bcc, from, from_name, reply_to, subject, text, html) over SMTP; returns the relay's answer (\"250 2.0.0 queued as 4F3B2\") and raises on any failure.",
+      "source": "include/jaiscript/stdlib/mail.hpp",
+      "form": "method",
+      "availability": "register_mail() + a host transport; send needs the network permission",
+      "display": "mail::smtp.send(message: map) -> string"
+    },
+    {
       "owner": "atomic<int>",
       "name": "load",
       "signature": "load() -> int",

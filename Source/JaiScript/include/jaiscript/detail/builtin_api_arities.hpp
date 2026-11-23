@@ -389,7 +389,7 @@ namespace jai::detail {
 
 	// The builtins a debugger's watch may call: every catalog entry of the name only reads, copies, builds or converts (a callback it
 	// takes is the watch's own code, or script the watch refuses as it runs). Functions by qualified name, methods by name.
-	inline constexpr std::array<std::string_view, 209> BUILTIN_OBSERVING_FUNCTIONS{{
+	inline constexpr std::array<std::string_view, 210> BUILTIN_OBSERVING_FUNCTIONS{{
 		"array::append",
 		"array::concat",
 		"array::fill",
@@ -440,6 +440,7 @@ namespace jai::detail {
 		"jai::permissions::is_enabled",
 		"language::cast<T>",
 		"language::raw",
+		"mail::smtp",
 		"map::filter",
 		"map::merge",
 		"math::abs",

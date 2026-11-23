@@ -70,8 +70,9 @@ namespace net {
 			}
 		}
 
-		// false when no address of host:port took the connection before the deadline; a_error says why
-		bool connect(const std::string& a_host, int a_port, clock::time_point a_deadline, std::string& a_error) {
+		// false when no address of host:port took the connection before the deadline; a_error says why. With a_beyond_loopback,
+		// a host with any address beyond loopback is refused with that text before a connection is tried
+		bool connect(const std::string& a_host, int a_port, clock::time_point a_deadline, std::string& a_error, std::string_view a_beyond_loopback = {}) {
 			if (!sockets_ready()) {
 				a_error = "the socket library did not start";
 				return false;
@@ -85,6 +86,13 @@ namespace net {
 			if (::getaddrinfo(a_host.c_str(), port_text.c_str(), &hints, &found) != 0 || !found) {
 				a_error = "cannot resolve host '" + a_host + "'";
 				return false;
+			}
+			for (addrinfo* candidate = found; candidate && !a_beyond_loopback.empty(); candidate = candidate->ai_next) {
+				if (!is_loopback(*candidate->ai_addr)) {
+					::freeaddrinfo(found);
+					a_error = std::string(a_beyond_loopback);
+					return false;
+				}
 			}
 			bool timed_out = false;
 			for (addrinfo* candidate = found; candidate && socket_ == bad_socket; candidate = candidate->ai_next) {
@@ -187,6 +195,14 @@ namespace net {
 #else
 			::fcntl(a_socket, F_SETFL, ::fcntl(a_socket, F_GETFL, 0) | O_NONBLOCK);
 #endif
+		}
+
+		// 127.0.0.0/8, ::1 and 127.0.0.0/8 mapped into IPv6
+		static bool is_loopback(const sockaddr& a_address) {
+			if (a_address.sa_family == AF_INET) { return (ntohl(reinterpret_cast<const sockaddr_in&>(a_address).sin_addr.s_addr) >> 24) == 127; }
+			if (a_address.sa_family != AF_INET6) { return false; }
+			const in6_addr& address = reinterpret_cast<const sockaddr_in6&>(a_address).sin6_addr;
+			return IN6_IS_ADDR_LOOPBACK(&address) || (IN6_IS_ADDR_V4MAPPED(&address) && address.s6_addr[12] == 127);
 		}
 
 		static bool in_progress() {

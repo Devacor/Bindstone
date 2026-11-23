@@ -790,9 +790,11 @@ form reads them.
   instruction, exactly where the door leaves it. Any other case parks the callee as the general probe parks it and runs the door
   (the binder converts, the general call runs).
 - **The plan.** What the probe establishes holds until general code runs, so a raw site keeps it as a plan: the raw epoch in
-  which the probe validated the callee and the callee's body. The epoch advances wherever general code may have run before the
-  next instruction of a block that can call raw (its entry from the dispatcher, its door calls, a callee getter or an
-  environment load at its doors) and when the debugger's hook changes; a block without raw sites never advances it. A probe
+  which the probe validated the callee and the callee's body. The epoch advances wherever general code may have run before a
+  block's next instruction (a block's entry from the dispatcher, a door's call, a callee getter or an environment load at a
+  door), when the debugger's hook changes and when a run switches, whatever the block: a raw-entered frame program with no raw
+  site of its own still runs general code at its doors, and its raw caller's plans, environment values and inlined leaves hold
+  only while the epoch its return compares has not moved. A probe
   whose plan is of the current epoch resolves nothing. The compiler records the callee's parameter kinds at the site and
   whether every argument is a pinned cell or a constant of exactly those kinds; such a site's arguments are never checked at
   run time, and the plan compares the callee's frame program's kinds with the site's once (a callee redefined with other

@@ -8635,9 +8635,9 @@ next_frame:
 // its status; the budget is polled at the cell back edge as before. A raw call or a raw return hands the block loop
 // another frame (raw_switch_): the raw chain runs it next, and the dispatcher takes whichever frame the chain ends in
 op_status vm_backend::cells_run(frame& entry, const chunk::cell_loop& entry_loop) {
-	// general code may have run since the last block run: a block that can call raw re-validates its sites' plans (a raw chain starts at such a
-	// block, so no plan outlives general code; a block without raw sites pays nothing)
-	if (entry_loop.raw_sites) [[unlikely]] { raw_epoch_advance(); }
+	// general code may have run since the last block run: no site's plan outlives it, and a raw call in flight around this frame, whose
+	// block may have no raw site of its own, re-validates its caller at its return
+	raw_epoch_advance();
 	if (entry_loop.frame_program) [[unlikely]] return cells_run_raw(entry, op_status::ok, true);
 	frame* ep = &entry;
 	const op_status st = cells_run_frame<false>(ep, entry_loop);
@@ -8811,7 +8811,7 @@ op_status vm_backend::exec_c_probe(frame& f, const vm_instruction& ins) {
 	bool observed = false;   // the resolution ran a getter (a property reference or a bare C++ property): an effect point
 	const op_status st = exec_probe_callee(f, f.code->code[cc.probe_ip], &observed);
 	if (st == op_status::failed) [[unlikely]] { cells_flush(f, loop); f.ip = cc.probe_ip; return st; }
-	if (observed && loop.raw_sites) [[unlikely]] { raw_epoch_advance(); }   // a getter ran: no plan outlives it
+	if (observed) [[unlikely]] { raw_epoch_advance(); }   // a getter ran: no plan outlives it, in this block or in a raw caller's
 	if (observed && !cells_reland(f, loop, cc, false, false)) [[unlikely]] { JAI_CELLS_COUNT(12); cells_miss(f, loop, cc.probe_ip + 1, 4); return {}; }   // the callee stays parked: the general form pushes the arguments, the getter never runs twice
 	++f.ip;
 	return {};
@@ -8869,7 +8869,7 @@ op_status vm_backend::exec_c_args(frame& f, const vm_instruction& ins) {
 				// the block's (the second would answer the first's binding)
 				const size_t here = f.ip;
 				f.ip = a.v;
-				if (loop.raw_sites) { raw_epoch_advance(); }   // the load may run a getter
+				raw_epoch_advance();   // the load may run a getter
 				const op_status st = exec_load(f, oi);
 				f.ip = here;
 				if (st == op_status::failed) [[unlikely]] { cells_flush(f, loop); f.ip = a.v; return st; }
@@ -8884,7 +8884,7 @@ op_status vm_backend::exec_c_args(frame& f, const vm_instruction& ins) {
 op_status vm_backend::exec_c_call(frame& f, const vm_instruction& ins) {
 	JAI_CELLS_COUNT(7); JAI_CELLS_COUNT(11);
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
-	if (loop.raw_sites) { raw_epoch_advance(); }   // user code may run: plans re-validate, and a raw call in flight around this one re-validates its caller at its return
+	raw_epoch_advance();   // user code may run: plans re-validate, and a raw call in flight around this frame re-validates its caller at its return
 	const chunk::cell_loop::cell_call& cc = loop.calls[ins.a];
 	const op_status st = exec_call_from_scratch(f, f.code->code[cc.call_ip]);
 	if (st == op_status::failed) [[unlikely]] { cells_flush(f, loop); f.ip = cc.call_ip; return st; }

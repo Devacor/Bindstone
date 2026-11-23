@@ -893,8 +893,10 @@ exception converts at that frame too). A block that makes no raw call pays one p
   raw frame lives across a yield; a raw chain a coroutine starts ends before its next yield.
 - **Hot reload**: the probe reads the callee's binding at every call; a running frame keeps its function pinned; a reload that
   changes a parameter's kind fails the kind check and takes the door.
-- **Parallel workers**: a worker takes the door (a worker's function copies are compiled at the barrier); raw entry is not
-  used on parallel workers.
+- **Parallel workers**: a worker's function copies are compiled at the barrier into the worker's own chunks, so its call
+  plans are its own; its probe reads the callee through the worker's rows of the chunk (the site's parked callee, the lookup
+  row) and enters a copy that closes over the worker's root environment while the caller stands there. A callee the worker
+  reaches any other way (a method's sandbox, a block scope) takes the door.
 
 ### How raw frames and cell blocks compose
 
@@ -1024,4 +1026,4 @@ callable or a reference that is written has no word, so such a signature keeps t
 Not built: scalar entries for host methods and for string results, one armed slow-path flag for depth, budget and debugger, compile-time
 frame shapes and site plans for general calls, proven initialization (a slot written before read still takes the null
 placeholder), loops inside frame programs, raw entry of frame programs that read environment values, container sites or graft
-guards, raw calls on parallel workers, and flat records.
+guards, and flat records.

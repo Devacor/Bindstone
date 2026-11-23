@@ -197,6 +197,82 @@ array<int> xs = []; for (int i = 0; i < 600; ++i) { xs.push(i); }
 				if (vm) { check(detail::engine_access::cells_counters(*e).entries - before >= 30, "each host call enters the loop's block"); }
 			}
 		});
+
+		test("one_engine_runs_string_regions_alone_and_then_on_several_workers", [this]() {
+			// a region alone on the engine's thread shares the table's and the literals' string nodes; the next region of the same engine
+			// runs on several workers and finds none of them in a worker's keeping; the table reads as it was after each
+			for (bool vm : { false, true }) {
+				auto e = jai::foundry::make_default_engine();
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
+				stdlib::register_all(*e);
+				e->execution_budget(0);
+				const std::string tag = vm ? "vm" : "interpreter";
+				e->execute(R"JAI(
+array<string> PAL = ["<a>", "<b>", "<c>", "<d>"];
+function row(int y) -> string {
+	array<string> parts = [];
+	for (int x = 0; x < 24; ++x) { parts.push(PAL[(x + y) % 4]); parts.push("-"); }
+	string own = PAL[y % 4];
+	own += "!";
+	parts.push(own);
+	return parts.join("");
+}
+array<int> ys = [];
+for (int y = 0; y < 48; ++y) { ys.push(y); }
+array<string> serial = [];
+for (int y : ys) { serial.push(row(y)); }
+function region() -> bool { var rows = parallel_transform(ys, row); return string::join(rows, "/") == string::join(serial, "/") && string::join(PAL, "") == "<a><b><c><d>"; }
+)JAI");
+				for (size_t workers : { size_t(1), size_t(4), size_t(1), size_t(3), size_t(1) }) {
+					e->parallel_thread_count(workers);
+					std::string got;
+					try { got = e->execute("region() && region()").to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+					check_eq(std::string("true"), got, tag + ": " + std::to_string(workers) + " workers give the serial rows and leave the table");
+				}
+			}
+		});
+
+		test("a_worker_enters_a_frame_program_raw", [this]() {
+			// a typed recursion called from a parallel body's loop: the worker's block enters the callee's frame program raw, as the
+			// engine's own blocks do, so the callee's general entry (a block entry per call) is not taken
+			const char* defs = R"JAI(
+function fib(int n) -> int { if (n < 2) { return n; } return fib(n - 1) + fib(n - 2); }
+function work(int x) -> int { int s = 0; for (int i = 0; i < 6; ++i) { s += fib(9 + (x + i) % 5); } return s; }
+array<int> xs = [];
+for (int i = 0; i < 64; ++i) { xs.push(i); }
+int serial = 0;
+for (int x : xs) { serial += work(x); }
+)JAI";
+			const char* run = "var out = parallel_transform(xs, work); int total = 0; for (auto v : out) { total += v; } to_string(total == serial) + \" \" + to_string(total);";
+			for (size_t workers : { size_t(1), size_t(4) }) {
+				const outcome interp = run_split(false, defs, run, workers), vm = run_split(true, defs, run, workers);
+				const std::string tag = "typed recursion (" + std::to_string(workers) + " workers)";
+				check_eq(interp.run, vm.run, tag + ": both backends");
+				check_eq(std::string("true 42502"), vm.run, tag + ": the serial loop's total");
+				check(vm.entries < 20000, tag + ": the callee's frames are raw (" + std::to_string(vm.entries) + " block entries)");
+			}
+		});
+
+		test("a_raise_inside_a_workers_raw_frame_is_the_general_calls", [this]() {
+			// an overflow and a call past the depth limit inside frames a worker entered raw: the element's error, as the interpreter words it
+			const char* defs = R"JAI(
+function grow(int n) -> int { if (n == 0) { return 9223372036854775800; } return grow(n - 1) + 1; }
+function overflows(int x) -> int { int s = 0; for (int i = 0; i < 4; ++i) { s = grow(x + i) % 7; } return s; }
+function sink(int n) -> int { return sink(n + 1) + 1; }
+function bottomless(int x) -> int { int s = 0; for (int i = 0; i < 2; ++i) { s += sink(x); } return s; }
+array<int> xs = [];
+for (int i = 0; i < 32; ++i) { xs.push(i); }
+)JAI";
+			for (const char* body : { "overflows", "bottomless" }) {
+				const std::string run = std::string("string r = \"none\"; try { var out = parallel_transform(xs, ") + body + "); r = to_string(out.size()); } catch (e) { r = to_string(e); } r";
+				for (size_t workers : { size_t(1), size_t(4) }) {
+					const outcome interp = run_split(false, defs, run, workers), vm = run_split(true, defs, run, workers);
+					const std::string tag = std::string(body) + " (" + std::to_string(workers) + " workers)";
+					check_eq(interp.run, vm.run, tag + ": both backends");
+					check(vm.run != "none" && vm.run != "32" && vm.run.rfind("throw:", 0) != 0, tag + ": the body's error is caught (" + vm.run + ")");
+				}
+			}
+		});
 	}
 };
 

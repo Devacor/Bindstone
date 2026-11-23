@@ -220,7 +220,8 @@ and never claim a sub-µs win from it — anything under ~1 µs needs a dedicate
 - A `checked_result` message is a NON-OWNING view for literals: dynamic text (a caught
   exception's `what()`, a built string) rides an error's `{0}` as a symbol from
   `engine::park_error_text` (`string_symbolizer::park`); the result never views the source buffer.
-- Parallel workers never borrow string handles raw: the "all primitive" short-circuit excludes
+- Parallel workers never borrow string handles raw (a region alone on the engine's thread is the exception: it wakes no
+  other thread, so its worker shares nodes as the serial loop does, `vm_backend::parallel_alone_`): the "all primitive" short-circuit excludes
   the str kind, and a typed primitive/string input is read through a boxed snapshot; an object-kind input lends its slots (`parallel_worker_slot::typed_input`)
   to both forms.
 - Neither form demotes an object-kind source: exclusivity comes from the ONE element proof

@@ -143,6 +143,15 @@ statement's region pool keeps the smoothed ns per element of main's own chunk
 chunk worth `k_parallel_chunk_overhead_ratio` (3x) the wake cost. Every region of two or more
 elements (`k_parallel_small_n`) takes this path; there is no separate small-count cutoff.
 
+**A region alone on the engine's thread shares string nodes.** A region whose partition is one context runs its chunk on the
+calling thread and wakes no pool thread, so no other thread counts a string node while it runs. Its worker (the VM's,
+`vm_backend::parallel_alone_`, set per region at the barrier) therefore takes a borrowed table's string element, a literal
+and a block's string constant as the node itself, as the serial loop shares it, where a worker of a wider region copies the
+bytes (`worker_owned_string`, `literal_string_value`, `block_constants`). Nothing shared this way enters the worker's own
+caches, so a later region that runs the same slot on a pool thread finds no engine-owned node in its keeping, and a write
+through such a string unshares it at the string write gate as any copy does. Everything a script can observe is the wider
+region's: admission, the write wall, the provisioning tiers, the results and the error a region reports.
+
 **Shared strings detach at the barrier, wherever a worker can copy them.** The only alias a
 value-closed element can still carry is a string node several slots share (a literal every
 instance of a class was built from: a field default, a map key, a `push` in a loop). The element
@@ -566,7 +575,8 @@ keep their binding (the body reads one, the method the other):
   sound); any other use of the parameter makes it a whole-value touch. Workers get ONE tagged raw pointer
   (`parallel_borrow_tag`, storage index 15) whose copies touch no refcount; element reads
   mint worker-local values — a primitive is read from the buffer, a string read copies
-  the BYTES into a fresh worker-owned string and never touches the live handle's count.
+  the BYTES into a fresh worker-owned string and never touches the live handle's count
+  (a region alone on the engine's thread shares the node: §3).
   **Zero copies at the barrier, zero refcount traffic, zero memory_cap charge.** GLOOM's
   bit-packed int64 grids and its glyph and palette tables ride this tier: the per-read byte
   copy of a short escape string is far cheaper than copying hundreds of table entries per

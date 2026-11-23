@@ -235,7 +235,7 @@ namespace jai::vm {
             switch_to_ = nullptr;
             raw_switch_ = nullptr;
             cells_frame_ = nullptr;
-            raw_epoch_ = 0;   // even: no plan the main backend wrote ever matches
+            raw_epoch_advance();   // no plan an earlier region left in this worker's chunks holds
             pending_site_ctx_ = {};
             external_site_stack_.clear();
             execution_budget_ = budget;
@@ -309,8 +309,16 @@ namespace jai::vm {
         std::vector<std::unique_ptr<worker_chunk_env_cache>> worker_env_caches_;   // records never move: callers keep pointers
         std::unordered_map<const chunk*, worker_chunk_env_cache*> worker_env_index_;
         worker_chunk_env_cache* worker_env_mru_ = nullptr;
+        // the records last found, by chunk address: a caller and its callees alternate, which one MRU row misses every time
+        static constexpr size_t k_worker_env_recent = 16;
+        worker_chunk_env_cache* worker_env_recent_[k_worker_env_recent] = {};
+        static size_t worker_env_recent_row(const chunk* code) noexcept {
+            const uintptr_t at = reinterpret_cast<uintptr_t>(code);
+            return ((at >> 5) ^ (at >> 11)) & (k_worker_env_recent - 1);
+        }
         JAI_FORCEINLINE worker_chunk_env_cache* worker_chunk_record(const chunk* code) {
             if (worker_env_mru_ && worker_env_mru_->code == code) { return worker_env_mru_; }
+            if (worker_chunk_env_cache* recent = worker_env_recent_[worker_env_recent_row(code)]; recent && recent->code == code) { worker_env_mru_ = recent; return recent; }
             return worker_chunk_record_slow(code);
         }
         worker_chunk_env_cache* worker_chunk_record_slow(const chunk* code);
@@ -370,6 +378,9 @@ namespace jai::vm {
         std::vector<ctor_context> ctor_contexts_;
         // a constructor frame's exit: the dispatch level it set back (ctor_exit_dispatch), the construction it owns (ctor_exit_context)
         static constexpr uint8_t ctor_exit_dispatch = 1, ctor_exit_context = 2;
+        // this worker's region runs on the engine's thread alone (one context, no pool thread): no other thread reads a node it shares, so a
+        // string it takes from a borrowed table is the table's own node, as the serial loop shares it
+        bool parallel_alone_ = false;
         script_value worker_borrowed_string(const script_value& borrow, const script_value& index, const script_string& source);
         script_value worker_owned_string(const script_array* node, uint64_t index, const script_string& source);   // the cache by node and index
         // A worker-minted string node can be published into the parent's output by the region
@@ -381,6 +392,7 @@ namespace jai::vm {
         static bool worker_string_private(const script_value& v) noexcept {
             return v.raw_storage_index() == script_value::TYPEID_STRING && v.unchecked_string_handle().unique();
         }
+        void parallel_region_alone(bool alone) noexcept { parallel_alone_ = alone; }
         void release_region_strings() noexcept {
             for (auto it = worker_borrowed_strings_.begin(); it != worker_borrowed_strings_.end();) {
                 if (worker_string_private(it->second)) { ++it; } else { it = worker_borrowed_strings_.erase(it); }
@@ -413,7 +425,7 @@ namespace jai::vm {
         const chunk* worker_block_constants_code_ = nullptr;
         const script_value* worker_block_constants_mru_ = nullptr;
         const script_value* block_constants(const chunk& code) {
-            if (!parallel_worker_) { return code.constants.data(); }
+            if (!parallel_worker_ || parallel_alone_) { return code.constants.data(); }
             if (worker_block_constants_code_ == &code) { return worker_block_constants_mru_; }
             return worker_block_constants_for(code);
         }
@@ -1501,10 +1513,10 @@ namespace jai::vm {
         // literal, the XTHREAD canary pins this): it shares its own per-chunk copy when the
         // chunk is pinned in its tables, else it copies the bytes
         script_value literal_string_value(const strong_ptr<script_string>& node) const {
-            return parallel_worker_ ? script_value(*node, engine_) : script_value(node, engine_);
+            return parallel_worker_ && !parallel_alone_ ? script_value(*node, engine_) : script_value(node, engine_);
         }
         script_value literal_string_value(const chunk& code, uint32_t const_index, const strong_ptr<script_string>& node) {
-            if (!parallel_worker_) { return script_value(node, engine_); }
+            if (!parallel_worker_ || parallel_alone_) { return script_value(node, engine_); }
             if (worker_chunk_env_cache* rec = worker_chunk_record(&code)) {
                 if (rec->string_constants.size() <= const_index) [[unlikely]] {
                     rec->string_constants.resize(code.constants.size(), script_value(std::monostate{}, engine_));
@@ -2574,7 +2586,7 @@ namespace jai::vm {
         // lands raw in a raw caller's cell, else boxes through its return pad. Both switch the block loop's frame through raw_switch_
         // in_loop: the frame-program loop follows the callee itself (*in_loop names it; raw_switch_ untouched)
         bool raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm_instruction& ins, op_status& st, frame** in_loop = nullptr);
-        const script_value* raw_env_value(const chunk& body, const chunk::cell_loop& loop, uint32_t k) const;
+        const script_value* raw_env_value(const chunk& body, const chunk::cell_loop& loop, uint32_t k);
         static constexpr size_t k_raw_small_cells = 16;   // a small program's cells clear with fixed-size stores (the vectors keep at least this many)
         frame& raw_push(frame& f, const chunk::cell_loop& loop, uint32_t index, const chunk::cell_loop::call_plan& plan);
         void raw_pop(call_record& rec);
@@ -3072,8 +3084,8 @@ namespace jai::vm {
         // the raw epoch: advanced wherever general code may have run before the next instruction of a block that can call raw (its entry from
         // the dispatcher, its door calls, a callee getter or an environment load at its doors) and when the debugger's hook changes. A call site's
         // plan holds for the epoch that validated it (a raw chain starts at such a block, so no plan outlives general code), and a raw return
-        // re-validates its caller when the epoch moved during the raw call. Odd on the main backend, even on a worker (never equal: a worker
-        // never plans, and a plan written by the main thread never matches a worker's epoch)
+        // re-validates its caller when the epoch moved during the raw call. A worker plans in its own chunks (each backend compiles its
+        // own), against its own lookup rows, and its epoch only moves forward across the regions it runs
         uint64_t raw_epoch_ = 1;
         cell_counters cells_counters_{};   // entries, boundaries, resumes, misses (engine::cells_counters)
         void raw_epoch_advance() { raw_epoch_ += 2; }

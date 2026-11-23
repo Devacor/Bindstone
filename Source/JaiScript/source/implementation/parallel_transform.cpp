@@ -6375,6 +6375,7 @@ struct region_run {
 			if (plan.prof) { ++(slot_fresh ? plan.prof->slot_provisions : plan.prof->slot_resets); }
 #endif
 			restamp_alias_proofs(eng, *slot);
+			if (slot->vm) { slot->vm->parallel_region_alone(worker_count == 1); }
 			slot->begin = chunk_begin[k];
 			slot->end = n;
 			slot->count = chunk_count[k];

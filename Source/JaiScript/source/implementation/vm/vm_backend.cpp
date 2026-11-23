@@ -2549,6 +2549,7 @@ JAI_NOINLINE vm_backend::worker_chunk_env_cache* vm_backend::worker_chunk_record
 	auto it = worker_env_index_.find(code);
 	if (it == worker_env_index_.end()) { return nullptr; }
 	worker_env_mru_ = it->second;
+	worker_env_recent_[worker_env_recent_row(code)] = it->second;
 	return it->second;
 }
 
@@ -2562,7 +2563,7 @@ env_lookup_cache_entry* vm_backend::worker_env_cache_slot(const chunk* code, siz
 }
 
 void vm_backend::worker_pin_env_cache(const std::shared_ptr<void>& pin, const chunk* code) {
-	if (worker_env_index_.count(code) || reference_mode_) { return; }
+	if (worker_chunk_record(code) || reference_mode_) { return; }
 	auto rec = std::make_unique<worker_chunk_env_cache>();
 	rec->pin = pin;
 	rec->code = code;
@@ -6163,6 +6164,12 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 		// the worker's own copy of it (same bytes the kernel would copy).
 		if (!lvalue_write) {
 			if (const script_string* source = detail::parallel_borrow_string_source(left, right)) {
+				if (parallel_alone_) {
+					const script_array& table = *left.parallel_borrow_array();
+					const size_t at = static_cast<size_t>(right.unchecked_as_int());
+					stack_.push_back(script_value(table.is_typed() ? table.strs()[at] : table.values()[at].unchecked_string_handle(), engine_));
+					return {};
+				}
 				stack_.push_back(worker_borrowed_string(left, right, *source));
 				return {};
 			}
@@ -9050,22 +9057,28 @@ op_status vm_backend::exec_c_call(frame& f, const vm_instruction& ins) {
 // frame program of the call's arity; the general probe's own resolution otherwise
 bool vm_backend::raw_probe(frame& f, const chunk::cell_loop& loop, uint32_t index) {
 	const chunk::cell_loop::cell_call& cc = loop.calls[index];
-	if (parallel_worker_) { return false; }
-	if (debug_hook_ || has_custom_numeric_ops_ || !cached_global_env_ || !f.window_backed || !f.locals || f.top_level || f.locals->is_method) return false;
+	if (debug_hook_ || has_custom_numeric_ops_ || !(cached_global_env_ || parallel_worker_) || !f.window_backed || !f.locals || f.top_level || f.locals->is_method) return false;
 	const call_site& site = f.code->call_sites[f.code->code[cc.probe_ip].a];
-	if (!site.ic_fn || site.ic_argc != cc.args.size() || site.callee.slot != k_invalid_u32 || (site.callee.load_flags & load_flags_unscoped)) return false;
+	if (site.callee.slot != k_invalid_u32 || (site.callee.load_flags & load_flags_unscoped)) return false;
+	// the site's cached script callee and the probe's lookup row: the chunk's own on the main engine, a worker's rows of its chunk
+	const worker_chunk_env_cache::call_ic* worker_ic = parallel_worker_ ? worker_call_ic(f, site) : nullptr;
+	if (parallel_worker_ && !worker_ic) return false;
+	const script_defined_function* cached = worker_ic ? worker_ic->fn : site.ic_fn;
+	if (!cached || (worker_ic ? worker_ic->argc : site.ic_argc) != cc.args.size()) return false;
 	ensure_frame_member_scope(f, environment_.get());
 	if (frame_scope_active(f)) return false;
-	const auto& cache = f.code->env_lookup_cache;
 	const size_t slot = f.ip * 3;
-	if (slot >= cache.size()) return false;
-	const env_lookup_cache_entry& e = cache[slot];
+	const env_lookup_cache_entry* row = parallel_worker_ ? worker_armed_entry(f, slot) : slot < f.code->env_lookup_cache.size() ? &f.code->env_lookup_cache[slot] : nullptr;
+	if (!row) return false;
+	const env_lookup_cache_entry& e = *row;
 	if (!(e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() &&
-	      e.fast_ptr->raw_storage_index() == script_value::TYPEID_FUNCTION && &e.fast_ptr->unchecked_as_function() == site.ic_identity)) return false;
-	const script_defined_function& fn = *site.ic_fn;
-	if (fn.closure_env || fn.converted()) return false;
+	      e.fast_ptr->raw_storage_index() == script_value::TYPEID_FUNCTION && &e.fast_ptr->unchecked_as_function() == (worker_ic ? worker_ic->identity : site.ic_identity))) return false;
+	const script_defined_function& fn = *cached;
+	// a worker's copy of a function closes over the worker's root: a raw frame of it runs there when the caller already stands there
+	if (fn.converted() || (fn.closure_env && !(parallel_worker_ && fn.closure_env.get() == worker_root_env_ && environment_.get() == worker_root_env_))) return false;
 	chunk* body = static_cast<chunk*>(fn.backend_body_cache.get());
 	if (!body || body->frame_program == k_invalid_u32) return false;
+	if (parallel_worker_) { worker_pin_env_cache(fn.backend_body_cache, body); }   // the callee's own rows, as the general push finds them
 	const chunk::cell_loop& program = body->cell_loops[body->frame_program];
 	if (!program.raw_enterable || program.param_cells.size() != cc.args.size() || cc.args.size() > 8 || program.param_kinds != cc.raw_kinds) return false;
 	chunk::cell_loop::call_plan& plan = loop.plans[index];   // until general code runs, this site's callee is this body's frame program
@@ -9090,6 +9103,11 @@ void vm_backend::park_raw_callee(frame& f, const chunk::cell_loop& loop) {
 	pending_callee& pc = pending_callees_.emplace_back();
 	pc.fn = site.ic_fn;
 	if (host) { if (site.ic_host_target) { pc.host_fn = site.ic_pin.get(); } else { pc.pin = site.ic_pin; } }
+	else if (parallel_worker_) {   // a worker's probe parks its row's callee pinned (exec_probe_callee)
+		const worker_chunk_env_cache::call_ic* ic = worker_call_ic(f, site);
+		pc.fn = ic->fn;
+		pc.pin = ic->pin;
+	}
 	pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
 }
 // a host site's probe (internal/typed_regions_design.md "Host scalar entries"): the callee name's binding is the site's cached host function,
@@ -9214,11 +9232,14 @@ JAI_NOINLINE bool vm_backend::cells_host_call(frame& f, const chunk::cell_loop& 
 // raises it. false: the callee is parked and the general door runs
 // a global a raw-entered frame program reads: the program's chunk's armed lookup-cache head (a raw frame has no member scope), a plain
 // int, float or bool of the cell's kind; null sends the call through the door, whose general entry resolves and arms it
-const script_value* vm_backend::raw_env_value(const chunk& body, const chunk::cell_loop& loop, uint32_t k) const {
+const script_value* vm_backend::raw_env_value(const chunk& body, const chunk::cell_loop& loop, uint32_t k) {
 	const chunk::cell_loop::cell& cl = loop.cells[k];
 	const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
-	if (!cached_global_env_ || er.cache_slot >= body.env_lookup_cache.size() || (er.operand.load_flags & load_flags_unscoped)) return nullptr;
-	const env_lookup_cache_entry& e = body.env_lookup_cache[er.cache_slot];
+	if (er.operand.load_flags & load_flags_unscoped) return nullptr;
+	const env_lookup_cache_entry* row = cached_global_env_ ? (er.cache_slot < body.env_lookup_cache.size() ? &body.env_lookup_cache[er.cache_slot] : nullptr)
+	                                   : parallel_worker_ && er.cache_slot < body.code.size() * 3 ? worker_env_cache_slot(&body, er.cache_slot) : nullptr;
+	if (!row) return nullptr;
+	const env_lookup_cache_entry& e = *row;
 	if (!e.fast_ptr || e.fast_env != environment_.get() || e.fast_serial != env_symbolizer_->env_epoch()) return nullptr;
 	const script_value* v = e.fast_ptr;
 	if (v->raw_storage_index() == script_value::TYPEID_REFERENCE) {
@@ -10099,7 +10120,7 @@ JAI_NOINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction& i
 		default: return miss();
 		}
 		// a worker pushes its own copy of a string element (the source may be the program's table, borrowed): the counts are not atomic
-		if (parallel_worker_) [[unlikely]] {
+		if (parallel_worker_ && !parallel_alone_) [[unlikely]] {
 			const script_string* text = form == src_form::raw_str ? (*raw_str ? raw_str->get() : nullptr)
 				: pv && pv->deref().raw_storage_index() == script_value::TYPEID_STRING ? &pv->deref().unchecked_as_string() : nullptr;
 			if (form == src_form::raw_str && !text) return miss();

@@ -2,6 +2,7 @@
 #include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <jaiscript/detail/engine_access.hpp>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -27,6 +28,7 @@ public:
 	struct outcome {
 		std::string text[4];
 		std::string listing;   // the vm's, proofs on
+		unsigned long long entries = 0;   // the cell blocks the vm entered, proofs on, during the last step (the workers' included)
 	};
 
 	static std::filesystem::path directory(const std::string& name, int way) {
@@ -41,17 +43,18 @@ public:
 	}
 
 	// the steps on one engine per way; a step's answer is its value, or its error's first line
-	static outcome run(const std::string& name, const std::vector<step>& steps, bool bite = false) {
+	static outcome run(const std::string& name, const std::vector<step>& steps, bool bite = false, size_t workers = 0) {
 		outcome result;
 		for (int way = 0; way < 4; ++way) {
 			const std::filesystem::path dir = directory(name, way);
-			const auto engine_of_the_way = [&result, &dir, way]() {
+			const auto engine_of_the_way = [&result, &dir, way, workers]() {
 				auto e = jai::foundry::make_default_engine();
 				e->set_backend(way < 2 ? jai::backend_type::interpreter : jai::backend_type::vm);
 				e->type_proofs(way % 2 == 0);
 				e->execution_budget(0);
 				e->import_recheck_interval(0);
 				e->jaibite_cache(true);
+				if (workers != 0) { e->parallel_thread_count(workers); }
 				jai::stdlib::register_all(e);
 				e->add_include_path(dir.string());
 				e->add_global("DIR", e->make_value(dir.generic_string()));
@@ -71,6 +74,7 @@ public:
 				for (const std::string& gone : s.removed) { std::filesystem::remove(dir / gone); }
 				for (const auto& [file, body] : s.files) { write(dir / file, body); }
 				if (!text.empty()) { text += " / "; }
+				const unsigned long long entered = detail::engine_access::cells_counters(*e).entries;
 				try {
 					if (!s.file.empty()) { text += e->execute_file((dir / s.file).string()).to_string(); }
 					else if (bite) { auto b = e->jaibite(s.source); text += b.execute().to_string(); }
@@ -79,6 +83,7 @@ public:
 					const std::string what = ex.what();
 					text += "ERROR: " + what.substr(0, what.find('\n'));
 				}
+				if (way == 2) { result.entries = detail::engine_access::cells_counters(*e).entries - entered; }
 			}
 		}
 		return result;
@@ -261,6 +266,59 @@ public:
 			const outcome r = run("scoped_method", {{{{"shadow.jai", "string hp = \"shadow\";\nstring GAIN = \"theirs\";\n"}, {"empty.jai", "int unused_here = 1;\n"}, {"main.jai", main}}, "", "main.jai"}});
 			agree(r, "a name an include declares in a method's scope");
 			check_eq(size_t(0), count(r.listing, "-- inlined twice"), "the unit's sibling calls stay calls: " + r.listing.substr(0, 3000));
+		});
+
+		// inside a parallel region a worker's root binds a table the region borrows as a borrow tag: the record a graft keeps of a global
+		// array stands for the array there too, so the graft runs in the worker (the block of each row's loop is entered: one entry in all
+		// where the record is refused), at one worker and at several
+		test("a_worker_takes_the_graft_of_a_call_over_a_global_arrays_element", [this]() {
+			struct kind_row { const char* name; std::string program; std::string call; const char* expected; bool grafts; };
+			const kind_row kinds[] = {
+				{"int", "array<int> XS = [1, 2, 3, 4];\nint K = 3;\nstring DEV = \"dev.jai\";\nvoid tick() { import(DEV); }\ntick();\nint leaf(int v, int k) { return v * k + 1; }\nfunction row(int y) -> int { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(XS[i], K); } return s + y; }\narray<int> ROWS = [0, 1, 2, 3, 4, 5, 6, 7];\nfunction region() {\n	var out = parallel_transform(ROWS, row);\n	array<int> cells = [0, 0, 0, 0, 0, 0, 0, 0];\n	parallel_for (auto& c : cells) { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(XS[i], K); } c = c + s; }\n	int total = 0;\n	for (int i = 0; i < 8; i++) { total += out[i] + cells[i]; }\n	return to_string(total);\n}\n\"ready\";\n", "region()", "572", true},
+				{"float", "array<float> XS = [1.5, 2.5, 3.5, 4.5];\nint K = 3;\nstring DEV = \"dev.jai\";\nvoid tick() { import(DEV); }\ntick();\nint leaf(float v, int k) { return math::itrunc(v * 2.0) + k; }\nfunction row(int y) -> int { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(XS[i], K); } return s + y; }\narray<int> ROWS = [0, 1, 2, 3, 4, 5, 6, 7];\nfunction region() {\n	var out = parallel_transform(ROWS, row);\n	array<int> cells = [0, 0, 0, 0, 0, 0, 0, 0];\n	parallel_for (auto& c : cells) { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(XS[i], K); } c = c + s; }\n	int total = 0;\n	for (int i = 0; i < 8; i++) { total += out[i] + cells[i]; }\n	return to_string(total);\n}\n\"ready\";\n", "region()", "604", true},
+				{"bool", "array<bool> XS = [true, false, true, true];\nint K = 3;\nstring DEV = \"dev.jai\";\nvoid tick() { import(DEV); }\ntick();\nint leaf(bool v, int k) { return v ? k : 1; }\nfunction row(int y) -> int { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(XS[i], K); } return s + y; }\narray<int> ROWS = [0, 1, 2, 3, 4, 5, 6, 7];\nfunction region() {\n	var out = parallel_transform(ROWS, row);\n	array<int> cells = [0, 0, 0, 0, 0, 0, 0, 0];\n	parallel_for (auto& c : cells) { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(XS[i], K); } c = c + s; }\n	int total = 0;\n	for (int i = 0; i < 8; i++) { total += out[i] + cells[i]; }\n	return to_string(total);\n}\n\"ready\";\n", "region()", "188", false},   // a bool element proves no argument: the call stays
+				{"string", "array<string> XS = [\"a\", \"bb\", \"ccc\", \"dddd\"];\nint K = 3;\nstring DEV = \"dev.jai\";\nvoid tick() { import(DEV); }\ntick();\nint leaf(string v, int k) { return v.size() + k; }\nfunction row(int y) -> int { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(XS[i], K); } return s + y; }\narray<int> ROWS = [0, 1, 2, 3, 4, 5, 6, 7];\nfunction region() {\n	var out = parallel_transform(ROWS, row);\n	array<int> cells = [0, 0, 0, 0, 0, 0, 0, 0];\n	parallel_for (auto& c : cells) { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(XS[i], K); } c = c + s; }\n	int total = 0;\n	for (int i = 0; i < 8; i++) { total += out[i] + cells[i]; }\n	return to_string(total);\n}\n\"ready\";\n", "region()", "380", false},
+				{"object", "class Body { int w = 2; }\narray<Body> XS = [Body(), Body(), Body(), Body()];\nint K = 3;\nstring DEV = \"dev.jai\";\nvoid tick() { import(DEV); }\ntick();\nint leaf(Body b, int k) { return b.w * k; }\nfunction row(int y) -> int { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(XS[i], K); } return s + y; }\narray<int> ROWS = [0, 1, 2, 3, 4, 5, 6, 7];\nfunction region() {\n	var out = parallel_transform(ROWS, row);\n	array<int> cells = [0, 0, 0, 0, 0, 0, 0, 0];\n	parallel_for (auto& c : cells) { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(XS[i], K); } c = c + s; }\n	int total = 0;\n	for (int i = 0; i < 8; i++) { total += out[i] + cells[i]; }\n	return to_string(total);\n}\n\"ready\";\n", "region()", "412", false},
+				{"var", "array<var> XS = [1, 2, 3, 4];\nint K = 3;\nstring DEV = \"dev.jai\";\nvoid tick() { import(DEV); }\ntick();\nint leaf(int v, int k) { return v * k + 1; }\nfunction row(int y) -> int { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(XS[i], K); } return s + y; }\narray<int> ROWS = [0, 1, 2, 3, 4, 5, 6, 7];\nfunction region() {\n	var out = parallel_transform(ROWS, row);\n	array<int> cells = [0, 0, 0, 0, 0, 0, 0, 0];\n	parallel_for (auto& c : cells) { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(XS[i], K); } c = c + s; }\n	int total = 0;\n	for (int i = 0; i < 8; i++) { total += out[i] + cells[i]; }\n	return to_string(total);\n}\n\"ready\";\n", "region()", "572", false},
+				{"refilled", "array<int> XS = [1, 2, 3, 4];\nvoid refill() { XS = [2, 4, 6, 8]; }\nint K = 3;\nstring DEV = \"dev.jai\";\nvoid tick() { import(DEV); }\ntick();\nint leaf(int v, int k) { return v * k + 1; }\nfunction row(int y) -> int { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(XS[i], K); } return s + y; }\narray<int> ROWS = [0, 1, 2, 3, 4, 5, 6, 7];\nfunction region() {\n	var out = parallel_transform(ROWS, row);\n	array<int> cells = [0, 0, 0, 0, 0, 0, 0, 0];\n	parallel_for (auto& c : cells) { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(XS[i], K); } c = c + s; }\n	int total = 0;\n	for (int i = 0; i < 8; i++) { total += out[i] + cells[i]; }\n	return to_string(total);\n}\n\"ready\";\n", "refill(); region()", "1052", true},
+				{"scalar", "array<int> XS = [1, 2, 3, 4];\nint BASE = 5;\nint K = 3;\nstring DEV = \"dev.jai\";\nvoid tick() { import(DEV); }\ntick();\nint leaf(int v, int k) { return v * k + 1; }\nfunction row(int y) -> int { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(BASE, K); } return s + y; }\narray<int> ROWS = [0, 1, 2, 3, 4, 5, 6, 7];\nfunction region() {\n	var out = parallel_transform(ROWS, row);\n	array<int> cells = [0, 0, 0, 0, 0, 0, 0, 0];\n	parallel_for (auto& c : cells) { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(BASE, K); } c = c + s; }\n	int total = 0;\n	for (int i = 0; i < 8; i++) { total += out[i] + cells[i]; }\n	return to_string(total);\n}\n\"ready\";\n", "region()", "1052", true},
+			};
+			for (const kind_row& k : kinds) {
+				for (const size_t workers : {size_t(1), size_t(4)}) {
+					const std::string what = std::string(k.name) + " elements, " + std::to_string(workers) + " worker(s)";
+					const outcome r = run(std::string("worker_") + k.name + std::to_string(workers), {{{{"dev.jai", "int DEV_LOADS = 1;\n"}, {"main.jai", "[[warn_mode]];\n" + k.program}}, "", "main.jai"},
+						{{}, k.call, ""}}, false, workers);
+					expect(r, std::string("ready / ") + k.expected, what);
+					if (!k.grafts) { continue; }
+					check(count(r.listing, "-- inlined leaf") >= 2, what + ": the leaf grafts in the row and in the loop's body: " + r.listing.substr(0, 3000));
+					check(r.entries >= 9, what + ": each of the eight rows enters its loop's block with the graft in it, and the parallel loop its own; entered " + std::to_string(r.entries));
+				}
+			}
+		});
+
+		test("a_region_reads_one_global_array_through_a_graft_and_writes_another", [this]() {
+			const std::string program = "array<int> XS = [1, 2, 3, 4];\narray<int> YS = [1, 2, 3, 4];\nint K = 3;\nstring DEV = \"dev.jai\";\nvoid tick() { import(DEV); }\ntick();\nint leaf(int v, int k) { return v * k + 1; }\nfunction region() {\n	parallel_for (auto& x : XS) { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(YS[i], K); } x = x + s; }\n	string wrote = \"\";\n	array<int> cells = [0, 0, 0, 0];\n	try { parallel_for (auto& c : cells) { YS[0] = leaf(YS[1], K) + c; } wrote = \"wrote\"; } catch (e) { wrote = \"refused\"; }\n	return to_string(XS[0] + XS[3]) + \",\" + wrote + \",\" + to_string(YS[0]);\n}\n\"ready\";\n";
+			for (const size_t workers : {size_t(1), size_t(4)}) {
+				const outcome r = run("worker_writes" + std::to_string(workers), {{{{"dev.jai", "int DEV_LOADS = 1;\n"}, {"main.jai", "[[warn_mode]];\n" + program}}, "", "main.jai"},
+					{{}, "region()", ""}}, false, workers);
+				agree(r, "the range the region writes beside the array it reads, " + std::to_string(workers) + " worker(s)");
+				check(r.text[2].rfind("ready / 73,", 0) == 0, "each element takes the sum of the grafted reads: " + r.text[2]);
+				check(count(r.listing, "-- inlined leaf") >= 1, "the leaf grafts in the region's loop: " + r.listing.substr(0, 3000));
+				check(r.entries >= 1, "the region's loop enters its block with the graft in it (one entry a chunk; none where the record is refused), entered " + std::to_string(r.entries));
+			}
+		});
+
+		// a refused record is no verdict for longer than its cause: a global retyped and declared its first type again (each declaration
+		// moves the epoch the refusal was kept under), and a name declared below its first use (no epoch moves: that refusal is not kept).
+		// The loop's block is entered again once the record holds, where a refusal kept too long would run the call for good
+		test("a_refused_record_is_asked_again_once_its_cause_is_mended", [this]() {
+			const outcome retyped = run("refused_retyped", {{{{"as_text.jai", "string IDX = \"s\";\n"}, {"as_int.jai", "int IDX = 2;\n"},
+				{"main.jai", "int IDX = 0;\nint N = 4;\nint two(int a, int b) { return a + b; }\nfunction f() { int s = 0; for (int i = 0; i < 3; i++) { s += two(IDX, N); } return s; }\nstring r = to_string(f());\ninclude \"as_text.jai\";\ntry { r += \"|\" + to_string(f()); } catch (e) { r += \"|refused\"; }\ntry { r += \"|\" + to_string(f()); } catch (e) { r += \"|refused\"; }\ninclude \"as_int.jai\";\nr += \"|\" + to_string(f()) + \"|\" + to_string(f());\nr;\n"}}, "", "main.jai"}});
+			expect(retyped, "12|refused|refused|18|18", "a global retyped and back");
+			check(retyped.entries >= 3, "the loop's block is entered before the retype and twice after the global is an int again, entered " + std::to_string(retyped.entries));
+			const outcome later = run("refused_later", {{{{"main.jai", "int N = 4;\nint two(int a, int b) { return a + b; }\nfunction f() { int s = 0; for (int i = 0; i < 3; i++) { s += two(LATE, N); } return s; }\nstring r = \"\";\ntry { r += to_string(f()); } catch (e) { r += \"undeclared\"; }\ntry { r += \"|\" + to_string(f()); } catch (e) { r += \"|undeclared\"; }\nint LATE = 10;\nr += \"|\" + to_string(f()) + \"|\" + to_string(f());\nr;\n"}}, "", "main.jai"}});
+			expect(later, "undeclared|undeclared|42|42", "a global declared below its first use");
+			check(later.entries >= 2, "the loop's block is entered at both calls after the declaration, entered " + std::to_string(later.entries));
 		});
 	}
 };

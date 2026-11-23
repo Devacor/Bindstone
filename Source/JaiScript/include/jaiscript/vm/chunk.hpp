@@ -806,7 +806,8 @@ namespace jai::vm {
             mutable uint8_t holds_next = 0;
             mutable strong_ptr<script_function_node> holds_fn;   // the free function the guard last validated: the same object holds again
             // the program-scope names the call's argument proofs read (call_expr::proof_globals: symbol id, kind): the guard holds only
-            // while each still holds its kind, re-checked when a run or a redeclaration of a program-scope name moved engine::definition_epoch past globals_epoch
+            // while each still holds its kind, checked once per engine::definition_epoch (a run, a definition or a redeclaration of a
+            // program-scope name moves it): globals_verdict is that epoch shifted left, the verdict in its low bit
             std::vector<proof_global> proof_globals;
             // the program-scope functions the parameter forwarding read (symbol id, body): a by-value parameter renamed to the caller's
             // variable because each callee it is passed to takes it by value; re-checked with the proof globals
@@ -818,7 +819,7 @@ namespace jai::vm {
             };
             std::vector<forward_callee> forward_callees;
             bool epoch_checked = false;   // proof_globals or forward_callees non-empty: the guard asks inline_globals_hold
-            mutable uint64_t globals_epoch = 0;
+            mutable uint64_t globals_verdict = 0;
             bool calls = false;           // the body makes calls: op_graft_depth counts the grafted frame while they run
             uint32_t receiver_this_field = 0;   // the frame's this-field holding a method graft's receiver: its slot + 1 (0: none)
             bool caller_globals = false;        // the body's program-scope names read in the caller's frame: its names resolve as the program's

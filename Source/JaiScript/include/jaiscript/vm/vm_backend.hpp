@@ -241,6 +241,7 @@ namespace jai::vm {
             execution_budget_ = budget;
             if (worker_math_alias_rows_) { worker_math_alias_rows_->fill(engine::math_alias_row{}); }
             for (auto& rec : worker_env_caches_) { std::fill(rec->inline_holds.begin(), rec->inline_holds.end(), nullptr); std::fill(rec->call_ics.begin(), rec->call_ics.end(), worker_chunk_env_cache::call_ic{}); std::fill(rec->method_holds.begin(), rec->method_holds.end(), std::pair<const class_definition*, uint64_t>{nullptr, 0}); }
+            for (auto& rec : worker_env_caches_) { std::fill(rec->site_verdicts.begin(), rec->site_verdicts.end(), uint64_t(0)); }
             parallel_worker_ = true;
             arm_execution_deadline();
         }
@@ -283,7 +284,9 @@ namespace jai::vm {
             // in a region shares this node instead of allocating per evaluation, and the
             // main engine's node is never touched from the worker thread
             std::vector<script_value> string_constants;
-            std::vector<uint64_t> site_epochs;   // per inline site: the definition epoch this worker last validated its globals and callees at
+            // per inline site: this worker's verdict on the site's globals and callees (chunk::inline_site::globals_verdict's word), for the
+            // region it runs: the rows clear when the worker is configured for the next one
+            std::vector<uint64_t> site_verdicts;
             std::vector<chunk::entry_memo_row> entry_rows;   // the worker's block-entry rows for this chunk (chunk::entry_memos' rule)
             std::vector<chunk::member_ic_entry> member_ic;   // the worker's member IC rows for this chunk (chunk::member_ic's rule)
             // per inline site: the callee function object this worker last validated the graft against (chunk::inline_site::holds_fn's

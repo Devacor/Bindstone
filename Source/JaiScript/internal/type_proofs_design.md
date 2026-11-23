@@ -186,7 +186,11 @@ Cost: one checker walk per unique source per surface epoch; `type_proofs(false)`
 A proof that rests on a program-scope name (`certain_global`: an argument that is a typed global or an element of a global array, a
 builtin's global receiver, a program function's declared return) records the name and what it took of it (`proof_global`), and the
 graft that consumes it checks the records once per definition epoch (`vm_backend::inline_globals_hold`): the name resolves, from the
-frame, to a cell of that kind, or to a function declared to return that type. The proof is stamped whatever the unit imports or
+frame, to a cell of that kind, or to a function declared to return that type. The verdict is kept either way (`inline_site::
+globals_verdict`); a refusal is kept only where nothing but an event that moves the epoch can mend it (a cell of a declared type
+holding another kind), so a name not declared yet, a `var`'s cell or a rebound callee is asked again at the next guard. A parallel
+worker keeps its own verdicts for the region it runs (its root is provisioned once a region), and there a table the region borrows
+is the borrow tag, which stands for the array it borrows: the record of `xs[i]` holds in a worker as it does on the main thread. The proof is stamped whatever the unit imports or
 includes, a path computed at run time included, because each thing a unit loaded at run time can do to such a name has an answer:
 
 | the loaded unit | what changes | what answers it |

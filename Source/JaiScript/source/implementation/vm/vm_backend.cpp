@@ -12706,56 +12706,70 @@ op_status vm_backend::exec_const_guard(frame& f, const vm_instruction& ins) {
 }
 
 // the program-scope names a graft's argument proofs read still hold the kinds the checker proved them (their declaring unit may have run
-// again with another type): re-checked once per definition epoch; a name that resolves to anything else keeps the call
+// again with another type): checked once per definition epoch, the verdict kept either way; a name that resolves to anything else keeps
+// the call. A worker keeps its verdicts in its own row for the region it runs (the shared site's is the main thread's): its root binds a
+// table the region borrows as the borrow tag (internal/parallel_design.md 13b), which stands for the array it borrows
 bool vm_backend::inline_globals_hold(const frame& f, const chunk::inline_site& site) {
-	const uint64_t epoch = engine_->definition_epoch();
-	if (site.globals_epoch == epoch) return true;
-	uint64_t* worker_epoch = nullptr;   // a worker validates once per epoch in its own table (the shared site's epoch is the main thread's)
+	const uint64_t held = engine_->definition_epoch() << 1 | 1, refused = held - 1;   // the epoch, the verdict in its low bit
+	uint64_t* verdict = &site.globals_verdict;
 	if (parallel_worker_) {
+		verdict = nullptr;
 		const size_t i = static_cast<size_t>(&site - f.code->inline_sites.data());
 		if (i < f.code->inline_sites.size()) {
 			if (worker_chunk_env_cache* rec = worker_chunk_record(f.code)) {
-				if (rec->site_epochs.size() < f.code->inline_sites.size()) { rec->site_epochs.resize(f.code->inline_sites.size(), 0); }
-				worker_epoch = &rec->site_epochs[i];
-				if (*worker_epoch == epoch) return true;
+				if (rec->site_verdicts.size() < f.code->inline_sites.size()) { rec->site_verdicts.resize(f.code->inline_sites.size(), 0); }
+				verdict = &rec->site_verdicts[i];
 			}
 		}
 	}
+	if (verdict) {
+		if (*verdict == held) return true;
+		if (*verdict == refused) return false;
+	}
+	// a refusal is kept where only what moves the epoch can mend it: a cell of a declared type holding another kind (a declaration retypes
+	// it, an assignment converts); a missing name, a var's cell, a reference or a callee may change under the same epoch and is asked again.
+	// A worker's root is provisioned once a region, so its row keeps every refusal for the region
+	const auto refuse = [&](const script_value* typed_cell) {
+		const type_info* stamp = typed_cell ? typed_cell->type_info_raw() : nullptr;
+		const bool lasting = parallel_worker_ || (stamp && stamp->base_type != script_value_type::jai_any_type && !stamp->dynamic_slot);
+		if (verdict && lasting) { *verdict = refused; }
+		return false;
+	};
 	for (const proof_global& g : site.proof_globals) {
 		const uint64_t sym = g.symbol;
 		const uint16_t kind = g.kind;
 		const script_value* v = environment_ ? environment_->get_value_ptr(sym) : nullptr;
-		if (!v) return false;
-		if (v->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*v)) return false; v = &v->deref(); }
+		if (!v) return refuse(nullptr);
+		if (v->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*v)) return refuse(nullptr); v = &v->deref(); }
 		const auto base = static_cast<script_value_type>(kind & 0xFF);
 		if (kind & proof_global::k_function) {   // a call's result: the name binds a script function declared to return that type
-			if (v->raw_storage_index() != script_value::TYPEID_FUNCTION) return false;
+			if (v->raw_storage_index() != script_value::TYPEID_FUNCTION) return refuse(nullptr);
 			const auto* thunk = v->unchecked_as_function().target<script_callable_thunk>();
-			if (!thunk || thunk->eng != engine_ || thunk->payload.kind != script_callable::kind_type::function || !thunk->payload.fn) return false;
+			if (!thunk || thunk->eng != engine_ || thunk->payload.kind != script_callable::kind_type::function || !thunk->payload.fn) return refuse(nullptr);
 			const type_info* rt = thunk->payload.fn->return_type.get();
-			if (!rt || rt->is_reference()) return false;
-			if (kind & proof_global::k_type) { if (rt != g.type && !(g.type && rt->equals(*g.type))) return false; }
-			else if (rt->base_type != base) return false;
+			if (!rt || rt->is_reference()) return refuse(nullptr);
+			if (kind & proof_global::k_type) { if (rt != g.type && !(g.type && rt->equals(*g.type))) return refuse(nullptr); }
+			else if (rt->base_type != base) return refuse(nullptr);
 			continue;
 		}
 		if (kind & proof_global::k_type) {   // any other declared type: the cell keeps the declaration's type, compared by identity
 			const type_info* vt = v->type_info_raw();
-			if (!vt || !g.type || (vt != g.type && !vt->equals(*g.type))) return false;
+			if (!vt || !g.type || (vt != g.type && !vt->equals(*g.type))) return refuse(v);
 			continue;
 		}
 		if (base == script_value_type::jai_array_type) {
-			if (v->raw_storage_index() != script_value::TYPEID_ARRAY) return false;
-			const script_array* node = v->unchecked_array_node();
+			bool borrowed = false;
+			const script_array* node = lane_element_source(*v, borrowed);   // the array, or the one a worker's borrow tag stands for
 			const auto el = static_cast<script_value_type>(kind >> 8);
 			const script_array::kind_t want = el == script_value_type::jai_int_type ? script_array::kind_t::i64 : el == script_value_type::jai_float_type ? script_array::kind_t::f64 : script_array::kind_t::b8;
-			if (!node || node->kind() != want) return false;
+			if (!node || node->kind() != want) return refuse(v);
 		} else {
 			const size_t want = base == script_value_type::jai_int_type ? script_value::TYPEID_INT : base == script_value_type::jai_float_type ? script_value::TYPEID_FLOAT : script_value::TYPEID_BOOL;
-			if (v->raw_storage_index() != want) return false;
+			if (v->raw_storage_index() != want) return refuse(v);
 		}
 	}
-	if (!site.forward_callees.empty() && !inline_forward_callees_hold(site)) return false;
-	if (!parallel_worker_) { site.globals_epoch = epoch; } else if (worker_epoch) { *worker_epoch = epoch; }
+	if (!site.forward_callees.empty() && !inline_forward_callees_hold(site)) return refuse(nullptr);
+	if (verdict) { *verdict = held; }
 	return true;
 }
 // a forwarded parameter's callees: each name still binds the program-scope function whose parameters the forwarding read

@@ -14235,7 +14235,7 @@ JAI_FORCEINLINE vm_backend::call_record& vm_backend::take_call_record() {
 	return *call_records_[call_records_top_++];
 }
 
-// the fields every push writes: the caller, the return conversion, the bases its pop truncates to, the name and the cells its body reads
+// the fields every push writes: the caller, the return conversion, the pending-callee size its pop truncates to, the name and the cells its body reads
 JAI_FORCEINLINE void vm_backend::init_call_record(call_record& rec, frame& caller, const type_info_ptr& return_type, uint8_t return_conv, std::string_view name, const chunk& body) {
 	rec.raw_prepared = nullptr;
 	rec.caller = &caller;

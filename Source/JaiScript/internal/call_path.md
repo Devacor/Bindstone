@@ -137,3 +137,27 @@ which no graft takes): `l.m(i)` 34.3 to 32.2 ns, `this.m(i)` 33.9 to 32.4, a bar
 - The lane from `op_call_from_scratch` into `push_plain_frame` again, with a lane for the probe's cached answers ahead of
   `exec_probe_callee`: the free call 2 ns faster, DeltaBlue 1.8% and bytecode 1.0% slower.
 - Power-of-two try, loop and counted-for records, so the pushes and pops size their stacks with a shift: nothing.
+- A graft guard that stops being tried once it has never held: every one of Richards' 3,280,400 guards holds, DeltaBlue's five
+  sites that never hold miss 245,200 times (about 1 ms of its second) and bytecode runs none, so only a probe written for the
+  shape moves.
+- A raw frame's sizes and its lean flag carried by the site's plan: about 30 of the 420 instructions a raw call and its return run.
+- A reference argument's target kept from the admission to the copy: a destructor the bind runs can move the container between them.
+
+The block door's plain frame, the handle row, the reference bind and the door's reference parameters, each on the one before
+it, against the tree they build on; the band is a second build of that tree against the first, and a row inside it is no result.
+
+| program | door | + handle row | + reference bind | + reference door | band |
+|---|---|---|---|---|---|
+| a free call from a typed loop, one argument | 0.875 | 0.871 | 0.871 | 0.879 | 0.998 |
+| the same, three arguments | 0.825 | 0.822 | 0.823 | 0.839 | 0.999 |
+| tree kernel (handles by value beside out-parameters) | 0.998 | 0.840 | 0.841 | 0.850 | 0.985 |
+| DeltaBlue | 0.995 | 0.954 | 0.966 | 0.957 | 0.993 |
+| GLOOM showcase (a sibling method over element arguments) | 0.996 | 1.006 | 0.899 | 0.908 | 1.001 |
+| queen kernel (`array<int>&` from a counted loop) | 1.015 | 1.004 | 0.998 | 0.922 | 1.007 |
+| a method over an element read through a reference | 0.996 | 0.999 | 0.593 | 0.596 | 0.998 |
+| a free function over a handle, an out-parameter beside it | 1.006 | 0.739 | 0.733 | 0.757 | 0.985 |
+| a free function over `array<int>&`, from a typed loop | 0.983 | 0.984 | 0.994 | 0.772 | 0.980 |
+
+Richards, bytecode, spatial, the reel's three scenes, GLOOM and Gator Quest stay inside the band. A method call from a typed
+loop gains nothing here: the loop that holds it is an open loop (its call is an effect the cell tier does not translate), so no
+door runs.

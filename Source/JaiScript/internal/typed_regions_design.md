@@ -74,7 +74,13 @@ compare-jumps (`op_c_jlt_ff`, `op_c_jge_iik`, `op_c_jeq_ii`, ...; an int equalit
 `op_c_jcmp_p`, as a float equality does), the pinned moves `op_c_mov_p` / `op_c_mov_k`,
 `op_c_sin_f` / `op_c_cos_f` / `op_c_sqrt_f`, `op_c_jtruth` (a call's landed int, float or bool as a
 branch), `op_c_load_f` (a float element read in place into a float cell) and `op_c_load_i` (its int twin: an int
-buffer's element through a pinned int index cell into an int cell; any other container or index runs `op_c_load`).
+buffer's element through a pinned int index cell into an int cell; any other container or index runs `op_c_load`),
+`op_c_load_fk` / `op_c_load_ik` / `op_c_load_fc` / `op_c_load_ic` (the same reads through an index of a pinned int cell
+plus or minus a small constant or a pinned int cell, a stencil's `a[i - 1]` and `a[i + w]`: the index is checked as the
+fold checks it, and an overflow, another container or an index outside the buffer runs `op_c_load` over the site's row)
+and `op_c_store_f` / `op_c_store_i` (a pinned float or int cell stored through a pinned int index cell into a buffer of
+its kind in place; any other container, a widening or an index outside the buffer is `op_c_index_store`'s, whose proto
+and original ip the instruction keeps).
 
 The compiler lowers in place after a callable's body is complete
 (`vm_compiler::lower_typed_ops`; the moves lower at emission, where the LOAD or CONST just

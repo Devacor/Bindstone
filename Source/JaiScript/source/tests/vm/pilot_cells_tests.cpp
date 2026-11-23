@@ -1132,7 +1132,7 @@ public:
 			(void)jai::detail::run_static_check(*e, parse_result.value());
 			jai::vm::vm_compiler compiler(symbolizer);
 			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
-			check_true(listing.find("CELLS_BACK") != std::string::npos && listing.find("C_INDEX_STORE") != std::string::npos, "the texture shape with a global view width closes: " + listing);
+			check_true(listing.find("CELLS_BACK") != std::string::npos && (listing.find("C_INDEX_STORE") != std::string::npos || listing.find("C_STORE_") != std::string::npos), "the texture shape with a global view width closes: " + listing);
 		});
 		test("a_flat_column_loop_closes_over_var_globals_math_and_clamps", [this]() {
 			// JaiDOOM's draw_flat_col: var globals in the arithmetic (CENTERY, VIEW_X, VIEW_Y, VW), a float / int division,
@@ -1264,7 +1264,7 @@ public:
 			(void)jai::detail::run_static_check(*e, parse_result.value());
 			jai::vm::vm_compiler compiler(symbolizer);
 			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
-			check_true(listing.find("CELLS_CFOR_BACK") != std::string::npos && listing.find("C_CFOR_BACK") != std::string::npos && listing.find("C_INDEX_STORE") != std::string::npos, "the counted clear loop closes: " + listing);
+			check_true(listing.find("CELLS_CFOR_BACK") != std::string::npos && listing.find("C_CFOR_BACK") != std::string::npos && (listing.find("C_INDEX_STORE") != std::string::npos || listing.find("C_STORE_") != std::string::npos), "the counted clear loop closes: " + listing);
 		});
 		test("compare_jumps_with_run_time_kinds_close_a_patch_loop_and_an_env_headed_loop", [this]() {
 			// JaiDOOM's draw_patch inner loop (py >= VH with VH a var global, a continue, a pinned sprite table, VW in the
@@ -2264,6 +2264,90 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 			const size_t at = listing.find("== total");
 			check_true(at != std::string::npos && listing.find("C_LOAD_I ", at) != std::string::npos, "the reads name themselves: " + listing);
 		});
+		test("element_reads_at_an_offset_and_stores_of_a_pinned_cell_run_in_place_or_as_the_general_rows", [this]() {
+			// a stencil's reads (a[i - 1], a[i + 1], a[i - w], a[i + w], a[1 + i]) over float and int buffers and the stores of a float or an
+			// int cell through an int cell run by their own opcodes; an index below zero or past the end, an index sum that overflows, an int
+			// stored into a float buffer (the general store widens) and a store through a computed index are the general rows', with their
+			// texts after the stores before them
+			const std::string defs = R"(
+				array<float> HW = []; array<float> HV = []; array<int> IA = []; array<int> IB = [];
+				for (int k = 0; k < 64; ++k) { HW.push(k * 0.25); HV.push(1.0 - k * 0.125); IA.push(k * 3 % 17); IB.push(0); }
+				function ripple(array<float>& hgt, array<float>& vel, int gw, int gh, float pull, float calm, float keep) -> float {
+					for (int y = 1; y < gh - 1; ++y) {
+						int i = y * gw + 1;
+						for (int x = 1; x < gw - 1; ++x) {
+							float here = hgt[i];
+							float speed = vel[i];
+							vel[i] = (speed + pull * (hgt[i - 1] + hgt[i + 1] + hgt[i - gw] + hgt[i + gw] - 4.0 * here)
+								+ calm * (vel[i - 1] + vel[i + 1] + vel[i - gw] + vel[i + gw] - 4.0 * speed)) * keep;
+							++i;
+						}
+					}
+					float s = 0.0; for (int k = 0; k < 64; ++k) { s += vel[k] * (k + 1); }
+					return s;
+				}
+				function ints(array<int>& a, array<int>& b, int n, int off) -> int {
+					for (int i = 2; i < n; ++i) { int v = a[i - 1] + a[i + 1] + a[i - off] + a[i + off] + a[1 + i]; b[i] = v; }
+					int s = 0; for (int k = 0; k < 64; ++k) { s = (s * 31 + b[k]) & 1048575; }
+					return s;
+				}
+				function edge(array<int>& a, array<float>& fa, int which, int n, int off) -> string {
+					int s = 0; float fs = 0.0; string out = "";
+					try {
+						for (int i = 0; i < n; ++i) {
+							if (which == 0) { int v = a[i - 1]; s += v; }
+							if (which == 1) { int v = a[i + 60]; s += v; }
+							if (which == 2) { int v = a[i + off]; s += v; }
+							if (which == 3) { int v = a[i - off]; s += v; }
+							if (which == 4) { float v = fa[i + off]; fs += v; }
+							if (which == 5) { a[i + 0] = i; int j = i * 7; a[j] = i; }
+							if (which == 6) { float v = i * 0.5; fa[i] = v; int j = i - 2; fa[j] = v; }
+							if (which == 7) { fa[i] = i; }
+						}
+					} catch (err) { out = "throw:" + err; }
+					return out + "|" + to_string(s) + "|" + to_string(fs) + "|" + to_string(a[0] + a[1] * 3 + a[2] * 5 + a[7] * 7) + "|" + to_string(fa[0] + fa[1] + fa[2] + fa[3]);
+				}
+			)";
+			auto run_with = [&](const std::string& script, bool passes, uint32_t miss_every) -> std::string {
+				auto e = jai::foundry::make_default_engine();
+				e->set_backend(backend_type::vm);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
+				if (!passes) { e->ir_passes(false); }
+				if (miss_every) { e->cells_miss_every(miss_every); }
+				try { return e->execute(script).to_string(); }
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			struct row { const char* call; const char* starts; };
+			const row rows[] = {
+				{ "to_string(ripple(HW, HV, 8, 8, 0.05, 0.02, 0.98)) + \"|\" + to_string(ints(IA, IB, 60, 2));", "" },
+				{ "edge(IA, HW, 0, 6, 3);", "throw:Array index -1 out of bounds" },
+				{ "edge(IA, HW, 1, 6, 3);", "throw:Array index 64 out of bounds" },
+				{ "edge(IA, HW, 2, 6, 3);", "|" },
+				{ "edge(IA, HW, 3, 6, 3);", "throw:Array index -3 out of bounds" },
+				{ "edge(IA, HW, 4, 6, 3);", "|" },
+				{ "edge(IA, HW, 5, 6, 3);", "|" },
+				{ "edge(IA, HW, 6, 6, 3);", "throw:Array index -2 out of bounds" },
+				{ "edge(IA, HW, 7, 6, 3);", "|" },
+				{ "edge(IA, HW, 2, 4, 9223372036854775807);", "throw:" },
+				{ "edge(IA, HW, 3, 4, -9223372036854775807 - 1);", "throw:Integer overflow in '-'" },
+				{ "edge(IA, HW, 4, 70, 0);", "throw:Array index 64 out of bounds" },
+				{ "edge(IA, HW, 5, 12, 3);", "throw:Array index 70 out of bounds" },
+			};
+			for (const row& r : rows) {
+				const std::string script = defs + r.call;
+				both(script, "", r.call);
+				both(script, "", (std::string(r.call) + " proofs off").c_str(), false);
+				const std::string vm = run_on(true, script);
+				check_true(vm.rfind(r.starts, 0) == 0, std::string(r.call) + " gives " + vm);
+				check_eq(vm, run_with(script, false, 0), std::string(r.call) + " the passes off");
+				if (!engine::miss_injection_available()) continue;
+				for (uint32_t every : { 1u, 2u, 3u, 7u }) { check_eq(vm, run_with(script, true, every), std::string(r.call) + " under an injected miss at every " + std::to_string(every)); }
+			}
+			const std::string listing = listing_run(defs + "ripple(HW, HV, 8, 8, 0.05, 0.02, 0.98); ints(IA, IB, 60, 2);");
+			for (const char* op : { "C_LOAD_FK ", "C_LOAD_FC ", "C_LOAD_IK ", "C_LOAD_IC ", "C_STORE_F ", "C_STORE_I " }) {
+				check_true(listing.find(op) != std::string::npos, std::string("the listing holds ") + op + ": " + listing);
+			}
+		});
 		test("an_endless_loop_around_a_closed_loop_and_a_host_call_ends_at_every_step_budget", [this]() {
 			// jaiscript_fuzz seeds 5792 and 9516 (--max-depth 3) on the vm ran past the budget in most runs: the loop counter is reset inside the
 			// body (i /= 94; a loop storing 0 into it), the body holds a closed counted loop, a host call and a continue; whether the deadline
@@ -3242,7 +3326,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                 " }"
 			                 " return acc; };";
 			const std::string listing = listing_of(fn);
-			check_true(listing.find("CELLS_") != std::string::npos && listing.find("C_LOAD") != std::string::npos && listing.find("C_INDEX_STORE") != std::string::npos, "the member containers close the loop: " + listing);
+			check_true(listing.find("CELLS_") != std::string::npos && listing.find("C_LOAD") != std::string::npos && (listing.find("C_INDEX_STORE") != std::string::npos || listing.find("C_STORE_") != std::string::npos), "the member containers close the loop: " + listing);
 			const std::string call = std::string(fn) + " var c = Chunk(); c.odist = [2.0, 4.0, 8.0, 0.5]; c.okind = [1, 2, 1, 2]; c.out = [0.0, 0.0, 0.0, 0.0];"
 			                         " float r = f(c, 4, 16.0); to_string(r) + \" \" + to_string(c.out[1]) + \" \" + to_string(c.out[3]);";
 			for (bool proofs : { true, false }) {
@@ -3270,7 +3354,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                  " for (int ci = 0; ci < cols; ++ci) { float lineh = vh / G.odist[ci]; G.out[ci] = lineh; acc = acc + lineh; }"
 			                  " return acc; };";
 			const std::string glisting = listing_of(gfn);
-			check_true(glisting.find("CELLS_") != std::string::npos && glisting.find("C_LOAD") != std::string::npos && glisting.find("C_INDEX_STORE") != std::string::npos, "a global's member containers close the loop: " + glisting);
+			check_true(glisting.find("CELLS_") != std::string::npos && glisting.find("C_LOAD") != std::string::npos && (glisting.find("C_INDEX_STORE") != std::string::npos || glisting.find("C_STORE_") != std::string::npos), "a global's member containers close the loop: " + glisting);
 			const std::string gcall = std::string(gfn) + " G.odist = [2.0, 4.0, 8.0, 0.5]; G.out = [0.0, 0.0, 0.0, 0.0];"
 			                          " float r = gf(4, 16.0); to_string(r) + \" \" + to_string(G.out[1]) + \" \" + to_string(G.out[3]);";
 			const std::string gswap = "class Chunk { array<float> odist = []; array<float> out = []; } Chunk G;"
@@ -3540,7 +3624,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, script);
 			check_true(vm.rfind("throw:", 0) != 0 && vm.find(",32,") != std::string::npos, "the record loops ran and the table store copied the record: " + vm);
 			const std::string l = listing_of("class Rec { int x0 = 0; int x1 = 0; array<int> pack = []; array<float> odist = []; array<int> oside = []; array<int> okind = []; array<int> otex = []; } var f = function(var& t) { int x0 = t.x0; int x1 = t.x1; int oi = 0; for (int x = x0; x < x1; ++x) { int word = t.pack[x / 15]; int c = (word >> ((x % 15) * 4)) & 15; t.odist[oi] = c * 0.5 + 0.25; t.oside[oi] = c & 1; t.okind[oi] = c; t.otex[oi] = word & 63; oi = oi + 1; } return oi; };");
-			check_true(l.find("CELLS_BACK") != std::string::npos && l.find("C_INDEX_STORE") != std::string::npos && l.find("-- open loop") == std::string::npos, "the five-site record loop closes: " + l);
+			check_true(l.find("CELLS_BACK") != std::string::npos && (l.find("C_INDEX_STORE") != std::string::npos || l.find("C_STORE_") != std::string::npos) && l.find("-- open loop") == std::string::npos, "the five-site record loop closes: " + l);
 		});
 		test("a_local_the_body_declares_lands_by_its_declaration_on_every_iteration", [this]() {
 			// the ray step's `int mx = cast<int>(posx);`: a narrowing declaration inside the body lands the cast float on every
@@ -3922,7 +4006,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			jai::vm::vm_compiler compiler(symbolizer);
 			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
 			check_true(listing.find("CELLS_BACK") != std::string::npos, "the closed typed loop's back edge is the cell entry: " + listing);
-			check_true(listing.find("C_LOAD") != std::string::npos && listing.find("C_INDEX_STORE") != std::string::npos, "the cell copy is present: " + listing);
+			check_true(listing.find("C_LOAD") != std::string::npos && (listing.find("C_INDEX_STORE") != std::string::npos || listing.find("C_STORE_") != std::string::npos), "the cell copy is present: " + listing);
 		});
 		test("an_injected_miss_at_every_plain_position_keeps_the_interpreter_s_answer", [this]() {
 			// miss injection (a build with JAISCRIPT_MISS_INJECTION defined, else the shapes run as plain parity):

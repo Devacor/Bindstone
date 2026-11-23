@@ -191,6 +191,7 @@ namespace {
 			case opcode::op_c_jeq_ii: case opcode::op_c_jne_ii: case opcode::op_c_jeq_iik: case opcode::op_c_jne_iik:
 			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f: case opcode::op_c_jtruth:
 			case opcode::op_graft_depth: case opcode::op_c_gdepth:
+			case opcode::op_c_load_fk: case opcode::op_c_load_ik: case opcode::op_c_load_fc: case opcode::op_c_load_ic: case opcode::op_c_store_f: case opcode::op_c_store_i:
 			case opcode::op_c_load_f: case opcode::op_c_load_i: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
@@ -436,6 +437,7 @@ namespace {
 			case opcode::op_c_jeq_ii: case opcode::op_c_jne_ii: case opcode::op_c_jeq_iik: case opcode::op_c_jne_iik:
 			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f: case opcode::op_c_jtruth:
 			case opcode::op_graft_depth: case opcode::op_c_gdepth:
+			case opcode::op_c_load_fk: case opcode::op_c_load_ik: case opcode::op_c_load_fc: case opcode::op_c_load_ic: case opcode::op_c_store_f: case opcode::op_c_store_i:
 			case opcode::op_c_load_f: case opcode::op_c_load_i: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
@@ -6783,8 +6785,38 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (ins.op == opcode::op_c_load && ip2 < c.typed_sites.size()) {
 					const chunk::typed_site& site = c.typed_sites[ip2];
 					const uint32_t ix = site.operands[0];
-					if (site.fold_count == 0 && (site.decl_expect == kf || site.decl_expect == ki) && site.cont_slot != chunk::k_iter_container && !(ix & k_typed_const_bit) && ix < loop.cells.size() && loop.cells[ix].kind == ki) {
+					const bool lands_its_kind = (site.decl_expect == kf || site.decl_expect == ki) && site.cont_slot != chunk::k_iter_container;
+					const bool cell_index = !(ix & k_typed_const_bit) && ix <= 0xFFu && ix < loop.cells.size() && loop.cells[ix].kind == ki;
+					if (site.fold_count == 0 && lands_its_kind && cell_index) {
 						ins.op = site.decl_expect == kf ? opcode::op_c_load_f : opcode::op_c_load_i; ins.b = ix;
+					} else if (site.fold_count == 1 && lands_its_kind && (site.fold_ops[0] == static_cast<uint8_t>(token_type::plus) || site.fold_ops[0] == static_cast<uint8_t>(token_type::minus))) {
+						// index + offset or index - offset: the offset a small constant (a subtraction is the negated constant) or a pinned int cell;
+						// a constant on the left of a plus changes places with the cell
+						const bool subtracts = site.fold_ops[0] == static_cast<uint8_t>(token_type::minus);
+						uint32_t base = ix, offset = site.operands[1];
+						if (!subtracts && (base & k_typed_const_bit) && !(offset & k_typed_const_bit)) { std::swap(base, offset); }
+						if (!(base & k_typed_const_bit) && base <= 0xFFu && base < loop.cells.size() && loop.cells[base].kind == ki) {
+							if (offset & k_typed_const_bit) {
+								const script_value& by = c.constants[offset & ~k_typed_const_bit];
+								if (by.raw_storage_index() == script_value::TYPEID_INT && by.unchecked_as_int() > -0x40000000 && by.unchecked_as_int() < 0x40000000) {
+									const int32_t signed_offset = static_cast<int32_t>(subtracts ? -by.unchecked_as_int() : by.unchecked_as_int());
+									ins = vm_instruction{site.decl_expect == kf ? opcode::op_c_load_fk : opcode::op_c_load_ik, ins.a, base, static_cast<uint32_t>(signed_offset)};
+								}
+							} else if (offset < loop.cells.size() && loop.cells[offset].kind == ki) {
+								ins = vm_instruction{site.decl_expect == kf ? opcode::op_c_load_fc : opcode::op_c_load_ic, ins.a, base | (subtracts ? k_cell_offset_subtracts : 0u), offset};
+							}
+						}
+					}
+					continue;
+				}
+				if (ins.op == opcode::op_c_index_store) {
+					// a pinned float or int cell stored through a pinned int index cell (no fold, no compound): the store names its value's kind
+					const fused_index_proto& sp = c.fused_index_protos[ins.a];
+					const uint32_t index_cell = sp.index.slot, value_cell = sp.store_value.slot;
+					if (sp.index_binary == k_invalid_u32 && !sp.compound && sp.index.const_index == k_invalid_u32 && sp.store_value.const_index == k_invalid_u32 && index_cell <= 0xFFu && value_cell <= 0xFFu
+					    && index_cell < loop.cells.size() && value_cell < loop.cells.size() && loop.cells[index_cell].kind == ki && (loop.cells[value_cell].kind == kf || loop.cells[value_cell].kind == ki)) {
+						ins.op = loop.cells[value_cell].kind == kf ? opcode::op_c_store_f : opcode::op_c_store_i;
+						ins.b = index_cell | (value_cell << k_cell_store_value_shift);
 					}
 					continue;
 				}

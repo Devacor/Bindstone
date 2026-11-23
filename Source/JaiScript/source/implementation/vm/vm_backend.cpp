@@ -7714,6 +7714,8 @@ static opcode cell_first_op(opcode op) {
 	case opcode::op_c_arith2: case opcode::op_c_arith_load: return opcode::op_c_arith_p;
 	case opcode::op_c_jcmp2: return opcode::op_c_jcmp_p;
 	case opcode::op_c_load2: case opcode::op_c_load_jcmp: case opcode::op_c_load_f: case opcode::op_c_load_i: return opcode::op_c_load;
+	case opcode::op_c_load_fk: case opcode::op_c_load_ik: case opcode::op_c_load_fc: case opcode::op_c_load_ic: return opcode::op_c_load;
+	case opcode::op_c_store_f: case opcode::op_c_store_i: return opcode::op_c_index_store;
 	default: return op;
 	}
 }
@@ -7958,7 +7960,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 				if (!sn || (borrowed && !parallel_worker_)) return refuse_site(ip, "a push source that is not a plain node");
 				cs.site_node2[ip - loop.copy_head] = sn;
 			}
-		} else if (ci.op == opcode::op_c_index_store) {
+		} else if (cell_first_op(ci.op) == opcode::op_c_index_store) {
 			const fused_index_proto& p = f.code->fused_index_protos[ci.a];
 			const size_t cache_slot = p.index_binary != k_invalid_u32 ? ci.c * 3 + 2 : ci.c * 3;
 			if (const env_lookup_cache_entry* ep = !(p.container.const_index == k_invalid_u32 && p.container.direct) ? armed_env_entry(f, cache_slot) : nullptr) {
@@ -7985,7 +7987,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 	}
 	for (uint32_t i = 0; i < pinned_count; ++i) {
 		for (const uint32_t ip : loop.sites) {
-			if ((f.code->code[ip].op == opcode::op_c_index_store || f.code->code[ip].op == opcode::op_c_push) && cs.site_node[ip - loop.copy_head] == pinned[i]) { return refuse_site(ip, "a store into a pinned table"); }
+			if ((cell_first_op(f.code->code[ip].op) == opcode::op_c_index_store || f.code->code[ip].op == opcode::op_c_push) && cs.site_node[ip - loop.copy_head] == pinned[i]) { return refuse_site(ip, "a store into a pinned table"); }
 		}
 	}
 	return true;
@@ -8234,7 +8236,7 @@ bool vm_backend::cells_sites_reenter(frame& f, const chunk::cell_loop& loop) {
 			// dereferenced as the resolution dereferences it: a guarded load's map entry, an unguarded load's or a store's silent reference
 			// (an element reference the resolution pins resolves again: the pins are its business)
 			const bool guarded = load_site && f.code->typed_sites[ip].guard_temp != k_invalid_u32;
-			const bool silent = guarded ? ref_map_entry(*cp) : (load_site || ci.op == opcode::op_c_index_store) && lane_deref_silent(*cp);
+			const bool silent = guarded ? ref_map_entry(*cp) : (load_site || first == opcode::op_c_index_store) && lane_deref_silent(*cp);
 			if (!silent) return false;
 		}
 		if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = &cp->deref(); }
@@ -8469,6 +8471,7 @@ static bool cells_miss_plain(const vm_instruction& ci) {
 	case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 	case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
 	case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f:
+	case opcode::op_c_load_fk: case opcode::op_c_load_ik: case opcode::op_c_load_fc: case opcode::op_c_load_ic: case opcode::op_c_store_f: case opcode::op_c_store_i:
 	case opcode::op_c_load_f: case opcode::op_c_load_i: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
 		return true;
 	default:
@@ -8510,6 +8513,37 @@ static bool cells_miss_plain(const vm_instruction& ci) {
 #define JAI_CELL_INT_MISS { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); break; }
 #define JAI_CELL_INT_CELL static_cast<script_int>(hot.cells[ci.c].bits)
 #define JAI_CELL_INT_CONST hot.consts[ci.c].unchecked_int_payload()
+// an element read through index + offset by its own opcode: AT gives the element's place from the index cell's value or declines (an overflow), LAND
+// writes the element into the cell; a declined place, another buffer or a place outside it runs C_LOAD's rows over the site's own row, with the
+// instruction's origin as the miss's ip
+#define JAI_CELL_LOAD_AT(KIND, BUFFER, AT, LAND) { \
+			const script_array* node = cs.site_node[ip - loop.copy_head]; \
+			const script_int base = static_cast<script_int>(hot.cells[ci.b & 0xFFu].bits); \
+			script_int at; \
+			if (node && node->kind() == script_array::kind_t::KIND && (AT) && static_cast<uint64_t>(at) < node->BUFFER().size()) { \
+				const uint32_t dst = ci.a; \
+				LAND; hot.dirty->b[dst] = 1; \
+				++ip; \
+				JAI_CELL_NEXT; \
+			} \
+			{ size_t at_ip = ip; st = exec_c_load_general(f, at_ip, ci.a, loop.origin[ip - loop.copy_head], regs); ip = at_ip; } \
+			break; }
+#define JAI_CELL_AT_CONSTANT (ints::small_step_fits(base) && (at = ints::wadd(base, static_cast<int32_t>(ci.c)), true))
+#define JAI_CELL_AT_CELL ((ci.b & k_cell_offset_subtracts) ? ints::try_sub(base, static_cast<script_int>(hot.cells[ci.c].bits), at) : ints::try_add(base, static_cast<script_int>(hot.cells[ci.c].bits), at))
+#define JAI_CELL_LAND_FLOAT hot.cells[dst].bits = cell_bits_of_float(node->floats()[static_cast<size_t>(at)]); hot.cells[dst].kind = static_cast<uint8_t>(script_value::TYPEID_FLOAT)
+#define JAI_CELL_LAND_INT hot.cells[dst].bits = static_cast<int64_t>(node->ints()[static_cast<size_t>(at)]); hot.cells[dst].kind = static_cast<uint8_t>(script_value::TYPEID_INT)
+// an element store of a pinned cell through a pinned int index cell by its own opcode; anything but the buffer of the value's kind and an index
+// inside it runs C_INDEX_STORE's rows (this instruction keeps its proto and its original ip)
+#define JAI_CELL_STORE(KIND, BUFFER, VALUE) { \
+			script_array* node = const_cast<script_array*>(cs.site_node[ip - loop.copy_head]); \
+			const uint64_t at = static_cast<uint64_t>(hot.cells[ci.b & 0xFFu].bits); \
+			if (node && node->kind() == script_array::kind_t::KIND && at < node->BUFFER().size()) { \
+				node->BUFFER()[static_cast<size_t>(at)] = VALUE(hot.cells[(ci.b >> k_cell_store_value_shift) & 0xFFu].bits); \
+				++ip; \
+				JAI_CELL_NEXT; \
+			} \
+			f.ip = ip; st = exec_c_index_store_general(f, ci, regs); ip = f.ip; \
+			break; }
 // one frame's block run (Raw: a frame program's, its calls and returns on the hot switch: a raw call or return into another frame
 // program continues here with fp following it; any other switch returns to the raw chain)
 template <bool Raw>
@@ -8647,6 +8681,12 @@ next_frame:
 			{ size_t at = ip; st = exec_c_load_general(f, at, ci.a, ci.c, regs); ip = at; }
 			break;
 		}
+		case opcode::op_c_load_fk: JAI_CELL_LOAD_AT(f64, floats, JAI_CELL_AT_CONSTANT, JAI_CELL_LAND_FLOAT)
+		case opcode::op_c_load_ik: JAI_CELL_LOAD_AT(i64, ints, JAI_CELL_AT_CONSTANT, JAI_CELL_LAND_INT)
+		case opcode::op_c_load_fc: JAI_CELL_LOAD_AT(f64, floats, JAI_CELL_AT_CELL, JAI_CELL_LAND_FLOAT)
+		case opcode::op_c_load_ic: JAI_CELL_LOAD_AT(i64, ints, JAI_CELL_AT_CELL, JAI_CELL_LAND_INT)
+		case opcode::op_c_store_f: JAI_CELL_STORE(f64, floats, cell_float_of_bits)
+		case opcode::op_c_store_i: JAI_CELL_STORE(i64, ints, static_cast<script_int>)
 		case opcode::op_c_jlt_ff: if ((cell_float_of_bits(hot.cells[ci.a].bits) < cell_float_of_bits(hot.cells[ci.b].bits)) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
 		case opcode::op_c_jle_ff: if ((cell_float_of_bits(hot.cells[ci.a].bits) <= cell_float_of_bits(hot.cells[ci.b].bits)) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
 		case opcode::op_c_jgt_ff: if ((cell_float_of_bits(hot.cells[ci.a].bits) > cell_float_of_bits(hot.cells[ci.b].bits)) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
@@ -10949,6 +10989,11 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_inst
 	}
 	++f.ip;
 	return {};
+}
+
+// a pinned element store off its row runs the general store here, outside the block switch
+JAI_NOINLINE op_status vm_backend::exec_c_index_store_general(frame& f, const vm_instruction& ins, const cell_regs& cr) {
+	return exec_c_index_store(f, ins, cr);
 }
 
 

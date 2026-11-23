@@ -2716,6 +2716,7 @@ namespace jai::vm {
         JAI_FORCEINLINE op_status exec_c_load(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool adopted);
         JAI_FORCEINLINE op_status exec_c_index_store(frame& f, const vm_instruction& ins, const cell_regs& cr);
         op_status exec_c_load_general(frame& f, size_t& ip, uint32_t dst, uint32_t original_ip, const cell_regs& cr);   // a pinned element read off its row
+        op_status exec_c_index_store_general(frame& f, const vm_instruction& ins, const cell_regs& cr);   // a pinned element store off its row
         JAI_FORCEINLINE op_status exec_c_back(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
         void cells_flush(frame& f, const chunk::cell_loop& loop);          // dirty cells back to their slots, state cleared
         void cfor_state_push(frame& f, const counted_for_proto& p);   // the state a counted loop's general back edge expects, built as exec_cfor_prep builds it minus the initial test

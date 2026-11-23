@@ -231,6 +231,128 @@ public:
 			)", "122,121;122,121;", "tail call");
 		});
 
+		// a plain function's by-value shared_ptr parameter: a handle or null already tagged with the parameter's type is the parameter as
+		// it stands, any other argument binds through the general rows (a derived handle, an untyped null, a var's handle, a wrong class)
+		test("a_function_takes_a_handle_of_its_parameters_type_as_it_is", [this]() {
+			all(R"(
+				class Node { int v = 0; shared_ptr<Node> next = null; Node(int n) { v = n; } }
+				class Leaf : Node { Leaf(int n) : super(n * 10) {} }
+				int value_of(shared_ptr<Node> n) { if (n == null) { return -1; } return n.v; }
+				int sum2(shared_ptr<Node> a, shared_ptr<Node> b, int k) { return value_of(a) + value_of(b) + k; }
+				void relink(shared_ptr<Node> from, shared_ptr<Node>& slot) { slot = from; }
+				void reseat(shared_ptr<Node> n) { n = new Node(99); }
+				int chain(shared_ptr<Node> n, int depth) { if (n == null) { return depth; } return chain(n.next, depth + 1); }
+				function run() -> string {
+					shared_ptr<Node> a = new Node(1);
+					shared_ptr<Node> b = new Node(2);
+					shared_ptr<Node> none = null;
+					shared_ptr<Leaf> leaf = new Leaf(3);
+					string out = to_string(sum2(a, b, 5)) + " " + to_string(value_of(none)) + " " + to_string(value_of(null)) + " " + to_string(value_of(leaf));
+					relink(b, a.next);
+					out += " " + to_string(a.next.v);
+					shared_ptr<Node> tmp = null;
+					relink(a, tmp);
+					out += " " + to_string(tmp.v);
+					reseat(a);
+					out += " " + to_string(a.v);
+					var loose = b;
+					out += " " + to_string(value_of(loose)) + " " + to_string(value_of(new Node(8))) + " " + to_string(chain(a, 0));
+					return out;
+				}
+				run() + " | " + run();
+			)", "8 -1 -1 30 2 1 1 2 8 2 | 8 -1 -1 30 2 1 1 2 8 2", "handle parameters");
+		});
+
+		test("a_handle_argument_of_another_class_raises_as_the_general_bind_does", [this]() {
+			const std::string script = R"(
+				class Node { int v = 1; }
+				class Other { int v = 7; }
+				int value_of(shared_ptr<Node> n) { return n.v; }
+				function run() -> string {
+					string log = "";
+					for (int i = 0; i < 3; ++i) {
+						var o = i == 1 ? new Other() : new Node();
+						try { log += to_string(value_of(o)); } catch (e) { log += "[" + e + "]"; }
+					}
+					return log;
+				}
+				run();
+			)";
+			const std::string oracle = run(which::interp, script);
+			check_true(oracle.find("[") != std::string::npos, "the wrong class is refused: " + oracle);
+			check_eq(oracle, run(which::vm, script), "another class: vm");
+			check_eq(oracle, run(which::vm_reference, script), "another class: vm-reference");
+		});
+
+		test("a_handle_parameter_dies_at_its_functions_exit", [this]() {
+			all(R"(
+				string log = "";
+				class D { int k = 0; D(int n) { k = n; } ~D() { log += "d" + to_string(k) + " "; } }
+				int peek(shared_ptr<D> d) { return d.k; }
+				int take(shared_ptr<D> d, shared_ptr<D>& out) { out = d; return d.k; }
+				function run() -> string {
+					shared_ptr<D> keep = null;
+					int s = 0;
+					for (int i = 0; i < 3; ++i) { s += peek(new D(i)); log += "| "; }
+					for (int i = 3; i < 5; ++i) { s += take(new D(i), keep); log += "| "; }
+					return to_string(s) + " ";
+				}
+				run() + log;
+			)", "10 d0 | d1 | d2 | | d3 | d4 ", "a handle parameter's lifetime");
+		});
+
+		test("out_parameters_over_fields_and_locals_rebuild_a_tree", [this]() {
+			// the treap's shape: by-value handles beside shared_ptr<T>& out-parameters bound to fields and to the caller's locals
+			all(R"(
+				class Node { int x = 0; int y = 0; shared_ptr<Node> left = null; shared_ptr<Node> right = null; }
+				int SEED = 7;
+				int next_priority() { SEED = (SEED * 1103 + 12345) % 65536; return SEED; }
+				void merge(shared_ptr<Node> lower, shared_ptr<Node> greater, shared_ptr<Node>& result) {
+					if (lower == null) { result = greater; }
+					else if (greater == null) { result = lower; }
+					else if (lower.y < greater.y) { result = lower; merge(lower.right, greater, lower.right); }
+					else { result = greater; merge(lower, greater.left, greater.left); }
+				}
+				void split(shared_ptr<Node> orig, shared_ptr<Node>& lower, shared_ptr<Node>& greater_or_equal, int value) {
+					if (orig == null) { lower = null; greater_or_equal = null; }
+					else if (orig.x < value) { lower = orig; split(orig.right, orig.right, greater_or_equal, value); }
+					else { greater_or_equal = orig; split(orig.left, lower, orig.left, value); }
+				}
+				void insert(shared_ptr<Node>& root, int x) {
+					shared_ptr<Node> lower = null;
+					shared_ptr<Node> equal_greater = null;
+					shared_ptr<Node> equal = null;
+					shared_ptr<Node> greater = null;
+					split(root, lower, equal_greater, x);
+					split(equal_greater, equal, greater, x + 1);
+					if (equal == null) { equal = new Node(); equal.x = x; equal.y = next_priority(); }
+					shared_ptr<Node> tmp = null;
+					merge(lower, equal, tmp);
+					merge(tmp, greater, root);
+				}
+				void erase(shared_ptr<Node>& root, int x) {
+					shared_ptr<Node> lower = null;
+					shared_ptr<Node> equal_greater = null;
+					shared_ptr<Node> equal = null;
+					shared_ptr<Node> greater = null;
+					split(root, lower, equal_greater, x);
+					split(equal_greater, equal, greater, x + 1);
+					merge(lower, greater, root);
+				}
+				string walk(shared_ptr<Node> n) { if (n == null) { return ""; } return walk(n.left) + to_string(n.x) + " " + walk(n.right); }
+				function run() -> string {
+					shared_ptr<Node> root = null;
+					int cur = 5;
+					for (int i = 1; i <= 60; ++i) {
+						cur = (cur * 57 + 43) % 101;
+						if (i % 3 == 1) { erase(root, cur % 23); } else { insert(root, cur % 23); }
+					}
+					return walk(root);
+				}
+				run();
+			)", "1 2 5 7 8 10 12 16 18 19 22 ", "a treap over out-parameters");
+		});
+
 		// a call from a typed loop (a cell block) into a callee that stays a call: its arguments are the block's values, its result lands in
 		// the block, and everything the general call does (order, conversions, limits, errors) is the general call's
 		test("a_block_calls_a_by_value_callee_and_lands_its_result", [this]() {

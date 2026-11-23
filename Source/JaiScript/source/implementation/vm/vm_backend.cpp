@@ -13960,7 +13960,8 @@ JAI_NOINLINE op_status vm_backend::construct_at_site(frame& f, const call_site& 
 // a by-value parameter type whose slot can take its argument as it is (the primitive and string rows of bind_parameters)
 static JAI_FORCEINLINE bool lean_parameter_type(script_value_type bt) {
 	return bt == script_value_type::jai_any_type || bt == script_value_type::jai_int_type || bt == script_value_type::jai_float_type ||
-	       bt == script_value_type::jai_bool_type || bt == script_value_type::jai_char_type || bt == script_value_type::jai_string_type;
+	       bt == script_value_type::jai_bool_type || bt == script_value_type::jai_char_type || bt == script_value_type::jai_string_type ||
+	       bt == script_value_type::jai_shared_ptr_type;
 }
 
 // a lean bind whose every parameter takes exactly one storage kind as it is (int, float, bool, char, string), packed: bit 0 set, bits 1..7 the
@@ -14007,7 +14008,8 @@ static JAI_FORCEINLINE bool shares_as_argument(const script_value& a) {
 }
 
 // bind_parameters' in-place rows: a primitive or string argument whose storage matches its by-value slot (any storage of those for a
-// var slot), or a handle or null into a var slot, is already the slot (each one's copy is its binding; a var slot's then takes lean_var_stamp)
+// var slot), a handle or null into a var slot, or a handle or null already tagged with a shared_ptr slot's exact type, is already the slot
+// (each one's copy is its binding; a var slot's then takes lean_var_stamp)
 static JAI_FORCEINLINE bool lean_slot_takes(const parameter& p, const script_value& a) {
 	const size_t ri = a.raw_storage_index();
 	const script_value_type bt = p.type ? p.type->base_type : script_value_type::jai_any_type;
@@ -14017,7 +14019,8 @@ static JAI_FORCEINLINE bool lean_slot_takes(const parameter& p, const script_val
 	case script_value::TYPEID_BOOL: return bt == script_value_type::jai_any_type || bt == script_value_type::jai_bool_type;
 	case script_value::TYPEID_CHAR: return bt == script_value_type::jai_any_type || bt == script_value_type::jai_char_type;
 	case script_value::TYPEID_STRING: return bt == script_value_type::jai_any_type || bt == script_value_type::jai_string_type;
-	case script_value::TYPEID_NULL: case script_value::TYPEID_OBJECT: return bt == script_value_type::jai_any_type && shares_as_argument(a);
+	case script_value::TYPEID_NULL: case script_value::TYPEID_OBJECT:
+		return bt == script_value_type::jai_any_type ? shares_as_argument(a) : bt == script_value_type::jai_shared_ptr_type && a.type_info_raw() == p.type.get();
 	default: return false;
 	}
 }
@@ -14036,16 +14039,14 @@ static JAI_FORCEINLINE bool lean_kinds_match(uint64_t kinds, const script_value*
 	return true;
 }
 
-// a method's in-place arguments that are already its parameters, as bind_parameters' first rows take them: the function rows
-// (lean_slot_takes), and a handle or null already tagged with a shared_ptr parameter's exact type
+// a method's in-place arguments that are already its parameters, as bind_parameters' first rows take them (lean_slot_takes)
 static JAI_FORCEINLINE bool method_binds_in_place(const function_decl& ast, script_value* args, size_t argc, engine* eng) {
 	if (ast.vm_lean_bind == 0) {
 		uint8_t lean = 1;
 		for (size_t i = 0; i < ast.parameters.size(); ++i) {
 			const parameter& p = ast.parameters[i];
-			const script_value_type bt = p.type ? p.type->base_type : script_value_type::jai_any_type;
 			if (p.is_reference || p.ref_escaping || p.default_value || p.slot_index != i ||
-			    !(lean_parameter_type(bt) || bt == script_value_type::jai_shared_ptr_type)) { lean = 2; break; }
+			    !lean_parameter_type(p.type ? p.type->base_type : script_value_type::jai_any_type)) { lean = 2; break; }
 		}
 		ast.vm_lean_kinds = lean == 1 ? lean_kinds_of(ast.parameters) : 2;
 		ast.vm_lean_bind = lean;
@@ -14055,11 +14056,6 @@ static JAI_FORCEINLINE bool method_binds_in_place(const function_decl& ast, scri
 	if (argc != ast.parameters.size()) { return false; }
 	for (size_t i = 0; i < argc; ++i) {
 		const parameter& p = ast.parameters[i];
-		if (p.type && p.type->base_type == script_value_type::jai_shared_ptr_type) {
-			const size_t ri = args[i].raw_storage_index();
-			if ((ri != script_value::TYPEID_OBJECT && ri != script_value::TYPEID_NULL) || args[i].type_info_raw() != p.type.get()) { return false; }
-			continue;
-		}
 		if (!lean_slot_takes(p, args[i])) { return false; }
 		lean_var_stamp(p, args[i], eng);
 	}

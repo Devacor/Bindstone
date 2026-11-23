@@ -83,6 +83,13 @@ bind in place when each one's storage index is its parameter's, one compare per 
 argument takes the per-parameter rows, which decide exactly as before. The method push moves the receiver into the record's
 pooled `this` directly.
 
+The per-parameter rows are the general binder's own in-place rows (`lean_slot_takes`), the same for a method frame and a plain
+frame: a primitive or a string of its parameter's storage, any of those and a shared handle or a null into a `var` parameter,
+and, into a by-value `shared_ptr<T>` parameter, a handle or a null already tagged with exactly that type. A handle tagged
+otherwise (a derived class's, one read from a `var`, an untyped null) is no in-place argument: the general bind admits or
+refuses it. A plain function whose parameters are these by value takes the plain frame, and with `T&` parameters beside them
+the plain frame that binds each reference to the caller's frame-slot local or to the place its argument evaluated to.
+
 ## A class-name call constructs through its site
 
 `T(args)` is a call whose callee is the class's constructor value. The probe's slow resolution caches that value at the site as

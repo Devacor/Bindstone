@@ -44,6 +44,8 @@ namespace Workbench {
 		Tool tool() const { return activeTool; }
 
 		GizmoSnapSteps snapSteps;
+		// The transform handles stay off while another editor works on the selection (the mesh editor).
+		void handlesHidden(bool a_hidden) { hideHandles = a_hidden; }
 		// Snapping on without Ctrl (the toolbar's magnet); Ctrl then turns it off for a gesture.
 		bool snapAlways = false;
 
@@ -76,7 +78,6 @@ namespace Workbench {
 		struct Gizmo;
 		struct NodeGizmo;
 		struct BoundsGizmo;
-		struct PointsGizmo;
 		struct HighlightGizmo;
 
 		Tool shownTool() const;
@@ -91,6 +92,7 @@ namespace Workbench {
 		const Theme& theme;
 		MV::TextLibrary& textLibrary;
 		Tool activeTool = Tool::MOVE;
+		bool hideHandles = false;
 
 		std::shared_ptr<MV::Scene::Node> nodeTarget;
 		std::shared_ptr<MV::Scene::Component> componentTarget;

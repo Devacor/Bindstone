@@ -182,11 +182,16 @@ namespace Workbench {
 		treePanel = static_cast<SceneTreePanel*>(dock->registerPanel(std::move(tree)));
 		inspectorPanel = static_cast<InspectorPanel*>(dock->registerPanel(std::move(inspector)));
 		inspectorPanel->onEditComponent = [this](const std::shared_ptr<MV::Scene::Component>& a_component) {
+			if (auto drawable = meshEditable(a_component)) {
+				editMesh(meshEditor->editing() == drawable ? nullptr : drawable);
+				return;
+			}
+			editMesh(nullptr);
 			gizmos->editComponent(gizmos->editedComponent() == a_component ? nullptr : a_component);
 			inspectorPanel->inspect(selectedNode);
 		};
 		inspectorPanel->componentGizmoActive = [this](const std::shared_ptr<MV::Scene::Component>& a_component) {
-			return gizmos->editedComponent() == a_component;
+			return gizmos->editedComponent() == a_component || (meshEditor && meshEditor->editing() == a_component);
 		};
 		inspectorPanel->onParallaxPreview = [this](bool a_preview) { parallaxPreview(a_preview); };
 		inspectorPanel->onSelectNode = [this](const std::shared_ptr<MV::Scene::Node>& a_node) { select(a_node); };
@@ -283,9 +288,22 @@ namespace Workbench {
 		toolbarActions.onFrame = [this]() { frameSelectionInViewport(); };
 		sceneToolbar = std::make_unique<SceneToolbar>(uiRoot->make("sceneToolbar"), managers.services, theme, focusRouter, history, toolbarActions);
 		dock->floatingHost(uiRoot->make("dockFloating"));
+		meshEditor = std::make_unique<MeshEditor>(gizmoOverlay, uiRoot->make("meshEditorBar"), managers.services, theme, focusRouter, history, mouse);
 		gizmos->pointerOverScene = [this](const MV::Point<int>& a_screenPoint) {
 			auto worldPoint = managers.renderer.worldFromScreen(a_screenPoint);
-			return dock->viewportAt(worldPoint) && !sceneToolbar->contains(worldPoint);
+			return dock->viewportAt(worldPoint) && !sceneToolbar->contains(worldPoint) && !meshEditor->barContains(worldPoint);
+		};
+		meshEditor->pointerOverScene = gizmos->pointerOverScene;
+		meshEditor->onEdited = [this]() {
+			if (inspectorPanel) {
+				inspectorPanel->inspect(selectedNode);
+			}
+		};
+		meshEditor->onEnded = [this]() {
+			gizmos->handlesHidden(false);
+			if (inspectorPanel) {
+				inspectorPanel->inspect(selectedNode);
+			}
 		};
 		sceneToolbar->tool(static_cast<int>(gizmos->tool()));
 		sceneToolbar->grid(sceneGrid->visible());
@@ -332,6 +350,10 @@ namespace Workbench {
 	void App::beginPan(PanButton a_button, const MV::Point<int>& a_screenPoint) {
 		auto worldPoint = managers.renderer.worldFromScreen(a_screenPoint);
 		if (sceneToolbar && sceneToolbar->contains(worldPoint)) {
+			return;
+		}
+		// the mesh editor has the left button; the others still pan
+		if (meshEditor && meshEditor->active() && (a_button == PanButton::LEFT || meshEditor->barContains(worldPoint))) {
 			return;
 		}
 		if (panButton == PanButton::NONE && dock->viewportAt(worldPoint)) {
@@ -1561,9 +1583,41 @@ namespace Workbench {
 		return documentPath.empty() ? saveSceneWithDialog() : saveScene(documentPath);
 	}
 
+	std::shared_ptr<MV::Scene::Drawable> App::meshEditable(const std::shared_ptr<MV::Scene::Component>& a_component) {
+		// a Sprite, a Text and the rest make their own points; only a plain Drawable keeps the ones it is given
+		if (a_component && typeid(*a_component) == typeid(MV::Scene::Drawable)) {
+			return std::static_pointer_cast<MV::Scene::Drawable>(a_component);
+		}
+		return nullptr;
+	}
+
+	bool App::editMesh(const std::shared_ptr<MV::Scene::Drawable>& a_drawable) {
+		if (!a_drawable) {
+			meshEditor->end();
+			return true;
+		}
+		if (!a_drawable->ownerIsAlive() || !inScene(a_drawable->owner())) {
+			return false;
+		}
+		if (selectedNode != a_drawable->owner()) {
+			select(a_drawable->owner());
+		}
+		gizmos->editComponent(nullptr);
+		gizmos->handlesHidden(true);
+		meshEditor->begin(a_drawable);
+		meshEditor->layout(dock->viewportRect());
+		if (inspectorPanel) {
+			inspectorPanel->inspect(selectedNode);
+		}
+		return true;
+	}
+
 	void App::select(const std::shared_ptr<MV::Scene::Node>& a_node) {
 		if (a_node != selectedNode) {
 			parallaxPreview(false);
+		}
+		if (meshEditor && meshEditor->active() && meshEditor->editing()->owner() != a_node) {
+			meshEditor->end();
 		}
 		selectedNode = a_node;
 		gizmos->select(a_node);
@@ -1833,6 +1887,8 @@ namespace Workbench {
 			}
 		}
 		gizmos->update();
+		meshEditor->layout(dock->viewportRect());
+		meshEditor->update();
 
 		auto hint = dock->cursorHintAt(managers.renderer.worldFromScreen(mouse.position()));
 		if (hint != activeCursor) {
@@ -1923,6 +1979,15 @@ namespace Workbench {
 			{ "Frame", "F", [this]() { frameSelectionInViewport(); }, true, {}, [this]() { return static_cast<bool>(selectedNode); } },
 			{ "Duplicate", "Ctrl+D", [this]() { duplicateSelected(); }, true, {}, [this]() { return selectionIsRemovable(); } },
 			{ "Delete", "Del", [this]() { deleteSelected(); }, false, {}, [this]() { return selectionIsRemovable(); } } };
+		if (selectedNode) {
+			for (auto&& variant : selectedNode->components<MV::Scene::Drawable>(false)) {
+				auto drawable = std::visit([](const auto& a_safe) { return meshEditable(a_safe.self()); }, variant);
+				if (drawable) {
+					result.push_back({ "Edit Mesh", "", [this, drawable]() { editMesh(drawable); }, true });
+					break;
+				}
+			}
+		}
 		if (linkOn(selectedNode)) {
 			result.push_back({ "Revert to BindSnap", "", [this]() { revertBindSnap(selectedNode); }, true });
 			result.push_back({ "Unpack BindSnap", "", [this]() { unpackBindSnap(selectedNode); } });
@@ -2043,6 +2108,10 @@ namespace Workbench {
 			// a press on a field's own menu is not a press away from the field
 			bool onContextMenu = event.type == SDL_MOUSEBUTTONDOWN && menuBar->contextOpen() && menuBar->popupContains(MV::Point<int>(event.button.x, event.button.y));
 			menuBar->handleInput(event);
+			// the mesh editor's keys (Enter among them) come before the focus keys, unless a field is being typed in
+			if (!focusRouter.hasActive() && !menuBar->isOpen() && meshEditor->active() && meshEditor->key(event)) {
+				continue;
+			}
 			if (handleFocusKey(event)) {
 				continue;
 			}

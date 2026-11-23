@@ -27,6 +27,7 @@
 #include "fast_json.hpp"
 #include "MV/Render/Scene/emitter.h"
 #include "MV/Render/Scene/bindSnapInstance.h"
+#include "MV/Render/mesh.h"
 #include <chrono>
 #include <algorithm>
 #include <vector>
@@ -456,6 +457,169 @@ static std::string describeJsonDifference(const std::string& a_first, const std:
 // -workbenchgizmoshot = shot that loads map.scene and selects a node so the gizmos render).
 // -workbenchselftest = drives a load, save, select, BindSnap drop and undo/redo, checking each result.
 // The smoke modes exit nonzero when a load fails, a script errors or the frame loop catches an exception.
+// The mesh editor on a plain Drawable, driven as a person would: picks, a drag, a box, extrude, the outline
+// tools, painting, a corner added on an edge, removal, and every step undone back to the start
+static void RunMeshEditorSelfTest(Workbench::App& a_app, Managers& a_managers, const std::function<void(bool, const std::string&)>& expect, const std::function<void(SDL_Keycode)>& pressWithControl) {
+	auto& mouse = *a_managers.services.get<MV::TapDevice>();
+	auto& meshEditor = a_app.meshEdit();
+	auto hold = [&](const MV::Point<int>& a_at, bool a_down, int a_frames = 2) {
+		mouse.simulate(a_at, a_down);
+		a_app.runFrames(a_frames);
+	};
+	auto click = [&](const MV::Point<int>& a_at) {
+		hold(a_at, false);
+		hold(a_at, true);
+		hold(a_at, false);
+	};
+	auto drag = [&](const MV::Point<int>& a_from, const MV::Point<int>& a_to) {
+		hold(a_from, false);
+		hold(a_from, true);
+		for (int step = 1; step <= 5; ++step) {
+			hold(MV::Point<int>(a_from.x + (a_to.x - a_from.x) * step / 5, a_from.y + (a_to.y - a_from.y) * step / 5), true, 1);
+		}
+		hold(a_to, false);
+	};
+	auto key = [&a_app](SDL_Keycode a_key, SDL_Keymod a_modifiers = KMOD_NONE) {
+		SDL_SetModState(a_modifiers);
+		SDL_Event press{};
+		press.type = SDL_KEYDOWN;
+		press.key.keysym.sym = a_key;
+		SDL_PushEvent(&press);
+		a_app.runFrames(2);
+		SDL_SetModState(KMOD_NONE);
+	};
+	auto read = [](const std::shared_ptr<MV::Scene::Drawable>& a_drawable) {
+		MV::Mesh::Data result;
+		result.points = a_drawable->getPoints();
+		result.indices.assign(a_drawable->pointIndices().begin(), a_drawable->pointIndices().end());
+		return result;
+	};
+
+	a_app.newScene();
+	a_app.requestUndoSteps(std::max<size_t>(a_app.undoSteps(), 200));
+	a_app.select(nullptr);
+	auto sheetNode = a_app.createChildNode();
+	sheetNode->id("Sheet");
+	auto sheet = sheetNode->attach<MV::Scene::Drawable>().self();
+	sheet->setPoints({
+		MV::DrawPoint(MV::point(0.0f, 0.0f), MV::Color(1.0f, 1.0f, 1.0f, 1.0f), MV::TexturePoint(0.0f, 0.0f)),
+		MV::DrawPoint(MV::point(100.0f, 0.0f), MV::Color(1.0f, 1.0f, 1.0f, 1.0f), MV::TexturePoint(1.0f, 0.0f)),
+		MV::DrawPoint(MV::point(100.0f, 100.0f), MV::Color(1.0f, 1.0f, 1.0f, 1.0f), MV::TexturePoint(1.0f, 1.0f)),
+		MV::DrawPoint(MV::point(0.0f, 100.0f), MV::Color(1.0f, 1.0f, 1.0f, 1.0f), MV::TexturePoint(0.0f, 1.0f)) }, { 0, 1, 2, 0, 2, 3 });
+	const auto original = read(sheet);
+	a_app.select(sheetNode);
+	a_app.frameSelectionInViewport();
+	a_app.runFrames(6);
+	{
+		// framed, the sheet fills the view: out to 40% so the shapes laid beside it are on open scene, clear of the tool bar
+		hold(sheetNode->screenFromLocal(MV::point(50.0f, 50.0f)), false);
+		SDL_Event wheel{};
+		wheel.type = SDL_MOUSEWHEEL;
+		wheel.wheel.y = -6;
+		SDL_PushEvent(&wheel);
+		a_app.runFrames(3);
+	}
+	const auto stepsBefore = a_app.commands().position();
+	expect(a_app.editMesh(sheet) && meshEditor.active() && meshEditor.editing() == sheet, "Edit Mesh starts on a plain Drawable");
+	a_app.runFrames(2);
+	auto at = [&](float a_x, float a_y) { return sheetNode->screenFromLocal(MV::point(a_x, a_y)); };
+	const float pixel = MV::distance(sheetNode->localFromScreen(MV::Point<int>(0, 0)), sheetNode->localFromScreen(MV::Point<int>(10, 0))) / 10.0f;
+
+	click(at(100.0f, 0.0f));
+	expect(meshEditor.selection() == MV::Mesh::Selection { 1 }, "a press on a corner picks it");
+	drag(at(100.0f, 0.0f), at(100.0f, 0.0f) + MV::Point<int>(30, 0));
+	expect(sheet->getPoints()[1].x > 100.0f + 20.0f * pixel && std::abs(sheet->getPoints()[0].x) < 0.001f, "a drag moves what is picked and nothing else");
+	pressWithControl(SDLK_z);
+	expect(read(sheet) == original, "and undo puts it back");
+
+	drag(at(-20.0f, 80.0f), at(120.0f, 120.0f));
+	expect(meshEditor.selection() == MV::Mesh::Selection { 2, 3 }, "a box picks the corners inside it");
+
+	auto pointer = at(50.0f, 110.0f);
+	hold(pointer, false);
+	key(SDLK_e);
+	hold(pointer + MV::Point<int>(0, 40), false);
+	click(pointer + MV::Point<int>(0, 40));
+	auto extruded = read(sheet);
+	expect(extruded.points.size() == 6 && extruded.triangleCount() == 4, "E extrudes the picked outside edge into a new quad: " + std::to_string(extruded.points.size()) + " corners");
+	expect(extruded.points.size() == 6 && extruded.points[4].y > 100.0f + 30.0f * pixel && meshEditor.selection().size() == 2, "below the old edge, with the new edge picked");
+
+	key(SDLK_g);
+	hold(pointer + MV::Point<int>(60, 40), false);
+	key(SDLK_x);
+	hold(pointer + MV::Point<int>(60, 70), false);
+	key(SDLK_RETURN);
+	auto grabbed = read(sheet);
+	expect(grabbed.points.size() == 6 && grabbed.points[4].x > extruded.points[4].x + 40.0f * pixel && std::abs(grabbed.points[4].y - extruded.points[4].y) < 0.001f, "G moves the pick, and X keeps it on its axis: " + (grabbed.points.size() == 6 ? std::to_string(grabbed.points[4].x) + "," + std::to_string(grabbed.points[4].y) + " from " + std::to_string(extruded.points[4].x) + "," + std::to_string(extruded.points[4].y) + " pixel " + std::to_string(pixel) + " picked " + std::to_string(meshEditor.selection().size()) : std::to_string(grabbed.points.size())));
+
+	key(SDLK_2);
+	expect(meshEditor.tool() == Workbench::MeshEditor::Tool::POLYGON, "2 is the polygon tool");
+	click(at(200.0f, 0.0f));
+	click(at(260.0f, 0.0f));
+	click(at(230.0f, 60.0f));
+	key(SDLK_RETURN);
+	auto withPolygon = read(sheet);
+	expect(withPolygon.points.size() == 9 && withPolygon.triangleCount() == 5, "a polygon laid out and closed with Enter becomes triangles: " + std::to_string(withPolygon.points.size()) + " corners " + std::to_string(withPolygon.triangleCount()) + " triangles, tool " + std::to_string(static_cast<int>(meshEditor.tool())));
+
+	key(SDLK_3);
+	meshEditor.settings.ribbonWidth = 20.0f;
+	click(at(-100.0f, 0.0f));
+	click(at(-100.0f, 80.0f));
+	click(at(-60.0f, 160.0f));
+	key(SDLK_RETURN);
+	auto withRibbon = read(sheet);
+	expect(withRibbon.points.size() == 15 && withRibbon.triangleCount() == 9, "a ribbon laid along a path becomes a strip");
+	expect(withRibbon.points.size() == 15 && std::abs(withRibbon.points[9].A) < 0.001f && withRibbon.points[11].A > 0.99f, "whose ends fade");
+
+	key(SDLK_4);
+	meshEditor.settings.color = MV::Color(1.0f, 1.0f, 1.0f, 0.0f);
+	meshEditor.settings.brushStrength = 1.0f;
+	drag(at(0.0f, 0.0f), at(0.0f, 0.0f) + MV::Point<int>(2, 2));
+	expect(sheet->getPoints()[0].A < 0.5f && sheet->getPoints()[2].A > 0.99f, "the brush blends the corners under it toward its colour");
+
+	key(SDLK_1);
+	SDL_SetModState(static_cast<SDL_Keymod>(KMOD_CTRL));
+	click(at(50.0f, 0.0f));
+	SDL_SetModState(KMOD_NONE);
+	auto split = read(sheet);
+	expect(split.points.size() == 16 && split.triangleCount() == 10 && meshEditor.selection().size() == 1, "Ctrl+press on an edge puts a corner on it");
+
+	key(SDLK_DELETE);
+	expect(read(sheet).points.size() == 15 && sheetNode->parent() == a_app.scene(), "Delete takes the picked corner out, and not the node");
+
+	meshEditor.select({ 0, 1, 2, 3 });
+	expect(meshEditor.subdivide() && read(sheet).triangleCount() > 10, "Subdivide splits the picked triangles");
+
+	size_t stepsTaken = 0;
+	while (a_app.commands().position() > stepsBefore && stepsTaken < 64) {
+		pressWithControl(SDLK_z);
+		++stepsTaken;
+	}
+	expect(read(sheet) == original, "undoing each step gets back the mesh it started with: " + std::to_string(stepsTaken) + " steps");
+	for (size_t step = 0; step < stepsTaken; ++step) {
+		pressWithControl(SDLK_y);
+	}
+	const auto edited = read(sheet);
+	expect(edited.points.size() > 15, "and redo brings all of them back");
+
+	a_app.runFrames(1, "mesh_editor_shot.bmp");
+	key(SDLK_ESCAPE);
+	expect(!meshEditor.active() && sheetNode->parent() == a_app.scene(), "Esc leaves the mesh editor");
+
+	auto saved = (std::filesystem::temp_directory_path() / "workbench_selftest_mesh.scene").string();
+	expect(a_app.saveScene(saved), "the scene saves");
+	try {
+		auto loaded = MV::Scene::Node::load(saved, a_managers.services, false)->get("Sheet", false);
+		auto loadedDrawable = loaded ? loaded->component<MV::Scene::Drawable>(false, false) : MV::Scene::SafeComponent<MV::Scene::Drawable>();
+		expect(loadedDrawable && read(loadedDrawable.self()) == edited, "and the edited mesh loads back as it was");
+	} catch (const std::exception& a_error) {
+		expect(false, std::string("the edited scene loads: ") + a_error.what());
+	}
+	std::error_code removeFailed;
+	std::filesystem::remove(saved, removeFailed);
+	mouse.stopSimulating();
+}
+
 static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 	auto expect = [&a_app](bool a_condition, const std::string& a_what) {
 		if (!a_condition) {
@@ -474,6 +638,10 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.runFrames(2);
 		SDL_SetModState(KMOD_NONE);
 	};
+	if (std::getenv("MESH_ONLY")) {
+		RunMeshEditorSelfTest(a_app, a_managers, expect, pressWithControl);
+		return;
+	}
 
 	a_app.newScene();
 	expect(a_app.scene()->empty() && !a_app.selected() && a_app.errors() == 0, "File > New Scene leaves an empty scene");
@@ -2319,6 +2487,8 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.runFrames(2);
 		std::filesystem::remove_all(folder, ignored);
 	}
+
+	RunMeshEditorSelfTest(a_app, a_managers, expect, pressWithControl);
 }
 
 static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", bool a_loadDefaultScene = false, bool a_selectForGizmo = false, bool a_selfTest = false) {

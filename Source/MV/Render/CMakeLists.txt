@@ -10,6 +10,7 @@ target_sources(BindStone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/lighting.h
   ${CMAKE_CURRENT_SOURCE_DIR}/matrix.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/points.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/mesh.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/points.h
   ${CMAKE_CURRENT_SOURCE_DIR}/render.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/render.h

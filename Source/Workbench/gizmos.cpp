@@ -12,7 +12,6 @@ namespace Workbench {
 	namespace {
 		// Old-editor handle palette (editorDefines.h): amber corners.
 		const MV::Color sizeHandleFill(0x44ffb400);
-		const MV::Color pointHandleFill(1.0f, 0.0f, 1.0f, 0.25f);
 		const MV::Color highlightFill(0x11ffffff);
 		// Dock chrome Clickables sit at the default 100; +100 wins inside the viewport. The transform
 		// handles sit above a bounds body, point handles between, so overlaps resolve smallest-first.
@@ -862,117 +861,6 @@ namespace Workbench {
 		MV::Point<int> lastPaintCell{ -1, -1 };
 	};
 
-	struct GizmoLayer::PointsGizmo : GizmoLayer::Gizmo {
-		PointsGizmo(GizmoLayer& a_layer, const std::shared_ptr<MV::Scene::Drawable>& a_target) :
-			Gizmo(a_layer),
-			target(a_target) {
-			container = a_layer.overlay->make("pointsGizmo");
-			sync();
-		}
-
-		std::vector<MV::Point<>> handlePositions() const {
-			std::vector<MV::Point<>> result;
-			for (size_t i = 0; i < target->pointSize(); ++i) {
-				result.push_back(MV::round<MV::PointPrecision>(target->owner()->worldFromLocal(target->point(i).point())));
-			}
-			return result;
-		}
-
-		bool dirty() const override {
-			auto current = handlePositions();
-			if (current.size() != lastPositions.size()) {
-				return true;
-			}
-			for (size_t i = 0; i < current.size(); ++i) {
-				if (!(current[i] == lastPositions[i])) {
-					return true;
-				}
-			}
-			return false;
-		}
-
-		void sync() override {
-			container->clear();
-			lastPositions = handlePositions();
-			for (size_t i = 0; i < lastPositions.size(); ++i) {
-				auto position = lastPositions[i];
-				bool duplicate = false;
-				for (size_t j = 0; j < i && !duplicate; ++j) {
-					duplicate = lastPositions[j] == position;
-				}
-				if (duplicate) {
-					continue;   // welded clusters share one handle
-				}
-				auto handle = container->make(std::to_string(i))->worldPosition(position)->attach<MV::Scene::Clickable>(layer.mouse);
-				handle->bounds({ MV::size(layer.theme.px(5.0f), layer.theme.px(5.0f)), true })->color(pointHandleFill)->show();
-				handle->globalPriority(handle->globalPriority() + pointPriorityBoost);
-				size_t pointIndex = i;
-				handle->onPress.connect("press", [this](std::shared_ptr<MV::Scene::Clickable>) {
-					dragging = true;
-					pressPoints = target->getPoints();
-					layer.pressed();
-				});
-				handle->onDrag.connect("drag", [this, pointIndex](std::shared_ptr<MV::Scene::Clickable> a_handle, const MV::Point<int>&, const MV::Point<int>& a_delta) {
-					a_handle->owner()->translate(a_handle->owner()->renderer().worldFromScreen(a_delta));
-					movePoint(pointIndex, target->owner()->localFromWorld(a_handle->owner()->worldPosition()));
-				});
-				handle->onRelease.connect("release", [this](std::shared_ptr<MV::Scene::Clickable>, const MV::Point<MV::PointPrecision>&) {
-					endGesture();
-				});
-			}
-		}
-
-		// Points within 0.75 local units of the dragged point's pre-tick position weld along
-		// with it; LSHIFT suppresses the weld (the old Drawable panel's contract).
-		void movePoint(size_t a_index, const MV::Point<>& a_final) {
-			auto pointList = target->getPoints();
-			if (a_index >= pointList.size()) {
-				return;
-			}
-			auto pointSelected = pointList[a_index];
-			pointList[a_index] = a_final;
-			target->setPoint(a_index, pointList[a_index]);
-			const Uint8* keys = SDL_GetKeyboardState(nullptr);
-			if (!keys[SDL_SCANCODE_LSHIFT]) {
-				for (size_t i = 0; i < pointList.size(); ++i) {
-					if (i != a_index && MV::distance(pointSelected.point(), pointList[i].point()) < 0.75f) {
-						pointList[i] = a_final;
-						target->setPoint(i, pointList[i]);
-					}
-				}
-			}
-		}
-
-		void endGesture() {
-			dragging = false;
-			auto newPoints = target->getPoints();
-			bool changed = newPoints.size() != pressPoints.size();
-			for (size_t i = 0; !changed && i < newPoints.size(); ++i) {
-				changed = !(newPoints[i].point() == pressPoints[i].point());
-			}
-			if (changed) {
-				std::weak_ptr<MV::Scene::Drawable> weak = target;
-				auto applyPoints = [weak](const std::vector<MV::DrawPoint>& a_points) {
-					if (auto locked = weak.lock()) {
-						for (size_t i = 0; i < a_points.size() && i < locked->pointSize(); ++i) {
-							locked->setPoint(i, a_points[i]);
-						}
-					}
-				};
-				auto oldPoints = pressPoints;
-				layer.history.record("points",
-					[applyPoints, newPoints]() { applyPoints(newPoints); },
-					[applyPoints, oldPoints]() { applyPoints(oldPoints); });
-			}
-			sync();
-			layer.edited();
-		}
-
-		std::shared_ptr<MV::Scene::Drawable> target;
-		std::vector<MV::DrawPoint> pressPoints;
-		std::vector<MV::Point<>> lastPositions;
-	};
-
 	struct GizmoLayer::HighlightGizmo : GizmoLayer::Gizmo {
 		HighlightGizmo(GizmoLayer& a_layer, const std::shared_ptr<MV::Scene::Component>& a_component) :
 			Gizmo(a_layer),
@@ -1012,7 +900,7 @@ namespace Workbench {
 	GizmoLayer::~GizmoLayer() = default;
 
 	Tool GizmoLayer::shownTool() const {
-		return componentGizmo && componentGizmo->takesInput() ? Tool::SELECT : activeTool;
+		return hideHandles || (componentGizmo && componentGizmo->takesInput()) ? Tool::SELECT : activeTool;
 	}
 
 	void GizmoLayer::pressed() {
@@ -1135,8 +1023,8 @@ namespace Workbench {
 			std::dynamic_pointer_cast<MV::Scene::Clickable>(a_component)) {
 			return std::make_unique<BoundsGizmo>(*this, a_component);
 		}
-		if (auto drawable = std::dynamic_pointer_cast<MV::Scene::Drawable>(a_component)) {
-			return std::make_unique<PointsGizmo>(*this, drawable);
+		if (std::dynamic_pointer_cast<MV::Scene::Drawable>(a_component)) {
+			return std::make_unique<HighlightGizmo>(*this, a_component);
 		}
 		return nullptr;
 	}

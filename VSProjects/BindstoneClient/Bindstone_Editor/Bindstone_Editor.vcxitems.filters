@@ -54,6 +54,9 @@
     <ClCompile Include="$(SolutionDir)Source\Workbench\gizmos.cpp">
       <Filter>Workbench</Filter>
     </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Workbench\meshEditor.cpp">
+      <Filter>Workbench</Filter>
+    </ClCompile>
     <ClCompile Include="$(SolutionDir)Source\Game\gameEditor.cpp">
       <Filter>Game</Filter>
     </ClCompile>
@@ -120,6 +123,9 @@
       <Filter>Workbench</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)Source\Workbench\gizmos.h">
+      <Filter>Workbench</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Workbench\meshEditor.h">
       <Filter>Workbench</Filter>
     </ClInclude>
   </ItemGroup>

@@ -8,6 +8,7 @@
 #include "commands.h"
 #include "dock.h"
 #include "gizmos.h"
+#include "meshEditor.h"
 #include "sceneTreePanel.h"
 #include "inspector.h"
 #include "menu.h"
@@ -152,6 +153,10 @@ namespace Workbench {
 		void gizmoTool(Tool a_tool);
 		Tool gizmoTool() const { return gizmos->tool(); }
 		GizmoLayer& gizmoLayer() { return *gizmos; }
+		// Edit mode for a Drawable's own triangles (MeshEditor); null leaves it. The inspector's toggle on a plain
+		// Drawable and the node menu's Edit Mesh come here.
+		bool editMesh(const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
+		MeshEditor& meshEdit() { return *meshEditor; }
 		SceneToolbar& sceneTools() { return *sceneToolbar; }
 		SceneGrid& grid() { return *sceneGrid; }
 		MenuBar& menus() { return *menuBar; }
@@ -198,6 +203,7 @@ namespace Workbench {
 		void syncViewportClip();
 		void pickSceneNode(const MV::Point<int>& a_screenPoint);
 		bool inScene(const std::shared_ptr<MV::Scene::Node>& a_node) const;
+		static std::shared_ptr<MV::Scene::Drawable> meshEditable(const std::shared_ptr<MV::Scene::Component>& a_component);
 		bool selectionIsRemovable() const;
 		void clearReferencesInto(const std::shared_ptr<MV::Scene::Node>& a_leaving);
 		bool unsavedChangesResolved();
@@ -243,6 +249,7 @@ namespace Workbench {
 
 		std::shared_ptr<MV::Scene::Node> gizmoOverlay;
 		std::unique_ptr<GizmoLayer> gizmos;
+		std::unique_ptr<MeshEditor> meshEditor;
 		std::unique_ptr<SceneGrid> sceneGrid;
 		std::unique_ptr<SceneToolbar> sceneToolbar;
 		std::shared_ptr<MV::Scene::Node> selectedNode;

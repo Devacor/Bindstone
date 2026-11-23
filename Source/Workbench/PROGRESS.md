@@ -988,6 +988,47 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Tests: the engine suite builds a file linked to itself and two linked to each other; the self-test places the
   open document in itself, a scene in a new scene, and saves a node over a file its child is linked to.
 
+## Increment 50: a mesh editor in place of the shape stamps (2026-11-23)
+- Dev: the legacy editor's mesh tools stamp fixed shapes with fixed texture coordinates (Q/A/Z/S/X); they suit the
+  waterfall and nothing else. Wanted: extrude, point editing and general tools.
+- `MV::Mesh` (`MV/Render/mesh.h`) is the geometry, plain functions over a Drawable's points and indices and a set
+  of picked vertices: places (welded corners within 0.75 are one), islands, outside edges, extrude (the texture
+  mapping of the edge's triangle carries on over the new quad), subdivide (neighbours split too, so no corner sits
+  in the middle of an edge), split an edge or a triangle, fill (ear clipping), duplicate, merge, add a corner,
+  remove corners or triangles, remove unused corners, set colour, a soft colour brush, lay the texture flat over
+  the picked corners, a polygon from an outline and a ribbon along a path (texture across and along, ends faded:
+  the waterfall's streams). Tests: `mesh_tests.cpp`.
+- `Workbench::MeshEditor` (`meshEditor.h`) is the edit mode on a plain Drawable (a Sprite, a Text and the rest
+  make their own points). The inspector's G on a Drawable and Edit Mesh in a node's right-press menu enter it; Esc,
+  Done or another selection leaves. While it is on it has the left button and the keys; the middle and right
+  buttons still pan, and the transform handles are off (`GizmoLayer::handlesHidden`).
+  - Select: a press on a corner picks it (with its welded copies), on a triangle its corners, on open scene starts
+    a box; Shift adds or takes away. Dragging a pick moves it. Ctrl+press puts a corner on an edge, inside a
+    triangle, or out in the open joined to the picked outside edge.
+  - Keys: G move, R rotate, S scale, E extrude (X or Y keeps a move to one axis; a press or Enter keeps it, Esc or
+    a right press puts it back), F fill, X or Delete remove, M merge, Shift+D duplicate, A all or none, L the
+    island under the pointer, C colour the pick, 1 to 4 the tools. The keys come before the focus keys while no
+    field is being typed in.
+  - Polygon lays an outline press by press and fills it on Enter or a press on its first corner. Ribbon lays a path
+    and makes a strip along it on Enter (width, corners across, texture repeat length, fade). Paint blends the
+    corners under the brush toward the colour while dragged.
+  - A bar along the bottom of the view: the tools and Done, the operations (Extrude, Fill, Subdivide, Delete,
+    Merge, Colour, Lay UV, Tidy), and the settings of the tool in use with the weld distance and the colour.
+  - Wireframe, outside edges, corners (one per place) and the picked triangles are drawn in the gizmo overlay
+    every frame; picking is done by distance in the node's space, not by a Clickable per corner.
+  - Every operation and every gesture is one undo step holding the points and indices before and after.
+- The points gizmo (handles per corner) is gone; the mesh editor does what it did. Other Drawables show the
+  highlight gizmo.
+- Checked first: the old points gizmo still moved a welded corner of a waterfall mesh in `map.scene`, undid,
+  redid and saved; the legacy editor still starts and loads the map.
+- Self-test (`RunMeshEditorSelfTest`, alone with `MESH_ONLY=1 Bindstone.exe -workbenchselftest`): a pick, a drag
+  and its undo, a box, E with a moved pointer, G with X held to its axis, a polygon, a ribbon with faded ends, the
+  brush, Ctrl+press on an edge, Delete, Subdivide, every step undone back to the start and redone, Esc, and the
+  edited mesh saved and loaded back as it was.
+- Not yet: edge and face pick modes, a UV panel over the texture, snapping corners to corners or the grid,
+  dissolving a corner (taking it out but keeping the triangles round it as one), the second texture slot, shader
+  and blend in the bar, and the legacy editor's waterfall shapes as presets of the ribbon.
+
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.
 - Authoring verbs still only in Source/Editor: the component kinds Add Component does not list — old-editor

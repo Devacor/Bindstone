@@ -661,8 +661,9 @@ namespace jai::vm {
             }
             // Bulk window padding: one capacity check + in-place null construction
             // (the per-slot make_null ctor+move+cap-check loop was the fill half of
-            // the window lifecycle tax). No-op when target <= size.
-            void fill_null_to(size_t target, class engine* eng) {
+            // the window lifecycle tax). No-op when target <= size: a window its arguments fill calls nothing.
+            JAI_FORCEINLINE void fill_null_to(size_t target, class engine* eng) { if (target > count) { fill_null_slots(target, eng); } }
+            void fill_null_slots(size_t target, class engine* eng) {
                 if (target > cap) [[unlikely]] {
                     const size_t grown = grown_capacity(cap);
                     relocate_to(target > grown ? target : grown);
@@ -1350,7 +1351,7 @@ namespace jai::vm {
         // round trip. KEEP the exact order: convert while the callee frame is live.
         // mode = op_return.b: 0 plain; return_mode_converted = already converted at an
         // in-region return site (op_return_convert), landed as is
-        op_status return_with_result(frame*& fp, script_value result, uint32_t mode = 0);
+        op_status return_with_result(frame*& fp, script_value&& result, uint32_t mode = 0);
         op_status return_with_conversion(frame*& fp, script_value result, uint32_t mode);
         // Fused `return <ident>;` / `return <a op b>;`: record-frame and
         // native-entry variants (the entry twins set return_value_ like op_return's

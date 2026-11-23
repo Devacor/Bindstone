@@ -22919,7 +22919,7 @@ JAI_FORCEINLINE void vm_backend::pop_lean_frame(call_record& rec) {
 	}
 	truncate_detached(pending_callees_, rec.f.pending_base);
 	if (rec.locals.is_method) {
-		*rec.locals.this_object_ptr = make_null();
+		{ script_value receiver(std::move(*rec.locals.this_object_ptr)); }   // the slot is null before the receiver dies: its destructor may run script
 		rec.locals.is_method = false;
 	}
 	if (rec.direct_pin) { rec.direct_pin = {}; }
@@ -22930,7 +22930,7 @@ JAI_FORCEINLINE void vm_backend::pop_lean_frame(call_record& rec) {
 	rec.cells.loop = k_invalid_u32;   // a raise unwinds a frame with its block active, and a loop-free body pushed here next resets no cells
 	--current_call_depth_;
 	frames_.pop_back();
-	sync_unit();
+	vm_backend::sync_unit();
 	--call_records_top_;
 }
 
@@ -23167,7 +23167,7 @@ op_status vm_backend::return_from_script_frame(frame*& fp, const vm_instruction&
 	return return_with_result(fp, std::move(result), ins.b);
 }
 
-op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32_t mode) {
+op_status vm_backend::return_with_result(frame*& fp, script_value&& result, uint32_t mode) {
 	call_record& rec = *call_records_[call_records_top_ - 1];
 	// The record's cached classification picks the epilogue without re-deriving it from
 	// type_info per return. none = convert_return_value's no-op route inline (deref only);

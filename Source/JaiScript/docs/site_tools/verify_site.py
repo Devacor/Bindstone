@@ -4,8 +4,8 @@
     python site_tools/verify_site.py [--no-samples] [--runner PATH]
 
 Order: script syntax (node --check), links and anchors, HTML structure, internal leakage and stale facts, retired error
-texts, shared tables, search index freshness, the search queries (node), chrome freshness, sitemap and robots.txt freshness,
-runnable-sample marks, then (unless --no-samples) every jaiscript
+texts, shared tables, search index freshness, the search queries (node), the scripts site.js loads later (node), chrome
+freshness, sitemap and robots.txt freshness, runnable-sample marks, then (unless --no-samples) every jaiscript
 sample on both backends under strict, with its expected output, and the host samples: the C++ samples and the
 host-dependent script samples a page marks data-sample, which the "Doc Samples" suite of jaiscript_tests (beside the
 runner) compiles from its own copy of their code, checks against the page and runs, on both backends. Exit code 1 if any
@@ -27,6 +27,7 @@ STEPS = [
     ("shared tables", ["check_shared_tables.py"]),
     ("search index", ["build_search_index.py", "--check"]),
     ("search queries", ["test_search.js"]),
+    ("script loads", ["test_site_loads.js"]),
     ("chrome", ["apply_chrome.py", "--check"]),
     ("sitemap", ["build_sitemap.py", "--check"]),
     ("runnable marks", ["mark_runnable.py", "--check"]),

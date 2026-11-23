@@ -1,6 +1,7 @@
 /* JaiScript docs: theme toggle, hand-rolled highlighter, code/output pairs, the search box. No dependencies. */
 (function () {
   "use strict";
+  var siteScript = document.currentScript;
 
   /* ---------------- theme toggle ---------------- */
   var root = document.documentElement;
@@ -331,9 +332,8 @@
   // headings (search-index.js) answer until the text arrives.
   var box = document.getElementById("search-box");
   var results = document.getElementById("search-results");
-  // The path back to the site root, from the site's own stylesheet (the font stylesheet comes first)
-  var siteCss = document.querySelector('link[rel="stylesheet"][href$="assets/style.css"]');
-  var rootPrefix = (siteCss ? siteCss.getAttribute("href") : "assets/style.css").replace(/assets\/style\.css$/, "");
+  // The path back to the site root, from this script's own tag, whose address a deploy may end with a version query
+  var rootPrefix = (siteScript ? siteScript.getAttribute("src") : "assets/site.js").replace(/assets\/site\.js.*$/, "");
   var sel = -1, engine = null, searchLoad = "", textLoad = "";
 
   function expand(on) {
@@ -431,11 +431,5 @@
 
   /* ---------------- runnable samples ---------------- */
   // A page with samples loads samples.js, which adds their Run buttons; the engine itself loads on the first run
-  (function () {
-    var me = document.querySelector('script[src$="assets/site.js"]');
-    if (!me || !document.querySelector(".codeblock[data-run]")) return;
-    var runner = document.createElement("script");
-    runner.src = me.src.replace(/site\.js$/, "samples.js");
-    document.body.appendChild(runner);
-  }());
+  if (document.querySelector(".codeblock[data-run]")) loadScript("samples.js");
 }());

@@ -145,9 +145,9 @@ public:
 			}
 			for (const auto& source : {
 				"array<int> values = [1]; auto s1 = array::slice(values); auto s2 = array::slice(values, 0); auto s3 = array::slice(values, 0, 1); values.erase(0);",
-				"string value = \"7\"; value.to_int(); value.to_int(0); value.to_int(0, 10); value.split(); value.split(\",\", 2);",
+				"string value = \"7\"; auto a = value.to_int(); auto b = value.to_int(0); auto c = value.to_int(0, 10); auto d = value.split(); auto f = value.split(\",\", 2);",
 				"string value = \" x \"; value.trim(); value.trim(\" \");",
-				"map<string,int> values = {\"a\": 1}; values.get(\"a\"); values.get(\"a\", 0);"
+				"map<string,int> values = {\"a\": 1}; auto a = values.get(\"a\"); auto b = values.get(\"a\", 0);"
 			}) {
 				auto result = e->check(source);
 				check_eq(std::size_t(0), result.error_count(), result.format(source));
@@ -3801,6 +3801,80 @@ public:
                     check_true(got.find(text) != std::string::npos, std::string(src) + " -> " + got);
                 }
             }
+        });
+
+        // A statement that drops the result of a builtin method that only returns a value (a library type's method that changes
+        // neither its receiver nor its arguments) does nothing: the load refuses it (err-nodiscard-copy); a method that changes
+        // something, runs a callback or reads the clock may be a statement
+        test("a_discarded_result_of_a_builtin_method_that_only_returns_a_value_fails_the_load", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            const std::string decls = "string s = \"abc\";\nutf8_string u = utf8_string(\"ab\");\narray<int> xs = [3, 1];\nmap<string, int> m = {\"a\": 1};\n"
+                                      "math::vec2 v = math::vec2(1, 2);\nmath::ivec2 iv = math::ivec2(1, 2);\ntime::date born = time::utc_date(2000, 1, 2);\n"
+                                      "time::stopwatch sw;\nregex rx = regex(\"a\");\nclass P { }\nshared_ptr<P> p = make_shared<P>();\nweak_ptr<P> wp = p;\n"
+                                      "class Box { string name = \"n\"; }\nBox box;\nbool flag = true;\n";
+            const std::pair<const char*, const char*> dropped[] = {
+                {"born.to_utc();", "the result of 'born.to_utc' is discarded: it returns a new value and leaves born unchanged, so the statement does nothing; keep the result (born = born.to_utc();)"},
+                {"born.add_days(3);", "the result of 'born.add_days' is discarded: it returns a new value and leaves born unchanged, so the statement does nothing; keep the result (born = born.add_days(...);)"},
+                {"s.substr(1);", "keep the result (s = s.substr(...);)"},
+                {"s.size();", "the result of 's.size' is discarded: it returns a new value and leaves s unchanged, so the statement does nothing; keep the result (auto result = s.size();)"},
+                {"v.normalized();", "keep the result (v = v.normalized();)"},
+                {"iv.normalized();", "keep the result (auto result = iv.normalized();)"},
+                {"u.substr(0, 1);", "keep the result (u = u.substr(...);)"},
+                {"u.at(0);", "keep the result (auto result = u.at(...);)"},
+                {"xs.front();", "the result of 'xs.front' is discarded"},
+                {"xs.contains(3);", "the result of 'xs.contains' is discarded"},
+                {"m.keys();", "the result of 'm.keys' is discarded"},
+                {"m.get(\"a\", 0);", "the result of 'm.get' is discarded"},
+                {"sw.is_running();", "the result of 'sw.is_running' is discarded"},
+                {"rx.matches(\"b\");", "the result of 'rx.matches' is discarded"},
+                {"p.use_count();", "the result of 'p.use_count' is discarded"},
+                {"wp.lock();", "the result of 'wp.lock' is discarded"},
+                {"box.name.substr(1);", "leaves box.name unchanged, so the statement does nothing; keep the result (box.name = box.name.substr(...);)"},
+                {"\"abc\".substr(1);", "the result of 'obj.substr' is discarded: it returns a new value and leaves its receiver unchanged, so the statement does nothing; keep the result (auto result = obj.substr(...);)"},
+                {"\"abc\".find(\"b\");", "the result of 'obj.find' is discarded"},
+                {"flag ? s.size() : 0;", "the result of 's.size' is discarded"},
+                {"void f() { s.empty(); }", "the result of 's.empty' is discarded"},
+                {"auto l = [&]() { born.unix(); };", "the result of 'born.unix' is discarded"},
+                {"string result = \"x\";\nresult.size();", "keep the result (auto kept = result.size();)"},
+            };
+            for (const auto& [stmt, text] : dropped) {
+                auto r = e->check(decls + stmt + "\nprint(1);");
+                check_eq((size_t)1, error_count(r), std::string(stmt) + "\n" + r.format());
+                check_true(has_diag(r, dlevel::error, text), r.format());
+            }
+            const char* kept[] = {
+                "xs.pop();", "xs.push(1);", "xs.remove(0);", "m.erase(\"a\");", "m.remove(\"a\");", "xs.remove_if([](int x) { return x > 2; });",
+                "xs.find([](int x) { print(x); return false; });", "xs.some([](int x) { print(x); return false; });", "xs.reduce([](var a, int x) { return a; }, 0);",
+                "s.to_upper();", "s.append(\"d\");", "sw.elapsed();", "sw.stop();", "sw.pause();", "rx.replace(\"x\", \"y\");",
+                "auto r = s.substr(1);", "s = s.substr(1);", "print(s.size());", "if (s.empty()) { }", "born = born.to_utc();",
+                "var d = born; d.to_utc();", "for (int i = 0; i < 2; s.size()) { i++; }", "p.reset();",
+                "class Late : time::date { string to_string() override { print(\"called\"); return \"late\"; } }\nborn.to_string();",
+            };
+            for (const char* stmt : kept) {
+                auto r = e->check(decls + stmt + "\nprint(1);");
+                check_eq((size_t)0, error_count(r), std::string(stmt) + "\n" + r.format());
+            }
+            check_eq((size_t)0, error_count(e->check(decls + "s.substr(1)")), "the program's last expression is its result");
+            auto w = e->check("[[warn_mode]]; " + decls + "s.substr(1);\nprint(1);");
+            check_eq((size_t)0, error_count(w), w.format());
+            check_true(has_diag(w, dlevel::warning, "the result of 's.substr' is discarded"), w.format());
+            for (const char* backend : {"interp", "vm"}) {
+                auto x = make_engine();
+                x->set_backend(std::string(backend) == "vm" ? backend_type::vm : backend_type::interpreter);
+                jai::stdlib::register_all(*x);
+                std::string got;
+                try { x->execute("time::date born = time::utc_date(2000, 1, 2);\nborn.to_utc();\nprint(1);"); } catch (const std::exception& ex) { got = ex.what(); }
+                check_true(got.find("the result of 'born.to_utc' is discarded") != std::string::npos, std::string(backend) + ": " + got);
+            }
+            auto host = make_engine();
+            jai::stdlib::register_all(*host);
+            dynamic_binder<probe_object>(*host, "Database").constructor<>()
+                .method("execute", [](probe_object& self, const std::string&) -> script_int { return ++self.value; })
+                .method("size", &probe_object::doubled)
+                .build();
+            auto hr = host->check("Database db = Database();\ndb.execute(\"DELETE\");\ndb.size();\nprint(1);");
+            check_eq((size_t)0, error_count(hr), "a host's class answers for its own methods: " + hr.format());
         });
 
         // Nothing to use (guide/06-functions.html#returning-nothing): a call the load resolves to a callee declared to return nothing

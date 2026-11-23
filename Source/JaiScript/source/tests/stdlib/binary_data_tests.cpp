@@ -49,12 +49,12 @@ public:
             expect(caught("auto b = \"xyz\".to_bytes(); int v = 256; b.push(v)"), "Cannot store 256 in array<uint8> (0..255)", "the result keeps the byte range");
             expect("array<int> b = \"xyz\".to_bytes(); b.push(1000); to_json(b)", "[120,121,122,1000]", "an array<int> takes the bytes by value");
             expect("var r = \"\x01\x02\".reader(); array<uint8> b = r.bytes(2); int v = 256; string e = \"\"; try { b.push(v); } catch (x) { e = x; } to_json(b) + \" \" + e", "[1,2] Cannot store 256 in array<uint8> (0..255)", "r.bytes(n) is an array<uint8>");
-            expect(caught("\"abc\".to_bytes(4)"), "to_bytes(4) out of bounds for string of size 3", "an offset past the end");
-            expect(caught("\"abc\".to_bytes(1, 3)"), "to_bytes(1, 3) out of bounds for string of size 3", "a count past the end");
-            expect(caught("\"abc\".to_bytes(-1)"), "to_bytes(-1) out of bounds for string of size 3", "a negative offset");
-            expect(caught("\"abc\".to_bytes(0, -1)"), "to_bytes(0, -1) out of bounds for string of size 3", "a negative count");
-            expect(caught("\"abc\".to_bytes(\"x\")"), "to_bytes() arguments must be integers", "a non-int argument");
-            expect(caught("\"abc\".to_bytes(0, 1, 2)"), "to_bytes() takes 0 to 2 arguments ([offset], [count])", "three arguments");
+            expect(caught("auto _ = \"abc\".to_bytes(4)"), "to_bytes(4) out of bounds for string of size 3", "an offset past the end");
+            expect(caught("auto _ = \"abc\".to_bytes(1, 3)"), "to_bytes(1, 3) out of bounds for string of size 3", "a count past the end");
+            expect(caught("auto _ = \"abc\".to_bytes(-1)"), "to_bytes(-1) out of bounds for string of size 3", "a negative offset");
+            expect(caught("auto _ = \"abc\".to_bytes(0, -1)"), "to_bytes(0, -1) out of bounds for string of size 3", "a negative count");
+            expect(caught("auto _ = \"abc\".to_bytes(\"x\")"), "to_bytes() arguments must be integers", "a non-int argument");
+            expect(caught("auto _ = \"abc\".to_bytes(0, 1, 2)"), "to_bytes() takes 0 to 2 arguments ([offset], [count])", "three arguments");
         });
 
         test("to_bytes_on_a_utf8_string_gives_its_utf8_bytes", [expect]() {

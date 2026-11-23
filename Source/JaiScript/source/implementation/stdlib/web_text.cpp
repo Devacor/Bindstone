@@ -927,6 +927,7 @@ namespace web_text_detail {
 			.property("fragment", &url_record::fragment)
 			.method("to_string", &url_record::to_string)
 			.build();
+		detail::engine_access::library_class(eng_ref, "web::url");
 
 		auto& ns = detail::engine_access::script_namespaces(eng_ref)[detail::engine_access::symbolize(eng_ref, "web")];
 		if (!ns) { ns = std::make_shared<script_namespace_data>(); }

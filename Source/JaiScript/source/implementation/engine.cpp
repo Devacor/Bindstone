@@ -508,6 +508,7 @@ struct engine::implementation {
     std::unordered_map<const void*, weaker_ptr<class_instance>> script_layers_;
     std::unordered_set<std::string> serial_functions_;
     std::unordered_set<std::string> serial_namespaces_;
+    std::unordered_set<std::string> library_classes_;
     std::unordered_set<std::string> parallel_namespace_entries_;   // the members of a serial namespace that read only their argument
     std::unordered_set<std::string> nodiscard_callables_;
     std::unordered_map<std::string, uint8_t> type_result_callables_;
@@ -3685,6 +3686,7 @@ struct engine::implementation {
         }
         for (const auto& [index, refusal] : self.constant_argument_indexes(name)) { fold(mix_key(0xA1, index)); }
         if (nodiscard_callables_.count(name)) { fold(0xD1); }
+        if (library_classes_.count(name)) { fold(0xD3); }
         if (auto typed = type_result_callables_.find(name); typed != type_result_callables_.end()) { fold(mix_key(0xD2, typed->second)); }
         if (name == detail::k_outside_constants) {
             std::vector<const std::pair<const std::string, std::vector<std::string>>*> texts;
@@ -6528,6 +6530,8 @@ bool engine::type_argument_method(const std::string& name) const {
 }
 
 void engine::serial_namespace(const std::string& space) { impl->serial_namespaces_.insert(space); }
+void engine::library_class(const std::string& name) { impl->library_classes_.insert(name); }
+bool engine::is_library_class(const std::string& name) const { return impl->library_classes_.count(name) != 0; }
 
 bool engine::host_function_serial(const std::string& name) const {
     if (impl->serial_functions_.count(name)) { return true; }

@@ -544,6 +544,7 @@ namespace spider_detail {
 				a_self.add_cookie(eng, cookie_line(eng, a_name, "", expired));
 			})
 			.build();
+		detail::engine_access::library_class(eng_ref, "spider::response");
 
 		detail::engine_access::serial_namespace(eng_ref, "spider");
 		auto& ns = detail::engine_access::script_namespaces(eng_ref)[detail::engine_access::symbolize(eng_ref, "spider")];

@@ -333,6 +333,12 @@ print(to_json(xs));</code></pre></div>
 <div class="api-entry" data-provider="stdlib" data-search="atomic&lt;bool&gt;.store(value: bool) -&gt; void mutate writes the value in one atomic step; a = value is the same store. register_atomics()"><h3 id="api-7d305608531f"><code>atomic&lt;bool&gt;.store(value: bool) -&gt; void</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
 <p>Writes the value in one atomic step; a = value is the same store.</p>
 </div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;bool&gt;.to_bool() -&gt; bool observe the value, as load() reads it. register_atomics()"><h3 id="api-93695a18b8ad"><code>atomic&lt;bool&gt;.to_bool() -&gt; bool</code></h3><p><strong>register_atomics()</strong> &middot; observe</p>
+<p>The value, as load() reads it.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;bool&gt;.to_string() -&gt; string observe true or false. register_atomics()"><h3 id="api-f0b9524d9286"><code>atomic&lt;bool&gt;.to_string() -&gt; string</code></h3><p><strong>register_atomics()</strong> &middot; observe</p>
+<p>true or false.</p>
+</div>
 </section>
 <section class="api-group"><h2 id="group-atomic-float">atomic&lt;float&gt;</h2>
 <div class="api-entry" data-provider="stdlib" data-search="atomic&lt;float&gt;.compare_exchange(expected: float&amp;, desired: float) -&gt; bool mutate c++&#x27;s compare_exchange_strong: stores desired and yields true when the value equals expected, else writes the value into expected and yields false. register_atomics()"><h3 id="api-e3e5fb82c64a"><code>atomic&lt;float&gt;.compare_exchange(expected: float&amp;, desired: float) -&gt; bool</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
@@ -352,6 +358,15 @@ print(to_json(xs));</code></pre></div>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="atomic&lt;float&gt;.store(value: float) -&gt; void mutate writes the value in one atomic step; a = value is the same store. register_atomics()"><h3 id="api-90516b3dd01d"><code>atomic&lt;float&gt;.store(value: float) -&gt; void</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
 <p>Writes the value in one atomic step; a = value is the same store.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;float&gt;.to_bool() -&gt; bool observe whether the value is not 0.0. register_atomics()"><h3 id="api-1add268ee52f"><code>atomic&lt;float&gt;.to_bool() -&gt; bool</code></h3><p><strong>register_atomics()</strong> &middot; observe</p>
+<p>Whether the value is not 0.0.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;float&gt;.to_float() -&gt; float observe the value, as load() reads it. register_atomics()"><h3 id="api-3174d95d9222"><code>atomic&lt;float&gt;.to_float() -&gt; float</code></h3><p><strong>register_atomics()</strong> &middot; observe</p>
+<p>The value, as load() reads it.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;float&gt;.to_string() -&gt; string observe the value as text, as to_string(float) writes it. register_atomics()"><h3 id="api-beafd5d9fddb"><code>atomic&lt;float&gt;.to_string() -&gt; string</code></h3><p><strong>register_atomics()</strong> &middot; observe</p>
+<p>The value as text, as to_string(float) writes it.</p>
 </div>
 </section>
 <section class="api-group"><h2 id="group-atomic-int">atomic&lt;int&gt;</h2>
@@ -381,6 +396,15 @@ print(to_json(xs));</code></pre></div>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="atomic&lt;int&gt;.store(value: int) -&gt; void mutate writes the value in one atomic step; a = value is the same store. register_atomics()"><h3 id="api-d06dd6f13ac2"><code>atomic&lt;int&gt;.store(value: int) -&gt; void</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
 <p>Writes the value in one atomic step; a = value is the same store.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;int&gt;.to_bool() -&gt; bool observe whether the value is not 0. register_atomics()"><h3 id="api-434683ed1740"><code>atomic&lt;int&gt;.to_bool() -&gt; bool</code></h3><p><strong>register_atomics()</strong> &middot; observe</p>
+<p>Whether the value is not 0.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;int&gt;.to_int() -&gt; int observe the value, as load() reads it. register_atomics()"><h3 id="api-6fa12413f95d"><code>atomic&lt;int&gt;.to_int() -&gt; int</code></h3><p><strong>register_atomics()</strong> &middot; observe</p>
+<p>The value, as load() reads it.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;int&gt;.to_string() -&gt; string observe the value as text. register_atomics()"><h3 id="api-18ba2e8217bd"><code>atomic&lt;int&gt;.to_string() -&gt; string</code></h3><p><strong>register_atomics()</strong> &middot; observe</p>
+<p>The value as text.</p>
 </div>
 </section>
 <section class="api-group"><h2 id="group-binary">binary</h2>

@@ -609,6 +609,8 @@ namespace jai::detail::regex_library {
 			})
 			.build();
 		dynamic_binder<regex_match>(eng, "regex::match").build();
+		engine_access::library_class(eng, "regex");
+		engine_access::library_class(eng, "regex::match");
 
 		const auto regex_class = engine_access::get_class_definition(eng, "regex");
 		const auto match_class = engine_access::get_class_definition(eng, "regex::match");

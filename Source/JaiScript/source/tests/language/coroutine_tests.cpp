@@ -1649,8 +1649,8 @@ public:
                        "1|1|1|true", "after the next() that finished the body: the same converted value");
             check_both("coroutine int g() { yield 1; }\nauto h = g(); for (auto v : h) { } to_string(h.result())",
                        "null", "a body that returns nothing gives null, here after a range-for");
-            check_both("coroutine int g() { yield 1; return 5; }\nauto h = g(); string t = \"\"; try { h.result(); } catch (e) { t = to_string(e); } "
-                       "h.next(); try { h.result(); } catch (e) { t += \"|\" + to_string(e); } t + \"|\" + to_string(h.next()) + \"|\" + to_string(h.result())",
+            check_both("coroutine int g() { yield 1; return 5; }\nauto h = g(); string t = \"\"; try { auto _ = h.result(); } catch (e) { t = to_string(e); } "
+                       "h.next(); try { auto _ = h.result(); } catch (e) { t += \"|\" + to_string(e); } t + \"|\" + to_string(h.next()) + \"|\" + to_string(h.result())",
                        "Coroutine has not finished: result() is available once done() is true|"
                        "Coroutine has not finished: result() is available once done() is true|5|5",
                        "before completion, created or suspended, it raises");

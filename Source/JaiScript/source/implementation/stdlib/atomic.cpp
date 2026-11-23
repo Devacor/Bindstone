@@ -69,6 +69,7 @@ namespace atomic_detail {
 			.method("to_bool", [](const atomic_int& a_self) -> bool { return a_self.load() != 0; })
 			.method("to_string", [](const atomic_int& a_self) -> std::string { return std::to_string(a_self.load()); })
 			.build();
+		detail::engine_access::library_class(a_engine, "atomic<int>");
 	}
 
 	void bind_atomic_float(engine& a_engine) {
@@ -92,6 +93,7 @@ namespace atomic_detail {
 			.method("to_bool", [](const atomic_float& a_self) -> bool { return a_self.load() != 0.0; })
 			.method("to_string", [](const atomic_float& a_self) -> std::string { return script_value::float_text(a_self.load()); })
 			.build();
+		detail::engine_access::library_class(a_engine, "atomic<float>");
 	}
 
 	void bind_atomic_bool(engine& a_engine) {
@@ -110,6 +112,7 @@ namespace atomic_detail {
 			.method("to_bool", [](const atomic_bool& a_self) -> bool { return a_self.load(); })
 			.method("to_string", [](const atomic_bool& a_self) -> std::string { return a_self.load() ? "true" : "false"; })
 			.build();
+		detail::engine_access::library_class(a_engine, "atomic<bool>");
 	}
 
 } // namespace atomic_detail

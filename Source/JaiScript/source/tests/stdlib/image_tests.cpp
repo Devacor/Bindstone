@@ -1186,7 +1186,7 @@ public:
 			check_eq(std::string("image::encode expects a quality of 1 to 100"), caught(e, "photo.encode(\"png\", 0);"));
 			check_eq(std::string("image::encode expects a quality of 1 to 100"), caught(e, "photo.encode(\"jpeg\", 0);"));
 			check_eq(std::string("image::encode expects a quality of 1 to 100"), caught(e, "photo.encode(\"jpeg\", 101);"));
-			check_eq(std::string("image: the image is empty (image::load makes one)"), caught(e, "image empty; empty.encode(\"jpeg\");"));
+			check_eq(std::string("image: the image is empty (image::load makes one)"), caught(e, "image empty; auto _ = empty.encode(\"jpeg\");"));
 		});
 
 		test("a_gif_loads_its_first_frame", [this]() {

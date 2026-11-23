@@ -727,9 +727,9 @@ public:
                 out;)"));
             check_eq(std::string("find() first argument must be a string|at() index out of bounds|substr() start argument must be an integer|05"), es(R"(
                 string s = "hello"; var n = 3; var t = "x"; string out = "";
-                try { s.find(n); } catch (e) { out = out + e; }
-                try { s.at(9); } catch (e) { out = `${out}|${e}`; }
-                try { s.substr(t); } catch (e) { out = `${out}|${e}`; }
+                try { auto _ = s.find(n); } catch (e) { out = out + e; }
+                try { auto _ = s.at(9); } catch (e) { out = `${out}|${e}`; }
+                try { auto _ = s.substr(t); } catch (e) { out = `${out}|${e}`; }
                 out = `${out}|${s.substr(99).size()}${s.size()}`;
                 out;)"));
             check_eq(std::string("3"), es(R"(

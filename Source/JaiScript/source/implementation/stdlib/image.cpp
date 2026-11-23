@@ -222,6 +222,7 @@ namespace image_detail {
 			.static_method("load", [eng, limits](const script_value& a_source) -> script_image { return load(eng, a_source, limits); })
 			.static_method("data", [eng, limits](const script_value& a_source) -> script_value { return data(eng, a_source, limits); })
 			.build();
+		detail::engine_access::library_class(eng_ref, "image");
 	}
 
 } // namespace stdlib

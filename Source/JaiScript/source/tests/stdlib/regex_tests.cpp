@@ -137,7 +137,7 @@ public:
             expect(date + "m.size()", "5", "size counts the whole match and every group");
             expect(caught(date + "m[5]"), "regex::match has no group 5 (it has 4 groups)", "a group past the last");
             expect(caught(date + "m[\"day\"]"), "regex::match has no group named 'day'", "an unknown name");
-            expect(caught(date + "m.start(1.5)"), "regex::match: start expects a group number or name, got float", "a bad group argument");
+            expect(caught(date + "auto _ = m.start(1.5)"), "regex::match: start expects a group number or name, got float", "a bad group argument");
             expect("var m = regex(\"(a)|b\").search(\"b\"); to_string(m[1] == null) + m[0]", "trueb", "the other alternative's group stays unmatched");
             expect("var m = regex(\"(a)*\").search(\"aaa\"); m[1] + \" \" + to_string(m.start(1))", "a 2", "a repeated group keeps its last iteration");
             expect("var m = regex(\"(?:(a)|b)+\").search(\"ab\"); to_string(m[1])", "a", "a group set in an earlier iteration stays set");
@@ -151,12 +151,12 @@ public:
         test("search_from_a_position_and_matches", [expect, caught]() {
             expect("var r = regex(\"a\"); to_string(r.search(\"banana\", 2).start()) + \" \" + to_string(r.search(\"banana\", 6) == null)", "3 true", "a start position");
             expect("to_string(regex(\"^a\").search(\"ba\", 1) == null) + \" \" + to_string(regex(R\"(\\ba)\").search(\"ba\", 1) == null)", "true true", "the text before the start stays the context");
-            expect(caught("regex(\"a\").search(\"abc\", 4)"), "regex: search position 4 is outside the text (0 to 3)", "past the end");
-            expect(caught("regex(\"a\").search(\"abc\", -1)"), "regex: search position -1 is outside the text (0 to 3)", "negative");
+            expect(caught("auto _ = regex(\"a\").search(\"abc\", 4)"), "regex: search position 4 is outside the text (0 to 3)", "past the end");
+            expect(caught("auto _ = regex(\"a\").search(\"abc\", -1)"), "regex: search position -1 is outside the text (0 to 3)", "negative");
             expect("var r = regex(R\"(\\d{3}-\\d{4})\"); to_string(r.matches(\"555-1234\")) + to_string(r.matches(\"555-12345\")) + to_string(r.matches(\"x555-1234\"))", "truefalsefalse", "matches is the whole text");
             expect("to_string(regex(\"a|ab\").matches(\"ab\")) + to_string(regex(\"(a|ab)(c|bcd)(d*)\").matches(\"abcd\"))", "truetrue", "matches takes any way through");
             expect("to_string(regex(\"\").matches(\"\")) + to_string(regex(\"a*\").matches(\"\")) + to_string(regex(\"a+\").matches(\"\"))", "truetruefalse", "the empty text");
-            expect(caught("regex(\"a\").matches(5)"), "regex: matches expects a string or utf8_string, got int", "a non-text subject");
+            expect(caught("auto _ = regex(\"a\").matches(5)"), "regex: matches expects a string or utf8_string, got int", "a non-text subject");
         });
 
         test("find_all_advances_past_empty_matches_as_ecmascript_does", [expect]() {
@@ -233,7 +233,7 @@ public:
             expect("string s = \"\xC3\xA9\"; regex(R\"(\\B)\").find_all(s).size()", "3", "on a string every byte position is a position");
             expect("utf8_string u = \"a\xFF" "b\"; to_string(regex(\"a.b\").search(u) == null) + to_string(regex(\"b\").search(u).start())", "true2", "an invalid byte matches nothing, and counts as a character");
             expect("utf8_string u = \"\xC3\x89T\xC3\xA9\"; to_string(regex(\"\xC3\xA9\", \"i\").search(u).start())", "2", "case folding stays ASCII");
-            expect(caught("regex(\"[\xC3\xA9]\").search(\"caf\xC3\xA9\")"), "regex: the class at position 0 holds '\xC3\xA9', a character of more than one byte, but a string matches by bytes (match a utf8_string, or write its bytes as \\xNN)", "a string's class holds bytes");
+            expect(caught("auto _ = regex(\"[\xC3\xA9]\").search(\"caf\xC3\xA9\")"), "regex: the class at position 0 holds '\xC3\xA9', a character of more than one byte, but a string matches by bytes (match a utf8_string, or write its bytes as \\xNN)", "a string's class holds bytes");
             expect("string s = \"caf\xC3\xA9\"; regex(\"\xC3\xA9\").search(s).start()", "3", "a multi-byte literal matches a string's bytes");
             expect(caught("var p = \"\\xFF\"; regex(p)"), "regex: the pattern is not valid UTF-8 at byte 0 (write a byte as \\xNN)", "a pattern is UTF-8 text");
         });

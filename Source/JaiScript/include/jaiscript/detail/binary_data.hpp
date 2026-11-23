@@ -710,6 +710,7 @@ namespace jai::binary {
 			.method("little_endian", [](writer& w) -> writer& { w.set_big(false); return w; })
 			.method("to_string", [](const writer& w) -> std::string { return w.data(); })
 			.build();
+		for (const char* name : {"binary::width", "binary::layout", "binary::reader", "binary::writer"}) { detail::engine_access::library_class(eng, name); }
 
 		auto& ns = detail::engine_access::script_namespaces(eng)[detail::engine_access::symbolize(eng, "binary")];
 		if (!ns) { ns = std::make_shared<script_namespace_data>(); }

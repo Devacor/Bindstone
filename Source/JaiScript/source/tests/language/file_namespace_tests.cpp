@@ -88,6 +88,12 @@ public:
 			check_true(load_errors("string s = file::read(\"p\"); bool b = file::exists(\"p\");").empty(), "declared results");
 		});
 
+		// They change the filesystem and answer whether they did: a statement may drop the answer
+		test("file_functions_that_change_the_filesystem_may_be_statements", [this]() {
+			const std::string source = "file::write(\"p\", \"x\");\nfile::remove(\"p\");\nfile::make_directories(\"d\");\nfile::move(\"a\", \"b\");\nfile::ensure_writable_directory(\"d\");\nprint(1);";
+			check_eq(std::string(), load_errors(source), "dropped answers of filesystem changes");
+		});
+
 		test("a_script_may_name_its_own_variable_file", [this]() {
 			const auto dir = test_temp_directory() / "file_namespace_variable";
 			std::filesystem::create_directories(dir);

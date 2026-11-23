@@ -322,6 +322,7 @@ namespace detail {
 			.method("name", &script_type::name)
 			.method("to_string", &script_type::to_string)
 			.build();
+		engine_access::library_class(eng, "reflect::type");
 	}
 
 } // namespace detail

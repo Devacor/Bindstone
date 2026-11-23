@@ -155,6 +155,17 @@ def generated_header(entries):
 		'\t\tfor (const auto& entry : BUILTIN_RECEIVER_EFFECTS) {',
 		'\t\t\tif (entry.name == a_name) { return &entry; }',
 		'\t\t}', '\t\treturn nullptr;', '\t}', '']
+	rows = result_only_rows(entries)
+	lines += ["	// The builtin methods whose call only returns a value, by receiver type and argument count: it changes neither its receiver",
+		'	// nor its arguments, so a statement that drops the result does nothing (the checker refuses it, err-nodiscard-copy)',
+		'	struct BuiltinResultOnly {', '		std::string_view owner;', '		std::string_view name;', '		uint8_t minimum;', '		uint8_t maximum;', '		bool keeps_type;', '	};', '',
+		f'	inline constexpr std::array<BuiltinResultOnly, {len(rows)}> BUILTIN_RESULT_ONLY_METHODS{{{{']
+	for owner, name, minimum, maximum, keeps in rows:
+		lines.append(f'		{{"{owner}", "{name}", {minimum}, {maximum}, {"true" if keeps else "false"}}},')
+	lines += ['	}};', '', '	constexpr const BuiltinResultOnly* findResultOnlyBuiltin(std::string_view a_owner, std::string_view a_name, size_t a_count) {',
+		'		for (const auto& entry : BUILTIN_RESULT_ONLY_METHODS) {',
+		'			if (entry.owner == a_owner && entry.name == a_name && a_count >= entry.minimum && a_count <= entry.maximum) { return &entry; }',
+		'		}', '		return nullptr;', '	}', '']
 	functions, methods = observing_calls(entries)
 	lines += ["\t// The builtins a debugger's watch may call: every catalog entry of the name only reads, copies, builds or converts (a callback it",
 		'\t// takes is the watch\'s own code, or script the watch refuses as it runs). Functions by qualified name, methods by name.',
@@ -170,6 +181,52 @@ def generated_header(entries):
 		'\t\t\tif (!a_method && entry == a_name) { return true; }',
 		'\t\t}', '\t\treturn false;', '\t}', '}', '']
 	return '\n'.join(lines)
+
+# The builtin methods a statement may not drop: the library's own types (the runner's and a host's are theirs), whose catalog
+# effect only observes, copies or parses, that return a value and take no callback. A stopwatch's elapsed() reads the clock.
+RESULT_ONLY_PROVIDERS = {'core', 'stdlib'}
+RESULT_ONLY_EFFECTS = {'observe', 'copy', 'deserialize'}
+RESULT_ONLY_EXCEPTIONS = {('time::stopwatch', 'elapsed')}
+
+def result_only(entry):
+	words = set(re.split(r'[,;]\s*', entry['effect']))
+	result = entry['signature'].rsplit('->', 1)[1].strip() if '->' in entry['signature'] else 'void'
+	callback = any('->' in p or p.split(':', 1)[-1].strip().startswith('function') for p in parameter_list(entry['signature']))
+	return (entry['provider'] in RESULT_ONLY_PROVIDERS and words <= RESULT_ONLY_EFFECTS and result != 'void' and not callback and
+		(entry['owner'], entry['name']) not in RESULT_ONLY_EXCEPTIONS)
+
+# a signature's counts where '[, name: T]' marks the parameters after it optional
+def bracketed_arity(signature):
+	params = parameter_list(signature)
+	minimum, maximum = arity(signature)
+	for i, p in enumerate(params):
+		if '[' in p: return min(minimum, i + 1), maximum
+	return minimum, maximum
+
+# whether the signature's result is a value of the receiver's own type (the checker's hint stores it back into the receiver)
+SAME_TYPE_RESULTS = {'math::vec2': {'floating_vector', 'vector2'}, 'math::vec3': {'floating_vector', 'vector3'}, 'math::vec4': {'floating_vector'}}
+
+ELEMENT_READS = {'at', 'front', 'back', 'first', 'last'}
+
+def keeps_type(entry):
+	result = entry['signature'].rsplit('->', 1)[1].strip()
+	if entry['name'] in ELEMENT_READS: return False   # a utf8_string's character is a utf8_string too, but no replacement for it
+	return result in ('Self', entry['owner']) or result in SAME_TYPE_RESULTS.get(entry['owner'], ())
+
+# (owner, name, minimum, maximum, keeps type) for each such method signature that no other signature of the name shares a count with
+def result_only_rows(entries):
+	methods = [e for e in entries if e['form'] == 'method']
+	rows = set()
+	for entry in methods:
+		if not result_only(entry): continue
+		low, high = bracketed_arity(entry['signature'])
+		clash = False
+		for other in methods:
+			if other['owner'] != entry['owner'] or other['name'] != entry['name'] or result_only(other): continue
+			o_low, o_high = bracketed_arity(other['signature'])
+			clash = clash or (o_low <= high and low <= o_high)
+		if not clash: rows.add((entry['owner'], entry['name'], low, high, keeps_type(entry)))
+	return sorted(rows)
 
 def observing_calls(entries):
 	reads = {'observe', 'copy', 'construct', 'convert', 'callback'}

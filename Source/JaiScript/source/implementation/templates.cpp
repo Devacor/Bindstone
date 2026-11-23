@@ -1062,6 +1062,7 @@ void register_library(engine& eng) {
 		.constructor<>()
 		.method("to_string", &html_text::to_string)
 		.build();
+	engine_access::library_class(eng, "web::html");
 	const auto html_class = engine_access::get_class_definition(eng, "web::html");
 	auto lib = std::make_shared<library>();
 	lib->eng = &eng;

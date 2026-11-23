@@ -246,6 +246,8 @@ namespace stdlib {
             })
             .build();
 
+        detail::engine_access::library_class(eng_ref, "time::stopwatch");
+        detail::engine_access::library_class(eng_ref, "time::date");
         const auto date_class = detail::engine_access::get_class_definition(eng_ref, "time::date");
         const uint64_t date_type = date_class->get_type_id();
         auto as_date = [date_type](const script_value& v) -> date* {

@@ -117,7 +117,7 @@ copy running: false, original running: true</code></pre></div>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">time::date d = time::utc_date(2024, 3, 31, 14, 3, 5);
 print("{} {} {} / weekday {} yearday {}", d.hour, d.minute, d.second, d.weekday, d.yearday);
 print(d.format("${military_hours} ${minutes} ${seconds} / ${hours} ${am_pm}"));
-try { d.format("${hour}:${minute}"); } catch (e) { print(e); }
+try { auto _ = d.format("${hour}:${minute}"); } catch (e) { print(e); }
 
 try { d.month = 4; } catch (e) { print(e); }       // April has no 31st
 try { d.hour = 24; } catch (e) { print(e); }
@@ -140,7 +140,7 @@ time::date: hour must be 0 to 23, got 24
 <tr><td><code>d.unix()</code>, <code>d.unix_ms()</code></td><td>the instant since the Unix epoch: float seconds, whole milliseconds</td></tr>
 <tr><td><code>to_utc()</code>, <code>to_local()</code></td><td>the same instant in the other zone</td></tr>
 </tbody></table></div>
-<p>Every <code>add_</code> method returns a new date and leaves the receiver alone. The two kinds differ in the local zone across a daylight-saving change: <code>add_days(1)</code> is the same time tomorrow, <code>add_hours(24)</code> is twenty-four hours later.</p>
+<p>Every <code>add_</code> method returns a new date and leaves the receiver alone, as <code>to_utc()</code> and <code>to_local()</code> do, so a statement that drops the result (<code>born.to_utc();</code>) fails the load: <code>keep the result (born = born.to_utc();)</code> (<a href="06-functions.html#nodiscard-builtin-methods">which methods</a>). The two kinds differ in the local zone across a daylight-saving change: <code>add_days(1)</code> is the same time tomorrow, <code>add_hours(24)</code> is twenty-four hours later.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">time::date launch = time::utc_date(2024, 1, 31, 9, 30);
 print(launch.add_months(1).to_string());       // February 31 does not exist: the day clamps
 print(launch.add_hours(36).to_string());
@@ -162,10 +162,10 @@ true true true
 print(d.format("${weekday_short} ${day:02} ${month_short} ${year} ${hours}:${minutes:02} ${am_pm}"));
 print(d.format("${military_hours:02}:${minutes:02}:${seconds:02}.${milliseconds:03} [${month_name:&gt;10}] [${weekday_name:*^11}] [${year:x}]"));
 print(time::date_now("${year}") == time::local_now().format("${year}"));
-try { d.format("${fortnight}"); } catch (e) { print(e); }
-try { d.format("${day"); } catch (e) { print(e); }
-try { d.format("${day:q}"); } catch (e) { print(e); }
-try { d.format("${month_name:05}"); } catch (e) { print(e); }</code></pre></div>
+try { auto _ = d.format("${fortnight}"); } catch (e) { print(e); }
+try { auto _ = d.format("${day"); } catch (e) { print(e); }
+try { auto _ = d.format("${day:q}"); } catch (e) { print(e); }
+try { auto _ = d.format("${month_name:05}"); } catch (e) { print(e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Sun 27 Sep 2026 2:03 PM
 14:03:05.007 [ September] [**Sunday***] [7ea]
 true

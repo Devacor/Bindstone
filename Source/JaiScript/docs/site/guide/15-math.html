@@ -172,7 +172,7 @@ try { print(math::sqrt(loose)); } catch (e) { print(e); }</code></pre></div>
 math::mix expects vectors of the same dimensions
 math::sqrt expects a numeric argument</code></pre></div>
 <h2 id="geometry">Geometry<a class="hlink" href="#geometry" aria-label="link">&#8203;</a></h2>
-<p>A method is the free function with the receiver first, but <strong>four names differ</strong>. Both spellings return a new value: there is no in-place form, so normalizing in place is <code>v = v.normalized();</code>. A color has none of the methods.</p>
+<p>A method is the free function with the receiver first, but <strong>four names differ</strong>. Both spellings return a new value: there is no in-place form, so normalizing in place is <code>v = v.normalized();</code>, and a statement <code>v.normalized();</code> that drops the result fails the load (<a href="06-functions.html#nodiscard-builtin-methods">which methods</a>). A color has none of the methods.</p>
 <div class="tablewrap"><table><thead><tr><th>Free function</th><th>Method (also returns a copy)</th></tr></thead><tbody>
 <tr><td><code>math::dot(a, b)</code>, <code>math::cross(a, b)</code>, <code>math::length(v)</code>, <code>math::length_squared(v)</code>, <code>math::angle(v)</code></td><td>the same names: <code>a.dot(b)</code>, <code>a.cross(b)</code>, <code>v.length()</code>, <code>v.length_squared()</code>, <code>v.angle()</code></td></tr>
 <tr><td><code>math::normalize(v)</code></td><td><code>v.normalized()</code></td></tr>

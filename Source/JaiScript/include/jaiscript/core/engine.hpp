@@ -1052,6 +1052,9 @@ namespace jai {
         uint64_t host_function_writeback(const std::string& name) const;
         // Every entry of a namespace the library owns whole (reflect::, spider::, time::) is serial
         void serial_namespace(const std::string& space);
+        // A class the library registered: the checker holds its methods to the catalog's (BUILTIN_RESULT_ONLY_METHODS)
+        void library_class(const std::string& name);
+        bool is_library_class(const std::string& name) const;
         // Every free function registered by name (host_function_registered's set)
         std::vector<std::string> host_function_names() const;
         // The running parallel region's number (0 outside one): what a chunk makes carries it (class_instance::region_tag)

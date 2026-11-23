@@ -56,6 +56,8 @@ namespace jai::detail {
         JAI_FORCEINLINE static std::vector<std::string> host_function_names(const engine& a_engine) { return a_engine.host_function_names(); }
         JAI_FORCEINLINE static void serial_function(engine& a_engine, const std::string& name) { a_engine.serial_function(name); }
         JAI_FORCEINLINE static void serial_namespace(engine& a_engine, const std::string& space) { a_engine.serial_namespace(space); }
+        JAI_FORCEINLINE static void library_class(engine& a_engine, const std::string& name) { a_engine.library_class(name); }
+        JAI_FORCEINLINE static bool is_library_class(const engine& a_engine, const std::string& name) { return a_engine.is_library_class(name); }
         JAI_FORCEINLINE static bool host_global_registered(const engine& a_engine, const std::string& name) { return a_engine.host_global_registered(name); }
         JAI_FORCEINLINE static uint64_t host_function_writeback(const engine& a_engine, const std::string& name) { return a_engine.host_function_writeback(name); }
         JAI_FORCEINLINE static uint32_t parallel_region_serial(const engine& a_engine) { return a_engine.parallel_region_serial(); }

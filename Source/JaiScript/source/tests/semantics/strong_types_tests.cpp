@@ -2330,7 +2330,7 @@ public:
             expect(caught("array<uint8> b = [255]; b[0]++"), "Cannot store 256 in array<uint8> (0..255)", "++ past the range");
             expect(caught("array<int8> b = [-128]; b[0]--"), "Cannot store -129 in array<int8> (-128..127)", "-- past the range");
             expect("array<uint8> b = [1, 2]; for (auto& x : b) { x = x * 100; } to_json(b)", "[100,200]", "range-for by reference");
-            expect(caught("array<uint8> b = [1, 3]; for (auto& x : b) { x = x * 100; } b.size()"), "Cannot store 300 in array<uint8> (0..255)", "range-for by reference past the range");
+            expect(caught("array<uint8> b = [1, 3]; for (auto& x : b) { x = x * 100; } auto _ = b.size()"), "Cannot store 300 in array<uint8> (0..255)", "range-for by reference past the range");
             expect("array<uint8> b = [9]; auto& r = b[0]; r = 10; to_string(b[0])", "10", "an element reference");
             expect(caught("array<uint8> b = [9]; auto& r = b[0]; int v = 999; r = v"), "Cannot store 999 in array<uint8> (0..255)", "an element reference past the range");
             // element conversions: int <-> uint8/int8 by value both ways, uint8 <-> int8 through the range, array<var> explicitly

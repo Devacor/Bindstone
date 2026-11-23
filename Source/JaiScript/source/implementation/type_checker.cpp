@@ -407,6 +407,7 @@ public:
     }
     bool host_function_result(const std::string& name, script_value_type& out) const { note(name); return engine_access::host_function_result(engine_, name, out); }
     bool host_nodiscard(const std::string& callable) const { note(callable); return engine_.is_nodiscard_function(callable); }
+    bool library_class(const std::string& name) const { note(name); return engine_access::is_library_class(engine_, name); }
     uint8_t type_argument_result(const std::string& callable) const { note(callable); return engine_.type_argument_result(callable); }
     // array<T> and shared_ptr<T> as the engine interns them (a typed host result: jai::returns<jai::array_of<jai::type_arg>>)
     const type_info* array_type_of(const type_info* element) const { return engine_access::get_type_info_array(engine_, const_cast<type_info*>(element)); }
@@ -791,8 +792,9 @@ private:
     std::unordered_map<std::string, ctype> namespace_inferred_types_;   // "path::name" -> what the walk inferred for an auto namespace variable it has passed
     std::unordered_map<std::string, std::vector<const function_decl*>> namespace_fns_;   // "path::name" -> the unit's declarations of it
     // [[nodiscard]] (docs/site/guide/06-functions.html): what resolving the call being inferred found, and every such call the walk met;
-    // twin names the in-place method a builtin namespace copy pairs with (empty for everything else)
-    struct nodiscard_callee { std::string name; std::string twin; };
+    // twin names the in-place method a builtin namespace copy pairs with (empty for everything else); a builtin method that only
+    // returns a value names its receiver as written and whether the result is of the receiver's type
+    struct nodiscard_callee { std::string name; std::string twin; std::string receiver; bool result_only = false; bool keeps_type = false; };
     nodiscard_callee nodiscard_hit_;
     std::unordered_map<const call_expr*, nodiscard_callee> nodiscard_calls_;
     // A callee declared to return nothing (docs/site/guide/06-functions.html#returning-nothing) that resolving the call being
@@ -5245,6 +5247,60 @@ private:
     }
     JAI_NOINLINE void report_void_result(const call_expr* c, const void_callee& hit) { diag(diag_level::error, c->location, void_result_text(hit)); }
 
+    // "the result of 'born.to_utc' is discarded: it returns a new value and leaves born unchanged, so the statement does nothing;
+    // keep the result (born = born.to_utc();)"; a result of another type is kept in a new variable
+    static std::string result_only_discarded_text(const nodiscard_callee& hit, bool no_arguments) {
+        const bool named = hit.receiver != "obj";
+        const std::string call = hit.receiver + "." + hit.name + (no_arguments ? "()" : "(...)");
+        const std::string keep = hit.keeps_type && named ? hit.receiver + " = " + call : (hit.receiver == "result" ? "auto kept = " : "auto result = ") + call;
+        return "the result of '" + hit.receiver + "." + hit.name + "' is discarded: it returns a new value and leaves " +
+               (named ? hit.receiver : std::string("its receiver")) + " unchanged, so the statement does nothing; keep the result (" + keep + ";)";
+    }
+    // A statement's call of a builtin method that only returns a value (BUILTIN_RESULT_ONLY_METHODS, by the receiver's type): the
+    // library's string, utf8_string, array, map, math, handle and coroutine methods, and those of a class the library binds that
+    // no script class derives from (an override may do anything)
+    void note_result_only(const call_expr* c, const member_expr* m, const ctype& recv, std::string_view owner = {}) {
+        if (!m->call_result_discarded || m->is_static || !kind_certain(recv) || !collect_diagnostics_) { return; }
+        if (owner.empty()) {
+            switch (recv.kind) {
+                case ctype::array_k: owner = "array<T>"; break;
+                case ctype::map_k: owner = "map<K,V>"; break;
+                case ctype::string_k: owner = "string"; break;
+                case ctype::utf8_k: owner = "utf8_string"; break;
+                case ctype::weak_k: owner = "weak_ptr<T>"; break;
+                case ctype::coroutine_k: owner = "coroutine"; break;
+                case ctype::math_k: owner = recv.cls; break;
+                case ctype::object_k:
+                    if (recv.ti && recv.ti->base_type == script_value_type::jai_shared_ptr_type) { return; }
+                    if (recv.cls.empty() || !eng_.library_class(std::string(recv.cls)) || library_class_derived(recv.cls)) { return; }
+                    owner = recv.cls;
+                    break;
+                default: return;
+            }
+        }
+        const BuiltinResultOnly* row = findResultOnlyBuiltin(owner, m->member, c->arguments.size());
+        if (!row) { return; }
+        nodiscard_hit_ = {std::string(m->member), {}, detail::method_value_receiver(m), true, row->keeps_type};
+    }
+    // whether a class of the unit, of the program or of the engine derives from the library's class cls
+    bool library_class_derived(std::string_view cls) {
+        for (const auto& [name, c] : classes_) {
+            if (name != cls && lw_derives(c.decl, cls, 0)) { return true; }
+        }
+        if (program_classes_) {
+            for (const auto& [name, cd] : *program_classes_) {
+                if (cd && cd->name != cls && lw_derives(cd.get(), cls, 0)) { return true; }
+            }
+        }
+        auto def = engine_class(cls);
+        if (!def) { return false; }
+        for (const auto& name : eng_.registered_class_names()) {
+            auto other = engine_class(name);
+            if (other && other.get() != def.get() && other->derives_from(def.get())) { return true; }
+        }
+        return false;
+    }
+
     // An expression statement drops its value: a call to a [[nodiscard]] callee there (or in either arm of a ternary there) fails the load
     void check_discarded(const expression* e) {
         if (!e || nodiscard_calls_.empty()) { return; }
@@ -5259,6 +5315,10 @@ private:
         if (it == nodiscard_calls_.end()) { return; }
         const nodiscard_callee& hit = it->second;
         const source_location& at = c->callee ? c->callee->location : c->location;
+        if (hit.result_only) {
+            diag(diag_level::error, at, result_only_discarded_text(hit, c->arguments.empty()));
+            return;
+        }
         if (hit.twin.empty()) {
             std::string spelled = hit.name;
             if (c->callee && c->callee->get_type() == node_type::member_expr) {
@@ -9379,6 +9439,7 @@ private:
             }
             ctype recv = declared_container_receiver(m->object.get(), infer(m->object.get()));
             if (function_member(m, recv)) { return {}; }
+            note_result_only(c, m, recv);
             if (!m->is_static && recv.kind == ctype::object_k && !recv.cls.empty() && eng_.has_constant_arguments()) {
                 check_constant_arguments(std::string(recv.cls) + "." + std::string(m->member), std::string(m->member), c);
             }
@@ -9558,6 +9619,7 @@ private:
         }
         if (!want_static) {
             if (ctype t; handle_builtin_result(m->member, t)) {
+                if (recv.ti && recv.ti->base_type == script_value_type::jai_shared_ptr_type) { note_result_only(c, m, recv, "shared_ptr<T>"); }
                 if (m->member == "reset") { narrow_end_roots(m->object.get(), /*escape=*/false); }   // the handle names another object, or none
                 if (m->member == "reset" && !c->arguments.empty()) { check_handle_reset(c, m, recv, args); }
                 if (recv.ti && recv.ti->base_type == script_value_type::jai_shared_ptr_type && !recv.tentative) { in_place_result_used(recv, m, c); }

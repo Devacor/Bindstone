@@ -4,10 +4,12 @@ with Emscripten) and one bundle per example game (its .jai files and arguments a
     python docs/site_tools/build_play.py [--emsdk DIR] [--site DIR] [--build DIR] [--games-only]
 
 --emsdk defaults to $EMSDK, --site to docs/site, --build to out/build/wasm-site (the threaded worker builds in
-<build>-threads). Writes <site>/play/engine/ (the landing page's scene loads engine/plain/) and <site>/play/games/.
+<build>-threads). Writes <site>/play/engine/ (the landing page's scene loads engine/plain/) and <site>/play/games/, then
+<site>/play/engine/build.json: the build's id, which the pages put on every address their engine workers load.
 """
 import argparse
 import glob
+import hashlib
 import json
 import os
 import pathlib
@@ -23,6 +25,9 @@ GAMES = {
     "grubwell": ("crawler", "scripts/crawler.jai", ["scripts/*.jai"], []),
     "demoreel": ("demoreel", "demoreel.jai", ["demoreel.jai", "scenes/**/*.jai"], []),
 }
+
+# The pages' engine workers and everything they load, relative to the site: a change to any of it is another build
+BUILD_FILES = ["play/play-worker.js", "assets/sample-worker.js", "play/engine/**/*", "play/games/*", "play/sandbox/*"]
 
 
 def emscripten_environment(emsdk):
@@ -74,6 +79,23 @@ def bundle_games(games_dir):
         print("bundled %s: %d files" % (game, len(files)))
 
 
+def name_build(site):
+    """Writes play/engine/build.json: the build's id, a hash of BUILD_FILES. A browser keeps a file by its address, so
+    an address that carries the id never pairs one build's cached engine with another build's scripts."""
+    named = site / "play" / "engine" / "build.json"
+    digest = hashlib.sha256()
+    for pattern in BUILD_FILES:
+        paths = [path for path in sorted(site.glob(pattern)) if path.is_file() and path != named]
+        if not paths:
+            sys.exit("build_play: no file matches %s under %s" % (pattern, site))
+        for path in paths:
+            digest.update(path.relative_to(site).as_posix().encode("utf-8") + b"\0" + path.read_bytes())
+    named.parent.mkdir(parents=True, exist_ok=True)
+    with named.open("w", encoding="utf-8", newline="\n") as handle:
+        json.dump({"id": digest.hexdigest()[:12]}, handle)
+    print("build %s" % digest.hexdigest()[:12])
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--emsdk", default=os.environ.get("EMSDK"))
@@ -87,6 +109,7 @@ def main():
             sys.exit("build_play: pass --emsdk or set EMSDK")
         build_engine(args.emsdk, pathlib.Path(args.build), play / "engine")
     bundle_games(play / "games")
+    name_build(pathlib.Path(args.site))
     print("play pages ready under %s" % play)
     return 0
 

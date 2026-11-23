@@ -4,11 +4,13 @@
 "use strict";
 
 var ENGINE = new URL("../play/engine/plain/", self.location.href).href;
+// The page ends this worker's address with the engine build's id (samples.js), and so do the engine's addresses
+var VERSION = self.location.search;
 var FOLDER = "/sample";
-importScripts(ENGINE + "jaiscript_web_worker.js");
+importScripts(ENGINE + "jaiscript_web_worker.js" + VERSION);
 
 var ready = createJaiScript({
-  locateFile: function (path) { return ENGINE + path; },
+  locateFile: function (path) { return ENGINE + path + VERSION; },
   jaiwebWrite: function (bytes) { self.postMessage({ out: bytes }, [bytes.buffer]); }
 });
 

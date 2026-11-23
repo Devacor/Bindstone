@@ -5,10 +5,20 @@
 (function () {
   "use strict";
   var WORKER = new URL("sample-worker.js", document.currentScript.src).href;
+  var BUILD = new URL("../play/engine/build.json", document.currentScript.src).href;
   var BUDGET = 20;
   var LIMIT = 200000;
   var SGR = new RegExp(String.fromCharCode(27) + "\\[([0-9;?]*)([A-Za-z])", "g");
-  var worker = null, running = null, waiting = [];
+  var worker = null, running = null, waiting = [], versioned = null;
+
+  // The worker's address ends with the engine build's id (build.json, which build_play.py writes) and the worker ends the
+  // engine's with it: a browser keeps a file by its address, so a page's samples never run on a kept engine of another build
+  function workerAddress() {
+    versioned = versioned || fetch(BUILD, { cache: "no-store" })
+      .then(function (reply) { return reply.ok ? reply.json() : null; })
+      .then(function (build) { return build ? WORKER + "?v=" + build.id : WORKER; }, function () { return WORKER; });
+    return versioned;
+  }
 
   function codeOf(block) { return block.querySelector("pre > code"); }
 
@@ -157,31 +167,34 @@
     running = waiting.shift() || null;
     if (!running) return;
     var job = running, decoder = new TextDecoder(), started = performance.now();
-    if (!worker) worker = new Worker(WORKER);
     job.out.block.classList.add("cb-ran");
     if (job.out.label) job.out.label.textContent = "running in your browser…";
     job.out.code.textContent = "";
-    worker.onmessage = function (message) {
-      var data = message.data;
-      if (data.out && job.text.length < LIMIT) {
-        job.text += decoder.decode(data.out, { stream: true });
-        if (job.text.length >= LIMIT) job.text = job.text.slice(0, LIMIT) + "\n[output cut at " + LIMIT + " characters]";
-        paint(job.out.code, job.text.replace(/\r/g, ""));
-      }
-      if (data.exit !== undefined) {
-        var ms = Math.round(performance.now() - started);
-        finish(job, data.exit === 0 ? "ran in your browser in " + ms + " ms" : "exit code " + data.exit);
-        next();
-      }
-      if (data.failed !== undefined) {
-        job.text += "\n" + data.failed;
-        worker.terminate();
-        worker = null;
-        finish(job, "the engine did not load");
-        next();
-      }
-    };
-    worker.postMessage({ files: job.files, main: job.main, budget: job.budget });
+    workerAddress().then(function (address) {
+      if (running !== job) return;
+      if (!worker) worker = new Worker(address);
+      worker.onmessage = function (message) {
+        var data = message.data;
+        if (data.out && job.text.length < LIMIT) {
+          job.text += decoder.decode(data.out, { stream: true });
+          if (job.text.length >= LIMIT) job.text = job.text.slice(0, LIMIT) + "\n[output cut at " + LIMIT + " characters]";
+          paint(job.out.code, job.text.replace(/\r/g, ""));
+        }
+        if (data.exit !== undefined) {
+          var ms = Math.round(performance.now() - started);
+          finish(job, data.exit === 0 ? "ran in your browser in " + ms + " ms" : "exit code " + data.exit);
+          next();
+        }
+        if (data.failed !== undefined) {
+          job.text += "\n" + data.failed;
+          worker.terminate();
+          worker = null;
+          finish(job, "the engine did not load");
+          next();
+        }
+      };
+      worker.postMessage({ files: job.files, main: job.main, budget: job.budget });
+    });
   }
 
   // Stops a sample that is running or waiting. One stopped before it printed anything shows what it showed before.

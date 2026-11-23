@@ -12,15 +12,27 @@ const JaiPlay = (() => {
 		Alt: 135, Escape: 136, Enter: 137, Tab: 138, Backspace: 139 };
 	const GAME_KEYS = new Set([" ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Backspace", "Enter"]);
 	const isolated = typeof SharedArrayBuffer !== "undefined" && self.crossOriginIsolated === true;
+	// The build's id (engine/build.json, which build_play.py writes) ends the worker's address, and the worker ends every
+	// address it loads with it: a browser keeps a file by its address, so a kept engine never runs another build's scripts
+	const version = (async () => {
+		try {
+			const reply = await fetch("engine/build.json", { cache: "no-store" });
+			return reply.ok ? "?v=" + (await reply.json()).id : "";
+		} catch (error) {
+			return "";
+		}
+	})();
+	const versioned = async (path) => path + await version;
+	const load = async (path) => fetch(await versioned(path));
 	// the threaded engine also needs its worker to start workers of its own; asked once, before the first run
-	const threaded = !isolated ? Promise.resolve(false) : new Promise((resolve) => {
-		const probe = new Worker("play-worker.js");
+	const threaded = !isolated ? Promise.resolve(false) : versioned("play-worker.js").then((address) => new Promise((resolve) => {
+		const probe = new Worker(address);
 		const done = (ok) => { probe.terminate(); resolve(ok); };
 		const timer = setTimeout(() => done(false), 3000);
 		probe.onmessage = (message) => { if (message.data.threads !== undefined) { clearTimeout(timer); done(message.data.threads); } };
 		probe.onerror = () => { clearTimeout(timer); done(false); };
 		probe.postMessage({ probe: true });
-	});
+	}));
 
 	function keyCode(event) {
 		if (event.key in NAMED) { return NAMED[event.key]; }
@@ -110,13 +122,14 @@ const JaiPlay = (() => {
 		// no click began, which leaves the page its focus and the sound locked
 		async start({ game, source, live, budget = 0, attended = true }) {
 			const useThreads = await threaded;
+			const address = await versioned("play-worker.js");
 			this.stop();
 			if (attended) { JaiAudio.unlock(); }
 			(this.screen || this.terminal).reset();
 			this.running = true;
 			if (attended) { this.element.focus(); }
 			const { cols, rows } = this.options;
-			this.worker = new Worker("play-worker.js");
+			this.worker = new Worker(address);
 			this.worker.onmessage = (message) => {
 				const data = message.data;
 				if (data.out) { this.write(data.out); }
@@ -159,5 +172,5 @@ const JaiPlay = (() => {
 		}
 	}
 
-	return { Session, isolated };
+	return { Session, isolated, load };
 })();

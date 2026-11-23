@@ -18,7 +18,7 @@ const JaiSandbox = (() => {
 	const picker = document.getElementById("sandbox-sample");
 	const run = document.getElementById("sandbox-run");
 	const panel = document.getElementById("sandbox");
-	const launcher = fetch("sandbox/live.jai").then((reply) => reply.ok ? reply.text() : "print(\"sandbox/live.jai did not load\");\n");
+	const launcher = JaiPlay.load("sandbox/live.jai").then((reply) => reply.ok ? reply.text() : "print(\"sandbox/live.jai did not load\");\n");
 	const declaresFrame = (text) => /\bbool\s+frame\s*\(\s*\)/.test(text);
 	let session = null;
 	let live = false;
@@ -35,7 +35,7 @@ const JaiSandbox = (() => {
 	async function load(id) {
 		const sample = SAMPLES.find((s) => s.id === id) || SAMPLES[0];
 		if (sample.source === undefined) {
-			const reply = await fetch(sample.file).catch(() => null);
+			const reply = await JaiPlay.load(sample.file).catch(() => null);
 			sample.source = reply && reply.ok ? await reply.text() : "// " + sample.file + " did not load\n";
 		}
 		if (picker.value === sample.id) { editor.value = sample.source; }

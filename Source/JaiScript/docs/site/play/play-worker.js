@@ -11,9 +11,12 @@
 
 const RING = 1024;
 const LIVE_FILE = "/sandbox/program.jai";
+// The page ends this worker's address with the build's id (play-host.js), and so does every address loaded from here
+const VERSION = self.location.search;
+const engineFile = (name) => "engine/" + name + VERSION;
 
 async function loadBundle(jai, game) {
-	const response = await fetch(game);
+	const response = await fetch(game + VERSION);
 	if (!response.ok) { throw new Error("cannot load " + game + " (" + response.status + ")"); }
 	const bundle = await response.json();
 	for (const [path, text] of Object.entries(bundle.files)) {
@@ -36,7 +39,7 @@ const write = (bytes) => self.postMessage({ out: bytes }, [bytes.buffer]);
 const sound = (op, id, bytes, value) => self.postMessage({ sound: [op, id, value], bytes }, bytes ? [bytes.buffer] : []);
 
 async function runShared({ shared, edits, game, source, live, budget }) {
-	importScripts("engine/jaiscript_web_worker.js");
+	importScripts(engineFile("jaiscript_web_worker.js"));
 	const words = new Int32Array(shared);
 	const editWords = new Int32Array(edits, 0, 2);
 	let editSeen = 0;
@@ -53,7 +56,7 @@ async function runShared({ shared, edits, game, source, live, budget }) {
 		jai.FS.writeFile(LIVE_FILE, text);
 	};
 	const jai = await createJaiScript({
-		locateFile: (path) => "engine/" + path,
+		locateFile: engineFile,
 		jaiwebWrite: write,
 		jaiwebSound: sound,
 		jaiwebSleep: (ms) => { Atomics.wait(words, 0, 0, ms); },
@@ -84,8 +87,8 @@ async function runShared({ shared, edits, game, source, live, budget }) {
 }
 
 async function runStepped({ game, source, live, budget, cols, rows }) {
-	importScripts("engine/jaiscript_web.js");
-	const jai = await createJaiScript({ locateFile: (path) => "engine/" + path, jaiwebWrite: write, jaiwebSound: sound });
+	importScripts(engineFile("jaiscript_web.js"));
+	const jai = await createJaiScript({ locateFile: engineFile, jaiwebWrite: write, jaiwebSound: sound });
 	self.onmessage = (message) => {
 		const data = message.data;
 		if (data.key !== undefined) { jai._jaiweb_key(data.key, data.down ? 1 : 0); }
@@ -145,7 +148,7 @@ function probeThreads() {
 
 if (self.name === "em-pthread") {
 	// the engine's threads start from the script of the worker that made them, this one: each runs the engine's thread
-	importScripts("engine/jaiscript_web_worker.js");
+	importScripts(engineFile("jaiscript_web_worker.js"));
 } else if (self.name === "jai-probe") {
 	self.postMessage("alive");
 } else {

@@ -155,7 +155,10 @@ of the tree compiles with `-fwasm-exceptions`, so the library catches the except
 `python docs/site_tools/build_play.py --emsdk <dir>` builds the threaded worker and the Asyncify build
 into `docs/site/play/engine/`, and the worker without threads into `docs/site/play/engine/plain/`,
 which the landing page's scene and the docs' runnable samples load on any page; it also bundles the
-example games into `docs/site/play/games/`; `python docs/site_tools/serve_site.py` serves
+example games into `docs/site/play/games/` and writes the build's id to
+`docs/site/play/engine/build.json`. The Play page and the samples end the address of everything their
+engine workers load with that id, so a browser that kept one build's engine never runs another
+build's scripts on it. `python docs/site_tools/serve_site.py` serves
 the site with the headers the Play pages need. `tools/ci/gates.sh wasm` builds the worker engine and
 plays GLOOM's, the crawler's and the demoreel's shims to the native gates' hashes.
 

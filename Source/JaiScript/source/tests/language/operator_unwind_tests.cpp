@@ -43,6 +43,16 @@ public:
 		class P { int n = 7; P() {} P(int a) { n = a; } auto operator+=(int o) { throw "pluseq"; } auto operator++() { throw "inc"; } auto operator++(int) { throw "postinc"; } }
 		class K { int n = 1; K() {} K(int a) { throw "conv"; } }
 		class Q { int n = 0; Q(int a) { n = a; } bool operator<(Q o) { throw "qless"; } }
+		class G {
+			int x = 5;
+			int y = 6;
+			var items = [1, 2, 3];
+			int _get_x() { throw "getx"; }
+			void _set_y(int v) { throw "sety"; }
+			var _get_items() { throw "getitems"; }
+			int raw_y() { return y; }
+		}
+		class G2 { int z = 5; int _get_z() { return z; } void _set_z(int v) { throw "setz"; } int raw_z() { return z; } }
 		int thrower(int i) { if (i == 1) { throw "T"; } return i + 10; }
 		float fthrower(int i) { if (i == 1) { throw "T"; } return i + 0.5; }
 	)jai";
@@ -315,6 +325,72 @@ public:
 				{R"jai(function f() { C e = C(5); var b = 5; try { while (e < 3) { b = 6; break; } b = 7; } catch (x) { print(x, " ", b); } } f();)jai", "less 5"},
 				{R"jai(function f() { C e = C(5); var b = 5; try { for (int i = 0; e < 3; ++i) { b = 6; } b = 7; } catch (x) { print(x, " ", b); } } f();)jai", "less 5"},
 				{R"jai(function f() { C e = C(5); var b = 5; try { switch (e) { case 3: b = 6; break; default: b = 7; } } catch (x) { print(x, " ", b); } } f();)jai", "eq 5"},
+			};
+			expect_printed(cases);
+		});
+
+		// obj.x through _get_x and _set_x: a getter that throws ends the expression that reads it, a setter that throws stores nothing
+		test("a_throwing_accessor_ends_the_read_the_store_and_the_compound_through_it", [this]() {
+			const std::pair<const char*, const char*> cases[] = {
+				{R"jai(function f() { G g; var r = 5; try { r = g.x; } catch (x) { print(x, " ", r); } } f();)jai", "getx 5"},
+				{R"jai(function f() { G g; var r = 5; try { r = g.x + 1; } catch (x) { print(x, " ", r); } } f();)jai", "getx 5"},
+				{R"jai(function f() { G g; int r = 5; try { r = 1 + g.x; } catch (x) { print(x, " ", r); } } f();)jai", "getx 5"},
+				{R"jai(function f() { G g; try { int r = g.x + 1; print("stored ", r); } catch (x) { print(x); } } f();)jai", "getx"},
+				{R"jai(function f() { G g; var r = 5; try { if (g.x > 1) { r = 6; } r = 7; } catch (x) { print(x, " ", r); } } f();)jai", "getx 5"},
+				{R"jai(function f() { G g; var r = 5; try { r = g.x == 5; } catch (x) { print(x, " ", r); } } f();)jai", "getx 5"},
+				{R"jai(function f() { G g; var r = 5; try { r = -g.x; } catch (x) { print(x, " ", r); } } f();)jai", "getx 5"},
+				{R"jai(function f() { G g; var r = 5; try { r = math::abs(g.x); } catch (x) { print(x, " ", r); } } f();)jai", "getx 5"},
+				{R"jai(function f() { G g; string s = "a"; try { s = `${g.x}`; } catch (x) { print(x, " ", s); } } f();)jai", "getx a"},
+				{R"jai(function f() { G g; var a = [1]; try { a.push(g.x); } catch (x) { print(x, " ", a.size()); } } f();)jai", "getx 1"},
+				{R"jai(function f() { G g; array<int> a = [1, 2, 3, 4, 5, 6]; try { a[g.x] = 9; } catch (x) { print(x, " ", a); } } f();)jai", "getx [1, 2, 3, 4, 5, 6]"},
+				{R"jai(function f() { G g; array<int> a = [1, 2, 3, 4, 5, 6]; var r = 5; try { r = a[g.x]; } catch (x) { print(x, " ", r); } } f();)jai", "getx 5"},
+				{R"jai(function h() { G g; return g.x + 1; } function f() { var r = 5; try { r = h(); } catch (x) { print(x, " ", r); } } f();)jai", "getx 5"},
+				{R"jai(function f() { G g; try { g.x += 1; } catch (x) { print(x); } } f();)jai", "getx"},
+				{R"jai(function f() { G g; try { g.y = 9; } catch (x) { print(x, " ", g.raw_y()); } } f();)jai", "sety 6"},
+				{R"jai(function f() { G g; try { g.y += 1; } catch (x) { print(x, " ", g.raw_y()); } } f();)jai", "sety 6"},
+				{R"jai(function f() { G2 g; try { g.z = 7; } catch (x) { print(x, " ", g.raw_z()); } } f();)jai", "setz 5"},
+				{R"jai(function f() { G2 g; try { g.z += 1; } catch (x) { print(x, " ", g.raw_z()); } } f();)jai", "setz 5"},
+				{R"jai(function f() { G2 g; try { g.z++; } catch (x) { print(x, " ", g.raw_z()); } } f();)jai", "setz 5"},
+				{R"jai(function f() { G2 g; var r = 5; try { r = (g.z = 7); } catch (x) { print(x, " ", r, " ", g.raw_z()); } } f();)jai", "setz 5 5"},
+				{R"jai(function f() { G g; var r = 5; try { r = g.items[0]; } catch (x) { print(x, " ", r); } } f();)jai", "getitems 5"},
+				{R"jai(function f() { G g; var r = 5; try { r = g.items[0] + 1; } catch (x) { print(x, " ", r); } } f();)jai", "getitems 5"},
+				{R"jai(function f() { G g; try { g.items[0] = 9; } catch (x) { print(x); } } f();)jai", "getitems"},
+				{R"jai(function f() { G g; try { g.items[0] += 9; } catch (x) { print(x); } } f();)jai", "getitems"},
+				{R"jai(function f() { G g; try { g.items.push(4); } catch (x) { print(x); } } f();)jai", "getitems"},
+				{R"jai(function f() { G g; var r = 5; try { for (auto v : g.items) { r = v; } } catch (x) { print(x, " ", r); } } f();)jai", "getitems 5"},
+				{R"jai(function f() { G g; var o = [g]; var r = 5; try { r = o[0].x + 1; } catch (x) { print(x, " ", r); } } f();)jai", "getx 5"},
+				{R"jai(function f() { G g; var o = [g]; try { o[0].y = 9; } catch (x) { print(x, " ", g.raw_y()); } } f();)jai", "sety 6"},
+				{R"jai(G g; var r = 5; try { r = g.x + 1; } catch (x) { print(x, " ", r); })jai", "getx 5"},
+				{R"jai(G g; try { g.y += 1; } catch (x) { print(x, " ", g.raw_y()); })jai", "sety 6"},
+				{R"jai(function f() { G g; int s = 0; for (int i = 0; i < 3; ++i) { try { s = s + g.x; } catch (x) { s += 1; } } print(s); } f();)jai", "3"},
+			};
+			expect_printed(cases);
+		});
+
+		// the same right sides and operands under a handle, a reference cast, a text or map index and a member of another object
+		test("a_throwing_operator_under_a_handle_a_cast_and_an_index_reaches_the_catch", [this]() {
+			const std::pair<const char*, const char*> cases[] = {
+				{R"jai(function f() { shared_ptr<C> p = new C(5); var r = 1; try { r = p + 3; } catch (x) { print(x, " ", r, " ", p.n); } } f();)jai", "boom 1 5"},
+				{R"jai(function f() { var p = new C(5); try { p = p + 3; } catch (x) { print(x, " ", p.n); } } f();)jai", "boom 5"},
+				{R"jai(function f() { array<shared_ptr<C>> a = [new C(5)]; try { a[0] += 3; } catch (x) { print(x, " ", a[0].n); } } f();)jai", "boom 5"},
+				{R"jai(function f() { C e = C(5); try { cast<C&>(e) += 3; } catch (x) { print(x, " ", e.n); } } f();)jai", "boom 5"},
+				{R"jai(function f() { C e = C(5); try { cast<C&>(e) = e + 3; } catch (x) { print(x, " ", e.n); } } f();)jai", "boom 5"},
+				{R"jai(function f() { string s = "abc"; C e = C(5); try { s[e[0]] = 'z'; } catch (x) { print(x, " ", s); } } f();)jai", "index abc"},
+				{R"jai(function f() { string s = "abc"; C e = C(5); var r = 'q'; try { r = s[e[0]]; } catch (x) { print(x, " ", r); } } f();)jai", "index q"},
+				{R"jai(function f() { map<string, int> m = {"a": 1}; T t; var r = 5; try { r = m["a" + t]; } catch (x) { print(x, " ", r); } } f();)jai", "ts 5"},
+				{R"jai(function f() { C e = C(5); var r = 1; try { var [a, b] = [e + 3, 2]; r = b; } catch (x) { print(x, " ", r); } } f();)jai", "boom 1"},
+				{R"jai(function f() { C e = C(5); int r = 1; try { r += (e < 3) ? 1 : 2; } catch (x) { print(x, " ", r); } } f();)jai", "less 1"},
+				{R"jai(function f() { C e = C(5); array<int> a = [1, 2]; try { a[0] += e[0]; } catch (x) { print(x, " ", a); } } f();)jai", "index [1, 2]"},
+				{R"jai(function f() { C e = C(5); array<int> a = [1, 2]; try { a[0] = a[1] + e[0]; } catch (x) { print(x, " ", a); } } f();)jai", "index [1, 2]"},
+				{R"jai(class HH { int n = 5; } function f() { C e = C(5); HH h; try { h.n += e[0]; } catch (x) { print(x, " ", h.n); } } f();)jai", "index 5"},
+				{R"jai(class HH { int n = 5; } function f() { C e = C(5); HH h; try { h.n = h.n + e[0]; } catch (x) { print(x, " ", h.n); } } f();)jai", "index 5"},
+				{R"jai(class HH { int n = 5; void go(C e) { try { n += e[0]; } catch (x) { print(x, " ", n); } } } HH h; h.go(C(5));)jai", "index 5"},
+				{R"jai(class HH { int n = 5; void go(C e) { try { n = n + e[0]; } catch (x) { print(x, " ", n); } } } HH h; h.go(C(5));)jai", "index 5"},
+				{R"jai(function f() { C e = C(5); float r = 1.5; try { r = r * e[0]; } catch (x) { print(x, " ", r); } } f();)jai", "index 1.5"},
+				{R"jai(function f() { C e = C(5); int r = 1; try { r = r << e[0]; } catch (x) { print(x, " ", r); } } f();)jai", "index 1"},
+				{R"jai(function f() { C e = C(5); bool b = true; try { b = b && (e == 3); } catch (x) { print(x, " ", b); } } f();)jai", "eq true"},
+				{R"jai(function f() { C e = C(5); var a = [1, 2]; try { a.push(e + 3); } catch (x) { print(x, " ", a.size()); } } f();)jai", "boom 2"},
+				{R"jai(function f() { C e = C(5); array<C> a = [C(1)]; try { a[0] = e + 3; a.push(e + 3); } catch (x) { print(x, " ", a.size(), " ", a[0].n); } } f();)jai", "boom 1 1"},
 			};
 			expect_printed(cases);
 		});

@@ -639,7 +639,8 @@ statement, an `if`, `while` or `for` condition (the grafts precede the condition
 `for` update, and an argument of a leaf, a host function or a builtin method. The graft is compiled, never spliced into the
 caller's tree (the interpreter walks that tree). The checker stamps the resolved callee decl for any program, includes or not (the
 guard carries the identity), and an argument proof under includes when the argument's type an include cannot change (a literal, a
-typed local or parameter, arithmetic, a unary, a ternary, a cast or a math intrinsic over those; never a global or a member). A callee another unit of the program
+typed local or parameter, a typed global or an element of a global array, whose kind the guard checks per definition epoch
+(`internal/type_proofs_design.md` 4.7), and arithmetic, a unary, a ternary, a cast or a math intrinsic over those; never a member). A callee another unit of the program
 declares resolves through the program's function table (the closure's cached units, the ones the imports execute; one unit
 declaring the name once), so a leaf grafts across a file boundary, and a reload of that unit fails the guard as any rebind does. In
 the statement's clone a replaced argument is the hoisted leaf's result temp, a slot of its return type, so the outer call's proof

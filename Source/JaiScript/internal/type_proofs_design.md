@@ -141,7 +141,7 @@ are independent of diagnostics (a stamp never depends on a `diag` having fired).
 |---|---|---|
 | S1 | `assignment_expr`, local target — `infer_assignment` | plain `=` (a compound is `x = T(x op rhs)`, a separate opcode) `&& !local->dynamic && same_type(local->type, rhs)` → `static_store_proof = proof_same_type`, else `proof_none`. A compound on a local stamps `static_operand_class = operand_class_of(local->type, rhs)` (the fused compound's typed row). |
 | S2 | `assignment_expr`, every other target (a field, an engine global, a subscript) | `proof_none`. incdec desugar nodes (`incdec_desugar`/`postfix_old_result`) are compound → `proof_none` by S1's `op` test. |
-| C1 | `call_expr` — `stamp_call_proofs` | One statically resolved same-script callee (`ov.size() == 1`; `fn->body && !fn->is_coroutine && arity_range(fn) == {n, n}`). Per by-value argument `i`: `proof_same_type` iff the parameter is untyped/var or `same_type(ctype_from_type_info(param.type), args[i])`; reference parameters get none. `proof_globals` lists the program names an argument proof read (an includes-free unit proves every argument; otherwise `certain_argument` decides per argument and records its dependencies). `proven_callee_decl` is set for a free callee (the inliner's identity). Every other callee shape (callable local, engine ctor/function, `new_expr`, member on non-object): `static_arg_proofs`, `proof_globals` cleared. `functions_` may hold several decls for one name ("later replaces earlier") → `size()==1` refuses those. |
+| C1 | `call_expr` — `stamp_call_proofs` | One statically resolved same-script callee (`ov.size() == 1`; `fn->body && !fn->is_coroutine && arity_range(fn) == {n, n}`). Per by-value argument `i`: `proof_same_type` iff the parameter is untyped/var or `same_type(ctype_from_type_info(param.type), args[i])`; reference parameters get none. `proof_globals` lists the program names an argument proof read (an includes-free unit proves every argument; otherwise `certain_argument` decides per argument and records its dependencies, section 4.7). `proven_callee_decl` is set for a free callee (the inliner's identity). Every other callee shape (callable local, engine ctor/function, `new_expr`, member on non-object): `static_arg_proofs`, `proof_globals` cleared. `functions_` may hold several decls for one name ("later replaces earlier") → `size()==1` refuses those. |
 | R1 | `return_stmt` — `check_return` | `r->value && !r->binds_reference && !fn.is_coroutine && fn.ret && ret = ctype_from_type_info(fn.ret); ret.kind != null_k && same_type(ret, value)` → `static_return_proof = same_type`; else `proof_none`. Lambdas share `check_return` and are stamped too. |
 | B1 | `binary_expr` — `infer` | Non-subscript: `operand_class_of(l, r)`: int,int→1 float,float→2 int,float→3 float,int→4 string,string→5 bool,bool→6 else 0 (tentative operands 0; char pairs 0, char is promoted by `binary_result`). Subscript: the proven element kind of a declared container — object elements → 7, math vectors → 8, a proven int/float element → 1/2, else 0. `static_operand_class` selects the VM compiler's typed row; the row's runtime guard keeps it sound. |
 
@@ -180,6 +180,30 @@ Every hook runs after `run_ast_marking_passes` (the parse tail, the jaibite load
 `register_template_type` and `note_class_shape_change` (section 3).
 
 Cost: one checker walk per unique source per surface epoch; `type_proofs(false)` clears the stamps.
+
+### 4.7 Program-scope names in a program that loads units at run time
+
+A proof that rests on a program-scope name (`certain_global`: an argument that is a typed global or an element of a global array, a
+builtin's global receiver, a program function's declared return) records the name and what it took of it (`proof_global`), and the
+graft that consumes it checks the records once per definition epoch (`vm_backend::inline_globals_hold`): the name resolves, from the
+frame, to a cell of that kind, or to a function declared to return that type. The proof is stamped whatever the unit imports or
+includes, a path computed at run time included, because each thing a unit loaded at run time can do to such a name has an answer:
+
+| the loaded unit | what changes | what answers it |
+|---|---|---|
+| declares a name the program does not | nothing the checker typed: the use is undeclared (a warning where a path is computed) | no proof exists |
+| an import declares a name another unit declares | a cell of its own; code keeps the cell it resolved (`internal/global_shadowing.md`), and code run or compiled later resolves the newest | every program-scope variable declaration moves the definition epoch, and the record is checked against the cell the frame resolves |
+| a top-level include, or a module's re-run, declares a name of its unit again with another type | the cell changes type in place | the same declaration moves the definition epoch |
+| redefines a function: another body, other parameters, another return type | the name binds another function | the graft's guard reads the callee's identity at every entry; a `k_function` record's return type is checked per definition epoch, which a function definition moves; a reload is checked against its users before it applies |
+| redefines a class | fields retype, live instances migrate | under imports no argument proof rests on a member (`certain_argument`); member sites keep their class shape and method epochs |
+| assigns a typed global | the store converts to the declared type | the cell keeps its kind |
+| assigns a `var` global | any kind | a `var` is never certain (`certain_type`) |
+
+One gate stays: an include below a unit's top level (`has_scoped_include_`: `include(expr)` in a function, a lambda or a block; a
+literal include in a function body is spliced and declares slots) declares into that scope's environment, where the scope's own code
+and a function it calls find its names ahead of the program's. Two activations of one body can stand under different environments
+within one definition epoch, so no epoch vouches for the name there: a unit that holds such an include proves no program-scope name.
+A lambda's captures are never in a callee's way (`internal/closures_and_captures.md`).
 
 ## 5. Interpreter
 

@@ -2689,8 +2689,9 @@ op_status vm_backend::define_decl_value(frame& f, uint64_t name_id, size_t slot_
 		frame_slot_set(f, slot_index, std::move(value));
 	} else if (!environment_->define_variable(name_id, std::move(value))) [[unlikely]] {
 		return raise_from(detail::inline_redefinition(*symbolizer_, name_id, decl));
-	} else if (decl && environment_->is_program_scope()) {
-		engine_->mark_const_cell(environment_->get_env_var_ptr(name_id), decl->is_const);   // interp parity: visit_variable_decl
+	} else if (environment_->is_program_scope()) {
+		if (decl) { engine_->mark_const_cell(environment_->get_env_var_ptr(name_id), decl->is_const); }   // interp parity: visit_variable_decl
+		if (!parallel_worker_) { engine_->bump_definition_epoch(); }   // the name binds another cell or another type from here on: what read it validates again (inline_globals_hold)
 	}
 	return {};
 }

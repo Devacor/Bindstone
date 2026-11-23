@@ -806,7 +806,7 @@ namespace jai::vm {
             mutable uint8_t holds_next = 0;
             mutable strong_ptr<script_function_node> holds_fn;   // the free function the guard last validated: the same object holds again
             // the program-scope names the call's argument proofs read (call_expr::proof_globals: symbol id, kind): the guard holds only
-            // while each still holds its kind, re-checked when a run moved engine::definition_epoch past globals_epoch
+            // while each still holds its kind, re-checked when a run or a program-scope declaration moved engine::definition_epoch past globals_epoch
             std::vector<proof_global> proof_globals;
             // the program-scope functions the parameter forwarding read (symbol id, body): a by-value parameter renamed to the caller's
             // variable because each callee it is passed to takes it by value; re-checked with the proof globals

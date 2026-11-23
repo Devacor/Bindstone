@@ -2902,7 +2902,10 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             // Global variable or no slot assigned - use environment
             if (!environment_->define_variable(decl->name_id, std::move(value))) [[unlikely]] { return detail::inline_redefinition(*string_symbolizer_, decl->name_id, decl); }
             if (decl->is_inline) [[unlikely]] { environment_->share(decl->name_id); }
-            if (environment_->is_program_scope()) { engine_->mark_const_cell(environment_->get_env_var_ptr(decl->name_id), decl->is_const); }
+            if (environment_->is_program_scope()) {
+                engine_->mark_const_cell(environment_->get_env_var_ptr(decl->name_id), decl->is_const);
+                if (!parallel_worker_) { engine_->bump_definition_epoch(); }   // vm parity: define_decl_value
+            }
         }
         return {};
     };
@@ -10483,6 +10486,8 @@ checked_result<void> interpreter::visit_destructuring_decl_t(destructuring_decl*
             call_stack_.back().set_local(decl->slot_indices[i], std::move(val));
         } else if (!environment_->define_variable(decl->names[i].second, std::move(val))) [[unlikely]] {
             return detail::inline_redefinition(*string_symbolizer_, decl->names[i].second, nullptr);
+        } else if (environment_->is_program_scope() && !parallel_worker_) {
+            engine_->bump_definition_epoch();   // vm parity: define_decl_value
         }
     }
 

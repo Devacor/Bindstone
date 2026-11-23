@@ -24,6 +24,7 @@
 #include "fuzz_falloff_band.hpp"
 #include "fuzz_unwind_band.hpp"
 #include "fuzz_generics_band.hpp"
+#include "fuzz_runtime_unit_band.hpp"
 #include "fuzz_block_band.hpp"
 #include "fuzz_local_alias_band.hpp"
 
@@ -497,6 +498,8 @@ namespace jai::fuzz {
 				p.segments.push_back(join());
 				p.labels.push_back("reload");
 			}
+			runtime_unit_band ruband(seed_);   // every segment reaches a unit through a computed path: under the call-arguments band's switch, never on every seed
+			if (call_args_ != band_mode::never && ruband.roll()) { ruband.apply(p); }
 			return p;
 		}
 

@@ -726,6 +726,7 @@ private:
     bool capped_ = false;
     bool has_includes_ = false;           // include/import present (any form): proof gates stay shut
     bool has_dynamic_includes_ = false;   // a path the closure cannot read: undeclared identifiers downgrade to warnings
+    bool has_scoped_include_ = false;     // an include below the unit's top level declares into that scope's environment, which its code and what it calls read ahead of the program's names
     // [[warn_mode]] / [[strict_mode]] regions, innermost on top. A statement-level frame stops
     // at nested function/lambda bodies (they re-push the nearest scoped mode); a block/unit
     // frame flows into them.
@@ -4227,10 +4228,11 @@ private:
     }
     // a program-scope name whose declared type changes only when its declaring unit runs again: this unit's own typed top-level
     // declaration, or the one spelled declaration another unit of the program makes, of any type a proof may rest on; a name a field
-    // could shadow (inside a class) or a runtime include could declare stays uncertain. The name and its proof join deps; declared
-    // receives the declared type
+    // could shadow (inside a class) or a scope's own include could declare ahead of it (has_scoped_include_) stays uncertain. A unit loaded
+    // at run time declares into the program scope, where a declaration moves the definition epoch the dependencies are checked under.
+    // The name and its proof join deps; declared receives the declared type
     bool certain_global(const identifier_expr* id, std::vector<proof_global>& deps, const type_info** declared = nullptr) {
-        if (has_dynamic_includes_ || class_ctx_ || id->symbol_id == UINT64_MAX) return false;
+        if (has_scoped_include_ || class_ctx_ || id->symbol_id == UINT64_MAX) return false;
         size_t scope = SIZE_MAX;
         const type_info* t = nullptr;
         if (var_entry* v = find_named(id, &scope)) {
@@ -4285,7 +4287,7 @@ private:
                 // a free script function with a declared return: its result converts to that type whatever the arguments; the name and the
                 // return join deps (proof_global::k_function), since a redefinition may declare another return type
                 auto* id = static_cast<const identifier_expr*>(ce->callee.get());
-                if (has_dynamic_includes_ || class_ctx_ || id->slot_index != SIZE_MAX || id->global_qualified || id->symbol_id == UINT64_MAX) return false;
+                if (has_scoped_include_ || class_ctx_ || id->slot_index != SIZE_MAX || id->global_qualified || id->symbol_id == UINT64_MAX) return false;
                 const auto fn = ce->proven_callee_decl.lock();
                 if (!fn || fn->is_coroutine) return false;
                 if (!certain_type(fn->return_type.get())) return false;
@@ -12690,6 +12692,7 @@ void static_checker::collect_names(const statement* node) {
         case node_type::include_decl:
             has_includes_ = true;
             has_dynamic_includes_ = true;   // nested: a runtime include, beyond the closure
+            has_scoped_include_ = true;
             break;
         case node_type::import_decl:
             has_includes_ = true;
@@ -12834,6 +12837,8 @@ void static_checker::collect_names_expr(const expression* e) {
             for (const auto& arg : static_cast<const new_expr*>(e)->arguments) { collect_names_expr(arg.get()); }
             break;
         case node_type::include_expr:
+            has_includes_ = true;
+            if (collect_depth_ > 0) { has_scoped_include_ = true; }
             collect_names_expr(static_cast<const include_expr*>(e)->path_expr.get());
             break;
         case node_type::import_expr: {

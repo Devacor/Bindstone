@@ -455,6 +455,8 @@ function by_reference(map<int, int>& m, int n) -> int { for (int i = 0; i < n; +
 function fill(map<int, int> m, int n) -> int { for (int i = 0; i < n; ++i) { m[(i & 15) * 5 + 2] = i; } return m.size(); }
 function tally(map<int, int> m, int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { int k = i & 3; int c = m[k] + 1; m[k] = c; s += c; } return s; }
 function widen(map<int, float> m, int n) -> string { for (int i = 0; i < n; ++i) { m[i & 3] = i; } return to_string(m); }
+function open_source(int n) -> string { map<int, int> m = {}; map<int, bool> b = {}; for (int i = 0; i < n; ++i) { var v = i; m[i & 3] = v; var t = i % 3 == 0; b[i & 3] = t; int w = i * 2; m[(i + 1) & 3] = w; } return to_string(m) + to_string(b); }
+function overwritten(int n) -> string { map<int, int> m = {0: 1, 1: 2}; map<int, float> f = {0: 0.5}; int& first = m[0]; string out = ""; for (int i = 0; i < n; ++i) { m[i & 1] = i * 7; f[0] = i * 0.25; out = out + to_string(first) + ","; } return out + to_string(m) + to_string(f); }
 function truths(map<int, bool> m, int n) -> string { for (int i = 0; i < n; ++i) { var v = i; m[i & 3] = v; } return to_string(m); }
 function text_fill(map<int, string> m, int n) -> int { for (int i = 0; i < n; ++i) { m[i & 3] = "t"; } return m.size(); }
 map<int, bool> GB = {}; GB[0] = true;
@@ -464,6 +466,7 @@ map<int, float> GF = {}; GF[0] = 0.5;
 0;)JAI";
 			same_everywhere({ defs, "ints(20);", "floats(9);", "flags(9);", "literals(6);", "widening(6);", "narrowing(1);", "narrowing(3);", "open_values(6);", "held_object(4);", "read_modify(13);",
 				"counting(21);", "key_kinds(3);", "open_keys(5);", "used_value(7);", "compound(9);", "rebound(9);", "by_value(G, 6);", "to_string(G);", "by_reference(G, 7);", "to_string(G);",
+				"open_source(9);", "overwritten(7);",
 				"fill(G, 40);", "tally(G, 9);", "to_string(G);", "widen(GF, 7);", "truths(GB, 7);", "text_fill(GS, 7);", "to_string(GS);" }, "", "map stores");
 			// the store, and a read beside it, are the block's own operations
 			auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); stdlib::register_all(*e);

@@ -720,7 +720,9 @@ A plain statement store into such a map (`m[k] = v;`) is the same kind of operat
 would give its slot, stored by the general store's own kernel (`map_scalar_store`: the insert, its charge, the entry). The
 operation runs only a store the kernel takes without converting, raising or running code: an int key into a map keyed by
 int or unconstrained, a value of the map's own value kind (an int into a float value widens there), or any scalar into an
-unconstrained value that no object holds.
+unconstrained value that no object holds. Where a typed map's entry already holds the value's kind under the value's stamp,
+the operation writes the payload in place and calls no kernel: the kernel's row for that pair leaves a copy of the value,
+which is the same entry.
 Every other store misses onto the general one. A compound store and a store whose value is used keep the element site's
 path, and a span with a compound store through the slot keeps that slot's reads general (the site would refuse the entry).
 Both operations dispatch through the block loop's out-of-line door (`cells_run_cold`): a lookup each, they add nothing to

@@ -10887,7 +10887,8 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, size_t& ip, const vm
 // kernel (map_scalar_store: the insert, its charge, the entry's stamp). Only a store the kernel takes without raising or running code is
 // made here: an int key into a map keyed by int or unconstrained, a value of the map's own value kind (an int into a float value
 // widens) or into an unconstrained value no object holds; anything else misses onto the general store and, where the pair of kinds
-// is one the cells do not take, refuses the block for the rest of this call
+// is one the cells do not take, refuses the block for the rest of this call. A typed map's entry that already holds the value's kind
+// under the value's stamp takes the payload in place: the kernel's row for that pair leaves exactly that
 JAI_NOINLINE op_status vm_backend::exec_c_map_store(frame& f, const vm_instruction& ins) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
@@ -10935,18 +10936,26 @@ JAI_NOINLINE op_status vm_backend::exec_c_map_store(frame& f, const vm_instructi
 	const type_info* key_type = tag && !tag->type_params.empty() ? tag->type_params[0].get() : nullptr;
 	const type_info* value_type = tag && tag->type_params.size() >= 2 ? tag->type_params[1].get() : nullptr;
 	if (key_type && key_type->base_type != script_value_type::jai_any_type && (key_type->base_type != script_value_type::jai_int_type || key_type->is_enum)) return refuse();
+	script_value value = cell_scalar(vkind, vbits, engine_);
+	if (vstamp) { value.set_type_info(type_info_ptr{vstamp}); }
 	if (value_type && value_type->base_type != script_value_type::jai_any_type) {
 		const script_value_type want = vkind == ki ? script_value_type::jai_int_type : vkind == kf ? script_value_type::jai_float_type : script_value_type::jai_bool_type;
 		const bool widens = vkind == ki && value_type->base_type == script_value_type::jai_float_type;   // the kernel's int -> float row: no code, no refusal
 		if ((value_type->base_type != want && !widens) || value_type->is_enum) return refuse();   // any other conversion, or its refusal, is the general store's
+		if (!widens && value.type_info_raw()) {
+			// the kernel's row for a value of the map's own kind leaves a copy of it: an entry already holding that kind under the value's stamp takes the payload where it lives
+			const auto& map_ptr = cp->get_map_storage();
+			if (const script_map::value_type* held = map_ptr ? map_ptr->lookup_int(key_int, engine_) : nullptr) {
+				script_value& target = const_cast<script_value&>(held->second);
+				if (target.raw_storage_index() == vkind && target.stamped_as(value.type_info_raw())) { target.unchecked_set_payload_bits(vbits); ++f.ip; return {}; }
+			}
+		}
 	} else {
 		const auto& map_ptr = cp->get_map_storage();
 		const script_map::value_type* held = map_ptr ? map_ptr->lookup_int(key_int, engine_) : nullptr;
 		if (!map_ptr || (held && detail::slot_value_assign_candidate(held->second))) return refuse();   // an object the entry holds takes the value through its own assignment
 	}
 	const script_value key(key_int, engine_);
-	script_value value = cell_scalar(vkind, vbits, engine_);
-	if (vstamp) { value.set_type_info(type_info_ptr{vstamp}); }
 	bool handled = false;
 	script_value* stored = nullptr;
 	const op_status st = map_scalar_store(*cp, key, value, handled, stored);

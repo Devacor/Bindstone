@@ -205,6 +205,12 @@ and a function it calls find its names ahead of the program's. Two activations o
 within one definition epoch, so no epoch vouches for the name there: a unit that holds such an include proves no program-scope name.
 A lambda's captures are never in a callee's way (`internal/closures_and_captures.md`).
 
+The stamps a method body's bare names take (`identifier_expr::this_field` and `program_name`, a sibling's `proven_method_decl`:
+`bare_field_context`) close on the same flag and on no other import or include. A unit loaded at program scope declares behind the
+members, never between a method's locals and them, and a method resolves its names through its own environment, never its
+caller's; a class a reload redefines is answered by the frame's layout (`frame_this_field`, `frame_globals_hold`) and by the
+graft's verdict at the receiver class's method epoch.
+
 ## 5. Interpreter
 
 The interpreter's own evaluation reads no proof: every store, declaration, argument and return runs its

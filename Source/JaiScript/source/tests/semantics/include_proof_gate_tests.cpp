@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -52,6 +53,10 @@ public:
 			e->add_global("DIR", e->make_value(dir.generic_string()));
 			// the program's own edit of one of its files, for a reload in the middle of a loop
 			e->add_function("edit_file", [dir](const std::string& file, const std::string& text) { write(dir / file, text); });
+			e->add_function("copy_file", [dir](const std::string& to, const std::string& from) {
+				std::ifstream in(dir / from, std::ios::binary);
+				write(dir / to, std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()));
+			});
 			if (way == 2) { e->disassembly_sink([&result](const std::string& listing, const std::string&) { result.listing += listing; result.listing += '\n'; }); }
 			std::string& text = result.text[way];
 			for (const step& s : steps) {
@@ -209,6 +214,37 @@ public:
 				"string r = tick() + \",\" + to_string(sum_all());\nfor (int k = 0; k < 20; k++) { sum_all(); }\nr + \",\" + to_string(SCALE);\n";
 			expect(run("bite_absent", {{{}, source, ""}}, true), "absent,20.0,2.0", "the module is not there");
 			expect(run("bite_present", {{{{"live.jai", "SCALE = 4.0;\n"}}, source, ""}}, true), "live,40.0,4.0", "the module stores into the program's global");
+		});
+
+		test("a_unit_with_imports_keeps_the_grafts_and_field_reads_of_its_methods", [this]() {
+			const std::string main = "import \"helper.jai\";\nstring DEV = \"dev.jai\";\nfloat GAIN = 1.5;\nclass Body {\n	float w = 2.0;\n	int n = 0;\n	float lift(float k) { return w * k + GAIN; }\n	float run(int count) { float acc = 0.0; for (int i = 0; i < count; i++) { acc += lift(i * 0.5); n += 1; } return acc; }\n}\nimport(DEV);\nBody b = Body();\nto_string(b.run(8)) + \"|\" + to_string(b.n) + \"|\" + to_string(helper_half(3));\n";
+			const outcome r = run("method_proofs", {{{{"helper.jai", "float helper_half(int i) { return i * 0.5; }\n"}, {"dev.jai", "int DEV_LOADS = 1;\n"}, {"main.jai", main}}, "", "main.jai"}});
+			expect(r, "40.0|8|1.5", "the method's loop");
+			check(count(r.listing, "-- inlined lift") > 0, "a sibling's call grafts in a unit that imports: " + r.listing.substr(0, 4000));
+			check_eq(size_t(0), count(r.listing, "call kept lift"), "the sibling stays no call");
+		});
+
+		test("a_reload_redefines_a_class_under_its_running_method", [this]() {
+			// the method's loop reloads its own class: a field retyped and a sibling's body changed, a field of a program name's spelling added,
+			// a subclass that overrides the sibling; the frame on the stack keeps its body and reads what the instance now holds
+			const std::string v1 = "import \"helper.jai\";\nclass Body {\n	float w = 2.0;\n	int n = 0;\n	float lift(float k) { return w * k + GAIN; }\n	string run(string next, int at) {\n		string seen = \"\";\n		for (int i = 0; i < 6; i++) {\n			if (i == at) { copy_file(\"shape.jai\", next); reload(); }\n			seen += to_string(lift(1.0)) + \":\" + to_string(w) + \":\" + to_string(GAIN) + \",\";\n			n += 1;\n		}\n		return seen + to_string(n) + to_string(helper_half(0));\n	}\n}\n";
+			const std::string v2 = "import \"helper.jai\";\nclass Body {\n	int w = 5;\n	int n = 0;\n	float lift(float k) { return w * k * 10.0 + GAIN; }\n	string run(string next, int at) {\n		string seen = \"\";\n		for (int i = 0; i < 6; i++) {\n			if (i == at) { copy_file(\"shape.jai\", next); reload(); }\n			seen += to_string(lift(1.0)) + \":\" + to_string(w) + \":\" + to_string(GAIN) + \",\";\n			n += 1;\n		}\n		return seen + to_string(n) + to_string(helper_half(0));\n	}\n}\n";
+			const std::string v3 = "import \"helper.jai\";\nclass Body {\n	float w = 1.0;\n	int n = 0;\n	float GAIN = 100.0;\n	float lift(float k) { return w * k + GAIN; }\n	string run(string next, int at) {\n		string seen = \"\";\n		for (int i = 0; i < 6; i++) {\n			if (i == at) { copy_file(\"shape.jai\", next); reload(); }\n			seen += to_string(lift(1.0)) + \":\" + to_string(w) + \":\" + to_string(GAIN) + \",\";\n			n += 1;\n		}\n		return seen + to_string(n) + to_string(helper_half(0));\n	}\n}\n";
+			const std::string v4 = "import \"helper.jai\";\nclass Body {\n	float w = 2.0;\n	int n = 0;\n	float lift(float k) { return w * k + GAIN; }\n	string run(string next, int at) {\n		string seen = \"\";\n		for (int i = 0; i < 6; i++) {\n			if (i == at) { copy_file(\"shape.jai\", next); reload(); }\n			seen += to_string(lift(1.0)) + \":\" + to_string(w) + \":\" + to_string(GAIN) + \",\";\n			n += 1;\n		}\n		return seen + to_string(n) + to_string(helper_half(0));\n	}\n}\nclass Heavy : Body { float lift(float k) override { return 1000.0 + k; } }\n";
+			const std::string main = "float GAIN = 0.5;\nimport \"shape.jai\";\narray<string> MODS = [\"shape.jai\"];\nfunction reload() { try { import(MODS); } catch (e) { return 1; } return 0; }\nBody b = Body();\nstring r = b.run(\"shape_v2.jai\", 2);\nr += \"|\" + b.run(\"shape_v3.jai\", 3);\nr += \"|\" + b.run(\"shape_v4.jai\", 1);\ncopy_file(\"shape.jai\", \"shape_v4.jai\");\nreload();\nHeavy h = Heavy();\nr += \"|\" + h.run(\"shape_v1.jai\", 4);\nr;\n";
+			const outcome r = run("reload_method", {{{{"helper.jai", "float helper_half(int i) { return i * 0.5; }\n"}, {"shape.jai", v1}, {"shape_v1.jai", v1}, {"shape_v2.jai", v2},
+				{"shape_v3.jai", v3}, {"shape_v4.jai", v4}, {"main.jai", main}}, "", "main.jai"}});
+			expect(r, "2.5:2.0:0.5,2.5:2.0:0.5,20.5:2:0.5,20.5:2:0.5,20.5:2:0.5,20.5:2:0.5,60.0|20.5:2:0.5,20.5:2:0.5,20.5:2:0.5,102.0:2.0:100.0,102.0:2.0:100.0,102.0:2.0:100.0,120.0|"
+				"102.0:2.0:100.0,2.5:2.0:0.5,2.5:2.0:0.5,2.5:2.0:0.5,2.5:2.0:0.5,2.5:2.0:0.5,180.0|1001.0:2.0:0.5,1001.0:2.0:0.5,1001.0:2.0:0.5,1001.0:2.0:0.5,1001.0:2.0:0.5,1001.0:2.0:0.5,60.0",
+				"a class reloaded under its own method");
+			check(count(r.listing, "-- inlined lift") > 0, "the sibling grafts in the module, a unit that imports: " + r.listing.substr(0, 3000));
+		});
+
+		test("an_include_inside_a_method_keeps_its_units_member_proofs_closed", [this]() {
+			const std::string main = "int GAIN = 7;\nclass C { int hp = 3; function m(string p) { include(p); return reflect::type_of(hp) + \":\" + to_string(hp) + \":\" + to_string(twice()) + \":\" + to_string(GAIN); } function twice() { return hp * 2; } }\nC().m(\"shadow.jai\") + \"|\" + C().m(\"empty.jai\");\n";
+			const outcome r = run("scoped_method", {{{{"shadow.jai", "string hp = \"shadow\";\nstring GAIN = \"theirs\";\n"}, {"empty.jai", "int unused_here = 1;\n"}, {"main.jai", main}}, "", "main.jai"}});
+			agree(r, "a name an include declares in a method's scope");
+			check_eq(size_t(0), count(r.listing, "-- inlined twice"), "the unit's sibling calls stay calls: " + r.listing.substr(0, 3000));
 		});
 	}
 };

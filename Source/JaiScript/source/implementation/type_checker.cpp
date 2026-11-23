@@ -4196,10 +4196,12 @@ private:
     }
 
     // Bare names reach this-fields here: method/ctor body or [this] lambda, not a static
-    // method, not a ctor initializer list, no includes (which can define anything).
+    // method, not a ctor initializer list, no include below the unit's top level (it declares into a scope's environment, which a bare
+    // name reads ahead of the members; a unit loaded at program scope declares behind them, and the frame's layout, the class's method
+    // epoch and the graft's verdict answer for a class it redefines).
     bool bare_field_context() const {
         return class_ctx_ && !fn_stack_.empty() && fn_stack_.back().sees_fields &&
-               !fn_stack_.back().is_static_method && !fn_stack_.back().in_ctor_initializers && !has_includes_;
+               !fn_stack_.back().is_static_method && !fn_stack_.back().in_ctor_initializers && !has_scoped_include_;
     }
 
     // a scalar (int, float, bool) as its base type, an array of scalars as jai_array_type | the element's base type << 8, else 0
@@ -8403,7 +8405,7 @@ private:
                 }
                 if (access_denied(hit, id->name, id->location)) { return {}; }
                 if (hit.methods) {
-                    if (!hit.methods->empty() && !hit.methods->front()->is_static && bare_field_context()) {   // a method is called or bound, never read bare
+                    if (!hit.methods->empty() && !hit.methods->front()->is_static && bare_field_context() && !has_includes_) {   // a method is called or bound, never read bare
                         diag(diag_level::error, id->location, detail::bare_method_value_text(id->name, class_ctx_name_));
                     }
                     return ctype::make(ctype::function_k);

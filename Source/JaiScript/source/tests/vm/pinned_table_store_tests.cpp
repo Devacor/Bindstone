@@ -1,7 +1,8 @@
-// A store or a push into a table an alias of the same loop body takes elements of (`var& row = T[i]; ... T[j] = v;`) is no site
-// of the block: every entry refuses a store into a table an alias pins, so the statement runs on the general form (a boundary,
-// or a bail in an arm) and the loop enters its block. A refused outer loop shows in the entry counter: none for a lone loop,
-// one per outer iteration where an inner loop keeps its own block. Every case holds both backends to one text, proofs on and off.
+// A call's result stored into a table an alias of the same loop body takes elements of (`T[k] = build(k); ... var& row = T[k];`)
+// is no site of the block: every entry refuses a store into a table an alias pins, so the statement runs on the general form (a
+// boundary, or a bail in an arm), as it did before its value landed in a temp, and the loop enters its block. A refused outer
+// loop shows in the entry counter: one entry per outer iteration, where the inner loop keeps its own block. Any other store into
+// such a table stays a site the entry refuses (no boundary runs). Every case holds both backends to one text, proofs on and off.
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
@@ -55,9 +56,10 @@ public:
 	}
 
 	void forge_tests() override {
-		test("a_store_into_the_aliased_table_runs_on_the_general_form", [this]() {
-			// a scalar stored beside the arrays the alias reads: a store site by its value, refused at every entry while it is one
-			enters(R"JAI(
+		test("a_plain_store_into_the_aliased_table_keeps_the_general_form", [this]() {
+			// a scalar stored beside the arrays the alias reads, and GLOOM's sprite sort (handles moved within the list its alias reads): store
+			// sites the entry refuses, so the loop runs on the general form and no boundary parks it on every iteration
+			const outcome scalar = both(R"JAI(
 function run(int n) -> string {
 	var T = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12], 0];
 	int acc = 0; int i = 0;
@@ -71,8 +73,30 @@ function run(int n) -> string {
 	return to_string(acc) + ":" + to_string(T[4]);
 }
 run(60);
-)JAI", "", "a scalar store on the main path", 4);
-			enters(R"JAI(
+)JAI", "", "a scalar store on the main path");
+			check_eq(0ull, scalar.counters.boundaries, "a scalar store on the main path: no boundary runs");
+			const outcome sorted = both(R"JAI(
+class Billboard { public: float depth = 0.0; int id = 0; Billboard(float d, int i) { depth = d; id = i; } }
+function run(int n) -> string {
+	array<shared_ptr<Billboard>> sprites = [];
+	for (int k = 0; k < n; ++k) { sprites.push(new Billboard(((k * 7) % 11) * 1.5, k)); }
+	for (int i = 1; i < sprites.size(); ++i) {
+		shared_ptr<Billboard> rec = sprites[i];
+		int j = i - 1;
+		while (j >= 0 && sprites[j].depth < rec.depth) {
+			sprites[j + 1] = sprites[j];
+			j = j - 1;
+		}
+		sprites[j + 1] = rec;
+	}
+	string out = "";
+	for (int k = 0; k < n; ++k) { out += to_string(sprites[k].id) + ","; }
+	return out;
+}
+run(24);
+)JAI", "", "an insertion sort through the list its alias reads");
+			check_eq(0ull, sorted.counters.boundaries, "an insertion sort through the list its alias reads: no boundary runs");
+			both(R"JAI(
 function run(int n) -> string {
 	var T = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12], 0];
 	int acc = 0; int i = 0;
@@ -86,7 +110,7 @@ function run(int n) -> string {
 	return to_string(acc) + ":" + to_string(T[4]) + ":" + to_string(T.size());
 }
 run(60);
-)JAI", "", "a scalar store and a push in an arm", 12);
+)JAI", "", "a scalar store and a push in an arm");
 			enters(R"JAI(
 function run(int n) -> string {
 	var T = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]];

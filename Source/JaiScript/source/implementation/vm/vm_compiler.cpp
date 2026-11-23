@@ -4447,7 +4447,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		return tramp;
 	};
 	size_t no_boundary_cand = SIZE_MAX;   // a loop translated again without boundary operations (they left it too little work of its own)
-	size_t pinned_store_cand = SIZE_MAX;   // a loop translated again with these store sites refused: each writes a table an alias of the body takes elements of
+	size_t pinned_store_cand = SIZE_MAX;   // a loop translated again with these stores of a call's result refused: each writes a table an alias of the body takes elements of
 	std::vector<uint32_t> pinned_store_ips;
 	size_t arm_bail_cand = SIZE_MAX;   // a loop translated again with these statements bails: each was a boundary of an arm that then left at a bail
 	std::vector<uint32_t> arm_bail_ips;
@@ -5301,7 +5301,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// an overflow, a zero divisor or a shift out of range misses onto the general compound)
 				const fused_index_proto& fp = c.fused_index_protos[st.a];
 				if (!array_target(fp)) { refuse(chunk::cell_refusal_representation, ip); break; }
-				if (!fp.compound || pinned_store(ip) || (fp.store_value.const_index == k_invalid_u32 && fp.store_value.symbol == k_invalid_u32)) { refuse(chunk::cell_refusal_translation, ip); break; }
+				if (!fp.compound || (fp.store_value.const_index == k_invalid_u32 && fp.store_value.symbol == k_invalid_u32)) { refuse(chunk::cell_refusal_translation, ip); break; }
 				uint32_t sink;
 				const uint32_t vslot = store_value_slot(fp, ip);
 				if (fp.store_value.const_index == k_invalid_u32 && fp.store_value.slot == k_invalid_u32 && vslot == k_invalid_u32) { refuse(chunk::cell_refusal_representation, ip); break; }
@@ -5579,7 +5579,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// as a handle at the push, so no string is borrowed); the append is the push kernel's rows, anything they decline a miss
 				const uint32_t pidx = st.op == opcode::op_push_fused ? st.a : c.typed_sites[ip].orig.a;
 				const push_proto& pp = c.push_protos[pidx];
-				if (!c.builtin_indexed || pinned_store(ip) || pp.site >= c.call_sites.size() || c.call_sites[pp.site].bi_array == builtin_method_registries::k_no_builtin) { refuse(chunk::cell_refusal_translation, ip); break; }
+				if (!c.builtin_indexed || pp.site >= c.call_sites.size() || c.call_sites[pp.site].bi_array == builtin_method_registries::k_no_builtin) { refuse(chunk::cell_refusal_translation, ip); break; }
 				if (pp.converting_receiver) { refuse(chunk::cell_refusal_representation, ip); break; }   // the general form converts each value: a boundary, never a site the entry refuses
 				const bool env_receiver = env_scalar(pp.receiver);   // an environment array: resolved at entry through its lookup, as a load site's container
 				if (!env_receiver && (!pp.receiver.direct || pp.receiver.slot == k_invalid_u32 || pp.receiver.slot >= k_typed_slot_mask || pp.receiver.const_index != k_invalid_u32 || pp.receiver.member_node != k_invalid_u32 || pp.receiver.is_subscript())) { refuse(chunk::cell_refusal_representation, ip); break; }
@@ -6015,8 +6015,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		if (refusal == chunk::cell_refusal_none && cells.size() > chunk::k_cell_limit) { refuse(chunk::cell_refusal_too_many_cells, back); }
 		if (arm_bail_added && refusal == chunk::cell_refusal_none) { --cand; continue; }
 		if (refusal == chunk::cell_refusal_none && !line && !fn_mode && !alias_slots.empty()) {
-			// a store or a push site over the table an alias of the body takes elements of is refused by every entry (the alias pins its
-			// table against the block's stores): the statement is the general form's, so the loop is translated again with the site refused
+			// a call's result stored into the table an alias of the body takes elements of: every entry refuses a store site into a table an
+			// alias pins, and the statement was a boundary before its value landed in a temp, so the loop is translated again with it one
 			auto named = [](const fused_operand& o) { return o.const_index == k_invalid_u32 && o.member_node == k_invalid_u32 && !o.is_subscript() && (o.slot != k_invalid_u32 || o.symbol != k_invalid_u32); };
 			auto same_name = [&](const fused_operand& a, const fused_operand& b) {
 				if (!named(a) || !named(b) || a.slot != b.slot || a.load_flags != b.load_flags) return false;
@@ -6025,7 +6025,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			bool again = false;
 			for (size_t k = 0; k < ops.size(); ++k) {
 				const ir_op& o = ops[k];
-				const fused_operand* written = o.kind == ir::store && o.member == k_invalid_u32 ? &c.fused_index_protos[o.proto].container : o.kind == ir::push ? &c.push_protos[o.proto].receiver : nullptr;
+				const fused_operand* written = o.kind == ir::store && o.member == k_invalid_u32 && c.fused_index_protos[o.proto].value_taken ? &c.fused_index_protos[o.proto].container : nullptr;
 				if (!written) continue;
 				for (const ir_op& r : ops) {
 					if (r.kind != ir::rebind || r.container == chunk::k_iter_container || !same_name(*written, c.fused_index_protos[r.proto].container)) continue;

@@ -364,8 +364,10 @@ public:
 					string tag(string s, int n) { switch (n) { default: return s + to_string(n); } }
 					int peek(shared_ptr<Acc> other, var k) { switch (1) { default: return other.total + k; } }
 					int bump(int x) { switch (x) { default: total += 1; return x; } }
+					int shift(int x, string s) { switch (x) { default: GA[0] = GA[0] + 100; GS[0] = GS[0] + "!"; return x * 1000 + s.size(); } }
 				}
 				array<int> GA = [1, 2, 3, 4];
+				array<string> GS = ["ab", "cd"];
 				function run() -> string {
 					array<float> f = [0.5, 1.5];
 					array<string> s = ["x", "y"];
@@ -382,11 +384,16 @@ public:
 					out += to_string(acc.peek(hr[1], a[1])) + " ";
 					a[0] = 7;
 					out += to_string(acc.add(a[0], acc.bump(a[0]))) + " " + to_string(acc.total);
+					// the parameter is the element's value at the call: the callee writing the element does not reach it (the site's later
+					// calls are the ones a cached method row answers)
+					auto& gs = GS;
+					for (int r = 0; r < 3; ++r) { out += " " + to_string(acc.shift(a[0], gs[0])); }
+					out += " " + to_string(a[0]) + gs[0];
 					try { out += to_string(acc.add(a[7], 1)); } catch (e) { out += " [" + e + "]"; }
 					return out;
 				}
 				run();
-			)", "5 10 15 20 4.5 y1 42 35 35 [Array index 7 out of bounds for array of size 4]", "reference arguments of a method");
+			)", "5 10 15 20 4.5 y1 42 35 35 7002 107003 207004 307ab!!! [Array index 7 out of bounds for array of size 4]", "reference arguments of a method");
 		});
 
 		// a call from a typed loop (a cell block) into a callee that stays a call: its arguments are the block's values, its result lands in

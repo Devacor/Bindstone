@@ -6644,6 +6644,17 @@ op_status vm_backend::raw_int_arith(token_type op, script_int a, script_int b,
 	}
 }
 
+static JAI_FORCEINLINE bool raw_int_bitwise(token_type op, script_int a, script_int b, script_int& out) noexcept {
+	switch (op) {
+	case token_type::ampersand: out = a & b; return true;
+	case token_type::pipe: out = a | b; return true;
+	case token_type::caret: out = a ^ b; return true;
+	case token_type::left_shift: if (b < 0 || b > 63) return false; out = a << b; return true;
+	case token_type::right_shift: if (b < 0 || b > 63) return false; out = a >> b; return true;
+	default: return false;
+	}
+}
+
 // The fused index operand of a subscript read or store: a raw int folded from a pure int binary (and its left-spine chain), a
 // computed or resolved value, or the boxed tail's unfused stack ([pending,] container, accumulator, one op_binary per remaining
 // step) left for the caller's real op_index / op_index_store; a mid-op unwind leaves the unfused pair's stack and settles
@@ -6669,6 +6680,13 @@ JAI_FORCEINLINE op_status vm_backend::resolve_fused_index_operand(frame& f, cons
 				if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 					VM_TRY(raw_int_arith(bop, pl->unchecked_as_int(), pr->unchecked_as_int(), out.raw, out.have_raw));
 				}
+			}
+		} else if (!is_numeric_binary_op(bop) && !(operator_table_ && operator_table_->any())) {
+			// the int bitwise rows of binary_fused_compute, raw: no registered operator to consult, a shift outside 0..63 raises there
+			const script_value* pl = fused_cmp_operand(f, bp.left, f.ip * 3);
+			const script_value* pr = pl ? fused_cmp_operand(f, bp.right, f.ip * 3 + 1) : nullptr;
+			if (pr && pl->raw_storage_index() == script_value::TYPEID_INT && pr->raw_storage_index() == script_value::TYPEID_INT) {
+				out.have_raw = raw_int_bitwise(bop, pl->unchecked_as_int(), pr->unchecked_as_int(), out.raw);
 			}
 		}
 		// Left-spine chain: fold raw while rights stay int (fused_ident_value runs no

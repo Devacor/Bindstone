@@ -7322,16 +7322,16 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(oracle.find("throw:") == std::string::npos, "runs: " + oracle);
 		});
 		test("boundary_operations_keep_the_loop_a_block", [this]() {
-			// one statement the block does not take (a map store) stays its own cost: the loop is one block entry, the statement runs on the general
-			// form every iteration with the block parked, and the block resumes after it (the counters, not a clock, pin the shape)
+			// one statement the block does not take (a map store under a text key) stays its own cost: the loop is one block entry, the statement runs
+			// on the general form every iteration with the block parked, and the block resumes after it (the counters, not a clock, pin the shape)
 			const std::string defs =
-				"map<int, int> m = {};\n"
-				"function tail_store() -> int { int s = 0; for (int i = 0; i < 1000; ++i) { s = (s + i * 3) % 1000003; s = s ^ (i & 255); m[i & 7] = s; } return s; }\n"
-				"function mid_store() -> int { int s = 0; int t = 0; for (int i = 0; i < 1000; ++i) { s = s + i; m[i & 3] = s; t = t + s * 2; } return t; }\n"
-				"function while_store() -> int { int s = 0; int i = 0; while (i < 1000) { s = s + i; m[i & 3] = s + 1; m[(i + 1) & 3] = s; i = i + 1; } return s; }\n"
-				"function writes_cell() -> int { int s = 1; int t = 0; for (int i = 0; i < 200; ++i) { m[i & 3] = i; s = m[i & 3] + s; t = t + s * 3; t = t ^ (i & 7); } return t; }\n"
-				"function thin() -> int { int t = 0; for (int i = 0; i < 300; ++i) { m[i & 3] = i + t; } return m[2]; }\n";
-			const std::string src = defs + "to_string(tail_store()) + \" \" + to_string(mid_store()) + \" \" + to_string(while_store()) + \" \" + to_string(writes_cell()) + \" \" + to_string(thin()) + \" \" + to_string(m[1]);";
+				"map<string, int> m = {};\n"
+				"function tail_store() -> int { int s = 0; for (int i = 0; i < 1000; ++i) { s = (s + i * 3) % 1000003; s = s ^ (i & 255); m[\"a\"] = s; } return s; }\n"
+				"function mid_store() -> int { int s = 0; int t = 0; for (int i = 0; i < 1000; ++i) { s = s + i; m[\"b\"] = s; t = t + s * 2; } return t; }\n"
+				"function while_store() -> int { int s = 0; int i = 0; while (i < 1000) { s = s + i; m[\"c\"] = s + 1; m[\"d\"] = s; i = i + 1; } return s; }\n"
+				"function writes_cell() -> int { int s = 1; int t = 0; for (int i = 0; i < 200; ++i) { m[\"e\"] = i; s = m[\"e\"] + s; t = t + s * 3; t = t ^ (i & 7); } return t; }\n"
+				"function thin() -> int { int t = 0; for (int i = 0; i < 300; ++i) { m[\"f\"] = i + t; } return m[\"f\"]; }\n";
+			const std::string src = defs + "to_string(tail_store()) + \" \" + to_string(mid_store()) + \" \" + to_string(while_store()) + \" \" + to_string(writes_cell()) + \" \" + to_string(thin()) + \" \" + to_string(m[\"d\"]);";
 			const std::string oracle = run_on(false, src);
 			check_true(oracle.find("throw") == std::string::npos, "the interpreter's answer: " + oracle);
 			both(src, oracle, "boundary operations");
@@ -7892,16 +7892,17 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			// not resume (the general form takes the inner loop with its state); a range-for with an alias
 			const std::string src =
 				"map<int, var> m = {};\n"
+				"map<string, var> named = {};\n"
 				"function kind_change() -> string { var v = 0; int n = 0; for (int i = 0; i < 20; ++i) { v = v + 1; n = n + 1; if (i == 9) { m[0] = 1; v = v * 1.5; } } return to_string(v) + \" \" + to_string(n); }\n"
 				"function kind_change_inner() -> string { var v = 1.5; int n = 0; for (int i = 0; i < 3; ++i) { for (int j = 0; j < 3; ++j) { auto w = v; v = [i]; var k = 7; n = n + k; } } return to_string(v) + \" \" + to_string(n); }\n"
-				"function raises(int at) -> int { int s = 0; for (int i = 0; i < 20; ++i) { s = s + i; m[i & 3] = 100 / (i - at); s = s + 1; } return s; }\n"
-				"function nested() -> int { int t = 0; for (int j = 0; j < 5; ++j) { int s = 0; for (int i = 0; i < 10; ++i) { s = s + i * j; m[i & 1] = s; } t = t + s; } return t; }\n"
+				"function raises(int at) -> int { int s = 0; for (int i = 0; i < 20; ++i) { s = s + i; named[\"r\"] = 100 / (i - at); s = s + 1; } return s; }\n"
+				"function nested() -> int { int t = 0; for (int j = 0; j < 5; ++j) { int s = 0; for (int i = 0; i < 10; ++i) { s = s + i * j; named[\"n\"] = s; } t = t + s; } return t; }\n"
 				"class P { int x = 0; }\n"
 				"array<P> ps = [P(), P(), P()];\n"
-				"function aliases() -> int { int s = 0; for (int r = 0; r < 4; ++r) { for (auto& p : ps) { p.x = p.x + r; m[p.x & 3] = p.x; s = s + p.x; } } return s; }\n"
+				"function aliases() -> int { int s = 0; for (int r = 0; r < 4; ++r) { for (auto& p : ps) { p.x = p.x + r; named[\"p\"] = p.x; s = s + p.x; } } return s; }\n"
 				"string out = kind_change() + \" \" + kind_change_inner();\n"
 				"try { out += \" \" + to_string(raises(7)); } catch (e) { out += \" caught:\" + e; }\n"
-				"out += \" \" + to_string(raises(100)) + \" \" + to_string(nested()) + \" \" + to_string(aliases()) + \" \" + to_string(m[1]);\n"
+				"out += \" \" + to_string(raises(100)) + \" \" + to_string(nested()) + \" \" + to_string(aliases()) + \" \" + to_string(named[\"n\"]);\n"
 				"out;";
 			const std::string oracle = run_on(false, src);
 			check_true(oracle.find("caught:") != std::string::npos, "the interpreter's answer: " + oracle);

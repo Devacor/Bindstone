@@ -3560,6 +3560,20 @@ static bool is_index_chain_arith(token_type op) {
 	}
 }
 
+// the operators a block's index fold computes over int cells (typed_int_index_row's rows)
+static bool is_index_fold_op(token_type op) {
+	switch (op) {
+	case token_type::ampersand:
+	case token_type::pipe:
+	case token_type::caret:
+	case token_type::left_shift:
+	case token_type::right_shift:
+		return true;
+	default:
+		return is_index_chain_arith(op);
+	}
+}
+
 // Left-spine walk for chained computed indexes (((a op b) op c) op d …): collects the
 // spine outermost-first. Descends while the step is arithmetic with an ident/literal
 // right and the left is another candidate binary; spine[depth-1] is the innermost node
@@ -4663,7 +4677,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (fp.index_binary == k_invalid_u32) return value(op, fp.index, kint, static_cast<uint32_t>(ip * 3 + 1), ip, sink);   // the general read's index role: ip * 3 is its container's
 			if (fp.index_binary >= c.fused_binary_protos.size()) return false;
 			const fused_binary_proto& bp = c.fused_binary_protos[fp.index_binary];
-			bool ok = is_index_chain_arith(static_cast<token_type>(bp.op)) && value(op, bp.left, kint, static_cast<uint32_t>(ip * 3), ip, sink) && value(op, bp.right, kint, static_cast<uint32_t>(ip * 3 + 1), ip, sink);
+			bool ok = is_index_fold_op(static_cast<token_type>(bp.op)) && value(op, bp.left, kint, static_cast<uint32_t>(ip * 3), ip, sink) && value(op, bp.right, kint, static_cast<uint32_t>(ip * 3 + 1), ip, sink);
 			for (const uint32_t step : fp.index_chain_ext) {
 				ok = ok && step < c.fused_binary_protos.size() && is_index_chain_arith(static_cast<token_type>(c.fused_binary_protos[step].op)) && value(op, c.fused_binary_protos[step].right, kint, static_cast<uint32_t>(ip * 3 + 1), ip, sink);
 			}

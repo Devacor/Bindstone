@@ -12,6 +12,7 @@
 #include "commands.h"
 #include "dock.h"
 #include "focus.h"
+#include "keyBindings.h"
 #include "theme.h"
 
 namespace Workbench {
@@ -22,16 +23,17 @@ namespace Workbench {
 	// The Select tool: a press on a corner picks it, on a triangle picks its corners, on open scene starts a box
 	// (Shift adds). A drag moves what is picked. Ctrl+press puts a corner on an edge, inside a triangle, or out in
 	// the open joined to the selected outside edge.
-	// Keys: G move, R rotate, S scale (X or Y keeps a move on one axis; a press or Enter keeps, Esc or a right
-	// press undoes), E extrude, F fill, X or Delete remove, M merge, Shift+D duplicate, A all or none, L island under
-	// the pointer, C colour the selection, 1 to 4 the tools, Esc leaves.
+	// Keys (standard bindings, each changeable in Settings, KeyBindings): G move, R rotate, S scale (X or Y keeps a
+	// move on one axis; a press or Enter keeps, Esc or a right press undoes), E extrude, F fill, X or Delete remove, M
+	// merge, Shift+D duplicate, A all or none, L island under the pointer, C colour the selection, 1 to 4 the tools.
+	// Esc, Enter and Backspace are fixed: Esc leaves.
 	// Polygon: presses lay an outline, Enter or a press on its first corner fills it. Ribbon: presses lay a path, Enter
 	// makes a strip along it. Paint: drag to blend the corners under the brush toward the colour.
 	class MeshEditor {
 	public:
 		enum class Tool { SELECT, POLYGON, RIBBON, PAINT };
 
-		MeshEditor(const std::shared_ptr<MV::Scene::Node>& a_overlay, const std::shared_ptr<MV::Scene::Node>& a_barHost, MV::Services& a_services, const Theme& a_theme, FocusRouter& a_focus, CommandHistory& a_history, MV::TapDevice& a_mouse);
+		MeshEditor(const std::shared_ptr<MV::Scene::Node>& a_overlay, const std::shared_ptr<MV::Scene::Node>& a_barHost, MV::Services& a_services, const Theme& a_theme, FocusRouter& a_focus, CommandHistory& a_history, MV::TapDevice& a_mouse, const KeyBindings& a_keys);
 		~MeshEditor();
 
 		void begin(const std::shared_ptr<MV::Scene::Drawable>& a_target);
@@ -111,6 +113,7 @@ namespace Workbench {
 		FocusRouter& focus;
 		CommandHistory& history;
 		MV::TapDevice& mouse;
+		const KeyBindings& keys;
 		std::shared_ptr<MV::Scene::Node> overlay;
 		std::shared_ptr<MV::Scene::Node> drawing;
 		std::shared_ptr<MV::Scene::Node> barHost;

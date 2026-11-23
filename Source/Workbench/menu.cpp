@@ -114,11 +114,13 @@ namespace Workbench {
 
 		float labelColumn = 0.0f;
 		float shortcutColumn = 0.0f;
+		std::vector<std::string> shortcuts;
 		for (auto&& item : a_items) {
 			rowLabels.push_back(item.liveLabel ? item.liveLabel() : item.label);
 			rowsEnabled.push_back(!item.enabled || item.enabled());
+			shortcuts.push_back(item.liveShortcut ? item.liveShortcut() : item.shortcut);
 			labelColumn = std::max(labelColumn, textWidth(rowLabels.back()));
-			shortcutColumn = std::max(shortcutColumn, textWidth(item.shortcut));
+			shortcutColumn = std::max(shortcutColumn, textWidth(shortcuts.back()));
 		}
 		const float inset = theme.px(4.0f);
 		const float textInset = theme.px(12.0f);
@@ -161,8 +163,8 @@ namespace Workbench {
 			std::string tint { enabled ? std::string() : disabledText };
 			auto label = makeLabel(row, services, theme, "label", MV::size(rowWidth - textInset * 2.0f, rowSize.height), tint + rowLabels[static_cast<size_t>(rowIndex)]);
 			label->owner()->position(MV::point(textInset, 0.0f));
-			if (!item.shortcut.empty()) {
-				auto shortcut = makeLabel(row, services, theme, "shortcut", MV::size(rowWidth - textInset * 2.0f, rowSize.height), tint + item.shortcut);
+			if (const auto& shortcutText = shortcuts[static_cast<size_t>(rowIndex)]; !shortcutText.empty()) {
+				auto shortcut = makeLabel(row, services, theme, "shortcut", MV::size(rowWidth - textInset * 2.0f, rowSize.height), tint + shortcutText);
 				shortcut->owner()->position(MV::point(textInset, 0.0f));
 				shortcut->justification(MV::TextJustification::RIGHT);
 			}

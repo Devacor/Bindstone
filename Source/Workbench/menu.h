@@ -19,6 +19,8 @@ namespace Workbench {
 		// Read each time the menu opens: a label that follows the editor's state, and whether the row can be chosen.
 		std::function<std::string()> liveLabel;
 		std::function<bool()> enabled;
+		// Read each time the menu opens, in place of shortcut: the key bound to the row's action now.
+		std::function<std::string()> liveShortcut;
 	};
 
 	// The menu titles in the title bar and the one dropdown open beneath them. Moving across the titles while a menu

@@ -9,6 +9,7 @@
 #include "dock.h"
 #include "gizmos.h"
 #include "meshEditor.h"
+#include "keyBindings.h"
 #include "sceneTreePanel.h"
 #include "inspector.h"
 #include "menu.h"
@@ -157,6 +158,8 @@ namespace Workbench {
 		// Drawable and the node menu's Edit Mesh come here.
 		bool editMesh(const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
 		MeshEditor& meshEdit() { return *meshEditor; }
+		// The keyboard shortcuts, the editor's and the mesh editor's: changed in Settings, kept in the settings file.
+		KeyBindings& keys() { return keyBindings; }
 		SceneToolbar& sceneTools() { return *sceneToolbar; }
 		SceneGrid& grid() { return *sceneGrid; }
 		MenuBar& menus() { return *menuBar; }
@@ -186,7 +189,8 @@ namespace Workbench {
 		void handleInput();
 		void render();
 		void updateCameraKeys(double a_dt);
-		bool handleShortcutKey(SDL_Keycode a_key);
+		bool runAction(const std::string& a_action);
+		std::function<std::string()> keyShortcutText(const std::string& a_action);
 		bool handleFocusKey(const SDL_Event& a_event);
 		void openContextMenu(const MV::Point<int>& a_screenPoint);
 		std::vector<MenuItem> nodeContextItems();
@@ -228,6 +232,7 @@ namespace Workbench {
 		void guarded(const char* a_stage, Step&& a_step);
 
 		Managers& managers;
+		KeyBindings keyBindings;
 		MV::Scene::BindSnapTracking bindSnapTracking;
 		std::map<std::string, std::filesystem::file_time_type> bindSnapWriteTimes;
 		double bindSnapCheckWait = 0.0;

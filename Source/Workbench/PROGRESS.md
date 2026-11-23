@@ -1029,6 +1029,26 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   dissolving a corner (taking it out but keeping the triangles round it as one), the second texture slot, shader
   and blend in the bar, and the legacy editor's waterfall shapes as presets of the ribbon.
 
+## Increment 51: key bindings in Settings (2026-11-23)
+- Dev: the mesh editor's Blender keys should be editable, in a key bindings panel in Settings.
+- `KeyBindings` (`keyBindings.h`) holds every shortcut by action, with the key it starts with, in groups: the
+  Workbench (tools, frame, delete, duplicate, undo, redo and a second redo, open, save, save as), the mesh editor
+  (its tools and operations) and the mesh editor while moving (the X and Y axis locks). `KeyChord` is a key with
+  Ctrl, Shift and Alt, written as `Ctrl+Shift+Z` with SDL's key names.
+- `App::handleInput` and `MeshEditor::key` ask the table which action a key-down is; Esc, Enter and Backspace stay
+  fixed in the mesh editor, and a text field being typed in still takes its keys first. A held Ctrl chord repeats;
+  a bare key acts once per press. Menus show the key bound now (`MenuItem::liveShortcut`).
+- Settings lists the bindings under the other settings, by group. A press on a binding's key waits for the next
+  key with its modifiers (a modifier alone keeps waiting; Esc, a mouse press anywhere or Settings closing gives up);
+  Reset beside a changed binding puts back its
+  standard key, and Reset all puts back every one. A key another action in the same group already has is taken, both
+  are marked `!`, and the Console says which.
+- The settings file keeps `key.<action> = <chord>` for each binding that is not its standard key and reads it back.
+- The text fields' own Ctrl+X/C/V/A and the focus keys (Tab, arrows, Enter, Space) are not in the table.
+- Self-test (`RunKeyBindingsSelfTest`, alone with `KEYS_ONLY=1`): Duplicate rebound by capture to Ctrl+K, Ctrl+D no
+  longer duplicating and Ctrl+K doing it, the settings file keeping and restoring it, Esc and a press giving up, a
+  clash warning, and Reset all by its button. Tab through Settings now reaches the binding keys after the fields.
+
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.
 - Authoring verbs still only in Source/Editor: the component kinds Add Component does not list — old-editor

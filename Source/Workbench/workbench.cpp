@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <optional>
 #include <thread>
 #include <vector>
@@ -237,6 +238,8 @@ namespace Workbench {
 			tooltips->dragNote("");
 		};
 		inspectorPanel->parallaxPreviewActive = [this]() { return parallaxPreviewing(); };
+		addStandardBindings(keyBindings);
+		keyBindings.onChanged = [this]() { settingsChanged(); };
 		std::vector<SettingsPanel::Row> settingRows {
 			{ "Undo steps", [this]() { return std::to_string(undoSteps()); }, [this](const std::string& a_text) {
 				if (auto steps = numberFrom(a_text); steps && *steps >= 1.0f) {
@@ -264,7 +267,16 @@ namespace Workbench {
 				}
 			} }
 		};
-		settingsPanel = static_cast<SettingsPanel*>(dock->registerPanel(std::make_shared<SettingsPanel>(std::move(settingRows))));
+		settingsPanel = static_cast<SettingsPanel*>(dock->registerPanel(std::make_shared<SettingsPanel>(std::move(settingRows), &keyBindings)));
+		settingsPanel->onWarning = [this](const std::string& a_message) { messageLog->add(MessageLevel::WARNING, a_message); };
+		// a press anywhere stops waiting for a key to bind; on a binding's own key it then waits afresh
+		for (auto* pressed : { &mouse.onLeftMouseDown, &mouse.onRightMouseDown, &mouse.onMiddleMouseDown }) {
+			panReceivers.push_back(pressed->connect([this](MV::TapDevice&) {
+				if (settingsPanel) {
+					settingsPanel->cancelCapture();
+				}
+			}));
+		}
 		consolePanel = static_cast<ConsolePanel*>(dock->registerPanel(std::make_shared<ConsolePanel>(messageLog)));
 		statusBar = uiRoot->make("statusBar");
 		Panel* viewportPanel = dock->registerPanel(std::move(viewport));
@@ -288,7 +300,7 @@ namespace Workbench {
 		toolbarActions.onFrame = [this]() { frameSelectionInViewport(); };
 		sceneToolbar = std::make_unique<SceneToolbar>(uiRoot->make("sceneToolbar"), managers.services, theme, focusRouter, history, toolbarActions);
 		dock->floatingHost(uiRoot->make("dockFloating"));
-		meshEditor = std::make_unique<MeshEditor>(gizmoOverlay, uiRoot->make("meshEditorBar"), managers.services, theme, focusRouter, history, mouse);
+		meshEditor = std::make_unique<MeshEditor>(gizmoOverlay, uiRoot->make("meshEditorBar"), managers.services, theme, focusRouter, history, mouse, keyBindings);
 		gizmos->pointerOverScene = [this](const MV::Point<int>& a_screenPoint) {
 			auto worldPoint = managers.renderer.worldFromScreen(a_screenPoint);
 			return dock->viewportAt(worldPoint) && !sceneToolbar->contains(worldPoint) && !meshEditor->barContains(worldPoint);
@@ -1323,6 +1335,9 @@ namespace Workbench {
 				controller.cursor(trimmed(line.substr(equals + 1)) == "on");
 				continue;
 			}
+			if (keyBindings.read(name, trimmed(line.substr(equals + 1)))) {
+				continue;
+			}
 			auto value = numberFrom(trimmed(line.substr(equals + 1)));
 			if (!value || *value <= 0.0f) {
 				continue;
@@ -1355,6 +1370,7 @@ namespace Workbench {
 		file << "rotationSnap = " << formatNumberCompact(rotationSnap()) << "\n";
 		file << "controllerCursor = " << (controllerCursor() ? "on" : "off") << "\n";
 		file << "layout = " << dock->describeLayout() << "\n";
+		keyBindings.write(file);
 		if (!file) {
 			reportError("the settings did not save to " + settingsPath);
 		}
@@ -1412,20 +1428,21 @@ namespace Workbench {
 		auto menuHost = bar->make("menus");
 		menuHost->position(MV::point(theme.px(6.0f), 0.0f));
 		menuBar = std::make_unique<MenuBar>(menuHost, uiRoot->make("menuPopups"), managers.services, theme);
+		auto keyText = [this](const char* a_action) { return keyShortcutText(a_action); };
 		menuBar->add("File", {
 			{ "New Scene", "", [this]() { requestNewScene(); } },
-			{ "Open...", "Ctrl+O", [this]() { requestOpenScene(); } },
-			{ "Save", "Ctrl+S", [this]() { saveCurrentScene(); }, true },
-			{ "Save As...", "Ctrl+Shift+S", [this]() { saveSceneWithDialog(); } },
+			{ "Open...", "", [this]() { requestOpenScene(); }, false, {}, {}, keyText("file.open") },
+			{ "Save", "", [this]() { saveCurrentScene(); }, true, {}, {}, keyText("file.save") },
+			{ "Save As...", "", [this]() { saveSceneWithDialog(); }, false, {}, {}, keyText("file.saveAs") },
 			{ "Exit", "", [this]() { requestExit(); }, true } });
 		auto named = [](const char* a_verb, const std::string& a_label) {
 			return a_label.empty() ? std::string(a_verb) : a_verb + (" " + a_label);
 		};
 		menuBar->add("Edit", {
-			{ "Undo", "Ctrl+Z", [this]() { history.undo(); }, false, [this, named]() { return named("Undo", history.undoLabel()); }, [this]() { return history.canUndo(); } },
-			{ "Redo", "Ctrl+Y", [this]() { history.redo(); }, false, [this, named]() { return named("Redo", history.redoLabel()); }, [this]() { return history.canRedo(); } },
-			{ "Duplicate", "Ctrl+D", [this]() { duplicateSelected(); }, true, {}, [this]() { return selectionIsRemovable(); } },
-			{ "Delete", "Del", [this]() { deleteSelected(); }, false, {}, [this]() { return selectionIsRemovable(); } },
+			{ "Undo", "", [this]() { history.undo(); }, false, [this, named]() { return named("Undo", history.undoLabel()); }, [this]() { return history.canUndo(); }, keyText("edit.undo") },
+			{ "Redo", "", [this]() { history.redo(); }, false, [this, named]() { return named("Redo", history.redoLabel()); }, [this]() { return history.canRedo(); }, keyText("edit.redo") },
+			{ "Duplicate", "", [this]() { duplicateSelected(); }, true, {}, [this]() { return selectionIsRemovable(); }, keyText("node.duplicate") },
+			{ "Delete", "", [this]() { deleteSelected(); }, false, {}, [this]() { return selectionIsRemovable(); }, keyText("node.delete") },
 			{ "History", "", [this]() { sceneToolbar->historyShown(!sceneToolbar->historyShown()); }, true, [this]() { return std::string(sceneToolbar->historyShown() ? "Hide History" : "Show History"); } },
 			{ "Create Child Node", "", [this]() { createChildNode(); }, true } });
 		menuBar->add("Settings", {
@@ -1887,6 +1904,9 @@ namespace Workbench {
 			}
 		}
 		gizmos->update();
+		if (settingsPanel && settingsPanel->capturing() && !dock->open(settingsPanel)) {
+			settingsPanel->cancelCapture();
+		}
 		meshEditor->layout(dock->viewportRect());
 		meshEditor->update();
 
@@ -1973,12 +1993,20 @@ namespace Workbench {
 		menuBar->openContext(a_screenPoint, items);
 	}
 
+	std::function<std::string()> App::keyShortcutText(const std::string& a_action) {
+		return [this, a_action]() {
+			auto chord = keyBindings.chord(a_action);
+			return chord.empty() ? std::string() : chord.text();
+		};
+	}
+
 	std::vector<MenuItem> App::nodeContextItems() {
+		auto keyText = [this](const char* a_action) { return keyShortcutText(a_action); };
 		std::vector<MenuItem> result {
 			{ "Create Child", "", [this]() { createChildNode(); } },
-			{ "Frame", "F", [this]() { frameSelectionInViewport(); }, true, {}, [this]() { return static_cast<bool>(selectedNode); } },
-			{ "Duplicate", "Ctrl+D", [this]() { duplicateSelected(); }, true, {}, [this]() { return selectionIsRemovable(); } },
-			{ "Delete", "Del", [this]() { deleteSelected(); }, false, {}, [this]() { return selectionIsRemovable(); } } };
+			{ "Frame", "", [this]() { frameSelectionInViewport(); }, true, {}, [this]() { return static_cast<bool>(selectedNode); }, keyText("view.frame") },
+			{ "Duplicate", "", [this]() { duplicateSelected(); }, true, {}, [this]() { return selectionIsRemovable(); }, keyText("node.duplicate") },
+			{ "Delete", "", [this]() { deleteSelected(); }, false, {}, [this]() { return selectionIsRemovable(); }, keyText("node.delete") } };
 		if (selectedNode) {
 			for (auto&& variant : selectedNode->components<MV::Scene::Drawable>(false)) {
 				auto drawable = std::visit([](const auto& a_safe) { return meshEditable(a_safe.self()); }, variant);
@@ -2069,29 +2097,26 @@ namespace Workbench {
 		return false;
 	}
 
-	bool App::handleShortcutKey(SDL_Keycode a_key) {
-		switch (a_key) {
-			case SDLK_q:
-				gizmoTool(Tool::SELECT);
-			break;
-			case SDLK_w:
-				gizmoTool(Tool::MOVE);
-			break;
-			case SDLK_e:
-				gizmoTool(Tool::ROTATE);
-			break;
-			case SDLK_r:
-				gizmoTool(Tool::SCALE);
-			break;
-			case SDLK_f:
-				frameSelectionInViewport();
-			break;
-			case SDLK_DELETE:
-				deleteSelected();
-			break;
-			default:
-				return false;
+	bool App::runAction(const std::string& a_action) {
+		static const std::map<std::string, std::function<void(App&)>> actions {
+			{ "tool.select", [](App& a_app) { a_app.gizmoTool(Tool::SELECT); } },
+			{ "tool.move", [](App& a_app) { a_app.gizmoTool(Tool::MOVE); } },
+			{ "tool.rotate", [](App& a_app) { a_app.gizmoTool(Tool::ROTATE); } },
+			{ "tool.scale", [](App& a_app) { a_app.gizmoTool(Tool::SCALE); } },
+			{ "view.frame", [](App& a_app) { a_app.frameSelectionInViewport(); } },
+			{ "node.delete", [](App& a_app) { a_app.deleteSelected(); } },
+			{ "node.duplicate", [](App& a_app) { a_app.duplicateSelected(); } },
+			{ "edit.undo", [](App& a_app) { a_app.history.undo(); } },
+			{ "edit.redo", [](App& a_app) { a_app.history.redo(); } },
+			{ "edit.redoAlternate", [](App& a_app) { a_app.history.redo(); } },
+			{ "file.open", [](App& a_app) { a_app.requestOpenScene(); } },
+			{ "file.save", [](App& a_app) { a_app.saveCurrentScene(); } },
+			{ "file.saveAs", [](App& a_app) { a_app.saveSceneWithDialog(); } } };
+		auto found = actions.find(a_action);
+		if (found == actions.end()) {
+			return false;
 		}
+		found->second(*this);
 		return true;
 	}
 
@@ -2103,6 +2128,10 @@ namespace Workbench {
 			}
 			if (event.type == SDL_QUIT) {
 				requestExit();
+				continue;
+			}
+			// a key being bound in Settings is not also a shortcut
+			if (settingsPanel && settingsPanel->capturing() && settingsPanel->captureKey(event)) {
 				continue;
 			}
 			// a press on a field's own menu is not a press away from the field
@@ -2118,38 +2147,11 @@ namespace Workbench {
 			if (!onContextMenu && focusRouter.handleEvent(event)) {
 				continue;
 			}
-			if (event.type == SDL_KEYDOWN && (SDL_GetModState() & KMOD_CTRL)) {
-				if (event.key.keysym.sym == SDLK_s) {
-					if (SDL_GetModState() & KMOD_SHIFT) {
-						saveSceneWithDialog();
-					} else {
-						saveCurrentScene();
-					}
+			if (auto action = keyBindings.actionFor("Workbench", event)) {
+				// a held Ctrl chord repeats (undo, redo); a bare key acts once per press
+				if ((keyBindings.chord(*action).control || !event.key.repeat) && runAction(*action)) {
 					continue;
 				}
-				if (event.key.keysym.sym == SDLK_o) {
-					requestOpenScene();
-					continue;
-				}
-				if (event.key.keysym.sym == SDLK_d) {
-					duplicateSelected();
-					continue;
-				}
-				if (event.key.keysym.sym == SDLK_z) {
-					if (SDL_GetModState() & KMOD_SHIFT) {
-						history.redo();
-					} else {
-						history.undo();
-					}
-					continue;
-				}
-				if (event.key.keysym.sym == SDLK_y) {
-					history.redo();
-					continue;
-				}
-			}
-			if (event.type == SDL_KEYDOWN && !event.key.repeat && !(SDL_GetModState() & (KMOD_CTRL | KMOD_ALT | KMOD_GUI)) && handleShortcutKey(event.key.keysym.sym)) {
-				continue;
 			}
 			if (event.type == SDL_MOUSEWHEEL) {
 				auto worldPoint = managers.renderer.worldFromScreen(mouse.position());

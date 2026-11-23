@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <map>
 
 namespace Workbench {
 
@@ -84,12 +85,13 @@ namespace Workbench {
 		}
 	}
 
-	MeshEditor::MeshEditor(const std::shared_ptr<MV::Scene::Node>& a_overlay, const std::shared_ptr<MV::Scene::Node>& a_barHost, MV::Services& a_services, const Theme& a_theme, FocusRouter& a_focus, CommandHistory& a_history, MV::TapDevice& a_mouse) :
+	MeshEditor::MeshEditor(const std::shared_ptr<MV::Scene::Node>& a_overlay, const std::shared_ptr<MV::Scene::Node>& a_barHost, MV::Services& a_services, const Theme& a_theme, FocusRouter& a_focus, CommandHistory& a_history, MV::TapDevice& a_mouse, const KeyBindings& a_keys) :
 		services(a_services),
 		theme(a_theme),
 		focus(a_focus),
 		history(a_history),
 		mouse(a_mouse),
+		keys(a_keys),
 		overlay(a_overlay->make("meshEditor")),
 		barHost(a_barHost) {
 
@@ -596,102 +598,79 @@ namespace Workbench {
 		if (!active() || a_event.type != SDL_KEYDOWN) {
 			return false;
 		}
-		const auto modifiers = SDL_GetModState();
-		if (modifiers & (KMOD_CTRL | KMOD_ALT | KMOD_GUI)) {
-			return false;
-		}
 		const auto symbol = a_event.key.keysym.sym;
+		const bool plain = (SDL_GetModState() & (KMOD_CTRL | KMOD_ALT | KMOD_GUI)) == 0;
 		if (modal == Modal::GRAB || modal == Modal::ROTATE || modal == Modal::SCALE || modal == Modal::EXTRUDE) {
-			if (symbol == SDLK_ESCAPE) {
+			if (plain && symbol == SDLK_ESCAPE) {
 				cancelModal();
-			} else if (symbol == SDLK_RETURN || symbol == SDLK_KP_ENTER) {
+			} else if (plain && (symbol == SDLK_RETURN || symbol == SDLK_KP_ENTER)) {
 				confirmModal();
-			} else if (symbol == SDLK_x || symbol == SDLK_y) {
-				const int wanted = symbol == SDLK_x ? 1 : 2;
+			} else if (keys.matches("mesh.lockX", a_event) || keys.matches("mesh.lockY", a_event)) {
+				const int wanted = keys.matches("mesh.lockX", a_event) ? 1 : 2;
 				axisLock = axisLock == wanted ? 0 : wanted;
 				applyModal();
 			}
 			return true;
 		}
-		if (a_event.key.repeat) {
-			return true;
-		}
-		switch (symbol) {
-			case SDLK_ESCAPE:
+		if (plain && (symbol == SDLK_ESCAPE || symbol == SDLK_RETURN || symbol == SDLK_KP_ENTER || symbol == SDLK_BACKSPACE)) {
+			if (a_event.key.repeat) {
+				return true;
+			}
+			if (symbol == SDLK_ESCAPE) {
 				if (!outline.empty()) {
 					outline.clear();
 				} else {
 					end();
 				}
-			break;
-			case SDLK_RETURN:
-			case SDLK_KP_ENTER:
-				finishOutline();
-			break;
-			case SDLK_BACKSPACE:
+			} else if (symbol == SDLK_BACKSPACE) {
 				if (!outline.empty()) {
 					outline.pop_back();
 				}
-			break;
-			case SDLK_1:
-				tool(Tool::SELECT);
-			break;
-			case SDLK_2:
-				tool(Tool::POLYGON);
-			break;
-			case SDLK_3:
-				tool(Tool::RIBBON);
-			break;
-			case SDLK_4:
-				tool(Tool::PAINT);
-			break;
-			case SDLK_g:
-				startModal('g');
-			break;
-			case SDLK_r:
-				startModal('r');
-			break;
-			case SDLK_s:
-				startModal('s');
-			break;
-			case SDLK_e:
-				startModal('e');
-			break;
-			case SDLK_f:
-				fill();
-			break;
-			case SDLK_x:
-			case SDLK_DELETE:
-				removeSelected();
-			break;
-			case SDLK_m:
-				merge();
-			break;
-			case SDLK_c:
-				colorSelection();
-			break;
-			case SDLK_d:
-				if (modifiers & KMOD_SHIFT) {
-					duplicate();
-				}
-			break;
-			case SDLK_a:
-				if (selected.size() == target->pointSize()) {
-					selected.clear();
-				} else {
-					selected = Mesh::all(read());
-				}
-			break;
-			case SDLK_l:
-				if (auto corner = cornerUnder(mouse.position())) {
-					auto piece = Mesh::island(read(), *corner, settings.weld);
-					selected.insert(piece.begin(), piece.end());
-				}
-			break;
-			default:
-				return false;
+			} else {
+				finishOutline();
+			}
+			return true;
 		}
-		return true;
+		auto action = keys.actionFor("Mesh editor", a_event);
+		if (!action) {
+			return false;
+		}
+		if (a_event.key.repeat) {
+			return true;
+		}
+		static const std::map<std::string, std::function<void(MeshEditor&)>> actions {
+			{ "mesh.toolSelect", [](MeshEditor& a_editor) { a_editor.tool(Tool::SELECT); } },
+			{ "mesh.toolPolygon", [](MeshEditor& a_editor) { a_editor.tool(Tool::POLYGON); } },
+			{ "mesh.toolRibbon", [](MeshEditor& a_editor) { a_editor.tool(Tool::RIBBON); } },
+			{ "mesh.toolPaint", [](MeshEditor& a_editor) { a_editor.tool(Tool::PAINT); } },
+			{ "mesh.move", [](MeshEditor& a_editor) { a_editor.startModal('g'); } },
+			{ "mesh.rotate", [](MeshEditor& a_editor) { a_editor.startModal('r'); } },
+			{ "mesh.scale", [](MeshEditor& a_editor) { a_editor.startModal('s'); } },
+			{ "mesh.extrude", [](MeshEditor& a_editor) { a_editor.startModal('e'); } },
+			{ "mesh.fill", [](MeshEditor& a_editor) { a_editor.fill(); } },
+			{ "mesh.remove", [](MeshEditor& a_editor) { a_editor.removeSelected(); } },
+			{ "mesh.removeAlternate", [](MeshEditor& a_editor) { a_editor.removeSelected(); } },
+			{ "mesh.merge", [](MeshEditor& a_editor) { a_editor.merge(); } },
+			{ "mesh.duplicate", [](MeshEditor& a_editor) { a_editor.duplicate(); } },
+			{ "mesh.colour", [](MeshEditor& a_editor) { a_editor.colorSelection(); } },
+			{ "mesh.all", [](MeshEditor& a_editor) {
+				if (a_editor.selected.size() == a_editor.target->pointSize()) {
+					a_editor.selected.clear();
+				} else {
+					a_editor.selected = Mesh::all(a_editor.read());
+				}
+			} },
+			{ "mesh.island", [](MeshEditor& a_editor) {
+				if (auto corner = a_editor.cornerUnder(a_editor.mouse.position())) {
+					auto piece = Mesh::island(a_editor.read(), *corner, a_editor.settings.weld);
+					a_editor.selected.insert(piece.begin(), piece.end());
+				}
+			} } };
+		if (auto found = actions.find(*action); found != actions.end()) {
+			found->second(*this);
+			return true;
+		}
+		return false;
 	}
 
 	void MeshEditor::buildBar() {

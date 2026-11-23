@@ -457,6 +457,97 @@ static std::string describeJsonDifference(const std::string& a_first, const std:
 // -workbenchgizmoshot = shot that loads map.scene and selects a node so the gizmos render).
 // -workbenchselftest = drives a load, save, select, BindSnap drop and undo/redo, checking each result.
 // The smoke modes exit nonzero when a load fails, a script errors or the frame loop catches an exception.
+// Key bindings: a key captured in Settings replaces the old one, is kept in the settings file and read back from it,
+// Esc gives up, a clash warns, and Reset all puts back the standard keys
+static void RunKeyBindingsSelfTest(Workbench::App& a_app, Managers& a_managers, const std::function<void(bool, const std::string&)>& expect) {
+	auto& mouse = *a_managers.services.get<MV::TapDevice>();
+	auto& keys = a_app.keys();
+	auto& settings = a_app.settings();
+	auto press = [&a_app](SDL_Keycode a_key, SDL_Keymod a_modifiers = KMOD_NONE) {
+		SDL_SetModState(a_modifiers);
+		SDL_Event event{};
+		event.type = SDL_KEYDOWN;
+		event.key.keysym.sym = a_key;
+		SDL_PushEvent(&event);
+		a_app.runFrames(2);
+		SDL_SetModState(KMOD_NONE);
+	};
+	auto childCount = [](const std::shared_ptr<MV::Scene::Node>& a_node) {
+		return static_cast<size_t>(std::distance(a_node->begin(), a_node->end()));
+	};
+	const auto control = static_cast<SDL_Keymod>(KMOD_CTRL);
+	const auto keysFile = (std::filesystem::temp_directory_path() / "workbench_selftest_keys.txt").string();
+	std::error_code ignored;
+	std::filesystem::remove(keysFile, ignored);
+	a_app.useSettingsFile(keysFile);
+	a_app.showSettings();
+	a_app.runFrames(3);
+	expect(settings.bindingShown("node.duplicate") == "Ctrl+D" && settings.bindingShown("mesh.extrude") == "E", "Settings lists the key bound to each action: " + settings.bindingShown("node.duplicate"));
+
+	a_app.newScene();
+	a_app.select(nullptr);
+	auto node = a_app.createChildNode();
+	a_app.select(node);
+	settings.beginCapture("node.duplicate");
+	a_app.runFrames(2);
+	expect(settings.capturing() && settings.bindingShown("node.duplicate") == "Press a key...", "a press on a binding waits for a key");
+	press(SDLK_LCTRL, control);
+	expect(settings.capturing(), "a modifier alone is not a key");
+	press(SDLK_k, control);
+	expect(!settings.capturing() && keys.chord("node.duplicate").text() == "Ctrl+K" && settings.bindingShown("node.duplicate") == "Ctrl+K", "the next key with its modifiers is the new binding: " + keys.chord("node.duplicate").text());
+
+	const auto before = childCount(a_app.scene());
+	press(SDLK_d, control);
+	expect(childCount(a_app.scene()) == before, "the old key no longer duplicates");
+	a_app.select(node);
+	press(SDLK_k, control);
+	expect(childCount(a_app.scene()) == before + 1, "the new one does");
+
+	const auto written = MV::fileContents(keysFile, true);
+	expect(written.find("key.node.duplicate = Ctrl+K") != std::string::npos && written.find("key.edit.undo") == std::string::npos, "the settings file keeps the changed binding and only that");
+	a_app.useSettingsFile("");
+	keys.resetAll();
+	expect(keys.chord("node.duplicate").text() == "Ctrl+D", "Reset all puts back the standard key");
+	a_app.useSettingsFile(keysFile);
+	expect(keys.chord("node.duplicate").text() == "Ctrl+K", "and the settings file brings the changed one back");
+
+	settings.beginCapture("tool.select");
+	press(SDLK_ESCAPE);
+	expect(!settings.capturing() && keys.chord("tool.select").text() == "Q", "Esc gives up waiting and keeps the key");
+
+	settings.beginCapture("tool.select");
+	mouse.simulate(a_app.statusBarScreenPoint(), false);
+	a_app.runFrames(2);
+	mouse.simulate(a_app.statusBarScreenPoint(), true);
+	a_app.runFrames(2);
+	mouse.simulate(a_app.statusBarScreenPoint(), false);
+	a_app.runFrames(2);
+	mouse.stopSimulating();
+	expect(!settings.capturing() && keys.chord("tool.select").text() == "Q", "and so does a press anywhere");
+	a_app.showSettings();
+	a_app.runFrames(2);
+
+	const auto warnings = a_app.messages().count(Workbench::MessageLevel::WARNING);
+	settings.beginCapture("mesh.fill");
+	press(SDLK_g);
+	a_app.runFrames(2);
+	expect(a_app.messages().count(Workbench::MessageLevel::WARNING) == warnings + 1 && settings.bindingShown("mesh.fill") == "! G" && settings.bindingShown("mesh.move") == "! G", "a key another action in the group has warns and marks both: " + settings.bindingShown("mesh.fill"));
+
+	if (auto resetAll = settings.resetAllScreenPoint()) {
+		mouse.simulate(*resetAll, false);
+		a_app.runFrames(2);
+		mouse.simulate(*resetAll, true);
+		a_app.runFrames(2);
+		mouse.simulate(*resetAll, false);
+		a_app.runFrames(2);
+		mouse.stopSimulating();
+	}
+	expect(keys.chord("node.duplicate").text() == "Ctrl+D" && keys.chord("mesh.fill").text() == "F" && settings.bindingShown("mesh.fill") == "F", "the Reset all button puts every key back");
+	expect(MV::fileContents(keysFile, true).find("key.") == std::string::npos, "and the settings file no longer lists any");
+	a_app.useSettingsFile("");
+	std::filesystem::remove(keysFile, ignored);
+}
+
 // The mesh editor on a plain Drawable, driven as a person would: picks, a drag, a box, extrude, the outline
 // tools, painting, a corner added on an edge, removal, and every step undone back to the start
 static void RunMeshEditorSelfTest(Workbench::App& a_app, Managers& a_managers, const std::function<void(bool, const std::string&)>& expect, const std::function<void(SDL_Keycode)>& pressWithControl) {
@@ -638,6 +729,10 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.runFrames(2);
 		SDL_SetModState(KMOD_NONE);
 	};
+	if (std::getenv("KEYS_ONLY")) {
+		RunKeyBindingsSelfTest(a_app, a_managers, expect);
+		return;
+	}
 	if (std::getenv("MESH_ONLY")) {
 		RunMeshEditorSelfTest(a_app, a_managers, expect, pressWithControl);
 		return;
@@ -1392,7 +1487,10 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		key(SDLK_TAB, KMOD_SHIFT);
 		expect(editingShows("200"), "Shift+Tab moves back a field");
 		key(SDLK_TAB, KMOD_SHIFT);
-		expect(editingShows("off"), "and from the first field wraps to the last");
+		{
+			auto focusedControl = std::static_pointer_cast<MV::Scene::Clickable>(a_managers.services.get<MV::TapDevice>()->focusedSubject());
+			expect(!a_app.editingText() && focusedControl && focusedControl->ownerIsAlive() && focusedControl->owner()->id() == "key_" + a_app.keys().all().back().id, "and from the first field wraps to the panel's last control, its last key binding");
+		}
 		key(SDLK_TAB);
 		expect(editingShows("200"), "as Tab from the last wraps to the first");
 		key(SDLK_ESCAPE);
@@ -2489,6 +2587,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 	}
 
 	RunMeshEditorSelfTest(a_app, a_managers, expect, pressWithControl);
+	RunKeyBindingsSelfTest(a_app, a_managers, expect);
 }
 
 static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", bool a_loadDefaultScene = false, bool a_selectForGizmo = false, bool a_selfTest = false) {

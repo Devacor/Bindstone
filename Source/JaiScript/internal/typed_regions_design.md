@@ -108,7 +108,12 @@ last lands there) and the read is the identifier-plus-temp shape, which takes th
 reference-slot container is guarded ahead of the index: the guard materializes it into a temp only when the
 slot's reference is not a plain cell (an element, field, map or property reference, whose dereference can
 raise), and the readers take the slot itself otherwise, so a getter runs once and in its place and a plain
-alias pays one tag test.
+alias pays one tag test. A member container at an arithmetic tree (`o.arr[i * w + j]`, `o` a frame-slot instance or handle) reads the
+member into a temp first (`MEMBER_TEMP`, the stack form's order: the member, then the index) and the read takes that temp as its
+container and its always guard. In a block the member is the read's own container site, resolved at entry like `o.arr[i]`, and
+the temp is never filled: every copy instruction from the member read to the element read carries the member read as its origin,
+so a miss among them runs the statement again from there, which is why the span between the two may hold only arithmetic and
+reads into temps (a call or a store in the tree keeps the statement on the general form).
 
 A closed loop may branch inside itself: a typed compare-jump or a jump whose target lies forward inside the
 loop or at its back edge is copied as a cell branch (`op_c_jcmp_p`, `op_c_jump`), so one-arm and two-arm

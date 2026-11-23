@@ -4349,7 +4349,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		if (o.member_node != k_invalid_u32) return o.slot != k_invalid_u32 ? o.slot < k_typed_slot_mask : o.symbol != k_invalid_u32 && !o.direct;
 		return o.slot != k_invalid_u32 || o.symbol != k_invalid_u32;
 	};
-	auto array_site = [&](const fused_index_proto& fp) { return fp.receiver != 3 && container_operand(fp.container); };   // a container the checker proved a map is no element site: its statement stays general (a boundary)
+	auto array_site = [&](const fused_index_proto& fp) { return fp.receiver != 3 && container_operand(fp.container) && !(fp.guard_always && fp.container.slot != k_invalid_u32 && fp.container.slot == fp.container_guard); };   // a container the checker proved a map is no element site: its statement stays general (a boundary)
 	auto array_target = [&](const fused_index_proto& fp) { return fp.receiver != 1 && array_site(fp); };   // a string's element is written through its base, never a cell site
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kbool = static_cast<uint8_t>(script_value::TYPEID_BOOL);
 	// straight-line regions: after the loops, the spans of translatable
@@ -4686,6 +4686,25 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// a site whose container is an alias reads the alias (the must-define dataflow holds it to a defined alias, the liveness keeps the
 		// alias until its last site); a push receiver is resolved at entry, never rebound
 		std::vector<uint32_t> boundary_locals;   // the named locals the body's boundary statements declare, the one a boundary defines as a cell aside (a named slot is one declaration's)
+		// `o.arr[tree]`: the member's value sits in a temp the statement's element read takes as its container. The block reads the member as
+		// that read's own container site and never fills the temp, so a miss between the member read and the element read resumes at the
+		// member read: the span between them holds only arithmetic and reads into temps, which run again unseen
+		struct member_container_read { uint32_t read; uint32_t base; uint32_t node; };
+		std::vector<member_container_read> member_container_reads;
+		size_t member_span_from = SIZE_MAX, member_span_to = 0;
+		auto member_container_read_of = [&](size_t at) -> size_t {   // the element read a member temp is the container of, 0: none the block takes
+			const uint32_t g = code[at].b;
+			const ast_node* stmt = caller_stmt_of(at);
+			for (size_t j = at + 1; j < back && caller_stmt_of(j) == stmt; ++j) {
+				const vm_instruction& n = code[j];
+				if (n.op == opcode::op_t_load && j < c.typed_sites.size() && c.typed_sites[j].guard_always && c.typed_sites[j].guard_temp == g && c.typed_sites[j].cont_slot == g) {
+					return c.typed_sites[j].orig.op == opcode::op_index_fused_decl && c.typed_sites[j].orig.a < c.fused_index_protos.size() ? j : 0;
+				}
+				const bool arithmetic = (n.op >= opcode::op_t_add_ii && n.op <= opcode::op_t_mod_ff) || (n.op >= opcode::op_d_add && n.op <= opcode::op_d_shr);
+				if (arithmetic ? (n.a >> k_typed_dst_shift) != k_typed_dst_temp || (n.a & k_typed_slot_mask) == g : n.op == opcode::op_binary_fused_temp || n.op == opcode::op_member_temp ? n.b == g : n.op != opcode::op_kill_slot) return 0;
+			}
+			return 0;
+		};
 		auto pinned_store = [&](size_t at) { return pinned_store_cand == cand && std::find(pinned_store_ips.begin(), pinned_store_ips.end(), static_cast<uint32_t>(at)) != pinned_store_ips.end(); };
 		// a container a boundary statement of this body declares exists only after that statement ran: no entry resolves it, so a site
 		// over it is the general form's (a boundary of its own, or part of the one that declares it)
@@ -5192,6 +5211,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				op = ir_op{}; op.kind = ir::skip;
 				ops.push_back(op);   // the call and its landing
 				ip += 2;
+			} else if (st.op == opcode::op_member_temp && member_base_slot_of(st.c) < k_typed_slot_mask && st.b < k_typed_slot_mask && member_container_read_of(ip) != 0) {
+				const size_t read = member_container_read_of(ip);
+				member_container_reads.push_back({static_cast<uint32_t>(read), member_base_slot_of(st.c), st.a});
+				member_span_from = ip; member_span_to = read;
+				op.kind = ir::skip;
 			} else if (st.op == opcode::op_member_temp && member_base_slot_of(st.c) < k_typed_slot_mask && st.b < k_typed_slot_mask) {
 				// a member read of a frame-slot instance into a compiler temp (`p.x`): a load site whose container is the base slot and whose
 				// field the entry resolves once (the class, the plain field slot, no user accessor); the temp takes the field's own kind; a
@@ -5203,11 +5227,21 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// (an unstamped decl lands the element's own tag, which a raw cell loses), a compiler value takes the element's kind
 				const chunk::typed_site& site = c.typed_sites[ip];
 				const bool classed = site.decl_expect == kint || site.decl_expect == kflt;
-				if (site.orig.op == opcode::op_index_fused_decl && site.orig.a < c.fused_index_protos.size() && !array_site(c.fused_index_protos[site.orig.a])) { refuse(chunk::cell_refusal_representation, ip); break; }
+				const member_container_read* of_member = nullptr;
+				for (const member_container_read& m : member_container_reads) { if (m.read == ip) { of_member = &m; } }
+				if (!of_member && ((site.guard_always && site.guard_temp != k_invalid_u32 && site.cont_slot == site.guard_temp) || (site.orig.op == opcode::op_index_fused_decl && site.orig.a < c.fused_index_protos.size() && !array_site(c.fused_index_protos[site.orig.a])))) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (site.stamp && stamp_kind(site.stamp) == 0 && site.stamp->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip); break; }
 				for (uint8_t k = 0; k <= site.fold_count && k < std::size(site.operands); ++k) { use_slot(site.operands[k], kint, false, 0, nullptr, ip); slot_read(op, site.operands[k]); }
 				{ const uint8_t ld = site.temp ? k_typed_dst_temp : decl_landing(st.a); use_slot(st.a, classed && (site.temp || stamp_kind(site.stamp) == site.decl_expect) ? site.decl_expect : 0, true, ld, ld == k_typed_dst_temp ? nullptr : site.stamp, ip); }
 				op.kind = ir::load; op.a = st.a; op.writes = st.a; op.container = site.cont_slot;
+				if (of_member) {   // the copy's read: the general read's proto with the member as its container, resolved at entry
+					fused_index_proto of = c.fused_index_protos[site.orig.a];
+					of.container = fused_operand{}; of.container.slot = of_member->base; of.container.direct = true; of.container.member_node = of_member->node;
+					of.container_guard = k_invalid_u32; of.guard_always = false;
+					op.container = of_member->base;
+					c.fused_index_protos.push_back(std::move(of));
+					op.proto = static_cast<uint32_t>(c.fused_index_protos.size() - 1);
+				}
 			} else if (st.op == opcode::op_index_fused && st.a < c.fused_index_protos.size() && (st.b & index_flag_lvalue_shape) && ip + 1 < back && code[ip + 1].op == opcode::op_decl_ref_value
 			           && code[ip + 1].a < c.nodes.size() && c.nodes[code[ip + 1].a] && c.nodes[code[ip + 1].a]->get_type() == node_type::variable_decl) {
 				// `var& strip = STRIPS[sidx]`: an element alias declared in the body is a rebind, the source table's element becoming the container of
@@ -5853,6 +5887,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				break;
 			}
 			if (!alias_site(op, ip)) break;
+			if (ip > member_span_from && ip <= member_span_to && op.origin == k_invalid_u32) { op.origin = static_cast<uint32_t>(member_span_from); }
 			ops.push_back(op);
 		}
 		// a statement inside a graft's body is a boundary of its own when it starts and ends in that body (no graft inside it): the general form runs
@@ -8418,6 +8453,35 @@ JAI_NOINLINE bool vm_compiler::try_emit_fused_index_shape(binary_expr* expr, uin
 				chunk_->fused_index_protos.push_back(p);
 				emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
 				free_temps(temp_mark);   // the index temp and a container snapshot die into the read
+				return true;
+			}
+			if (computed_mc && !held && member_base_slot(expr->left.get()) != k_invalid_u32 && !enum_temp_operand(expr->left.get()) && !velem_operand(expr->left.get()) && binary_lands_fused(rb)) {
+				// a member container at an arithmetic tree (`o.arr[i * w + j]`): the member's value lands in a temp ahead of the tree, the order
+				// the stack form reads them in, and the read takes that temp as its container and its always guard; a block reads the member
+				// as the read's own container site
+				const size_t temp_mark = temp_next_;
+				fused_operand container;
+				compile_member_into_temp(expr->left, container);
+				compile_expression(expr->right);
+				vm_instruction& last = chunk_->code.back();
+				if (last.op != opcode::op_binary_fused) { unreachable_construct("an index tree that did not land fused"); }
+				const uint32_t t = static_cast<uint32_t>(temp_next_);
+				++temp_next_;
+				if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+				last.op = opcode::op_binary_fused_temp;
+				last.b = t;
+				note_landing(expr->right.get());
+				fused_index_proto p;
+				p.container = container;
+				p.container_guard = container.slot;
+				p.guard_always = true;
+				p.index = fused_operand{};
+				p.index.slot = t;
+				p.index.symbol = temp_symbol_index();
+				p.index.direct = true;
+				chunk_->fused_index_protos.push_back(p);
+				emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
+				free_temps(temp_mark);
 				return true;
 			}
 		}

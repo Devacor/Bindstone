@@ -7917,7 +7917,9 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 			if (cp && cp->raw_storage_index() == script_value::TYPEID_ARRAY) {
 				const type_info* ti = cp->get_type_info().get();
 				const script_array* n = const_cast<script_value&>(*cp).unchecked_get_array_storage().get();
-				if (n && !(n->kind() == script_array::kind_t::hetero && ti && ti->element_type().get())) { node = n; }
+				// a hetero array of a declared element type converts on the general form; a var element takes a plain store as an untyped one does
+				const type_info* et = n && n->kind() == script_array::kind_t::hetero && ti ? ti->element_type().get() : nullptr;
+				if (n && !(et && (p.compound || et->base_type != script_value_type::jai_any_type))) { node = n; }
 			}
 		}
 		if (!node) { return refuse_site(ip, "a container that is not a plain node"); }
@@ -10603,7 +10605,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_inst
 	case script_array::kind_t::b8:
 		node->bytes()[at] = vbits != 0 ? 1 : 0;
 		break;
-	case script_array::kind_t::hetero: {   // a typed var array was refused at entry
+	case script_array::kind_t::hetero: {   // an untyped or a var element (a compound over a var array was refused at entry)
 		script_value& target = node->values()[at];
 		if (target.raw_storage_index() != vkind) return miss();
 		if (vkind == static_cast<uint8_t>(script_value::TYPEID_INT)) { target.unchecked_set_int_payload(static_cast<script_int>(vbits)); }

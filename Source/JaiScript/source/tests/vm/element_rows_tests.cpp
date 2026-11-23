@@ -274,6 +274,36 @@ function last_owner(int n) -> string { LOG = ""; array<shared_ptr<Owner>> os = [
 				"weak_element(3);", "replaced(6);", "last_owner(3);", "last_owner(5);" }, "", "member of element");
 		});
 
+		test("a_var_array_takes_a_store_as_an_untyped_array_does", [this]() {
+			same_everywhere({ R"JAI(
+class P { int a = 0; P(int v) { a = v; } }
+function plain(int n) -> string {
+	array<var> typed = [1, 2.5, "s", true, 5, 6.5]; var untyped = [1, 2.5, "s", true, 5, 6.5];
+	for (int i = 0; i < n; ++i) { typed[i % 6] = i; untyped[i % 6] = i; }
+	string out = to_string(typed) + to_string(untyped);
+	for (int i = 0; i < n; ++i) { float half = i * 0.5; typed[i % 6] = half; untyped[i % 6] = half; }
+	return out + to_string(typed) + to_string(untyped);
+}
+function compound(int n) -> string {
+	array<var> typed = [1, 2.5, 3, 4.5]; var untyped = [1, 2.5, 3, 4.5];
+	for (int i = 0; i < n; ++i) { typed[i & 3] += 1; untyped[i & 3] += 1; typed[i & 3] *= 2; untyped[i & 3] -= 0.5; }
+	return to_string(typed) + to_string(untyped);
+}
+function objects(int n) -> string {
+	array<var> typed = [P(1), 2, null]; int s = 0;
+	for (int i = 0; i < n; ++i) { typed[1] = i; s += typed[1]; typed[2] = i; }
+	typed[0] = 7;
+	return to_string(s) + to_string(typed);
+}
+function constrained(int n) -> string {
+	array<float> floats = [1.0, 2.0]; array<int> ints = [1, 2];
+	for (int i = 0; i < n; ++i) { floats[i & 1] = i; ints[i & 1] = i * 3; }
+	return to_string(floats) + to_string(ints);
+}
+function refused(int n) -> int { array<int> ints = [1, 2]; for (int i = 0; i < n; ++i) { var half = i * 0.5; ints[i & 1] = half; } return ints[0] + ints[1]; }
+0;)JAI", "plain(9);", "plain(2);", "compound(7);", "objects(4);", "constrained(5);", "refused(5);" }, "", "var array stores");
+		});
+
 		test("a_map_keeps_its_iteration_and_store_rules", [this]() {
 			same_everywhere({ R"JAI(
 class P { int a = 0; P(int v) { a = v; } }

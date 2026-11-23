@@ -3259,7 +3259,7 @@ JAI_NOINLINE bool vm_compiler::compile_no_result_expression(const expression_ptr
 			if (un->is_postfix) flags |= incdec_flag_postfix;
 			if (un->op.type == token_type::plus_plus) flags |= incdec_flag_increment;
 			if (ident->global_qualified) flags |= incdec_flag_global_only;
-			emit(opcode::op_incdec, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
+			note_this_field(emit(opcode::op_incdec, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags), ident);
 			return true;
 		}
 	}
@@ -8819,7 +8819,7 @@ JAI_NOINLINE void vm_compiler::compile_unary(const std::shared_ptr<unary_expr>& 
 			if (expr->is_postfix) flags |= incdec_flag_postfix;
 			if (expr->op.type == token_type::plus_plus) flags |= incdec_flag_increment;
 			if (ident->global_qualified) flags |= incdec_flag_global_only;
-			emit(opcode::op_incdec, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
+			note_this_field(emit(opcode::op_incdec, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags), ident);
 		} else {
 			compile_expression(expr->operand);
 			emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::invalid_assignment_target), k_invalid_u32, k_invalid_u32);

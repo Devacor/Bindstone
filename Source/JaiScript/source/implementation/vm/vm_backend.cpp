@@ -3192,10 +3192,17 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 			return {};
 		}
 	}
-	if (const uint32_t this_slot = f.this_inst ? this_field_slot_at(f) : 0) {   // a member body's bare field: the hot rung, ahead of the operand build
-		if (script_value* cell = frame_this_field(f, this_slot)) {
-			stack_.push_back(*cell);
-			return {};
+	if (f.this_inst) {
+		if (const uint32_t this_slot = this_field_slot_at(f)) {   // a member body's bare field: the hot rung, ahead of the operand build
+			if (script_value* cell = frame_this_field(f, this_slot)) {
+				stack_.push_back(*cell);
+				return {};
+			}
+		} else if (f.ip < f.code->this_global_ips.size() && f.code->this_global_ips[f.ip] == ins.b + 1 && frame_globals_hold(f)) {
+			if (script_value* cell = armed_env_cell(f, f.ip * 3)) {   // a name past the members: the lookup's armed cell
+				stack_.push_back(cell->deref());
+				return {};
+			}
 		}
 	}
 	std::optional<script_value> scratch;
@@ -4320,7 +4327,9 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 	if (!(ins.c & incdec_flag_global_only)) {
 		// a plain int or float steps in place whoever owns it (a local or a field of this): the step keeps its kind, so no declared
 		// type converts it, and the name's resolution has already applied any access rule
-		script_value* cell = resolve_local_or_env(f, ins.b, sym, f.ip * 3 + 2);
+		const uint32_t this_slot = f.this_inst ? this_field_slot_at(f) : 0;
+		script_value* cell = this_slot ? frame_this_field(f, this_slot) : nullptr;   // a member body's bare field at its compiled slot
+		if (!cell) { cell = resolve_local_or_env(f, ins.b, sym, f.ip * 3 + 2); }
 		if (cell && cell->raw_storage_index() == script_value::TYPEID_INT) {
 			VM_TRY_ASSIGN(script_value stepped, detail::incdec_step(*cell, isIncrement, engine_));
 			const script_int old = cell->unchecked_as_int();
@@ -5616,8 +5625,10 @@ const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand&
 	if (operand.this_slot && f.this_inst) {
 		if (script_value* cell = frame_this_field(f, operand.this_slot)) { return cell; }
 	}
-	// the lookup cache's armed head, where no member scope of the frame can take the name: env_lookup_cached's answer without its calls
-	if (cached_global_env_ && cache_slot < f.code->env_lookup_cache.size() && (!f.locals || f.top_level || (f.locals->scope_state != 0 && !frame_scope_active(f)))) {
+	// the lookup cache's armed head, where no member scope of the frame can take the name (none is active, or the frame's layout settles
+	// the name past the members): env_lookup_cached's answer without its calls
+	if (cached_global_env_ && cache_slot < f.code->env_lookup_cache.size() &&
+	    (!f.locals || f.top_level || (f.locals->scope_state != 0 && !frame_scope_active(f)) || (operand.this_global && frame_globals_hold(f)))) {
 		const env_lookup_cache_entry& e = f.code->env_lookup_cache[cache_slot];
 		if (e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch()) {
 			return e.fast_ptr;
@@ -5997,14 +6008,18 @@ namespace {
 	}
 }
 
-bool vm_backend::resolve_cfor_int_operand(frame& f, const fused_operand& operand, script_int*& ptr, script_int& val) {
+bool vm_backend::resolve_cfor_int_operand(frame& f, const fused_operand& operand, script_int*& ptr, script_int& val, size_t cache_slot) {
 	if (operand.const_index != k_invalid_u32) {
 		const script_value& tmpl = f.code->constants[operand.const_index];
 		if (tmpl.raw_storage_index() != script_value::TYPEID_INT) return false;
 		val = tmpl.unchecked_as_int();
 		return true;
 	}
-	script_value* resolved = resolve_local_or_env(f, operand.slot, f.code->symbols[operand.symbol]);
+	// a member-class body's bare field, or its name past the members, where the frame's layout settles it; else the ladder
+	script_value* resolved = nullptr;
+	if (operand.this_slot && f.this_inst) { resolved = frame_this_field(f, operand.this_slot); }
+	else if (operand.this_global && cache_slot != SIZE_MAX && frame_globals_hold(f)) { resolved = env_lookup_cached(f, cache_slot, f.code->symbols[operand.symbol]); }
+	if (!resolved) { resolved = resolve_local_or_env(f, operand.slot, f.code->symbols[operand.symbol]); }
 	if (!resolved) return false;
 	script_value& target = resolved->deref();
 	if (target.raw_storage_index() != script_value::TYPEID_INT) return false;
@@ -6012,7 +6027,7 @@ bool vm_backend::resolve_cfor_int_operand(frame& f, const fused_operand& operand
 	return true;
 }
 
-vm_backend::counted_for_state vm_backend::counted_for_entry_state(frame& f, const counted_for_proto& p) {
+vm_backend::counted_for_state vm_backend::counted_for_entry_state(frame& f, const counted_for_proto& p, size_t cache_base) {
 	counted_for_state st;
 	st.cmp = p.cmp;
 	st.subtract = p.step_subtract;
@@ -6032,15 +6047,15 @@ vm_backend::counted_for_state vm_backend::counted_for_entry_state(frame& f, cons
 			fast = false;
 		}
 	}
-	if (fast) fast = resolve_cfor_int_operand(f, p.end, st.end_ptr, st.end_val);
-	if (fast) fast = resolve_cfor_int_operand(f, p.step, st.step_ptr, st.step_val);
+	if (fast) fast = resolve_cfor_int_operand(f, p.end, st.end_ptr, st.end_val, cache_base == SIZE_MAX ? SIZE_MAX : cache_base + 1);
+	if (fast) fast = resolve_cfor_int_operand(f, p.step, st.step_ptr, st.step_val, cache_base == SIZE_MAX ? SIZE_MAX : cache_base + 2);
 	st.fast = fast;
 	return st;
 }
 
 op_status vm_backend::exec_cfor_prep(frame& f, const vm_instruction& ins) {
 	const counted_for_proto& p = f.code->counted_for_protos[ins.a];
-	counted_for_state st = counted_for_entry_state(f, p);
+	counted_for_state st = counted_for_entry_state(f, p, f.ip * 3);
 	const bool fast = st.fast;
 
 	if (!fast) {

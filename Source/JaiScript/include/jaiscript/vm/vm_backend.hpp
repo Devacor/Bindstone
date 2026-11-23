@@ -2466,6 +2466,13 @@ namespace jai::vm {
             const auto& t = f.code->this_field_slots;
             return f.ip < t.size() ? t[f.ip] : 0;
         }
+        // the armed head of a site's lookup row: the cell the environment gives the site's name while the current environment and the env
+        // serial stand (env_lookup_cached's own two compares, without its calls); null sends the read to the lookup
+        JAI_FORCEINLINE script_value* armed_env_cell(const frame& f, size_t cache_slot) const noexcept {
+            if (!cached_global_env_ || cache_slot >= f.code->env_lookup_cache.size()) { return nullptr; }
+            const env_lookup_cache_entry& e = f.code->env_lookup_cache[cache_slot];
+            return e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() ? e.fast_ptr : nullptr;
+        }
         bool handle_admits(const script_value& v, const type_info_ptr& declared);
         struct handle_admits_row { const class_definition* cd = nullptr; const type_info* tag = nullptr; const type_info* declared = nullptr; uint64_t epoch = 0; bool admits = false; };
         static constexpr size_t k_handle_admits_rows = 8;
@@ -2850,7 +2857,7 @@ namespace jai::vm {
         // Counted-for ops: both always retarget f.ip (run() must `continue` after them)
         op_status exec_cfor_prep(frame& f, const vm_instruction& ins);
         op_status exec_cfor_back(frame& f, const vm_instruction& ins);
-        bool resolve_cfor_int_operand(frame& f, const fused_operand& operand, script_int*& ptr, script_int& val);
+        bool resolve_cfor_int_operand(frame& f, const fused_operand& operand, script_int*& ptr, script_int& val, size_t cache_slot = SIZE_MAX);
         // Resolves an identifier operand exactly like exec_load (frame slot,
         // type-ctor names, env, this-field/bound-method/static) without pushing;
         // values that must be materialized land in scratch. nullptr = failed, with the
@@ -3001,7 +3008,7 @@ namespace jai::vm {
         // The fiber a coroutine's first resume opens: its body's chunk, its entry scope and its frame over its own stack
         void open_fiber(coroutine_handle& handle, vm_coroutine_state& state, const std::shared_ptr<function_decl>& function);
         // The state a counted loop's prep makes for its variable, limit and step as they stand
-        counted_for_state counted_for_entry_state(frame& f, const counted_for_proto& p);
+        counted_for_state counted_for_entry_state(frame& f, const counted_for_proto& p, size_t cache_base = SIZE_MAX);   // cache_base: the op_cfor_prep's own lookup rows (its end at + 1, its step at + 2)
         // Runs (or continues) the fiber; returns the yield value, the final return value on the
         // completing resume, or an error (handle marked failed) — never a stale prior yield.
         checked_result<script_value> run_fiber(coroutine_handle& handle, vm_coroutine_state& state);

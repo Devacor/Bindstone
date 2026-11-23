@@ -9,7 +9,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <ctime>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -128,7 +127,8 @@ namespace stdlib {
         int64_t second = 0;
         int64_t millisecond = 0;
         bool utc = true;
-        int8_t dst = -1;   // the zone's daylight flag when read from an instant: keeps a local round trip exact in a repeated hour
+        static constexpr int32_t no_offset = INT32_MIN;
+        int32_t read_offset = no_offset;   // the zone offset in seconds a local date read from an instant had: keeps its round trip exact in a repeated hour
 
         int64_t days() const { return time_calendar::days_from_civil(year, month, day); }
         int64_t weekday() const { const int64_t w = (days() + 4) % 7; return w < 0 ? w + 7 : w; }   // 0 = Sunday; 1970-01-01 was a Thursday
@@ -146,55 +146,23 @@ namespace stdlib {
             d.millisecond = rest % 1000;
             return d;
         }
-        // false when the platform cannot place the instant in the local zone
-        static bool from_unix_ms_local(int64_t ms, date& out) {
-            const int64_t secs = time_calendar::floor_div(ms, 1000);
-            const std::time_t t = static_cast<std::time_t>(secs);
-            if (static_cast<int64_t>(t) != secs) return false;
-            std::tm tm{};
-#ifdef _WIN32
-            if (localtime_s(&tm, &t) != 0) return false;
-#else
-            if (!localtime_r(&t, &tm)) return false;
-#endif
-            out.year = tm.tm_year + 1900; out.month = tm.tm_mon + 1; out.day = tm.tm_mday;
-            out.hour = tm.tm_hour; out.minute = tm.tm_min; out.second = tm.tm_sec > 59 ? 59 : tm.tm_sec;
-            out.millisecond = ms - secs * 1000;
-            out.utc = false;
-            out.dst = static_cast<int8_t>(tm.tm_isdst > 0 ? 1 : 0);
-            return true;
-        }
+        // the machine's zone, for every instant and every local date (source/implementation/stdlib/time.cpp)
+        static date from_unix_ms_local(int64_t ms);
         static bool from_unix_ms(int64_t ms, bool in_utc, date& out) {
             if (ms < time_calendar::min_unix_ms || ms > time_calendar::max_unix_ms) return false;
-            if (in_utc) { out = from_unix_ms_utc(ms); return true; }
-            return from_unix_ms_local(ms, out) && out.year >= time_calendar::min_year && out.year <= time_calendar::max_year;
+            out = in_utc ? from_unix_ms_utc(ms) : from_unix_ms_local(ms);
+            return out.year >= time_calendar::min_year && out.year <= time_calendar::max_year;
         }
-        bool unix_ms(int64_t& out) const {
-            if (utc) {
-                out = days() * 86400000 + hour * 3600000 + minute * 60000 + second * 1000 + millisecond;
-                return true;
-            }
-            std::tm tm{};
-            tm.tm_year = static_cast<int>(year - 1900); tm.tm_mon = static_cast<int>(month - 1); tm.tm_mday = static_cast<int>(day);
-            tm.tm_hour = static_cast<int>(hour); tm.tm_min = static_cast<int>(minute); tm.tm_sec = static_cast<int>(second);
-            tm.tm_isdst = dst;
-            const std::time_t t = std::mktime(&tm);
-            if (t == static_cast<std::time_t>(-1) && !(year == 1969 && month == 12 && day == 31)) return false;
-            out = static_cast<int64_t>(t) * 1000 + millisecond;
-            return true;
-        }
-        int64_t unix_ms_or_throw() const {
-            int64_t ms = 0;
-            if (!unix_ms(ms)) throw runtime_error("time::date: " + to_string() + " is outside the local time the platform can represent");
-            return ms;
-        }
+        int64_t wall_ms() const { return days() * 86400000 + hour * 3600000 + minute * 60000 + second * 1000 + millisecond; }
+        int64_t local_unix_ms() const;
+        int64_t unix_ms() const { return utc ? wall_ms() : local_unix_ms(); }
         date in_zone(bool in_utc) const {
             date out;
-            if (!from_unix_ms(unix_ms_or_throw(), in_utc, out)) throw runtime_error("time::date: " + to_string() + " is outside the supported range (years 1 to 9999)");
+            if (!from_unix_ms(unix_ms(), in_utc, out)) throw runtime_error("time::date: " + to_string() + " is outside the supported range (years 1 to 9999)");
             return out;
         }
         date plus_ms(int64_t delta) const {
-            const int64_t ms = unix_ms_or_throw();
+            const int64_t ms = unix_ms();
             date out;
             if ((delta > 0 && ms > time_calendar::max_unix_ms - delta) || (delta < 0 && ms < time_calendar::min_unix_ms - delta) ||
                 !from_unix_ms(ms + delta, utc, out)) {
@@ -208,7 +176,7 @@ namespace stdlib {
             const auto c = time_calendar::civil_from_days(days() + n);
             if (c.year < time_calendar::min_year || c.year > time_calendar::max_year) throw runtime_error("time::date: the result is outside the supported range (years 1 to 9999)");
             date out = *this;
-            out.year = c.year; out.month = c.month; out.day = c.day; out.dst = -1;
+            out.year = c.year; out.month = c.month; out.day = c.day; out.read_offset = no_offset;
             return out;
         }
         // calendar months: the day clamps to the last day of the target month (Jan 31 + 1 month = Feb 28 or 29)
@@ -222,7 +190,7 @@ namespace stdlib {
             out.year = y;
             out.month = index - y * 12 + 1;
             out.day = day > time_calendar::days_in_month(y, out.month) ? time_calendar::days_in_month(y, out.month) : day;
-            out.dst = -1;
+            out.read_offset = no_offset;
             return out;
         }
 
@@ -248,7 +216,7 @@ namespace stdlib {
             return "time::date: day " + std::to_string(d) + " does not exist in " + ys + "-" + (m < 10 ? "0" : "") + std::to_string(m);
         }
         std::string store(int64_t& field, int64_t v, std::string error) {
-            if (error.empty()) { field = v; dst = -1; }
+            if (error.empty()) { field = v; read_offset = no_offset; }
             return error;
         }
         std::string set_year(int64_t v) {

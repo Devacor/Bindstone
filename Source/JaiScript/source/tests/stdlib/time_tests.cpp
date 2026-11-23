@@ -389,6 +389,28 @@ public:
                    "true true true 2023-11-14T22:13:20.123Z false", "now in both zones");
         });
 
+        // Whatever the machine's zone: every in-range year converts both ways, before 1970 and before the zone data begins
+        test("local_dates_convert_in_every_supported_year", [expect]() {
+            expect(R"(array<string> bad;
+                for (int y : [1, 2, 399, 400, 1582, 1600, 1601, 1602, 1900, 1901, 1960, 1969, 1970, 2038, 2100, 9998, 9999]) {
+                    for (int m : [1, 6]) {
+                        time::date l = time::local_date(y, m, 15, 12, 30, 15, 250);
+                        time::date back = time::date_from_unix(l.unix());
+                        time::date u = time::utc_date(y, m, 15, 12, 30, 15, 250);
+                        if (back.to_string() != l.to_string() || l.to_utc().to_local().to_string() != l.to_string() ||
+                            u.to_local().to_utc().to_string() != u.to_string() || u.to_local().unix_ms() != u.unix_ms() ||
+                            time::date_from_unix(u.unix()).unix_ms() != u.unix_ms() || l.add_days(1).add_days(-1).to_string() != l.to_string() ||
+                            l.add_hours(1).unix_ms() - l.unix_ms() != 3600000) {
+                            bad.push(l.to_string());
+                        }
+                    }
+                }
+                time::date edge = time::local_date(1969, 12, 31, 23, 59, 59);
+                time::date before = time::date_from_unix(-1);
+                `${bad.size()} ${(time::date_from_unix(edge.unix()).to_string() == edge.to_string())} ${before.to_utc().to_string()} ${(before.unix() == -1)} ${(time::local_date(1960, 3, 1).unix() < 0)}`;)",
+                   "0 true 1969-12-31T23:59:59.000Z true true", "round trips from year 1 to 9999");
+        });
+
         test("qualified_type_names_everywhere", [expect]() {
             expect(R"(
                 function span(time::date a, time::date b) -> float { return b - a; }

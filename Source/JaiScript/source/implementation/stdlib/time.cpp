@@ -13,8 +13,117 @@
 #include <string_view>
 #include <vector>
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace jai {
 namespace stdlib {
+
+    namespace time_zone_detail {
+        constexpr int64_t day_seconds = 86400;
+        // The years whose every instant, a day either side, the platform's zone API answers for: Windows' starts at 1601, a
+        // 32-bit time_t spans 1901 to 2038
+#if defined(_WIN32)
+        constexpr int64_t first_answered_year = 1602;
+        constexpr int64_t last_answered_year = time_calendar::max_year + 1;
+#else
+        constexpr int64_t first_answered_year = sizeof(std::time_t) >= 8 ? time_calendar::min_year - 1 : 1902;
+        constexpr int64_t last_answered_year = sizeof(std::time_t) >= 8 ? time_calendar::max_year + 1 : 2037;
+#endif
+
+        int64_t jan1_weekday(int64_t a_year) { return ((time_calendar::days_from_civil(a_year, 1, 1) + 4) % 7 + 7) % 7; }
+
+        // The year nearest the answered range with the calendar of a_year (its leap day and the weekday of its January 1),
+        // so the zone's rules for that edge of the range apply on a_year's own weekdays
+        int64_t answered_year_like(int64_t a_year) {
+            const bool leap = time_calendar::is_leap(a_year);
+            const int64_t weekday = jan1_weekday(a_year);
+            const int64_t step = a_year < first_answered_year ? 1 : -1;
+            int64_t result = a_year < first_answered_year ? first_answered_year : last_answered_year;
+            while (time_calendar::is_leap(result) != leap || jan1_weekday(result) != weekday) { result += step; }
+            return result;
+        }
+
+        // The machine's zone: read once per conversion, asked for its offset at UTC seconds
+        class machine_zone {
+        public:
+#if defined(_WIN32)
+            machine_zone() { known = GetDynamicTimeZoneInformation(&zone) != TIME_ZONE_ID_INVALID; }
+#endif
+
+            // the offset from UTC in seconds at a UTC second of any year; a zone the machine does not name is UTC
+            int64_t offset_at(int64_t a_seconds) const {
+                const int64_t year = time_calendar::civil_from_days(time_calendar::floor_div(a_seconds, day_seconds)).year;
+                int64_t shift = 0;
+                if (year < first_answered_year || year > last_answered_year) {
+                    shift = (time_calendar::days_from_civil(answered_year_like(year), 1, 1) - time_calendar::days_from_civil(year, 1, 1)) * day_seconds;
+                }
+                int64_t result = 0;
+                return platform_offset(a_seconds + shift, result) ? result : 0;
+            }
+
+        private:
+#if defined(_WIN32)
+            DYNAMIC_TIME_ZONE_INFORMATION zone{};
+            bool known = false;
+
+            bool platform_offset(int64_t a_seconds, int64_t& a_offset) const {
+                if (!known) { return false; }
+                ULARGE_INTEGER ticks{};
+                ticks.QuadPart = static_cast<uint64_t>(a_seconds + 11644473600LL) * 10000000ULL;   // FILETIME counts 100 ns from 1601
+                const FILETIME instant{ticks.LowPart, ticks.HighPart};
+                SYSTEMTIME utc{};
+                SYSTEMTIME local{};
+                if (!FileTimeToSystemTime(&instant, &utc) || !SystemTimeToTzSpecificLocalTimeEx(&zone, &utc, &local)) { return false; }
+                a_offset = time_calendar::days_from_civil(local.wYear, local.wMonth, local.wDay) * day_seconds + local.wHour * 3600 +
+                           local.wMinute * 60 + local.wSecond - a_seconds;
+                return true;
+            }
+#else
+            bool platform_offset(int64_t a_seconds, int64_t& a_offset) const {
+                const std::time_t instant = static_cast<std::time_t>(a_seconds);
+                if (static_cast<int64_t>(instant) != a_seconds) { return false; }
+                std::tm local{};
+                if (!localtime_r(&instant, &local)) { return false; }
+                a_offset = time_calendar::days_from_civil(int64_t(local.tm_year) + 1900, local.tm_mon + 1, local.tm_mday) * day_seconds +
+                           local.tm_hour * 3600 + local.tm_min * 60 + (local.tm_sec > 59 ? 59 : local.tm_sec) - a_seconds;
+                return true;
+            }
+#endif
+        };
+    }
+
+    date date::from_unix_ms_local(int64_t ms) {
+        const time_zone_detail::machine_zone zone;
+        const int64_t offset = zone.offset_at(time_calendar::floor_div(ms, 1000));
+        date result = from_unix_ms_utc(ms + offset * 1000);
+        result.utc = false;
+        result.read_offset = static_cast<int32_t>(offset);
+        return result;
+    }
+
+    // The instant whose local date this is. A repeated hour reads as its first pass unless the date was read from the second;
+    // an hour the zone skips reads with the offset before the change, so it lands past the change
+    int64_t date::local_unix_ms() const {
+        const time_zone_detail::machine_zone zone;
+        const int64_t wall = wall_ms();
+        auto offset_ms = [&zone](int64_t a_ms) { return zone.offset_at(time_calendar::floor_div(a_ms, 1000)) * 1000; };
+        if (read_offset != no_offset && offset_ms(wall - int64_t(read_offset) * 1000) == int64_t(read_offset) * 1000) {
+            return wall - int64_t(read_offset) * 1000;
+        }
+        const int64_t before = offset_ms(wall - 36 * 3600000LL);
+        const int64_t after = offset_ms(wall + 36 * 3600000LL);
+        if (offset_ms(wall - before) == before) { return wall - before; }
+        if (offset_ms(wall - after) == after) { return wall - after; }
+        return wall - before;
+    }
 
     // Expands ${name} / ${name:spec} placeholders (the template-string spec mini-language); an empty result
     // means success, else the error text
@@ -99,7 +208,7 @@ namespace stdlib {
             if (!std::isfinite(ms) || std::fabs(ms) > 1e15) throw runtime_error(std::string("time::date::") + what + " is out of range");
             return static_cast<int64_t>(std::llround(ms));
         };
-        auto instant = [](const date& d) { return d.unix_ms_or_throw(); };
+        auto instant = [](const date& d) { return d.unix_ms(); };
         // The field setters and the operators are registered below as checked functions: a refused store or a
         // non-date operand raises a catchable error (a throw from those call sites would leave the script)
         auto unused_setter = [](date&, script_int) {};
@@ -167,8 +276,7 @@ namespace stdlib {
                     if (op.kind == 1 && x) return script_value(token == "!=", eng);
                     return checked_text("time::date: '" + token + "' needs two dates, got " + (a.size() == 2 ? detail::slot_source_type_name(a[1], eng) : std::string("no operand")));
                 }
-                int64_t tx = 0, ty = 0;
-                if (!x->unix_ms(tx) || !y->unix_ms(ty)) return checked_text("time::date: a date is outside the local time the platform can represent");
+                const int64_t tx = x->unix_ms(), ty = y->unix_ms();
                 if (op.kind == 2) return script_value(static_cast<script_float>(tx - ty) / 1000.0, eng);
                 const bool r = token == "<" ? tx < ty : token == "<=" ? tx <= ty : token == ">" ? tx > ty : token == ">=" ? tx >= ty : token == "==" ? tx == ty : tx != ty;
                 return script_value(r, eng);

@@ -6655,6 +6655,7 @@ struct region_run {
 			state.worker_cells.resumes += now.resumes - ctx->cells_folded.resumes;
 			state.worker_cells.misses += now.misses - ctx->cells_folded.misses;
 			state.worker_cells.row_entries += now.row_entries - ctx->cells_folded.row_entries;
+			state.worker_cells.lean_calls += now.lean_calls - ctx->cells_folded.lean_calls;
 			ctx->cells_folded = now;
 		}
 		{

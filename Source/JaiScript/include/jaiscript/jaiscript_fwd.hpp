@@ -92,6 +92,7 @@ namespace jai {
     struct cell_counters {
         unsigned long long entries = 0, boundaries = 0, resumes = 0, misses = 0, row_entries = 0;   // row_entries: entries whose sites and bindings a loop's block-entry row answered
         unsigned long long host_calls = 0;   // calls a block made through a host function's scalar entry
+        unsigned long long lean_calls = 0;   // block calls whose arguments instruction entered the callee's plain frame (the lean door)
     };
 
 } // namespace jai

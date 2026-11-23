@@ -555,7 +555,13 @@ namespace jai::vm {
             // instruction enters it; k_host_call_mark set: a host site's, whose arguments instruction calls the scalar entry). A block's calls
             // number below 32767 where one is marked (the translation marks no raw or host site past that)
             uint16_t raw_landing = 0;
-            uint16_t raw_call = 0;
+            // 1 + the call index of a lean door call in flight: its callee bound every argument by value, so its landing checks no argument's slot
+            uint16_t lean_landing = 0;
+            // k_lean_call marks a callee the probe found for the lean door (the site's plain script function, entered by the arguments instruction
+            // over a plain frame) where the unmarked index names a raw callee; either is parked by a miss or an inner probe. The probe marks
+            // no site past the bound the host mark leaves the index
+            static constexpr uint32_t k_lean_call = 0x80000000u;
+            uint32_t raw_call = 0;
             cell_dirty dirty;
             std::vector<const script_array*> site_node;  // per copy instruction: the load/store site's container node, resolved at entry
             std::vector<const script_array*> site_node2;  // per copy instruction: a push site's source container (an element push), resolved at entry
@@ -2599,6 +2605,8 @@ namespace jai::vm {
         JAI_NOINLINE void cells_run_lean(frame*& fp, const chunk::cell_loop*& lp);
         JAI_NOINLINE frame* raw_return_lean(frame& f, uint8_t kind, int64_t bits, const chunk::cell_loop*& back_loop);
         bool raw_probe(frame& f, const chunk::cell_loop& loop, uint32_t index);   // the callee found through the site's cache: a raw-enterable frame program
+        bool door_probe_lean(frame& f, const chunk::cell_loop::cell_call& cc);    // the callee found through the site's cache: a plain script function its arguments bind by value
+        bool door_enter_lean(frame& f, const chunk::cell_loop& loop, const vm_instruction& ins);   // its arguments boxed and its plain frame pushed; false: parked, the general door runs
         void park_raw_callee(frame& f, const chunk::cell_loop& loop);             // a raw probe's callee parked as the general probe parks it (a miss before the arguments)
         // a host site (internal/typed_regions_design.md "Host scalar entries"): the callee name binds the site's cached host function, whose
         // direct overload has a scalar entry for the call's arity and consumer; the arguments instruction then calls the entry on the argument

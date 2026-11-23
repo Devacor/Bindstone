@@ -5975,7 +5975,7 @@ cell_counters engine::cells_counters() const {
     if (impl && impl->parallel_) {
         const cell_counters& w = impl->parallel_->worker_cells;
         result.entries += w.entries; result.boundaries += w.boundaries; result.resumes += w.resumes;
-        result.misses += w.misses; result.row_entries += w.row_entries;
+        result.misses += w.misses; result.row_entries += w.row_entries; result.lean_calls += w.lean_calls;
     }
     return result;
 }

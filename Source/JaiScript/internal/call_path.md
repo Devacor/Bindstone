@@ -47,6 +47,7 @@ to the landing, and a window its arguments already fill calls no fill.
 | `op_call_method` | `enter_lean_method_call` | the receiver's class against the site's method rows: the monomorphic row (statically resolved), then the polymorphic rows |
 | `op_call_from_scratch`, `op_call_typed` | `enter_lean_sibling_call` | a parked sibling method: its dispatcher's memoized overload on a copy of the frame's receiver |
 | `op_probe_callee` followed by a call with no arguments | `enter_probed_call` | the probe's own answer (the frame receiver's sibling method, or the site-cached script function), entered at once |
+| a cell block's `op_c_probe` and `op_c_args` | `door_probe_lean`, `door_enter_lean` | the probe's cached script function over a plain frame, its arguments boxed from the block's cells (internal/typed_regions_design.md, "The call floor") |
 
 Each lane answers what the instruction's general path answers first, under the same guards, and pushes the same record.
 A lane that declines has changed nothing, and the general path runs: it answers the same rows again, takes the shapes a lean

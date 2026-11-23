@@ -8340,7 +8340,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 	const chunk::entry_memo_row* row = env_reuse ? nullptr : cells_entry_row(f, loop);
 	cs.env_loop = nullptr;
 	cs.env_of = environment_.get(); cs.env_serial = env_symbolizer_->env_epoch();
-	cs.raw_landing = 0; cs.raw_call = 0;   // no raw call is in flight at a block's entry (an earlier run may have ended in a C++ exception or an unwind)
+	cs.raw_landing = 0; cs.lean_landing = 0; cs.raw_call = 0;   // no raw or lean call is in flight at a block's entry (an earlier run may have ended in a C++ exception or an unwind)
 	++cs.entry_serial;   // a block parked in this frame for a statement does not resume over this entry's cells
 	if (cs.env_ptr.size() < loop.cells.size()) { cs.env_ptr.resize(loop.cells.size(), nullptr); }
 	if (row) { for (const chunk::entry_memo_row::env_cell& e : row->env_cells) { cs.env_ptr[e.cell] = e.binding; } }
@@ -8731,7 +8731,7 @@ next_frame:
 		case opcode::op_c_probe:
 			if constexpr (Raw) {
 				// a raw site whose plan holds (no general code ran since the probe validated it) resolves nothing
-				if (loop.calls[ci.a].raw && loop.plans.data()[ci.a].epoch == raw_epoch_ && cs.raw_call == 0) { cs.raw_call = static_cast<uint16_t>(ci.a + 1); ++ip; JAI_CELL_NEXT; }
+				if (loop.calls[ci.a].raw && loop.plans.data()[ci.a].epoch == raw_epoch_ && cs.raw_call == 0) { cs.raw_call = ci.a + 1; ++ip; JAI_CELL_NEXT; }
 				f.ip = ip; st = exec_c_probe(f, ci); ip = f.ip; break;
 			}
 			[[fallthrough]];
@@ -8749,7 +8749,7 @@ next_frame:
 						break;
 					}
 				}
-				f.ip = ip; st = exec_c_args(f, ci); if (raw_switch_) { if (raw_follow(fp, lp, st)) goto next_frame; return st; } ip = f.ip; break;
+				f.ip = ip; st = exec_c_args(f, ci); if (raw_switch_) { if (raw_follow(fp, lp, st)) goto next_frame; return st; } if (switch_to_) return st; ip = f.ip; break;   // a lean door call's callee runs in the dispatcher
 			}
 			[[fallthrough]];
 		case opcode::op_c_ret:
@@ -8841,7 +8841,7 @@ void vm_backend::cells_run_lean(frame*& fp, const chunk::cell_loop*& lp) {
 			case opcode::op_c_mov_p: cells[ci.a].bits = cells[ci.b].bits; cells[ci.a].kind = cells[ci.b].kind; dirty.set(ci.a); ++ip; continue;
 			case opcode::op_c_jump: if (ci.c == 1) break; ip = ci.a; continue;   // a back edge polls the budget on the block loop's case
 			case opcode::op_c_probe:
-				if (loop.calls.data()[ci.a].raw && loop.plans.data()[ci.a].epoch == raw_epoch_ && cs.raw_call == 0) { cs.raw_call = static_cast<uint16_t>(ci.a + 1); ++ip; continue; }
+				if (loop.calls.data()[ci.a].raw && loop.plans.data()[ci.a].epoch == raw_epoch_ && cs.raw_call == 0) { cs.raw_call = ci.a + 1; ++ip; continue; }
 				break;
 			case opcode::op_c_args:
 				if (cs.raw_call == ci.a + 1) {
@@ -8939,7 +8939,7 @@ op_status vm_backend::exec_c_probe(frame& f, const vm_instruction& ins) {
 		// a raw call's probe: the site's plan holds for this epoch (no general code ran since the probe validated it), or the callee's binding
 		// is the site's cached script function (the lookup cache's fast head, no getter) and its body has a raw-enterable frame program of the
 		// arguments' kinds; nothing is parked, and a miss before the arguments instruction parks it (cells_miss)
-		f.cells->raw_call = static_cast<uint16_t>(ins.a + 1);
+		f.cells->raw_call = ins.a + 1;
 		++f.ip;
 		return {};
 	}
@@ -8957,6 +8957,11 @@ op_status vm_backend::exec_c_probe(frame& f, const vm_instruction& ins) {
 	if (f.cells->dirty.any_of(loop.env_cells)) [[unlikely]] {
 		// the callee and the verbatim environment pushes read the environment: written values go back first
 		for (const uint32_t k : loop.env_cells) { if (f.cells->dirty.test(k)) { env_flush_one(f, loop, k); f.cells->dirty.clear(k); } }
+	}
+	if (ins.a < 0x7FFFu && door_probe_lean(f, cc)) {
+		f.cells->raw_call = cell_state::k_lean_call | (ins.a + 1);
+		++f.ip;
+		return {};
 	}
 	if (cc.callee_cell != k_invalid_u32 && f.cells->dirty.test(cc.callee_cell)) [[unlikely]] {
 		// the callee is a slot whose value the block holds: the general probe reads the slot (a scalar there is its not-callable error)
@@ -8980,7 +8985,9 @@ op_status vm_backend::exec_c_args(frame& f, const vm_instruction& ins) {
 	cell_state& cs = *f.cells;
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
 	const chunk::cell_loop::cell_call& cc = loop.calls[ins.a];
-	if (cc.raw) {
+	if (cs.raw_call == (cell_state::k_lean_call | (ins.a + 1))) {
+		if (door_enter_lean(f, loop, ins)) return {};
+	} else if (cc.raw) {
 		op_status raw_st = op_status::ok;
 		if (raw_call_enter(f, loop, ins, raw_st)) return raw_st;
 	}
@@ -9100,7 +9107,7 @@ void vm_backend::park_raw_callee(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
 	if (cs.raw_call == 0) return;
 	const bool host = (cs.raw_call & k_host_call_mark) != 0;
-	const chunk::cell_loop::cell_call& cc = loop.calls[(cs.raw_call & ~k_host_call_mark) - 1];
+	const chunk::cell_loop::cell_call& cc = loop.calls[(cs.raw_call & ~(k_host_call_mark | cell_state::k_lean_call)) - 1];
 	cs.raw_call = 0;
 	const call_site& site = f.code->call_sites[f.code->code[cc.probe_ip].a];
 	pending_callee& pc = pending_callees_.emplace_back();
@@ -9226,6 +9233,85 @@ JAI_NOINLINE bool vm_backend::cells_host_call(frame& f, const chunk::cell_loop& 
 	f.ip += 2;
 	cs.raw_landing = static_cast<uint16_t>(index + 1);   // parameters of words bound nothing of this frame's
 	st = cells_land(f, loop, cc);
+	return true;
+}
+// the lean door's probe: exec_probe_callee's fast lane for a script function (the site's cached function is the name's binding, read
+// through its namespace cell or, in a frame without a member scope, through the probe's own lookup-cache row: a method frame's bare names
+// are its members' first, and no row answers there), when that function's frame is the plain one over a by-value bind and the call is no
+// tail call. Nothing is parked, as a raw probe parks nothing: no cell instruction between the probe and the arguments instruction can
+// rebind the name
+bool vm_backend::door_probe_lean(frame& f, const chunk::cell_loop::cell_call& cc) {
+#ifdef JAISCRIPT_VM_COVERAGE
+	(void)f; (void)cc;
+	return false;   // the census counts the door's four instructions
+#else
+	if (parallel_worker_ || debug_hook_ || !cached_global_env_) return false;
+	const vm_instruction& probe = f.code->code[cc.probe_ip];
+	const call_site& site = f.code->call_sites[probe.a];
+	if (!site.ic_fn || probe.b != site.ic_argc || cc.args.size() != probe.b || site.callee.slot != k_invalid_u32 ||
+	    (site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only)) || !site.staged_argument_slots.empty() ||
+	    site.ic_fn->backend_frame_plan != 2 || f.code->code[cc.call_ip].c != 0) return false;
+	const script_value* fast = nullptr;
+	if (site.callee.load_flags & load_flag_namespace_cell) {
+		fast = f.code->namespace_cells[site.callee.namespace_cell].cell;
+	} else {
+		bool plain_frame = !f.locals || f.top_level;
+		if (!plain_frame && !f.locals->is_method) { ensure_frame_member_scope(f, environment_.get()); plain_frame = !frame_scope_active(f); }
+		const auto& cache = f.code->env_lookup_cache;
+		const size_t slot = f.ip * 3;
+		if (plain_frame && slot < cache.size()) {
+			const env_lookup_cache_entry& e = cache[slot];
+			if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch()) { fast = e.fast_ptr; }
+		}
+	}
+	return fast && fast->raw_storage_index() == script_value::TYPEID_FUNCTION && &fast->unchecked_as_function() == site.ic_identity;
+#endif
+}
+// the lean door's arguments instruction: every argument is a scalar cell or a constant, boxed as the general door boxes it (a local's cell
+// keeps its slot's stamp) with no slot written back, since a by-value parameter binds nothing of this frame's; the plain frame is pushed at
+// once and the caller parks on its call instruction, where the callee's return lands. Any other argument (an element alias, a string cell,
+// an environment name's load), an argument of another storage than the one its parameter takes (the binder converts it), a bind the plain
+// frame declines and a limit park the callee and leave the call to the general door, which converts and raises
+bool vm_backend::door_enter_lean(frame& f, const chunk::cell_loop& loop, const vm_instruction& ins) {
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop::cell_call& cc = loop.calls[ins.a];
+	const call_site& site = f.code->call_sites[f.code->code[cc.probe_ip].a];
+	const vm_instruction& call = f.code->code[cc.call_ip];
+	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kbool = static_cast<uint8_t>(script_value::TYPEID_BOOL);
+	const uint64_t kinds = site.ic_fn->backend_lean_kinds;   // packed when each parameter takes exactly one storage (lean_kinds_of)
+	for (size_t i = 0; i < cc.args.size(); ++i) {
+		const chunk::cell_loop::call_arg& a = cc.args[i];
+		uint8_t kind;
+		if (a.kind == 1) {
+			kind = cs.cells[a.v].kind;
+			if (kind != kint && kind != kflt && kind != kbool) { park_raw_callee(f, loop); return false; }
+		} else {
+			const vm_instruction& oi = f.code->code[a.v];
+			if (oi.op == opcode::op_load) { park_raw_callee(f, loop); return false; }
+			kind = static_cast<uint8_t>(f.code->constants[oi.a].raw_storage_index());
+		}
+		if ((kinds & 1) && kind != ((kinds >> (8 * (i + 1))) & 0xFF)) { park_raw_callee(f, loop); return false; }
+	}
+	materialize_raw_window(f);   // the pushes go above this frame's window
+	const size_t args_base = stack_.size();
+	for (const chunk::cell_loop::call_arg& a : cc.args) {
+		if (a.kind != 1) { push_constant(*f.code, f.code->code[a.v].a); continue; }
+		script_value v = cell_scalar(cs.cells[a.v].kind, cs.cells[a.v].bits, engine_);
+		if (type_info* st = cs.cells[a.v].stamp()) { v.set_type_info(type_info_ptr{st}); }
+		stack_.push_back(std::move(v));
+	}
+	strong_ptr<script_function_node> pin;   // a site-cached script function is pinned by its site, as the probe parks it
+	++f.ip;   // parked on the call instruction (the door's C_CALL follows its C_ARGS)
+	if (!push_plain_frame(f, f.code->call_sites[call.b], *site.ic_fn, pin, args_base, cc.args.size())) {
+		--f.ip;
+		stack_.truncate(args_base);
+		park_raw_callee(f, loop);
+		return false;
+	}
+	cs.raw_call = 0;
+	cs.lean_landing = static_cast<uint16_t>(ins.a + 1);
+	++cells_counters_.lean_calls;
+	raw_epoch_advance();   // user code runs: plans re-validate, as at the general door's call
 	return true;
 }
 // a raw call: the arguments instruction of a raw site whose probe found a raw callee. When every argument's kind is its parameter's, the callee's
@@ -9355,7 +9441,7 @@ JAI_FORCEINLINE vm_backend::frame& vm_backend::raw_push(frame& f, const chunk::c
 	rec.f.pending_base = pending_callees_.size();
 	ncs.dirty.reset(body->max_cells);   // reset_call's, the loop set below
 	ncs.refused_loops = 0; ncs.park_at = k_invalid_u32; ncs.env_loop = nullptr;
-	ncs.raw_landing = 0; ncs.raw_call = 0;   // the entry the frame's cells_enter would have made
+	ncs.raw_landing = 0; ncs.lean_landing = 0; ncs.raw_call = 0;   // the entry the frame's cells_enter would have made
 	++current_call_depth_;
 	rec.f.code = body;
 	rec.f.ip = callee_loop.copy_head;
@@ -9562,6 +9648,10 @@ op_status vm_backend::cells_land(frame& f, const chunk::cell_loop& loop, const c
 	if (f.cells->raw_landing != 0) [[unlikely]] {
 		raw = f.cells->raw_landing == static_cast<uint32_t>(&cc - loop.calls.data()) + 1;   // the call entered a frame program raw: its callee bound nothing of this frame's
 		f.cells->raw_landing = 0;
+	}
+	if (f.cells->lean_landing != 0) {
+		raw = f.cells->lean_landing == static_cast<uint32_t>(&cc - loop.calls.data()) + 1;   // a lean door call: by-value bindings, as a raw call's
+		f.cells->lean_landing = 0;
 	}
 	if (!cells_reland(f, loop, cc, raw)) return miss();
 	if (cc.consumer == 0) { ++f.ip; return {}; }   // a statement's result was never pushed (land_call_result) or was dropped by the native path

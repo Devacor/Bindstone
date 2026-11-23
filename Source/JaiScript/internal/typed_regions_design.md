@@ -975,6 +975,19 @@ once, at compile time, and the run time keeps only the guards that keep those de
   reading the caller's code. A frame-program run takes its scalar operations, branches, raw calls and raw returns through a lean lane
   (`cells_run_lean`) small enough to keep its state in registers; any other instruction, an overflow or a declined call runs on the block
   loop's own case. The stamps are cleared at a raw entry only for a program that can write one (`cell_loop::writes_stamps`).
+- **The block door into a plain frame.** A call inside a cell region whose callee is no raw-enterable frame program keeps the door's
+  four instructions. When the probe's fast lane answers (the name's binding is the site's cached script function, read through its
+  namespace cell or the probe's own lookup-cache row) and that function's frame is the plain one over a by-value bind, the probe
+  parks nothing, as a raw probe parks nothing, and the arguments instruction enters the callee: each argument, a scalar cell or a
+  constant of the storage its parameter takes, is boxed above the window (a local's cell keeps its slot's stamp; no slot is written
+  back, since a by-value parameter binds nothing of the caller's), the plain frame is pushed, and the caller parks on its call
+  instruction, where the callee's return lands as the door's does. That landing checks no argument slot (`cell_state::lean_landing`,
+  as a raw call's landing) and everything else user code could have reached, as after any call. An argument of another kind (an
+  element alias, a string cell, an environment name's load), an argument its parameter converts, a push the plain frame declines (a
+  depth limit, a budget poll, a block-scope environment), a tail call and a name rebound since the site's cache was filled park the
+  callee, as a miss in the argument zone does, and the general door runs: it converts, binds and raises. A function with a `T&`
+  parameter or a default never takes this door: the general door writes the argument's slot back before the bind names it.
+  `cell_counters::lean_calls` counts the calls that entered this way. A worker, an armed debugger and a coverage build keep the door.
 - **The result goes where it is used.** `op_call_typed` lands an int or float result straight into its declaration or
   compiler temp (by `chunk::typed_sites`, skipping the consumer that follows); a raw return lands its payload in the caller's
   destination cell and skips the landing.

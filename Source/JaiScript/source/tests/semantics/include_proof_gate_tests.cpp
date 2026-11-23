@@ -312,6 +312,10 @@ public:
 		// moves the epoch the refusal was kept under), and a name declared below its first use (no epoch moves: that refusal is not kept).
 		// The loop's block is entered again once the record holds, where a refusal kept too long would run the call for good
 		test("a_refused_record_is_asked_again_once_its_cause_is_mended", [this]() {
+			// a global of a class type takes a subclass by assignment and its own class again, under one epoch: that refusal is never kept
+			const outcome classed = run("refused_class", {{{{"helper.jai", "float helper_half(int i) { return i * 0.5; }\n"}, {"main.jai", "import \"helper.jai\";\nclass Body { int w = 2; }\nclass Big : Body { int extra = 1; }\nBody B = Body();\nint K = 3;\nint leaf(Body b, int k) { return b.w * k; }\nfunction run() { int s = 0; for (int i = 0; i < 4; i++) { s += leaf(B, K); } return s; }\nstring r = to_string(run());\nB = Big();\nr += \"|\" + to_string(run()) + \",\" + reflect::type_of(B);\nB = Body();\nr += \"|\" + to_string(run()) + \",\" + reflect::type_of(B) + \"|\" + to_string(helper_half(2));\nr;\n"}}, "", "main.jai"}});
+			expect(classed, "24|24,Big|24,Body|1.0", "a global holding a subclass and its own class again");
+			check(count(classed.listing, "-- inlined leaf") > 0, "the call over the class-typed global grafts: " + classed.listing.substr(0, 3000));
 			const outcome retyped = run("refused_retyped", {{{{"as_text.jai", "string IDX = \"s\";\n"}, {"as_int.jai", "int IDX = 2;\n"},
 				{"main.jai", "int IDX = 0;\nint N = 4;\nint two(int a, int b) { return a + b; }\nfunction f() { int s = 0; for (int i = 0; i < 3; i++) { s += two(IDX, N); } return s; }\nstring r = to_string(f());\ninclude \"as_text.jai\";\ntry { r += \"|\" + to_string(f()); } catch (e) { r += \"|refused\"; }\ntry { r += \"|\" + to_string(f()); } catch (e) { r += \"|refused\"; }\ninclude \"as_int.jai\";\nr += \"|\" + to_string(f()) + \"|\" + to_string(f());\nr;\n"}}, "", "main.jai"}});
 			expect(retyped, "12|refused|refused|18|18", "a global retyped and back");

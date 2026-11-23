@@ -12726,8 +12726,9 @@ bool vm_backend::inline_globals_hold(const frame& f, const chunk::inline_site& s
 		if (*verdict == held) return true;
 		if (*verdict == refused) return false;
 	}
-	// a refusal is kept where only what moves the epoch can mend it: a cell of a declared type holding another kind (a declaration retypes
-	// it, an assignment converts); a missing name, a var's cell, a reference or a callee may change under the same epoch and is asked again.
+	// a refusal is kept where only what moves the epoch can mend it: a cell declared a scalar or an array of scalars holding another kind (a
+	// declaration retypes it, an assignment converts); a missing name, a var's cell, a reference, a callee or a cell of a class type, which
+	// an assignment may fill with another class, may change under the same epoch and is asked again.
 	// A worker's root is provisioned once a region, so its row keeps every refusal for the region
 	const auto refuse = [&](const script_value* typed_cell) {
 		const type_info* stamp = typed_cell ? typed_cell->type_info_raw() : nullptr;
@@ -12754,7 +12755,7 @@ bool vm_backend::inline_globals_hold(const frame& f, const chunk::inline_site& s
 		}
 		if (kind & proof_global::k_type) {   // any other declared type: the cell keeps the declaration's type, compared by identity
 			const type_info* vt = v->type_info_raw();
-			if (!vt || !g.type || (vt != g.type && !vt->equals(*g.type))) return refuse(v);
+			if (!vt || !g.type || (vt != g.type && !vt->equals(*g.type))) return refuse(nullptr);
 			continue;
 		}
 		if (base == script_value_type::jai_array_type) {

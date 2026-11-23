@@ -3897,6 +3897,7 @@ void vm_compiler::fold_member_temps(chunk& c) {
 		else if (o >= opcode::op_d_add && o <= opcode::op_d_shr) { fd.kind = chunk::member_fold::dyn_arith; operands[0] = consumer.b; operands[1] = consumer.c; }
 		else if (o >= opcode::op_d_jlt && o <= opcode::op_d_jne) { fd.kind = chunk::member_fold::dyn_cmp_jump; operands[0] = consumer.a; operands[1] = consumer.b; }
 		else if (o == opcode::op_t_decl_mov) { fd.kind = chunk::member_fold::typed_decl_move; operands[0] = consumer.b; }
+		else if (o == opcode::op_t_store_mov) { fd.kind = chunk::member_fold::typed_store_move; operands[0] = consumer.b; }
 		else if (o == opcode::op_set_member_value) {
 			const member_store_proto& sp = c.member_store_protos[consumer.a];
 			if (!sp.value.direct || sp.value.const_index != k_invalid_u32) continue;
@@ -3914,6 +3915,16 @@ void vm_compiler::fold_member_temps(chunk& c) {
 			++fd.count;
 		}
 		if (!ok) continue;
+		if ((fd.kind == chunk::member_fold::typed_arith || fd.kind == chunk::member_fold::dyn_arith) && j + 1 < code.size() && !held[j + 1] &&
+		    code[j + 1].op == opcode::op_kill_slot && code[j + 1].b < fd.count && !(j + 2 < code.size() && code[j + 2].op == opcode::op_jump)) {
+			// the kill's slots [a - b, a] are all this fold's temps, and no jump follows for the kill to take (fuse_kill_jumps)
+			bool own = true;
+			for (uint32_t s = code[j + 1].a - code[j + 1].b; s <= code[j + 1].a && own; ++s) {
+				own = false;
+				for (size_t m = ip; m < j; ++m) { if (code[m].b == s) { own = true; } }
+			}
+			fd.kill_follows = own;
+		}
 		fd.consumer = consumer;
 		fd.first = code[ip];
 		c.member_folds.push_back(fd);

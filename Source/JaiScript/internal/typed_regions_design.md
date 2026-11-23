@@ -283,6 +283,10 @@ of a statement-position move from a slot or a literal, and `x = a[i];` lands its
 moves it with the same row. Their guard is total: the same-type payload test on the live slot lands in place,
 anything else replays the exact general pair from the typed site, so a proof adds nothing to their soundness and
 they are emitted with proofs on or off. The proofs flag gates the arithmetic and compare rows only.
+`op_t_store_mov` has a handle row beside its scalar ones: a handle the source slot holds, tagged the very
+`shared_ptr<T>` type the destination slot carries, is the store's identity admission, so it is copied in, or moved
+in when the source is a temp the store is the last to read (the counts are those of the general pair: the load's
+copy, the temp's kill, the store).
 
 A unary minus, complement or not over an operand is a definition into a compiler value (`op_unary_temp`, the shape
 of `op_math_temp`): the lift, the flat pre-step, a math argument, a declaration, a statement-position store and an

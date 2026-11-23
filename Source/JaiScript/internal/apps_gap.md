@@ -84,13 +84,14 @@ method) is `MEMBER_TEMP_THIS`, where it was a stack read and a landing; a statem
 (`current_tcb.state = v;`) is one `SET_MEMBER_VALUE`, where it was a load, a store and a pop.
 
 - **Member temps fold into their consumer.** When the instruction after one or two member temps consumes their temps (a typed or dynamic
-  arithmetic, a typed or dynamic compare-jump, a typed declaration's move, a member store's value), the first member temp becomes
+  arithmetic, a typed or dynamic compare-jump, a typed declaration's or store's move (`cur = cur.next`), a member store's value), the first member temp becomes
   `MFOLD`: one dispatch reads each field where it lives by the member temp's own rows (an element's object in place, else the member
   cache row: the receiver's class at its method epoch names the slot), lands it in its temp as the member temp would, and runs the
   consumer's own fast rows (a member store runs whole). A field the rows do not serve (no instance, another class or epoch, a getter, a
   host member) runs the member temps and the consumer as compiled; a consumer row that declines continues at the consumer. A jump into the consumer, a cell region's span and the
   debugger see the instructions as compiled, and every temp holds what the member temp leaves in it, so lifetimes and texts are the
-  general form's.
+  general form's. When the instruction after an arithmetic consumer kills exactly the fold's temps (`member_fold::kill_follows`), a run
+  whose arithmetic row succeeded steps past the kill: the row read ints or floats out of those temps, which own nothing.
 - **Method grafts take the frame's receiver.** Besides a local, a graft's receiver is the frame's `this` (a sibling's bare `m()`,
   `this.m()`) or a bare field holding a handle (`current_tcb.m()`), read where it lives. The clone compiles the body's bare names as the
   caller's own operands: on `this` the body's fields are the caller's this-field operands; on a field or a local they are member reads

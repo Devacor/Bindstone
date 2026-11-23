@@ -2676,6 +2676,7 @@ namespace jai::vm {
         op_status exec_typed_decl_mov(frame& f, const vm_instruction& ins);
         op_status exec_typed_decl_const(frame& f, const vm_instruction& ins);
         op_status exec_typed_store_mov(frame& f, const vm_instruction& ins);
+        bool typed_store_mov_fast(frame& f, const vm_instruction& ins);
         op_status exec_typed_store_const(frame& f, const vm_instruction& ins);
         op_status exec_typed_push(frame& f, const vm_instruction& ins);
         // The value of an assignment expression is the destination's stored value

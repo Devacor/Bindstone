@@ -231,6 +231,27 @@ function map_reference() -> int { map<int, int> m = {}; m[1] = 4; int s = 0; for
 0;)JAI", "removed_below();", "inserted_below();", "removed_above();", "shrunk();", "writes_through();", "handle_reference();", "map_reference();" }, "", "reference rules");
 		});
 
+		test("a_handle_moves_between_a_field_and_a_local", [this]() {
+			same_everywhere({ R"JAI(
+var LOG = "";
+class Node { int v = 0; shared_ptr<Node> next = null; ~Node() { LOG = LOG + "~" + to_string(v); } }
+function build(int n) -> shared_ptr<Node> { shared_ptr<Node> head = null; for (int i = 0; i < n; ++i) { shared_ptr<Node> nd = new Node(); nd.v = i; nd.next = head; head = nd; } return head; }
+function walk(shared_ptr<Node> head) -> int { int s = 0; shared_ptr<Node> cur = head; while (cur != null) { s += cur.v; cur = cur.next; } return s; }
+function walk_counts(shared_ptr<Node> head) -> string { string out = ""; shared_ptr<Node> cur = head.next; while (cur != null) { out = out + to_string(cur.use_count()); cur = cur.next; } return out; }
+function drain(int n) -> string {
+	LOG = "";
+	shared_ptr<Node> cur = build(n);
+	int s = 0;
+	while (cur != null) { s += cur.v; cur = cur.next; LOG = LOG + "."; }
+	return to_string(s) + LOG;
+}
+function var_cursor(shared_ptr<Node> head) -> int { int s = 0; var cur = head; while (cur != null) { s += cur.v; cur = cur.next; } return s; }
+function self_link() -> int { shared_ptr<Node> a = new Node(); a.v = 4; a.next = a; shared_ptr<Node> cur = a; int s = 0; for (int i = 0; i < 3; ++i) { s += cur.v; cur = cur.next; } a.next = null; return s; }
+function dropped() -> string { shared_ptr<Node> head = build(3); int s = walk(head); LOG = ""; head = null; return to_string(s) + LOG; }
+shared_ptr<Node> H = build(6);
+0;)JAI", "walk(H);", "walk_counts(H);", "drain(4);", "var_cursor(H);", "self_link();", "dropped();" }, "", "handle moves");
+		});
+
 		test("a_member_of_an_element_reads_through_every_element_kind", [this]() {
 			same_everywhere({ R"JAI(
 var LOG = "";

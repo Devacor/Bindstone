@@ -11043,11 +11043,10 @@ op_status vm_backend::exec_typed_decl_const(frame& f, const vm_instruction& ins)
 	return {};
 }
 
-// `x = y;` as one op: store_popped_value's proven-identity slot store over the LOAD's value
-op_status vm_backend::exec_typed_store_mov(frame& f, const vm_instruction& ins) {
-	const chunk::typed_site& site = f.code->typed_sites[f.ip];
+// exec_typed_store_mov's rows that need no stack; false = the LOAD and the STORE run
+JAI_FORCEINLINE bool vm_backend::typed_store_mov_fast(frame& f, const vm_instruction& ins) {
 	script_value* dst = frame_slot(f, ins.a);
-	const script_value* src = dst ? frame_slot(f, ins.b) : nullptr;
+	script_value* src = dst ? frame_slot(f, ins.b) : nullptr;
 	if (src && src->raw_storage_index() == script_value::TYPEID_REFERENCE && !lane_deref_silent(*src)) { src = nullptr; }
 	if (src && !dst->is_reference()) {
 		const script_value& v = src->deref();
@@ -11058,7 +11057,7 @@ op_status vm_backend::exec_typed_store_mov(frame& f, const vm_instruction& ins) 
 			if (!slot_type ? !detail::slot_value_assign_candidate(*dst) : detail::same_type_payload(v, slot_type)) {
 				JAI_TYPED_INPLACE(2);
 				*dst = v;
-				return {};
+				return true;
 			}
 			// a var slot: the store stamps the slot's own tag on the value (store_popped_value's var row)
 			const type_info* vt = v.type_info_raw();
@@ -11067,16 +11066,34 @@ op_status vm_backend::exec_typed_store_mov(frame& f, const vm_instruction& ins) 
 				JAI_TYPED_INPLACE(2);
 				*dst = v;
 				dst->set_type_info(type_info_ptr{const_cast<type_info*>(slot_type)});
-				return {};
+				return true;
 			}
 			// an int into a float slot: the store's table row (int -> float)
 			if (vi == script_value::TYPEID_INT && slot_type && slot_type->base_type == script_value_type::jai_float_type) {
 				JAI_TYPED_INPLACE(2);
 				*dst = script_value(static_cast<script_float>(v.unchecked_as_int()), engine_);
-				return {};
+				return true;
+			}
+		} else if (vi == script_value::TYPEID_OBJECT && &v == src && dst != src && f.locals && !f.top_level) {
+			// a handle the source slot itself holds into a shared_ptr<T> local of the handle's own static type: store_popped_value's handle
+			// row, whose admission is the identity; a temp the store is the last to read moves in, which leaves the counts the LOAD's copy
+			// and the temp's kill leave
+			const type_info* slot_type = dst->type_info_raw();
+			if (slot_type && slot_type == v.type_info_raw() && slot_type->base_type == script_value_type::jai_shared_ptr_type && !slot_type->dynamic_pointee) {
+				JAI_TYPED_INPLACE(2);
+				if (f.code->typed_sites[f.ip].release) { *dst = std::move(*src); }
+				else { *dst = v; }
+				return true;
 			}
 		}
 	}
+	return false;
+}
+
+// `x = y;` as one op: store_popped_value's proven-identity slot store over the LOAD's value
+op_status vm_backend::exec_typed_store_mov(frame& f, const vm_instruction& ins) {
+	if (typed_store_mov_fast(f, ins)) return {};
+	const chunk::typed_site& site = f.code->typed_sites[f.ip];
 	JAI_TYPED_INPLACE(3);
 	VM_TRY(exec_load(f, site.orig));
 	if (site.release) { kill_frame_slot(f, ins.b); }
@@ -16119,9 +16136,21 @@ JAI_NOINLINE int vm_backend::member_fold_fast(frame& f, const chunk::member_fold
 	f.ip = at + fd.count;   // the consumer's own rows (its typed site, its cache slots)
 	const vm_instruction& ins = fd.consumer;
 	switch (fd.kind) {
-	case chunk::member_fold::typed_arith: if (typed_arith_fast(f, ins)) { ++f.ip; return 1; } break;
+	case chunk::member_fold::typed_arith: if (typed_arith_fast(f, ins)) { f.ip += fd.kill_follows ? 2 : 1; return 1; } break;
 	case chunk::member_fold::typed_cmp_jump: if (typed_cmp_jump_fast(f, ins) > 0) { return 1; } break;
-	case chunk::member_fold::dyn_arith: if (dyn_arith_fast(f, ins)) { ++f.ip; return 1; } break;
+	case chunk::member_fold::dyn_arith:
+		if (dyn_arith_fast(f, ins)) {
+			// the kill is skipped over temps that hold the scalars themselves (an operand read through a reference keeps its kill)
+			bool scalars = fd.kill_follows;
+			for (uint8_t k = 0; scalars && k < fd.count; ++k) {
+				const script_value* t = frame_slot(f, (k == 0 ? fd.first : f.code->code[at + k]).b);
+				scalars = t && (t->raw_storage_index() == script_value::TYPEID_INT || t->raw_storage_index() == script_value::TYPEID_FLOAT);
+			}
+			f.ip += scalars ? 2 : 1;
+			return 1;
+		}
+		break;
+	case chunk::member_fold::typed_store_move: if (typed_store_mov_fast(f, ins)) { ++f.ip; return 1; } break;
 	case chunk::member_fold::dyn_cmp_jump: {
 		if (has_custom_numeric_ops_) break;
 		const script_value* lp = dyn_operand(f, ins.a);

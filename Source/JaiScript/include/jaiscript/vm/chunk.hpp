@@ -964,11 +964,12 @@ namespace jai::vm {
         // member temps and the consumer of their temps run as one instruction (op_mfold): each field read where it lives through its member
         // temp's member_ic row into its temp, then the consumer's own fast rows; anything else continues with the instructions as compiled
         struct member_fold {
-            enum : uint8_t { typed_arith = 1, typed_cmp_jump, dyn_arith, dyn_cmp_jump, typed_decl_move, member_store };
+            enum : uint8_t { typed_arith = 1, typed_cmp_jump, dyn_arith, dyn_cmp_jump, typed_decl_move, member_store, typed_store_move };
             vm_instruction consumer;   // as compiled: its operands name the temps
             vm_instruction first;      // the first member temp, which a miss runs (a second one stays in the code after the fold)
             uint8_t kind = 0;
             uint8_t count = 0;         // the member temps (1 or 2)
+            bool kill_follows = false; // the instruction after the consumer kills these temps and nothing else: an arithmetic row, which read scalars, runs past it
         };
         std::vector<member_fold> member_folds;
         std::unordered_map<uint32_t, uint32_t> member_this_symbols;   // a this-field base's member node: its symbols index

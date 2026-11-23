@@ -224,7 +224,9 @@ namespace {
 				out << pre << "member_folds " << ch.member_folds.size() << "\n";
 				for (size_t i = 0; i < ch.member_folds.size(); ++i) {
 					const chunk::member_fold& m = ch.member_folds[i];
-					out << pre << " " << i << " kind=" << static_cast<int>(m.kind) << " count=" << static_cast<int>(m.count) << " consumer=" << ins(m.consumer) << " first=" << ins(m.first) << "\n";
+					out << pre << " " << i << " kind=" << static_cast<int>(m.kind) << " count=" << static_cast<int>(m.count) << " consumer=" << ins(m.consumer) << " first=" << ins(m.first);
+					if (m.kill_follows) { out << " kill_follows=1"; }
+					out << "\n";
 				}
 			}
 			if (!ch.member_this_symbols.empty()) {

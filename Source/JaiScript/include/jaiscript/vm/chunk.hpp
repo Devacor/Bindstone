@@ -475,6 +475,7 @@ namespace jai::vm {
         // code (a custom numeric operator, a getter, an operator[]), whatever the slot holds; the readers take the temp every time
         bool guard_always = false;
         uint8_t receiver = 0;   // the subscript's container the checker proved (binary_expr::subscript_receiver): 1 string, 2 array, 3 map, 0 unproven
+        bool int_keyed_scalar_map = false;   // the container is a frame slot declared a map from int to int, float, bool or var (the compiler's own fact): a block reads and stores its entries as operations of its own
         // op_index_store_fused: the store target's chunk::string_target_sites entry (k_invalid_u32 = none)
         uint32_t string_target = k_invalid_u32;
         bool compound = false;        // op_index_compound_operand: a read-modify-write of the element by compound_kind (opcode.hpp compound_*; compound_plus is 0)

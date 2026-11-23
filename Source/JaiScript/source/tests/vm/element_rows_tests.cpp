@@ -3,6 +3,7 @@
 // vm-reference backend to one result, errors and destructor order included.
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/detail/engine_access.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <string>
 #include <vector>
@@ -349,6 +350,163 @@ function constrained(int n) -> string {
 }
 function refused(int n) -> int { array<int> ints = [1, 2]; for (int i = 0; i < n; ++i) { var half = i * 0.5; ints[i & 1] = half; } return ints[0] + ints[1]; }
 0;)JAI", "plain(9);", "plain(2);", "compound(7);", "objects(4);", "constrained(5);", "refused(5);" }, "", "var array stores");
+		});
+
+		test("a_proven_map_read_in_a_loop_takes_its_entry_where_it_lives", [this]() {
+			const std::string defs = R"JAI(
+class P { int a = 4; }
+function ints(int n) -> int { map<int, int> m = {}; for (int i = 0; i < 16; ++i) { m[i * 7 + 3] = i; } int s = 0; for (int i = 0; i < n; ++i) { s += m[(i & 15) * 7 + 3]; } return s; }
+function floats(int n) -> float { map<int, float> m = {}; for (int i = 0; i < 8; ++i) { m[i] = i * 0.5; } float s = 0.0; for (int i = 0; i < n; ++i) { s += m[i & 7]; } return s; }
+function flags(int n) -> int { map<int, bool> m = {}; for (int i = 0; i < 8; ++i) { m[i] = i % 3 == 0; } int s = 0; for (int i = 0; i < n; ++i) { if (m[i & 7]) { s += 1; } } return s; }
+function declared(int n) -> string {
+	map<int, int> m = {}; for (int i = 0; i < 8; ++i) { m[i] = i * 3; }
+	int s = 0; float f = 0.0; string out = "";
+	for (int i = 0; i < n; ++i) { int v = m[i & 7]; float w = m[(i + 1) & 7]; var d = m[i & 3]; s += v; f = f + w; out = out + to_string(d); }
+	return to_string(s) + ":" + to_string(f) + ":" + out;
+}
+function mixed(int n) -> string {
+	map<int, var> m = {}; m[0] = 1; m[1] = 2.5; m[2] = "text"; m[3] = true; m[4] = P(); m[5] = [1, 2]; m[6] = null; m[7] = 9;
+	string out = ""; int s = 0;
+	for (int i = 0; i < n; ++i) { var v = m[i & 7]; out = out + to_string(i & 7) + "=" + (i % 8 == 4 ? to_string(v.a) : to_string(v)) + ";"; if ((i & 7) == 0 || (i & 7) == 7) { s += m[i & 7]; } }
+	return out + to_string(s);
+}
+function missing(int n) -> int { map<int, int> m = {}; m[0] = 5; m[1] = 6; int s = 0; for (int i = 0; i < n; ++i) { s += m[i]; } return s; }
+function rebound(int n) -> int {
+	map<int, int> m = {}; map<int, int> other = {}; for (int i = 0; i < 4; ++i) { m[i] = i; other[i] = i * 100; }
+	int s = 0;
+	for (int i = 0; i < n; ++i) { s += m[i & 3]; if (i == 5) { m = other; } }
+	return s;
+}
+function also_stored(int n) -> int { map<int, int> m = {}; for (int i = 0; i < 4; ++i) { m[i] = i; } int s = 0; for (int i = 0; i < n; ++i) { s += m[i & 3]; m[(i + 1) & 3] = s; } return s; }
+function shrinks(int n) -> int { map<int, int> m = {}; m[0] = 1; m[1] = 2; int s = 0; for (int i = 0; i < n; ++i) { s += m[i & 1]; if (i == 2) { m.remove(1); } s += m.size(); } return s; }
+function by_reference(map<int, int>& m, int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { s += m[i & 3]; } return s; }
+function nested(int n) -> int { map<int, array<int>> m = {}; m[0] = [1, 2]; m[1] = [3, 4]; int s = 0; for (int i = 0; i < n; ++i) { s += m[i & 1][i & 1]; } return s; }
+function text_keys(int n) -> int { map<string, int> m = {}; m["a"] = 2; m["b"] = 3; array<string> ks = ["a", "b"]; int s = 0; for (int i = 0; i < n; ++i) { s += m[ks[i & 1]]; } return s; }
+function overflowing(int n) -> int { map<int, int> m = {}; m[0] = 1; int s = 0; int big = 9223372036854775807; for (int i = 0; i < n; ++i) { s += m[(i & 0) * 2 + big * i]; } return s; }
+function sum_ints(map<int, int> m, int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { s += m[(i & 3) * 2 + 1]; } return s; }
+function sum_floats(map<int, float> m, int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { s += m[i & 3]; } return s; }
+function count_flags(map<int, bool> m, int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { if (m[i & 3]) { s += 1; } } return s; }
+function sum_text(map<string, int> m, array<string> ks, int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { s += m[ks[i & 1]]; } return s; }
+function sum_text_local(map<string, int> m, int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { string k = (i & 1) == 0 ? "a" : "b"; s += m[k]; } return s; }
+function text_sizes(map<int, string> m, int n) -> int { int c = 0; for (int i = 0; i < n; ++i) { string t = m[i & 3]; c += t.size(); } return c; }
+function count_open(map<int, var> m, int n) -> int { int c = 0; for (int i = 0; i < n; ++i) { if (m[i & 3]) { c += 1; } } return c; }
+map<string, int> GT = {}; GT["a"] = 2; GT["b"] = 3;
+array<string> KS = ["a", "b"];
+map<int, string> GS = {}; GS[0] = "a"; GS[1] = "bb"; GS[2] = ""; GS[3] = "dddd";
+map<int, var> GO = {}; GO[0] = true; GO[1] = 0; GO[2] = 2.5; GO[3] = 1;
+map<int, var> GM = {}; GM[0] = true; GM[1] = "text"; GM[2] = false; GM[3] = [1, 2];
+map<int, int> G = {}; G[0] = 1; G[1] = 2; G[2] = 3; G[3] = 4; G[5] = 6; G[7] = 8;
+map<int, float> GF = {}; GF[0] = 0.5; GF[1] = 1.5; GF[2] = 2.5; GF[3] = 3.5;
+map<int, bool> GB = {}; GB[0] = true; GB[1] = false; GB[2] = true; GB[3] = true;
+0;)JAI";
+			same_everywhere({ defs, "ints(40);", "floats(20);", "flags(20);", "declared(9);", "mixed(16);", "missing(2);", "missing(3);", "rebound(12);", "also_stored(9);", "shrinks(3);", "shrinks(5);",
+				"by_reference(G, 9);", "nested(6);", "text_keys(7);", "overflowing(1);", "overflowing(3);", "sum_ints(G, 9);", "sum_floats(GF, 9);", "count_flags(GB, 9);", "sum_text(GT, KS, 9);", "sum_text_local(GT, 9);",
+				"text_sizes(GS, 9);", "count_open(GO, 9);", "count_open(GM, 9);" }, "", "map reads");
+			// the read is the block's own operation: the loop runs as one block with no statement parked for it and nothing missing
+			auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+			e->execute(defs);
+			for (const char* call : { "sum_ints(G, 400);", "sum_floats(GF, 400);", "count_flags(GB, 400);", "count_open(GO, 400);", "by_reference(G, 400);" }) {
+				const cell_counters c0 = detail::engine_access::cells_counters(*e);
+				e->execute(call);
+				const cell_counters c1 = detail::engine_access::cells_counters(*e);
+				const std::string label = std::string(call) + ": entries " + std::to_string(c1.entries - c0.entries) + ", boundaries " + std::to_string(c1.boundaries - c0.boundaries) +
+				                          ", misses " + std::to_string(c1.misses - c0.misses);
+				check_true(c1.entries - c0.entries >= 1, "the reading loop enters a block: " + label);
+				check_eq(uint64_t{0}, c1.boundaries - c0.boundaries, "the read parks nothing: " + label);
+				check_eq(uint64_t{0}, c1.misses - c0.misses, "and misses nothing: " + label);
+			}
+			// a map keyed by text, or one of text, is no such operation: its loop never enters a block that the key or the entry would miss out of
+			for (const char* call : { "sum_text(GT, KS, 400);", "sum_text_local(GT, 400);", "text_sizes(GS, 400);" }) {
+				const cell_counters c0 = detail::engine_access::cells_counters(*e);
+				e->execute(call);
+				const cell_counters c1 = detail::engine_access::cells_counters(*e);
+				check_eq(uint64_t{0}, c1.misses - c0.misses, std::string(call) + " misses nothing");
+			}
+			// an open value the cells do not take costs the call one miss, not one per iteration
+			{
+				const cell_counters c0 = detail::engine_access::cells_counters(*e);
+				e->execute("count_open(GM, 400);");
+				const cell_counters c1 = detail::engine_access::cells_counters(*e);
+				check_eq(uint64_t{1}, c1.misses - c0.misses, "a map of mixed values misses once in a call");
+				check_eq(uint64_t{1}, c1.entries - c0.entries, "and its block is not entered again in that call");
+			}
+		});
+
+		test("a_proven_map_store_in_a_loop_is_the_general_stores_own", [this]() {
+			const std::string defs = R"JAI(
+class P { int a = 4; }
+function ints(int n) -> string { map<int, int> m = {}; for (int i = 0; i < n; ++i) { m[(i & 7) * 3 + 1] = i; } return to_string(m); }
+function floats(int n) -> string { map<int, float> m = {}; for (int i = 0; i < n; ++i) { float v = i * 0.5; m[i & 3] = v; } return to_string(m); }
+function flags(int n) -> string { map<int, bool> m = {}; for (int i = 0; i < n; ++i) { bool b = i % 3 == 0; m[i & 3] = b; } return to_string(m); }
+function literals(int n) -> string { map<int, int> m = {}; map<int, float> f = {}; map<int, bool> b = {}; for (int i = 0; i < n; ++i) { m[i & 3] = 7; f[i & 3] = 2.5; b[i & 3] = true; } return to_string(m) + to_string(f) + to_string(b); }
+function widening(int n) -> string { map<int, float> m = {}; for (int i = 0; i < n; ++i) { m[i & 3] = i; } return to_string(m); }
+function narrowing(int n) -> string { map<int, int> m = {}; for (int i = 0; i < n; ++i) { var v = i * 0.5; m[i & 3] = v; } return to_string(m); }
+function open_values(int n) -> string { map<int, var> m = {}; m[1] = "text"; m[2] = [1, 2]; for (int i = 0; i < n; ++i) { m[i & 3] = i; float h = i * 0.5; m[(i & 3) + 4] = h; } return to_string(m); }
+function held_object(int n) -> string { map<int, var> m = {}; m[0] = P(); string out = ""; for (int i = 0; i < n; ++i) { m[i & 1] = i; out = out + to_string(m[1]); } return out + to_string(m.size()); }
+function read_modify(int n) -> int { map<int, int> m = {}; for (int i = 0; i < 4; ++i) { m[i] = 0; } for (int i = 0; i < n; ++i) { m[i & 3] = m[i & 3] + i; } int s = 0; for (int i = 0; i < 4; ++i) { s += m[i] * (i + 1); } return s; }
+function counting(int n) -> string { map<int, int> m = {}; for (int i = 0; i < 4; ++i) { m[i] = 0; } for (int i = 0; i < n; ++i) { int k = (i * 7) & 3; int c = m[k] + 1; m[k] = c; } return to_string(m); }
+function key_kinds(int n) -> string { map<float, int> m = {}; for (int i = 0; i < n; ++i) { var k = i & 3; m[k] = i; } return to_string(m); }
+function open_keys(int n) -> string { map<var, int> m = {}; m["a"] = 1; for (int i = 0; i < n; ++i) { m[i & 3] = i; } return to_string(m); }
+function used_value(int n) -> int { map<int, int> m = {}; int s = 0; for (int i = 0; i < n; ++i) { int t = (m[i & 3] = i); s += t; } return s + m[1]; }
+function compound(int n) -> string { map<int, int> m = {}; for (int i = 0; i < 4; ++i) { m[i] = 1; } for (int i = 0; i < n; ++i) { m[i & 3] += i; m[(i + 1) & 3] = i; } return to_string(m); }
+function rebound(int n) -> string { map<int, int> m = {}; map<int, int> other = {}; for (int i = 0; i < n; ++i) { m[i & 3] = i; if (i == 5) { m = other; } } return to_string(m) + to_string(other); }
+function by_value(map<int, int> m, int n) -> string { for (int i = 0; i < n; ++i) { m[i & 3] = i * 10; } return to_string(m); }
+function by_reference(map<int, int>& m, int n) -> int { for (int i = 0; i < n; ++i) { m[i & 3] = i; } return m.size(); }
+function fill(map<int, int> m, int n) -> int { for (int i = 0; i < n; ++i) { m[(i & 15) * 5 + 2] = i; } return m.size(); }
+function tally(map<int, int> m, int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { int k = i & 3; int c = m[k] + 1; m[k] = c; s += c; } return s; }
+function widen(map<int, float> m, int n) -> string { for (int i = 0; i < n; ++i) { m[i & 3] = i; } return to_string(m); }
+function truths(map<int, bool> m, int n) -> string { for (int i = 0; i < n; ++i) { var v = i; m[i & 3] = v; } return to_string(m); }
+function text_fill(map<int, string> m, int n) -> int { for (int i = 0; i < n; ++i) { m[i & 3] = "t"; } return m.size(); }
+map<int, bool> GB = {}; GB[0] = true;
+map<int, string> GS = {}; GS[0] = "a";
+map<int, int> G = {}; G[0] = 1; G[1] = 2; G[2] = 3; G[3] = 4;
+map<int, float> GF = {}; GF[0] = 0.5;
+0;)JAI";
+			same_everywhere({ defs, "ints(20);", "floats(9);", "flags(9);", "literals(6);", "widening(6);", "narrowing(1);", "narrowing(3);", "open_values(6);", "held_object(4);", "read_modify(13);",
+				"counting(21);", "key_kinds(3);", "open_keys(5);", "used_value(7);", "compound(9);", "rebound(9);", "by_value(G, 6);", "to_string(G);", "by_reference(G, 7);", "to_string(G);",
+				"fill(G, 40);", "tally(G, 9);", "to_string(G);", "widen(GF, 7);", "truths(GB, 7);", "text_fill(GS, 7);", "to_string(GS);" }, "", "map stores");
+			// the store, and a read beside it, are the block's own operations
+			auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+			e->execute(defs);
+			for (const char* call : { "fill(G, 400);", "tally(G, 400);", "widen(GF, 400);", "by_reference(G, 400);" }) {
+				const cell_counters c0 = detail::engine_access::cells_counters(*e);
+				e->execute(call);
+				const cell_counters c1 = detail::engine_access::cells_counters(*e);
+				const std::string label = std::string(call) + ": entries " + std::to_string(c1.entries - c0.entries) + ", boundaries " + std::to_string(c1.boundaries - c0.boundaries) +
+				                          ", misses " + std::to_string(c1.misses - c0.misses);
+				check_true(c1.entries - c0.entries >= 1, "the storing loop enters a block: " + label);
+				check_eq(uint64_t{0}, c1.boundaries - c0.boundaries, "the store parks nothing: " + label);
+				check_eq(uint64_t{0}, c1.misses - c0.misses, "and misses nothing: " + label);
+			}
+			// a value the map's type converts is the general store's: one miss in the call, and a map of text is never the block's
+			{
+				const cell_counters c0 = detail::engine_access::cells_counters(*e);
+				e->execute("truths(GB, 400);");
+				const cell_counters c1 = detail::engine_access::cells_counters(*e);
+				check_eq(uint64_t{1}, c1.misses - c0.misses, "a converting store misses once in a call");
+				e->execute("text_fill(GS, 400);");
+				const cell_counters c2 = detail::engine_access::cells_counters(*e);
+				check_eq(uint64_t{0}, c2.misses - c1.misses, "a store into a map of text misses nothing");
+			}
+		});
+
+		test("a_map_store_in_a_block_meets_the_memory_cap_where_the_general_store_does", [this]() {
+			const std::vector<std::string> steps = { R"JAI(
+map<int, int> G = {};
+map<int, float> GF = {};
+function fill(map<int, int>& m, int n) { for (int i = 0; i < n; ++i) { m[i * 3] = i; } }
+function fill_floats(map<int, float>& m, int n) { for (int i = 0; i < n; ++i) { float v = i * 0.5; m[i] = v; } }
+function capped(int n) -> string { try { fill(G, n); } catch (e) { return "caught|" + e + "|" + to_string(G.size()); } return "no cap " + to_string(G.size()); }
+function capped_floats(int n) -> string { try { fill_floats(GF, n); } catch (e) { return "caught|" + e + "|" + to_string(GF.size()); } return "no cap " + to_string(GF.size()); }
+0;)JAI", "capped(50);", "capped(1000000);", "G.size();", "capped_floats(1000000);", "GF.size();" };
+			// the vm's general store charges an insert its entry alone and the interpreter's charges more, so the count at the cap is the vm's own:
+			// the block, the general form with proofs off and the reference form stop at the same store
+			auto cap = [](engine& e) { e.memory_cap(262144); };
+			const std::string reference = run(backend::vm_reference, steps, cap);
+			check_eq(reference, run(backend::vm, steps, cap), "the cap inside a filling loop (vm)");
+			check_eq(reference, run(backend::vm_no_proofs, steps, cap), "the cap inside a filling loop (vm, no proofs)");
+			check(reference.find("caught|Script memory cap exceeded") != std::string::npos, "the cap raised inside the loop and was caught: " + reference);
+			check(run(backend::interpreter, steps, cap).find("caught|Script memory cap exceeded") != std::string::npos, "and on the interpreter");
 		});
 
 		test("a_map_keeps_its_iteration_and_store_rules", [this]() {

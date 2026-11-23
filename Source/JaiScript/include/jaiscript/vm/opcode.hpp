@@ -375,9 +375,11 @@ namespace jai::vm {
         // a fused back edge whose head sums its bound first, one cell plus a constant (x < w - 1): a as op_c_for_lt's, b = bound cell | source cell <<
         // k_cell_for_bound_source_shift | the signed offset << k_cell_for_bound_offset_shift, c = the body's copy ip, past the head's sum and compare
         op_c_for_lto, op_c_for_leo, op_c_for_gto, op_c_for_geo,
+        op_c_map_load,      // a = dst cell, b = 1 for a destination whose kind is adopted at run time, c = the original read's ip (its typed_site at the copy's ip): `m[k]` over a frame slot declared a map from int to a scalar or var, the key from int cells
+        op_c_map_store,     // a = fused index proto (the copy's: its index and value name cells), c = the original store's ip: `m[k] = v;` into a frame slot declared a map from int to a scalar or var, an int key and an int, float or bool value by the general store's kernel
     };
     inline constexpr size_t k_opcode_space = 512;   // tables indexed by opcode (the coverage report's) are this long
-    static_assert(static_cast<size_t>(opcode::op_c_for_geo) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
+    static_assert(static_cast<size_t>(opcode::op_c_map_store) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
     static_assert(static_cast<uint32_t>(opcode::op_d_jne) < 256 && static_cast<uint32_t>(opcode::op_t_load) < 256, "a cell instruction packs a typed opcode above k_cell_op_shift in 8 bits");
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
@@ -712,6 +714,8 @@ namespace jai::vm {
             case opcode::op_velem_store: return "VELEM_STORE";
             case opcode::op_size_temp: return "SIZE_TEMP";
             case opcode::op_c_size: return "C_SIZE";
+            case opcode::op_c_map_load: return "C_MAP_LOAD";
+            case opcode::op_c_map_store: return "C_MAP_STORE";
             case opcode::op_c_ret: return "C_RET";
             case opcode::op_c_boundary: return "C_BOUNDARY";
             case opcode::op_c_add_ff: return "C_ADD_FF";

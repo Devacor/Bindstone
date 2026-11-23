@@ -593,8 +593,9 @@ namespace jai::vm {
             const environment* env_of = nullptr;
             uint64_t env_serial = 0;
             const void* env_loop = nullptr;   // the loop whose entry recorded env_ptr in this call (its next entry re-reads them while the environment holds)
-            // the refusal valve: loops (by index, below 64) whose entry a container site refused in this call; container bindings
-            // do not change within a call, so the entry is not attempted again until the next call
+            // the refusal valve: loops (by index, below 64) whose entry a container site refused in this call (container bindings do
+            // not change within a call), or whose range or map operation met a kind its cells do not take: the entry is not attempted
+            // again until the next call
             uint64_t refused_loops = 0;
             // a parked block (a boundary operation): the general form runs a statement and the block resumes where it ends (park_at, a general
             // ip) when nothing entered another block of this frame since (entry_serial, counted by every entry)
@@ -2528,6 +2529,8 @@ namespace jai::vm {
         bool worker_inline_method_holds(frame& f, const chunk::inline_site& site);   // the identity, read without running a getter
         op_status exec_cells_back(frame& f, const vm_instruction& ins);
         op_status exec_c_mload(frame& f, const vm_instruction& ins);   // a member read site: the field's kind and payload into the cell
+        op_status exec_c_map_store(frame& f, const vm_instruction& ins);   // a declared frame-slot map's entry under an int key takes a cell's int, float or bool
+        op_status exec_c_map_load(frame& f, const vm_instruction& ins);   // a declared frame-slot map's entry under an int key: its int, float or bool into the cell
         op_status exec_c_mstore(frame& f, const vm_instruction& ins);   // a member store site: the field's payload written in place when the kinds agree
         op_status exec_c_mcompound(frame& f, const vm_instruction& ins);   // a compound member store site: the field read, the operation and the store in place
         // fused cell pairs: the first instruction's executor on its own word, then the second's on the next word when the block is

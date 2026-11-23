@@ -43,6 +43,7 @@ namespace jai::vm {
 		uint32_t writes = k_invalid_u32;         // the slot the operation writes (a local or a compiler value)
 		uint32_t container = k_invalid_u32;      // load and store: the container slot when the binding is a frame slot
 		bool head = false;
+		bool map = false;                        // load, store: the container is a frame slot declared a map from int to a scalar or var (op_c_map_load, op_c_map_store: through the slot at each run, no site)
 		bool sense = false;                      // cmp: jump when true (a comparison value followed by JUMP_IF_TRUE)
 		uint32_t origin = k_invalid_u32;         // the original ip a miss at this operation re-runs (k_invalid_u32 = its own): an argument's value re-runs from the probe
 		bool poll = false;                       // arith: an inner counted loop's step, preceded in the copy by the budget poll (C_JUMP c = 1: a miss on exhaustion onto the step's own origin)

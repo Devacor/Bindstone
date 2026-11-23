@@ -8462,7 +8462,7 @@ static bool cells_miss_plain(const vm_instruction& ci) {
 	case opcode::op_c_guard: case opcode::op_c_mov: case opcode::op_c_math:
 	case opcode::op_c_cmp_any: case opcode::op_c_jcmp_any: case opcode::op_c_cmpval:
 	case opcode::op_c_neg: case opcode::op_c_bnot: case opcode::op_c_lnot: case opcode::op_c_cast:
-	case opcode::op_c_append: case opcode::op_c_text_append: case opcode::op_c_push: case opcode::op_c_mload: case opcode::op_c_mstore: case opcode::op_c_size:
+	case opcode::op_c_append: case opcode::op_c_text_append: case opcode::op_c_push: case opcode::op_c_mload: case opcode::op_c_mstore: case opcode::op_c_size: case opcode::op_c_map_load: case opcode::op_c_map_store:
 	case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp:
 	case opcode::op_c_ret:
 	case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any: case opcode::op_c_step_back: case opcode::op_c_for_lto: case opcode::op_c_for_leo: case opcode::op_c_for_gto: case opcode::op_c_for_geo:
@@ -9035,6 +9035,8 @@ op_status vm_backend::cells_run_cold(frame& f, const chunk::cell_loop& loop, con
 	case opcode::op_c_call: return exec_c_call(f, ci);
 	case opcode::op_c_land: return cells_land(f, loop, loop.calls[ci.a]);
 	case opcode::op_c_bail: cells_miss(f, loop, ci.a, 5); return {};   // a planned miss: an instruction the translation does not take, inside a conditional span; nothing observed first
+	case opcode::op_c_map_load: return exec_c_map_load(f, ci);   // the map operations: a lookup each, nothing the hot switch's code generation should carry
+	case opcode::op_c_map_store: return exec_c_map_store(f, ci);
 	case opcode::op_c_boundary: {
 		// a boundary operation: the dirty cells the statement may read go back, the block parks (its cells stay valid), and the general form runs
 		// the statement from its first instruction; the statement's end resumes the block (cells_unpark)
@@ -10877,6 +10879,129 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, size_t& ip, const vm
 	else if (site.cont_slot == chunk::k_iter_container && cr.cells[ins.a].kind != 0) { cells_miss_ip(f, ip, loop, original_ip, 2); return {}; }   // a range-for variable is a fresh declaration per iteration: the general ITER_NEXT binds another kind as the element is
 	else if (!cell_land(f, loop, ins.a, expect, bits)) { cells_miss_ip(f, ip, loop, original_ip, 2); return {}; }   // an adopted kind changing: the declared-type rule
 	++ip;
+	return {};
+}
+
+// `m[k] = v;` inside a block, m a frame slot declared a map from int to a scalar or an unconstrained value: the key from int cells (the
+// store's fold), the value a cell's or a constant's int, float or bool under its landing's stamp, stored by the general store's own
+// kernel (map_scalar_store: the insert, its charge, the entry's stamp). Only a store the kernel takes without raising or running code is
+// made here: an int key into a map keyed by int or unconstrained, a value of the map's own value kind (an int into a float value
+// widens) or into an unconstrained value no object holds; anything else misses onto the general store and, where the pair of kinds
+// is one the cells do not take, refuses the block for the rest of this call
+JAI_NOINLINE op_status vm_backend::exec_c_map_store(frame& f, const vm_instruction& ins) {
+	JAI_CELLS_COUNT(7);
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
+	auto miss = [&]() -> op_status { cells_miss(f, loop, ins.c, 3); return {}; };
+	auto refuse = [&]() -> op_status { if (cs.loop < 64) { cs.refused_loops |= uint64_t(1) << cs.loop; } return miss(); };
+	const uint8_t ki = static_cast<uint8_t>(script_value::TYPEID_INT), kf = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kb = static_cast<uint8_t>(script_value::TYPEID_BOOL);
+	auto cell_int = [&](const fused_operand& o, script_int& out) -> bool {
+		if (o.const_index != k_invalid_u32) { const script_value& v = f.code->constants[o.const_index]; if (v.raw_storage_index() != script_value::TYPEID_INT) return false; out = v.unchecked_as_int(); return true; }
+		if (o.slot == k_invalid_u32 || cs.cells[o.slot].kind != ki) return false;
+		out = static_cast<script_int>(cs.cells[o.slot].bits);
+		return true;
+	};
+	uint8_t vkind; int64_t vbits; type_info* vstamp;
+	if (p.store_value.const_index != k_invalid_u32) {
+		const script_value& v = f.code->constants[p.store_value.const_index];
+		vkind = static_cast<uint8_t>(v.raw_storage_index());
+		if (vkind != ki && vkind != kf && vkind != kb) return refuse();
+		vbits = cell_bits(v, vkind);
+		vstamp = nullptr;
+	} else {
+		const uint32_t k = p.store_value.slot;
+		if (k == k_invalid_u32) return miss();
+		vkind = cs.cells[k].kind; vbits = cs.cells[k].bits;
+		if (vkind != ki && vkind != kf && vkind != kb) return refuse();
+		const chunk::cell_loop::cell& vc = loop.cells[k];   // the stamp a flush would give the slot the general store reads
+		vstamp = cs.cells[k].stamp() ? cs.cells[k].stamp() : vc.first_decl && vc.decl_stamp ? vc.decl_stamp : vc.landing == k_typed_dst_decl && vc.stamp ? vc.stamp : nullptr;
+	}
+	script_int key_int;
+	if (p.index_binary != k_invalid_u32) {
+		const fused_binary_proto& bp = f.code->fused_binary_protos[p.index_binary];
+		script_int l, r;
+		if (!cell_int(bp.left, l) || !cell_int(bp.right, r) || !typed_int_index_row(static_cast<token_type>(bp.op), l, r, key_int)) return miss();
+		for (const uint32_t step : p.index_chain_ext) {
+			const fused_binary_proto& sp = f.code->fused_binary_protos[step];
+			script_int r2;
+			if (!cell_int(sp.right, r2) || !typed_int_index_row(static_cast<token_type>(sp.op), key_int, r2, key_int)) return miss();
+		}
+	} else if (!cell_int(p.index, key_int)) return miss();
+	script_value* cp = p.container.slot != k_invalid_u32 ? frame_slot(f, p.container.slot) : nullptr;
+	if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }
+	if (!cp || cp->raw_storage_index() != script_value::TYPEID_MAP) return refuse();
+	const type_info* tag = cp->type_info_raw();
+	const type_info* key_type = tag && !tag->type_params.empty() ? tag->type_params[0].get() : nullptr;
+	const type_info* value_type = tag && tag->type_params.size() >= 2 ? tag->type_params[1].get() : nullptr;
+	if (key_type && key_type->base_type != script_value_type::jai_any_type && (key_type->base_type != script_value_type::jai_int_type || key_type->is_enum)) return refuse();
+	if (value_type && value_type->base_type != script_value_type::jai_any_type) {
+		const script_value_type want = vkind == ki ? script_value_type::jai_int_type : vkind == kf ? script_value_type::jai_float_type : script_value_type::jai_bool_type;
+		const bool widens = vkind == ki && value_type->base_type == script_value_type::jai_float_type;   // the kernel's int -> float row: no code, no refusal
+		if ((value_type->base_type != want && !widens) || value_type->is_enum) return refuse();   // any other conversion, or its refusal, is the general store's
+	} else {
+		const auto& map_ptr = cp->get_map_storage();
+		const script_map::value_type* held = map_ptr ? map_ptr->lookup_int(key_int, engine_) : nullptr;
+		if (!map_ptr || (held && detail::slot_value_assign_candidate(held->second))) return refuse();   // an object the entry holds takes the value through its own assignment
+	}
+	const script_value key(key_int, engine_);
+	script_value value = cell_scalar(vkind, vbits, engine_);
+	if (vstamp) { value.set_type_info(type_info_ptr{vstamp}); }
+	bool handled = false;
+	script_value* stored = nullptr;
+	const op_status st = map_scalar_store(*cp, key, value, handled, stored);
+	if (st == op_status::failed) return st;
+	if (!handled) return refuse();
+	++f.ip;
+	return {};
+}
+
+// `m[k]` inside a block, m a frame slot declared a map from int to a scalar or an unconstrained value: the key from the site's int cells
+// (the read's fold), the entry found by the general read's own lookup, and its int, float or bool landed as C_LOAD lands a var element.
+// The slot is read at each run, so no entry resolution or hold check stands behind it. A missing key misses onto the general read, which
+// raises; a map keyed otherwise or an entry of a kind the cells do not take misses and refuses the block for the rest of this call, as a
+// range over such elements does, so a loop over them pays one miss
+JAI_NOINLINE op_status vm_backend::exec_c_map_load(frame& f, const vm_instruction& ins) {
+	JAI_CELLS_COUNT(7);
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	const chunk::typed_site& site = f.code->typed_sites[f.ip];   // the copy's own row: its operands name cells
+	auto miss = [&]() -> op_status { cells_miss(f, loop, ins.c, 2); return {}; };
+	auto refuse = [&]() -> op_status { if (cs.loop < 64) { cs.refused_loops |= uint64_t(1) << cs.loop; } return miss(); };
+	const script_value* cp = site.cont_slot != k_invalid_u32 ? frame_slot(f, site.cont_slot) : nullptr;
+	if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }
+	if (!cp || cp->raw_storage_index() != script_value::TYPEID_MAP) return refuse();
+	if (const type_info* tag = cp->type_info_raw(); tag && !tag->type_params.empty()) {
+		const type_info* key_type = tag->type_params[0].get();   // a key the general read converts or refuses is its own
+		if (key_type && key_type->base_type != script_value_type::jai_any_type && (key_type->base_type != script_value_type::jai_int_type || key_type->is_enum)) return refuse();
+	}
+	auto read_int = [&](uint32_t o, script_int& out) -> bool {
+		if (o & k_typed_const_bit) { const script_value& v = f.code->constants[o & ~k_typed_const_bit]; if (v.raw_storage_index() != script_value::TYPEID_INT) return false; out = v.unchecked_as_int(); return true; }
+		if (cs.cells[o].kind != static_cast<uint8_t>(script_value::TYPEID_INT)) return false;
+		out = static_cast<script_int>(cs.cells[o].bits);
+		return true;
+	};
+	script_int key = 0, r = 0;
+	bool ok = read_int(site.operands[0], key);
+	for (uint8_t k = 0; ok && k < site.fold_count; ++k) { ok = read_int(site.operands[k + 1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[k]), key, r, key); }
+	if (!ok) return miss();
+	const auto& map_ptr = const_cast<script_value&>(*cp).get_map_storage();
+	const script_map::value_type* hit = map_ptr ? map_ptr->lookup_int(key, engine_) : nullptr;
+	if (!hit) return miss();
+	const script_value& el = hit->second;
+	const size_t ei = el.raw_storage_index();
+	const uint8_t ki = static_cast<uint8_t>(script_value::TYPEID_INT), kf = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kb = static_cast<uint8_t>(script_value::TYPEID_BOOL);
+	if (ei != script_value::TYPEID_INT && ei != script_value::TYPEID_FLOAT && ei != script_value::TYPEID_BOOL) return refuse();
+	const uint8_t expect = site.decl_expect == 0xFF ? static_cast<uint8_t>(ei) : site.decl_expect;
+	int64_t bits;
+	if (ei == script_value::TYPEID_INT && expect == ki) { bits = el.unchecked_as_int(); }
+	else if (ei == script_value::TYPEID_INT && expect == kf && !site.temp) { bits = cell_bits_of_float(static_cast<script_float>(el.unchecked_as_int())); }   // the decl's int -> float row; a temp keeps a boxed int
+	else if (ei == script_value::TYPEID_FLOAT && expect == kf) { bits = cell_bits_of_float(el.unchecked_as_float()); }
+	else if (ei == script_value::TYPEID_BOOL && expect == kb) { bits = el.unchecked_as_bool() ? 1 : 0; }
+	else return refuse();
+	if (ins.b == 0 || cs.cells[ins.a].kind == expect) { cs.cells[ins.a].bits = bits; cs.cells[ins.a].kind = expect; cs.dirty.set(ins.a); }
+	else if (!cell_land(f, loop, ins.a, expect, bits)) return miss();   // an adopted kind changing: the declared-type rule
+	++f.ip;
 	return {};
 }
 

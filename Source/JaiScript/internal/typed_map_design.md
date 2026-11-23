@@ -93,6 +93,13 @@ so a hit is one resident line. Hard parts:
 **Stage C (proposal, only if measured worthwhile): typed string keys** (a raw `strong_ptr<script_string>` with no `script_value`
 around it). Short string keys already compare 8 bytes beside the hash; their remaining cost is the slot and entry loads.
 
+## Reads in cell blocks
+
+Independently of the storage, a block reads the int, float or bool entry of a frame slot declared a map from int to a
+scalar or var (a reference parameter's referent included), and stores one, as operations of its own (`op_c_map_load`,
+`op_c_map_store`, internal/typed_regions_design.md "Map reads and stores"): the lookup is `lookup_int` and the store
+`map_scalar_store`, as the general forms'. A string key and a map under a program-scope name stay general.
+
 ## Gates
 
 Each stage is its own gated landing with a same-directory A/B, every run from a fresh copy of its exe (byte-identical

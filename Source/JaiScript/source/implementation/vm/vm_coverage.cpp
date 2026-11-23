@@ -115,7 +115,7 @@ namespace {
 		case opcode::op_c_for_lt: case opcode::op_c_for_le: case opcode::op_c_for_gt: case opcode::op_c_for_ge: case opcode::op_c_for_ltk: case opcode::op_c_for_lek: case opcode::op_c_for_gtk: case opcode::op_c_for_gek: case opcode::op_c_for_any: case opcode::op_c_step_back: case opcode::op_c_for_lto: case opcode::op_c_for_leo: case opcode::op_c_for_gto: case opcode::op_c_for_geo:
 		case opcode::op_c_jeq_ii: case opcode::op_c_jne_ii: case opcode::op_c_jeq_iik: case opcode::op_c_jne_iik:
 			return fam::cell_branch;
-		case opcode::op_c_load: case opcode::op_c_load_any: case opcode::op_c_load2: case opcode::op_c_load_jcmp: case opcode::op_c_index_store: case opcode::op_c_push:
+		case opcode::op_c_load: case opcode::op_c_load_any: case opcode::op_c_load2: case opcode::op_c_load_jcmp: case opcode::op_c_index_store: case opcode::op_c_push: case opcode::op_c_map_load: case opcode::op_c_map_store:
 		case opcode::op_c_load_f: case opcode::op_c_load_i:
 		case opcode::op_c_load_fk: case opcode::op_c_load_ik: case opcode::op_c_load_fc: case opcode::op_c_load_ic: case opcode::op_c_store_f: case opcode::op_c_store_i:
 		case opcode::op_c_size: case opcode::op_c_guard: case opcode::op_c_rebind:

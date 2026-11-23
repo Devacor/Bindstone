@@ -175,6 +175,8 @@ namespace {
 			case opcode::op_cells_enter:
 			case opcode::op_c_mload:
 			case opcode::op_c_size:
+			case opcode::op_c_map_load:
+			case opcode::op_c_map_store:
 			case opcode::op_c_mstore:
 			case opcode::op_set_member_value:
 			case opcode::op_c_load:
@@ -421,6 +423,8 @@ namespace {
 			case opcode::op_cells_enter:
 			case opcode::op_c_mload:
 			case opcode::op_c_size:
+			case opcode::op_c_map_load:
+			case opcode::op_c_map_store:
 			case opcode::op_c_mstore:
 			case opcode::op_set_member_value:
 			case opcode::op_c_load:
@@ -3562,6 +3566,17 @@ static bool is_index_chain_arith(token_type op) {
 	}
 }
 
+// a declared map from int to int, float, bool or an unconstrained value: the entries a block's cells take (an enum keeps its own rules)
+static bool int_keyed_scalar_map(const type_info* t) {
+	if (!t || t->base_type != script_value_type::jai_map_type) return false;
+	const type_info_ptr key = t->key_type(), value = t->value_type();
+	if (!key || !value || key->base_type != script_value_type::jai_int_type || key->is_enum || value->is_enum) return false;
+	switch (value->base_type) {
+		case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type: case script_value_type::jai_any_type: return true;
+		default: return false;
+	}
+}
+
 // the operators a block's index fold computes over int cells (typed_int_index_row's rows)
 static bool is_index_fold_op(token_type op) {
 	switch (op) {
@@ -4759,6 +4774,26 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		ir_op head_op;
 		const size_t first = counted != k_invalid_u32 ? head + 1 : head;
 		region.head = static_cast<uint32_t>(head); region.first = static_cast<uint32_t>(first); region.back = static_cast<uint32_t>(back);
+		// A read of a frame slot declared a map from int to a scalar or an unconstrained value (`s += m[k]`, `int v = m[k]`) is no element
+		// site: the copy reads the entry through the slot at each run (op_c_map_load), so nothing is resolved at entry or held across a call;
+		// a plain statement store into such a map is the same kind of operation (op_c_map_store). Any other map stays general (its key or
+		// its entry is no cell). A span with a compound store through the slot keeps the read general: that store's site refuses the entry
+		auto map_slot = [&](const fused_index_proto& fp) {
+			const fused_operand& o = fp.container;
+			return fp.int_keyed_scalar_map && o.const_index == k_invalid_u32 && o.direct && o.slot < k_typed_slot_mask && o.member_node == k_invalid_u32 && !o.is_subscript() &&
+			       o.load_flags == 0 && fp.container_guard == k_invalid_u32;
+		};
+		auto map_store_site = [&](const fused_index_proto& fp) { return !fp.compound && map_slot(fp); };
+		std::vector<uint32_t> stored_slots;
+		for (size_t at = first; at < back; ++at) {
+			const vm_instruction& si = code[at];
+			if ((si.op == opcode::op_index_store_fused || si.op == opcode::op_index_compound_operand) && si.a < c.fused_index_protos.size() && c.fused_index_protos[si.a].container.slot != k_invalid_u32 &&
+			    !(si.op == opcode::op_index_store_fused && map_store_site(c.fused_index_protos[si.a]))) {
+				stored_slots.push_back(c.fused_index_protos[si.a].container.slot);
+			}
+		}
+		auto map_site = [&](const fused_index_proto& fp) { return map_slot(fp) && std::find(stored_slots.begin(), stored_slots.end(), fp.container.slot) == stored_slots.end(); };
+		auto load_site = [&](const fused_index_proto& fp) { return array_site(fp) || map_site(fp); };
 		// a condition's true-sense leaf (emit_cond_jump_true): the compare-jump at `at` skips the jump after it, which nothing else targets; the
 		// pair is one cmp taken in the jump's sense (its origin the compare-jump, the jump's copy a placeholder)
 		auto true_sense_leaf = [&](size_t at, uint32_t false_target) -> bool {
@@ -5229,7 +5264,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const bool classed = site.decl_expect == kint || site.decl_expect == kflt;
 				const member_container_read* of_member = nullptr;
 				for (const member_container_read& m : member_container_reads) { if (m.read == ip) { of_member = &m; } }
-				if (!of_member && ((site.guard_always && site.guard_temp != k_invalid_u32 && site.cont_slot == site.guard_temp) || (site.orig.op == opcode::op_index_fused_decl && site.orig.a < c.fused_index_protos.size() && !array_site(c.fused_index_protos[site.orig.a])))) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (!of_member && ((site.guard_always && site.guard_temp != k_invalid_u32 && site.cont_slot == site.guard_temp) || (site.orig.op == opcode::op_index_fused_decl && site.orig.a < c.fused_index_protos.size() && !load_site(c.fused_index_protos[site.orig.a])))) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (site.stamp && stamp_kind(site.stamp) == 0 && site.stamp->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip); break; }
 				for (uint8_t k = 0; k <= site.fold_count && k < std::size(site.operands); ++k) { use_slot(site.operands[k], kint, false, 0, nullptr, ip); slot_read(op, site.operands[k]); }
 				{ const uint8_t ld = site.temp ? k_typed_dst_temp : decl_landing(st.a); use_slot(st.a, classed && (site.temp || stamp_kind(site.stamp) == site.decl_expect) ? site.decl_expect : 0, true, ld, ld == k_typed_dst_temp ? nullptr : site.stamp, ip); }
@@ -5242,6 +5277,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					c.fused_index_protos.push_back(std::move(of));
 					op.proto = static_cast<uint32_t>(c.fused_index_protos.size() - 1);
 				}
+				op.map = site.orig.op == opcode::op_index_fused_decl && site.orig.a < c.fused_index_protos.size() && map_site(c.fused_index_protos[site.orig.a]);
 			} else if (st.op == opcode::op_index_fused && st.a < c.fused_index_protos.size() && (st.b & index_flag_lvalue_shape) && ip + 1 < back && code[ip + 1].op == opcode::op_decl_ref_value
 			           && code[ip + 1].a < c.nodes.size() && c.nodes[code[ip + 1].a] && c.nodes[code[ip + 1].a]->get_type() == node_type::variable_decl) {
 				// `var& strip = STRIPS[sidx]`: an element alias declared in the body is a rebind, the source table's element becoming the container of
@@ -5289,11 +5325,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// (a string is borrowed), and the compound is the append with run-time kinds; the pair's origin is the read (a miss at
 				// the append re-runs the push and the compound on the general form, so the temp is never flushed)
 				const fused_index_proto& fp = c.fused_index_protos[st.a];
-				if (fp.index_chain_ext.size() > chunk::typed_site::k_max_chain_ext || !array_site(fp) || !index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (fp.index_chain_ext.size() > chunk::typed_site::k_max_chain_ext || !load_site(fp) || !index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				const uint32_t t = arg_temp_next++;
 				use_slot(t, 0, true, k_typed_dst_temp, nullptr, ip);
 				{ const int tk = find_cell(t); if (tk >= 0) { cells[tk].string_borrow = true; } }   // the append replays from this read on a miss, so a borrowed string may land here
-				op.kind = ir::load; op.a = t; op.proto = st.a; op.writes = t;
+				op.kind = ir::load; op.a = t; op.proto = st.a; op.writes = t; op.map = map_site(fp);
 				op.container = fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
 				if (!alias_site(op, ip)) break;
 				ops.push_back(op);
@@ -5308,14 +5344,14 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// jump's sense; the pair's origin is the read (a miss at the test re-runs the read and the general jump follows)
 				const fused_index_proto& fp = c.fused_index_protos[st.a];
 				const vm_instruction& j = code[ip + 1];
-				if (fp.index_chain_ext.size() > chunk::typed_site::k_max_chain_ext || !array_site(fp) || !index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (fp.index_chain_ext.size() > chunk::typed_site::k_max_chain_ext || !load_site(fp) || !index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (!(j.a > ip + 1)) { refuse(chunk::cell_refusal_effect, ip + 1); break; }   // an edge past the back edge exits the block
 				bool targeted = false;
 				for (size_t ip2 = first; ip2 < back && !targeted; ++ip2) { targeted = branch_target(ip2) == ip + 1; }
 				if (targeted) { refuse(chunk::cell_refusal_malformed, ip + 1); break; }
 				const uint32_t t = arg_temp_next++;
 				use_slot(t, 0, true, k_typed_dst_temp, nullptr, ip);
-				op.kind = ir::load; op.a = t; op.proto = st.a; op.writes = t;
+				op.kind = ir::load; op.a = t; op.proto = st.a; op.writes = t; op.map = map_site(fp);
 				op.container = fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
 				if (!alias_site(op, ip)) break;
 				ops.push_back(op);
@@ -5330,12 +5366,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// row, built at emission (environment values take synthetic slots), landing in a stamped scalar decl or a compiler
 				// value by the declared kind
 				const fused_index_proto& fp = c.fused_index_protos[st.a];
-				if (fp.decl_slot == k_invalid_u32 || fp.decl_slot >= k_typed_slot_mask || fp.index_chain_ext.size() > chunk::typed_site::k_max_chain_ext || !array_site(fp)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (fp.decl_slot == k_invalid_u32 || fp.decl_slot >= k_typed_slot_mask || fp.index_chain_ext.size() > chunk::typed_site::k_max_chain_ext || !load_site(fp)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				const uint8_t dk = stamp_kind(fp.decl_type);
 				if (!fp.decl_temp && dk == 0 && fp.decl_type && fp.decl_type->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (!index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				{ const uint8_t ld = fp.decl_temp ? k_typed_dst_temp : decl_landing(fp.decl_slot); use_slot(fp.decl_slot, fp.decl_temp ? (fp.decl_expect == kint || fp.decl_expect == kflt ? fp.decl_expect : 0) : dk, true, ld, ld == k_typed_dst_temp ? nullptr : fp.decl_type, ip); }
-				op.kind = ir::load; op.a = fp.decl_slot; op.proto = st.a; op.writes = fp.decl_slot;
+				op.kind = ir::load; op.a = fp.decl_slot; op.proto = st.a; op.writes = fp.decl_slot; op.map = map_site(fp);
 				op.container = direct_slot(fp.container) || (fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask) ? fp.container.slot : k_invalid_u32;
 			} else if (st.op == opcode::op_index_store_fused && st.a < c.fused_index_protos.size()) {
 				// store: the container resolved once at entry, the index operands int values, the value a cell of its own (or adopted)
@@ -5343,6 +5379,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const fused_index_proto& fp = c.fused_index_protos[st.a];
 				if (!array_target(fp)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (st.c == 0 || pinned_store(ip)) { refuse(chunk::cell_refusal_translation, ip); break; }   // an element store whose value is used, or into a table an alias pins
+				op.map = map_store_site(fp);
 				uint32_t sink;
 				const uint32_t vslot = store_value_slot(fp, ip);
 				if (fp.store_value.const_index == k_invalid_u32 && fp.store_value.slot == k_invalid_u32 && vslot == k_invalid_u32) { refuse(chunk::cell_refusal_representation, ip); break; }
@@ -6420,6 +6457,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				chunk_ = &c;
 				typed_site_at(code.size()) = site;
 				const uint32_t miss_ip = op.origin != k_invalid_u32 ? op.origin : static_cast<uint32_t>(ip);   // a range landing misses onto the general ITER_NEXT, an argument's read onto the first argument instruction (argument values are never flushed)
+				if (op.map) { append(vm_instruction{opcode::op_c_map_load, dst, adopted ? 1u : 0u, miss_ip}, ip); break; }
 				append(vm_instruction{adopted ? opcode::op_c_load_any : opcode::op_c_load, dst, loop_index, miss_ip}, ip);
 				break;
 			}
@@ -6439,7 +6477,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				else { cellify(cp.index); }
 				cellify(cp.store_value);
 				c.fused_index_protos.push_back(cp);
-				append(vm_instruction{opcode::op_c_index_store, static_cast<uint32_t>(c.fused_index_protos.size() - 1), loop_index, static_cast<uint32_t>(ip)}, ip);
+				append(vm_instruction{op.map ? opcode::op_c_map_store : opcode::op_c_index_store, static_cast<uint32_t>(c.fused_index_protos.size() - 1), loop_index, static_cast<uint32_t>(ip)}, ip);
 				break;
 			}
 			case ir::math: {
@@ -6986,6 +7024,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			loop.frame_program = true;
 			c.frame_program = loop_index;
 			bool enterable = loop.sites.empty() && loop.inline_sites.empty() && loop.math_alias_sites.empty() && loop.rebinds.empty() && loop.iter_proto == k_invalid_u32;
+			for (uint32_t at = loop.copy_head; at < loop.copy_back && enterable; ++at) { enterable = code[at].op != opcode::op_c_map_load && code[at].op != opcode::op_c_map_store; }   // a map operation goes through its frame slot: the window is built
 			for (const uint32_t k : loop.env_cells) {   // a global the body only reads resolves at the raw entry (raw_enter_env); one it writes would flush past the raw return
 				if (loop.cells[k].defined || loop.env_operands[loop.cells[k].env_operand].member_node != k_invalid_u32) { enterable = false; }
 			}
@@ -8299,7 +8338,10 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 	if (reference_) return false;
 	const size_t protos = chunk_->fused_index_protos.size();
 	const bool emitted = try_emit_fused_index_shape(expr, flags);
-	if (emitted && chunk_->fused_index_protos.size() > protos) { chunk_->fused_index_protos.back().receiver = expr->subscript_receiver; }
+	if (emitted && chunk_->fused_index_protos.size() > protos) {
+		chunk_->fused_index_protos.back().receiver = expr->subscript_receiver;
+		chunk_->fused_index_protos.back().int_keyed_scalar_map = int_keyed_scalar_map(slot_declared_type(expr->left.get()));
+	}
 	return emitted;
 }
 JAI_NOINLINE bool vm_compiler::try_emit_fused_index_shape(binary_expr* expr, uint32_t flags) {
@@ -9069,7 +9111,10 @@ bool vm_compiler::try_emit_fused_index_store(binary_expr* sub, const expression_
 	if (reference_) return false;
 	const size_t protos = chunk_->fused_index_protos.size();
 	const bool emitted = try_emit_fused_index_store_shape(sub, value, no_result, string_site, compound);
-	if (emitted && chunk_->fused_index_protos.size() > protos) { chunk_->fused_index_protos.back().receiver = sub->subscript_receiver; }
+	if (emitted && chunk_->fused_index_protos.size() > protos) {
+		chunk_->fused_index_protos.back().receiver = sub->subscript_receiver;
+		chunk_->fused_index_protos.back().int_keyed_scalar_map = int_keyed_scalar_map(slot_declared_type(sub->left.get()));
+	}
 	return emitted;
 }
 JAI_NOINLINE bool vm_compiler::try_emit_fused_index_store_shape(binary_expr* sub, const expression_ptr& value, bool no_result, uint32_t string_site, uint32_t compound_kind) {

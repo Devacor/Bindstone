@@ -698,6 +698,34 @@ kept it (`-- call kept tile_at line 246: an unproven return in a loop`), and the
 rule over the chunks that ran. Inside a parallel worker the guard holds for the worker's copy of the
 callee, whose closure is the worker's root environment, so a graft runs in the workers as it does on the main thread.
 
+### Map reads and stores
+
+A read of a frame slot declared a map from int to int, float, bool or var (`s += m[k]`, `int v = m[k]`, `if (m[k])`, the
+key an int cell or the read's index fold over int cells; `fused_index_proto::int_keyed_scalar_map`, the compiler's fact
+from the slot's declaration, a reference parameter's referent included) is a block operation and no site
+(`op_c_map_load`): the copy reads the slot at each run, checks that it holds a map, finds the entry with the general
+read's own lookup (`script_map::lookup_int`) and lands its int, float
+or bool as `C_LOAD` lands a `var` element. Nothing is resolved at entry and nothing is held across a call, so a statement of
+the loop that rebinds or changes the map is read through. A missing key, a slot that holds no map and a value of another
+kind miss onto the general read, which raises or converts by its own rules. A frame program with such a read is never
+entered raw, since the read goes through the window.
+
+A map keyed by text or by anything else, or one whose declared value is no scalar, is never such an operation: its key or
+its entry is no cell, so its loop stays the general one. Where the declaration leaves the kind open (a `map<int, var>`
+holding text, a value the map's type converts or refuses), the operation misses once and refuses the block for the rest
+of the call, as a range over elements the cells do not take does; a missing key misses onto the general read, which raises.
+
+A plain statement store into such a map (`m[k] = v;`) is the same kind of operation
+(`op_c_map_store`): the key from int cells, the value a cell's or a constant's int, float or bool under the stamp a flush
+would give its slot, stored by the general store's own kernel (`map_scalar_store`: the insert, its charge, the entry). The
+operation runs only a store the kernel takes without converting, raising or running code: an int key into a map keyed by
+int or unconstrained, a value of the map's own value kind (an int into a float value widens there), or any scalar into an
+unconstrained value that no object holds.
+Every other store misses onto the general one. A compound store and a store whose value is used keep the element site's
+path, and a span with a compound store through the slot keeps that slot's reads general (the site would refuse the entry).
+Both operations dispatch through the block loop's out-of-line door (`cells_run_cold`): a lookup each, they add nothing to
+the hot switch.
+
 ### Member read sites
 
 A member read of a frame-slot instance that lands in a compiler temp (`p.x`, `op_member_temp`) is a load site of the block:

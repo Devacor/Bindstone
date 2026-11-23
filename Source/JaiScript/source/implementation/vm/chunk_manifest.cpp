@@ -206,6 +206,7 @@ namespace {
 				out << "] value=" << operand(ch, p.store_value) << (p.value_taken ? " taken=1" : "") << " decl_slot=" << u(p.decl_slot) << " expect=" << static_cast<int>(p.decl_expect) << " type=" << tn(p.decl_type)
 				    << " temp=" << b(p.decl_temp) << " lane=" << b(p.typed_lane) << " spec=" << b(p.speculative) << " guard=" << u(p.container_guard) << " always=" << b(p.guard_always) << " release=" << static_cast<int>(p.release);
 				if (p.compound) { out << " compound=" << p.compound_kind; }
+				if (p.int_keyed_scalar_map) { out << " int_keyed_scalar_map=1"; }
 				out << "\n";
 			}
 			out << pre << "push_protos " << ch.push_protos.size() << "\n";

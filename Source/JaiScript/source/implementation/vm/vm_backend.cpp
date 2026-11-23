@@ -11691,8 +11691,12 @@ op_status vm_backend::index_store_fused_rows(frame& f, const vm_instruction& ins
 		}
 	}
 	std::optional<script_value> cscratch, mscratch, vscratch;
-	const bool value_operand = p.store_value.const_index != k_invalid_u32 ||
-	                           p.store_value.symbol != k_invalid_u32;
+	if (p.value_taken) {
+		script_value* landed = frame_slot(f, p.store_value.slot);
+		stack_.push_back(landed ? std::move(*landed) : make_null());
+	}
+	const bool value_operand = !p.value_taken && (p.store_value.const_index != k_invalid_u32 ||
+	                           p.store_value.symbol != k_invalid_u32);
 	const script_value* value_ptr = nullptr;
 	if (value_operand) {
 		// Value resolves FIRST — the unfused sequence evaluated it before the container,

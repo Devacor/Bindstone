@@ -180,6 +180,7 @@ namespace jai::vm {
         void compile_member_into_temp(const expression_ptr& e, fused_operand& out);
         bool call_temp_operand(const expression* e) const;   // a call an expression consumes as an operand: a plain-name callee, its result into a compiler temp
         bool value_call_operand(const expression* e) const;
+        bool call_result_may_land(const expression* e) const;   // a call a block's door takes, whose result the checker did not prove a value no cell holds
         bool call_partner_ok(const expression* e, const expression* call);           // a partner a hoisted call may run ahead of: a literal or a private local
         void compile_call_into_temp(const expression_ptr& e, fused_operand& out);
         bool quiet_partner(const expression* e);

@@ -4447,6 +4447,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		return tramp;
 	};
 	size_t no_boundary_cand = SIZE_MAX;   // a loop translated again without boundary operations (they left it too little work of its own)
+	size_t pinned_store_cand = SIZE_MAX;   // a loop translated again with these store sites refused: each writes a table an alias of the body takes elements of
+	std::vector<uint32_t> pinned_store_ips;
 	for (size_t cand = 0;; ++cand) {
 		size_t back = cand, line_head = SIZE_MAX;
 		if (cand >= original_size) {
@@ -4663,6 +4665,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// a site whose container is an alias reads the alias (the must-define dataflow holds it to a defined alias, the liveness keeps the
 		// alias until its last site); a push receiver is resolved at entry, never rebound
 		std::vector<uint32_t> boundary_locals;   // the named locals the body's boundary statements declare, the one a boundary defines as a cell aside (a named slot is one declaration's)
+		auto pinned_store = [&](size_t at) { return pinned_store_cand == cand && std::find(pinned_store_ips.begin(), pinned_store_ips.end(), static_cast<uint32_t>(at)) != pinned_store_ips.end(); };
 		auto alias_site = [&](ir_op& op, size_t at) -> bool {
 			if (op.container == k_invalid_u32) return true;
 			// a container a boundary statement of this body declares exists only after that statement ran: no entry resolves it, so a site
@@ -5267,7 +5270,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// kind or a literal; the copy reads environment values through synthetic slots
 				const fused_index_proto& fp = c.fused_index_protos[st.a];
 				if (!array_target(fp)) { refuse(chunk::cell_refusal_representation, ip); break; }
-				if (st.c == 0) { refuse(chunk::cell_refusal_translation, ip); break; }   // an element store whose value is used
+				if (st.c == 0 || pinned_store(ip)) { refuse(chunk::cell_refusal_translation, ip); break; }   // an element store whose value is used, or into a table an alias pins
 				uint32_t sink;
 				const uint32_t vslot = store_value_slot(fp, ip);
 				if (fp.store_value.const_index == k_invalid_u32 && fp.store_value.slot == k_invalid_u32 && vslot == k_invalid_u32) { refuse(chunk::cell_refusal_representation, ip); break; }
@@ -5279,7 +5282,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// an overflow, a zero divisor or a shift out of range misses onto the general compound)
 				const fused_index_proto& fp = c.fused_index_protos[st.a];
 				if (!array_target(fp)) { refuse(chunk::cell_refusal_representation, ip); break; }
-				if (!fp.compound || (fp.store_value.const_index == k_invalid_u32 && fp.store_value.symbol == k_invalid_u32)) { refuse(chunk::cell_refusal_translation, ip); break; }
+				if (!fp.compound || pinned_store(ip) || (fp.store_value.const_index == k_invalid_u32 && fp.store_value.symbol == k_invalid_u32)) { refuse(chunk::cell_refusal_translation, ip); break; }
 				uint32_t sink;
 				const uint32_t vslot = store_value_slot(fp, ip);
 				if (fp.store_value.const_index == k_invalid_u32 && fp.store_value.slot == k_invalid_u32 && vslot == k_invalid_u32) { refuse(chunk::cell_refusal_representation, ip); break; }
@@ -5557,7 +5560,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// as a handle at the push, so no string is borrowed); the append is the push kernel's rows, anything they decline a miss
 				const uint32_t pidx = st.op == opcode::op_push_fused ? st.a : c.typed_sites[ip].orig.a;
 				const push_proto& pp = c.push_protos[pidx];
-				if (!c.builtin_indexed || pp.site >= c.call_sites.size() || c.call_sites[pp.site].bi_array == builtin_method_registries::k_no_builtin) { refuse(chunk::cell_refusal_translation, ip); break; }
+				if (!c.builtin_indexed || pinned_store(ip) || pp.site >= c.call_sites.size() || c.call_sites[pp.site].bi_array == builtin_method_registries::k_no_builtin) { refuse(chunk::cell_refusal_translation, ip); break; }
 				if (pp.converting_receiver) { refuse(chunk::cell_refusal_representation, ip); break; }   // the general form converts each value: a boundary, never a site the entry refuses
 				const bool env_receiver = env_scalar(pp.receiver);   // an environment array: resolved at entry through its lookup, as a load site's container
 				if (!env_receiver && (!pp.receiver.direct || pp.receiver.slot == k_invalid_u32 || pp.receiver.slot >= k_typed_slot_mask || pp.receiver.const_index != k_invalid_u32 || pp.receiver.member_node != k_invalid_u32 || pp.receiver.is_subscript())) { refuse(chunk::cell_refusal_representation, ip); break; }
@@ -5985,6 +5988,29 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (!held) { refuse(chunk::cell_refusal_translation, s.guard_ip); }
 		}
 		if (refusal == chunk::cell_refusal_none && cells.size() > chunk::k_cell_limit) { refuse(chunk::cell_refusal_too_many_cells, back); }
+		if (refusal == chunk::cell_refusal_none && !line && !fn_mode && !alias_slots.empty()) {
+			// a store or a push site over the table an alias of the body takes elements of is refused by every entry (the alias pins its
+			// table against the block's stores): the statement is the general form's, so the loop is translated again with the site refused
+			auto named = [](const fused_operand& o) { return o.const_index == k_invalid_u32 && o.member_node == k_invalid_u32 && !o.is_subscript() && (o.slot != k_invalid_u32 || o.symbol != k_invalid_u32); };
+			auto same_name = [&](const fused_operand& a, const fused_operand& b) {
+				if (!named(a) || !named(b) || a.slot != b.slot || a.load_flags != b.load_flags) return false;
+				return a.slot != k_invalid_u32 || (a.symbol < c.symbols.size() && b.symbol < c.symbols.size() && c.symbols[a.symbol] == c.symbols[b.symbol]);
+			};
+			bool again = false;
+			for (size_t k = 0; k < ops.size(); ++k) {
+				const ir_op& o = ops[k];
+				const fused_operand* written = o.kind == ir::store && o.member == k_invalid_u32 ? &c.fused_index_protos[o.proto].container : o.kind == ir::push ? &c.push_protos[o.proto].receiver : nullptr;
+				if (!written) continue;
+				for (const ir_op& r : ops) {
+					if (r.kind != ir::rebind || r.container == chunk::k_iter_container || !same_name(*written, c.fused_index_protos[r.proto].container)) continue;
+					if (pinned_store_cand != cand) { pinned_store_cand = cand; pinned_store_ips.clear(); }
+					pinned_store_ips.push_back(static_cast<uint32_t>(first + k));
+					again = true;
+					break;
+				}
+			}
+			if (again) { --cand; continue; }
+		}
 		if (refusal == chunk::cell_refusal_none && !boundary_ops.empty()) {
 			// a block pays a park and a resume per boundary each iteration: it stays a block only with work of its own beside them, and
 			// only while the general form's share of the body (the boundaries' instructions) stays small beside that work
@@ -8056,6 +8082,16 @@ bool vm_compiler::value_call_operand(const expression* e) const {
 	const auto decl = static_cast<const call_expr*>(e)->proven_callee_decl.lock();
 	return decl && !(decl->return_type && decl->return_type->is_reference());
 }
+// a call whose result a block's door may land in a cell: a function's (a plain or namespace name: a method call on a receiver has no
+// door), unless the checker resolved it to a callee declared to return a value no cell holds (a string, a container, an object)
+bool vm_compiler::call_result_may_land(const expression* e) const {
+	const auto* call = static_cast<const call_expr*>(e);
+	if (call->callee->get_type() != node_type::identifier_expr && !namespace_callee(call)) return false;
+	const auto decl = call->proven_callee_decl.lock();
+	if (!decl || !decl->return_type) return true;
+	const script_value_type declared = decl->return_type->base_type;
+	return declared == script_value_type::jai_int_type || declared == script_value_type::jai_float_type || declared == script_value_type::jai_bool_type || declared == script_value_type::jai_any_type;
+}
 bool vm_compiler::call_partner_ok(const expression* e, const expression* call) {
 	if (!e) return false;
 	if (e->get_type() == node_type::literal_expr) return true;
@@ -8953,6 +8989,12 @@ JAI_NOINLINE bool vm_compiler::try_emit_fused_index_store_shape(binary_expr* sub
 	} else if (no_result && ternary_temp_operand(value.get())) {
 		compile_ternary_into_temp(value, p.store_value);
 		value_operand = true;   // `a[i] = c ? x : y`: each arm lands in the temp, so no value crosses the join on the stack
+	} else if (no_result && !compound && call_temp_operand(value.get()) && call_result_may_land(value.get())) {
+		// `a[i] = f(x)`: the call runs where it did (the value ahead of the container and the index) and its result lands in a temp, so a
+		// block's door lands it in a cell; the general store takes an int or a float from the temp and any other value back from it
+		compile_call_into_temp(value, p.store_value);
+		p.value_taken = true;
+		value_operand = true;
 	} else if (no_result && value->get_type() == node_type::binary_expr && binary_lands_fused(static_cast<binary_expr*>(value.get()))) {
 		// `a[i] = e op f`: the value binary lands in a compiler temp (its fused binary rewritten to land there, as an operand's
 		// does) and the store takes the temp as an operand; a shape the fuse declined stays on the stack

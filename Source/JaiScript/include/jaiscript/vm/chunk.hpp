@@ -445,6 +445,7 @@ namespace jai::vm {
         // instruction's c=1 elides the result push): ident/literal RHS resolves in-op
         // instead of LOAD+push. Absent (all-invalid) = the value rides the stack.
         fused_operand store_value;
+        bool value_taken = false;   // store_value is the temp a call's result landed in: a row that reads no int or float there moves it back to the stack and stores it from there
         // op_index_fused_decl lane facts, proven at the peephole (decl_fast_slot_store,
         // not ref-escaping, slot-resident): the read lands DIRECTLY in decl_slot when
         // the runtime value's raw index matches decl_expect (0xFF = any scalar; TYPEID_OBJECT =

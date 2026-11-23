@@ -203,7 +203,7 @@ namespace {
 				const fused_index_proto& p = ch.fused_index_protos[i];
 				out << pre << " " << i << " container=" << operand(ch, p.container) << " index=" << operand(ch, p.index) << " index_binary=" << u(p.index_binary) << " chain=[";
 				for (uint32_t s : p.index_chain_ext) { out << s << " "; }
-				out << "] value=" << operand(ch, p.store_value) << " decl_slot=" << u(p.decl_slot) << " expect=" << static_cast<int>(p.decl_expect) << " type=" << tn(p.decl_type)
+				out << "] value=" << operand(ch, p.store_value) << (p.value_taken ? " taken=1" : "") << " decl_slot=" << u(p.decl_slot) << " expect=" << static_cast<int>(p.decl_expect) << " type=" << tn(p.decl_type)
 				    << " temp=" << b(p.decl_temp) << " lane=" << b(p.typed_lane) << " spec=" << b(p.speculative) << " guard=" << u(p.container_guard) << " always=" << b(p.guard_always) << " release=" << static_cast<int>(p.release);
 				if (p.compound) { out << " compound=" << p.compound_kind; }
 				out << "\n";

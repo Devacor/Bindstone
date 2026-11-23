@@ -7981,19 +7981,20 @@ bool vm_backend::cells_rebind_apply(frame& f, const chunk::cell_loop& loop, cons
 		if (s.handle && s.handle->is_instance()) { inst = s.handle->unchecked_instance(); }
 	}
 	if (!node && !inst) return false;
-	if (!reprobe && rb.ref_decl != k_invalid_u32) {
-		// admission belongs to each new binding, never a re-probe; a refusal resumes the declaration, which raises its own text
-		const auto* decl = static_cast<const variable_decl*>(f.code->nodes[rb.ref_decl].get());
-		const type_info* referent = decl->type->element_type().get();
-		class_definition* actual = inst ? inst->get_class_definition() : nullptr;
-		if (!actual || (actual->get_name() != referent->type_name &&
-			!detail::class_derives_from(engine_, actual->get_type_id(), referent->id))) { return false; }
-	}
 	const size_t ri = static_cast<size_t>(&rb - loop.rebinds.data());
 	if (cs.rebind_memos.size() <= ri) { cs.rebind_memos.resize(ri + 1); }
 	cell_state::rebind_memo& memo = cs.rebind_memos[ri];
 	class_definition* inst_cd = inst ? inst->get_class_definition() : nullptr;
-	if (inst_cd && !reprobe && memo.cd == inst_cd && memo.code == f.code && memo.copy_ip == rb.copy_ip && memo.epoch == inst_cd->method_epoch()) {
+	const bool memo_class = inst_cd && !reprobe && memo.cd == inst_cd && memo.code == f.code && memo.copy_ip == rb.copy_ip && memo.epoch == inst_cd->method_epoch();
+	if (!reprobe && !(memo_class && memo.admitted) && (rb.ref_decl != k_invalid_u32 || rb.admit)) {
+		// admission belongs to each new binding, never a re-probe (a class the memo holds as admitted passed it at the binding that recorded
+		// it); a refusal resumes the declaration (a range-for's ITER_NEXT), which raises its own text
+		const type_info* referent = rb.admit ? f.code->iter_protos[loop.iter_proto].element_type.get()
+		                                     : static_cast<const variable_decl*>(f.code->nodes[rb.ref_decl].get())->type->element_type().get();
+		if (!inst_cd || (inst_cd->get_name() != referent->type_name &&
+			!detail::class_derives_from(engine_, inst_cd->get_type_id(), referent->id))) { return false; }
+	}
+	if (memo_class) {
 		// an element of the class the last one had: its fields through the slots that element's sites found
 		class_instance* holders[4] = {};
 		bool same = true;
@@ -8078,7 +8079,7 @@ bool vm_backend::cells_rebind_apply(frame& f, const chunk::cell_loop& loop, cons
 	}
 	if (memo_ok) {
 		memo.prefix_count = static_cast<uint8_t>(prefix_count);
-		memo.code = f.code; memo.copy_ip = rb.copy_ip; memo.epoch = inst_cd->method_epoch(); memo.cd = inst_cd;
+		memo.code = f.code; memo.copy_ip = rb.copy_ip; memo.epoch = inst_cd->method_epoch(); memo.cd = inst_cd; memo.admitted = !reprobe;
 	}
 	cs.cells[rb.cell].kind = static_cast<uint8_t>(script_value::TYPEID_REFERENCE); cs.cells[rb.cell].bits = static_cast<int64_t>(index); cs.dirty.set(rb.cell);
 	return true;

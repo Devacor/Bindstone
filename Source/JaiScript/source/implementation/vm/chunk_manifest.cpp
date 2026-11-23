@@ -293,7 +293,7 @@ namespace {
 				    << (l.frame_program ? (l.writes_stamps ? " stamps=1" : " stamps=0") : "") << " temp_mask=" << mask(l.temp_mask) << " env_mask=" << mask(l.env_mask) << " iter=" << u(l.iter_proto) << "/" << u(l.iter_index_cell) << "/" << u(l.iter_site) << "\n";
 				if (!l.rebinds.empty()) {
 					out << pre << "  rebinds";
-					for (const auto& rb : l.rebinds) { out << " (" << rb.copy_ip << " c" << rb.cell << " s" << u(rb.source_site) << " rd" << u(rb.ref_decl) << " d"; for (const uint32_t d : rb.dependents) { out << ":" << d; } out << ")"; }
+					for (const auto& rb : l.rebinds) { out << " (" << rb.copy_ip << " c" << rb.cell << " s" << u(rb.source_site) << " rd" << u(rb.ref_decl) << (rb.admit ? " admit" : "") << " d"; for (const uint32_t d : rb.dependents) { out << ":" << d; } out << ")"; }
 					out << "\n";
 				}
 				out << pre << "  cells";

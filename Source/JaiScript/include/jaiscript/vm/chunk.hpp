@@ -634,7 +634,7 @@ namespace jai::vm {
             // an element alias declared in the body (`var& strip = STRIPS[sidx]`): the copy instruction that rebinds it, its cell (a compiler value of
             // kind reference: the element index is its payload, the source table its own site), the site index of its source table and the site
             // indices of the loads and stores through the alias, whose containers the rebind sets and the entry never resolves
-            struct rebind { uint32_t copy_ip = 0, cell = 0, source_site = k_invalid_u32; std::vector<uint32_t> dependents; bool iter = false; uint32_t ref_decl = k_invalid_u32; };   // iter: a range-for's by-reference loop variable (the reference carries the range-for's element constraint); ref_decl: a class reference's declaration (its admission runs at each new binding, its constraint rides the flushed reference)
+            struct rebind { uint32_t copy_ip = 0, cell = 0, source_site = k_invalid_u32; std::vector<uint32_t> dependents; bool iter = false; uint32_t ref_decl = k_invalid_u32; bool admit = false; };   // iter: a range-for's by-reference loop variable (the reference carries the range-for's element constraint); ref_decl: a class reference's declaration (its admission runs at each new binding, its constraint rides the flushed reference); admit: an iter variable declared a class the checker could not prove of the elements (the admission runs at each new binding)
             std::vector<rebind> rebinds;
             // a C_TEXT_APPEND: the target's cell, its pieces' cells or k_typed_const_bit | constant, the general proto (the charge rule)
             struct text_append { uint32_t target = 0; uint32_t proto = 0; std::vector<uint32_t> pieces; };

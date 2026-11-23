@@ -209,6 +209,12 @@ index at entry, stepped by the block's back edge (`C_BACK_STEP`) and written bac
 index) and at the exit; the state's container is the head's site, resolved at entry and holding through calls (no callee
 rebinds it; the body may grow the array, as the general form reads its size every iteration). An element the cells do not
 take (a string by value, an instance by reference) misses at the landing once and refuses the block for the rest of the call.
+A typed loop variable over elements the checker could not class (the container is behind a reference: a `T&` parameter, a
+reference local) is a head as well when a cell can check each binding: a by-value `int`, `float` or `bool` variable pins its
+cell to that kind, so an element of another kind misses onto the general `ITER_NEXT`, which converts it or raises; a
+by-reference class variable runs the reference's admission at each new binding (`rebind::admit`: the element is an instance
+of the class or of one derived from it), and an element it does not take misses the same way. A variable of any other declared
+type keeps the general form.
 
 A member read whose base is a frame-slot identifier (`p.x`) lands in a compiler temp in the general form (`MEMBER_TEMP`:
 the base pushed as its `LOAD` would have, `GET_MEMBER`'s kernel with its cache, proofs and texts, the value popped into the

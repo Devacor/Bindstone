@@ -49,6 +49,7 @@ namespace jai::vm {
 		uint32_t member = k_invalid_u32;         // load: the member_expr node of a member read site (container = the base slot; the field resolved at entry)
 		bool branch = false;                     // land: the call's result as a truth jump to target (sense as cmp's), b the landed slot
 		uint32_t ref_decl = k_invalid_u32;       // rebind: a typed class reference declaration whose admission must run at binding
+		bool admit = false;                      // rebind: a range-for's class reference variable over elements the checker could not class: its admission runs at each binding
 		uint32_t pieces[8] = {}; uint8_t npieces = 0;   // text: the joined operands, as a, b and c are
 	};
 

@@ -4497,7 +4497,15 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			head = be.a; cmp_ip = head; hd = code[head + 1];
 			const iter_proto& ipr = c.iter_protos[range_proto];
 			if (ipr.slot == SIZE_MAX || ipr.slot >= k_typed_slot_mask) { refuse(chunk::cell_refusal_head, head); }
-			if (ipr.element_type && !ipr.conversion_free) { refuse(chunk::cell_refusal_head, head); }   // the binding converts: the general form
+			if (ipr.element_type && !ipr.conversion_free) {
+				// elements the checker could not class (a container behind a reference): a scalar variable's cell takes only its own kind
+				// and a class reference binds an instance its admission takes; any other element misses onto the general ITER_NEXT, which
+				// converts or raises. A variable of any other type is the general form's
+				const type_info* et = ipr.element_type.get();
+				const bool cell_binds = !et->is_enum && (ipr.is_reference ? et->base_type == script_value_type::jai_object_type && !et->type_name.empty()
+				                                                           : stamp_kind(et) != 0);
+				if (!cell_binds) { refuse(chunk::cell_refusal_head, head); }
+			}
 		} else if (be.op == opcode::op_loop_back) {
 			head = be.a;
 			if (head >= back) continue;
@@ -4798,8 +4806,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					use_slot(range_var_slot, static_cast<uint8_t>(script_value::TYPEID_REFERENCE), true, k_typed_dst_temp, nullptr, ip);
 					alias_slots.push_back(range_var_slot);
 					op.kind = ir::rebind;
+					op.admit = !c.iter_protos[range_proto].conversion_free;
 				} else {
-					use_slot(range_var_slot, 0, true, k_typed_dst_decl, nullptr, ip);
+					// a declared scalar over elements the checker could not class: the cell is that kind, flushed under the declared stamp
+					const iter_proto& ipr = c.iter_protos[range_proto];
+					const bool pinned = ipr.element_type && !ipr.conversion_free;
+					use_slot(range_var_slot, pinned ? stamp_kind(ipr.element_type.get()) : 0, true, k_typed_dst_decl, pinned ? ipr.element_type.get() : nullptr, ip);
 					op.kind = ir::load;
 				}
 				op.a = range_var_slot; op.writes = range_var_slot; op.b = range_index_slot; op.container = chunk::k_iter_container; op.origin = static_cast<uint32_t>(head);
@@ -6398,7 +6410,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				chunk::cell_loop::rebind rb; rb.copy_ip = static_cast<uint32_t>(code.size()); rb.cell = dst_of(op.a); rb.ref_decl = op.ref_decl;
 				if (op.container == chunk::k_iter_container) {
 					// a range-for's by-reference loop variable: the iteration state's container at the index cell
-					site.cont_slot = chunk::k_iter_container; site.operands[0] = current[op.b]; site.orig = code[ip]; rb.iter = true;
+					site.cont_slot = chunk::k_iter_container; site.operands[0] = current[op.b]; site.orig = code[ip]; rb.iter = true; rb.admit = op.admit;
 					chunk_ = &c;
 					typed_site_at(code.size()) = site;
 					loop.rebinds.push_back(rb);

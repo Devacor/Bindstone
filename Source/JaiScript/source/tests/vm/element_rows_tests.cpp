@@ -252,6 +252,53 @@ shared_ptr<Node> H = build(6);
 0;)JAI", "walk(H);", "walk_counts(H);", "drain(4);", "var_cursor(H);", "self_link();", "dropped();" }, "", "handle moves");
 		});
 
+		test("a_range_for_over_a_container_behind_a_reference_binds_each_element_as_declared", [this]() {
+			same_everywhere({ R"JAI(
+class E { int x = 0; int y = 0; E(int a, int b) { x = a; y = b; } }
+class Sub : E { int z = 9; Sub(int a) : super(a, a + 1) {} }
+class Other { int x = 5; int y = 1; }
+function sum_ints(array<int>& b) -> int { int s = 0; for (int j : b) { s += j; } return s; }
+function sum_floats(array<float>& b) -> float { float s = 0.0; for (float j : b) { s += j; } return s; }
+function count_flags(array<bool>& b) -> int { int s = 0; for (bool j : b) { if (j) { s += 1; } } return s; }
+function ints_of_var(var& b) -> int { int s = 0; for (int j : b) { s += j; } return s; }
+function floats_of_var(var& b) -> float { float s = 0.0; for (float j : b) { s += j; } return s; }
+function sum_refs(array<E>& es) -> int { int s = 0; for (E& e : es) { s += e.x - e.y; e.y = e.y + 1; } return s; }
+function refs_of_var(var& es) -> int { int s = 0; for (E& e : es) { s += e.x * 10 + e.y; } return s; }
+function skips(array<int>& b, int skip) -> int { int s = 0; for (int j : b) { if (j == skip) { continue; } if (j > 6) { break; } s += j; } return s; }
+function local_reference(int rounds) -> int {
+	map<int, array<int>> m = {}; m[1] = [1, 2, 3, 4];
+	int s = 0;
+	for (int r = 0; r < rounds; ++r) { array<int>& b = m[1]; for (int j : b) { if (j == r) { continue; } s += j; } }
+	return s;
+}
+function neighbours(array<E>& es, array<int>& picks, int self) -> int {
+	E& e = es[self];
+	int s = 0;
+	for (int j : picks) { if (j == self) { continue; } E& other = es[j]; int dx = e.x - other.x; int dy = e.y - other.y; if (dx * dx + dy * dy < 50) { s += dx + dy; } }
+	return s;
+}
+function grows(array<int>& b) -> int { int s = 0; for (int j : b) { s += j; if (b.size() < 8) { b.push(j + 10); } } return s; }
+function shrinks(array<int>& b) -> int { int s = 0; for (int j : b) { s += j; if (b.size() > 2) { b.pop(); } } return s; }
+enum Level { low, mid, high }
+function levels(array<Level>& ls) -> string { string out = ""; for (Level l : ls) { out = out + to_string(l) + (l == Level.mid ? "!" : "."); } return out; }
+function levels_of_var(var& ls) -> string { string out = ""; for (Level l : ls) { out = out + to_string(l); } return out; }
+array<Level> LEVELS = [Level.high, Level.mid, Level.low];
+var PLAIN = [2, 1, 0];
+array<int> INTS = [1, 2, 3, 4, 5, 6, 7, 8];
+array<float> FLOATS = [1.5, 2.5, 3.0];
+array<bool> FLAGS = [true, false, true, true];
+array<E> ES = [E(1, 2), E(3, 4), E(5, 6)];
+var MIXED_INTS = [1, 2, 3];
+var MIXED = [1, 2.5, 3];
+var TEXTS = [1, "two", 3];
+var THINGS = [E(1, 2), Sub(3), E(5, 6)];
+var STRANGERS = [E(1, 2), Other(), E(5, 6)];
+0;)JAI", "sum_ints(INTS);", "sum_floats(FLOATS);", "count_flags(FLAGS);", "ints_of_var(MIXED_INTS);", "ints_of_var(MIXED);", "floats_of_var(MIXED);", "ints_of_var(TEXTS);",
+				"sum_refs(ES);", "sum_refs(ES);", "refs_of_var(THINGS);", "refs_of_var(STRANGERS);", "skips(INTS, 3);", "local_reference(4);",
+				"array<int> picks = [0, 1, 2, 1]; neighbours(ES, picks, 1);", "array<int> g = [1, 2, 3]; to_string(grows(g)) + to_string(g);",
+				"array<int> sh = [1, 2, 3, 4, 5]; to_string(shrinks(sh)) + to_string(sh);", "levels(LEVELS);", "levels_of_var(LEVELS);", "levels_of_var(PLAIN);" }, "", "range-for");
+		});
+
 		test("a_member_of_an_element_reads_through_every_element_kind", [this]() {
 			same_everywhere({ R"JAI(
 var LOG = "";

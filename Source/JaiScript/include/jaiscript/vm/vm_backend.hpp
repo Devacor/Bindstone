@@ -548,6 +548,7 @@ namespace jai::vm {
             struct rebind_memo {
                 const chunk* code = nullptr; uint32_t copy_ip = UINT32_MAX;
                 const class_definition* cd = nullptr; uint64_t epoch = 0;
+                bool admitted = false;   // a new binding recorded the class (its admission ran, where the rebind has one); a re-probe's record admits nothing
                 uint8_t prefix_count = 0;
                 const class_definition* prefix_cd[4] = {}; uint64_t prefix_epoch[4] = {}; uint32_t prefix_slot[4] = {};
                 std::vector<uint32_t> slot; std::vector<uint8_t> prefix_of;   // per dependent: the field slot, and its prefix (0xFF: the element itself)

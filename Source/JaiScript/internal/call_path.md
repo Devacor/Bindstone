@@ -21,6 +21,25 @@ and `push_plain_frame`, and one pop, `pop_lean_frame`. The return doors (`return
 `fall_off_script_frame`) run the pop themselves; `pop_script_frame_core` runs it for every other exit (unwinding, a frame
 whose slot was boxed). A profiled build pops every frame through the general pop, which accounts it.
 
+## What a frame saves when it needs it
+
+A record's pop truncates the try, iteration and counted-loop stacks to the sizes they had when its frame was pushed. The frame
+takes those three sizes at its own first push onto one of them (`note_side_push`, ahead of `exec_try_push`, `exec_iter_init`,
+`exec_cfor_prep` and `cfor_state_push`), while nothing of its own is on them, and `frame::side_bases_saved` records that it
+has. A frame that opens no try, range-for or counted loop takes none, and its pop (`pop_lean_frame`,
+`pop_script_frame_core`, the tail splice's release of the dying activation) truncates none: every entry on the three stacks is
+pushed by the instruction of the frame that owns it, and a callee's entries are gone by the callee's own pop, so nothing above
+the sizes the frame never took can be its own. A frame that did open one pops through `pop_frame_side_state`, out of line: its
+loops release, its stack territory dies, the three stacks truncate, in that order.
+
+The pending-callee size is taken at every push: a probe parks its callee without naming a frame. A native entry and a fiber
+frame are no records: `frame_guard` takes its own three sizes at construction, and a default-constructed `frame` reads as
+having taken them.
+
+The lean pop moves the receiver out of the record's `this` and lets it die there, so the slot is null before a destructor the
+release runs can re-enter, as an assignment of null leaves it. The identity return takes its result by reference and moves it
+to the landing, and a window its arguments already fill calls no fill.
+
 ## The call instructions enter lean frames themselves
 
 | instruction | lane | what it answers |

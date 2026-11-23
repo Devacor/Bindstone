@@ -258,11 +258,15 @@ refusal valve): a binding does not change within a call, and the guards would ot
 for nothing. A named local whose slot holds a reference (a reference declaration, a boxed local) refuses the same
 way: the slot keeps the reference for the call.
 
-The valve also closes on a block that keeps missing at once: an entry that ends in a miss within the copy's first sixteen
-instructions, with the budget's tick as the entry found it (every back edge of a block ticks it, and so does a call, so no back
-edge ran), paid its guards and its flush for an iteration the general form ran. Sixteen such entries of one loop in a row refuse
-the loop for the rest of the call; an entry that gets past a back edge starts the count again, and so does each call. The
-injection lever's misses are not the program's: a run under it refuses nothing.
+The valve also closes on a block whose entries keep ending early: an entry that ends in a miss or a planned bail before it ran
+`k_cells_short_entry_work` copy instructions paid its guards, its flush and the next entry for less than they cost. The work is
+an estimate from what the miss has at hand, so the block switch counts nothing: the passes the entry ran (the budget's ticks
+since the entry: every back edge of a block ticks it once, an inner loop's too, and so does a call) at the copy's length each,
+plus the miss's distance into the copy. Sixteen such entries of one loop in a row refuse the loop for the rest of the call and
+the general form runs it (a hot arm the block cannot run, a read that misses every iteration); an entry whose passes alone reach
+the work starts the count again, however it ends, and so does each call. The estimate counts a skipped arm as run and an inner
+loop's pass as a whole one, so it errs toward keeping the block. The injection lever's misses are not the program's: a run under
+it refuses nothing.
 
 Each loop keeps a block-entry row (`chunk::entry_memos`; a parallel worker keeps its own in its record of the chunk): the
 path its last full entry reached each container site by (a frame slot or an environment binding) with the node found,

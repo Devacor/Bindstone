@@ -603,14 +603,14 @@ namespace jai::vm {
             uint32_t park_boundary = 0;
             uint32_t park_serial = 0;
             uint32_t entry_serial = 0;
-            // the always-missing valve: the budget tick as the last entry found it (every back edge of a block ticks it), and the run of entries
-            // of one loop (early_loop) that ended in a miss within their first operations with the tick unmoved
+            // the short-entry valve: the budget tick as the last entry found it (every back edge of a block ticks it), and the run of entries
+            // of one loop (short_loop) that ended in a miss or a bail before they had run k_cells_short_entry_work copy instructions
             uint32_t entry_tick = 0;
-            uint32_t early_loop = k_invalid_u32;
-            uint32_t early_misses = 0;
+            uint32_t short_loop = k_invalid_u32;
+            uint32_t short_entries = 0;
             void reset(size_t cells) { loop = k_invalid_u32; dirty.reset(cells); }
             // a call's entry: cells = the body's largest loop (chunk::max_cells), past which this frame never reads a dirty byte
-            void reset_call(size_t cells) { reset(cells); refused_loops = 0; park_at = k_invalid_u32; env_loop = nullptr; early_misses = 0; }
+            void reset_call(size_t cells) { reset(cells); refused_loops = 0; park_at = k_invalid_u32; env_loop = nullptr; short_entries = 0; }
         };
 
         struct frame_guard;
@@ -2720,11 +2720,13 @@ namespace jai::vm {
         void cfor_state_push(frame& f, const counted_for_proto& p);   // the state a counted loop's general back edge expects, built as exec_cfor_prep builds it minus the initial test
         void cells_push_inner_states(frame& f, const chunk::cell_loop& loop, size_t ip);
         void refuse_container_site(frame& f, const chunk::cell_loop& loop);   // the refusal valve: mark the loop for the rest of the call
-        void cells_note_early_miss(frame& f, const chunk::cell_loop& loop);
-        // the always-missing valve: a block that misses within k_cells_early_miss_span copy instructions of its head before any back edge ran, at
-        // k_cells_early_miss_limit entries in a row, is not entered again in this call
-        static constexpr uint32_t k_cells_early_miss_span = 16;
-        static constexpr uint32_t k_cells_early_miss_limit = 16;
+        void cells_note_short_entry(frame& f, const chunk::cell_loop& loop);
+        // the short-entry valve: a block whose entries end in a miss or a bail before k_cells_short_entry_work copy instructions ran (the passes the
+        // budget's tick counted at the copy's length each, plus the way into the last one), k_cells_short_entry_limit entries in a row, is not
+        // entered again in this call. The work is where an entry, a flush and the next entry cost what the block's instructions saved: a nine
+        // instruction body breaks even between 23 and 32 of them an entry, a body of 28 already wins at 24
+        static constexpr uint32_t k_cells_short_entry_work = 24;
+        static constexpr uint32_t k_cells_short_entry_limit = 16;
         void cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step);
         op_status exec_typed_fallback(frame& f, const vm_instruction& orig);
         op_status exec_typed_arith(frame& f, const vm_instruction& ins);

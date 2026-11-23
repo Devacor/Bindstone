@@ -2147,6 +2147,78 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 				check_true(detail::engine_access::cells_counters(*e).entries - before > 100, "an injected miss at every instruction keeps the block entered");
 			}
 		});
+		test("a_block_whose_entries_keep_ending_in_a_miss_or_a_bail_after_little_work_is_refused_for_the_call", [this]() {
+			// an arm the block cannot run ends the entry each time it is taken: a miss (a string element's compare) or a planned bail (a kept
+			// call's value into an object declaration). Taken every 2nd iteration, each entry runs one pass: sixteen such entries in a row and
+			// the loop is the general form's for the rest of the call. Taken every 16th, each entry runs its share and the block stays. A loop
+			// whose arm is hot for a phase is refused in it and entered again by the next call. The results are the interpreter's every time
+			const std::string defs = R"(
+				function arm(array<string>& ks, int n, int every) -> int {
+					int s = 0;
+					for (int i = 0; i < n; ++i) { s += i & 7; if (i % every == 0) { if (ks[i & 63] == "k5") { s += 100; } } }
+					return s;
+				}
+				function phased(array<string>& ks, array<int>& take, int n) -> int {
+					int s = 0;
+					for (int i = 0; i < n; ++i) { s += i & 7; if (take[i] != 0) { if (ks[i & 63] == "k5") { s += 100; } } }
+					return s;
+				}
+				array<string> NAMES = ["ant", "bee", "cat", "dog"];
+				class Tag { int v = 0; string n = ""; Tag(int a) { v = a; } }
+				array<Tag> TAGS = [Tag(5), Tag(6), Tag(7), Tag(8)];
+				int pick(int i) { string t = "x"; if (i > 5000000) { return 3; } return i % 4 + t.size() - 1; }
+				int bails(int k, int every) {
+					int n = 0; int len = 0;
+					for (int i = 0; i < k; ++i) {
+						int a = i * 3 + 1; n = n + (a & 7);
+						if (i % every != 0) { continue; }
+						Tag g = TAGS[pick(i)]; if (g.v > 7 && i > 7000000) { return -n; }
+						len = len + g.v + NAMES[i % 4].size();
+					}
+					return n * 1000 + len;
+				}
+				array<string> KS = []; array<int> PHASES = [];
+				for (int i = 0; i < 64; ++i) { KS.push("k" + to_string(i % 7)); }
+				for (int i = 0; i < 400; ++i) { PHASES.push((i % 200) < 100 ? (i & 1) : 0); }
+			)";
+			struct shape { const char* call; uint64_t least; uint64_t most; };
+			const shape shapes[] = {
+				{ "arm(KS, 400, 2);", 16, 20 },                                           // a pass and a miss per entry: refused after sixteen
+				{ "arm(KS, 400, 16);", 24, 28 },                                          // fifteen passes per entry: entered after every miss
+				{ "arm(KS, 400, 1);", 16, 20 },                                           // the always-missing case
+				{ "phased(KS, PHASES, 400);", 16, 20 },                                   // refused in its first hot phase, general through the cold one
+				{ "phased(KS, PHASES, 400) + phased(KS, PHASES, 400);", 32, 40 },         // each call counts for itself
+				{ "bails(400, 2);", 16, 20 },                                             // a pass and a bail per entry: refused after sixteen
+				{ "bails(400, 16);", 24, 28 },                                            // fifteen passes per entry: entered after every bail
+			};
+			for (const shape& sh : shapes) {
+				const std::string script = defs + sh.call;
+				const std::string interp = [&]() { auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::interpreter); stdlib::register_all(*e); return e->execute(script).to_string(); }();
+				auto e = jai::foundry::make_default_engine();
+				e->set_backend(backend_type::vm);
+				stdlib::register_all(*e);
+				e->execute(defs);
+				const uint64_t before = detail::engine_access::cells_counters(*e).entries;
+				const std::string vm = e->execute(sh.call).to_string();
+				const uint64_t entries = detail::engine_access::cells_counters(*e).entries - before;
+				check_eq(interp, vm, std::string(sh.call) + " both backends");
+				check_true(entries >= sh.least && entries <= sh.most, std::string(sh.call) + " entered " + std::to_string(entries) + " times, expected " + std::to_string(sh.least) + ".." + std::to_string(sh.most));
+			}
+			const std::string listing = listing_run(defs + "bails(40, 2);");
+			const size_t at = listing.find("== bails ");
+			check_true(at != std::string::npos && listing.find("-- cell loop", at) != std::string::npos && listing.find("C_BAIL", at) != std::string::npos, "bails' loop closes with a bail: " + listing);
+			if (engine::miss_injection_available()) {
+				// the lever's misses are not the program's: a run under it refuses nothing
+				auto e = jai::foundry::make_default_engine();
+				e->set_backend(backend_type::vm);
+				stdlib::register_all(*e);
+				e->cells_miss_every(3);
+				e->execute(defs);
+				const uint64_t before = detail::engine_access::cells_counters(*e).entries;
+				e->execute("arm(KS, 400, 2);");
+				check_true(detail::engine_access::cells_counters(*e).entries - before > 100, "under the lever the block stays entered");
+			}
+		});
 		test("an_endless_loop_around_a_closed_loop_and_a_host_call_ends_at_every_step_budget", [this]() {
 			// jaiscript_fuzz seeds 5792 and 9516 (--max-depth 3) on the vm ran past the budget in most runs: the loop counter is reset inside the
 			// body (i /= 94; a loop storing 0 into it), the body holds a closed counted loop, a host call and a continue; whether the deadline

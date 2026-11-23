@@ -182,7 +182,9 @@ so none of the arm's later locals leaves a cell for the entry guard), so the loo
 the cost (the miss-site table names the site); the head span, the back edge, the main path and the representation and
 effect classes refuse as before. The end of a local no cell holds (the `KILL_SLOT` of a var, a container or an object a branch declares, at the
 branch's close or ahead of a `continue`) bails the same way where the kill is its statement's first instruction: the release may run a
-destructor, which is the general form's, and nothing of the statement is pending there. A refusal names its class and its first offending instruction: `representation` (a value the model
+destructor, which is the general form's, and nothing of the statement is pending there. A boundary statement earlier in the arm a bail
+leaves would park and resume only for the arm to leave: the loop is translated again with the arm leaving at that statement, one miss
+for a taken arm. A refusal names its class and its first offending instruction: `representation` (a value the model
 does not take: strings, maps, members, getters, nested typed arrays, a local of two kinds), `effect` (a call,
 an exit, a binding write, a scope), `translation` (a supported core operation in an encoding the translation
 does not normalize yet: a coverage gap), `malformed` (a lifetime rule failed), `head` (a loop form the model

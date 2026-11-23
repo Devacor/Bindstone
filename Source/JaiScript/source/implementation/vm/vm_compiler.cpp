@@ -4449,6 +4449,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	size_t no_boundary_cand = SIZE_MAX;   // a loop translated again without boundary operations (they left it too little work of its own)
 	size_t pinned_store_cand = SIZE_MAX;   // a loop translated again with these store sites refused: each writes a table an alias of the body takes elements of
 	std::vector<uint32_t> pinned_store_ips;
+	size_t arm_bail_cand = SIZE_MAX;   // a loop translated again with these statements bails: each was a boundary of an arm that then left at a bail
+	std::vector<uint32_t> arm_bail_ips;
 	for (size_t cand = 0;; ++cand) {
 		size_t back = cand, line_head = SIZE_MAX;
 		if (cand >= original_size) {
@@ -4772,6 +4774,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		std::vector<std::pair<uint32_t, std::vector<uint32_t>>> bail_held;
 		std::vector<std::pair<uint32_t, uint32_t>> exit_spans;   // [exit, end): an exit statement's instructions, which have no copy: a jump into one lands on its exit
 		std::vector<size_t> boundary_ops;   // the boundary operations' positions in ops
+		bool arm_bail_added = false;
+		auto arm_bail = [&](size_t at) { return arm_bail_cand == cand && std::find(arm_bail_ips.begin(), arm_bail_ips.end(), static_cast<uint32_t>(at)) != arm_bail_ips.end(); };
 		auto arm_end_of = [&](size_t at) -> uint32_t {   // the nearest target after `at` of a forward branch before it: the end of the innermost arm holding `at`, invalid on the main path
 			if (!line && counted == k_invalid_u32 && at <= cmp_ip) return k_invalid_u32;   // the head span and the head compare are the loop's own
 			uint32_t end = k_invalid_u32;
@@ -5835,7 +5839,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// a statement inside a graft's body is a boundary of its own when it starts and ends in that body (no graft inside it): the general form runs
 		// the callee's statement in place, and the resume re-reads the compiler values (the graft's parameters and locals) live after it
 		const size_t snap_graft = graft_of(snap_ip);
-		if (refusal != chunk::cell_refusal_none && refusal != chunk::cell_refusal_head && refusal != chunk::cell_refusal_malformed && !line && ir_passes_ && cand != no_boundary_cand && snap_stmt
+		if (refusal != chunk::cell_refusal_none && refusal != chunk::cell_refusal_head && refusal != chunk::cell_refusal_malformed && !line && ir_passes_ && cand != no_boundary_cand && !arm_bail(snap_ip) && snap_stmt
 		    && (snap_stmt->get_type() == node_type::expression_stmt || snap_stmt->get_type() == node_type::variable_decl || snap_stmt->get_type() == node_type::expression_decl)
 		    && snap_ip >= first && (counted != k_invalid_u32 || snap_ip > cmp_ip) && last_ip >= snap_ip && refusal_ip >= snap_ip && ops.size() >= snap_ip - first
 		    && (snap_graft == SIZE_MAX ? caller_stmt_of(snap_ip) == snap_stmt && (snap_ip == first || caller_stmt_of(snap_ip - 1) != snap_stmt)
@@ -5945,7 +5949,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// the end of a local no cell holds (a var, a container or an object a branch declares) bails too: its release may run a destructor, which
 		// the general form runs; a scope's own kill is its statement's first instruction, where the general form holds nothing pending
 		const bool kill_refusal = refusal == chunk::cell_refusal_effect && refusal_ip < code.size() && code[refusal_ip].op == opcode::op_kill_slot;
-		if ((refusal == chunk::cell_refusal_translation || door_refusal || kill_refusal) && snap_stmt &&
+		if ((refusal == chunk::cell_refusal_translation || door_refusal || kill_refusal || arm_bail(snap_ip)) && snap_stmt &&
 		    (snap_stmt->get_type() == node_type::expression_stmt || snap_stmt->get_type() == node_type::variable_decl || snap_stmt->get_type() == node_type::expression_decl || (kill_refusal && snap_ip == refusal_ip))
 		    && snap_ip >= first && (line || counted != k_invalid_u32 || snap_ip > cmp_ip) && last_ip >= snap_ip && refusal_ip >= snap_ip && ops.size() >= snap_ip - first) {
 			const uint32_t arm_end = arm_end_of(snap_ip);
@@ -5963,6 +5967,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					held.push_back(dk);
 				}
 				if (!held.empty()) { bail_held.emplace_back(static_cast<uint32_t>(snap_ip), std::move(held)); }
+				// a boundary earlier in this arm parks and resumes only for the arm to leave here: the loop is translated again with the arm leaving there
+				if (!boundary_ops.empty() && ops[boundary_ops.back()].a < snap_ip && arm_end_of(ops[boundary_ops.back()].a) == arm_end) {
+					if (arm_bail_cand != cand) { arm_bail_cand = cand; arm_bail_ips.clear(); }
+					arm_bail_ips.push_back(ops[boundary_ops.back()].a);
+					arm_bail_added = true;
+				}
 				ir_op bail; bail.kind = ir::bail; bail.target = static_cast<uint32_t>(snap_ip);
 				ops.push_back(bail);
 				for (size_t k = snap_ip + 1; k < arm_end; ++k) { ir_op sk; sk.kind = ir::skip; ops.push_back(sk); }
@@ -6003,6 +6013,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (!held) { refuse(chunk::cell_refusal_translation, s.guard_ip); }
 		}
 		if (refusal == chunk::cell_refusal_none && cells.size() > chunk::k_cell_limit) { refuse(chunk::cell_refusal_too_many_cells, back); }
+		if (arm_bail_added && refusal == chunk::cell_refusal_none) { --cand; continue; }
 		if (refusal == chunk::cell_refusal_none && !line && !fn_mode && !alias_slots.empty()) {
 			// a store or a push site over the table an alias of the body takes elements of is refused by every entry (the alias pins its
 			// table against the block's stores): the statement is the general form's, so the loop is translated again with the site refused

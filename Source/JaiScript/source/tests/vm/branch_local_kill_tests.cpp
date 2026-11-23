@@ -204,6 +204,79 @@ function run(int n) -> string {
 run(90);
 )JAI", "", "an arm every iteration, nested arms, a while");
 		});
+
+		test("an_arms_boundary_ahead_of_its_bail_is_the_bail", [this]() {
+			// an arm whose first statements are a boundary and which then leaves at a bail (its local's kill) leaves at the boundary's
+			// place: one miss, no park and resume ahead of it
+			const outcome arm = both(R"JAI(
+function run(int n) -> string {
+	int s = 0; int fg = 0;
+	for (int i = 0; i < n; ++i) {
+		int p0 = (i * 7) & 15;
+		if ((i & 7) == 1) {
+			var state = [fg, p0];
+			state[1] = i;
+			fg = state[0] + 1;
+			s = s + 1;
+			continue;
+		}
+		if (p0 != fg) { fg = p0; s = s + 1; }
+		s = s + (p0 >> 1);
+	}
+	return to_string(s) + ":" + to_string(fg);
+}
+run(400);
+)JAI", "", "a boundary then a kill in one arm");
+			check(arm.counters.entries > 0 && arm.counters.misses > 0, "a boundary then a kill in one arm: the loop enters and the arm bails");
+			check_eq(0ull, arm.counters.boundaries, "a boundary then a kill in one arm: no boundary runs");
+			check(arm.listing.find("C_BAIL") != std::string::npos && arm.listing.find("C_BOUNDARY") == std::string::npos && arm.listing.find("-- open loop") == std::string::npos, "a boundary then a kill in one arm: the listing");
+			// two boundaries apart in the arm: the arm leaves at the first
+			const outcome two = both(R"JAI(
+function run(int n) -> string {
+	int s = 0; int t = 0;
+	for (int i = 0; i < n; ++i) {
+		if ((i % 9) == 2) {
+			var a = [i, i + 1];
+			s = s + 3;
+			t = t + a[1];
+			s = s + t;
+			var b = [t];
+			t = t + 1;
+			s = s + b[0];
+			t = t + 2;
+			continue;
+		}
+		s = s + (i & 3);
+	}
+	return to_string(s) + ":" + to_string(t);
+}
+run(300);
+)JAI", "", "two boundaries then a kill in one arm");
+			check_eq(0ull, two.counters.boundaries, "two boundaries then a kill in one arm: no boundary runs");
+			check(two.counters.entries > 0 && two.listing.find("-- open loop") == std::string::npos, "two boundaries then a kill in one arm: the loop closes and enters");
+			// a boundary on the main path ahead of the arm, and one in an arm the bail's own arm encloses, keep their place
+			const outcome kept = both(R"JAI(
+function run(int n) -> string {
+	int s = 0; string log = "";
+	array<string> names = ["a", "b", "c", "d"];
+	for (int i = 0; i < n; ++i) {
+		string name = names[i & 3];
+		s = s + name.size() + (i & 5);
+		if ((i % 11) == 3) {
+			if ((i & 1) == 1) { log = log + name; }
+			var held = [i];
+			s = s + held[0];
+			s = s + 1;
+			continue;
+		}
+		s = s + 2;
+	}
+	return to_string(s) + ":" + log;
+}
+run(300);
+)JAI", "", "a boundary on the main path and one in an inner arm");
+			check(kept.counters.entries > 0 && kept.listing.find("-- open loop") == std::string::npos, "a boundary on the main path and one in an inner arm: the loop closes and enters");
+		});
 	}
 };
 

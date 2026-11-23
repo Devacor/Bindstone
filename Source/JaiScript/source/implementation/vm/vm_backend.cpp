@@ -14039,7 +14039,10 @@ static JAI_FORCEINLINE bool lean_kinds_match(uint64_t kinds, const script_value*
 	return true;
 }
 
-// a method's in-place arguments that are already its parameters, as bind_parameters' first rows take them (lean_slot_takes)
+static bool bind_slice_references(const std::vector<parameter>& ps, script_value* args, size_t argc, size_t first, engine* eng);
+
+// a method's in-place arguments that are already its parameters, as bind_parameters' first rows take them (lean_slot_takes), a
+// reference argument read silently binding its referent's copy, as a function's (binds_slice_in_place)
 static JAI_FORCEINLINE bool method_binds_in_place(const function_decl& ast, script_value* args, size_t argc, engine* eng) {
 	if (ast.vm_lean_bind == 0) {
 		uint8_t lean = 1;
@@ -14056,7 +14059,9 @@ static JAI_FORCEINLINE bool method_binds_in_place(const function_decl& ast, scri
 	if (argc != ast.parameters.size()) { return false; }
 	for (size_t i = 0; i < argc; ++i) {
 		const parameter& p = ast.parameters[i];
-		if (!lean_slot_takes(p, args[i])) { return false; }
+		if (!lean_slot_takes(p, args[i])) {
+			return args[i].raw_storage_index() == script_value::TYPEID_REFERENCE && bind_slice_references(ast.parameters, args, argc, i, eng);
+		}
 		lean_var_stamp(p, args[i], eng);
 	}
 	return true;

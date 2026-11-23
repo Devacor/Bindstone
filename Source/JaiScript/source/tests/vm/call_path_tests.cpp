@@ -353,6 +353,42 @@ public:
 			)", "1 2 5 7 8 10 12 16 18 19 22 ", "a treap over out-parameters");
 		});
 
+		test("a_method_reads_a_reference_argument_into_its_by_value_parameter", [this]() {
+			// an element or a field read through a reference alias arrives as a reference; the parameter takes its value as the general
+			// bind does, and an element out of range raises as it does
+			all(R"(
+				class Acc {
+					int total = 0;
+					int add(int x, int y) { switch (x) { default: total += x + y; return total; } }
+					float scale(float f, int k) { switch (k) { default: return f * k; } }
+					string tag(string s, int n) { switch (n) { default: return s + to_string(n); } }
+					int peek(shared_ptr<Acc> other, var k) { switch (1) { default: return other.total + k; } }
+					int bump(int x) { switch (x) { default: total += 1; return x; } }
+				}
+				array<int> GA = [1, 2, 3, 4];
+				function run() -> string {
+					array<float> f = [0.5, 1.5];
+					array<string> s = ["x", "y"];
+					array<shared_ptr<Acc>> hs = [new Acc(), new Acc()];
+					auto& a = GA;
+					auto& fr = f;
+					auto& sr = s;
+					auto& hr = hs;
+					shared_ptr<Acc> acc = new Acc();
+					string out = "";
+					for (int i = 0; i < 4; ++i) { out += to_string(acc.add(a[i], a[3 - i])) + " "; }
+					out += to_string(acc.scale(fr[1], a[2])) + " " + acc.tag(sr[1], a[0]) + " ";
+					hr[1].total = 40;
+					out += to_string(acc.peek(hr[1], a[1])) + " ";
+					a[0] = 7;
+					out += to_string(acc.add(a[0], acc.bump(a[0]))) + " " + to_string(acc.total);
+					try { out += to_string(acc.add(a[7], 1)); } catch (e) { out += " [" + e + "]"; }
+					return out;
+				}
+				run();
+			)", "5 10 15 20 4.5 y1 42 35 35 [Array index 7 out of bounds for array of size 4]", "reference arguments of a method");
+		});
+
 		// a call from a typed loop (a cell block) into a callee that stays a call: its arguments are the block's values, its result lands in
 		// the block, and everything the general call does (order, conversions, limits, errors) is the general call's
 		test("a_block_calls_a_by_value_callee_and_lands_its_result", [this]() {

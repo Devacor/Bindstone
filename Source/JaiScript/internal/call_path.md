@@ -87,7 +87,9 @@ The per-parameter rows are the general binder's own in-place rows (`lean_slot_ta
 frame: a primitive or a string of its parameter's storage, any of those and a shared handle or a null into a `var` parameter,
 and, into a by-value `shared_ptr<T>` parameter, a handle or a null already tagged with exactly that type. A handle tagged
 otherwise (a derived class's, one read from a `var`, an untyped null) is no in-place argument: the general bind admits or
-refuses it. A plain function whose parameters are these by value takes the plain frame, and with `T&` parameters beside them
+refuses it. A reference argument whose target reads without running anything (a cell, an element in range, a present field;
+`silent_referent`) binds its target's copy by the same rows, on either frame; a property's getter and an element out of range
+are the general bind's. A plain function whose parameters are these by value takes the plain frame, and with `T&` parameters beside them
 the plain frame that binds each reference to the caller's frame-slot local or to the place its argument evaluated to.
 
 ## A class-name call constructs through its site

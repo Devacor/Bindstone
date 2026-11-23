@@ -3,10 +3,15 @@
 // Every case holds both backends to one result; the vm's blocks take the entry where the case says so (cell_counters::host_calls).
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/engine_time.hpp>
+#include <jaiscript/core/script_run.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <chrono>
 #include <functional>
+#include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -254,6 +259,116 @@ int reads_a_table() { int s = 0; for (int i = 0; i < 400; ++i) { s += table[i & 
 int reads_a_define() { int s = 0; for (int i = 0; i < 400; ++i) { s += K; s += redefine(i) % 2; s += K; } return s; }
 to_string(reads_a_global()) + " " + to_string(reads_a_table()) + " " + to_string(reads_a_define())
 )JAI", "", 0, "an entry that reaches the engine", bind);
+		});
+
+		test("a_callback_a_scalar_entry_runs_writes_the_callers_local_through_a_reference", [this]() {
+			// the signature takes words, the function reaches script through what the host kept: a callback that holds a reference to
+			// a local of the frame the loop runs in, captured ahead of the loop and handed over inside it
+			const bind_fn bind = [](engine& e) {
+				auto kept = std::make_shared<std::function<void()>>();
+				e.add_function("remember", [kept](std::function<void()> fn) { *kept = std::move(fn); });
+				e.add_function("forget", [kept]() { *kept = nullptr; });
+				e.add_function("poke", [kept](script_int x) -> script_int { if (*kept) { (*kept)(); } return x + 1; });
+			};
+			both(R"JAI(
+function captured_before() -> string {
+	int c = 0; int sum = 0;
+	remember([&]() { c += 100; });
+	for (int i = 0; i < 1000; ++i) { sum += poke(i); }
+	forget();
+	return to_string(c) + " " + to_string(sum);
+}
+function grab(int& r) { remember([&]() { r += 100; }); return 0; }
+function handed_inside() -> string {
+	int c = 0; int sum = 0;
+	for (int i = 0; i < 1000; ++i) { if (i == 500) { grab(c); } sum += poke(i); c += 1; }
+	forget();
+	return to_string(c) + " " + to_string(sum);
+}
+int G = 0;
+function through_a_global() -> string {
+	int sum = 0;
+	remember([]() { G = G + 3; });
+	for (int i = 0; i < 1000; ++i) { G = G + 1; sum += poke(i) + G; }
+	forget();
+	return to_string(G) + " " + to_string(sum);
+}
+captured_before() + " | " + handed_inside() + " | " + through_a_global()
+)JAI", "100000 500500 | 51000 500500 | 4000 2502500", 499, "a callback that writes the caller", bind);
+		});
+
+		test("a_script_error_thrown_through_a_scalar_entry_raises_at_its_call", [this]() {
+			const bind_fn bind = [](engine& e) {
+				engine* raw = &e;
+				auto kept = std::make_shared<std::function<void()>>();
+				e.add_function("remember", [kept](std::function<void()> fn) { *kept = std::move(fn); });
+				e.add_function("forget", [kept]() { *kept = nullptr; });
+				e.add_function("poke", [kept](script_int x) -> script_int { if (*kept) { (*kept)(); } return x + 1; });
+				e.add_function("relay_checked", [raw](script_int x) -> script_int { return raw->execute("checked(" + std::to_string(x) + ")").as_int(); });
+			};
+			const std::string script = R"JAI(
+function checked(int x) { if (x == 700) { throw "seven hundred"; } return x; }
+function through_execute() -> string {
+	int total = 0;
+	try { for (int i = 0; i < 1000; ++i) { total += relay_checked(i); } } catch (e) { return to_string(total) + ": " + to_string(e); }
+	return "none";
+}
+int calls = 0;
+function through_a_callback() -> string {
+	int total = 0;
+	remember([]() { calls = calls + 1; if (calls == 300) { throw "the three hundredth"; } });
+	try { for (int i = 0; i < 1000; ++i) { total += poke(i); } } catch (e) { forget(); return to_string(total) + " " + to_string(calls) + ": " + to_string(e); }
+	forget();
+	return "none";
+}
+through_execute() + " | " + through_a_callback()
+)JAI";
+			both(script, "", 0, "a script error through the entry", bind);
+			const outcome vm = run_on(true, script, bind);
+			check(vm.text.find("none") == std::string::npos && vm.text.rfind("throw:", 0) != 0, "both errors are caught in the caller (" + vm.text + ")");
+			check(vm.text.rfind("244650: ", 0) == 0 && vm.text.find(" | 44850 300: ") != std::string::npos, "the totals are those before the failing calls (" + vm.text + ")");
+		});
+
+		test("a_scalar_entry_starts_a_run_and_blocks_a_sleep_inside_a_suspendable_run", [this]() {
+			// inside a run of its own a block's host call may start another run, which suspends back into the host function, and may
+			// run script that sleeps, which blocks there (a run suspends only where no host call is in flight)
+			using ns = std::chrono::nanoseconds;
+			std::string text[2];
+			for (bool vm : { false, true }) {
+				auto e = jai::foundry::make_default_engine();
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
+				stdlib::register_all(*e);
+				bind_scalars(*e);
+				e->execution_budget(0);
+				e->set_script_warning_handler([](const std::string&) {});
+				ns now = std::chrono::seconds(10);
+				e->time().source([&now] { return now; }, [&now] { return ns(1700000000000000000LL) + now; }, [&now](ns d) { now += d; });
+				std::vector<script_run> spawned;
+				engine* raw = e.get();
+				e->add_function("spawn_at", [raw, &spawned](script_int x) -> script_int {
+					if (x % 400 == 0) { spawned.push_back(raw->start("int inner = " + std::to_string(x) + "; sleep(1.0); inner_done = inner_done + inner + 1;")); }
+					return x + 1;
+				});
+				e->add_function("nap_at", [raw](script_int x) -> script_int { if (x == 300) { raw->execute("sleep(0.25);"); } return x; });
+				std::string& got = text[vm ? 1 : 0];
+				try {
+					script_run run = e->start(R"JAI(
+int inner_done = 0;
+int climb() { int c = 0; for (int i = 0; i < 1000; ++i) { c = spawn_at(c) + nap_at(i) - i; } return c; }
+int first = climb();
+sleep(2.0);
+to_string(first) + " " + to_string(inner_done)
+)JAI");
+					check_eq((size_t)3, spawned.size(), std::string(vm ? "vm" : "interpreter") + ": three runs started inside the loop");
+					now += std::chrono::milliseconds(1500);
+					for (script_run& inner : spawned) { while (!inner.done()) { if (inner.wake_at() > now) { now = inner.wake_at(); } inner.resume(); } }
+					while (!run.done()) { if (run.wake_at() > now) { now = run.wake_at(); } run.resume(); }
+					got = run.result().has_value() ? run.result().value().to_string() : std::string("error:") + std::string(run.result().message());
+				} catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				spawned.clear();
+			}
+			check_eq(text[0], text[1], "runs inside a run: both backends");
+			check_eq(std::string("1000 1203"), text[1], "runs inside a run: the value");
 		});
 
 		test("a_parallel_body_calls_a_scalar_entry_through_the_door", [this]() {

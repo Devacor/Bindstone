@@ -203,6 +203,11 @@ includes, a path computed at run time included, because each thing a unit loaded
 | assigns a typed global | the store converts to the declared type | the cell keeps its kind |
 | assigns a `var` global | any kind | a `var` is never certain (`certain_type`) |
 
+An untyped lambda's inferred result kind (`lambda_expr::inferred_return_kind`) is a fact its graft declares the result with, no conversion
+behind it, so it rests only on what a record holds or the body owns: each return is an expression `certain_argument` describes (never a
+member, whose class another unit may define again), and the names the returns read (`lambda_return_records_`) join the `proof_globals` of
+every call of the lambda. A unit that imports infers it as one that does not.
+
 One gate stays: an include below a unit's top level (`has_scoped_include_`: `include(expr)` in a function, a lambda or a block; a
 literal include in a function body is spliced and declares slots) declares into that scope's environment, where the scope's own code
 and a function it calls find its names ahead of the program's. Two activations of one body can stand under different environments

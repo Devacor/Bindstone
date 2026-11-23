@@ -308,6 +308,19 @@ public:
 			}
 		});
 
+		// an untyped lambda's result kind is what its graft declares the result with no conversion behind it: it rests on what the body owns
+		// and on records (a typed global, a function's declared return), in a unit that imports as in one that does not, and never on a
+		// member; a function or a class another unit defines again changes the result as the call would
+		test("a_lambdas_inferred_result_rests_on_records", [this]() {
+			const outcome redefined = run("lambda_redefined", {{{{"leafu.jai", "int helper(float a) { return 2; }\nfunction run() { auto f = [](float a) { return helper(a); }; float s = 0.0; for (int i = 0; i < 3; i++) { s += f(1.0); } return s; }\nclass Body { int w = 2; }\nBody B = Body();\nfunction weigh() { auto f = [](int k) { return B.w * k; }; var s = 0; for (int i = 0; i < 3; i++) { s += f(i + 1); } return s; }\n"}, {"main.jai", "[[warn_mode]];\nimport \"leafu.jai\";\nstring r = to_string(run()) + \",\" + to_string(weigh());\nfloat helper(float a) { return 2.5; }\nclass Body { float w = 2.5; }\nr += \"|\" + to_string(run()) + \",\" + to_string(weigh());\nr;\n"}}, "", "main.jai"}});
+			expect(redefined, "6.0,12|7.5,12.0", "a callee and a class another unit defines again");
+			check(count(redefined.listing, "-- inlined <lambda>") > 0, "the lambda over a function's declared return grafts: " + redefined.listing.substr(0, 3000));
+			const outcome imported = run("lambda_imports", {{{{"helper.jai", "float helper_half(int i) { return i * 0.5; }\n"}, {"retype_gain.jai", "int GAIN = 2;\n"},
+				{"main.jai", "import \"helper.jai\";\nfloat GAIN = 1.5;\nfunction run() { auto f = [](float a) { return a * GAIN + helper_half(2); }; float s = 0.0; for (int i = 0; i < 4; i++) { s += f(i * 1.0); } return s; }\nstring r = to_string(run());\ninclude \"retype_gain.jai\";\nr += \"|\" + to_string(run());\nr;\n"}}, "", "main.jai"}});
+			expect(imported, "13.0|16.0", "a unit that imports, its global retyped by an include");
+			check(count(imported.listing, "-- inlined <lambda>") > 0, "the lambda grafts in a unit that imports: " + imported.listing.substr(0, 3000));
+		});
+
 		// a refused record is no verdict for longer than its cause: a global retyped and declared its first type again (each declaration
 		// moves the epoch the refusal was kept under), and a name declared below its first use (no epoch moves: that refusal is not kept).
 		// The loop's block is entered again once the record holds, where a refusal kept too long would run the call for good

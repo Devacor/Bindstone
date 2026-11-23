@@ -1108,6 +1108,7 @@ private:
         // "declaration shadows a global used earlier in the same scope chain").
         std::unordered_set<std::string_view> globals_used;
         uint8_t inferred_return = 0;      // auto: the kind every return so far certainly yields (1 int, 2 float, 3 bool)
+        std::vector<proof_global> return_records;   // auto: the program-scope names that kind rests on (lambda_return_records_)
         bool inferred_mixed = false;      // auto: a return of another kind, of an uncertain kind, or without a value
         bool returns_seen = false;        // auto: a return with a value was walked
         bool returns_values = true;       // auto: every return yields a value the checker knows (no handle, no reference, no function)
@@ -8865,6 +8866,7 @@ private:
         }
         // a local declared with a lambda literal: the lambda as a one-overload declaration (the guard checks the binding at run time)
         const std::vector<const function_decl*>* lambda_ov = nullptr;
+        const std::vector<proof_global>* lambda_records = nullptr;   // what the lambda's inferred result rests on: the graft's guard checks them with the arguments'
         if (!ov && program_ov.empty() && c->callee && c->callee->get_type() == node_type::identifier_expr) {
             auto* id = static_cast<identifier_expr*>(c->callee.get());
             const var_entry* local = id->slot_index != SIZE_MAX && !id->global_qualified ? find_local(id->name) : nullptr;
@@ -8879,7 +8881,11 @@ private:
                 }
                 if (lam->graft_decl) {
                     // an untyped lambda whose returns are one certain kind declares that kind with the engine's canonical stamp
-                    const uint8_t k = lam->return_type ? 0 : lam->inferred_return_kind;
+                    // (a pass that stamps asks its own walk of the lambda for the records the kind rests on: a call inside the lambda's own body has none yet)
+                    const auto records = lambda_return_records_.find(lam);
+                    const bool recorded = proofs_ == proof_mode::leave || records != lambda_return_records_.end();
+                    const uint8_t k = lam->return_type || !recorded ? 0 : lam->inferred_return_kind;
+                    if (k != 0 && records != lambda_return_records_.end()) { lambda_records = &records->second; }
                     lam->graft_decl->graft_return_kind = k;
                     lam->graft_decl->return_type = k == 1 ? type_info_ptr{eng_.get_type_info_int()} : k == 2 ? type_info_ptr{eng_.get_type_info_float()}
                                                  : k == 3 ? type_info_ptr{eng_.get_type_info_bool()} : lam->return_type;
@@ -8888,6 +8894,9 @@ private:
             }
         }
         stamp_call_proofs(c, lambda_ov ? lambda_ov : program_ov.empty() ? ov : &program_ov, args, free_callee || !program_ov.empty() || lambda_ov != nullptr);
+        if (lambda_records && stamping()) {
+            for (const auto& d : *lambda_records) { if (std::find(c->proof_globals.begin(), c->proof_globals.end(), d) == c->proof_globals.end()) { c->proof_globals.push_back(d); } }
+        }
         {
             const function_decl* md = nullptr;
             if (stamping() && ov && ov->size() == 1 && c->callee) {
@@ -11657,8 +11666,11 @@ private:
         }
         if (!fn.is_coroutine && !fn.ret) {
             fn_ctx& open = fn_stack_.back();
-            const uint8_t k = !valued || r->binds_reference || value.tentative || narrow_derived_ ? 0
-                            : value.kind == ctype::int_k ? (enum_value(value) ? 0 : 1) : value.kind == ctype::float_k ? 2 : value.kind == ctype::bool_k ? 3 : 0;
+            uint8_t k = !valued || r->binds_reference || value.tentative || narrow_derived_ ? 0
+                      : value.kind == ctype::int_k ? (enum_value(value) ? 0 : 1) : value.kind == ctype::float_k ? 2 : value.kind == ctype::bool_k ? 3 : 0;
+            // the kind is what a graft declares its result (lambda_expr::inferred_return_kind) with no conversion behind it: it rests only on
+            // what the body owns or a record holds, never on a member or a callee another unit may redefine unseen
+            if (k != 0 && !certain_argument(r->value.get(), open.return_records)) { k = 0; }
             if (k == 0 || (open.inferred_return != 0 && open.inferred_return != k)) { open.inferred_mixed = true; }
             else { open.inferred_return = k; }
             open.returns_seen = true;
@@ -12493,6 +12505,7 @@ private:
     }
 
     std::unordered_map<const lambda_expr*, ctype> lambda_results_;   // an undeclared lambda whose returns are one certain scalar kind
+    std::unordered_map<const lambda_expr*, std::vector<proof_global>> lambda_return_records_;   // and the program-scope names that kind rests on
     std::unordered_map<const lambda_expr*, const type_info*> lambda_return_types_;   // and the one type they yield, void for none (fn_ctx::returned)
     std::unordered_map<const lambda_expr*, const type_info*> lambda_stated_return_types_;   // the one type they yield with declared results read (fn_ctx::stated)
 
@@ -12588,10 +12601,10 @@ private:
         check_falls_off_end(l->return_type.get(), l->body.get(), l->location, "lambda");
         {
             const fn_ctx& done = fn_stack_.back();
-            const uint8_t kind = !l->return_type && !done.inferred_mixed && !has_includes_ ? done.inferred_return : uint8_t(0);
+            const uint8_t kind = !l->return_type && !done.inferred_mixed ? done.inferred_return : uint8_t(0);
             stamp(l->inferred_return_kind, kind, uint8_t(0));
-            if (kind) { lambda_results_[l] = ctype::make(kind == 1 ? ctype::int_k : kind == 2 ? ctype::float_k : ctype::bool_k); }
-            else { lambda_results_.erase(l); }
+            if (kind) { lambda_results_[l] = ctype::make(kind == 1 ? ctype::int_k : kind == 2 ? ctype::float_k : ctype::bool_k); lambda_return_records_[l] = done.return_records; }
+            else { lambda_results_.erase(l); lambda_return_records_.erase(l); }
             std::string reason;
             const bool deduced = !l->return_type || l->contextual_return;
             if (deduced && (l->contextual_return ? !done.gives_value && !has_includes_ : close_deduced_body(done, l->body.get(), reason))) { nothing_lambdas_[l] = reason; }

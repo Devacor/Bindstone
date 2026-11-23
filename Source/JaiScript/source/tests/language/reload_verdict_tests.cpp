@@ -599,18 +599,18 @@ public:
 				{"class Cell<K, V> { K v; int tag() { return 3; } }\nT same<T>(T x) { return x; }\nnamespace box { class Lid<T> { T v; int tag() { return 10; } } T pick<T>(T x) { return x; } }\n", "'Cell' takes 2 type arguments, not 1"},
 				{"class Cell<T> { T held; int tag() { return 4; } }\nT same<T>(T x) { return x; }\nnamespace box { class Lid<T> { T v; int tag() { return 10; } } T pick<T>(T x) { return x; } }\n", "no member 'v' in class 'Cell<float>'"},
 				{"class Cell<T> { T v; int tag() { return 1; } }\nT same<T>(T x, T y) { return x; }\nnamespace box { class Lid<T> { T v; int tag() { return 10; } } T pick<T>(T x) { return x; } }\n", "'same<int>' expects 2 argument(s), got 1"},
-				{"class Cell { int v = 1; int tag() { return 77; } }\nT same<T>(T x) { return x; }\nnamespace box { class Lid<T> { T v; int tag() { return 10; } } T pick<T>(T x) { return x; } }\n", "'Cell<float>' cannot be made: 'Cell' is a plain class here, not a generic"},
+				{"class Cell { int v = 1; int tag() { return 77; } }\nT same<T>(T x) { return x; }\nnamespace box { class Lid<T> { T v; int tag() { return 10; } } T pick<T>(T x) { return x; } }\n", "'Cell' takes no type arguments: it is not a generic class"},
 			};
 			for (const auto& [text, says] : unfit) {
 				auto e = engine_with(text);
 				const std::string refused = loaded_in(*e);
 				check_true(failed(refused) && has(refused, says), says + ": " + refused);
 			}
-			// where nothing declares the generic the bite's instances wait for a declaration, as they always did
+			// and where nothing declares the generic
 			{
 				auto bare = engine_with("");
-				const std::string waits = loaded_in(*bare);
-				check_true(failed(waits), "no generic declared: " + waits);
+				const std::string refused = loaded_in(*bare);
+				check_true(failed(refused) && has(refused, "unknown type 'Cell<float>': no generic class 'Cell' is declared"), "no generic declared: " + refused);
 			}
 		});
 
@@ -665,7 +665,7 @@ public:
 			};
 			size_t cases = 0, refused = 0;
 			std::string wrong;
-			std::set<std::string> waiting;
+			std::set<std::string> bound;
 			for (const auto& [source_name, source] : sources) {
 				auto maker = engine_with(engines.front().second);
 				jaibite made = maker->jaibite(source);
@@ -696,8 +696,8 @@ public:
 							if (!failed(got)) { wrong += what + ": the source fails (" + expected.substr(0, 110) + "), the bite answered " + got + "\n"; }
 						} else if (got != expected) {
 							// a call the saved text bound to a generic's instance stays that instance's: where the engine declares no
-							// generic of the name the bite waits for one and says so, though its source would reach the plain function
-							if (has(got, "is not declared yet: it waits for") || has(got, "cannot be made: ")) { waiting.insert(source_name + " | " + engine_name); }
+							// generic of the name the bite fails its load and says so, though its source would reach the plain function
+							if (has(got, "static check failed") && has(got, "unknown function 'same<int>': no generic function 'same' is declared")) { bound.insert(source_name + " | " + engine_name); }
 							else { wrong += what + ": the source answers " + expected + ", the bite " + got.substr(0, 260) + "\n"; }
 						}
 						if (with_live && before != outcome(*e, "held();")) { wrong += what + ": what live code holds changed\n"; }
@@ -706,9 +706,9 @@ public:
 				}
 			}
 			check_eq(std::string(), wrong);
-			std::string waited;
-			for (const auto& w : waiting) { waited += w + "\n"; }
-			check_eq(std::string("classes and functions | a plain function of the name\n"), waited);
+			std::string refused_alone;
+			for (const auto& b : bound) { refused_alone += b + "\n"; }
+			check_eq(std::string("classes and functions | a plain function of the name\n"), refused_alone);
 			check_true(cases >= 90 && refused >= 20, "the table covers loads that run and loads that are refused: " + std::to_string(cases) + " cases, " + std::to_string(refused) + " refused");
 		});
 
@@ -802,85 +802,193 @@ public:
 			}
 		});
 
-		test("a_bites_instance_of_a_generic_the_engine_lacks_waits_and_says_what_holds_the_name", [this]() {
-			// A bite's instance of a generic the engine does not declare waits for it, as any unit's does: the bite loads, a use
-			// reached before the generic is declared raises there (code before it has run), and once the generic is declared the
-			// same bite runs. Where a plain class or function holds the name, the text says so. A method's instance is never added
-			// to a class that stands without the generic, in an engine with no generic at all too: the class keeps the methods it
-			// declared and the bite's call raises.
-			const std::string lib = "class Cell<T> { T v; int tag() { return 1; } }\nT same<T>(T x) { return x; }\nclass Tool { int level = 1; T scaled<T>(T x) { return x; } }\n";
-			struct loaded_bite {
-				std::shared_ptr<engine> eng;
-				std::string ran;
-				std::string at_load = "loaded";
-				std::string at_run;
+		test("a_bite_bound_to_a_generic_the_engine_lacks_fails_its_load", [this]() {
+			// A bite carries the instances its text names. One of a generic the engine declares nowhere cannot be made there, so
+			// the bite fails its check as its source does: at the load, before any of its code runs and whether or not the use
+			// would ever run. The same bytes load once the generic is declared, and nothing the engine holds under the name moves.
+			const std::string lib = "class Cell<T> { T v; int tag() { return 1; } }\nT same<T>(T x) { return x; }\nclass Tool { int level = 1; T scaled<T>(T x) { return x; } }\n"
+			                        "namespace box { class Lid<T> { T v; int tag() { return 10; } } T pick<T>(T x) { return x; } }\n";
+			const auto engine_with = [](const std::string& text, std::string* ran) {
+				auto e = make_engine();
+				stdlib::register_all(*e);
+				e->add_function("mark", [ran](const std::string& s) { if (ran) { *ran += s + ";"; } });
+				if (!text.empty()) { e->execute(text); }
+				return e;
 			};
-			const auto meet = [&](const std::string& source, const std::string& engine_text, const std::string& declared_later) {
-				std::vector<uint8_t> bytes;
-				{
-					auto maker = make_engine();
-					stdlib::register_all(*maker);
-					maker->add_function("mark", [](const std::string&) {});
-					maker->execute(lib);
-					bytes = maker->jaibite(source).save_bytes();
-				}
-				auto result = std::make_shared<loaded_bite>();
-				result->eng = make_engine();
-				stdlib::register_all(*result->eng);
-				result->eng->add_function("mark", [raw = result.get()](const std::string& s) { raw->ran += s + ";"; });
-				if (!engine_text.empty()) { result->eng->execute(engine_text); }
+			const auto outcome = [](engine& e, const std::string& code) {
 				try {
-					jaibite bite = result->eng->jaibite_load_bytes(bytes);
-					const auto run = [&]() {
-						try {
-							return "= " + bite.execute().to_string();
-						} catch (const std::exception& error) {
-							const std::string text = error.what();
-							return text.substr(0, text.find('\n'));
-						}
-					};
-					result->at_run = run();
-					if (!declared_later.empty()) {
-						result->eng->execute(declared_later);
-						result->at_run += " | then " + run();
-					}
+					return e.execute(code).to_string();
 				} catch (const std::exception& error) {
-					const std::string text = error.what();
-					result->at_load = text.substr(0, text.find('\n'));
+					return std::string("ERR: ") + error.what();
 				}
-				return result;
 			};
+			const auto saved = [&](const std::string& made_with, const std::string& source, std::string& where_made) {
+				auto maker = engine_with(made_with, nullptr);
+				jaibite made = maker->jaibite(source);
+				where_made = made.execute().to_string();
+				return made.save_bytes();
+			};
+			const auto loaded = [](engine& e, const std::vector<uint8_t>& bytes) {
+				try {
+					return e.jaibite_load_bytes(bytes).execute().to_string();
+				} catch (const std::exception& error) {
+					return std::string("ERR: ") + error.what();
+				}
+			};
+			const auto refused_at_load = [&](const std::string& got, const std::string& ran) { return has(got, "ERR: static check failed") && ran.empty(); };
+			const std::string none;
+			const std::string other = "class Other { int n = 1; }\nint other() { return 1; }\nclass Tool { int level = 1; }\nnamespace box { int here() { return 1; } }\n";
+			const std::string plain = "class Cell { int v = 1; int tag() { return 6; } }\nint same(int x) { return x + 100; }\nclass Tool { int level = 1; int scaled(int x) { return x + 50; } }\n"
+			                          "namespace box { class Lid { int v = 0; int tag() { return 60; } } int pick(int x) { return x + 7; } }\n";
+			const std::string shapes = "class Cell<K, V> { K v; int tag() { return 3; } }\nA same<A, B>(A x, B y) { return x; }\nclass Tool { int level = 1; A scaled<A, B>(A x, B y) { return x; } }\n"
+			                           "namespace box { class Lid<K, V> { K v; int tag() { return 30; } } A pick<A, B>(A x, B y) { return x; } }\n";
 			const std::string calls = "mark(\"before\"); int n = same(4); mark(\"after\"); n;";
+			const std::string written = "mark(\"before\"); int n = same<int>(4); mark(\"after\"); n;";
 			const std::string makes = "mark(\"before\"); Cell<float> c; mark(\"after\"); c.tag();";
+			const std::string nested = "mark(\"before\"); Cell<Cell<int>> c; mark(\"after\"); c.tag();";
 			const std::string method = "mark(\"before\"); Tool t; int n = t.scaled<int>(4); mark(\"after\"); n;";
-			// the generic is declared after the bite loads: the first run raises at the use, the next one runs
-			auto early = meet(calls, "", lib);
-			check_eq(std::string("loaded"), early->at_load);
-			check_eq(std::string("'same<int>' is not declared yet: it waits for 'same' | then = 4"), early->at_run);
-			check_eq(std::string("before;before;after;"), early->ran, "the first run reached the use");
-			auto early_class = meet(makes, "class Unrelated { int n = 1; }", lib);
-			check_eq(std::string("'Cell<float>' is not declared yet: it waits for 'Cell' | then = 1"), early_class->at_run);
-			check_eq(std::string("before;before;after;"), early_class->ran);
-			// a plain function or class holds the name: the use says so
-			auto plain_function = meet(calls, "int same(int x) { return x + 100; }", "");
-			check_eq(std::string("loaded"), plain_function->at_load);
-			check_eq(std::string("'same<int>' cannot be made: 'same' is a plain function here, not a generic"), plain_function->at_run);
-			check_eq(std::string("104"), plain_function->eng->execute("same(4);").to_string(), "the engine's function is untouched");
-			auto plain_class = meet(makes, "class Cell { int v = 1; int tag() { return 6; } }", "");
-			check_eq(std::string("'Cell<float>' cannot be made: 'Cell' is a plain class here, not a generic"), plain_class->at_run);
-			check_eq(std::string("6"), plain_class->eng->execute("Cell c; c.tag();").to_string(), "the engine's class is untouched");
-			// a method's instance where the class stands without the generic, whether or not the engine declares any generic
-			for (const std::string others : {"", "T unrelated<T>(T x) { return x; }\n"}) {
-				const std::string where = others.empty() ? "no generic in the engine" : "another generic in the engine";
-				auto kept_out = meet(method, others + "class Tool { int level = 1; int scaled(int x) { return x + 50; } }", "");
-				check_eq(std::string("loaded"), kept_out->at_load, where);
-				check_eq(std::string("Tool has no member 'scaled<int>'"), kept_out->at_run, where + ": the bite's call finds no such method");
-				check_eq(std::string("before;"), kept_out->ran, where);
-				check_eq(std::string("54"), kept_out->eng->execute("Tool t; t.scaled(4);").to_string(), where + ": the engine's method is the one it declared");
+			const std::string deduced_method = "mark(\"before\"); Tool t; int n = t.scaled(4); mark(\"after\"); n;";
+			const std::string spaced = "mark(\"before\"); box::Lid<int> lid; lid.v = box::pick(3); mark(\"after\"); lid.tag() + lid.v;";
+			const std::string never_called = "mark(\"before\"); int unused() { Cell<float> c; return same(4) + c.tag(); } mark(\"after\"); 7;";
+			const std::string field = "mark(\"before\"); class Holder { Cell<int> c; } Holder h; mark(\"after\"); h.c.tag();";
+			const std::string beside = "mark(\"before\"); class Pair<A, B> { A a; B b; } Pair<int, Cell<int>> p; mark(\"after\"); p.b.tag();";
+			const std::string no_function = "unknown function 'same<int>': no generic function 'same' is declared";
+			const std::string no_class = "unknown type 'Cell<float>': no generic class 'Cell' is declared";
+			const std::string no_method = "unknown method 'Tool::scaled<int>': no generic method 'Tool::scaled' is declared";
+			struct row { std::string source, engine_text; std::vector<std::string> says; };
+			const std::vector<row> rows = {
+				{calls, none, {no_function}},
+				{calls, other, {no_function}},
+				{calls, plain, {no_function}},
+				{calls, shapes, {"unknown function 'same<int>': no single generic function 'same' takes its type arguments and parameters"}},
+				{written, none, {no_function}},
+				{written, plain, {no_function}},
+				{makes, none, {no_class}},
+				{makes, other, {no_class}},
+				{makes, plain, {"'Cell' takes no type arguments: it is not a generic class"}},
+				{makes, shapes, {"'Cell' takes 2 type arguments, not 1"}},
+				{nested, none, {"unknown type 'Cell<Cell<int>>': no generic class 'Cell' is declared", "unknown type 'Cell<int>': no generic class 'Cell' is declared"}},
+				{method, none, {"unknown type 'Tool'"}},
+				{method, other, {no_method}},
+				{method, plain, {no_method}},
+				{method, shapes, {"unknown method 'Tool::scaled<int>': no single generic method 'Tool::scaled' takes its type arguments and parameters"}},
+				{deduced_method, other, {no_method}},
+				{deduced_method, plain, {no_method}},
+				{spaced, none, {"unknown type 'box::Lid<int>': no generic class 'box::Lid' is declared", "unknown function 'box::pick<int>': no generic function 'box::pick' is declared"}},
+				{spaced, other, {"unknown type 'box::Lid<int>': no generic class 'box::Lid' is declared", "unknown function 'box::pick<int>': no generic function 'box::pick' is declared"}},
+				{spaced, plain, {"'box::Lid' takes no type arguments: it is not a generic class", "unknown function 'box::pick<int>': no generic function 'box::pick' is declared"}},
+				{spaced, shapes, {"'box::Lid' takes 2 type arguments, not 1", "unknown function 'box::pick<int>': no single generic function 'box::pick' takes its type arguments and parameters"}},
+				{never_called, none, {no_class, no_function}},
+				{never_called, plain, {"'Cell' takes no type arguments: it is not a generic class", no_function}},
+				{field, none, {"unknown type 'Cell<int>': no generic class 'Cell' is declared"}},
+				{beside, none, {"unknown type 'Cell<int>': no generic class 'Cell' is declared"}},
+				{beside, plain, {"'Cell' takes no type arguments: it is not a generic class"}},
+			};
+			for (const row& r : rows) {
+				const std::string where = r.source + " | " + (r.engine_text.empty() ? std::string("nothing declared") : r.engine_text.substr(0, 40));
+				std::string where_made, ran;
+				const std::vector<uint8_t> bytes = saved(lib, r.source, where_made);
+				auto e = engine_with(r.engine_text, &ran);
+				const std::string got = loaded(*e, bytes);
+				check_true(refused_at_load(got, ran), where + " | ran [" + ran + "] | " + got);
+				for (const std::string& says : r.says) { check_true(has(got, says), where + " | " + got); }
+				check_true(!has(got, "waits for") && !has(got, "cannot be made") && !has(got, "use of undeclared identifier 'same<") && !has(got, "no member 'pick<"), where + " | " + got);
+				if (!r.engine_text.empty()) { continue; }
+				// the library declared after the refusal: the same bytes load and run
+				check_eq(std::string("null"), outcome(*e, lib), where);
+				check_eq(where_made, loaded(*e, bytes), where);
+				check_eq(std::string("before;after;"), ran, where);
 			}
-			// where its class is not declared at all, the bite's check says so
-			auto no_class = meet(method, "", "");
-			check_true(no_class->at_load.rfind("static check failed", 0) == 0 && no_class->ran.empty(), no_class->at_load);
+			// what the engine holds under the names is what it declared
+			{
+				std::string where_made, ran;
+				auto e = engine_with(plain, &ran);
+				for (const std::string& source : {calls, makes, method, spaced}) { check_true(refused_at_load(loaded(*e, saved(lib, source, where_made)), ran), source); }
+				check_eq(std::string("104|6|54|67"), outcome(*e, "Cell c; Tool t; box::Lid lid; to_string(same(4)) + \"|\" + to_string(c.tag()) + \"|\" + to_string(t.scaled(4)) + \"|\" + to_string(lid.tag() + box::pick(0));"));
+			}
+			// a generic the bite declares itself is the bite's wherever it loads
+			{
+				std::string where_made;
+				const std::vector<uint8_t> bytes = saved(lib, "class Pair<A, B> { A a; B b; } U twice<U>(U x) { return x + x; } Pair<int, int> p; p.a = twice(2); p.a;", where_made);
+				for (const std::string& text : {none, other, plain, shapes, lib}) { check_eq(std::string("4"), loaded(*engine_with(text, nullptr), bytes), text.substr(0, 40)); }
+			}
+			// An instance only another instance's text asked for is that text's: where the engine's declaration no longer asks
+			// for it, it is not the bite's to make, whatever became of its generic; where the declaration still asks, the
+			// request is the declaration's and says where it stands
+			const std::string nest = "class Cell<T> { T v; int tag() { return 1; } }\nclass Shelf<T> { Cell<T> c; int tag() { return 10 + c.tag(); } }\nT same<T>(T x) { return x; }\nT twice<T>(T x) { return same(x) + same(x); }\n";
+			const std::string shelf = "Shelf<int> s; s.tag();", doubles = "twice(4);";
+			// the unit's own call of an instance an instance's text asked for first (its argument is typed once twice<int> is made)
+			const std::string calls_both = "auto x = twice(4); same(x);";
+			const std::string wraps = "class Wrap<T> { Cell<T> c; int tag() { return 5 + c.tag(); } } Shelf<int> s; Wrap<int> w; s.tag() + w.tag();";
+			const std::vector<row> asked_within = {
+				{shelf, nest, {}},
+				{shelf, "class Cell<K, V> { K v; int tag() { return 2; } }\nclass Shelf<T> { T c; int tag() { return 20; } }\n", {}},
+				{shelf, "class Shelf<T> { T c; int tag() { return 20; } }\n", {}},
+				{shelf, "class Cell<T> { T v; int tag() { return 3; } }\nclass Shelf<T> { Cell<T> c; int tag() { return 10 + c.tag(); } }\n", {}},
+				{shelf, "class Shelf<T> { Cell<T> c; int tag() { return 10 + c.tag(); } }\n", {"unknown type 'Cell<int>': no generic class 'Cell' is declared", "in Shelf<int>, instantiated at "}},
+				{shelf, "class Cell<T> { T v; int tag() { return 1; } }\n", {"unknown type 'Shelf<int>': no generic class 'Shelf' is declared"}},
+				{doubles, nest, {}},
+				{doubles, "T twice<T>(T x) { return x + x + x; }\n", {}},
+				{doubles, "A same<A, B>(A x, B y) { return x; }\nT twice<T>(T x) { return x + x + x; }\n", {}},
+				{doubles, "T twice<T>(T x) { return same(x) + same(x); }\n", {"use of undeclared identifier 'same'", "in twice<int>, instantiated at "}},
+				{doubles, "T same<T>(T x) { return x; }\n", {"unknown function 'twice<int>': no generic function 'twice' is declared"}},
+				{calls_both, nest, {}},
+				{calls_both, "T same<T>(T x) { return x; }\nT twice<T>(T x) { return x + x + x; }\n", {}},
+				{calls_both, "T same<T>(T x) { return x + 1; }\nT twice<T>(T x) { return x + x + x; }\n", {}},
+				{calls_both, "T twice<T>(T x) { return x + x + x; }\n", {"unknown function 'same<int>': no generic function 'same' is declared"}},
+				{wraps, nest, {}},
+				{wraps, "class Cell<T> { T v; int tag() { return 3; } }\nclass Shelf<T> { T c; int tag() { return 20; } }\n", {}},
+				{wraps, "class Cell<T> { T v; int tag() { return 1; } }\nclass Shelf<T> { Cell<T> c; int tag() { return 30 + c.tag(); } }\n", {}},
+				{wraps, "class Shelf<T> { T c; int tag() { return 20; } }\n", {"unknown type 'Cell<int>': no generic class 'Cell' is declared", "in Wrap<int>, instantiated at "}},
+			};
+			for (const row& r : asked_within) {
+				const std::string where = r.source + " | " + r.engine_text;
+				std::string where_made;
+				const std::vector<uint8_t> bytes = saved(nest, r.source, where_made);
+				const std::string got = loaded(*engine_with(r.engine_text, nullptr), bytes);
+				const std::string its_source = outcome(*engine_with(r.engine_text, nullptr), r.source);
+				if (r.says.empty()) {
+					check_true(!failed(its_source), where + " | " + its_source);
+					check_eq(its_source, got, where);
+					continue;
+				}
+				check_true(failed(its_source) && has(got, "ERR: static check failed"), where + " | " + its_source + " | " + got);
+				for (const std::string& says : r.says) { check_true(has(got, says), where + " | " + got); }
+			}
+			// A bite's check reads no file its text imports, where it is made and where it loads: what such a file declares is
+			// the engine's once the file has run, a generic as a plain function is. Until then the bite fails its load.
+			{
+				program made_in("bound_maker"), fresh("bound_loader");
+				const std::string library = "class Cell<T> { T v; int tag() { return 1; } }\nT same<T>(T x) { return x; }\nint plain(int x) { return x + 1; }\n";
+				made_in.write("lib.jai", library);
+				fresh.write("lib.jai", library);
+				const std::string names_generics = "import \"lib.jai\";\nCell<float> c; c.tag() + same(4);", names_plain = "import \"lib.jai\";\nplain(3);";
+				check_eq(std::string("null"), made_in.run("import \"lib.jai\";"));
+				jaibite generics = made_in.eng->jaibite(names_generics), plains = made_in.eng->jaibite(names_plain);
+				check_eq(std::string("5|4"), generics.execute().to_string() + "|" + plains.execute().to_string());
+				const std::vector<uint8_t> generic_bytes = generics.save_bytes(), plain_bytes = plains.save_bytes();
+				const std::string early = loaded(*fresh.eng, generic_bytes);
+				check_true(has(early, "ERR: static check failed") && has(early, no_class) && has(early, no_function), early);
+				const std::string early_plain = loaded(*fresh.eng, plain_bytes);
+				check_true(has(early_plain, "ERR: static check failed") && has(early_plain, "use of undeclared identifier 'plain'"), early_plain);
+				std::string made_there = "made";
+				try { (void)fresh.eng->jaibite(names_generics); } catch (const std::exception& error) { made_there = error.what(); }
+				check_true(has(made_there, no_class), "a bite made there: " + made_there);
+				check_eq(std::string("null"), fresh.run("import \"lib.jai\";"));
+				check_eq(std::string("5|4"), loaded(*fresh.eng, generic_bytes) + "|" + loaded(*fresh.eng, plain_bytes));
+			}
+			// A bite made here, then a plain class takes its generic's name: its next run is checked against that, as its source is
+			{
+				auto e = engine_with(lib, nullptr);
+				const std::string source = "Cell<float> c; c.tag() + same(4);";
+				jaibite own = e->jaibite(source);
+				check_eq(std::string("5"), own.execute().to_string());
+				check_eq(std::string("6"), outcome(*e, "class Cell { int v = 1; int tag() { return 6; } }\nCell c; c.tag();"));
+				std::string next;
+				try { next = own.execute().to_string(); } catch (const std::exception& error) { next = std::string("ERR: ") + error.what(); }
+				check_true(has(next, "ERR: static check failed") && has(next, "'Cell' takes no type arguments: it is not a generic class"), next);
+				check_true(has(outcome(*e, source), "'Cell' takes no type arguments: it is not a generic class"), outcome(*e, source));
+			}
 		});
 	}
 };

@@ -603,6 +603,13 @@ public:
 			check_true(contains(failure(*stdlib_engine(), "int f() { return twice(2); }\nint r = f();\nT twice<T>(T x) { return x + x; }"), waits));
 			check_true(contains(failure(*stdlib_engine(), "namespace m { int f() { return twice(2); } }\nint r = m::f();\nnamespace m { T twice<T>(T x) { return x + x; } }"),
 				"'m::twice<int>' is not declared yet: it waits for 'm::twice'"));
+			// a plain function or class an earlier unit declared under the name changes nothing of that: the generic is declared below
+			{
+				auto held = stdlib_engine();
+				held->execute("int twice(int x) { return x + 100; }\nclass Holder { int n = 1; }");
+				check_true(contains(failure(*held, "float f() { return twice<float>(1.5); }\nfloat r = f();\nT twice<T>(T x) { return x + x; }"), "'twice<float>' is not declared yet: it waits for 'twice'"));
+				check_true(contains(failure(*held, "int g() { Holder<int> h; return 1; }\nint r = g();\nclass Holder<T> { T held; }"), "'Holder<int>' is not declared yet: it waits for 'Holder'"));
+			}
 			// from its generic's declaration on it is there: a function above calls it once the declaration has run
 			auto e = stdlib_engine();
 			check_eq((int64_t)4, e->execute("int f() { return twice<int>(2); }\nT twice<T>(T x) { return x + x; }\nf();").as_int());

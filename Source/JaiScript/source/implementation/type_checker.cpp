@@ -2149,8 +2149,8 @@ private:
             const bool made = instance_declared(*overload, instance);
             declared = declared && made;
             // asked for when the unit does not declare it, and when the unit's own text names an instance it was only making
-            // again (the instance is the unit's from here)
-            const bool claims = remade_root(standing) && !remade_root(instance_ctx_);
+            // again, or one only an instance's text had asked for (the instance is the unit's own from here)
+            const bool claims = (remade_root(standing) && !remade_root(instance_ctx_)) || (standing && !instance_ctx_ && !standing->within.empty());
             if (!generic_requests_ || (made ? !claims : standing && !claims) || !requested_now_.emplace(instance, asked.stamp).second) { continue; }
             generic_request request;
             request.name = instance;

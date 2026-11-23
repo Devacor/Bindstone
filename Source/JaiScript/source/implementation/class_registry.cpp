@@ -1379,26 +1379,11 @@ namespace {
 
 } // namespace
 
-namespace {
-    // An instance waits for a generic no unit has declared, and a plain class or function holds that name here: no later
-    // declaration is what the use lacks, so the text says what stands in the generic's place
-    std::string held_plain_text(engine& eng, std::string_view instance, const std::string& generic, std::string_view kind) {
-        if (engine_access::get_class_registry(eng).declared_generics_.count(generic) != 0) { return {}; }
-        const bool held = kind == "class" ? engine_access::get_class_definition(eng, generic) != nullptr : eng.has_function(generic);
-        if (!held) { return {}; }
-        return "'" + std::string(instance) + "' cannot be made: '" + generic + "' is a plain " + std::string(kind) + " here, not a generic";
-    }
-}
-
 std::string waiting_instance_text(engine& eng, const std::string& name) {
     const std::string key = type_name_key(name);   // the name arrives as text
     for (const auto& w : engine_access::get_class_registry(eng).waiting_instances_) {
         if (w.decl->method_instances || type_name_key(w.decl->name) != key) { continue; }
-        const std::string waits_for = instance_waits_for(eng, *w.decl);
-        if (waits_for == w.decl->instance_generic) {
-            if (std::string plain = held_plain_text(eng, w.decl->name, waits_for, "class"); !plain.empty()) { return plain; }
-        }
-        return "'" + std::string(w.decl->name) + "' is not declared yet: it waits for '" + waits_for + "'";
+        return "'" + std::string(w.decl->name) + "' is not declared yet: it waits for '" + instance_waits_for(eng, *w.decl) + "'";
     }
     return {};
 }
@@ -1415,10 +1400,7 @@ std::string_view undeclared_instance_text(engine& eng, uint64_t id) {
     if (text.empty()) {   // a function's instance, bound when its generic's declaration runs
         for (const auto& w : registry.waiting_functions_) {
             if (symbols.get_string(w.name_id) != name) { continue; }
-            text = w.space ? std::string() : held_plain_text(eng, name, w.generic, "function");
-            if (text.empty()) {
-                text = "'" + (w.space ? std::string(symbols.get_string(w.space_id)) + "::" : std::string()) + std::string(name) + "' is not declared yet: it waits for '" + w.generic + "'";
-            }
+            text = "'" + (w.space ? std::string(symbols.get_string(w.space_id)) + "::" : std::string()) + std::string(name) + "' is not declared yet: it waits for '" + w.generic + "'";
             break;
         }
     }

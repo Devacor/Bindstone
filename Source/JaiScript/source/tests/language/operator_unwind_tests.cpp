@@ -53,6 +53,9 @@ public:
 			int raw_y() { return y; }
 		}
 		class G2 { int z = 5; int _get_z() { return z; } void _set_z(int v) { throw "setz"; } int raw_z() { return z; } }
+		class K2 { int n = 1; K2() {} K2(int a) { n = 50; throw "conv"; } ~K2() { LOG += `~${n};`; } }
+		class HK2 { K2 k; }
+		class SK2 { static K2 s; }
 		int thrower(int i) { if (i == 1) { throw "T"; } return i + 10; }
 		float fthrower(int i) { if (i == 1) { throw "T"; } return i + 0.5; }
 	)jai";
@@ -391,6 +394,25 @@ public:
 				{R"jai(function f() { C e = C(5); bool b = true; try { b = b && (e == 3); } catch (x) { print(x, " ", b); } } f();)jai", "eq true"},
 				{R"jai(function f() { C e = C(5); var a = [1, 2]; try { a.push(e + 3); } catch (x) { print(x, " ", a.size()); } } f();)jai", "boom 2"},
 				{R"jai(function f() { C e = C(5); array<C> a = [C(1)]; try { a[0] = e + 3; a.push(e + 3); } catch (x) { print(x, " ", a.size(), " ", a[0].n); } } f();)jai", "boom 1 1"},
+			};
+			expect_printed(cases);
+		});
+
+		// the site: "A constructor that throws leaves the assignment target with its old value"; K2(int) marks its object (n = 50) before
+		// it throws, so a target that took the half-built object shows 50, and the half-built object's destructor body never runs
+		test("a_throwing_converting_constructor_leaves_the_assignment_target_with_its_old_value", [this]() {
+			const std::pair<const char*, const char*> cases[] = {
+				{R"jai(function f() { K2 k; k.n = 9; try { k = 3; } catch (x) { print(x, " ", k.n, " [", LOG, "]"); } } f(); print("[", LOG, "]");)jai", "conv 9 []\n[~9;]"},
+				{R"jai(K2 k; k.n = 9; try { k = 3; } catch (x) { print(x, " ", k.n, " [", LOG, "]"); })jai", "conv 9 []"},
+				{R"jai(function f() { HK2 h; h.k.n = 9; try { h.k = 3; } catch (x) { print(x, " ", h.k.n, " [", LOG, "]"); } } f();)jai", "conv 9 []"},
+				{R"jai(class M2 { K2 k; void go() { k.n = 9; try { k = 3; } catch (x) { print(x, " ", k.n, " [", LOG, "]"); } } } function f() { M2 m; m.go(); } f();)jai", "conv 9 []"},
+				{R"jai(function f() { SK2::s.n = 9; try { SK2::s = 3; } catch (x) { print(x, " ", SK2::s.n, " [", LOG, "]"); } } f();)jai", "conv 9 []"},
+				{R"jai(function f() { K2 k; k.n = 9; K2& r = k; try { r = 3; } catch (x) { print(x, " ", k.n, " [", LOG, "]"); } } f();)jai", "conv 9 []"},
+				{R"jai(void put(K2& r) { r = 3; } function f() { K2 k; k.n = 9; try { put(k); } catch (x) { print(x, " ", k.n, " [", LOG, "]"); } } f();)jai", "conv 9 []"},
+				{R"jai(function gk() -> K2 { return 3; } function f() { K2 k; k.n = 9; try { k = gk(); } catch (x) { print(x, " ", k.n, " [", LOG, "]"); } } f();)jai", "conv 9 []"},
+				{R"jai(function takek(K2 k) { return 1; } function f() { int r = 0; try { r = takek(3); } catch (x) { print(x, " ", r, " [", LOG, "]"); } } f();)jai", "conv 0 []"},
+				{R"jai(function f() { K2 k; k.n = 9; try { k = K2(3); } catch (x) { print(x, " ", k.n, " [", LOG, "]"); } } f();)jai", "conv 9 []"},
+				{R"jai(function f() { var r = 5; try { K2 k = 3; r = k.n; } catch (x) { print(x, " ", r, " [", LOG, "]"); } } f();)jai", "conv 5 []"},
 			};
 			expect_printed(cases);
 		});

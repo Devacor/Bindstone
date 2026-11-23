@@ -1139,6 +1139,7 @@ namespace jai::detail {
 			auto converted = ref_declared_convert_with(refLocal, static_kind ? declared_static : ref_declared_type(refLocal), value, eng, site_of);
 			if (!converted) { return {}; }
 			if (!*converted) { return converted->error_value(); }
+			if (eng && engine_access::backend_unwinding(*eng)) { return {}; }   // the converting constructor threw: the referent keeps its value
 			return ref_store_through_storage_with(refLocal, converted->value(), eng, symbolizer, site_of);
 		}
 		return ref_store_through_storage_with(refLocal, value, eng, symbolizer, site_of);

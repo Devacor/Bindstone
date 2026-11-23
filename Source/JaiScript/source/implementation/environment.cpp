@@ -378,6 +378,7 @@ std::optional<checked_result<void>> converting_copy_assign(const script_value& c
         return failed;
     }
     if (made.value().v != slot_conversion::verdict::converted) { return std::nullopt; }
+    if (engine_access::backend_unwinding(*eng)) { return checked_result<void>(); }   // the constructor threw: the slot's object keeps its state, nothing is assigned
     script_value temporary = std::move(*made.value().value);
     return class_copy_assign(current_in, temporary, eng, declared);
 }

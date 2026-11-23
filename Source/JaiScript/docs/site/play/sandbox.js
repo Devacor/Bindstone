@@ -47,17 +47,14 @@ const JaiSandbox = (() => {
 		session = new JaiPlay.Session(document.getElementById("sandbox-term"), {
 			cols: 100, rows: 18, scrollback: 2000, fitHeight: false,
 			onStatus: (text) => onStatus(text),
-			onExit: (code) => {
-				note(code === 0 ? "finished" : "exit code " + code);
-				run.disabled = false;
-			},
+			onExit: (code) => note(code === 0 ? "finished" : "exit code " + code),
 		});
 		firstSample.then(() => {
 			if (picker.value === SAMPLES[0].id && !session.running && !panel.hidden) { start(false); }
 		});
 	}
+	// Starts the editor's program, in place of the one that is running
 	async function start(attended) {
-		run.disabled = true;
 		const text = editor.value;
 		live = declaresFrame(text);
 		if (live) {
@@ -70,7 +67,6 @@ const JaiSandbox = (() => {
 		if (!session || !session.running) { return; }
 		session.stop();
 		note(reason);
-		run.disabled = false;
 	}
 
 	picker.addEventListener("change", () => load(picker.value));

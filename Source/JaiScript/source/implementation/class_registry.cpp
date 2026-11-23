@@ -1771,6 +1771,7 @@ checked_result<void> define_script_class(class_decl* decl, const class_declarati
                     if (!init_result) {
                         return init_result.error_value();
                     }
+                    if (engine_access::backend_unwinding(*eng)) { return {}; }   // the initializer threw: the declaration ends with it, no static takes the placeholder
                     default_val = initializer_store_value(std::move(init_result.value()), initializer_ast.get());
                 }
                 // Declared type ('auto' parses as null and infers; 'var' stores the any tag); the initializer converts through

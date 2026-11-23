@@ -395,6 +395,22 @@ public:
 			expect_printed(cases);
 		});
 
+		// a static's initializer runs where its class is declared: its throw is the declaration's, whatever type the static declares
+		test("a_throwing_static_initializer_ends_the_class_declaration", [this]() {
+			const std::pair<const char*, const char*> cases[] = {
+				{R"jai(class S { static C s = C(5) + 3; } print("declared");)jai", "ERROR boom"},
+				{R"jai(try { class L { static C s = C(5) + 3; } print("declared"); } catch (x) { print("caught ", x); })jai", "caught boom"},
+				{R"jai(C make() { throw "made"; } try { class L { static C s = make(); } print("declared"); } catch (x) { print("caught ", x); })jai", "caught made"},
+				{R"jai(class S { static const C s = C(5) + 3; } print("declared");)jai", "ERROR boom"},
+				{R"jai(enum E { a = 1 } class S { static E e = C(5) + 3; } print("declared");)jai", "ERROR boom"},
+				{R"jai(class S { static var s = C(5) + 3; } print("declared");)jai", "ERROR boom"},
+				{R"jai(class S { static int k = C(5) + 3; } print("declared");)jai", "ERROR boom"},
+				{R"jai(namespace ns { C v = C(5) + 3; } print("declared");)jai", "ERROR boom"},
+				{R"jai(namespace ns { var w = C(5) + 3; } print("declared");)jai", "ERROR boom"},
+			};
+			expect_printed(cases);
+		});
+
 		// a call that throws inside a counted loop leaves the loop's typed locals as the last finished statement wrote them
 		test("a_throwing_call_in_a_counted_loop_leaves_its_locals_as_written", [this]() {
 			const std::pair<const char*, const char*> cases[] = {

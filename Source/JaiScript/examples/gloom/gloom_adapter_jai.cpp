@@ -36,6 +36,14 @@ public:
 		: opt_(opt), eng_(jai::engine::make()), coverage_(opt.coverage) {
 		if (!coverage_.empty() && !jai::engine::vm_coverage_available()) { throw std::runtime_error("--coverage needs a build with JAISCRIPT_VM_COVERAGE"); }
 		eng_->execution_budget(0.0);
+		if (!opt.disasm.empty() || !opt.manifest.empty()) {
+			auto listing = opt.disasm.empty() ? nullptr : std::make_shared<std::ofstream>(opt.disasm, std::ios::binary | std::ios::trunc);
+			auto manifest = opt.manifest.empty() ? nullptr : std::make_shared<std::ofstream>(opt.manifest, std::ios::binary | std::ios::trunc);
+			eng_->disassembly_sink([listing, manifest](const std::string& text, const std::string& facts) {
+				if (listing) { (*listing) << text << '\n'; listing->flush(); }
+				if (manifest) { (*manifest) << facts << '\n'; manifest->flush(); }
+			});
+		}
 		if (opt.workers > 0) { eng_->parallel_thread_count(static_cast<size_t>(opt.workers)); }
 		eng_->parameter_alias(opt.param_alias);
 		eng_->local_alias(opt.local_alias);

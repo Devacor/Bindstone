@@ -25,6 +25,8 @@ struct host_options {
 	int64_t workers = -1;            // parallel width; -1 = engine default, 0 = serial (ports: always serial)
 	uint32_t miss_every = 0;         // jai: engine::cells_miss_every (--miss-every N; a build with JAISCRIPT_MISS_INJECTION)
 	std::string coverage;            // jai: the vm's execution-coverage census written here at exit (--coverage FILE; a build with JAISCRIPT_VM_COVERAGE)
+	std::string disasm;              // jai: the listing of every chunk the vm compiles, written here as it compiles (--disasm FILE)
+	std::string manifest;            // jai: their manifests (--manifest FILE)
 	bool param_alias = true;         // jai: engine::parameter_alias (--no-param-alias for an A/B on one binary)
 	bool local_alias = true;         // jai: engine::local_alias (--no-local-alias for an A/B on one binary)
 	int64_t width = 0;               // 0 = autodetect

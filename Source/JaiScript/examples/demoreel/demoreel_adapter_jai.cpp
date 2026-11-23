@@ -35,6 +35,8 @@ struct jai_flags {
 	bool debug_wait = false;             // also hold boot until a debugger attaches
 	int64_t debug_port = 52472;
 	std::string coverage;                // the vm's execution-coverage census, written at exit (a build with JAISCRIPT_VM_COVERAGE)
+	std::string disasm;                  // the listing of every chunk the vm compiles, written as it compiles
+	std::string manifest;                // their manifests
 	std::string pix;                     // the cell shape: half, sext or auto (the script's default)
 };
 
@@ -83,6 +85,14 @@ public:
 		: opt_(opt), flags_(flags), eng_(jai::engine::make()) {
 		if (!flags_.coverage.empty() && !jai::engine::vm_coverage_available()) { throw std::runtime_error("--coverage needs a build with JAISCRIPT_VM_COVERAGE"); }
 		eng_->execution_budget(0.0);
+		if (!flags_.disasm.empty() || !flags_.manifest.empty()) {
+			auto listing = flags_.disasm.empty() ? nullptr : std::make_shared<std::ofstream>(flags_.disasm, std::ios::binary | std::ios::trunc);
+			auto manifest = flags_.manifest.empty() ? nullptr : std::make_shared<std::ofstream>(flags_.manifest, std::ios::binary | std::ios::trunc);
+			eng_->disassembly_sink([listing, manifest](const std::string& text, const std::string& facts) {
+				if (listing) { (*listing) << text << '\n'; listing->flush(); }
+				if (manifest) { (*manifest) << facts << '\n'; manifest->flush(); }
+			});
+		}
 		if (opt.workers > 0) { eng_->parallel_thread_count(static_cast<size_t>(opt.workers)); }
 		jai::stdlib::register_all(eng_);
 
@@ -248,6 +258,8 @@ public:
 		if (a == "--precompiled") { flags_.precompiled = true; return 1; }
 		if (a == "--jaibite" && has_value()) { flags_.jaibite_path = argv[i + 1]; return 2; }
 		if (a == "--coverage" && has_value()) { flags_.coverage = argv[i + 1]; return 2; }
+		if (a == "--disasm" && has_value()) { flags_.disasm = argv[i + 1]; return 2; }
+		if (a == "--manifest" && has_value()) { flags_.manifest = argv[i + 1]; return 2; }
 		if (a == "--pix" && has_value()) { flags_.pix = argv[i + 1]; return 2; }
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 		if (a == "--debug") { flags_.debug = true; return 1; }
@@ -262,6 +274,8 @@ public:
 			"  --precompiled    boot from demoreel.jaibite (saved on first run)\n"
 			"  --jaibite PATH   .jaibite path for --precompiled\n"
 			"  --coverage PATH  write the vm's execution-coverage census to PATH at exit (a build with JAISCRIPT_VM_COVERAGE)\n"
+			"  --disasm PATH    write the listing of every chunk the vm compiles to PATH (cell loops, open loops, kept calls)\n"
+			"  --manifest PATH  write their manifests to PATH\n"
 			"  --pix MODE       cells: sext (2x3 sextants), half (1x2 half blocks) or auto (sextants within the pixel budget)\n"
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 			"  --debug          listen for a VS Code attach the whole run\n"

@@ -473,6 +473,13 @@ namespace jai::vm {
             uint32_t window_live = 0;
             bool window_backed = false;
             bool raw = false;                          // raw-entered: its window is reserved and built when the general form first needs it
+            // false: a record frame that has opened no try, range-for or counted loop yet, so its pop has none to truncate; its first one
+            // takes the bases (note_side_push). The pending-callee base is taken at every push
+            bool side_bases_saved = true;
+            size_t try_base = 0;
+            size_t iter_base = 0;
+            size_t cfor_base = 0;
+            size_t pending_base = 0;
             // Debugger edge state (touched only while a session is armed): the last instruction this frame dispatched
             // inside a stop span, of which chunk, under which session. A reused record enters at ip 0, which the backend
             // tells from a back edge to ip 0 by the frame it dispatched last.
@@ -828,10 +835,6 @@ namespace jai::vm {
             // Lazy no-closure frames never touch environment_ (nothing saved,
             // nothing restored) — the biggest per-call env cost on the fib path gone
             bool env_untouched = false;
-            size_t try_base = 0;
-            size_t iter_base = 0;
-            size_t cfor_base = 0;
-            size_t pending_base = 0;
             uint64_t raw_mark = 0;     // a raw-entered record: the raw epoch at its entry (its raw return re-validates the caller when the epoch moved)
             // a raw-entered record's return, decided at its entry: the caller's call instruction (its ip and its raw_landing mark), the caller's
             // loop and the call's destination cell, the result kind a raw return lands (0: none), and how it lands (k_raw_land_*, or the contract
@@ -1069,6 +1072,11 @@ namespace jai::vm {
         std::vector<try_record> try_records_;
         void release_catch_variable(frame& f, const try_record& rec);
         void release_loops(frame& f, size_t base);
+        // ahead of a frame's push onto the try, iteration or counted-loop stack: its first one takes the sizes its pop truncates the three to,
+        // while nothing of its own is on them
+        JAI_FORCEINLINE void note_side_push(frame& f) noexcept { if (!f.side_bases_saved) [[unlikely]] { save_side_bases(f); } }
+        void save_side_bases(frame& f) noexcept;
+        void pop_frame_side_state(frame& f);
         void kill_unwound_try_locals(frame& f, size_t handler_ip);
         void pop_scopes_through(const environment* scope);
         // C++'s category of an argument's, a capture's or a return's source expression (detail::classify_source)

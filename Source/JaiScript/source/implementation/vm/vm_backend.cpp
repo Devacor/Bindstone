@@ -6057,6 +6057,7 @@ op_status vm_backend::exec_cfor_prep(frame& f, const vm_instruction& ins) {
 	const counted_for_proto& p = f.code->counted_for_protos[ins.a];
 	counted_for_state st = counted_for_entry_state(f, p, f.ip * 3);
 	const bool fast = st.fast;
+	note_side_push(f);
 
 	if (!fast) {
 		cfor_states_.push_back(st);
@@ -7315,6 +7316,7 @@ void vm_backend::cfor_state_push(frame& f, const counted_for_proto& p) {
 	if (fast) fast = resolve_cfor_int_operand(f, p.end, st.end_ptr, st.end_val);
 	if (fast) fast = resolve_cfor_int_operand(f, p.step, st.step_ptr, st.step_val);
 	st.fast = fast;
+	note_side_push(f);
 	cfor_states_.push_back(st);
 }
 
@@ -9184,10 +9186,8 @@ JAI_FORCEINLINE vm_backend::frame& vm_backend::raw_push(frame& f, const chunk::c
 	++call_records_top_;
 	cell_state& ncs = rec.cells;
 	rec.caller = &f;
-	rec.try_base = try_records_.size();
-	rec.iter_base = iter_states_.size();
-	rec.cfor_base = cfor_states_.size();
-	rec.pending_base = pending_callees_.size();
+	rec.f.side_bases_saved = false;
+	rec.f.pending_base = pending_callees_.size();
 	ncs.dirty.reset(body->max_cells);   // reset_call's, the loop set below
 	ncs.refused_loops = 0; ncs.park_at = k_invalid_u32; ncs.env_loop = nullptr;
 	ncs.raw_landing = 0; ncs.raw_call = 0;   // the entry the frame's cells_enter would have made
@@ -13406,8 +13406,8 @@ op_status vm_backend::call_parked_script(frame& f, const vm_instruction& ins, co
 			    rec.env_untouched &&
 			    (conv == return_conv::none ||
 			     (conv >= return_conv::prim_int && conv <= return_conv::prim_shared)) &&
-			    try_records_.size() == rec.try_base &&
-			    pending_callees_.size() == rec.pending_base) {
+			    (!rec.f.side_bases_saved || try_records_.size() == rec.f.try_base) &&
+			    pending_callees_.size() == rec.f.pending_base) {
 				if (execution_limit_exhausted()) [[unlikely]] {
 					return raise_from(execution_limit_failure());
 				}
@@ -13858,10 +13858,8 @@ JAI_FORCEINLINE void vm_backend::init_call_record(call_record& rec, frame& calle
 	rec.caller = &caller;
 	rec.return_type = return_type;
 	rec.return_conv_class = return_conv;
-	rec.try_base = try_records_.size();
-	rec.iter_base = iter_states_.size();
-	rec.cfor_base = cfor_states_.size();
-	rec.pending_base = pending_callees_.size();
+	rec.f.side_bases_saved = false;
+	rec.f.pending_base = pending_callees_.size();
 	rec.locals.function_name = name;
 	rec.locals.reset_member_scope();
 	if (!body.cell_loops.empty()) { rec.cells.reset_call(body.max_cells); }
@@ -14080,9 +14078,11 @@ op_status vm_backend::tail_splice_frame(call_record& rec, const script_defined_f
 	const size_t window_extent = stack_.size() - args_base;
 	// The dying frame's loop state dies at the boundary pop would have killed it
 	// (cfor fast-state pointers into the old window die BEFORE the window is reused)
-	if (iter_states_.size() > rec.iter_base) [[unlikely]] { release_loops(rec.f, rec.iter_base); }
-	if (cfor_states_.size() > rec.cfor_base) {
-		cfor_states_.erase(cfor_states_.begin() + rec.cfor_base, cfor_states_.end());
+	if (rec.f.side_bases_saved) {
+		if (iter_states_.size() > rec.f.iter_base) [[unlikely]] { release_loops(rec.f, rec.f.iter_base); }
+		if (cfor_states_.size() > rec.f.cfor_base) {
+			cfor_states_.erase(cfor_states_.begin() + rec.f.cfor_base, cfor_states_.end());
+		}
 	}
 	const size_t window_base = rec.f.window_base;
 	if (args_base != window_base) {
@@ -20009,6 +20009,7 @@ op_status vm_backend::exec_try_push(frame& f, const vm_instruction& ins) {
 	is_unwinding_ = false;
 	trace_captured_ = false;
 
+	note_side_push(f);
 	try_records_.push_back(std::move(rec));
 	return {};
 }
@@ -20364,6 +20365,7 @@ op_status vm_backend::exec_iter_init(frame& f, const vm_instruction& ins) {
 		container = std::move(derefed);
 	}
 
+	note_side_push(f);
 	const iter_proto& proto = f.code->iter_protos[ins.a];
 	iter_state state;
 	state.env_pushed = proto.slot == SIZE_MAX || !has_slots(f);
@@ -20620,6 +20622,23 @@ JAI_NOINLINE op_status vm_backend::iter_next_map_entry(frame& f, const iter_prot
 // KEEP BYTE-PARALLEL with the interpreter's visit_range_for_stmt slot release
 // The loops a return, an unwind or a frame's end leaves (f's iter states above `base`) die as C++ ends their scopes: the innermost
 // first, each loop's interior (its variable's slot and the slots above it) before its range
+void vm_backend::save_side_bases(frame& f) noexcept {
+	f.side_bases_saved = true;
+	f.try_base = try_records_.size();
+	f.iter_base = iter_states_.size();
+	f.cfor_base = cfor_states_.size();
+}
+
+// a popped record frame that opened a try, a range-for or a counted loop: its loops release, its stack territory dies, then the three
+// stacks truncate to its bases
+JAI_NOINLINE void vm_backend::pop_frame_side_state(frame& f) {
+	if (iter_states_.size() > f.iter_base) [[unlikely]] { release_loops(f, f.iter_base); }
+	if (stack_.size() > f.stack_base) { stack_.truncate(f.stack_base); }
+	truncate_detached(try_records_, f.try_base);
+	truncate_detached(iter_states_, f.iter_base);
+	if (cfor_states_.size() > f.cfor_base) { cfor_states_.erase(cfor_states_.begin() + f.cfor_base, cfor_states_.end()); }
+}
+
 JAI_NOINLINE void vm_backend::release_loops(frame& f, size_t base) {
 	while (iter_states_.size() > base) {
 		const iter_state& st = iter_states_.back();
@@ -22594,7 +22613,7 @@ JAI_NOINLINE vm_backend::frame* vm_backend::enter_lean_sibling_call(frame& f, co
 	if (callee) {
 		pending_callee parked = std::move(top);
 		pending_callees_.pop_back();
-		call_records_[call_records_top_ - 1]->pending_base = pending_callees_.size();
+		call_records_[call_records_top_ - 1]->f.pending_base = pending_callees_.size();
 	}
 	return callee;
 }
@@ -22893,12 +22912,12 @@ void vm_backend::anchor_method_result(script_value& result, script_value& receiv
 JAI_FORCEINLINE void vm_backend::pop_lean_frame(call_record& rec) {
 	JAI_COVERAGE_FRAME_EXIT(rec.f);
 	rec.lean = false;
-	if (iter_states_.size() > rec.iter_base) [[unlikely]] { release_loops(rec.f, rec.iter_base); }
-	if (stack_.size() > rec.f.stack_base) { stack_.truncate(rec.f.stack_base); }
-	truncate_detached(try_records_, rec.try_base);
-	truncate_detached(iter_states_, rec.iter_base);
-	if (cfor_states_.size() > rec.cfor_base) [[unlikely]] { cfor_states_.erase(cfor_states_.begin() + rec.cfor_base, cfor_states_.end()); }
-	truncate_detached(pending_callees_, rec.pending_base);
+	if (rec.f.side_bases_saved) {
+		pop_frame_side_state(rec.f);
+	} else if (stack_.size() > rec.f.stack_base) {
+		stack_.truncate(rec.f.stack_base);
+	}
+	truncate_detached(pending_callees_, rec.f.pending_base);
 	if (rec.locals.is_method) {
 		*rec.locals.this_object_ptr = make_null();
 		rec.locals.is_method = false;
@@ -22938,17 +22957,13 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 		// it would CLOBBER the live caller env)
 		environment_ = std::move(rec.prev_env);
 	}
-	if (iter_states_.size() > rec.iter_base) [[unlikely]] { release_loops(rec.f, rec.iter_base); }
-	if (stack_.size() > rec.f.stack_base) {
-		// Window + operand temps + (zero-copy) the callee pin die HERE, at the frame's end
+	// Window + operand temps + (zero-copy) the callee pin die HERE, at the frame's end
+	if (rec.f.side_bases_saved) {
+		pop_frame_side_state(rec.f);
+	} else if (stack_.size() > rec.f.stack_base) {
 		stack_.truncate(rec.f.stack_base);
 	}
-	truncate_detached(try_records_, rec.try_base);
-	truncate_detached(iter_states_, rec.iter_base);
-	if (cfor_states_.size() > rec.cfor_base) {
-		cfor_states_.erase(cfor_states_.begin() + rec.cfor_base, cfor_states_.end());
-	}
-	truncate_detached(pending_callees_, rec.pending_base);
+	truncate_detached(pending_callees_, rec.f.pending_base);
 	if (!rec.env_lazy) {
 		// Moved out first so the pool's use_count()==1 guard sees today's count
 		release_scope_env(std::move(rec.f.entry_env));

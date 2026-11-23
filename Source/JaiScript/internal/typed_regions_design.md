@@ -54,7 +54,10 @@ dispatch of the fused forms. Thirty-three opcodes, `op_t_*` in `vm/opcode.hpp`:
 - moves: `T x = y`, `T x = lit`, `x = y;`, `x = lit;` as one instruction each;
 - `op_t_push`: `recv.push(v);` with a slot receiver and a slot or constant value;
 - `op_t_load`: `T x = arr[index]` on the proven shape, the container, the index fold and the
-  landing facts in `chunk::typed_sites`.
+  landing facts in `chunk::typed_sites`. A slot-resident `shared_ptr<T>` declaration is such a landing too
+  (`decl_expect` is the object index): a handle element tagged `T` (an object buffer's slot, a `var` element)
+  is copied into the slot as it is, which is the declaration's admission of a handle of its own type; any
+  other element (null, another class, a class value) is the general declaration's.
 
 The dynamic slot-operand set (`op_d_*`, `vm_compiler::lower_dynamic_ops`) takes a fused binary or
 compare-jump still general after the typed lowering and the cell translation whose operands are

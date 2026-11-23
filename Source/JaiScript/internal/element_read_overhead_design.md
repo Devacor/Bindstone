@@ -216,6 +216,25 @@ the non-fast-path operator machinery; op[] and += get true fast paths").
   structural stack-vs-register gap. Next campaign: builtin-call fast lane (intrinsic dispatch
   for pure-numeric natives), then region-entry cost, then method/coroutine cost.
 
+## A declaration's read and the index fold
+
+- **A fused declaration reads the value.** `T x = a[i]` and `T x = m[k]` (`op_index_fused_decl`, a compiler temp's landing
+  included) dereference their initializer in the same instruction, whatever `T` is: the declaration's first act on a reference
+  is to take its referent, and its copy rule comes from the instruction's own lvalue flag, never from the value being a
+  reference. So the read passes the transient flag itself and takes the element or the entry's value where the unfused pair
+  minted a holder for the declaration to drop (`shared_ptr<T> q = a[i]` shares the handle, `T v = a[i]` clones it, a scalar
+  lands). The runtime gate is the transient read's (`has_custom_binary_ops_`). The interpreter keeps its reference and its
+  dereference: the value, the texts and the counts a copy constructor can observe are the same.
+- **The index fold is raw for the int bitwise and shift operators too.** `a[i & mask]`, `m[(i >> 3) * k + b]`: the fused
+  index operand computes `& | ^ << >>` over two ints as it computes the arithmetic ones (no container snapshot, no boxed
+  accumulator, the chain's steps folded onto the raw int), under `binary_fused_compute`'s own gate for those rows (no
+  registered operator in the table; a shift outside 0..63 is the general binary's raise). A cell block's index fold takes
+  the same operators (`typed_int_index_row`), so a loop over `a[i & mask]` is a block. A container the checker has not
+  proven (a program-scope name, a reference parameter) is an element site under such an index as under an arithmetic one:
+  the entry resolves it, and one that holds a map refuses the block for the call, where the general form runs. A host's
+  global bitwise operator over numbers latches the numeric lanes off like an arithmetic one
+  (`numeric_operator_takes_numbers`).
+
 ## Open risks
 
 - Frame-level payoff unconfirmed until a GLOOM profile run (first gate after Stage 1).

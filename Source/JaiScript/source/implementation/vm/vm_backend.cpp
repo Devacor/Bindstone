@@ -7079,6 +7079,14 @@ bool vm_backend::typed_decl_land_element(frame& f, uint32_t dslot, uint8_t expec
 		frame_slot_set(f, dslot, std::move(v));
 		return true;
 	}
+	case script_array::kind_t::obj: {
+		// a handle slot tagged the declared handle type: the declaration's admission is the identity
+		if (borrowed || expect != static_cast<uint8_t>(script_value::TYPEID_OBJECT) || !stamp) return false;
+		const obj_slot& slot = node.objs()[at];
+		if (!slot.handle || slot.tag.get() != stamp) return false;
+		frame_slot_set(f, dslot, script_value(slot.handle, slot.tag, engine_));
+		return true;
+	}
 	case script_array::kind_t::hetero: {
 		const script_value& el = node.values()[at];
 		const size_t ei = el.raw_storage_index();
@@ -7086,6 +7094,7 @@ bool vm_backend::typed_decl_land_element(frame& f, uint32_t dslot, uint8_t expec
 			if (ei == script_value::TYPEID_INT) return typed_decl_land_int(f, dslot, expect, stamp, el.unchecked_as_int());
 			if (ei == script_value::TYPEID_FLOAT) return typed_decl_land_float(f, dslot, expect, stamp, el.unchecked_as_float());
 		}
+		if (ei == script_value::TYPEID_OBJECT && (borrowed || !stamp || el.type_info_raw() != stamp)) return false;   // a handle lands only as the declared handle type
 		if (borrowed && ei == script_value::TYPEID_STRING) return false;
 		if (ei == expect ||
 		    (expect == 0xFF &&
@@ -11103,7 +11112,7 @@ op_status vm_backend::exec_typed_store_const(frame& f, const vm_instruction& ins
 
 bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t) {
 	// The read's lvalue/transient flags do not matter here: for the payloads this lane lands
-	// (raw scalars, strings) the kernel's element reference is consumed by the same decl one
+	// (raw scalars, strings, a handle of the declared type) the kernel's element reference is consumed by the same decl one
 	// op later as exactly this copy; every other element falls to the kernel untouched
 	const script_value* cp = fast_operand(f, p.container, p.index_binary != k_invalid_u32 ? f.ip * 3 + 2 : f.ip * 3);
 	return typed_element_read(f, cp, p.container_guard, p.guard_always, p.decl_slot, p.decl_expect,
@@ -11213,7 +11222,7 @@ op_status vm_backend::index_fused_decl_rows(frame& f, const vm_instruction& ins)
 			}
 			void operator()(script_value&& v) {
 				const size_t vi = v.raw_storage_index();
-				if (vi == proto.decl_expect ||
+				if ((vi == proto.decl_expect && (vi != script_value::TYPEID_OBJECT || v.type_info_raw() == proto.decl_type)) ||
 				    (proto.decl_expect == 0xFF &&
 				     (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
 				      vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR ||
@@ -11261,7 +11270,7 @@ op_status vm_backend::index_fused_decl_rows(frame& f, const vm_instruction& ins)
 				}
 			}
 		} sink{this, f, p};
-		VM_TRY(index_fused_read<false>(f, ins, sink));
+		VM_TRY(index_fused_read<false>(f, ins, sink, index_flag_transient_read));   // a declaration dereferences its initializer at once: the element is read as the value it would take from a reference
 		if (sink.landed || is_unwinding_) {
 			return {};   // unwound: parity states stand, the decl never runs
 		}
@@ -11276,7 +11285,7 @@ op_status vm_backend::index_fused_decl_rows(frame& f, const vm_instruction& ins)
 		return exec_decl_var(f, decl_ins);
 	}
 	std::optional<script_value> computed;
-	VM_TRY(index_fused_read<false>(f, ins, [&](script_value&& v) { computed.emplace(std::move(v)); }));
+	VM_TRY(index_fused_read<false>(f, ins, [&](script_value&& v) { computed.emplace(std::move(v)); }, index_flag_transient_read));
 	if (!computed) [[unlikely]] {
 		return {};   // the read unwound; the decl never runs (pair parity)
 	}

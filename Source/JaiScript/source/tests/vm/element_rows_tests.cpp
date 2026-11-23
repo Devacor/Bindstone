@@ -112,6 +112,125 @@ function typed_index(int k) -> int { array<int> a = [1, 2, 3, 40]; int s = 0; fo
 			});
 		});
 
+		test("a_declaration_takes_an_element_as_the_value_its_reference_gives", [this]() {
+			same_everywhere({ R"JAI(
+var LOG = "";
+class P { int a = 0; P() {} P(int v) { a = v; } }
+class Q { int a = 0; Q(int v) { a = v; } Q(const Q& o) { a = o.a + 100; LOG = LOG + "c" + to_string(o.a); } ~Q() { LOG = LOG + "~" + to_string(a); } }
+class Base { int k = 1; function who() -> string { return "base" + to_string(k); } }
+class Derived : Base { int extra = 7; override function who() -> string { return "derived" + to_string(k + extra); } }
+function scalars(int n) -> string {
+	array<int> ints = [1, 2, 3, 4]; array<float> floats = [1.5, 2.5, 3.5, 4.5]; array<string> strs = ["a", "b", "c", "d"]; array<bool> flags = [true, false, true, false];
+	array<var> vars = [7, 2.25, "text", true, 'c', null, [1, 2], {"k": 3}];
+	string out = "";
+	for (int i = 0; i < n; ++i) {
+		int x = ints[i & 3]; float y = floats[i & 3]; string s = strs[i & 3]; bool b = flags[i & 3]; float widened = ints[i & 3];
+		var v = vars[i & 7]; auto w = vars[(i + 1) & 7]; var copy = ints[i & 3]; auto text = strs[(i + 2) & 3];
+		int from_var = vars[i & 0]; float widened_var = vars[i & 0]; float float_var = vars[(i & 0) + 1]; string text_var = vars[(i & 0) + 2];
+		out = out + to_string(x) + to_string(y) + s + to_string(b) + to_string(widened) + to_string(v) + to_string(w) + to_string(copy) + text +
+			to_string(from_var) + to_string(widened_var) + to_string(float_var) + text_var + ";";
+	}
+	return out;
+}
+function narrowed(int n) -> int { array<var> vars = [7, 2.25]; int s = 0; for (int i = 0; i < n; ++i) { int x = vars[i & 1]; s += x; } return s; }
+function values(int n) -> string {
+	array<P> ps = []; array<Q> qs = []; array<var> mixed = [];
+	for (int i = 0; i < 4; ++i) { ps.push(P(i)); qs.push(Q(i)); mixed.push(P(i + 10)); }
+	LOG = "";
+	string out = "";
+	for (int i = 0; i < n; ++i) {
+		P p = ps[i & 3]; p.a = p.a + 50;
+		Q q = qs[i & 3]; q.a = q.a + 1;
+		var m = mixed[i & 3]; m.a = m.a + 5;
+		out = out + to_string(p.a) + "/" + to_string(ps[i & 3].a) + "/" + to_string(q.a) + "/" + to_string(qs[i & 3].a) + "/" + to_string(m.a) + "/" + to_string(mixed[i & 3].a) + ";";
+	}
+	return out + LOG;
+}
+function handles(int n) -> string {
+	array<shared_ptr<P>> hs = []; array<shared_ptr<Base>> bases = []; array<weak_ptr<P>> weaks = []; array<var> mixed = [];
+	for (int i = 0; i < 4; ++i) { shared_ptr<P> p = new P(i); hs.push(p); weaks.push(p); mixed.push(p); }
+	bases.push(new Base()); bases.push(new Derived()); bases.push(null); bases.push(new Derived());
+	hs.push(null);
+	string out = "";
+	for (int i = 0; i < n; ++i) {
+		shared_ptr<P> q = hs[i & 3]; q.a = q.a + 1;
+		shared_ptr<P> none = hs[4];
+		shared_ptr<Base> b = bases[i & 3];
+		weak_ptr<P> w = hs[i & 3]; weak_ptr<P> w2 = weaks[i & 3];
+		var m = mixed[i & 3]; auto h = hs[i & 3]; shared_ptr<P> from_var = mixed[i & 3];
+		out = out + to_string(q.a) + ":" + to_string(q.use_count()) + ":" + to_string(none == null) + ":" + (b == null ? "null" : b.who()) + ":" +
+			to_string(w.expired()) + to_string(w2.expired()) + ":" + to_string(m.a) + to_string(h.a) + to_string(from_var.a) + ";";
+	}
+	shared_ptr<P> first = hs[0];
+	return out + to_string(first.use_count());
+}
+0;)JAI", "scalars(9);", "values(5);", "handles(6);", "narrowed(1);", "narrowed(2);" }, "", "declarations");
+		});
+
+		test("a_declaration_from_an_element_keeps_its_texts", [this]() {
+			same_everywhere({ R"JAI(
+class P { int a = 0; }
+class Other { int b = 0; }
+class Base { int k = 1; }
+class Derived : Base { int extra = 7; }
+function out_of_range(int k) -> int { array<shared_ptr<P>> hs = [new P()]; int s = 0; for (int i = 0; i < 2; ++i) { shared_ptr<P> q = hs[i + k]; s += q.a; } return s; }
+function wrong_class() -> int { array<var> mixed = [new Other()]; int s = 0; for (int i = 0; i < 2; ++i) { shared_ptr<P> q = mixed[i & 0]; s += q.a; } return s; }
+function downcast() -> int { array<var> bases = [new Derived(), new Base()]; int s = 0; for (int i = 0; i < 2; ++i) { shared_ptr<Derived> d = bases[i & 1]; s += d.extra; } return s; }
+function upcast() -> int { array<var> deriveds = [new Derived(), new Derived()]; int s = 0; for (int i = 0; i < 2; ++i) { shared_ptr<Base> b = deriveds[i & 1]; s += b.k; } return s; }
+function from_weak() -> int { shared_ptr<P> keep = new P(); weak_ptr<P> w = keep; array<var> weaks = []; weaks.push(w); int s = 0; for (int i = 0; i < 2; ++i) { shared_ptr<P> q = weaks[i & 0]; s += q.a; } return s; }
+function value_into_handle() -> int { array<var> ps = [P()]; int s = 0; for (int i = 0; i < 2; ++i) { shared_ptr<P> q = ps[i & 0]; s += q.a; } return s; }
+function string_into_int() -> int { array<var> mixed = ["text"]; int s = 0; for (int i = 0; i < 2; ++i) { int x = mixed[i & 0]; s += x; } return s; }
+function null_member() -> int { array<shared_ptr<P>> hs = [null]; int s = 0; for (int i = 0; i < 2; ++i) { shared_ptr<P> q = hs[i & 0]; s += q.a; } return s; }
+function map_missing(int k) -> int { map<int, shared_ptr<P>> m = {}; m[1] = new P(); int s = 0; for (int i = 0; i < 2; ++i) { shared_ptr<P> q = m[i + k]; s += q.a; } return s; }
+function map_string_missing(string k) -> int { map<string, int> m = {}; m["a"] = 4; int s = 0; for (int i = 0; i < 2; ++i) { int x = m[k]; s += x; } return s; }
+0;)JAI", "out_of_range(0);", "out_of_range(-1);", "wrong_class();", "downcast();", "upcast();", "from_weak();", "value_into_handle();", "string_into_int();", "null_member();",
+				"map_missing(1);", "map_missing(0);", "map_string_missing(\"a\");", "map_string_missing(\"b\");" }, "", "declaration texts");
+		});
+
+		test("a_declaration_from_an_element_runs_the_copy_and_the_destructors_in_order", [this]() {
+			same_everywhere({ R"JAI(
+var LOG = "";
+var COUNTS = [];
+class Q { string n = ""; Q(string s) { n = s; } Q(const Q& o) { n = o.n + "'"; LOG = LOG + "c" + n; } ~Q() { LOG = LOG + "~" + n; } }
+class H { string n = ""; H(string s) { n = s; } ~H() { LOG = LOG + "~" + n; } }
+function copies() -> string {
+	array<Q> qs = []; qs.push(Q("a")); qs.push(Q("b"));
+	LOG = "";
+	for (int i = 0; i < 3; ++i) { Q q = qs[i & 1]; LOG = LOG + "|"; }
+	return LOG;
+}
+function last_handle() -> string {
+	LOG = "";
+	for (int i = 0; i < 3; ++i) {
+		array<shared_ptr<H>> hs = []; hs.push(new H("h" + to_string(i)));
+		shared_ptr<H> q = hs[i & 0];
+		hs.clear();
+		LOG = LOG + "held" + to_string(q.use_count()) + "|";
+	}
+	return LOG;
+}
+function reassigned() -> string {
+	LOG = "";
+	array<shared_ptr<H>> hs = []; hs.push(new H("x")); hs.push(new H("y"));
+	for (int i = 0; i < 4; ++i) { shared_ptr<H> q = hs[i & 1]; hs[i & 1] = new H("n" + to_string(i)); LOG = LOG + q.n + "|"; }
+	return LOG;
+}
+0;)JAI", "copies();", "last_handle();", "reassigned();", "LOG;" }, "", "declaration order");
+		});
+
+		test("a_real_reference_to_an_element_keeps_the_reference_rules", [this]() {
+			same_everywhere({ R"JAI(
+class P { int a = 0; P(int v) { a = v; } }
+function removed_below() -> int { array<P> ps = [P(1), P(2), P(3)]; int s = 0; for (int i = 0; i < 2; ++i) { P& r = ps[1]; ps.remove(0); s += r.a; } return s; }
+function inserted_below() -> int { array<P> ps = [P(1), P(2), P(3)]; int s = 0; for (int i = 0; i < 2; ++i) { P& r = ps[1]; ps.insert(0, P(9)); s += r.a; } return s; }
+function removed_above() -> int { array<P> ps = [P(1), P(2), P(3), P(4)]; int s = 0; for (int i = 0; i < 2; ++i) { P& r = ps[0]; ps.pop(); s += r.a; } return s; }
+function shrunk() -> int { array<P> ps = [P(1), P(2)]; int s = 0; for (int i = 0; i < 2; ++i) { P& r = ps[1]; ps.pop(); s += r.a; } return s; }
+function writes_through() -> int { array<P> ps = [P(1), P(2)]; int seen = 0; for (int i = 0; i < 4; ++i) { P& r = ps[i & 1]; r.a = r.a + 10; P copy = ps[i & 1]; copy.a = copy.a + 1000; seen += copy.a; } return ps[0].a * 100 + ps[1].a + seen; }
+function handle_reference() -> int { array<shared_ptr<P>> hs = [new P(1), new P(2)]; for (int i = 0; i < 4; ++i) { shared_ptr<P>& r = hs[i & 1]; r = new P(i + 5); } return hs[0].a * 100 + hs[1].a; }
+function map_reference() -> int { map<int, int> m = {}; m[1] = 4; int s = 0; for (int i = 0; i < 2; ++i) { int& r = m[1]; m.remove(1); s += r; } return s; }
+0;)JAI", "removed_below();", "inserted_below();", "removed_above();", "shrunk();", "writes_through();", "handle_reference();", "map_reference();" }, "", "reference rules");
+		});
+
 		test("a_member_of_an_element_reads_through_every_element_kind", [this]() {
 			same_everywhere({ R"JAI(
 var LOG = "";

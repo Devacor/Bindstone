@@ -442,7 +442,8 @@ namespace jai::vm {
         fused_operand store_value;
         // op_index_fused_decl lane facts, proven at the peephole (decl_fast_slot_store,
         // not ref-escaping, slot-resident): the read lands DIRECTLY in decl_slot when
-        // the runtime value's raw index matches decl_expect (0xFF = any scalar) —
+        // the runtime value's raw index matches decl_expect (0xFF = any scalar; TYPEID_OBJECT =
+        // a handle tagged decl_type, a shared_ptr<T> declaration's identity) —
         // no per-exec decl checks, no landing round-trip. k_invalid_u32 = general
         // landing. decl_type = the decl's type tag to stamp (raw ptr; the chunk pins
         // the decl node which pins its type), null = no stamp.

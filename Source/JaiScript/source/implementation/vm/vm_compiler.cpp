@@ -10054,7 +10054,10 @@ JAI_NOINLINE void vm_compiler::compile_decl_value(const std::shared_ptr<variable
 		vm_instruction& ins = code.back();
 		ins.op = opcode::op_index_fused_decl;
 		ins.c = add_node(decl);
-		if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
+		// a slot-resident shared_ptr<T> declaration takes a handle tagged T as it is (exec_decl_var's identity row)
+		const bool handle_decl = decl->type && decl->type->base_type == script_value_type::jai_shared_ptr_type && decl->type->element_type() &&
+		                         !decl->is_static && decl->site_kind == variable_decl::site_declaration;
+		if (((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store || handle_decl) &&
 		    !decl->ref_escaping && decl->slot_index != SIZE_MAX) {
 			auto& proto = chunk_->fused_index_protos[ins.a];
 			proto.decl_slot = static_cast<uint32_t>(decl->slot_index);
@@ -10067,6 +10070,7 @@ JAI_NOINLINE void vm_compiler::compile_decl_value(const std::shared_ptr<variable
 			case script_value_type::jai_char_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_CHAR); break;
 			case script_value_type::jai_string_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_STRING); break;
 			case script_value_type::jai_any_type: proto.decl_expect = 0xFF; break;
+			case script_value_type::jai_shared_ptr_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_OBJECT); break;
 			default: proto.decl_slot = k_invalid_u32; proto.decl_type = nullptr; break;   // container/object decls: general landing
 			}
 			if (proto.decl_slot != k_invalid_u32 && index_proto_typed_lane_shape(*chunk_, proto)) {

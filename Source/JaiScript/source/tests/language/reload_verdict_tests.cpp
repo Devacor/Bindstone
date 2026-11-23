@@ -990,6 +990,81 @@ public:
 				check_true(has(outcome(*e, source), "'Cell' takes no type arguments: it is not a generic class"), outcome(*e, source));
 			}
 		});
+
+		test("a_bite_makes_again_what_it_declares_again_as_its_source_does_where_the_library_changed", [this]() {
+			// A bite that declares a generic again makes again the instances of it the engine holds. One of those may be built
+			// on an instance the bite's own instances are built on too (the library's Cell<int>, the library's same<int>). Where
+			// the library changes between the bite's check and its run, the bite's instances are made again, and so are the ones
+			// it only makes again: each asks again for what its text names, as the bite's source run there does.
+			struct scenario {
+				std::string name, library, earlier, bite, change, held, fresh;
+				std::string runs, holds;   // what the bite's run answers, and what live code answers after it
+			};
+			const std::string cells = "class Cell<T> { T v; int tag() { return 7; } }\nclass Shelf<T> { Cell<T> c; int tag() { return 10 + c.tag(); } }\n";
+			const std::string wrap_before = "class Wrap<T> { T v; int tag() { return 1; } }\nWrap<int> w0;\nint held() { return w0.tag(); }\n";
+			const std::string wrap_again = "class Wrap<T> { Cell<T> c; int tag() { return 5 + c.tag(); } }\nShelf<int> s; s.tag();";
+			const std::string calls = "T same<T>(T x) { return x; }\nT twice<T>(T x) { return same(x) + same(x); }\n";
+			const std::string wrap_fn_before = "T wrap<T>(T x) { return x; }\nint held() { return wrap(1); }\nint warm = held();\n";
+			const std::string wrap_fn_again = "T wrap<T>(T x) { return same(x) + 100; }\ntwice(4);";
+			const std::string tool_before = "class Tool { int level = 1; T scaled<T>(T x) { return x; } }\nTool t0;\nint held() { return t0.scaled(2); }\nint warm = held();\n";
+			const std::string tool_again = "class Tool { int level = 1; T scaled<T>(T x) { Cell<T> c; return x + c.tag(); } }\nShelf<int> s; s.tag();";
+			const std::vector<scenario> scenarios = {
+				{"a class built on a class the library's instance no longer names", cells, wrap_before, wrap_again, "class Shelf<T> { T c; int tag() { return 20; } }\n",
+				 "held();", "Wrap<int> w; w.tag();", "20", "12"},
+				{"a class built on a class the library's instance still names", cells, wrap_before, wrap_again, "class Shelf<T> { Cell<T> c; int tag() { return 30 + c.tag(); } }\n",
+				 "held();", "Wrap<int> w; w.tag();", "37", "12"},
+				{"a function that calls one the library's instance no longer calls", calls, wrap_fn_before, wrap_fn_again, "T twice<T>(T x) { return x + x + x; }\n",
+				 "held();", "wrap(1);", "12", "101"},
+				{"a function that calls one the library's instance still calls", calls, wrap_fn_before, wrap_fn_again, "T twice<T>(T x) { return same(x) + same(x) + same(x); }\n",
+				 "held();", "wrap(1);", "12", "101"},
+				{"a method whose body makes a class the library's instance no longer names", cells, tool_before, tool_again, "class Shelf<T> { T c; int tag() { return 20; } }\n",
+				 "held();", "Tool t; t.scaled(2);", "20", "9"},
+			};
+			const auto outcome = [](engine& e, const std::string& code) {
+				try {
+					return e.execute(code).to_string();
+				} catch (const std::exception& error) {
+					return std::string("ERR: ") + error.what();
+				}
+			};
+			const auto warned = [](engine& e) {
+				std::string text;
+				for (const auto& d : e.last_check_diagnostics().diagnostics) { text += d.message + "\n"; }
+				return text;
+			};
+			for (const scenario& s : scenarios) {
+				for (const bool ran_before : {false, true}) {
+					const std::string where = s.name + (ran_before ? " (the bite ran once before the change)" : " (the bite first runs after the change)");
+					auto with_bite = make_engine(), with_source = make_engine();
+					stdlib::register_all(*with_bite);
+					stdlib::register_all(*with_source);
+					for (const auto& e : {with_bite, with_source}) {
+						check_eq(std::string("null"), outcome(*e, s.library), where);
+						check_true(!failed(outcome(*e, s.earlier)), where);
+					}
+					jaibite own = with_bite->jaibite(s.bite);
+					if (ran_before) {
+						std::string first;
+						try { first = own.execute().to_string(); } catch (const std::exception& error) { first = std::string("ERR: ") + error.what(); }
+						check_eq(outcome(*with_source, s.bite), first, where + ": the first run");
+					}
+					check_eq(std::string("null"), outcome(*with_bite, s.change), where);
+					check_eq(std::string("null"), outcome(*with_source, s.change), where);
+					std::string ran;
+					try { ran = own.execute().to_string(); } catch (const std::exception& error) { ran = std::string("ERR: ") + error.what(); }
+					const std::string bite_warned = warned(*with_bite);
+					const std::string source_ran = outcome(*with_source, s.bite);
+					const std::string source_warned = warned(*with_source);
+					check_eq(s.runs, source_ran, where + ": its source");
+					check_eq(source_ran, ran, where);
+					check_eq(source_warned, bite_warned, where + ": what the check warned of");
+					check_eq(std::string(), bite_warned, where);
+					check_eq(s.holds, outcome(*with_source, s.held), where + ": live code after its source ran");
+					check_eq(s.holds, outcome(*with_bite, s.held), where + ": live code after the bite ran");
+					check_eq(outcome(*with_source, s.fresh), outcome(*with_bite, s.fresh), where + ": a new use");
+				}
+			}
+		});
 	}
 };
 

@@ -2084,7 +2084,9 @@ struct engine::implementation {
     // not take is the call's error. An instance only another instance's text asked for leaves: that text asks again where
     // it still names it. An instance no declaration makes fails the unit's check: a class's through its request asked
     // again, a function's or a method's through its request, which stays and says so. An instance the unit only makes
-    // again (generic_instance_decl::remade) and what its text asked for are judged one by one. True when the unit changed.
+    // again (generic_instance_decl::remade) leaves with what its text asked for: the check that follows makes again what
+    // the engine holds of the generics the unit declares (note_remade_instances), as a parse of the unit's text does, so
+    // what such an instance is built on is asked for by its own text. True when the unit changed.
     bool withdraw_stale_instances(std::vector<declaration_ptr>& decls) {
         const generic_request_index requests = index_requests(decls);
         if (requests.empty()) { return false; }
@@ -2107,7 +2109,7 @@ struct engine::implementation {
             bool held = false;                     // the unit or the engine holds the text it was made from
         };
         std::unordered_map<const generic_instance_decl*, standing_instance> judged;
-        bool remake = false;   // an instance the unit's own text led to is not as the engine would make it
+        bool remake = false;   // an instance is not as the engine would make it
         for (const auto& [id, request] : requests) {
             if (!request->expanded || request->remade) { continue; }
             const auto from = made.find(request);
@@ -2125,7 +2127,7 @@ struct engine::implementation {
             const auto gone = dropped_generics_.find(generic);   // a generic a file dropped stands for every unit
             const auto held = generics_.find(generic);
             if (holds(own) || (gone != dropped_generics_.end() && holds(gone->second)) || (held != generics_.end() && holds(held->second))) { continue; }
-            remake = remake || !remade_root(requests, request);
+            remake = true;
             if (request->stamp == 0) { continue; }   // a class's: its name finds the declaration, or its request asked again says that none does
             detail::generic_definition_ptr sole, sole_fitting;
             size_t typed = 0, fitting = 0;
@@ -2151,20 +2153,20 @@ struct engine::implementation {
                                             : "no generic " + kind + " '" + generic + "' is declared");
             }
         }
+        if (!remake) { return false; }
         std::unordered_set<const generic_instance_decl*> leaving, again;
         for (const auto& [id, request] : requests) {
-            const bool only_made_again = remade_root(requests, request) != nullptr;
-            if (remake && !only_made_again && !request->within.empty()) {
-                const generic_instance_decl& root = request_root(requests, *request);
-                if (root.within.empty() && judged.count(&root) != 0) {
-                    leaving.insert(request);
-                    continue;
-                }
-            }
             const auto instance = judged.find(request);
-            if (instance != judged.end() && (!instance->second.held || (remake && !only_made_again && request->within.empty()))) { again.insert(request); }
+            if (remade_root(requests, request)) {
+                leaving.insert(request);
+            } else if (request->within.empty()) {
+                if (instance != judged.end()) { again.insert(request); }
+            } else if (const generic_instance_decl& root = request_root(requests, *request); root.within.empty() && judged.count(&root) != 0) {
+                leaving.insert(request);
+            } else if (instance != judged.end() && !instance->second.held) {   // its asker is no instance the unit makes again here
+                again.insert(request);
+            }
         }
-        if (leaving.empty() && again.empty()) { return false; }
         std::erase_if(decls, [&](const declaration_ptr& d) {   // the declarations first: each is found by its request
             if (!d || d->get_type() == node_type::generic_instance_decl) { return false; }
             const auto asked = requests.find(instance_of(*d));

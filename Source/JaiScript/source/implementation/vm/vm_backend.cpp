@@ -236,6 +236,7 @@ vm_backend::vm_backend(string_symbolizer* symbolizer, std::shared_ptr<environmen
 void vm_backend::set_engine_reference(engine* engine_ref) {
 	engine_ = engine_ref;
 	layout_gen_ = engine_ ? engine_->layout_generation() : nullptr;
+	definition_epoch_ = engine_ ? engine_->definition_epoch_counter() : nullptr;
 	if (engine_) {
 #ifdef JAISCRIPT_VM_COVERAGE
 		engine_->vm_coverage_adopt(coverage_);
@@ -8924,6 +8925,17 @@ op_status vm_backend::exec_c_probe(frame& f, const vm_instruction& ins) {
 		++f.ip;
 		return {};
 	}
+	if (cc.host && (loop.plans[ins.a].epoch == raw_epoch_ || host_probe(f, loop, ins.a))) {
+		// a host site's probe: the plan holds for this epoch, or the callee's binding is the site's cached host function with a scalar entry
+		// for this call; nothing is parked. An arguments instruction that follows at once (no argument is computed) runs here
+		++f.ip;
+		if (f.code->code[f.ip].op == opcode::op_c_args) {
+			op_status st = op_status::ok;
+			return cells_host_call(f, loop, ins.a, st) ? st : op_status::ok;
+		}
+		f.cells->raw_call = static_cast<uint16_t>(k_host_call_mark | (ins.a + 1));
+		return {};
+	}
 	if (f.cells->dirty.any_of(loop.env_cells)) [[unlikely]] {
 		// the callee and the verbatim environment pushes read the environment: written values go back first
 		for (const uint32_t k : loop.env_cells) { if (f.cells->dirty.test(k)) { env_flush_one(f, loop, k); f.cells->dirty.clear(k); } }
@@ -8953,6 +8965,10 @@ op_status vm_backend::exec_c_args(frame& f, const vm_instruction& ins) {
 	if (cc.raw) {
 		op_status raw_st = op_status::ok;
 		if (raw_call_enter(f, loop, ins, raw_st)) return raw_st;
+	}
+	if (cs.raw_call == (k_host_call_mark | (ins.a + 1))) {
+		op_status host_st = op_status::ok;
+		if (cells_host_call(f, loop, ins.a, host_st)) return host_st;
 	}
 	materialize_raw_window(f);   // the pushes go above this frame's window, and a slot argument's flush writes into it
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT);
@@ -9059,12 +9075,129 @@ bool vm_backend::raw_probe(frame& f, const chunk::cell_loop& loop, uint32_t inde
 void vm_backend::park_raw_callee(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
 	if (cs.raw_call == 0) return;
-	const chunk::cell_loop::cell_call& cc = loop.calls[cs.raw_call - 1];
+	const bool host = (cs.raw_call & k_host_call_mark) != 0;
+	const chunk::cell_loop::cell_call& cc = loop.calls[(cs.raw_call & ~k_host_call_mark) - 1];
 	cs.raw_call = 0;
 	const call_site& site = f.code->call_sites[f.code->code[cc.probe_ip].a];
 	pending_callee& pc = pending_callees_.emplace_back();
 	pc.fn = site.ic_fn;
+	if (host) { if (site.ic_host_target) { pc.host_fn = site.ic_pin.get(); } else { pc.pin = site.ic_pin; } }
 	pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
+}
+// a host site's probe (internal/typed_regions_design.md "Host scalar entries"): the callee name's binding is the site's cached host function,
+// read as the general probe's fast head reads it (a namespace cell, or the probe's own lookup-cache row in a frame whose member scope cannot
+// shadow the name), and that function's one direct overload has a scalar entry for the call's arity whose result the consumer takes
+bool vm_backend::host_probe(frame& f, const chunk::cell_loop& loop, uint32_t index) {
+	const chunk::cell_loop::cell_call& cc = loop.calls[index];
+	if (parallel_worker_ || debug_hook_ || !cached_global_env_) return false;
+	const call_site& site = f.code->call_sites[f.code->code[cc.probe_ip].a];
+	if (site.ic_fn || !site.ic_native || (site.ic_host_checked && !site.ic_host_scalar) || site.callee.slot != k_invalid_u32 ||
+	    (site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) return false;
+	const script_value* fast = nullptr;
+	if (site.callee.load_flags & load_flag_namespace_cell) {
+		fast = f.code->namespace_cells[site.callee.namespace_cell].cell;
+	} else {
+		bool plain_frame = !f.locals || f.top_level;
+		if (!plain_frame && !f.locals->is_method) { ensure_frame_member_scope(f, environment_.get()); plain_frame = !frame_scope_active(f); }
+		const auto& cache = f.code->env_lookup_cache;
+		const size_t slot = f.ip * 3;
+		if (plain_frame && slot < cache.size()) {
+			const env_lookup_cache_entry& e = cache[slot];
+			if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch()) { fast = e.fast_ptr; }
+		}
+	}
+	if (!fast || fast->raw_storage_index() != script_value::TYPEID_FUNCTION || &fast->unchecked_as_function() != site.ic_identity) return false;
+	if (!site.ic_host_checked) { fill_host_site(site, *fast); }
+	if (!site.ic_host_scalar || !site.ic_host_target || site.ic_host_argc != cc.args.size() || *site.ic_host_gen != site.ic_host_at) return false;
+	const uint8_t rk = site.ic_host_scalar_result;
+	if (cc.consumer != 0 && rk != script_value::TYPEID_INT && rk != script_value::TYPEID_FLOAT && rk != script_value::TYPEID_BOOL) return false;   // nothing to land
+	chunk::cell_loop::call_plan& plan = loop.plans[index];   // until general code runs, this site's callee is this entry
+	plan.epoch = raw_epoch_;
+	plan.host_invoke = site.ic_host_scalar;
+	plan.host_target = site.ic_host_target;
+	plan.host_kinds = site.ic_host_scalar_kinds;
+	plan.host_result = rk;
+	return true;
+}
+// a host site's call, its probe unparked (f.ip is its arguments instruction's): each argument's word (a cell's payload, a constant's, a plain
+// slot's) to the scalar entry and the result word into the destination cell by the declared-type rule, the block continuing past the landing.
+// A function of words reaches nothing the block holds unless it enters the engine by itself: a run it starts moves the raw epoch and a
+// definition it makes the definition epoch, and the door's landing then re-reads what the block holds. false: an argument of another kind,
+// or an int its parameter's type cannot hold; the callee is parked and the door's pushes run next
+JAI_NOINLINE bool vm_backend::cells_host_call(frame& f, const chunk::cell_loop& loop, uint32_t index, op_status& st) {
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop::cell_call& cc = loop.calls[index];
+	const chunk::cell_loop::call_plan& plan = loop.plans[index];
+	auto declined = [&]() { cs.raw_call = static_cast<uint16_t>(k_host_call_mark | (index + 1)); park_raw_callee(f, loop); return false; };
+	if (cs.dirty.any_of(loop.env_cells)) [[unlikely]] {
+		// the environment as the general call leaves it for the callee: written values go back first
+		for (const uint32_t k : loop.env_cells) { if (cs.dirty.test(k)) { env_flush_one(f, loop, k); cs.dirty.clear(k); } }
+	}
+	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kstr = static_cast<uint8_t>(script_value::TYPEID_STRING);
+	int64_t words[8];
+	const size_t argc = cc.args.size();
+	for (size_t i = 0; i < argc; ++i) {
+		const chunk::cell_loop::call_arg& a = cc.args[i];
+		const uint32_t want = (plan.host_kinds >> (4 * i)) & 0xFu;
+		uint8_t kind;
+		int64_t bits;
+		if (a.kind == 1) {
+			kind = cs.cells[a.v].kind;
+			bits = cs.cells[a.v].bits;
+		} else {
+			// a constant, or a slot the block holds no cell for, read where the general load reads it (a reference there is the door's)
+			const vm_instruction& oi = f.code->code[a.v];
+			const script_value* v = oi.op == opcode::op_const ? &f.code->constants[oi.a] : frame_slot(f, oi.a);
+			kind = v ? static_cast<uint8_t>(v->raw_storage_index()) : 0;
+			bits = kind != (want & 7u) && kind != kint ? 0 : kind == kstr ? reinterpret_cast<int64_t>(v->unchecked_string_handle().get()) : cell_bits(*v, kind);
+		}
+		if (kind != (want & 7u)) {
+			if (!((want & detail::host_scalar_int_widens) && kind == kint)) { return declined(); }
+			bits = cell_bits_of_float(static_cast<script_float>(static_cast<script_int>(bits)));
+		}
+		if (kind == kstr && bits == 0) { return declined(); }
+		words[i] = bits;
+	}
+	const uint64_t epoch = raw_epoch_;
+	const uint64_t defined = *definition_epoch_;
+	int64_t result = 0;
+	bool taken = false;
+	{
+		struct running { uint32_t& n; explicit running(uint32_t& c) : n(c) { ++n; } ~running() { --n; } } run{host_site_calls_};
+		try {
+			JAI_CENSUS(call_native_lane); taken = plan.host_invoke(plan.host_target, words, &result);
+		} catch (const std::exception& e) {
+			// the direct lane's own catch: the general call's error at its call instruction
+			cs.raw_call = 0;
+			st = raise_from(host_exception_error(engine_, detail::native_exception_text(e)));
+			cells_flush(f, loop);
+			f.ip = cc.call_ip;
+			return true;
+		} catch (...) {
+			cs.raw_call = 0;
+			cells_flush(f, loop);
+			f.ip = cc.call_ip;
+			st = call_threw(SIZE_MAX);
+			return true;
+		}
+	}
+	if (!taken) { return declined(); }
+	cs.raw_call = 0;
+	++cells_counters_.host_calls;
+	const uint8_t rk = plan.host_result;
+	if (raw_epoch_ == epoch && *definition_epoch_ == defined && (cc.consumer == 0 || cell_land_fast(f, loop, cc.dst, rk, result))) [[likely]] {
+		f.ip += 3;   // past the call and the landing
+		st = op_status::ok;
+		return true;
+	}
+	// the function entered the engine, or the landing converts: the door's landing with the result where the general call leaves it
+	raw_epoch_advance();
+	materialize_raw_window(f);
+	if (cc.consumer != 0) { stack_.push_back(cell_scalar(rk, result, engine_)); }
+	f.ip += 2;
+	cs.raw_landing = static_cast<uint16_t>(index + 1);   // parameters of words bound nothing of this frame's
+	st = cells_land(f, loop, cc);
+	return true;
 }
 // a raw call: the arguments instruction of a raw site whose probe found a raw callee. When every argument's kind is its parameter's, the callee's
 // record is pushed without an environment, a binder or an argument vector, the payloads land in its parameter cells, and its frame program runs
@@ -13447,6 +13580,7 @@ JAI_NOINLINE bool vm_backend::call_host_site(const call_site& site, size_t argc,
 	if ((argc != site.ic_host_argc && (site.ic_host_argc != UINT32_MAX || argc == 0 || argc > 8)) || *site.ic_host_gen != site.ic_host_at) { return false; }
 	const size_t base = stack_.size() - argc;
 	const script_value* args = stack_.data() + base;
+	if (site.ic_host_scalar && call_host_scalar(site, args, argc, st)) { return true; }
 	for (size_t i = 0; i < argc; ++i) {   // an any-kind parameter (a host direct row) takes every argument but a reference
 		if (site.ic_host_kinds[i] == script_value_type::jai_any_type ? args[i].is_reference() : args[i].deref().type() != site.ic_host_kinds[i]) { return false; }
 	}
@@ -13462,6 +13596,47 @@ JAI_NOINLINE bool vm_backend::call_host_site(const call_site& site, size_t argc,
 	stack_.truncate(base);
 	if (!out) { st = raise_from(out); return true; }
 	stack_.push_back(std::move(out.value()));
+	return true;
+}
+// the site's scalar entry on the arguments where they are: each a plain int, float, bool or string of its parameter's kind (an int where a
+// double parameter widens one), its payload word passed as it is and the result word boxed; false leaves the call to the direct lane
+bool vm_backend::call_host_scalar(const call_site& site, const script_value* args, size_t argc, op_status& st) {
+	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kstr = static_cast<uint8_t>(script_value::TYPEID_STRING);
+	int64_t words[8];
+	for (size_t i = 0; i < argc; ++i) {
+		const uint32_t want = (site.ic_host_scalar_kinds >> (4 * i)) & 0xFu;
+		const uint8_t kind = static_cast<uint8_t>(args[i].raw_storage_index());
+		int64_t bits;
+		if (kind == (want & 7u)) {
+			bits = kind == kstr ? reinterpret_cast<int64_t>(args[i].unchecked_string_handle().get()) : cell_bits(args[i], kind);
+			if (kind == kstr && bits == 0) { return false; }
+		} else if ((want & detail::host_scalar_int_widens) && kind == kint) {
+			bits = cell_bits_of_float(static_cast<script_float>(args[i].unchecked_as_int()));
+		} else {
+			return false;
+		}
+		words[i] = bits;
+	}
+	const size_t base = stack_.size() - argc;
+	int64_t result = 0;
+	bool taken = false;
+	{
+		struct running { uint32_t& n; explicit running(uint32_t& c) : n(c) { ++n; } ~running() { --n; } } run{host_site_calls_};
+		try {
+			JAI_CENSUS(call_native_lane); taken = site.ic_host_scalar(site.ic_host_target, words, &result);
+		} catch (const std::exception& e) {
+			stack_.truncate(base);
+			st = raise_from(host_exception_error(engine_, detail::native_exception_text(e)));
+			return true;
+		} catch (...) {
+			st = call_threw(base);
+			return true;
+		}
+	}
+	if (!taken) { return false; }
+	const uint8_t rk = site.ic_host_scalar_result;
+	stack_.truncate(base);
+	if (rk == script_value::TYPEID_NULL) { stack_.push_back(make_null()); } else { stack_.push_back(cell_scalar(rk, result, engine_)); }
 	return true;
 }
 // the site's host lane from its cached callee, looked for on the first hit after a refill (a site that misses pays nothing): the one direct overload of an overload dispatcher, else none
@@ -13491,6 +13666,9 @@ JAI_NOINLINE void vm_backend::fill_host_site(const call_site& site, const script
 	site.ic_host_at = snap.at;
 	site.ic_host_invoke = snap.invoke;
 	site.ic_host_target = snap.target;
+	site.ic_host_scalar = snap.scalar.invoke;
+	site.ic_host_scalar_kinds = snap.scalar.kinds;
+	site.ic_host_scalar_result = snap.scalar.result;
 }
 
 // A host function's direct entry (engine::overload_dispatch::try_direct) on the arguments where they are on the stack
@@ -21269,6 +21447,7 @@ checked_result<void> vm_backend::run(frame& entry) {
 	frame* fp = &entry;
 	const size_t records_base = call_records_top_;
 	detail::host_time_pause host_paused(*limits_, *this);   // script the host runs inside a call the budget does not count is the script's time
+	raw_epoch_advance();   // a native entry is general code: no call plan outlives it, and a host scalar entry that started it lands through the door
 	if (debug_hook_) [[unlikely]] { debug_last_frame_ = nullptr; }   // a host-entered frame at ip 0 is a new frame, whatever record holds it
 	for (;;) {
 		try {

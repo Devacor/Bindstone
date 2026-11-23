@@ -4478,6 +4478,14 @@ bool engine::overload_dispatch::direct_entry(direct_snapshot& out) const {
     out.owner = only.function;
     out.generation = &overloads->generation;
     out.at = overloads->generation;
+    out.scalar = only.direct.scalar;
+    for (size_t i = 0; out.scalar.invoke && i < only.argCount; ++i) {   // the scalar entry reads each word as the kind the direct lane admits there
+        const uint32_t word = (out.scalar.kinds >> (4 * i)) & 7u;
+        const script_value_type want = out.kinds[i];
+        const bool agrees = want == script_value_type::jai_int_type ? word == script_value::TYPEID_INT : want == script_value_type::jai_float_type ? word == script_value::TYPEID_FLOAT :
+                            want == script_value_type::jai_bool_type ? word == script_value::TYPEID_BOOL : want == script_value_type::jai_string_type && word == script_value::TYPEID_STRING;
+        if (!agrees) { out.scalar = {}; }
+    }
     return true;
 }
 

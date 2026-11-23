@@ -879,7 +879,8 @@ exception converts at that frame too). A block that makes no raw call pays one p
 
 ### Where a raw value becomes a `script_value`
 
-- **The host**: a door call to a host function boxes its arguments at the door; `execute`'s result, a callback's arguments and
+- **The host**: a door call to a host function boxes its arguments at the door (a host function with a scalar entry takes its
+  arguments' words and boxes nothing: "Host scalar entries"); `execute`'s result, a callback's arguments and
   results, `get_global` and `as<T>` see only `script_value`s, since a global is an environment value, never a raw cell.
 - **A miss, a bail, an exit**: the flush writes the dirty cells (the parameters included) into the window.
 - **Errors**: raised by the general executor after the flush, so the value an error text names is the slot's.
@@ -986,7 +987,41 @@ once, at compile time, and the run time keeps only the guards that keep those de
   bound method minted and no argument vector built. An argument of another kind or count declines to the ordinary call; an
   overloaded name, a guarded binding (a permission) or a class parameter has no lane; a field of the name keeps the ordinary call.
 
-Not built: typed host thunks for scalar host functions, one armed slow-path flag for depth, budget and debugger, compile-time
+### Host scalar entries
+
+A host function bound by value whose parameters are ints, floats, bools and strings and whose result is an int, a float, a bool
+or nothing has a scalar entry beside its direct lane (`engine::host_scalar_entry`, derived by `add_function` from the C++
+signature: `detail::host_scalar_signature`): the same call over payload words (an int's value, a float's bits, a bool's 0 or 1,
+a string's address), no `script_value` built for an argument or the result. The entry exists exactly where the direct lane does
+(one overload under its name, no permission guard, time the budget counts), declines an int its parameter's type cannot hold
+with nothing called, and lets an exception out as the function threw it. A char, a `long`, an object, a `script_value`, a
+callable or a reference that is written has no word, so such a signature keeps the direct lane alone.
+
+- **In a block.** A call whose callee is an environment name the checker resolved to no script function, with every argument a
+  cell, a constant or a slot the block holds no cell for (a string local, read where the general load reads it), is a host site
+  (`cell_call::host`); an environment name as an argument keeps the door, where its load resolves. Its probe reads the name's binding as the general probe's fast head
+  does; when that is the site's cached host function with a scalar entry for the call's arity (and a result the consumer can
+  land), nothing is parked, and the arguments instruction calls the entry on the argument cells' words and lands the result
+  word in the destination cell by the declared-type rule, continuing past the call and the landing: no flush, no window, no
+  pending callee, no re-read of what the block holds. An int cell widens into a `double` parameter as the general call converts
+  it; any other kind, or an int out of the parameter's range, parks the callee as the general probe would and runs the door,
+  whose general call converts or raises. A site keeps what its probe found as a plan for the raw epoch (the raw sites' rule), so
+  a second call in the same epoch resolves nothing; a probe directly ahead of its arguments instruction runs the call itself.
+- **What holds across the call.** The fact is the signature's: a function of words reaches nothing the block holds through its
+  arguments. A function that reaches the engine by itself (a captured engine pointer, a signal with script receivers) is
+  caught by two epochs read around the call: a native entry (`vm_backend::run`) advances the raw epoch, and a registration, a
+  define or an execute moves the engine's definition epoch. When either moved, the result takes the door's landing, which
+  re-reads environment cells, strings, container sites, aliases and grafts exactly as after a general call; the environment
+  cells a block wrote go back before the call, as the door's probe writes them. A throw raises at the general call instruction
+  after the block's flush, with the direct lane's text.
+- **On the general form** the site's direct lane tries the scalar entry first, on arguments that are plain values of its
+  parameters' kinds, and boxes the result word; anything else takes the direct lane's own conversions.
+- **Not taken**: a parallel worker (its call sites are the worker's own), an armed debugger, an overload set, a guarded binding
+  and a binding whose time the budget does not count keep the door and the general call.
+
+`cell_counters::host_calls` counts the calls blocks make through a scalar entry (suite `Host Scalar Entries`).
+
+Not built: scalar entries for host methods and for string results, one armed slow-path flag for depth, budget and debugger, compile-time
 frame shapes and site plans for general calls, proven initialization (a slot written before read still takes the null
 placeholder), loops inside frame programs, raw entry of frame programs that read environment values, container sites or graft
 guards, raw calls on parallel workers, and flat records.

@@ -13,6 +13,7 @@
 #include "parameter_storage.hpp"
 #include "runtime_errors.hpp"
 #include <jaiscript/detail/numeric_conversion.hpp>
+#include <bit>
 #include <functional>
 #include <optional>
 #include <set>
@@ -20,6 +21,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <tuple>
+#include <utility>
 
 // Forward declarations to avoid circular dependencies
 namespace jai {
@@ -843,6 +845,73 @@ class engine;
             return host_lane_params<Tuple>(std::make_index_sequence<std::tuple_size_v<Tuple>>{});
         }
 
+        // A host scalar entry (engine::host_scalar_entry) passes a parameter or a result as one payload word. The integer types are the
+        // ones whose conversion from a script int is a range test and a cast; a char type is a character, never a number
+        template<typename D>
+        inline constexpr bool host_scalar_int = std::is_same_v<D, script_int> || std::is_same_v<D, int> || std::is_same_v<D, int16_t> || std::is_same_v<D, int32_t> ||
+                                                std::is_same_v<D, int64_t> || std::is_same_v<D, uint16_t> || std::is_same_v<D, uint32_t> || std::is_same_v<D, uint64_t> ||
+                                                std::is_same_v<D, size_t>;
+        inline constexpr uint32_t host_scalar_int_widens = 8;
+        // a parameter's storage index, host_scalar_int_widens set where an int argument converts as a double does (0: no entry carries the type)
+        template<typename P>
+        consteval uint32_t host_scalar_param_kind() {
+            using D = std::remove_cvref_t<P>;
+            if (std::is_reference_v<P> && !std::is_const_v<std::remove_reference_t<P>>) { return 0; }
+            if (std::is_same_v<D, bool>) { return static_cast<uint32_t>(script_value::TYPEID_BOOL); }
+            if (std::is_same_v<D, double>) { return static_cast<uint32_t>(script_value::TYPEID_FLOAT) | host_scalar_int_widens; }
+            if (std::is_same_v<D, float>) { return static_cast<uint32_t>(script_value::TYPEID_FLOAT); }
+            if (host_scalar_int<D> || std::is_enum_v<D>) { return static_cast<uint32_t>(script_value::TYPEID_INT); }
+            if (std::is_same_v<D, std::string>) { return static_cast<uint32_t>(script_value::TYPEID_STRING); }
+            return 0;
+        }
+        // a result's storage index (TYPEID_NULL: void; 0xFF: no entry carries the type)
+        template<typename R>
+        consteval uint8_t host_scalar_result_kind() {
+            if (std::is_void_v<R>) { return static_cast<uint8_t>(script_value::TYPEID_NULL); }
+            if (std::is_reference_v<R>) { return 0xFF; }
+            using D = std::remove_cv_t<R>;
+            if (std::is_same_v<D, bool>) { return static_cast<uint8_t>(script_value::TYPEID_BOOL); }
+            if (std::is_same_v<D, double> || std::is_same_v<D, float>) { return static_cast<uint8_t>(script_value::TYPEID_FLOAT); }
+            if (host_scalar_int<D> || std::is_enum_v<D>) { return static_cast<uint8_t>(script_value::TYPEID_INT); }
+            return 0xFF;
+        }
+        template<typename Tuple, size_t... Is>
+        consteval uint32_t host_scalar_kinds(std::index_sequence<Is...>) {
+            return ((host_scalar_param_kind<std::tuple_element_t<Is, Tuple>>() << (4 * Is)) | ... | 0u);
+        }
+        template<typename Tuple>
+        consteval uint32_t host_scalar_kinds() {
+            return host_scalar_kinds<Tuple>(std::make_index_sequence<std::tuple_size_v<Tuple>>{});
+        }
+        template<typename R, typename Tuple, size_t... Is>
+        consteval bool host_scalar_signature(std::index_sequence<Is...>) {
+            return sizeof...(Is) <= 8 && host_scalar_result_kind<R>() != 0xFF && ((host_scalar_param_kind<std::tuple_element_t<Is, Tuple>>() != 0) && ...);
+        }
+        template<typename R, typename Tuple>
+        consteval bool host_scalar_signature() {
+            return host_scalar_signature<R, Tuple>(std::make_index_sequence<std::tuple_size_v<Tuple>>{});
+        }
+        template<typename P>
+        constexpr bool host_scalar_holds(int64_t word) {
+            using D = std::remove_cvref_t<P>;
+            if constexpr (host_scalar_int<D>) { return std::in_range<D>(word); }
+            else { return true; }
+        }
+        template<typename P>
+        decltype(auto) host_scalar_argument(int64_t word) {
+            using D = std::remove_cvref_t<P>;
+            if constexpr (std::is_same_v<D, bool>) { return word != 0; }
+            else if constexpr (std::is_floating_point_v<D>) { return static_cast<D>(std::bit_cast<script_float>(word)); }
+            else if constexpr (std::is_same_v<D, std::string>) { return static_cast<const std::string&>(*reinterpret_cast<const std::string*>(static_cast<intptr_t>(word))); }
+            else { return static_cast<D>(static_cast<script_int>(word)); }
+        }
+        template<typename R>
+        int64_t host_scalar_word(const R& result) {
+            if constexpr (std::is_same_v<R, bool>) { return result ? 1 : 0; }
+            else if constexpr (std::is_floating_point_v<R>) { return std::bit_cast<int64_t>(static_cast<script_float>(result)); }
+            else { return static_cast<int64_t>(static_cast<script_int>(result)); }
+        }
+
         // A direct-lane argument behind a reference parameter takes the ordinary call's conversion: a bound object, a string, a
         // script_value, a script array or a script map is the script's own, borrowed in place, a bound_array or bound_map views
         // it; anything else is the converted value, a temporary the call's full expression keeps
@@ -949,12 +1018,29 @@ class engine;
                 return static_cast<const by_value_call*>(self)->call(args, argc);
             }
             static const void* locate(const script_function& f) { return f.template target<by_value_call>(); }
+            // the engine's host scalar entry (detail::host_scalar_signature): an exception leaves as the function threw it
+            static bool invoke_scalar(const void* self, const int64_t* args, int64_t* result) {
+                using traits = detail::function_traits<Func>;
+                return call_scalar<typename traits::return_type, typename traits::argument_types>(static_cast<const by_value_call*>(self)->func, args, result,
+                                                                                               std::make_index_sequence<traits::arity>{});
+            }
         };
 
     private:
         Func func_;
         engine* engine_;
-        
+
+        template<typename R, typename ArgsTuple, typename F, size_t... Is>
+        static bool call_scalar(F&& func, [[maybe_unused]] const int64_t* args, [[maybe_unused]] int64_t* result, std::index_sequence<Is...>) {
+            if (!(detail::host_scalar_holds<std::tuple_element_t<Is, ArgsTuple>>(args[Is]) && ...)) { return false; }
+            if constexpr (std::is_void_v<R>) {
+                func(detail::host_scalar_argument<std::tuple_element_t<Is, ArgsTuple>>(args[Is])...);
+            } else {
+                *result = detail::host_scalar_word<std::remove_cv_t<R>>(func(detail::host_scalar_argument<std::tuple_element_t<Is, ArgsTuple>>(args[Is])...));
+            }
+            return true;
+        }
+
         template<typename R, typename ArgsTuple, typename F, size_t... Is>
         static script_value call_impl_static(F&& func, const script_value* args, std::index_sequence<Is...>, engine* eng) {
             if constexpr (std::is_void_v<R>) {

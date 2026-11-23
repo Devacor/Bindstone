@@ -5603,10 +5603,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (c.call_sites[st.a].call_node < c.nodes.size() && code[call_ip].c == 0) {   // a tail call keeps the general splice (no raw frame grows the chain)
 					const auto* ce = static_cast<const call_expr*>(c.nodes[c.call_sites[st.a].call_node].get());
 					const auto decl = ce->proven_callee_decl.lock();
-					if (calls.size() < 65534 && decl && raw_signature(decl.get()) && ce->arguments.size() == decl->parameters.size() && raw_call_reaches_program(decl.get(), callable_body_, stack_)) {
+					if (calls.size() < 32766 && decl && raw_signature(decl.get()) && ce->arguments.size() == decl->parameters.size() && raw_call_reaches_program(decl.get(), callable_body_, stack_)) {
 						cc.raw = 1;   // the arguments instruction may enter the callee's frame program raw
 						for (size_t pi = 0; pi < decl->parameters.size(); ++pi) { cc.raw_kinds |= static_cast<uint32_t>(raw_scalar_kind(decl->parameters[pi].type.get())) << (4 * pi); }
 					}
+					// an environment name no script declaration answers: its binding may be a host function with a scalar entry (the emission keeps
+					// the mark when every argument is a cell or a constant)
+					if (calls.size() < 32766 && !decl && c.call_sites[st.a].callee.slot == k_invalid_u32) { cc.host = 1; }
 				}
 				std::vector<ir_op> seq;   // one operation per instruction from the probe to the call
 				ir_op probe_op; probe_op.kind = ir::probe; probe_op.a = static_cast<uint32_t>(calls.size());
@@ -6076,7 +6079,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		struct fixup { uint32_t at; uint8_t field; uint32_t target; uint32_t bits; };   // field 0 = a (a jump), 1 = c (a compare's target | its sense bit), 2 = b (a guard: alias | read offset << 8)
 		std::vector<fixup> fixups;
 		loop.calls = calls;
-		for (const auto& cc : calls) { if (cc.raw) { loop.plans.resize(calls.size()); loop.raw_sites = true; break; } }   // a raw site's run-time plan
+		for (const auto& cc : calls) { if (cc.raw || cc.host) { loop.plans.resize(calls.size()); loop.raw_sites = true; break; } }   // a raw or host site's run-time plan
 		loop.inline_sites = loop_inline_sites;
 		loop.math_alias_sites = loop_alias_sites;
 		for (ir_op& o : ops) {   // a branch onto skipped kills that run into the back edge takes the back edge itself
@@ -6366,6 +6369,16 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						kinds |= static_cast<uint32_t>(k) << (4 * ai);
 					}
 					cc.raw_proven = proven && kinds == cc.raw_kinds ? 1 : 0;
+				}
+				if (cc.host) {
+					// a scalar entry reads words: every argument a cell, a constant or a slot the block holds no cell for (a string local); an
+					// environment name's load resolves at the door
+					bool words = cc.args.size() <= 8;
+					for (size_t ai = 0; ai < cc.args.size() && words; ++ai) {
+						const chunk::cell_loop::call_arg& arg = cc.args[ai];
+						words = arg.kind == 1 || code[arg.v].op == opcode::op_const || (code[arg.v].op == opcode::op_load && code[arg.v].a != k_invalid_u32 && code[arg.v].c == 0);
+					}
+					if (!words) { cc.host = 0; }
 				}
 				c.call_arg_zones.emplace_back(static_cast<uint32_t>(code.size()), static_cast<uint32_t>(code.size() + 1));
 				append(vm_instruction{opcode::op_c_args, op.a, loop_index, cc.call_ip}, cc.probe_ip);

@@ -322,6 +322,7 @@ namespace {
 				for (const auto& c : l.calls) {
 					out << " (" << c.probe_ip << " " << c.call_ip << " " << c.consumer_ip << " c" << static_cast<int>(c.consumer) << " dst=" << u(c.dst) << " raw=" << static_cast<int>(c.raw) << " proven=" << static_cast<int>(c.raw_proven) << " kinds=" << std::hex << c.raw_kinds << std::dec;
 					if (c.callee_cell != k_invalid_u32) { out << " callee_cell=" << c.callee_cell; }
+					if (c.host) { out << " host=1"; }
 					out << " args=[";
 					for (const auto& a : c.args) { out << "(" << static_cast<int>(a.kind) << " " << a.v << " " << a.ip << ")"; }
 					out << "])";

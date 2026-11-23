@@ -226,6 +226,11 @@ namespace jai::vm {
         mutable strong_ptr<script_function_node> ic_host_owner;
         mutable const uint64_t* ic_host_gen = nullptr;   // the overload set's mutation count: a registration of the name since the fill declines the lane
         mutable uint64_t ic_host_at = 0;
+        // that overload's entry over payload words, when its parameters and result are ints, floats, bools and strings (engine::host_scalar_entry:
+        // each parameter's storage index, four bits a parameter, and the result's): no value is built for an argument or the result
+        mutable bool (*ic_host_scalar)(const void*, const int64_t*, int64_t*) = nullptr;
+        mutable uint32_t ic_host_scalar_kinds = 0;
+        mutable uint8_t ic_host_scalar_result = 0;
         mutable const void* call_host_seen = nullptr;   // op_call: the callee identity the site last looked a direct entry up for
     };
 
@@ -685,6 +690,7 @@ namespace jai::vm {
             struct cell_call {
                 uint32_t probe_ip, call_ip, consumer_ip; uint8_t consumer = 0; uint32_t dst = k_invalid_u32; std::vector<call_arg> args; uint8_t raw = 0;
                 uint8_t raw_proven = 0; uint32_t raw_kinds = 0;
+                uint8_t host = 0;   // an environment name the checker resolved to no script function, every argument a cell, a constant or a plain slot: the probe may find a host scalar entry (vm_backend::host_probe)
                 uint32_t callee_cell = k_invalid_u32;   // the callee is a slot the block holds in this cell: the probe reads the slot, so the cell goes back first
                 // what the landing re-checks (narrowed): the land_sites entries and the inlined leaves the block can reach from it before
                 // another landing, which checks the rest; not narrowed: every one
@@ -708,10 +714,15 @@ namespace jai::vm {
             std::vector<uint32_t> param_cells;
             std::string ir_text;   // the region's canonical operations (index:kind, ->target, w slot, r slots), filled only when the compiler lists the IR
             uint32_t param_kinds = 0;   // the parameter cells' kinds, four bits per parameter (the call site's raw_kinds form)
-            // a raw site's plan, the run time's (one per call when any call is raw): the epoch in which the probe last validated the callee
+            // a raw site's plan, the run time's (one per call when any call is raw or may be a host scalar entry's): the epoch in which the probe last validated the callee
             // (vm_backend::raw_epoch_), its body's chunk, that body's frame program, the function the probe found and how a raw return lands
             // (vm_backend::call_record::raw_land)
-            struct call_plan { uint64_t epoch = 0; chunk* body = nullptr; const cell_loop* program = nullptr; const script_defined_function* fn = nullptr; uint8_t land = 0; };
+            // a host site's plan (cell_call::host): the binding's scalar entry and its target as the probe found them, the parameters' kinds and
+            // the result's (call_site::ic_host_scalar_kinds, ic_host_scalar_result)
+            struct call_plan {
+                uint64_t epoch = 0; chunk* body = nullptr; const cell_loop* program = nullptr; const script_defined_function* fn = nullptr; uint8_t land = 0;
+                uint8_t host_result = 0; uint32_t host_kinds = 0; bool (*host_invoke)(const void*, const int64_t*, int64_t*) = nullptr; const void* host_target = nullptr;
+            };
             mutable std::vector<call_plan> plans;
         };
         std::vector<cell_loop> cell_loops;

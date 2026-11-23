@@ -537,7 +537,8 @@ namespace jai::vm {
             uint32_t loop = k_invalid_u32;
             // a raw call in flight from this frame: 1 + the call index (its landing, if the callee comes back through the general return, binds
             // nothing of this frame's by reference); and 1 + the call index whose probe found a raw callee without parking it (its arguments
-            // instruction enters it). A block's calls number below 65535 (the translation marks no raw site past that)
+            // instruction enters it; k_host_call_mark set: a host site's, whose arguments instruction calls the scalar entry). A block's calls
+            // number below 32767 where one is marked (the translation marks no raw or host site past that)
             uint16_t raw_landing = 0;
             uint16_t raw_call = 0;
             cell_dirty dirty;
@@ -2580,6 +2581,13 @@ namespace jai::vm {
         JAI_NOINLINE frame* raw_return_lean(frame& f, uint8_t kind, int64_t bits, const chunk::cell_loop*& back_loop);
         bool raw_probe(frame& f, const chunk::cell_loop& loop, uint32_t index);   // the callee found through the site's cache: a raw-enterable frame program
         void park_raw_callee(frame& f, const chunk::cell_loop& loop);             // a raw probe's callee parked as the general probe parks it (a miss before the arguments)
+        // a host site (internal/typed_regions_design.md "Host scalar entries"): the callee name binds the site's cached host function, whose
+        // direct overload has a scalar entry for the call's arity and consumer; the arguments instruction then calls the entry on the argument
+        // cells' words and lands the result word (false: the callee is parked and the door runs)
+        bool host_probe(frame& f, const chunk::cell_loop& loop, uint32_t index);
+        JAI_NOINLINE bool cells_host_call(frame& f, const chunk::cell_loop& loop, uint32_t index, op_status& st);
+        static constexpr uint16_t k_host_call_mark = 0x8000;   // cell_state::raw_call of a host site's unparked probe
+        const uint64_t* definition_epoch_ = nullptr;   // engine::definition_epoch_counter: a host registration or define during a scalar entry moves it
         // back: a raw return that landed in a frame-program caller names it (and its loop) for the frame-program loop to follow; raw_switch_ otherwise
         op_status exec_c_ret(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, frame*& back, const chunk::cell_loop*& back_loop);
         void materialize_raw_window(frame& f) { if (f.raw) [[unlikely]] { build_raw_window(f); } }   // a raw-entered frame's window, built when the general form first needs it
@@ -2910,10 +2918,12 @@ namespace jai::vm {
         op_status call_threw(size_t truncate_to);
         bool call_host_direct(const script_function& callee, size_t argc, op_status& st);
         bool call_host_site(const call_site& site, size_t argc, op_status& st);
+        bool call_host_scalar(const call_site& site, const script_value* args, size_t argc, op_status& st);   // the site's scalar entry on plain arguments of its parameters' kinds
         void fill_host_site(const call_site& site, const script_value& callee);
         static void clear_host_site(const call_site& site) noexcept {
             site.ic_host_target = nullptr;
             site.ic_host_invoke = nullptr;
+            site.ic_host_scalar = nullptr;
             site.ic_host_checked = false;
             if (site.ic_host_owner) { site.ic_host_owner = {}; }
         }

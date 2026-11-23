@@ -527,6 +527,16 @@ namespace jai {
         static constexpr size_t host_direct_any_arity = SIZE_MAX;   // a variadic function's row: any call of 1 to 8 arguments
         void add_host_direct(std::string_view name, size_t arity, host_direct_invoke invoke, const void* target);
         void add_host_direct(const script_value& function, size_t arity, host_direct_invoke invoke, const void* target);   // a function value (a namespace's)
+        // A by-value binding whose parameters are ints, floats, bools and strings and whose result is an int, a float, a bool or nothing: the
+        // same call over payload words (an int's value, a float's bits, a bool's 0 or 1, a string's address), no value built on either side.
+        // false: an int its parameter's type cannot hold, and nothing ran. `kinds` holds each parameter's storage index, four bits a
+        // parameter (detail::host_scalar_int_widens set: an int argument converts as a double does); `result` the result's (TYPEID_NULL: none)
+        using host_scalar_invoke = bool (*)(const void* target, const int64_t* args, int64_t* result);
+        struct host_scalar_entry {
+            host_scalar_invoke invoke = nullptr;
+            uint32_t kinds = 0;
+            uint8_t result = 0;
+        };
 
         using stack_frame = ::jai::stack_frame;
         std::vector<stack_frame> last_stack_trace() const;
@@ -678,7 +688,7 @@ namespace jai {
         void add_variadic_function(const std::string& name, Func&& func, const Options&... options) {
             using call_t = detail::engine_variadic_call<std::decay_t<Func>>;
             const function_options folded = detail::fold_function_options(options...);
-            add_engine_variadic_function(name, bound_function<detail::excludes_execution_time<Options...>>(call_t{std::forward<Func>(func), this}, folded.required), {&call_t::invoke, &call_t::locate},
+            add_engine_variadic_function(name, bound_function<detail::excludes_execution_time<Options...>>(call_t{std::forward<Func>(func), this}, folded.required), {&call_t::invoke, &call_t::locate, {}},
                                          host_result_kind<typename call_t::result_type>());
             apply_function_options(name, folded);
         }
@@ -708,7 +718,11 @@ namespace jai {
             if constexpr (!detail::excludes_execution_time<Options...> && detail::host_lane_params<typename traits::argument_types>()) {
                 if (folded.required.empty()) {
                     using call_t = typename decltype(binder)::by_value_call;
-                    stage_host_direct({&call_t::invoke, &call_t::locate});
+                    host_direct_entry direct{&call_t::invoke, &call_t::locate, {}};
+                    if constexpr (detail::host_scalar_signature<return_type, typename traits::argument_types>()) {
+                        direct.scalar = {&call_t::invoke_scalar, detail::host_scalar_kinds<typename traits::argument_types>(), detail::host_scalar_result_kind<return_type>()};
+                    }
+                    stage_host_direct(direct);
                 }
             }
             
@@ -1491,6 +1505,7 @@ namespace jai {
                 script_value owner{std::monostate{}, nullptr};
                 const uint64_t* generation = nullptr;   // the set's mutation count, read where it lives: the overload holds while it reads at
                 uint64_t at = 0;
+                host_scalar_entry scalar;   // the binding's entry over payload words, when its signature has one
             };
             bool direct_entry(direct_snapshot& out) const;
             // how the overloads taking argc arguments bind argument i (detail::arg_binding bits)
@@ -1733,6 +1748,7 @@ namespace jai {
         struct host_direct_entry {
             checked_result<script_value> (*invoke)(const void*, const script_value*, size_t) = nullptr;
             const void* (*locate)(const script_function&) = nullptr;
+            host_scalar_entry scalar;
         };
         void stage_host_direct(host_direct_entry entry);
         void add_engine_variadic_function(const std::string& name, script_function func, host_direct_entry direct, script_value_type result);

@@ -13176,6 +13176,22 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 					site.ic_native = false;
 					clear_host_site(site);
 				}
+			} else if (thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::constructor && cached_global_env_ && !parallel_worker_ &&
+			           (!thunk->payload.definition_env() || thunk->payload.definition_env().get() == cached_global_env_) && site_script_class(&site, thunk)) {
+				// a script class's constructor, called by the class's name: cached on its identity as a callee the call constructs through
+				// (construct_at_site), the site's constructor memo beside it. A class a block declares keeps the general call: the pin
+				// would hold the block's environment past its end
+				pc.pin = *calleeVal.get_storage().get_if<script_value::TYPEID_FUNCTION>();
+				parked_direct = true;
+				retire_site_callee(site);
+				site.ic_pin = pc.pin;
+				site.ic_identity = &calleeVal.unchecked_as_function();
+				site.ic_fn = nullptr;
+				site.ic_native = true;
+				clear_host_site(site);
+				site.ctor_pin = pc.pin;
+				site.ctor_identity = site.ic_identity;
+				site.ctor_thunk = thunk;
 			} else if (!thunk && !calleeVal.unchecked_as_function().target<script_static_method_dispatch>()) {   // a static method enters in-loop (invoke_callee)
 				// a host callable takes the arguments as they are (invoke_callee's opaque path): held by its payload, cached
 				// on the same identity the script callee's cache keys on. A bound method owns its receiver, which must die with
@@ -13807,6 +13823,7 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 		}
 	}
 
+	if (pc.pin && !pc.fn && pc.pin.get() == site.ctor_identity && site.ctor_thunk && !parallel_worker_) { return construct_at_site(f, site, pc, argc); }
 	// Opaque / arity-window path: today's pooled invoke with the parked value
 	if (pc.native()) {
 		if (op_status st{}; call_host_direct(pc.native_fn(), argc, st)) { return st; }
@@ -13820,6 +13837,34 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 	stack_.truncate(base);
 	if (pc.native()) { return invoke_native(f, *pc.pin, arguments, site); }
 	return invoke_callee(f, std::move(pc.value), arguments, site);
+}
+
+// a class-name call whose probe parked the site's cached constructor (park_callee): the construction invoke_callee makes for the
+// constructor's value, with the class the site remembers: the default construction of a class that declares no constructor, else the
+// constructor's body entered in the loop
+JAI_NOINLINE op_status vm_backend::construct_at_site(frame& f, const call_site& site, const pending_callee& pc, size_t argc) {
+	auto arguments = acquire_arg_vector(argc);
+	arg_vector_return arg_return{this, &arguments, argc};
+	const size_t base = stack_.size() - argc;
+	for (size_t i = 0; i < argc; ++i) {
+		arguments.push_back(std::move(stack_[base + i]));
+	}
+	stack_.truncate(base);
+	const auto* thunk = static_cast<const script_callable_thunk*>(site.ctor_thunk);
+	if (const std::shared_ptr<script_class_definition>* cls = site_script_class(&site, thunk)) {
+		if ((*cls)->get_constructor_asts().empty()) {
+			auto result = construct_default_instance(*cls, arguments);
+			if (!result) {
+				return raise_from(result);
+			}
+			stack_.push_back(std::move(result.value()));
+			return {};
+		}
+		if (thunk->payload.definition_env()) {
+			return enter_constructor_in_loop(f, *cls, thunk->payload.definition_env(), arguments, nullptr, &site);
+		}
+	}
+	return invoke_native(f, *pc.pin, arguments, site);
 }
 
 // a by-value parameter type whose slot can take its argument as it is (the primitive and string rows of bind_parameters)

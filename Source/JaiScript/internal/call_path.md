@@ -82,6 +82,17 @@ bind in place when each one's storage index is its parameter's, one compare per 
 argument takes the per-parameter rows, which decide exactly as before. The method push moves the receiver into the record's
 pooled `this` directly.
 
+## A class-name call constructs through its site
+
+`T(args)` is a call whose callee is the class's constructor value. The probe's slow resolution caches that value at the site as
+it caches a host callable (`call_site::ic_identity`, pinned), with the site's constructor memo beside it (`ctor_identity`,
+`ctor_thunk`, `ctor_cls`, the `new` sites' rows), when the value is a script class's constructor. From then on the probe's fast
+head parks the site's pin while the name still binds that value, and the call constructs through the memo
+(`vm_backend::construct_at_site`): the default construction of a class that declares no constructor, else the constructor's body
+entered in the loop, which is what the general call reaches for the same value. The callee still resolves ahead of the arguments,
+a name bound to another class or a class declared again fails the identity and resolves again, and a parallel worker keeps the
+general call.
+
 ## Measured
 
 Release LTCG, interleaved, pinned to one P core, against the base at an equal-length path (base2/base is the noise row).

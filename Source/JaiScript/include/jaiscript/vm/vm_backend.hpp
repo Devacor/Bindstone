@@ -2931,6 +2931,7 @@ namespace jai::vm {
             return engine_->active_run_pins() ? detail::call_function_value(f, args) : f(args);
         }
         op_status exec_call_from_scratch_general(frame& f, const vm_instruction& ins);
+        op_status construct_at_site(frame& f, const call_site& site, const pending_callee& pc, size_t argc);
         op_status call_parked_script(frame& f, const vm_instruction& ins, const script_defined_function& fn, strong_ptr<script_function_node> pin);
         // the call paths' catch: the active exception becomes the unwinding state (out of line, no texts on the caller's
         // frame); truncate_to drops the stack first (SIZE_MAX keeps it)

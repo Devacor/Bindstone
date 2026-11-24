@@ -50,6 +50,7 @@ namespace Workbench {
 		sceneRoot = viewCamera->make("root");
 		// Sibling after the camera: draws above the scene, stencil-clipped, never serialized, and
 		// stays unscaled so handles keep pixel size at any zoom.
+		cameraOverlay = viewportClip->make("cameraOverlay");
 		gizmoOverlay = viewportClip->make("gizmoOverlay");
 		gizmos = std::make_unique<GizmoLayer>(gizmoOverlay, mouse, history, theme, managers.textLibrary);
 		gizmos->onHandlePressed = [this]() {
@@ -90,7 +91,11 @@ namespace Workbench {
 			if (std::abs(current.x - panStart.x) + std::abs(current.y - panStart.y) > 4) {
 				panMoved = true;
 			}
-			viewCamera->translate(managers.renderer.worldFromScreen(current - panLast));
+			if (cameraMode->active()) {
+				cameraMode->pan(panLast, current);
+			} else {
+				viewCamera->translate(managers.renderer.worldFromScreen(current - panLast));
+			}
 			panLast = current;
 		}));
 
@@ -307,12 +312,15 @@ namespace Workbench {
 			sceneToolbar->grid(sceneGrid->visible());
 		};
 		toolbarActions.onFrame = [this]() { frameSelectionInViewport(); };
+		toolbarActions.onCameraToggle = [this]() { lookThroughCamera(!lookingThroughCamera()); };
 		sceneToolbar = std::make_unique<SceneToolbar>(uiRoot->make("sceneToolbar"), managers.services, theme, focusRouter, history, toolbarActions);
 		dock->floatingHost(uiRoot->make("dockFloating"));
 		meshEditor = std::make_unique<MeshEditor>(gizmoOverlay, uiRoot->make("meshEditorBar"), managers.services, theme, focusRouter, history, mouse, keyBindings);
+		cameraMode = std::make_unique<CameraMode>(viewCamera, cameraOverlay, uiRoot->make("cameraModeBar"), managers.services, theme, focusRouter, history);
+		cameraMode->onExit = [this]() { lookThroughCamera(false); };
 		gizmos->pointerOverScene = [this](const MV::Point<int>& a_screenPoint) {
 			auto worldPoint = managers.renderer.worldFromScreen(a_screenPoint);
-			return dock->viewportAt(worldPoint) && !sceneToolbar->contains(worldPoint) && !meshEditor->barContains(worldPoint);
+			return dock->viewportAt(worldPoint) && !sceneToolbar->contains(worldPoint) && !meshEditor->barContains(worldPoint) && !cameraMode->barContains(worldPoint);
 		};
 		meshEditor->pointerOverScene = gizmos->pointerOverScene;
 		meshEditor->onEdited = [this]() {
@@ -370,7 +378,7 @@ namespace Workbench {
 
 	void App::beginPan(PanButton a_button, const MV::Point<int>& a_screenPoint) {
 		auto worldPoint = managers.renderer.worldFromScreen(a_screenPoint);
-		if (sceneToolbar && sceneToolbar->contains(worldPoint)) {
+		if ((sceneToolbar && sceneToolbar->contains(worldPoint)) || (cameraMode && cameraMode->barContains(worldPoint))) {
 			return;
 		}
 		// the mesh editor has the left button; the others still pan
@@ -1467,6 +1475,7 @@ namespace Workbench {
 			{ "Duplicate", "", [this]() { duplicateSelected(); }, true, {}, [this]() { return selectionIsRemovable(); }, keyText("node.duplicate") },
 			{ "Delete", "", [this]() { deleteSelected(); }, false, {}, [this]() { return selectionIsRemovable(); }, keyText("node.delete") },
 			{ "History", "", [this]() { sceneToolbar->historyShown(!sceneToolbar->historyShown()); }, true, [this]() { return std::string(sceneToolbar->historyShown() ? "Hide History" : "Show History"); } },
+			{ "Look Through Camera", "", [this]() { lookThroughCamera(!lookingThroughCamera()); }, false, [this]() { return std::string(lookingThroughCamera() ? "Back to the Editor's Camera" : "Look Through Camera"); } },
 			{ "Create Child Node", "", [this]() { createChildNode(); }, true } });
 		menuBar->add("Settings", {
 			{ "Editor Settings", "", [this]() { showSettings(); } } });
@@ -1611,6 +1620,21 @@ namespace Workbench {
 		}
 	}
 
+	bool App::lookThroughCamera(bool a_on, const std::string& a_camera) {
+		bool result = true;
+		if (a_on) {
+			parallaxPreview(false);
+			result = cameraMode->begin(sceneRoot, a_camera);
+			if (!result) {
+				messageLog->add(MessageLevel::WARNING, "The scene has no camera to look through");
+			}
+		} else {
+			cameraMode->end();
+		}
+		sceneToolbar->camera(cameraMode->active());
+		return result;
+	}
+
 	void App::refreshTitle() {
 		shownTitle = documentName() + (history.modified() ? "*" : "") + "  -  Bindstone Workbench";
 		if (titleText) {
@@ -1619,6 +1643,7 @@ namespace Workbench {
 	}
 
 	void App::newScene() {
+		lookThroughCamera(false);
 		history.clear();
 		select(nullptr);
 		viewCamera->remove(sceneRoot, false);
@@ -1709,6 +1734,7 @@ namespace Workbench {
 			auto assetPath = assetFile(a_fileName);
 			std::error_code ignored;
 			auto newRoot = MV::Scene::Node::load(std::filesystem::exists(assetPath, ignored) ? assetPath : a_fileName, managers.services, false);
+			lookThroughCamera(false);
 			history.clear();
 			select(nullptr);
 			viewCamera->remove(sceneRoot, false);
@@ -1748,6 +1774,7 @@ namespace Workbench {
 				parallax->authoringPreview(a_displaced ? panelEye : nullptr);
 			}
 		}
+		cameraMode->layersLive(a_displaced);
 	}
 
 	std::filesystem::path App::bindSnapFileFor(const std::shared_ptr<MV::Scene::Node>& a_node, const std::string& a_folder) {
@@ -1939,6 +1966,10 @@ namespace Workbench {
 		}
 		dock->update(a_dt);
 		syncViewportClip();
+		if (cameraMode->active()) {
+			sceneFramePending = false;
+			selectionFramePending = false;
+		}
 		if ((sceneFramePending || selectionFramePending) && !frameAwaitsDraw) {
 			auto view = dock->viewportRect();
 			if (view.size.width > 0.0f && view.size.height > 0.0f) {
@@ -1957,6 +1988,7 @@ namespace Workbench {
 		}
 		meshEditor->layout(dock->viewportRect());
 		meshEditor->update();
+		cameraMode->layout(dock->viewportRect());
 
 		auto hint = dock->cursorHintAt(managers.renderer.worldFromScreen(mouse.position()));
 		if (hint != activeCursor) {
@@ -1985,7 +2017,11 @@ namespace Workbench {
 		}
 		sceneToolbar->position(MV::point(view.position.x + theme.px(8.0f), view.position.y + theme.px(8.0f)));
 		sceneToolbar->viewWidth(view.size.width - theme.px(16.0f));
-		sceneGrid->update(viewCamera->position(), viewCamera->scale().x, MV::BoxAABB<>(view.position, view.size));
+		if (cameraMode->active()) {
+			sceneGrid->update(cameraMode->sceneOrigin(), cameraMode->sceneScale(), MV::BoxAABB<>(view.position, view.size));
+		} else {
+			sceneGrid->update(viewCamera->position(), viewCamera->scale().x, MV::BoxAABB<>(view.position, view.size));
+		}
 		if (panelEye) {
 			panelEye->owner()->position(view.position);
 			panelEye->viewSize(view.size, 1.0f);
@@ -2007,7 +2043,11 @@ namespace Workbench {
 		if (keys[SDL_SCANCODE_UP]) { delta.y += speed; }
 		if (keys[SDL_SCANCODE_DOWN]) { delta.y -= speed; }
 		if (delta.x != 0.0f || delta.y != 0.0f) {
-			viewCamera->translate(delta);
+			if (cameraMode->active()) {
+				cameraMode->panBy(delta);
+			} else {
+				viewCamera->translate(delta);
+			}
 		}
 	}
 
@@ -2207,7 +2247,9 @@ namespace Workbench {
 			}
 			if (event.type == SDL_EVENT_MOUSE_WHEEL) {
 				auto worldPoint = managers.renderer.worldFromScreen(mouse.position());
-				if (dock->viewportAt(worldPoint)) {
+				if (dock->viewportAt(worldPoint) && cameraMode->active()) {
+					cameraMode->zoomBy(1.0f + 0.1f * static_cast<float>(event.wheel.integer_y), mouse.position());
+				} else if (dock->viewportAt(worldPoint)) {
 					float zoom = 1.0f + 0.1f * static_cast<float>(event.wheel.integer_y);
 					auto current = viewCamera->scale();
 					float newScale = std::clamp(current.x * zoom, minimumZoom, maximumZoom);
@@ -2242,6 +2284,7 @@ namespace Workbench {
 
 	void App::render() {
 		managers.renderer.clearScreen();
+		cameraMode->update();
 		if (lastSceneDelta > 0.0) {
 			visor->drawUpdate(lastSceneDelta);
 		} else {
@@ -2283,6 +2326,7 @@ namespace Workbench {
 			guarded("render", [&]() {
 				if (!a_screenshotPath.empty() && frame == a_frameCount - 1) {
 					managers.renderer.clearScreen();
+					cameraMode->update();
 					visor->drawUpdate(lastDelta);
 					uiRoot->drawUpdate(lastDelta);
 					captureScreenshot(a_screenshotPath);

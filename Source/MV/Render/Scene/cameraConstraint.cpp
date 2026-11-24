@@ -35,7 +35,17 @@ namespace MV {
 			return std::static_pointer_cast<CameraConstraint>(shared_from_this());
 		}
 
+		std::shared_ptr<CameraConstraint> CameraConstraint::authoringCamera(const std::shared_ptr<Camera>& a_camera) {
+			authoredCamera = a_camera;
+			return std::static_pointer_cast<CameraConstraint>(shared_from_this());
+		}
+
 		std::shared_ptr<Camera> CameraConstraint::camera() {
+			if (isAuthoring) {
+				if (auto authored = authoredCamera.lock()) {
+					return authored;
+				}
+			}
 			auto result = resolvedCamera.lock();
 			if (result && result->ownerIsAlive() && result->owner()->id() == *cameraNodeId) {
 				return result;

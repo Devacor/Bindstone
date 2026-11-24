@@ -29,6 +29,7 @@
     <ClCompile Include="$(SolutionDir)Source\Workbench\scriptPanel.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\gizmos.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\meshEditor.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Workbench\cameraMode.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\keyBindings.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\menu.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\fileDialog.cpp" />
@@ -67,6 +68,7 @@
     <ClInclude Include="$(SolutionDir)Source\Workbench\scriptPanel.h" />
     <ClInclude Include="$(SolutionDir)Source\Workbench\gizmos.h" />
     <ClInclude Include="$(SolutionDir)Source\Workbench\meshEditor.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\cameraMode.h" />
     <ClInclude Include="$(SolutionDir)Source\Workbench\keyBindings.h" />
     <ClInclude Include="$(SolutionDir)Source\Workbench\menu.h" />
     <ClInclude Include="$(SolutionDir)Source\Workbench\fileDialog.h" />

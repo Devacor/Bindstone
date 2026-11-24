@@ -63,9 +63,11 @@ namespace MV {
 			// Moves the camera by a distance in this node's space.
 			std::shared_ptr<CameraConstraint> moveCamera(const Point<>& a_delta);
 
-			// While authoring (an editor's mode, never saved) it leaves the camera to whoever is moving it.
+			// While authoring (an editor's mode, never saved) it leaves the camera to whoever is moving it, and measures
+			// and moves the authoring camera, when one is given, in place of the one it names.
 			bool authoring() const { return isAuthoring; }
 			std::shared_ptr<CameraConstraint> authoring(bool a_authoring);
+			std::shared_ptr<CameraConstraint> authoringCamera(const std::shared_ptr<Camera>& a_camera);
 
 		protected:
 			CameraConstraint(const std::weak_ptr<Node>& a_owner);
@@ -110,6 +112,7 @@ namespace MV {
 			JAI_NAMED_PROPERTY((PointPrecision), "easing", easingRate, 12.0f);
 
 			std::weak_ptr<Camera> resolvedCamera;
+			std::weak_ptr<Camera> authoredCamera;
 			Point<> releasedAround { 0.5f, 0.5f };
 			bool isHeld = false;
 			bool isAuthoring = false;

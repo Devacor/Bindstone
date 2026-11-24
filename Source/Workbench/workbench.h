@@ -9,6 +9,7 @@
 #include "dock.h"
 #include "gizmos.h"
 #include "meshEditor.h"
+#include "cameraMode.h"
 #include "keyBindings.h"
 #include "sceneTreePanel.h"
 #include "inspector.h"
@@ -177,6 +178,12 @@ namespace Workbench {
 		// The title bar's text: the document's name, starred while it is modified.
 		const std::string& title() const { return shownTitle; }
 
+		// The Scene panel looking through one of the scene's cameras (CameraMode) and back to the editor's own camera,
+		// with its pan and zoom as they were. False when the scene has nothing to look through.
+		bool lookThroughCamera(bool a_on, const std::string& a_camera = "");
+		bool lookingThroughCamera() const { return cameraMode->active(); }
+		CameraMode& cameraView() { return *cameraMode; }
+
 		// Places the Parallax layers on the selected node and below it as a run would for a camera seeing what the Scene
 		// panel shows, until the selection changes. A save writes the layers at rest either way.
 		void parallaxPreview(bool a_preview);
@@ -257,7 +264,9 @@ namespace Workbench {
 		MV::Scene::SafeComponent<MV::Scene::Stencil> viewportStencil;
 		DockRect lastViewportRect;
 
+		std::shared_ptr<MV::Scene::Node> cameraOverlay;
 		std::shared_ptr<MV::Scene::Node> gizmoOverlay;
+		std::unique_ptr<CameraMode> cameraMode;
 		std::unique_ptr<GizmoLayer> gizmos;
 		std::unique_ptr<MeshEditor> meshEditor;
 		std::unique_ptr<SceneGrid> sceneGrid;

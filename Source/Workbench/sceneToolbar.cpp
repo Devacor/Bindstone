@@ -47,13 +47,19 @@ namespace Workbench {
 		}, "Show the grid");
 		place(aids, *gridButton, 1);
 
-		auto view = addGroup(x, 1);
+		auto view = addGroup(x, 2);
 		frameButton = std::make_unique<IconButton>(view, services, theme, "frame", Icon::Frame, [this]() {
 			if (actions.onFrame) {
 				actions.onFrame();
 			}
 		}, "Frame the selection (F)");
 		place(view, *frameButton, 0);
+		cameraButton = std::make_unique<IconButton>(view, services, theme, "camera", Icon::Camera, [this]() {
+			if (actions.onCameraToggle) {
+				actions.onCameraToggle();
+			}
+		}, "Look through the scene's camera");
+		place(view, *cameraButton, 1);
 
 		auto past = addGroup(x, 1);
 		historyButton = std::make_unique<IconButton>(past, services, theme, "history", Icon::History, [this]() {
@@ -100,12 +106,16 @@ namespace Workbench {
 		gridButton->active(a_on);
 	}
 
+	void SceneToolbar::camera(bool a_on) {
+		cameraButton->active(a_on);
+	}
+
 	void SceneToolbar::position(const MV::Point<>& a_topLeft) {
 		host->position(a_topLeft);
 	}
 
 	const IconButton* SceneToolbar::button(int a_index) const {
-		return a_index < 4 ? toolButtons[static_cast<size_t>(a_index)].get() : a_index == 4 ? snapButton.get() : a_index == 5 ? gridButton.get() : a_index == 6 ? frameButton.get() : historyButton.get();
+		return a_index < 4 ? toolButtons[static_cast<size_t>(a_index)].get() : a_index == 4 ? snapButton.get() : a_index == 5 ? gridButton.get() : a_index == 6 ? frameButton.get() : a_index == 8 ? cameraButton.get() : historyButton.get();
 	}
 
 	MV::Point<int> SceneToolbar::buttonScreenPoint(int a_index) const {

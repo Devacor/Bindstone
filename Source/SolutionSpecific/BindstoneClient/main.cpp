@@ -1979,6 +1979,120 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(false, "map.scene's root has a CameraConstraint");
 	}
 
+	// Camera mode: the map looked through the camera its CameraConstraint names, held in the constraint's range, its
+	// bounds' edges and zoom limits a press away, parallax placed for it, and nothing of it in the file
+	expect(a_app.loadScene("Scenes/map.scene"), "the map loads for camera mode");
+	{
+		auto& mouse = *a_managers.services.get<MV::TapDevice>();
+		auto& mode = a_app.cameraView();
+		a_app.runFrames(3);
+		auto readFile = [](const std::string& a_path) {
+			std::ifstream file(a_path, std::ios::binary);
+			return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+		};
+		auto savedBefore = (processScratchDirectory() / "workbench_selftest_camera_before.scene").string();
+		auto savedDuring = (processScratchDirectory() / "workbench_selftest_camera_during.scene").string();
+		expect(a_app.saveScene(savedBefore), "the map saves before camera mode");
+		const auto editorView = a_app.scene()->worldTransform();
+		auto cameras = Workbench::CameraMode::camerasIn(a_app.scene());
+		expect(cameras.size() == 1 && cameras.front() == "WorldCamera", "the map is looked through the camera its constraint names");
+		expect(a_app.lookThroughCamera(true) && a_app.lookingThroughCamera() && mode.lookingThrough() == "WorldCamera", "camera mode starts");
+		a_app.runFrames(3);
+		auto limits = mode.constraint();
+		auto eye = mode.camera();
+		expect(limits && eye, "camera mode looks through the constraint's camera");
+		std::shared_ptr<MV::Scene::Parallax> layer;
+		std::function<void(const std::shared_ptr<MV::Scene::Node>&)> findLayer = [&](const std::shared_ptr<MV::Scene::Node>& a_node) {
+			auto parallax = a_node->component<MV::Scene::Parallax>(true, false);
+			if (!layer && parallax && parallax->translateRatio().x > 0.1f && parallax->translateRatio().x < 0.9f) {
+				layer = parallax.self();
+			}
+			for (auto&& child : *a_node) {
+				findLayer(child);
+			}
+		};
+		findLayer(a_app.scene());
+		expect(layer != nullptr, "the map has a layer at a depth");
+		if (limits && eye && layer) {
+			auto closeTo = [](float a_value, float a_expected) { return std::abs(a_value - a_expected) < 0.05f; };
+			auto layerNode = layer->owner();
+			expect(closeTo(eye->zoom(), limits->minimumZoom(true)) && limits->settled(), "it starts squared up on the soft bounds");
+
+			mode.zoom(100.0f);
+			expect(closeTo(eye->zoom(), limits->maximumZoom(false)), "the zoom stops at the hard maximum");
+			mode.zoom(0.0001f);
+			expect(closeTo(eye->zoom(), limits->minimumZoom(false)), "the zoom stops where the view fits the hard bounds");
+			mode.toZoomLimit(true, true);
+			expect(closeTo(eye->zoom(), limits->maximumZoom(true)), "a press goes to the soft maximum zoom");
+
+			mode.toEdge(false, Workbench::CameraMode::Edge::LEFT);
+			expect(closeTo(limits->visible().minPoint.x, limits->hard().minPoint.x), "a press puts the view at the hard left edge");
+			auto bottom = mode.barButtonScreenPoint("Soft Bottom");
+			expect(bottom.has_value(), "the bar has the soft bounds' edges");
+			if (bottom) {
+				mouse.simulate(*bottom, false);
+				a_app.runFrames(2);
+				mouse.simulate(*bottom, true);
+				a_app.runFrames(2);
+				mouse.simulate(*bottom, false);
+				a_app.runFrames(2);
+				mouse.stopSimulating();
+				expect(closeTo(limits->visible().maxPoint.y, limits->soft().maxPoint.y), "its press puts the view at the soft bottom edge");
+			}
+
+			a_app.runFrames(2);
+			auto placed = layerNode->position();
+			const auto ratio = layer->translateRatio();
+			auto centerBefore = eye->center();
+			mode.panBy(MV::point(-60.0f, 0.0f));
+			a_app.runFrames(2);
+			auto moved = eye->center() - centerBefore;
+			expect(std::abs(moved.x) > 1.0f, "panning in camera mode moves its camera");
+			expect(closeTo(layerNode->position().x - placed.x, (1.0f - ratio.x) * moved.x), "the layer follows its share of the camera's move");
+
+			auto restBefore = layer->restCenter();
+			mode.restParallaxHere();
+			a_app.runFrames(2);
+			expect(closeTo(layerNode->position().x, layer->localOffset().x) && closeTo(layerNode->position().y, layer->localOffset().y), "at the view taken as the rest view the layer is at rest");
+			pressWithControl(SDLK_Z);
+			expect(closeTo(layer->restCenter().x, restBefore.x) && closeTo(layer->restCenter().y, restBefore.y), "undo puts the rest view back");
+
+			auto middle = a_managers.renderer.screenFromWorld(MV::point(a_app.viewport().position.x + a_app.viewport().size.width * 0.5f, a_app.viewport().position.y + a_app.viewport().size.height * 0.4f));
+			mode.zoom(1.0f);
+			centerBefore = eye->center();
+			mouse.simulate(middle, false, false, true);
+			a_app.runFrames(2);
+			for (int step = 1; step <= 4; ++step) {
+				mouse.simulate(MV::Point<int>(middle.x - 10 * step, middle.y), false, false, true);
+				a_app.runFrames(1);
+			}
+			mouse.simulate(MV::Point<int>(middle.x - 40, middle.y), false);
+			a_app.runFrames(2);
+			mouse.stopSimulating();
+			expect(eye->center().x > centerBefore.x + 1.0f, "a middle drag pans the camera, not the editor");
+
+			expect(a_app.saveScene(savedDuring), "the map saves in camera mode");
+			expect(readFile(savedDuring) == readFile(savedBefore), "camera mode leaves the file as it was");
+		}
+		a_app.lookThroughCamera(false);
+		a_app.runFrames(2);
+		expect(!a_app.lookingThroughCamera(), "camera mode ends");
+		const auto editorAfter = a_app.scene()->worldTransform();
+		bool editorKept = true;
+		for (size_t column = 0; column < 4; ++column) {
+			for (size_t row = 0; row < 4; ++row) {
+				editorKept = editorKept && std::abs(editorAfter(column, row) - editorView(column, row)) < 0.001f;
+			}
+		}
+		expect(editorKept, "the editor's own pan and zoom come back");
+		if (layer) {
+			expect(sameXY(layer->owner()->position(), layer->localOffset()), "the layers go back to rest");
+		}
+		std::error_code ignoredRemove;
+		std::filesystem::remove(savedBefore, ignoredRemove);
+		std::filesystem::remove(savedDuring, ignoredRemove);
+	}
+
 	// Parallax: at rest while editing, displaced only by the preview, saved at rest either way
 	expect(a_app.loadScene("Scenes/map.scene"), "the map loads");
 	std::shared_ptr<MV::Scene::Parallax> layer;

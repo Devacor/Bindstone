@@ -124,6 +124,11 @@ namespace Workbench {
 						}
 					}
 				break;
+				case Icon::Camera: {
+					const float lens = std::hypot(a_x - 0.50f, a_y - 0.58f);
+					result = (inBox(a_x, a_y, 0.12f, 0.32f, 0.88f, 0.82f) && lens > 0.18f) || lens <= 0.10f || inBox(a_x, a_y, 0.34f, 0.20f, 0.62f, 0.33f);
+				}
+				break;
 				case Icon::Document:
 					result = inPolygon(a_x, a_y, { {0.20f, 0.06f}, {0.60f, 0.06f}, {0.80f, 0.26f}, {0.80f, 0.94f}, {0.20f, 0.94f} }) &&
 						!nearSegment(a_x, a_y, 0.60f, 0.06f, 0.60f, 0.26f, 0.018f) && !nearSegment(a_x, a_y, 0.60f, 0.26f, 0.80f, 0.26f, 0.018f);

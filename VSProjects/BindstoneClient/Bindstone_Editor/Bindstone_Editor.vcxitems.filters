@@ -60,6 +60,9 @@
     <ClCompile Include="$(SolutionDir)Source\Workbench\meshEditor.cpp">
       <Filter>Workbench</Filter>
     </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Workbench\cameraMode.cpp">
+      <Filter>Workbench</Filter>
+    </ClCompile>
     <ClCompile Include="$(SolutionDir)Source\Workbench\keyBindings.cpp">
       <Filter>Workbench</Filter>
     </ClCompile>
@@ -132,6 +135,9 @@
       <Filter>Workbench</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)Source\Workbench\meshEditor.h">
+      <Filter>Workbench</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Workbench\cameraMode.h">
       <Filter>Workbench</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)Source\Workbench\keyBindings.h">

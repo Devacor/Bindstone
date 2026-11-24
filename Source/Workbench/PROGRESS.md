@@ -1049,6 +1049,41 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
   longer duplicating and Ctrl+K doing it, the settings file keeping and restoring it, Esc and a press giving up, a
   clash warning, and Reset all by its button. Tab through Settings now reaches the binding keys after the fields.
 
+## Increment 52: looking through a scene camera, and the map's camera bounds (2026-11-23)
+- Dev: the game's camera should be a scene Camera the match pilots, the map's hard and soft bounds a component, and
+  parallax kept but easy to square up and test in the editor at different zooms.
+- The match pans and zooms game.scene's WorldCamera (its node's position and `Camera::zoom`); `Camera::eye` leaves
+  out scale, so zoom has one source. map.scene's bounds are a `MV::Scene::CameraConstraint` on its root: hard and
+  soft boxes in the root's space, hard and soft zoom limits (the minimum where the view fits the box unless that is
+  turned off), an easing strength. Held, it clamps to hard; let go, it eases to soft at that strength, per axis as
+  before (a view wider than the box is centred on it, one inside it is pushed back over the edge it crossed).
+- Parallax measures from the camera its View draws through, against a rest view (a centre in the layer's parent's
+  space and a magnification) where it sits at localOffset; it follows `1 - translateRatio` of the camera's move from
+  the rest centre and grows by `(zoom / rest zoom)^(zoomRatio - 1)` about the camera's centre.
+- Gizmos: every box gizmo (a Sprite's, a Text's, a Clickable's, an emitter's area) is outlined and gripped at each
+  corner and each edge by a handle centred on it; a corner moves two sides, an edge one, the body all four, each drag
+  one undo step. A CameraConstraint's gizmo is two of them (`BoundsGizmo` takes any box in its component's space;
+  `BoundsPairGizmo` holds two): hard bounds grey, soft yellow, everything past the hard bounds dimmed and the elastic
+  band between the two shaded yellow.
+- Camera mode (`CameraMode`, `cameraMode.h`): the toolbar's camera button, or Edit > Look Through Camera, shows the
+  scene through one of its Cameras, or through the camera a CameraConstraint names when another scene holds it
+  (map.scene's WorldCamera is game.scene's). The game's window (this monitor's shape, 1080 high) is fitted into the
+  panel and what lies outside it is dimmed; the constraint's boxes are drawn over it.
+  - The mode looks through a camera of its own made to the scene camera's measure, drawn through a view slot of its
+    own, so nothing in the scene moves and nothing of the mode is saved. The editor's camera comes back as it was.
+  - Pan (any drag on open scene, the arrows) and the wheel move that camera, held inside the constraint's hard
+    bounds and zoom range as a player's drag is. A bar along the bottom: the camera (a cycle when the scene has
+    several), a zoom scrub limited to the constraint's range, buttons to each edge of the hard and soft bounds and
+    to each end of their zoom ranges, Rest here (every layer takes this view as its rest view, one undo step) and
+    Done. Every Parallax layer is placed for the mode's camera while it is on.
+- The selection's parallax preview places its layers for a camera seeing what the Scene panel shows.
+- Self-test: the constraint gizmo's hard and soft corners dragged and undone; camera mode on map.scene starting
+  squared up on the soft bounds, the zoom held to the hard range, the zoom and edge buttons, a layer following its
+  share of a pan, Rest here and its undo, a middle drag panning the mode's camera, a save in the mode writing the
+  same file as before it, and the editor's camera and the layers' rest coming back when it ends.
+- Not yet: a perspective camera is looked through as if orthographic; a second View (a minimap) sees the layers
+  where the main camera put them; rotating the mode's camera.
+
 ## Known gaps (next increments)
 - Write-notify = postLoadStep coarse hook; refine per-component.
 - Authoring verbs still only in Source/Editor: the component kinds Add Component does not list — old-editor

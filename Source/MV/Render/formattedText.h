@@ -96,6 +96,14 @@ namespace MV {
 		bool equivalent(const std::string &a_identifier, const std::string &a_file, int a_size, FontStyle a_style) const {
 			return identifier == a_identifier && file == a_file && size == a_size && style == a_style;
 		}
+
+		// This font rasterized for drawing a_scale times larger than its size, for glyphs that stay sharp when a View
+		// shows them grown; itself at a scale of 1. Layout keeps using this font's own measurements.
+		std::shared_ptr<FontDefinition> rasterizedAt(PointPrecision a_scale);
+		// How many of its pixels make one unit of the font it was rasterized from: 1 for a font as made.
+		PointPrecision rasterScale() const {
+			return ourRasterScale;
+		}
 	private:
 		std::string file;
 		TTF_Font* font = nullptr;
@@ -108,6 +116,8 @@ namespace MV {
 
 		typedef std::map<std::string, std::shared_ptr<CharacterDefinition>> CachedGlyphs;
 		CachedGlyphs cachedGlyphs;
+		PointPrecision ourRasterScale = 1.0f;
+		std::map<int, std::shared_ptr<FontDefinition>> rasterizedFonts;
 		std::map<std::string, PointPrecision> measuredGlyphWidths;
 		PointPrecision glyphWidth(const std::string &a_glyph);
 
@@ -228,6 +238,9 @@ namespace MV {
 		Scale scale() const;
 		void scale(const Scale& a_scale);
 
+		// Draws its glyph from the font rasterized a_scale times larger, in the same box.
+		void rasterScale(PointPrecision a_scale);
+
 		void applyState(const std::shared_ptr<FormattedState> &a_state, bool a_isPassword = false);
 		bool partOfFormat(bool a_isPartOfFormat);
 		bool partOfFormat() const;
@@ -242,10 +255,13 @@ namespace MV {
 		std::shared_ptr<FormattedState> state;
 
 	private:
+		void applyGlyph();
+
 		bool isPartOfFormat = false;
 		Point<> basePosition;
 		Point<> offsetPosition;
 		Scale characterScale;
+		PointPrecision glyphRasterScale = 1.0f;
 		FormattedCharacter(const std::shared_ptr<Scene::Node> &parent, const std::string &a_character, const std::shared_ptr<FormattedState> &a_state, bool a_isPassword);
 	};
 
@@ -380,6 +396,13 @@ namespace MV {
 
 		std::shared_ptr<Scene::Node> scene() const;
 
+		// The scale its glyphs are rasterized at (FontDefinition::rasterizedAt); a Text sets it to how large its View
+		// draws it.
+		PointPrecision rasterScale() const {
+			return glyphRasterScale;
+		}
+		void rasterScale(PointPrecision a_scale);
+
 		FormattedText& operator=(const FormattedText& a_rhs) {
 			defaultState(a_rhs.defaultStateIdentifier);
 			textWidth = a_rhs.textWidth;
@@ -448,6 +471,7 @@ namespace MV {
 		PointPrecision textWidth;
 		PointPrecision minimumTextLineHeight;
 		bool showAsPassword = false;
+		PointPrecision glyphRasterScale = 1.0f;
 
 		TextJustification textJustification = TextJustification::LEFT;
 	};

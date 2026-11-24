@@ -154,8 +154,8 @@ namespace Workbench {
 		auto thumbNode = row->make("scroller");
 		thumbNode->position(MV::point(track->position().x + trackInset, trackY + trackHeight + theme.px(1.0f)));
 		scrollThumb = thumbNode->attach<MV::Scene::Clickable>(mouse).self();
-		scrollThumb->onDrag.connect("scroll", [this](const std::shared_ptr<MV::Scene::Clickable>&, const MV::Point<int>&, const MV::Point<int>& a_delta) {
-			scrollBy(static_cast<float>(a_delta.x));
+		scrollThumb->onDrag.connect("scroll", [this](const std::shared_ptr<MV::Scene::Clickable>& a_thumb, const MV::Point<int>&, const MV::Point<int>& a_delta) {
+			scrollBy(worldDelta(a_thumb->owner()->renderer(), a_delta).x);
 		});
 		scrollThumbFace = thumbNode->make("face")->attach<MV::Scene::Sprite>().self();
 		scrollThumbFace->color(theme.scrollThumb());

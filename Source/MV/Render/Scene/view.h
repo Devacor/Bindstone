@@ -42,6 +42,10 @@ namespace MV {
 			std::shared_ptr<View> subject(const std::string& a_id);
 
 			std::shared_ptr<Camera> camera() const;
+			// At run time only, never saved: look through this Camera, and draw this node, wherever they are (an editor's
+			// preview of a camera in the scene it edits). Null goes back to `camera` and `subject`.
+			std::shared_ptr<View> lookThrough(const std::shared_ptr<Camera>& a_camera);
+			std::shared_ptr<View> show(const std::shared_ptr<Node>& a_subject);
 			// The slot its subtree draws and converts through; -1 while it has none.
 			int32_t slot() const { return viewSlot; }
 			// The whole matrix from the scene's world to the window's clip space.
@@ -102,6 +106,8 @@ namespace MV {
 			JAI_NAMED_PROPERTY((std::string), "camera", cameraNodeId);
 			JAI_NAMED_PROPERTY((std::string), "subject", subjectId);
 
+			std::weak_ptr<Camera> cameraOverride;
+			std::weak_ptr<Node> subjectOverride;
 			int32_t viewSlot = -1;
 			bool isAuthoring = false;
 			bool scissored = false;

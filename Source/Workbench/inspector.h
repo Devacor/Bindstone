@@ -8,6 +8,7 @@
 #include "dock.h"
 #include "menu.h"
 #include "widgets.h"
+#include "MV/Render/Scene/view.h"
 #include <jaiscript/properties/property_manager.hpp>
 
 namespace Workbench {
@@ -30,6 +31,12 @@ namespace Workbench {
 		// Parallax preview bridge: the row shows on a node that has an enabled Parallax layer on it or below it.
 		std::function<void(bool)> onParallaxPreview;
 		std::function<bool()> parallaxPreviewActive;
+		// The scene being edited, which a selected Camera's preview shows.
+		std::function<std::shared_ptr<MV::Scene::Node>()> editedScene;
+
+		void update(double a_dt) override;
+		// The View showing the selected Camera's picture, while one is inspected.
+		std::shared_ptr<MV::Scene::View> cameraPreview() const { return cameraPreviewView.lock(); }
 
 		// A press on a reference field selects the node it names.
 		std::function<void(const std::shared_ptr<MV::Scene::Node>&)> onSelectNode;
@@ -120,6 +127,9 @@ namespace Workbench {
 		void openColorPopup(const std::weak_ptr<MV::Scene::Component>& a_component, const std::string& a_propertyName, jai::property_base* a_property, const std::weak_ptr<MV::Scene::Sprite>& a_swatch, const MV::Point<int>& a_screenPoint);
 		void closeColorPopup(bool a_keepColor);
 		std::shared_ptr<MV::Scene::Node> makeRow(const std::string& a_label);
+		void addCameraPreview(const std::shared_ptr<MV::Scene::Camera>& a_camera);
+		std::weak_ptr<MV::Scene::View> cameraPreviewView;
+		std::weak_ptr<MV::Scene::Sprite> cameraPreviewFrame;
 		static void notifyEdited(const std::shared_ptr<MV::Scene::Component>& a_component);
 
 		float labelWidth() const { return std::clamp(panelWidth * 0.4f, theme->px(80.0f), theme->px(180.0f)); }

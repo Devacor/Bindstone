@@ -1,5 +1,7 @@
 #include "text.h"
 #include "MV/Utility/tinyutf8.h"
+#include <algorithm>
+#include <cmath>
 
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/signals/signal.hpp>
@@ -158,7 +160,30 @@ namespace MV{
 			}
 		}
 
+		// How many window pixels one of the text's units covers where it is drawn, stepped to quarter octaves and
+		// rounded up, so glyphs are rasterized at least as large as they show.
+		static PointPrecision glyphRasterScaleFor(Node& a_owner) {
+			auto& renderer = a_owner.renderer();
+			if (renderer.headless()) {
+				return 1.0f;
+			}
+			const TransformMatrix full = renderer.cameraProjectionMatrix(a_owner.cameraId()) * a_owner.worldTransform();
+			const auto pixels = renderer.window().drawableSize();
+			const PointPrecision depth = std::abs(full(3, 3)) > 0.0001f ? std::abs(full(3, 3)) : 1.0f;
+			const PointPrecision across = std::hypot(full(0, 0), full(0, 1)) * static_cast<PointPrecision>(pixels.width) * 0.5f / depth;
+			const PointPrecision down = std::hypot(full(1, 0), full(1, 1)) * static_cast<PointPrecision>(pixels.height) * 0.5f / depth;
+			const PointPrecision shown = std::max(across, down);
+			if (!(shown > 0.0f)) {
+				return 1.0f;
+			}
+			const PointPrecision steps = std::ceil(std::log2(shown) * 4.0f - 0.05f) / 4.0f;
+			return std::clamp(std::exp2(steps), 0.5f, 8.0f);
+		}
+
 		void Text::updateImplementation(double a_dt) {
+			if (formattedText) {
+				formattedText->rasterScale(glyphRasterScaleFor(*owner()));
+			}
 			if (displayCursor) {
 				accumulatedTime += a_dt;
 				if (accumulatedTime > BLINK_DURATION) {

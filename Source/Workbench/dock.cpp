@@ -270,8 +270,9 @@ namespace Workbench {
 			});
 			mover->onDrag.connect("move", [this, leaf](const std::shared_ptr<MV::Scene::Clickable>&, const MV::Point<int>&, const MV::Point<int>& a_delta) {
 				if (auto* moving = floatOf(leaf); moving && lastArea.size.width > 0.0f && lastArea.size.height > 0.0f) {
-					moving->fraction.position.x += static_cast<float>(a_delta.x) / lastArea.size.width;
-					moving->fraction.position.y += static_cast<float>(a_delta.y) / lastArea.size.height;
+					const auto travel = worldDelta(uiRoot->renderer(), a_delta);
+					moving->fraction.position.x += travel.x / lastArea.size.width;
+					moving->fraction.position.y += travel.y / lastArea.size.height;
 					layoutFloat(*moving);
 				}
 			});
@@ -289,8 +290,9 @@ namespace Workbench {
 		resize->onDrag.connect("resize", [this, leaf](const std::shared_ptr<MV::Scene::Clickable>&, const MV::Point<int>&, const MV::Point<int>& a_delta) {
 			if (auto* sizing = floatOf(leaf); sizing && lastArea.size.width > 0.0f && lastArea.size.height > 0.0f) {
 				auto current = worldRectOf(sizing->fraction);
-				sizing->fraction.size.width = (current.size.width + static_cast<float>(a_delta.x)) / lastArea.size.width;
-				sizing->fraction.size.height = (current.size.height + static_cast<float>(a_delta.y)) / lastArea.size.height;
+				const auto travel = worldDelta(uiRoot->renderer(), a_delta);
+				sizing->fraction.size.width = (current.size.width + travel.x) / lastArea.size.width;
+				sizing->fraction.size.height = (current.size.height + travel.y) / lastArea.size.height;
 				layoutFloat(*sizing);
 			}
 		});
@@ -489,7 +491,7 @@ namespace Workbench {
 			Panel* activePanel = a_leaf->panels[static_cast<size_t>(a_leaf->active)];
 			float viewHeight = viewHeightOf(rectIt->second);
 			if (viewHeight > 0.0f) {
-				scrollOffsets[activePanel] += static_cast<float>(a_delta.y) * activePanel->contentHeight() / viewHeight;
+				scrollOffsets[activePanel] += worldDelta(uiRoot->renderer(), a_delta).y * activePanel->contentHeight() / viewHeight;
 				syncScroll(a_leaf);
 			}
 		});
@@ -587,7 +589,8 @@ namespace Workbench {
 			if (extent <= 0.0f) {
 				return;
 			}
-			float deltaAlongAxis = static_cast<float>(a_split->vertical ? a_delta.y : a_delta.x);
+			const auto travel = worldDelta(uiRoot->renderer(), a_delta);
+			float deltaAlongAxis = a_split->vertical ? travel.y : travel.x;
 			a_split->ratio = std::clamp(a_split->ratio + deltaAlongAxis / extent, 0.1f, 0.9f);
 			layout(lastArea);
 		});

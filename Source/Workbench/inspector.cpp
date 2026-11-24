@@ -1,6 +1,7 @@
 #include "inspector.h"
 #include "gizmos.h"
 #include "MV/Render/Scene/focusGroup.h"
+#include "MV/Render/Scene/view.h"
 #include <sstream>
 #include <typeindex>
 
@@ -320,6 +321,51 @@ namespace Workbench {
 		for (auto&& [name, property] : properties) {
 			addPropertyRow(a_component, name, property);
 		}
+		if (auto camera = std::dynamic_pointer_cast<MV::Scene::Camera>(a_component)) {
+			addCameraPreview(camera);
+		}
+	}
+
+	// A View of its own inside the panel: it draws the edited scene through the camera into the frame's rectangle of
+	// the window, as a picture-in-picture would.
+	void InspectorPanel::addCameraPreview(const std::shared_ptr<MV::Scene::Camera>& a_camera) {
+		auto scene = editedScene ? editedScene() : nullptr;
+		if (!scene) {
+			return;
+		}
+		auto pixels = contentNode->renderer().targetPixelSize();
+		const float width = panelWidth - rowIndent - theme->pad;
+		const float height = std::round(width * static_cast<float>(std::max(pixels.height, 1)) / static_cast<float>(std::max(pixels.width, 1)));
+		auto row = contentNode->make(MV::guid("cameraPreview_"));
+		auto frame = row->attach<MV::Scene::Sprite>();
+		frame->bounds(MV::BoxAABB<>(MV::point(rowIndent, 0.0f), MV::point(rowIndent + width, height)))->color(theme->fieldBg());
+		auto view = row->make("preview")->attach<MV::Scene::View>();
+		view->clear(MV::Scene::View::Clear::COLOR)->lookThrough(a_camera)->show(scene);
+		view->color(theme->windowBg());
+		cameraPreviewView = view.self();
+		cameraPreviewFrame = frame.self();
+		update(0.0);
+	}
+
+	void InspectorPanel::update(double) {
+		auto view = cameraPreviewView.lock();
+		auto frame = cameraPreviewFrame.lock();
+		if (!view || !frame) {
+			return;
+		}
+		const auto pixels = contentNode->renderer().targetPixelSize();
+		if (pixels.width <= 0 || pixels.height <= 0) {
+			return;
+		}
+		const auto shown = frame->screenBounds();
+		const MV::BoxAABB<> fractions(
+			MV::point(static_cast<float>(shown.minPoint.x) / pixels.width, static_cast<float>(shown.minPoint.y) / pixels.height),
+			MV::point(static_cast<float>(shown.maxPoint.x) / pixels.width, static_cast<float>(shown.maxPoint.y) / pixels.height));
+		const auto current = view->viewport();
+		if (std::abs(current.minPoint.x - fractions.minPoint.x) > 0.0001f || std::abs(current.minPoint.y - fractions.minPoint.y) > 0.0001f ||
+			std::abs(current.maxPoint.x - fractions.maxPoint.x) > 0.0001f || std::abs(current.maxPoint.y - fractions.maxPoint.y) > 0.0001f) {
+			view->viewport(fractions);
+		}
 	}
 
 	void InspectorPanel::notifyEdited(const std::shared_ptr<MV::Scene::Component>& a_component) {
@@ -607,6 +653,16 @@ namespace Workbench {
 			enumField(MV::Scene::Clickable::BoundsType{}, { "Local", "Node", "Children", "NodeChildren", "None" });
 		} else if (typeId == std::type_index(typeid(MV::Scene::FocusGroup::Kind))) {
 			enumField(MV::Scene::FocusGroup::Kind{}, { "Window", "Tabs" });
+		} else if (typeId == std::type_index(typeid(MV::Scene::View::Clear))) {
+			enumField(MV::Scene::View::Clear{}, { "Nothing", "Depth", "Color" });
+		} else if (typeId == std::type_index(typeid(MV::Scene::View::Depth))) {
+			enumField(MV::Scene::View::Depth{}, { "Off", "Per object", "Shared" });
+		} else if (typeId == std::type_index(typeid(MV::Scene::Camera::Projection))) {
+			enumField(MV::Scene::Camera::Projection{}, { "Orthographic", "Perspective" });
+		} else if (typeId == std::type_index(typeid(MV::Scene::Camera::Units))) {
+			enumField(MV::Scene::Camera::Units{}, { "Pixels", "Scaled pixels", "Reference" });
+		} else if (typeId == std::type_index(typeid(MV::Scene::Camera::Origin))) {
+			enumField(MV::Scene::Camera::Origin{}, { "Top left", "Center" });
 		} else if (typeId == std::type_index(typeid(MV::BoxAABB<>))) {
 			auto box = *a_property->value_as<MV::BoxAABB<>>();
 			std::ostringstream text;

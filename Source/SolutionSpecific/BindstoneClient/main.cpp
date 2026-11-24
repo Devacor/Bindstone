@@ -1607,9 +1607,9 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 				}
 				a_app.runFrames(4);
 				std::string all = componentNames(node);
-				expect(all == "Sprite Text Clickable Button FocusGroup Stencil Grid Parallax Light ", "every kind is on the node in the order it was added: " + all);
+				expect(all == "Sprite Text Clickable Button FocusGroup Stencil Grid Parallax Light View Camera ", "every kind is on the node in the order it was added: " + all);
 				expect(a_app.removeComponent(node->component<MV::Scene::Clickable>(true, false).self()), "one from the middle comes off");
-				expect(componentNames(node) == "Sprite Text Button FocusGroup Stencil Grid Parallax Light ", "leaving the rest: " + componentNames(node));
+				expect(componentNames(node) == "Sprite Text Button FocusGroup Stencil Grid Parallax Light View Camera ", "leaving the rest: " + componentNames(node));
 				pressWithControl(SDLK_Z);
 				a_app.runFrames(3);
 				expect(componentNames(node) == all, "and undo puts it back where it was, not last: " + componentNames(node));
@@ -2327,7 +2327,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		auto bar = docking.floatBarScreenPoint("Settings");
 		drag(bar, bar + MV::Point<int>(-140, 90));
 		auto movedFloat = docking.floatRect("Settings");
-		expect(std::abs((movedFloat.position.x - floated.position.x) - a_managers.renderer.worldFromScreen(MV::Point<int>(-140, 0)).x) < 3.0f && movedFloat.position.y > floated.position.y + 20.0f && std::abs(movedFloat.size.width - floated.size.width) < 1.0f, "dragging its tab bar moves it and keeps its size");
+		expect(std::abs((movedFloat.position.x - floated.position.x) - a_managers.renderer.worldFromScreen(MV::Point<int>(-140, 0)).x) < 3.0f && movedFloat.position.y > floated.position.y + 20.0f && std::abs(movedFloat.size.width - floated.size.width) < 1.0f, "dragging its tab bar moves it and keeps its size: moved " + std::to_string(movedFloat.position.x - floated.position.x) + ", " + std::to_string(movedFloat.position.y - floated.position.y) + " from " + std::to_string(floated.position.x) + "," + std::to_string(floated.position.y));
 		auto corner = docking.floatCornerScreenPoint("Settings");
 		drag(corner, corner + MV::Point<int>(120, 80));
 		auto sizedFloat = docking.floatRect("Settings");
@@ -2668,6 +2668,22 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		std::filesystem::remove_all(folder, ignored);
 	}
 
+	{
+		a_app.newScene();
+		auto eye = a_app.createChildNode();
+		eye->id("Eye");
+		auto camera = eye->attach<MV::Scene::Camera>();
+		a_app.hierarchy().refresh();
+		a_app.select(eye);
+		a_app.runFrames(3);
+		auto preview = a_app.inspector().cameraPreview();
+		expect(preview && preview->slot() > 0 && preview->camera() == camera.self() && preview->viewport().width() > 0.0f, "a selected Camera shows its picture in the inspector");
+		preview.reset();
+		a_app.select(nullptr);
+		a_app.runFrames(2);
+		expect(!a_app.inspector().cameraPreview(), "and the picture goes when the Camera is no longer inspected");
+	}
+
 	RunMeshEditorSelfTest(a_app, a_managers, expect, pressWithControl);
 	RunKeyBindingsSelfTest(a_app, a_managers, expect);
 }
@@ -2695,13 +2711,19 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 	}
 	managers.renderer.window().setTitle("Bindstone Workbench");
 
+	// The Workbench's world is the window in logical units: the OS's scale for the window turns them into its
+	// pixels, so everything laid out in the world keeps its physical size, and follows the window to another display.
+	auto fitWorldToScale = [&managers]() {
+		const auto pixels = managers.renderer.window().drawableSize();
+		const float scale = managers.renderer.window().uiScale();
+		managers.renderer.world().resize(MV::Size<>(static_cast<float>(pixels.width) / scale, static_cast<float>(pixels.height) / scale));
+		managers.renderer.resetViewport();
+	};
 	float workbenchUiScale = managers.renderer.window().uiScale();
 	if (a_smoke) {
 		// the smoke modes keep one logical size on every display, so their shots compare
 		if (workbenchUiScale > 1.0f) {
-			// the world first: the window's resize rebuilds the projection from it
 			MV::Size<int> launchSize(static_cast<int>(1600 * workbenchUiScale), static_cast<int>(900 * workbenchUiScale));
-			managers.renderer.world().resize(MV::cast<MV::PointPrecision>(launchSize));
 			managers.renderer.window().resize(launchSize);
 			if (auto* sdlWindow = SDL_GL_GetCurrentWindow()) {
 				SDL_SetWindowPosition(sdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
@@ -2710,19 +2732,24 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 	} else {
 		managers.renderer.window().maximize();
 	}
-	Workbench::Theme workbenchTheme(workbenchUiScale);
+	fitWorldToScale();
+	auto worldFollowsScale = managers.renderer.onUiScaleChanged.connect([fitWorldToScale](float) { fitWorldToScale(); });
+	// logical units: the interface's Views grow them by the window's scale, which follows the display it is on
+	Workbench::Theme workbenchTheme;
 	MV::FontDefinition::make(managers.textLibrary, "default", "Fonts/Verdana.ttf", 14);
 	MV::FontDefinition::make(managers.textLibrary, "small", "Fonts/Verdana.ttf", 9);
 	MV::FontDefinition::make(managers.textLibrary, "big", "Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
-	MV::FontDefinition::make(managers.textLibrary, "wb-small", "Fonts/Verdana.ttf", static_cast<int>(12 * workbenchUiScale));
+	MV::FontDefinition::make(managers.textLibrary, "wb-small", "Fonts/Verdana.ttf", 12);
 
-	int workbenchResizeBorder = std::max(6, static_cast<int>(8 * workbenchUiScale));
-	int workbenchTitleBarHeight = static_cast<int>(workbenchTheme.titleBarHeight);
-	int workbenchTitleButtonStrip = static_cast<int>(workbenchTheme.titleButtonWidth * 3.0f);
-	// the app reports how much of the title bar's left takes presses once it has built its menus
+	// the app reports how much of the title bar's left takes presses once it has built its menus (logical units)
 	auto workbenchTitleInteractiveWidth = std::make_shared<int>(0);
 	auto& workbenchWindow = managers.renderer.window();
-	workbenchWindow.hitTest([&workbenchWindow, workbenchResizeBorder, workbenchTitleBarHeight, workbenchTitleButtonStrip, workbenchTitleInteractiveWidth](const MV::Point<int>& a_point, const MV::Size<int>& a_size) -> SDL_HitTestResult {
+	workbenchWindow.hitTest([&workbenchWindow, &workbenchTheme, workbenchTitleInteractiveWidth](const MV::Point<int>& a_point, const MV::Size<int>& a_size) -> SDL_HitTestResult {
+		const float scale = workbenchWindow.uiScale();
+		const int workbenchResizeBorder = std::max(6, static_cast<int>(8 * scale));
+		const int workbenchTitleBarHeight = static_cast<int>(workbenchTheme.titleBarHeight * scale);
+		const int workbenchTitleButtonStrip = static_cast<int>(workbenchTheme.titleButtonWidth * 3.0f * scale);
+		const int interactiveWidth = static_cast<int>(static_cast<float>(*workbenchTitleInteractiveWidth) * scale);
 		if (!workbenchWindow.maximized()) {
 			bool onLeft = a_point.x < workbenchResizeBorder;
 			bool onRight = a_point.x >= a_size.width - workbenchResizeBorder;
@@ -2741,7 +2768,7 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 			if (a_point.x >= a_size.width - workbenchTitleButtonStrip) {
 				return SDL_HITTEST_NORMAL;
 			}
-			if (a_point.x < *workbenchTitleInteractiveWidth) {
+			if (a_point.x < interactiveWidth) {
 				return SDL_HITTEST_NORMAL;   // menus and transport buttons
 			}
 			return SDL_HITTEST_DRAGGABLE;

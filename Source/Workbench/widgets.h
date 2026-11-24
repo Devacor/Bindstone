@@ -13,6 +13,12 @@
 
 namespace Workbench {
 
+	// A pointer's travel on screen in world units: the Workbench's world is the window in logical units, which a
+	// display's scale makes smaller than its pixels.
+	inline MV::Point<> worldDelta(MV::Draw2D& a_renderer, const MV::Point<int>& a_delta) {
+		return a_renderer.worldFromScreen(a_delta) - a_renderer.worldFromScreen(MV::Point<int>());
+	}
+
 	// Fixed notation, trailing zeros dropped: 993.646, 340, 0 (never -0 or 1e-05).
 	std::string formatNumberCompact(float a_value, int a_maximumDecimals = 3);
 

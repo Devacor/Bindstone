@@ -226,6 +226,7 @@ namespace Workbench {
 		// to it there would not be saved.
 		bool contentLocked(const std::shared_ptr<MV::Scene::Node>& a_node, const std::string& a_verb);
 		void previewedLayersDisplaced(bool a_displaced);
+		static void authorViews(const std::shared_ptr<MV::Scene::Node>& a_node);
 		static void forEachParallax(const std::shared_ptr<MV::Scene::Node>& a_node, const std::function<void(const std::shared_ptr<MV::Scene::Parallax>&)>& a_visit);
 		void frameNode(const DockRect& a_view, const std::shared_ptr<MV::Scene::Node>& a_node, float a_fill, float a_maximumZoom);
 		template <typename Step>

@@ -41,9 +41,23 @@ namespace MV {
 			return std::static_pointer_cast<View>(shared_from_this());
 		}
 
+		std::shared_ptr<View> View::lookThrough(const std::shared_ptr<Camera>& a_camera) {
+			cameraOverride = a_camera;
+			refresh();
+			return std::static_pointer_cast<View>(shared_from_this());
+		}
+
+		std::shared_ptr<View> View::show(const std::shared_ptr<Node>& a_subject) {
+			subjectOverride = a_subject;
+			return std::static_pointer_cast<View>(shared_from_this());
+		}
+
 		std::shared_ptr<Camera> View::camera() const {
 			if (!ownerIsAlive()) {
 				return nullptr;
+			}
+			if (auto overridden = cameraOverride.lock()) {
+				return overridden;
 			}
 			if (!cameraNodeId->empty()) {
 				auto node = owner()->id() == *cameraNodeId ? owner() : owner()->get(cameraNodeId, false);
@@ -151,14 +165,20 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> View::subjectNode() const {
-			if (subjectId->empty() || !ownerIsAlive()) {
+			if (!ownerIsAlive()) {
 				return nullptr;
 			}
-			auto top = owner();
-			while (top->parent()) {
-				top = top->parent();
+			auto found = subjectOverride.lock();
+			if (!found) {
+				if (subjectId->empty()) {
+					return nullptr;
+				}
+				auto top = owner();
+				while (top->parent()) {
+					top = top->parent();
+				}
+				found = top->id() == *subjectId ? top : top->get(subjectId, false);
 			}
-			auto found = top->id() == *subjectId ? top : top->get(subjectId, false);
 			// a subject that holds this View would draw it again inside itself
 			for (auto node = owner(); found && node; node = node->parent()) {
 				if (node == found) {
@@ -225,6 +245,7 @@ namespace MV {
 				return eye ? eye->sees() : 0xFFFFFFFFu;
 			}();
 			if (clearKind.get() == Clear::COLOR) {
+				lazyInitializeShader();
 				drawingColor = true;
 				Sprite::defaultDrawImplementation();
 				drawingColor = false;

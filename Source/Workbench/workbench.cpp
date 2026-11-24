@@ -199,6 +199,7 @@ namespace Workbench {
 			return gizmos->editedComponent() == a_component || (meshEditor && meshEditor->editing() == a_component);
 		};
 		inspectorPanel->onParallaxPreview = [this](bool a_preview) { parallaxPreview(a_preview); };
+		inspectorPanel->editedScene = [this]() { return sceneRoot; };
 		inspectorPanel->onSelectNode = [this](const std::shared_ptr<MV::Scene::Node>& a_node) { select(a_node); };
 		inspectorPanel->onRemoveComponent = [this](const std::shared_ptr<MV::Scene::Component>& a_component) { removeComponent(a_component); };
 		inspectorPanel->onAddComponent = [this](const MV::Point<int>& a_screenPoint) { menuBar->openContext(a_screenPoint, addComponentItems()); };
@@ -524,6 +525,7 @@ namespace Workbench {
 				placed->position(parent->localFromScreen(a_screenPoint));
 			}
 			forEachParallax(placed, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
+			authorViews(placed);
 			link->markUnchanged();
 			history.record("place " + std::filesystem::path(a_fileName).filename().string(),
 				[parent, placed]() {
@@ -809,6 +811,7 @@ namespace Workbench {
 				link->refresh();
 				auto node = link->owner();
 				forEachParallax(node, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
+				authorViews(node);
 				link->markUnchanged();
 			}
 		}
@@ -980,6 +983,14 @@ namespace Workbench {
 				} },
 				{ "Light", [](const std::shared_ptr<MV::Scene::Node>& a_node, Managers&, MV::TapDevice&) -> std::shared_ptr<MV::Scene::Component> {
 					return a_node->attach<MV::Scene::Light>().self();
+				} },
+				{ "View", [](const std::shared_ptr<MV::Scene::Node>& a_node, Managers&, MV::TapDevice&) -> std::shared_ptr<MV::Scene::Component> {
+					auto view = a_node->attach<MV::Scene::View>();
+					view->authoring(true);
+					return view.self();
+				} },
+				{ "Camera", [](const std::shared_ptr<MV::Scene::Node>& a_node, Managers&, MV::TapDevice&) -> std::shared_ptr<MV::Scene::Component> {
+					return a_node->attach<MV::Scene::Camera>().self();
 				} } };
 		}
 
@@ -1154,6 +1165,7 @@ namespace Workbench {
 		try {
 			auto copy = original->clone();
 			forEachParallax(copy, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
+			authorViews(copy);
 			std::weak_ptr<MV::Scene::Node> weakOriginal = original;
 			history.record("duplicate " + nodeLabel(original),
 				[this, parent, copy]() {
@@ -1543,6 +1555,13 @@ namespace Workbench {
 		}
 	}
 
+	// The editor shows a scene through its own view: a View in it lays nothing out while it is edited.
+	void App::authorViews(const std::shared_ptr<MV::Scene::Node>& a_node) {
+		for (auto&& view : a_node->componentsInChildren<MV::Scene::View>(false, true)) {
+			std::get<0>(view)->authoring(true);
+		}
+	}
+
 	void App::forEachParallax(const std::shared_ptr<MV::Scene::Node>& a_node, const std::function<void(const std::shared_ptr<MV::Scene::Parallax>&)>& a_visit) {
 		if (auto parallax = a_node->component<MV::Scene::Parallax>(true, false)) {
 			a_visit(parallax.self());
@@ -1674,6 +1693,7 @@ namespace Workbench {
 			viewCamera->add(sceneRoot);
 			sceneRoot->postLoadStep();
 			forEachParallax(sceneRoot, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
+			authorViews(sceneRoot);
 			{
 				// the layers going to rest is not a change to a linked node, and its file is read as of now
 				bindSnapWriteTimes.clear();

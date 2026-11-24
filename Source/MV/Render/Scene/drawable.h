@@ -428,14 +428,15 @@ namespace MV {
 			std::shared_ptr<TextureDefinition> foundNormalMap;
 			std::string foundNormalMapFor;   // the texture 0 file foundNormalMap was looked for beside
 
+			// a component that draws itself outside draw() (a View's clear) asks for its shader first
+			void lazyInitializeShader();
+
 		private:
 			virtual void clearTextureCoordinates(size_t a_textureId) {
 			}
 
 			virtual void updateTextureCoordinates(size_t a_textureId) {
 			}
-
-			void lazyInitializeShader();
 
 			void forceInitializeShader();
 		};

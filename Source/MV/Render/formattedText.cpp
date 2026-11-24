@@ -57,6 +57,25 @@ namespace MV {
 
 
 
+	std::shared_ptr<FontDefinition> FontDefinition::rasterizedAt(PointPrecision a_scale) {
+		const int pixelSize = static_cast<int>(std::lround(static_cast<PointPrecision>(size) * a_scale));
+		if (pixelSize == size || pixelSize <= 0 || ourRasterScale != 1.0f) {
+			return shared_from_this();
+		}
+		auto& found = rasterizedFonts[pixelSize];
+		if (!found) {
+			SDL_IOStream* fileHandle = sdlFileHandle(file);
+			require<ResourceException>(fileHandle, "Error loading font [", identifier, "] at ", pixelSize, " pixels: file missing");
+			TTF_Font* newFont = TTF_OpenFontIO(fileHandle, true, static_cast<float>(pixelSize));
+			require<ResourceException>(newFont, "Error loading font [", identifier, "] at ", pixelSize, " pixels: ", SDL_GetError());
+			TTF_SetFontHinting(newFont, TTF_HINTING_NORMAL);
+			TTF_SetFontStyle(newFont, static_cast<TTF_FontStyleFlags>(style));
+			found = std::shared_ptr<FontDefinition>(new FontDefinition(textLibrary, file, pixelSize, newFont, style, identifier));
+			found->ourRasterScale = static_cast<PointPrecision>(pixelSize) / static_cast<PointPrecision>(size);
+		}
+		return found;
+	}
+
 	PointPrecision FontDefinition::glyphWidth(const std::string &a_glyph) {
 		auto found = measuredGlyphWidths.find(a_glyph);
 		if (found == measuredGlyphWidths.end()) {
@@ -266,17 +285,38 @@ namespace MV {
 	}
 	void FormattedCharacter::scale(const Scale& a_scale){
 		characterScale = a_scale;
-		shape->silence()->position((basePosition + offsetPosition) * characterScale)->component<Scene::Sprite>()->bounds(cast<PointPrecision>(character->characterSize()) * characterScale);
+		shape->silence()->position((basePosition + offsetPosition) * characterScale);
+		applyGlyph();
+	}
+
+	void FormattedCharacter::rasterScale(PointPrecision a_scale) {
+		if (glyphRasterScale != a_scale) {
+			glyphRasterScale = a_scale;
+			applyGlyph();
+		}
+	}
+
+	void FormattedCharacter::applyGlyph() {
+		auto drawn = character;
+		if (glyphRasterScale != 1.0f) {
+			auto font = character->font();
+			auto sharper = font ? font->rasterizedAt(glyphRasterScale) : nullptr;
+			if (sharper && sharper != font) {
+				drawn = sharper->characterDefinition(character->character());
+			}
+		}
+		const PointPrecision drawnScale = drawn->font() ? drawn->font()->rasterScale() : 1.0f;
+		auto silencedShape = shape->silence();
+		auto sprite = shape->component<Scene::Sprite>();
+		sprite->bounds(cast<PointPrecision>(drawn->characterSize()) / drawnScale * characterScale);
+		sprite->texture(drawn->texture());
 	}
 
 	void FormattedCharacter::applyState(const std::shared_ptr<FormattedState> &a_state, bool a_isPassword) {
 		state = a_state;
 		character = a_isPassword ? a_state->font->characterDefinition(U8_STR("●")) : state->font->characterDefinition(textCharacter);
-		auto silencedShape = shape->silence();
-		auto sprite = shape->component<Scene::Sprite>();
-		sprite->bounds(cast<PointPrecision>(character->characterSize()) * characterScale);
-		sprite->texture(character->texture());
-		sprite->color(state->color);
+		applyGlyph();
+		shape->silence()->component<Scene::Sprite>()->color(state->color);
 	}
 
 	bool FormattedCharacter::partOfFormat(bool a_isPartOfFormat) {
@@ -674,6 +714,18 @@ namespace MV {
 		return lines[a_index];
 	}
 
+	void FormattedText::rasterScale(PointPrecision a_scale) {
+		if (glyphRasterScale == a_scale) {
+			return;
+		}
+		glyphRasterScale = a_scale;
+		for (auto&& line : lines) {
+			for (size_t i = 0; i < line->size(); ++i) {
+				(*line)[i]->rasterScale(a_scale);
+			}
+		}
+	}
+
 	FormattedText::FormattedText(const FormattedText& a_rhs):
 		FormattedText(*a_rhs.library, a_rhs.defaultStateIdentifier, a_rhs.textWidth, a_rhs.textWrapping, a_rhs.textJustification){
 		minimumTextLineHeight = a_rhs.minimumTextLineHeight;
@@ -914,6 +966,7 @@ namespace MV {
 		utf8_string utfCharacters(a_characters);
 		for (auto it = utfCharacters.begin(); it != utfCharacters.end();++it) {
 			formattedCharacters.push_back(FormattedCharacter::make(textScene, it.str(), foundState, showAsPassword));
+			formattedCharacters.back()->rasterScale(glyphRasterScale);
 			++inserted;
 		}
 
@@ -966,6 +1019,7 @@ namespace MV {
 		std::shared_ptr<FormattedLine> line = lines.back();
 		for (auto it = utfCharacters.begin(); it != utfCharacters.end(); ++it) {
 			formattedCharacters.push_back(FormattedCharacter::make(textScene, it.str(), foundState, showAsPassword));
+			formattedCharacters.back()->rasterScale(glyphRasterScale);
 			++inserted;
 		}
 

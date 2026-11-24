@@ -1705,7 +1705,7 @@ namespace jai {
                 return param_type_info(script_value_type::jai_char_type);
             } else if constexpr (std::is_same_v<decay_t, std::string> || std::is_same_v<decay_t, script_string>) {
                 return param_type_info(script_value_type::jai_string_type);
-            } else if constexpr (is_specialization_v<decay_t, std::vector>) {
+            } else if constexpr (is_specialization_v<decay_t, std::vector> || is_host_tuple_v<decay_t>) {
                 return param_type_info(script_value_type::jai_array_type);
             } else if constexpr (is_specialization_v<decay_t, bound_array>) {
                 return param_type_info(script_value_type::jai_array_type);

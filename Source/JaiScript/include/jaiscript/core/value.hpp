@@ -55,6 +55,8 @@ namespace jai {
         // (value.cpp): "Cannot convert string to int"
         [[noreturn]] void throw_conversion_error(const script_value& value, const char* target);
         error_propagator conversion_error(const script_value& value, const char* target, runtime_error_code code = runtime_error_code::type_mismatch);
+        // An array for a std::pair or std::tuple whose length is not the tuple's: "Cannot convert an array of 3 elements to a tuple of 2 elements"
+        [[noreturn]] void throw_tuple_length_error(size_t a_got, size_t a_want);
     }
 
     // shared_ptr extraction (engine.cpp): locks an extended object's weakly held owner
@@ -97,6 +99,9 @@ namespace jai {
     // a map a C++ binding treats as a script map: a std::map, or script_map itself
     template <typename T>
     inline constexpr bool is_script_map_like_v = is_specialization_v<T, std::map> || std::is_same_v<T, script_map>;
+    // a std::pair or std::tuple: a C++ binding hands it across as an array<var> of its elements in order
+    template <typename T>
+    inline constexpr bool is_host_tuple_v = is_specialization_v<T, std::tuple> || is_specialization_v<T, std::pair>;
 
     // Convert a double to script_int (int64) with DEFINED behavior for NaN, +/-inf,
     // and out-of-range values. A plain static_cast of those to a 64-bit integer is
@@ -1714,10 +1719,7 @@ namespace detail {
 
                 // Built-in vector handling
                 if (type() != script_value_type::jai_array_type) {
-                    return checked_result<T>(
-                        make_error_code(runtime_error_code::not_an_array),
-                        "Cannot convert non-array to vector"
-                    );
+                    return detail::conversion_error(deref(), "array", runtime_error_code::not_an_array);
                 }
 
                 using element_type = typename T::value_type;
@@ -1770,10 +1772,7 @@ namespace detail {
 
                 // Built-in map handling
                 if (type() != script_value_type::jai_map_type) {
-                    return checked_result<T>(
-                        make_error_code(runtime_error_code::not_a_map),
-                        "Cannot convert non-map to std::map"
-                    );
+                    return detail::conversion_error(deref(), "map", runtime_error_code::not_a_map);
                 }
 
                 using key_type = typename T::key_type;

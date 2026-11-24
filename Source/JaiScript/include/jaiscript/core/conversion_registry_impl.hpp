@@ -15,20 +15,23 @@ namespace jai {
     std::shared_ptr<conversions::conversion_registry> get_engine_conversion_registry(engine* eng);
     // engine.cpp: the class type_info registered for a C++ type (null when unbound), kept out of this header's type set
     type_info* get_engine_class_type_info_for(engine* eng, const std::type_info& cpp_type);
-    namespace detail { bool class_derives_from(engine* eng, uint64_t derived_id, uint64_t base_id); }
+    namespace detail {
+        bool class_derives_from(engine* eng, uint64_t derived_id, uint64_t base_id);
+        template<typename T> struct value_converter;   // function_binder.hpp: a std::pair or std::tuple element converts through it
+    }
 
 namespace conversions {
 
 template<typename T>
 std::vector<T> convert_script_array_to_vector(const script_value& v, engine* eng) {
     if (v.type() != script_value_type::jai_array_type) {
-        throw runtime_error("Cannot convert non-array to vector");
+        detail::throw_conversion_error(v.deref(), "array");
     }
     
     std::vector<T> result;
     const script_array* node = v.unchecked_array_node();
     if (!node) {
-        throw runtime_error("Cannot convert non-array to vector");
+        detail::throw_conversion_error(v.deref(), "array");
     }
     result.reserve(node->size());
 
@@ -84,6 +87,8 @@ std::vector<T> convert_script_array_to_vector(const script_value& v, engine* eng
     node->for_each(eng, [&](const script_value& elem) {
         if constexpr (detail::is_script_value_v<T>) {
             result.push_back(elem);
+        } else if constexpr (is_host_tuple_v<T>) {
+            result.push_back(detail::value_converter<T>::from(elem, eng));
         } else {
             if (registry) {
                 try {
@@ -106,7 +111,7 @@ script_value convert_vector_to_script_array(const std::vector<T>& vec, engine* e
 template<typename K, typename V>
 std::map<K, V> convert_script_map_to_stdmap(const script_value& v, engine* eng) {
     if (v.type() != script_value_type::jai_map_type) {
-        throw runtime_error("Cannot convert non-map to std::map");
+        detail::throw_conversion_error(v.deref(), "map");
     }
 
     std::map<K, V> result;
@@ -129,6 +134,8 @@ std::map<K, V> convert_script_map_to_stdmap(const script_value& v, engine* eng) 
     auto converted_value = [&](const script_value& val) -> V {
         if constexpr (detail::is_script_value_v<V>) {
             return val;
+        } else if constexpr (is_host_tuple_v<V>) {
+            return detail::value_converter<V>::from(val, eng);
         } else {
             if (registry && registry->template has_conversion<V>()) {
                 return registry->template convert_from_script<V>(val);

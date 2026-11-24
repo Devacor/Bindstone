@@ -299,7 +299,7 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
                    std::is_same_v<T, std::string> || detail::is_script_value_v<T> ||
                    is_specialization_v<T, std::shared_ptr> ||
                    is_specialization_v<T, std::vector> || is_script_map_like_v<T> ||
-                   is_specialization_v<T, std::unordered_map>) {
+                   is_specialization_v<T, std::unordered_map> || is_host_tuple_v<T>) {
         // nested containers convert to arrays/maps, never to objects: the element type
         // stays dynamic (a class-typed element type would mint an object buffer)
         element_type = nullptr;
@@ -328,6 +328,8 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
             arr.push(eng->make_value(item));
         } else if constexpr (math_adapted<T>) {
             arr.push(convert_custom_type_with_registry(item, eng));   // the vector buffer of the adapter's kind
+        } else if constexpr (is_host_tuple_v<T>) {
+            arr.push(detail::value_converter<T>::to(item, eng));
         } else {
             if (eng) {
                 auto registry = detail::engine_access::get_conversion_registry(*eng);
@@ -361,7 +363,7 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
     if constexpr (std::is_same_v<V, int> || std::is_same_v<V, int64_t> ||
                    std::is_same_v<V, float> || std::is_same_v<V, double> ||
                    std::is_same_v<V, bool> || std::is_same_v<V, char> ||
-                   std::is_same_v<V, std::string> || detail::is_script_value_v<V>) {
+                   std::is_same_v<V, std::string> || detail::is_script_value_v<V> || is_host_tuple_v<V>) {
         value_type = nullptr;
     } else {
         value_type = detail::engine_access::get_type_info_for_cpp_type<V>(*eng);
@@ -407,6 +409,8 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
             converted_value = script_value(value, eng);
         } else if constexpr (is_specialization_v<V, std::shared_ptr>) {
             converted_value = eng->make_value(value);
+        } else if constexpr (is_host_tuple_v<V>) {
+            converted_value = detail::value_converter<V>::to(value, eng);
         } else {
             if (eng) {
                 auto registry = detail::engine_access::get_conversion_registry(*eng);

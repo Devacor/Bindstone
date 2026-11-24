@@ -370,6 +370,15 @@ class engine;
                     temp = v.as<std::remove_cv_t<T>>();
                     return temp;
                 }
+                if constexpr (is_host_tuple_v<std::remove_cv_t<T>>) {
+                    auto* storage = detail::get_engine_parameter_storage(eng);
+                    if (!storage) {
+                        throw runtime_error("No parameter storage available for reference conversion");
+                    }
+                    std::remove_cv_t<T>& temp = storage->allocate<std::remove_cv_t<T>>();
+                    temp = value_converter<std::remove_cv_t<T>>::from(v, eng);
+                    return temp;
+                }
                 // Get the actual target value (dereferences if v is a reference)
                 script_value& target = const_cast<script_value&>(v).deref();
                 
@@ -409,7 +418,7 @@ class engine;
                 else if constexpr (std::is_class_v<T> &&
                              !std::is_same_v<T, std::string> &&
                              !is_specialization_v<T, std::vector> &&
-                             !is_script_map_like_v<T>) {
+                             !is_script_map_like_v<T> && !is_host_tuple_v<std::remove_cv_t<T>>) {
                     return convert_reference_with_registry<T>(t, eng);
                 }
                 // For basic types, delegate to const T& version
@@ -454,6 +463,15 @@ class engine;
                     using key_type = typename T::key_type;
                     using value_type = typename T::mapped_type;
                     temp = conversions::convert_script_map_to_stdmap<key_type, value_type>(v, eng);
+                    return temp;
+                }
+                else if constexpr (is_host_tuple_v<T>) {
+                    auto* storage = detail::get_engine_parameter_storage(eng);
+                    if (!storage) {
+                        throw runtime_error("No parameter storage available for const reference conversion");
+                    }
+                    T& temp = storage->allocate<T>();
+                    temp = value_converter<T>::from(v, eng);
                     return temp;
                 }
                 // A math value has no host object to alias: the decoded host value in parameter storage
@@ -505,7 +523,7 @@ class engine;
                 // Smart pointers route to their own specialization — the registry path
                 // would look up a class literally named "std::shared_ptr<T>" (the sim's
                 // creature-signal args hit exactly this).
-                if constexpr (is_specialization_v<T, std::shared_ptr>) {
+                if constexpr (is_specialization_v<T, std::shared_ptr> || is_host_tuple_v<T>) {
                     return value_converter<T>::to(t, eng);
                 }
                 // Check if this is a custom class type (excluding standard containers and string)
@@ -605,7 +623,7 @@ class engine;
         struct value_converter<std::map<K, V>> {
             static std::map<K, V> from(const script_value& v, engine* eng) {
                 if (!v.is_map()) {
-                    throw runtime_error("Cannot convert non-map to std::map<K,V>");
+                    throw_conversion_error(v.deref(), "map");
                 }
                 // Convert script map to std::map
                 std::map<K, V> result;
@@ -623,6 +641,45 @@ class engine;
                 return conversions::convert_stdmap_to_script_map(stdmap, eng);
             }
         };
+
+        // A std::pair or std::tuple crosses as an array<var>, each element converted as a parameter or a result of its own type
+        template<typename T>
+        struct host_tuple_converter {
+            static T from(const script_value& v, engine* eng) {
+                const script_value& actual = v.deref();
+                if (actual.raw_storage_index() != script_value::TYPEID_ARRAY) {
+                    throw_conversion_error(actual, "array");
+                }
+                const script_array& node = *actual.unchecked_array_node();
+                if (node.size() != std::tuple_size_v<T>) {
+                    throw_tuple_length_error(node.size(), std::tuple_size_v<T>);
+                }
+                return from_elements(node, eng, std::make_index_sequence<std::tuple_size_v<T>>{});
+            }
+
+            static script_value to(const T& t, engine* eng) {
+                script_value result = script_value::make_array(nullptr, eng);
+                push_elements(*result.unchecked_get_array_storage(), t, eng, std::make_index_sequence<std::tuple_size_v<T>>{});
+                return result;
+            }
+
+        private:
+            template<size_t... Is>
+            static T from_elements(const script_array& node, engine* eng, std::index_sequence<Is...>) {
+                return T{value_converter<std::tuple_element_t<Is, T>>::from(node.get(Is, eng), eng)...};
+            }
+
+            template<size_t... Is>
+            static void push_elements(script_array& node, const T& t, engine* eng, std::index_sequence<Is...>) {
+                (node.push(value_converter<std::tuple_element_t<Is, T>>::to(std::get<Is>(t), eng)), ...);
+            }
+        };
+
+        template<typename A, typename B>
+        struct value_converter<std::pair<A, B>> : host_tuple_converter<std::pair<A, B>> {};
+
+        template<typename... Ts>
+        struct value_converter<std::tuple<Ts...>> : host_tuple_converter<std::tuple<Ts...>> {};
         
         // A non-const T& host parameter whose argument reaches the callee as a private copy: the callee's final value
         // is stored back through the script lvalue the argument names. A registered class aliases its live object,
@@ -634,7 +691,7 @@ class engine;
                 using D = std::remove_cv_t<std::remove_reference_t<P>>;
                 return std::is_arithmetic_v<D> || std::is_enum_v<D> || std::is_same_v<D, std::string> ||
                        detail::is_script_value_v<D> || is_specialization_v<D, std::vector> || is_script_map_like_v<D> ||
-                       is_specialization_v<D, std::shared_ptr> || math_adapted<D>;
+                       is_host_tuple_v<D> || is_specialization_v<D, std::shared_ptr> || math_adapted<D>;
             }
         }
 
@@ -819,7 +876,7 @@ class engine;
             } else if constexpr (std::is_class_v<D>) {
                 return !std::is_same_v<D, std::string> && !is_script_value_v<D> && !math_adapted<D> &&
                        !is_specialization_v<D, std::vector> && !is_script_map_like_v<D> && !is_specialization_v<D, std::unordered_map> &&
-                       !is_specialization_v<D, std::set> &&
+                       !is_host_tuple_v<D> && !is_specialization_v<D, std::set> &&
                        !is_specialization_v<D, std::unordered_set> && !is_specialization_v<D, std::function> &&
                        !is_specialization_v<D, std::weak_ptr> && !is_specialization_v<D, std::unique_ptr> &&
                        !is_specialization_v<D, bound_array> && !is_specialization_v<D, bound_map> &&
@@ -940,7 +997,7 @@ class engine;
                     return static_cast<const D&>(actual.as<const D&>());
                 } else if constexpr (std::is_same_v<D, char>) {
                     return value_converter<char>::from(actual, eng);
-                } else if constexpr (is_specialization_v<D, std::vector> || is_script_map_like_v<D>) {
+                } else if constexpr (is_specialization_v<D, std::vector> || is_script_map_like_v<D> || is_host_tuple_v<D>) {
                     return value_converter<D>::from(actual, eng);
                 } else {
                     return D(actual.as<P>());
@@ -1214,7 +1271,7 @@ class engine;
                             !is_bound_array_type<base_type>::value &&
                             !is_bound_map_type<base_type>::value &&
                             !is_specialization_v<base_type, std::vector> &&
-                            !is_script_map_like_v<base_type>) {
+                            !is_script_map_like_v<base_type> && !is_host_tuple_v<base_type>) {
 					// Reference parameters borrow the live object. Ownership is only required
 					// for shared_ptr parameters; their conversion is handled above.
 					return std::ref(const_cast<script_value&>(actual_arg).as<base_type&>());
@@ -1225,7 +1282,8 @@ class engine;
                     return std::cref(const_cast<script_value&>(actual_arg).as<const std::string&>());   // the script's own string
                 } else if constexpr (std::is_same_v<base_type, char>) {
                     return detail::value_converter<char>::from(actual_arg, eng);
-                } else if constexpr (std::is_const_v<std::remove_reference_t<T>> && (is_specialization_v<base_type, std::vector> || is_script_map_like_v<base_type>)) {
+                } else if constexpr (std::is_const_v<std::remove_reference_t<T>> &&
+                                     (is_specialization_v<base_type, std::vector> || is_script_map_like_v<base_type> || is_host_tuple_v<base_type>)) {
                     // the callee reads a converted copy, as a bound method's const container reference does
                     return detail::value_converter<base_type>::from(actual_arg, eng);
                 } else {

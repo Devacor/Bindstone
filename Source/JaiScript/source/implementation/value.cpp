@@ -103,6 +103,11 @@ namespace {
     throw runtime_error("Cannot convert " + container_value_type_name(value) + " to " + target);
 }
 
+[[noreturn]] JAI_NOINLINE void throw_tuple_length_error(size_t a_got, size_t a_want) {
+    auto elements = [](size_t a_count) { return std::to_string(a_count) + (a_count == 1 ? " element" : " elements"); };
+    throw runtime_error("Cannot convert an array of " + elements(a_got) + " to a tuple of " + elements(a_want));
+}
+
 // A value whose type has a class name (or a typed container's spelling) parks its text in the error's {0}; a builtin type's text is static
 JAI_NOINLINE error_propagator conversion_error(const script_value& value, const char* target, runtime_error_code code) {
     const script_value& held = value.deref();

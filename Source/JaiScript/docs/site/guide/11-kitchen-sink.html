@@ -143,7 +143,7 @@ Pt p;
 print("{} {}", twice(3.0), p.x + p.y);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">6.0 3</code></pre></div>
 <h2 id="destructuring">Destructuring<a class="hlink" href="#destructuring" aria-label="link">&#8203;</a></h2>
-<p><code>auto [a, b, c] = arr;</code> unpacks an array by position. Extra elements are ignored and missing ones bind <code>null</code>. In a range-for over a map, <code>auto [key, value]</code> binds each entry.</p>
+<p><code>auto [a, b, c] = arr;</code> unpacks an array by position. Extra elements are ignored and missing ones bind <code>null</code>. In a range-for over a map, <code>auto [key, value]</code> binds each entry. A host function&#x27;s <code>std::pair</code> or <code>std::tuple</code> arrives as an array, so <code>auto [count, name] = f();</code> unpacks it (<a href="../reference/host.html#host-tuples">tuples</a>).</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto [x, y] = [10, 20, 30];
 auto [p, q, r] = [1, 2];
 print("{} {} {} {} {}", x, y, p, q, r);

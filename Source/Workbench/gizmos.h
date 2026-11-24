@@ -57,6 +57,10 @@ namespace Workbench {
 
 		// Where a transform handle can be grabbed: moveX, moveY, moveFree, rotate, scaleX, scaleY or scaleUniform.
 		std::optional<MV::Point<int>> handleScreenPoint(const std::string& a_handle) const;
+		// A corner handle of the box gizmo on the edited component (a_corner 0 top left, 1 top right, 2 bottom right,
+		// 3 bottom left); a CameraConstraint's are box 0 the hard bounds and box 1 the soft.
+		std::optional<MV::Point<int>> componentCornerScreenPoint(size_t a_box, size_t a_corner) const;
+
 		// The rotate sweep on screen while its ring is dragged, in degrees turning the way screen angles grow
 		// (clockwise, as y runs down); zero when no sweep shows.
 		float sweepShown() const;
@@ -78,6 +82,7 @@ namespace Workbench {
 		struct Gizmo;
 		struct NodeGizmo;
 		struct BoundsGizmo;
+		struct BoundsPairGizmo;
 		struct HighlightGizmo;
 
 		Tool shownTool() const;

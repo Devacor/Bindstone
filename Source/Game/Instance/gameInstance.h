@@ -164,20 +164,7 @@ protected:
 	bool requestCamera(); //returns the result of cameraIsFree and cancels any interruptable camera action.
 
 	void handleScroll(float a_amount, const MV::Point<int> &a_position);
-	void zoomAroundScreenPoint(float a_zoom, const MV::Point<int>& a_position);
-	void moveCameraInMap(const MV::Point<>& a_mapDelta);
-
-	// map.scene marks the view's limits with TopLeft_Hard/BottomRight_Hard and the _Soft pair: the
-	// view may never show past the hard box; past the soft box it is allowed briefly, then eases
-	// back. Zoom-out has no limit of its own - it stops where the view fits each box (the tighter
-	// axis wins); zoom-in clamps at maxZoomHard and eases back to maxZoomSoft.
-	MV::BoxAABB<> visibleMapBounds();
-	bool mapViewBounds(MV::BoxAABB<>& a_bounds, bool a_soft);
-	bool cornerBounds(MV::BoxAABB<>& a_bounds, const std::string& a_suffix);
-	float zoomToFit(const MV::BoxAABB<>& a_bounds);
-	MV::Point<> viewCorrection(const MV::BoxAABB<>& a_bounds);
-	void clampToHardBounds(const MV::Point<int>& a_pointerCenter);
-	void easeToBoundsIfExceeded(const MV::Point<int>& a_pointerCenter);
+	void releaseCamera(const MV::Point<int>& a_position);
 
         std::vector<std::shared_ptr<Building>> buildings;
         std::map<int64_t, std::shared_ptr<Creature>> creatures;
@@ -189,6 +176,8 @@ protected:
 	std::shared_ptr<MV::Scene::Node> worldScene;
 	MV::Scene::SafeComponent<MV::Scene::View> worldView;
 	std::shared_ptr<MV::Scene::Camera> worldCamera;
+	// map.scene's limits on the view: hard while the player drags or pinches, eased back to soft on release
+	MV::Scene::SafeComponent<MV::Scene::CameraConstraint> cameraLimits;
 	MV::Point<> cameraStartPosition;
 	MV::PointPrecision cameraStartZoom = 1.0f;
 
@@ -210,15 +199,6 @@ protected:
 	size_t maxFixedStepsPerUpdate = 1;
 
 	bool hasActiveTouch = false;
-
-	const MV::PointPrecision maxZoomHard = 3.5f;
-	const MV::PointPrecision maxZoomSoft = 3.0f;
-
-	const MV::PointPrecision viewSoftInset = .04f;   // PathMap fallback for a scene without corner markers
-	const MV::PointPrecision zoomSanityFloor = .01f;   // keeps the projection invertible, not a design limit
-	float minZoom(bool a_soft);
-	const double viewEaseSeconds = 0.25;
-	const double viewEaseHoldSeconds = 0.1;
 
 	BindstoneNetworkObjectPool synchronizedObjects;
 };

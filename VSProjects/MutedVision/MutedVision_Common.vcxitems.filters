@@ -129,6 +129,9 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\view.cpp">
       <Filter>MV\Render\Scene</Filter>
     </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\cameraConstraint.cpp">
+      <Filter>MV\Render\Scene</Filter>
+    </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\bindSnapInstance.cpp">
       <Filter>MV\Render\Scene</Filter>
     </ClCompile>
@@ -336,6 +339,9 @@
       <Filter>MV\Render\Scene</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\view.h">
+      <Filter>MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\cameraConstraint.h">
       <Filter>MV\Render\Scene</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\bindSnapInstance.h">

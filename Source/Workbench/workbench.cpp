@@ -526,8 +526,7 @@ namespace Workbench {
 			if (atPoint) {
 				placed->position(parent->localFromScreen(a_screenPoint));
 			}
-			forEachParallax(placed, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
-			authorViews(placed);
+			enterAuthoring(placed);
 			link->markUnchanged();
 			history.record("place " + std::filesystem::path(a_fileName).filename().string(),
 				[parent, placed]() {
@@ -812,8 +811,7 @@ namespace Workbench {
 			if (link->ownerIsAlive() && link->owner() != a_except && inScene(link->owner()) && bindSnapSourceName(link->source()) == a_sourceName) {
 				link->refresh();
 				auto node = link->owner();
-				forEachParallax(node, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
-				authorViews(node);
+				enterAuthoring(node);
 				link->markUnchanged();
 			}
 		}
@@ -993,6 +991,12 @@ namespace Workbench {
 				} },
 				{ "Camera", [](const std::shared_ptr<MV::Scene::Node>& a_node, Managers&, MV::TapDevice&) -> std::shared_ptr<MV::Scene::Component> {
 					return a_node->attach<MV::Scene::Camera>().self();
+				} },
+				{ "CameraConstraint", [](const std::shared_ptr<MV::Scene::Node>& a_node, Managers&, MV::TapDevice&) -> std::shared_ptr<MV::Scene::Component> {
+					auto constraint = a_node->attach<MV::Scene::CameraConstraint>();
+					constraint->hard(MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::point(1000.0f, 1000.0f)))->soft(MV::BoxAABB<>(MV::point(50.0f, 50.0f), MV::point(950.0f, 950.0f)));
+					constraint->authoring(true);
+					return constraint.self();
 				} } };
 		}
 
@@ -1166,8 +1170,7 @@ namespace Workbench {
 		auto parent = original->parent();
 		try {
 			auto copy = original->clone();
-			forEachParallax(copy, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
-			authorViews(copy);
+			enterAuthoring(copy);
 			std::weak_ptr<MV::Scene::Node> weakOriginal = original;
 			history.record("duplicate " + nodeLabel(original),
 				[this, parent, copy]() {
@@ -1564,6 +1567,20 @@ namespace Workbench {
 		}
 	}
 
+	void App::enterAuthoring(const std::shared_ptr<MV::Scene::Node>& a_node) {
+		forEachParallax(a_node, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
+		std::function<void(const std::shared_ptr<MV::Scene::Node>&)> visit = [&](const std::shared_ptr<MV::Scene::Node>& a_visited) {
+			if (auto constraint = a_visited->component<MV::Scene::CameraConstraint>(true, false)) {
+				constraint->authoring(true);
+			}
+			for (auto&& child : *a_visited) {
+				visit(child);
+			}
+		};
+		visit(a_node);
+		authorViews(a_node);
+	}
+
 	void App::forEachParallax(const std::shared_ptr<MV::Scene::Node>& a_node, const std::function<void(const std::shared_ptr<MV::Scene::Parallax>&)>& a_visit) {
 		if (auto parallax = a_node->component<MV::Scene::Parallax>(true, false)) {
 			a_visit(parallax.self());
@@ -1694,8 +1711,7 @@ namespace Workbench {
 			sceneRoot = newRoot;
 			viewCamera->add(sceneRoot);
 			sceneRoot->postLoadStep();
-			forEachParallax(sceneRoot, [](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) { a_parallax->authoring(true); });
-			authorViews(sceneRoot);
+			enterAuthoring(sceneRoot);
 			{
 				// the layers going to rest is not a change to a linked node, and its file is read as of now
 				bindSnapWriteTimes.clear();

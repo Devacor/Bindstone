@@ -10,6 +10,7 @@
 	#include "MV/Render/Scene/bindSnapInstance.h"
 	#include "MV/Render/Scene/camera.h"
 	#include "MV/Render/Scene/view.h"
+	#include "MV/Render/Scene/cameraConstraint.h"
 	#include "MV/Render/Scene/scroller.h"
 	#include "MV/Render/Scene/button.h"
 	#include "MV/Render/Scene/text.h"

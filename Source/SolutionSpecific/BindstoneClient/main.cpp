@@ -1607,9 +1607,9 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 				}
 				a_app.runFrames(4);
 				std::string all = componentNames(node);
-				expect(all == "Sprite Text Clickable Button FocusGroup Stencil Grid Parallax Light View Camera ", "every kind is on the node in the order it was added: " + all);
+				expect(all == "Sprite Text Clickable Button FocusGroup Stencil Grid Parallax Light View Camera CameraConstraint ", "every kind is on the node in the order it was added: " + all);
 				expect(a_app.removeComponent(node->component<MV::Scene::Clickable>(true, false).self()), "one from the middle comes off");
-				expect(componentNames(node) == "Sprite Text Button FocusGroup Stencil Grid Parallax Light View Camera ", "leaving the rest: " + componentNames(node));
+				expect(componentNames(node) == "Sprite Text Button FocusGroup Stencil Grid Parallax Light View Camera CameraConstraint ", "leaving the rest: " + componentNames(node));
 				pressWithControl(SDLK_Z);
 				a_app.runFrames(3);
 				expect(componentNames(node) == all, "and undo puts it back where it was, not last: " + componentNames(node));
@@ -1934,6 +1934,49 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		click(a_app.menus().titleScreenPoint(0));
 		click(a_app.menus().rowScreenPoint(0));
 		expect(!a_app.menus().isOpen() && a_app.scene()->empty() && a_app.document().empty(), "File > New Scene from the menu leaves an empty, untitled scene");
+	}
+
+	// The map's CameraConstraint gizmo: both boxes drawn, a corner of each dragged, each drag one undo step
+	expect(a_app.loadScene("Scenes/map.scene"), "the map loads for its camera constraint");
+	if (auto constraint = a_app.scene()->component<MV::Scene::CameraConstraint>(true, false)) {
+		auto& mouse = *a_managers.services.get<MV::TapDevice>();
+		a_app.runFrames(3);
+		a_app.select(a_app.scene());
+		a_app.gizmoLayer().editComponent(constraint.self());
+		a_app.runFrames(2);
+		auto dragCorner = [&](size_t a_box, size_t a_corner, const MV::Point<int>& a_by) {
+			auto at = a_app.gizmoLayer().componentCornerScreenPoint(a_box, a_corner);
+			expect(at.has_value(), "the constraint gizmo shows corner " + std::to_string(a_corner) + " of box " + std::to_string(a_box));
+			if (!at) {
+				return;
+			}
+			mouse.simulate(*at, false);
+			a_app.runFrames(2);
+			mouse.simulate(*at, true);
+			a_app.runFrames(2);
+			for (int step = 1; step <= 4; ++step) {
+				mouse.simulate(MV::Point<int>(at->x + a_by.x * step / 4, at->y + a_by.y * step / 4), true);
+				a_app.runFrames(1);
+			}
+			mouse.simulate(MV::Point<int>(at->x + a_by.x, at->y + a_by.y), false);
+			a_app.runFrames(2);
+			mouse.stopSimulating();
+		};
+		auto hardBefore = constraint->hard();
+		auto softBefore = constraint->soft();
+		dragCorner(0, 2, MV::Point<int>(30, 20));
+		expect(constraint->hard().maxPoint.x > hardBefore.maxPoint.x + 1.0f && constraint->hard().maxPoint.y > hardBefore.maxPoint.y + 1.0f && sameXY(constraint->hard().minPoint, hardBefore.minPoint), "dragging the hard box's bottom right corner moves that corner alone");
+		expect(sameXY(constraint->soft().minPoint, softBefore.minPoint) && sameXY(constraint->soft().maxPoint, softBefore.maxPoint), "dragging the hard box leaves the soft one");
+		pressWithControl(SDLK_Z);
+		expect(sameXY(constraint->hard().maxPoint, hardBefore.maxPoint), "undo puts the hard box back");
+		dragCorner(1, 2, MV::Point<int>(-25, -15));
+		expect(constraint->soft().maxPoint.x < softBefore.maxPoint.x - 1.0f && constraint->soft().maxPoint.y < softBefore.maxPoint.y - 1.0f && sameXY(constraint->soft().minPoint, softBefore.minPoint) && sameXY(constraint->hard().maxPoint, hardBefore.maxPoint), "dragging the soft box's bottom right corner moves that corner of the soft box");
+		pressWithControl(SDLK_Z);
+		expect(sameXY(constraint->soft().minPoint, softBefore.minPoint) && sameXY(constraint->soft().maxPoint, softBefore.maxPoint), "undo puts the soft box back");
+		a_app.gizmoLayer().editComponent(nullptr);
+		a_app.select(nullptr);
+	} else {
+		expect(false, "map.scene's root has a CameraConstraint");
 	}
 
 	// Parallax: at rest while editing, displaced only by the preview, saved at rest either way
@@ -2930,6 +2973,86 @@ static int RunArena(const std::string& a_left, const std::string& a_right, doubl
 	return 0;
 }
 
+// A match over game.scene, played on the simulated mouse: a drag pans its WorldCamera and stops at map.scene's hard
+// bounds while held, let go it eases inside the soft ones, the wheel zooms the camera within the hard limits and eases
+// back to the soft, and the match gives the camera back as it found it.
+static void verifyCameraPilot(Managers& a_managers, MV::TapDevice& a_mouse, int& a_passed, int& a_failed) {
+	try {
+		GameData data(a_managers, true);
+		auto root = MV::Scene::Node::load("Scenes/game.scene", a_managers.services);
+		auto world = root->get("World");
+		auto camera = world->component<MV::Scene::View>()->camera();
+		if (!camera) { throw std::runtime_error("game.scene's World View has no camera"); }
+		const auto startPosition = camera->owner()->position();
+		const auto startZoom = camera->zoom();
+		auto player = [](int64_t a_id) {
+			auto result = std::make_shared<InGamePlayer>();
+			result->id = a_id;
+			result->handle = "pilot" + std::to_string(a_id);
+			for (int slot = 0; slot < 8; ++slot) {
+				result->loadout.buildings.push_back("life");
+				result->loadout.skins.push_back("");
+			}
+			return result;
+		};
+		auto expect = [](bool a_ok, const std::string& a_what) {
+			if (!a_ok) { throw std::runtime_error(a_what); }
+		};
+		auto closeTo = [](float a_value, float a_expected, float a_tolerance) { return std::abs(a_value - a_expected) <= a_tolerance; };
+		{
+			auto instance = ArenaGameInstance::make(world, data, a_mouse, player(1), player(2));
+			auto limits = instance->scene()->component<MV::Scene::CameraConstraint>();
+			expect(instance->camera() == camera, "the match does not pilot the World View's camera");
+			auto settle = [&](double a_seconds) {
+				for (double elapsed = 0.0; elapsed < a_seconds; elapsed += 1.0 / 60.0) {
+					instance->update(1.0 / 60.0);
+				}
+			};
+			auto at = [&](const MV::Point<int>& a_point, bool a_down) {
+				a_mouse.simulate(a_point, a_down);
+				a_mouse.update();
+			};
+
+			camera->owner()->position(MV::point(200.0f, 591.0f));
+			at(MV::Point<int>(100, 40), false);
+			at(MV::Point<int>(100, 40), true);
+			for (int x = 150; x <= 900; x += 50) {
+				at(MV::Point<int>(x, 40), true);
+			}
+			auto held = limits->visible();
+			expect(closeTo(held.minPoint.x, limits->hard().minPoint.x, 0.05f), "a drag past the hard edge did not stop at it: " + std::to_string(held.minPoint.x));
+			at(MV::Point<int>(900, 40), false);
+			settle(2.0);
+			auto released = limits->visible();
+			expect(closeTo(released.minPoint.x, limits->soft().minPoint.x, 0.05f), "let go, the view did not ease to the soft edge: " + std::to_string(released.minPoint.x));
+
+			SDL_Event wheel {};
+			wheel.type = SDL_EVENT_MOUSE_WHEEL;
+			wheel.wheel.y = 1.0f;
+			at(MV::Point<int>(640, 360), false);
+			for (int notch = 0; notch < 40; ++notch) {
+				instance->handleEvent(wheel);
+			}
+			expect(closeTo(camera->zoom(), limits->maximumZoom(false), 0.001f), "the wheel zoomed past the hard limit: " + std::to_string(camera->zoom()));
+			settle(2.0);
+			expect(closeTo(camera->zoom(), limits->maximumZoom(true), 0.001f), "the zoom did not ease to the soft limit: " + std::to_string(camera->zoom()));
+			wheel.wheel.y = -1.0f;
+			for (int notch = 0; notch < 80; ++notch) {
+				instance->handleEvent(wheel);
+			}
+			expect(closeTo(camera->zoom(), limits->minimumZoom(false), 0.001f), "zooming out did not stop where the view fits the hard bounds: " + std::to_string(camera->zoom()));
+			a_mouse.stopSimulating();
+		}
+		expect(camera->owner()->position() == startPosition && camera->zoom() == startZoom, "the match left the camera moved");
+		std::cout << "[OK]   camera pilot (drag stops at the hard bounds, eases to the soft, zoom clamps and eases)" << std::endl;
+		++a_passed;
+	} catch (std::exception& e) {
+		a_mouse.stopSimulating();
+		std::cout << "[FAIL] camera pilot: " << e.what() << std::endl;
+		++a_failed;
+	}
+}
+
 static int RunAssetVerification() {
 	Managers managers({ "", "" });
 	auto jaiEngine = MV::makeScriptEngine(managers.services);
@@ -3177,6 +3300,8 @@ static int RunAssetVerification() {
 		std::cout << "[FAIL] Battle wire: " << e.what() << std::endl;
 		++failed;
 	}
+
+	verifyCameraPilot(managers, verifyMouse, passed, failed);
 
 	MV::Script script(*jaiEngine);
 	verifyFamilyScripts<Creature>(script, "Creatures", passed, failed);

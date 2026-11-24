@@ -13,6 +13,8 @@ namespace Workbench {
 		// Old-editor handle palette (editorDefines.h): amber corners.
 		const MV::Color sizeHandleFill(0x44ffb400);
 		const MV::Color highlightFill(0x11ffffff);
+		const MV::Color hardBoundsColor(0xccff6040);
+		const MV::Color softBoundsColor(0xcc40e080);
 		// Dock chrome Clickables sit at the default 100; +100 wins inside the viewport. The transform
 		// handles sit above a bounds body, point handles between, so overlaps resolve smallest-first.
 		constexpr int64_t bodyPriorityBoost = 100;
@@ -61,6 +63,7 @@ namespace Workbench {
 			}
 		}
 		virtual bool takesInput() const { return true; }
+		virtual std::optional<MV::Point<int>> cornerScreenPoint(size_t, size_t) const { return std::nullopt; }
 
 		bool dragging = false;
 		GizmoLayer& layer;
@@ -628,12 +631,35 @@ namespace Workbench {
 	};
 
 	struct GizmoLayer::BoundsGizmo : GizmoLayer::Gizmo {
+		// A box in the component's owner's space that is not the component's own bounds, framed in a_outline.
+		BoundsGizmo(GizmoLayer& a_layer, const std::shared_ptr<MV::Scene::Component>& a_component, std::function<MV::BoxAABB<>()> a_read, std::function<void(const MV::BoxAABB<>&)> a_write, const MV::Color& a_outline, int64_t a_priority) :
+			Gizmo(a_layer),
+			component(a_component),
+			readLocal(std::move(a_read)),
+			writeLocal(std::move(a_write)),
+			outline(a_outline),
+			outlined(true),
+			priority(a_priority) {
+			container = a_layer.overlay->make(MV::guid("boundsGizmo_"));
+			std::weak_ptr<MV::Scene::Component> weak = a_component;
+			auto reader = readLocal;
+			readFrame = [weak, reader]() {
+				auto locked = weak.lock();
+				return locked && locked->ownerIsAlive() ? locked->owner()->worldFromLocal(reader()) : MV::BoxAABB<>();
+			};
+			sync();
+		}
+
 		BoundsGizmo(GizmoLayer& a_layer, const std::shared_ptr<MV::Scene::Component>& a_component) :
 			Gizmo(a_layer),
 			component(a_component) {
-			container = a_layer.overlay->make("boundsGizmo");
+			container = a_layer.overlay->make(MV::guid("boundsGizmo_"));
 
 			std::weak_ptr<MV::Scene::Component> weak = a_component;
+			readFrame = [weak]() {
+				auto locked = weak.lock();
+				return locked ? locked->worldBounds() : MV::BoxAABB<>();
+			};
 			readLocal = [weak]() {
 				auto locked = weak.lock();
 				return locked ? locked->bounds() : MV::BoxAABB<>();
@@ -680,19 +706,31 @@ namespace Workbench {
 		}
 
 		bool dirty() const override {
-			auto frame = MV::round<MV::PointPrecision>(component->worldBounds());
+			auto frame = MV::round<MV::PointPrecision>(readFrame());
 			return !(frame.minPoint == lastFrame.minPoint) || !(frame.maxPoint == lastFrame.maxPoint);
+		}
+
+		std::optional<MV::Point<int>> cornerScreenPoint(size_t a_box, size_t a_corner) const override {
+			const MV::Scene::SafeComponent<MV::Scene::Clickable>* corners[] { &topLeft, &topRight, &bottomRight, &bottomLeft };
+			if (a_box != 0 || a_corner >= 4 || !*corners[a_corner]) {
+				return std::nullopt;
+			}
+			auto& corner = *corners[a_corner];
+			return corner->owner()->screenFromLocal(corner->bounds()).centerPoint();
 		}
 
 		void sync() override {
 			container->clear();
-			auto rectBox = MV::round<MV::PointPrecision>(component->worldBounds());
+			auto rectBox = MV::round<MV::PointPrecision>(readFrame());
 			lastFrame = rectBox;
 			auto handleSize = MV::size(layer.theme.px(5.0f), layer.theme.px(5.0f));
+			if (outlined) {
+				drawOutline(rectBox);
+			}
 
 			body = container->make(MV::guid("body_"))->worldPosition(rectBox.topLeftPoint())->attach<MV::Scene::Clickable>(layer.mouse);
 			body->bounds({ MV::Point<>(), rectBox.size() });
-			body->globalPriority(body->globalPriority() + bodyPriorityBoost);
+			body->globalPriority(body->globalPriority() + bodyPriorityBoost + priority);
 			body->onPress.connect("press", [this](std::shared_ptr<MV::Scene::Clickable>) { beginGesture(); });
 			if (painter) {
 				body->onDrag.connect("paint", [this](std::shared_ptr<MV::Scene::Clickable> a_handle, const MV::Point<int>&, const MV::Point<int>&) {
@@ -725,9 +763,22 @@ namespace Workbench {
 
 		MV::Scene::SafeComponent<MV::Scene::Clickable> makeCorner(const MV::Point<>& a_at, const std::string& a_name) {
 			auto corner = container->make(MV::guid(a_name))->worldPosition(a_at)->attach<MV::Scene::Clickable>(layer.mouse);
-			corner->bounds(MV::size(layer.theme.px(5.0f), layer.theme.px(5.0f)))->color(sizeHandleFill)->show();
-			corner->globalPriority(corner->globalPriority() + bodyPriorityBoost);
+			corner->bounds(MV::size(layer.theme.px(5.0f), layer.theme.px(5.0f)))->color(outlined ? outline : sizeHandleFill)->show();
+			corner->globalPriority(corner->globalPriority() + bodyPriorityBoost + priority);
 			return corner;
+		}
+
+		void drawOutline(const MV::BoxAABB<>& a_frame) {
+			const auto thickness = layer.theme.px(1.5f);
+			const MV::BoxAABB<> edges[] {
+				{ a_frame.minPoint, MV::point(a_frame.maxPoint.x, a_frame.minPoint.y + thickness) },
+				{ MV::point(a_frame.minPoint.x, a_frame.maxPoint.y - thickness), a_frame.maxPoint },
+				{ a_frame.minPoint, MV::point(a_frame.minPoint.x + thickness, a_frame.maxPoint.y) },
+				{ MV::point(a_frame.maxPoint.x - thickness, a_frame.minPoint.y), a_frame.maxPoint }
+			};
+			for (auto&& edge : edges) {
+				container->make(MV::guid("edge_"))->worldPosition(edge.minPoint)->attach<MV::Scene::Sprite>()->bounds(edge.size())->color(outline);
+			}
 		}
 
 		// A corner drag moves its row neighbor vertically and its column neighbor horizontally,
@@ -752,7 +803,7 @@ namespace Workbench {
 			MV::BoxAABB<> local(pressBounds.minPoint + localMove(pressTopLeftAt, topLeft->worldBounds().bottomRightPoint()));
 			local.expandWith(pressBounds.maxPoint + localMove(pressBottomRightAt, bottomRight->worldBounds().topLeftPoint()));
 			writeLocal(local);
-			auto rectBox = MV::round<MV::PointPrecision>(component->worldBounds());
+			auto rectBox = MV::round<MV::PointPrecision>(readFrame());
 			body->bounds(rectBox.size());
 			body->owner()->worldPosition(rectBox.minPoint);
 		}
@@ -843,8 +894,12 @@ namespace Workbench {
 		std::shared_ptr<MV::Scene::Component> component;
 		std::function<MV::BoxAABB<>()> readLocal;
 		std::function<void(const MV::BoxAABB<>&)> writeLocal;
+		std::function<MV::BoxAABB<>()> readFrame;
 		std::function<void()> restore;
 		bool painter = false;
+		MV::Color outline;
+		bool outlined = false;
+		int64_t priority = 0;
 
 		MV::Scene::SafeComponent<MV::Scene::Clickable> body;
 		MV::Scene::SafeComponent<MV::Scene::Clickable> topLeft;
@@ -859,6 +914,52 @@ namespace Workbench {
 		MV::Point<> pressBottomRightAt;
 		std::vector<std::pair<MV::Point<int>, bool>> paintedCells;
 		MV::Point<int> lastPaintCell{ -1, -1 };
+	};
+
+	// Two boxes on one component, each drawn and dragged as a BoundsGizmo: a CameraConstraint's hard and soft bounds.
+	struct GizmoLayer::BoundsPairGizmo : GizmoLayer::Gizmo {
+		BoundsPairGizmo(GizmoLayer& a_layer, const std::shared_ptr<MV::Scene::CameraConstraint>& a_constraint) :
+			Gizmo(a_layer) {
+			std::weak_ptr<MV::Scene::CameraConstraint> weak = a_constraint;
+			auto box = [&](bool a_soft, const MV::Color& a_color, int64_t a_priority) {
+				return std::make_unique<BoundsGizmo>(a_layer, a_constraint,
+					[weak, a_soft]() {
+						auto locked = weak.lock();
+						return locked ? locked->bounds(a_soft) : MV::BoxAABB<>();
+					},
+					[weak, a_soft](const MV::BoxAABB<>& a_bounds) {
+						if (auto locked = weak.lock()) {
+							if (a_soft) {
+								locked->soft(a_bounds);
+							} else {
+								locked->hard(a_bounds);
+							}
+						}
+					}, a_color, a_priority);
+			};
+			hard = box(false, hardBoundsColor, 0);
+			soft = box(true, softBoundsColor, 1);
+		}
+
+		bool dirty() const override { return false; }
+
+		void sync() override {
+			hard->sync();
+			soft->sync();
+		}
+
+		void update() override {
+			hard->update();
+			soft->update();
+			dragging = hard->dragging || soft->dragging;
+		}
+
+		std::optional<MV::Point<int>> cornerScreenPoint(size_t a_box, size_t a_corner) const override {
+			return a_box == 0 ? hard->cornerScreenPoint(0, a_corner) : a_box == 1 ? soft->cornerScreenPoint(0, a_corner) : std::nullopt;
+		}
+
+		std::unique_ptr<BoundsGizmo> hard;
+		std::unique_ptr<BoundsGizmo> soft;
 	};
 
 	struct GizmoLayer::HighlightGizmo : GizmoLayer::Gizmo {
@@ -972,6 +1073,10 @@ namespace Workbench {
 		return std::nullopt;
 	}
 
+	std::optional<MV::Point<int>> GizmoLayer::componentCornerScreenPoint(size_t a_box, size_t a_corner) const {
+		return componentGizmo ? componentGizmo->cornerScreenPoint(a_box, a_corner) : std::nullopt;
+	}
+
 	void GizmoLayer::select(const std::shared_ptr<MV::Scene::Node>& a_node) {
 		if (nodeTarget == a_node) {
 			return;   // re-selecting keeps the active component gizmo
@@ -1007,10 +1112,14 @@ namespace Workbench {
 			std::dynamic_pointer_cast<MV::Scene::Text>(a_component) ||
 			std::dynamic_pointer_cast<MV::Scene::Spine>(a_component) ||
 			std::dynamic_pointer_cast<MV::Scene::Parallax>(a_component) ||
-			std::dynamic_pointer_cast<MV::Scene::PathMap>(a_component));
+			std::dynamic_pointer_cast<MV::Scene::PathMap>(a_component) ||
+			std::dynamic_pointer_cast<MV::Scene::CameraConstraint>(a_component));
 	}
 
 	std::unique_ptr<GizmoLayer::Gizmo> GizmoLayer::makeComponentGizmo(const std::shared_ptr<MV::Scene::Component>& a_component) {
+		if (auto constraint = std::dynamic_pointer_cast<MV::Scene::CameraConstraint>(a_component)) {
+			return std::make_unique<BoundsPairGizmo>(*this, constraint);
+		}
 		if (std::dynamic_pointer_cast<MV::Scene::Grid>(a_component) ||
 			std::dynamic_pointer_cast<MV::Scene::Spine>(a_component) ||
 			std::dynamic_pointer_cast<MV::Scene::Parallax>(a_component)) {

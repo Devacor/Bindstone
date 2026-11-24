@@ -20,94 +20,25 @@ static jai::registrar<GameInstance, MV::Services> _hookGameInstance([](jai::dyna
 
 void GameInstance::handleScroll(float a_amount, const MV::Point<int>& a_position) {
 	if (worldCamera && requestCamera()) {
+		auto around = worldView->viewFromScreen(a_position);
 		auto zoom = worldCamera->zoom();
-		auto zoomStep = .05f * a_amount + (zoom / 10.0f * a_amount);
-		auto finalZoom = zoom + zoomStep;
-
-		if (finalZoom > maxZoomHard) {
-			zoomStep -= finalZoom - maxZoomHard;
+		auto target = zoom + .05f * a_amount + (zoom / 10.0f * a_amount);
+		if (cameraLimits) {
+			target = std::max(std::min(target, cameraLimits->maximumZoom(false)), cameraLimits->minimumZoom(false));
 		}
-		auto floorZoom = minZoom(false);
-		if (finalZoom < floorZoom) {
-			zoomStep -= finalZoom - floorZoom;
+		if (std::abs(target - zoom) > 0.00000001f) {
+			worldCamera->zoomAround(target, around);
 		}
-		if (std::abs(zoomStep) > 0.00000001f) {
-			zoomAroundScreenPoint(zoom + zoomStep, a_position);
+		if (cameraLimits) {
+			cameraLimits->hold()->clamp(around)->release(around);
 		}
-		clampToHardBounds(a_position);
-		easeToBoundsIfExceeded(a_position);
 	}
 }
 
-MV::BoxAABB<> GameInstance::visibleMapBounds() {
-	return worldCamera->visibleIn(worldScene);
-}
-
-bool GameInstance::cornerBounds(MV::BoxAABB<>& a_bounds, const std::string& a_suffix) {
-	auto topLeft = worldScene->get("TopLeft_" + a_suffix, false);
-	auto bottomRight = worldScene->get("BottomRight_" + a_suffix, false);
-	if (!topLeft || !bottomRight) { return false; }
-	a_bounds = MV::BoxAABB<>(worldScene->localFromWorld(topLeft->worldPosition()), worldScene->localFromWorld(bottomRight->worldPosition()));
-	a_bounds.sanitize();
-	return a_bounds.width() > 0.0f && a_bounds.height() > 0.0f;
-}
-
-bool GameInstance::mapViewBounds(MV::BoxAABB<>& a_bounds, bool a_soft) {
-	if (cornerBounds(a_bounds, a_soft ? "Soft" : "Hard")) { return true; }
-	if (!pathMap) { return false; }
-	a_bounds = worldScene->localFromWorld(pathMap->owner()->worldBounds(false));
-	if (a_soft) {
-		auto inset = MV::toPoint(a_bounds.size()) * viewSoftInset;
-		a_bounds.minPoint += inset;
-		a_bounds.maxPoint -= inset;
+void GameInstance::releaseCamera(const MV::Point<int>& a_position) {
+	if (cameraLimits && worldView) {
+		cameraLimits->release(worldView->viewFromScreen(a_position));
 	}
-	return a_bounds.width() > 0.0f && a_bounds.height() > 0.0f;
-}
-
-float GameInstance::minZoom(bool a_soft) {
-	MV::BoxAABB<> bounds;
-	return mapViewBounds(bounds, a_soft) ? std::max(zoomSanityFloor, zoomToFit(bounds)) : zoomSanityFloor;
-}
-
-float GameInstance::zoomToFit(const MV::BoxAABB<>& a_bounds) {
-	auto visible = visibleMapBounds();
-	auto ratio = std::max(visible.width() / a_bounds.width(), visible.height() / a_bounds.height());
-	return worldCamera->zoom() * ratio;   // the zoom at which the view exactly fits, larger or smaller than now
-}
-
-MV::Point<> GameInstance::viewCorrection(const MV::BoxAABB<>& a_bounds) {
-	auto visible = visibleMapBounds();
-	auto centering = a_bounds.centerPoint() - visible.centerPoint();
-	MV::Point<> correction;
-	if (visible.width() >= a_bounds.width()) { correction.x = centering.x; }
-	else if (visible.minPoint.x < a_bounds.minPoint.x) { correction.x = a_bounds.minPoint.x - visible.minPoint.x; }
-	else if (visible.maxPoint.x > a_bounds.maxPoint.x) { correction.x = a_bounds.maxPoint.x - visible.maxPoint.x; }
-	if (visible.height() >= a_bounds.height()) { correction.y = centering.y; }
-	else if (visible.minPoint.y < a_bounds.minPoint.y) { correction.y = a_bounds.minPoint.y - visible.minPoint.y; }
-	else if (visible.maxPoint.y > a_bounds.maxPoint.y) { correction.y = a_bounds.maxPoint.y - visible.maxPoint.y; }
-	return correction;
-}
-
-void GameInstance::clampToHardBounds(const MV::Point<int>& a_pointerCenter) {
-	MV::BoxAABB<> hard;
-	if (!worldCamera || !mapViewBounds(hard, false)) { return; }
-	auto fit = zoomToFit(hard);
-	if (fit > worldCamera->zoom()) {
-		zoomAroundScreenPoint(fit, a_pointerCenter);
-	}
-	auto correction = viewCorrection(hard);
-	if (correction != MV::Point<>()) {
-		moveCameraInMap(correction);
-	}
-}
-
-void GameInstance::moveCameraInMap(const MV::Point<>& a_mapDelta) {
-	auto toScene = worldScene->worldTransform();
-	worldCamera->sceneTranslate(toScene * a_mapDelta - toScene * MV::Point<>());
-}
-
-void GameInstance::zoomAroundScreenPoint(float a_zoom, const MV::Point<int>& a_position) {
-	worldCamera->zoomAround(a_zoom, worldView->viewFromScreen(a_position));
 }
 
 GameInstance::GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse, float a_timeStep, size_t a_maxFixedStepsPerUpdate) :
@@ -135,6 +66,7 @@ void GameInstance::initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer,
 		cameraStartPosition = worldCamera->owner()->position();
 		cameraStartZoom = worldCamera->zoom();
 	}
+	cameraLimits = worldScene->component<MV::Scene::CameraConstraint>(false, false);
 
 	pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();
 
@@ -150,7 +82,7 @@ void GameInstance::initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer,
 
 	ourMouse.onLeftMouseUp.connect("cancelDragObserver", [this](MV::TapDevice& a_mouse2) {
 		activeDrag.reset();
-		easeToBoundsIfExceeded(ourMouse.position());
+		releaseCamera(ourMouse.position());
 	});
 
 	zoomSignal = ourMouse.onPinchZoom.connect([&](MV::Point<int> a_point, float a_zoomAmount, float a_rotateAmount) {
@@ -177,13 +109,19 @@ GameInstance::~GameInstance() {
 void GameInstance::beginMapDrag() {
 	if (worldCamera && requestCamera()) {
 		ourMouse.queueExclusiveAction(MV::ExclusiveTapAction(true, { 10 }, [&]() {
+			if (cameraLimits) {
+				cameraLimits->hold();
+			}
 			activeDrag = ourMouse.onMove.connect([this](MV::TapDevice& a_mouse) {
-				worldCamera->sceneTranslate(worldCamera->sceneFromView(worldView->viewFromScreen(a_mouse.oldPosition())) - worldCamera->sceneFromView(worldView->viewFromScreen(a_mouse.position())));
-				clampToHardBounds(a_mouse.position());
+				auto around = worldView->viewFromScreen(a_mouse.position());
+				worldCamera->sceneTranslate(worldCamera->sceneFromView(worldView->viewFromScreen(a_mouse.oldPosition())) - worldCamera->sceneFromView(around));
+				if (cameraLimits) {
+					cameraLimits->clamp(around);
+				}
 			});
 		}, [this]() {
 			activeDrag.reset();
-			easeToBoundsIfExceeded(ourMouse.position());
+			releaseCamera(ourMouse.position());
 		}, "MapDrag"));
 	}
 }
@@ -220,40 +158,16 @@ void GameInstance::moveCamera(MV::Point<> a_center, MV::PointPrecision a_zoom, b
 	auto startCenter = worldCamera->center();
 	auto startZoom = worldCamera->zoom();
 	cameraAction.cancel();
+	if (cameraLimits) {
+		cameraLimits->hold();
+	}
 	cameraAction.then(a_interruptable ? "interruptable" : "force", [this, startCenter, a_center, startZoom, a_zoom](MV::Task &a_self, double /*a_dt*/) {
 		float percent = std::min(static_cast<MV::PointPrecision>(a_self.localElapsed() / 0.5f), 1.0f);
 		worldCamera->zoom(MV::mix(startZoom, a_zoom, percent, 2.0f));
 		worldCamera->sceneTranslate(MV::mix(startCenter, a_center, percent, 2.0f) - worldCamera->center());
-		return percent != 1.0f;
-	});
-}
-
-void GameInstance::easeToBoundsIfExceeded(const MV::Point<int> &a_pointerCenter) {
-	if (!worldCamera || !cameraIsFree()) {
-		return;
-	}
-	MV::BoxAABB<> soft;
-	bool haveSoft = mapViewBounds(soft, true);
-	auto startScale = worldCamera->zoom();
-	auto endScale = std::clamp(startScale, minZoom(true), maxZoomSoft);
-	bool outsideSoft = haveSoft && viewCorrection(soft) != MV::Point<>();
-	if (endScale == startScale && !outsideSoft) {
-		return;
-	}
-	cameraAction.cancel();
-	cameraAction.then(std::make_shared<MV::BlockForSeconds>(static_cast<float>(viewEaseHoldSeconds)));
-
-	auto eased = std::make_shared<float>(0.0f);
-	cameraAction.thenAlso("interruptable", [this, startScale, endScale, a_pointerCenter, soft, haveSoft, eased](MV::Task& a_self, double /*a_dt*/) {
-		float percent = std::min(static_cast<MV::PointPrecision>(a_self.localElapsed() / viewEaseSeconds), 1.0f);
-		float easedNow = MV::mixOut(0.0f, 1.0f, percent, 2.0f);
-		zoomAroundScreenPoint(MV::mixOut(startScale, endScale, percent, 2.0f), a_pointerCenter);
-		if (haveSoft) {
-			// each frame closes the share of the remaining distance that this frame's easing covers
-			float step = percent >= 1.0f ? 1.0f : std::clamp((easedNow - *eased) / std::max(1.0f - *eased, 0.0001f), 0.0f, 1.0f);
-			moveCameraInMap(viewCorrection(soft) * step);
+		if (percent == 1.0f && cameraLimits) {
+			cameraLimits->release();
 		}
-		*eased = easedNow;
 		return percent != 1.0f;
 	});
 }

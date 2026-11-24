@@ -40,7 +40,7 @@ namespace MV {
 		}
 		~OwnedSurface() {
 			if (ourSurface != nullptr) {
-				SDL_FreeSurface(ourSurface);
+				SDL_DestroySurface(ourSurface);
 			}
 		}
 		SDL_Surface* get() {

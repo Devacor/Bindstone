@@ -22,7 +22,7 @@
 
 #define U8_STR(stringVal) reinterpret_cast<const char *>(u8##stringVal)
 using namespace std::string_literals; //for convenience to enable ""s
-struct SDL_RWops;
+struct SDL_IOStream;
 namespace MV {
 	typedef char UtfChar;
 	typedef std::string UtfString;
@@ -310,7 +310,7 @@ namespace MV {
 	bool deleteFile(const std::string& a_path);
 	time_t lastFileWriteTime(const std::string& a_path);
 
-	SDL_RWops* sdlFileHandle(const std::string& a_path);
+	SDL_IOStream* sdlFileHandle(const std::string& a_path);
 	//returns a blank string if a_throwOnMissing is false.
 	std::string fileContents(const std::string& a_path, bool a_throwOnMissing = false);
 	//fileContents split into lines, CR-tolerant, trailing empties dropped. Empty if missing.

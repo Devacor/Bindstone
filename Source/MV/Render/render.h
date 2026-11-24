@@ -46,14 +46,14 @@
 #define HAVE_OPENGLES 1
 #endif
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #define GL_GLEXT_PROTOTYPES
 #define GLX_GLEXT_PROTOTYPES
 
 #ifdef HAVE_OPENGLES
-	//#include <SDL_opengl.h>
-#include <SDL_opengles2.h>
+	//#include <SDL3/SDL_opengl.h>
+#include <SDL3/SDL_opengles2.h>
 //#include <OpenGLES/ES3/gl.h>
 //#include <OpenGLES/ES3/glext.h>
 //typedef GLfloat GLdouble; //opengles has no GLdouble
@@ -63,7 +63,7 @@ inline int gl3wInit() {
 }
 #else
 #include <gl3w/include/GL/gl3w.h>
-#include <SDL_opengl.h>
+#include <SDL3/SDL_opengl.h>
 #endif
 
 #ifdef GL_DEPTH_COMPONENT24
@@ -303,6 +303,7 @@ namespace MV {
 		void refreshContext();
 		void updateScreen();
 		void updateWindowResizeLimits();
+		bool applyFullscreenDisplayMode();
 		void conformToAspectRatio(int& a_width, int& a_height) const;
 
 		SDL_GLContext glcontext = 0;
@@ -313,7 +314,8 @@ namespace MV {
 		Size<int> ourWindowSize;
 		Size<int> ourDrawableSize;
 		PointPrecision aspectRatio;
-		uint32_t SDLflags;
+		SDL_WindowFlags SDLflags;
+		bool exclusiveFullscreen = false;
 		std::string title;
 
 		bool vsync = false;

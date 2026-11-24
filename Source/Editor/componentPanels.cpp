@@ -22,8 +22,8 @@ void EditorPanel::handleInput(SDL_Event &a_event) {
 	if(auto lockedAT = activeTextbox.lock()){
 		lockedAT->text(a_event);
 	} else {
-		if (a_event.type == SDL_KEYDOWN && a_event.key.keysym.sym == SDLK_c) {
-			const Uint8* keystate = SDL_GetKeyboardState(NULL);
+		if (a_event.type == SDL_EVENT_KEY_DOWN && a_event.key.key == SDLK_C) {
+			const bool* keystate = SDL_GetKeyboardState(NULL);
 			if (keystate[SDL_SCANCODE_LSHIFT] && keystate[SDL_SCANCODE_LCTRL]) {
 				CopiedComponent = getEditingComponent();
 			}
@@ -356,17 +356,17 @@ void SelectedNodeEditorPanel::handleInput(SDL_Event &a_event) {
 	EditorPanel::handleInput(a_event);
 	componentPanel->handleInput(a_event);
 
-	if (CopiedComponent && a_event.type == SDL_KEYDOWN && a_event.key.keysym.sym == SDLK_v) {
-		const Uint8* keystate = SDL_GetKeyboardState(NULL);
+	if (CopiedComponent && a_event.type == SDL_EVENT_KEY_DOWN && a_event.key.key == SDLK_V) {
+		const bool* keystate = SDL_GetKeyboardState(NULL);
 		if (keystate[SDL_SCANCODE_LSHIFT] && keystate[SDL_SCANCODE_LCTRL]) {
 			CopiedComponent->clone(controls->elementToEdit);
 		}
 	}
 
-	if (a_event.type == SDL_DROPFILE) {
-		std::cout << a_event.drop.file << std::endl;
-		if (MV::fileExistsAbsolute(a_event.drop.file)) {
-			auto newNode = controls->elementToEdit->make(a_event.drop.file, panel.services());
+	if (a_event.type == SDL_EVENT_DROP_FILE) {
+		std::cout << a_event.drop.data << std::endl;
+		if (MV::fileExistsAbsolute(a_event.drop.data)) {
+			auto newNode = controls->elementToEdit->make(a_event.drop.data, panel.services());
 
 			//auto editableNode = std::make_shared<EditableNode>(newNode, panel.editor(), panel.services().get<MV::TapDevice>());
 
@@ -396,7 +396,7 @@ SelectedDrawableEditorPanel::SelectedDrawableEditorPanel(EditorControls &a_panel
 		pointList[a_pointIndex] = a_final;
 		controls->elementToEdit->setPoint(a_pointIndex, pointList[a_pointIndex]);
 
-		const Uint8* keystate = SDL_GetKeyboardState(NULL);
+		const bool* keystate = SDL_GetKeyboardState(NULL);
 		if (!keystate[SDL_SCANCODE_LSHIFT]) {
 			for (size_t i = 0; i < pointList.size(); ++i) {
 				if (i != a_pointIndex && MV::distance(pointSelected.point(), pointList[i].point()) < 0.75f) {
@@ -507,7 +507,7 @@ void SelectedDrawableEditorPanel::openTexturePicker(size_t a_textureId) {
 void SelectedDrawableEditorPanel::handleInput(SDL_Event &a_event) {
 	if (auto lockedAT = activeTextbox.lock()) {
 		lockedAT->text(a_event);
-	} else if (a_event.type == SDL_KEYDOWN) {
+	} else if (a_event.type == SDL_EVENT_KEY_DOWN) {
 		EditorPanel::handleInput(a_event);
 		auto offsetPosition = controls->elementToEdit->owner()->localFromScreen(panel.services().get<MV::TapDevice>()->position());
 		auto originalMouseLocalPosition = offsetPosition;
@@ -524,7 +524,7 @@ void SelectedDrawableEditorPanel::handleInput(SDL_Event &a_event) {
 
 		MV::Scale scale(.5f, .5f);
 
-		if (a_event.key.keysym.sym == SDLK_p) {
+		if (a_event.key.key == SDLK_P) {
 			if (selectedPointIndex != -1) {
 				std::set<size_t> attachedIndices;
 				attachedIndices.insert(selectedPointIndex);
@@ -570,7 +570,7 @@ void SelectedDrawableEditorPanel::handleInput(SDL_Event &a_event) {
 				controls->elementToEdit->setPoints(pointList, indexList);
 				controls->resetHandles();
 			}
-		} else if (a_event.key.keysym.sym == SDLK_q) {
+		} else if (a_event.key.key == SDLK_Q) {
 			controls->elementToEdit->appendPoints({
 				MV::DrawPoint{ MV::point(0.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.0f) },
 				MV::DrawPoint{ MV::point(0.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 1.0f) },
@@ -639,7 +639,7 @@ void SelectedDrawableEditorPanel::handleInput(SDL_Event &a_event) {
 					21, 24, 25
 				});
 			controls->resetHandles();
-		} else if (a_event.key.keysym.sym == SDLK_a) {
+		} else if (a_event.key.key == SDLK_A) {
 			controls->elementToEdit->appendPoints({
 				MV::DrawPoint{ MV::point(0.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.0f) },
 				MV::DrawPoint{ MV::point(0.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 1.0f) },
@@ -660,7 +660,7 @@ void SelectedDrawableEditorPanel::handleInput(SDL_Event &a_event) {
 				});
 
 			controls->resetHandles();
-		} else if (a_event.key.keysym.sym == SDLK_z) {
+		} else if (a_event.key.key == SDLK_Z) {
 			controls->elementToEdit->appendPoints({
 				MV::DrawPoint{ MV::point(0.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.0f) },
 				MV::DrawPoint{ MV::point(0.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 1.0f) },
@@ -690,7 +690,7 @@ void SelectedDrawableEditorPanel::handleInput(SDL_Event &a_event) {
 				});
 
 			controls->resetHandles();
-		} else if (a_event.key.keysym.sym == SDLK_s) {
+		} else if (a_event.key.key == SDLK_S) {
 			controls->elementToEdit->appendPoints({
 				MV::DrawPoint{ MV::point(0.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.0f) },
 				MV::DrawPoint{ MV::point(-75.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 1.0f) },
@@ -726,7 +726,7 @@ void SelectedDrawableEditorPanel::handleInput(SDL_Event &a_event) {
 				});
 
 			controls->resetHandles();
-		} else if (a_event.key.keysym.sym == SDLK_x) {
+		} else if (a_event.key.key == SDLK_X) {
 			controls->elementToEdit->appendPoints({
 				MV::DrawPoint{ MV::point(0.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.0f) },
 				MV::DrawPoint{ MV::point(-75.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 1.0f) },
@@ -1753,8 +1753,8 @@ void DeselectedEditorPanel::handleInput(SDL_Event &a_event) {
 	if (auto lockedAT = activeTextbox.lock()) {
 		lockedAT->text(a_event);
 	}
-	else if (a_event.type == SDL_KEYDOWN) {
-		if (a_event.key.keysym.sym == SDLK_s) {
+	else if (a_event.type == SDL_EVENT_KEY_DOWN) {
+		if (a_event.key.key == SDLK_S) {
 			panel.content()->renderer().reloadShaders();
 		}
 	}

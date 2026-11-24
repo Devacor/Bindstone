@@ -1,20 +1,19 @@
 apply plugin: 'com.android.application'
 
 android {
-    compileSdkVersion = 23
-    buildToolsVersion = "29.0.2"
+    namespace = "com.snapjaw.bindstone"
+    compileSdkVersion = 35
 
     defaultConfig.with {
         applicationId = "com.snapjaw.bindstone"
         minSdkVersion = 21
         targetSdkVersion = 23
-        compileSdkVersion = 29
         multiDexEnabled true
     }
     
     compileOptions.with {
-        sourceCompatibility=JavaVersion.VERSION_1_7
-        targetCompatibility=JavaVersion.VERSION_1_7
+        sourceCompatibility=JavaVersion.VERSION_1_8
+        targetCompatibility=JavaVersion.VERSION_1_8
     }
 
     signingConfigs {
@@ -36,7 +35,7 @@ android {
         debug {
             debuggable = true
             minifyEnabled true
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules-debug.pro'
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules-debug.pro'
         }
     }
 
@@ -56,6 +55,11 @@ android {
             ndk.abiFilters 'x86_64'
         }
         create("all")
+    }
+
+    lint {
+        // targetSdkVersion stays at 23 until it is raised on purpose
+        disable 'ExpiredTargetSdkVersion'
     }
 
     sourceSets {

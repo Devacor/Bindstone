@@ -55,14 +55,14 @@ public:
 			activeTextbox = lockedNewAT;
 			lockedNewAT->enableCursor();
 		}
-		SDL_StartTextInput();
+		MV::startTextInput();
 	}
 	void deactivateText() {
 		if (auto lockedAT = activeTextbox.lock()) {
 			lockedAT->disableCursor();
 		}
 		activeTextbox.reset();
-		SDL_StopTextInput();
+		MV::stopTextInput();
 	}
 	bool hasActiveText() const {
 		return !activeTextbox.expired();

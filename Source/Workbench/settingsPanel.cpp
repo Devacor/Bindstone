@@ -122,16 +122,16 @@ namespace Workbench {
 		if (capturingId.empty() || !keys) {
 			return false;
 		}
-		if (a_event.type != SDL_KEYDOWN) {
-			return a_event.type == SDL_KEYUP || a_event.type == SDL_TEXTINPUT;
+		if (a_event.type != SDL_EVENT_KEY_DOWN) {
+			return a_event.type == SDL_EVENT_KEY_UP || a_event.type == SDL_EVENT_TEXT_INPUT;
 		}
-		const auto symbol = a_event.key.keysym.sym;
+		const auto symbol = a_event.key.key;
 		if (KeyChord::modifierKey(symbol)) {
 			return true;
 		}
 		const auto id = capturingId;
 		capturingId.clear();
-		if (symbol != SDLK_ESCAPE || (SDL_GetModState() & (KMOD_CTRL | KMOD_SHIFT | KMOD_ALT))) {
+		if (symbol != SDLK_ESCAPE || (SDL_GetModState() & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT | SDL_KMOD_ALT))) {
 			keys->set(id, KeyChord::of(a_event));
 			auto clashes = keys->clashes(id);
 			if (!clashes.empty() && onWarning) {

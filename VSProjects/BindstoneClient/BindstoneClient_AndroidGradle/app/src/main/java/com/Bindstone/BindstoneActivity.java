@@ -20,9 +20,9 @@ public class BindstoneActivity extends SDLActivity
             //"m",
             //"wolfssl",
             //"hidapi", //I'm just compiling this directly into the app.
-            "SDL2",
-            "SDL2_Image",
-            "SDL2_ttf",
+            "SDL3",
+            "SDL3_image",
+            "SDL3_ttf",
             //"mutedvision",
             //"external",
             "bindstonemain"

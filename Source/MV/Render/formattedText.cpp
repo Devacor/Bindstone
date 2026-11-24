@@ -13,18 +13,18 @@ namespace MV {
 			require<ResourceException>(exists->equivalent(a_identifier, a_file, a_size, a_style), "Found an existing definition that doesn't match: ", exists);
 			return exists;
 		} else {
-			SDL_RWops* fileHandle = sdlFileHandle(a_file);
+			SDL_IOStream* fileHandle = sdlFileHandle(a_file);
 			if (fileHandle) {
-				TTF_Font* newFont = TTF_OpenFontRW(fileHandle, 1, a_size);
+				TTF_Font* newFont = TTF_OpenFontIO(fileHandle, true, static_cast<float>(a_size));
 				if (newFont) {
 					TTF_SetFontHinting(newFont, TTF_HINTING_NORMAL);
-					TTF_SetFontStyle(newFont, static_cast<int>(a_style));
+					TTF_SetFontStyle(newFont, static_cast<TTF_FontStyleFlags>(a_style));
 					auto fontDefinitionToAdd = std::shared_ptr<FontDefinition>(new FontDefinition(&a_library, a_file, a_size, newFont, a_style, a_identifier));
 					a_library.add(fontDefinitionToAdd);
 					return fontDefinitionToAdd;
 				}
 				else {
-					require<ResourceException>(false, "Error loading font [", a_identifier, "]: ", TTF_GetError());
+					require<ResourceException>(false, "Error loading font [", a_identifier, "]: ", SDL_GetError());
 				}
 			} else {
 				require<ResourceException>(false, "Error loading font [file missing]: ");
@@ -44,7 +44,7 @@ namespace MV {
 				SurfaceTextureDefinition::make(renderChar, [=]() -> std::shared_ptr<OwnedSurface> {
 					if (textLibrary->renderer().headless()) { return nullptr; }
 					
-					return OwnedSurface::make(TTF_RenderUTF8_Blended(font, renderChar.c_str(), {255, 255, 255, 255}));
+					return OwnedSurface::make(TTF_RenderText_Blended(font, renderChar.c_str(), 0, {255, 255, 255, 255}));
 				}),
 				renderChar,
 				shared_from_this()
@@ -63,7 +63,7 @@ namespace MV {
 			int width = 0;
 			int height = 0;
 			if (font != nullptr) {
-				TTF_SizeUTF8(font, a_glyph.c_str(), &width, &height);
+				TTF_GetStringSize(font, a_glyph.c_str(), 0, &width, &height);
 			}
 			found = measuredGlyphWidths.emplace(a_glyph, static_cast<PointPrecision>(width)).first;
 		}

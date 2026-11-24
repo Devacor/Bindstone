@@ -222,7 +222,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x86'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL3\include;$(SolutionDir)VSProjects\SDL3_ttf\include;$(SolutionDir)VSProjects\SDL3_image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -232,13 +232,13 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\</AdditionalLibraryDirectories>
-      <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem</LibraryDependencies>
+      <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL3;SDL3_ttf;SDL3_image;external;boost_system;boost_filesystem</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;$(SolutionDir)VSProjects\SDL2_ttf\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL3\include;$(SolutionDir)VSProjects\SDL3_ttf\include;$(SolutionDir)VSProjects\SDL3_image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;$(SolutionDir)VSProjects\SDL3_ttf\include</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -248,13 +248,13 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\</AdditionalLibraryDirectories>
-      <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem</LibraryDependencies>
+      <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL3;SDL3_ttf;SDL3_image;external;boost_system;boost_filesystem</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL3\include;$(SolutionDir)VSProjects\SDL3_ttf\include;$(SolutionDir)VSProjects\SDL3_image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -264,13 +264,13 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\</AdditionalLibraryDirectories>
-      <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem</LibraryDependencies>
+      <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL3;SDL3_ttf;SDL3_image;external;boost_system;boost_filesystem</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL3\include;$(SolutionDir)VSProjects\SDL3_ttf\include;$(SolutionDir)VSProjects\SDL3_image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -280,13 +280,13 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\</AdditionalLibraryDirectories>
-      <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem</LibraryDependencies>
+      <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL3;SDL3_ttf;SDL3_image;external;boost_system;boost_filesystem</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL3\include;$(SolutionDir)VSProjects\SDL3_ttf\include;$(SolutionDir)VSProjects\SDL3_image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -296,14 +296,14 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\</AdditionalLibraryDirectories>
-      <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem</LibraryDependencies>
+      <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL3;SDL3_ttf;SDL3_image;external;boost_system;boost_filesystem</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
       <AdditionalOptions>-fno-gnu-unique %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL3\include;$(SolutionDir)VSProjects\SDL3_ttf\include;$(SolutionDir)VSProjects\SDL3_image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -313,14 +313,14 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\</AdditionalLibraryDirectories>
-      <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem</LibraryDependencies>
+      <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL3;SDL3_ttf;SDL3_image;external;boost_system;boost_filesystem</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
       <AdditionalOptions>-fno-gnu-unique %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL3\include;$(SolutionDir)VSProjects\SDL3_ttf\include;$(SolutionDir)VSProjects\SDL3_image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -330,14 +330,14 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\</AdditionalLibraryDirectories>
-      <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem</LibraryDependencies>
+      <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL3;SDL3_ttf;SDL3_image;external;boost_system;boost_filesystem</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
       <AdditionalOptions>-fno-gnu-unique %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL3\include;$(SolutionDir)VSProjects\SDL3_ttf\include;$(SolutionDir)VSProjects\SDL3_image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -347,7 +347,7 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\</AdditionalLibraryDirectories>
-      <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem</LibraryDependencies>
+      <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL3;SDL3_ttf;SDL3_image;external;boost_system;boost_filesystem</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
       <AdditionalOptions>-fno-gnu-unique %(AdditionalOptions)</AdditionalOptions>
     </Link>

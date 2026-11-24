@@ -241,9 +241,9 @@ namespace Workbench {
 		if (!isOpen()) {
 			return;
 		}
-		if (a_event.type == SDL_KEYDOWN && a_event.key.keysym.sym == SDLK_ESCAPE) {
+		if (a_event.type == SDL_EVENT_KEY_DOWN && a_event.key.key == SDLK_ESCAPE) {
 			close();
-		} else if (a_event.type == SDL_MOUSEBUTTONDOWN) {
+		} else if (a_event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
 			MV::Point<int> pressed(a_event.button.x, a_event.button.y);
 			auto world = worldFromScreen(pressed);
 			bool insidePopup = popupContains(pressed);

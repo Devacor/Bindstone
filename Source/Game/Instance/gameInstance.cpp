@@ -191,8 +191,8 @@ bool GameInstance::update(double a_dt) {
 }
 
 bool GameInstance::handleEvent(const SDL_Event &a_event) {
-	if (a_event.type == SDL_MOUSEWHEEL) {
-		handleScroll(static_cast<MV::PointPrecision>(a_event.wheel.y), mouse().position());
+	if (a_event.type == SDL_EVENT_MOUSE_WHEEL) {
+		handleScroll(static_cast<MV::PointPrecision>(a_event.wheel.integer_y), mouse().position());
 	}
 	ourMouse.updateTouch(a_event, gameData.managers().renderer.window().drawableSize());
 	return false;

@@ -13,14 +13,10 @@
 
 #if __has_include(<vulkan/vulkan.h>)
 
-#ifndef SDL_MAIN_HANDLED
-#define SDL_MAIN_HANDLED
-#endif
-
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
-#include <SDL.h>
-#include <SDL_vulkan.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 
 #include "MV/Render/Backends/handlePool.h"
 #include "MV/Utility/require.hpp"
@@ -316,7 +312,7 @@ namespace MV {
 					std::fprintf(stderr, "[Vulkan] window was not created with SDL_WINDOW_VULKAN; staying on GL.\n");
 					return false;
 				}
-				if (SDL_Vulkan_LoadLibrary(nullptr) != 0) {
+				if (!SDL_Vulkan_LoadLibrary(nullptr)) {
 					std::fprintf(stderr, "[Vulkan] SDL_Vulkan_LoadLibrary failed: %s\n", SDL_GetError());
 					return false;
 				}
@@ -324,7 +320,7 @@ namespace MV {
 
 				if (!loadGlobalFunctions()) { return false; }
 				if (!createInstance()) { return false; }
-				if (!SDL_Vulkan_CreateSurface(window, instance, &surface)) {
+				if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) {
 					std::fprintf(stderr, "[Vulkan] SDL_Vulkan_CreateSurface failed: %s\n", SDL_GetError());
 					return false;
 				}
@@ -334,7 +330,7 @@ namespace MV {
 				if (!createFrameResources()) { return false; }
 
 				int w = 0, h = 0;
-				SDL_Vulkan_GetDrawableSize(window, &w, &h);
+				SDL_GetWindowSizeInPixels(window, &w, &h);
 				if (!createSwapchain(w, h)) { return false; }
 
 				VkPhysicalDeviceProperties props{};
@@ -357,10 +353,10 @@ namespace MV {
 			}
 
 			bool VulkanDevice::createInstance() {
-				unsigned int extCount = 0;
-				if (!SDL_Vulkan_GetInstanceExtensions(window, &extCount, nullptr)) { return false; }
-				std::vector<const char*> extensions(extCount);
-				if (!SDL_Vulkan_GetInstanceExtensions(window, &extCount, extensions.data())) { return false; }
+				Uint32 extCount = 0;
+				const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&extCount);
+				if (!sdlExtensions) { return false; }
+				std::vector<const char*> extensions(sdlExtensions, sdlExtensions + extCount);
 
 				// Validation only when both the layer and VK_EXT_debug_utils are present (the messenger
 				// needs the extension; requesting it unsupported would fail vkCreateInstance).
@@ -702,7 +698,7 @@ namespace MV {
 				fns.vkQueueWaitIdle(presentQueue); // ensure no present still references a renderFinished semaphore we destroy
 				destroySwapchain();
 				int w = 0, h = 0;
-				SDL_Vulkan_GetDrawableSize(window, &w, &h);
+				SDL_GetWindowSizeInPixels(window, &w, &h);
 				return createSwapchain(w, h);
 			}
 

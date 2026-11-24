@@ -6,7 +6,7 @@
 #include <future>
 #include <set>
 #include <cstring>
-#include <SDL_image.h>
+#include <SDL3_image/SDL_image.h>
 #include "MV/Utility/generalUtility.h"
 #include <jaiscript/thread_pool.hpp>
 #include "MV/Render/points.h"
@@ -48,18 +48,19 @@ namespace MV {
 	}
 
 	GLenum getTextureFormat(SDL_Surface* img) {
-		if (img->format->format == SDL_PIXELFORMAT_ABGR8888 && img->format->BytesPerPixel == 4) {
+		const SDL_PixelFormatDetails* details = SDL_GetPixelFormatDetails(img->format);
+		if (img->format == SDL_PIXELFORMAT_ABGR8888 && details->bytes_per_pixel == 4) {
 			return GL_RGBA;
 		}
 
-		if (img->format->BytesPerPixel == 4) {	  // contains an alpha channel
-			if (img->format->Rmask == 0x000000ff) {
+		if (details->bytes_per_pixel == 4) {	  // contains an alpha channel
+			if (details->Rmask == 0x000000ff) {
 				return GL_RGBA;
 			} else {
 				return GL_BGRA;
 			}
-		} else if (img->format->BytesPerPixel == 3) {	  // no alpha channel
-			if (img->format->Rmask == 0x000000ff) {
+		} else if (details->bytes_per_pixel == 3) {	  // no alpha channel
+			if (details->Rmask == 0x000000ff) {
 				return GL_RGB;
 			} else {
 				return GL_BGR;
@@ -69,9 +70,9 @@ namespace MV {
 	}
 
 	GLenum getInternalTextureFormat(SDL_Surface* img) {
-		if (img->format->BytesPerPixel == 4) {	  // contains an alpha channel
+		if (SDL_BYTESPERPIXEL(img->format) == 4) {	  // contains an alpha channel
 			return GL_RGBA;
-		} else if (img->format->BytesPerPixel == 3) {	  // no alpha channel
+		} else if (SDL_BYTESPERPIXEL(img->format) == 3) {	  // no alpha channel
 			return GL_RGB;
 		}
 		return 0;
@@ -87,21 +88,18 @@ namespace MV {
 
 	// The upload reads a surface's pixels as tight rows; SDL_ttf pads the rows of the glyphs it renders.
 	static bool rowsArePadded(const SDL_Surface* a_surface) {
-		return a_surface->pitch != a_surface->w * a_surface->format->BytesPerPixel;
+		return a_surface->pitch != a_surface->w * SDL_BYTESPERPIXEL(a_surface->format);
 	}
 
 	std::shared_ptr<OwnedSurface> convertToPowerOfTwoSurface(const std::shared_ptr<OwnedSurface>& a_img) {
 		static const auto FORMAT = SDL_PIXELFORMAT_ABGR8888;
-		if (a_img != nullptr && a_img->get() != nullptr && (!isPowerOfTwo(a_img->get()->w) || !isPowerOfTwo(a_img->get()->h) || a_img->get()->format->format != FORMAT || rowsArePadded(a_img->get()))) {
+		if (a_img != nullptr && a_img->get() != nullptr && (!isPowerOfTwo(a_img->get()->w) || !isPowerOfTwo(a_img->get()->h) || a_img->get()->format != FORMAT || rowsArePadded(a_img->get()))) {
 			int widthPowerOfTwo = roundUpPowerOfTwo(a_img->get()->w);
 			int heightPowerOfTwo = roundUpPowerOfTwo(a_img->get()->h);
-			int bpp;
-			Uint32 Rmask, Gmask, Bmask, Amask;
-			SDL_PixelFormatEnumToMasks(FORMAT, &bpp, &Rmask, &Gmask, &Bmask, &Amask);
-			auto surface = OwnedSurface::make(SDL_CreateRGBSurface(0, widthPowerOfTwo, heightPowerOfTwo, bpp, Rmask, Gmask, Bmask, Amask));
+			auto surface = OwnedSurface::make(SDL_CreateSurface(widthPowerOfTwo, heightPowerOfTwo, FORMAT));
 			
 			SDL_SetSurfaceBlendMode(a_img->get(), SDL_BLENDMODE_NONE);
-			require<ResourceException>(SDL_BlitSurface(a_img->get(), 0, surface->get(), 0) == 0, "SDL_BlitSurface failed to copy!");
+			require<ResourceException>(SDL_BlitSurface(a_img->get(), nullptr, surface->get(), nullptr), "SDL_BlitSurface failed to copy!");
 
 			return surface;
 		}
@@ -110,14 +108,11 @@ namespace MV {
 
 	std::shared_ptr<OwnedSurface> convertToBGRSurface(const std::shared_ptr<OwnedSurface>& a_img) {
 		static const auto FORMAT = SDL_PIXELFORMAT_ABGR8888;
-		if (a_img != nullptr && a_img->get() != nullptr && (a_img->get()->format->format != FORMAT || rowsArePadded(a_img->get()))) {
-			int bpp;
-			Uint32 Rmask, Gmask, Bmask, Amask;
-			SDL_PixelFormatEnumToMasks(FORMAT, &bpp, &Rmask, &Gmask, &Bmask, &Amask);
-			auto surface = OwnedSurface::make(SDL_CreateRGBSurface(0, a_img->get()->w, a_img->get()->h, bpp, Rmask, Gmask, Bmask, Amask));
+		if (a_img != nullptr && a_img->get() != nullptr && (a_img->get()->format != FORMAT || rowsArePadded(a_img->get()))) {
+			auto surface = OwnedSurface::make(SDL_CreateSurface(a_img->get()->w, a_img->get()->h, FORMAT));
 
 			SDL_SetSurfaceBlendMode(a_img->get(), SDL_BLENDMODE_NONE);
-			require<ResourceException>(SDL_BlitSurface(a_img->get(), 0, surface->get(), 0) == 0, "SDL_BlitSurface failed to copy!");
+			require<ResourceException>(SDL_BlitSurface(a_img->get(), nullptr, surface->get(), nullptr), "SDL_BlitSurface failed to copy!");
 
 			return surface;
 		}
@@ -131,14 +126,14 @@ namespace MV {
 
 	// CPU-only image decode (no GL) — safe to run on the thread pool.
 	std::shared_ptr<OwnedSurface> decodeTextureSurface(const TextureParameters &a_parameters) {
-		SDL_RWops* sdlIO = sdlFileHandle(a_parameters.path);
+		SDL_IOStream* sdlIO = sdlFileHandle(a_parameters.path);
 		if (!sdlIO) {
 			MV::warning("Failed to load image [", a_parameters.path, "]");
 			return nullptr;
 		}
 		++textureLoadProfile().loadFileCalls;
 		auto decodeStart = std::chrono::steady_clock::now();
-		SDL_Surface *img = IMG_Load_RW(sdlIO, 1);
+		SDL_Surface *img = IMG_Load_IO(sdlIO, true);
 		textureLoadProfile().decodeMicros += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - decodeStart).count();
 		if (!img) {
 			MV::error("Failed to load image [", a_parameters.path, "] [", SDL_GetError(), "]");
@@ -964,7 +959,7 @@ namespace MV {
 		if (!existing->get()) {
 			return false;
 		}
-		auto rgba = OwnedSurface::make(SDL_ConvertSurfaceFormat(existing->get(), SDL_PIXELFORMAT_RGBA32, 0));
+		auto rgba = OwnedSurface::make(SDL_ConvertSurface(existing->get(), SDL_PIXELFORMAT_RGBA32));
 		SDL_Surface* surface = rgba->get();
 		if (!surface || surface->w != a_size.width || surface->h != a_size.height) {
 			return false;
@@ -982,9 +977,9 @@ namespace MV {
 		if (pngHoldsPixels(a_fileName, a_pixels, a_size)) {
 			return;
 		}
-		SDL_Surface *surf = SDL_CreateRGBSurfaceFrom(const_cast<uint8_t*>(a_pixels.data()), a_size.width, a_size.height, 32, a_size.width * 4, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
+		SDL_Surface *surf = SDL_CreateSurfaceFrom(a_size.width, a_size.height, SDL_PIXELFORMAT_RGBA32, const_cast<uint8_t*>(a_pixels.data()), a_size.width * 4);
 		IMG_SavePNG(surf, a_fileName.c_str());
-		SDL_FreeSurface(surf);
+		SDL_DestroySurface(surf);
 	}
 
 	std::mutex LoadedTexture::lock;

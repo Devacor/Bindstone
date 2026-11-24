@@ -44,13 +44,13 @@
     <ProjectReference Include="..\..\MutedVision\MutedVision_Android\MutedVision_Android.vcxproj">
       <Project>{46b19b64-8cd7-424c-969e-2cdc234da7a5}</Project>
     </ProjectReference>
-    <ProjectReference Include="..\..\SDL2\SDL2_Android.vcxproj">
+    <ProjectReference Include="..\..\SDL3\SDL3_Android.vcxproj">
       <Project>{b7be417c-b6c5-4a69-a056-e0cb0c6a344c}</Project>
     </ProjectReference>
-    <ProjectReference Include="..\..\SDL2_image\SDL2_image_Android.vcxproj">
+    <ProjectReference Include="..\..\SDL3_image\SDL3_image_Android.vcxproj">
       <Project>{03a9401d-ceff-4f5e-a7b4-fc2a0d9f6c95}</Project>
     </ProjectReference>
-    <ProjectReference Include="..\..\SDL2_ttf\SDL2_ttf_Android.vcxproj">
+    <ProjectReference Include="..\..\SDL3_ttf\SDL3_ttf_Android.vcxproj">
       <Project>{8572235c-b335-40dd-ba5f-9954bedc4bfc}</Project>
     </ProjectReference>
     <ProjectReference Include="..\BindstoneCommon_Android\BindstoneCommon_Android.vcxproj">
@@ -242,7 +242,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x86'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL3\include;$(SolutionDir)VSProjects\SDL3_ttf\include;$(SolutionDir)VSProjects\SDL3_image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -259,7 +259,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)Source\JaiScript\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL3\include;$(SolutionDir)VSProjects\SDL3_ttf\include;$(SolutionDir)VSProjects\SDL3_image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;$(SolutionDir)VSProjects\SDL3_ttf\include;$(SolutionDir)Source\JaiScript\include</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -276,7 +276,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL3\include;$(SolutionDir)VSProjects\SDL3_ttf\include;$(SolutionDir)VSProjects\SDL3_image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -293,7 +293,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL3\include;$(SolutionDir)VSProjects\SDL3_ttf\include;$(SolutionDir)VSProjects\SDL3_image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -310,7 +310,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL3\include;$(SolutionDir)VSProjects\SDL3_ttf\include;$(SolutionDir)VSProjects\SDL3_image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -327,7 +327,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;;$(SolutionDir)Source\JaiScript\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL3\include;$(SolutionDir)VSProjects\SDL3_ttf\include;$(SolutionDir)VSProjects\SDL3_image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;;$(SolutionDir)Source\JaiScript\include</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -344,7 +344,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL3\include;$(SolutionDir)VSProjects\SDL3_ttf\include;$(SolutionDir)VSProjects\SDL3_image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -361,7 +361,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL3\include;$(SolutionDir)VSProjects\SDL3_ttf\include;$(SolutionDir)VSProjects\SDL3_image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>

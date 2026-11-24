@@ -1,7 +1,7 @@
 #ifndef _GAME_MV_H_
 #define _GAME_MV_H_
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include "Game/managers.h"
 #include "Game/player.h"
 #include "Game/building.h"

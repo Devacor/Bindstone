@@ -25,7 +25,7 @@ Editor::Editor(Managers &a_managers):
 void Editor::updateCameraWithKeyboardState(double dt) {
 	const static float speed = 175.0f;
 	const static float zoomSpeed = 7.5f;
-	const Uint8* keystate = SDL_GetKeyboardState(NULL);
+	const bool* keystate = SDL_GetKeyboardState(NULL);
 	if (keystate[SDL_SCANCODE_LEFT]) {
 		scene->camera().translate(MV::point(speed, 0.0f) * static_cast<float>(dt));
 		controlPanel->onSceneDrag(MV::cast<int>(MV::point(speed, 0.0f) * static_cast<float>(dt)));
@@ -84,7 +84,7 @@ void Editor::initializeWindow(){
 	mouse.onLeftMouseDown.connect("initDrag", [&](MV::TapDevice& a_mouse){
 		a_mouse.queueExclusiveAction(MV::ExclusiveTapAction(true, {10}, [&](){
 			auto signature = mouse.onMove.connect("inDrag", [&](MV::TapDevice& a_mouse2){
-				const Uint8* keystate = SDL_GetKeyboardState(NULL);
+				const bool* keystate = SDL_GetKeyboardState(NULL);
 				if (!keystate[SDL_SCANCODE_LSHIFT]) {
 					scene->camera().translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
 					scene->renderer().updateCameraProjectionMatrices();
@@ -121,11 +121,11 @@ void Editor::handleInput(){
 	while(SDL_PollEvent(&event)){
 		if(!managers.renderer.handleEvent(event)){
 			switch(event.type){
-			case SDL_QUIT:
+			case SDL_EVENT_QUIT:
 				done = true;
 				break;
-			case SDL_KEYDOWN:
-				switch(event.key.keysym.sym){
+			case SDL_EVENT_KEY_DOWN:
+				switch(event.key.key){
 				case SDLK_ESCAPE:
 					done = true;
 					break;
@@ -145,10 +145,8 @@ void Editor::handleInput(){
 					break;
 				}
 				break;
-			case SDL_WINDOWEVENT:
-				break;
-			case SDL_MOUSEWHEEL:
-				handleScroll(static_cast<float>(event.wheel.y), mouse.position());
+			case SDL_EVENT_MOUSE_WHEEL:
+				handleScroll(static_cast<float>(event.wheel.integer_y), mouse.position());
 				break;
 			}
 			controlPanel->handleInput(event);

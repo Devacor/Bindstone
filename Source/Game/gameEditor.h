@@ -70,7 +70,7 @@ private:
 
 	void runGame() {
 		runGameFrames(-1, "");
-		const Uint8 *state = SDL_GetKeyboardState(NULL);
+		const bool* state = SDL_GetKeyboardState(NULL);
 		if (state[SDL_SCANCODE_LSHIFT] || state[SDL_SCANCODE_RSHIFT]) {
 			runLimbo();
 		}

@@ -89,7 +89,7 @@
   <ItemDefinitionGroup>
     <GradlePackage>
       <ProjectDirectory>$(ProjectDir)app</ProjectDirectory>
-      <GradlePlugin>gradle:3.1.0</GradlePlugin>
+      <GradlePlugin>gradle:8.7.3</GradlePlugin>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
       </AdditionalOptions>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
@@ -106,7 +106,7 @@
       </AdditionalOptions>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
       </AdditionalOptions>
-      <GradleVersion>4.4</GradleVersion>
+      <GradleVersion>8.12</GradleVersion>
       <ApplicationName>com.snapjaw.bindstone</ApplicationName>
       <ApkFileName Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">all\$(Configuration)\app-all-$(Configuration).apk</ApkFileName>
       <ApkFileName Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">all\$(Configuration)\app-all-$(Configuration).apk</ApkFileName>
@@ -174,6 +174,10 @@
     <JavaCompile Include="app\src\main\java\org\libsdl\app\SDLActivity.java" />
     <JavaCompile Include="app\src\main\java\org\libsdl\app\SDLAudioManager.java" />
     <JavaCompile Include="app\src\main\java\org\libsdl\app\SDLControllerManager.java" />
+    <JavaCompile Include="app\src\main\java\org\libsdl\app\SDLDummyEdit.java" />
+    <JavaCompile Include="app\src\main\java\org\libsdl\app\SDLInputConnection.java" />
+    <JavaCompile Include="app\src\main\java\org\libsdl\app\SDLSensorManager.java" />
+    <JavaCompile Include="app\src\main\java\org\libsdl\app\SDLSurface.java" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="app\jni\Android.mk" />
@@ -209,9 +213,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\External\VSProjects\External_Android\External_Android.vcxproj" />
     <ProjectReference Include="..\..\MutedVision\MutedVision_Android\MutedVision_Android.vcxproj" />
-    <ProjectReference Include="..\..\SDL2\SDL2_Android.vcxproj" />
-    <ProjectReference Include="..\..\SDL2_image\SDL2_image_Android.vcxproj" />
-    <ProjectReference Include="..\..\SDL2_ttf\SDL2_ttf_Android.vcxproj" />
+    <ProjectReference Include="..\..\SDL3\SDL3_Android.vcxproj" />
+    <ProjectReference Include="..\..\SDL3_image\SDL3_image_Android.vcxproj" />
+    <ProjectReference Include="..\..\SDL3_ttf\SDL3_ttf_Android.vcxproj" />
     <ProjectReference Include="..\BindstoneClient_Android\BindstoneClient_Android.vcxproj" />
     <ProjectReference Include="..\BindstoneCommon_Android\BindstoneCommon_Android.vcxproj" />
   </ItemGroup>

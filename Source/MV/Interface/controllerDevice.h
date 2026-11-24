@@ -1,7 +1,7 @@
 #ifndef _MV_CONTROLLERDEVICE_H_
 #define _MV_CONTROLLERDEVICE_H_
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <array>
 #include <memory>
 #include <optional>
@@ -130,7 +130,7 @@ namespace MV {
 		bool simulated = false;
 		ControllerState simulatedState;
 
-		std::vector<SDL_GameController*> opened;
+		std::vector<SDL_Gamepad*> opened;
 
 		bool navigationEnabled = true;
 		std::optional<FocusDirection> navigationHeld;

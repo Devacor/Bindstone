@@ -25,11 +25,11 @@ void GameEditor::handleInput(){
 	while (SDL_PollEvent(&event)) {
 		if (!game.managers().renderer.handleEvent(event)) {
 			switch (event.type) {
-			case SDL_QUIT:
+			case SDL_EVENT_QUIT:
 				done = true;
 				break;
-			case SDL_KEYDOWN:
-				switch (event.key.keysym.sym) {
+			case SDL_EVENT_KEY_DOWN:
+				switch (event.key.key) {
 				case SDLK_ESCAPE:
 					done = true;
 					break;
@@ -48,9 +48,7 @@ void GameEditor::handleInput(){
 					break;
 				}
 				break;
-			case SDL_WINDOWEVENT:
-				break;
-			case SDL_MOUSEWHEEL:
+			case SDL_EVENT_MOUSE_WHEEL:
 				break;
 			}
 			mouse.updateTouch(event, managers.renderer.window().drawableSize());
@@ -276,10 +274,10 @@ int GameEditor::runDriver(const std::string& a_scriptPath, bool a_live) {
 	};
 	auto pushKey = [](SDL_Keycode a_key, bool a_down) {
 		SDL_Event event{};
-		event.type = a_down ? SDL_KEYDOWN : SDL_KEYUP;
-		event.key.state = a_down ? SDL_PRESSED : SDL_RELEASED;
-		event.key.keysym.sym = a_key;
-		event.key.keysym.scancode = SDL_GetScancodeFromKey(a_key);
+		event.type = a_down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+		event.key.down = a_down;
+		event.key.key = a_key;
+		event.key.scancode = SDL_GetScancodeFromKey(a_key, nullptr);
 		SDL_PushEvent(&event);
 	};
 
@@ -353,19 +351,16 @@ int GameEditor::runDriver(const std::string& a_scriptPath, bool a_live) {
 			else if (step.op == "scroll") {
 				if (step.args.size() >= 3) { cursor = MV::Point<int>(std::atoi(step.args[1].c_str()), std::atoi(step.args[2].c_str())); }
 				SDL_Event event{};
-				event.type = SDL_MOUSEWHEEL;
-				event.wheel.y = step.args.empty() ? 1 : std::atoi(step.args[0].c_str());
+				event.type = SDL_EVENT_MOUSE_WHEEL;
+				event.wheel.integer_y = step.args.empty() ? 1 : std::atoi(step.args[0].c_str());
+				event.wheel.y = static_cast<float>(event.wheel.integer_y);
 				SDL_PushEvent(&event);
 				waitRemaining = 1.0 / 60.0;
 			}
 			else if (step.op == "type") {
 				const std::string& text = step.args.empty() ? std::string() : step.args[0];
 				for (size_t i = 0; i < text.size(); i += 31) {
-					SDL_Event event{};
-					event.type = SDL_TEXTINPUT;
-					auto chunk = text.substr(i, 31);
-					std::memcpy(event.text.text, chunk.c_str(), chunk.size() + 1);
-					SDL_PushEvent(&event);
+					MV::pushTextInputEvent(text.substr(i, 31));
 				}
 			}
 			else if (step.op == "key") {
@@ -447,7 +442,7 @@ int GameEditor::runFrames(int a_frameCount, const std::string& a_capturePath) {
 
 void GameEditor::captureScreenshot(const std::string& a_path) {
 	auto size = managers.renderer.window().drawableSize();
-	SDL_Surface* surface = SDL_CreateRGBSurface(0, size.width, size.height, 32, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
+	SDL_Surface* surface = SDL_CreateSurface(size.width, size.height, SDL_PIXELFORMAT_RGBA32);
 	std::vector<uint8_t> pixels(static_cast<size_t>(size.width) * size.height * 4);
 	managers.renderer.flushDraws();
 	glReadPixels(0, 0, size.width, size.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
@@ -458,6 +453,6 @@ void GameEditor::captureScreenshot(const std::string& a_path) {
 			static_cast<size_t>(size.width) * 4);
 	}
 	SDL_SaveBMP(surface, a_path.c_str());
-	SDL_FreeSurface(surface);
+	SDL_DestroySurface(surface);
 	std::cout << "Game screenshot: " << a_path << std::endl;
 }

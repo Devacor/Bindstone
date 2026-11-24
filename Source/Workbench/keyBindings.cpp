@@ -76,8 +76,8 @@ namespace Workbench {
 	}
 
 	KeyChord KeyChord::of(const SDL_Event& a_event) {
-		const auto held = static_cast<Uint16>(SDL_GetModState()) | a_event.key.keysym.mod;
-		return chordOf(a_event.key.keysym.sym, (held & KMOD_CTRL) != 0, (held & KMOD_SHIFT) != 0, (held & KMOD_ALT) != 0);
+		const auto held = static_cast<Uint16>(SDL_GetModState()) | a_event.key.mod;
+		return chordOf(a_event.key.key, (held & SDL_KMOD_CTRL) != 0, (held & SDL_KMOD_SHIFT) != 0, (held & SDL_KMOD_ALT) != 0);
 	}
 
 	bool KeyChord::modifierKey(SDL_Keycode a_key) {
@@ -165,7 +165,7 @@ namespace Workbench {
 	}
 
 	std::optional<std::string> KeyBindings::actionFor(const std::string& a_group, const SDL_Event& a_event) const {
-		if (a_event.type != SDL_KEYDOWN) {
+		if (a_event.type != SDL_EVENT_KEY_DOWN) {
 			return std::nullopt;
 		}
 		const auto pressed = KeyChord::of(a_event);
@@ -179,7 +179,7 @@ namespace Workbench {
 
 	bool KeyBindings::matches(const std::string& a_id, const SDL_Event& a_event) const {
 		auto* binding = find(a_id);
-		return binding && a_event.type == SDL_KEYDOWN && !binding->chord.empty() && binding->chord == KeyChord::of(a_event);
+		return binding && a_event.type == SDL_EVENT_KEY_DOWN && !binding->chord.empty() && binding->chord == KeyChord::of(a_event);
 	}
 
 	std::vector<std::string> KeyBindings::clashes(const std::string& a_id) const {
@@ -219,41 +219,41 @@ namespace Workbench {
 
 	void addStandardBindings(KeyBindings& a_bindings) {
 		const std::string editor = "Workbench";
-		a_bindings.add("tool.select", "Select tool", editor, chordOf(SDLK_q));
-		a_bindings.add("tool.move", "Move tool", editor, chordOf(SDLK_w));
-		a_bindings.add("tool.rotate", "Rotate tool", editor, chordOf(SDLK_e));
-		a_bindings.add("tool.scale", "Scale tool", editor, chordOf(SDLK_r));
-		a_bindings.add("view.frame", "Frame selection", editor, chordOf(SDLK_f));
+		a_bindings.add("tool.select", "Select tool", editor, chordOf(SDLK_Q));
+		a_bindings.add("tool.move", "Move tool", editor, chordOf(SDLK_W));
+		a_bindings.add("tool.rotate", "Rotate tool", editor, chordOf(SDLK_E));
+		a_bindings.add("tool.scale", "Scale tool", editor, chordOf(SDLK_R));
+		a_bindings.add("view.frame", "Frame selection", editor, chordOf(SDLK_F));
 		a_bindings.add("node.delete", "Delete", editor, chordOf(SDLK_DELETE));
-		a_bindings.add("node.duplicate", "Duplicate", editor, chordOf(SDLK_d, true));
-		a_bindings.add("edit.undo", "Undo", editor, chordOf(SDLK_z, true));
-		a_bindings.add("edit.redo", "Redo", editor, chordOf(SDLK_y, true));
-		a_bindings.add("edit.redoAlternate", "Redo (second key)", editor, chordOf(SDLK_z, true, true));
-		a_bindings.add("file.open", "Open", editor, chordOf(SDLK_o, true));
-		a_bindings.add("file.save", "Save", editor, chordOf(SDLK_s, true));
-		a_bindings.add("file.saveAs", "Save As", editor, chordOf(SDLK_s, true, true));
+		a_bindings.add("node.duplicate", "Duplicate", editor, chordOf(SDLK_D, true));
+		a_bindings.add("edit.undo", "Undo", editor, chordOf(SDLK_Z, true));
+		a_bindings.add("edit.redo", "Redo", editor, chordOf(SDLK_Y, true));
+		a_bindings.add("edit.redoAlternate", "Redo (second key)", editor, chordOf(SDLK_Z, true, true));
+		a_bindings.add("file.open", "Open", editor, chordOf(SDLK_O, true));
+		a_bindings.add("file.save", "Save", editor, chordOf(SDLK_S, true));
+		a_bindings.add("file.saveAs", "Save As", editor, chordOf(SDLK_S, true, true));
 
 		const std::string mesh = "Mesh editor";
 		a_bindings.add("mesh.toolSelect", "Select tool", mesh, chordOf(SDLK_1));
 		a_bindings.add("mesh.toolPolygon", "Polygon tool", mesh, chordOf(SDLK_2));
 		a_bindings.add("mesh.toolRibbon", "Ribbon tool", mesh, chordOf(SDLK_3));
 		a_bindings.add("mesh.toolPaint", "Paint tool", mesh, chordOf(SDLK_4));
-		a_bindings.add("mesh.move", "Move", mesh, chordOf(SDLK_g));
-		a_bindings.add("mesh.rotate", "Rotate", mesh, chordOf(SDLK_r));
-		a_bindings.add("mesh.scale", "Scale", mesh, chordOf(SDLK_s));
-		a_bindings.add("mesh.extrude", "Extrude", mesh, chordOf(SDLK_e));
-		a_bindings.add("mesh.fill", "Fill", mesh, chordOf(SDLK_f));
-		a_bindings.add("mesh.remove", "Remove", mesh, chordOf(SDLK_x));
+		a_bindings.add("mesh.move", "Move", mesh, chordOf(SDLK_G));
+		a_bindings.add("mesh.rotate", "Rotate", mesh, chordOf(SDLK_R));
+		a_bindings.add("mesh.scale", "Scale", mesh, chordOf(SDLK_S));
+		a_bindings.add("mesh.extrude", "Extrude", mesh, chordOf(SDLK_E));
+		a_bindings.add("mesh.fill", "Fill", mesh, chordOf(SDLK_F));
+		a_bindings.add("mesh.remove", "Remove", mesh, chordOf(SDLK_X));
 		a_bindings.add("mesh.removeAlternate", "Remove (second key)", mesh, chordOf(SDLK_DELETE));
-		a_bindings.add("mesh.merge", "Merge", mesh, chordOf(SDLK_m));
-		a_bindings.add("mesh.duplicate", "Duplicate", mesh, chordOf(SDLK_d, false, true));
-		a_bindings.add("mesh.all", "Pick all or none", mesh, chordOf(SDLK_a));
-		a_bindings.add("mesh.island", "Pick island under pointer", mesh, chordOf(SDLK_l));
-		a_bindings.add("mesh.colour", "Colour the pick", mesh, chordOf(SDLK_c));
+		a_bindings.add("mesh.merge", "Merge", mesh, chordOf(SDLK_M));
+		a_bindings.add("mesh.duplicate", "Duplicate", mesh, chordOf(SDLK_D, false, true));
+		a_bindings.add("mesh.all", "Pick all or none", mesh, chordOf(SDLK_A));
+		a_bindings.add("mesh.island", "Pick island under pointer", mesh, chordOf(SDLK_L));
+		a_bindings.add("mesh.colour", "Colour the pick", mesh, chordOf(SDLK_C));
 
 		const std::string meshMoving = "Mesh editor, while moving";
-		a_bindings.add("mesh.lockX", "Keep to X", meshMoving, chordOf(SDLK_x));
-		a_bindings.add("mesh.lockY", "Keep to Y", meshMoving, chordOf(SDLK_y));
+		a_bindings.add("mesh.lockX", "Keep to X", meshMoving, chordOf(SDLK_X));
+		a_bindings.add("mesh.lockY", "Keep to Y", meshMoving, chordOf(SDLK_Y));
 	}
 
 }

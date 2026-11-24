@@ -1,5 +1,6 @@
-#include <SDL.h>
-#include <SDL_image.h>
+#include <SDL3/SDL.h>
+#include <SDL3_image/SDL_image.h>
+#include <SDL3/SDL_main.h>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -37,7 +38,7 @@ void SetupRenderer();
 void Render();
 void RunGame();
 
-SDL_Rect playerPos;
+SDL_FRect playerPos;
 
 int main(int argc, char* args[])
 {
@@ -92,25 +93,21 @@ bool InitEverything()
 }
 bool InitSDL()
 {
-	if (SDL_Init(SDL_INIT_EVERYTHING) == -1)
+	if (!SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_JOYSTICK | SDL_INIT_HAPTIC | SDL_INIT_GAMEPAD | SDL_INIT_SENSOR))
 	{
 		std::cout << " Failed to initialize SDL : " << SDL_GetError() << std::endl;
 		return false;
-	}
-
-	int imgInitDesiredFlags = IMG_INIT_JPG | IMG_INIT_PNG | IMG_INIT_WEBP;
-	int imgInitFlags = IMG_Init(imgInitDesiredFlags);
-	if ((imgInitFlags & imgInitDesiredFlags) != imgInitDesiredFlags) {
-		output("IMG_Init: Failed to init jpg, png support!");
-		std::string error = IMG_GetError();
-		output(error);
 	}
 
 	return true;
 }
 bool CreateWindow()
 {
-	window = SDL_CreateWindow("Server", posX, posY, sizeX, sizeY, 0);
+	window = SDL_CreateWindow("Server", sizeX, sizeY, 0);
+	if (window != nullptr)
+	{
+		SDL_SetWindowPosition(window, posX, posY);
+	}
 
 	if (window == nullptr)
 	{
@@ -122,7 +119,7 @@ bool CreateWindow()
 }
 bool CreateRenderer()
 {
-	renderer = SDL_CreateRenderer(window, -1, 0);
+	renderer = SDL_CreateRenderer(window, nullptr);
 
 	if (renderer == nullptr)
 	{
@@ -135,7 +132,7 @@ bool CreateRenderer()
 void SetupRenderer()
 {
 	// Set size of renderer to the same as window
-	SDL_RenderSetLogicalSize(renderer, sizeX, sizeY);
+	SDL_SetRenderLogicalPresentation(renderer, sizeX, sizeY, SDL_LOGICAL_PRESENTATION_LETTERBOX);
 
 	// Set color of renderer to green
 	SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
@@ -156,12 +153,12 @@ void RunGame()
 	output(contents);
 	output("FILE_END_2");
 
-	SDL_RWops* sdlIO = SDL_RWFromFile("Interface/interfaceManagerNOEXIST.script", "rb+");
+	SDL_IOStream* sdlIO = SDL_IOFromFile("Interface/interfaceManagerNOEXIST.script", "rb+");
 	if (sdlIO) {
 		output("YESSSSSSSS");
 	}
 
-	sdlIO = SDL_RWFromFile("BindstoneTest.txt", "rb+");
+	sdlIO = SDL_IOFromFile("BindstoneTest.txt", "rb+");
 	if (sdlIO) {
 		output("YESSSSSSSS2");
 	}
@@ -173,7 +170,7 @@ void RunGame()
 	output(std::filesystem::unique_path().string());
 	SDL_Surface* image = IMG_Load("Images/image.webp");
 	
-	output(IMG_GetError());
+	output(SDL_GetError());
  	SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, image);
 
 	bool loop = true;
@@ -183,11 +180,11 @@ void RunGame()
 		SDL_Event event;
 		while (SDL_PollEvent(&event))
 		{
-			if (event.type == SDL_QUIT)
+			if (event.type == SDL_EVENT_QUIT)
 				loop = false;
-			else if (event.type == SDL_KEYDOWN)
+			else if (event.type == SDL_EVENT_KEY_DOWN)
 			{
-				switch (event.key.keysym.sym)
+				switch (event.key.key)
 				{
 				case SDLK_RIGHT:
 					++playerPos.x;
@@ -211,9 +208,9 @@ void RunGame()
 		// Clear the window and make it all green
 		SDL_RenderClear(renderer);
 		//SDL_Rect dstrect = { 5, 5, 320, 240 };
-		//SDL_RenderCopy(renderer, texture, NULL, &dstrect);
+		//SDL_RenderTexture(renderer, texture, NULL, &dstrect);
 		//SDL_Rect dstrect = { 5, 5, 320, 240 };
-		SDL_RenderCopy(renderer, texture, NULL, NULL);
+		SDL_RenderTexture(renderer, texture, NULL, NULL);
 
 		SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
 

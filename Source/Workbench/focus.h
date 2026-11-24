@@ -20,7 +20,7 @@ namespace Workbench {
 			a_text->enableCursor();
 			// what is there is selected, so typing replaces it and an arrow key keeps it
 			a_text->selectAll();
-			SDL_StartTextInput();
+			MV::startTextInput();
 		}
 
 		// Leaves the field as a press elsewhere would: committing it, or putting an Enter-only field back.
@@ -63,17 +63,17 @@ namespace Workbench {
 			if (!locked) {
 				return false;
 			}
-			if (a_event.type == SDL_MOUSEBUTTONDOWN) {
+			if (a_event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
 				// a right press is for the field's menu, which works on what is being typed
 				if (a_event.button.button == SDL_BUTTON_LEFT) {
 					leaveActive();
 				}
 				return false;
 			}
-			if (a_event.type != SDL_KEYDOWN && a_event.type != SDL_KEYUP && a_event.type != SDL_TEXTINPUT && a_event.type != SDL_TEXTEDITING) {
+			if (a_event.type != SDL_EVENT_KEY_DOWN && a_event.type != SDL_EVENT_KEY_UP && a_event.type != SDL_EVENT_TEXT_INPUT && a_event.type != SDL_EVENT_TEXT_EDITING) {
 				return false;
 			}
-			if (a_event.type == SDL_KEYDOWN && a_event.key.keysym.sym == SDLK_ESCAPE) {
+			if (a_event.type == SDL_EVENT_KEY_DOWN && a_event.key.key == SDLK_ESCAPE) {
 				cancel();
 				return true;
 			}
@@ -93,7 +93,7 @@ namespace Workbench {
 			activeText.reset();
 			activeCommit = nullptr;
 			activeAbandon = nullptr;
-			SDL_StopTextInput();
+			MV::stopTextInput();
 			if (locked) {
 				// Text::disableCursor emits onEnter, which the fields route back here: nothing is active by now
 				locked->disableCursor();

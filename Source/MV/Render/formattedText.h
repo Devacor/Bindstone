@@ -8,7 +8,7 @@
 #include <map>
 #include "MV/Utility/generalUtility.h"
 #include "MV/Utility/services.hpp"
-#include "SDL_ttf.h"
+#include <SDL3_ttf/SDL_ttf.h>
 #include "MV/Render/points.h"
 #include <jaiscript/serialization/archive.hpp>
 #include <jaiscript/serialization/construct.hpp>
@@ -122,12 +122,12 @@ namespace MV {
 		}
 
 		void initializeFromLoad() {
-			TTF_Font* newFont = TTF_OpenFont(file.c_str(), size);
+			TTF_Font* newFont = TTF_OpenFont(file.c_str(), static_cast<float>(size));
 			if (newFont) {
 				TTF_SetFontHinting(newFont, TTF_HINTING_NORMAL);
-				TTF_SetFontStyle(newFont, static_cast<int>(style));
+				TTF_SetFontStyle(newFont, static_cast<TTF_FontStyleFlags>(style));
 			} else {
-				require<ResourceException>(false, "Error loading font [", identifier, "]: ", TTF_GetError());
+				require<ResourceException>(false, "Error loading font [", identifier, "]: ", SDL_GetError());
 			}
 		}
 
@@ -137,8 +137,8 @@ namespace MV {
 			size(a_size),
 			identifier(a_identifier),
             style(a_style),
-			lineHeight(static_cast<PointPrecision>(TTF_FontLineSkip(a_font))),
-			baseLine(static_cast<PointPrecision>(TTF_FontAscent(a_font))),
+			lineHeight(static_cast<PointPrecision>(TTF_GetFontLineSkip(a_font))),
+			baseLine(static_cast<PointPrecision>(TTF_GetFontAscent(a_font))),
             textLibrary(a_library){
 		}
 		FontDefinition(){}

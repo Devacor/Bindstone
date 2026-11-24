@@ -18,37 +18,37 @@ namespace MV {
 
 		struct ButtonSource {
 			ControllerButton button;
-			SDL_GameControllerButton source;
+			SDL_GamepadButton source;
 		};
 		const ButtonSource BUTTON_SOURCES[] {
-			{ ControllerButton::SOUTH, SDL_CONTROLLER_BUTTON_A },
-			{ ControllerButton::EAST, SDL_CONTROLLER_BUTTON_B },
-			{ ControllerButton::WEST, SDL_CONTROLLER_BUTTON_X },
-			{ ControllerButton::NORTH, SDL_CONTROLLER_BUTTON_Y },
-			{ ControllerButton::BACK, SDL_CONTROLLER_BUTTON_BACK },
-			{ ControllerButton::GUIDE, SDL_CONTROLLER_BUTTON_GUIDE },
-			{ ControllerButton::START, SDL_CONTROLLER_BUTTON_START },
-			{ ControllerButton::LEFT_STICK, SDL_CONTROLLER_BUTTON_LEFTSTICK },
-			{ ControllerButton::RIGHT_STICK, SDL_CONTROLLER_BUTTON_RIGHTSTICK },
-			{ ControllerButton::LEFT_SHOULDER, SDL_CONTROLLER_BUTTON_LEFTSHOULDER },
-			{ ControllerButton::RIGHT_SHOULDER, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER },
-			{ ControllerButton::DPAD_UP, SDL_CONTROLLER_BUTTON_DPAD_UP },
-			{ ControllerButton::DPAD_DOWN, SDL_CONTROLLER_BUTTON_DPAD_DOWN },
-			{ ControllerButton::DPAD_LEFT, SDL_CONTROLLER_BUTTON_DPAD_LEFT },
-			{ ControllerButton::DPAD_RIGHT, SDL_CONTROLLER_BUTTON_DPAD_RIGHT }
+			{ ControllerButton::SOUTH, SDL_GAMEPAD_BUTTON_SOUTH },
+			{ ControllerButton::EAST, SDL_GAMEPAD_BUTTON_EAST },
+			{ ControllerButton::WEST, SDL_GAMEPAD_BUTTON_WEST },
+			{ ControllerButton::NORTH, SDL_GAMEPAD_BUTTON_NORTH },
+			{ ControllerButton::BACK, SDL_GAMEPAD_BUTTON_BACK },
+			{ ControllerButton::GUIDE, SDL_GAMEPAD_BUTTON_GUIDE },
+			{ ControllerButton::START, SDL_GAMEPAD_BUTTON_START },
+			{ ControllerButton::LEFT_STICK, SDL_GAMEPAD_BUTTON_LEFT_STICK },
+			{ ControllerButton::RIGHT_STICK, SDL_GAMEPAD_BUTTON_RIGHT_STICK },
+			{ ControllerButton::LEFT_SHOULDER, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER },
+			{ ControllerButton::RIGHT_SHOULDER, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER },
+			{ ControllerButton::DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_UP },
+			{ ControllerButton::DPAD_DOWN, SDL_GAMEPAD_BUTTON_DPAD_DOWN },
+			{ ControllerButton::DPAD_LEFT, SDL_GAMEPAD_BUTTON_DPAD_LEFT },
+			{ ControllerButton::DPAD_RIGHT, SDL_GAMEPAD_BUTTON_DPAD_RIGHT }
 		};
 
 		struct AxisSource {
 			ControllerAxis axis;
-			SDL_GameControllerAxis source;
+			SDL_GamepadAxis source;
 		};
 		const AxisSource AXIS_SOURCES[] {
-			{ ControllerAxis::LEFT_X, SDL_CONTROLLER_AXIS_LEFTX },
-			{ ControllerAxis::LEFT_Y, SDL_CONTROLLER_AXIS_LEFTY },
-			{ ControllerAxis::RIGHT_X, SDL_CONTROLLER_AXIS_RIGHTX },
-			{ ControllerAxis::RIGHT_Y, SDL_CONTROLLER_AXIS_RIGHTY },
-			{ ControllerAxis::LEFT_TRIGGER, SDL_CONTROLLER_AXIS_TRIGGERLEFT },
-			{ ControllerAxis::RIGHT_TRIGGER, SDL_CONTROLLER_AXIS_TRIGGERRIGHT }
+			{ ControllerAxis::LEFT_X, SDL_GAMEPAD_AXIS_LEFTX },
+			{ ControllerAxis::LEFT_Y, SDL_GAMEPAD_AXIS_LEFTY },
+			{ ControllerAxis::RIGHT_X, SDL_GAMEPAD_AXIS_RIGHTX },
+			{ ControllerAxis::RIGHT_Y, SDL_GAMEPAD_AXIS_RIGHTY },
+			{ ControllerAxis::LEFT_TRIGGER, SDL_GAMEPAD_AXIS_LEFT_TRIGGER },
+			{ ControllerAxis::RIGHT_TRIGGER, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER }
 		};
 
 		std::optional<FocusDirection> directionFromParts(int a_x, int a_y) {
@@ -77,9 +77,9 @@ namespace MV {
 
 	ControllerDevice::~ControllerDevice() {
 		// a device that outlives SDL has nothing left to close
-		if (SDL_WasInit(SDL_INIT_GAMECONTROLLER)) {
+		if (SDL_WasInit(SDL_INIT_GAMEPAD)) {
 			for (auto&& controller : opened) {
-				SDL_GameControllerClose(controller);
+				SDL_CloseGamepad(controller);
 			}
 		}
 	}
@@ -123,41 +123,40 @@ namespace MV {
 	// A headless run starts SDL without its controller subsystem, and then there is no hardware to read.
 	ControllerState ControllerDevice::readHardware() {
 		ControllerState result;
-		if (!SDL_WasInit(SDL_INIT_GAMECONTROLLER)) {
+		if (!SDL_WasInit(SDL_INIT_GAMEPAD)) {
 			opened.clear();
 			return result;
 		}
-		opened.erase(std::remove_if(opened.begin(), opened.end(), [](SDL_GameController* a_controller) {
-			if (SDL_GameControllerGetAttached(a_controller)) {
+		opened.erase(std::remove_if(opened.begin(), opened.end(), [](SDL_Gamepad* a_controller) {
+			if (SDL_GamepadConnected(a_controller)) {
 				return false;
 			}
-			SDL_GameControllerClose(a_controller);
+			SDL_CloseGamepad(a_controller);
 			return true;
 		}), opened.end());
-		const int joysticks = SDL_NumJoysticks();
-		for (int index = 0; index < joysticks; ++index) {
-			if (!SDL_IsGameController(index)) {
-				continue;
-			}
-			const SDL_JoystickID instance = SDL_JoystickGetDeviceInstanceID(index);
-			const bool alreadyOpen = std::any_of(opened.begin(), opened.end(), [instance](SDL_GameController* a_controller) {
-				return SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(a_controller)) == instance;
+		int gamepadCount = 0;
+		SDL_JoystickID* gamepads = SDL_GetGamepads(&gamepadCount);
+		for (int index = 0; index < gamepadCount; ++index) {
+			const SDL_JoystickID instance = gamepads[index];
+			const bool alreadyOpen = std::any_of(opened.begin(), opened.end(), [instance](SDL_Gamepad* a_controller) {
+				return SDL_GetGamepadID(a_controller) == instance;
 			});
 			if (!alreadyOpen) {
-				if (auto* controller = SDL_GameControllerOpen(index)) {
+				if (auto* controller = SDL_OpenGamepad(instance)) {
 					opened.push_back(controller);
 				}
 			}
 		}
+		SDL_free(gamepads);
 		for (auto&& controller : opened) {
 			for (auto&& source : BUTTON_SOURCES) {
-				if (SDL_GameControllerGetButton(controller, source.source)) {
+				if (SDL_GetGamepadButton(controller, source.source)) {
 					result.press(source.button);
 				}
 			}
 			for (auto&& source : AXIS_SOURCES) {
 				// SDL reads -32768 to 32767
-				const float value = std::clamp(static_cast<float>(SDL_GameControllerGetAxis(controller, source.source)) / 32767.0f, -1.0f, 1.0f);
+				const float value = std::clamp(static_cast<float>(SDL_GetGamepadAxis(controller, source.source)) / 32767.0f, -1.0f, 1.0f);
 				float& furthest = result.axes[static_cast<size_t>(source.axis)];
 				if (std::abs(value) > std::abs(furthest)) {
 					furthest = value;
@@ -288,8 +287,10 @@ namespace MV {
 		}
 		bool mouseMoved = false;
 		if (SDL_WasInit(SDL_INIT_VIDEO)) {
-			MV::Point<int> hardware;
-			SDL_GetMouseState(&hardware.x, &hardware.y);
+			float hardwareX = 0.0f;
+			float hardwareY = 0.0f;
+			SDL_GetMouseState(&hardwareX, &hardwareY);
+			MV::Point<int> hardware(static_cast<int>(hardwareX), static_cast<int>(hardwareY));
 			mouseMoved = hardwareMouse && *hardwareMouse != hardware;
 			hardwareMouse = hardware;
 		}

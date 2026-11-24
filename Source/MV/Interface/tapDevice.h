@@ -1,8 +1,10 @@
 #ifndef _MV_MOUSE_H_
 #define _MV_MOUSE_H_
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
+#include <SDL3_gesture/SDL_gesture.h>
 #include <memory>
+#include <string>
 #include "MV/Render/points.h"
 #include <jaiscript/signals/signal_decl.hpp>
 
@@ -293,6 +295,13 @@ namespace MV{
 
 		jai::signal<TouchCallbackSignature> onPinchZoom;
 	};
+
+	// Queues a text input event as a keyboard would; SDL keeps only a pointer to the text, so each distinct text lives as long as the process.
+	void pushTextInputEvent(const std::string& a_text);
+
+	// Text input (key text, the IME, the on-screen keyboard) for every window, as SDL2 kept it.
+	void startTextInput();
+	void stopTextInput();
 }
 
 #endif

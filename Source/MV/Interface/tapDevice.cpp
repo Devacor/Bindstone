@@ -1,5 +1,7 @@
 #include "tapDevice.h"
 #include <algorithm>
+#include <mutex>
+#include <unordered_set>
 #include <jaiscript/signals/signal_impl.hpp>
 
 namespace MV{
@@ -46,10 +48,13 @@ namespace MV{
 			newMiddle = simulatedMiddle;
 			newRight = simulatedRight;
 		} else {
-			uint32_t state = SDL_GetMouseState(&newPosition.x, &newPosition.y);
-			newLeft = (state & SDL_BUTTON(SDL_BUTTON_LEFT)) != false;
-			newMiddle = (state & SDL_BUTTON(SDL_BUTTON_MIDDLE)) != false;
-			newRight = (state & SDL_BUTTON(SDL_BUTTON_RIGHT)) != false;
+			float mouseX = 0.0f;
+			float mouseY = 0.0f;
+			SDL_MouseButtonFlags state = SDL_GetMouseState(&mouseX, &mouseY);
+			newPosition = MV::Point<int>(static_cast<int>(mouseX), static_cast<int>(mouseY));
+			newLeft = (state & SDL_BUTTON_MASK(SDL_BUTTON_LEFT)) != false;
+			newMiddle = (state & SDL_BUTTON_MASK(SDL_BUTTON_MIDDLE)) != false;
+			newRight = (state & SDL_BUTTON_MASK(SDL_BUTTON_RIGHT)) != false;
 		}
 
 		if(newPosition != mousePosition){
@@ -768,9 +773,10 @@ namespace MV{
 	}
 
 	void TapDevice::updateTouch(SDL_Event a_event, MV::Size<int> a_screenSize) {
-		if (a_event.type == SDL_MULTIGESTURE){
-			MV::Point<int> position(static_cast<int>(a_event.mgesture.x * a_screenSize.width), static_cast<int>(a_event.mgesture.y * a_screenSize.height));
-			onPinchZoomSignal(position, a_event.mgesture.dDist, a_event.mgesture.dTheta);
+		if (a_event.type == GESTURE_MULTIGESTURE){
+			const auto& gesture = reinterpret_cast<const Gesture_MultiGestureEvent&>(a_event);
+			MV::Point<int> position(static_cast<int>(gesture.x * a_screenSize.width), static_cast<int>(gesture.y * a_screenSize.height));
+			onPinchZoomSignal(position, gesture.dDist, gesture.dTheta);
 		}
 	}
 
@@ -825,5 +831,39 @@ namespace MV{
 		nodesToExecute.push_back(a_node);
 	}
 
+
+	namespace {
+		template <typename Toggle>
+		void forEachWindow(Toggle a_toggle) {
+			int count = 0;
+			SDL_Window** windows = SDL_GetWindows(&count);
+			for (int index = 0; index < count; ++index) {
+				a_toggle(windows[index]);
+			}
+			SDL_free(windows);
+		}
+	}
+
+	void startTextInput() {
+		forEachWindow([](SDL_Window* a_window) {SDL_StartTextInput(a_window);});
+	}
+
+	void stopTextInput() {
+		forEachWindow([](SDL_Window* a_window) {SDL_StopTextInput(a_window);});
+	}
+
+	void pushTextInputEvent(const std::string& a_text) {
+		static std::mutex textLock;
+		static std::unordered_set<std::string> heldText;
+		const char* text = nullptr;
+		{
+			std::lock_guard<std::mutex> guard(textLock);
+			text = heldText.insert(a_text).first->c_str();
+		}
+		SDL_Event event{};
+		event.type = SDL_EVENT_TEXT_INPUT;
+		event.text.text = text;
+		SDL_PushEvent(&event);
+	}
 
 }

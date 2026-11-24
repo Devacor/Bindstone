@@ -1,4 +1,5 @@
 #include "render.h"
+#include <SDL3_gesture/SDL_gesture.h>
 #include "MV/Render/device.h"
 #include <jaiscript/signals/signal_impl.hpp>
 #include "Scene/node.h"
@@ -289,7 +290,7 @@ namespace MV {
 
 	Window::~Window(){
 		if (!renderer.headless()) {
-			SDL_GL_DeleteContext(glcontext);
+			SDL_GL_DestroyContext(glcontext);
 			SDL_DestroyWindow(window);
 		}
 	}
@@ -311,7 +312,7 @@ namespace MV {
 		if(window){
 			if (!renderer.headless()) {
 				SDL_SetWindowSize(window, ourWindowSize.width, ourWindowSize.height);
-				SDL_GL_GetDrawableSize(window, &ourDrawableSize.width, &ourDrawableSize.height);
+				SDL_GetWindowSizeInPixels(window, &ourDrawableSize.width, &ourDrawableSize.height);
 				SDL_GetWindowSize(window, &ourWindowSize.width, &ourWindowSize.height);
 			}
 			updateAspectRatio();
@@ -332,7 +333,7 @@ namespace MV {
 		userCanResize = true;
 		SDLflags = SDLflags | SDL_WINDOW_RESIZABLE;
 		if(window && !renderer.headless()){
-			SDL_SetWindowResizable(window, SDL_TRUE);
+			SDL_SetWindowResizable(window, true);
 		}
 		updateWindowResizeLimits();
 		return *this;
@@ -342,7 +343,7 @@ namespace MV {
 		userCanResize = false;
 		SDLflags = SDLflags & ~ SDL_WINDOW_RESIZABLE;
 		if(window && !renderer.headless()){
-			SDL_SetWindowResizable(window, SDL_FALSE);
+			SDL_SetWindowResizable(window, false);
 		}
 		minSize = Size<int>(ourWindowSize.width, ourWindowSize.height);
 		maxSize = minSize;
@@ -352,9 +353,10 @@ namespace MV {
 
 	void Window::updateWindowResizeLimits(){
 		if(window && !renderer.headless()){
-			SDL_SetWindowMinimumSize(window, std::max(minSize.width, 1), std::max(minSize.height, 1));
-			SDL_SetWindowMaximumSize(window, std::max(maxSize.width, 1), std::max(maxSize.height, 1));
-			SDL_GL_GetDrawableSize(window, &ourDrawableSize.width, &ourDrawableSize.height);
+			// SDL3 clamps the window to a limit as it is set, and 0 is no limit: an unset size must not shrink the window
+			SDL_SetWindowMinimumSize(window, std::max(minSize.width, 0), std::max(minSize.height, 0));
+			SDL_SetWindowMaximumSize(window, std::max(maxSize.width, 0), std::max(maxSize.height, 0));
+			SDL_GetWindowSizeInPixels(window, &ourDrawableSize.width, &ourDrawableSize.height);
 			SDL_GetWindowSize(window, &ourWindowSize.width, &ourWindowSize.height);
 			updateAspectRatio();
 			checkSDLError(__LINE__);
@@ -363,45 +365,58 @@ namespace MV {
 
 	Window& Window::windowedMode(){
 		SDLflags = SDLflags & ~ SDL_WINDOW_FULLSCREEN;
-		SDLflags = SDLflags & ~ SDL_WINDOW_FULLSCREEN_DESKTOP;
+		exclusiveFullscreen = false;
 		if(window && !renderer.headless()){
-			SDL_SetWindowFullscreen(window, 0);
+			SDL_SetWindowFullscreen(window, false);
 		}
 		return *this;
 	}
     
     Window& Window::highResolution(){
-        SDLflags = SDLflags | SDL_WINDOW_ALLOW_HIGHDPI;
+        SDLflags = SDLflags | SDL_WINDOW_HIGH_PIXEL_DENSITY;
         return *this;
     }
     
     Window& Window::normalResolution(){
-        SDLflags = SDLflags & ~ SDL_WINDOW_ALLOW_HIGHDPI;
+        SDLflags = SDLflags & ~ SDL_WINDOW_HIGH_PIXEL_DENSITY;
         return *this;
     }
 
 	Window& Window::fullScreenMode(){
-		SDLflags = SDLflags & ~SDL_WINDOW_FULLSCREEN_DESKTOP;
 		SDLflags = SDLflags | SDL_WINDOW_FULLSCREEN;
+		exclusiveFullscreen = true;
 		if(window && !renderer.headless()){
-			SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
+			applyFullscreenDisplayMode();
+			SDL_SetWindowFullscreen(window, true);
 		}
-        return *this;
+		return *this;
 	}
 
 	Window& Window::fullScreenWindowedMode(){
-		SDLflags = SDLflags & ~SDL_WINDOW_FULLSCREEN;
-		SDLflags = SDLflags | SDL_WINDOW_FULLSCREEN_DESKTOP;
+		SDLflags = SDLflags | SDL_WINDOW_FULLSCREEN;
+		exclusiveFullscreen = false;
 		if(window && !renderer.headless()){
-			SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+			applyFullscreenDisplayMode();
+			SDL_SetWindowFullscreen(window, true);
 		}
-        return *this;
+		return *this;
+	}
+
+	bool Window::applyFullscreenDisplayMode(){
+		if (!exclusiveFullscreen) {
+			return SDL_SetWindowFullscreenMode(window, nullptr);
+		}
+		SDL_DisplayMode closest;
+		if (!SDL_GetClosestFullscreenDisplayMode(SDL_GetDisplayForWindow(window), ourWindowSize.width, ourWindowSize.height, 0.0f, false, &closest)) {
+			return false;
+		}
+		return SDL_SetWindowFullscreenMode(window, &closest);
 	}
 	
 	Window& Window::borderless(){
 		SDLflags = SDLflags | SDL_WINDOW_BORDERLESS;
 		if(window && !renderer.headless()){
-			SDL_SetWindowBordered(window, SDL_FALSE);
+			SDL_SetWindowBordered(window, false);
 		}
 		return *this;
 	}
@@ -409,7 +424,7 @@ namespace MV {
 	Window& Window::bordered(){
 		SDLflags = SDLflags & ~ SDL_WINDOW_BORDERLESS;
 		if(window && !renderer.headless()){
-			SDL_SetWindowBordered(window, SDL_TRUE);
+			SDL_SetWindowBordered(window, true);
 		}
 		return *this;
 	}
@@ -483,7 +498,7 @@ namespace MV {
 
 	bool Window::initialize(){
 		if (!window && !renderer.headless()) {
-			window = SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, ourWindowSize.width, ourWindowSize.height, SDLflags);
+			window = SDL_CreateWindow(title.c_str(), ourWindowSize.width, ourWindowSize.height, SDLflags | SDL_WINDOW_HIDDEN);
 			if (!window) {
 				std::cerr << "Window creation failed: " << SDL_GetError() << std::endl;
 				atexit(SDL_Quit); // Quit SDL at exit.
@@ -495,16 +510,12 @@ namespace MV {
 			checkSDLError(__LINE__);
 
 			SDL_GetWindowSize(window, &ourWindowSize.width, &ourWindowSize.height);
-			SDL_GL_GetDrawableSize(window, &ourDrawableSize.width, &ourDrawableSize.height);
+			SDL_GetWindowSizeInPixels(window, &ourDrawableSize.width, &ourDrawableSize.height);
 			updateAspectRatio();
 			updateWindowResizeLimits();
 			checkSDLError(__LINE__);
 
-			SDL_DisplayMode displayMode;
-			SDL_zero(displayMode);
-			displayMode.format = SDL_PIXELFORMAT_RGB888;
-
-			if (SDL_SetWindowDisplayMode(window, &displayMode) < 0) {
+			if (!applyFullscreenDisplayMode()) {
 				std::cerr << "Window display mode failed: " << SDL_GetError() << std::endl;
 				atexit(SDL_Quit);
 				return false;
@@ -538,13 +549,13 @@ namespace MV {
 				renderer.firstInitializationOpenGL = false;
 			}
 
-			if (SDL_GL_MakeCurrent(window, glcontext)) {
+			if (!SDL_GL_MakeCurrent(window, glcontext)) {
 				std::cerr << "SDL_GL_MakeCurrent(): " << SDL_GetError() << std::endl;
 				atexit(SDL_Quit);
 			}
 
 #ifndef HAVE_OPENGLES
-			if (vsync && SDL_GL_SetSwapInterval(-1) == -1) { //set adaptave vsync (-1), but if it fails it returns -1
+			if (vsync && !SDL_GL_SetSwapInterval(-1)) { //set adaptive vsync (-1), and if that fails plain vsync
 				SDL_GL_SetSwapInterval(1); //on
 			} else {
 				SDL_GL_SetSwapInterval(0); //off
@@ -558,7 +569,7 @@ namespace MV {
 #	if TARGET_OS_MAC
 			return 72.0f;
 #	else
-			return 132.0f
+			return 132.0f;
 #	endif
 #elif defined(__ANDROID__)
 			return 160.0f;
@@ -569,22 +580,17 @@ namespace MV {
 	}
 
 	float Window::windowDpi() const {
-		float dpiResult;
-
-		if (SDL_GetDisplayDPI(SDL_GetWindowDisplayIndex(window), NULL, &dpiResult, NULL) != 0) {
-			dpiResult = systemDefaultDpi();
-		}
-
-		return dpiResult;
+		return uiScale() * systemDefaultDpi();
 	}
 
 	float Window::uiScale() const {
-		return windowDpi() / systemDefaultDpi();
+		float result = window ? SDL_GetDisplayContentScale(SDL_GetDisplayForWindow(window)) : 0.0f;
+		return result > 0.0f ? result : 1.0f;
 	}
 
 	bool Window::handleEvent(const SDL_Event &a_event, RenderWorld &a_world){
-		if(a_event.type == SDL_WINDOWEVENT){
-			if (a_event.window.event == SDL_WINDOWEVENT_RESIZED) {
+		if(a_event.type >= SDL_EVENT_WINDOW_FIRST && a_event.type <= SDL_EVENT_WINDOW_LAST){
+			if (a_event.type == SDL_EVENT_WINDOW_RESIZED) {
 				MV::info("Window Resized!");
 				auto worldScreenDelta = cast<PointPrecision>(ourDrawableSize) / a_world.size();
 				Size<int> newSize(std::min(std::max(a_event.window.data1, minSize.width), maxSize.width), std::min(std::max(a_event.window.data2, minSize.height), maxSize.height));
@@ -609,7 +615,7 @@ namespace MV {
 
 	void Window::refreshContext(){
 		ensureValidGLContext();
-		if(!renderer.headless() && SDL_GL_MakeCurrent(window, glcontext)){
+		if(!renderer.headless() && !SDL_GL_MakeCurrent(window, glcontext)){
 			MV::error("Problem with refreshContext(): ", SDL_GetError());
 		}
 	}
@@ -709,15 +715,14 @@ namespace MV {
 			return MV::size<int>(1920, 1080);
 		}
 		setupSDL();
-		SDL_DisplayMode DM;
-		SDL_GetCurrentDisplayMode(0, &DM);
-		MV::info("Monitor Size: ", DM.w, "x", DM.h);
-		return MV::Size<int>(DM.w, DM.h);
+		const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+		MV::Size<int> result = mode ? MV::Size<int>(mode->w, mode->h) : MV::Size<int>();
+		MV::info("Monitor Size: ", result.width, "x", result.height);
+		return result;
 	}
-	
+
 	void Draw2D::summarizeDisplayMode() const{
-		SDL_DisplayMode mode;
-		SDL_GetCurrentDisplayMode(0, &mode);
+		const SDL_DisplayMode* mode = headless() ? nullptr : SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
 
 		std::stringstream summary;
 		summary << "\\/==================================================\\/" << std::endl;
@@ -725,7 +730,7 @@ namespace MV {
 		summary << "DrawableSize : (" << sdlWindow.drawableSize() << ")" << std::endl;
 		if (!headless()) {
 			summary << "Driver	  : " << SDL_GetCurrentVideoDriver() << std::endl;
-			summary << "Screen bpp : " << SDL_BITSPERPIXEL(mode.format) << std::endl;
+			summary << "Screen bpp : " << (mode ? SDL_BITSPERPIXEL(mode->format) : 0) << std::endl;
 			summary << "Vendor	  : " << glGetString(GL_VENDOR) << std::endl;
 			summary << "Renderer	: " << glGetString(GL_RENDERER) << std::endl;
 			summary << "Version	 : " << glGetString(GL_VERSION) << std::endl;
@@ -741,8 +746,11 @@ namespace MV {
 		if(firstInitializationSDL){
 			firstInitializationSDL = false;
 			if (!headless()) {
-				if (SDL_Init(SDL_INIT_EVERYTHING) == -1) {
+				if (!SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_JOYSTICK | SDL_INIT_HAPTIC | SDL_INIT_GAMEPAD | SDL_INIT_SENSOR)) {
 					MV::error("SDL_Init: ", SDL_GetError());
+				}
+				if (Gesture_Init() != 0) {
+					MV::error("Gesture_Init: ", SDL_GetError());
 				}
                 
 				/*if (SDL_GetNumVideoDrivers() < 1 || SDL_VideoInit(0) < 0) {
@@ -752,8 +760,11 @@ namespace MV {
 				}*/
                 gl3wInit();
 			} else {
-				if (SDL_Init(SDL_INIT_EVENTS) == -1) {
+				if (!SDL_Init(SDL_INIT_EVENTS)) {
 					MV::error("SDL_Init [HEADLESS]: ", SDL_GetError());
+				}
+				if (Gesture_Init() != 0) {
+					MV::error("Gesture_Init [HEADLESS]: ", SDL_GetError());
 				}
 			}
 			setInitialSDLAttributes();
@@ -762,20 +773,20 @@ namespace MV {
 
 	void Draw2D::setInitialSDLAttributes() {
 #ifdef HAVE_OPENGLES
-		if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES) != 0) {
+		if (!SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES)) {
 			MV::error("Failed to set GL Context to ES");
 		}
-		if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3) != 0) {
+		if (!SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3)) {
 			MV::error("Failed to set GL Major Context to 3!");
 		}
-		if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0) != 0) {
+		if (!SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0)) {
 			MV::error("Failed to set GL Minor Context to 0!");
 		}
 #else
-		if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3) != 0) {
+		if (!SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3)) {
 			MV::error("Failed to set GL Major Context to 3!");
 		}
-		if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1) != 0) {
+		if (!SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1)) {
 			MV::error("Failed to set GL Minor Context to 1!");
 		}
 #endif

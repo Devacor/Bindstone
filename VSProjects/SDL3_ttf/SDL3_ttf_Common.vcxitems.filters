@@ -1,0 +1,226 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="external">
+      <UniqueIdentifier>{ce68e082-6077-d12f-e72c-07392019f3ef}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype">
+      <UniqueIdentifier>{6272ced5-ba46-a30a-c4be-41e161a6754f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src">
+      <UniqueIdentifier>{af2d6ddc-f73a-430a-891f-155f855e655a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\autofit">
+      <UniqueIdentifier>{7dc7d3f2-0717-3170-a0ec-d03a276c9480}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\base">
+      <UniqueIdentifier>{f2e3b073-b452-f35d-76a6-c3263f5474de}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\bdf">
+      <UniqueIdentifier>{3e8dd9c2-b171-aaaa-45cd-08fbcd1e638f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\cache">
+      <UniqueIdentifier>{7177fb19-8ef3-51ac-c967-74b7415adde7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\cff">
+      <UniqueIdentifier>{2407c8c8-ddff-681c-2fd2-8a49033af98a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\cid">
+      <UniqueIdentifier>{22003b7e-0aca-f5a5-5c64-288801a1c132}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\gzip">
+      <UniqueIdentifier>{f1e73ac8-c0da-073d-6b00-f5ac19142d91}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\lzw">
+      <UniqueIdentifier>{7af09b27-3e11-1353-a87b-4933a763d055}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\pcf">
+      <UniqueIdentifier>{80446fc2-24dc-5a85-b5d6-1f10b93559ca}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\pfr">
+      <UniqueIdentifier>{afce56ab-aee1-af73-7e2a-1ee2338fa503}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\psaux">
+      <UniqueIdentifier>{440d7ff6-359f-aaaf-8613-0ea8da30ba46}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\pshinter">
+      <UniqueIdentifier>{4e0527f0-7852-559d-4829-c7d8a9e06025}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\psnames">
+      <UniqueIdentifier>{38b0eaf8-66a5-6e0f-0f5d-38a7cf142d79}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\raster">
+      <UniqueIdentifier>{78a9f069-9cc3-1bef-e126-34fa6f9f5e07}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\sdf">
+      <UniqueIdentifier>{ebe74a8c-9498-2c4d-9333-ee528f62f149}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\sfnt">
+      <UniqueIdentifier>{ca9a7abf-53c8-854a-8f25-ade4e95be625}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\smooth">
+      <UniqueIdentifier>{21a77163-3b88-0922-407b-76498c716a3f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\svg">
+      <UniqueIdentifier>{b7477b7f-0621-8b74-263b-9991af53a19b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\truetype">
+      <UniqueIdentifier>{c2678673-58a3-4a44-e1b7-8b38d5d5aca3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\type1">
+      <UniqueIdentifier>{af3ac4a3-19a7-d364-ef23-caf71e46bd42}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\type42">
+      <UniqueIdentifier>{033a3c0d-8cdd-e328-933c-511e07c4b512}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\freetype\src\winfonts">
+      <UniqueIdentifier>{102fce07-9c4e-0479-e788-3f833ea1c797}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src">
+      <UniqueIdentifier>{68db29c6-4d5b-86de-40ae-b1d03b3f9a43}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\SDL_ttf.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\SDL_hashtable.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\SDL_hashtable_ttf.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\SDL_gpu_textengine.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\SDL_renderer_textengine.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\SDL_surface_textengine.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\autofit\autofit.c">
+      <Filter>external\freetype\src\autofit</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftbase.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftbbox.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftbdf.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftbitmap.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftcid.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftdebug.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftfstype.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftgasp.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftglyph.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftgxval.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftinit.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftmm.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftotval.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftpatent.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftpfr.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftstroke.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftsynth.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftsystem.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\fttype1.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\base\ftwinfnt.c">
+      <Filter>external\freetype\src\base</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\bdf\bdf.c">
+      <Filter>external\freetype\src\bdf</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\cache\ftcache.c">
+      <Filter>external\freetype\src\cache</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\cff\cff.c">
+      <Filter>external\freetype\src\cff</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\cid\type1cid.c">
+      <Filter>external\freetype\src\cid</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\gzip\ftgzip.c">
+      <Filter>external\freetype\src\gzip</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\lzw\ftlzw.c">
+      <Filter>external\freetype\src\lzw</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\pcf\pcf.c">
+      <Filter>external\freetype\src\pcf</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\pfr\pfr.c">
+      <Filter>external\freetype\src\pfr</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\psaux\psaux.c">
+      <Filter>external\freetype\src\psaux</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\pshinter\pshinter.c">
+      <Filter>external\freetype\src\pshinter</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\psnames\psmodule.c">
+      <Filter>external\freetype\src\psnames</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\raster\raster.c">
+      <Filter>external\freetype\src\raster</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\sdf\sdf.c">
+      <Filter>external\freetype\src\sdf</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\sfnt\sfnt.c">
+      <Filter>external\freetype\src\sfnt</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\smooth\smooth.c">
+      <Filter>external\freetype\src\smooth</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\svg\svg.c">
+      <Filter>external\freetype\src\svg</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\truetype\truetype.c">
+      <Filter>external\freetype\src\truetype</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\type1\type1.c">
+      <Filter>external\freetype\src\type1</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\type42\type42.c">
+      <Filter>external\freetype\src\type42</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\freetype\src\winfonts\winfnt.c">
+      <Filter>external\freetype\src\winfonts</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

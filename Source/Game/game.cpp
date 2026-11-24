@@ -1,4 +1,5 @@
 #include "game.h"
+#include <SDL3_gesture/SDL_gesture.h>
 #include "MV\Utility\stringUtility.h"
 #include "MV/Utility/generalUtility.h"
 #include <functional>
@@ -35,6 +36,7 @@ static jai::registrar<Game, MV::Services> _hookGame([](jai::dynamic_binder<Game>
 });
 
 void sdl_quit(void){
+	Gesture_Quit();
 	SDL_Quit();
 	TTF_Quit();
 }
@@ -187,11 +189,11 @@ void Game::handleInput() {
 		auto windowResized = gameData.managers().renderer.handleEvent(event);
 		if(!windowResized && (!ourGui || (ourGui && !ourGui->handleInput(event))) && (!ourInstance || (ourInstance && !ourInstance->handleEvent(event)))){
 			switch(event.type){
-			case SDL_QUIT:
+			case SDL_EVENT_QUIT:
 				done = true;
 				break;
-			case SDL_KEYDOWN:
-				switch(event.key.keysym.sym){
+			case SDL_EVENT_KEY_DOWN:
+				switch(event.key.key){
 				case SDLK_ESCAPE:
 					done = true;
 					break;

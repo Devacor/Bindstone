@@ -298,53 +298,53 @@ namespace MV{
 		bool Text::text(SDL_Event &event) {
 			if (owner()->renderer().headless()) { return false; }
 
-			if (event.type == SDL_TEXTINPUT) {
+			if (event.type == SDL_EVENT_TEXT_INPUT) {
 				insertAtCursor(event.text.text);
 				refreshSelection();
 				return true;
-			} else if (event.type == SDL_TEXTEDITING) {
+			} else if (event.type == SDL_EVENT_TEXT_EDITING) {
 				//setTemporaryText(stringToWide(event.edit.text), event.edit.start, event.edit.length);
-			} else if (event.type == SDL_KEYDOWN) {
-				const bool shift = (SDL_GetModState() & KMOD_SHIFT) != 0;
-				const bool control = (SDL_GetModState() & KMOD_CTRL) != 0;
+			} else if (event.type == SDL_EVENT_KEY_DOWN) {
+				const bool shift = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
+				const bool control = (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
 				auto self = std::static_pointer_cast<Text>(shared_from_this());
-				if (event.key.keysym.sym == SDLK_BACKSPACE && !formattedText->empty()) {
+				if (event.key.key == SDLK_BACKSPACE && !formattedText->empty()) {
 					backspace();
 					return true;
-				} else if (event.key.keysym.sym == SDLK_DELETE && hasSelection()) {
+				} else if (event.key.key == SDLK_DELETE && hasSelection()) {
 					eraseSelection();
 					onChangeSignal(self);
 					return true;
-				} else if (event.key.keysym.sym == SDLK_DELETE && !formattedText->empty() && cursor < formattedText->size()) {
+				} else if (event.key.key == SDLK_DELETE && !formattedText->empty() && cursor < formattedText->size()) {
 					++cursor; //this is okay because backspace will reposition the cursor.
 					backspace();
 					return true;
-				} else if (event.key.keysym.sym == SDLK_a && control) {
+				} else if (event.key.key == SDLK_A && control) {
 					selectAll();
 					return true;
-				} else if (event.key.keysym.sym == SDLK_v && control) {
+				} else if (event.key.key == SDLK_V && control) {
 					pasteFromClipboard();
 					return true;
-				} else if (event.key.keysym.sym == SDLK_c && control) {
+				} else if (event.key.key == SDLK_C && control) {
 					copyToClipboard();
 					return true;
-				} else if (event.key.keysym.sym == SDLK_x && control) {
+				} else if (event.key.key == SDLK_X && control) {
 					cutToClipboard();
 					return true;
-				} else if (event.key.keysym.sym == SDLK_LEFT) {
+				} else if (event.key.key == SDLK_LEFT) {
 					// without Shift a selection collapses to the end the arrow points at
 					moveCursor(!shift && hasSelection() ? static_cast<int64_t>(selectionStart()) : static_cast<int64_t>(cursor) - 1, shift);
 					return true;
-				} else if (event.key.keysym.sym == SDLK_RIGHT) {
+				} else if (event.key.key == SDLK_RIGHT) {
 					moveCursor(!shift && hasSelection() ? static_cast<int64_t>(selectionEnd()) : static_cast<int64_t>(cursor) + 1, shift);
 					return true;
-				} else if (event.key.keysym.sym == SDLK_HOME) {
+				} else if (event.key.key == SDLK_HOME) {
 					moveCursor(0, shift);
 					return true;
-				} else if (event.key.keysym.sym == SDLK_END) {
+				} else if (event.key.key == SDLK_END) {
 					moveCursor(static_cast<int64_t>(formattedText->size()), shift);
 					return true;
-				} else if (event.key.keysym.sym == SDLK_RETURN) {
+				} else if (event.key.key == SDLK_RETURN) {
 					onEnterSignal(self);
 					return true;
 				}

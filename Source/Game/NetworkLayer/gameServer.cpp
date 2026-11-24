@@ -3,11 +3,13 @@
 #include "networkAction.h"
 #include "clientActions.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
+#include <SDL3_gesture/SDL_gesture.h>
 
 #include <conio.h>
 
 void sdl_quit_gameserver(void) {
+	Gesture_Quit();
 	SDL_Quit();
 	TTF_Quit();
 }

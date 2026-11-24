@@ -1,0 +1,553 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="external">
+      <UniqueIdentifier>{be9980a0-cb88-07d3-65f5-cb1eb3938319}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\libpng">
+      <UniqueIdentifier>{c44f2e4f-376a-6c19-d2f5-b3510525e708}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\libpng\arm">
+      <UniqueIdentifier>{e89b0fa2-9963-84d4-ec36-40d6510aed24}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\libpng\intel">
+      <UniqueIdentifier>{c3a3ed90-2fb0-1250-b97f-fc5b203dd7fa}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\libwebp">
+      <UniqueIdentifier>{c3aaca00-021c-a489-31ea-9334ef62c015}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\libwebp\sharpyuv">
+      <UniqueIdentifier>{e33bc7e8-1dc4-766a-b770-411242357ba2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\libwebp\src">
+      <UniqueIdentifier>{560a7329-6f25-e709-a4c2-02320e58c05c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\libwebp\src\dec">
+      <UniqueIdentifier>{7a3eca82-abac-7e34-f782-c9aecb0c055b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\libwebp\src\demux">
+      <UniqueIdentifier>{8c9b161c-2005-2596-64c9-7b08ef67a024}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\libwebp\src\dsp">
+      <UniqueIdentifier>{bfc9de2a-1a1a-a9ac-9ee8-4578507b5197}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\libwebp\src\enc">
+      <UniqueIdentifier>{709b54f3-8e4d-50cb-1c19-a9eac19d3ca7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\libwebp\src\mux">
+      <UniqueIdentifier>{830ecb9b-50c4-ed0d-e6d7-a841d5ccdb07}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\libwebp\src\utils">
+      <UniqueIdentifier>{e7fa827f-a2ef-1066-740b-9528e761734f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src">
+      <UniqueIdentifier>{291290f4-b013-8544-78a7-88ab207957f5}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_bmp.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_gif.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_jpg.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_lbm.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_pcx.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_png.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_libpng.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_pnm.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_qoi.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_stb.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_svg.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_tga.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_tif.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_webp.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_xcf.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_xpm.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_xv.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_xxx.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\xmlman.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_ani.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_anim_decoder.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_anim_encoder.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_avif.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_jxl.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\IMG_WIC.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\png.c">
+      <Filter>external\libpng</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\pngerror.c">
+      <Filter>external\libpng</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\pngget.c">
+      <Filter>external\libpng</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\pngmem.c">
+      <Filter>external\libpng</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\pngpread.c">
+      <Filter>external\libpng</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\pngread.c">
+      <Filter>external\libpng</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\pngrio.c">
+      <Filter>external\libpng</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\pngrtran.c">
+      <Filter>external\libpng</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\pngrutil.c">
+      <Filter>external\libpng</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\pngset.c">
+      <Filter>external\libpng</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\pngtrans.c">
+      <Filter>external\libpng</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\pngwio.c">
+      <Filter>external\libpng</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\pngwrite.c">
+      <Filter>external\libpng</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\pngwtran.c">
+      <Filter>external\libpng</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\pngwutil.c">
+      <Filter>external\libpng</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\arm\arm_init.c">
+      <Filter>external\libpng\arm</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\arm\filter_neon_intrinsics.c">
+      <Filter>external\libpng\arm</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\arm\palette_neon_intrinsics.c">
+      <Filter>external\libpng\arm</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\intel\filter_sse2_intrinsics.c">
+      <Filter>external\libpng\intel</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libpng\intel\intel_init.c">
+      <Filter>external\libpng\intel</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dec\alpha_dec.c">
+      <Filter>external\libwebp\src\dec</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dec\buffer_dec.c">
+      <Filter>external\libwebp\src\dec</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dec\frame_dec.c">
+      <Filter>external\libwebp\src\dec</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dec\idec_dec.c">
+      <Filter>external\libwebp\src\dec</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dec\io_dec.c">
+      <Filter>external\libwebp\src\dec</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dec\quant_dec.c">
+      <Filter>external\libwebp\src\dec</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dec\tree_dec.c">
+      <Filter>external\libwebp\src\dec</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dec\vp8_dec.c">
+      <Filter>external\libwebp\src\dec</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dec\vp8l_dec.c">
+      <Filter>external\libwebp\src\dec</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dec\webp_dec.c">
+      <Filter>external\libwebp\src\dec</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\demux\anim_decode.c">
+      <Filter>external\libwebp\src\demux</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\demux\demux.c">
+      <Filter>external\libwebp\src\demux</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\alpha_processing.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\alpha_processing_mips_dsp_r2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\alpha_processing_neon.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\alpha_processing_sse2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\alpha_processing_sse41.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\cost.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\cost_mips32.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\cost_mips_dsp_r2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\cost_neon.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\cost_sse2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\cpu.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\dec.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\dec_clip_tables.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\dec_mips32.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\dec_mips_dsp_r2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\dec_msa.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\dec_neon.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\dec_sse2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\dec_sse41.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\enc.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\enc_mips32.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\enc_mips_dsp_r2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\enc_msa.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\enc_neon.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\enc_sse2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\enc_sse41.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\filters.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\filters_mips_dsp_r2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\filters_msa.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\filters_neon.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\filters_sse2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\lossless.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\lossless_enc.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\lossless_enc_mips32.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\lossless_enc_mips_dsp_r2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\lossless_enc_msa.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\lossless_enc_neon.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\lossless_enc_sse2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\lossless_enc_sse41.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\lossless_mips_dsp_r2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\lossless_msa.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\lossless_neon.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\lossless_sse2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\lossless_sse41.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\rescaler.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\rescaler_mips32.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\rescaler_mips_dsp_r2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\rescaler_msa.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\rescaler_neon.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\rescaler_sse2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\ssim.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\ssim_sse2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\upsampling.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\upsampling_mips_dsp_r2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\upsampling_msa.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\upsampling_neon.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\upsampling_sse2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\upsampling_sse41.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\yuv.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\yuv_mips32.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\yuv_mips_dsp_r2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\yuv_neon.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\yuv_sse2.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\dsp\yuv_sse41.c">
+      <Filter>external\libwebp\src\dsp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\alpha_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\analysis_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\backward_references_cost_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\backward_references_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\config_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\cost_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\filter_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\frame_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\histogram_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\iterator_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\near_lossless_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\picture_csp_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\picture_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\picture_psnr_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\picture_rescale_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\picture_tools_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\predictor_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\quant_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\syntax_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\token_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\tree_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\vp8l_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\enc\webp_enc.c">
+      <Filter>external\libwebp\src\enc</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\mux\anim_encode.c">
+      <Filter>external\libwebp\src\mux</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\mux\muxedit.c">
+      <Filter>external\libwebp\src\mux</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\mux\muxinternal.c">
+      <Filter>external\libwebp\src\mux</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\mux\muxread.c">
+      <Filter>external\libwebp\src\mux</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\utils\bit_reader_utils.c">
+      <Filter>external\libwebp\src\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\utils\bit_writer_utils.c">
+      <Filter>external\libwebp\src\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\utils\color_cache_utils.c">
+      <Filter>external\libwebp\src\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\utils\filters_utils.c">
+      <Filter>external\libwebp\src\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\utils\huffman_encode_utils.c">
+      <Filter>external\libwebp\src\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\utils\huffman_utils.c">
+      <Filter>external\libwebp\src\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\utils\quant_levels_dec_utils.c">
+      <Filter>external\libwebp\src\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\utils\quant_levels_utils.c">
+      <Filter>external\libwebp\src\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\utils\random_utils.c">
+      <Filter>external\libwebp\src\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\utils\rescaler_utils.c">
+      <Filter>external\libwebp\src\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\utils\thread_utils.c">
+      <Filter>external\libwebp\src\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\src\utils\utils.c">
+      <Filter>external\libwebp\src\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\sharpyuv\sharpyuv.c">
+      <Filter>external\libwebp\sharpyuv</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\sharpyuv\sharpyuv_cpu.c">
+      <Filter>external\libwebp\sharpyuv</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\sharpyuv\sharpyuv_csp.c">
+      <Filter>external\libwebp\sharpyuv</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\sharpyuv\sharpyuv_dsp.c">
+      <Filter>external\libwebp\sharpyuv</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\sharpyuv\sharpyuv_gamma.c">
+      <Filter>external\libwebp\sharpyuv</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\sharpyuv\sharpyuv_neon.c">
+      <Filter>external\libwebp\sharpyuv</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)external\libwebp\sharpyuv\sharpyuv_sse2.c">
+      <Filter>external\libwebp\sharpyuv</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

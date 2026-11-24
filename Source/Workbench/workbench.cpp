@@ -63,9 +63,9 @@ namespace Workbench {
 			}
 		};
 
-		cursorArrow = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
-		cursorResizeH = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE);
-		cursorResizeV = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS);
+		cursorArrow = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
+		cursorResizeH = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE);
+		cursorResizeV = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NS_RESIZE);
 
 		auto panWith = [this](PanButton a_button, jai::signal<MV::TapDevice::CallbackSignature>& a_down, jai::signal<MV::TapDevice::CallbackSignature>& a_up) {
 			panReceivers.push_back(a_down.connect([this, a_button](MV::TapDevice& a_mouse) { beginPan(a_button, a_mouse.position()); }));
@@ -129,7 +129,7 @@ namespace Workbench {
 			std::string message = "Save changes to " + a_documentName + "?";
 			SDL_MessageBoxData box { SDL_MESSAGEBOX_WARNING, SDL_GetKeyboardFocus(), "Bindstone Workbench", message.c_str(), 3, buttons, nullptr };
 			int pressed = 2;
-			if (SDL_ShowMessageBox(&box, &pressed) != 0) {
+			if (!SDL_ShowMessageBox(&box, &pressed)) {
 				return UnsavedChoice::CANCEL;
 			}
 			return pressed == 0 ? UnsavedChoice::SAVE : pressed == 1 ? UnsavedChoice::DISCARD : UnsavedChoice::CANCEL;
@@ -142,7 +142,7 @@ namespace Workbench {
 			};
 			SDL_MessageBoxData box { SDL_MESSAGEBOX_WARNING, SDL_GetKeyboardFocus(), "Bindstone Workbench", a_message.c_str(), 2, buttons, nullptr };
 			int pressed = 1;
-			return SDL_ShowMessageBox(&box, &pressed) == 0 && pressed == 0;
+			return SDL_ShowMessageBox(&box, &pressed) && pressed == 0;
 		};
 
 		messageLog = std::make_shared<MessageLog>();
@@ -353,7 +353,7 @@ namespace Workbench {
 		SDL_SetCursor(SDL_GetDefaultCursor());
 		for (auto&& cursor : { cursorArrow, cursorResizeH, cursorResizeV }) {
 			if (cursor) {
-				SDL_FreeCursor(cursor);
+				SDL_DestroyCursor(cursor);
 			}
 		}
 	}
@@ -1953,7 +1953,7 @@ namespace Workbench {
 	}
 
 	void App::updateCameraKeys(double a_dt) {
-		const Uint8* keys = SDL_GetKeyboardState(nullptr);
+		const bool* keys = SDL_GetKeyboardState(nullptr);
 		float speed = static_cast<float>(600.0 * a_dt);
 		MV::Point<> delta;
 		if (keys[SDL_SCANCODE_LEFT]) { delta.x += speed; }
@@ -2064,17 +2064,17 @@ namespace Workbench {
 		return {
 			{ "Cut", "Ctrl+X", onText(&MV::Scene::Text::cutToClipboard), false, {}, selected },
 			{ "Copy", "Ctrl+C", onText(&MV::Scene::Text::copyToClipboard) },
-			{ "Paste", "Ctrl+V", onText(&MV::Scene::Text::pasteFromClipboard), false, {}, []() { return SDL_HasClipboardText() == SDL_TRUE; } },
+			{ "Paste", "Ctrl+V", onText(&MV::Scene::Text::pasteFromClipboard), false, {}, []() { return SDL_HasClipboardText() == true; } },
 			{ "Select All", "Ctrl+A", onText(&MV::Scene::Text::selectAll), true } };
 	}
 
 	// Tab and Shift+Tab walk the focusable controls of the panel the focus is in; Enter and Space press a focused
 	// control that is not a text field; Escape lets the focus go.
 	bool App::handleFocusKey(const SDL_Event& a_event) {
-		if (a_event.type != SDL_KEYDOWN || (SDL_GetModState() & (KMOD_CTRL | KMOD_ALT | KMOD_GUI))) {
+		if (a_event.type != SDL_EVENT_KEY_DOWN || (SDL_GetModState() & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI))) {
 			return false;
 		}
-		auto key = a_event.key.keysym.sym;
+		auto key = a_event.key.key;
 		if (key == SDLK_TAB) {
 			auto focusedClickable = std::static_pointer_cast<MV::Scene::Clickable>(mouse.focusedSubject());
 			auto from = focusRouter.active() ? focusRouter.active()->owner() : focusedClickable ? focusedClickable->owner() : nullptr;
@@ -2083,7 +2083,7 @@ namespace Workbench {
 				return false;
 			}
 			focusRouter.leave();
-			if (SDL_GetModState() & KMOD_SHIFT) {
+			if (SDL_GetModState() & SDL_KMOD_SHIFT) {
 				mouse.focusPrevious(scope.get());
 			} else {
 				mouse.focusNext(scope.get());
@@ -2132,7 +2132,7 @@ namespace Workbench {
 			if (managers.renderer.handleEvent(event)) {
 				continue;
 			}
-			if (event.type == SDL_QUIT) {
+			if (event.type == SDL_EVENT_QUIT) {
 				requestExit();
 				continue;
 			}
@@ -2141,7 +2141,7 @@ namespace Workbench {
 				continue;
 			}
 			// a press on a field's own menu is not a press away from the field
-			bool onContextMenu = event.type == SDL_MOUSEBUTTONDOWN && menuBar->contextOpen() && menuBar->popupContains(MV::Point<int>(event.button.x, event.button.y));
+			bool onContextMenu = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && menuBar->contextOpen() && menuBar->popupContains(MV::Point<int>(event.button.x, event.button.y));
 			menuBar->handleInput(event);
 			// the mesh editor's keys (Enter among them) come before the focus keys, unless a field is being typed in
 			if (!focusRouter.hasActive() && !menuBar->isOpen() && meshEditor->active() && meshEditor->key(event)) {
@@ -2159,10 +2159,10 @@ namespace Workbench {
 					continue;
 				}
 			}
-			if (event.type == SDL_MOUSEWHEEL) {
+			if (event.type == SDL_EVENT_MOUSE_WHEEL) {
 				auto worldPoint = managers.renderer.worldFromScreen(mouse.position());
 				if (dock->viewportAt(worldPoint)) {
-					float zoom = 1.0f + 0.1f * static_cast<float>(event.wheel.y);
+					float zoom = 1.0f + 0.1f * static_cast<float>(event.wheel.integer_y);
 					auto current = viewCamera->scale();
 					float newScale = std::clamp(current.x * zoom, minimumZoom, maximumZoom);
 					auto position = viewCamera->position();
@@ -2171,7 +2171,7 @@ namespace Workbench {
 					viewCamera->position(MV::point(worldPoint.x - local.x * newScale, worldPoint.y - local.y * newScale, position.z));
 					viewCamera->scale(MV::Scale(newScale, newScale, current.z));
 				} else {
-					dock->wheelScroll(worldPoint, static_cast<float>(event.wheel.y));
+					dock->wheelScroll(worldPoint, static_cast<float>(event.wheel.integer_y));
 				}
 				continue;
 			}
@@ -2254,7 +2254,7 @@ namespace Workbench {
 
 	void App::captureScreenshot(const std::string& a_path) {
 		auto size = managers.renderer.window().drawableSize();
-		SDL_Surface* surface = SDL_CreateRGBSurface(0, size.width, size.height, 32, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
+		SDL_Surface* surface = SDL_CreateSurface(size.width, size.height, SDL_PIXELFORMAT_RGBA32);
 		std::vector<uint8_t> pixels(static_cast<size_t>(size.width) * size.height * 4);
 		managers.renderer.flushDraws();
 		glReadPixels(0, 0, size.width, size.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
@@ -2265,7 +2265,7 @@ namespace Workbench {
 				static_cast<size_t>(size.width) * 4);
 		}
 		SDL_SaveBMP(surface, a_path.c_str());
-		SDL_FreeSurface(surface);
+		SDL_DestroySurface(surface);
 		std::cout << "Workbench screenshot: " << a_path << std::endl;
 	}
 

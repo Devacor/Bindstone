@@ -17,6 +17,7 @@
 
 #include <jaiscript/core/engine.hpp>
 #include "MV/Script/script.h"
+#include <SDL3/SDL_main.h>
 
 #include <cstring>
 #include <fstream>

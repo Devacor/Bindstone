@@ -5,7 +5,7 @@
 #include <map>
 #include <algorithm>
 #include <fstream>
-#include "SDL.h"
+#include <SDL3/SDL.h>
 #include "scopeGuard.hpp"
 #include <filesystem>
 #include "stringUtility.h"
@@ -164,10 +164,10 @@ namespace MV {
 			return false;
 		}
 #if defined(__ANDROID__) || defined(__APPLE__)
-		SDL_RWops* sdlIO = SDL_RWFromFile(a_path.c_str(), "rb");
+		SDL_IOStream* sdlIO = SDL_IOFromFile(a_path.c_str(), "rb");
 		if (sdlIO != NULL)
 		{
-			SDL_RWclose(sdlIO);
+			SDL_CloseIO(sdlIO);
 			return true;
 		}
 		return false;
@@ -185,34 +185,34 @@ namespace MV {
 #endif
 	}
 
-	SDL_RWops* sdlFileHandle(const std::string& a_path) {
+	SDL_IOStream* sdlFileHandle(const std::string& a_path) {
 		if (a_path.empty()) {
 			return {};
 		}
 		std::string userPrefPath = playerPreferencesPath() + a_path;
 #if defined(__ANDROID__) || defined(__APPLE__)
-		SDL_RWops* sdlIO = SDL_RWFromFile(fileExistsAbsolute(userPrefPath) ? userPrefPath.c_str() : a_path.c_str(), "rb");
+		SDL_IOStream* sdlIO = SDL_IOFromFile(fileExistsAbsolute(userPrefPath) ? userPrefPath.c_str() : a_path.c_str(), "rb");
 #else
 		//supports absolute paths too.
-		SDL_RWops* sdlIO = SDL_RWFromFile(fileExistsAbsolute(a_path) ? a_path.c_str() : fileExistsAbsolute(userPrefPath) ? userPrefPath.c_str() : ("Assets/" + a_path).c_str(), "rb");
+		SDL_IOStream* sdlIO = SDL_IOFromFile(fileExistsAbsolute(a_path) ? a_path.c_str() : fileExistsAbsolute(userPrefPath) ? userPrefPath.c_str() : ("Assets/" + a_path).c_str(), "rb");
 #endif
 		return sdlIO;
 	}
 
 	std::string fileContents(const std::string& a_path, bool a_throwOnMissing) {
-		SDL_RWops* sdlIO = sdlFileHandle(a_path);
+		SDL_IOStream* sdlIO = sdlFileHandle(a_path);
 		if (sdlIO == nullptr) {
 			if (a_throwOnMissing) {
 				throw MV::ResourceException("Missing file at path: "s + a_path);
 			}
 			return {};
 		}
-		SCOPE_EXIT{ SDL_RWclose(sdlIO); };
-		auto totalSize = SDL_RWsize(sdlIO);
+		SCOPE_EXIT{ SDL_CloseIO(sdlIO); };
+		auto totalSize = SDL_GetIOSize(sdlIO);
 
 		std::string data;
 		data.resize(totalSize);
-		SDL_RWread(sdlIO, &data[0], totalSize, sizeof(data[0]));
+		SDL_ReadIO(sdlIO, &data[0], static_cast<size_t>(totalSize));
 
 		return data;
 	}
@@ -232,10 +232,10 @@ namespace MV {
 		std::filesystem::path finalPath = useAsIs ? a_path : playerPreferencesPath() + a_path;
 		std::filesystem::create_directories(finalPath.parent_path());
 #if defined(__ANDROID__) || defined(__APPLE__)
-		SDL_RWops* rw = SDL_RWFromFile(finalPath.c_str(), "wb");
+		SDL_IOStream* rw = SDL_IOFromFile(finalPath.c_str(), "wb");
 		if (rw != NULL) {
-			SCOPE_EXIT{ SDL_RWclose(rw); };
-			if (SDL_RWwrite(rw, a_contents.c_str(), 1, a_contents.size()) == a_contents.size()) {
+			SCOPE_EXIT{ SDL_CloseIO(rw); };
+			if (SDL_WriteIO(rw, a_contents.c_str(), a_contents.size()) == a_contents.size()) {
 				MV::info("Saving File: ", finalPath);
 				return true;
 			}

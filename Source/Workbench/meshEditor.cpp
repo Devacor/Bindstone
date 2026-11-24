@@ -246,8 +246,8 @@ namespace Workbench {
 			return;
 		}
 		const auto modifiers = SDL_GetModState();
-		const bool shift = (modifiers & KMOD_SHIFT) != 0;
-		const bool control = (modifiers & KMOD_CTRL) != 0;
+		const bool shift = (modifiers & SDL_KMOD_SHIFT) != 0;
+		const bool control = (modifiers & SDL_KMOD_CTRL) != 0;
 		switch (activeTool) {
 			case Tool::SELECT: {
 				if (control) {
@@ -595,11 +595,11 @@ namespace Workbench {
 	}
 
 	bool MeshEditor::key(const SDL_Event& a_event) {
-		if (!active() || a_event.type != SDL_KEYDOWN) {
+		if (!active() || a_event.type != SDL_EVENT_KEY_DOWN) {
 			return false;
 		}
-		const auto symbol = a_event.key.keysym.sym;
-		const bool plain = (SDL_GetModState() & (KMOD_CTRL | KMOD_ALT | KMOD_GUI)) == 0;
+		const auto symbol = a_event.key.key;
+		const bool plain = (SDL_GetModState() & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) == 0;
 		if (modal == Modal::GRAB || modal == Modal::ROTATE || modal == Modal::SCALE || modal == Modal::EXTRUDE) {
 			if (plain && symbol == SDLK_ESCAPE) {
 				cancelModal();

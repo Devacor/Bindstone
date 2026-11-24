@@ -133,10 +133,7 @@ namespace Workbench {
 		}
 
 		std::shared_ptr<MV::OwnedSurface> makeIconSurface(Icon a_icon, int a_size) {
-			int bitsPerPixel = 0;
-			Uint32 redMask = 0, greenMask = 0, blueMask = 0, alphaMask = 0;
-			SDL_PixelFormatEnumToMasks(SDL_PIXELFORMAT_ABGR8888, &bitsPerPixel, &redMask, &greenMask, &blueMask, &alphaMask);
-			SDL_Surface* surface = SDL_CreateRGBSurface(0, a_size, a_size, bitsPerPixel, redMask, greenMask, blueMask, alphaMask);
+			SDL_Surface* surface = SDL_CreateSurface(a_size, a_size, SDL_PIXELFORMAT_ABGR8888);
 			SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_NONE);
 			auto* pixels = static_cast<uint32_t*>(surface->pixels);
 			const int pitch = surface->pitch / 4;
@@ -185,10 +182,7 @@ namespace Workbench {
 		}
 
 		std::shared_ptr<MV::OwnedSurface> makeFolderSurface(int a_size) {
-			int bitsPerPixel = 0;
-			Uint32 redMask = 0, greenMask = 0, blueMask = 0, alphaMask = 0;
-			SDL_PixelFormatEnumToMasks(SDL_PIXELFORMAT_ABGR8888, &bitsPerPixel, &redMask, &greenMask, &blueMask, &alphaMask);
-			SDL_Surface* surface = SDL_CreateRGBSurface(0, a_size, a_size, bitsPerPixel, redMask, greenMask, blueMask, alphaMask);
+			SDL_Surface* surface = SDL_CreateSurface(a_size, a_size, SDL_PIXELFORMAT_ABGR8888);
 			SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_NONE);
 			auto* pixels = static_cast<uint32_t*>(surface->pixels);
 			const int pitch = surface->pitch / 4;

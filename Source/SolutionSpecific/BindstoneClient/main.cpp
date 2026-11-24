@@ -28,6 +28,7 @@
 #include "MV/Render/Scene/emitter.h"
 #include "MV/Render/Scene/bindSnapInstance.h"
 #include "MV/Render/mesh.h"
+#include <SDL3/SDL_main.h>
 #include "MV/Render/material.h"
 #include <chrono>
 #include <algorithm>
@@ -464,19 +465,19 @@ static void RunKeyBindingsSelfTest(Workbench::App& a_app, Managers& a_managers, 
 	auto& mouse = *a_managers.services.get<MV::TapDevice>();
 	auto& keys = a_app.keys();
 	auto& settings = a_app.settings();
-	auto press = [&a_app](SDL_Keycode a_key, SDL_Keymod a_modifiers = KMOD_NONE) {
+	auto press = [&a_app](SDL_Keycode a_key, SDL_Keymod a_modifiers = SDL_KMOD_NONE) {
 		SDL_SetModState(a_modifiers);
 		SDL_Event event{};
-		event.type = SDL_KEYDOWN;
-		event.key.keysym.sym = a_key;
+		event.type = SDL_EVENT_KEY_DOWN;
+		event.key.key = a_key;
 		SDL_PushEvent(&event);
 		a_app.runFrames(2);
-		SDL_SetModState(KMOD_NONE);
+		SDL_SetModState(SDL_KMOD_NONE);
 	};
 	auto childCount = [](const std::shared_ptr<MV::Scene::Node>& a_node) {
 		return static_cast<size_t>(std::distance(a_node->begin(), a_node->end()));
 	};
-	const auto control = static_cast<SDL_Keymod>(KMOD_CTRL);
+	const auto control = static_cast<SDL_Keymod>(SDL_KMOD_CTRL);
 	const auto keysFile = (std::filesystem::temp_directory_path() / "workbench_selftest_keys.txt").string();
 	std::error_code ignored;
 	std::filesystem::remove(keysFile, ignored);
@@ -494,14 +495,14 @@ static void RunKeyBindingsSelfTest(Workbench::App& a_app, Managers& a_managers, 
 	expect(settings.capturing() && settings.bindingShown("node.duplicate") == "Press a key...", "a press on a binding waits for a key");
 	press(SDLK_LCTRL, control);
 	expect(settings.capturing(), "a modifier alone is not a key");
-	press(SDLK_k, control);
+	press(SDLK_K, control);
 	expect(!settings.capturing() && keys.chord("node.duplicate").text() == "Ctrl+K" && settings.bindingShown("node.duplicate") == "Ctrl+K", "the next key with its modifiers is the new binding: " + keys.chord("node.duplicate").text());
 
 	const auto before = childCount(a_app.scene());
-	press(SDLK_d, control);
+	press(SDLK_D, control);
 	expect(childCount(a_app.scene()) == before, "the old key no longer duplicates");
 	a_app.select(node);
-	press(SDLK_k, control);
+	press(SDLK_K, control);
 	expect(childCount(a_app.scene()) == before + 1, "the new one does");
 
 	const auto written = MV::fileContents(keysFile, true);
@@ -530,7 +531,7 @@ static void RunKeyBindingsSelfTest(Workbench::App& a_app, Managers& a_managers, 
 
 	const auto warnings = a_app.messages().count(Workbench::MessageLevel::WARNING);
 	settings.beginCapture("mesh.fill");
-	press(SDLK_g);
+	press(SDLK_G);
 	a_app.runFrames(2);
 	expect(a_app.messages().count(Workbench::MessageLevel::WARNING) == warnings + 1 && settings.bindingShown("mesh.fill") == "! G" && settings.bindingShown("mesh.move") == "! G", "a key another action in the group has warns and marks both: " + settings.bindingShown("mesh.fill"));
 
@@ -571,14 +572,14 @@ static void RunMeshEditorSelfTest(Workbench::App& a_app, Managers& a_managers, c
 		}
 		hold(a_to, false);
 	};
-	auto key = [&a_app](SDL_Keycode a_key, SDL_Keymod a_modifiers = KMOD_NONE) {
+	auto key = [&a_app](SDL_Keycode a_key, SDL_Keymod a_modifiers = SDL_KMOD_NONE) {
 		SDL_SetModState(a_modifiers);
 		SDL_Event press{};
-		press.type = SDL_KEYDOWN;
-		press.key.keysym.sym = a_key;
+		press.type = SDL_EVENT_KEY_DOWN;
+		press.key.key = a_key;
 		SDL_PushEvent(&press);
 		a_app.runFrames(2);
-		SDL_SetModState(KMOD_NONE);
+		SDL_SetModState(SDL_KMOD_NONE);
 	};
 	auto read = [](const std::shared_ptr<MV::Scene::Drawable>& a_drawable) {
 		MV::Mesh::Data result;
@@ -606,8 +607,9 @@ static void RunMeshEditorSelfTest(Workbench::App& a_app, Managers& a_managers, c
 		// framed, the sheet fills the view: out to 40% so the shapes laid beside it are on open scene, clear of the tool bar
 		hold(sheetNode->screenFromLocal(MV::point(50.0f, 50.0f)), false);
 		SDL_Event wheel{};
-		wheel.type = SDL_MOUSEWHEEL;
-		wheel.wheel.y = -6;
+		wheel.type = SDL_EVENT_MOUSE_WHEEL;
+		wheel.wheel.y = -6.0f;
+		wheel.wheel.integer_y = -6;
 		SDL_PushEvent(&wheel);
 		a_app.runFrames(3);
 	}
@@ -621,7 +623,7 @@ static void RunMeshEditorSelfTest(Workbench::App& a_app, Managers& a_managers, c
 	expect(meshEditor.selection() == MV::Mesh::Selection { 1 }, "a press on a corner picks it");
 	drag(at(100.0f, 0.0f), at(100.0f, 0.0f) + MV::Point<int>(30, 0));
 	expect(sheet->getPoints()[1].x > 100.0f + 20.0f * pixel && std::abs(sheet->getPoints()[0].x) < 0.001f, "a drag moves what is picked and nothing else");
-	pressWithControl(SDLK_z);
+	pressWithControl(SDLK_Z);
 	expect(read(sheet) == original, "and undo puts it back");
 
 	drag(at(-20.0f, 80.0f), at(120.0f, 120.0f));
@@ -629,16 +631,16 @@ static void RunMeshEditorSelfTest(Workbench::App& a_app, Managers& a_managers, c
 
 	auto pointer = at(50.0f, 110.0f);
 	hold(pointer, false);
-	key(SDLK_e);
+	key(SDLK_E);
 	hold(pointer + MV::Point<int>(0, 40), false);
 	click(pointer + MV::Point<int>(0, 40));
 	auto extruded = read(sheet);
 	expect(extruded.points.size() == 6 && extruded.triangleCount() == 4, "E extrudes the picked outside edge into a new quad: " + std::to_string(extruded.points.size()) + " corners");
 	expect(extruded.points.size() == 6 && extruded.points[4].y > 100.0f + 30.0f * pixel && meshEditor.selection().size() == 2, "below the old edge, with the new edge picked");
 
-	key(SDLK_g);
+	key(SDLK_G);
 	hold(pointer + MV::Point<int>(60, 40), false);
-	key(SDLK_x);
+	key(SDLK_X);
 	hold(pointer + MV::Point<int>(60, 70), false);
 	key(SDLK_RETURN);
 	auto grabbed = read(sheet);
@@ -670,9 +672,9 @@ static void RunMeshEditorSelfTest(Workbench::App& a_app, Managers& a_managers, c
 	expect(sheet->getPoints()[0].A < 0.5f && sheet->getPoints()[2].A > 0.99f, "the brush blends the corners under it toward its colour");
 
 	key(SDLK_1);
-	SDL_SetModState(static_cast<SDL_Keymod>(KMOD_CTRL));
+	SDL_SetModState(static_cast<SDL_Keymod>(SDL_KMOD_CTRL));
 	click(at(50.0f, 0.0f));
-	SDL_SetModState(KMOD_NONE);
+	SDL_SetModState(SDL_KMOD_NONE);
 	auto split = read(sheet);
 	expect(split.points.size() == 16 && split.triangleCount() == 10 && meshEditor.selection().size() == 1, "Ctrl+press on an edge puts a corner on it");
 
@@ -684,12 +686,12 @@ static void RunMeshEditorSelfTest(Workbench::App& a_app, Managers& a_managers, c
 
 	size_t stepsTaken = 0;
 	while (a_app.commands().position() > stepsBefore && stepsTaken < 64) {
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		++stepsTaken;
 	}
 	expect(read(sheet) == original, "undoing each step gets back the mesh it started with: " + std::to_string(stepsTaken) + " steps");
 	for (size_t step = 0; step < stepsTaken; ++step) {
-		pressWithControl(SDLK_y);
+		pressWithControl(SDLK_Y);
 	}
 	const auto edited = read(sheet);
 	expect(edited.points.size() > 15, "and redo brings all of them back");
@@ -722,13 +724,13 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		return std::abs(a_left.x - a_right.x) < 0.001f && std::abs(a_left.y - a_right.y) < 0.001f;
 	};
 	auto pressWithControl = [&a_app](SDL_Keycode a_key) {
-		SDL_SetModState(static_cast<SDL_Keymod>(KMOD_CTRL));
+		SDL_SetModState(static_cast<SDL_Keymod>(SDL_KMOD_CTRL));
 		SDL_Event press{};
-		press.type = SDL_KEYDOWN;
-		press.key.keysym.sym = a_key;
+		press.type = SDL_EVENT_KEY_DOWN;
+		press.key.key = a_key;
 		SDL_PushEvent(&press);
 		a_app.runFrames(2);
-		SDL_SetModState(KMOD_NONE);
+		SDL_SetModState(SDL_KMOD_NONE);
 	};
 	if (std::getenv("KEYS_ONLY")) {
 		RunKeyBindingsSelfTest(a_app, a_managers, expect);
@@ -781,10 +783,10 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 	expect(childCount() == countBeforeDrop + 1, "a BindSnap dropped on the viewport joins the scene");
 	expect(a_app.selected() && a_app.selected()->parent() == a_app.scene(), "the dropped BindSnap is selected");
 	a_app.runFrames(2);
-	pressWithControl(SDLK_z);
+	pressWithControl(SDLK_Z);
 	expect(childCount() == countBeforeDrop, "undo removes the dropped BindSnap");
 	expect(!a_app.selected(), "undo deselects a node that left the scene");
-	pressWithControl(SDLK_y);
+	pressWithControl(SDLK_Y);
 	expect(childCount() == countBeforeDrop + 1, "redo places the BindSnap again");
 
 	// Transform gizmos: each gesture through the calls a handle drag makes, then real drags on a simulated mouse
@@ -798,8 +800,8 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		auto exactXY = [](const auto& a_left, const auto& a_right) { return a_left.x == a_right.x && a_left.y == a_right.y; };
 		auto pressKey = [&a_app](SDL_Keycode a_key) {
 			SDL_Event press{};
-			press.type = SDL_KEYDOWN;
-			press.key.keysym.sym = a_key;
+			press.type = SDL_EVENT_KEY_DOWN;
+			press.key.key = a_key;
 			SDL_PushEvent(&press);
 			a_app.runFrames(2);
 		};
@@ -843,48 +845,48 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(sameXY(subject->position(), restPosition + MV::point(37.0f, 0.0f)), "a move on X leaves Y alone");
 		expect(gizmoLayer.moveSelected(Workbench::GizmoAxis::Y, MV::point(55.0f, -12.0f)), "a second move applies");
 		expect(sameXY(subject->position(), restPosition + MV::point(37.0f, -12.0f)), "a move on Y leaves X alone");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		expect(sameXY(subject->position(), restPosition + MV::point(37.0f, 0.0f)), "one undo takes back one move");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		expect(exactXY(subject->position(), restPosition), "undo restores the position exactly");
-		pressWithControl(SDLK_y);
+		pressWithControl(SDLK_Y);
 		expect(sameXY(subject->position(), restPosition + MV::point(37.0f, 0.0f)), "redo moves again");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		gizmoLayer.moveSelected(Workbench::GizmoAxis::BOTH, MV::point(3.3f, 16.2f), true);
 		auto snappedPosition = subject->position();
 		expect(std::abs(std::remainder(snappedPosition.x, gizmoLayer.snapSteps.moveX)) < 0.001f && std::abs(std::remainder(snappedPosition.y, gizmoLayer.snapSteps.moveY)) < 0.001f, "a snapped move lands on the grid");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		expect(exactXY(subject->position(), restPosition), "undo restores the position after a snapped move");
 
 		gizmoLayer.rotateSelected(40.0f);
 		expect(std::abs(subject->rotation().z - (MV::toDegrees(restRotation.z) + 40.0f)) < 0.001f, "a rotation turns about Z");
 		expect(exactXY(subject->position(), restPosition) && exactXY(subject->scale(), restScale), "a rotation leaves position and scale alone");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		expect(subject->rotationRad().z == restRotation.z, "undo restores the rotation exactly");
 		gizmoLayer.rotateSelected(40.0f, true);
 		expect(std::abs(std::remainder(subject->rotation().z, gizmoLayer.snapSteps.rotate)) < 0.001f, "a snapped rotation lands on the rotation step");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		expect(subject->rotationRad().z == restRotation.z, "undo restores the rotation after a snapped turn");
 
 		gizmoLayer.scaleSelected(Workbench::GizmoAxis::X, 2.0f);
 		expect(std::abs(subject->scale().x - restScale.x * 2.0f) < 0.001f && subject->scale().y == restScale.y, "a scale on X leaves Y alone");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		gizmoLayer.scaleSelected(Workbench::GizmoAxis::BOTH, 1.5f);
 		expect(std::abs(subject->scale().x - restScale.x * 1.5f) < 0.001f && std::abs(subject->scale().y - restScale.y * 1.5f) < 0.001f, "the centre handle scales both axes");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		expect(exactXY(subject->scale(), restScale), "undo restores the scale exactly");
 		gizmoLayer.scaleSelected(Workbench::GizmoAxis::Y, 1.234f, true);
 		expect(std::abs(std::remainder(subject->scale().y, gizmoLayer.snapSteps.scale)) < 0.001f, "a snapped scale lands on a 0.1 step");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		expect(exactXY(subject->scale(), restScale), "undo restores the scale after a snapped one");
 
-		pressKey(SDLK_q);
+		pressKey(SDLK_Q);
 		expect(a_app.gizmoTool() == Workbench::Tool::SELECT && !gizmoLayer.handleScreenPoint("moveX"), "Q shows no transform handles");
-		pressKey(SDLK_e);
+		pressKey(SDLK_E);
 		expect(a_app.gizmoTool() == Workbench::Tool::ROTATE && gizmoLayer.handleScreenPoint("rotate"), "E shows the rotate ring");
-		pressKey(SDLK_r);
+		pressKey(SDLK_R);
 		expect(a_app.gizmoTool() == Workbench::Tool::SCALE && gizmoLayer.handleScreenPoint("scaleX") && gizmoLayer.handleScreenPoint("scaleUniform"), "R shows the scale handles");
-		pressKey(SDLK_w);
+		pressKey(SDLK_W);
 		expect(a_app.gizmoTool() == Workbench::Tool::MOVE && gizmoLayer.handleScreenPoint("moveX") && gizmoLayer.handleScreenPoint("moveY") && gizmoLayer.handleScreenPoint("moveFree"), "W shows the move handles");
 		expect(gizmoLayer.handleScreenPoint("moveY").value_or(MV::Point<int>()).y < gizmoLayer.handleScreenPoint("moveFree").value_or(MV::Point<int>()).y, "the vertical move arrow points up");
 		if (auto editable = subject->component<MV::Scene::Clickable>(false, false)) {
@@ -909,32 +911,32 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		drag(moveGrab, { moveGrab + MV::Point<int>(20, 10), moveDrop });
 		expect(std::abs(subject->position().x - (restPosition.x + expectedMove.x)) < 0.01f && subject->position().y == restPosition.y, "dragging the X arrow moves along X by the cursor's travel");
 		expect(sameXY(a_app.scene()->worldPosition(), cameraBefore), "a handle drag does not pan the camera");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		expect(exactXY(subject->position(), restPosition), "undo restores the position after an arrow drag");
 
 		moveGrab = grab("moveY");
-		SDL_SetModState(static_cast<SDL_Keymod>(KMOD_CTRL));
+		SDL_SetModState(static_cast<SDL_Keymod>(SDL_KMOD_CTRL));
 		drag(moveGrab, { moveGrab + MV::Point<int>(31, 47) });
-		SDL_SetModState(KMOD_NONE);
+		SDL_SetModState(SDL_KMOD_NONE);
 		expect(subject->position().x == restPosition.x && subject->position().y != restPosition.y && std::abs(std::remainder(subject->position().y, gizmoLayer.snapSteps.moveY)) < 0.001f, "Ctrl snaps an arrow drag to the grid");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 
 		moveGrab = grab("moveX");
-		SDL_SetModState(static_cast<SDL_Keymod>(KMOD_SHIFT));
+		SDL_SetModState(static_cast<SDL_Keymod>(SDL_KMOD_SHIFT));
 		drag(moveGrab, { moveGrab + MV::Point<int>(47, 9) });
-		SDL_SetModState(KMOD_NONE);
+		SDL_SetModState(SDL_KMOD_NONE);
 		expect(subject->position().x != restPosition.x && subject->position().y == restPosition.y && std::abs(std::remainder(subject->position().x, gizmoLayer.snapSteps.moveX)) < 0.001f, "Shift snaps an arrow drag to the grid too");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 
 		moveGrab = grab("moveFree");
 		moveDrop = moveGrab + MV::Point<int>(-40, 33);
 		expectedMove = parent->localFromScreen(moveDrop) - parent->localFromScreen(moveGrab);
 		drag(moveGrab, { moveDrop });
 		expect(sameXY(subject->position(), restPosition + expectedMove), "dragging the centre square moves freely");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		expect(exactXY(subject->position(), restPosition), "undo restores the position after a free drag");
 
-		pressKey(SDLK_e);
+		pressKey(SDLK_E);
 		auto pivot = MV::cast<float>(subject->screenPosition());
 		auto ringGrab = grab("rotate");
 		auto spoke = MV::cast<float>(ringGrab) - pivot;
@@ -945,7 +947,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		}
 		drag(ringGrab, arc);
 		expect(std::abs(subject->rotation().z - (MV::toDegrees(restRotation.z) + 90.0f)) < 1.5f, "dragging a quarter of the ring turns 90 degrees, got " + std::to_string(subject->rotation().z));
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		expect(subject->rotationRad().z == restRotation.z, "undo restores the rotation after a ring drag");
 
 		// the sweep is drawn the way the pointer went: checked while the button is still down
@@ -962,22 +964,22 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.runFrames(2);
 		mouse.stopSimulating();
 		expect(gizmoLayer.sweepShown() == 0.0f, "and is gone at release");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 
-		pressKey(SDLK_r);
+		pressKey(SDLK_R);
 		auto scaleGrab = grab("scaleX");
 		auto alongAxis = MV::cast<float>(scaleGrab) - pivot;
 		drag(scaleGrab, { MV::round<int>(MV::cast<float>(scaleGrab) + alongAxis * (0.5f / 0.6f)) });
 		expect(std::abs(subject->scale().x - restScale.x * 1.5f) < 0.03f && subject->scale().y == restScale.y, "dragging the X scale handle half its length scales X by 1.5, got " + std::to_string(subject->scale().x));
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		expect(exactXY(subject->scale(), restScale), "undo restores the scale after a handle drag");
 		scaleGrab = grab("scaleY");
 		expect(scaleGrab.y < MV::round<int>(pivot).y, "the vertical scale handle points up");
 		alongAxis = MV::cast<float>(scaleGrab) - pivot;
 		drag(scaleGrab, { MV::round<int>(MV::cast<float>(scaleGrab) + alongAxis * (0.5f / 0.6f)) });
 		expect(std::abs(subject->scale().y - restScale.y * 1.5f) < 0.03f && subject->scale().x == restScale.x, "dragging the Y scale handle up half its length scales Y by 1.5, got " + std::to_string(subject->scale().y));
-		pressWithControl(SDLK_z);
-		pressKey(SDLK_w);
+		pressWithControl(SDLK_Z);
+		pressKey(SDLK_W);
 
 		auto viewCenter = renderer.screenFromWorld(MV::point(view.position.x + view.size.width * 0.5f, view.position.y + view.size.height * 0.25f));
 		for (auto button : { Button::MIDDLE, Button::RIGHT }) {
@@ -989,11 +991,11 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		}
 		expect(a_app.selected() == subject && exactXY(subject->position(), restPosition), "panning keeps the selection and the document");
 
-		pressKey(SDLK_f);
+		pressKey(SDLK_F);
 		a_app.runFrames(2);
 		expect(insideViewport(subject->worldBounds()), "F frames the selection again after a pan");
 		a_app.select(nullptr);
-		pressKey(SDLK_f);
+		pressKey(SDLK_F);
 		a_app.runFrames(2);
 		expect(insideViewport(a_app.scene()->worldBounds()), "F with nothing selected frames the whole scene");
 	};
@@ -1015,8 +1017,8 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		};
 		auto pressKey = [&a_app](SDL_Keycode a_key) {
 			SDL_Event press{};
-			press.type = SDL_KEYDOWN;
-			press.key.keysym.sym = a_key;
+			press.type = SDL_EVENT_KEY_DOWN;
+			press.key.key = a_key;
 			SDL_PushEvent(&press);
 			a_app.runFrames(2);
 		};
@@ -1049,11 +1051,11 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			moveBy(last, MV::point(40.0f, 0.0f));
 		}
 		expect(history.undoLabel() == "move both" && !sameXY(first->position(), firstRest) && !sameXY(last->position(), lastRest), "steps recorded in a group are one step under its label");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		expect(sameXY(first->position(), firstRest) && sameXY(last->position(), lastRest), "one undo takes back every step of a group, last first");
-		pressWithControl(SDLK_y);
+		pressWithControl(SDLK_Y);
 		expect(!sameXY(first->position(), firstRest) && !sameXY(last->position(), lastRest), "one redo applies the group again");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		{
 			auto nothingRecorded = history.group("nothing");
 		}
@@ -1067,45 +1069,45 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		pressKey(SDLK_DELETE);
 		expect(std::distance(a_app.scene()->begin(), a_app.scene()->end()) == countBefore - 1 && !last->parent() && !a_app.selected(), "Delete removes the selected node and clears the selection");
 		expect(history.undoLabel() == "delete " + last->id(), "the delete is a labelled step, got " + history.undoLabel());
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		expect(last->parent() == a_app.scene() && *std::prev(a_app.scene()->end()) == last && last->depth() == depthBefore, "undo puts the same node back where it was");
 		expect(a_app.selected() == last, "undo of a delete selects the node again");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		expect(sameXY(last->position(), lastRest), "a step recorded before the delete still undoes on the restored node");
-		pressWithControl(SDLK_y);
-		pressWithControl(SDLK_y);
+		pressWithControl(SDLK_Y);
+		pressWithControl(SDLK_Y);
 		expect(!last->parent() && sameXY(last->position(), movedPosition), "redo moves the node and deletes it again");
-		pressWithControl(SDLK_z);
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
+		pressWithControl(SDLK_Z);
 		expect(last->parent() == a_app.scene() && sameXY(last->position(), lastRest), "both steps undo again");
 
 		a_app.select(a_app.scene());
 		expect(!a_app.deleteSelected() && !a_app.duplicateSelected(), "the scene's root is neither deleted nor duplicated");
 
 		a_app.select(last);
-		pressWithControl(SDLK_d);
+		pressWithControl(SDLK_D);
 		auto copy = a_app.selected();
 		expect(copy && copy != last && copy->parent() == a_app.scene() && copy->id() != last->id(), "Ctrl+D adds a copy beside the original and selects it");
 		if (copy) {
 			expect(std::distance(copy->begin(), copy->end()) == std::distance(last->begin(), last->end()) && sameXY(copy->position(), last->position()), "the copy carries the original's children and transform");
 		}
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		expect(std::distance(a_app.scene()->begin(), a_app.scene()->end()) == countBefore && a_app.selected() == last, "undo removes the copy and selects the original");
-		pressWithControl(SDLK_y);
+		pressWithControl(SDLK_Y);
 		expect(std::distance(a_app.scene()->begin(), a_app.scene()->end()) == countBefore + 1 && a_app.selected() == copy, "redo puts the same copy back, selected");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 
 		auto historyFile = (processScratchDirectory() / "workbench_selftest_history.scene").string();
 		auto starred = [&a_app]() { return a_app.title().find('*') != std::string::npos; };
 		expect(a_app.saveScene(historyFile) && !a_app.modified() && !starred(), "a save leaves the scene unmodified and its title plain");
 		moveBy(last, MV::point(12.0f, 0.0f));
 		expect(a_app.modified() && starred(), "an edit marks the scene modified and stars the title");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		expect(!a_app.modified() && !starred(), "undoing back to the saved state clears the mark");
-		pressWithControl(SDLK_y);
+		pressWithControl(SDLK_Y);
 		expect(a_app.modified(), "redoing past the saved state marks it again");
 		expect(a_app.saveScene(historyFile) && !a_app.modified(), "a second save moves the saved mark");
-		pressWithControl(SDLK_z);
+		pressWithControl(SDLK_Z);
 		expect(a_app.modified() && starred(), "undoing behind the saved state is a modification too");
 
 		int asked = 0;
@@ -1170,11 +1172,11 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			}
 			std::filesystem::remove(referenceFile, removeIgnored);
 			expect(history.undoLabel() == "delete " + idleView->id(), "a delete with cleared references is still one step");
-			pressWithControl(SDLK_z);
+			pressWithControl(SDLK_Z);
 			expect(idleView->parent() == placedButton && buttonComponent->idleNode() == idleView && std::distance(placedButton->begin(), placedButton->end()) == viewCount, "undo puts the node and the reference back");
-			pressWithControl(SDLK_y);
+			pressWithControl(SDLK_Y);
 			expect(!idleView->parent() && !buttonComponent->idleNode(), "redo deletes and clears again");
-			pressWithControl(SDLK_z);
+			pressWithControl(SDLK_Z);
 			a_app.runFrames(3);
 		}
 		a_app.select(nullptr);
@@ -1239,8 +1241,8 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		auto captionStarts = [&strip](const std::string& a_text) { return strip.caption().rfind(a_text, 0) == 0; };
 		auto pushKey = [](SDL_Keycode a_key) {
 			SDL_Event press{};
-			press.type = SDL_KEYDOWN;
-			press.key.keysym.sym = a_key;
+			press.type = SDL_EVENT_KEY_DOWN;
+			press.key.key = a_key;
 			SDL_PushEvent(&press);
 		};
 		auto typeInto = [&](const MV::Point<int>& a_field, const std::string& a_text, bool a_enter) {
@@ -1249,10 +1251,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 				pushKey(SDLK_BACKSPACE);
 			}
 			for (char character : a_text) {
-				SDL_Event typed{};
-				typed.type = SDL_TEXTINPUT;
-				typed.text.text[0] = character;
-				SDL_PushEvent(&typed);
+				MV::pushTextInputEvent(std::string(1, character));
 			}
 			if (a_enter) {
 				pushKey(SDLK_RETURN);
@@ -1262,7 +1261,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		// the simulated mouse makes no SDL event, and a field is left on a button-down event
 		auto pressElsewhere = [&a_app]() {
 			SDL_Event press{};
-			press.type = SDL_MOUSEBUTTONDOWN;
+			press.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
 			press.button.button = SDL_BUTTON_LEFT;
 			SDL_PushEvent(&press);
 			a_app.runFrames(2);
@@ -1446,21 +1445,18 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			}
 			mouse.stopSimulating();
 		};
-		auto key = [&a_app](SDL_Keycode a_key, int a_modifiers = KMOD_NONE) {
+		auto key = [&a_app](SDL_Keycode a_key, int a_modifiers = SDL_KMOD_NONE) {
 			SDL_SetModState(static_cast<SDL_Keymod>(a_modifiers));
 			SDL_Event press{};
-			press.type = SDL_KEYDOWN;
-			press.key.keysym.sym = a_key;
+			press.type = SDL_EVENT_KEY_DOWN;
+			press.key.key = a_key;
 			SDL_PushEvent(&press);
 			a_app.runFrames(2);
-			SDL_SetModState(KMOD_NONE);
+			SDL_SetModState(SDL_KMOD_NONE);
 		};
 		auto type = [&a_app](const std::string& a_text) {
 			for (char character : a_text) {
-				SDL_Event typed{};
-				typed.type = SDL_TEXTINPUT;
-				typed.text.text[0] = character;
-				SDL_PushEvent(&typed);
+				MV::pushTextInputEvent(std::string(1, character));
 			}
 			a_app.runFrames(2);
 		};
@@ -1480,14 +1476,14 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(a_app.gridSize().width == 40.0f && !a_app.editingText(), "typing over the selection replaces it, got " + std::to_string(a_app.gridSize().width));
 		click(settings.fieldScreenPoint("Grid X"));
 		key(SDLK_END);
-		key(SDLK_LEFT, KMOD_SHIFT);
+		key(SDLK_LEFT, SDL_KMOD_SHIFT);
 		type("5");
 		key(SDLK_RETURN);
 		expect(a_app.gridSize().width == 45.0f, "Shift with an arrow selects from the cursor, and typing replaces that much: got " + std::to_string(a_app.gridSize().width));
 		click(settings.fieldScreenPoint("Grid X"));
-		key(SDLK_TAB, KMOD_SHIFT);
+		key(SDLK_TAB, SDL_KMOD_SHIFT);
 		expect(editingShows("200"), "Shift+Tab moves back a field");
-		key(SDLK_TAB, KMOD_SHIFT);
+		key(SDLK_TAB, SDL_KMOD_SHIFT);
 		{
 			auto focusedControl = std::static_pointer_cast<MV::Scene::Clickable>(a_managers.services.get<MV::TapDevice>()->focusedSubject());
 			expect(!a_app.editingText() && focusedControl && focusedControl->ownerIsAlive() && focusedControl->owner()->id() == "key_" + a_app.keys().all().back().id, "and from the first field wraps to the panel's last control, its last key binding");
@@ -1530,7 +1526,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 					expect(inspector.dropNode(emailField, *down), "a node dropped on a link is taken");
 					a_app.runFrames(2);
 					expect(button->focusLink(MV::FocusLink::DOWN) == "EmailBackground", "and named as that neighbour: " + button->focusLink(MV::FocusLink::DOWN));
-					pressWithControl(SDLK_z);
+					pressWithControl(SDLK_Z);
 					expect(button->focusLink(MV::FocusLink::DOWN).empty(), "undo clears the link");
 				}
 			}
@@ -1574,8 +1570,8 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			expect(inner && inner->parent() == node && a_app.selected() == inner, "with a node selected the new one goes under it");
 			auto beside = (a_app.select(node), a_app.createChildNode());
 			expect(beside && inner && beside->id() != inner->id(), "and is named as no node beside it is: " + (beside ? beside->id() : std::string()));
-			pressWithControl(SDLK_z);
-			pressWithControl(SDLK_z);
+			pressWithControl(SDLK_Z);
+			pressWithControl(SDLK_Z);
 			expect(childCount(node) == 0 && a_app.selected() == node, "undo takes each new node away and selects its parent");
 			a_app.runFrames(3);
 
@@ -1596,11 +1592,11 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 					click(*remove);
 					a_app.runFrames(3);
 					expect(componentNames(node).empty(), "which takes the component off the node");
-					pressWithControl(SDLK_z);
+					pressWithControl(SDLK_Z);
 					expect(componentNames(node) == "Sprite ", "undo puts it back");
-					pressWithControl(SDLK_z);
+					pressWithControl(SDLK_Z);
 					expect(componentNames(node).empty(), "and undo again takes back the adding");
-					pressWithControl(SDLK_y);
+					pressWithControl(SDLK_Y);
 					expect(componentNames(node) == "Sprite ", "which redo does once more");
 				}
 				for (auto&& kind : kinds) {
@@ -1613,7 +1609,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 				expect(all == "Sprite Text Clickable Button FocusGroup Stencil Grid Parallax Light ", "every kind is on the node in the order it was added: " + all);
 				expect(a_app.removeComponent(node->component<MV::Scene::Clickable>(true, false).self()), "one from the middle comes off");
 				expect(componentNames(node) == "Sprite Text Button FocusGroup Stencil Grid Parallax Light ", "leaving the rest: " + componentNames(node));
-				pressWithControl(SDLK_z);
+				pressWithControl(SDLK_Z);
 				a_app.runFrames(3);
 				expect(componentNames(node) == all, "and undo puts it back where it was, not last: " + componentNames(node));
 			}
@@ -1724,8 +1720,8 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		};
 		auto key = [&a_app](SDL_Keycode a_key) {
 			SDL_Event press{};
-			press.type = SDL_KEYDOWN;
-			press.key.keysym.sym = a_key;
+			press.type = SDL_EVENT_KEY_DOWN;
+			press.key.key = a_key;
 			SDL_PushEvent(&press);
 			a_app.runFrames(2);
 		};
@@ -1751,7 +1747,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 					size_t before = childCount(scene);
 					click(menus.rowScreenPoint(2));
 					expect(!menus.isOpen() && childCount(scene) == before + 1, "Duplicate from the menu duplicates the node");
-					pressWithControl(SDLK_z);
+					pressWithControl(SDLK_Z);
 					expect(childCount(scene) == before, "and undoes as one step");
 				}
 			}
@@ -1929,8 +1925,8 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		click(a_app.menus().titleScreenPoint(0));
 		expect(a_app.menus().isOpen(), "a press on File opens its menu");
 		SDL_Event escape{};
-		escape.type = SDL_KEYDOWN;
-		escape.key.keysym.sym = SDLK_ESCAPE;
+		escape.type = SDL_EVENT_KEY_DOWN;
+		escape.key.key = SDLK_ESCAPE;
 		SDL_PushEvent(&escape);
 		a_app.runFrames(2);
 		expect(!a_app.menus().isOpen(), "Escape closes the menu");
@@ -2017,7 +2013,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 				auto pointsBefore = sprite->pointSize();
 				dragRight(*subdivisionsField, 40);
 				expect(sprite->subdivisions() > 0 && sprite->pointSize() > pointsBefore, "scrubbing subdivisions subdivides the sprite");
-				pressWithControl(SDLK_z);
+				pressWithControl(SDLK_Z);
 				expect(sprite->subdivisions() == 0 && sprite->pointSize() == pointsBefore, "undo restores the sprite's grid");
 			}
 
@@ -2032,7 +2028,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 				if (tile) {
 					click(*tile);
 					expect(!inspector.texturePickerOpen() && sprite->texture(size_t{0}) != textureBefore, "choosing a tile sets the texture and closes the picker");
-					pressWithControl(SDLK_z);
+					pressWithControl(SDLK_Z);
 					expect(sprite->texture(size_t{0}) == textureBefore, "undo restores the texture");
 				}
 			}
@@ -2054,14 +2050,14 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 				if (chosenRow >= 0) {
 					click(menus.rowScreenPoint(chosenRow));
 					expect(sprite->materialId() == shaderChosen && !menus.contextOpen(), "choosing a shader sets the drawable's shader and closes the list");
-					pressWithControl(SDLK_z);
+					pressWithControl(SDLK_Z);
 					expect(sprite->materialId() == shaderBefore, "undo restores the shader");
 				}
 				menus.close();
 				if (auto dropAt = inspector.rowScreenPoint("material")) {
 					expect(inspector.dropFile("Assets/Shaders/" + shaderChosen + ".frag", *dropAt), "a shader file dropped on the shader field is taken");
 					expect(sprite->materialId() == shaderChosen, "the dropped file's shader becomes the drawable's");
-					pressWithControl(SDLK_z);
+					pressWithControl(SDLK_Z);
 					expect(sprite->materialId() == shaderBefore, "undo restores the shader after a drop");
 				}
 			}
@@ -2082,7 +2078,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 				if (auto sharedTime = inspector.rowScreenPoint("shared time")) {
 					click(*sharedTime);
 					expect(filterMaterial->sharedTime.get(), "the shared time toggle sets the material's clock");
-					pressWithControl(SDLK_z);
+					pressWithControl(SDLK_Z);
 					expect(!filterMaterial->sharedTime.get(), "undo restores the material's clock");
 					showFilterMaterial();
 				} else {
@@ -2095,11 +2091,11 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 					if (auto scrub = inspector.rowScreenPoint("alphaFilter"); parameter && scrub) {
 						dragRight(*scrub, 40);
 						expect(parameter->value.get() > 0.0f, "scrubbing the parameter changes the material's value");
-						pressWithControl(SDLK_z);
+						pressWithControl(SDLK_Z);
 						expect(parameter->value.get() == 0.0f, "undo restores the parameter's value");
 						showFilterMaterial();
 					}
-					pressWithControl(SDLK_z);
+					pressWithControl(SDLK_Z);
 					expect(filterMaterial->parameters->empty(), "undo takes the parameter back off the material");
 				} else {
 					expect(false, "the material section offers the shader's alphaFilter uniform");
@@ -2111,7 +2107,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 					if (auto overrideToggle = inspector.rowScreenPoint("alphaFilter")) {
 						click(*overrideToggle);
 						expect(MV::findParameter(sprite->materialOverrides(), "alphaFilter") != nullptr, "the override toggle gives the drawable its own alphaFilter");
-						pressWithControl(SDLK_z);
+						pressWithControl(SDLK_Z);
 						expect(sprite->materialOverrides().empty(), "undo takes the override back off");
 					} else {
 						expect(false, "the overrides group lists alphaFilter");
@@ -2134,7 +2130,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 					auto anchorBefore = sprite->anchors().anchor();
 					dragRight(*anchorField, 30);
 					expect(!(sprite->anchors().anchor() == anchorBefore), "scrubbing an anchor field moves the anchor");
-					pressWithControl(SDLK_z);
+					pressWithControl(SDLK_Z);
 					expect(sprite->anchors().anchor() == anchorBefore, "undo restores the anchor");
 				}
 				auto parentField = inspector.rowScreenPoint("parent");
@@ -2145,7 +2141,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 					expect(inspector.dropNode(other, *parentField), "a node dropped on the anchor's parent field is taken");
 					a_app.runFrames(2);
 					expect(sprite->anchors().hasParent() && sprite->anchors().parent()->owner() == other, "the dropped node's drawable becomes the anchor parent");
-					pressWithControl(SDLK_z);
+					pressWithControl(SDLK_Z);
 					expect(!sprite->anchors().hasParent(), "undo clears the anchor parent");
 				}
 			}
@@ -2169,7 +2165,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 					float rateBefore = emitter->properties().maximumSpawnRate;
 					dragRight(*rateField, 30);
 					expect(emitter->properties().maximumSpawnRate != rateBefore, "scrubbing a nested field changes the emitter");
-					pressWithControl(SDLK_z);
+					pressWithControl(SDLK_Z);
 					expect(emitter->properties().maximumSpawnRate == rateBefore, "undo restores the nested value");
 				}
 			}
@@ -2439,8 +2435,8 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		auto typeName = [&a_app](const std::string& a_text) {
 			auto pushKey = [](SDL_Keycode a_key) {
 				SDL_Event press{};
-				press.type = SDL_KEYDOWN;
-				press.key.keysym.sym = a_key;
+				press.type = SDL_EVENT_KEY_DOWN;
+				press.key.key = a_key;
 				SDL_PushEvent(&press);
 			};
 			for (int erased = 0; erased < 24; ++erased) {
@@ -2448,10 +2444,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			}
 			a_app.runFrames(2);
 			for (char character : a_text) {
-				SDL_Event typed{};
-				typed.type = SDL_TEXTINPUT;
-				typed.text.text[0] = character;
-				SDL_PushEvent(&typed);
+				MV::pushTextInputEvent(std::string(1, character));
 			}
 			a_app.runFrames(2);
 			pushKey(SDLK_RETURN);
@@ -2497,9 +2490,9 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			auto second = a_app.selected();
 			expect(second && second != crate && second->parent() == a_app.scene() && second->id() == "Crate_2" && linkOf(second) && sameXY(childPlace(second), MV::point(33.0f, 44.0f)), "a BindSnap let go on a Hierarchy row goes under that row's node, linked to its file");
 			if (second && second != crate) {
-				pressWithControl(SDLK_z);
+				pressWithControl(SDLK_Z);
 				expect(!second->parent(), "undo takes it out again");
-				pressWithControl(SDLK_y);
+				pressWithControl(SDLK_Y);
 				expect(second->parent() == a_app.scene(), "and redo puts it back");
 
 				(*crate->begin())->position(MV::point(70.0f, 80.0f));
@@ -2510,7 +2503,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 				text = savedScene();
 				expect(countOf(text, "\"overrides\"") == 2 && linkOf(second)->overrides().size() == 1 && linkOf(crate)->overrides().empty(), "what a linked node changes is saved with the scene as its overrides");
 				expect(a_app.revertBindSnap(second) && sameXY(childPlace(second), MV::point(70.0f, 80.0f)), "Revert puts a linked node back as its file has it");
-				pressWithControl(SDLK_z);
+				pressWithControl(SDLK_Z);
 				expect(sameXY(childPlace(second), MV::point(5.0f, 6.0f)), "and undo brings its changes back");
 
 				try {
@@ -2554,7 +2547,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 				expect(childrenInFile(file) == 0 && linkOf(third) && childCount(crate) == 0, "Replace writes over the file, and the nodes linked to it take it up");
 
 				expect(a_app.unpackBindSnap(second) && !linkOf(second), "Unpack cuts a node's link");
-				pressWithControl(SDLK_z);
+				pressWithControl(SDLK_Z);
 				expect(static_cast<bool>(linkOf(second)), "and undo links it again");
 			}
 
@@ -3133,7 +3126,7 @@ static int RunAssetVerification() {
 
 static void saveFrameBuffer(MV::Draw2D& a_renderer, const std::string& a_path) {
 	auto size = a_renderer.window().drawableSize();
-	SDL_Surface* surface = SDL_CreateRGBSurface(0, size.width, size.height, 32, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
+	SDL_Surface* surface = SDL_CreateSurface(size.width, size.height, SDL_PIXELFORMAT_RGBA32);
 	std::vector<uint8_t> pixels(static_cast<size_t>(size.width) * size.height * 4);
 	a_renderer.flushDraws();
 	glReadPixels(0, 0, size.width, size.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
@@ -3142,7 +3135,7 @@ static void saveFrameBuffer(MV::Draw2D& a_renderer, const std::string& a_path) {
 		std::memcpy(target + static_cast<size_t>(y) * surface->pitch, pixels.data() + static_cast<size_t>(size.height - 1 - y) * size.width * 4, static_cast<size_t>(size.width) * 4);
 	}
 	SDL_SaveBMP(surface, a_path.c_str());
-	SDL_FreeSurface(surface);
+	SDL_DestroySurface(surface);
 }
 
 // -spriteshot [count] [scaled]: a grid of sprites from the shipped atlases, runs of eight to a texture, turned and

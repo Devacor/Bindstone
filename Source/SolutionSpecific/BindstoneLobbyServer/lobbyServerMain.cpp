@@ -9,6 +9,7 @@
 
 #include <jaiscript/core/engine.hpp>
 #include "MV/Script/script.h"
+#include <SDL3/SDL_main.h>
 
 // Lines of "email handle password"; each missing account is created through the same
 // query/hash path CreatePlayer uses, so local clients can log straight in.

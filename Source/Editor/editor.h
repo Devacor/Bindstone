@@ -1,7 +1,7 @@
 #ifndef __MV_EDITOR_H__
 #define __MV_EDITOR_H__
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include "editorSceneGraphPanel.h"
 #include "editorControls.h"
@@ -51,7 +51,7 @@ private:
 		}
 		if (static_cast<int>(accumulatedFrames) % 10 == 0) {
 			//fps->text(MV::to_string(accumulatedFrames / accumulatedTime, 3));
-			const Uint8* keystate = SDL_GetKeyboardState(NULL);
+			const bool* keystate = SDL_GetKeyboardState(NULL);
 			if (keystate[SDL_SCANCODE_RSHIFT]) {
 				std::cout << accumulatedFrames / accumulatedTime << '\t';
 			}

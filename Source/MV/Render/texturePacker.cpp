@@ -291,7 +291,7 @@ namespace MV{
 			if (!decoded) {
 				return std::nullopt;
 			}
-			auto rgba = OwnedSurface::make(SDL_ConvertSurfaceFormat(decoded->get(), SDL_PIXELFORMAT_RGBA32, 0));
+			auto rgba = OwnedSurface::make(SDL_ConvertSurface(decoded->get(), SDL_PIXELFORMAT_RGBA32));
 			SDL_Surface* source = rgba->get();
 			if (!source || source->w != shape.bounds.width() || source->h != shape.bounds.height()) {
 				return std::nullopt;

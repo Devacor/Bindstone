@@ -392,8 +392,8 @@ namespace Workbench {
 	void InspectorPanel::handleInput(SDL_Event& a_event) {
 		if (texturePicker.open && popupNode) {
 			auto popup = popupNode->get("texturePopup", false);
-			bool escape = a_event.type == SDL_KEYDOWN && a_event.key.keysym.sym == SDLK_ESCAPE;
-			bool pressedOutside = a_event.type == SDL_MOUSEBUTTONDOWN && (!popup || !popup->screenBounds().contains(MV::Point<int>(a_event.button.x, a_event.button.y)));
+			bool escape = a_event.type == SDL_EVENT_KEY_DOWN && a_event.key.key == SDLK_ESCAPE;
+			bool pressedOutside = a_event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && (!popup || !popup->screenBounds().contains(MV::Point<int>(a_event.button.x, a_event.button.y)));
 			if (escape || pressedOutside) {
 				closeTexturePicker();
 			}
@@ -401,9 +401,9 @@ namespace Workbench {
 		if (!colorPopupClose || !popupNode) {
 			return;
 		}
-		if (a_event.type == SDL_KEYDOWN && a_event.key.keysym.sym == SDLK_ESCAPE) {
+		if (a_event.type == SDL_EVENT_KEY_DOWN && a_event.key.key == SDLK_ESCAPE) {
 			closeColorPopup(false);
-		} else if (a_event.type == SDL_MOUSEBUTTONDOWN) {
+		} else if (a_event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
 			auto popup = popupNode->get("colorPopup", false);
 			if (!popup || !popup->screenBounds().contains(MV::Point<int>(a_event.button.x, a_event.button.y))) {
 				closeColorPopup(true);

@@ -13,10 +13,7 @@ namespace MV {
 
 			// white disc with an antialiased edge; straight alpha, as the default shader multiplies it in
 			std::shared_ptr<OwnedSurface> makeDotSurface() {
-				int bitsPerPixel = 0;
-				Uint32 redMask = 0, greenMask = 0, blueMask = 0, alphaMask = 0;
-				SDL_PixelFormatEnumToMasks(SDL_PIXELFORMAT_ABGR8888, &bitsPerPixel, &redMask, &greenMask, &blueMask, &alphaMask);
-				SDL_Surface* surface = SDL_CreateRGBSurface(0, DOT_SURFACE_SIZE, DOT_SURFACE_SIZE, bitsPerPixel, redMask, greenMask, blueMask, alphaMask);
+				SDL_Surface* surface = SDL_CreateSurface(DOT_SURFACE_SIZE, DOT_SURFACE_SIZE, SDL_PIXELFORMAT_ABGR8888);
 				SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_NONE);
 				auto* pixels = static_cast<uint32_t*>(surface->pixels);
 				const int pitch = surface->pitch / 4;

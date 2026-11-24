@@ -86,7 +86,7 @@ namespace mv_tests {
 					}
 				}
 				for (bool powerOfTwo : { true, false }) {
-					auto source = MV::OwnedSurface::make(SDL_CreateRGBSurfaceWithFormatFrom(padded.data(), width, height, 32, paddedPitch, SDL_PIXELFORMAT_ABGR8888));
+					auto source = MV::OwnedSurface::make(SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_ABGR8888, padded.data(), paddedPitch));
 					auto normalized = powerOfTwo ? MV::convertToPowerOfTwoSurface(source) : MV::convertToBGRSurface(source);
 					auto* surface = normalized->get();
 					check_eq(width * 4, surface->pitch, "normalized rows are tight");

@@ -476,7 +476,7 @@ namespace Workbench {
 			if (!dragging || !parent) {
 				return;
 			}
-			bool snap = ((SDL_GetModState() & (KMOD_SHIFT | KMOD_CTRL)) != 0) != layer.snapAlways;
+			bool snap = ((SDL_GetModState() & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) != 0) != layer.snapAlways;
 			switch (activeGesture) {
 				case Gesture::MOVE:
 					applyMove(parent->localFromScreen(a_cursor) - pressCursorParent, snap);

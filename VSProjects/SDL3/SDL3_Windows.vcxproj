@@ -1,0 +1,233 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>16.0</VCProjectVersion>
+    <ProjectGuid>{293A519C-5BD3-4847-9DAB-C3C39391D48A}</ProjectGuid>
+    <RootNamespace>SDL3Windows</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>SDL3_Windows_Lib</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <WholeProgramOptimization Condition="'$(BindstoneFastIteration)'!='true'">true</WholeProgramOptimization>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <WholeProgramOptimization Condition="'$(BindstoneFastIteration)'!='true'">true</WholeProgramOptimization>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+    <Import Project="SDL3_Common.vcxitems" Label="Shared" />
+    <Import Project="..\SDL3_image\SDL3_image_Common.vcxitems" Label="Shared" />
+    <Import Project="..\SDL3_ttf\SDL3_ttf_Common.vcxitems" Label="Shared" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <OutDir>$(SolutionDir)Builds\Windows\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)Builds\Intermediate\Windows\$(TargetName)\$(RootNamespace)\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>SDL3_Static</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <OutDir>$(SolutionDir)Builds\Windows\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)Builds\Intermediate\Windows\$(TargetName)\$(RootNamespace)\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>SDL3_Static</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <OutDir>$(SolutionDir)Builds\Windows\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)Builds\Intermediate\Windows\$(TargetName)\$(RootNamespace)\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>SDL3_Static</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(SolutionDir)Builds\Windows\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)Builds\Intermediate\Windows\$(TargetName)\$(RootNamespace)\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>SDL3_Static</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)include/build_config;$(ProjectDir)src;$(ProjectDir)../SDL3_image/include;$(ProjectDir)../SDL3_image/src;$(ProjectDir)../SDL3_image/external/libpng;$(ProjectDir)../SDL3_image/external/libwebp;$(ProjectDir)../SDL3_image/external/libwebp/src;$(ProjectDir)../SDL3_image/external/zlib;$(ProjectDir)../SDL3_ttf/include;$(ProjectDir)../SDL3_ttf/src;$(ProjectDir)../SDL3_ttf/external/freetype/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_DEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;LOAD_BMP;LOAD_GIF;LOAD_JPG;LOAD_PNG;LOAD_WEBP;USE_STBIMAGE;SDL_IMAGE_LIBPNG;PNG_NO_CONFIG_H;FT2_BUILD_LIBRARY;FT_PUBLIC_FUNCTION_ATTRIBUTE=;HAVE_FREETYPE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <OmitDefaultLibName>true</OmitDefaultLibName>
+      <ExceptionHandling>false</ExceptionHandling>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <SDLCheck>false</SDLCheck>
+      <DebugInformationFormat>OldStyle</DebugInformationFormat>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)include/build_config;$(ProjectDir)src;$(ProjectDir)../SDL3_image/include;$(ProjectDir)../SDL3_image/src;$(ProjectDir)../SDL3_image/external/libpng;$(ProjectDir)../SDL3_image/external/libwebp;$(ProjectDir)../SDL3_image/external/libwebp/src;$(ProjectDir)../SDL3_image/external/zlib;$(ProjectDir)../SDL3_ttf/include;$(ProjectDir)../SDL3_ttf/src;$(ProjectDir)../SDL3_ttf/external/freetype/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_DEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;LOAD_BMP;LOAD_GIF;LOAD_JPG;LOAD_PNG;LOAD_WEBP;USE_STBIMAGE;SDL_IMAGE_LIBPNG;PNG_NO_CONFIG_H;FT2_BUILD_LIBRARY;FT_PUBLIC_FUNCTION_ATTRIBUTE=;HAVE_FREETYPE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <OmitDefaultLibName>true</OmitDefaultLibName>
+      <ExceptionHandling>false</ExceptionHandling>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <SDLCheck>false</SDLCheck>
+      <DebugInformationFormat>OldStyle</DebugInformationFormat>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)include/build_config;$(ProjectDir)src;$(ProjectDir)../SDL3_image/include;$(ProjectDir)../SDL3_image/src;$(ProjectDir)../SDL3_image/external/libpng;$(ProjectDir)../SDL3_image/external/libwebp;$(ProjectDir)../SDL3_image/external/libwebp/src;$(ProjectDir)../SDL3_image/external/zlib;$(ProjectDir)../SDL3_ttf/include;$(ProjectDir)../SDL3_ttf/src;$(ProjectDir)../SDL3_ttf/external/freetype/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;LOAD_BMP;LOAD_GIF;LOAD_JPG;LOAD_PNG;LOAD_WEBP;USE_STBIMAGE;SDL_IMAGE_LIBPNG;PNG_NO_CONFIG_H;FT2_BUILD_LIBRARY;FT_PUBLIC_FUNCTION_ATTRIBUTE=;HAVE_FREETYPE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <OmitDefaultLibName>true</OmitDefaultLibName>
+      <ExceptionHandling>false</ExceptionHandling>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <SDLCheck>false</SDLCheck>
+      <DebugInformationFormat>OldStyle</DebugInformationFormat>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)include/build_config;$(ProjectDir)src;$(ProjectDir)../SDL3_image/include;$(ProjectDir)../SDL3_image/src;$(ProjectDir)../SDL3_image/external/libpng;$(ProjectDir)../SDL3_image/external/libwebp;$(ProjectDir)../SDL3_image/external/libwebp/src;$(ProjectDir)../SDL3_image/external/zlib;$(ProjectDir)../SDL3_ttf/include;$(ProjectDir)../SDL3_ttf/src;$(ProjectDir)../SDL3_ttf/external/freetype/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;LOAD_BMP;LOAD_GIF;LOAD_JPG;LOAD_PNG;LOAD_WEBP;USE_STBIMAGE;SDL_IMAGE_LIBPNG;PNG_NO_CONFIG_H;FT2_BUILD_LIBRARY;FT_PUBLIC_FUNCTION_ATTRIBUTE=;HAVE_FREETYPE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <OmitDefaultLibName>true</OmitDefaultLibName>
+      <ExceptionHandling>false</ExceptionHandling>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <SDLCheck>false</SDLCheck>
+      <DebugInformationFormat>OldStyle</DebugInformationFormat>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="src\audio\directsound\SDL_directsound.c" />
+    <ClCompile Include="src\audio\disk\SDL_diskaudio.c" />
+    <ClCompile Include="src\audio\wasapi\SDL_wasapi.c" />
+    <ClCompile Include="src\camera\mediafoundation\SDL_camera_mediafoundation.c" />
+    <ClCompile Include="src\core\windows\SDL_gameinput.cpp" />
+    <ClCompile Include="src\core\windows\SDL_hid.c" />
+    <ClCompile Include="src\core\windows\SDL_immdevice.c" />
+    <ClCompile Include="src\core\windows\SDL_windows.c" />
+    <ClCompile Include="src\core\windows\SDL_xinput.c" />
+    <ClCompile Include="src\dialog\windows\SDL_windowsdialog.c" />
+    <ClCompile Include="src\filesystem\windows\SDL_sysfilesystem.c" />
+    <ClCompile Include="src\filesystem\windows\SDL_sysfsops.c" />
+    <ClCompile Include="src\gpu\d3d12\SDL_gpu_d3d12.c" />
+    <ClCompile Include="src\haptic\windows\SDL_dinputhaptic.c" />
+    <ClCompile Include="src\haptic\windows\SDL_windowshaptic.c" />
+    <ClCompile Include="src\io\windows\SDL_asyncio_windows_ioring.c" />
+    <ClCompile Include="src\joystick\gdk\SDL_gameinputjoystick.cpp" />
+    <ClCompile Include="src\joystick\windows\SDL_dinputjoystick.c" />
+    <ClCompile Include="src\joystick\windows\SDL_rawinputjoystick.c" />
+    <ClCompile Include="src\joystick\windows\SDL_windows_gaming_input.c" />
+    <ClCompile Include="src\joystick\windows\SDL_windowsjoystick.c" />
+    <ClCompile Include="src\joystick\windows\SDL_xinputjoystick.c" />
+    <ClCompile Include="src\libm\s_modf.c" />
+    <ClCompile Include="src\loadso\windows\SDL_sysloadso.c" />
+    <ClCompile Include="src\locale\windows\SDL_syslocale.c" />
+    <ClCompile Include="src\main\windows\SDL_sysmain_runapp.c" />
+    <ClCompile Include="src\misc\windows\SDL_sysurl.c" />
+    <ClCompile Include="src\power\windows\SDL_syspower.c" />
+    <ClCompile Include="src\process\windows\SDL_windowsprocess.c" />
+    <ClCompile Include="src\sensor\windows\SDL_windowssensor.c" />
+    <ClCompile Include="src\storage\steam\SDL_steamstorage.c" />
+    <ClCompile Include="src\thread\generic\SDL_syscond.c" />
+    <ClCompile Include="src\thread\generic\SDL_sysrwlock.c" />
+    <ClCompile Include="src\thread\windows\SDL_syscond_cv.c" />
+    <ClCompile Include="src\thread\windows\SDL_sysmutex.c" />
+    <ClCompile Include="src\thread\windows\SDL_sysrwlock_srw.c" />
+    <ClCompile Include="src\thread\windows\SDL_syssem.c" />
+    <ClCompile Include="src\thread\windows\SDL_systhread.c" />
+    <ClCompile Include="src\thread\windows\SDL_systls.c" />
+    <ClCompile Include="src\time\windows\SDL_systime.c" />
+    <ClCompile Include="src\timer\windows\SDL_systimer.c" />
+    <ClCompile Include="src\tray\windows\SDL_tray.c" />
+    <ClCompile Include="src\video\dummy\SDL_nullevents.c" />
+    <ClCompile Include="src\video\dummy\SDL_nullframebuffer.c" />
+    <ClCompile Include="src\video\dummy\SDL_nullvideo.c" />
+    <ClCompile Include="src\video\offscreen\SDL_offscreenevents.c" />
+    <ClCompile Include="src\video\offscreen\SDL_offscreenframebuffer.c" />
+    <ClCompile Include="src\video\offscreen\SDL_offscreenopengles.c" />
+    <ClCompile Include="src\video\offscreen\SDL_offscreenvideo.c" />
+    <ClCompile Include="src\video\offscreen\SDL_offscreenvulkan.c" />
+    <ClCompile Include="src\video\offscreen\SDL_offscreenwindow.c" />
+    <ClCompile Include="src\video\windows\SDL_windowsclipboard.c" />
+    <ClCompile Include="src\video\windows\SDL_windowsevents.c" />
+    <ClCompile Include="src\video\windows\SDL_windowsframebuffer.c" />
+    <ClCompile Include="src\video\windows\SDL_windowsgameinput.cpp" />
+    <ClCompile Include="src\video\windows\SDL_windowskeyboard.c" />
+    <ClCompile Include="src\video\windows\SDL_windowsmessagebox.c" />
+    <ClCompile Include="src\video\windows\SDL_windowsmodes.c" />
+    <ClCompile Include="src\video\windows\SDL_windowsmouse.c" />
+    <ClCompile Include="src\video\windows\SDL_windowsopengl.c" />
+    <ClCompile Include="src\video\windows\SDL_windowsopengles.c" />
+    <ClCompile Include="src\video\windows\SDL_windowsrawinput.c" />
+    <ClCompile Include="src\video\windows\SDL_windowsshape.c" />
+    <ClCompile Include="src\video\windows\SDL_windowsvideo.c" />
+    <ClCompile Include="src\video\windows\SDL_windowsvulkan.c" />
+    <ClCompile Include="src\video\windows\SDL_windowswindow.c" />
+    <ClCompile Include="..\SDL3_image\external\zlib\adler32.c" />
+    <ClCompile Include="..\SDL3_image\external\zlib\compress.c" />
+    <ClCompile Include="..\SDL3_image\external\zlib\crc32.c" />
+    <ClCompile Include="..\SDL3_image\external\zlib\deflate.c" />
+    <ClCompile Include="..\SDL3_image\external\zlib\gzclose.c" />
+    <ClCompile Include="..\SDL3_image\external\zlib\gzlib.c" />
+    <ClCompile Include="..\SDL3_image\external\zlib\gzread.c" />
+    <ClCompile Include="..\SDL3_image\external\zlib\gzwrite.c" />
+    <ClCompile Include="..\SDL3_image\external\zlib\infback.c" />
+    <ClCompile Include="..\SDL3_image\external\zlib\inffast.c" />
+    <ClCompile Include="..\SDL3_image\external\zlib\inflate.c" />
+    <ClCompile Include="..\SDL3_image\external\zlib\inftrees.c" />
+    <ClCompile Include="..\SDL3_image\external\zlib\trees.c" />
+    <ClCompile Include="..\SDL3_image\external\zlib\uncompr.c" />
+    <ClCompile Include="..\SDL3_image\external\zlib\zutil.c" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

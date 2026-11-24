@@ -2,7 +2,8 @@
 
 MSVC project files used to build on Windows and Android.  Useful when locating build settings.
 
-Contains subfolders for clients, servers and the MutedVision library as well as SDL2 projects.
+Contains subfolders for clients, servers and the MutedVision library as well as the SDL3 projects (SDL3, SDL3_image and SDL3_ttf, built from source; one
+`SDL3_Static.lib` on Windows).
 `JaiScript/JaiScript_Windows` builds JaiScript's `source/implementation/**/*.cpp` through one wildcard into
 `jaiscript.lib` (the interpreter under `source/interpreter/` is outside it by design), compiled without `/GL` and
 without the engine's precompiled header; `MutedVision_Windows` references it and folds it into `mutedvision.lib`.

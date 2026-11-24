@@ -49,10 +49,7 @@ namespace Workbench {
 		// default premultiply shader multiplies rgb by alpha at the end. Power-of-two content so
 		// convertToPowerOfTwoSurface never pads (padding would shrink/blur the slice corners).
 		SDL_Surface* makeStraightAlphaSurface(int a_width, int a_height) {
-			int bitsPerPixel = 0;
-			Uint32 redMask = 0, greenMask = 0, blueMask = 0, alphaMask = 0;
-			SDL_PixelFormatEnumToMasks(SDL_PIXELFORMAT_ABGR8888, &bitsPerPixel, &redMask, &greenMask, &blueMask, &alphaMask);
-			SDL_Surface* surface = SDL_CreateRGBSurface(0, a_width, a_height, bitsPerPixel, redMask, greenMask, blueMask, alphaMask);
+			SDL_Surface* surface = SDL_CreateSurface(a_width, a_height, SDL_PIXELFORMAT_ABGR8888);
 			SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_NONE);
 			return surface;
 		}

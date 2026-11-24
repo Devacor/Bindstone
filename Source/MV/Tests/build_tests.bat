@@ -15,7 +15,7 @@ cl /nologo /O2 /std:c++20 /EHsc /MD /bigobj /DJAISCRIPT_ENABLE_DEBUGGER ^
   /I"%ROOT%\Source" /I"%ROOT%\External" /I"%ROOT%\External\glm" ^
   /I"%ROOT%\External\gl3w\include" ^
   /I"%ROOT%\External\openssl\openssl-3.5.9\include" /I"%ROOT%\Source\JaiScript\include" ^
-  /I"%ROOT%\VSProjects\SDL2\include" /I"%ROOT%\VSProjects\SDL2_ttf\include" ^
+  /I"%ROOT%\VSProjects\SDL3\include" /I"%ROOT%\VSProjects\SDL3_ttf\include" ^
   matrix_tests.cpp scene_tests.cpp atlas_tests.cpp rhi_tests.cpp device_binding_tests.cpp scriptdebug_tests.cpp ^
   scene_serialization_tests.cpp texture_handle_tests.cpp pathfinding_tests.cpp utility_tests.cpp threadpool_tests.cpp emitter_tests.cpp ^
   network_tests.cpp openssl_tests.cpp tls_tests.cpp web_tests.cpp input_tests.cpp text_tests.cpp grid_tests.cpp focus_tests.cpp controller_tests.cpp focus_group_tests.cpp bounds_tests.cpp batching_tests.cpp scroller_tests.cpp bindsnap_instance_tests.cpp mesh_tests.cpp ^
@@ -25,7 +25,7 @@ cl /nologo /O2 /std:c++20 /EHsc /MD /bigobj /DJAISCRIPT_ENABLE_DEBUGGER ^
   /link /LTCG /LIBPATH:"%ENGINE_LIBDIR%" ^
   /LIBPATH:"%ROOT%\Builds\Windows\x64\Release" ^
   /LIBPATH:"%ROOT%\External\openssl\openssl-3.5.9\x64\lib" ^
-  mutedvision.lib external.lib SDL2_Static.lib opengl32.lib setupapi.lib winmm.lib ^
+  mutedvision.lib external.lib SDL3_Static.lib opengl32.lib setupapi.lib winmm.lib ^
   imm32.lib version.lib Crypt32.lib libssl.lib libcrypto.lib ws2_32.lib ^
   user32.lib gdi32.lib shell32.lib ole32.lib oleaut32.lib advapi32.lib uuid.lib cfgmgr32.lib
 if errorlevel 1 (echo BUILD FAILED & exit /b 1)

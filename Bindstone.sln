@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
 VisualStudioVersion = 18.8.12105.206 oobstable
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SDL2_Base_Android", "VSProjects\SDL2\SDL2_Android.vcxproj", "{B7BE417C-B6C5-4A69-A056-E0CB0C6A344C}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SDL3_Android", "VSProjects\SDL3\SDL3_Android.vcxproj", "{B7BE417C-B6C5-4A69-A056-E0CB0C6A344C}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BindstoneClient_Android", "VSProjects\BindstoneClient\BindstoneClient_Android\BindstoneClient_Android.vcxproj", "{B7F3A6F1-0359-4427-925D-4A6D1C979B61}"
 	ProjectSection(ProjectDependencies) = postProject
@@ -17,19 +17,19 @@ Project("{39E2626F-3545-4960-A6E8-258AD8476CE5}") = "BindstoneClient_AndroidGrad
 		{B7F3A6F1-0359-4427-925D-4A6D1C979B61} = {B7F3A6F1-0359-4427-925D-4A6D1C979B61}
 	EndProjectSection
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SDL2_Base_Windows_Lib", "VSProjects\SDL2\SDL2_Windows.vcxproj", "{293A519C-5BD3-4847-9DAB-C3C39391D48A}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SDL3_Windows_Lib", "VSProjects\SDL3\SDL3_Windows.vcxproj", "{293A519C-5BD3-4847-9DAB-C3C39391D48A}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SDL2_Base_Common", "VSProjects\SDL2\SDL2_Common.vcxitems", "{04EA8A26-9B59-453D-BADB-8EEA1A7F3411}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SDL3_Common", "VSProjects\SDL3\SDL3_Common.vcxitems", "{04EA8A26-9B59-453D-BADB-8EEA1A7F3411}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BindstoneClient_Windows", "VSProjects\BindstoneClient\BindstoneClient_Windows\BindstoneClient_Windows.vcxproj", "{42D400C4-186C-4B11-9095-D87E555C4279}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SDL2_Image_Android", "VSProjects\SDL2_image\SDL2_image_Android.vcxproj", "{03A9401D-CEFF-4F5E-A7B4-FC2A0D9F6C95}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SDL3_image_Android", "VSProjects\SDL3_image\SDL3_image_Android.vcxproj", "{03A9401D-CEFF-4F5E-A7B4-FC2A0D9F6C95}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SDL2_Image_Common", "VSProjects\SDL2_image\SDL2_Image_Common.vcxitems", "{0A216055-7992-4818-AB1C-A3D0A4317566}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SDL3_image_Common", "VSProjects\SDL3_image\SDL3_image_Common.vcxitems", "{0A216055-7992-4818-AB1C-A3D0A4317566}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SDL2_ttf_Android", "VSProjects\SDL2_ttf\SDL2_ttf_Android.vcxproj", "{8572235C-B335-40DD-BA5F-9954BEDC4BFC}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SDL3_ttf_Android", "VSProjects\SDL3_ttf\SDL3_ttf_Android.vcxproj", "{8572235C-B335-40DD-BA5F-9954BEDC4BFC}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SDL2_ttf_Common", "VSProjects\SDL2_ttf\SDL2_ttf_Common.vcxitems", "{7D0090A3-D938-4E0E-8411-DAB035C8E641}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SDL3_ttf_Common", "VSProjects\SDL3_ttf\SDL3_ttf_Common.vcxitems", "{7D0090A3-D938-4E0E-8411-DAB035C8E641}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SDL", "SDL", "{DCCC7423-A6D8-43C2-84D6-168688997DF7}"
 EndProject
@@ -139,13 +139,13 @@ Global
 		{F38408B0-8D17-4D2B-AEB4-5FA30B7F6373}.Release|x86.ActiveCfg = Release|x86
 		{F38408B0-8D17-4D2B-AEB4-5FA30B7F6373}.Release|x86.Build.0 = Release|x86
 		{F38408B0-8D17-4D2B-AEB4-5FA30B7F6373}.Release|x86.Deploy.0 = Release|x86
-		{293A519C-5BD3-4847-9DAB-C3C39391D48A}.Debug|ARM.ActiveCfg = Debug|ARM
+		{293A519C-5BD3-4847-9DAB-C3C39391D48A}.Debug|ARM.ActiveCfg = Debug|Win32
 		{293A519C-5BD3-4847-9DAB-C3C39391D48A}.Debug|ARM64.ActiveCfg = Debug|Win32
 		{293A519C-5BD3-4847-9DAB-C3C39391D48A}.Debug|x64.ActiveCfg = Debug|x64
 		{293A519C-5BD3-4847-9DAB-C3C39391D48A}.Debug|x64.Build.0 = Debug|x64
 		{293A519C-5BD3-4847-9DAB-C3C39391D48A}.Debug|x86.ActiveCfg = Debug|Win32
 		{293A519C-5BD3-4847-9DAB-C3C39391D48A}.Debug|x86.Build.0 = Debug|Win32
-		{293A519C-5BD3-4847-9DAB-C3C39391D48A}.Release|ARM.ActiveCfg = Release|ARM
+		{293A519C-5BD3-4847-9DAB-C3C39391D48A}.Release|ARM.ActiveCfg = Release|Win32
 		{293A519C-5BD3-4847-9DAB-C3C39391D48A}.Release|ARM64.ActiveCfg = Release|Win32
 		{293A519C-5BD3-4847-9DAB-C3C39391D48A}.Release|x64.ActiveCfg = Release|x64
 		{293A519C-5BD3-4847-9DAB-C3C39391D48A}.Release|x64.Build.0 = Release|x64
@@ -346,12 +346,12 @@ Global
 		SolutionGuid = {5F9E227F-8F40-42A4-B967-E23FBBAAD8A3}
 	EndGlobalSection
 	GlobalSection(SharedMSBuildProjectFiles) = preSolution
-		VSProjects\SDL2_image\SDL2_Image_Common.vcxitems*{03a9401d-ceff-4f5e-a7b4-fc2a0d9f6c95}*SharedItemsImports = 4
-		VSProjects\SDL2\SDL2_Common.vcxitems*{04ea8a26-9b59-453d-badb-8eea1a7f3411}*SharedItemsImports = 9
-		VSProjects\SDL2_image\SDL2_Image_Common.vcxitems*{0a216055-7992-4818-ab1c-a3d0a4317566}*SharedItemsImports = 9
-		VSProjects\SDL2\SDL2_Common.vcxitems*{293a519c-5bd3-4847-9dab-c3c39391d48a}*SharedItemsImports = 4
-		VSProjects\SDL2_image\SDL2_Image_Common.vcxitems*{293a519c-5bd3-4847-9dab-c3c39391d48a}*SharedItemsImports = 4
-		VSProjects\SDL2_ttf\SDL2_ttf_Common.vcxitems*{293a519c-5bd3-4847-9dab-c3c39391d48a}*SharedItemsImports = 4
+		VSProjects\SDL3_image\SDL3_image_Common.vcxitems*{03a9401d-ceff-4f5e-a7b4-fc2a0d9f6c95}*SharedItemsImports = 4
+		VSProjects\SDL3\SDL3_Common.vcxitems*{04ea8a26-9b59-453d-badb-8eea1a7f3411}*SharedItemsImports = 9
+		VSProjects\SDL3_image\SDL3_image_Common.vcxitems*{0a216055-7992-4818-ab1c-a3d0a4317566}*SharedItemsImports = 9
+		VSProjects\SDL3\SDL3_Common.vcxitems*{293a519c-5bd3-4847-9dab-c3c39391d48a}*SharedItemsImports = 4
+		VSProjects\SDL3_image\SDL3_image_Common.vcxitems*{293a519c-5bd3-4847-9dab-c3c39391d48a}*SharedItemsImports = 4
+		VSProjects\SDL3_ttf\SDL3_ttf_Common.vcxitems*{293a519c-5bd3-4847-9dab-c3c39391d48a}*SharedItemsImports = 4
 		VSProjects\MutedVision\MutedVision_Common.vcxitems*{31bf8318-85d5-4e81-98d3-04bfd30f062b}*SharedItemsImports = 4
 		VSProjects\BindstoneClient\Bindstone_Common\Bindstone_Common.vcxitems*{42d400c4-186c-4b11-9095-d87e555c4279}*SharedItemsImports = 4
 		VSProjects\BindstoneClient\Bindstone_Editor\Bindstone_Editor.vcxitems*{42d400c4-186c-4b11-9095-d87e555c4279}*SharedItemsImports = 4
@@ -359,13 +359,13 @@ Global
 		VSProjects\BindstoneClient\Bindstone_Common\Bindstone_Common.vcxitems*{56c44de2-76fd-49ac-a41a-c1145e7737d9}*SharedItemsImports = 4
 		External\VSProjects\External_Common\External_Common.vcxitems*{62d1ae53-e46d-4cd1-91a9-1f1e3efcf064}*SharedItemsImports = 4
 		VSProjects\BindstoneClient\Bindstone_Common\Bindstone_Common.vcxitems*{77966753-df43-4201-b7f4-7b184be77fad}*SharedItemsImports = 4
-		VSProjects\SDL2_ttf\SDL2_ttf_Common.vcxitems*{7d0090a3-d938-4e0e-8411-dab035c8e641}*SharedItemsImports = 9
-		VSProjects\SDL2_ttf\SDL2_ttf_Common.vcxitems*{8572235c-b335-40dd-ba5f-9954bedc4bfc}*SharedItemsImports = 4
+		VSProjects\SDL3_ttf\SDL3_ttf_Common.vcxitems*{7d0090a3-d938-4e0e-8411-dab035c8e641}*SharedItemsImports = 9
+		VSProjects\SDL3_ttf\SDL3_ttf_Common.vcxitems*{8572235c-b335-40dd-ba5f-9954bedc4bfc}*SharedItemsImports = 4
 		VSProjects\BindstoneClient\Bindstone_Common\Bindstone_Common.vcxitems*{8e980497-3531-4455-8290-5491c08a9385}*SharedItemsImports = 9
 		External\VSProjects\External_Common\External_Common.vcxitems*{a362b2c9-3629-4701-be16-fb7e28a51cc6}*SharedItemsImports = 9
 		VSProjects\BindstoneClient\Bindstone_Common\Bindstone_Common.vcxitems*{add84207-f5b2-46f0-9bd9-ce302ae95b45}*SharedItemsImports = 4
 		VSProjects\MutedVision\MutedVision_Common.vcxitems*{b2e0b593-79fd-432c-aa7b-1eca70a96271}*SharedItemsImports = 9
-		VSProjects\SDL2\SDL2_Common.vcxitems*{b7be417c-b6c5-4a69-a056-e0cb0c6a344c}*SharedItemsImports = 4
+		VSProjects\SDL3\SDL3_Common.vcxitems*{b7be417c-b6c5-4a69-a056-e0cb0c6a344c}*SharedItemsImports = 4
 		External\VSProjects\External_Common\External_Common.vcxitems*{cf1fc4ef-e11d-40a8-9107-a1148411b280}*SharedItemsImports = 4
 	EndGlobalSection
 EndGlobal

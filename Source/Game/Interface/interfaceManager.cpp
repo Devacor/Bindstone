@@ -132,13 +132,13 @@ namespace MV {
 			activeTextPage->removeFocus();
 		}
 		activeTextPage = a_current;
-		SDL_StartTextInput();
+		MV::startTextInput();
 	}
 
 	void InterfaceManager::removeActiveText(Interface* a_current) {
 		if (activeTextPage && activeTextPage == a_current) {
 			activeTextPage = nullptr;
-			SDL_StopTextInput();
+			MV::stopTextInput();
 		}
 	}
 

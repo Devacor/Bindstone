@@ -68,9 +68,8 @@ namespace MV {
 			return found ? found.self() : nullptr;
 		}
 
-		TransformMatrix View::viewProjection() const {
+		BoxAABB<> View::windowFraction() const {
 			auto& renderer = owner()->renderer();
-			const auto world = renderer.world().size();
 			// the viewport's part of the target, as fractions of the whole window
 			const auto pixels = renderer.targetPixelSize();
 			const auto target = renderer.target();
@@ -86,7 +85,30 @@ namespace MV {
 			const auto top = targetTop + viewportTop * targetHeight;
 			const auto width = std::max((std::clamp(viewportBox->maxPoint.x, 0.0f, 1.0f) - viewportLeft) * targetWidth, 0.0001f);
 			const auto height = std::max((std::clamp(viewportBox->maxPoint.y, 0.0f, 1.0f) - viewportTop) * targetHeight, 0.0001f);
-			const Size<> seen(world.width * width, world.height * height);
+			return BoxAABB<>(MV::point(left, top), MV::point(left + width, top + height));
+		}
+
+		Size<> View::viewSize() const {
+			const auto world = owner()->renderer().world().size();
+			const auto fraction = windowFraction();
+			return Size<>(world.width * fraction.width(), world.height * fraction.height());
+		}
+
+		Point<> View::viewFromScreen(const Point<int>& a_screen) const {
+			const auto rect = pixelRect();
+			return Point<>(
+				static_cast<PointPrecision>(a_screen.x - rect.minPoint.x) / static_cast<PointPrecision>(std::max(rect.width(), 1)),
+				static_cast<PointPrecision>(a_screen.y - rect.minPoint.y) / static_cast<PointPrecision>(std::max(rect.height(), 1)));
+		}
+
+		TransformMatrix View::viewProjection() const {
+			auto& renderer = owner()->renderer();
+			const auto fraction = windowFraction();
+			const auto left = fraction.minPoint.x;
+			const auto top = fraction.minPoint.y;
+			const auto width = fraction.width();
+			const auto height = fraction.height();
+			const auto seen = viewSize();
 			TransformMatrix projection;
 			if (auto eye = camera()) {
 				projection = eye->projectionFor(seen, renderer.window().contentScale(), renderer.window().userScale()) * eye->eye();
@@ -159,6 +181,9 @@ namespace MV {
 		void View::refresh() {
 			if (isAuthoring || viewSlot < 0 || !ownerIsAlive()) {
 				return;
+			}
+			if (auto eye = camera()) {
+				eye->viewSize(viewSize(), owner()->renderer().window().contentScale(), owner()->renderer().window().userScale());
 			}
 			owner()->renderer().viewProjection(viewSlot, viewProjection());
 			// the area the camera sees, laid on the node's own plane: what anchors under it lay out against

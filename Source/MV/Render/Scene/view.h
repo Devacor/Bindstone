@@ -52,6 +52,10 @@ namespace MV {
 			TransformMatrix viewProjection() const;
 			// Where it draws, in the window's pixels: its viewport's part of the renderer's target.
 			BoxAABB<int> pixelRect() const;
+			// Its size in window units, what its camera's projection is made for.
+			Size<> viewSize() const;
+			// A point of the window, in its pixels, as a fraction of this View's rectangle: what Camera::sceneFromView takes.
+			Point<> viewFromScreen(const Point<int>& a_screen) const;
 
 			// While authoring, a View takes no part: what is under it draws through the editor's own view.
 			bool authoring() const { return isAuthoring; }
@@ -98,6 +102,8 @@ namespace MV {
 			void claim();
 			void release();
 			void stepAside();
+			// Its rectangle as fractions of the whole window: left, top, width and height.
+			BoxAABB<> windowFraction() const;
 			void refresh();
 			std::shared_ptr<Node> subjectNode() const;
 

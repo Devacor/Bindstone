@@ -331,6 +331,44 @@ namespace Workbench {
 		}
 	}
 
+	namespace {
+		// The editor's pan and zoom sit above the scene but not in a camera's eye, which leaves scale out: they are set
+		// aside while what is under this draws, and put back after.
+		class WithoutEditorView : public MV::Scene::Component {
+		public:
+			WithoutEditorView(const std::weak_ptr<MV::Scene::Node>& a_owner, std::function<std::shared_ptr<MV::Scene::Node>()> a_editorCamera) :
+				Component(a_owner),
+				editorCamera(std::move(a_editorCamera)) {
+			}
+
+			void beforeNodeDraw() override {
+				held = editorCamera ? editorCamera() : nullptr;
+				if (held) {
+					heldPosition = held->position();
+					heldScale = held->scale();
+					auto quiet = held->silence();
+					quiet->position(MV::Point<>());
+					quiet->scale(MV::Scale(1.0f, 1.0f, 1.0f));
+				}
+			}
+
+			void afterNodeDraw() override {
+				if (held) {
+					auto quiet = held->silence();
+					quiet->position(heldPosition);
+					quiet->scale(heldScale);
+					held.reset();
+				}
+			}
+
+		private:
+			std::function<std::shared_ptr<MV::Scene::Node>()> editorCamera;
+			std::shared_ptr<MV::Scene::Node> held;
+			MV::Point<> heldPosition;
+			MV::Scale heldScale;
+		};
+	}
+
 	// A View of its own inside the panel: it draws the edited scene through the camera into the frame's rectangle of
 	// the window, as a picture-in-picture would.
 	float InspectorPanel::addCameraPreview(const std::shared_ptr<MV::Scene::Camera>& a_camera) {
@@ -344,6 +382,7 @@ namespace Workbench {
 		auto row = contentNode->make(MV::guid("cameraPreview_"));
 		auto frame = row->attach<MV::Scene::Sprite>();
 		frame->bounds(MV::BoxAABB<>(MV::point(rowIndent, 0.0f), MV::point(rowIndent + width, height)))->color(theme->fieldBg());
+		row->attach<WithoutEditorView>(editorCamera);
 		auto view = row->make("preview")->attach<MV::Scene::View>();
 		view->clear(MV::Scene::View::Clear::COLOR)->lookThrough(a_camera)->show(scene);
 		view->color(theme->windowBg());

@@ -132,6 +132,42 @@ namespace mv_tests {
 				check(around(thing->screenFromLocal(MV::Point<>()), 650, 350), "centred: " + text(thing->screenFromLocal(MV::Point<>())));
 			});
 
+			test("a camera's eye leaves its node's scale out: how much it sees is its zoom", [] {
+				SceneHost host;
+				auto root = Node::make(host.renderer, "root");
+				auto layer = root->make("layer");
+				auto eye = layer->make("eye");
+				eye->position(MV::point(500.0f, 500.0f));
+				eye->attach<Camera>()->origin(Camera::Origin::CENTER);
+				layer->attach<View>();
+				auto thing = layer->make("thing");
+				thing->position(MV::point(510.0f, 490.0f));
+				eye->scale(MV::Scale(2.0f, 2.0f, 1.0f));
+				root->update(0.0);
+				check(around(thing->screenFromLocal(MV::Point<>()), 650, 350), "a scaled camera node: " + text(thing->screenFromLocal(MV::Point<>())));
+			});
+
+			test("a camera finds the scene under a point of its view and zooms around it", [] {
+				SceneHost host;
+				auto root = Node::make(host.renderer, "root");
+				auto layer = root->make("layer");
+				auto eye = layer->make("eye");
+				eye->position(MV::point(500.0f, 500.0f));
+				auto camera = eye->attach<Camera>()->origin(Camera::Origin::CENTER);
+				auto view = layer->attach<View>();
+				root->update(0.0);
+				const auto middle = camera->center();
+				check(std::abs(middle.x - 500.0f) < 0.01f && std::abs(middle.y - 500.0f) < 0.01f, "the middle of what it sees is its node");
+				const auto corner = camera->sceneFromView(MV::point(0.0f, 0.0f));
+				check(std::abs(corner.x + 140.0f) < 0.01f && std::abs(corner.y - 140.0f) < 0.01f, "its top left is half the view away");
+				const auto under = camera->sceneFromView(MV::point(0.25f, 0.25f));
+				camera->zoomAround(2.0f, MV::point(0.25f, 0.25f));
+				const auto after = camera->sceneFromView(MV::point(0.25f, 0.25f));
+				check(std::abs(after.x - under.x) < 0.01f && std::abs(after.y - under.y) < 0.01f, "zooming keeps the point under the view's point where it was");
+				const auto viewed = view->viewFromScreen(MV::Point<int>(320, 180));
+				check(std::abs(viewed.x - 0.25f) < 0.001f && std::abs(viewed.y - 0.25f) < 0.001f, "a window point is a fraction of the View");
+			});
+
 			test("a reference camera fits its reference height, its width, or a blend of the two", [] {
 				SceneHost host;
 				auto root = Node::make(host.renderer, "root");

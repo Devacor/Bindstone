@@ -200,6 +200,7 @@ namespace Workbench {
 		};
 		inspectorPanel->onParallaxPreview = [this](bool a_preview) { parallaxPreview(a_preview); };
 		inspectorPanel->editedScene = [this]() { return sceneRoot; };
+		inspectorPanel->editorCamera = [this]() { return viewCamera; };
 		inspectorPanel->onSelectNode = [this](const std::shared_ptr<MV::Scene::Node>& a_node) { select(a_node); };
 		inspectorPanel->onRemoveComponent = [this](const std::shared_ptr<MV::Scene::Component>& a_component) { removeComponent(a_component); };
 		inspectorPanel->onAddComponent = [this](const MV::Point<int>& a_screenPoint) { menuBar->openContext(a_screenPoint, addComponentItems()); };

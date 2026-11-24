@@ -9,7 +9,8 @@ namespace MV {
 	namespace Scene {
 
 		// The eye a View draws through. The eye is this node: where it is and how it is turned, so a camera moves,
-		// follows (as a child of what it follows) and animates like any node. It draws nothing itself.
+		// follows (as a child of what it follows) and animates like any node. It draws nothing itself. The node's scale,
+		// and its parents', is not the eye's: how much it sees is its zoom alone.
 		class Camera : public jai::property_owner<Camera, Component> {
 			friend Node;
 			friend jai::access;
@@ -62,6 +63,23 @@ namespace MV {
 			// From the scene's world to the eye's own space.
 			TransformMatrix eye();
 
+			// The view it draws into, in window units, and the OS's and the user's scales: its View sets them as it
+			// draws, a host looking through it another way sets them itself. Until then it is the renderer's whole world.
+			Size<> viewSize() const;
+			std::shared_ptr<Camera> viewSize(const Size<>& a_size, PointPrecision a_contentScale, PointPrecision a_userScale);
+			// How much of the scene it sees at its zoom, in scene units: exact for an orthographic camera, and for a
+			// perspective one at the plane z = 0 straight ahead.
+			Size<> seen() const;
+			// From a point of its view, as fractions (0,0 its top left, 1,1 its bottom right), to the scene.
+			Point<> sceneFromView(const Point<>& a_fraction);
+			// The middle of what it sees, in the scene, and what it sees as a box in a node's own space.
+			Point<> center();
+			BoxAABB<> visibleIn(const std::shared_ptr<Node>& a_node);
+			// Moves its node by a distance in the scene, whatever the node's parents do to it.
+			std::shared_ptr<Camera> sceneTranslate(const Point<>& a_delta);
+			// Zooms keeping the scene point under a point of its view where it is on the view.
+			std::shared_ptr<Camera> zoomAround(PointPrecision a_zoom, const Point<>& a_fraction);
+
 		protected:
 			Camera(const std::weak_ptr<Node>& a_owner);
 
@@ -89,6 +107,10 @@ namespace MV {
 			}
 
 		private:
+			// Its node's place and turn in the scene, without scale.
+			TransformMatrix lens();
+			Size<> orthographicSeen(const Size<>& a_viewSize, PointPrecision a_contentScale, PointPrecision a_userScale) const;
+
 			JAI_NAMED_PROPERTY((Projection), "projection", projectionKind, Projection::ORTHOGRAPHIC);
 			JAI_NAMED_PROPERTY((Units), "units", unitKind, Units::PIXELS);
 			JAI_NAMED_PROPERTY((Origin), "origin", originKind, Origin::TOP_LEFT);
@@ -101,6 +123,9 @@ namespace MV {
 			JAI_NAMED_PROPERTY((PointPrecision), "near", nearDistance, -10000.0f);
 			JAI_NAMED_PROPERTY((PointPrecision), "far", farDistance, 10000.0f);
 			JAI_NAMED_PROPERTY((uint32_t), "sees", groupMask, 0xFFFFFFFFu);
+			Size<> viewedSize;
+			PointPrecision viewedContentScale = 1.0f;
+			PointPrecision viewedUserScale = 1.0f;
 		};
 
 	}

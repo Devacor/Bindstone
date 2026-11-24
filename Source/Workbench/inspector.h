@@ -31,8 +31,9 @@ namespace Workbench {
 		// Parallax preview bridge: the row shows on a node that has an enabled Parallax layer on it or below it.
 		std::function<void(bool)> onParallaxPreview;
 		std::function<bool()> parallaxPreviewActive;
-		// The scene being edited, which a selected Camera's preview shows.
+		// The scene being edited, which a selected Camera's preview shows, and the editor's pan and zoom above it.
 		std::function<std::shared_ptr<MV::Scene::Node>()> editedScene;
+		std::function<std::shared_ptr<MV::Scene::Node>()> editorCamera;
 
 		void update(double a_dt) override;
 		// The View showing the selected Camera's picture, while one is inspected.

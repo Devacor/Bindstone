@@ -2222,9 +2222,9 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 			hold(a_to, false);
 			mouse.stopSimulating();
 		};
-		const std::string starting = "H 0.18 (L 0 [Hierarchy]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 0 [Inspector])) X [File,Settings]";
+		const std::string starting = "H 0.18 (L 0 [Hierarchy]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 0 [Inspector])) X [File,Game,Settings]";
 		expect(a_app.dockLayout() == starting, "the starting layout reads as text, with File and Settings closed: " + a_app.dockLayout());
-		const std::string allDocked = "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 0 [Inspector,Settings]))";
+		const std::string allDocked = "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 0 [Inspector,Settings])) X [Game]";
 		expect(a_app.dockLayout(allDocked) && a_app.dockLayout() == allDocked, "a layout with every panel docked applies from text");
 		a_app.runFrames(3);
 
@@ -2233,12 +2233,12 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.useSettingsFile(layoutSettings);
 
 		drag(docking.tabScreenPoint("Settings"), docking.dropScreenPoint("Project", Zone::Right));
-		const std::string moved = "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (H 0.7 (L 0 [Project,Console]) (L 0 [Settings]))) (L 0 [Inspector]))";
+		const std::string moved = "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (H 0.7 (L 0 [Project,Console]) (L 0 [Settings]))) (L 0 [Inspector])) X [Game]";
 		expect(a_app.dockLayout() == moved, "a tab dragged onto a panel's right edge docks beside it: " + a_app.dockLayout());
 		expect(MV::fileContents(layoutSettings).find("layout = " + moved) != std::string::npos, "the new layout is written to the settings file as it changes");
 
 		drag(docking.tabScreenPoint("Settings"), docking.dropScreenPoint("Inspector", Zone::Center));
-		expect(a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 1 [Inspector,Settings]))", "dragged back onto the Inspector it is a tab there again, in front: " + a_app.dockLayout());
+		expect(a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 1 [Inspector,Settings])) X [Game]", "dragged back onto the Inspector it is a tab there again, in front: " + a_app.dockLayout());
 
 		auto splitter = docking.rootSplitterScreenPoint();
 		drag(splitter, splitter + MV::Point<int>(160, 0));
@@ -2305,13 +2305,13 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.showSettings();
 		a_app.runFrames(2);
 		click(docking.closeButtonScreenPoint("Settings"));
-		expect(!docking.open(settingsTab) && a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 0 [Inspector])) X [Settings]", "the x on a tab closes its panel and the layout says so: " + a_app.dockLayout());
+		expect(!docking.open(settingsTab) && a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 0 [Inspector])) X [Game,Settings]", "the x on a tab closes its panel and the layout says so: " + a_app.dockLayout());
 		click(a_app.menus().titleScreenPoint(3));
 		expect(a_app.menus().isOpen() && a_app.menus().rowLabel(5) == "Settings (closed)" && a_app.menus().rowLabel(4) == "Inspector", "Window marks the closed panel");
 		if (a_app.menus().isOpen()) {
 			click(a_app.menus().rowScreenPoint(5));
 		}
-		expect(docking.open(settingsTab) && !docking.floating(settingsTab) && a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 1 [Inspector,Settings]))", "choosing it in Window brings it back beside the panel it was closed next to: " + a_app.dockLayout());
+		expect(docking.open(settingsTab) && !docking.floating(settingsTab) && a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 1 [Inspector,Settings])) X [Game]", "choosing it in Window brings it back beside the panel it was closed next to: " + a_app.dockLayout());
 
 		// floating: a tab dropped on the middle of a panel floats there
 		drag(docking.tabScreenPoint("Settings"), docking.dropScreenPoint("Scene", Zone::Float));
@@ -2342,7 +2342,7 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		expect(std::abs(restoredFloat.position.x - sizedFloat.position.x) < 2.0f && std::abs(restoredFloat.size.height - sizedFloat.size.height) < 2.0f, "and puts it back where it was, at its size");
 
 		drag(docking.tabScreenPoint("Settings"), docking.dropScreenPoint("Inspector", Zone::Center));
-		expect(!docking.floating(settingsTab) && a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 1 [Inspector,Settings]))", "a floating panel's tab dropped on a tab bar docks there: " + a_app.dockLayout());
+		expect(!docking.floating(settingsTab) && a_app.dockLayout() == "H 0.18 (L 0 [Hierarchy,File]) (H 0.72 (V 0.7 (L 0 [Scene]) (L 0 [Project,Console])) (L 1 [Inspector,Settings])) X [Game]", "a floating panel's tab dropped on a tab bar docks there: " + a_app.dockLayout());
 
 		expect(a_app.dockLayout("L 0 [Scene] X [Hierarchy,File,Project,Inspector,Settings,Console]") && !docking.closePanel(docking.panelTitled("Scene")) && docking.open(docking.panelTitled("Scene")), "the last panel docked in the main area cannot be closed");
 		a_app.resetDockLayout();
@@ -2682,6 +2682,25 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.select(nullptr);
 		a_app.runFrames(2);
 		expect(!a_app.inspector().cameraPreview(), "and the picture goes when the Camera is no longer inspected");
+	}
+	{
+		const auto errorsBefore = a_app.errors();
+		expect(a_app.loadScene("Scenes/game.scene"), "the game's composition loads");
+		auto& docking = a_app.docking();
+		auto* gamePanel = docking.panelTitled("Game");
+		expect(gamePanel && !docking.open(gamePanel), "the Game panel starts closed");
+		docking.show(gamePanel);
+		a_app.runFrames(3);
+		bool allAuthoring = true;
+		for (auto&& view : a_app.scene()->componentsInChildren<MV::Scene::View>(false, true)) {
+			allAuthoring = allAuthoring && std::get<0>(view)->authoring();
+		}
+		auto& game = a_app.gameView();
+		expect(game.viewsDrawn() == 2 && game.lastTarget().width() > 0 && allAuthoring && a_app.errors() == errorsBefore,
+			"the Game panel draws the composition through its two Views in its own rectangle and leaves them to the editor after");
+		docking.closePanel(gamePanel);
+		a_app.newScene();
+		a_app.runFrames(2);
 	}
 	{
 		auto& window = a_managers.renderer.window();

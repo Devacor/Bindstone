@@ -71,10 +71,21 @@ namespace MV {
 		TransformMatrix View::viewProjection() const {
 			auto& renderer = owner()->renderer();
 			const auto world = renderer.world().size();
-			const auto left = std::clamp(viewportBox->minPoint.x, 0.0f, 1.0f);
-			const auto top = std::clamp(viewportBox->minPoint.y, 0.0f, 1.0f);
-			const auto width = std::max(std::clamp(viewportBox->maxPoint.x, 0.0f, 1.0f) - left, 0.0001f);
-			const auto height = std::max(std::clamp(viewportBox->maxPoint.y, 0.0f, 1.0f) - top, 0.0001f);
+			// the viewport's part of the target, as fractions of the whole window
+			const auto pixels = renderer.targetPixelSize();
+			const auto target = renderer.target();
+			const float windowWidth = static_cast<float>(std::max(pixels.width, 1));
+			const float windowHeight = static_cast<float>(std::max(pixels.height, 1));
+			const float targetLeft = static_cast<float>(target.minPoint.x) / windowWidth;
+			const float targetTop = static_cast<float>(target.minPoint.y) / windowHeight;
+			const float targetWidth = static_cast<float>(target.width()) / windowWidth;
+			const float targetHeight = static_cast<float>(target.height()) / windowHeight;
+			const auto viewportLeft = std::clamp(viewportBox->minPoint.x, 0.0f, 1.0f);
+			const auto viewportTop = std::clamp(viewportBox->minPoint.y, 0.0f, 1.0f);
+			const auto left = targetLeft + viewportLeft * targetWidth;
+			const auto top = targetTop + viewportTop * targetHeight;
+			const auto width = std::max((std::clamp(viewportBox->maxPoint.x, 0.0f, 1.0f) - viewportLeft) * targetWidth, 0.0001f);
+			const auto height = std::max((std::clamp(viewportBox->maxPoint.y, 0.0f, 1.0f) - viewportTop) * targetHeight, 0.0001f);
 			const Size<> seen(world.width * width, world.height * height);
 			TransformMatrix projection;
 			if (auto eye = camera()) {
@@ -95,17 +106,19 @@ namespace MV {
 			if (!ownerIsAlive()) {
 				return {};
 			}
-			const auto pixels = owner()->renderer().targetPixelSize();
+			const auto target = owner()->renderer().target();
+			const float width = static_cast<float>(target.width());
+			const float height = static_cast<float>(target.height());
 			return BoxAABB<int>(
-				Point<int>(static_cast<int>(std::round(viewportBox->minPoint.x * pixels.width)), static_cast<int>(std::round(viewportBox->minPoint.y * pixels.height))),
-				Point<int>(static_cast<int>(std::round(viewportBox->maxPoint.x * pixels.width)), static_cast<int>(std::round(viewportBox->maxPoint.y * pixels.height))));
+				Point<int>(target.minPoint.x + static_cast<int>(std::round(viewportBox->minPoint.x * width)), target.minPoint.y + static_cast<int>(std::round(viewportBox->minPoint.y * height))),
+				Point<int>(target.minPoint.x + static_cast<int>(std::round(viewportBox->maxPoint.x * width)), target.minPoint.y + static_cast<int>(std::round(viewportBox->maxPoint.y * height))));
 		}
 
 		std::shared_ptr<View> View::authoring(bool a_authoring) {
 			if (isAuthoring != a_authoring) {
 				isAuthoring = a_authoring;
 				if (isAuthoring) {
-					release();
+					stepAside();
 				} else {
 					claim();
 				}
@@ -129,6 +142,14 @@ namespace MV {
 				owner()->renderer().releaseViewSlot(viewSlot);
 			}
 			viewSlot = -1;
+			if (ownerIsAlive()) {
+				auto parent = owner()->parent();
+				owner()->cameraId(parent ? parent->cameraId() : 0);
+			}
+		}
+
+		// Authoring keeps the slot reserved, so an editor showing the game can turn the View on and off each frame.
+		void View::stepAside() {
 			if (ownerIsAlive()) {
 				auto parent = owner()->parent();
 				owner()->cameraId(parent ? parent->cameraId() : 0);

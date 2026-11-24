@@ -304,6 +304,36 @@ namespace mv_tests {
 				check(firstFile.contents() == secondFile.contents(), "the page drifted on a load and save under its View");
 			});
 
+			test("a View lays itself out in the renderer's target, as an editor's game view pushes it", [] {
+				SceneHost host;
+				auto root = Node::make(host.renderer, "root");
+				auto layer = root->make("layer");
+				layer->make("eye")->attach<Camera>();
+				auto view = layer->attach<View>();
+				auto thing = layer->make("thing");
+				thing->position(MV::point(100.0f, 50.0f));
+				host.renderer.pushTarget(MV::BoxAABB<int>(MV::Point<int>(640, 360), MV::Point<int>(1280, 720)));
+				root->update(0.0);
+				check(around(thing->screenFromLocal(MV::Point<>()), 740, 410), "inside the target: " + text(thing->screenFromLocal(MV::Point<>())));
+				check_eq(640, view->pixelRect().minPoint.x);
+				check_eq(720, view->pixelRect().maxPoint.y);
+				host.renderer.popTarget();
+				root->update(0.0);
+				check(around(thing->screenFromLocal(MV::Point<>()), 100, 50), "the whole window again: " + text(thing->screenFromLocal(MV::Point<>())));
+			});
+
+			test("an authoring View keeps its slot to take part again", [] {
+				SceneHost host;
+				auto root = Node::make(host.renderer, "root");
+				auto layer = root->make("layer");
+				auto view = layer->attach<View>();
+				const auto slot = view->slot();
+				view->authoring(true);
+				view->authoring(false);
+				check_eq(slot, view->slot());
+				check_eq(slot, layer->cameraId());
+			});
+
 			test("an authoring View takes no part", [] {
 				SceneHost host;
 				auto root = Node::make(host.renderer, "root");

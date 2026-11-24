@@ -984,6 +984,20 @@ namespace MV {
 		return window().drawableSize();
 	}
 
+	void Draw2D::pushTarget(const BoxAABB<int>& a_rectangle) {
+		targetRectangles.push_back(a_rectangle);
+	}
+
+	void Draw2D::popTarget() {
+		if (!targetRectangles.empty()) {
+			targetRectangles.pop_back();
+		}
+	}
+
+	BoxAABB<int> Draw2D::target() const {
+		return targetRectangles.empty() ? BoxAABB<int>(Point<int>(), toPoint(targetPixelSize())) : targetRectangles.back();
+	}
+
 	void Draw2D::clearScreen(){
 		updateCameraProjectionMatrices();
 		sceneLighting->beginFrame();

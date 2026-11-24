@@ -41,6 +41,7 @@
     <ClCompile Include="$(SolutionDir)Source\Workbench\settingsPanel.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\tooltips.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\consolePanel.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Workbench\gameViewPanel.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Game\gameEditor.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -76,6 +77,7 @@
     <ClInclude Include="$(SolutionDir)Source\Workbench\settingsPanel.h" />
     <ClInclude Include="$(SolutionDir)Source\Workbench\tooltips.h" />
     <ClInclude Include="$(SolutionDir)Source\Workbench\consolePanel.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\gameViewPanel.h" />
     <ClInclude Include="$(SolutionDir)Source\Workbench\messageLog.h" />
   </ItemGroup>
 </Project>

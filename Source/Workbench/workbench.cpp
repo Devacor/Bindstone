@@ -284,6 +284,7 @@ namespace Workbench {
 			}));
 		}
 		consolePanel = static_cast<ConsolePanel*>(dock->registerPanel(std::make_shared<ConsolePanel>(messageLog)));
+		gamePanel = static_cast<GameViewPanel*>(dock->registerPanel(std::make_shared<GameViewPanel>([this]() { return sceneRoot; }, [this]() { return viewCamera; })));
 		statusBar = uiRoot->make("statusBar");
 		Panel* viewportPanel = dock->registerPanel(std::move(viewport));
 		Panel* filePanel = dock->registerPanel(std::move(file));
@@ -292,7 +293,7 @@ namespace Workbench {
 		projectPanel->onRename = [this](const std::filesystem::path& a_entry, const std::string& a_newName) { renameAsset(a_entry, a_newName); };
 		discardFile = [](const std::filesystem::path& a_entry) { return moveToRecycleBin(a_entry.string()); };
 
-		menuPanels = { treePanel, filePanel, viewportPanel, projectPanel, inspectorPanel, settingsPanel, consolePanel };
+		menuPanels = { treePanel, filePanel, viewportPanel, projectPanel, inspectorPanel, settingsPanel, consolePanel, gamePanel };
 
 		SceneToolbar::Actions toolbarActions;
 		toolbarActions.onTool = [this](int a_toolIndex) { gizmoTool(static_cast<Tool>(a_toolIndex)); };
@@ -339,8 +340,8 @@ namespace Workbench {
 					DockSpace::leaf({ viewportPanel }),
 					DockSpace::leaf({ projectPanel, consolePanel })),
 				DockSpace::leaf({ inspectorPanel }))));
-		// File's load and save are in the File menu and Settings opens from its own: both start closed
-		defaultDockLayout = dock->describeLayout() + " X [File,Settings]";
+		// File's load and save are in the File menu, Settings opens from its own and Game from Window: they start closed
+		defaultDockLayout = dock->describeLayout() + " X [File,Game,Settings]";
 		dock->applyLayout(defaultDockLayout);
 		dock->onLayoutChanged = [this]() { writeSettingsFile(); };
 

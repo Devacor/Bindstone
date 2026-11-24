@@ -127,7 +127,9 @@ namespace Workbench {
 		void openColorPopup(const std::weak_ptr<MV::Scene::Component>& a_component, const std::string& a_propertyName, jai::property_base* a_property, const std::weak_ptr<MV::Scene::Sprite>& a_swatch, const MV::Point<int>& a_screenPoint);
 		void closeColorPopup(bool a_keepColor);
 		std::shared_ptr<MV::Scene::Node> makeRow(const std::string& a_label);
-		void addCameraPreview(const std::shared_ptr<MV::Scene::Camera>& a_camera);
+		// The preview is the last row, so its height runs past the rows' fixed cell where nothing follows it.
+		float addCameraPreview(const std::shared_ptr<MV::Scene::Camera>& a_camera);
+		std::weak_ptr<MV::Scene::Camera> previewedCamera;
 		std::weak_ptr<MV::Scene::View> cameraPreviewView;
 		std::weak_ptr<MV::Scene::Sprite> cameraPreviewFrame;
 		static void notifyEdited(const std::shared_ptr<MV::Scene::Component>& a_component);

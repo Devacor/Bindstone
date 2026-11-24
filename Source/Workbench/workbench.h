@@ -18,6 +18,7 @@
 #include "settingsPanel.h"
 #include "tooltips.h"
 #include "consolePanel.h"
+#include "gameViewPanel.h"
 #include "projectPanel.h"
 #include "messageLog.h"
 #include "MV/Render/Scene/parallax.h"
@@ -115,6 +116,7 @@ namespace Workbench {
 		// window shows the latest line and how many errors and warnings there have been, and a press on it opens the Console.
 		MessageLog& messages() { return *messageLog; }
 		ConsolePanel& console() { return *consolePanel; }
+		GameViewPanel& gameView() { return *gamePanel; }
 		void showConsole();
 		const std::string& statusLine() const { return shownStatus; }
 		const std::string& statusCounts() const { return shownCounts; }
@@ -276,6 +278,7 @@ namespace Workbench {
 		ProjectPanel* projectPanel = nullptr;
 		SettingsPanel* settingsPanel = nullptr;
 		ConsolePanel* consolePanel = nullptr;
+		GameViewPanel* gamePanel = nullptr;
 		std::shared_ptr<MessageLog> messageLog;
 		std::shared_ptr<MV::Scene::Node> statusBar;
 		std::shared_ptr<MV::Scene::Text> statusText;

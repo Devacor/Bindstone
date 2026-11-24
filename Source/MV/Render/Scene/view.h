@@ -50,7 +50,7 @@ namespace MV {
 			int32_t slot() const { return viewSlot; }
 			// The whole matrix from the scene's world to the window's clip space.
 			TransformMatrix viewProjection() const;
-			// Where it draws, in the window's pixels.
+			// Where it draws, in the window's pixels: its viewport's part of the renderer's target.
 			BoxAABB<int> pixelRect() const;
 
 			// While authoring, a View takes no part: what is under it draws through the editor's own view.
@@ -97,6 +97,7 @@ namespace MV {
 		private:
 			void claim();
 			void release();
+			void stepAside();
 			void refresh();
 			std::shared_ptr<Node> subjectNode() const;
 

@@ -137,8 +137,13 @@ namespace Workbench {
 				}
 			}
 		}
+		float previewOverflow = 0.0f;
+		if (auto camera = previewedCamera.lock()) {
+			previewOverflow = addCameraPreview(camera);
+		}
+		previewedCamera.reset();
 		rowGrid->layoutCells();
-		builtHeight = rowGrid->bounds().height();
+		builtHeight = rowGrid->bounds().height() + previewOverflow;
 	}
 
 	// Returns true when the section is expanded; draws the Unity-style foldout header.
@@ -322,16 +327,16 @@ namespace Workbench {
 			addPropertyRow(a_component, name, property);
 		}
 		if (auto camera = std::dynamic_pointer_cast<MV::Scene::Camera>(a_component)) {
-			addCameraPreview(camera);
+			previewedCamera = camera;
 		}
 	}
 
 	// A View of its own inside the panel: it draws the edited scene through the camera into the frame's rectangle of
 	// the window, as a picture-in-picture would.
-	void InspectorPanel::addCameraPreview(const std::shared_ptr<MV::Scene::Camera>& a_camera) {
+	float InspectorPanel::addCameraPreview(const std::shared_ptr<MV::Scene::Camera>& a_camera) {
 		auto scene = editedScene ? editedScene() : nullptr;
 		if (!scene) {
-			return;
+			return 0.0f;
 		}
 		auto pixels = contentNode->renderer().targetPixelSize();
 		const float width = panelWidth - rowIndent - theme->pad;
@@ -345,6 +350,7 @@ namespace Workbench {
 		cameraPreviewView = view.self();
 		cameraPreviewFrame = frame.self();
 		update(0.0);
+		return std::max(0.0f, height - std::max(theme->rowHeight, theme->fieldHeight));
 	}
 
 	void InspectorPanel::update(double) {

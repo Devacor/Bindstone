@@ -744,8 +744,11 @@ namespace Workbench {
 		}
 		if (!closedPanels.empty()) {
 			out << " X [";
-			for (size_t index = 0; index < closedPanels.size(); ++index) {
-				out << (index > 0 ? "," : "") << closedPanels[index]->title();
+			// by title, so the text says which are closed whatever order they were closed in
+			auto closedByTitle = closedPanels;
+			std::sort(closedByTitle.begin(), closedByTitle.end(), [](const Panel* a_first, const Panel* a_second) { return a_first->title() < a_second->title(); });
+			for (size_t index = 0; index < closedByTitle.size(); ++index) {
+				out << (index > 0 ? "," : "") << closedByTitle[index]->title();
 			}
 			out << "]";
 		}
@@ -901,13 +904,11 @@ namespace Workbench {
 		if (reader.failed || !read || reader.at != a_description.size()) {
 			return false;
 		}
-		DockNode* firstLeaf = read.get();
-		while (!firstLeaf->isLeaf()) {
-			firstLeaf = firstLeaf->a.get();
-		}
+		// a panel the text does not name (one newer than a saved layout) starts closed, to be opened from Window
 		for (auto&& panel : ownedPanels) {
-			if (std::find(reader.placed.begin(), reader.placed.end(), panel.get()) == reader.placed.end()) {
-				firstLeaf->panels.push_back(panel.get());
+			if (std::find(reader.placed.begin(), reader.placed.end(), panel.get()) == reader.placed.end() &&
+				std::find(readClosed.begin(), readClosed.end(), panel.get()) == readClosed.end()) {
+				readClosed.push_back(panel.get());
 			}
 		}
 		endTabDrag(false);

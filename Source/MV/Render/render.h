@@ -28,6 +28,7 @@
 #include <map>
 #include <optional>
 #include "MV/Render/points.h"
+#include "MV/Render/boxaabb.h"
 #include "MV/Render/matrix.hpp"
 #include "MV/Render/device.h"   // RHI seam; Shader/Draw2D hold Render::Device + Bound* handles.
 #include "MV/Render/batchingDevice.h"
@@ -570,6 +571,11 @@ namespace MV {
 		}
 		// The window's size in pixels, for a View laying itself out in it.
 		Size<int> targetPixelSize() const;
+		// The rectangle of the window, in pixels, that Views lay themselves out in: all of it, or the part an editor
+		// pushes to show a game's composition in a panel.
+		void pushTarget(const BoxAABB<int>& a_rectangle);
+		void popTarget();
+		BoxAABB<int> target() const;
 
 		const TransformMatrix& cameraProjectionMatrix(int32_t a_index) const {
 			auto found = ourCameraProjectionMatrices.find(a_index);
@@ -756,6 +762,7 @@ namespace MV {
 			uint32_t groups;
 		};
 		std::vector<DrawThrough> drawThroughSlots;
+		std::vector<BoxAABB<int>> targetRectangles;
 
 		std::unordered_map<std::string, std::shared_ptr<Shader>> shaders;
 		std::shared_ptr<Shader> defaultShaderPtr = nullptr;

@@ -2024,7 +2024,7 @@ namespace Workbench {
 		}
 		if (panelEye) {
 			panelEye->owner()->position(view.position);
-			panelEye->viewSize(view.size, 1.0f);
+			panelEye->viewSize(view.size, 1.0f, 1.0f);
 		}
 		if (view.position.x != lastViewportRect.position.x || view.position.y != lastViewportRect.position.y ||
 			view.size.width != lastViewportRect.size.width || view.size.height != lastViewportRect.size.height) {

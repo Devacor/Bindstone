@@ -98,11 +98,11 @@ namespace Workbench {
 		auto eyeNode = viewCamera->make("cameraModeEye");
 		eye = eyeNode->attach<MV::Scene::Camera>().self();
 		if (subject) {
-			eye->projection(subject->projection())->units(subject->units())->origin(subject->origin())->height(subject->height())
+			eye->projection(subject->projection())->units(subject->units())->origin(subject->origin())->width(subject->width())->height(subject->height())->match(subject->match())->userScaled(subject->userScaled())
 				->zoom(subject->zoom())->fieldOfView(subject->fieldOfView())->planes(subject->nearPlane(), subject->farPlane())->sees(subject->sees());
 			eyeNode->position(subject->owner()->worldTransform().position());
 		}
-		eye->viewSize(gameView(), renderer.window().uiScale());
+		eye->viewSize(gameView(), renderer.window().contentScale(), renderer.window().userScale());
 		limits = found;
 		if (found) {
 			found->authoringCamera(eye);
@@ -466,7 +466,7 @@ namespace Workbench {
 		place.access(1, 1) = height;
 		place.access(3, 0) = left * 2.0f + width - 1.0f;
 		place.access(3, 1) = 1.0f - (top * 2.0f + height);
-		renderer.viewProjection(slot, place * eye->projectionFor(gameView(), renderer.window().uiScale()) * eye->eye());
+		renderer.viewProjection(slot, place * eye->projectionFor(gameView(), renderer.window().contentScale(), renderer.window().userScale()) * eye->eye());
 		drawOverlay();
 		auto field = zoomField.lock();
 		if (field && focus.active() != field && !services.get<MV::TapDevice>()->leftDown() && std::abs(eye->zoom() - shownZoom) > 0.0001f) {

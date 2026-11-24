@@ -3143,6 +3143,7 @@ static void verifyCameraPilot(Managers& a_managers, MV::TapDevice& a_mouse, int&
 			SDL_Event wheel {};
 			wheel.type = SDL_EVENT_MOUSE_WHEEL;
 			wheel.wheel.y = 1.0f;
+			wheel.wheel.integer_y = 1;
 			at(MV::Point<int>(640, 360), false);
 			for (int notch = 0; notch < 40; ++notch) {
 				instance->handleEvent(wheel);
@@ -3151,6 +3152,7 @@ static void verifyCameraPilot(Managers& a_managers, MV::TapDevice& a_mouse, int&
 			settle(2.0);
 			expect(closeTo(camera->zoom(), limits->maximumZoom(true), 0.001f), "the zoom did not ease to the soft limit: " + std::to_string(camera->zoom()));
 			wheel.wheel.y = -1.0f;
+			wheel.wheel.integer_y = -1;
 			for (int notch = 0; notch < 80; ++notch) {
 				instance->handleEvent(wheel);
 			}

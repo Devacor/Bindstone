@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 #include "MV/Utility/generalUtility.h"
+#include "widgets.h"
 
 namespace Workbench {
 
@@ -766,7 +767,7 @@ namespace Workbench {
 				body->onRelease.connect("release", [this](std::shared_ptr<MV::Scene::Clickable>, const MV::Point<MV::PointPrecision>&) { endPaintGesture(); });
 			} else {
 				body->onDrag.connect("position", [this](std::shared_ptr<MV::Scene::Clickable> a_handle, const MV::Point<int>&, const MV::Point<int>& a_delta) {
-					a_handle->owner()->translate(a_handle->owner()->renderer().worldFromScreen(a_delta));
+					a_handle->owner()->translate(worldDelta(a_handle->owner()->renderer(), a_delta));
 					auto moved = localMove(pressBodyAt, a_handle->owner()->worldPosition());
 					writeLocal(MV::BoxAABB<>(pressBounds.minPoint + moved, pressBounds.maxPoint + moved));
 					place(nullptr);
@@ -779,7 +780,7 @@ namespace Workbench {
 					handle->globalPriority(handle->globalPriority() + bodyPriorityBoost + priority + (grip < Grip::TOP ? 3 : 2));
 					handle->onPress.connect("press", [this](std::shared_ptr<MV::Scene::Clickable>) { beginGesture(); });
 					handle->onDrag.connect("size", [this, grip](std::shared_ptr<MV::Scene::Clickable> a_handle, const MV::Point<int>&, const MV::Point<int>& a_delta) {
-						a_handle->owner()->translate(a_handle->owner()->renderer().worldFromScreen(a_delta));
+						a_handle->owner()->translate(worldDelta(a_handle->owner()->renderer(), a_delta));
 						dragGrip(grip, a_handle->owner());
 					});
 					handle->onRelease.connect("release", [this](std::shared_ptr<MV::Scene::Clickable>, const MV::Point<MV::PointPrecision>&) { endBoundsGesture(); });

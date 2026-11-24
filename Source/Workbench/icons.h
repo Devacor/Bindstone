@@ -12,6 +12,8 @@ namespace Workbench {
 	enum class Icon { Select, Move, Rotate, Scale, Snap, Grid, Frame, History, StepBack, StepForward, Close, Minimize, Maximize, Pause, Play, Step, Handles, Document };
 
 	// A white icon drawn at the theme's scale, or at a_pixels across for one shown large; tint it through the Sprite's colour.
+	// The surfaces iconHandle makes are named with this, for reloading them when the window's scale changes.
+	inline const std::string ICON_SURFACE_PREFIX = "workbenchIcon_";
 	std::shared_ptr<MV::TextureHandle> iconHandle(MV::Services& a_services, const Theme& a_theme, Icon a_icon, int a_pixels = 0);
 
 	// A folder in its own colours, drawn open with its front leaning forward: for a Sprite of any square size.

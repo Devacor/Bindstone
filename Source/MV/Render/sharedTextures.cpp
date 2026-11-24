@@ -91,6 +91,14 @@ namespace MV {
 		}
 	}
 
+	void SharedTextures::reloadSurfaces(const std::string &a_prefix) {
+		for (auto&& [identifier, definition] : surfaceDefinitions) {
+			if (identifier.rfind(a_prefix, 0) == 0) {
+				definition->reload();
+			}
+		}
+	}
+
 	std::vector<std::pair<std::string, bool>> SharedTextures::fileIds() const {
 		std::vector<std::pair<std::string, bool>> keys;
 		std::transform(fileDefinitions.begin(), fileDefinitions.end(), std::back_inserter(keys), [](const std::map<std::string, std::shared_ptr<FileTextureDefinition>>::value_type &pair) {

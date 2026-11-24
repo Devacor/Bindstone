@@ -2683,6 +2683,19 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 		a_app.runFrames(2);
 		expect(!a_app.inspector().cameraPreview(), "and the picture goes when the Camera is no longer inspected");
 	}
+	{
+		auto& window = a_managers.renderer.window();
+		const auto errorsBefore = a_app.errors();
+		const float scaleBefore = window.userScale();
+		window.userScale(1.5f);
+		a_app.runFrames(3);
+		const auto pixels = window.drawableSize();
+		const auto world = a_managers.renderer.world().size();
+		expect(std::abs(world.width - static_cast<float>(pixels.width) / window.uiScale()) < 1.0f && a_app.viewport().size.width > 0.0f && a_app.errors() == errorsBefore,
+			"a change of scale refits the world to the window in logical units and the editor lays itself out again");
+		window.userScale(scaleBefore);
+		a_app.runFrames(3);
+	}
 
 	RunMeshEditorSelfTest(a_app, a_managers, expect, pressWithControl);
 	RunKeyBindingsSelfTest(a_app, a_managers, expect);
@@ -2733,7 +2746,10 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 		managers.renderer.window().maximize();
 	}
 	fitWorldToScale();
-	auto worldFollowsScale = managers.renderer.onUiScaleChanged.connect([fitWorldToScale](float) { fitWorldToScale(); });
+	auto worldFollowsScale = managers.renderer.onUiScaleChanged.connect([fitWorldToScale, &managers](float) {
+		fitWorldToScale();
+		managers.textures.reloadSurfaces(Workbench::ICON_SURFACE_PREFIX);
+	});
 	// logical units: the interface's Views grow them by the window's scale, which follows the display it is on
 	Workbench::Theme workbenchTheme;
 	MV::FontDefinition::make(managers.textLibrary, "default", "Fonts/Verdana.ttf", 14);

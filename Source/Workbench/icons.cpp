@@ -213,12 +213,13 @@ namespace Workbench {
 	}
 
 	std::shared_ptr<MV::TextureHandle> iconHandle(MV::Services& a_services, const Theme& a_theme, Icon a_icon, int a_pixels) {
-		// sized in logical units and drawn grown by the window's scale, so rasterized at the size it shows
-		const float shownScale = a_services.get<MV::Draw2D>()->window().uiScale();
+		// sized in logical units and drawn grown by the window's scale, so rasterized at the size it shows, again
+		// whenever that scale changes (ICON_SURFACE_PREFIX)
+		auto* renderer = a_services.get<MV::Draw2D>();
 		const int logical = a_pixels > 0 ? a_pixels : static_cast<int>(a_theme.px(16.0f));
-		const int surfaceSize = MV::roundUpPowerOfTwo(std::max(16, static_cast<int>(std::ceil(static_cast<float>(logical) * shownScale))));
-		return a_services.get<MV::SharedTextures>()->surface("workbenchIcon_" + std::to_string(static_cast<int>(a_icon)) + "_" + std::to_string(surfaceSize), [a_icon, surfaceSize] {
-			return makeIconSurface(a_icon, surfaceSize);
+		return a_services.get<MV::SharedTextures>()->surface(ICON_SURFACE_PREFIX + std::to_string(static_cast<int>(a_icon)) + "_" + std::to_string(logical), [a_icon, logical, renderer] {
+			const float shownScale = renderer->window().uiScale();
+			return makeIconSurface(a_icon, MV::roundUpPowerOfTwo(std::max(16, static_cast<int>(std::ceil(static_cast<float>(logical) * shownScale)))));
 		})->makeHandle();
 	}
 

@@ -51,6 +51,8 @@ namespace MV {
 		std::shared_ptr<FileTextureDefinition> file(const std::string &a_filename, bool a_repeat = false, bool a_pixel = false);
 		std::shared_ptr<DynamicTextureDefinition> dynamic(const std::string &a_identifier, const Size<int> &a_size);
 		std::shared_ptr<SurfaceTextureDefinition> surface(const std::string &a_identifier, std::function<std::shared_ptr<OwnedSurface>()> a_surfaceGenerator);
+		// Every generated surface whose id starts with a_prefix runs its generator again (icons after a scale change).
+		void reloadSurfaces(const std::string &a_prefix);
 
 		void files(const std::string &a_rootDirectory, bool a_repeat = false, bool a_pixel = false);
 

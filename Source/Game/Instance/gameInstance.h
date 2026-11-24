@@ -69,6 +69,12 @@ public:
 	std::shared_ptr<MV::Scene::Node> scene() const {
 		return worldScene;
 	}
+
+	// The camera the map is looked at through (the World View's); servers have none. The match moves it and gives
+	// it back where it found it.
+	std::shared_ptr<MV::Scene::Camera> camera() const {
+		return worldCamera;
+	}
 	
 	MV::Scene::SafeComponent<MV::Scene::PathMap> path() const {
 		return pathMap;
@@ -86,8 +92,9 @@ public:
 		return left->player == a_player ? *right : *left;
 	}
 
-	void moveCamera(MV::Point<> a_startPosition, MV::Scale a_scale, bool interruptable = false);
-	void moveCamera(std::shared_ptr<MV::Scene::Node> a_targetNode, MV::Scale a_scale, bool interruptable = false);
+	// Eases the camera's centre to a point of the scene, or a node, and its zoom to a_zoom.
+	void moveCamera(MV::Point<> a_center, MV::PointPrecision a_zoom, bool a_interruptable = false);
+	void moveCamera(std::shared_ptr<MV::Scene::Node> a_targetNode, MV::PointPrecision a_zoom, bool a_interruptable = false);
 
 	virtual bool canUpgradeBuildingFor(const std::shared_ptr<InGamePlayer> &) const = 0;
 	// the player behind this process (a client); servers have none
@@ -157,17 +164,17 @@ protected:
 	bool requestCamera(); //returns the result of cameraIsFree and cancels any interruptable camera action.
 
 	void handleScroll(float a_amount, const MV::Point<int> &a_position);
-	void rawScaleAroundCenter(float a_amount);
-	void rawScaleAroundScreenPoint(float a_amount, const MV::Point<int>& a_position);
+	void zoomAroundScreenPoint(float a_zoom, const MV::Point<int>& a_position);
+	void moveCameraInMap(const MV::Point<>& a_mapDelta);
 
 	// map.scene marks the view's limits with TopLeft_Hard/BottomRight_Hard and the _Soft pair: the
 	// view may never show past the hard box; past the soft box it is allowed briefly, then eases
 	// back. Zoom-out has no limit of its own - it stops where the view fits each box (the tighter
-	// axis wins); zoom-in clamps at maxScaleHard and eases back to maxScaleSoft.
+	// axis wins); zoom-in clamps at maxZoomHard and eases back to maxZoomSoft.
 	MV::BoxAABB<> visibleMapBounds();
 	bool mapViewBounds(MV::BoxAABB<>& a_bounds, bool a_soft);
 	bool cornerBounds(MV::BoxAABB<>& a_bounds, const std::string& a_suffix);
-	float scaleToFit(const MV::BoxAABB<>& a_bounds);
+	float zoomToFit(const MV::BoxAABB<>& a_bounds);
 	MV::Point<> viewCorrection(const MV::BoxAABB<>& a_bounds);
 	void clampToHardBounds(const MV::Point<int>& a_pointerCenter);
 	void easeToBoundsIfExceeded(const MV::Point<int>& a_pointerCenter);
@@ -180,6 +187,10 @@ protected:
 
 	MV::TapDevice &ourMouse;
 	std::shared_ptr<MV::Scene::Node> worldScene;
+	MV::Scene::SafeComponent<MV::Scene::View> worldView;
+	std::shared_ptr<MV::Scene::Camera> worldCamera;
+	MV::Point<> cameraStartPosition;
+	MV::PointPrecision cameraStartZoom = 1.0f;
 
 	MV::Scene::SafeComponent<MV::Scene::PathMap> pathMap;
 
@@ -200,12 +211,12 @@ protected:
 
 	bool hasActiveTouch = false;
 
-	const MV::PointPrecision maxScaleHard = 3.5f;
-	const MV::PointPrecision maxScaleSoft = 3.0f;
+	const MV::PointPrecision maxZoomHard = 3.5f;
+	const MV::PointPrecision maxZoomSoft = 3.0f;
 
 	const MV::PointPrecision viewSoftInset = .04f;   // PathMap fallback for a scene without corner markers
-	const MV::PointPrecision scaleSanityFloor = .01f;   // keeps the transform invertible, not a design limit
-	float minScale(bool a_soft);
+	const MV::PointPrecision zoomSanityFloor = .01f;   // keeps the projection invertible, not a design limit
+	float minZoom(bool a_soft);
 	const double viewEaseSeconds = 0.25;
 	const double viewEaseHoldSeconds = 0.1;
 

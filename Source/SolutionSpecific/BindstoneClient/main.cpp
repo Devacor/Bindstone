@@ -3254,8 +3254,8 @@ static int RunSpriteShot(int a_count, bool a_scaled) {
 	return 0;
 }
 
-// -mapshot <file.bmp> [frames] [x y zoom]: map.scene in a 1600x900 window, centred on (x, y) of the map at zoom (by
-// default the whole map), updated 60 steps a second of game time; writes the last frame to the file and prints the
+// -mapshot <file.bmp> [frames] [x y zoom]: map.scene in a 1600x900 window through a camera centred on (x, y) of the map
+// at zoom (by default the whole map), updated 60 steps a second of game time; writes the last frame to the file and prints the
 // frame summary, so two frame counts show two moments of anything that animates.
 static int RunMapShot(const std::string& a_path, int a_frames, std::optional<MV::Point<>> a_centre, MV::PointPrecision a_zoom) {
 	Managers managers({ "", "" });
@@ -3269,12 +3269,16 @@ static int RunMapShot(const std::string& a_path, int a_frames, std::optional<MV:
 	while (managers.textures.pendingTextureLoads() > 0) {
 		managers.pool.run_posted();
 	}
+	auto world = MV::Scene::Node::make(managers.renderer, "World");
+	world->attach<MV::Scene::View>();
+	auto eye = world->make("MapCamera")->attach<MV::Scene::Camera>();
+	world->add(map);
 	const MV::Size<> mapSize(6144.0f, 2048.0f);
 	const MV::Size<> view = managers.renderer.world().size();
 	MV::Point<> centre = a_centre.value_or(MV::Point<>(mapSize.width / 2.0f, mapSize.height / 2.0f));
 	MV::PointPrecision zoom = a_centre ? a_zoom : std::min(view.width / mapSize.width, view.height / mapSize.height);
-	map->scale(MV::Scale(zoom, zoom, 1.0f));
-	map->position(MV::Point<>(view.width / 2.0f - centre.x * zoom, view.height / 2.0f - centre.y * zoom));
+	eye->zoom(zoom);
+	eye->sceneTranslate(centre - eye->center());
 
 	std::vector<MV::FrameReport> frames;
 	for (int frame = 0; frame < a_frames; ++frame) {
@@ -3282,9 +3286,9 @@ static int RunMapShot(const std::string& a_path, int a_frames, std::optional<MV:
 		while (SDL_PollEvent(&event)) {
 			managers.renderer.handleEvent(event);
 		}
-		map->update(1.0 / 60.0);
+		world->update(1.0 / 60.0);
 		managers.renderer.clearScreen();
-		map->draw();
+		world->draw();
 		if (frame == a_frames - 1) {
 			saveFrameBuffer(managers.renderer, a_path);
 		}

@@ -15,22 +15,24 @@ static jai::registrar<GameInstance, MV::Services> _hookGameInstance([](jai::dyna
 	}, jai::serial);
 	builder.method("data", [](GameInstance& a_self) -> GameData& { return a_self.data(); });
 	builder.method("pathMap", [](GameInstance& a_self) { return a_self.path().self(); });
+	builder.method("camera", [](GameInstance& a_self) { return a_self.camera(); });
 });
 
 void GameInstance::handleScroll(float a_amount, const MV::Point<int>& a_position) {
-	if (requestCamera()) {
-		auto screenScale = .05f * a_amount + (worldScene->scale().x / 10.0f * a_amount);
-		auto finalScale = screenScale + worldScene->scale().x;
+	if (worldCamera && requestCamera()) {
+		auto zoom = worldCamera->zoom();
+		auto zoomStep = .05f * a_amount + (zoom / 10.0f * a_amount);
+		auto finalZoom = zoom + zoomStep;
 
-		if (finalScale > maxScaleHard) {
-			screenScale -= finalScale - maxScaleHard;
+		if (finalZoom > maxZoomHard) {
+			zoomStep -= finalZoom - maxZoomHard;
 		}
-		auto floorScale = minScale(false);
-		if (finalScale < floorScale) {
-			screenScale -= finalScale - floorScale;
+		auto floorZoom = minZoom(false);
+		if (finalZoom < floorZoom) {
+			zoomStep -= finalZoom - floorZoom;
 		}
-		if (std::abs(screenScale) > 0.00000001f) {
-			rawScaleAroundScreenPoint(worldScene->scale().x + screenScale, a_position);
+		if (std::abs(zoomStep) > 0.00000001f) {
+			zoomAroundScreenPoint(zoom + zoomStep, a_position);
 		}
 		clampToHardBounds(a_position);
 		easeToBoundsIfExceeded(a_position);
@@ -38,7 +40,7 @@ void GameInstance::handleScroll(float a_amount, const MV::Point<int>& a_position
 }
 
 MV::BoxAABB<> GameInstance::visibleMapBounds() {
-	return worldScene->localFromScreen(MV::BoxAABB<int>(MV::Point<int>(), MV::toPoint(gameData.managers().renderer.window().drawableSize())));
+	return worldCamera->visibleIn(worldScene);
 }
 
 bool GameInstance::cornerBounds(MV::BoxAABB<>& a_bounds, const std::string& a_suffix) {
@@ -62,15 +64,15 @@ bool GameInstance::mapViewBounds(MV::BoxAABB<>& a_bounds, bool a_soft) {
 	return a_bounds.width() > 0.0f && a_bounds.height() > 0.0f;
 }
 
-float GameInstance::minScale(bool a_soft) {
+float GameInstance::minZoom(bool a_soft) {
 	MV::BoxAABB<> bounds;
-	return mapViewBounds(bounds, a_soft) ? std::max(scaleSanityFloor, scaleToFit(bounds)) : scaleSanityFloor;
+	return mapViewBounds(bounds, a_soft) ? std::max(zoomSanityFloor, zoomToFit(bounds)) : zoomSanityFloor;
 }
 
-float GameInstance::scaleToFit(const MV::BoxAABB<>& a_bounds) {
+float GameInstance::zoomToFit(const MV::BoxAABB<>& a_bounds) {
 	auto visible = visibleMapBounds();
 	auto ratio = std::max(visible.width() / a_bounds.width(), visible.height() / a_bounds.height());
-	return worldScene->scale().x * ratio;   // the scale at which the view exactly fits, larger or smaller than now
+	return worldCamera->zoom() * ratio;   // the zoom at which the view exactly fits, larger or smaller than now
 }
 
 MV::Point<> GameInstance::viewCorrection(const MV::BoxAABB<>& a_bounds) {
@@ -88,30 +90,29 @@ MV::Point<> GameInstance::viewCorrection(const MV::BoxAABB<>& a_bounds) {
 
 void GameInstance::clampToHardBounds(const MV::Point<int>& a_pointerCenter) {
 	MV::BoxAABB<> hard;
-	if (!mapViewBounds(hard, false)) { return; }
-	auto fit = scaleToFit(hard);
-	if (fit > worldScene->scale().x) {
-		rawScaleAroundScreenPoint(fit, a_pointerCenter);
+	if (!worldCamera || !mapViewBounds(hard, false)) { return; }
+	auto fit = zoomToFit(hard);
+	if (fit > worldCamera->zoom()) {
+		zoomAroundScreenPoint(fit, a_pointerCenter);
 	}
 	auto correction = viewCorrection(hard);
 	if (correction != MV::Point<>()) {
-		worldScene->translate(correction * -worldScene->scale().x);
+		moveCameraInMap(correction);
 	}
 }
 
-void GameInstance::rawScaleAroundCenter(float a_scale) {
-	rawScaleAroundScreenPoint(a_scale, MV::toPoint(gameData.managers().renderer.window().drawableSize() / 2));
+void GameInstance::moveCameraInMap(const MV::Point<>& a_mapDelta) {
+	auto toScene = worldScene->worldTransform();
+	worldCamera->sceneTranslate(toScene * a_mapDelta - toScene * MV::Point<>());
 }
 
-void GameInstance::rawScaleAroundScreenPoint(float a_scale, const MV::Point<int>& a_position) {
-	auto originalScreenPosition = worldScene->localFromScreen(a_position) * (MV::toPoint(a_scale - worldScene->scale()));
-	worldScene->scale(a_scale);
-	worldScene->translate(originalScreenPosition * -1.0f);
-	MV::info("CurrentScale: ", worldScene->scale());
+void GameInstance::zoomAroundScreenPoint(float a_zoom, const MV::Point<int>& a_position) {
+	worldCamera->zoomAround(a_zoom, worldView->viewFromScreen(a_position));
 }
 
 GameInstance::GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse, float a_timeStep, size_t a_maxFixedStepsPerUpdate) :
 	worldScene(a_root->make("Scenes/map.scene", services())->depth(-1)),
+	worldView(a_root->component<MV::Scene::View>(false, false)),
 	ourMouse(a_mouse),
 	gameData(a_gameData),
 	timeStep(a_timeStep),
@@ -126,6 +127,14 @@ void GameInstance::initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer,
 
 	//manually updating this.
 	worldScene->silence().forget()->pause();
+
+	if (worldView) {
+		worldCamera = worldView->camera();
+	}
+	if (worldCamera) {
+		cameraStartPosition = worldCamera->owner()->position();
+		cameraStartZoom = worldCamera->zoom();
+	}
 
 	pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();
 
@@ -159,17 +168,18 @@ void GameInstance::initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer,
 
 GameInstance::~GameInstance() {
 	worldScene->removeFromParent();
+	if (worldCamera && worldCamera->ownerIsAlive()) {
+		worldCamera->owner()->position(cameraStartPosition);
+		worldCamera->zoom(cameraStartZoom);
+	}
 }
 
 void GameInstance::beginMapDrag() {
-	if (requestCamera()) {
+	if (worldCamera && requestCamera()) {
 		ourMouse.queueExclusiveAction(MV::ExclusiveTapAction(true, { 10 }, [&]() {
 			activeDrag = ourMouse.onMove.connect([this](MV::TapDevice& a_mouse) {
-				if (worldScene) {
-					auto layer = worldScene->parent();
-					worldScene->translate(layer->localFromScreen(a_mouse.position()) - layer->localFromScreen(a_mouse.oldPosition()));
-					clampToHardBounds(a_mouse.position());
-				}
+				worldCamera->sceneTranslate(worldCamera->sceneFromView(worldView->viewFromScreen(a_mouse.oldPosition())) - worldCamera->sceneFromView(worldView->viewFromScreen(a_mouse.position())));
+				clampToHardBounds(a_mouse.position());
 			});
 		}, [this]() {
 			activeDrag.reset();
@@ -199,31 +209,33 @@ bool GameInstance::handleEvent(const SDL_Event &a_event) {
 	return false;
 }
 
-void GameInstance::moveCamera(std::shared_ptr<MV::Scene::Node> a_targetNode, MV::Scale a_scale, bool interruptable) {
-	moveCamera(((worldScene->worldPosition() - a_targetNode->worldPosition()) / a_targetNode->worldScale()) + MV::toPoint(gameData.managers().renderer.world().size() / 2.0f), a_scale);
+void GameInstance::moveCamera(std::shared_ptr<MV::Scene::Node> a_targetNode, MV::PointPrecision a_zoom, bool a_interruptable) {
+	moveCamera(a_targetNode->worldTransform().position(), a_zoom, a_interruptable);
 }
 
-void GameInstance::moveCamera(MV::Point<> endPosition, MV::Scale endScale, bool interruptable) {
-	auto startPosition = worldScene->position();
-	auto startScale = worldScene->scale();
+void GameInstance::moveCamera(MV::Point<> a_center, MV::PointPrecision a_zoom, bool a_interruptable) {
+	if (!worldCamera) {
+		return;
+	}
+	auto startCenter = worldCamera->center();
+	auto startZoom = worldCamera->zoom();
 	cameraAction.cancel();
-	cameraAction.then(interruptable ? "interruptable" : "force", [&, startPosition, endPosition, startScale, endScale](MV::Task &a_self, double /*a_dt*/) {
-        float percent = std::min(static_cast<MV::PointPrecision>(a_self.localElapsed() / 0.5f), 1.0f);
-		worldScene->silence()->
-			position(MV::mix(startPosition, endPosition, percent, 2.0f))->
-			scale(MV::mix(startScale, endScale, percent, 2.0f));
+	cameraAction.then(a_interruptable ? "interruptable" : "force", [this, startCenter, a_center, startZoom, a_zoom](MV::Task &a_self, double /*a_dt*/) {
+		float percent = std::min(static_cast<MV::PointPrecision>(a_self.localElapsed() / 0.5f), 1.0f);
+		worldCamera->zoom(MV::mix(startZoom, a_zoom, percent, 2.0f));
+		worldCamera->sceneTranslate(MV::mix(startCenter, a_center, percent, 2.0f) - worldCamera->center());
 		return percent != 1.0f;
 	});
 }
 
 void GameInstance::easeToBoundsIfExceeded(const MV::Point<int> &a_pointerCenter) {
-	if (!cameraIsFree()) {
+	if (!worldCamera || !cameraIsFree()) {
 		return;
 	}
 	MV::BoxAABB<> soft;
 	bool haveSoft = mapViewBounds(soft, true);
-	auto startScale = worldScene->scale().x;
-	auto endScale = std::clamp(startScale, minScale(true), maxScaleSoft);
+	auto startScale = worldCamera->zoom();
+	auto endScale = std::clamp(startScale, minZoom(true), maxZoomSoft);
 	bool outsideSoft = haveSoft && viewCorrection(soft) != MV::Point<>();
 	if (endScale == startScale && !outsideSoft) {
 		return;
@@ -235,11 +247,11 @@ void GameInstance::easeToBoundsIfExceeded(const MV::Point<int> &a_pointerCenter)
 	cameraAction.thenAlso("interruptable", [this, startScale, endScale, a_pointerCenter, soft, haveSoft, eased](MV::Task& a_self, double /*a_dt*/) {
 		float percent = std::min(static_cast<MV::PointPrecision>(a_self.localElapsed() / viewEaseSeconds), 1.0f);
 		float easedNow = MV::mixOut(0.0f, 1.0f, percent, 2.0f);
-		rawScaleAroundScreenPoint(MV::mixOut(startScale, endScale, percent, 2.0f), a_pointerCenter);
+		zoomAroundScreenPoint(MV::mixOut(startScale, endScale, percent, 2.0f), a_pointerCenter);
 		if (haveSoft) {
 			// each frame closes the share of the remaining distance that this frame's easing covers
 			float step = percent >= 1.0f ? 1.0f : std::clamp((easedNow - *eased) / std::max(1.0f - *eased, 0.0001f), 0.0f, 1.0f);
-			worldScene->translate(viewCorrection(soft) * (-worldScene->scale().x * step));
+			moveCameraInMap(viewCorrection(soft) * step);
 		}
 		*eased = easedNow;
 		return percent != 1.0f;

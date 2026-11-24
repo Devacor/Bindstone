@@ -12,9 +12,12 @@ namespace Workbench {
 	namespace {
 		// Old-editor handle palette (editorDefines.h): amber corners.
 		const MV::Color sizeHandleFill(0x44ffb400);
+		const MV::Color sizeHandleOutline(0xccffb400);
 		const MV::Color highlightFill(0x11ffffff);
-		const MV::Color hardBoundsColor(0xccff6040);
-		const MV::Color softBoundsColor(0xcc40e080);
+		const MV::Color hardBoundsColor(0xddd0d0d0);
+		const MV::Color softBoundsColor(0xeef6d532);
+		const MV::Color outsideHardFill(0x88000000);
+		const MV::Color elasticBandFill(0x40f6d532);
 		// Dock chrome Clickables sit at the default 100; +100 wins inside the viewport. The transform
 		// handles sit above a bounds body, point handles between, so overlaps resolve smallest-first.
 		constexpr int64_t bodyPriorityBoost = 100;
@@ -696,6 +699,7 @@ namespace Workbench {
 					}
 				};
 			}
+			outlined = !painter;
 			sync();
 		}
 
@@ -705,31 +709,54 @@ namespace Workbench {
 			}
 		}
 
+		// Where a grip sits on the frame and which sides of the box it moves.
+		enum class Grip { TOP_LEFT, TOP_RIGHT, BOTTOM_RIGHT, BOTTOM_LEFT, TOP, RIGHT, BOTTOM, LEFT };
+		static constexpr Grip allGrips[] { Grip::TOP_LEFT, Grip::TOP_RIGHT, Grip::BOTTOM_RIGHT, Grip::BOTTOM_LEFT, Grip::TOP, Grip::RIGHT, Grip::BOTTOM, Grip::LEFT };
+
+		static MV::Point<> gripPoint(const MV::BoxAABB<>& a_frame, Grip a_grip) {
+			const auto center = a_frame.centerPoint();
+			switch (a_grip) {
+				case Grip::TOP_LEFT: return a_frame.minPoint;
+				case Grip::TOP_RIGHT: return MV::point(a_frame.maxPoint.x, a_frame.minPoint.y);
+				case Grip::BOTTOM_RIGHT: return a_frame.maxPoint;
+				case Grip::BOTTOM_LEFT: return MV::point(a_frame.minPoint.x, a_frame.maxPoint.y);
+				case Grip::TOP: return MV::point(center.x, a_frame.minPoint.y);
+				case Grip::RIGHT: return MV::point(a_frame.maxPoint.x, center.y);
+				case Grip::BOTTOM: return MV::point(center.x, a_frame.maxPoint.y);
+				default: return MV::point(a_frame.minPoint.x, center.y);
+			}
+		}
+		static bool movesLeft(Grip a_grip) { return a_grip == Grip::TOP_LEFT || a_grip == Grip::BOTTOM_LEFT || a_grip == Grip::LEFT; }
+		static bool movesRight(Grip a_grip) { return a_grip == Grip::TOP_RIGHT || a_grip == Grip::BOTTOM_RIGHT || a_grip == Grip::RIGHT; }
+		static bool movesTop(Grip a_grip) { return a_grip == Grip::TOP_LEFT || a_grip == Grip::TOP_RIGHT || a_grip == Grip::TOP; }
+		static bool movesBottom(Grip a_grip) { return a_grip == Grip::BOTTOM_LEFT || a_grip == Grip::BOTTOM_RIGHT || a_grip == Grip::BOTTOM; }
+
 		bool dirty() const override {
 			auto frame = MV::round<MV::PointPrecision>(readFrame());
 			return !(frame.minPoint == lastFrame.minPoint) || !(frame.maxPoint == lastFrame.maxPoint);
 		}
 
 		std::optional<MV::Point<int>> cornerScreenPoint(size_t a_box, size_t a_corner) const override {
-			const MV::Scene::SafeComponent<MV::Scene::Clickable>* corners[] { &topLeft, &topRight, &bottomRight, &bottomLeft };
-			if (a_box != 0 || a_corner >= 4 || !*corners[a_corner]) {
+			if (a_box != 0 || a_corner >= grips.size() || !grips[a_corner].second) {
 				return std::nullopt;
 			}
-			auto& corner = *corners[a_corner];
-			return corner->owner()->screenFromLocal(corner->bounds()).centerPoint();
+			auto& handle = grips[a_corner].second;
+			return handle->owner()->screenFromLocal(handle->bounds()).centerPoint();
 		}
 
 		void sync() override {
 			container->clear();
+			edges.clear();
+			grips.clear();
 			auto rectBox = MV::round<MV::PointPrecision>(readFrame());
 			lastFrame = rectBox;
-			auto handleSize = MV::size(layer.theme.px(5.0f), layer.theme.px(5.0f));
 			if (outlined) {
-				drawOutline(rectBox);
+				for (int edge = 0; edge < 4; ++edge) {
+					edges.push_back(container->make(MV::guid("edge_"))->attach<MV::Scene::Sprite>()->color(outline));
+				}
 			}
 
-			body = container->make(MV::guid("body_"))->worldPosition(rectBox.topLeftPoint())->attach<MV::Scene::Clickable>(layer.mouse);
-			body->bounds({ MV::Point<>(), rectBox.size() });
+			body = container->make(MV::guid("body_"))->attach<MV::Scene::Clickable>(layer.mouse);
 			body->globalPriority(body->globalPriority() + bodyPriorityBoost + priority);
 			body->onPress.connect("press", [this](std::shared_ptr<MV::Scene::Clickable>) { beginGesture(); });
 			if (painter) {
@@ -739,73 +766,66 @@ namespace Workbench {
 				body->onRelease.connect("release", [this](std::shared_ptr<MV::Scene::Clickable>, const MV::Point<MV::PointPrecision>&) { endPaintGesture(); });
 			} else {
 				body->onDrag.connect("position", [this](std::shared_ptr<MV::Scene::Clickable> a_handle, const MV::Point<int>&, const MV::Point<int>& a_delta) {
-					auto worldDelta = a_handle->owner()->renderer().worldFromScreen(a_delta);
-					a_handle->owner()->translate(worldDelta);
-					for (auto&& corner : { &topLeft, &topRight, &bottomLeft, &bottomRight }) {
-						(*corner)->owner()->translate(worldDelta);
-					}
-					auto current = readLocal();
-					writeLocal(MV::BoxAABB<>(pressBounds.minPoint + localMove(pressBodyAt, a_handle->owner()->worldPosition()), current.size()));
+					a_handle->owner()->translate(a_handle->owner()->renderer().worldFromScreen(a_delta));
+					auto moved = localMove(pressBodyAt, a_handle->owner()->worldPosition());
+					writeLocal(MV::BoxAABB<>(pressBounds.minPoint + moved, pressBounds.maxPoint + moved));
+					place(nullptr);
 				});
 				body->onRelease.connect("release", [this](std::shared_ptr<MV::Scene::Clickable>, const MV::Point<MV::PointPrecision>&) { endBoundsGesture(); });
+				const float size = layer.theme.px(outlined ? 10.0f : 8.0f);
+				for (auto grip : allGrips) {
+					auto handle = container->make(MV::guid("grip_"))->attach<MV::Scene::Clickable>(layer.mouse);
+					handle->bounds(MV::BoxAABB<>(MV::point(-size * 0.5f, -size * 0.5f), MV::point(size * 0.5f, size * 0.5f)))->color(outlined ? outline : sizeHandleFill)->show();
+					handle->globalPriority(handle->globalPriority() + bodyPriorityBoost + priority + (grip < Grip::TOP ? 3 : 2));
+					handle->onPress.connect("press", [this](std::shared_ptr<MV::Scene::Clickable>) { beginGesture(); });
+					handle->onDrag.connect("size", [this, grip](std::shared_ptr<MV::Scene::Clickable> a_handle, const MV::Point<int>&, const MV::Point<int>& a_delta) {
+						a_handle->owner()->translate(a_handle->owner()->renderer().worldFromScreen(a_delta));
+						dragGrip(grip, a_handle->owner());
+					});
+					handle->onRelease.connect("release", [this](std::shared_ptr<MV::Scene::Clickable>, const MV::Point<MV::PointPrecision>&) { endBoundsGesture(); });
+					grips.emplace_back(grip, handle);
+				}
 			}
-
-			topLeft = makeCorner(rectBox.topLeftPoint() - MV::toPoint(handleSize), "topLeft_");
-			topRight = makeCorner(rectBox.topRightPoint() - MV::point(0.0f, handleSize.height), "topRight_");
-			bottomLeft = makeCorner(rectBox.bottomLeftPoint() - MV::point(handleSize.width, 0.0f), "bottomLeft_");
-			bottomRight = makeCorner(rectBox.bottomRightPoint(), "bottomRight_");
-
-			wireCorner(topLeft, &topRight, &bottomLeft);
-			wireCorner(topRight, &topLeft, &bottomRight);
-			wireCorner(bottomLeft, &bottomRight, &topLeft);
-			wireCorner(bottomRight, &bottomLeft, &topRight);
+			place(nullptr);
 		}
 
-		MV::Scene::SafeComponent<MV::Scene::Clickable> makeCorner(const MV::Point<>& a_at, const std::string& a_name) {
-			auto corner = container->make(MV::guid(a_name))->worldPosition(a_at)->attach<MV::Scene::Clickable>(layer.mouse);
-			corner->bounds(MV::size(layer.theme.px(5.0f), layer.theme.px(5.0f)))->color(outlined ? outline : sizeHandleFill)->show();
-			corner->globalPriority(corner->globalPriority() + bodyPriorityBoost + priority);
-			return corner;
-		}
-
-		void drawOutline(const MV::BoxAABB<>& a_frame) {
-			const auto thickness = layer.theme.px(1.5f);
-			const MV::BoxAABB<> edges[] {
-				{ a_frame.minPoint, MV::point(a_frame.maxPoint.x, a_frame.minPoint.y + thickness) },
-				{ MV::point(a_frame.minPoint.x, a_frame.maxPoint.y - thickness), a_frame.maxPoint },
-				{ a_frame.minPoint, MV::point(a_frame.minPoint.x + thickness, a_frame.maxPoint.y) },
-				{ MV::point(a_frame.maxPoint.x - thickness, a_frame.minPoint.y), a_frame.maxPoint }
-			};
-			for (auto&& edge : edges) {
-				container->make(MV::guid("edge_"))->worldPosition(edge.minPoint)->attach<MV::Scene::Sprite>()->bounds(edge.size())->color(outline);
+		// Puts the outline, the body and every grip but the one being dragged where the box now is.
+		void place(const std::shared_ptr<MV::Scene::Node>& a_dragged) {
+			auto frame = readFrame();
+			if (!edges.empty()) {
+				const auto thickness = layer.theme.px(1.5f);
+				const MV::BoxAABB<> sides[] {
+					{ frame.minPoint, MV::point(frame.maxPoint.x, frame.minPoint.y + thickness) },
+					{ MV::point(frame.minPoint.x, frame.maxPoint.y - thickness), frame.maxPoint },
+					{ frame.minPoint, MV::point(frame.minPoint.x + thickness, frame.maxPoint.y) },
+					{ MV::point(frame.maxPoint.x - thickness, frame.minPoint.y), frame.maxPoint }
+				};
+				for (size_t side = 0; side < edges.size(); ++side) {
+					edges[side]->owner()->worldPosition(sides[side].minPoint);
+					edges[side]->bounds(sides[side].size());
+				}
+			}
+			if (body && body->owner() != a_dragged) {
+				body->owner()->worldPosition(frame.minPoint);
+				body->bounds({ MV::Point<>(), frame.size() });
+			}
+			for (auto&& [grip, handle] : grips) {
+				if (handle->owner() != a_dragged) {
+					handle->owner()->worldPosition(gripPoint(frame, grip));
+				}
 			}
 		}
 
-		// A corner drag moves its row neighbor vertically and its column neighbor horizontally,
-		// then bounds recompute from the diagonal pair (the old ResizeHandles contract).
-		void wireCorner(MV::Scene::SafeComponent<MV::Scene::Clickable>& a_corner,
-				MV::Scene::SafeComponent<MV::Scene::Clickable>* a_rowNeighbor,
-				MV::Scene::SafeComponent<MV::Scene::Clickable>* a_columnNeighbor) {
-			a_corner->onPress.connect("press", [this](std::shared_ptr<MV::Scene::Clickable>) { beginGesture(); });
-			a_corner->onDrag.connect("size", [this, a_rowNeighbor, a_columnNeighbor](std::shared_ptr<MV::Scene::Clickable> a_handle, const MV::Point<int>&, const MV::Point<int>& a_delta) {
-				auto worldDelta = a_handle->owner()->renderer().worldFromScreen(a_delta);
-				a_handle->owner()->translate(worldDelta);
-				(*a_rowNeighbor)->owner()->translate(MV::point(0.0f, worldDelta.y));
-				(*a_columnNeighbor)->owner()->translate(MV::point(worldDelta.x, 0.0f));
-				applyHandleBounds();
-			});
-			a_corner->onRelease.connect("release", [this](std::shared_ptr<MV::Scene::Clickable>, const MV::Point<MV::PointPrecision>&) { endBoundsGesture(); });
-		}
-
-		// The handles frame the component's box in world space, which a turned owner makes larger than the box itself,
-		// so a drag moves the box's corners by how far the handles moved in the component's own space.
-		void applyHandleBounds() {
-			MV::BoxAABB<> local(pressBounds.minPoint + localMove(pressTopLeftAt, topLeft->worldBounds().bottomRightPoint()));
-			local.expandWith(pressBounds.maxPoint + localMove(pressBottomRightAt, bottomRight->worldBounds().topLeftPoint()));
+		void dragGrip(Grip a_grip, const std::shared_ptr<MV::Scene::Node>& a_handle) {
+			auto moved = localMove(pressGripAt[static_cast<size_t>(a_grip)], a_handle->worldPosition());
+			auto local = pressBounds;
+			if (movesLeft(a_grip)) { local.minPoint.x += moved.x; }
+			if (movesRight(a_grip)) { local.maxPoint.x += moved.x; }
+			if (movesTop(a_grip)) { local.minPoint.y += moved.y; }
+			if (movesBottom(a_grip)) { local.maxPoint.y += moved.y; }
+			local.sanitize();
 			writeLocal(local);
-			auto rectBox = MV::round<MV::PointPrecision>(readFrame());
-			body->bounds(rectBox.size());
-			body->owner()->worldPosition(rectBox.minPoint);
+			place(a_handle);
 		}
 
 		MV::Point<> localMove(const MV::Point<>& a_fromWorld, const MV::Point<>& a_toWorld) const {
@@ -817,8 +837,10 @@ namespace Workbench {
 			dragging = true;
 			pressBounds = readLocal();
 			pressBodyAt = body->owner()->worldPosition();
-			pressTopLeftAt = topLeft->worldBounds().bottomRightPoint();
-			pressBottomRightAt = bottomRight->worldBounds().topLeftPoint();
+			const auto frame = readFrame();
+			for (auto grip : allGrips) {
+				pressGripAt[static_cast<size_t>(grip)] = gripPoint(frame, grip);
+			}
 			paintedCells.clear();
 			lastPaintCell = MV::Point<int>(-1, -1);
 			layer.pressed();
@@ -897,21 +919,18 @@ namespace Workbench {
 		std::function<MV::BoxAABB<>()> readFrame;
 		std::function<void()> restore;
 		bool painter = false;
-		MV::Color outline;
+		MV::Color outline { sizeHandleOutline };
 		bool outlined = false;
 		int64_t priority = 0;
 
 		MV::Scene::SafeComponent<MV::Scene::Clickable> body;
-		MV::Scene::SafeComponent<MV::Scene::Clickable> topLeft;
-		MV::Scene::SafeComponent<MV::Scene::Clickable> topRight;
-		MV::Scene::SafeComponent<MV::Scene::Clickable> bottomLeft;
-		MV::Scene::SafeComponent<MV::Scene::Clickable> bottomRight;
+		std::vector<std::shared_ptr<MV::Scene::Sprite>> edges;
+		std::vector<std::pair<Grip, MV::Scene::SafeComponent<MV::Scene::Clickable>>> grips;
 
 		MV::BoxAABB<> lastFrame;
 		MV::BoxAABB<> pressBounds;
 		MV::Point<> pressBodyAt;
-		MV::Point<> pressTopLeftAt;
-		MV::Point<> pressBottomRightAt;
+		std::array<MV::Point<>, 8> pressGripAt;
 		std::vector<std::pair<MV::Point<int>, bool>> paintedCells;
 		MV::Point<int> lastPaintCell{ -1, -1 };
 	};
@@ -937,8 +956,15 @@ namespace Workbench {
 						}
 					}, a_color, a_priority);
 			};
+			// drawn before the boxes' own nodes, which later siblings put above it
+			container = a_layer.overlay->make(MV::guid("constraintShade_"));
+			container->depth(-1000.0f);
+			for (int piece = 0; piece < 8; ++piece) {
+				shade.push_back(container->make(MV::guid("shade_"))->attach<MV::Scene::Sprite>()->color(piece < 4 ? outsideHardFill : elasticBandFill));
+			}
 			hard = box(false, hardBoundsColor, 0);
 			soft = box(true, softBoundsColor, 1);
+			placeShade();
 		}
 
 		bool dirty() const override { return false; }
@@ -946,12 +972,39 @@ namespace Workbench {
 		void sync() override {
 			hard->sync();
 			soft->sync();
+			placeShade();
 		}
 
 		void update() override {
 			hard->update();
 			soft->update();
 			dragging = hard->dragging || soft->dragging;
+			placeShade();
+		}
+
+		// Everything past the hard box is dimmed, the band between it and the soft box is yellow: the view goes into
+		// the band only while held.
+		void placeShade() {
+			const auto outer = hard->readFrame();
+			auto inner = soft->readFrame();
+			inner = MV::BoxAABB<>(MV::point(std::clamp(inner.minPoint.x, outer.minPoint.x, outer.maxPoint.x), std::clamp(inner.minPoint.y, outer.minPoint.y, outer.maxPoint.y)),
+				MV::point(std::clamp(inner.maxPoint.x, outer.minPoint.x, outer.maxPoint.x), std::clamp(inner.maxPoint.y, outer.minPoint.y, outer.maxPoint.y)));
+			const float beyond = 100000.0f;
+			auto frameAround = [](const MV::BoxAABB<>& a_outside, const MV::BoxAABB<>& a_hole) {
+				return std::array<MV::BoxAABB<>, 4> {
+					MV::BoxAABB<>(a_outside.minPoint, MV::point(a_outside.maxPoint.x, a_hole.minPoint.y)),
+					MV::BoxAABB<>(MV::point(a_outside.minPoint.x, a_hole.maxPoint.y), a_outside.maxPoint),
+					MV::BoxAABB<>(MV::point(a_outside.minPoint.x, a_hole.minPoint.y), MV::point(a_hole.minPoint.x, a_hole.maxPoint.y)),
+					MV::BoxAABB<>(MV::point(a_hole.maxPoint.x, a_hole.minPoint.y), MV::point(a_outside.maxPoint.x, a_hole.maxPoint.y))
+				};
+			};
+			const auto outside = frameAround(MV::BoxAABB<>(MV::point(outer.minPoint.x - beyond, outer.minPoint.y - beyond), MV::point(outer.maxPoint.x + beyond, outer.maxPoint.y + beyond)), outer);
+			const auto band = frameAround(outer, inner);
+			for (size_t piece = 0; piece < 8; ++piece) {
+				const auto& area = piece < 4 ? outside[piece] : band[piece - 4];
+				shade[piece]->owner()->worldPosition(area.minPoint);
+				shade[piece]->bounds(MV::size(std::max(area.width(), 0.0f), std::max(area.height(), 0.0f)));
+			}
 		}
 
 		std::optional<MV::Point<int>> cornerScreenPoint(size_t a_box, size_t a_corner) const override {
@@ -960,6 +1013,7 @@ namespace Workbench {
 
 		std::unique_ptr<BoundsGizmo> hard;
 		std::unique_ptr<BoundsGizmo> soft;
+		std::vector<std::shared_ptr<MV::Scene::Sprite>> shade;
 	};
 
 	struct GizmoLayer::HighlightGizmo : GizmoLayer::Gizmo {

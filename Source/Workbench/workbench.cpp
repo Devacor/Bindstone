@@ -1593,14 +1593,18 @@ namespace Workbench {
 	void App::parallaxPreview(bool a_preview) {
 		for (auto&& weakParallax : previewedParallax) {
 			if (auto parallax = weakParallax.lock()) {
-				parallax->authoringPreview(false);
+				parallax->authoringPreview(nullptr);
 			}
 		}
 		previewedParallax.clear();
 		if (a_preview && selectedNode) {
+			if (!panelEye) {
+				panelEye = visor->make("panelEye")->attach<MV::Scene::Camera>().self();
+				syncViewportClip();
+			}
 			forEachParallax(selectedNode, [this](const std::shared_ptr<MV::Scene::Parallax>& a_parallax) {
 				if (a_parallax->enabled()) {
-					a_parallax->authoringPreview(true);
+					a_parallax->authoringPreview(panelEye);
 					previewedParallax.push_back(a_parallax);
 				}
 			});
@@ -1741,7 +1745,7 @@ namespace Workbench {
 	void App::previewedLayersDisplaced(bool a_displaced) {
 		for (auto&& weakParallax : previewedParallax) {
 			if (auto parallax = weakParallax.lock()) {
-				parallax->authoringPreview(a_displaced);
+				parallax->authoringPreview(a_displaced ? panelEye : nullptr);
 			}
 		}
 	}
@@ -1982,6 +1986,10 @@ namespace Workbench {
 		sceneToolbar->position(MV::point(view.position.x + theme.px(8.0f), view.position.y + theme.px(8.0f)));
 		sceneToolbar->viewWidth(view.size.width - theme.px(16.0f));
 		sceneGrid->update(viewCamera->position(), viewCamera->scale().x, MV::BoxAABB<>(view.position, view.size));
+		if (panelEye) {
+			panelEye->owner()->position(view.position);
+			panelEye->viewSize(view.size, 1.0f);
+		}
 		if (view.position.x != lastViewportRect.position.x || view.position.y != lastViewportRect.position.y ||
 			view.size.width != lastViewportRect.size.width || view.size.height != lastViewportRect.size.height) {
 			lastViewportRect = view;

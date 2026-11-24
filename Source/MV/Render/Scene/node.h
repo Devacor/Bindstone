@@ -821,6 +821,7 @@ namespace MV {
 
 			void markParentBoundsDirty();
 			void markChildBoundsDirty();
+			void markLoadedBoundsDirty();
 
 			void silenceInternal() {
 				onChildAddSignal.block();

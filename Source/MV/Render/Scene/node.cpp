@@ -1215,6 +1215,16 @@ namespace MV {
 		void Node::postLoadStep() {
 			recalculateAlpha();
 			recalculateMatrixAfterLoad();
+			markLoadedBoundsDirty();
+		}
+
+		// a load restores no bounds and silences what would mark them, so every loaded node works its own out on first ask
+		void Node::markLoadedBoundsDirty() {
+			dirtyLocalBounds = true;
+			dirtyChildBounds = true;
+			for (auto&& child : childNodes) {
+				child->markLoadedBoundsDirty();
+			}
 		}
 
 		void Node::quietLocalMatrixFix() {

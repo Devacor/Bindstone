@@ -177,8 +177,8 @@ namespace Workbench {
 		// The title bar's text: the document's name, starred while it is modified.
 		const std::string& title() const { return shownTitle; }
 
-		// Displaces the Parallax layers on the selected node and below it as a run would, until the selection changes.
-		// A save writes the layers at rest either way.
+		// Places the Parallax layers on the selected node and below it as a run would for a camera seeing what the Scene
+		// panel shows, until the selection changes. A save writes the layers at rest either way.
 		void parallaxPreview(bool a_preview);
 		bool parallaxPreviewing() const { return !previewedParallax.empty(); }
 
@@ -264,6 +264,8 @@ namespace Workbench {
 		std::unique_ptr<SceneToolbar> sceneToolbar;
 		std::shared_ptr<MV::Scene::Node> selectedNode;
 		std::vector<std::weak_ptr<MV::Scene::Parallax>> previewedParallax;
+		// What the Scene panel shows, as a camera the previewed layers are placed for.
+		std::shared_ptr<MV::Scene::Camera> panelEye;
 
 		std::unique_ptr<DockSpace> dock;
 		std::unique_ptr<MenuBar> menuBar;

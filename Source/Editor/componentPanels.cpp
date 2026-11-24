@@ -2424,8 +2424,8 @@ SelectedParallaxEditorPanel::SelectedParallaxEditorPanel(EditorControls& a_panel
 	offsetX = makeInputField(this, panel.services(), grid, "OffsetX", MV::size(textboxWidth, 27.0f), std::to_string(controls->elementToEdit->localOffset().x));
 	offsetY = makeInputField(this, panel.services(), grid, "OffsetY", MV::size(textboxWidth, 27.0f), std::to_string(controls->elementToEdit->localOffset().y));
 
-	zoomOffsetX = makeInputField(this, panel.services(), grid, "ZoomX", MV::size(textboxWidth, 27.0f), std::to_string(controls->elementToEdit->worldZoomOffset().x));
-	zoomOffsetY = makeInputField(this, panel.services(), grid, "ZoomY", MV::size(textboxWidth, 27.0f), std::to_string(controls->elementToEdit->worldZoomOffset().y));
+	zoomOffsetX = makeInputField(this, panel.services(), grid, "RestX", MV::size(textboxWidth, 27.0f), std::to_string(controls->elementToEdit->restCenter().x));
+	zoomOffsetY = makeInputField(this, panel.services(), grid, "RestY", MV::size(textboxWidth, 27.0f), std::to_string(controls->elementToEdit->restCenter().y));
 
 	makeToggle(grid, panel.services(), "Enabled", a_controls->elementToEdit->enabled(), [&] {
 		controls->elementToEdit->enabled(true);
@@ -2449,20 +2449,13 @@ SelectedParallaxEditorPanel::SelectedParallaxEditorPanel(EditorControls& a_panel
 			controls->elementToEdit->localOffset({ offsetX->number(), offsetY->number() });
 		});
 
-		auto xZoomClick = offsetX->owner()->component<MV::Scene::Clickable>();
-		xZoomClick->onAccept.connect("updateX", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
-			controls->elementToEdit->worldZoomOffset({ zoomOffsetX->number(), zoomOffsetY->number() });
-		});
-		zoomOffsetX->onEnter.connect("updateX", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
-			controls->elementToEdit->worldZoomOffset({ zoomOffsetX->number(), zoomOffsetY->number() });
-		});
-		auto yZoomClick = offsetY->owner()->component<MV::Scene::Clickable>();
-		yZoomClick->onAccept.connect("updateY", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
-			controls->elementToEdit->worldZoomOffset({ zoomOffsetX->number(), zoomOffsetY->number() });
-		});
-		zoomOffsetY->onEnter.connect("updateY", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
-			controls->elementToEdit->worldZoomOffset({ zoomOffsetX->number(), zoomOffsetY->number() });
-		});
+		auto restCenterFromFields = [&]() {
+			controls->elementToEdit->restView({ zoomOffsetX->number(), zoomOffsetY->number() }, controls->elementToEdit->restZoom());
+		};
+		zoomOffsetX->owner()->component<MV::Scene::Clickable>()->onAccept.connect("updateRestX", [restCenterFromFields](std::shared_ptr<MV::Scene::Clickable>) { restCenterFromFields(); });
+		zoomOffsetX->onEnter.connect("updateRestX", [restCenterFromFields](std::shared_ptr<MV::Scene::Text>) { restCenterFromFields(); });
+		zoomOffsetY->owner()->component<MV::Scene::Clickable>()->onAccept.connect("updateRestY", [restCenterFromFields](std::shared_ptr<MV::Scene::Clickable>) { restCenterFromFields(); });
+		zoomOffsetY->onEnter.connect("updateRestY", [restCenterFromFields](std::shared_ptr<MV::Scene::Text>) { restCenterFromFields(); });
 
 		auto ratioXClick = ratioX->owner()->component<MV::Scene::Clickable>();
 		ratioXClick->onAccept.connect("updateWidth", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {

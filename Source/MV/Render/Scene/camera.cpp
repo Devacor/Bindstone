@@ -1,5 +1,6 @@
 #include "camera.h"
 #include <algorithm>
+#include <cmath>
 #include <jaiscript/core/dynamic_binder.hpp>
 
 namespace MV {
@@ -34,6 +35,21 @@ namespace MV {
 			return std::static_pointer_cast<Camera>(shared_from_this());
 		}
 
+		std::shared_ptr<Camera> Camera::width(PointPrecision a_width) {
+			referenceWidth = std::max(a_width, 0.001f);
+			return std::static_pointer_cast<Camera>(shared_from_this());
+		}
+
+		std::shared_ptr<Camera> Camera::match(PointPrecision a_match) {
+			widthHeightMatch = std::clamp(a_match, 0.0f, 1.0f);
+			return std::static_pointer_cast<Camera>(shared_from_this());
+		}
+
+		std::shared_ptr<Camera> Camera::userScaled(bool a_userScaled) {
+			followsUserScale = a_userScaled;
+			return std::static_pointer_cast<Camera>(shared_from_this());
+		}
+
 		std::shared_ptr<Camera> Camera::height(PointPrecision a_height) {
 			fixedHeight = std::max(a_height, 0.001f);
 			return std::static_pointer_cast<Camera>(shared_from_this());
@@ -60,7 +76,7 @@ namespace MV {
 			return std::static_pointer_cast<Camera>(shared_from_this());
 		}
 
-		TransformMatrix Camera::projectionFor(const Size<>& a_viewSize, PointPrecision a_pixelScale) const {
+		TransformMatrix Camera::projectionFor(const Size<>& a_viewSize, PointPrecision a_contentScale, PointPrecision a_userScale) const {
 			TransformMatrix result;
 			const auto width = std::max(a_viewSize.width, 1.0f);
 			const auto height = std::max(a_viewSize.height, 1.0f);
@@ -69,13 +85,21 @@ namespace MV {
 				result.makePerspective(*verticalFieldOfView / std::max(*zoomLevel, 0.0001f), width / height, nearPlaneDistance, std::max(*farDistance, nearPlaneDistance + 0.001f));
 				return result;
 			}
-			Size<> seen(width, height);
+			// how many window units one of this camera's units covers
+			PointPrecision unitSize = 1.0f;
 			if (unitKind.get() == Units::SCALED_PIXELS) {
-				seen = Size<>(width / std::max(a_pixelScale, 0.0001f), height / std::max(a_pixelScale, 0.0001f));
-			} else if (unitKind.get() == Units::FIXED_HEIGHT) {
-				seen = Size<>(*fixedHeight * width / height, *fixedHeight);
+				unitSize = std::max(a_contentScale, 0.0001f);
+			} else if (unitKind.get() == Units::REFERENCE) {
+				// blended in log space, so a view twice as wide and half as tall comes out at 1 for a match of 0.5
+				const auto widthFit = std::log2(width / *referenceWidth);
+				const auto heightFit = std::log2(height / *fixedHeight);
+				unitSize = std::exp2(widthFit + (heightFit - widthFit) * *widthHeightMatch);
 			}
-			seen = Size<>(seen.width / *zoomLevel, seen.height / *zoomLevel);
+			if (*followsUserScale) {
+				unitSize *= std::max(a_userScale, 0.0001f);
+			}
+			const PointPrecision shown = unitSize * *zoomLevel;
+			const Size<> seen(width / shown, height / shown);
 			if (originKind.get() == Origin::CENTER) {
 				result.makeOrtho(-seen.width * 0.5f, seen.width * 0.5f, seen.height * 0.5f, -seen.height * 0.5f, *nearDistance, *farDistance);
 			} else {

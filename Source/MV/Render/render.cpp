@@ -544,6 +544,7 @@ namespace MV {
 
 			SDL_ShowWindow(window);
 			checkSDLError(__LINE__);
+			refreshContentScale();
 
 			if(hitTester){
 				SDL_SetWindowHitTest(window, sdlHitTestThunk, &hitTester);
@@ -584,32 +585,32 @@ namespace MV {
 		}
 	}
 
-	constexpr float Window::systemDefaultDpi() const {
-#if defined(__APPLE__)
-#	if TARGET_OS_MAC
-			return 72.0f;
-#	else
-			return 132.0f;
-#	endif
-#elif defined(__ANDROID__)
-			return 160.0f;
-#elif defined(_WIN32)
-			return 96.0f;
-#endif
-		return 0;
+	bool Window::refreshContentScale() {
+		const float reported = renderer.headless() || !window ? 1.0f : SDL_GetWindowDisplayScale(window);
+		const float scale = reported > 0.0f ? reported : 1.0f;
+		if (MV::equals(scale, ourContentScale)) {
+			return false;
+		}
+		ourContentScale = scale;
+		renderer.onUiScaleChangedSignal(uiScale());
+		return true;
 	}
 
-	float Window::windowDpi() const {
-		return uiScale() * systemDefaultDpi();
-	}
-
-	float Window::uiScale() const {
-		float result = window ? SDL_GetDisplayContentScale(SDL_GetDisplayForWindow(window)) : 0.0f;
-		return result > 0.0f ? result : 1.0f;
+	Window& Window::userScale(float a_scale) {
+		const float scale = std::max(a_scale, 0.1f);
+		if (!MV::equals(scale, ourUserScale)) {
+			ourUserScale = scale;
+			renderer.onUiScaleChangedSignal(uiScale());
+		}
+		return *this;
 	}
 
 	bool Window::handleEvent(const SDL_Event &a_event, RenderWorld &a_world){
 		if(a_event.type >= SDL_EVENT_WINDOW_FIRST && a_event.type <= SDL_EVENT_WINDOW_LAST){
+			// another display, or the OS setting for this one: the scale everything sizes by is read again
+			if (a_event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED || a_event.type == SDL_EVENT_WINDOW_DISPLAY_CHANGED) {
+				refreshContentScale();
+			}
 			if (a_event.type == SDL_EVENT_WINDOW_RESIZED) {
 				MV::info("Window Resized!");
 				auto worldScreenDelta = cast<PointPrecision>(ourDrawableSize) / a_world.size();
@@ -677,6 +678,7 @@ namespace MV {
 
 	Draw2D::Draw2D() :
 		onCameraUpdated(onCameraUpdatedSignal),
+		onUiScaleChanged(onUiScaleChangedSignal),
 		glExtensions(this),
 		clearBackgroundColor(0x3d3d3d),
 		initialized(0),

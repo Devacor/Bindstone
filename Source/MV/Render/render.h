@@ -293,10 +293,16 @@ namespace MV {
 
 		bool handleEvent(const SDL_Event& event, RenderWorld& a_world);
 
-		float windowDpi() const;
-		float uiScale() const;
-		constexpr float systemDefaultDpi() const;
+		// The scale the OS gives this window's content (1 at 100%, 2 at 200%), read again when SDL reports the window
+		// moving to another display or its scale changing, so whatever lays out by it follows. The user's own scale
+		// multiplies it.
+		float contentScale() const { return ourContentScale; }
+		float userScale() const { return ourUserScale; }
+		Window& userScale(float a_scale);
+		float uiScale() const { return ourContentScale * ourUserScale; }
 	private:
+		// true when the OS's scale for the window changed
+		bool refreshContentScale();
 		Window(Draw2D& a_renderer);
 		bool initialize();
 		void ensureValidGLContext();
@@ -323,6 +329,8 @@ namespace MV {
 		Size<int> minSize;
 		Size<int> maxSize;
 		HitTester hitTester;
+		float ourContentScale = 1.0f;
+		float ourUserScale = 1.0f;
 
 		SDL_Window* window = nullptr;
 		Draw2D& renderer;
@@ -510,11 +518,14 @@ namespace MV {
 		friend RenderWorld;
 
 		jai::signal_emitter<void(int32_t)> onCameraUpdatedSignal;
+		jai::signal_emitter<void(float)> onUiScaleChangedSignal;
 	public:
 		Draw2D();
 		~Draw2D();
 
 		jai::signal<void(int32_t)> onCameraUpdated;
+		// The window's uiScale changed (another display, the OS setting, or the user's scale): the new value.
+		jai::signal<void(float)> onUiScaleChanged;
 
 		typedef jai::signal<void(int32_t)>::shared_receiver_type CameraRecieveType;
 

@@ -64,7 +64,7 @@ namespace MV {
 			const Size<> seen(world.width * width, world.height * height);
 			TransformMatrix projection;
 			if (auto eye = camera()) {
-				projection = eye->projectionFor(seen, renderer.window().uiScale()) * eye->eye();
+				projection = eye->projectionFor(seen, renderer.window().contentScale(), renderer.window().userScale()) * eye->eye();
 			} else {
 				projection.makeOrtho(0.0f, seen.width, seen.height, 0.0f, -1.0f, 1.0f);
 			}

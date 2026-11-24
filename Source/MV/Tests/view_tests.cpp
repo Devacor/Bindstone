@@ -132,15 +132,41 @@ namespace mv_tests {
 				check(around(thing->screenFromLocal(MV::Point<>()), 650, 350), "centred: " + text(thing->screenFromLocal(MV::Point<>())));
 			});
 
-			test("a fixed-height camera fits that many units to the view's height", [] {
+			test("a reference camera fits its reference height, its width, or a blend of the two", [] {
 				SceneHost host;
 				auto root = Node::make(host.renderer, "root");
 				auto layer = root->make("layer");
-				layer->make("eye")->attach<Camera>()->units(Camera::Units::FIXED_HEIGHT)->height(360.0f);
+				auto camera = layer->make("eye")->attach<Camera>()->units(Camera::Units::REFERENCE)->width(640.0f)->height(180.0f);
 				layer->attach<View>();
 				auto thing = layer->make("thing");
-				thing->position(MV::point(100.0f, 180.0f));
-				check(around(thing->screenFromLocal(MV::Point<>()), 200, 360), "fixed height: " + text(thing->screenFromLocal(MV::Point<>())));
+				thing->position(MV::point(100.0f, 90.0f));
+				check(around(thing->screenFromLocal(MV::Point<>()), 400, 360), "matching height: " + text(thing->screenFromLocal(MV::Point<>())));
+				camera->match(0.0f);
+				root->update(0.0);
+				check(around(thing->screenFromLocal(MV::Point<>()), 200, 180), "matching width: " + text(thing->screenFromLocal(MV::Point<>())));
+				camera->match(0.5f);
+				root->update(0.0);
+				check(around(thing->screenFromLocal(MV::Point<>()), 283, 255), "blended: " + text(thing->screenFromLocal(MV::Point<>())));
+			});
+
+			test("a user-scaled camera grows with the user's scale and the change is announced", [] {
+				SceneHost host;
+				float announced = 0.0f;
+				auto receiver = host.renderer.onUiScaleChanged.connect([&](float a_scale) { announced = a_scale; });
+				auto root = Node::make(host.renderer, "root");
+				auto layer = root->make("layer");
+				auto camera = layer->make("eye")->attach<Camera>()->userScaled(true);
+				layer->attach<View>();
+				auto thing = layer->make("thing");
+				thing->position(MV::point(100.0f, 50.0f));
+				host.renderer.window().userScale(1.5f);
+				root->update(0.0);
+				check_eq(1.5f, announced);
+				check(around(thing->screenFromLocal(MV::Point<>()), 150, 75), "user scaled: " + text(thing->screenFromLocal(MV::Point<>())));
+				camera->userScaled(false);
+				root->update(0.0);
+				check(around(thing->screenFromLocal(MV::Point<>()), 100, 50), "not user scaled: " + text(thing->screenFromLocal(MV::Point<>())));
+				host.renderer.window().userScale(1.0f);
 			});
 
 			test("a View's viewport places it in its part of the window, and its box is what it sees", [] {

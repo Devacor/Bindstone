@@ -178,11 +178,11 @@ namespace MV{
 		auto scene = Scene::Node::make(*renderer);
 		for(auto&& shape : shapes){
 			if(shape.texture){
-				scene->make()->attach<MV::Scene::Sprite>()->bounds(cast<PointPrecision>(shape.bounds))->texture(shape.texture->makeHandle(shape.texture->contentSize()))->shader(PREMULTIPLY_ID);
+				scene->make()->attach<MV::Scene::Sprite>()->bounds(cast<PointPrecision>(shape.bounds))->texture(shape.texture->makeHandle(shape.texture->contentSize()))->material(PREMULTIPLY_ID);
 			}
 		}
 		if(consolidatedTexture){
-			scene->make()->attach<MV::Scene::Sprite>()->bounds(cast<PointPrecision>(consolidatedTexture->size()))->texture(consolidatedTexture->makeHandle())->shader(PREMULTIPLY_ID);
+			scene->make()->attach<MV::Scene::Sprite>()->bounds(cast<PointPrecision>(consolidatedTexture->size()))->texture(consolidatedTexture->makeHandle())->material(PREMULTIPLY_ID);
 		}
 		return scene;
 	}

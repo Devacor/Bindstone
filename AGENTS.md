@@ -390,6 +390,18 @@ receiver loads armed. Run it after any change to a property, registrar or loader
   and never reaches the destroyed device. A new holder of device objects joins the same way, never caches a
   `Device*` to free them later.
 
+## Shaders and materials
+
+- `Assets/Shaders` is loaded by convention when the renderer starts (`Draw2D::loadShaderFolder`); no C++ loads a game
+  shader by hand. Each `name.vert`/`name.frag` pair (a missing stage is `default.vert`/`default.frag`) is a program and
+  an implicit material of that name, which keeps the drawable's blend. `name.material` replaces it: a serialized
+  `MV::Material` (`material.h`: its stages, blend, `sharedTime`, typed `parameters`), read on first use and
+  round-tripped by `-verifyassets`.
+- A drawable's `material` key names one; `materialOverrides` are its own values for the material's parameters.
+  Drawables on one material with `sharedTime` and no overrides record the same uniforms and merge into one draw.
+- The Workbench inspector picks a drawable's material from a dropdown or a file dropped from the Project panel, and
+  edits a material in its own section (stages, blend, clock, a row per uniform its stages declare, Save).
+
 ## Git
 
 - Dev handles all git operations. Look before any destructive action (a checkout over local changes, a reset, a

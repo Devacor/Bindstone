@@ -65,6 +65,13 @@ namespace Workbench {
 
 	void InspectorPanel::inspect(const std::shared_ptr<MV::Scene::Node>& a_node) {
 		inspectedNode = a_node;
+		inspectedMaterialId.clear();
+		rebuild();
+	}
+
+	void InspectorPanel::inspectMaterial(const std::string& a_materialId) {
+		inspectedNode.reset();
+		inspectedMaterialId = a_materialId;
 		rebuild();
 	}
 
@@ -91,7 +98,13 @@ namespace Workbench {
 		}
 		rowGrid->cellSize(MV::size(panelWidth, std::max(theme->rowHeight, theme->fieldHeight)))->padding(MV::Point<>(), MV::point(0.0f, theme->px(4.0f)));
 		auto node = inspectedNode.lock();
-		if (!node) {
+		if (!node && !inspectedMaterialId.empty()) {
+			if (auto material = contentNode->renderer().getMaterial(inspectedMaterialId)) {
+				addMaterialSection(material, nullptr);
+			} else {
+				makeLabel(contentNode, *services, *theme, "empty", MV::size(theme->px(200.0f), theme->rowHeight), "No material " + inspectedMaterialId);
+			}
+		} else if (!node) {
 			makeLabel(contentNode, *services, *theme, "empty", MV::size(theme->px(200.0f), theme->rowHeight), "Nothing selected");
 		} else {
 			if (addSectionHeader("Node: " + (node->id().empty() ? std::string("(unnamed)") : node->id()), "node")) {
@@ -112,6 +125,15 @@ namespace Workbench {
 					}
 				});
 				addComponentButton = button->owner();
+			}
+			std::vector<std::shared_ptr<MV::Material>> shownMaterials;
+			for (auto&& entry : node->components<MV::Scene::Drawable>(false)) {
+				auto drawable = std::get<0>(entry).self();
+				auto material = drawable ? drawable->material() : nullptr;
+				if (material && std::find(shownMaterials.begin(), shownMaterials.end(), material) == shownMaterials.end()) {
+					shownMaterials.push_back(material);
+					addMaterialSection(material, drawable);
+				}
 			}
 		}
 		rowGrid->layoutCells();

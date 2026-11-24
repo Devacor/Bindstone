@@ -20,10 +20,8 @@ namespace MV {
 			a_builder.method("color", static_cast<std::shared_ptr<Drawable>(Drawable::*)(const Color&)>(&Drawable::color));
 			a_builder.method("colors", &Drawable::colors);
 
-			a_builder.method("shader", static_cast<std::string(Drawable::*)() const>(&Drawable::shader));
-			a_builder.method("shader", static_cast<std::shared_ptr<Drawable>(Drawable::*)(const std::string&)>(&Drawable::shader), jai::serial);
-			a_builder.method("material", static_cast<std::shared_ptr<Material>(Drawable::*)() const>(&Drawable::material));
-			a_builder.method("material", static_cast<std::shared_ptr<Drawable>(Drawable::*)(std::shared_ptr<Material>)>(&Drawable::material));
+			a_builder.method("materialId", &Drawable::materialId);
+			a_builder.method("material", static_cast<std::shared_ptr<Drawable>(Drawable::*)(const std::string&)>(&Drawable::material), jai::serial);
 
 			a_builder.method("texture", static_cast<std::shared_ptr<TextureHandle>(Drawable::*)(size_t) const>(&Drawable::texture));
 			a_builder.method("texture", static_cast<std::shared_ptr<Drawable>(Drawable::*)(std::shared_ptr<TextureHandle>, size_t)>(&Drawable::texture), jai::serial);
@@ -111,20 +109,35 @@ namespace MV {
 			return self;
 		}
 
-		std::shared_ptr<Drawable> Drawable::shader(const std::string &a_shaderProgramId) {
-			shaderProgramId = a_shaderProgramId;
+		std::shared_ptr<Drawable> Drawable::material(const std::string &a_materialId) {
+			ourMaterialId = a_materialId;
 			auto self = std::static_pointer_cast<Drawable>(shared_from_this());
 			forceInitializeShader();
 			return self;
 		}
 
 		std::shared_ptr<Drawable> Drawable::material(std::shared_ptr<Material> a_material) {
-			materialInstance = a_material;
-			if (a_material) {
-				materialId = a_material->id();
+			return material(a_material ? a_material->id() : PREMULTIPLY_ID);
+		}
+
+		std::shared_ptr<Drawable> Drawable::materialOverride(std::shared_ptr<MaterialParameter> a_parameter) {
+			auto& overrides = ourMaterialOverrides.get();
+			auto found = std::find_if(overrides.begin(), overrides.end(), [&](const std::shared_ptr<MaterialParameter>& a_existing) {
+				return a_existing && a_existing->name() == a_parameter->name();
+			});
+			if (found != overrides.end()) {
+				*found = a_parameter;
 			} else {
-				materialId = "";
+				overrides.push_back(a_parameter);
 			}
+			return std::static_pointer_cast<Drawable>(shared_from_this());
+		}
+
+		std::shared_ptr<Drawable> Drawable::clearMaterialOverride(const std::string& a_name) {
+			auto& overrides = ourMaterialOverrides.get();
+			std::erase_if(overrides, [&](const std::shared_ptr<MaterialParameter>& a_existing) {
+				return !a_existing || a_existing->name() == a_name;
+			});
 			return std::static_pointer_cast<Drawable>(shared_from_this());
 		}
 
@@ -180,26 +193,32 @@ namespace MV {
 			refreshBounds();
 		}
 
-		// The material/userMaterialSettings pass; shaderProgram->set records into the open uniform set (device) or issues GL (legacy).
+		// The engine's uniforms, the material's parameters, this drawable's overrides of them, then userMaterialSettings;
+		// shaderProgram->set records into the open uniform set (device) or issues GL (legacy).
 		void Drawable::applyMaterialPass(Draw2D &a_renderer) {
+			materialSettingsImplementation(*shaderProgram);
 			if (materialInstance) {
 				try {
 					MaterialContext context {
 						a_renderer,
-						static_cast<float>(accumulatedDelta),
+						static_cast<float>(animationTime()),
 						owner()->worldTransform(),
 						owner()->worldAlpha(),
 						owner()->cameraId()
 					};
-					materialInstance->apply(*shaderProgram, context);
+					GLuint textureSlot = FIRST_MATERIAL_TEXTURE_SLOT;
+					materialInstance->apply(*shaderProgram, context, textureSlot);
+					for (auto&& parameter : *ourMaterialOverrides) {
+						if (parameter) {
+							parameter->apply(*shaderProgram, textureSlot);
+						}
+					}
 				} catch (std::exception &e) {
 					MV::error("Drawable::defaultDrawImplementation. Exception in material->apply: ", e.what());
 				}
-			} else {
-				materialSettingsImplementation(*shaderProgram);
-				if (userMaterialSettings) {
-					try { userMaterialSettings(*shaderProgram); } catch (std::exception &e) { MV::error("Drawable::defaultDrawImplementation. Exception in userMaterialSettings: ", e.what()); }
-				}
+			}
+			if (userMaterialSettings) {
+				try { userMaterialSettings(*shaderProgram); } catch (std::exception &e) { MV::error("Drawable::defaultDrawImplementation. Exception in userMaterialSettings: ", e.what()); }
 			}
 			if (shaderProgram->lit()) {
 				applyLighting(a_renderer);
@@ -209,7 +228,7 @@ namespace MV {
 		void Drawable::applyLighting(Draw2D &a_renderer) {
 			auto ourOwner = owner();
 			applyLights(*shaderProgram, a_renderer, ourOwner->worldFromLocal(*localBounds), ourOwner->root().get());
-			if (materialInstance && materialInstance->textures().count(1)) {
+			if (findParameter(*ourMaterialOverrides, "texture1") || (materialInstance && findParameter(*materialInstance->parameters, "texture1"))) {
 				shaderProgram->set("normalMapped", 1.0f, false);
 				return;
 			}
@@ -271,7 +290,7 @@ namespace MV {
 			if (vertexIndices->empty()) { return; }
 			require<ResourceException>(shaderProgram, "No shader program for Drawable!");
 
-			const BlendMode effectiveBlend = materialInstance ? materialInstance->blend() : blendModePreset;
+			const BlendMode effectiveBlend = materialInstance ? materialInstance->blendFor(blendModePreset) : blendModePreset;
 			if (drawsInBatches(ourRenderer) && (!queuedDrawWentAlone || ourRenderer.batches()->probing())) {
 				queueBatchedDraw(ourRenderer, effectiveBlend);
 				return;
@@ -300,10 +319,12 @@ namespace MV {
 		}
 
 		void Drawable::prepareDeviceUniformSet(Render::Device& a_device, Draw2D& a_renderer, BlendMode a_blend) {
-			if (devicePipeline != cachedPipelineForKey || cachedBlendMode != a_blend
-			    || cachedTopologyDrawType != drawType || cachedColorWriteMask != devicePipelineColorWriteMask || !deviceUniformSet.valid()) {
+			if (devicePipeline != cachedPipelineForKey || cachedPipelineShader != shaderProgram.get() || cachedPipelineRevision != a_renderer.pipelineRevision()
+			    || cachedBlendMode != a_blend || cachedTopologyDrawType != drawType || cachedColorWriteMask != devicePipelineColorWriteMask || !deviceUniformSet.valid()) {
 				devicePipeline = a_renderer.pipelineFor(shaderProgram, a_blend, drawType, devicePipelineColorWriteMask);
 				cachedPipelineForKey = devicePipeline;
+				cachedPipelineShader = shaderProgram.get();
+				cachedPipelineRevision = a_renderer.pipelineRevision();
 				cachedBlendMode = a_blend;
 				cachedTopologyDrawType = drawType;
 				cachedColorWriteMask = devicePipelineColorWriteMask;
@@ -319,18 +340,17 @@ namespace MV {
 				&& (!materialInstance || materialInstance->batchable());
 		}
 
-		// The draw's material is the one it names or its shader's. The queue gets its own buffers and uniform set as
-		// well as its vertices, so a draw nothing joins draws as it would unbatched.
+		double Drawable::animationTime() const {
+			return materialInstance && materialInstance->sharedTime.get() ? accumulatedDelta : accumulatedDelta + clockOffset;
+		}
+
+		// The queue gets its own buffers and uniform set as well as its vertices, so a draw nothing joins draws as it
+		// would unbatched.
 		void Drawable::queueBatchedDraw(Draw2D& a_renderer, BlendMode a_blend) {
 			auto& batches = *a_renderer.batches();
 			syncDeviceBuffers(&batches, Render::BufferUpdateHint::Dynamic);
 			prepareDeviceUniformSet(batches, a_renderer, a_blend);
-			if (!materialInstance && (cachedShaderMaterialShader != shaderProgram.get() || cachedShaderMaterialBlend != a_blend)) {
-				cachedShaderMaterial = a_renderer.shaderMaterial(shaderProgram, a_blend).get();
-				cachedShaderMaterialShader = shaderProgram.get();
-				cachedShaderMaterialBlend = a_blend;
-			}
-			const Material* drawMaterial = materialInstance ? materialInstance.get() : cachedShaderMaterial;
+			const Material* drawMaterial = materialInstance.get();
 
 			Render::UniformRecord& uniforms = batches.openRecord();
 			SCOPE_EXIT{ batches.closeRecord(); };
@@ -370,11 +390,13 @@ namespace MV {
 		}
 
 		void Drawable::forceInitializeShader() {
-			if (owner()->renderer().hasShader(shaderProgramId)) {
-				shaderProgram = owner()->renderer().getShader(shaderProgramId);
-			} else {
-				shaderProgram = owner()->renderer().defaultShader();
+			auto& renderer = owner()->renderer();
+			materialInstance = renderer.getMaterial(ourMaterialId);
+			if (!materialInstance) {
+				warning("Material [", ourMaterialId.get(), "] not found for [", owner()->id(), "].[", id(), "]: drawn with the default, id kept for re-save");
+				materialInstance = renderer.getMaterial(renderer.defaultShader()->id());
 			}
+			shaderProgram = materialInstance && renderer.hasShader(materialInstance->shaderProgramId()) ? renderer.getShader(materialInstance->shaderProgramId()) : renderer.defaultShader();
 		}
 
 		Drawable::Drawable(const std::weak_ptr<Node> &a_owner) :
@@ -390,7 +412,7 @@ namespace MV {
 
 		void Drawable::materialSettingsImplementation(Shader& a_shaderProgram) {
 			auto ourOwner = owner();
-			a_shaderProgram.set("time", static_cast<PointPrecision>(accumulatedDelta), false); //optional but helpful default
+			a_shaderProgram.set("time", static_cast<PointPrecision>(animationTime()), false);
 			// Record alpha unconditionally: the device path reuses one uniform set, so a conditional set
 			// would let a stale prior-frame alpha persist (alpha==1 is the shader identity anyway).
 			a_shaderProgram.set("alpha", ourOwner->worldAlpha(), false);
@@ -462,12 +484,7 @@ namespace MV {
 		}
 
 		void Drawable::postLoadInitialize() {
-			if (!materialId->empty() && (!materialInstance || materialInstance->id() != materialId.get())) {
-				materialInstance = owner()->renderer().getMaterial(materialId.get());
-				if (!materialInstance) {
-					warning("Material [", materialId.get(), "] not found for [", owner()->id(), "].[", id(), "] - id kept for re-save");
-				}
-			}
+			forceInitializeShader();
 			ourAnchors->postLoadInitialize();
 		}
 

@@ -489,10 +489,12 @@ namespace MV {
 			Render::Device* dev = ourRenderer.device();
 			syncDeviceBuffers(dev, Render::BufferUpdateHint::Stream); // particles churn every frame.
 
-			if (devicePipeline != cachedPipelineForKey || cachedBlendMode != blendModePreset
-			    || cachedTopologyDrawType != drawType || !deviceUniformSet.valid()) {
+			if (devicePipeline != cachedPipelineForKey || cachedPipelineShader != shaderProgram.get() || cachedPipelineRevision != ourRenderer.pipelineRevision()
+			    || cachedBlendMode != blendModePreset || cachedTopologyDrawType != drawType || !deviceUniformSet.valid()) {
 				devicePipeline = ourRenderer.pipelineFor(shaderProgram, blendModePreset, drawType);
 				cachedPipelineForKey = devicePipeline;
+				cachedPipelineShader = shaderProgram.get();
+				cachedPipelineRevision = ourRenderer.pipelineRevision();
 				cachedBlendMode = blendModePreset;
 				cachedTopologyDrawType = drawType;
 				if (deviceUniformSet.valid()) { dev->destroyUniformSet(deviceUniformSet); }

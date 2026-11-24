@@ -37,6 +37,7 @@ struct Managers {
 
 		textures.loadThreadPool(&pool);
 		textures.renderer(&renderer);
+		renderer.services(&services);
 	}
 
 	MV::Stopwatch timer;

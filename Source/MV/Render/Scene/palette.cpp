@@ -43,7 +43,7 @@ namespace MV {
 			ourMouse(a_mouse),
 			hsv(360.0f, 0.0f, 0.0f, 1.0f){
 
-			shaderProgramId = MV::COLOR_PICKER_ID;
+			ourMaterialId = MV::COLOR_PICKER_ID;
 
 			//14 for the color selector, 4 for the hue + saturation,
 			//4 for the alpha left, 4 for the alpha right, 4 for the preview.

@@ -476,9 +476,9 @@ SelectedDrawableEditorPanel::SelectedDrawableEditorPanel(EditorControls &a_panel
 	});
 
 	makeInputField(this, *panel.services().get<MV::TapDevice>(), grid, *panel.services().get<MV::TextLibrary>(), "Shader", buttonSize)->
-		text(controls->elementToEdit->shader())->
+		text(controls->elementToEdit->materialId())->
 		onEnter.connect("shader", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text) {
-			controls->elementToEdit->shader(a_text->text());
+			controls->elementToEdit->material(a_text->text());
 		});
 
 	makeInputField(this, *panel.services().get<MV::TapDevice>(), grid, *panel.services().get<MV::TextLibrary>(), "BlendMode", buttonSize)->
@@ -1168,9 +1168,9 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 	});
 
 	makeInputField(this, panel.services(), grid, "Shader", buttonSize)->
-		text(controls->elementToEdit->shader())->
+		text(controls->elementToEdit->materialId())->
 		onEnter.connect("shader", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text) {
-		controls->elementToEdit->shader(a_text->text());
+		controls->elementToEdit->material(a_text->text());
 	});
 
 	makeInputField(this, panel.services(), grid, "BlendMode", buttonSize)->
@@ -1847,7 +1847,7 @@ ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel, co
 void ChooseElementCreationType::createText(const MV::BoxAABB<int> &a_selected) {
 	panel.selection().disable();
 	auto newShape = nodeToAttachTo->attach<MV::Scene::Text>(*panel.services().get<MV::TextLibrary>());
-	newShape->bounds(nodeToAttachTo->localFromScreen(a_selected))->shader(MV::DEFAULT_ID)->id(MV::guid("text"));
+	newShape->bounds(nodeToAttachTo->localFromScreen(a_selected))->material(MV::DEFAULT_ID)->id(MV::guid("text"));
 
 	panel.loadPanel<SelectedTextEditorPanel>(std::make_shared<EditableText>(newShape, panel.editor(), panel.services().get<MV::TapDevice>()), editorPanel->CreateComponentButton(newShape).self());
 }
@@ -1855,7 +1855,7 @@ void ChooseElementCreationType::createText(const MV::BoxAABB<int> &a_selected) {
 void ChooseElementCreationType::createRectangle(const MV::BoxAABB<int> &a_selected) {
 	panel.selection().disable();
 	auto newShape = nodeToAttachTo->attach<MV::Scene::Sprite>();
-	newShape->bounds(nodeToAttachTo->localFromScreen(a_selected))->color({ CREATED_DEFAULT })->shader(MV::DEFAULT_ID)->id(MV::guid("sprite"));
+	newShape->bounds(nodeToAttachTo->localFromScreen(a_selected))->color({ CREATED_DEFAULT })->material(MV::DEFAULT_ID)->id(MV::guid("sprite"));
 
 	panel.loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(newShape, panel.editor(), panel.services().get<MV::TapDevice>()), editorPanel->CreateComponentButton(newShape).self());
 }
@@ -1874,7 +1874,7 @@ void ChooseElementCreationType::createEmitter(const MV::BoxAABB<int> &a_selected
 	panel.selection().disable();
 
 	auto newEmitter = nodeToAttachTo->attach<MV::Scene::Emitter>(*panel.services().get<jai::thread_pool>());
-	newEmitter->id(MV::guid("emitter"))->shader(MV::DEFAULT_ID);
+	newEmitter->id(MV::guid("emitter"))->material(MV::DEFAULT_ID);
 	auto transformedSelection = nodeToAttachTo->localFromScreen(a_selected);
 	newEmitter->properties().minimumPosition = transformedSelection.minPoint;
 	newEmitter->properties().maximumPosition = transformedSelection.maxPoint;
@@ -1951,7 +1951,7 @@ void ChooseElementCreationType::createClickable(const MV::BoxAABB<int> &a_select
 void ChooseElementCreationType::createSpine() {
 	panel.selection().disable();
 
-	auto newSpine = nodeToAttachTo->attach<MV::Scene::Spine>()->shader(MV::DEFAULT_ID)->safe();
+	auto newSpine = nodeToAttachTo->attach<MV::Scene::Spine>()->material(MV::DEFAULT_ID)->safe();
 	newSpine->id(MV::guid("spine"));
 
 	panel.loadPanel<SelectedSpineEditorPanel>(std::make_shared<EditableSpine>(newSpine, panel.editor(), panel.services().get<MV::TapDevice>()), editorPanel->CreateComponentButton(newSpine).self());

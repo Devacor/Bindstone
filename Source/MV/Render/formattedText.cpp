@@ -313,7 +313,7 @@ namespace MV {
 			bounds(cast<PointPrecision>(character->characterSize()))->
 			texture(character->texture())->
 			color(state->color)->
-			shader(MV::PREMULTIPLY_ID)->
+			material(MV::PREMULTIPLY_ID)->
 			owner();
 	}
 

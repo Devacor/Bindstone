@@ -36,6 +36,7 @@
     <ClCompile Include="$(SolutionDir)Source\Workbench\sceneGrid.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\sceneToolbar.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\inspectorEditors.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Workbench\inspectorMaterials.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\historyStrip.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\settingsPanel.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Workbench\tooltips.cpp" />

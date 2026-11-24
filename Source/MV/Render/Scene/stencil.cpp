@@ -33,7 +33,7 @@ namespace MV {
 
 		Stencil::Stencil(const std::weak_ptr<Node> &a_owner) :
 			jai::property_owner<Stencil, Sprite>(a_owner) {
-			//shaderProgramId = ALPHA_FILTER_ID;
+			//ourMaterialId = ALPHA_FILTER_ID;
 			auto newColor = Color(0.0f, 0.0f, 0.0f, 1.0f);
 			for (auto&& point : points) {
 				point = newColor;

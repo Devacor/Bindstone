@@ -40,6 +40,7 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\headlessDevice.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\vulkanDevice.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\render.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\material.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\button.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\clickable.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\controllerCursor.cpp" />
@@ -109,6 +110,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\handlePool.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\headlessDevice.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\render.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\material.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\button.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\clickable.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\controllerCursor.h" />

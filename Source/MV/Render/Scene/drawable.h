@@ -3,6 +3,7 @@
 
 #include "node.h"
 #include "MV/Render/deviceBindings.h"
+#include "MV/Render/material.h"
 #include <jaiscript/properties.hpp>
 #include <jaiscript/serialization/archive.hpp>
 
@@ -22,9 +23,9 @@
 		return MV::Scene::Drawable::color(); \
 	}
 
-#define DrawableDerivedAccessorsShader(ComponentType) \
-	std::shared_ptr<ComponentType> shader(const std::string &a_shaderProgramId) { \
-		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::shader(a_shaderProgramId)); \
+#define DrawableDerivedAccessorsMaterial(ComponentType) \
+	std::shared_ptr<ComponentType> material(const std::string &a_materialId) { \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::material(a_materialId)); \
 	} \
 	std::shared_ptr<ComponentType> material(std::shared_ptr<Material> a_material) { \
 		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::material(a_material)); \
@@ -41,19 +42,19 @@
 	std::shared_ptr<MV::TextureHandle> texture(size_t a_textureId = 0) const{ \
 		return MV::Scene::Drawable::texture(a_textureId); \
 	} \
-	std::string shader() const { \
-		return MV::Scene::Drawable::shader(); \
+	std::string materialId() const { \
+		return MV::Scene::Drawable::materialId(); \
 	}
 
 #define DrawableDerivedAccessorsNoColor(ComponentType) \
 	ComponentDerivedAccessors(ComponentType) \
 	DrawableDerivedAccessorsShowHide(ComponentType) \
-	DrawableDerivedAccessorsShader(ComponentType)
+	DrawableDerivedAccessorsMaterial(ComponentType)
 
 #define DrawableDerivedAccessorsNoShowHide(ComponentType) \
 	ComponentDerivedAccessors(ComponentType) \
 	DrawableDerivedAccessorsColor(ComponentType) \
-	DrawableDerivedAccessorsShader(ComponentType)
+	DrawableDerivedAccessorsMaterial(ComponentType)
 
 #define DrawableDerivedAccessors(ComponentType) \
 	DrawableDerivedAccessorsNoColor(ComponentType) \
@@ -158,8 +159,9 @@ namespace MV {
 
 			Color color() const;
 
-			std::string shader() const {
-				return shaderProgramId;
+			// The material the drawable names; kept as named for re-save even when nothing resolves it.
+			std::string materialId() const {
+				return ourMaterialId;
 			}
 
 			Anchors& anchors() {
@@ -172,10 +174,15 @@ namespace MV {
 			std::shared_ptr<Drawable> color(const Color& a_newColor);
 			std::shared_ptr<Drawable> colors(const std::vector<Color>& a_newColors);
 
-			std::shared_ptr<Drawable> shader(const std::string& a_shaderProgramId);
-			
+			std::shared_ptr<Drawable> material(const std::string& a_materialId);
+			// A material made in code (Draw2D::loadMaterial); its id is what the drawable saves.
 			std::shared_ptr<Drawable> material(std::shared_ptr<Material> a_material);
 			std::shared_ptr<Material> material() const { return materialInstance; }
+
+			// What this drawable gives its material's shader in place of the material's own parameters of those names.
+			const MaterialParameters& materialOverrides() const { return ourMaterialOverrides.get(); }
+			std::shared_ptr<Drawable> materialOverride(std::shared_ptr<MaterialParameter> a_parameter);
+			std::shared_ptr<Drawable> clearMaterialOverride(const std::string& a_name);
 
 			std::shared_ptr<TextureHandle> texture(size_t a_index = 0) const {
 				return ourTextures->at(a_index);
@@ -280,6 +287,8 @@ namespace MV {
 			virtual void releaseDeviceBindings(Render::Device& a_device);
 
 			void addTexturesToShader();
+			// Material texture parameters bind from here up, clear of the drawable's own texture slots.
+			static constexpr GLuint FIRST_MATERIAL_TEXTURE_SLOT = 8;
 
 			virtual void onRemoved() {
 				notifyParentOfBoundsChange();
@@ -304,6 +313,9 @@ namespace MV {
 
 			// Whether this draw may join Draw2D's queue of mergeable draws rather than drawing on its own.
 			bool drawsInBatches(Draw2D& a_renderer) const;
+			// The shader's time: one clock for every drawable on a material that shares time, else this one's own,
+			// started at a random point on load.
+			double animationTime() const;
 			void queueBatchedDraw(Draw2D& a_renderer, BlendMode a_blend);
 			// The pipeline for the draw's state and a uniform set bound to it, made again only when that state changes.
 			void prepareDeviceUniformSet(Render::Device& a_device, Draw2D& a_renderer, BlendMode a_blend);
@@ -361,10 +373,11 @@ namespace MV {
 			JAI_TRANSIENT_PROPERTY((BoxAABB<>), localBounds);  // derived: recomputed from points
 
 			std::shared_ptr<Shader> shaderProgram = nullptr;
-			JAI_PROPERTY((std::string), shaderProgramId, PREMULTIPLY_ID);
-
 			std::shared_ptr<Material> materialInstance = nullptr;
-			JAI_PROPERTY((std::string), materialId, "");
+			JAI_NAMED_PROPERTY((std::string), "material", ourMaterialId, PREMULTIPLY_ID);
+			JAI_NAMED_PROPERTY((MaterialParameters), "materialOverrides", ourMaterialOverrides, [](auto& source, auto& destination) {
+				destination = cloneParameters(source.get());
+			});
 			
 			bool dirtyVertexBuffer = true;
 
@@ -383,9 +396,8 @@ namespace MV {
 			GLenum                  cachedTopologyDrawType = 0; // 0 == no pipeline resolved yet.
 			uint8_t                 devicePipelineColorWriteMask = 0xF; // Stencil sets 0 to draw its mask without color.
 			uint8_t                 cachedColorWriteMask = 0xF;
-			const Material*         cachedShaderMaterial = nullptr;   // Draw2D::shaderMaterial for the two below.
-			const Shader*           cachedShaderMaterialShader = nullptr;
-			BlendMode               cachedShaderMaterialBlend = BLEND_DEFAULT;
+			const Shader*           cachedPipelineShader = nullptr;
+			uint64_t                cachedPipelineRevision = 0;   // Draw2D::pipelineRevision when the pipeline was taken.
 			bool                    queuedDrawWentAlone = false;   // the queue sets it when it draws this drawable's draw
 			bool                    dirtyIndexBuffer = true;
 

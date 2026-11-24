@@ -345,6 +345,8 @@ namespace Workbench {
 					openScene(target.generic_string());
 				} else if (extension == ".png" || extension == ".jpg") {
 					openImagePreview(target.generic_string());
+				} else if (auto materialId = MV::materialIdOfFile(target.generic_string()); !materialId.empty() && onOpenMaterial) {
+					onOpenMaterial(materialId);
 				}
 			}
 		});
@@ -393,7 +395,7 @@ namespace Workbench {
 				std::string extension = entry.extension().string();
 				bool isImage = extension == ".png" || extension == ".jpg";
 				// a scene is placed in another as a BindSnap is: which a file is called is convention
-				bool draggable = extension == ".bindsnap" || extension == ".scene" || !MV::shaderIdOfFile(entry.string()).empty();
+				bool draggable = extension == ".bindsnap" || extension == ".scene" || !MV::materialIdOfFile(entry.string()).empty();
 
 				auto row = tileHost->make(MV::guid("listRow_"));
 				row->position(MV::point(0.0f, index * theme->rowHeight));
@@ -465,7 +467,7 @@ namespace Workbench {
 
 			std::string extension = entry.extension().string();
 			bool isImage = extension == ".png" || extension == ".jpg";
-			bool draggable = extension == ".bindsnap" || extension == ".scene" || !MV::shaderIdOfFile(entry.string()).empty();
+			bool draggable = extension == ".bindsnap" || extension == ".scene" || !MV::materialIdOfFile(entry.string()).empty();
 
 			if (isImage) {
 				attachOutlinedRect(tile, *services, *theme, MV::size(tileSize, tileSize), theme->fieldBg(), theme->fieldOutline());

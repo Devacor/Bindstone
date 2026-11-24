@@ -11,7 +11,7 @@ namespace Workbench {
 	// Unity-style Project window over Assets/: folder tree left, tile grid right, breadcrumb
 	// top; double-click navigates folders and loads .scene/.bindsnap files into the editor.
 	// A footer slider scales the tiles; at its minimum the grid becomes a list. A BindSnap's tile drags out into
-	// the scene, as a scene's does, a shader file's onto a drawable's shader field, and a Hierarchy row let go on
+	// the scene, as a scene's does, a shader or material file's onto a drawable's material field, and a Hierarchy row let go on
 	// the panel is saved into the folder it is over (App::saveAsBindSnap).
 	class ProjectPanel : public Panel {
 	public:
@@ -44,6 +44,8 @@ namespace Workbench {
 		bool beginRename(const std::filesystem::path& a_entry);
 		bool renaming() const { return !renameField.expired(); }
 		std::function<void(const std::filesystem::path& a_entry, const std::string& a_newName)> onRename;
+		// A double-click on a .material, .vert or .frag: the material it gives.
+		std::function<void(const std::string& a_materialId)> onOpenMaterial;
 
 	protected:
 		void build() override;

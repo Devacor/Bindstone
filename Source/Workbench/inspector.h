@@ -20,6 +20,8 @@ namespace Workbench {
 		explicit InspectorPanel(CommandHistory& a_history) : Panel("Inspector"), history(&a_history) {}
 
 		void inspect(const std::shared_ptr<MV::Scene::Node>& a_node);
+		// A material on its own, as the Project panel opens a .material, .vert or .frag.
+		void inspectMaterial(const std::string& a_materialId);
 
 		// Gizmo bridge: header "G" buttons toggle a component's viewport gizmo through the app.
 		std::function<void(const std::shared_ptr<MV::Scene::Component>&)> onEditComponent;
@@ -42,8 +44,8 @@ namespace Workbench {
 		std::optional<MV::Point<int>> removeComponentScreenPoint(const std::string& a_typeName) const;
 		// A node dragged out of the Hierarchy and released over a reference field is assigned to it. True when a field took it.
 		bool dropNode(const std::shared_ptr<MV::Scene::Node>& a_node, const MV::Point<int>& a_screenPoint);
-		// A file dragged out of the Project panel and released over a field that takes it (a shader file on a drawable's
-		// shader). True when a field took it.
+		// A file dragged out of the Project panel and released over a field that takes it (a shader or material file on a
+		// drawable's material). True when a field took it.
 		bool dropFile(const std::string& a_path, const MV::Point<int>& a_screenPoint);
 
 		// Where a row can be pressed, by its label (the first row with it): its field, or the whole row for a group's header.
@@ -80,14 +82,21 @@ namespace Workbench {
 		void addNodeReferenceRow(const std::string& a_label, const std::shared_ptr<MV::Scene::Node>& a_node, std::function<void(const std::shared_ptr<MV::Scene::Node>&)> a_assign);
 		void addAnchorsGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
 		void addTextureRows(const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
-		// The registered shader programs to choose from, and a shader file from the Project panel to drop on.
-		void addShaderRow(const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
+		// The materials to choose from, and a shader or material file from the Project panel to drop on.
+		void addMaterialRow(const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
+		// inspectorMaterials.cpp: a material's own section (its stages, blend, clock, a row per uniform its stages take,
+		// Save), a drawable's overrides of its material's parameters, and a field for one parameter's value.
+		void addMaterialSection(const std::shared_ptr<MV::Material>& a_material, const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
+		void addStageRow(const std::shared_ptr<MV::Material>& a_material, bool a_vertex);
+		void addOverridesGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
+		void addParameterField(const std::shared_ptr<MV::Scene::Node>& a_fieldHost, float a_width, const std::shared_ptr<MV::MaterialParameter>& a_parameter);
 		void addPointsGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
 		void addIndicesGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
 		void addFocusLinksGroup(const std::shared_ptr<MV::Scene::Clickable>& a_clickable);
 		// Rows of a list a page at a time, with the pager; returns the first index to show.
 		size_t addPager(const std::string& a_key, size_t a_count, size_t a_perPage);
 		void openTexturePicker(const std::weak_ptr<MV::Scene::Drawable>& a_drawable, size_t a_slot, const MV::Point<int>& a_screenPoint);
+		void openTexturePicker(std::function<void(const std::shared_ptr<MV::TextureHandle>&)> a_choose, const MV::Point<int>& a_screenPoint);
 		void buildTexturePicker();
 		void closeTexturePicker();
 
@@ -142,6 +151,7 @@ namespace Workbench {
 		CommandHistory* history = nullptr;
 
 		std::weak_ptr<MV::Scene::Node> inspectedNode;
+		std::string inspectedMaterialId;
 		// Ends the open colour picker session: true records the change as one command, false restores the colour it opened with.
 		std::function<void(bool)> colorPopupClose;
 
@@ -164,8 +174,7 @@ namespace Workbench {
 		std::map<std::string, size_t> listPages;
 
 		struct TexturePicker {
-			std::weak_ptr<MV::Scene::Drawable> drawable;
-			size_t slot = 0;
+			std::function<void(const std::shared_ptr<MV::TextureHandle>&)> choose;
 			size_t source = 0;
 			size_t page = 0;
 			MV::Point<> position;

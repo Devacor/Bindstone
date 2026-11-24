@@ -105,6 +105,9 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\render.cpp">
       <Filter>MV\Render</Filter>
     </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\material.cpp">
+      <Filter>MV\Render</Filter>
+    </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\sharedTextures.cpp">
       <Filter>MV\Render</Filter>
     </ClCompile>
@@ -302,6 +305,9 @@
       <Filter>MV\Render\Backends</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\render.h">
+      <Filter>MV\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\material.h">
       <Filter>MV\Render</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\sharedTextures.h">

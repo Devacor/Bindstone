@@ -7,6 +7,7 @@
 #include "MV/Utility/generalUtility.h"
 #include "MV/Utility/stringUtility.h"
 #include "MV/Utility/stopwatch.h"
+#include "MV/Render/material.h"
 
 #include <chrono>
 #include <filesystem>
@@ -23,11 +24,11 @@ namespace MV {
 	const std::string DEFAULT_VERTEX_SHADER_FILE = "Shaders/default.vert";
 	const std::string SHADER_FOLDER = "Shaders";
 
-	std::string shaderIdOfFile(const std::string& a_path) {
+	std::string materialIdOfFile(const std::string& a_path) {
 		std::filesystem::path path(a_path);
 		auto extension = path.extension().string();
 		toLowerInPlace(extension);
-		return extension == ".vert" || extension == ".frag" ? path.stem().string() : std::string();
+		return extension == ".vert" || extension == ".frag" || extension == ".material" ? path.stem().string() : std::string();
 	}
 
 	bool RUNNING_IN_HEADLESS = false;
@@ -1170,6 +1171,7 @@ namespace MV {
 			for (auto& kv : pipelineCache) { batchedDevice->destroyPipeline(kv.second); }
 		}
 		pipelineCache.clear();
+		++pipelineCacheRevision;
 	}
 
 	void StencilStack::push(const std::function<void()> &a_drawMask) {
@@ -1230,19 +1232,25 @@ namespace MV {
 				return;
 			}
 		}
+		if (a_folder == SHADER_FOLDER) {
+			shaderFolderPath = directory.generic_string();
+		}
 		std::map<std::string, std::set<std::string>> extensionsByName;
 		for (auto&& entry : std::filesystem::directory_iterator(directory, ignored)) {
 			if (entry.is_regular_file(ignored)) {
-				if (auto name = shaderIdOfFile(entry.path().filename().string()); !name.empty()) {
-					auto extension = entry.path().extension().string();
-					toLowerInPlace(extension);
+				auto extension = entry.path().extension().string();
+				toLowerInPlace(extension);
+				auto name = entry.path().stem().string();
+				if (extension == ".material") {
+					materialFiles[name] = a_folder + "/" + entry.path().filename().string();
+				} else if (extension == ".vert" || extension == ".frag") {
 					extensionsByName[name].insert(extension);
 				}
 			}
 		}
 		auto inFolder = [&](const std::string& a_file) { return a_folder + "/" + a_file; };
 		for (auto&& [name, extensions] : extensionsByName) {
-			if (hasShader(name)) {
+			if (hasShader(name) || materialFiles.contains(name)) {
 				continue;
 			}
 			try {
@@ -1288,6 +1296,25 @@ namespace MV {
 		}
 	}
 
+
+	void Draw2D::reloadShader(const std::shared_ptr<Shader>& a_shader, const std::string& a_vertexShaderFilename, const std::string& a_fragmentShaderFilename) {
+		std::string vertexShaderCode = fileContents(a_vertexShaderFilename);
+		MV::require<ResourceException>(!vertexShaderCode.empty(), "Failed to load vertex shader: ", a_vertexShaderFilename);
+		std::string fragmentShaderCode = fileContents(a_fragmentShaderFilename);
+		MV::require<ResourceException>(!fragmentShaderCode.empty(), "Failed to load fragment shader: ", a_fragmentShaderFilename);
+		if (!headless()) {
+			auto newId = loadShaderGetProgramId(vertexShaderCode, fragmentShaderCode);
+			glDeleteProgram(a_shader->programId);
+			a_shader->programId = newId;
+		}
+		a_shader->vertexShaderFile = a_vertexShaderFilename;
+		a_shader->fragmentShaderFile = a_fragmentShaderFilename;
+		a_shader->batchable(a_shader->lit() || a_vertexShaderFilename == DEFAULT_VERTEX_SHADER_FILE);
+		if (device()) {
+			a_shader->initializeDeviceModules(device(), vertexShaderCode, fragmentShaderCode);
+		}
+		clearPipelineCache();
+	}
 
 	bool Draw2D::hasShader(const std::string &a_id) {
 		auto found = shaders.find(a_id);
@@ -1441,67 +1468,107 @@ namespace MV {
 		return false;
 	}
 
-	void Material::apply(Shader& shader, const MaterialContext& context) const {
-		shader.set("alpha", context.alpha, false);
-		shader.set("transformation", context.renderer.cameraProjectionMatrix(context.cameraId) * context.worldTransform);
-		for (const auto& [slot, tex] : defaultTextures) {
-			if (tex) {
-				shader.set("texture" + std::to_string(slot), tex, static_cast<int>(slot), false);
-			}
-		}
-
-		if (applyFunction) {
-			applyFunction(shader, context);
-		}
-	}
-
 	std::shared_ptr<Material> Draw2D::loadMaterial(const std::string& a_id, const std::string& a_shaderProgramId) {
 		if (!hasShader(a_shaderProgramId)) {
 			error("loadMaterial: Shader program not found: ", a_shaderProgramId);
 			return nullptr;
 		}
-		
 		auto material = std::make_shared<Material>(a_id, a_shaderProgramId);
 		materials[a_id] = material;
 		return material;
 	}
 
-	bool Draw2D::hasMaterial(const std::string& a_id) const {
-		return materials.find(a_id) != materials.end();
-	}
-
 	std::shared_ptr<Material> Draw2D::getMaterial(const std::string& a_id) {
-		auto it = materials.find(a_id);
-		if (it != materials.end()) {
-			return it->second;
+		if (auto found = materials.find(a_id); found != materials.end()) {
+			return found->second;
 		}
-		return nullptr;
-	}
-
-	std::shared_ptr<const Material> Draw2D::getMaterial(const std::string& a_id) const {
-		auto it = materials.find(a_id);
-		if (it != materials.end()) {
-			return it->second;
+		std::shared_ptr<Material> result;
+		if (auto file = materialFiles.find(a_id); file != materialFiles.end()) {
+			try {
+				auto* engine = ourServices ? ourServices->get<jai::engine>(false) : nullptr;
+				MV::require<ResourceException>(engine, "no script engine to read it with");
+				auto loaded = materialFromJson(fileContents(file->second, true), *ourServices);
+				MV::require<ResourceException>(loaded, "the file holds no Material");
+				loaded->ourId = a_id;
+				loaded->ourShaderProgramId = a_id;
+				materialStagesChanged(loaded);
+				result = loaded;
+			} catch (std::exception& e) {
+				error("Material [", a_id, "] in ", file->second, " not loaded: ", e.what());
+			}
+		} else if (hasShader(a_id)) {
+			result = std::make_shared<Material>(a_id, a_id);
+			result->isImplicit = true;
+			auto shader = getShader(a_id);
+			auto stageName = [](const std::string& a_file) { return std::filesystem::path(a_file).filename().string(); };
+			if (!shader->vertexShaderFile.empty()) {
+				result->vertex = stageName(shader->vertexShaderFile);
+			}
+			if (!shader->fragmentShaderFile.empty()) {
+				result->fragment = stageName(shader->fragmentShaderFile);
+			}
+		} else {
+			return nullptr;
 		}
-		return nullptr;
-	}
-
-	std::shared_ptr<Material> Draw2D::defaultMaterial() const {
-		return defaultMaterialPtr;
-	}
-
-	const std::shared_ptr<Material>& Draw2D::shaderMaterial(const std::shared_ptr<Shader>& a_shader, BlendMode a_blend) {
-		auto& result = shaderMaterials[{ a_shader->id(), a_blend }];
-		if (!result) {
-			result = std::make_shared<Material>("shader:" + a_shader->id(), a_shader->id());
-			result->blend(a_blend);
-		}
+		materials[a_id] = result;
 		return result;
 	}
 
-	std::shared_ptr<Material> Draw2D::defaultMaterial(const std::string& a_id) {
-		defaultMaterialPtr = getMaterial(a_id);
-		return defaultMaterialPtr;
+	std::vector<std::string> Draw2D::materialIds() const {
+		std::set<std::string> ids;
+		for (auto&& [id, material] : materials) {
+			if (material) {
+				ids.insert(id);
+			}
+		}
+		for (auto&& [id, file] : materialFiles) {
+			ids.insert(id);
+		}
+		for (auto&& [id, shader] : shaders) {
+			ids.insert(id);
+		}
+		return { ids.begin(), ids.end() };
+	}
+
+	std::vector<std::string> Draw2D::shaderStageFiles(const std::string& a_extension) const {
+		std::vector<std::string> result;
+		std::error_code ignored;
+		for (auto&& entry : std::filesystem::directory_iterator(shaderFolderPath, ignored)) {
+			if (entry.path().extension() == a_extension) {
+				result.push_back(entry.path().filename().string());
+			}
+		}
+		std::sort(result.begin(), result.end());
+		return result;
+	}
+
+	std::string Draw2D::materialFile(const std::string& a_id) const {
+		auto found = materialFiles.find(a_id);
+		return found == materialFiles.end() ? std::string() : found->second;
+	}
+
+	bool Draw2D::saveMaterial(const std::shared_ptr<Material>& a_material) {
+		if (!a_material || !ourServices || shaderFolderPath.empty()) {
+			return false;
+		}
+		const auto fileName = a_material->id() + ".material";
+		if (!writeToFile("./" + shaderFolderPath + "/" + fileName, materialToJson(a_material, *ourServices))) {
+			return false;
+		}
+		a_material->isImplicit = false;
+		materialFiles[a_material->id()] = SHADER_FOLDER + "/" + fileName;
+		materials[a_material->id()] = a_material;
+		return true;
+	}
+
+	void Draw2D::materialStagesChanged(const std::shared_ptr<Material>& a_material) {
+		auto vertexFile = SHADER_FOLDER + "/" + a_material->vertex.get();
+		auto fragmentFile = SHADER_FOLDER + "/" + a_material->fragment.get();
+		if (hasShader(a_material->shaderProgramId())) {
+			reloadShader(getShader(a_material->shaderProgramId()), vertexFile, fragmentFile);
+		} else {
+			loadShader(a_material->shaderProgramId(), vertexFile, fragmentFile);
+		}
 	}
 
 }

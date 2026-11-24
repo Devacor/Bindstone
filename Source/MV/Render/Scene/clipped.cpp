@@ -31,9 +31,9 @@ namespace MV {
 			if (owner()->renderer().headless()) { return; }
 
 			if (a_forceRefreshEvenIfNotDirty || dirtyTexture) {
-				auto originalShaderId = shader();
-				SCOPE_EXIT{ dirtyTexture = false;  shader(originalShaderId); };
-				shader(refreshShaderId);
+				auto originalMaterialId = materialId();
+				SCOPE_EXIT{ dirtyTexture = false;  material(originalMaterialId); };
+				material(refreshShaderId);
 				bool emptyCapturedBounds = capturedBounds->empty();
 				auto pointAABB = emptyCapturedBounds ? bounds() : *capturedBounds;
 				pointAABB += capturedOffset;
@@ -74,7 +74,7 @@ namespace MV {
 		Clipped::Clipped(const std::weak_ptr<Node> &a_owner) :
 			jai::property_owner<Clipped, Sprite>(a_owner){
 
-			shaderProgramId = DEFAULT_ID;
+			ourMaterialId = DEFAULT_ID;
 		}
 
 		std::shared_ptr<Clipped> Clipped::clearCaptureBounds() {

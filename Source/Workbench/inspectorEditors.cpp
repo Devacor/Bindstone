@@ -516,29 +516,29 @@ namespace Workbench {
 		}
 	}
 
-	void InspectorPanel::addShaderRow(const std::shared_ptr<MV::Scene::Drawable>& a_drawable) {
-		auto row = makeRow("shader");
+	void InspectorPanel::addMaterialRow(const std::shared_ptr<MV::Scene::Drawable>& a_drawable) {
+		auto row = makeRow("material");
 		auto fieldHost = row->make("field");
 		fieldHost->position(MV::point(labelWidth() + theme->pad, 0.0f));
 		std::weak_ptr<MV::Scene::Drawable> weakDrawable = a_drawable;
-		auto choose = [this, weakDrawable](const std::string& a_shaderId) {
+		auto choose = [this, weakDrawable](const std::string& a_materialId) {
 			auto locked = weakDrawable.lock();
-			if (!locked || locked->shader() == a_shaderId) {
+			if (!locked || locked->materialId() == a_materialId) {
 				return;
 			}
 			auto apply = [weakDrawable](const std::string& a_id) {
 				if (auto drawable = weakDrawable.lock()) {
-					drawable->shader(a_id);
+					drawable->material(a_id);
 				}
 			};
-			auto previous = locked->shader();
-			apply(a_shaderId);
-			history->record("shader", [apply, a_shaderId]() { apply(a_shaderId); }, [apply, previous]() { apply(previous); });
+			auto previous = locked->materialId();
+			apply(a_materialId);
+			history->record("material", [apply, a_materialId]() { apply(a_materialId); }, [apply, previous]() { apply(previous); });
 			rebuild();
 		};
 		auto& renderer = a_drawable->owner()->renderer();
-		const std::string current = a_drawable->shader();
-		const std::string shown = renderer.hasShader(current) ? current : current + " (not registered)";
+		const std::string current = a_drawable->materialId();
+		const std::string shown = renderer.hasMaterial(current) ? current : current + " (not found)";
 		makeDropdown(fieldHost, *services, *theme, "value", MV::size(fieldWidth(), theme->fieldHeight), shown, [this, weakDrawable, choose](const MV::Point<int>& a_screenPoint) {
 			auto locked = weakDrawable.lock();
 			if (!locked || !onOpenMenu) {
@@ -547,7 +547,7 @@ namespace Workbench {
 			auto& lockedRenderer = locked->owner()->renderer();
 			lockedRenderer.loadShaderFolder();
 			std::vector<MenuItem> items;
-			for (auto&& id : lockedRenderer.shaderIds()) {
+			for (auto&& id : lockedRenderer.materialIds()) {
 				MenuItem item;
 				item.label = id;
 				item.action = [choose, id]() { choose(id); };
@@ -557,13 +557,13 @@ namespace Workbench {
 		});
 		fileDropZones.push_back({ row, [weakDrawable, choose](const std::string& a_path) {
 			auto locked = weakDrawable.lock();
-			auto id = MV::shaderIdOfFile(a_path);
+			auto id = MV::materialIdOfFile(a_path);
 			if (!locked || id.empty()) {
 				return false;
 			}
 			auto& lockedRenderer = locked->owner()->renderer();
 			lockedRenderer.loadShaderFolder();
-			if (!lockedRenderer.hasShader(id)) {
+			if (!lockedRenderer.hasMaterial(id)) {
 				return false;
 			}
 			choose(id);
@@ -572,9 +572,29 @@ namespace Workbench {
 	}
 
 	void InspectorPanel::openTexturePicker(const std::weak_ptr<MV::Scene::Drawable>& a_drawable, size_t a_slot, const MV::Point<int>& a_screenPoint) {
+		openTexturePicker([this, a_drawable, a_slot](const std::shared_ptr<MV::TextureHandle>& a_handle) {
+			auto drawable = a_drawable.lock();
+			if (!drawable) {
+				return;
+			}
+			auto previous = drawable->texture(a_slot);
+			auto apply = [a_drawable, a_slot](const std::shared_ptr<MV::TextureHandle>& a_chosen) {
+				if (auto locked = a_drawable.lock()) {
+					if (a_chosen) {
+						locked->texture(a_chosen, a_slot);
+					} else {
+						locked->clearTexture(a_slot);
+					}
+				}
+			};
+			apply(a_handle);
+			history->record("texture", [apply, a_handle]() { apply(a_handle); }, [apply, previous]() { apply(previous); });
+		}, a_screenPoint);
+	}
+
+	void InspectorPanel::openTexturePicker(std::function<void(const std::shared_ptr<MV::TextureHandle>&)> a_choose, const MV::Point<int>& a_screenPoint) {
 		closeColorPopup(true);
-		texturePicker.drawable = a_drawable;
-		texturePicker.slot = a_slot;
+		texturePicker.choose = std::move(a_choose);
 		texturePicker.page = 0;
 		texturePicker.position = contentNode->renderer().worldFromScreen(a_screenPoint);
 		texturePicker.open = true;
@@ -678,24 +698,11 @@ namespace Workbench {
 				image->attach<MV::Scene::Sprite>()->bounds(fitted)->texture(handle);
 			}
 			cell->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(tile, tile))->globalPriority(priority++)->onAccept.connect("choose", [this, handle](const std::shared_ptr<MV::Scene::Clickable>&) {
-				auto weakDrawable = texturePicker.drawable;
-				auto slot = texturePicker.slot;
-				auto drawable = weakDrawable.lock();
-				if (!drawable || !handle) {
+				if (!handle || !texturePicker.choose) {
 					return;
 				}
-				auto previous = drawable->texture(slot);
-				auto apply = [weakDrawable, slot](const std::shared_ptr<MV::TextureHandle>& a_handle) {
-					if (auto locked = weakDrawable.lock()) {
-						if (a_handle) {
-							locked->texture(a_handle, slot);
-						} else {
-							locked->clearTexture(slot);
-						}
-					}
-				};
-				apply(handle);
-				history->record("texture", [apply, handle]() { apply(handle); }, [apply, previous]() { apply(previous); });
+				auto choose = texturePicker.choose;
+				choose(handle);
 				closeTexturePicker();
 				rebuild();
 			});
@@ -792,8 +799,16 @@ namespace Workbench {
 			addTextureRows(drawable);
 			return true;
 		}
-		if (drawable && topLevel && label == "shaderProgramId") {
-			addShaderRow(drawable);
+		if (drawable && topLevel && label == "material") {
+			addMaterialRow(drawable);
+			return true;
+		}
+		if (drawable && topLevel && label == "materialOverrides") {
+			addOverridesGroup(drawable);
+			return true;
+		}
+		if (drawable && topLevel && label == "blendMode" && drawable->material() && !drawable->material()->implicit()) {
+			addReadOnlyRow(label, "set by the material " + drawable->material()->id());
 			return true;
 		}
 		if (drawable && topLevel && typeId == std::type_index(typeid(std::vector<MV::DrawPoint>))) {

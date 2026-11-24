@@ -42,6 +42,9 @@
     <ClCompile Include="$(SolutionDir)Source\Workbench\inspector.cpp">
       <Filter>Workbench</Filter>
     </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Workbench\inspectorMaterials.cpp">
+      <Filter>Workbench</Filter>
+    </ClCompile>
     <ClCompile Include="$(SolutionDir)Source\Workbench\workbench.cpp">
       <Filter>Workbench</Filter>
     </ClCompile>

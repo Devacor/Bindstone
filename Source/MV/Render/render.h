@@ -89,6 +89,8 @@ namespace MV {
 		class Node;
 	}
 	class Draw2D;
+	class Material;
+	class Services;
 	namespace Render { class Device; }
 
 	extern bool RUNNING_IN_HEADLESS;
@@ -102,9 +104,9 @@ namespace MV {
 	extern const std::string DEFAULT_VERTEX_SHADER_FILE;
 	extern const std::string SHADER_FOLDER;
 
-	// The shader program a file in the shader folder registers: its name without the extension, for a .vert or .frag;
+	// The material a file in the shader folder gives: its name without the extension, for a .vert, .frag or .material;
 	// empty for any other file.
-	std::string shaderIdOfFile(const std::string& a_path);
+	std::string materialIdOfFile(const std::string& a_path);
 
 #if SDL_BYTEORDER == SDL_BIG_ENDIAN
 	const Uint32 SDL_RMASK = 0xff000000;
@@ -469,71 +471,6 @@ namespace MV {
 		bool                      litByScene = false;
 	};
 
-	struct MaterialContext {
-		Draw2D& renderer;
-		float time;
-		const TransformMatrix& worldTransform;
-		float alpha;
-		int32_t cameraId;
-		// Add other context data as needed
-	};
-
-	class Material {
-	public:
-		using ApplyFunction = std::function<void(Shader&, const MaterialContext&)>;
-		
-		Material(const std::string& id, const std::string& shaderProgramId)
-			: ourId(id), ourShaderProgramId(shaderProgramId) {}
-		
-		Material& setApply(ApplyFunction applyFn) {
-			applyFunction = applyFn;
-			return *this;
-		}
-		
-		Material& texture(size_t slot, std::shared_ptr<TextureHandle> tex) {
-			defaultTextures[slot] = tex;
-			return *this;
-		}
-		
-		Material& blend(BlendMode mode) {
-			blendMode = mode;
-			return *this;
-		}
-		
-		BlendMode blend() const { 
-			return blendMode; 
-		}
-
-		// Whether drawables using this material may share one draw. apply sets the standard `transformation` (the
-		// camera's projection times worldTransform) and `alpha` before the apply function runs; true says that function
-		// sets nothing from the drawable's context beyond those, so a batched draw can bake the transform into the
-		// vertices; everything else it sets is the same for every drawable. Undeclared, a material with an apply
-		// function draws on its own and one without batches.
-		Material& batchable(bool a_batchable) {
-			declaredBatchable = a_batchable;
-			return *this;
-		}
-
-		bool batchable() const {
-			return declaredBatchable.value_or(!applyFunction);
-		}
-		
-		// The standard `alpha` and `transformation`, the default textures, then the apply function, which may override them.
-		void apply(Shader& shader, const MaterialContext& context) const;
-		
-		const std::string& id() const { return ourId; }
-		const std::string& shaderProgramId() const { return ourShaderProgramId; }
-		const std::map<size_t, std::shared_ptr<TextureHandle>>& textures() const { return defaultTextures; }
-		
-	private:
-		std::string ourId;
-		std::string ourShaderProgramId;
-		ApplyFunction applyFunction;
-		std::map<size_t, std::shared_ptr<TextureHandle>> defaultTextures;
-		BlendMode blendMode = BLEND_DEFAULT;
-		std::optional<bool> declaredBatchable;
-	};
-
 	//If attempting to make multiple instances of Draw2D bear in mind it modifies global state in the
 	//projection matrices, OpenGL, and SDL.
 	// Owned by Draw2D; the whole stencil-clip nesting state is one int of depth (each level's GPU
@@ -668,6 +605,8 @@ namespace MV {
 		// Registers a shader program for every name.vert and name.frag pair in the folder, a missing stage being
 		// default.vert or default.frag. A name already registered is left as it is.
 		void loadShaderFolder(const std::string& a_folder = SHADER_FOLDER);
+		// Compiles new stage files into a shader already registered, so everything holding it draws with them.
+		void reloadShader(const std::shared_ptr<Shader>& a_shader, const std::string& a_vertexShaderFilename, const std::string& a_fragmentShaderFilename);
 		std::shared_ptr<Shader> loadShader(const std::string& a_id, const std::string& a_vertexShaderFilename, const std::string& a_fragmentShaderFilename);
 		std::shared_ptr<Shader> loadShaderCode(const std::string& a_id, const std::string& a_vertexShaderCode, const std::string& a_fragmentShaderCode);
 
@@ -675,6 +614,8 @@ namespace MV {
 		// per-drawable allocating. Borrowed by Drawables; owned + destroyed here.
 		Render::BoundPipeline pipelineFor(const std::shared_ptr<Shader>& a_shader, BlendMode a_blend, GLenum a_drawType, uint8_t a_colorWriteMask = 0xF);
 		void clearPipelineCache();
+		// Moves on each time the cache is cleared: a pipeline borrowed before then is gone.
+		uint64_t pipelineRevision() const { return pipelineCacheRevision; }
 
 		void reloadShaders();
 
@@ -717,16 +658,25 @@ namespace MV {
 		// For a light that may outlive the renderer (a script engine keeps scene nodes past it).
 		std::weak_ptr<Render::Lighting> lightingHandle() const { return sceneLighting; }
 
-		// Material management
+		// A material made in code over a registered shader program; it owns its blend and saves nowhere.
 		std::shared_ptr<Material> loadMaterial(const std::string& a_id, const std::string& a_shaderProgramId);
-		bool hasMaterial(const std::string& a_id) const;
+		// The material an id names: one already made, else the shader folder's <id>.material (read on first use), else
+		// the implicit material of a registered shader program of that name. Null when the id names none of them.
 		std::shared_ptr<Material> getMaterial(const std::string& a_id);
-		std::shared_ptr<const Material> getMaterial(const std::string& a_id) const;
-		
-		std::shared_ptr<Material> defaultMaterial() const;
-		std::shared_ptr<Material> defaultMaterial(const std::string& a_id);
-		// The material of a drawable that names none: its shader and blend, its own textures, no apply function.
-		const std::shared_ptr<Material>& shaderMaterial(const std::shared_ptr<Shader>& a_shader, BlendMode a_blend);
+		bool hasMaterial(const std::string& a_id) { return getMaterial(a_id) != nullptr; }
+		// Every id getMaterial resolves, sorted.
+		std::vector<std::string> materialIds() const;
+		// The shader folder's files with an extension (".vert", ".frag"), sorted.
+		std::vector<std::string> shaderStageFiles(const std::string& a_extension) const;
+		// The .material file an id reads from; empty for an implicit or code-made material.
+		std::string materialFile(const std::string& a_id) const;
+		// Writes the material to <id>.material in the shader folder, which then backs that id.
+		bool saveMaterial(const std::shared_ptr<Material>& a_material);
+		// After a material's vertex or fragment changed: its program is built again in place, so every drawable on it
+		// draws with the new stages.
+		void materialStagesChanged(const std::shared_ptr<Material>& a_material);
+		// Reading .material files needs the jai engine and the textures they name, both reached through these.
+		void services(Services* a_services) { ourServices = a_services; }
 
 		void checkGlError(std::string a_location = "[not supplied location]") {
 			GLenum error = glGetError();
@@ -776,10 +726,12 @@ namespace MV {
 			}
 		};
 		std::unordered_map<PipelineKey, Render::BoundPipeline, PipelineKeyHash> pipelineCache;
+		uint64_t pipelineCacheRevision = 0;
 		
 		std::unordered_map<std::string, std::shared_ptr<Material>> materials;
-		std::shared_ptr<Material> defaultMaterialPtr = nullptr;
-		std::map<std::pair<std::string, BlendMode>, std::shared_ptr<Material>> shaderMaterials;
+		std::map<std::string, std::string> materialFiles;
+		std::string shaderFolderPath;
+		Services* ourServices = nullptr;
 
 		bool isHeadless = false;
 		std::unique_ptr<Render::Device> backend;

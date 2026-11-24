@@ -273,8 +273,8 @@ namespace MV {
 			template<class Archive>
 			void load(Archive & archive, std::uint32_t const /*version*/) {
 				archive(property_mgr);
-				if (accumulatedDelta == 0.0) {
-					accumulatedDelta = MV::randomNumber(0.0f, 1.0f); //avoid awkward synchronization
+				if (clockOffset == 0.0) {
+					clockOffset = MV::randomNumber(0.0f, 1.0f);
 				}
 			}
 
@@ -287,6 +287,9 @@ namespace MV {
 
 			virtual void updateImplementation(double a_delta) {}
 			double accumulatedDelta = 0.0;
+			// A loaded component's random start, so copies of one thing do not animate in step; a drawable on a
+			// material that shares time leaves it out (Drawable::animationTime).
+			double clockOffset = 0.0;
 
 		private:
 			bool allowSerialize = true;

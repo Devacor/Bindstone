@@ -177,7 +177,7 @@ namespace Workbench {
 				requestLoadScene(a_fileName);
 			},
 			[this](const std::string& a_fileName, const MV::Point<int>& a_screenPoint) {
-				if (!MV::shaderIdOfFile(a_fileName).empty()) {
+				if (!MV::materialIdOfFile(a_fileName).empty()) {
 					inspectorPanel->dropFile(a_fileName, a_screenPoint);
 				} else {
 					dropPrefab(a_fileName, a_screenPoint);
@@ -287,6 +287,7 @@ namespace Workbench {
 		Panel* viewportPanel = dock->registerPanel(std::move(viewport));
 		Panel* filePanel = dock->registerPanel(std::move(file));
 		projectPanel = static_cast<ProjectPanel*>(dock->registerPanel(std::move(project)));
+		projectPanel->onOpenMaterial = [this](const std::string& a_materialId) { inspectorPanel->inspectMaterial(a_materialId); };
 		projectPanel->onRename = [this](const std::filesystem::path& a_entry, const std::string& a_newName) { renameAsset(a_entry, a_newName); };
 		discardFile = [](const std::filesystem::path& a_entry) { return moveToRecycleBin(a_entry.string()); };
 

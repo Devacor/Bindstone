@@ -78,7 +78,7 @@ GameEditor::GameEditor(std::string a_username, std::string a_password, bool a_au
 	resumeTitleMusic();
 
 	// 		auto stencilNode = limbo->make("StencilTestNode");
-	// 		auto spineTestNode = stencilNode->make("SpineTest")->position({ 400.0f, 600.0f })->attach<MV::Scene::Spine>(MV::Scene::Spine::FileBundle("Spine/Tree/life.json", "Spine/Tree/life.spineatlas", 0.5f))->shader(MV::DEFAULT_ID)->animate("idle")->bindNode("effects", "tree_particle")->bindNode("effects", "simple")->owner();
+	// 		auto spineTestNode = stencilNode->make("SpineTest")->position({ 400.0f, 600.0f })->attach<MV::Scene::Spine>(MV::Scene::Spine::FileBundle("Spine/Tree/life.json", "Spine/Tree/life.spineatlas", 0.5f))->material(MV::DEFAULT_ID)->animate("idle")->bindNode("effects", "tree_particle")->bindNode("effects", "simple")->owner();
 	// 
 	// 		stencilNode->attach<MV::Scene::Stencil>()->bounds({ MV::Point<>(), MV::Size<>(450.0f, 550.0f) });
 

@@ -28,6 +28,7 @@
 #include "MV/Render/Scene/emitter.h"
 #include "MV/Render/Scene/bindSnapInstance.h"
 #include "MV/Render/mesh.h"
+#include "MV/Render/material.h"
 #include <chrono>
 #include <algorithm>
 #include <vector>
@@ -2036,9 +2037,9 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 				}
 			}
 
-			const auto shaderBefore = sprite->shader();
+			const auto shaderBefore = sprite->materialId();
 			const std::string shaderChosen = shaderBefore == "wave" ? "pool" : "wave";
-			auto shaderField = inspector.rowScreenPoint("shader");
+			auto shaderField = inspector.rowScreenPoint("material");
 			expect(shaderField.has_value(), "the inspector shows the shader dropdown");
 			if (shaderField) {
 				click(*shaderField);
@@ -2052,18 +2053,76 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 				expect(chosenRow >= 0, "the shader dropdown lists the registered shaders");
 				if (chosenRow >= 0) {
 					click(menus.rowScreenPoint(chosenRow));
-					expect(sprite->shader() == shaderChosen && !menus.contextOpen(), "choosing a shader sets the drawable's shader and closes the list");
+					expect(sprite->materialId() == shaderChosen && !menus.contextOpen(), "choosing a shader sets the drawable's shader and closes the list");
 					pressWithControl(SDLK_z);
-					expect(sprite->shader() == shaderBefore, "undo restores the shader");
+					expect(sprite->materialId() == shaderBefore, "undo restores the shader");
 				}
 				menus.close();
-				if (auto dropAt = inspector.rowScreenPoint("shader")) {
+				if (auto dropAt = inspector.rowScreenPoint("material")) {
 					expect(inspector.dropFile("Assets/Shaders/" + shaderChosen + ".frag", *dropAt), "a shader file dropped on the shader field is taken");
-					expect(sprite->shader() == shaderChosen, "the dropped file's shader becomes the drawable's");
+					expect(sprite->materialId() == shaderChosen, "the dropped file's shader becomes the drawable's");
 					pressWithControl(SDLK_z);
-					expect(sprite->shader() == shaderBefore, "undo restores the shader after a drop");
+					expect(sprite->materialId() == shaderBefore, "undo restores the shader after a drop");
 				}
 			}
+
+			// alphaFilter's fragment takes a float uniform of its own: its material section offers it as a parameter and
+			// the drawable's overrides group as an override
+			sprite->material(MV::ALPHA_FILTER_ID);
+			auto filterMaterial = sprite->material();
+			expect(filterMaterial && filterMaterial->id() == MV::ALPHA_FILTER_ID, "the sprite resolves the alphaFilter material");
+			// an undo shows the selection again, so the material is shown again after each
+			auto showFilterMaterial = [&]() {
+				inspector.inspectMaterial(MV::ALPHA_FILTER_ID);
+				a_app.runFrames(2);
+			};
+			if (filterMaterial) {
+				showFilterMaterial();
+				expect(inspector.rowScreenPoint("vertex").has_value() && inspector.rowScreenPoint("fragment").has_value() && inspector.rowScreenPoint("file").has_value(), "the material section shows its stages and Save");
+				if (auto sharedTime = inspector.rowScreenPoint("shared time")) {
+					click(*sharedTime);
+					expect(filterMaterial->sharedTime.get(), "the shared time toggle sets the material's clock");
+					pressWithControl(SDLK_z);
+					expect(!filterMaterial->sharedTime.get(), "undo restores the material's clock");
+					showFilterMaterial();
+				} else {
+					expect(false, "the material section shows shared time");
+				}
+				if (auto addFilter = inspector.rowScreenPoint("alphaFilter")) {
+					click(*addFilter);
+					auto parameter = std::dynamic_pointer_cast<MV::FloatParameter>(MV::findParameter(*filterMaterial->parameters, "alphaFilter"));
+					expect(parameter != nullptr, "Add makes the uniform a float parameter of the material");
+					if (auto scrub = inspector.rowScreenPoint("alphaFilter"); parameter && scrub) {
+						dragRight(*scrub, 40);
+						expect(parameter->value.get() > 0.0f, "scrubbing the parameter changes the material's value");
+						pressWithControl(SDLK_z);
+						expect(parameter->value.get() == 0.0f, "undo restores the parameter's value");
+						showFilterMaterial();
+					}
+					pressWithControl(SDLK_z);
+					expect(filterMaterial->parameters->empty(), "undo takes the parameter back off the material");
+				} else {
+					expect(false, "the material section offers the shader's alphaFilter uniform");
+				}
+				a_app.select(layerNode);
+				a_app.runFrames(2);
+				if (auto overridesHeader = inspector.rowScreenPoint("overrides", false)) {
+					click(*overridesHeader);
+					if (auto overrideToggle = inspector.rowScreenPoint("alphaFilter")) {
+						click(*overrideToggle);
+						expect(MV::findParameter(sprite->materialOverrides(), "alphaFilter") != nullptr, "the override toggle gives the drawable its own alphaFilter");
+						pressWithControl(SDLK_z);
+						expect(sprite->materialOverrides().empty(), "undo takes the override back off");
+					} else {
+						expect(false, "the overrides group lists alphaFilter");
+					}
+				} else {
+					expect(false, "the drawable shows an overrides group for its material's uniforms");
+				}
+			}
+			sprite->material(shaderBefore);
+			a_app.select(layerNode);
+			a_app.runFrames(2);
 
 			auto anchorsHeader = inspector.rowScreenPoint("anchors", false);
 			expect(anchorsHeader.has_value() && !inspector.rowScreenPoint("anchor min").has_value(), "anchors is a closed group");
@@ -2874,8 +2933,8 @@ static int RunAssetVerification() {
 			root->postLoadStep();
 			for (auto&& entry : root->componentsInChildren<MV::Scene::Drawable>(false, true)) {
 				auto drawable = std::get<0>(entry).self();
-				if (drawable && !managers.renderer.hasShader(drawable->shader())) {
-					throw std::runtime_error("shader [" + drawable->shader() + "] on [" + drawable->owner()->id() + "] is not in " + MV::SHADER_FOLDER);
+				if (drawable && !managers.renderer.hasMaterial(drawable->materialId())) {
+					throw std::runtime_error("material [" + drawable->materialId() + "] on [" + drawable->owner()->id() + "] is not in " + MV::SHADER_FOLDER);
 				}
 			}
 			// Save and reload to exercise the save side too (catches unregistered-on-save
@@ -2899,6 +2958,36 @@ static int RunAssetVerification() {
 		} catch (std::exception& e) {
 			std::cout << "[FAIL] " << path << ": " << e.what() << std::endl;
 			++failed;
+		}
+	}
+
+	// Every material file round-trips JSON->binary->JSON with a stable resave and builds its program
+	{
+		std::error_code ignored;
+		for (auto&& entry : std::filesystem::directory_iterator("Assets/Shaders", ignored)) {
+			if (entry.path().extension() != ".material") {
+				continue;
+			}
+			const auto path = entry.path().generic_string();
+			try {
+				auto original = MV::fileContents(path, true);
+				auto material = MV::materialFromJson(original, managers.services);
+				if (!material) { throw std::runtime_error("the file holds no Material"); }
+				auto reloaded = MV::fromBinaryString<std::shared_ptr<MV::Material>>(MV::toBinaryString(material, managers.services), managers.services);
+				if (!reloaded) { throw std::runtime_error("binary round-trip returned null"); }
+				auto firstJson = MV::materialToJson(reloaded, managers.services);
+				auto secondJson = MV::materialToJson(MV::materialFromJson(firstJson, managers.services), managers.services);
+				auto drift = describeJsonDifference(firstJson, secondJson);
+				if (!drift.empty()) { throw std::runtime_error("json round-trip drift: " + drift); }
+				auto typeDrift = describeTypeTagDrift(typeTagCounts(original), typeTagCounts(firstJson));
+				if (!typeDrift.empty()) { throw std::runtime_error("$type multiset drift original->resave: " + typeDrift); }
+				if (!managers.renderer.getMaterial(entry.path().stem().string())) { throw std::runtime_error("the renderer could not build it"); }
+				std::cout << "[OK]   " << path << " (" << material->parameters->size() << " parameters, round-trip ok, json stable)" << std::endl;
+				++passed;
+			} catch (std::exception& e) {
+				std::cout << "[FAIL] " << path << ": " << e.what() << std::endl;
+				++failed;
+			}
 		}
 	}
 

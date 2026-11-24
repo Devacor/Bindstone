@@ -94,7 +94,20 @@ namespace MV {
 			result.y = result.y * 2.0f - 1.0f;
 			result.z = result.z * 2.0f - 1.0f;
 
-			// the ray through the point from the near plane to the far one, met with the node's own plane (z = 0)
+			const bool perspective = !MV::equals(conversionMatrix.access(0, 3), 0.0f) || !MV::equals(conversionMatrix.access(1, 3), 0.0f) || !MV::equals(conversionMatrix.access(2, 3), 0.0f) || !MV::equals(conversionMatrix.access(3, 3), 1.0f);
+			if (!perspective) {
+				PointPrecision w;
+				result = fullMatrixPointMultiply(conversionMatrix, result, w);
+				if (MV::equals(w, 0.0f)) {
+					MV::error("unProjectScreen	failure, point is exactly at the clip pane.");
+					result.clear();
+				} else {
+					result /= w;
+					result.z = a_point.z;
+				}
+				return result;
+			}
+			// under perspective, the ray through the point from the near plane to the far one, met with the node's own plane (z = 0)
 			PointPrecision nearW;
 			PointPrecision farW;
 			auto nearPoint = fullMatrixPointMultiply(conversionMatrix, Point<>(result.x, result.y, -1.0f), nearW);

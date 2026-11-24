@@ -27,6 +27,7 @@
 #include "fast_json.hpp"
 #include "MV/Render/Scene/emitter.h"
 #include "MV/Render/Scene/bindSnapInstance.h"
+#include "MV/Render/Scene/view.h"
 #include "MV/Render/mesh.h"
 #include <SDL3/SDL_main.h>
 #include "MV/Render/material.h"
@@ -204,7 +205,7 @@ static void RunButtonWiring() {
 	MV::initializeSpineBindings();
 
 	auto fakeRoot = MV::Scene::Node::make(managers.renderer);
-	fakeRoot->attach<MV::Scene::Sprite>()->hide()->id("ScreenScaler");
+	fakeRoot->attach<MV::Scene::View>()->id("Interface");
 
 	struct Wire { const char* scene; const char* button; const char* script; };
 	Wire wires[] = {
@@ -258,7 +259,7 @@ static void RunLoginUiRepair(const char* a_onlyPath = nullptr) {
 	}
 
 	auto fakeRoot = MV::Scene::Node::make(managers.renderer);
-	fakeRoot->attach<MV::Scene::Sprite>()->hide()->id("ScreenScaler");
+	fakeRoot->attach<MV::Scene::View>()->id("Interface");
 
 	auto retexture = [&](const std::shared_ptr<MV::Scene::Node>& a_node, const char* a_textureName) {
 		auto sprite = a_node->component<MV::Scene::Sprite>().self();
@@ -338,7 +339,7 @@ static void RunLoginUiRepair(const char* a_onlyPath = nullptr) {
 		button->bounds(MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::point(100.0f, 30.0f)));
 	});
 	// The Play button's own rectangle is centred on its node (-75..75 x -20..20, anchored to the
-	// ScreenScaler's centre); the conversion left its state views unanchored, untextured and unlabelled.
+	// Interface View's centre); the conversion left its state views unanchored, untextured and unlabelled.
 	repairScene("Assets/Interface/Main/view.scene", [&](const std::shared_ptr<MV::Scene::Node>&, const std::shared_ptr<MV::Scene::Button>& button) {
 		MV::BoxAABB<> viewBox(MV::point(-75.0f, -20.0f), MV::point(75.0f, 20.0f));
 		MV::BoxAABB<> fill(MV::point(0.0f, 0.0f), MV::point(1.0f, 1.0f));
@@ -2884,10 +2885,11 @@ static int RunAssetVerification() {
 	MV::initializeSpineBindings();
 
 	auto fakeRoot = MV::Scene::Node::make(managers.renderer);
-	fakeRoot->attach<MV::Scene::Sprite>()->hide()->id("ScreenScaler");
+	fakeRoot->attach<MV::Scene::View>()->id("Interface");
 
 	const char* nodeFiles[] = {
 		"Scenes/map.scene",
+		"Scenes/game.scene",
 		"Assets/Interface/Login/view.scene",
 		"Assets/Interface/Main/view.scene",
 		"Assets/BattleEffects/Missile/Default/unit.bindsnap",

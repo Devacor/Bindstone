@@ -26,7 +26,6 @@ protected:
 	jai::signal_emitter<void(Team&)> onTeamDefeatedSignal;
 
 public:
-	static const int GameCameraId = 2;
 
 	jai::signal<void(Team&)> onTeamDefeated;
 

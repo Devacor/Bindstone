@@ -569,6 +569,10 @@ namespace MV {
 			return *this;
 		}
 
+		static bool anchoredPointsMatch(const Point<>& a_first, const Point<>& a_second) {
+			return std::abs(a_first.x - a_second.x) < 0.001f && std::abs(a_first.y - a_second.y) < 0.001f;
+		}
+
 		Anchors& Anchors::apply() {
 			if (!applying) {
 				if (auto lockedParentReference = parentReference.lock()) {
@@ -578,11 +582,19 @@ namespace MV {
 					auto parentSize = parentBounds.size();
 
 					BoxAABB<> childBounds{ (parentAnchors * toScale(parentSize)) + ourOffset + parentBounds.minPoint };
+					// world space is reached through the cameras, so a re-apply lands a hair off: what already fits stays put,
+					// or every load nudges the layout and a re-save drifts
+					auto owner = selfReference->owner();
 					if (applyingPosition) {
-						selfReference->owner()->worldPosition(childBounds.minPoint + (toPoint(childBounds.size()) * pivotPercent));
-						selfReference->worldBounds(childBounds);
-					} else {
-						selfReference->worldBounds(childBounds);
+						const auto position = childBounds.minPoint + (toPoint(childBounds.size()) * pivotPercent);
+						if (!anchoredPointsMatch(owner->worldPosition(), position)) {
+							owner->worldPosition(position);
+						}
+					}
+					const auto local = owner->localFromWorld(childBounds);
+					const auto current = selfReference->bounds();
+					if (!anchoredPointsMatch(current.minPoint, local.minPoint) || !anchoredPointsMatch(current.maxPoint, local.maxPoint)) {
+						selfReference->bounds(local);
 					}
 				}
 			}

@@ -70,7 +70,7 @@ namespace MV {
 				return result;
 			}
 			Size<> seen(width, height);
-			if (unitKind.get() == Units::PIXELS) {
+			if (unitKind.get() == Units::SCALED_PIXELS) {
 				seen = Size<>(width / std::max(a_pixelScale, 0.0001f), height / std::max(a_pixelScale, 0.0001f));
 			} else if (unitKind.get() == Units::FIXED_HEIGHT) {
 				seen = Size<>(*fixedHeight * width / height, *fixedHeight);

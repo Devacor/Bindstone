@@ -111,7 +111,7 @@ void GameInstance::rawScaleAroundScreenPoint(float a_scale, const MV::Point<int>
 }
 
 GameInstance::GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse, float a_timeStep, size_t a_maxFixedStepsPerUpdate) :
-	worldScene(a_root->make("Scenes/map.scene", services())->depth(-1)->cameraId(GameCameraId)),
+	worldScene(a_root->make("Scenes/map.scene", services())->depth(-1)),
 	ourMouse(a_mouse),
 	gameData(a_gameData),
 	timeStep(a_timeStep),
@@ -166,7 +166,8 @@ void GameInstance::beginMapDrag() {
 		ourMouse.queueExclusiveAction(MV::ExclusiveTapAction(true, { 10 }, [&]() {
 			activeDrag = ourMouse.onMove.connect([this](MV::TapDevice& a_mouse) {
 				if (worldScene) {
-					worldScene->camera().translate(MV::round<MV::PointPrecision>(a_mouse.position() - a_mouse.oldPosition()));
+					auto layer = worldScene->parent();
+					worldScene->translate(layer->localFromScreen(a_mouse.position()) - layer->localFromScreen(a_mouse.oldPosition()));
 					clampToHardBounds(a_mouse.position());
 				}
 			});
@@ -259,7 +260,7 @@ bool GameInstance::requestCamera() {
 }
 
 ClientGameInstance::ClientGameInstance(Game& a_game) :
-	GameInstance(a_game.root(), a_game.data(), a_game.mouse(), 1.0f / 60.0f, 4),
+	GameInstance(a_game.worldLayer(), a_game.data(), a_game.mouse(), 1.0f / 60.0f, 4),
 	game(a_game) {
 
 	synchronizedObjects.onSpawn<BuildingNetworkState>([this](std::shared_ptr<MV::NetworkObject<BuildingNetworkState>> a_newItem) {

@@ -16,9 +16,9 @@ namespace MV {
 
 		public:
 			enum class Projection { ORTHOGRAPHIC, PERSPECTIVE };
-			// What an orthographic unit is: a pixel of the window (scaled for its density), a pixel as the window has
-			// them, or whatever makes `height` units fill the view's height.
-			enum class Units { PIXELS, DEVICE_PIXELS, FIXED_HEIGHT };
+			// What an orthographic unit is: a unit of the window as the renderer lays it out (its world size), one
+			// scaled up by the display's density (uiScale), or whatever makes `height` units fill the view's height.
+			enum class Units { PIXELS, SCALED_PIXELS, FIXED_HEIGHT };
 			// Where the eye's position falls in an orthographic view: its top left, as a screen is laid out, or its middle.
 			enum class Origin { TOP_LEFT, CENTER };
 

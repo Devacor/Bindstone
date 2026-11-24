@@ -77,6 +77,11 @@ public:
 		return rootScene;
 	}
 
+	// Where a match's map goes: under the world's View.
+	std::shared_ptr<MV::Scene::Node> worldLayer() {
+		return worldRoot;
+	}
+
 	void enterGameServer(const std::string &gameServer, int64_t secret) {
 		std::cout << "Game Found: " << gameServer << std::endl;
 		ourGameClient = MV::Client::make(MV::Url{ gameServer }, GameCertificates::player(), [=](const std::string &a_message) {
@@ -155,7 +160,6 @@ private:
 	Game(const Game &) = delete;
 	Game& operator=(const Game &) = delete;
 
-	void updateScreenScaler();
 	void initializeWindow();
 
 	void initializeClientConnection();
@@ -177,8 +181,8 @@ private:
 	
 	bool done;
 
+	std::shared_ptr<MV::Scene::Node> worldRoot;
 	std::shared_ptr<MV::Scene::Node> uiRoot;
-	MV::Scene::SafeComponent<MV::Scene::Sprite> screenScaler;
 	MV::TapDevice ourMouse;
 	MV::ControllerDevice ourController;
 	std::unique_ptr<MV::Scene::ControllerCursor> ourControllerCursor;

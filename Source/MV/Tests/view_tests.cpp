@@ -104,7 +104,7 @@ namespace mv_tests {
 				auto root = Node::make(host.renderer, "root");
 				auto layer = root->make("layer");
 				auto eye = layer->make("eye");
-				eye->attach<Camera>()->units(Camera::Units::DEVICE_PIXELS);
+				eye->attach<Camera>()->units(Camera::Units::PIXELS);
 				auto view = layer->attach<View>();
 				auto thing = layer->make("thing");
 				thing->position(MV::point(100.0f, 50.0f));
@@ -125,7 +125,7 @@ namespace mv_tests {
 				auto layer = root->make("layer");
 				auto eye = layer->make("eye");
 				eye->position(MV::point(500.0f, 500.0f));
-				eye->attach<Camera>()->units(Camera::Units::DEVICE_PIXELS)->origin(Camera::Origin::CENTER);
+				eye->attach<Camera>()->units(Camera::Units::PIXELS)->origin(Camera::Origin::CENTER);
 				layer->attach<View>();
 				auto thing = layer->make("thing");
 				thing->position(MV::point(510.0f, 490.0f));
@@ -147,7 +147,7 @@ namespace mv_tests {
 				SceneHost host;
 				auto root = Node::make(host.renderer, "root");
 				auto layer = root->make("layer");
-				layer->make("eye")->attach<Camera>()->units(Camera::Units::DEVICE_PIXELS);
+				layer->make("eye")->attach<Camera>()->units(Camera::Units::PIXELS);
 				auto view = layer->attach<View>();
 				view->viewport(MV::BoxAABB<>(MV::point(0.5f, 0.5f), MV::point(1.0f, 1.0f)));
 				auto thing = layer->make("thing");
@@ -242,11 +242,47 @@ namespace mv_tests {
 				check_eq(size_t(1), records.size());
 			});
 
+			test("two Views that show each other draw each other once", [] {
+				SceneHost host;
+				std::vector<DrawRecord> records;
+				auto root = Node::make(host.renderer, "root");
+				auto first = root->make("first");
+				first->attach<View>()->subject("second");
+				first->make("a")->attach<DrawProbe>(&records);
+				auto second = root->make("second");
+				second->attach<View>()->subject("first");
+				second->make("b")->attach<DrawProbe>(&records);
+				root->draw();
+				check_eq(size_t(4), records.size());
+			});
+
+			test("a page anchored to a View saves the same after it loads under it", [] {
+				SceneHost host;
+				auto root = Node::make(host.renderer, "root");
+				auto layer = root->make("layer");
+				layer->attach<View>()->id("Interface");
+				auto page = layer->make("page");
+				auto panel = page->make("panel");
+				auto sprite = panel->attach<MV::Scene::Sprite>();
+				sprite->bounds(MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::size(299.0f, 135.0f)));
+				sprite->anchors().anchor(MV::BoxAABB<>(MV::point(0.5f, 0.5f), MV::point(0.5f, 0.5f))).parent(layer->component<View>().self(), true);
+				panel->make("field")->position(MV::point(99.0f, 9.0f))->attach<MV::Scene::Sprite>()->bounds(MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::size(200.0f, 36.0f)));
+
+				ScratchScene firstFile;
+				page->saveJai(firstFile.path, host.services, false);
+				page->removeFromParent();
+				auto loaded = layer->loadChild(firstFile.path, host.services, "page");
+				root->update(0.0);
+				ScratchScene secondFile;
+				loaded->saveJai(secondFile.path, host.services, false);
+				check(firstFile.contents() == secondFile.contents(), "the page drifted on a load and save under its View");
+			});
+
 			test("an authoring View takes no part", [] {
 				SceneHost host;
 				auto root = Node::make(host.renderer, "root");
 				auto layer = root->make("layer");
-				layer->make("eye")->attach<Camera>()->units(Camera::Units::DEVICE_PIXELS)->zoom(2.0f);
+				layer->make("eye")->attach<Camera>()->units(Camera::Units::PIXELS)->zoom(2.0f);
 				auto view = layer->attach<View>();
 				auto thing = layer->make("thing");
 				thing->position(MV::point(100.0f, 50.0f));

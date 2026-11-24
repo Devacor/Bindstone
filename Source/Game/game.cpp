@@ -122,20 +122,16 @@ void Game::initializeWindow(){
 	//MV::AudioPlayer::instance()->initAudio();
 	ourMouse.update();
 
-	rootScene = MV::Scene::Node::make(gameData.managers().renderer);
-
-	uiRoot = rootScene->make("UI")->cameraId(1);
+	// the world's View and the interface's View, one over the other
+	rootScene = MV::Scene::Node::load("Scenes/game.scene", gameData.managers().services);
+	worldRoot = rootScene->get("World");
+	uiRoot = rootScene->get("Interface");
 	// buttons show their highlight under the pointer as they do under the focus
 	ourMouse.trackHover(true);
 	ourControllerCursor = std::make_unique<MV::Scene::ControllerCursor>(uiRoot, ourController, gameData.managers().textures);
 	if (const char* cursorRequested = std::getenv("MV_CONTROLLER_CURSOR"); cursorRequested && std::string(cursorRequested) == "1") {
 		ourController.cursor(true);
 	}
-	screenScaler = rootScene->attach<MV::Scene::Sprite>();
-	screenScaler->hide()->id("ScreenScaler");
-	auto scaledDpi = gameData.managers().renderer.window().uiScale();
-	screenScaler->bounds({ MV::point(0.0f, 0.0f), gameData.managers().renderer.world().size() / scaledDpi });
-	rootScene->scale(scaledDpi);
 
 	MV::FontDefinition::make(gameData.managers().textLibrary, "default", "Fonts/Verdana.ttf", 14);
 	MV::FontDefinition::make(gameData.managers().textLibrary, "small", "Fonts/Verdana.ttf", 9);
@@ -216,10 +212,6 @@ void Game::handleInput() {
 				}
 				break;
 			}
-		} else if (windowResized) {
-			auto scale = gameData.managers().renderer.window().uiScale();
-			screenScaler->bounds({ MV::point(0.0f, 0.0f), gameData.managers().renderer.world().size() / scale });
-			screenScaler->owner()->scale(scale);
 		}
 	}
 	ourMouse.update();
@@ -228,18 +220,8 @@ void Game::handleInput() {
 
 void Game::render() {
 	gameData.managers().renderer.clearScreen();
-	updateScreenScaler();
 	rootScene->draw();
 	
 	gameData.managers().renderer.updateScreen();
-}
-
-void Game::updateScreenScaler() {
-	auto scaler = rootScene->component<MV::Scene::Drawable>("ScreenScaler", false);
-	if (!scaler) {
-		auto scale = gameData.managers().renderer.window().uiScale();
-		rootScene->attach<MV::Scene::Drawable>()->id("ScreenScaler")->worldBounds({ MV::Point<>(0, 0), gameData.managers().renderer.world().size() / scale });
-		rootScene->scale(scale);
-	}
 }
 

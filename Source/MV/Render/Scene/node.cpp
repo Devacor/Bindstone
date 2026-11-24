@@ -14,6 +14,7 @@
 #include "text.h"
 #include "clickable.h"
 #include "focusGroup.h"
+#include "view.h"
 #include "bindSnapInstance.h"
 #include "clipped.h"
 #include "stencil.h"
@@ -46,6 +47,12 @@ namespace MV {
 			});
 			a_builder.method("componentBindSnapInstance", [](Node& a_self) {
 				return a_self.component<BindSnapInstance>(false, false).self();
+			});
+			a_builder.method("componentView", [](Node& a_self) {
+				return a_self.componentInChildren<View>(false, false, true).self();
+			});
+			a_builder.method("componentCamera", [](Node& a_self) {
+				return a_self.componentInChildren<Camera>(false, false, true).self();
 			});
 			a_builder.method("componentFocusGroup", [](Node& a_self) {
 				return a_self.componentInChildren<FocusGroup>(false, true, true).self();
@@ -140,8 +147,13 @@ namespace MV {
 		void Node::draw() {
 			if (allowDraw) {
 				require<ResourceException>(renderer().device(), "Node::draw requires a render device.");
+				const auto present = childComponents.get();
+				for (auto&& component : present) {
+					component->beforeNodeDraw();
+				}
+				const bool drawsSelf = renderer().drawsGroup(ourGroup);
 				bool allowChildrenToDraw = true;
-				for (size_t i = 0; i < childComponents->size();++i) {
+				for (size_t i = 0; drawsSelf && i < childComponents->size();++i) {
 					// Guard against re-entrant node destruction: a draw callback can
 					// fire a signal that detaches/destroys components on this node.
 					// Check ownerIsAlive() before drawing to avoid the PointerException
@@ -153,12 +165,24 @@ namespace MV {
 				if (allowChildrenToDraw) {
 					drawChildren();
 				}
-				for (size_t i = 0; i < childComponents->size(); ++i) {
+				for (size_t i = 0; drawsSelf && i < childComponents->size(); ++i) {
 					if ((*childComponents)[i]->ownerIsAlive()) {
 						childComponents[i]->endDraw();
 					}
 				}
+				for (auto component = present.rbegin(); component != present.rend(); ++component) {
+					(*component)->afterNodeDraw();
+				}
 			}
+		}
+
+		bool Node::keepsOwnCamera() const {
+			for (auto&& component : childComponents.get()) {
+				if (component->ownsCamera()) {
+					return true;
+				}
+			}
+			return false;
 		}
 
 		void Node::drawChildren() {
@@ -185,8 +209,13 @@ namespace MV {
 				// generic (*= localTransform()) product it replaces, with ~44% fewer flops.
 				temporaryWorldMatrixTransform = affineMultiply(temporaryWorldMatrixTransform, localMatrixTransform);
 				temporaryWorldAlpha = a_overrideParentAlpha * nodeAlpha;
+				const auto present = childComponents.get();
+				for (auto&& component : present) {
+					component->beforeNodeDraw();
+				}
+				const bool drawsSelf = renderer().drawsGroup(ourGroup);
 				bool allowChildrenToDraw = true;
-				for (size_t i = 0; i < childComponents->size();++i) {
+				for (size_t i = 0; drawsSelf && i < childComponents->size();++i) {
 					if ((*childComponents)[i]->ownerIsAlive()) {
 						allowChildrenToDraw = childComponents[i]->draw() && allowChildrenToDraw;
 					}
@@ -194,10 +223,13 @@ namespace MV {
 				if (allowChildrenToDraw) {
 					drawChildren(worldTransform(), temporaryWorldAlpha);
 				}
-				for (size_t i = 0; i < childComponents->size(); ++i) {
+				for (size_t i = 0; drawsSelf && i < childComponents->size(); ++i) {
 					if ((*childComponents)[i]->ownerIsAlive()) {
 						childComponents[i]->endDraw();
 					}
+				}
+				for (auto component = present.rbegin(); component != present.rend(); ++component) {
+					(*component)->afterNodeDraw();
 				}
 			}
 		}
@@ -410,7 +442,7 @@ namespace MV {
 		void Node::adopt(const std::shared_ptr<Node> &a_child) {
 			requireNotAncestor(a_child);
 			a_child->myParent = this;
-			if (a_child->ourCameraId != ourCameraId) {
+			if (a_child->ourCameraId != ourCameraId && !a_child->keepsOwnCamera()) {
 				a_child->cameraIdInternal(ourCameraId);
 			}
 			a_child->onParentAlphaChangeSignal = onAlphaChangeSignal.connect([child = a_child.get()](const std::shared_ptr<Node> &) {

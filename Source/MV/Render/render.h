@@ -537,6 +537,29 @@ namespace MV {
 			return ourCameras[a_index];
 		}
 
+		// A View's slot: the number its subtree draws and converts through, in place of a fixed camera id. The View
+		// sets the slot's whole matrix (its projection, its camera's eye and its place in the window); a change is
+		// announced on onCameraUpdated as a camera's is.
+		int32_t reserveViewSlot();
+		void releaseViewSlot(int32_t a_slot);
+		void viewProjection(int32_t a_slot, const TransformMatrix& a_matrix);
+
+		// While a View draws a subtree that is not its own (its subject), what is drawn goes through the View's slot
+		// whatever slot the nodes have, and only the groups in the View's camera mask draw.
+		void pushDrawThrough(int32_t a_slot, uint32_t a_groups);
+		void popDrawThrough();
+		int32_t drawSlot(int32_t a_cameraId) const {
+			return drawThroughSlots.empty() || drawThroughSlots.back().slot < 0 ? a_cameraId : drawThroughSlots.back().slot;
+		}
+		bool drawingThrough() const {
+			return !drawThroughSlots.empty() && drawThroughSlots.back().slot >= 0;
+		}
+		bool drawsGroup(uint32_t a_group) const {
+			return drawThroughSlots.empty() || a_group >= 32 || (drawThroughSlots.back().groups & (1u << a_group)) != 0;
+		}
+		// The window's size in pixels, for a View laying itself out in it.
+		Size<int> targetPixelSize() const;
+
 		const TransformMatrix& cameraProjectionMatrix(int32_t a_index) const {
 			auto found = ourCameraProjectionMatrices.find(a_index);
 			if (found != ourCameraProjectionMatrices.end()) {
@@ -555,6 +578,9 @@ namespace MV {
 			ourCameraProjectionMatrices.clear();
 			for (auto&& kv : ourCameras) {
 				ourCameraProjectionMatrices.emplace(kv.first, projectionMatrix().top() * kv.second);
+			}
+			for (auto&& kv : viewSlotMatrices) {
+				ourCameraProjectionMatrices[kv.first] = kv.second;
 			}
 			for (auto&& kv : cameraAccessedThisFrame) {
 				if (kv.second) {
@@ -712,6 +738,13 @@ namespace MV {
 		std::unordered_map<int32_t, bool> cameraAccessedThisFrame;
 		std::unordered_map<int32_t, TransformMatrix> ourCameras;
 		std::unordered_map<int32_t, TransformMatrix> ourCameraProjectionMatrices;
+		std::unordered_map<int32_t, TransformMatrix> viewSlotMatrices;
+		int32_t nextViewSlot = 1000000;
+		struct DrawThrough {
+			int32_t slot;
+			uint32_t groups;
+		};
+		std::vector<DrawThrough> drawThroughSlots;
 
 		std::unordered_map<std::string, std::shared_ptr<Shader>> shaders;
 		std::shared_ptr<Shader> defaultShaderPtr = nullptr;

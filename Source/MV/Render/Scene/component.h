@@ -151,6 +151,11 @@ namespace MV {
 
 			virtual bool draw() { return true; }
 			virtual void endDraw() { }
+			// Around everything its node draws (its components and its children): a View sets itself up here.
+			virtual void beforeNodeDraw() {}
+			virtual void afterNodeDraw() {}
+			// Its node and what is under it keep the camera slot this component gives them (a View).
+			virtual bool ownsCamera() const { return false; }
 
 			void update(double a_delta) {
 				accumulatedDelta += a_delta;

@@ -204,7 +204,7 @@ namespace MV {
 						static_cast<float>(animationTime()),
 						owner()->worldTransform(),
 						owner()->worldAlpha(),
-						owner()->cameraId()
+						owner()->renderer().drawSlot(owner()->cameraId())
 					};
 					GLuint textureSlot = FIRST_MATERIAL_TEXTURE_SLOT;
 					materialInstance->apply(*shaderProgram, context, textureSlot);
@@ -418,7 +418,7 @@ namespace MV {
 			a_shaderProgram.set("alpha", ourOwner->worldAlpha(), false);
 			addTexturesToShader();
 
-			a_shaderProgram.set("transformation", ourOwner->renderer().cameraProjectionMatrix(ourOwner->cameraId()) * ourOwner->worldTransform());
+			a_shaderProgram.set("transformation", ourOwner->renderer().cameraProjectionMatrix(ourOwner->renderer().drawSlot(ourOwner->cameraId())) * ourOwner->worldTransform());
 		}
 
 		void Drawable::addTexturesToShader() {

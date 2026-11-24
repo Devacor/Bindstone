@@ -311,6 +311,20 @@ namespace MV {
 			return *this;
 		}
 
+		// A perspective projection for an eye looking along +z with y running down the screen, as the orthographic one
+		// lays out a 2D scene: a_fieldOfView is vertical, in degrees.
+		TransformMatrix& makePerspective(PointPrecision a_fieldOfView, PointPrecision a_aspect, PointPrecision a_near, PointPrecision a_far) {
+			const PointPrecision focal = 1.0f / std::tan(a_fieldOfView * 0.5f * 3.14159265358979f / 180.0f);
+			clear();
+			(*this).access(0, 0) = focal / a_aspect;
+			(*this).access(1, 1) = -focal;
+			(*this).access(2, 2) = (a_far + a_near) / (a_far - a_near);
+			(*this).access(3, 2) = -2.0f * a_far * a_near / (a_far - a_near);
+			(*this).access(2, 3) = 1.0f;
+			(*this).access(3, 3) = 0.0f;
+			return *this;
+		}
+
 		TransformMatrix& makeOrtho(PointPrecision a_left, PointPrecision a_right, PointPrecision a_bottom, PointPrecision a_top, PointPrecision a_near, PointPrecision a_far) {
 			PointPrecision a = 2.0f / (a_right - a_left);
 			PointPrecision b = 2.0f / (a_top - a_bottom);

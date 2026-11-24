@@ -94,14 +94,21 @@ namespace MV {
 			result.y = result.y * 2.0f - 1.0f;
 			result.z = result.z * 2.0f - 1.0f;
 
-			PointPrecision w;
-			result = fullMatrixPointMultiply(conversionMatrix, result, w);
-			if (MV::equals(w, 0.0f)) {
+			// the ray through the point from the near plane to the far one, met with the node's own plane (z = 0)
+			PointPrecision nearW;
+			PointPrecision farW;
+			auto nearPoint = fullMatrixPointMultiply(conversionMatrix, Point<>(result.x, result.y, -1.0f), nearW);
+			auto farPoint = fullMatrixPointMultiply(conversionMatrix, Point<>(result.x, result.y, 1.0f), farW);
+			if (MV::equals(nearW, 0.0f) || MV::equals(farW, 0.0f)) {
 				MV::error("unProjectScreen	failure, point is exactly at the clip pane.");
 				result.clear();
 			} else {
-				result /= w;
-				result.z = a_point.z; //restore original z since we're just 2d.
+				nearPoint /= nearW;
+				farPoint /= farW;
+				const auto depth = farPoint.z - nearPoint.z;
+				const auto along = std::abs(depth) < 1e-9f ? 0.0f : -nearPoint.z / depth;
+				result = nearPoint + (farPoint - nearPoint) * along;
+				result.z = a_point.z;
 			}
 		}
 		return result;
@@ -922,6 +929,44 @@ namespace MV {
 			<< " (queued draws mean " << queuedMean << ": " << batchesMean << " merged, " << loneMean << " alone)"
 			<< std::setprecision(3) << ", draw ms mean " << drawMean << " median " << drawMedian << ", frame ms mean " << frameMean << " median " << frameMedian;
 		return result.str();
+	}
+
+	int32_t Draw2D::reserveViewSlot() {
+		return nextViewSlot++;
+	}
+
+	void Draw2D::releaseViewSlot(int32_t a_slot) {
+		viewSlotMatrices.erase(a_slot);
+		ourCameraProjectionMatrices.erase(a_slot);
+	}
+
+	void Draw2D::viewProjection(int32_t a_slot, const TransformMatrix& a_matrix) {
+		auto found = viewSlotMatrices.find(a_slot);
+		bool changed = found == viewSlotMatrices.end();
+		for (size_t column = 0; !changed && column < 4; ++column) {
+			for (size_t row = 0; !changed && row < 4; ++row) {
+				changed = found->second(column, row) != a_matrix(column, row);
+			}
+		}
+		viewSlotMatrices[a_slot] = a_matrix;
+		ourCameraProjectionMatrices[a_slot] = a_matrix;
+		if (changed) {
+			onCameraUpdatedSignal(a_slot);
+		}
+	}
+
+	void Draw2D::pushDrawThrough(int32_t a_slot, uint32_t a_groups) {
+		drawThroughSlots.push_back({ a_slot, a_groups });
+	}
+
+	void Draw2D::popDrawThrough() {
+		if (!drawThroughSlots.empty()) {
+			drawThroughSlots.pop_back();
+		}
+	}
+
+	Size<int> Draw2D::targetPixelSize() const {
+		return window().drawableSize();
 	}
 
 	void Draw2D::clearScreen(){

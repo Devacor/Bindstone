@@ -474,7 +474,7 @@ namespace MV {
 			addTexturesToShader();
 			shaderProgram->set("alpha", ourOwner->worldAlpha(), false);
 			auto emitterSpace = relativeNodePosition->expired() ? ourOwner : relativeNodePosition->lock();
-			shaderProgram->set("transformation", ourOwner->renderer().cameraProjectionMatrix(ourOwner->cameraId()) * emitterSpace->worldTransform());
+			shaderProgram->set("transformation", ourOwner->renderer().cameraProjectionMatrix(ourOwner->renderer().drawSlot(ourOwner->cameraId())) * emitterSpace->worldTransform());
 			if (userMaterialSettings) {
 				try { userMaterialSettings(*shaderProgram); } catch (std::exception &e) { MV::error("Emitter::defaultDrawImplementation. Exception in userMaterialSettings: ", e.what()); }
 			}

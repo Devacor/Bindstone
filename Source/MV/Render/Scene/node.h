@@ -542,6 +542,15 @@ namespace MV {
 			int32_t cameraId() const {
 				return ourCameraId;
 			}
+			// Which group the node is in, 0 to 31: a Camera draws the groups its mask names (Camera::sees). Its
+			// children have groups of their own.
+			uint32_t group() const { return ourGroup; }
+			std::shared_ptr<Node> group(uint32_t a_group) {
+				ourGroup = std::min<uint32_t>(a_group, 31);
+				return shared_from_this();
+			}
+			// A View on it gives it and what is under it a camera slot of their own.
+			bool keepsOwnCamera() const;
 
 			std::shared_ptr<Node> cameraId(int32_t a_newCameraId) {
 				cameraIdInternal(a_newCameraId);
@@ -754,7 +763,9 @@ namespace MV {
 			void cameraIdInternal(int32_t a_newCameraId) {
 				ourCameraId = a_newCameraId;
 				for (auto&& child : childNodes) {
-					child->cameraIdInternal(a_newCameraId);
+					if (!child->keepsOwnCamera()) {
+						child->cameraIdInternal(a_newCameraId);
+					}
 				}
 			}
 
@@ -991,7 +1002,9 @@ namespace MV {
 			JAI_PROPERTY((PointPrecision), nodeAlpha, 1.0f);
 			JAI_PROPERTY((bool), allowUpdate, true);
 			JAI_PROPERTY((bool), allowDraw, true);
-			JAI_PROPERTY((int32_t), ourCameraId, 0);
+			// set at run time from the View above (or 0, the window's own view): files do not carry it
+			JAI_TRANSIENT_PROPERTY((int32_t), ourCameraId, 0);
+			JAI_NAMED_PROPERTY((uint32_t), "group", ourGroup, 0u);
 
 			bool onChangeCallNeeded = false;
 			bool allowChangeCallNeeded = true;

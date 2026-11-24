@@ -512,6 +512,39 @@ namespace Workbench {
 		}
 	}
 
+	std::shared_ptr<MV::Scene::Button> makeDropdown(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, const MV::Size<>& a_size, const std::string& a_text, std::function<void(const MV::Point<int>&)> a_onOpen) {
+		auto& library = *a_services.get<MV::TextLibrary>();
+		auto& mouse = *a_services.get<MV::TapDevice>();
+		auto button = a_parent->make(a_id)->attach<MV::Scene::Button>(mouse)->bounds(a_size);
+		const float arrowWidth = a_theme.px(18.0f);
+		const float inset = a_theme.px(6.0f);
+		MV::Size<> textSize(std::max(0.0f, a_size.width - arrowWidth - inset), a_size.height);
+
+		auto activeScene = attachOutlinedRect(button->owner()->make("active"), a_services, a_theme, a_size, a_theme.buttonActive(), a_theme.buttonOutline(), true)->owner();
+		auto idleFill = attachOutlinedRect(button->owner()->make("idle"), a_services, a_theme, a_size, a_theme.fieldBg(), a_theme.fieldOutline());
+		auto idleScene = idleFill->owner();
+		hoverTint(button, idleFill, a_theme.fieldBg(), a_theme.buttonHover());
+		for (auto&& stateScene : { activeScene, idleScene }) {
+			auto textHost = stateScene->make("text");
+			textHost->position(MV::point(inset, 0.0f));
+			auto stateText = textHost->attach<MV::Scene::Text>(library, a_theme.labelFont);
+			stateText->bounds({ MV::Point<>(), textSize });
+			stateText->wrapping(MV::TextWrapMethod::NONE, textSize.width)->minimumLineHeight(a_size.height)->text(fitLabelText(a_services, a_theme, a_text, textSize.width));
+			auto arrowHost = stateScene->make("arrowHost");
+			arrowHost->position(MV::point(a_size.width - arrowWidth, 0.0f));
+			makeExpanderArrow(arrowHost, a_services, a_theme, MV::size(arrowWidth, a_size.height), true);
+		}
+		button->activeNode(activeScene);
+		button->idleNode(idleScene);
+		if (a_onOpen) {
+			button->onAccept.connect("open", [a_onOpen](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
+				auto box = a_clickable->owner()->screenBounds();
+				a_onOpen(MV::Point<int>(box.minPoint.x, box.maxPoint.y));
+			});
+		}
+		return button;
+	}
+
 	std::shared_ptr<MV::Scene::Button> makeCycleButton(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, const MV::Size<>& a_size, std::vector<std::string> a_labels, int a_initialIndex, std::function<void(int)> a_onChange) {
 		int startIndex = a_labels.empty() ? 0 : std::max(0, std::min<int>(a_initialIndex, static_cast<int>(a_labels.size()) - 1));
 		auto button = makeButton(a_parent, a_services, a_theme, a_id, a_size, a_labels.empty() ? std::string("--") : a_labels[startIndex], nullptr);

@@ -322,7 +322,7 @@ namespace Workbench {
 		}
 	}
 
-	void ProjectPanel::wireEntryInteractions(const std::shared_ptr<MV::Scene::Clickable>& a_click, const fs::path& a_target, bool a_isFolder, bool a_isPrefab) {
+	void ProjectPanel::wireEntryInteractions(const std::shared_ptr<MV::Scene::Clickable>& a_click, const fs::path& a_target, bool a_isFolder, bool a_draggable) {
 		fs::path target = a_target;
 		auto lastClick = std::make_shared<std::chrono::steady_clock::time_point>();
 		auto dragging = std::make_shared<bool>(false);
@@ -348,13 +348,13 @@ namespace Workbench {
 				}
 			}
 		});
-		if (a_isPrefab) {
+		if (a_draggable) {
 			a_click->onDrag.connect("dragOut", [dragging](const std::shared_ptr<MV::Scene::Clickable>&, const MV::Point<int>&, const MV::Point<int>&) {
 				*dragging = true;
 			});
 			a_click->onRelease.connect("dropOut", [this, target, dragging](const std::shared_ptr<MV::Scene::Clickable>& a_clickable, const MV::Point<MV::PointPrecision>&) {
-				if (*dragging && dropPrefab) {
-					dropPrefab(target.generic_string(), a_clickable->mouse().position());
+				if (*dragging && dropFile) {
+					dropFile(target.generic_string(), a_clickable->mouse().position());
 				}
 			});
 		}
@@ -393,7 +393,7 @@ namespace Workbench {
 				std::string extension = entry.extension().string();
 				bool isImage = extension == ".png" || extension == ".jpg";
 				// a scene is placed in another as a BindSnap is: which a file is called is convention
-				bool isPrefab = extension == ".bindsnap" || extension == ".scene";
+				bool draggable = extension == ".bindsnap" || extension == ".scene" || !MV::shaderIdOfFile(entry.string()).empty();
 
 				auto row = tileHost->make(MV::guid("listRow_"));
 				row->position(MV::point(0.0f, index * theme->rowHeight));
@@ -426,7 +426,7 @@ namespace Workbench {
 
 				auto rowClick = row->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(rowWidth, theme->rowHeight));
 				hoverTint(rowClick, row->component<MV::Scene::Sprite>(false, false).self(), index % 2 == 0 ? theme->panelAlt() : theme->panelBg(), theme->rowHover());
-				wireEntryInteractions(rowClick, entry, isFolder, isPrefab);
+				wireEntryInteractions(rowClick, entry, isFolder, draggable);
 				++index;
 			}
 			builtHeight = theme->rowHeight + theme->pad + index * theme->rowHeight + footerHeight();
@@ -465,7 +465,7 @@ namespace Workbench {
 
 			std::string extension = entry.extension().string();
 			bool isImage = extension == ".png" || extension == ".jpg";
-			bool isPrefab = extension == ".bindsnap" || extension == ".scene";
+			bool draggable = extension == ".bindsnap" || extension == ".scene" || !MV::shaderIdOfFile(entry.string()).empty();
 
 			if (isImage) {
 				attachOutlinedRect(tile, *services, *theme, MV::size(tileSize, tileSize), theme->fieldBg(), theme->fieldOutline());
@@ -493,7 +493,7 @@ namespace Workbench {
 
 			auto tileClick = tile->attach<MV::Scene::Clickable>(mouse)->bounds(MV::size(tileSize, tileSize + captionHeight));
 			hoverShow(tileClick, hoverBack);
-			wireEntryInteractions(tileClick, entry, isFolder, isPrefab);
+			wireEntryInteractions(tileClick, entry, isFolder, draggable);
 		}
 		builtHeight = theme->rowHeight + theme->pad + ((index + columns - 1) / std::max(1, columns)) * cellHeight + footerHeight();
 	}

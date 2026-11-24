@@ -9,6 +9,8 @@
 #include "MV/Utility/stopwatch.h"
 
 #include <chrono>
+#include <filesystem>
+#include <set>
 #include <iomanip>
 #include <sstream>
 
@@ -19,6 +21,14 @@ namespace MV {
 	const std::string ALPHA_FILTER_ID = "alphaFilter";
 	const std::string LIT_ID = "lit";
 	const std::string DEFAULT_VERTEX_SHADER_FILE = "Shaders/default.vert";
+	const std::string SHADER_FOLDER = "Shaders";
+
+	std::string shaderIdOfFile(const std::string& a_path) {
+		std::filesystem::path path(a_path);
+		auto extension = path.extension().string();
+		toLowerInPlace(extension);
+		return extension == ".vert" || extension == ".frag" ? path.stem().string() : std::string();
+	}
 
 	bool RUNNING_IN_HEADLESS = false;
 
@@ -1208,6 +1218,41 @@ namespace MV {
 		// lit.vert multiplies the position by `transformation` and derives the rest from the result, so a batch's
 		// clip-space vertices light the same.
 		loadShader(MV::LIT_ID, "Shaders/lit.vert", "Shaders/lit.frag")->batchable(true).lit(true);
+		loadShaderFolder();
+	}
+
+	void Draw2D::loadShaderFolder(const std::string& a_folder) {
+		std::error_code ignored;
+		std::filesystem::path directory(a_folder);
+		if (!std::filesystem::is_directory(directory, ignored)) {
+			directory = std::filesystem::path("Assets") / a_folder;
+			if (!std::filesystem::is_directory(directory, ignored)) {
+				return;
+			}
+		}
+		std::map<std::string, std::set<std::string>> extensionsByName;
+		for (auto&& entry : std::filesystem::directory_iterator(directory, ignored)) {
+			if (entry.is_regular_file(ignored)) {
+				if (auto name = shaderIdOfFile(entry.path().filename().string()); !name.empty()) {
+					auto extension = entry.path().extension().string();
+					toLowerInPlace(extension);
+					extensionsByName[name].insert(extension);
+				}
+			}
+		}
+		auto inFolder = [&](const std::string& a_file) { return a_folder + "/" + a_file; };
+		for (auto&& [name, extensions] : extensionsByName) {
+			if (hasShader(name)) {
+				continue;
+			}
+			try {
+				const std::string vertexFile = extensions.contains(".vert") ? name + ".vert" : "default.vert";
+				const std::string fragmentFile = extensions.contains(".frag") ? name + ".frag" : "default.frag";
+				loadShader(name, inFolder(vertexFile), inFolder(fragmentFile));
+			} catch (std::exception& e) {
+				error("Shader [", name, "] in ", a_folder, " not loaded: ", e.what());
+			}
+		}
 	}
 
 	std::shared_ptr<Shader> Draw2D::loadShader(const std::string &a_id, const std::string &a_vertexShaderFilename, const std::string &a_fragmentShaderFilename) {
@@ -1247,6 +1292,15 @@ namespace MV {
 	bool Draw2D::hasShader(const std::string &a_id) {
 		auto found = shaders.find(a_id);
 		return found != shaders.end();
+	}
+
+	std::vector<std::string> Draw2D::shaderIds() const {
+		std::vector<std::string> result;
+		for (auto&& [id, shader] : shaders) {
+			result.push_back(id);
+		}
+		std::sort(result.begin(), result.end());
+		return result;
 	}
 
 	std::shared_ptr<Shader> Draw2D::getShader(const std::string &a_id) {

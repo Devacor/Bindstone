@@ -2036,6 +2036,35 @@ static void RunWorkbenchSelfTest(Workbench::App& a_app, Managers& a_managers) {
 				}
 			}
 
+			const auto shaderBefore = sprite->shader();
+			const std::string shaderChosen = shaderBefore == "wave" ? "pool" : "wave";
+			auto shaderField = inspector.rowScreenPoint("shader");
+			expect(shaderField.has_value(), "the inspector shows the shader dropdown");
+			if (shaderField) {
+				click(*shaderField);
+				auto& menus = a_app.menus();
+				int chosenRow = -1;
+				for (int row = 0; menus.contextOpen() && row < menus.rowCount(); ++row) {
+					if (menus.rowLabel(row) == shaderChosen) {
+						chosenRow = row;
+					}
+				}
+				expect(chosenRow >= 0, "the shader dropdown lists the registered shaders");
+				if (chosenRow >= 0) {
+					click(menus.rowScreenPoint(chosenRow));
+					expect(sprite->shader() == shaderChosen && !menus.contextOpen(), "choosing a shader sets the drawable's shader and closes the list");
+					pressWithControl(SDLK_z);
+					expect(sprite->shader() == shaderBefore, "undo restores the shader");
+				}
+				menus.close();
+				if (auto dropAt = inspector.rowScreenPoint("shader")) {
+					expect(inspector.dropFile("Assets/Shaders/" + shaderChosen + ".frag", *dropAt), "a shader file dropped on the shader field is taken");
+					expect(sprite->shader() == shaderChosen, "the dropped file's shader becomes the drawable's");
+					pressWithControl(SDLK_z);
+					expect(sprite->shader() == shaderBefore, "undo restores the shader after a drop");
+				}
+			}
+
 			auto anchorsHeader = inspector.rowScreenPoint("anchors", false);
 			expect(anchorsHeader.has_value() && !inspector.rowScreenPoint("anchor min").has_value(), "anchors is a closed group");
 			if (anchorsHeader) {
@@ -2634,14 +2663,6 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 	MV::FontDefinition::make(managers.textLibrary, "big", "Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 	MV::FontDefinition::make(managers.textLibrary, "wb-small", "Fonts/Verdana.ttf", static_cast<int>(12 * workbenchUiScale));
 
-	// The game's animated-material shaders; without them scene materials fall back to default.
-	managers.renderer.loadShader("vortex", "Shaders/default.vert", "Shaders/vortex.frag");
-	managers.renderer.loadShader("lillypad", "Shaders/lillypad.vert", "Shaders/default.frag");
-	managers.renderer.loadShader("wave", "Shaders/wave.vert", "Shaders/wave.frag");
-	managers.renderer.loadShader("waterfall", "Shaders/default.vert", "Shaders/waterfall.frag");
-	managers.renderer.loadShader("pool", "Shaders/default.vert", "Shaders/pool.frag");
-	managers.renderer.loadShader("shimmer", "Shaders/default.vert", "Shaders/shimmer.frag");
-
 	int workbenchResizeBorder = std::max(6, static_cast<int>(8 * workbenchUiScale));
 	int workbenchTitleBarHeight = static_cast<int>(workbenchTheme.titleBarHeight);
 	int workbenchTitleButtonStrip = static_cast<int>(workbenchTheme.titleButtonWidth * 3.0f);
@@ -2851,6 +2872,12 @@ static int RunAssetVerification() {
 			auto root = MV::Scene::Node::load(path, managers.services, false);
 			fakeRoot->add(root);
 			root->postLoadStep();
+			for (auto&& entry : root->componentsInChildren<MV::Scene::Drawable>(false, true)) {
+				auto drawable = std::get<0>(entry).self();
+				if (drawable && !managers.renderer.hasShader(drawable->shader())) {
+					throw std::runtime_error("shader [" + drawable->shader() + "] on [" + drawable->owner()->id() + "] is not in " + MV::SHADER_FOLDER);
+				}
+			}
 			// Save and reload to exercise the save side too (catches unregistered-on-save
 			// polymorphic types that a load-only check misses).
 			auto blob = MV::toBinaryString(root, managers.services);
@@ -3092,13 +3119,6 @@ static int RunMapShot(const std::string& a_path, int a_frames, std::optional<MV:
 		std::cout << "[mapshot] renderer init failed" << std::endl;
 		return 1;
 	}
-	managers.renderer.loadShader("vortex", "Shaders/default.vert", "Shaders/vortex.frag");
-	managers.renderer.loadShader("lillypad", "Shaders/lillypad.vert", "Shaders/default.frag");
-	managers.renderer.loadShader("wave", "Shaders/wave.vert", "Shaders/wave.frag");
-	managers.renderer.loadShader("waterfall", "Shaders/default.vert", "Shaders/waterfall.frag");
-	managers.renderer.loadShader("pool", "Shaders/default.vert", "Shaders/pool.frag");
-	managers.renderer.loadShader("shimmer", "Shaders/default.vert", "Shaders/shimmer.frag");
-
 	auto map = MV::Scene::Node::load("Scenes/map.scene", managers.services, true);
 	while (managers.textures.pendingTextureLoads() > 0) {
 		managers.pool.run_posted();

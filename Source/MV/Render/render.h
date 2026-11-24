@@ -100,6 +100,11 @@ namespace MV {
 	extern const std::string ALPHA_FILTER_ID;
 	extern const std::string LIT_ID;
 	extern const std::string DEFAULT_VERTEX_SHADER_FILE;
+	extern const std::string SHADER_FOLDER;
+
+	// The shader program a file in the shader folder registers: its name without the extension, for a .vert or .frag;
+	// empty for any other file.
+	std::string shaderIdOfFile(const std::string& a_path);
 
 #if SDL_BYTEORDER == SDL_BIG_ENDIAN
 	const Uint32 SDL_RMASK = 0xff000000;
@@ -660,6 +665,9 @@ namespace MV {
 		void defaultBlendFunction();
 
 		void loadDefaultShaders();
+		// Registers a shader program for every name.vert and name.frag pair in the folder, a missing stage being
+		// default.vert or default.frag. A name already registered is left as it is.
+		void loadShaderFolder(const std::string& a_folder = SHADER_FOLDER);
 		std::shared_ptr<Shader> loadShader(const std::string& a_id, const std::string& a_vertexShaderFilename, const std::string& a_fragmentShaderFilename);
 		std::shared_ptr<Shader> loadShaderCode(const std::string& a_id, const std::string& a_vertexShaderCode, const std::string& a_fragmentShaderCode);
 
@@ -672,6 +680,7 @@ namespace MV {
 
 		bool hasShader(const std::string& a_id);
 		std::shared_ptr<Shader> getShader(const std::string& a_id);
+		std::vector<std::string> shaderIds() const;
 
 		std::shared_ptr<Shader> defaultShader() const;
 		std::shared_ptr<Shader> defaultShader(const std::string& a_id);

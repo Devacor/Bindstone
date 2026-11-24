@@ -63,6 +63,10 @@ namespace Workbench {
 
 	std::shared_ptr<MV::Scene::Node> makeToggle(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, bool a_initial, std::function<void(bool)> a_onChange);
 
+	// The chosen value with an arrow pointing down; a press gives a_onOpen the point under its bottom-left corner, where
+	// the list of choices opens.
+	std::shared_ptr<MV::Scene::Button> makeDropdown(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, const MV::Size<>& a_size, const std::string& a_text, std::function<void(const MV::Point<int>&)> a_onOpen);
+
 	std::shared_ptr<MV::Scene::Button> makeCycleButton(const std::shared_ptr<MV::Scene::Node>& a_parent, MV::Services& a_services, const Theme& a_theme, const std::string& a_id, const MV::Size<>& a_size, std::vector<std::string> a_labels, int a_initialIndex, std::function<void(int)> a_onChange);
 
 	// Numeric field with Unity-style drag-to-scrub: horizontal drag changes the value live

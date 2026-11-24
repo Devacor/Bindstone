@@ -11,14 +11,14 @@ namespace Workbench {
 	// Unity-style Project window over Assets/: folder tree left, tile grid right, breadcrumb
 	// top; double-click navigates folders and loads .scene/.bindsnap files into the editor.
 	// A footer slider scales the tiles; at its minimum the grid becomes a list. A BindSnap's tile drags out into
-	// the scene, as a scene's does, and a Hierarchy row let go on the panel is saved into the folder it is over
-	// (App::saveAsBindSnap).
+	// the scene, as a scene's does, a shader file's onto a drawable's shader field, and a Hierarchy row let go on
+	// the panel is saved into the folder it is over (App::saveAsBindSnap).
 	class ProjectPanel : public Panel {
 	public:
-		ProjectPanel(std::function<void(const std::string&)> a_openScene, std::function<void(const std::string&, const MV::Point<int>&)> a_dropPrefab) :
+		ProjectPanel(std::function<void(const std::string&)> a_openScene, std::function<void(const std::string&, const MV::Point<int>&)> a_dropFile) :
 			Panel("Project"),
 			openScene(std::move(a_openScene)),
-			dropPrefab(std::move(a_dropPrefab)) {
+			dropFile(std::move(a_dropFile)) {
 		}
 
 		void resized(const MV::Size<>& a_size) override;
@@ -55,7 +55,7 @@ namespace Workbench {
 		void rebuildTiles();
 		void buildFooter();
 		void layoutFooter();
-		void wireEntryInteractions(const std::shared_ptr<MV::Scene::Clickable>& a_click, const std::filesystem::path& a_target, bool a_isFolder, bool a_isPrefab);
+		void wireEntryInteractions(const std::shared_ptr<MV::Scene::Clickable>& a_click, const std::filesystem::path& a_target, bool a_isFolder, bool a_draggable);
 		float footerHeight() const { return theme->rowHeight + theme->pad; }
 		// How far the dock has wheel-scrolled the content.
 		float scrolled() const { return theme->tabHeight + theme->pad - contentNode->position().y; }
@@ -79,7 +79,7 @@ namespace Workbench {
 		bool listModeFor() const { return tilePercent < 0.12f; }
 
 		std::function<void(const std::string&)> openScene;
-		std::function<void(const std::string&, const MV::Point<int>&)> dropPrefab;
+		std::function<void(const std::string&, const MV::Point<int>&)> dropFile;
 		std::unique_ptr<TreeView<std::string>> folderTree;
 		std::shared_ptr<MV::Scene::Node> breadcrumbHost;
 		std::shared_ptr<MV::Scene::Node> tileHost;

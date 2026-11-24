@@ -6,6 +6,7 @@
 #include <optional>
 #include "commands.h"
 #include "dock.h"
+#include "menu.h"
 #include "widgets.h"
 #include <jaiscript/properties/property_manager.hpp>
 
@@ -34,11 +35,16 @@ namespace Workbench {
 		// screen a list of what can be added belongs).
 		std::function<void(const std::shared_ptr<MV::Scene::Component>&)> onRemoveComponent;
 		std::function<void(const MV::Point<int>&)> onAddComponent;
+		// A list of choices for a field, opened under it.
+		std::function<void(const MV::Point<int>&, const std::vector<MenuItem>&)> onOpenMenu;
 		// The middle of the Add Component button, and of the remove button on the header of a component type.
 		std::optional<MV::Point<int>> addComponentScreenPoint() const;
 		std::optional<MV::Point<int>> removeComponentScreenPoint(const std::string& a_typeName) const;
 		// A node dragged out of the Hierarchy and released over a reference field is assigned to it. True when a field took it.
 		bool dropNode(const std::shared_ptr<MV::Scene::Node>& a_node, const MV::Point<int>& a_screenPoint);
+		// A file dragged out of the Project panel and released over a field that takes it (a shader file on a drawable's
+		// shader). True when a field took it.
+		bool dropFile(const std::string& a_path, const MV::Point<int>& a_screenPoint);
 
 		// Where a row can be pressed, by its label (the first row with it): its field, or the whole row for a group's header.
 		std::optional<MV::Point<int>> rowScreenPoint(const std::string& a_label, bool a_field = true) const;
@@ -74,6 +80,8 @@ namespace Workbench {
 		void addNodeReferenceRow(const std::string& a_label, const std::shared_ptr<MV::Scene::Node>& a_node, std::function<void(const std::shared_ptr<MV::Scene::Node>&)> a_assign);
 		void addAnchorsGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
 		void addTextureRows(const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
+		// The registered shader programs to choose from, and a shader file from the Project panel to drop on.
+		void addShaderRow(const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
 		void addPointsGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
 		void addIndicesGroup(const std::shared_ptr<MV::Scene::Drawable>& a_drawable);
 		void addFocusLinksGroup(const std::shared_ptr<MV::Scene::Clickable>& a_clickable);
@@ -142,6 +150,11 @@ namespace Workbench {
 			std::function<void(const std::shared_ptr<MV::Scene::Node>&)> assign;
 		};
 		std::vector<NodeDropZone> nodeDropZones;
+		struct FileDropZone {
+			std::weak_ptr<MV::Scene::Node> row;
+			std::function<bool(const std::string&)> take;
+		};
+		std::vector<FileDropZone> fileDropZones;
 		std::vector<std::pair<std::string, std::weak_ptr<MV::Scene::Node>>> labelledRows;
 		std::vector<std::pair<std::string, std::weak_ptr<MV::Scene::Node>>> removeButtons;
 		std::weak_ptr<MV::Scene::Node> addComponentButton;

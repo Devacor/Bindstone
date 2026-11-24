@@ -177,7 +177,11 @@ namespace Workbench {
 				requestLoadScene(a_fileName);
 			},
 			[this](const std::string& a_fileName, const MV::Point<int>& a_screenPoint) {
-				dropPrefab(a_fileName, a_screenPoint);
+				if (!MV::shaderIdOfFile(a_fileName).empty()) {
+					inspectorPanel->dropFile(a_fileName, a_screenPoint);
+				} else {
+					dropPrefab(a_fileName, a_screenPoint);
+				}
 			});
 
 		treePanel = static_cast<SceneTreePanel*>(dock->registerPanel(std::move(tree)));
@@ -198,6 +202,7 @@ namespace Workbench {
 		inspectorPanel->onSelectNode = [this](const std::shared_ptr<MV::Scene::Node>& a_node) { select(a_node); };
 		inspectorPanel->onRemoveComponent = [this](const std::shared_ptr<MV::Scene::Component>& a_component) { removeComponent(a_component); };
 		inspectorPanel->onAddComponent = [this](const MV::Point<int>& a_screenPoint) { menuBar->openContext(a_screenPoint, addComponentItems()); };
+		inspectorPanel->onOpenMenu = [this](const MV::Point<int>& a_screenPoint, const std::vector<MenuItem>& a_items) { menuBar->openContext(a_screenPoint, a_items); };
 		treePanel->onNodeDroppedOutside = [this](const std::shared_ptr<MV::Scene::Node>& a_node, const MV::Point<int>& a_screenPoint) {
 			if (inspectorPanel->dropNode(a_node, a_screenPoint)) {
 				return;

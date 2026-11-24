@@ -78,6 +78,7 @@ namespace Workbench {
 		closeColorPopup(true);
 		closeTexturePicker();
 		nodeDropZones.clear();
+		fileDropZones.clear();
 		labelledRows.clear();
 		removeButtons.clear();
 		addComponentButton.reset();
